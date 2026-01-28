@@ -21,6 +21,7 @@ import android.content.*
 import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
+import android.hardware.camera2.CameraCharacteristics
 import android.hardware.display.DisplayManager
 import android.os.Build
 import android.os.Bundle
@@ -30,13 +31,16 @@ import android.view.KeyEvent
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.Button
 import android.widget.Toast
+import androidx.camera.camera2.interop.Camera2CameraInfo
 import androidx.camera.core.*
 import androidx.camera.core.resolutionselector.AspectRatioStrategy
 import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.concurrent.futures.await
 import androidx.core.view.setPadding
+import androidx.exifinterface.media.ExifInterface
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
@@ -54,6 +58,7 @@ import com.android.example.cameraxbasic.utils.simulateClick
 import com.bumptech.glide.Glide
 import com.bumptech.glide.request.RequestOptions
 import kotlinx.coroutines.launch
+import java.io.File
 import java.nio.ByteBuffer
 import java.text.SimpleDateFormat
 import java.util.*
@@ -85,7 +90,7 @@ class CameraFragment : Fragment() {
     private lateinit var mediaStoreUtils: MediaStoreUtils
 
     private var displayId: Int = -1
-    private var lensFacing: Int = CameraSelector.LENS_FACING_BACK
+    private var cameraSelector: CameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
     private var preview: Preview? = null
     private var imageCapture: ImageCapture? = null
     private var imageAnalyzer: ImageAnalysis? = null
@@ -237,18 +242,58 @@ class CameraFragment : Fragment() {
     private suspend fun setUpCamera() {
         cameraProvider = ProcessCameraProvider.getInstance(requireContext()).await()
 
-        // Select lensFacing depending on the available cameras
-        lensFacing = when {
-            hasBackCamera() -> CameraSelector.LENS_FACING_BACK
-            hasFrontCamera() -> CameraSelector.LENS_FACING_FRONT
-            else -> throw IllegalStateException("Back and front camera are unavailable")
-        }
-
-        // Enable or disable switching between cameras
-        updateCameraSwitchButton()
+        // Enumerate cameras and update UI
+        enumerateCameras()
 
         // Build and bind the camera use cases
         bindCameraUseCases()
+    }
+
+    @SuppressLint("UnsafeOptInUsageError")
+    private fun enumerateCameras() {
+        val cameraProvider = cameraProvider ?: return
+        val container = cameraUiContainerBinding?.cameraSelectorContainer ?: return
+        container.removeAllViews()
+
+        val availableCameras = cameraProvider.availableCameraInfos.filter {
+            it.lensFacing == CameraSelector.LENS_FACING_BACK
+        }.sortedBy {
+            // Sort by focal length if available
+            val camera2Info = Camera2CameraInfo.from(it)
+            camera2Info.getCameraCharacteristic(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.get(0) ?: 0f
+        }
+
+        availableCameras.forEach { cameraInfo ->
+            val button = Button(requireContext())
+            val camera2Info = Camera2CameraInfo.from(cameraInfo)
+            val focalLengths = camera2Info.getCameraCharacteristic(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
+
+            val label = if (focalLengths != null && focalLengths.isNotEmpty()) {
+                "%.1fmm".format(focalLengths[0])
+            } else {
+                "Cam"
+            }
+            button.text = label
+
+            button.setOnClickListener {
+                cameraSelector = CameraSelector.Builder()
+                    .addCameraFilter { infos -> infos.filter { it == cameraInfo } }
+                    .build()
+                bindCameraUseCases()
+            }
+            container.addView(button)
+        }
+
+        // Also add a Front Camera toggle if available
+        if (cameraProvider.hasCamera(CameraSelector.DEFAULT_FRONT_CAMERA)) {
+            val button = Button(requireContext())
+            button.text = "Front"
+            button.setOnClickListener {
+                cameraSelector = CameraSelector.DEFAULT_FRONT_CAMERA
+                bindCameraUseCases()
+            }
+            container.addView(button)
+        }
     }
 
     /** Declare and bind preview, capture and analysis use cases */
@@ -268,11 +313,11 @@ class CameraFragment : Fragment() {
                 ?: throw IllegalStateException("Camera initialization failed.")
 
         // CameraSelector
-        val cameraSelector = CameraSelector.Builder().requireLensFacing(lensFacing).build()
+        val cameraSelector = this.cameraSelector
 
         val cameraInfo = cameraProvider.getCameraInfo(cameraSelector)
         val capabilities = ImageCapture.getImageCaptureCapabilities(cameraInfo)
-        val isRawSupported = capabilities.supportedOutputFormats.contains(ImageCapture.OUTPUT_FORMAT_RAW_JPEG)
+        val supportedFormats = capabilities.supportedOutputFormats
 
         val resolutionSelector = ResolutionSelector.Builder()
             .setAspectRatioStrategy(AspectRatioStrategy(screenAspectRatio, AspectRatioStrategy.FALLBACK_RULE_AUTO))
@@ -296,7 +341,9 @@ class CameraFragment : Fragment() {
             // during the lifecycle of this use case
             .setTargetRotation(rotation)
             .apply {
-                if (isRawSupported) {
+                if (supportedFormats.contains(ImageCapture.OUTPUT_FORMAT_RAW)) {
+                    setOutputFormat(ImageCapture.OUTPUT_FORMAT_RAW)
+                } else if (supportedFormats.contains(ImageCapture.OUTPUT_FORMAT_RAW_JPEG)) {
                     setOutputFormat(ImageCapture.OUTPUT_FORMAT_RAW_JPEG)
                 }
             }
@@ -488,6 +535,8 @@ class CameraFragment : Fragment() {
                 val name = SimpleDateFormat(FILENAME, Locale.US)
                     .format(System.currentTimeMillis())
 
+                var tempJpegFile: File? = null
+
                 // Callback for image saved
                 val imageSavedCallback = object : ImageCapture.OnImageSavedCallback {
                     override fun onError(exc: ImageCaptureException) {
@@ -495,8 +544,33 @@ class CameraFragment : Fragment() {
                     }
 
                     override fun onImageSaved(output: ImageCapture.OutputFileResults) {
+                        // Delete temp file if exists
+                        tempJpegFile?.let {
+                            if (it.exists()) it.delete()
+                        }
+
                         val savedUri = output.savedUri
                         Log.d(TAG, "Photo capture succeeded: $savedUri")
+
+                        // Enhance EXIF data
+                        savedUri?.let { uri ->
+                            // Skip if uri points to the temp file (which is deleted)
+                            if (tempJpegFile != null && uri.path == tempJpegFile?.path) return@let
+
+                            try {
+                                val pfd = requireContext().contentResolver.openFileDescriptor(uri, "rw")
+                                pfd?.use {
+                                    val exif = ExifInterface(it.fileDescriptor)
+                                    val appName = requireContext().getString(R.string.app_name)
+                                    exif.setAttribute(ExifInterface.TAG_SOFTWARE, appName)
+                                    exif.setAttribute(ExifInterface.TAG_MAKE, Build.MANUFACTURER)
+                                    exif.setAttribute(ExifInterface.TAG_MODEL, Build.MODEL)
+                                    exif.saveAttributes()
+                                }
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Failed to write EXIF: ${e.message}", e)
+                            }
+                        }
 
                         // We can only change the foreground Drawable using API level 23+ API
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
@@ -516,8 +590,8 @@ class CameraFragment : Fragment() {
                     }
                 }
 
-                if (imageCapture.outputFormat == ImageCapture.OUTPUT_FORMAT_RAW_JPEG) {
-                    // RAW+JPEG Capture
+                if (imageCapture.outputFormat == ImageCapture.OUTPUT_FORMAT_RAW) {
+                    // RAW Only
                     val dngContentValues = ContentValues().apply {
                         put(MediaStore.MediaColumns.DISPLAY_NAME, name)
                         put(MediaStore.MediaColumns.MIME_TYPE, "image/x-adobe-dng")
@@ -532,19 +606,27 @@ class CameraFragment : Fragment() {
                             dngContentValues)
                         .build()
 
-                    val jpegContentValues = ContentValues().apply {
+                    imageCapture.takePicture(dngOutputOptions, cameraExecutor, imageSavedCallback)
+                } else if (imageCapture.outputFormat == ImageCapture.OUTPUT_FORMAT_RAW_JPEG) {
+                    // RAW+JPEG Capture (Discard JPEG)
+                    val dngContentValues = ContentValues().apply {
                         put(MediaStore.MediaColumns.DISPLAY_NAME, name)
-                        put(MediaStore.MediaColumns.MIME_TYPE, PHOTO_TYPE)
+                        put(MediaStore.MediaColumns.MIME_TYPE, "image/x-adobe-dng")
                         if (Build.VERSION.SDK_INT > Build.VERSION_CODES.P) {
                             val appName = requireContext().resources.getString(R.string.app_name)
                             put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/${appName}")
                         }
                     }
-                    val jpegOutputOptions = ImageCapture.OutputFileOptions
+                    val dngOutputOptions = ImageCapture.OutputFileOptions
                         .Builder(requireContext().contentResolver,
                             MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                            jpegContentValues)
+                            dngContentValues)
                         .build()
+
+                    // Save JPEG to cache (temp)
+                    val jpegFile = File(requireContext().cacheDir, "temp_${name}.jpg")
+                    tempJpegFile = jpegFile
+                    val jpegOutputOptions = ImageCapture.OutputFileOptions.Builder(jpegFile).build()
 
                     imageCapture.takePicture(
                         dngOutputOptions,
@@ -587,23 +669,8 @@ class CameraFragment : Fragment() {
             }
         }
 
-        // Setup for button used to switch cameras
-        cameraUiContainerBinding?.cameraSwitchButton?.let {
-
-            // Disable the button until the camera is set up
-            it.isEnabled = false
-
-            // Listener for button used to switch cameras. Only called if the button is enabled
-            it.setOnClickListener {
-                lensFacing = if (CameraSelector.LENS_FACING_FRONT == lensFacing) {
-                    CameraSelector.LENS_FACING_BACK
-                } else {
-                    CameraSelector.LENS_FACING_FRONT
-                }
-                // Re-bind use cases to update selected camera
-                bindCameraUseCases()
-            }
-        }
+        // Enumerate cameras to populate buttons
+        enumerateCameras()
 
         // Listener for button used to view the most recent photo
         cameraUiContainerBinding?.photoViewButton?.setOnClickListener {
@@ -620,24 +687,6 @@ class CameraFragment : Fragment() {
         }
     }
 
-    /** Enabled or disabled a button to switch cameras depending on the available cameras */
-    private fun updateCameraSwitchButton() {
-        try {
-            cameraUiContainerBinding?.cameraSwitchButton?.isEnabled = hasBackCamera() && hasFrontCamera()
-        } catch (exception: CameraInfoUnavailableException) {
-            cameraUiContainerBinding?.cameraSwitchButton?.isEnabled = false
-        }
-    }
-
-    /** Returns true if the device has an available back camera. False otherwise */
-    private fun hasBackCamera(): Boolean {
-        return cameraProvider?.hasCamera(CameraSelector.DEFAULT_BACK_CAMERA) ?: false
-    }
-
-    /** Returns true if the device has an available front camera. False otherwise */
-    private fun hasFrontCamera(): Boolean {
-        return cameraProvider?.hasCamera(CameraSelector.DEFAULT_FRONT_CAMERA) ?: false
-    }
 
     /**
      * Our custom image analysis class.
