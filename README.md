@@ -1,20 +1,28 @@
-# Camera Samples Repository
+# CameraXbasic
 
-This repository contains a set of individual Android Studio projects to help you get
-started with the [CameraX](https://developer.android.com/training/camerax) and 
-[Camera2](https://developer.android.com/training/camera2) APIs in Android.
+CameraXbasic aims to demonstrate how to use CameraX APIs written in Kotlin.
 
-## Samples
+## Build
 
-| Sample                                    | Description  |
-| ----------------------------------------- | ------------ |
-| [CameraXBasic](CameraXBasic)              | Demonstrates how to use CameraX APIs. |
-| [CameraXAdvanced](CameraXAdvanced)        | Demonstrates how to use CameraX APIs with TFLite and others |
-| [CameraXVideo](CameraXVideo)              | Demonstrates how to use CameraX VideoCapture API. |
-| [CameraX-MLKit](CameraX-MLKit)            | Demonstrates how to use CameraX's MlKitAnalyzer to build a QR-code scanner. |
-| [Camera2Basic](Camera2Basic)              | Demonstrates capturing JPEG, RAW and DEPTH images, e.g. unprocessed pixel data directly from the camera sensor. |
-| [Camera2SlowMotion](Camera2SlowMotion)    | Demonstrates capturing high-speed video in a constrained camera capture session. |
-| [Camera2Video](Camera2Video)              | Demonstrates recording video using the Camera2 API and MediaRecorder. |
-| [Camera2Extensions](Camera2Extensions)    | Demonstrates Camera2 extension live preview and still capture.
-| [CameraXExtensions](CameraXExtensions)    | Demonstrates CameraX extension live preview and still capture.
-| [HdrViewfinder](HdrViewfinder)            | Demonstrates use of RenderScript to display a live HDR feed from camera frames using Camera2 API. |
+To build the app directly from the command line, run:
+```sh
+./gradlew assembleDebug
+```
+
+## Test
+
+Unit testing and instrumented device testing share the same code. To test the app using Robolectric, no device required, run:
+```sh
+./gradlew test
+```
+
+To run the same tests in an Android device connected via ADB, run:
+```sh
+./gradlew connectedAndroidTest
+```
+
+Alternatively, test running configurations can be added to Android Studio for convenience (and a nice UI). To do that:
+1. Go to: `Run` > `Edit Configurations` > `Add New Configuration`.
+1. For Robolectric select `Android JUnit`, for connected device select `Android Instrumented Tests`.
+1. Select `app` module and `com.android.example.cameraxbasic.MainInstrumentedTest` class.
+1. Optional: Give the run configuration a name, like `test robolectric` or `test device`
