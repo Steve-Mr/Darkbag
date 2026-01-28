@@ -22,6 +22,7 @@ import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
 import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CameraManager
 import android.hardware.display.DisplayManager
 import android.os.Build
 import android.os.Bundle
@@ -253,6 +254,7 @@ class CameraFragment : Fragment() {
     private fun enumerateCameras() {
         val cameraProvider = cameraProvider ?: return
         val container = cameraUiContainerBinding?.cameraSelectorContainer ?: return
+        val cameraManager = requireContext().getSystemService(Context.CAMERA_SERVICE) as CameraManager
         container.removeAllViews()
 
         val availableCameras = cameraProvider.availableCameraInfos.filter {
@@ -267,12 +269,42 @@ class CameraFragment : Fragment() {
             val button = Button(requireContext())
             val camera2Info = Camera2CameraInfo.from(cameraInfo)
             val focalLengths = camera2Info.getCameraCharacteristic(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
+            val id = camera2Info.cameraId
 
-            val label = if (focalLengths != null && focalLengths.isNotEmpty()) {
-                "%.1fmm".format(focalLengths[0])
+            // Check for physical cameras in a logical multi-camera
+            val physicalCameraIds = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                val chars = cameraManager.getCameraCharacteristics(id)
+                chars.physicalCameraIds
             } else {
-                "Cam"
+                emptySet()
             }
+
+            val label = if (physicalCameraIds.isNotEmpty()) {
+                // It's a logical camera, list physical focal lengths
+                val physicalFocalLengths = physicalCameraIds.mapNotNull { physicalId ->
+                    try {
+                        val chars = cameraManager.getCameraCharacteristics(physicalId)
+                        chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.get(0)
+                    } catch (e: Exception) {
+                        null
+                    }
+                }.sorted()
+
+                if (physicalFocalLengths.isNotEmpty()) {
+                     physicalFocalLengths.joinToString("-") { "%.0f".format(it) } + "mm"
+                } else if (focalLengths != null && focalLengths.isNotEmpty()) {
+                    "%.1fmm".format(focalLengths[0])
+                } else {
+                     "Multi"
+                }
+            } else {
+                if (focalLengths != null && focalLengths.isNotEmpty()) {
+                    "%.1fmm".format(focalLengths[0])
+                } else {
+                    "Cam"
+                }
+            }
+
             button.text = label
 
             button.setOnClickListener {
