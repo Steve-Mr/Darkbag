@@ -235,7 +235,7 @@ class CameraFragment : Fragment() {
         bindCameraUseCases()
 
         // Enable or disable switching between cameras
-        updateCameraSwitchButton()
+        // updateCameraSwitchButton() // Removed as we use discrete buttons
     }
 
     /** Initialize CameraX, and prepare to bind the camera use cases  */
@@ -544,19 +544,25 @@ class CameraFragment : Fragment() {
                     }
 
                     override fun onImageSaved(output: ImageCapture.OutputFileResults) {
-                        // Delete temp file if exists
-                        tempJpegFile?.let {
-                            if (it.exists()) it.delete()
+                        val savedUri = output.savedUri
+
+                        // Check if this is the temporary JPEG file
+                        tempJpegFile?.let { tempFile ->
+                             if (savedUri != null && savedUri.path == tempFile.path) {
+                                 // Delete the temp JPEG and return
+                                 try {
+                                     if (tempFile.exists()) tempFile.delete()
+                                 } catch (e: Exception) {
+                                     Log.e(TAG, "Failed to delete temp jpeg", e)
+                                 }
+                                 return
+                             }
                         }
 
-                        val savedUri = output.savedUri
                         Log.d(TAG, "Photo capture succeeded: $savedUri")
 
-                        // Enhance EXIF data
+                        // Enhance EXIF data for the saved image (DNG or JPEG depending on mode)
                         savedUri?.let { uri ->
-                            // Skip if uri points to the temp file (which is deleted)
-                            if (tempJpegFile != null && uri.path == tempJpegFile?.path) return@let
-
                             try {
                                 val pfd = requireContext().contentResolver.openFileDescriptor(uri, "rw")
                                 pfd?.use {
@@ -629,8 +635,8 @@ class CameraFragment : Fragment() {
                     val jpegOutputOptions = ImageCapture.OutputFileOptions.Builder(jpegFile).build()
 
                     imageCapture.takePicture(
-                        jpegOutputOptions,
                         dngOutputOptions,
+                        jpegOutputOptions,
                         cameraExecutor,
                         imageSavedCallback
                     )
