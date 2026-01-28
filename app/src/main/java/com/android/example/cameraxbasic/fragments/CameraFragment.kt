@@ -629,8 +629,8 @@ class CameraFragment : Fragment() {
                     val jpegOutputOptions = ImageCapture.OutputFileOptions.Builder(jpegFile).build()
 
                     imageCapture.takePicture(
-                        dngOutputOptions,
                         jpegOutputOptions,
+                        dngOutputOptions,
                         cameraExecutor,
                         imageSavedCallback
                     )
