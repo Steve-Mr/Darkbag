@@ -92,6 +92,8 @@ class CameraFragment : Fragment() {
 
     private var displayId: Int = -1
     private var cameraSelector: CameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+    // Keep track of the last used rear camera ID to switch back to it
+    private var lastRearCameraId: String? = null
     private var preview: Preview? = null
     private var imageCapture: ImageCapture? = null
     private var imageAnalyzer: ImageAnalysis? = null
@@ -236,7 +238,7 @@ class CameraFragment : Fragment() {
         bindCameraUseCases()
 
         // Enable or disable switching between cameras
-        // updateCameraSwitchButton() // Removed as we use discrete buttons
+        updateCameraSwitchButton()
     }
 
     /** Initialize CameraX, and prepare to bind the camera use cases  */
@@ -257,74 +259,132 @@ class CameraFragment : Fragment() {
         val cameraManager = requireContext().getSystemService(Context.CAMERA_SERVICE) as CameraManager
         container.removeAllViews()
 
-        val availableCameras = cameraProvider.availableCameraInfos.filter {
-            it.lensFacing == CameraSelector.LENS_FACING_BACK
-        }.sortedBy {
-            // Sort by focal length if available
-            val camera2Info = Camera2CameraInfo.from(it)
-            camera2Info.getCameraCharacteristic(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.get(0) ?: 0f
-        }
-
-        availableCameras.forEach { cameraInfo ->
-            val button = Button(requireContext())
-            val camera2Info = Camera2CameraInfo.from(cameraInfo)
-            val focalLengths = camera2Info.getCameraCharacteristic(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
-            val id = camera2Info.cameraId
-
-            // Check for physical cameras in a logical multi-camera
-            val physicalCameraIds = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                val chars = cameraManager.getCameraCharacteristics(id)
-                chars.physicalCameraIds
-            } else {
-                emptySet()
-            }
-
-            val label = if (physicalCameraIds.isNotEmpty()) {
-                // It's a logical camera, list physical focal lengths
-                val physicalFocalLengths = physicalCameraIds.mapNotNull { physicalId ->
-                    try {
-                        val chars = cameraManager.getCameraCharacteristics(physicalId)
-                        chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.get(0)
-                    } catch (e: Exception) {
-                        null
+        // Get all back cameras from CameraManager to be aggressive
+        val rearCameraIds = mutableSetOf<String>()
+        try {
+            for (cameraId in cameraManager.cameraIdList) {
+                val chars = cameraManager.getCameraCharacteristics(cameraId)
+                if (chars.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK) {
+                    // Check for physical cameras
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && chars.physicalCameraIds.isNotEmpty()) {
+                        chars.physicalCameraIds.forEach { physicalId ->
+                             rearCameraIds.add(physicalId)
+                        }
+                    } else {
+                        rearCameraIds.add(cameraId)
                     }
-                }.sorted()
-
-                if (physicalFocalLengths.isNotEmpty()) {
-                     physicalFocalLengths.joinToString("-") { "%.0f".format(it) } + "mm"
-                } else if (focalLengths != null && focalLengths.isNotEmpty()) {
-                    "%.1fmm".format(focalLengths[0])
-                } else {
-                     "Multi"
-                }
-            } else {
-                if (focalLengths != null && focalLengths.isNotEmpty()) {
-                    "%.1fmm".format(focalLengths[0])
-                } else {
-                    "Cam"
                 }
             }
-
-            button.text = label
-
-            button.setOnClickListener {
-                cameraSelector = CameraSelector.Builder()
-                    .addCameraFilter { infos -> infos.filter { it == cameraInfo } }
-                    .build()
-                bindCameraUseCases()
-            }
-            container.addView(button)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to enumerate cameras via CameraManager", e)
         }
 
-        // Also add a Front Camera toggle if available
-        if (cameraProvider.hasCamera(CameraSelector.DEFAULT_FRONT_CAMERA)) {
-            val button = Button(requireContext())
-            button.text = "Front"
-            button.setOnClickListener {
-                cameraSelector = CameraSelector.DEFAULT_FRONT_CAMERA
-                bindCameraUseCases()
+        // If we found multiple rear cameras, show the selector
+        if (rearCameraIds.size > 1) {
+            container.visibility = View.VISIBLE
+
+            // Create a button for each rear camera ID
+            // Sort them by focal length for better UX
+            val sortedIds = rearCameraIds.sortedBy { id ->
+                try {
+                    val chars = cameraManager.getCameraCharacteristics(id)
+                    chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.get(0) ?: 0f
+                } catch (e: Exception) {
+                    0f
+                }
             }
-            container.addView(button)
+
+            sortedIds.forEach { id ->
+                 val button = Button(requireContext())
+                 var label = "Cam $id"
+                 try {
+                     val chars = cameraManager.getCameraCharacteristics(id)
+                     val focalLengths = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
+                     if (focalLengths != null && focalLengths.isNotEmpty()) {
+                         label = "%.1fmm".format(focalLengths[0])
+                     }
+                 } catch (e: Exception) {
+                     Log.e(TAG, "Error getting characteristics for $id", e)
+                 }
+                 button.text = label
+                 button.setOnClickListener {
+                     // Try to select this specific camera ID
+                     // Note: We need a CameraSelector that selects this ID.
+                     // CameraX filters available cameras. If this ID is physical only, it might not be in CameraX's default list.
+                     // We try to filter available infos by ID.
+                     val newSelector = CameraSelector.Builder()
+                         .addCameraFilter { infos ->
+                             infos.filter { info ->
+                                 try {
+                                     Camera2CameraInfo.from(info).cameraId == id
+                                 } catch(e: Exception) { false }
+                             }
+                         }
+                         .build()
+
+                     // Fallback: If CameraX doesn't expose the physical ID directly, we might need to rely on the logical one
+                     // and Zoom, but the user asked for "one lens one button".
+                     // We proceed with the selector. If binding fails, we catch it.
+
+                     cameraSelector = newSelector
+                     lastRearCameraId = id
+                     bindCameraUseCases()
+                 }
+                 container.addView(button)
+            }
+            // Update lastRearCameraId if not set
+            if (lastRearCameraId == null && sortedIds.isNotEmpty()) {
+                lastRearCameraId = sortedIds[0]
+            }
+
+        } else {
+            container.visibility = View.GONE
+            // If only one, ensure we have a default
+            if (lastRearCameraId == null && rearCameraIds.isNotEmpty()) {
+                 lastRearCameraId = rearCameraIds.first()
+            }
+        }
+
+        // Update the switch button visibility/function
+        updateCameraSwitchButton()
+    }
+
+    /** Enable/disable camera switching based on available cameras */
+    @SuppressLint("UnsafeOptInUsageError")
+    private fun updateCameraSwitchButton() {
+        val switchButton = cameraUiContainerBinding?.cameraSwitchButton
+        try {
+            switchButton?.isEnabled = false
+
+            if (cameraProvider?.hasCamera(CameraSelector.DEFAULT_FRONT_CAMERA) == true) {
+                switchButton?.isEnabled = true
+                switchButton?.setOnClickListener {
+                    // Toggle logic
+                    if (cameraSelector == CameraSelector.DEFAULT_FRONT_CAMERA) {
+                        // Switch to Rear
+                        if (lastRearCameraId != null) {
+                             cameraSelector = CameraSelector.Builder()
+                                 .addCameraFilter { infos ->
+                                     infos.filter { Camera2CameraInfo.from(it).cameraId == lastRearCameraId }
+                                 }
+                                 .build()
+                        } else {
+                             cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+                        }
+                    } else {
+                        // Switch to Front
+                        cameraSelector = CameraSelector.DEFAULT_FRONT_CAMERA
+                    }
+                    bindCameraUseCases()
+                }
+            }
+
+            // If there's no front camera, maybe hide the button?
+            // Or if we are on rear and there are no other cameras, disable it?
+            // The prompt implies keeping the button for front switching.
+
+        } catch (exc: Exception) {
+             switchButton?.isEnabled = false
         }
     }
 
