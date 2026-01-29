@@ -581,7 +581,11 @@ class CameraFragment : Fragment() {
                     val uri = images.first().uri
                     val intent = Intent(Intent.ACTION_VIEW, uri)
                     intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                    startActivity(intent)
+                    try {
+                        startActivity(intent)
+                    } catch (e: ActivityNotFoundException) {
+                        Toast.makeText(requireContext(), "No gallery app installed", Toast.LENGTH_SHORT).show()
+                    }
                 }
             }
         }
