@@ -327,6 +327,13 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processRaw(
     float* wb = env->GetFloatArrayElements(wbGains, 0);
     float* colorMat = env->GetFloatArrayElements(ccm, 0);
 
+    if (!wb || !colorMat) {
+        LOGE("Failed to get array elements");
+        if (wb) env->ReleaseFloatArrayElements(wbGains, wb, 0);
+        if (colorMat) env->ReleaseFloatArrayElements(ccm, colorMat, 0);
+        return JNI_FALSE;
+    }
+
     const char* lut_path_cstr = (lutPath) ? env->GetStringUTFChars(lutPath, 0) : nullptr;
     const char* tiff_path_cstr = (outputTiffPath) ? env->GetStringUTFChars(outputTiffPath, 0) : nullptr;
     const char* jpg_path_cstr = (outputJpgPath) ? env->GetStringUTFChars(outputJpgPath, 0) : nullptr;
