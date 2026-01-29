@@ -20,17 +20,21 @@ import android.annotation.SuppressLint
 import android.content.*
 import android.content.res.Configuration
 import android.graphics.Color
+import android.graphics.ImageFormat
 import android.graphics.drawable.ColorDrawable
-import android.hardware.camera2.CameraCharacteristics
-import android.hardware.camera2.CameraManager
+import android.hardware.camera2.*
 import android.hardware.display.DisplayManager
+import android.media.ImageReader
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.HandlerThread
 import android.provider.MediaStore
 import android.util.Log
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.LayoutInflater
+import android.view.SurfaceHolder
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
@@ -112,6 +116,13 @@ class CameraFragment : Fragment() {
         requireContext().getSystemService(Context.CAMERA_SERVICE) as CameraManager
     }
 
+    // Camera2 variables
+    private var camera2Device: CameraDevice? = null
+    private var camera2Session: CameraCaptureSession? = null
+    private var camera2ImageReader: ImageReader? = null
+    private var camera2Thread: HandlerThread? = null
+    private var camera2Handler: Handler? = null
+
     /** Blocking camera operations are performed using this executor */
     private lateinit var cameraExecutor: ExecutorService
 
@@ -144,6 +155,19 @@ class CameraFragment : Fragment() {
         } ?: Unit
     }
 
+    override fun onStart() {
+        super.onStart()
+        // Restart Camera2 if we are in Camera2 mode (SurfaceView is visible) and we have a valid ID
+        if (currentCameraId != null && fragmentCameraBinding.root.findViewById<View>(R.id.view_finder_camera2).visibility == View.VISIBLE) {
+            startCamera2(currentCameraId!!)
+        }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        stopCamera2()
+    }
+
     override fun onResume() {
         super.onResume()
         // Make sure that all permissions are still present, since the
@@ -157,6 +181,7 @@ class CameraFragment : Fragment() {
 
     override fun onDestroyView() {
         _fragmentCameraBinding = null
+        stopCamera2()
         super.onDestroyView()
 
         // Shut down our background executor
@@ -195,6 +220,11 @@ class CameraFragment : Fragment() {
     @SuppressLint("MissingPermission")
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+
+        // Restore state
+        savedInstanceState?.getString("currentCameraId")?.let {
+            currentCameraId = it
+        }
 
         // Initialize our background executor
         cameraExecutor = Executors.newSingleThreadExecutor()
@@ -248,6 +278,11 @@ class CameraFragment : Fragment() {
         updateCameraSwitchButton()
     }
 
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        currentCameraId?.let { outState.putString("currentCameraId", it) }
+    }
+
     /** Initialize CameraX, and prepare to bind the camera use cases  */
     private suspend fun setUpCamera() {
         cameraProvider = ProcessCameraProvider.getInstance(requireContext()).await()
@@ -298,7 +333,17 @@ class CameraFragment : Fragment() {
         if (currentCameraId != null) {
             try {
                 if (!cameraProvider.hasCamera(cameraSelector)) {
-                    Toast.makeText(requireContext(), "Camera ID $currentCameraId not supported by CameraX", Toast.LENGTH_SHORT).show()
+                    // Fallback to Camera2
+                    Toast.makeText(requireContext(), "Switching to Camera ID $currentCameraId (Camera2 mode)...", Toast.LENGTH_SHORT).show()
+
+                    // Unbind CameraX
+                    cameraProvider.unbindAll()
+
+                    // Hide PreviewView, Show SurfaceView
+                    fragmentCameraBinding.viewFinder.visibility = View.GONE
+                    fragmentCameraBinding.root.findViewById<View>(R.id.view_finder_camera2).visibility = View.VISIBLE
+
+                    startCamera2(currentCameraId!!)
                     return
                 }
             } catch (e: Exception) {
@@ -595,6 +640,12 @@ class CameraFragment : Fragment() {
                                 currentCameraId = id
                                 lensFacing = CameraSelector.LENS_FACING_BACK // Keep this for context
                                 Toast.makeText(context, "Switching to Camera ID $id", Toast.LENGTH_SHORT).show()
+
+                                // Stop Camera2 if running
+                                stopCamera2()
+                                fragmentCameraBinding.viewFinder.visibility = View.VISIBLE
+                                fragmentCameraBinding.root.findViewById<View>(R.id.view_finder_camera2).visibility = View.GONE
+
                                 bindCameraUseCases()
                             }
                         }
@@ -633,6 +684,11 @@ class CameraFragment : Fragment() {
 
         // Listener for button used to capture photo
         cameraUiContainerBinding?.cameraCaptureButton?.setOnClickListener {
+
+            if (camera2Device != null) {
+                takePictureCamera2()
+                return@setOnClickListener
+            }
 
             // Get a stable reference of the modifiable image capture use case
             imageCapture?.let { imageCapture ->
@@ -760,6 +816,11 @@ class CameraFragment : Fragment() {
                     currentCameraId = null
                     CameraSelector.LENS_FACING_FRONT
                 }
+                // Stop Camera2 if running
+                stopCamera2()
+                fragmentCameraBinding.viewFinder.visibility = View.VISIBLE
+                fragmentCameraBinding.root.findViewById<View>(R.id.view_finder_camera2).visibility = View.GONE
+
                 // Re-bind use cases to update selected camera
                 bindCameraUseCases()
             }
@@ -798,6 +859,201 @@ class CameraFragment : Fragment() {
     private fun hasFrontCamera(): Boolean {
         return cameraProvider?.hasCamera(CameraSelector.DEFAULT_FRONT_CAMERA) ?: false
     }
+
+    @SuppressLint("MissingPermission")
+    private fun startCamera2(cameraId: String) {
+        stopCamera2()
+
+        camera2Thread = HandlerThread("Camera2Thread").apply { start() }
+        camera2Handler = Handler(camera2Thread!!.looper)
+
+        val surfaceView = fragmentCameraBinding.root.findViewById<android.view.SurfaceView>(R.id.view_finder_camera2)
+
+        // Wait for surface
+        if (surfaceView.holder.surface.isValid) {
+            openCamera2Device(cameraId)
+        } else {
+            surfaceView.holder.addCallback(object : SurfaceHolder.Callback {
+                override fun surfaceCreated(holder: SurfaceHolder) {
+                    openCamera2Device(cameraId)
+                }
+                override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {}
+                override fun surfaceDestroyed(holder: SurfaceHolder) {}
+            })
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun openCamera2Device(cameraId: String) {
+        try {
+            val characteristics = cameraManager.getCameraCharacteristics(cameraId)
+            val streamConfigMap = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+
+            // Setup ImageReader for RAW
+            val rawSizes = streamConfigMap?.getOutputSizes(ImageFormat.RAW_SENSOR)
+            if (rawSizes != null && rawSizes.isNotEmpty()) {
+                val largestRaw = Collections.max(Arrays.asList(*rawSizes)) { o1, o2 ->
+                    (o1.width.toLong() * o1.height).compareTo(o2.width.toLong() * o2.height)
+                }
+                camera2ImageReader = ImageReader.newInstance(largestRaw.width, largestRaw.height, ImageFormat.RAW_SENSOR, 2)
+            }
+
+            cameraManager.openCamera(cameraId, object : CameraDevice.StateCallback() {
+                override fun onOpened(camera: CameraDevice) {
+                    camera2Device = camera
+                    createCamera2Session()
+                }
+                override fun onDisconnected(camera: CameraDevice) {
+                    camera.close()
+                    camera2Device = null
+                }
+                override fun onError(camera: CameraDevice, error: Int) {
+                    camera.close()
+                    camera2Device = null
+                    Toast.makeText(context, "Camera2 Open Error: $error", Toast.LENGTH_SHORT).show()
+                }
+            }, camera2Handler)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to open Camera2", e)
+        }
+    }
+
+    private fun createCamera2Session() {
+        try {
+            val surfaceView = fragmentCameraBinding.root.findViewById<android.view.SurfaceView>(R.id.view_finder_camera2)
+            val previewSurface = surfaceView.holder.surface
+            val targets = mutableListOf(previewSurface)
+
+            camera2ImageReader?.surface?.let { targets.add(it) }
+
+            camera2Device?.createCaptureSession(targets, object : CameraCaptureSession.StateCallback() {
+                override fun onConfigured(session: CameraCaptureSession) {
+                    if (camera2Device == null) return
+                    camera2Session = session
+
+                    try {
+                        val builder = camera2Device!!.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
+                        builder.addTarget(previewSurface)
+                        session.setRepeatingRequest(builder.build(), null, camera2Handler)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Camera2 preview failed", e)
+                    }
+                }
+                override fun onConfigureFailed(session: CameraCaptureSession) {
+                     Toast.makeText(context, "Camera2 Session Failed", Toast.LENGTH_SHORT).show()
+                }
+            }, camera2Handler)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to create Camera2 session", e)
+        }
+    }
+
+    private fun stopCamera2() {
+        try {
+            camera2Session?.close()
+            camera2Session = null
+            camera2Device?.close()
+            camera2Device = null
+            camera2ImageReader?.close()
+            camera2ImageReader = null
+            camera2Thread?.quitSafely()
+            // Removed join to prevent UI blocking
+            camera2Thread = null
+            camera2Handler = null
+        } catch (e: Exception) {
+            Log.e(TAG, "Error stopping Camera2", e)
+        }
+    }
+
+    private fun takePictureCamera2() {
+        if (camera2Device == null || camera2Session == null || camera2ImageReader == null) return
+
+        try {
+            val characteristics = cameraManager.getCameraCharacteristics(camera2Device!!.id)
+            val builder = camera2Device!!.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE)
+            builder.addTarget(camera2ImageReader!!.surface)
+            // Orientation
+            val sensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
+            val rotation = requireActivity().windowManager.defaultDisplay.rotation
+            builder.set(CaptureRequest.JPEG_ORIENTATION, sensorOrientation) // Rough handling
+
+            // Variables to hold Image and Result
+            var capturedImage: android.media.Image? = null
+            var capturedResult: TotalCaptureResult? = null
+
+            // Function to process DNG when both are ready
+            fun processDngIfReady() {
+                if (capturedImage != null && capturedResult != null) {
+                    val dngCreator = android.hardware.camera2.DngCreator(characteristics, capturedResult!!)
+                    val image = capturedImage!!
+
+                    try {
+                        val name = SimpleDateFormat(FILENAME, Locale.US).format(System.currentTimeMillis())
+                        val dngContentValues = ContentValues().apply {
+                            put(MediaStore.MediaColumns.DISPLAY_NAME, name)
+                            put(MediaStore.MediaColumns.MIME_TYPE, "image/x-adobe-dng")
+                            if (Build.VERSION.SDK_INT > Build.VERSION_CODES.P) {
+                                val appName = requireContext().resources.getString(R.string.app_name)
+                                put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/${appName}")
+                            }
+                        }
+                        val dngUri = requireContext().contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, dngContentValues)
+
+                        if (dngUri != null) {
+                            val outputStream = requireContext().contentResolver.openOutputStream(dngUri)
+                            if (outputStream != null) {
+                                dngCreator.writeImage(outputStream, image)
+                                outputStream.close()
+
+                                // Add Extra EXIF
+                                 val pfd = requireContext().contentResolver.openFileDescriptor(dngUri, "rw")
+                                 if (pfd != null) {
+                                     val exif = ExifInterface(pfd.fileDescriptor)
+                                     exif.setAttribute(ExifInterface.TAG_MAKE, Build.MANUFACTURER)
+                                     exif.setAttribute(ExifInterface.TAG_MODEL, Build.MODEL)
+                                     exif.setAttribute(ExifInterface.TAG_SOFTWARE, requireContext().resources.getString(R.string.app_name))
+                                     exif.saveAttributes()
+                                     pfd.close()
+                                 }
+
+                                 // Display flash logic similar to CameraX
+                                 fragmentCameraBinding.root.post {
+                                     fragmentCameraBinding.root.foreground = ColorDrawable(Color.WHITE)
+                                     fragmentCameraBinding.root.postDelayed(
+                                             { fragmentCameraBinding.root.foreground = null }, ANIMATION_FAST_MILLIS)
+                                 }
+                                 // Toast on Main Thread
+                                 fragmentCameraBinding.root.post {
+                                     Toast.makeText(context, "DNG Saved (Camera2)", Toast.LENGTH_SHORT).show()
+                                 }
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error saving Camera2 DNG", e)
+                    } finally {
+                        image.close()
+                        dngCreator.close()
+                    }
+                }
+            }
+
+            camera2ImageReader?.setOnImageAvailableListener({ reader ->
+                capturedImage = reader.acquireNextImage()
+                processDngIfReady()
+            }, camera2Handler)
+
+            camera2Session?.capture(builder.build(), object : CameraCaptureSession.CaptureCallback() {
+                 override fun onCaptureCompleted(session: CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {
+                     capturedResult = result
+                     processDngIfReady()
+                 }
+            }, camera2Handler)
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Camera2 Capture Failed", e)
+        }
+    }
+
 
     /**
      * Our custom image analysis class.
