@@ -85,6 +85,8 @@ dependencies {
     // CameraX View class
     implementation "androidx.camera:camera-view:$camerax_version"
 
+    // EXIF Interface
+    implementation "androidx.exifinterface:exifinterface:1.3.7"
 
     // CameraX Extensions library
     // implementation "androidx.camera:camera-extensions:$camerax_version"

@@ -23,6 +23,27 @@
     android:layout_height="match_parent">
 
     <!-- Camera control and gallery buttons -->
+
+    <!-- Lens selection buttons -->
+    <HorizontalScrollView
+        android:id="@+id/camera_lens_list_scroll"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="@dimen/margin_small"
+        app:layout_constraintBottom_toTopOf="@id/camera_capture_button"
+        app:layout_constraintLeft_toLeftOf="parent"
+        app:layout_constraintRight_toRightOf="parent">
+
+        <LinearLayout
+            android:id="@+id/camera_lens_list"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:paddingStart="@dimen/margin_small"
+            android:paddingEnd="@dimen/margin_small" />
+
+    </HorizontalScrollView>
+
     <ImageButton
         android:id="@+id/camera_switch_button"
         android:layout_width="@dimen/round_button_medium"

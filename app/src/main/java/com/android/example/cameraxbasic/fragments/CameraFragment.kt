@@ -21,22 +21,29 @@ import android.content.*
 import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
+import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CameraManager
 import android.hardware.display.DisplayManager
 import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
 import android.util.Log
+import android.view.Gravity
 import android.view.KeyEvent
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.Button
+import android.widget.LinearLayout
 import android.widget.Toast
+import androidx.camera.camera2.interop.Camera2CameraInfo
 import androidx.camera.core.*
 import androidx.camera.core.resolutionselector.AspectRatioStrategy
 import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.concurrent.futures.await
 import androidx.core.view.setPadding
+import androidx.exifinterface.media.ExifInterface
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
@@ -53,7 +60,10 @@ import com.android.example.cameraxbasic.utils.MediaStoreUtils
 import com.android.example.cameraxbasic.utils.simulateClick
 import com.bumptech.glide.Glide
 import com.bumptech.glide.request.RequestOptions
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
 import java.nio.ByteBuffer
 import java.text.SimpleDateFormat
 import java.util.*
@@ -86,6 +96,7 @@ class CameraFragment : Fragment() {
 
     private var displayId: Int = -1
     private var lensFacing: Int = CameraSelector.LENS_FACING_BACK
+    private var currentCameraId: String? = null
     private var preview: Preview? = null
     private var imageCapture: ImageCapture? = null
     private var imageAnalyzer: ImageAnalysis? = null
@@ -95,6 +106,10 @@ class CameraFragment : Fragment() {
 
     private val displayManager by lazy {
         requireContext().getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
+    }
+
+    private val cameraManager by lazy {
+        requireContext().getSystemService(Context.CAMERA_SERVICE) as CameraManager
     }
 
     /** Blocking camera operations are performed using this executor */
@@ -249,6 +264,9 @@ class CameraFragment : Fragment() {
 
         // Build and bind the camera use cases
         bindCameraUseCases()
+
+        // Populate lens buttons after camera is set up
+        populateLensButtons()
     }
 
     /** Declare and bind preview, capture and analysis use cases */
@@ -268,11 +286,42 @@ class CameraFragment : Fragment() {
                 ?: throw IllegalStateException("Camera initialization failed.")
 
         // CameraSelector
-        val cameraSelector = CameraSelector.Builder().requireLensFacing(lensFacing).build()
+        val cameraSelector = if (currentCameraId != null) {
+            CameraSelector.Builder().addCameraFilter { cameraInfos ->
+                cameraInfos.filter { Camera2CameraInfo.from(it).cameraId == currentCameraId }
+            }.build()
+        } else {
+            CameraSelector.Builder().requireLensFacing(lensFacing).build()
+        }
 
-        val cameraInfo = cameraProvider.getCameraInfo(cameraSelector)
-        val capabilities = ImageCapture.getImageCaptureCapabilities(cameraInfo)
-        val isRawSupported = capabilities.supportedOutputFormats.contains(ImageCapture.OUTPUT_FORMAT_RAW_JPEG)
+        // Safety Check: Ensure the selected camera is supported by CameraX
+        if (currentCameraId != null) {
+            try {
+                if (!cameraProvider.hasCamera(cameraSelector)) {
+                    Toast.makeText(requireContext(), "Camera ID $currentCameraId not supported by CameraX", Toast.LENGTH_SHORT).show()
+                    return
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error checking camera availability", e)
+                return
+            }
+        }
+
+        // Check for RAW support
+        var isRawSupported = false
+        try {
+            // Check if we can get camera info for the selector to verify capabilities
+            if (cameraProvider.hasCamera(cameraSelector)) {
+               val cameraInfos = cameraSelector.filter(cameraProvider.availableCameraInfos)
+               if (cameraInfos.isNotEmpty()) {
+                   val cameraInfo = cameraInfos[0]
+                   val capabilities = ImageCapture.getImageCaptureCapabilities(cameraInfo)
+                   isRawSupported = capabilities.supportedOutputFormats.contains(ImageCapture.OUTPUT_FORMAT_RAW)
+               }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error checking RAW support", e)
+        }
 
         val resolutionSelector = ResolutionSelector.Builder()
             .setAspectRatioStrategy(AspectRatioStrategy(screenAspectRatio, AspectRatioStrategy.FALLBACK_RULE_AUTO))
@@ -297,7 +346,7 @@ class CameraFragment : Fragment() {
             .setTargetRotation(rotation)
             .apply {
                 if (isRawSupported) {
-                    setOutputFormat(ImageCapture.OUTPUT_FORMAT_RAW_JPEG)
+                    setOutputFormat(ImageCapture.OUTPUT_FORMAT_RAW)
                 }
             }
             .build()
@@ -456,6 +505,108 @@ class CameraFragment : Fragment() {
         return AspectRatio.RATIO_16_9
     }
 
+    private fun populateLensButtons() {
+        val lensListContainer = cameraUiContainerBinding?.cameraLensList
+        lensListContainer?.removeAllViews()
+
+        Toast.makeText(requireContext(), "Scanning for cameras...", Toast.LENGTH_SHORT).show()
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            // Scan for available cameras, including aggressive scan
+            val availableCameras = mutableListOf<Pair<String, String>>() // ID, Name
+
+            try {
+                val systemIds = cameraManager.cameraIdList.toMutableList()
+                // Aggressive scan
+                for (i in 0..5) {
+                    if (!systemIds.contains(i.toString())) {
+                        try {
+                            // Check if we can get characteristics (meaning it likely exists)
+                            cameraManager.getCameraCharacteristics(i.toString())
+                            systemIds.add(i.toString())
+                            withContext(Dispatchers.Main) {
+                                Toast.makeText(requireContext(), "Found hidden camera ID $i", Toast.LENGTH_SHORT).show()
+                            }
+                        } catch (e: Exception) {
+                            // Ignore
+                        }
+                    }
+                }
+
+                // Find main back camera for zoom calc (widest lens that is BACK facing)
+                var mainBackId: String? = null
+                var mainBackFocalLength: Float = Float.MAX_VALUE
+
+                for (id in systemIds) {
+                    try {
+                        val chars = cameraManager.getCameraCharacteristics(id)
+                        val facing = chars.get(CameraCharacteristics.LENS_FACING)
+                        if (facing == CameraCharacteristics.LENS_FACING_BACK) {
+                            val focalLengths = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
+                            if (focalLengths != null && focalLengths.isNotEmpty()) {
+                                val focalLength = focalLengths[0]
+                                if (focalLength < mainBackFocalLength) {
+                                    mainBackFocalLength = focalLength
+                                    mainBackId = id
+                                }
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error checking camera ID $id", e)
+                    }
+                }
+
+                for (id in systemIds) {
+                    try {
+                        val chars = cameraManager.getCameraCharacteristics(id)
+                        val facing = chars.get(CameraCharacteristics.LENS_FACING)
+
+                        if (facing == CameraCharacteristics.LENS_FACING_BACK) {
+                            val focalLengths = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
+                            var zoomText = id
+                            if (mainBackId != null && focalLengths != null && focalLengths.isNotEmpty()) {
+                                val zoomRatio = focalLengths[0] / mainBackFocalLength
+                                zoomText = String.format(Locale.US, "%.1fx", zoomRatio)
+                            }
+                            availableCameras.add(Pair(id, zoomText))
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error processing camera ID $id", e)
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error enumerating cameras", e)
+            }
+
+            withContext(Dispatchers.Main) {
+                if (availableCameras.size > 1) {
+                    cameraUiContainerBinding?.cameraLensListScroll?.visibility = View.VISIBLE
+                    for ((id, name) in availableCameras) {
+                        val button = Button(requireContext()).apply {
+                            text = name
+                            layoutParams = LinearLayout.LayoutParams(
+                                ViewGroup.LayoutParams.WRAP_CONTENT,
+                                ViewGroup.LayoutParams.WRAP_CONTENT
+                            ).apply {
+                                marginEnd = 16
+                            }
+                            setOnClickListener {
+                                // Switch to this specific camera ID
+                                currentCameraId = id
+                                lensFacing = CameraSelector.LENS_FACING_BACK // Keep this for context
+                                Toast.makeText(context, "Switching to Camera ID $id", Toast.LENGTH_SHORT).show()
+                                bindCameraUseCases()
+                            }
+                        }
+                        lensListContainer?.addView(button)
+                    }
+                } else {
+                    cameraUiContainerBinding?.cameraLensListScroll?.visibility = View.GONE
+                }
+            }
+        }
+    }
+
     /** Method used to re-draw the camera UI controls, called every time configuration changes. */
     private fun updateCameraUi() {
 
@@ -469,6 +620,8 @@ class CameraFragment : Fragment() {
                 fragmentCameraBinding.root,
                 true
         )
+
+        populateLensButtons()
 
         // In the background, load latest photo taken (if any) for gallery thumbnail
         lifecycleScope.launch {
@@ -488,6 +641,9 @@ class CameraFragment : Fragment() {
                 val name = SimpleDateFormat(FILENAME, Locale.US)
                     .format(System.currentTimeMillis())
 
+                val appContext = requireContext().applicationContext
+                val appNameStr = resources.getString(R.string.app_name)
+
                 // Callback for image saved
                 val imageSavedCallback = object : ImageCapture.OnImageSavedCallback {
                     override fun onError(exc: ImageCaptureException) {
@@ -497,6 +653,23 @@ class CameraFragment : Fragment() {
                     override fun onImageSaved(output: ImageCapture.OutputFileResults) {
                         val savedUri = output.savedUri
                         Log.d(TAG, "Photo capture succeeded: $savedUri")
+
+                        // Add EXIF metadata
+                        try {
+                            if (savedUri != null) {
+                                val pfd = appContext.contentResolver.openFileDescriptor(savedUri, "rw")
+                                if (pfd != null) {
+                                    val exif = ExifInterface(pfd.fileDescriptor)
+                                    exif.setAttribute(ExifInterface.TAG_MAKE, Build.MANUFACTURER)
+                                    exif.setAttribute(ExifInterface.TAG_MODEL, Build.MODEL)
+                                    exif.setAttribute(ExifInterface.TAG_SOFTWARE, appNameStr)
+                                    exif.saveAttributes()
+                                    pfd.close()
+                                }
+                            }
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Error writing EXIF", e)
+                        }
 
                         // We can only change the foreground Drawable using API level 23+ API
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
@@ -509,15 +682,15 @@ class CameraFragment : Fragment() {
                         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
                             // Suppress deprecated Camera usage needed for API level 23 and below
                             @Suppress("DEPRECATION")
-                            requireActivity().sendBroadcast(
+                            appContext.sendBroadcast(
                                 Intent(android.hardware.Camera.ACTION_NEW_PICTURE, savedUri)
                             )
                         }
                     }
                 }
 
-                if (imageCapture.outputFormat == ImageCapture.OUTPUT_FORMAT_RAW_JPEG) {
-                    // RAW+JPEG Capture
+                if (imageCapture.outputFormat == ImageCapture.OUTPUT_FORMAT_RAW) {
+                    // RAW Only Capture (DNG)
                     val dngContentValues = ContentValues().apply {
                         put(MediaStore.MediaColumns.DISPLAY_NAME, name)
                         put(MediaStore.MediaColumns.MIME_TYPE, "image/x-adobe-dng")
@@ -532,28 +705,13 @@ class CameraFragment : Fragment() {
                             dngContentValues)
                         .build()
 
-                    val jpegContentValues = ContentValues().apply {
-                        put(MediaStore.MediaColumns.DISPLAY_NAME, name)
-                        put(MediaStore.MediaColumns.MIME_TYPE, PHOTO_TYPE)
-                        if (Build.VERSION.SDK_INT > Build.VERSION_CODES.P) {
-                            val appName = requireContext().resources.getString(R.string.app_name)
-                            put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/${appName}")
-                        }
-                    }
-                    val jpegOutputOptions = ImageCapture.OutputFileOptions
-                        .Builder(requireContext().contentResolver,
-                            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                            jpegContentValues)
-                        .build()
-
                     imageCapture.takePicture(
                         dngOutputOptions,
-                        jpegOutputOptions,
                         cameraExecutor,
                         imageSavedCallback
                     )
                 } else {
-                    // Standard JPEG Capture
+                    // Fallback or Standard JPEG Capture
                     val contentValues = ContentValues().apply {
                         put(MediaStore.MediaColumns.DISPLAY_NAME, name)
                         put(MediaStore.MediaColumns.MIME_TYPE, PHOTO_TYPE)
@@ -596,8 +754,10 @@ class CameraFragment : Fragment() {
             // Listener for button used to switch cameras. Only called if the button is enabled
             it.setOnClickListener {
                 lensFacing = if (CameraSelector.LENS_FACING_FRONT == lensFacing) {
+                    currentCameraId = null // Reset specific ID when switching groups
                     CameraSelector.LENS_FACING_BACK
                 } else {
+                    currentCameraId = null
                     CameraSelector.LENS_FACING_FRONT
                 }
                 // Re-bind use cases to update selected camera
