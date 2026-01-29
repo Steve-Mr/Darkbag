@@ -47,6 +47,12 @@ android {
        }
     }
 
+    externalNativeBuild {
+        cmake {
+            path "src/main/cpp/CMakeLists.txt"
+        }
+    }
+
     buildFeatures {
         viewBinding true
     }
