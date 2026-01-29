@@ -733,6 +733,27 @@ class CameraFragment : Fragment() {
                 dngCreatorReal.writeImage(dngOut, image.image!!)
                 dngOut.close()
                 Log.d(TAG, "Saved DNG to ${dngFile.absolutePath}")
+
+                // Insert DNG into MediaStore
+                val dngValues = ContentValues().apply {
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, "$dngName.dng")
+                    put(MediaStore.MediaColumns.MIME_TYPE, "image/x-adobe-dng")
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/Darkbag")
+                        put(MediaStore.MediaColumns.IS_PENDING, 1)
+                    }
+                }
+                val dngUri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, dngValues)
+                if (dngUri != null) {
+                    contentResolver.openOutputStream(dngUri)?.use { out ->
+                        java.io.FileInputStream(dngFile).copyTo(out)
+                    }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        dngValues.clear()
+                        dngValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                        contentResolver.update(dngUri, dngValues, null, null)
+                    }
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to save DNG", e)
             }
@@ -865,7 +886,11 @@ class CameraFragment : Fragment() {
                     val jpgUri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, jpgValues)
                     if (jpgUri != null) {
                         contentResolver.openOutputStream(jpgUri)?.use { out ->
-                            bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, out)
+                            // Apply rotation
+                            val matrix = android.graphics.Matrix()
+                            matrix.postRotate(image.imageInfo.rotationDegrees.toFloat())
+                            val rotatedBitmap = android.graphics.Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+                            rotatedBitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, out)
                         }
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                             jpgValues.clear()
