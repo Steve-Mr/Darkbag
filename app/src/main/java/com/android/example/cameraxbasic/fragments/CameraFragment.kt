@@ -31,11 +31,17 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
+import android.graphics.BitmapFactory
 import androidx.camera.core.*
 import androidx.camera.core.resolutionselector.AspectRatioStrategy
 import androidx.camera.core.resolutionselector.ResolutionSelector
+import androidx.camera.camera2.interop.Camera2CameraInfo
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.concurrent.futures.await
+import com.android.example.cameraxbasic.processor.ColorProcessor
+import java.io.File
+import java.io.FileOutputStream
+import android.net.Uri
 import androidx.core.view.setPadding
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
@@ -458,6 +464,12 @@ class CameraFragment : Fragment() {
             }
         }
 
+        // Listener for settings button
+        cameraUiContainerBinding?.settingsButton?.setOnClickListener {
+            Navigation.findNavController(requireActivity(), R.id.fragment_container)
+                .navigate(CameraFragmentDirections.actionCameraToSettings())
+        }
+
         // Listener for button used to capture photo
         cameraUiContainerBinding?.cameraCaptureButton?.setOnClickListener {
 
@@ -497,26 +509,27 @@ class CameraFragment : Fragment() {
                 }
 
                 if (imageCapture.outputFormat == ImageCapture.OUTPUT_FORMAT_RAW) {
-                    // RAW Capture
-                    val dngContentValues = ContentValues().apply {
-                        put(MediaStore.MediaColumns.DISPLAY_NAME, name)
-                        put(MediaStore.MediaColumns.MIME_TYPE, "image/x-adobe-dng")
-                        if (Build.VERSION.SDK_INT > Build.VERSION_CODES.P) {
-                            val appName = requireContext().resources.getString(R.string.app_name)
-                            put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/${appName}")
-                        }
-                    }
-                    val dngOutputOptions = ImageCapture.OutputFileOptions
-                        .Builder(requireContext().contentResolver,
-                            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                            dngContentValues)
-                        .build()
+                    // RAW Capture with Processing
+                    imageCapture.takePicture(cameraExecutor, object : ImageCapture.OnImageCapturedCallback() {
+                        override fun onCaptureSuccess(image: ImageProxy) {
+                            // Process and Save
+                            processCapturedImage(image)
+                            image.close()
 
-                    imageCapture.takePicture(
-                        dngOutputOptions,
-                        cameraExecutor,
-                        imageSavedCallback
-                    )
+                            // UI Feedback
+                            fragmentCameraBinding.root.post {
+                                Toast.makeText(requireContext(), "DNG Captured & Processed", Toast.LENGTH_SHORT).show()
+
+                                // Update Thumbnail (Simplified)
+                                // In real app, we should update with the processed JPG/TIFF
+                            }
+                        }
+
+                        override fun onError(exception: ImageCaptureException) {
+                            Log.e(TAG, "Photo capture failed: ${exception.message}", exception)
+                        }
+                    })
+
                 } else {
                     Toast.makeText(requireContext(), "RAW capture is not supported on this device.", Toast.LENGTH_SHORT).show()
                 }
@@ -669,6 +682,112 @@ class CameraFragment : Fragment() {
             listeners.forEach { it(luma) }
 
             image.close()
+        }
+    }
+
+    @androidx.annotation.OptIn(androidx.camera.camera2.interop.ExperimentalCamera2Interop::class)
+    private fun processCapturedImage(image: ImageProxy) {
+        val context = requireContext()
+        val contentResolver = context.contentResolver
+
+        val dngName = SimpleDateFormat(FILENAME, Locale.US).format(System.currentTimeMillis())
+        val dngFile = File(context.getExternalFilesDir(null), "$dngName.dng")
+
+        val camera2Info = Camera2CameraInfo.from(camera!!.cameraInfo)
+        val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as android.hardware.camera2.CameraManager
+        val chars = cameraManager.getCameraCharacteristics(camera2Info.cameraId)
+
+        val camera2ImageInfo = androidx.camera.camera2.interop.Camera2ImageInfo.from(image.imageInfo)
+        val captureResult = camera2ImageInfo.captureResult
+
+        val dngCreatorReal = android.hardware.camera2.DngCreator(chars, captureResult)
+
+        try {
+            val dngOut = FileOutputStream(dngFile)
+            dngCreatorReal.writeImage(dngOut, image.image!!)
+            dngOut.close()
+            Log.d(TAG, "Saved DNG to ${dngFile.absolutePath}")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to save DNG", e)
+        }
+        dngCreatorReal.close()
+
+        // 2. Prepare for Processing
+        val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val targetLogName = prefs.getString(SettingsFragment.KEY_TARGET_LOG, "None")
+        val targetLogIndex = SettingsFragment.LOG_CURVES.indexOf(targetLogName)
+        val lutPath = prefs.getString(SettingsFragment.KEY_LUT_URI, null)
+
+        var nativeLutPath: String? = null
+        if (lutPath != null) {
+            if (lutPath.startsWith("content://")) {
+                val lutFile = File(context.cacheDir, "temp_lut.cube")
+                try {
+                    contentResolver.openInputStream(Uri.parse(lutPath))?.use { input ->
+                        FileOutputStream(lutFile).use { output -> input.copyTo(output) }
+                    }
+                    nativeLutPath = lutFile.absolutePath
+                } catch (e: Exception) { Log.e(TAG, "Failed to load LUT", e) }
+            } else {
+                nativeLutPath = lutPath
+            }
+        }
+
+        val saveTiff = prefs.getBoolean(SettingsFragment.KEY_SAVE_TIFF, true)
+        val saveJpg = prefs.getBoolean(SettingsFragment.KEY_SAVE_JPG, true)
+
+        val tiffPath = if (saveTiff) File(context.getExternalFilesDir(null), "$dngName.tiff").absolutePath else null
+        val bmpPath = if (saveJpg) File(context.cacheDir, "temp.bmp").absolutePath else null
+
+        val buffer = image.planes[0].buffer
+        val width = image.width
+        val height = image.height
+        val stride = image.planes[0].rowStride
+
+        val whiteLevel = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_WHITE_LEVEL) ?: 1023
+        val blackLevelPattern = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_BLACK_LEVEL_PATTERN)
+        val blackLevel = blackLevelPattern?.getOffsetForIndex(0,0) ?: 0
+        val cfa = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_COLOR_FILTER_ARRANGEMENT) ?: 0
+
+        val forwardMat = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_FORWARD_MATRIX1)
+        val ccm = FloatArray(9)
+        if (forwardMat != null) {
+            forwardMat.copyElements(ccm, 0)
+        } else {
+            ccm[0]=1f; ccm[4]=1f; ccm[8]=1f;
+        }
+
+        // Extract WB from CaptureResult
+        val neutral = captureResult.get(android.hardware.camera2.CaptureResult.SENSOR_NEUTRAL_COLOR_POINT)
+        val wb = if (neutral != null && neutral.size >= 3) {
+            // Gains are 1 / Neutral
+            val r = if (neutral[0].toFloat() > 0) 1.0f / neutral[0].toFloat() else 1.0f
+            val g = if (neutral[1].toFloat() > 0) 1.0f / neutral[1].toFloat() else 1.0f
+            val b = if (neutral[2].toFloat() > 0) 1.0f / neutral[2].toFloat() else 1.0f
+            floatArrayOf(r, g, g, b)
+        } else {
+            floatArrayOf(2.0f, 1.0f, 1.0f, 2.0f)
+        }
+
+        ColorProcessor.processRaw(
+            buffer, width, height, stride, whiteLevel, blackLevel, cfa,
+            wb, ccm, targetLogIndex, nativeLutPath, tiffPath, bmpPath
+        )
+
+        if (saveJpg && bmpPath != null) {
+            try {
+                val bitmap = BitmapFactory.decodeFile(bmpPath)
+                if (bitmap != null) {
+                    val jpgFile = File(context.getExternalFilesDir(null), "$dngName.jpg")
+                    val out = FileOutputStream(jpgFile)
+                    bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, out)
+                    out.close()
+                    Log.d(TAG, "Saved JPG to ${jpgFile.absolutePath}")
+                    File(bmpPath).delete()
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to convert BMP to JPG", e)
+            }
         }
     }
 
