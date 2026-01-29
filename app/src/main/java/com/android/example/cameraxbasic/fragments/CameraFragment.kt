@@ -272,7 +272,7 @@ class CameraFragment : Fragment() {
 
         val cameraInfo = cameraProvider.getCameraInfo(cameraSelector)
         val capabilities = ImageCapture.getImageCaptureCapabilities(cameraInfo)
-        val isRawSupported = capabilities.supportedOutputFormats.contains(ImageCapture.OUTPUT_FORMAT_RAW_JPEG)
+        val isRawSupported = capabilities.supportedOutputFormats.contains(ImageCapture.OUTPUT_FORMAT_RAW)
 
         val resolutionSelector = ResolutionSelector.Builder()
             .setAspectRatioStrategy(AspectRatioStrategy(screenAspectRatio, AspectRatioStrategy.FALLBACK_RULE_AUTO))
@@ -288,7 +288,7 @@ class CameraFragment : Fragment() {
 
         // ImageCapture
         imageCapture = ImageCapture.Builder()
-            .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+            .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
             // We request aspect ratio but no resolution to match preview config, but letting
             // CameraX optimize for whatever specific resolution best fits our use cases
             .setResolutionSelector(resolutionSelector)
@@ -297,7 +297,7 @@ class CameraFragment : Fragment() {
             .setTargetRotation(rotation)
             .apply {
                 if (isRawSupported) {
-                    setOutputFormat(ImageCapture.OUTPUT_FORMAT_RAW_JPEG)
+                    setOutputFormat(ImageCapture.OUTPUT_FORMAT_RAW)
                 }
             }
             .build()
@@ -516,8 +516,8 @@ class CameraFragment : Fragment() {
                     }
                 }
 
-                if (imageCapture.outputFormat == ImageCapture.OUTPUT_FORMAT_RAW_JPEG) {
-                    // RAW+JPEG Capture
+                if (imageCapture.outputFormat == ImageCapture.OUTPUT_FORMAT_RAW) {
+                    // RAW Capture
                     val dngContentValues = ContentValues().apply {
                         put(MediaStore.MediaColumns.DISPLAY_NAME, name)
                         put(MediaStore.MediaColumns.MIME_TYPE, "image/x-adobe-dng")
@@ -532,46 +532,13 @@ class CameraFragment : Fragment() {
                             dngContentValues)
                         .build()
 
-                    val jpegContentValues = ContentValues().apply {
-                        put(MediaStore.MediaColumns.DISPLAY_NAME, name)
-                        put(MediaStore.MediaColumns.MIME_TYPE, PHOTO_TYPE)
-                        if (Build.VERSION.SDK_INT > Build.VERSION_CODES.P) {
-                            val appName = requireContext().resources.getString(R.string.app_name)
-                            put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/${appName}")
-                        }
-                    }
-                    val jpegOutputOptions = ImageCapture.OutputFileOptions
-                        .Builder(requireContext().contentResolver,
-                            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                            jpegContentValues)
-                        .build()
-
                     imageCapture.takePicture(
                         dngOutputOptions,
-                        jpegOutputOptions,
                         cameraExecutor,
                         imageSavedCallback
                     )
                 } else {
-                    // Standard JPEG Capture
-                    val contentValues = ContentValues().apply {
-                        put(MediaStore.MediaColumns.DISPLAY_NAME, name)
-                        put(MediaStore.MediaColumns.MIME_TYPE, PHOTO_TYPE)
-                        if (Build.VERSION.SDK_INT > Build.VERSION_CODES.P) {
-                            val appName = requireContext().resources.getString(R.string.app_name)
-                            put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/${appName}")
-                        }
-                    }
-
-                    val outputOptions = ImageCapture.OutputFileOptions
-                        .Builder(requireContext().contentResolver,
-                            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                            contentValues)
-                        .build()
-
-                    imageCapture.takePicture(
-                        outputOptions, cameraExecutor, imageSavedCallback
-                    )
+                    Toast.makeText(requireContext(), "RAW capture is not supported on this device.", Toast.LENGTH_SHORT).show()
                 }
 
                 // We can only change the foreground Drawable using API level 23+ API
@@ -609,12 +576,12 @@ class CameraFragment : Fragment() {
         cameraUiContainerBinding?.photoViewButton?.setOnClickListener {
             // Only navigate when the gallery has photos
             lifecycleScope.launch {
-                if (mediaStoreUtils.getImages().isNotEmpty()) {
-                    Navigation.findNavController(requireActivity(), R.id.fragment_container)
-                        .navigate(CameraFragmentDirections.actionCameraToGallery(
-                            mediaStoreUtils.mediaStoreCollection.toString()
-                        )
-                    )
+                val images = mediaStoreUtils.getImages()
+                if (images.isNotEmpty()) {
+                    val uri = images.first().uri
+                    val intent = Intent(Intent.ACTION_VIEW, uri)
+                    intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    startActivity(intent)
                 }
             }
         }
