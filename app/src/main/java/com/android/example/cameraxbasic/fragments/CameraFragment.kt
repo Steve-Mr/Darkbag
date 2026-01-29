@@ -36,6 +36,8 @@ import androidx.camera.core.*
 import androidx.camera.core.resolutionselector.AspectRatioStrategy
 import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.camera2.interop.Camera2CameraInfo
+import androidx.camera.camera2.interop.Camera2ImageInfo
+import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.concurrent.futures.await
 import com.android.example.cameraxbasic.processor.ColorProcessor
@@ -697,7 +699,7 @@ class CameraFragment : Fragment() {
         val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as android.hardware.camera2.CameraManager
         val chars = cameraManager.getCameraCharacteristics(camera2Info.cameraId)
 
-        val camera2ImageInfo = androidx.camera.camera2.interop.Camera2ImageInfo.from(image.imageInfo)
+        val camera2ImageInfo = Camera2ImageInfo.from(image.imageInfo)
         val captureResult = camera2ImageInfo.captureResult
 
         val dngCreatorReal = android.hardware.camera2.DngCreator(chars, captureResult)
@@ -752,18 +754,35 @@ class CameraFragment : Fragment() {
         val forwardMat = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_FORWARD_MATRIX1)
         val ccm = FloatArray(9)
         if (forwardMat != null) {
-            forwardMat.copyElements(ccm, 0)
+            val rationals = IntArray(18) // 3x3 matrix * 2 (numerator/denominator) = 18 ints? No, copyElements takes rational array or int array.
+            // Actually, SENSOR_FORWARD_MATRIX1 returns ColorSpaceTransform.
+            // https://developer.android.com/reference/android/hardware/camera2/params/ColorSpaceTransform
+            // copyElements(int[] destination, int offset) copies the numerator/denominator pairs. 3x3 = 9 elements. 9*2 = 18 integers.
+            val rawMat = IntArray(18)
+            forwardMat.copyElements(rawMat, 0)
+            for (i in 0 until 9) {
+                val num = rawMat[i * 2]
+                val den = rawMat[i * 2 + 1]
+                ccm[i] = if (den != 0) num.toFloat() / den.toFloat() else 0f
+            }
         } else {
             ccm[0]=1f; ccm[4]=1f; ccm[8]=1f;
         }
 
         // Extract WB from CaptureResult
         val neutral = captureResult.get(android.hardware.camera2.CaptureResult.SENSOR_NEUTRAL_COLOR_POINT)
-        val wb = if (neutral != null && neutral.size >= 3) {
+        val wb = if (neutral != null) {
+            // RggbChannelVector has named properties: red, greenEven, greenOdd, blue
+            val rVal = neutral.red
+            val gEvenVal = neutral.greenEven
+            val gOddVal = neutral.greenOdd
+            val bVal = neutral.blue
+
             // Gains are 1 / Neutral
-            val r = if (neutral[0].toFloat() > 0) 1.0f / neutral[0].toFloat() else 1.0f
-            val g = if (neutral[1].toFloat() > 0) 1.0f / neutral[1].toFloat() else 1.0f
-            val b = if (neutral[2].toFloat() > 0) 1.0f / neutral[2].toFloat() else 1.0f
+            val r = if (rVal > 0) 1.0f / rVal else 1.0f
+            val g = if (gEvenVal > 0) 1.0f / gEvenVal else 1.0f // Average G? Or just use G_even? Typically G_even ~= G_odd
+            val b = if (bVal > 0) 1.0f / bVal else 1.0f
+
             floatArrayOf(r, g, g, b)
         } else {
             floatArrayOf(2.0f, 1.0f, 1.0f, 2.0f)
