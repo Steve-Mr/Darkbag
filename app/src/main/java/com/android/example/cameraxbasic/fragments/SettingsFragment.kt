@@ -26,16 +26,48 @@ class SettingsFragment : Fragment() {
 
     private val lutPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         uri?.let {
+            // Check extension
+            val path = it.toString()
+            val filename = getFileName(it)
+            if (filename != null && !filename.endsWith(".cube", ignoreCase = true)) {
+                Toast.makeText(context, "Please select a valid .cube LUT file", Toast.LENGTH_SHORT).show()
+                return@let
+            }
+
             try {
                 // Persist permission
                 requireContext().contentResolver.takePersistableUriPermission(it, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                val path = it.toString()
                 prefs.edit().putString(KEY_LUT_URI, path).apply()
                 updateLutLabel(path)
             } catch (e: Exception) {
                 Toast.makeText(context, "Failed to select LUT: ${e.message}", Toast.LENGTH_SHORT).show()
             }
         }
+    }
+
+    private fun getFileName(uri: Uri): String? {
+        var result: String? = null
+        if (uri.scheme == "content") {
+            val cursor = requireContext().contentResolver.query(uri, null, null, null, null)
+            try {
+                if (cursor != null && cursor.moveToFirst()) {
+                    val index = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                    if (index >= 0) {
+                        result = cursor.getString(index)
+                    }
+                }
+            } finally {
+                cursor?.close()
+            }
+        }
+        if (result == null) {
+            result = uri.path
+            val cut = result?.lastIndexOf('/')
+            if (cut != null && cut != -1) {
+                result = result?.substring(cut + 1)
+            }
+        }
+        return result
     }
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {

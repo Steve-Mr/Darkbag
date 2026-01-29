@@ -718,7 +718,8 @@ class CameraFragment : Fragment() {
         val dngName = SimpleDateFormat(FILENAME, Locale.US).format(System.currentTimeMillis())
         val dngFile = File(context.getExternalFilesDir(null), "$dngName.dng")
 
-        val camera2Info = Camera2CameraInfo.from(camera!!.cameraInfo)
+        val cam = camera ?: return
+        val camera2Info = Camera2CameraInfo.from(cam.cameraInfo)
         val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as android.hardware.camera2.CameraManager
         val chars = cameraManager.getCameraCharacteristics(camera2Info.cameraId)
 
@@ -804,15 +805,16 @@ class CameraFragment : Fragment() {
         val blackLevel = blackLevelPattern?.getOffsetForIndex(0,0) ?: 0
         val cfa = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_COLOR_FILTER_ARRANGEMENT) ?: 0
 
-        val forwardMat = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_FORWARD_MATRIX1)
+        // Use SENSOR_COLOR_TRANSFORM1 (Camera -> XYZ) if available, otherwise fallback to Forward Matrix (XYZ -> Camera)
+        // Note: If using Forward Matrix, we technically need to invert it, but for now we prioritize the Transform matrix.
+        val colorTransform = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_COLOR_TRANSFORM1)
+            ?: chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_FORWARD_MATRIX1)
+
         val ccm = FloatArray(9)
-        if (forwardMat != null) {
-            val rationals = IntArray(18) // 3x3 matrix * 2 (numerator/denominator) = 18 ints? No, copyElements takes rational array or int array.
-            // Actually, SENSOR_FORWARD_MATRIX1 returns ColorSpaceTransform.
-            // https://developer.android.com/reference/android/hardware/camera2/params/ColorSpaceTransform
+        if (colorTransform != null) {
             // copyElements(int[] destination, int offset) copies the numerator/denominator pairs. 3x3 = 9 elements. 9*2 = 18 integers.
             val rawMat = IntArray(18)
-            forwardMat.copyElements(rawMat, 0)
+            colorTransform.copyElements(rawMat, 0)
             for (i in 0 until 9) {
                 val num = rawMat[i * 2]
                 val den = rawMat[i * 2 + 1]

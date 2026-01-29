@@ -124,11 +124,21 @@ LUT3D load_lut(const char* path) {
     std::string line;
     while (std::getline(file, line)) {
         if (line.empty() || line[0] == '#') continue;
+        // Skip metadata lines that might be parsed as data
+        if (line.rfind("TITLE", 0) == 0 ||
+            line.rfind("DOMAIN", 0) == 0 ||
+            line.rfind("LUT_1D", 0) == 0) continue;
+
         if (line.find("LUT_3D_SIZE") != std::string::npos) {
             std::stringstream ss(line);
             std::string temp;
             ss >> temp >> lut.size;
-            lut.data.reserve(lut.size * lut.size * lut.size);
+            if (lut.size > 256) {
+                LOGE("LUT size %d is too large, capping to 256 or invalidating", lut.size);
+                lut.size = 0; // Invalidate
+            } else if (lut.size > 0) {
+                lut.data.reserve(lut.size * lut.size * lut.size);
+            }
             continue;
         }
         std::stringstream ss(line);
@@ -137,6 +147,14 @@ LUT3D load_lut(const char* path) {
             lut.data.push_back({r, g, b});
         }
     }
+
+    // Validate size
+    if (lut.size > 0 && lut.data.size() != (size_t)(lut.size * lut.size * lut.size)) {
+        LOGE("Invalid LUT data size. Expected %d^3, got %zu", lut.size, lut.data.size());
+        lut.size = 0; // Invalidate
+        lut.data.clear();
+    }
+
     return lut;
 }
 
@@ -144,9 +162,10 @@ Vec3 apply_lut(const LUT3D& lut, Vec3 color) {
     if (lut.size == 0) return color;
 
     float scale = (lut.size - 1);
-    float r = color.r * scale;
-    float g = color.g * scale;
-    float b = color.b * scale;
+    // Clamp input to [0, 1] to ensure indices are within bounds
+    float r = std::max(0.0f, std::min(1.0f, color.r)) * scale;
+    float g = std::max(0.0f, std::min(1.0f, color.g)) * scale;
+    float b = std::max(0.0f, std::min(1.0f, color.b)) * scale;
 
     int r0 = (int)r; int r1 = std::min(r0 + 1, lut.size - 1);
     int g0 = (int)g; int g1 = std::min(g0 + 1, lut.size - 1);
@@ -310,6 +329,13 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processRaw(
 
     float* wb = env->GetFloatArrayElements(wbGains, 0);
     float* colorMat = env->GetFloatArrayElements(ccm, 0);
+
+    if (!wb || !colorMat) {
+        LOGE("Failed to get array elements");
+        if (wb) env->ReleaseFloatArrayElements(wbGains, wb, 0);
+        if (colorMat) env->ReleaseFloatArrayElements(ccm, colorMat, 0);
+        return JNI_FALSE;
+    }
 
     const char* lut_path_cstr = (lutPath) ? env->GetStringUTFChars(lutPath, 0) : nullptr;
     const char* tiff_path_cstr = (outputTiffPath) ? env->GetStringUTFChars(outputTiffPath, 0) : nullptr;
