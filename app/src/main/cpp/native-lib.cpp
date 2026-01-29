@@ -144,9 +144,10 @@ Vec3 apply_lut(const LUT3D& lut, Vec3 color) {
     if (lut.size == 0) return color;
 
     float scale = (lut.size - 1);
-    float r = color.r * scale;
-    float g = color.g * scale;
-    float b = color.b * scale;
+    // Clamp input to [0, 1] to ensure indices are within bounds
+    float r = std::max(0.0f, std::min(1.0f, color.r)) * scale;
+    float g = std::max(0.0f, std::min(1.0f, color.g)) * scale;
+    float b = std::max(0.0f, std::min(1.0f, color.b)) * scale;
 
     int r0 = (int)r; int r1 = std::min(r0 + 1, lut.size - 1);
     int g0 = (int)g; int g1 = std::min(g0 + 1, lut.size - 1);
