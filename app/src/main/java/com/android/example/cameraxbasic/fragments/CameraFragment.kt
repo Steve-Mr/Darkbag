@@ -39,6 +39,7 @@ import androidx.camera.camera2.interop.Camera2CameraInfo
 import androidx.camera.camera2.interop.Camera2ImageInfo
 import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.lifecycle.ProcessCameraProvider
+import android.hardware.camera2.params.RggbChannelVector
 import androidx.concurrent.futures.await
 import com.android.example.cameraxbasic.processor.ColorProcessor
 import java.io.File
@@ -770,7 +771,7 @@ class CameraFragment : Fragment() {
         }
 
         // Extract WB from CaptureResult
-        val neutral = captureResult.get(android.hardware.camera2.CaptureResult.SENSOR_NEUTRAL_COLOR_POINT)
+        val neutral = captureResult.get(android.hardware.camera2.CaptureResult.SENSOR_NEUTRAL_COLOR_POINT) as? RggbChannelVector
         val wb = if (neutral != null) {
             // RggbChannelVector has named properties: red, greenEven, greenOdd, blue
             val rVal = neutral.red
