@@ -25,6 +25,7 @@ import android.hardware.display.DisplayManager
 import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
+import android.media.ExifInterface
 import android.util.Log
 import android.view.KeyEvent
 import android.view.LayoutInflater
@@ -729,6 +730,15 @@ class CameraFragment : Fragment() {
         if (captureResult != null) {
             val dngCreatorReal = android.hardware.camera2.DngCreator(chars, captureResult)
             try {
+                // Calculate and set Exif Orientation
+                val orientation = when (image.imageInfo.rotationDegrees) {
+                    90 -> ExifInterface.ORIENTATION_ROTATE_90
+                    180 -> ExifInterface.ORIENTATION_ROTATE_180
+                    270 -> ExifInterface.ORIENTATION_ROTATE_270
+                    else -> ExifInterface.ORIENTATION_NORMAL
+                }
+                dngCreatorReal.setOrientation(orientation)
+
                 val dngOut = FileOutputStream(dngFile)
                 dngCreatorReal.writeImage(dngOut, image.image!!)
                 dngOut.close()
