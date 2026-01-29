@@ -258,9 +258,6 @@ class CameraFragment : Fragment() {
         val metrics = windowMetricsCalculator.computeCurrentWindowMetrics(requireActivity()).bounds
         Log.d(TAG, "Screen metrics: ${metrics.width()} x ${metrics.height()}")
 
-        val screenAspectRatio = aspectRatio(metrics.width(), metrics.height())
-        Log.d(TAG, "Preview aspect ratio: $screenAspectRatio")
-
         val rotation = fragmentCameraBinding.viewFinder.display.rotation
 
         // CameraProvider
@@ -274,8 +271,9 @@ class CameraFragment : Fragment() {
         val capabilities = ImageCapture.getImageCaptureCapabilities(cameraInfo)
         val isRawSupported = capabilities.supportedOutputFormats.contains(ImageCapture.OUTPUT_FORMAT_RAW)
 
+        // Force 4:3 aspect ratio to match typical sensor output and avoid cropping in preview
         val resolutionSelector = ResolutionSelector.Builder()
-            .setAspectRatioStrategy(AspectRatioStrategy(screenAspectRatio, AspectRatioStrategy.FALLBACK_RULE_AUTO))
+            .setAspectRatioStrategy(AspectRatioStrategy(AspectRatio.RATIO_4_3, AspectRatioStrategy.FALLBACK_RULE_AUTO))
             .build()
 
         // Preview
@@ -437,24 +435,6 @@ class CameraFragment : Fragment() {
         }
     }
 
-    /**
-     *  [androidx.camera.core.ImageAnalysis.Builder] requires enum value of
-     *  [androidx.camera.core.AspectRatio]. Currently it has values of 4:3 & 16:9.
-     *
-     *  Detecting the most suitable ratio for dimensions provided in @params by counting absolute
-     *  of preview ratio to one of the provided values.
-     *
-     *  @param width - preview width
-     *  @param height - preview height
-     *  @return suitable aspect ratio
-     */
-    private fun aspectRatio(width: Int, height: Int): Int {
-        val previewRatio = max(width, height).toDouble() / min(width, height)
-        if (abs(previewRatio - RATIO_4_3_VALUE) <= abs(previewRatio - RATIO_16_9_VALUE)) {
-            return AspectRatio.RATIO_4_3
-        }
-        return AspectRatio.RATIO_16_9
-    }
 
     /** Method used to re-draw the camera UI controls, called every time configuration changes. */
     private fun updateCameraUi() {
