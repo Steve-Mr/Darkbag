@@ -36,10 +36,13 @@ import androidx.camera.core.*
 import androidx.camera.core.resolutionselector.AspectRatioStrategy
 import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.camera2.interop.Camera2CameraInfo
-import androidx.camera.camera2.interop.Camera2ImageInfo
+import androidx.camera.camera2.interop.Camera2Interop
 import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.lifecycle.ProcessCameraProvider
 import android.hardware.camera2.params.RggbChannelVector
+import android.hardware.camera2.CameraCaptureSession
+import android.hardware.camera2.CaptureRequest
+import android.hardware.camera2.TotalCaptureResult
 import androidx.concurrent.futures.await
 import com.android.example.cameraxbasic.processor.ColorProcessor
 import java.io.File
@@ -108,6 +111,13 @@ class CameraFragment : Fragment() {
 
     /** Blocking camera operations are performed using this executor */
     private lateinit var cameraExecutor: ExecutorService
+
+    // Cache for CaptureResults to match with ImageProxy timestamps
+    private val captureResults = java.util.Collections.synchronizedMap(object : java.util.LinkedHashMap<Long, TotalCaptureResult>() {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, TotalCaptureResult>?): Boolean {
+            return size > 20
+        }
+    })
 
     /** Volume down button receiver used to trigger shutter */
     private val volumeDownReceiver = object : BroadcastReceiver() {
@@ -294,20 +304,32 @@ class CameraFragment : Fragment() {
             .build()
 
         // ImageCapture
-        imageCapture = ImageCapture.Builder()
+        val imageCaptureBuilder = ImageCapture.Builder()
             .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
-            // We request aspect ratio but no resolution to match preview config, but letting
-            // CameraX optimize for whatever specific resolution best fits our use cases
             .setResolutionSelector(resolutionSelector)
-            // Set initial target rotation, we will have to call this again if rotation changes
-            // during the lifecycle of this use case
             .setTargetRotation(rotation)
             .apply {
                 if (isRawSupported) {
                     setOutputFormat(ImageCapture.OUTPUT_FORMAT_RAW)
                 }
             }
-            .build()
+
+        // Add Camera2 Interop Callback to capture metadata
+        androidx.camera.camera2.interop.Camera2Interop.Extender(imageCaptureBuilder)
+            .setSessionCaptureCallback(object : CameraCaptureSession.CaptureCallback() {
+                override fun onCaptureCompleted(
+                    session: CameraCaptureSession,
+                    request: CaptureRequest,
+                    result: TotalCaptureResult
+                ) {
+                    val timestamp = result.get(android.hardware.camera2.CaptureResult.SENSOR_TIMESTAMP)
+                    if (timestamp != null) {
+                        captureResults[timestamp] = result
+                    }
+                }
+            })
+
+        imageCapture = imageCaptureBuilder.build()
 
         // ImageAnalysis
         imageAnalyzer = ImageAnalysis.Builder()
@@ -700,20 +722,24 @@ class CameraFragment : Fragment() {
         val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as android.hardware.camera2.CameraManager
         val chars = cameraManager.getCameraCharacteristics(camera2Info.cameraId)
 
-        val camera2ImageInfo = Camera2ImageInfo.from(image.imageInfo)
-        val captureResult = camera2ImageInfo.captureResult
+        // Attempt to find matching CaptureResult
+        val timestamp = image.imageInfo.timestamp
+        val captureResult = captureResults[timestamp]
 
-        val dngCreatorReal = android.hardware.camera2.DngCreator(chars, captureResult)
-
-        try {
-            val dngOut = FileOutputStream(dngFile)
-            dngCreatorReal.writeImage(dngOut, image.image!!)
-            dngOut.close()
-            Log.d(TAG, "Saved DNG to ${dngFile.absolutePath}")
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to save DNG", e)
+        if (captureResult != null) {
+            val dngCreatorReal = android.hardware.camera2.DngCreator(chars, captureResult)
+            try {
+                val dngOut = FileOutputStream(dngFile)
+                dngCreatorReal.writeImage(dngOut, image.image!!)
+                dngOut.close()
+                Log.d(TAG, "Saved DNG to ${dngFile.absolutePath}")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to save DNG", e)
+            }
+            dngCreatorReal.close()
+        } else {
+             Log.w(TAG, "No matching CaptureResult for timestamp $timestamp. DNG creation skipped.")
         }
-        dngCreatorReal.close()
 
         // 2. Prepare for Processing
         val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
@@ -771,7 +797,7 @@ class CameraFragment : Fragment() {
         }
 
         // Extract WB from CaptureResult
-        val neutral = captureResult.get(android.hardware.camera2.CaptureResult.SENSOR_NEUTRAL_COLOR_POINT) as? RggbChannelVector
+        val neutral = captureResult?.get(android.hardware.camera2.CaptureResult.SENSOR_NEUTRAL_COLOR_POINT) as? RggbChannelVector
         val wb = if (neutral != null) {
             // RggbChannelVector has named properties: red, greenEven, greenOdd, blue
             val rVal = neutral.red
