@@ -765,10 +765,15 @@ class CameraFragment : Fragment() {
         val saveTiff = prefs.getBoolean(SettingsFragment.KEY_SAVE_TIFF, true)
         val saveJpg = prefs.getBoolean(SettingsFragment.KEY_SAVE_JPG, true)
 
-        val tiffPath = if (saveTiff) File(context.getExternalFilesDir(null), "$dngName.tiff").absolutePath else null
+        val tiffFile = if (saveTiff) File(context.cacheDir, "$dngName.tiff") else null
+        val tiffPath = tiffFile?.absolutePath
         val bmpPath = if (saveJpg) File(context.cacheDir, "temp.bmp").absolutePath else null
 
         val buffer = image.planes[0].buffer
+        if (!buffer.isDirect) {
+            Log.e(TAG, "Buffer is not direct, cannot process in native code.")
+            return
+        }
         val width = image.width
         val height = image.height
         val stride = image.planes[0].rowStride
@@ -815,25 +820,64 @@ class CameraFragment : Fragment() {
             floatArrayOf(2.0f, 1.0f, 1.0f, 2.0f)
         }
 
-        ColorProcessor.processRaw(
-            buffer, width, height, stride, whiteLevel, blackLevel, cfa,
-            wb, ccm, targetLogIndex, nativeLutPath, tiffPath, bmpPath
-        )
+        try {
+            ColorProcessor.processRaw(
+                buffer, width, height, stride, whiteLevel, blackLevel, cfa,
+                wb, ccm, targetLogIndex, nativeLutPath, tiffPath, bmpPath
+            )
 
-        if (saveJpg && bmpPath != null) {
-            try {
+            // Save TIFF to MediaStore
+            if (tiffFile != null && tiffFile.exists()) {
+                val tiffValues = ContentValues().apply {
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, "$dngName.tiff")
+                    put(MediaStore.MediaColumns.MIME_TYPE, "image/tiff")
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/Darkbag")
+                        put(MediaStore.MediaColumns.IS_PENDING, 1)
+                    }
+                }
+                val tiffUri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, tiffValues)
+                if (tiffUri != null) {
+                    contentResolver.openOutputStream(tiffUri)?.use { out ->
+                        java.io.FileInputStream(tiffFile).copyTo(out)
+                    }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        tiffValues.clear()
+                        tiffValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                        contentResolver.update(tiffUri, tiffValues, null, null)
+                    }
+                }
+                tiffFile.delete()
+            }
+
+            // Save JPG to MediaStore
+            if (saveJpg && bmpPath != null) {
                 val bitmap = BitmapFactory.decodeFile(bmpPath)
                 if (bitmap != null) {
-                    val jpgFile = File(context.getExternalFilesDir(null), "$dngName.jpg")
-                    val out = FileOutputStream(jpgFile)
-                    bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, out)
-                    out.close()
-                    Log.d(TAG, "Saved JPG to ${jpgFile.absolutePath}")
+                    val jpgValues = ContentValues().apply {
+                        put(MediaStore.MediaColumns.DISPLAY_NAME, "$dngName.jpg")
+                        put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                            put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/Darkbag")
+                            put(MediaStore.MediaColumns.IS_PENDING, 1)
+                        }
+                    }
+                    val jpgUri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, jpgValues)
+                    if (jpgUri != null) {
+                        contentResolver.openOutputStream(jpgUri)?.use { out ->
+                            bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, out)
+                        }
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                            jpgValues.clear()
+                            jpgValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                            contentResolver.update(jpgUri, jpgValues, null, null)
+                        }
+                    }
                     File(bmpPath).delete()
                 }
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to convert BMP to JPG", e)
             }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error processing image", e)
         }
     }
 
