@@ -28,6 +28,7 @@ import android.provider.MediaStore
 import android.media.ExifInterface
 import android.util.Log
 import android.view.KeyEvent
+import android.view.OrientationEventListener
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
