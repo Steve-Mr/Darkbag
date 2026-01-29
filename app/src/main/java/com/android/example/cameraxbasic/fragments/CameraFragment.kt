@@ -258,9 +258,6 @@ class CameraFragment : Fragment() {
         val metrics = windowMetricsCalculator.computeCurrentWindowMetrics(requireActivity()).bounds
         Log.d(TAG, "Screen metrics: ${metrics.width()} x ${metrics.height()}")
 
-        val screenAspectRatio = aspectRatio(metrics.width(), metrics.height())
-        Log.d(TAG, "Preview aspect ratio: $screenAspectRatio")
-
         val rotation = fragmentCameraBinding.viewFinder.display.rotation
 
         // CameraProvider
@@ -272,10 +269,11 @@ class CameraFragment : Fragment() {
 
         val cameraInfo = cameraProvider.getCameraInfo(cameraSelector)
         val capabilities = ImageCapture.getImageCaptureCapabilities(cameraInfo)
-        val isRawSupported = capabilities.supportedOutputFormats.contains(ImageCapture.OUTPUT_FORMAT_RAW_JPEG)
+        val isRawSupported = capabilities.supportedOutputFormats.contains(ImageCapture.OUTPUT_FORMAT_RAW)
 
+        // Force 4:3 aspect ratio to match typical sensor output and avoid cropping in preview
         val resolutionSelector = ResolutionSelector.Builder()
-            .setAspectRatioStrategy(AspectRatioStrategy(screenAspectRatio, AspectRatioStrategy.FALLBACK_RULE_AUTO))
+            .setAspectRatioStrategy(AspectRatioStrategy(AspectRatio.RATIO_4_3, AspectRatioStrategy.FALLBACK_RULE_AUTO))
             .build()
 
         // Preview
@@ -288,7 +286,7 @@ class CameraFragment : Fragment() {
 
         // ImageCapture
         imageCapture = ImageCapture.Builder()
-            .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+            .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
             // We request aspect ratio but no resolution to match preview config, but letting
             // CameraX optimize for whatever specific resolution best fits our use cases
             .setResolutionSelector(resolutionSelector)
@@ -297,7 +295,7 @@ class CameraFragment : Fragment() {
             .setTargetRotation(rotation)
             .apply {
                 if (isRawSupported) {
-                    setOutputFormat(ImageCapture.OUTPUT_FORMAT_RAW_JPEG)
+                    setOutputFormat(ImageCapture.OUTPUT_FORMAT_RAW)
                 }
             }
             .build()
@@ -437,24 +435,6 @@ class CameraFragment : Fragment() {
         }
     }
 
-    /**
-     *  [androidx.camera.core.ImageAnalysis.Builder] requires enum value of
-     *  [androidx.camera.core.AspectRatio]. Currently it has values of 4:3 & 16:9.
-     *
-     *  Detecting the most suitable ratio for dimensions provided in @params by counting absolute
-     *  of preview ratio to one of the provided values.
-     *
-     *  @param width - preview width
-     *  @param height - preview height
-     *  @return suitable aspect ratio
-     */
-    private fun aspectRatio(width: Int, height: Int): Int {
-        val previewRatio = max(width, height).toDouble() / min(width, height)
-        if (abs(previewRatio - RATIO_4_3_VALUE) <= abs(previewRatio - RATIO_16_9_VALUE)) {
-            return AspectRatio.RATIO_4_3
-        }
-        return AspectRatio.RATIO_16_9
-    }
 
     /** Method used to re-draw the camera UI controls, called every time configuration changes. */
     private fun updateCameraUi() {
@@ -516,8 +496,8 @@ class CameraFragment : Fragment() {
                     }
                 }
 
-                if (imageCapture.outputFormat == ImageCapture.OUTPUT_FORMAT_RAW_JPEG) {
-                    // RAW+JPEG Capture
+                if (imageCapture.outputFormat == ImageCapture.OUTPUT_FORMAT_RAW) {
+                    // RAW Capture
                     val dngContentValues = ContentValues().apply {
                         put(MediaStore.MediaColumns.DISPLAY_NAME, name)
                         put(MediaStore.MediaColumns.MIME_TYPE, "image/x-adobe-dng")
@@ -532,46 +512,13 @@ class CameraFragment : Fragment() {
                             dngContentValues)
                         .build()
 
-                    val jpegContentValues = ContentValues().apply {
-                        put(MediaStore.MediaColumns.DISPLAY_NAME, name)
-                        put(MediaStore.MediaColumns.MIME_TYPE, PHOTO_TYPE)
-                        if (Build.VERSION.SDK_INT > Build.VERSION_CODES.P) {
-                            val appName = requireContext().resources.getString(R.string.app_name)
-                            put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/${appName}")
-                        }
-                    }
-                    val jpegOutputOptions = ImageCapture.OutputFileOptions
-                        .Builder(requireContext().contentResolver,
-                            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                            jpegContentValues)
-                        .build()
-
                     imageCapture.takePicture(
                         dngOutputOptions,
-                        jpegOutputOptions,
                         cameraExecutor,
                         imageSavedCallback
                     )
                 } else {
-                    // Standard JPEG Capture
-                    val contentValues = ContentValues().apply {
-                        put(MediaStore.MediaColumns.DISPLAY_NAME, name)
-                        put(MediaStore.MediaColumns.MIME_TYPE, PHOTO_TYPE)
-                        if (Build.VERSION.SDK_INT > Build.VERSION_CODES.P) {
-                            val appName = requireContext().resources.getString(R.string.app_name)
-                            put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/${appName}")
-                        }
-                    }
-
-                    val outputOptions = ImageCapture.OutputFileOptions
-                        .Builder(requireContext().contentResolver,
-                            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                            contentValues)
-                        .build()
-
-                    imageCapture.takePicture(
-                        outputOptions, cameraExecutor, imageSavedCallback
-                    )
+                    Toast.makeText(requireContext(), "RAW capture is not supported on this device.", Toast.LENGTH_SHORT).show()
                 }
 
                 // We can only change the foreground Drawable using API level 23+ API
@@ -609,12 +556,16 @@ class CameraFragment : Fragment() {
         cameraUiContainerBinding?.photoViewButton?.setOnClickListener {
             // Only navigate when the gallery has photos
             lifecycleScope.launch {
-                if (mediaStoreUtils.getImages().isNotEmpty()) {
-                    Navigation.findNavController(requireActivity(), R.id.fragment_container)
-                        .navigate(CameraFragmentDirections.actionCameraToGallery(
-                            mediaStoreUtils.mediaStoreCollection.toString()
-                        )
-                    )
+                val images = mediaStoreUtils.getImages()
+                if (images.isNotEmpty()) {
+                    val uri = images.first().uri
+                    val intent = Intent(Intent.ACTION_VIEW, uri)
+                    intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    try {
+                        startActivity(intent)
+                    } catch (e: ActivityNotFoundException) {
+                        Toast.makeText(requireContext(), "No gallery app installed", Toast.LENGTH_SHORT).show()
+                    }
                 }
             }
         }
