@@ -25,8 +25,10 @@ import android.hardware.display.DisplayManager
 import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
+import android.media.ExifInterface
 import android.util.Log
 import android.view.KeyEvent
+import android.view.OrientationEventListener
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -109,6 +111,27 @@ class CameraFragment : Fragment() {
         requireContext().getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
     }
 
+    /** Orientation listener to track device rotation independently of UI rotation */
+    private val orientationEventListener by lazy {
+        object : OrientationEventListener(requireContext()) {
+            override fun onOrientationChanged(orientation: Int) {
+                if (orientation == OrientationEventListener.ORIENTATION_UNKNOWN) {
+                    return
+                }
+
+                val rotation = when (orientation) {
+                    in 45 until 135 -> android.view.Surface.ROTATION_270
+                    in 135 until 225 -> android.view.Surface.ROTATION_180
+                    in 225 until 315 -> android.view.Surface.ROTATION_90
+                    else -> android.view.Surface.ROTATION_0
+                }
+
+                imageCapture?.targetRotation = rotation
+                imageAnalyzer?.targetRotation = rotation
+            }
+        }
+    }
+
     /** Blocking camera operations are performed using this executor */
     private lateinit var cameraExecutor: ExecutorService
 
@@ -142,10 +165,19 @@ class CameraFragment : Fragment() {
         override fun onDisplayChanged(displayId: Int) = view?.let { view ->
             if (displayId == this@CameraFragment.displayId) {
                 Log.d(TAG, "Rotation changed: ${view.display.rotation}")
-                imageCapture?.targetRotation = view.display.rotation
-                imageAnalyzer?.targetRotation = view.display.rotation
+                preview?.targetRotation = view.display.rotation
             }
         } ?: Unit
+    }
+
+    override fun onStart() {
+        super.onStart()
+        orientationEventListener.enable()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        orientationEventListener.disable()
     }
 
     override fun onResume() {
@@ -730,6 +762,15 @@ class CameraFragment : Fragment() {
         if (captureResult != null) {
             val dngCreatorReal = android.hardware.camera2.DngCreator(chars, captureResult)
             try {
+                // Calculate and set Exif Orientation
+                val orientation = when (image.imageInfo.rotationDegrees) {
+                    90 -> ExifInterface.ORIENTATION_ROTATE_90
+                    180 -> ExifInterface.ORIENTATION_ROTATE_180
+                    270 -> ExifInterface.ORIENTATION_ROTATE_270
+                    else -> ExifInterface.ORIENTATION_NORMAL
+                }
+                dngCreatorReal.setOrientation(orientation)
+
                 val dngOut = FileOutputStream(dngFile)
                 dngCreatorReal.writeImage(dngOut, image.image!!)
                 dngOut.close()
