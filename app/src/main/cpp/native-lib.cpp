@@ -133,7 +133,10 @@ LUT3D load_lut(const char* path) {
             std::stringstream ss(line);
             std::string temp;
             ss >> temp >> lut.size;
-            if (lut.size > 0) {
+            if (lut.size > 256) {
+                LOGE("LUT size %d is too large, capping to 256 or invalidating", lut.size);
+                lut.size = 0; // Invalidate
+            } else if (lut.size > 0) {
                 lut.data.reserve(lut.size * lut.size * lut.size);
             }
             continue;
