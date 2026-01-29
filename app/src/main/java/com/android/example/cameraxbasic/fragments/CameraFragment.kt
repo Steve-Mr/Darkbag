@@ -718,7 +718,8 @@ class CameraFragment : Fragment() {
         val dngName = SimpleDateFormat(FILENAME, Locale.US).format(System.currentTimeMillis())
         val dngFile = File(context.getExternalFilesDir(null), "$dngName.dng")
 
-        val camera2Info = Camera2CameraInfo.from(camera!!.cameraInfo)
+        val cam = camera ?: return
+        val camera2Info = Camera2CameraInfo.from(cam.cameraInfo)
         val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as android.hardware.camera2.CameraManager
         val chars = cameraManager.getCameraCharacteristics(camera2Info.cameraId)
 
