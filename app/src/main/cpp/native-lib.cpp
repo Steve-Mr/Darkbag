@@ -124,11 +124,18 @@ LUT3D load_lut(const char* path) {
     std::string line;
     while (std::getline(file, line)) {
         if (line.empty() || line[0] == '#') continue;
+        // Skip metadata lines that might be parsed as data
+        if (line.rfind("TITLE", 0) == 0 ||
+            line.rfind("DOMAIN", 0) == 0 ||
+            line.rfind("LUT_1D", 0) == 0) continue;
+
         if (line.find("LUT_3D_SIZE") != std::string::npos) {
             std::stringstream ss(line);
             std::string temp;
             ss >> temp >> lut.size;
-            lut.data.reserve(lut.size * lut.size * lut.size);
+            if (lut.size > 0) {
+                lut.data.reserve(lut.size * lut.size * lut.size);
+            }
             continue;
         }
         std::stringstream ss(line);
@@ -137,6 +144,14 @@ LUT3D load_lut(const char* path) {
             lut.data.push_back({r, g, b});
         }
     }
+
+    // Validate size
+    if (lut.size > 0 && lut.data.size() != (size_t)(lut.size * lut.size * lut.size)) {
+        LOGE("Invalid LUT data size. Expected %d^3, got %zu", lut.size, lut.data.size());
+        lut.size = 0; // Invalidate
+        lut.data.clear();
+    }
+
     return lut;
 }
 
