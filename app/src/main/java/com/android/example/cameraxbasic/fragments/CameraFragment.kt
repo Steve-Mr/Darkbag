@@ -1065,6 +1065,36 @@ class CameraFragment : Fragment() {
                                 dngValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
                                 contentResolver.update(dngUri, dngValues, null, null)
                             }
+
+                            // Inject DNG Crop Metadata if Zoomed
+                            if (image.zoomRatio > 1.05f) {
+                                try {
+                                    // ExifInterface needs a FileDescriptor or File.
+                                    // Since we wrote to a Stream, we need to open it again as FD.
+                                    val fd = contentResolver.openFileDescriptor(dngUri, "rw")?.fileDescriptor
+                                    if (fd != null) {
+                                        val exif = androidx.exifinterface.media.ExifInterface(fd)
+
+                                        // Calculate Crop
+                                        val fullWidth = image.width
+                                        val fullHeight = image.height
+                                        val cropWidth = (fullWidth / image.zoomRatio).toInt()
+                                        val cropHeight = (fullHeight / image.zoomRatio).toInt()
+                                        val x = (fullWidth - cropWidth) / 2
+                                        val y = (fullHeight - cropHeight) / 2
+
+                                        // Set Tags (50719 DefaultCropSize, 50720 DefaultCropOrigin)
+                                        // These are rational/short pairs usually, usually stored as "W H" or "N D" strings in ExifInterface
+                                        exif.setAttribute("DefaultCropSize", "$cropWidth $cropHeight")
+                                        exif.setAttribute("DefaultCropOrigin", "$x $y")
+                                        exif.saveAttributes()
+                                        Log.d(TAG, "Injected DNG Crop: Size=$cropWidth $cropHeight, Origin=$x $y")
+                                    }
+                                } catch (e: Exception) {
+                                    Log.e(TAG, "Failed to inject DNG crop metadata", e)
+                                }
+                            }
+
                         } else {
                             Log.e(TAG, "Failed to open OutputStream for $dngUri")
                             contentResolver.delete(dngUri, null, null)
