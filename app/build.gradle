@@ -29,6 +29,10 @@ android {
         targetSdkVersion 35
         versionCode 1
         versionName "1.0.0"
+
+        ndk {
+            abiFilters "arm64-v8a"
+        }
     }
 
     compileOptions {
@@ -40,10 +44,33 @@ android {
         jvmTarget = rootProject.ext.java_version.toString()
     }
 
+    signingConfigs {
+        release
+    }
+
+    def keystorePropertiesFile = rootProject.file("keystore.properties")
+    def keystoreFile = rootProject.file("keystore.jks")
+    if (keystorePropertiesFile.exists() && keystoreFile.exists()) {
+        def keystoreProperties = new Properties()
+        keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+        signingConfigs.release.storeFile = keystoreFile
+        signingConfigs.release.storePassword = keystoreProperties['storePassword']
+        signingConfigs.release.keyAlias = keystoreProperties['keyAlias']
+        signingConfigs.release.keyPassword = keystoreProperties['keyPassword']
+    }
+
     buildTypes {
        release {
+           if (keystorePropertiesFile.exists() && keystoreFile.exists()) {
+               signingConfig signingConfigs.release
+           }
            minifyEnabled false
            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+       }
+       debug {
+           if (keystorePropertiesFile.exists() && keystoreFile.exists()) {
+               signingConfig signingConfigs.release
+           }
        }
     }
 
