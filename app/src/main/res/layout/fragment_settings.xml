@@ -17,6 +17,17 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent" />
 
+    <Switch
+        android:id="@+id/switch_use_gpu"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="24dp"
+        android:text="Use GPU Acceleration"
+        android:textColor="@android:color/white"
+        android:checked="false"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/tv_settings_title" />
+
     <TextView
         android:id="@+id/tv_target_log"
         android:layout_width="wrap_content"
@@ -26,7 +37,7 @@
         android:textColor="@android:color/white"
         android:textSize="16sp"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/tv_settings_title" />
+        app:layout_constraintTop_toBottomOf="@id/switch_use_gpu" />
 
     <Spinner
         android:id="@+id/spinner_target_log"

@@ -864,6 +864,7 @@ class CameraFragment : Fragment() {
 
         val saveTiff = prefs.getBoolean(SettingsFragment.KEY_SAVE_TIFF, true)
         val saveJpg = prefs.getBoolean(SettingsFragment.KEY_SAVE_JPG, true)
+        val useGpu = prefs.getBoolean(SettingsFragment.KEY_USE_GPU, false)
 
         val tiffFile = if (saveTiff) File(context.cacheDir, "$dngName.tiff") else null
         val tiffPath = tiffFile?.absolutePath
@@ -914,10 +915,18 @@ class CameraFragment : Fragment() {
 
         try {
             // Process to generate BMP/TIFF
-            ColorProcessor.processRaw(
+            val result = ColorProcessor.processRaw(
                 directBuffer, image.width, image.height, packedStride, whiteLevel, blackLevel, cfa,
-                wb, ccm, targetLogIndex, nativeLutPath, tiffPath, bmpPath
+                wb, ccm, targetLogIndex, nativeLutPath, tiffPath, bmpPath, useGpu
             )
+
+            if (result == 1) {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, "GPU processing failed. Fallback to CPU used.", Toast.LENGTH_LONG).show()
+                }
+            } else if (result < 0) {
+                throw RuntimeException("ColorProcessor returned error code $result")
+            }
 
             // Load the processed image (BMP) for thumbnail and JPG saving
             var processedBitmap: android.graphics.Bitmap? = null

@@ -131,6 +131,11 @@ class SettingsFragment : Fragment() {
     }
 
     private fun setupCheckboxes() {
+        binding.switchUseGpu.isChecked = prefs.getBoolean(KEY_USE_GPU, false)
+        binding.switchUseGpu.setOnCheckedChangeListener { _, isChecked ->
+            prefs.edit().putBoolean(KEY_USE_GPU, isChecked).apply()
+        }
+
         binding.cbSaveTiff.isChecked = prefs.getBoolean(KEY_SAVE_TIFF, true)
         binding.cbSaveJpg.isChecked = prefs.getBoolean(KEY_SAVE_JPG, true)
 
@@ -159,6 +164,7 @@ class SettingsFragment : Fragment() {
         const val KEY_LUT_URI = "lut_uri"
         const val KEY_SAVE_TIFF = "save_tiff"
         const val KEY_SAVE_JPG = "save_jpg"
+        const val KEY_USE_GPU = "use_gpu"
         const val KEY_MANUAL_CONTROLS = "enable_manual_controls"
 
         val LOG_CURVES = listOf(
