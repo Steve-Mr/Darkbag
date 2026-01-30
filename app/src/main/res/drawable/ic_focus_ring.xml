@@ -5,7 +5,7 @@
         android:width="2dp"
         android:color="#FFFFFFFF" />
     <size
-        android:width="64dp"
-        android:height="64dp" />
+        android:width="@dimen/focus_ring_size"
+        android:height="@dimen/focus_ring_size" />
     <solid android:color="#00000000" />
 </shape>

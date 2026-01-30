@@ -1113,15 +1113,18 @@ class CameraFragment : Fragment() {
         val width = focusRing.width.toFloat()
         val height = focusRing.height.toFloat()
 
+        // Cancel any ongoing animation to prevent conflicts from rapid taps
+        focusRing.animate().cancel()
+
         focusRing.translationX = x - width / 2
         focusRing.translationY = y - height / 2
         focusRing.visibility = View.VISIBLE
         focusRing.alpha = 1.0f
 
         focusRing.animate()
-            .setStartDelay(500)
+            .setStartDelay(FOCUS_RING_DISPLAY_TIME_MS)
             .alpha(0.0f)
-            .setDuration(300)
+            .setDuration(FOCUS_RING_FADE_OUT_DURATION_MS)
             .withEndAction { focusRing.visibility = View.GONE }
             .start()
     }
@@ -1365,5 +1368,7 @@ class CameraFragment : Fragment() {
         private const val PHOTO_TYPE = "image/jpeg"
         private const val RATIO_4_3_VALUE = 4.0 / 3.0
         private const val RATIO_16_9_VALUE = 16.0 / 9.0
+        private const val FOCUS_RING_DISPLAY_TIME_MS = 500L
+        private const val FOCUS_RING_FADE_OUT_DURATION_MS = 300L
     }
 }

@@ -33,8 +33,8 @@
 
     <View
         android:id="@+id/focus_ring"
-        android:layout_width="64dp"
-        android:layout_height="64dp"
+        android:layout_width="@dimen/focus_ring_size"
+        android:layout_height="@dimen/focus_ring_size"
         android:background="@drawable/ic_focus_ring"
         android:visibility="gone"
         app:layout_constraintTop_toTopOf="@id/view_finder"
