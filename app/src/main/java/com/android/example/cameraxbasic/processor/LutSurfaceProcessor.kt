@@ -52,12 +52,12 @@ class LutSurfaceProcessor : SurfaceProcessor, SurfaceTexture.OnFrameAvailableLis
         glThread.start()
         glHandler = Handler(glThread.looper)
 
-        // Quad Geometry
+        // Quad Geometry: x, y, u, v
         val coords = floatArrayOf(
-            -1f, -1f, 0f, 0f, 0f,
-             1f, -1f, 0f, 1f, 0f,
-            -1f,  1f, 0f, 0f, 1f,
-             1f,  1f, 0f, 1f, 1f
+            -1f, -1f, 0f, 0f,
+             1f, -1f, 1f, 0f,
+            -1f,  1f, 0f, 1f,
+             1f,  1f, 1f, 1f
         )
         vertexBuffer = ByteBuffer.allocateDirect(coords.size * 4)
             .order(ByteOrder.nativeOrder()).asFloatBuffer().put(coords)
@@ -165,28 +165,31 @@ class LutSurfaceProcessor : SurfaceProcessor, SurfaceTexture.OnFrameAvailableLis
 
     private fun createProgram() {
         val vertexSrc = """
-            attribute vec4 aPosition;
+            #version 300 es
+            in vec4 aPosition;
             uniform mat4 uTexMatrix;
-            varying vec2 vTexCoord;
+            out vec2 vTexCoord;
             void main() {
                 gl_Position = vec4(aPosition.xy, 0.0, 1.0);
                 // aPosition.z/w contains tex coords 0..1 from quad definition
-                // Actually I packed 0f, 0f, 1f, 0f etc in vertexBuffer
                 vec2 rawCoord = vec2(aPosition.z, aPosition.w);
                 vTexCoord = (uTexMatrix * vec4(rawCoord, 0.0, 1.0)).xy;
             }
         """.trimIndent()
 
         val fragmentSrc = """
-            #extension GL_OES_EGL_image_external : require
+            #version 300 es
+            #extension GL_OES_EGL_image_external_essl3 : require
             precision mediump float;
             precision mediump sampler3D;
 
-            varying vec2 vTexCoord;
+            in vec2 vTexCoord;
             uniform samplerExternalOES uInput;
             uniform sampler3D uLut;
             uniform int uLutSize;
             uniform int uTargetLog;
+
+            layout(location = 0) out vec4 outColor;
 
             // Log functions match native
             float arri_logc3(float x) {
@@ -198,10 +201,12 @@ class LutSurfaceProcessor : SurfaceProcessor, SurfaceTexture.OnFrameAvailableLis
                 return (x * 171.21029 + 95.0) / 1023.0;
             }
             float f_log(float x) {
-                 return 0.344676 * log(0.555556 * x + 0.009468) / log(10.0) + 0.790453;
+                 if (x >= 0.00089) return 0.344676 * log(0.555556 * x + 0.009468) / log(10.0) + 0.790453;
+                 return 8.52 * x + 0.0929;
             }
             float vlog(float x) {
-                 return 0.241514 * log(x + 0.008730) / log(10.0) + 0.598206;
+                 if (x >= 0.01) return 0.241514 * log(x + 0.008730) / log(10.0) + 0.598206;
+                 return 5.6 * x + 0.125;
             }
 
             float apply_log(float x, int type) {
@@ -214,7 +219,7 @@ class LutSurfaceProcessor : SurfaceProcessor, SurfaceTexture.OnFrameAvailableLis
             }
 
             void main() {
-                vec4 color = texture2D(uInput, vTexCoord);
+                vec4 color = texture(uInput, vTexCoord);
 
                 if (uLutSize > 0) {
                      // 1. Linearize approximation (sRGB to Linear)
@@ -236,7 +241,7 @@ class LutSurfaceProcessor : SurfaceProcessor, SurfaceTexture.OnFrameAvailableLis
                      color.rgb = texture(uLut, coord).rgb;
                 }
 
-                gl_FragColor = color;
+                outColor = color;
             }
         """.trimIndent()
 
@@ -367,10 +372,21 @@ class LutSurfaceProcessor : SurfaceProcessor, SurfaceTexture.OnFrameAvailableLis
     private fun loadProgram(vSource: String, fSource: String): Int {
         val vShader = loadShader(GLES20.GL_VERTEX_SHADER, vSource)
         val fShader = loadShader(GLES20.GL_FRAGMENT_SHADER, fSource)
+        if (vShader == 0 || fShader == 0) return 0
+
         val program = GLES20.glCreateProgram()
         GLES20.glAttachShader(program, vShader)
         GLES20.glAttachShader(program, fShader)
         GLES20.glLinkProgram(program)
+
+        // 检查链接状态
+        val linkStatus = IntArray(1)
+        GLES20.glGetProgramiv(program, GLES20.GL_LINK_STATUS, linkStatus, 0)
+        if (linkStatus[0] == 0) {
+            Log.e(TAG, "Program link failed: ${GLES20.glGetProgramInfoLog(program)}")
+            GLES20.glDeleteProgram(program)
+            return 0
+        }
         return program
     }
 
@@ -378,6 +394,15 @@ class LutSurfaceProcessor : SurfaceProcessor, SurfaceTexture.OnFrameAvailableLis
         val shader = GLES20.glCreateShader(type)
         GLES20.glShaderSource(shader, source)
         GLES20.glCompileShader(shader)
+
+        // 检查编译状态
+        val compiled = IntArray(1)
+        GLES20.glGetShaderiv(shader, GLES20.GL_COMPILE_STATUS, compiled, 0)
+        if (compiled[0] == 0) {
+            Log.e(TAG, "Shader compile failed ($type): ${GLES20.glGetShaderInfoLog(shader)}")
+            GLES20.glDeleteShader(shader)
+            return 0
+        }
         return shader
     }
 }
