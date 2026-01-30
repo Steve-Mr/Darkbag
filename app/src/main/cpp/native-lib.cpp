@@ -683,7 +683,16 @@ bool processGpu(
 
     if (glCheckFramebufferStatus(GL_READ_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
         LOGE("FBO incomplete");
-        // Cleanup...
+        glDeleteFramebuffers(1, &fbo);
+        glDeleteTextures(1, &texInput);
+        glDeleteTextures(1, &texOutput);
+        if (texLut) glDeleteTextures(1, &texLut);
+        glDeleteProgram(program);
+        glDeleteShader(cs);
+
+        eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+        eglDestroySurface(display, surface);
+        eglDestroyContext(display, context);
         return false;
     }
 
