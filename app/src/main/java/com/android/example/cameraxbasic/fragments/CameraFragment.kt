@@ -866,7 +866,7 @@ class CameraFragment : Fragment() {
                 val dngOut = FileOutputStream(dngFile)
                 // Use ByteArrayInputStream for the raw data
                 val inputStream = java.io.ByteArrayInputStream(image.data)
-                dngCreatorReal.writeImage(dngOut, inputStream, 0, image.width, image.height)
+                dngCreatorReal.writeInputStream(dngOut, android.util.Size(image.width, image.height), inputStream, 0)
                 dngOut.close()
                 Log.d(TAG, "Saved DNG to ${dngFile.absolutePath}")
 
