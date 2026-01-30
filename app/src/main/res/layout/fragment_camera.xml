@@ -31,4 +31,13 @@
         android:layout_marginBottom="180dp"
         app:scaleType="fitCenter" />
 
+    <View
+        android:id="@+id/focus_ring"
+        android:layout_width="@dimen/focus_ring_size"
+        android:layout_height="@dimen/focus_ring_size"
+        android:background="@drawable/ic_focus_ring"
+        android:visibility="gone"
+        app:layout_constraintTop_toTopOf="@id/view_finder"
+        app:layout_constraintStart_toStartOf="@id/view_finder" />
+
 </androidx.constraintlayout.widget.ConstraintLayout>

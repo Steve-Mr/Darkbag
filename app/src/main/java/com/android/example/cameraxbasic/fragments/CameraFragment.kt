@@ -335,6 +335,9 @@ class CameraFragment : Fragment() {
             // Build UI controls
             updateCameraUi()
 
+            // Setup Tap to Focus
+            setupTapToFocus()
+
             // Set up the camera and its use cases
             lifecycleScope.launch {
                 setUpCamera()
@@ -1078,6 +1081,54 @@ class CameraFragment : Fragment() {
         }
     }
 
+    private fun setupTapToFocus() {
+        fragmentCameraBinding.viewFinder.setOnTouchListener { view, event ->
+            if (event.action == android.view.MotionEvent.ACTION_UP) {
+                val factory = fragmentCameraBinding.viewFinder.meteringPointFactory
+                val point = factory.createPoint(event.x, event.y)
+                val action = FocusMeteringAction.Builder(point).build()
+
+                // If in manual focus mode, tapping switch to AF
+                isManualFocus = false
+                applyManualControls() // Apply change (clear manual focus override)
+
+                // Also reset Focus UI if active
+                if (activeManualTab == "Focus") {
+                    updateManualPanel()
+                }
+
+                // Update text color for Focus Tab (Reset to auto color)
+                updateTabColors()
+
+                camera?.cameraControl?.startFocusAndMetering(action)
+                showFocusRing(event.x, event.y)
+                view.performClick()
+            }
+            true
+        }
+    }
+
+    private fun showFocusRing(x: Float, y: Float) {
+        val focusRing = fragmentCameraBinding.focusRing
+        val width = focusRing.width.toFloat()
+        val height = focusRing.height.toFloat()
+
+        // Cancel any ongoing animation to prevent conflicts from rapid taps
+        focusRing.animate().cancel()
+
+        focusRing.translationX = x - width / 2
+        focusRing.translationY = y - height / 2
+        focusRing.visibility = View.VISIBLE
+        focusRing.alpha = 1.0f
+
+        focusRing.animate()
+            .setStartDelay(FOCUS_RING_DISPLAY_TIME_MS)
+            .alpha(0.0f)
+            .setDuration(FOCUS_RING_FADE_OUT_DURATION_MS)
+            .withEndAction { focusRing.visibility = View.GONE }
+            .start()
+    }
+
     private fun initManualControls() {
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
         val enabled = prefs.getBoolean(SettingsFragment.KEY_MANUAL_CONTROLS, false)
@@ -1141,30 +1192,6 @@ class CameraFragment : Fragment() {
             updateTabColors()
         }
 
-        // Tap to Focus on ViewFinder
-        fragmentCameraBinding.viewFinder.setOnTouchListener { view, event ->
-            if (event.action == android.view.MotionEvent.ACTION_UP) {
-                val factory = fragmentCameraBinding.viewFinder.meteringPointFactory
-                val point = factory.createPoint(event.x, event.y)
-                val action = FocusMeteringAction.Builder(point).build()
-
-                // If in manual focus mode, tapping switch to AF
-                isManualFocus = false
-                applyManualControls() // Apply change (clear manual focus override)
-
-                // Also reset Focus UI if active
-                if (activeManualTab == "Focus") {
-                     updateManualPanel()
-                }
-
-                // Update text color for Focus Tab (Reset to auto color)
-                updateTabColors()
-
-                camera?.cameraControl?.startFocusAndMetering(action)
-                view.performClick()
-            }
-            true
-        }
     }
 
     private fun handleManualProgress(progress: Int) {
@@ -1341,5 +1368,7 @@ class CameraFragment : Fragment() {
         private const val PHOTO_TYPE = "image/jpeg"
         private const val RATIO_4_3_VALUE = 4.0 / 3.0
         private const val RATIO_16_9_VALUE = 16.0 / 9.0
+        private const val FOCUS_RING_DISPLAY_TIME_MS = 500L
+        private const val FOCUS_RING_FADE_OUT_DURATION_MS = 300L
     }
 }

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="oval">
+    <stroke
+        android:width="2dp"
+        android:color="#FFFFFFFF" />
+    <size
+        android:width="@dimen/focus_ring_size"
+        android:height="@dimen/focus_ring_size" />
+    <solid android:color="#00000000" />
+</shape>
