@@ -134,6 +134,12 @@ class CameraFragment : Fragment() {
     private var currentExposureTime = 10_000_000L // 10ms
     private var currentEvIndex = 0
 
+    // Zoom State
+    private var defaultFocalLength = 24
+    private var currentFocalLength = -1
+    private var is2xMode = false
+    private var zoomJob: kotlinx.coroutines.Job? = null
+
     /** Orientation listener to track device rotation independently of UI rotation */
     private val orientationEventListener by lazy {
         object : OrientationEventListener(requireContext()) {
@@ -308,6 +314,14 @@ class CameraFragment : Fragment() {
 
         // Initialize MediaStoreUtils for fetching this app's images
         mediaStoreUtils = MediaStoreUtils(requireContext())
+
+        // Initialize Zoom Default
+        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val defaultStr = prefs.getString(SettingsFragment.KEY_DEFAULT_FOCAL_LENGTH, "24") ?: "24"
+        defaultFocalLength = defaultStr.toIntOrNull() ?: 24
+        if (currentFocalLength == -1) {
+            currentFocalLength = defaultFocalLength
+        }
 
         // Start processing consumer
         viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
@@ -489,6 +503,10 @@ class CameraFragment : Fragment() {
             // Attach the viewfinder's surface provider to preview use case
             preview?.setSurfaceProvider(fragmentCameraBinding.viewFinder.surfaceProvider)
             observeCameraState(camera?.cameraInfo!!)
+
+            // Restore Zoom
+            updateZoom(false)
+
         } catch (exc: Exception) {
             Log.e(TAG, "Use case binding failed", exc)
         }
@@ -635,6 +653,9 @@ class CameraFragment : Fragment() {
 
         // Initialize Manual Controls
         initManualControls()
+
+        // Initialize Zoom Controls
+        initZoomControls()
 
         // Listener for button used to view the most recent photo
         cameraUiContainerBinding?.photoViewButton?.setOnClickListener {
@@ -1305,6 +1326,95 @@ class CameraFragment : Fragment() {
                     binding.seekbarManual?.progress = (ratio * max).toInt()
                     binding.tvManualValue?.text = "$currentEvIndex"
                 }
+            }
+        }
+    }
+
+    private fun initZoomControls() {
+        val binding = cameraUiContainerBinding ?: return
+
+        binding.btnZoomToggle?.setOnClickListener {
+            if (is2xMode) {
+                is2xMode = false
+                currentFocalLength = defaultFocalLength
+            } else {
+                currentFocalLength = when (currentFocalLength) {
+                    24 -> 28
+                    28 -> 35
+                    35 -> 24
+                    else -> 24
+                }
+            }
+            updateZoom(true)
+        }
+
+        binding.btnZoom2x?.setOnClickListener {
+            if (!is2xMode) {
+                is2xMode = true
+                updateZoom(true)
+            }
+        }
+
+        // Set initial UI state
+        updateZoomUI(false)
+    }
+
+    private fun updateZoom(animate: Boolean) {
+        val targetRatio = if (is2xMode) {
+            2.0f
+        } else {
+            currentFocalLength / 24.0f
+        }
+
+        val maxZoom = camera?.cameraInfo?.zoomState?.value?.maxZoomRatio ?: 8.0f // Default high enough if null
+        val ratio = targetRatio.coerceAtMost(maxZoom)
+
+        camera?.cameraControl?.setZoomRatio(ratio)
+        updateZoomUI(animate)
+    }
+
+    private fun updateZoomUI(animate: Boolean) {
+        val binding = cameraUiContainerBinding ?: return
+        val activeColor = Color.YELLOW
+        val inactiveColor = Color.WHITE
+
+        if (is2xMode) {
+            binding.btnZoom2x?.setTextColor(activeColor)
+            binding.btnZoomToggle?.setTextColor(inactiveColor)
+
+            // If we just switched to 2x, we might want to ensure 1x label is generic or last state?
+            // Requirement: "user at 2x clicks 1x returns to default".
+            // Label can just remain "1x" or whatever it was?
+            // Let's reset it to "1x" for clarity as "Standard".
+            binding.btnZoomToggle?.text = "1x"
+            zoomJob?.cancel()
+        } else {
+            binding.btnZoom2x?.setTextColor(inactiveColor)
+            binding.btnZoomToggle?.setTextColor(activeColor)
+
+            zoomJob?.cancel()
+            if (animate) {
+                 zoomJob = lifecycleScope.launch(Dispatchers.Main) {
+                     val labelMm = "${currentFocalLength}mm"
+                     val labelX = when (currentFocalLength) {
+                         24 -> "1x"
+                         28 -> "1.2x"
+                         35 -> "1.5x"
+                         else -> "1x"
+                     }
+
+                     binding.btnZoomToggle?.text = labelMm
+                     delay(500)
+                     binding.btnZoomToggle?.text = labelX
+                 }
+            } else {
+                 val labelX = when (currentFocalLength) {
+                         24 -> "1x"
+                         28 -> "1.2x"
+                         35 -> "1.5x"
+                         else -> "1x"
+                     }
+                 binding.btnZoomToggle?.text = labelX
             }
         }
     }
