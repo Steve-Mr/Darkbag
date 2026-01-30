@@ -840,6 +840,8 @@ class CameraFragment : Fragment() {
         val contentResolver = context.contentResolver
         val dngName = SimpleDateFormat(FILENAME, Locale.US).format(System.currentTimeMillis())
 
+        Log.d(TAG, "Processing Image: Timestamp=${image.timestamp}, ZoomRatio=${image.zoomRatio}, Rotation=${image.rotationDegrees}")
+
         val cam = camera ?: return@withContext
         val camera2Info = Camera2CameraInfo.from(cam.cameraInfo)
         val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as android.hardware.camera2.CameraManager
@@ -1060,28 +1062,24 @@ class CameraFragment : Fragment() {
                             }
                             Log.d(TAG, "Saved DNG to $dngUri")
 
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                                dngValues.clear()
-                                dngValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
-                                contentResolver.update(dngUri, dngValues, null, null)
-                            }
-
                             // Inject DNG Crop Metadata if Zoomed
+                            // Must be done BEFORE setting IS_PENDING = 0 to avoid file locks
                             if (image.zoomRatio > 1.05f) {
                                 try {
                                     // ExifInterface needs a FileDescriptor or File.
                                     // Since we wrote to a Stream, we need to open it again as FD.
-                                    val fd = contentResolver.openFileDescriptor(dngUri, "rw")?.fileDescriptor
-                                    if (fd != null) {
-                                        val exif = androidx.exifinterface.media.ExifInterface(fd)
+                                    contentResolver.openFileDescriptor(dngUri, "rw")?.use { pfd ->
+                                        val exif = androidx.exifinterface.media.ExifInterface(pfd.fileDescriptor)
 
                                         // Calculate Crop
                                         val fullWidth = image.width
                                         val fullHeight = image.height
                                         val cropWidth = (fullWidth / image.zoomRatio).toInt()
                                         val cropHeight = (fullHeight / image.zoomRatio).toInt()
-                                        val x = (fullWidth - cropWidth) / 2
-                                        val y = (fullHeight - cropHeight) / 2
+
+                                        // Ensure even coordinates for Bayer pattern alignment
+                                        val x = ((fullWidth - cropWidth) / 2) / 2 * 2
+                                        val y = ((fullHeight - cropHeight) / 2) / 2 * 2
 
                                         // Set Tags (50719 DefaultCropSize, 50720 DefaultCropOrigin)
                                         // These are rational/short pairs usually, usually stored as "W H" or "N D" strings in ExifInterface
@@ -1093,6 +1091,12 @@ class CameraFragment : Fragment() {
                                 } catch (e: Exception) {
                                     Log.e(TAG, "Failed to inject DNG crop metadata", e)
                                 }
+                            }
+
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                dngValues.clear()
+                                dngValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                                contentResolver.update(dngUri, dngValues, null, null)
                             }
 
                         } else {
