@@ -768,7 +768,6 @@ class CameraFragment : Fragment() {
     private suspend fun processImageAsync(context: Context, image: RawImageHolder) = kotlinx.coroutines.withContext(Dispatchers.IO) {
         val contentResolver = context.contentResolver
         val dngName = SimpleDateFormat(FILENAME, Locale.US).format(System.currentTimeMillis())
-        val dngFile = File(context.getExternalFilesDir(null), "$dngName.dng")
 
         val cam = camera ?: return@withContext
         val camera2Info = Camera2CameraInfo.from(cam.cameraInfo)
@@ -915,13 +914,6 @@ class CameraFragment : Fragment() {
                     dngCreatorReal.setThumbnail(thumbBitmap)
                 }
 
-                val dngOut = FileOutputStream(dngFile)
-                // Use ByteArrayInputStream for the raw data
-                val inputStream = java.io.ByteArrayInputStream(image.data)
-                dngCreatorReal.writeInputStream(dngOut, android.util.Size(image.width, image.height), inputStream, 0)
-                dngOut.close()
-                Log.d(TAG, "Saved DNG to ${dngFile.absolutePath}")
-
                 // Insert DNG into MediaStore
                 val dngValues = ContentValues().apply {
                     put(MediaStore.MediaColumns.DISPLAY_NAME, "$dngName.dng")
@@ -933,14 +925,31 @@ class CameraFragment : Fragment() {
                 }
                 val dngUri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, dngValues)
                 if (dngUri != null) {
-                    contentResolver.openOutputStream(dngUri)?.use { out ->
-                        java.io.FileInputStream(dngFile).copyTo(out)
+                    try {
+                        val dngOut = contentResolver.openOutputStream(dngUri)
+                        if (dngOut != null) {
+                            dngOut.use { out ->
+                                // Use ByteArrayInputStream for the raw data
+                                val inputStream = java.io.ByteArrayInputStream(image.data)
+                                dngCreatorReal.writeInputStream(out, android.util.Size(image.width, image.height), inputStream, 0)
+                            }
+                            Log.d(TAG, "Saved DNG to $dngUri")
+
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                dngValues.clear()
+                                dngValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                                contentResolver.update(dngUri, dngValues, null, null)
+                            }
+                        } else {
+                            Log.e(TAG, "Failed to open OutputStream for $dngUri")
+                            contentResolver.delete(dngUri, null, null)
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error writing DNG to MediaStore", e)
+                        contentResolver.delete(dngUri, null, null)
                     }
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                        dngValues.clear()
-                        dngValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
-                        contentResolver.update(dngUri, dngValues, null, null)
-                    }
+                } else {
+                    Log.e(TAG, "Failed to create MediaStore entry for DNG")
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to save DNG", e)
