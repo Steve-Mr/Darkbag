@@ -101,6 +101,17 @@
         app:layout_constraintStart_toEndOf="@id/cb_save_tiff"
         app:layout_constraintTop_toTopOf="@id/cb_save_tiff" />
 
+    <Switch
+        android:id="@+id/switch_manual_controls"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="24dp"
+        android:text="@string/enable_manual_controls"
+        android:textColor="@android:color/white"
+        android:textSize="16sp"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/cb_save_tiff" />
+
     <Button
         android:id="@+id/btn_back"
         android:layout_width="wrap_content"
