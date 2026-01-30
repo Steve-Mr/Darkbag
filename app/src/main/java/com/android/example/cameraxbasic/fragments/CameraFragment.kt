@@ -925,17 +925,28 @@ class CameraFragment : Fragment() {
                 }
                 val dngUri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, dngValues)
                 if (dngUri != null) {
-                    contentResolver.openOutputStream(dngUri)?.use { dngOut ->
-                        // Use ByteArrayInputStream for the raw data
-                        val inputStream = java.io.ByteArrayInputStream(image.data)
-                        dngCreatorReal.writeInputStream(dngOut, android.util.Size(image.width, image.height), inputStream, 0)
-                    }
-                    Log.d(TAG, "Saved DNG to $dngUri")
+                    try {
+                        val dngOut = contentResolver.openOutputStream(dngUri)
+                        if (dngOut != null) {
+                            dngOut.use { out ->
+                                // Use ByteArrayInputStream for the raw data
+                                val inputStream = java.io.ByteArrayInputStream(image.data)
+                                dngCreatorReal.writeInputStream(out, android.util.Size(image.width, image.height), inputStream, 0)
+                            }
+                            Log.d(TAG, "Saved DNG to $dngUri")
 
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                        dngValues.clear()
-                        dngValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
-                        contentResolver.update(dngUri, dngValues, null, null)
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                dngValues.clear()
+                                dngValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                                contentResolver.update(dngUri, dngValues, null, null)
+                            }
+                        } else {
+                            Log.e(TAG, "Failed to open OutputStream for $dngUri")
+                            contentResolver.delete(dngUri, null, null)
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error writing DNG to MediaStore", e)
+                        contentResolver.delete(dngUri, null, null)
                     }
                 } else {
                     Log.e(TAG, "Failed to create MediaStore entry for DNG")
