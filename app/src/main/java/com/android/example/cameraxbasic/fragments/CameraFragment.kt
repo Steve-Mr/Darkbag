@@ -180,7 +180,8 @@ class CameraFragment : Fragment() {
         val width: Int,
         val height: Int,
         val timestamp: Long,
-        val rotationDegrees: Int
+        val rotationDegrees: Int,
+        val zoomRatio: Float
     ) {
         override fun equals(other: Any?): Boolean {
             if (this === other) return true
@@ -193,6 +194,7 @@ class CameraFragment : Fragment() {
             if (height != other.height) return false
             if (timestamp != other.timestamp) return false
             if (rotationDegrees != other.rotationDegrees) return false
+            if (zoomRatio != other.zoomRatio) return false
 
             return true
         }
@@ -203,6 +205,7 @@ class CameraFragment : Fragment() {
             result = 31 * result + height
             result = 31 * result + timestamp.hashCode()
             result = 31 * result + rotationDegrees
+            result = 31 * result + zoomRatio.hashCode()
             return result
         }
     }
@@ -482,7 +485,9 @@ class CameraFragment : Fragment() {
                         // Values returned from our analyzer are passed to the attached listener
                         // We log image analysis results here - you should do something useful
                         // instead!
-                        Log.d(TAG, "Average luminosity: $luma")
+                        // Values returned from our analyzer are passed to the attached listener
+                        // We log image analysis results here - you should do something useful
+                        // instead!
                     })
                 }
 
@@ -571,7 +576,13 @@ class CameraFragment : Fragment() {
                         override fun onCaptureSuccess(image: ImageProxy) {
                             try {
                                 // 1. Immediate Copy (Free the pipeline)
-                                val holder = copyImageToHolder(image)
+                                // Capture current zoom state safely on main thread (or effectively so, since this callback is usually on main/camera thread)
+                                // But to be safe, we access the volatile/state vars.
+                                // Actually, onCaptureSuccess is called on cameraExecutor. Accessing is2xMode/currentFocalLength might be slightly racy if main thread changes it.
+                                // However, user is clicking capture, so state shouldn't change *during* capture ideally.
+                                val currentZoom = if (is2xMode) 2.0f else (currentFocalLength / 24.0f)
+
+                                val holder = copyImageToHolder(image, currentZoom)
                                 image.close() // Close ASAP
 
                                 // 2. Queue for Processing
@@ -777,7 +788,7 @@ class CameraFragment : Fragment() {
         }
     }
 
-    private fun copyImageToHolder(image: ImageProxy): RawImageHolder {
+    private fun copyImageToHolder(image: ImageProxy, zoomRatio: Float): RawImageHolder {
         val plane = image.planes[0]
         val buffer = plane.buffer
         val width = image.width
@@ -819,7 +830,8 @@ class CameraFragment : Fragment() {
             width = width,
             height = height,
             timestamp = image.imageInfo.timestamp,
-            rotationDegrees = image.imageInfo.rotationDegrees
+            rotationDegrees = image.imageInfo.rotationDegrees,
+            zoomRatio = zoomRatio
         )
     }
 
@@ -962,30 +974,41 @@ class CameraFragment : Fragment() {
                 val cropRegion = captureResult.get(android.hardware.camera2.CaptureResult.SCALER_CROP_REGION)
                 val activeArray = chars.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
 
-                if (cropRegion != null && activeArray != null) {
-                    val zoomFactor = activeArray.width().toFloat() / cropRegion.width().toFloat()
+                // Determine zoom factor: Prioritize UI state passed in Holder, fallback to Metadata
+                // Why? Because metadata SCALER_CROP_REGION sometimes returns full array even if zoom is active on some devices/impls
+                var zoomFactor = 1.0f
+                var source = "None"
 
-                    if (zoomFactor > 1.05f) { // Tolerance for 1.0x
-                         val newWidth = (processedBitmap.width / zoomFactor).toInt()
-                         val newHeight = (processedBitmap.height / zoomFactor).toInt()
-                         val x = (processedBitmap.width - newWidth) / 2
-                         val y = (processedBitmap.height - newHeight) / 2
-
-                         // Ensure bounds are safe
-                         val safeX = max(0, x)
-                         val safeY = max(0, y)
-                         val safeWidth = min(newWidth, processedBitmap.width - safeX)
-                         val safeHeight = min(newHeight, processedBitmap.height - safeY)
-
-                         val croppedBitmap = android.graphics.Bitmap.createBitmap(processedBitmap, safeX, safeY, safeWidth, safeHeight)
-
-                         // Recycle old bitmap to save memory? Be careful if it's reused.
-                         // processedBitmap = croppedBitmap
-                         // But createBitmap might return the same object if immutable/unchanged, though here we crop.
-                         processedBitmap = croppedBitmap
-
-                         Log.d(TAG, "Applied Digital Zoom Crop: Factor=$zoomFactor, NewSize=${safeWidth}x${safeHeight}")
+                if (image.zoomRatio > 1.05f) {
+                    zoomFactor = image.zoomRatio
+                    source = "UI_State"
+                } else if (cropRegion != null && activeArray != null) {
+                    val metaZoom = activeArray.width().toFloat() / cropRegion.width().toFloat()
+                    if (metaZoom > 1.05f) {
+                        zoomFactor = metaZoom
+                        source = "Metadata"
                     }
+                }
+
+                Log.d(TAG, "Digital Zoom Check: Source=$source, Factor=$zoomFactor, HolderRatio=${image.zoomRatio}, MetadataRegion=$cropRegion")
+
+                if (zoomFactor > 1.05f) {
+                     val newWidth = (processedBitmap.width / zoomFactor).toInt()
+                     val newHeight = (processedBitmap.height / zoomFactor).toInt()
+                     val x = (processedBitmap.width - newWidth) / 2
+                     val y = (processedBitmap.height - newHeight) / 2
+
+                     // Ensure bounds are safe
+                     val safeX = max(0, x)
+                     val safeY = max(0, y)
+                     val safeWidth = min(newWidth, processedBitmap.width - safeX)
+                     val safeHeight = min(newHeight, processedBitmap.height - safeY)
+
+                     val croppedBitmap = android.graphics.Bitmap.createBitmap(processedBitmap, safeX, safeY, safeWidth, safeHeight)
+
+                     processedBitmap = croppedBitmap
+
+                     Log.d(TAG, "Applied Digital Zoom Crop: NewSize=${safeWidth}x${safeHeight}")
                 }
             }
 
