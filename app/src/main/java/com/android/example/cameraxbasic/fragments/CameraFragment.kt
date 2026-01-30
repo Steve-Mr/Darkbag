@@ -466,13 +466,14 @@ class CameraFragment : Fragment() {
             .build()
 
         // Configure LUT Processor and Effect
-        val effect = CameraEffect(
-            CameraEffect.PREVIEW,
+        val effect = object : CameraEffect(
+            PREVIEW,
             cameraExecutor,
-            lutSurfaceProcessor
-        ) { error ->
-            Log.e(TAG, "CameraEffect error: ${error.cause}", error)
-        }
+            lutSurfaceProcessor,
+            androidx.core.util.Consumer { error ->
+                Log.e(TAG, "CameraEffect error: ${error.cause}", error)
+            }
+        ) {}
 
         // Sync Log setting
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)

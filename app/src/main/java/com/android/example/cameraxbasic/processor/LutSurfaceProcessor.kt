@@ -118,7 +118,7 @@ class LutSurfaceProcessor : SurfaceProcessor, SurfaceTexture.OnFrameAvailableLis
             inputSurfaceTexture?.setDefaultBufferSize(request.resolution.width, request.resolution.height)
             request.provideSurface(inputSurface!!, executor) { result ->
                 // Cleanup if needed
-                Log.d(TAG, "Input surface result: ${result.code}")
+                Log.d(TAG, "Input surface result: ${result.resultCode}")
             }
         }
     }
