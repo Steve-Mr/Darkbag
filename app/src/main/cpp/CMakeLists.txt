@@ -15,10 +15,17 @@ find_library(
         jnigraphics-lib
         jnigraphics)
 
+find_library(
+        android-lib
+        android)
+
 target_link_libraries(
         native-lib
         ${log-lib}
         ${jnigraphics-lib}
+        ${android-lib}
+        GLESv3
+        EGL
         -fopenmp
         -static-openmp)
 

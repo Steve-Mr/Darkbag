@@ -21,6 +21,8 @@ object ColorProcessor {
      * @param lutPath Path to .cube file.
      * @param outputTiffPath Output path for TIFF.
      * @param outputJpgPath Output path for JPEG.
+     * @param useGpu Whether to use GPU acceleration.
+     * @return 0 for GPU Success, 1 for CPU Success (Fallback or requested), -1 for Failure.
      */
     external fun processRaw(
         rawBuffer: ByteBuffer,
@@ -35,6 +37,7 @@ object ColorProcessor {
         targetLog: Int,
         lutPath: String?,
         outputTiffPath: String?,
-        outputJpgPath: String?
-    ): Boolean
+        outputJpgPath: String?,
+        useGpu: Boolean
+    ): Int
 }
