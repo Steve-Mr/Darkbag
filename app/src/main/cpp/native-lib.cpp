@@ -344,7 +344,7 @@ bool processCpu(
 const char* COMPUTE_SHADER_SRC = R"(#version 310 es
 layout(local_size_x = 16, local_size_y = 16) in;
 
-layout(r16ui, binding = 0) readonly uniform mediump uimage2D uInput;
+uniform mediump usampler2D uInput;
 layout(rgba16ui, binding = 1) writeonly uniform mediump uimage2D uOutput;
 uniform mediump sampler3D uLut;
 
@@ -406,11 +406,11 @@ void main() {
     bool is_b = ((x & 1) == b_x) && ((y & 1) == b_y);
     bool is_g = !is_r && !is_b;
 
-    float val = float(imageLoad(uInput, pos).r);
+    float val = float(texelFetch(uInput, pos, 0).r);
     float r = 0.0, g = 0.0, b = 0.0;
 
     // Note: Boundary checks omitted for brevity in shader, usually texture repeating/clamping handles it
-    // But imageLoad needs checks. We just clamp coord.
+    // But texelFetch needs checks. We just clamp coord.
     ivec2 sz = ivec2(uWidth, uHeight);
 
     if (is_g) {
@@ -425,7 +425,7 @@ void main() {
 
         for (int i=0; i<4; i++) {
             if (coords[i].x >= 0 && coords[i].x < uWidth && coords[i].y >= 0 && coords[i].y < uHeight) {
-                float v = float(imageLoad(uInput, coords[i]).r);
+                float v = float(texelFetch(uInput, coords[i], 0).r);
                 bool n_is_r = ((coords[i].x & 1) == r_x) && ((coords[i].y & 1) == r_y);
                 if (n_is_r) { r_sum += v; r_cnt++; } else { b_sum += v; b_cnt++; }
             }
@@ -444,7 +444,7 @@ void main() {
         c_cross[2] = ivec2(x, y-1); c_cross[3] = ivec2(x, y+1);
         for(int i=0; i<4; i++) {
              if (c_cross[i].x >= 0 && c_cross[i].x < uWidth && c_cross[i].y >= 0 && c_cross[i].y < uHeight) {
-                 g_sum += float(imageLoad(uInput, c_cross[i]).r); g_cnt++;
+                 g_sum += float(texelFetch(uInput, c_cross[i], 0).r); g_cnt++;
              }
         }
 
@@ -454,7 +454,7 @@ void main() {
         c_diag[2] = ivec2(x-1, y+1); c_diag[3] = ivec2(x+1, y+1);
         for(int i=0; i<4; i++) {
              if (c_diag[i].x >= 0 && c_diag[i].x < uWidth && c_diag[i].y >= 0 && c_diag[i].y < uHeight) {
-                 b_sum += float(imageLoad(uInput, c_diag[i]).r); b_cnt++;
+                 b_sum += float(texelFetch(uInput, c_diag[i], 0).r); b_cnt++;
              }
         }
         g = (g_cnt > 0) ? g_sum / float(g_cnt) : 0.0;
@@ -471,7 +471,7 @@ void main() {
         c_cross[2] = ivec2(x, y-1); c_cross[3] = ivec2(x, y+1);
         for(int i=0; i<4; i++) {
              if (c_cross[i].x >= 0 && c_cross[i].x < uWidth && c_cross[i].y >= 0 && c_cross[i].y < uHeight) {
-                 g_sum += float(imageLoad(uInput, c_cross[i]).r); g_cnt++;
+                 g_sum += float(texelFetch(uInput, c_cross[i], 0).r); g_cnt++;
              }
         }
         // R neighbors (diag)
@@ -480,7 +480,7 @@ void main() {
         c_diag[2] = ivec2(x-1, y+1); c_diag[3] = ivec2(x+1, y+1);
         for(int i=0; i<4; i++) {
              if (c_diag[i].x >= 0 && c_diag[i].x < uWidth && c_diag[i].y >= 0 && c_diag[i].y < uHeight) {
-                 r_sum += float(imageLoad(uInput, c_diag[i]).r); r_cnt++;
+                 r_sum += float(texelFetch(uInput, c_diag[i], 0).r); r_cnt++;
              }
         }
         g = (g_cnt > 0) ? g_sum / float(g_cnt) : 0.0;
@@ -647,10 +647,11 @@ bool processGpu(
     }
 
     // 4. Uniforms
-    glBindImageTexture(0, texInput, 0, GL_FALSE, 0, GL_READ_ONLY, GL_R16UI);
-    glBindImageTexture(1, texOutput, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16UI);
-
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, texInput);
     glUniform1i(glGetUniformLocation(program, "uInput"), 0);
+
+    glBindImageTexture(1, texOutput, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16UI);
     glUniform1i(glGetUniformLocation(program, "uOutput"), 1);
 
     if (texLut) {
