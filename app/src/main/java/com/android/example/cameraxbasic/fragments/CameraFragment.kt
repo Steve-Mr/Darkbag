@@ -955,6 +955,40 @@ class CameraFragment : Fragment() {
                  processedBitmap = BitmapFactory.decodeFile(bmpPath)
             }
 
+            // Check for digital zoom cropping
+            if (processedBitmap != null) {
+                // Get SCALER_CROP_REGION to determine if we need to crop the output
+                // Note: captureResult is TotalCaptureResult
+                val cropRegion = captureResult.get(android.hardware.camera2.CaptureResult.SCALER_CROP_REGION)
+                val activeArray = chars.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
+
+                if (cropRegion != null && activeArray != null) {
+                    val zoomFactor = activeArray.width().toFloat() / cropRegion.width().toFloat()
+
+                    if (zoomFactor > 1.05f) { // Tolerance for 1.0x
+                         val newWidth = (processedBitmap.width / zoomFactor).toInt()
+                         val newHeight = (processedBitmap.height / zoomFactor).toInt()
+                         val x = (processedBitmap.width - newWidth) / 2
+                         val y = (processedBitmap.height - newHeight) / 2
+
+                         // Ensure bounds are safe
+                         val safeX = max(0, x)
+                         val safeY = max(0, y)
+                         val safeWidth = min(newWidth, processedBitmap.width - safeX)
+                         val safeHeight = min(newHeight, processedBitmap.height - safeY)
+
+                         val croppedBitmap = android.graphics.Bitmap.createBitmap(processedBitmap, safeX, safeY, safeWidth, safeHeight)
+
+                         // Recycle old bitmap to save memory? Be careful if it's reused.
+                         // processedBitmap = croppedBitmap
+                         // But createBitmap might return the same object if immutable/unchanged, though here we crop.
+                         processedBitmap = croppedBitmap
+
+                         Log.d(TAG, "Applied Digital Zoom Crop: Factor=$zoomFactor, NewSize=${safeWidth}x${safeHeight}")
+                    }
+                }
+            }
+
             // 4. Save DNG (with Thumbnail)
             val dngCreatorReal = android.hardware.camera2.DngCreator(chars, captureResult)
             try {
