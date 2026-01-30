@@ -145,6 +145,10 @@ class CameraFragment : Fragment() {
         }
     })
 
+    // Rate limiting semaphore to prevent OOM
+    private val processingSemaphore = kotlinx.coroutines.sync.Semaphore(3)
+    private val processingChannel = kotlinx.coroutines.channels.Channel<RawImageHolder>(3)
+
     data class RawImageHolder(
         val data: ByteArray,
         val width: Int,
@@ -284,6 +288,23 @@ class CameraFragment : Fragment() {
 
         // Initialize MediaStoreUtils for fetching this app's images
         mediaStoreUtils = MediaStoreUtils(requireContext())
+
+        // Start processing consumer
+        viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
+            for (holder in processingChannel) {
+                try {
+                    processImageAsync(requireContext(), holder)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error processing image from channel", e)
+                } finally {
+                    processingSemaphore.release()
+                    withContext(Dispatchers.Main) {
+                        cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
+                        cameraUiContainerBinding?.cameraCaptureButton?.alpha = 1.0f
+                    }
+                }
+            }
+        }
 
         // Wait for the views to be properly laid out
         fragmentCameraBinding.viewFinder.post {
@@ -482,63 +503,58 @@ class CameraFragment : Fragment() {
 
         // Listener for button used to capture photo
         cameraUiContainerBinding?.cameraCaptureButton?.setOnClickListener {
+            // Check concurrency limit
+            if (!processingSemaphore.tryAcquire()) {
+                Toast.makeText(requireContext(), "Processing queue full, please wait...", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
 
             // Get a stable reference of the modifiable image capture use case
             imageCapture?.let { imageCapture ->
-
-                // Create time stamped name and MediaStore entry.
-                val name = SimpleDateFormat(FILENAME, Locale.US)
-                    .format(System.currentTimeMillis())
-
-                // Callback for image saved
-                val imageSavedCallback = object : ImageCapture.OnImageSavedCallback {
-                    override fun onError(exc: ImageCaptureException) {
-                        Log.e(TAG, "Photo capture failed: ${exc.message}", exc)
-                    }
-
-                    override fun onImageSaved(output: ImageCapture.OutputFileResults) {
-                        val savedUri = output.savedUri
-                        Log.d(TAG, "Photo capture succeeded: $savedUri")
-
-                        // We can only change the foreground Drawable using API level 23+ API
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                            // Update the gallery thumbnail with latest picture taken
-                            savedUri?.let { setGalleryThumbnail(it.toString()) }
-                        }
-
-                        // Implicit broadcasts will be ignored for devices running API level >= 24
-                        // so if you only target API level 24+ you can remove this statement
-                        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
-                            // Suppress deprecated Camera usage needed for API level 23 and below
-                            @Suppress("DEPRECATION")
-                            requireActivity().sendBroadcast(
-                                Intent(android.hardware.Camera.ACTION_NEW_PICTURE, savedUri)
-                            )
-                        }
-                    }
-                }
 
                 if (imageCapture.outputFormat == ImageCapture.OUTPUT_FORMAT_RAW) {
                     // RAW Capture with Processing
                     imageCapture.takePicture(cameraExecutor, object : ImageCapture.OnImageCapturedCallback() {
                         override fun onCaptureSuccess(image: ImageProxy) {
-                            // 1. Immediate Copy (Free the pipeline)
-                            val holder = copyImageToHolder(image)
-                            image.close()
+                            try {
+                                // 1. Immediate Copy (Free the pipeline)
+                                val holder = copyImageToHolder(image)
+                                image.close() // Close ASAP
 
-                            // 2. Offload Processing
-                            val context = context ?: return
-                            lifecycleScope.launch(Dispatchers.IO) {
-                                processImageAsync(context, holder)
+                                // 2. Queue for Processing
+                                lifecycleScope.launch {
+                                    processingChannel.send(holder)
+                                }
+                            } catch (e: OutOfMemoryError) {
+                                Log.e(TAG, "OOM during capture copy", e)
+                                image.close()
+                                processingSemaphore.release()
+                                lifecycleScope.launch(Dispatchers.Main) {
+                                    Toast.makeText(requireContext(), "Memory full, photo not saved", Toast.LENGTH_SHORT).show()
+                                }
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Error during capture copy", e)
+                                image.close()
+                                processingSemaphore.release()
                             }
                         }
 
                         override fun onError(exception: ImageCaptureException) {
                             Log.e(TAG, "Photo capture failed: ${exception.message}", exception)
+                            processingSemaphore.release()
                         }
                     })
 
+                    // Optimistic UI update: disable button if we think we might be full,
+                    // though the semaphore check handles the hard limit.
+                    // We can also dim the button to indicate "busy" if usage is high.
+                    if (processingSemaphore.availablePermits == 0) {
+                        cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = false
+                        cameraUiContainerBinding?.cameraCaptureButton?.alpha = 0.5f
+                    }
+
                 } else {
+                    processingSemaphore.release() // Not raw, release immediately (logic for JPG path)
                     Toast.makeText(requireContext(), "RAW capture is not supported on this device.", Toast.LENGTH_SHORT).show()
                 }
 
@@ -751,10 +767,25 @@ class CameraFragment : Fragment() {
 
         // 1. Wait for Metadata
         var attempts = 0
-        var captureResult = captureResults[image.timestamp]
-        while (captureResult == null && attempts < 25) { // Wait up to 5 seconds
-            kotlinx.coroutines.delay(200)
+        var captureResult: TotalCaptureResult? = null
+        val tolerance = 5_000_000L // 5ms in nanoseconds
+
+        while (attempts < 25) { // Wait up to 5 seconds
+            // Try exact match
             captureResult = captureResults[image.timestamp]
+
+            // Try fuzzy match
+            if (captureResult == null) {
+                 synchronized(captureResults) {
+                    captureResult = captureResults.entries.find {
+                        kotlin.math.abs(it.key - image.timestamp) < tolerance
+                    }?.value
+                 }
+            }
+
+            if (captureResult != null) break
+
+            kotlinx.coroutines.delay(200)
             attempts++
         }
 
