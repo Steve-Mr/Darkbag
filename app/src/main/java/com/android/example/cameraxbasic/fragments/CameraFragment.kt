@@ -141,7 +141,7 @@ class CameraFragment : Fragment() {
     // Cache for CaptureResults to match with ImageProxy timestamps
     private val captureResults = java.util.Collections.synchronizedMap(object : java.util.LinkedHashMap<Long, TotalCaptureResult>() {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, TotalCaptureResult>?): Boolean {
-            return size > 20
+            return size > 300
         }
     })
 
