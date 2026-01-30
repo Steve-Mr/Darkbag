@@ -29,4 +29,5 @@
     <string name="delete_button_alt">Delete</string>
     <string name="delete_dialog">Delete current photo?</string>
     <string name="delete_title">Confirm</string>
+    <string name="enable_manual_controls">Enable Manual Controls</string>
 </resources>

@@ -34,8 +34,13 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
 import android.graphics.BitmapFactory
+import android.hardware.camera2.CameraCharacteristics
+import android.widget.SeekBar
+import android.widget.ToggleButton
 import androidx.camera.core.*
 import androidx.camera.core.resolutionselector.AspectRatioStrategy
+import androidx.camera.camera2.interop.CaptureRequestOptions
+import androidx.camera.camera2.interop.Camera2CameraControl
 import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.camera2.interop.Camera2CameraInfo
 import androidx.camera.camera2.interop.Camera2Interop
@@ -113,6 +118,21 @@ class CameraFragment : Fragment() {
     private val displayManager by lazy {
         requireContext().getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
     }
+
+    // Manual Control State
+    private var isManualFocus = false
+    private var isManualExposure = false
+    private var activeManualTab: String? = null
+
+    private var minFocusDistance = 0.0f
+    private var isoRange: android.util.Range<Int>? = null
+    private var exposureTimeRange: android.util.Range<Long>? = null
+    private var evRange: android.util.Range<Int>? = null
+
+    private var currentFocusDistance = 0.0f
+    private var currentIso = 100
+    private var currentExposureTime = 10_000_000L // 10ms
+    private var currentEvIndex = 0
 
     /** Orientation listener to track device rotation independently of UI rotation */
     private val orientationEventListener by lazy {
@@ -375,6 +395,22 @@ class CameraFragment : Fragment() {
         val cameraSelector = CameraSelector.Builder().requireLensFacing(lensFacing).build()
 
         val cameraInfo = cameraProvider.getCameraInfo(cameraSelector)
+
+        // Fetch Characteristics for Manual Control
+        try {
+            val camera2Info = Camera2CameraInfo.from(cameraInfo)
+            val chars = androidx.camera.camera2.interop.Camera2CameraInfo.from(cameraInfo).getCameraCharacteristic(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
+            isoRange = chars
+            exposureTimeRange = androidx.camera.camera2.interop.Camera2CameraInfo.from(cameraInfo).getCameraCharacteristic(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
+            minFocusDistance = androidx.camera.camera2.interop.Camera2CameraInfo.from(cameraInfo).getCameraCharacteristic(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE) ?: 0.0f
+            evRange = cameraInfo.exposureState.exposureCompensationRange
+
+            // Initialize defaults if ranges are valid
+            isoRange?.let { currentIso = it.lower }
+            exposureTimeRange?.let { currentExposureTime = it.lower }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to fetch camera characteristics", e)
+        }
         val capabilities = ImageCapture.getImageCaptureCapabilities(cameraInfo)
         val isRawSupported = capabilities.supportedOutputFormats.contains(ImageCapture.OUTPUT_FORMAT_RAW)
 
@@ -597,6 +633,9 @@ class CameraFragment : Fragment() {
                 bindCameraUseCases()
             }
         }
+
+        // Initialize Manual Controls
+        initManualControls()
 
         // Listener for button used to view the most recent photo
         cameraUiContainerBinding?.photoViewButton?.setOnClickListener {
@@ -1019,6 +1058,241 @@ class CameraFragment : Fragment() {
 
         } catch (e: Exception) {
             Log.e(TAG, "Error in background processing", e)
+        }
+    }
+
+    private fun initManualControls() {
+        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val enabled = prefs.getBoolean(SettingsFragment.KEY_MANUAL_CONTROLS, false)
+        if (!enabled) return
+
+        val binding = cameraUiContainerBinding ?: return
+        binding.manualControlsRoot?.visibility = View.VISIBLE
+
+        // Tab Listeners
+        val tabs = mutableMapOf<ToggleButton, String>()
+        binding.btnTabFocus?.let { tabs[it] = "Focus" }
+        binding.btnTabIso?.let { tabs[it] = "ISO" }
+        binding.btnTabShutter?.let { tabs[it] = "Shutter" }
+        binding.btnTabEv?.let { tabs[it] = "EV" }
+
+        tabs.forEach { (btn, name) ->
+            btn.setOnCheckedChangeListener { _, isChecked ->
+                if (isChecked) {
+                    // Uncheck others
+                    tabs.keys.filter { it != btn }.forEach { it.isChecked = false }
+                    activeManualTab = name
+                    binding.manualPanel?.visibility = View.VISIBLE
+                    updateManualPanel()
+                } else {
+                    if (activeManualTab == name) {
+                        activeManualTab = null
+                        binding.manualPanel?.visibility = View.GONE
+                    }
+                }
+            }
+        }
+
+        // Manual Panel Listeners
+        binding.seekbarManual?.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                if (!fromUser) return
+                handleManualProgress(progress)
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        })
+
+        binding.btnManualAuto?.setOnClickListener {
+            resetCurrentManualParameter()
+        }
+
+        // Focus Extras
+        binding.btnFocusNear?.setOnClickListener {
+            currentFocusDistance = minFocusDistance
+            isManualFocus = true
+            applyManualControls()
+            updateManualPanel() // Update slider position
+        }
+
+        binding.btnFocusFar?.setOnClickListener {
+            currentFocusDistance = 0.0f
+            isManualFocus = true
+            applyManualControls()
+            updateManualPanel()
+        }
+
+        // Tap to Focus on ViewFinder
+        fragmentCameraBinding.viewFinder.setOnTouchListener { view, event ->
+            if (event.action == android.view.MotionEvent.ACTION_UP) {
+                val factory = fragmentCameraBinding.viewFinder.meteringPointFactory
+                val point = factory.createPoint(event.x, event.y)
+                val action = FocusMeteringAction.Builder(point).build()
+
+                // If in manual focus mode, tapping switch to AF
+                isManualFocus = false
+                applyManualControls() // Apply change (clear manual focus override)
+
+                // Also reset Focus UI if active
+                if (activeManualTab == "Focus") {
+                     updateManualPanel()
+                }
+
+                camera?.cameraControl?.startFocusAndMetering(action)
+                view.performClick()
+            }
+            true
+        }
+    }
+
+    private fun handleManualProgress(progress: Int) {
+        val binding = cameraUiContainerBinding ?: return
+        val max = binding.seekbarManual?.max ?: 100
+        val ratio = progress.toFloat() / max
+
+        when (activeManualTab) {
+            "Focus" -> {
+                // 0 is Far (0.0), Max is Near (minFocusDistance)
+                currentFocusDistance = ratio * minFocusDistance
+                isManualFocus = true
+                binding.tvManualValue?.text = String.format("%.2f", currentFocusDistance)
+            }
+            "ISO" -> {
+                isoRange?.let { range ->
+                    currentIso = (range.lower + (range.upper - range.lower) * ratio).toInt()
+                    isManualExposure = true
+                    binding.tvManualValue?.text = "$currentIso"
+                }
+            }
+            "Shutter" -> {
+                exposureTimeRange?.let { range ->
+                     // Logarithmic scale
+                     // v = min * (max/min)^ratio
+                     val minVal = range.lower.toDouble()
+                     val maxVal = range.upper.toDouble()
+                     val res = minVal * Math.pow(maxVal / minVal, ratio.toDouble())
+                     currentExposureTime = res.toLong()
+                     isManualExposure = true
+
+                     // Format text
+                     val ms = currentExposureTime / 1_000_000.0
+                     if (ms < 1000) {
+                         binding.tvManualValue?.text = String.format("%.0f 1/%.0f", ms, 1000.0/ms) // Approx
+                     } else {
+                         binding.tvManualValue?.text = String.format("%.1fs", ms/1000.0)
+                     }
+                }
+            }
+            "EV" -> {
+                 evRange?.let { range ->
+                     currentEvIndex = (range.lower + (range.upper - range.lower) * ratio).toInt()
+                     // EV doesn't set isManualExposure flag as it works in Auto.
+                     // But if isManualExposure is TRUE, EV does nothing.
+                     if (isManualExposure) {
+                         Toast.makeText(requireContext(), "EV disabled in Manual Exposure", Toast.LENGTH_SHORT).show()
+                     } else {
+                         binding.tvManualValue?.text = "$currentEvIndex"
+                     }
+                 }
+            }
+        }
+        applyManualControls()
+    }
+
+    private fun resetCurrentManualParameter() {
+         when (activeManualTab) {
+            "Focus" -> {
+                isManualFocus = false
+                camera?.cameraControl?.cancelFocusAndMetering()
+            }
+            "ISO", "Shutter" -> {
+                isManualExposure = false
+            }
+            "EV" -> {
+                currentEvIndex = 0
+            }
+        }
+        applyManualControls()
+        updateManualPanel()
+    }
+
+    private fun updateManualPanel() {
+        val binding = cameraUiContainerBinding ?: return
+        binding.focusExtras?.visibility = if (activeManualTab == "Focus") View.VISIBLE else View.GONE
+
+        val max = binding.seekbarManual?.max ?: 100
+
+        when (activeManualTab) {
+            "Focus" -> {
+                if (isManualFocus) {
+                    val ratio = if (minFocusDistance > 0) currentFocusDistance / minFocusDistance else 0f
+                    binding.seekbarManual?.progress = (ratio * max).toInt()
+                    binding.tvManualValue?.text = String.format("%.2f", currentFocusDistance)
+                } else {
+                    binding.tvManualValue?.text = "Auto"
+                    binding.seekbarManual?.progress = 0
+                }
+            }
+            "ISO" -> {
+                isoRange?.let { range ->
+                    if (isManualExposure) {
+                        val ratio = (currentIso - range.lower).toFloat() / (range.upper - range.lower)
+                        binding.seekbarManual?.progress = (ratio * max).toInt()
+                        binding.tvManualValue?.text = "$currentIso"
+                    } else {
+                         binding.tvManualValue?.text = "Auto"
+                         binding.seekbarManual?.progress = 0
+                    }
+                }
+            }
+            "Shutter" -> {
+                exposureTimeRange?.let { range ->
+                    if (isManualExposure) {
+                        val minVal = range.lower.toDouble()
+                        val maxVal = range.upper.toDouble()
+                        val ratio = Math.log(currentExposureTime.toDouble() / minVal) / Math.log(maxVal / minVal)
+                        binding.seekbarManual?.progress = (ratio * max).toInt()
+                         val ms = currentExposureTime / 1_000_000.0
+                         binding.tvManualValue?.text = String.format("%.1f ms", ms)
+                    } else {
+                        binding.tvManualValue?.text = "Auto"
+                        binding.seekbarManual?.progress = 0
+                    }
+                }
+            }
+            "EV" -> {
+                evRange?.let { range ->
+                    val ratio = (currentEvIndex - range.lower).toFloat() / (range.upper - range.lower)
+                    binding.seekbarManual?.progress = (ratio * max).toInt()
+                    binding.tvManualValue?.text = "$currentEvIndex"
+                }
+            }
+        }
+    }
+
+    private fun applyManualControls() {
+        val cameraControl = camera?.cameraControl ?: return
+        val camera2Control = Camera2CameraControl.from(cameraControl)
+        val builder = CaptureRequestOptions.Builder()
+
+        // Focus
+        if (isManualFocus) {
+            builder.setCaptureRequestOption(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF)
+            builder.setCaptureRequestOption(CaptureRequest.LENS_FOCUS_DISTANCE, currentFocusDistance)
+        }
+
+        // Exposure
+        if (isManualExposure) {
+            builder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
+            builder.setCaptureRequestOption(CaptureRequest.SENSOR_SENSITIVITY, currentIso)
+            builder.setCaptureRequestOption(CaptureRequest.SENSOR_EXPOSURE_TIME, currentExposureTime)
+        }
+
+        camera2Control.setCaptureRequestOptions(builder.build())
+
+        // EV
+        if (!isManualExposure) {
+             cameraControl.setExposureCompensationIndex(currentEvIndex)
         }
     }
 
