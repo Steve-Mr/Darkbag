@@ -146,8 +146,8 @@ class CameraFragment : Fragment() {
     })
 
     // Rate limiting semaphore to prevent OOM
-    private val processingSemaphore = kotlinx.coroutines.sync.Semaphore(3)
-    private val processingChannel = kotlinx.coroutines.channels.Channel<RawImageHolder>(3)
+    private val processingSemaphore = kotlinx.coroutines.sync.Semaphore(2)
+    private val processingChannel = kotlinx.coroutines.channels.Channel<RawImageHolder>(2)
 
     data class RawImageHolder(
         val data: ByteArray,
@@ -531,17 +531,27 @@ class CameraFragment : Fragment() {
                                 processingSemaphore.release()
                                 lifecycleScope.launch(Dispatchers.Main) {
                                     Toast.makeText(requireContext(), "Memory full, photo not saved", Toast.LENGTH_SHORT).show()
+                                    cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
+                                    cameraUiContainerBinding?.cameraCaptureButton?.alpha = 1.0f
                                 }
                             } catch (e: Exception) {
                                 Log.e(TAG, "Error during capture copy", e)
                                 image.close()
                                 processingSemaphore.release()
+                                lifecycleScope.launch(Dispatchers.Main) {
+                                    cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
+                                    cameraUiContainerBinding?.cameraCaptureButton?.alpha = 1.0f
+                                }
                             }
                         }
 
                         override fun onError(exception: ImageCaptureException) {
                             Log.e(TAG, "Photo capture failed: ${exception.message}", exception)
                             processingSemaphore.release()
+                            lifecycleScope.launch(Dispatchers.Main) {
+                                cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
+                                cameraUiContainerBinding?.cameraCaptureButton?.alpha = 1.0f
+                            }
                         }
                     })
 
@@ -889,9 +899,20 @@ class CameraFragment : Fragment() {
                 }
                 dngCreatorReal.setOrientation(orientation)
 
-                // Set Thumbnail if available
+                // Set Thumbnail if available (Resize to max 256x256)
                 if (processedBitmap != null) {
-                    dngCreatorReal.setThumbnail(processedBitmap)
+                    val maxThumbSize = 256
+                    val scale = min(maxThumbSize.toDouble() / processedBitmap.width, maxThumbSize.toDouble() / processedBitmap.height)
+                    val thumbWidth = (processedBitmap.width * scale).toInt()
+                    val thumbHeight = (processedBitmap.height * scale).toInt()
+
+                    val thumbBitmap = if (scale < 1.0) {
+                        android.graphics.Bitmap.createScaledBitmap(processedBitmap, thumbWidth, thumbHeight, true)
+                    } else {
+                        processedBitmap
+                    }
+
+                    dngCreatorReal.setThumbnail(thumbBitmap)
                 }
 
                 val dngOut = FileOutputStream(dngFile)
