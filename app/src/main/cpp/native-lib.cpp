@@ -498,10 +498,7 @@ void main() {
     g *= g_gain;
     b *= uWbGains.w;
 
-    vec3 res;
-    res.x = uCombinedMat[0][0]*r + uCombinedMat[1][0]*g + uCombinedMat[2][0]*b;
-    res.y = uCombinedMat[0][1]*r + uCombinedMat[1][1]*g + uCombinedMat[2][1]*b;
-    res.z = uCombinedMat[0][2]*r + uCombinedMat[1][2]*g + uCombinedMat[2][2]*b;
+    vec3 res = uCombinedMat * vec3(r, g, b);
 
     res.x = apply_log(res.x, uTargetLog);
     res.y = apply_log(res.y, uTargetLog);
@@ -782,16 +779,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processRaw(
         }
     } else {
         processCpu(rawData, width, height, stride, whiteLevel, blackLevel, cfaPattern, wb, combinedMat, targetLog, lut, outputImage);
-        result = 1; // "CPU used" implies 1, or maybe 0 if user requested CPU?
-        // User requested CPU -> CPU used. This is success.
-        // My plan said: 0: GPU Success, 1: CPU Success (Fallback).
-        // If user requested CPU, we can return 1 (CPU Used) or 0 (Success).
-        // The Toast logic in plan says: "if 1, show Toast 'GPU failed, fell back'".
-        // So if user requested CPU, and we used CPU, we should probably return something that DOESNT trigger the warning.
-        // Let's say:
-        // 0: Success (as requested)
-        // 1: Fallback occurred
-        // -1: Error
+        // User requested CPU, so this is a success case that should not trigger a fallback warning.
         result = 0;
     }
 
