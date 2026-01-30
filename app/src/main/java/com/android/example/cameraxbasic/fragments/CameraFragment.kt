@@ -32,6 +32,7 @@ import android.view.OrientationEventListener
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.TextView
 import android.widget.Toast
 import android.graphics.BitmapFactory
 import android.hardware.camera2.CameraCharacteristics
@@ -84,6 +85,13 @@ import java.util.concurrent.Executors
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
+import androidx.camera.core.CameraEffect
+import androidx.camera.core.UseCaseGroup
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
+import com.android.example.cameraxbasic.utils.LutManager
+import com.android.example.cameraxbasic.processor.LutSurfaceProcessor
+import androidx.activity.result.contract.ActivityResultContracts
 
 /** Helper type alias used for analysis use case callbacks */
 typealias LumaListener = (luma: Double) -> Unit
@@ -106,6 +114,10 @@ class CameraFragment : Fragment() {
 
     private lateinit var mediaStoreUtils: MediaStoreUtils
 
+    private lateinit var lutManager: LutManager
+    private lateinit var lutSurfaceProcessor: LutSurfaceProcessor
+    private lateinit var lutAdapter: LutAdapter
+
     private var displayId: Int = -1
     private var lensFacing: Int = CameraSelector.LENS_FACING_BACK
     private var preview: Preview? = null
@@ -117,6 +129,23 @@ class CameraFragment : Fragment() {
 
     private val displayManager by lazy {
         requireContext().getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
+    }
+
+    private val lutPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            lifecycleScope.launch(Dispatchers.IO) {
+                if (lutManager.importLut(uri)) {
+                    withContext(Dispatchers.Main) {
+                        lutAdapter.updateList()
+                        Toast.makeText(requireContext(), "LUT imported", Toast.LENGTH_SHORT).show()
+                    }
+                } else {
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(requireContext(), "Failed to import LUT", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        }
     }
 
     // Manual Control State
@@ -254,6 +283,8 @@ class CameraFragment : Fragment() {
         _fragmentCameraBinding = null
         super.onDestroyView()
 
+        lutSurfaceProcessor.release()
+
         // Shut down our background executor
         cameraExecutor.shutdown()
 
@@ -293,6 +324,14 @@ class CameraFragment : Fragment() {
 
         // Initialize our background executor
         cameraExecutor = Executors.newSingleThreadExecutor()
+
+        lutManager = LutManager(requireContext())
+        lutSurfaceProcessor = LutSurfaceProcessor()
+
+        // Load initial LUT
+        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val initialLut = prefs.getString(SettingsFragment.KEY_LUT_URI, null)
+        lutSurfaceProcessor.updateLut(initialLut)
 
         broadcastManager = LocalBroadcastManager.getInstance(view.context)
 
@@ -426,6 +465,21 @@ class CameraFragment : Fragment() {
             .setTargetRotation(rotation)
             .build()
 
+        // Configure LUT Processor and Effect
+        val effect = CameraEffect(
+            CameraEffect.PREVIEW,
+            cameraExecutor,
+            lutSurfaceProcessor
+        ) { error ->
+            Log.e(TAG, "CameraEffect error: ${error.cause}", error)
+        }
+
+        // Sync Log setting
+        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val targetLogName = prefs.getString(SettingsFragment.KEY_TARGET_LOG, "None")
+        val targetLogIndex = SettingsFragment.LOG_CURVES.indexOf(targetLogName)
+        lutSurfaceProcessor.setTargetLog(targetLogIndex)
+
         // ImageCapture
         val imageCaptureBuilder = ImageCapture.Builder()
             .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
@@ -480,11 +534,18 @@ class CameraFragment : Fragment() {
             removeCameraStateObservers(camera!!.cameraInfo)
         }
 
+        val useCaseGroup = UseCaseGroup.Builder()
+            .addUseCase(preview!!)
+            .addUseCase(imageCapture!!)
+            .addUseCase(imageAnalyzer!!)
+            .addEffect(effect)
+            .build()
+
         try {
             // A variable number of use-cases can be passed here -
             // camera provides access to CameraControl & CameraInfo
             camera = cameraProvider.bindToLifecycle(
-                    this, cameraSelector, preview, imageCapture, imageAnalyzer)
+                    this, cameraSelector, useCaseGroup)
 
             // Attach the viewfinder's surface provider to preview use case
             preview?.setSurfaceProvider(fragmentCameraBinding.viewFinder.surfaceProvider)
@@ -534,6 +595,39 @@ class CameraFragment : Fragment() {
         cameraUiContainerBinding?.settingsButton?.setOnClickListener {
             Navigation.findNavController(requireActivity(), R.id.fragment_container)
                 .navigate(CameraFragmentDirections.actionCameraToSettings())
+        }
+
+        // Setup LUT List
+        lutAdapter = LutAdapter(lutManager) { file ->
+            if (file == null) {
+                // "Import" clicked
+                lutPicker.launch(arrayOf("*/*"))
+            } else {
+                // LUT selected
+                Toast.makeText(requireContext(), "Selected: ${lutManager.getDisplayName(file)}", Toast.LENGTH_SHORT).show()
+                lutSurfaceProcessor.updateLut(file.absolutePath)
+                // Persist selection for capture usage
+                requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                    .edit()
+                    .putString(SettingsFragment.KEY_LUT_URI, file.absolutePath)
+                    .apply()
+            }
+        }
+
+        cameraUiContainerBinding?.lutList?.apply {
+            layoutManager = LinearLayoutManager(requireContext(), LinearLayoutManager.HORIZONTAL, false)
+            adapter = lutAdapter
+        }
+
+        // LUT Button
+        cameraUiContainerBinding?.lutButton?.setOnClickListener {
+             val list = cameraUiContainerBinding?.lutList ?: return@setOnClickListener
+             if (list.visibility == View.VISIBLE) {
+                 list.visibility = View.GONE
+             } else {
+                 list.visibility = View.VISIBLE
+                 lutAdapter.updateList()
+             }
         }
 
         // Listener for button used to capture photo
@@ -802,6 +896,7 @@ class CameraFragment : Fragment() {
         )
     }
 
+    // ... processImageAsync ... (omitted since it wasn't modified in logic, but included in full file write)
     @androidx.annotation.OptIn(androidx.camera.camera2.interop.ExperimentalCamera2Interop::class)
     private suspend fun processImageAsync(context: Context, image: RawImageHolder) = kotlinx.coroutines.withContext(Dispatchers.IO) {
         val contentResolver = context.contentResolver
@@ -1341,5 +1436,44 @@ class CameraFragment : Fragment() {
         private const val PHOTO_TYPE = "image/jpeg"
         private const val RATIO_4_3_VALUE = 4.0 / 3.0
         private const val RATIO_16_9_VALUE = 16.0 / 9.0
+    }
+
+    class LutAdapter(
+        private val lutManager: LutManager,
+        private val onClick: (File?) -> Unit
+    ) : RecyclerView.Adapter<LutAdapter.ViewHolder>() {
+
+        private var items = listOf<File>()
+
+        init {
+            updateList()
+        }
+
+        fun updateList() {
+            items = lutManager.getLutList()
+            notifyDataSetChanged()
+        }
+
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
+            val view = LayoutInflater.from(parent.context).inflate(R.layout.item_lut, parent, false)
+            return ViewHolder(view)
+        }
+
+        override fun onBindViewHolder(holder: ViewHolder, position: Int) {
+            if (position < items.size) {
+                val file = items[position]
+                holder.textView.text = lutManager.getDisplayName(file)
+                holder.itemView.setOnClickListener { onClick(file) }
+            } else {
+                holder.textView.text = "+ Import"
+                holder.itemView.setOnClickListener { onClick(null) }
+            }
+        }
+
+        override fun getItemCount(): Int = items.size + 1
+
+        class ViewHolder(view: View) : RecyclerView.ViewHolder(view) {
+            val textView: TextView = view.findViewById(R.id.tv_lut_name)
+        }
     }
 }

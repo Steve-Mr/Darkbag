@@ -37,6 +37,36 @@
         app:layout_constraintEnd_toEndOf="parent"
         android:contentDescription="@string/settings_button_alt" />
 
+    <ImageButton
+        android:id="@+id/lut_button"
+        android:layout_width="@dimen/round_button_medium"
+        android:layout_height="@dimen/round_button_medium"
+        android:layout_marginTop="@dimen/margin_xsmall"
+        android:layout_marginStart="@dimen/margin_xsmall"
+        android:padding="@dimen/spacing_large"
+        android:scaleType="fitCenter"
+        android:background="@android:color/transparent"
+        app:srcCompat="@drawable/ic_photo"
+        app:tint="@android:color/white"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        android:contentDescription="LUTs" />
+        <!-- Reusing ic_photo for now as placeholder, or I can use a generic icon if available. I'll tint it white. -->
+
+    <!-- LUT List -->
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/lut_list"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:visibility="gone"
+        android:padding="8dp"
+        android:clipToPadding="false"
+        android:background="#99000000"
+        app:layout_constraintBottom_toTopOf="@id/manual_controls_root"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
     <!-- Manual Controls Container -->
     <androidx.constraintlayout.widget.ConstraintLayout
         android:id="@+id/manual_controls_root"

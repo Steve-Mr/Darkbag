@@ -40,4 +40,11 @@ object ColorProcessor {
         outputJpgPath: String?,
         useGpu: Boolean
     ): Int
+
+    /**
+     * Loads a 3D LUT from a file.
+     * @param path Path to .cube file.
+     * @return FloatArray where index 0 is size, and subsequent elements are RGB triplets. Returns null if loading failed.
+     */
+    external fun loadLutNative(path: String): FloatArray?
 }

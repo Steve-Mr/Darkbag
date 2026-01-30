@@ -799,3 +799,36 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processRaw(
 
     return result;
 }
+
+extern "C" JNIEXPORT jfloatArray JNICALL
+Java_com_android_example_cameraxbasic_processor_ColorProcessor_loadLutNative(
+        JNIEnv* env,
+        jobject /* this */,
+        jstring path) {
+
+    if (!path) return nullptr;
+    const char* path_cstr = env->GetStringUTFChars(path, 0);
+
+    LUT3D lut = load_lut(path_cstr);
+    env->ReleaseStringUTFChars(path, path_cstr);
+
+    if (lut.size == 0) return nullptr;
+
+    // Return format: [size, r, g, b, r, g, b...]
+    size_t numElements = 1 + lut.data.size() * 3;
+    jfloatArray result = env->NewFloatArray(numElements);
+    if (!result) return nullptr;
+
+    std::vector<float> buffer;
+    buffer.reserve(numElements);
+    buffer.push_back((float)lut.size);
+    for (const auto& v : lut.data) {
+        buffer.push_back(v.r);
+        buffer.push_back(v.g);
+        buffer.push_back(v.b);
+    }
+
+    env->SetFloatArrayRegion(result, 0, numElements, buffer.data());
+
+    return result;
+}
