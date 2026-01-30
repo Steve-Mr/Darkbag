@@ -20,18 +20,20 @@ jobs:
       run: chmod +x gradlew
 
     - name: Decode Keystore
-      if: ${{ secrets.KEYSTORE != '' }}
       env:
         ENCODED_STRING: ${{ secrets.KEYSTORE }}
       run: |
-        echo $ENCODED_STRING | base64 --decode > keystore.jks
+        if [ -n "$ENCODED_STRING" ]; then
+          echo "$ENCODED_STRING" | base64 --decode > keystore.jks
+        fi
 
     - name: Decode Keystore Properties
-      if: ${{ secrets.KEY_PROPERTIES != '' }}
       env:
         ENCODED_STRING: ${{ secrets.KEY_PROPERTIES }}
       run: |
-        echo $ENCODED_STRING | base64 --decode > keystore.properties
+        if [ -n "$ENCODED_STRING" ]; then
+          echo "$ENCODED_STRING" | base64 --decode > keystore.properties
+        fi
 
     - name: Build with Gradle
       run: ./gradlew assembleDebug assembleRelease
