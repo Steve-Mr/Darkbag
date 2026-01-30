@@ -399,10 +399,9 @@ class CameraFragment : Fragment() {
         // Fetch Characteristics for Manual Control
         try {
             val camera2Info = Camera2CameraInfo.from(cameraInfo)
-            val chars = androidx.camera.camera2.interop.Camera2CameraInfo.from(cameraInfo).getCameraCharacteristic(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
-            isoRange = chars
-            exposureTimeRange = androidx.camera.camera2.interop.Camera2CameraInfo.from(cameraInfo).getCameraCharacteristic(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
-            minFocusDistance = androidx.camera.camera2.interop.Camera2CameraInfo.from(cameraInfo).getCameraCharacteristic(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE) ?: 0.0f
+            isoRange = camera2Info.getCameraCharacteristic(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
+            exposureTimeRange = camera2Info.getCameraCharacteristic(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
+            minFocusDistance = camera2Info.getCameraCharacteristic(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE) ?: 0.0f
             evRange = cameraInfo.exposureState.exposureCompensationRange
 
             // Initialize defaults if ranges are valid
