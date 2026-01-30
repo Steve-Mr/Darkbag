@@ -51,6 +51,18 @@ class LutManager(private val context: Context) {
         }
     }
 
+    fun renameLut(file: File, newName: String): Boolean {
+        if (!file.exists() || file.parentFile != lutDir) return false
+
+        // Ensure extension
+        val finalName = if (!newName.endsWith(".cube", ignoreCase = true)) "$newName.cube" else newName
+        val dest = File(lutDir, finalName)
+
+        if (dest.exists()) return false // Conflict
+
+        return file.renameTo(dest)
+    }
+
     fun getDisplayName(file: File): String {
         var name = file.name
 

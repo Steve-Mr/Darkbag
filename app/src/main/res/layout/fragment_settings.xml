@@ -59,11 +59,11 @@
         app:layout_constraintTop_toBottomOf="@id/spinner_target_log" />
 
     <Button
-        android:id="@+id/btn_select_lut"
+        android:id="@+id/btn_manage_luts"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginTop="8dp"
-        android:text="Select LUT File"
+        android:text="Manage LUTs"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@id/tv_lut_section" />
 
@@ -74,10 +74,10 @@
         android:layout_marginStart="16dp"
         android:text="No LUT selected"
         android:textColor="@android:color/darker_gray"
-        app:layout_constraintBottom_toBottomOf="@id/btn_select_lut"
+        app:layout_constraintBottom_toBottomOf="@id/btn_manage_luts"
         app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toEndOf="@id/btn_select_lut"
-        app:layout_constraintTop_toTopOf="@id/btn_select_lut" />
+        app:layout_constraintStart_toEndOf="@id/btn_manage_luts"
+        app:layout_constraintTop_toTopOf="@id/btn_manage_luts" />
 
     <TextView
         android:id="@+id/tv_output_format"
@@ -88,7 +88,7 @@
         android:textColor="@android:color/white"
         android:textSize="16sp"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/btn_select_lut" />
+        app:layout_constraintTop_toBottomOf="@id/btn_manage_luts" />
 
     <CheckBox
         android:id="@+id/cb_save_tiff"

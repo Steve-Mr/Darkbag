@@ -112,8 +112,9 @@ class SettingsFragment : Fragment() {
         val savedLut = prefs.getString(KEY_LUT_URI, null)
         updateLutLabel(savedLut)
 
-        binding.btnSelectLut.setOnClickListener {
-            lutPicker.launch(arrayOf("*/*")) // Allow all initially, user selects .cube ideally
+        binding.btnManageLuts.setOnClickListener {
+            Navigation.findNavController(requireActivity(), R.id.fragment_container)
+                .navigate(SettingsFragmentDirections.actionSettingsToLutManagement())
         }
     }
 
@@ -121,11 +122,16 @@ class SettingsFragment : Fragment() {
         if (uriString == null) {
             binding.tvSelectedLut.text = "No LUT selected"
         } else {
-            // Try to decode URI to filename
-            binding.tvSelectedLut.text = try {
-                 Uri.parse(uriString).lastPathSegment ?: uriString
-            } catch (e: Exception) {
-                uriString
+            // Check if it's a file path or Uri
+            val file = java.io.File(uriString)
+            if (file.exists()) {
+                 binding.tvSelectedLut.text = file.nameWithoutExtension
+            } else {
+                 binding.tvSelectedLut.text = try {
+                     Uri.parse(uriString).lastPathSegment ?: uriString
+                } catch (e: Exception) {
+                    uriString
+                }
             }
         }
     }

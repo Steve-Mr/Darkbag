@@ -53,6 +53,17 @@
     <fragment
         android:id="@+id/settings_fragment"
         android:name="com.android.example.cameraxbasic.fragments.SettingsFragment"
-        android:label="SettingsFragment" />
+        android:label="SettingsFragment" >
+        <action
+            android:id="@+id/action_settings_to_lut_management"
+            app:destination="@id/lut_management_fragment" />
+    </fragment>
+
+    <fragment
+        android:id="@+id/lut_management_fragment"
+        android:name="com.android.example.cameraxbasic.fragments.LutManagementFragment"
+        android:label="LUT Management"
+        tools:layout="@layout/fragment_lut_management"
+        xmlns:tools="http://schemas.android.com/tools"/>
 
 </navigation>

@@ -393,11 +393,15 @@ class CameraFragment : Fragment() {
         super.onConfigurationChanged(newConfig)
 
         // Rebind the camera with the updated display metrics
-        bindCameraUseCases()
+        bindCameraUseCases(isCaptureMode = false)
 
         // Enable or disable switching between cameras
         updateCameraSwitchButton()
     }
+
+    // --- Mode Switch Logic ---
+    private var isPreviewLutEnabled = false
+    private var isRawSupported = false
 
     /** Initialize CameraX, and prepare to bind the camera use cases  */
     private suspend fun setUpCamera() {
@@ -413,12 +417,24 @@ class CameraFragment : Fragment() {
         // Enable or disable switching between cameras
         updateCameraSwitchButton()
 
+        // Check capabilities once
+        val cameraSelector = CameraSelector.Builder().requireLensFacing(lensFacing).build()
+        val cameraInfo = cameraProvider?.getCameraInfo(cameraSelector)
+        if (cameraInfo != null) {
+             val capabilities = ImageCapture.getImageCaptureCapabilities(cameraInfo)
+             isRawSupported = capabilities.supportedOutputFormats.contains(ImageCapture.OUTPUT_FORMAT_RAW)
+        }
+
         // Build and bind the camera use cases
-        bindCameraUseCases()
+        bindCameraUseCases(isCaptureMode = false)
     }
 
-    /** Declare and bind preview, capture and analysis use cases */
-    private fun bindCameraUseCases() {
+    /**
+     * Declare and bind preview, capture and analysis use cases
+     * @param isCaptureMode If true, bind ImageCapture (RAW) and standard Preview (No Effect).
+     *                      If false, bind Preview (With Effect) and ImageAnalysis.
+     */
+    private fun bindCameraUseCases(isCaptureMode: Boolean) {
 
         // Get screen metrics used to setup camera for full screen resolution
         val metrics = windowMetricsCalculator.computeCurrentWindowMetrics(requireActivity()).bounds
@@ -449,8 +465,6 @@ class CameraFragment : Fragment() {
         } catch (e: Exception) {
             Log.e(TAG, "Failed to fetch camera characteristics", e)
         }
-        val capabilities = ImageCapture.getImageCaptureCapabilities(cameraInfo)
-        val isRawSupported = capabilities.supportedOutputFormats.contains(ImageCapture.OUTPUT_FORMAT_RAW)
 
         // Force 4:3 aspect ratio to match typical sensor output and avoid cropping in preview
         val resolutionSelector = ResolutionSelector.Builder()
@@ -466,48 +480,57 @@ class CameraFragment : Fragment() {
             .build()
 
         // Configure LUT Processor and Effect
-        val effect = object : CameraEffect(
-            PREVIEW,
-            cameraExecutor,
-            lutSurfaceProcessor,
-            androidx.core.util.Consumer { error ->
-                Log.e(TAG, "CameraEffect error: ${error.cause}", error)
-            }
-        ) {}
+        val effect = if (isPreviewLutEnabled && !isCaptureMode) {
+             object : CameraEffect(
+                PREVIEW,
+                cameraExecutor,
+                lutSurfaceProcessor,
+                androidx.core.util.Consumer { error ->
+                    Log.e(TAG, "CameraEffect error: ${error.cause}", error)
+                }
+            ) {}
+        } else {
+            null
+        }
 
-        // Sync Log setting
-        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        val targetLogName = prefs.getString(SettingsFragment.KEY_TARGET_LOG, "None")
-        val targetLogIndex = SettingsFragment.LOG_CURVES.indexOf(targetLogName)
-        lutSurfaceProcessor.setTargetLog(targetLogIndex)
+        if (isPreviewLutEnabled) {
+            // Sync Log setting if effect is active (or will be)
+            val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+            val targetLogName = prefs.getString(SettingsFragment.KEY_TARGET_LOG, "None")
+            val targetLogIndex = SettingsFragment.LOG_CURVES.indexOf(targetLogName)
+            lutSurfaceProcessor.setTargetLog(targetLogIndex)
+        }
 
         // ImageCapture
-        val imageCaptureBuilder = ImageCapture.Builder()
-            .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
-            .setResolutionSelector(resolutionSelector)
-            .setTargetRotation(rotation)
-            .apply {
-                if (isRawSupported) {
-                    setOutputFormat(ImageCapture.OUTPUT_FORMAT_RAW)
-                }
-            }
-
-        // Add Camera2 Interop Callback to capture metadata
-        androidx.camera.camera2.interop.Camera2Interop.Extender(imageCaptureBuilder)
-            .setSessionCaptureCallback(object : CameraCaptureSession.CaptureCallback() {
-                override fun onCaptureCompleted(
-                    session: CameraCaptureSession,
-                    request: CaptureRequest,
-                    result: TotalCaptureResult
-                ) {
-                    val timestamp = result.get(android.hardware.camera2.CaptureResult.SENSOR_TIMESTAMP)
-                    if (timestamp != null) {
-                        captureResults[timestamp] = result
+        imageCapture = if (isCaptureMode) {
+            val imageCaptureBuilder = ImageCapture.Builder()
+                .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
+                .setResolutionSelector(resolutionSelector)
+                .setTargetRotation(rotation)
+                .apply {
+                    if (isRawSupported) {
+                        setOutputFormat(ImageCapture.OUTPUT_FORMAT_RAW)
                     }
                 }
-            })
 
-        imageCapture = imageCaptureBuilder.build()
+            // Add Camera2 Interop Callback to capture metadata
+            androidx.camera.camera2.interop.Camera2Interop.Extender(imageCaptureBuilder)
+                .setSessionCaptureCallback(object : CameraCaptureSession.CaptureCallback() {
+                    override fun onCaptureCompleted(
+                        session: CameraCaptureSession,
+                        request: CaptureRequest,
+                        result: TotalCaptureResult
+                    ) {
+                        val timestamp = result.get(android.hardware.camera2.CaptureResult.SENSOR_TIMESTAMP)
+                        if (timestamp != null) {
+                            captureResults[timestamp] = result
+                        }
+                    }
+                })
+            imageCaptureBuilder.build()
+        } else {
+            null
+        }
 
         // ImageAnalysis
         imageAnalyzer = ImageAnalysis.Builder()
@@ -535,18 +558,23 @@ class CameraFragment : Fragment() {
             removeCameraStateObservers(camera!!.cameraInfo)
         }
 
-        val useCaseGroup = UseCaseGroup.Builder()
+        val useCaseGroupBuilder = UseCaseGroup.Builder()
             .addUseCase(preview!!)
-            .addUseCase(imageCapture!!)
             .addUseCase(imageAnalyzer!!)
-            .addEffect(effect)
-            .build()
+
+        if (imageCapture != null) {
+            useCaseGroupBuilder.addUseCase(imageCapture!!)
+        }
+
+        if (effect != null) {
+            useCaseGroupBuilder.addEffect(effect)
+        }
 
         try {
             // A variable number of use-cases can be passed here -
             // camera provides access to CameraControl & CameraInfo
             camera = cameraProvider.bindToLifecycle(
-                    this, cameraSelector, useCaseGroup)
+                    this, cameraSelector, useCaseGroupBuilder.build())
 
             // Attach the viewfinder's surface provider to preview use case
             preview?.setSurfaceProvider(fragmentCameraBinding.viewFinder.surfaceProvider)
@@ -625,9 +653,21 @@ class CameraFragment : Fragment() {
              val list = cameraUiContainerBinding?.lutList ?: return@setOnClickListener
              if (list.visibility == View.VISIBLE) {
                  list.visibility = View.GONE
+                 isPreviewLutEnabled = false
+
+                 // If we were using preview LUT, we need to unbind the effect now
+                 lifecycleScope.launch {
+                     bindCameraUseCases(isCaptureMode = false)
+                 }
              } else {
                  list.visibility = View.VISIBLE
                  lutAdapter.updateList()
+                 isPreviewLutEnabled = true
+
+                 // Enable effect
+                 lifecycleScope.launch {
+                     bindCameraUseCases(isCaptureMode = false)
+                 }
              }
         }
 
@@ -639,12 +679,11 @@ class CameraFragment : Fragment() {
                 return@setOnClickListener
             }
 
-            // Get a stable reference of the modifiable image capture use case
-            imageCapture?.let { imageCapture ->
-
-                if (imageCapture.outputFormat == ImageCapture.OUTPUT_FORMAT_RAW) {
+            // Define the capture logic as a function to be called after binding or immediately
+            fun performCapture(captureUseCase: ImageCapture) {
+                if (captureUseCase.outputFormat == ImageCapture.OUTPUT_FORMAT_RAW) {
                     // RAW Capture with Processing
-                    imageCapture.takePicture(cameraExecutor, object : ImageCapture.OnImageCapturedCallback() {
+                    captureUseCase.takePicture(cameraExecutor, object : ImageCapture.OnImageCapturedCallback() {
                         override fun onCaptureSuccess(image: ImageProxy) {
                             try {
                                 // 1. Immediate Copy (Free the pipeline)
@@ -654,6 +693,12 @@ class CameraFragment : Fragment() {
                                 // 2. Queue for Processing
                                 lifecycleScope.launch {
                                     processingChannel.send(holder)
+                                    // If we switched modes, switch back after capture data is secured
+                                    if (isPreviewLutEnabled) {
+                                        withContext(Dispatchers.Main) {
+                                            bindCameraUseCases(isCaptureMode = false)
+                                        }
+                                    }
                                 }
                             } catch (e: OutOfMemoryError) {
                                 Log.e(TAG, "OOM during capture copy", e)
@@ -681,31 +726,66 @@ class CameraFragment : Fragment() {
                             lifecycleScope.launch(Dispatchers.Main) {
                                 cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
                                 cameraUiContainerBinding?.cameraCaptureButton?.alpha = 1.0f
+                                // Switch back on error
+                                if (isPreviewLutEnabled) {
+                                    bindCameraUseCases(isCaptureMode = false)
+                                }
                             }
                         }
                     })
 
-                    // Optimistic UI update: disable button if we think we might be full,
-                    // though the semaphore check handles the hard limit.
-                    // We can also dim the button to indicate "busy" if usage is high.
+                    // Optimistic UI update
                     if (processingSemaphore.availablePermits == 0) {
                         cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = false
                         cameraUiContainerBinding?.cameraCaptureButton?.alpha = 0.5f
                     }
 
                 } else {
-                    processingSemaphore.release() // Not raw, release immediately (logic for JPG path)
+                    processingSemaphore.release() // Not raw
                     Toast.makeText(requireContext(), "RAW capture is not supported on this device.", Toast.LENGTH_SHORT).show()
                 }
 
-                // We can only change the foreground Drawable using API level 23+ API
+                // Flash Animation
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                    // Display flash animation to indicate that photo was captured
                     fragmentCameraBinding.root.postDelayed({
                         fragmentCameraBinding.root.foreground = ColorDrawable(Color.WHITE)
                         fragmentCameraBinding.root.postDelayed(
                                 { fragmentCameraBinding.root.foreground = null }, ANIMATION_FAST_MILLIS)
                     }, ANIMATION_SLOW_MILLIS)
+                }
+            }
+
+            // Mode Switch Logic
+            if (isPreviewLutEnabled && isRawSupported) {
+                // We are in Preview Mode (Effect enabled), need to switch to Capture Mode (RAW enabled, Effect disabled)
+                lifecycleScope.launch(Dispatchers.Main) {
+                    bindCameraUseCases(isCaptureMode = true)
+                    // Wait for binding to settle (heuristic) or check ImageCapture availability
+                    // Currently bindCameraUseCases is synchronous regarding binding call, but hardware takes time.
+                    // Ideally we listen to CameraState, but for simplicity we try immediately after binding returns.
+                    // Wait a frame or two
+                    delay(100)
+
+                    imageCapture?.let { performCapture(it) } ?: run {
+                        Log.e(TAG, "ImageCapture failed to bind")
+                        processingSemaphore.release()
+                        bindCameraUseCases(isCaptureMode = false) // Revert
+                    }
+                }
+            } else {
+                // Standard mode or RAW not supported (fallback logic in bindCameraUseCases would handle ImageCapture if not RAW)
+                // However, our bind logic only adds ImageCapture if isCaptureMode=true OR if we change logic to always add it if not RAW.
+                // Current logic: ImageCapture is ONLY added if isCaptureMode=true.
+                // So if isPreviewLutEnabled=false, we still need to be in "CaptureMode" state effectively (ImageCapture bound).
+                // Let's adjust: If isPreviewLutEnabled=false, we bind ImageCapture always.
+                // See bindCameraUseCases update below.
+
+                imageCapture?.let { performCapture(it) } ?: run {
+                     // If imageCapture is null, it means we are in a state where it wasn't bound.
+                     // If we are not in LUT preview mode, we should have it bound.
+                     // The only case is if isRawSupported is false, but then we don't support RAW anyway.
+                     processingSemaphore.release()
+                     Toast.makeText(requireContext(), "Camera not ready for capture.", Toast.LENGTH_SHORT).show()
                 }
             }
         }
@@ -724,7 +804,7 @@ class CameraFragment : Fragment() {
                     CameraSelector.LENS_FACING_FRONT
                 }
                 // Re-bind use cases to update selected camera
-                bindCameraUseCases()
+                bindCameraUseCases(isCaptureMode = false)
             }
         }
 

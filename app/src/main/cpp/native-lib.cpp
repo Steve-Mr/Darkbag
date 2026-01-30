@@ -806,7 +806,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_loadLutNative(
         jobject /* this */,
         jstring path) {
 
-    if (!path) return nullptr;
+    if (path == nullptr) return nullptr;
     const char* path_cstr = env->GetStringUTFChars(path, 0);
 
     LUT3D lut = load_lut(path_cstr);
