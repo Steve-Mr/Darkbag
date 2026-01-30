@@ -1181,7 +1181,7 @@ class CameraFragment : Fragment() {
                      // Format text
                      val ms = currentExposureTime / 1_000_000.0
                      if (ms < 1000) {
-                         binding.tvManualValue?.text = String.format("%.0f 1/%.0f", ms, 1000.0/ms) // Approx
+                         binding.tvManualValue?.text = String.format("1/%.0fs", 1000.0/ms)
                      } else {
                          binding.tvManualValue?.text = String.format("%.1fs", ms/1000.0)
                      }
@@ -1270,7 +1270,11 @@ class CameraFragment : Fragment() {
                         val ratio = Math.log(currentExposureTime.toDouble() / minVal) / Math.log(maxVal / minVal)
                         binding.seekbarManual?.progress = (ratio * max).toInt()
                          val ms = currentExposureTime / 1_000_000.0
-                         binding.tvManualValue?.text = String.format("%.1f ms", ms)
+                         if (ms < 1000) {
+                             binding.tvManualValue?.text = String.format("1/%.0fs", 1000.0/ms)
+                         } else {
+                             binding.tvManualValue?.text = String.format("%.1fs", ms/1000.0)
+                         }
                     } else {
                         binding.tvManualValue?.text = "Auto"
                         binding.seekbarManual?.progress = 0
