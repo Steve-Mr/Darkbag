@@ -393,7 +393,7 @@ class CameraFragment : Fragment() {
         super.onConfigurationChanged(newConfig)
 
         // Rebind the camera with the updated display metrics
-        bindCameraUseCases(isCaptureMode = false)
+        bindCameraUseCases(forceCaptureMode = false)
 
         // Enable or disable switching between cameras
         updateCameraSwitchButton()
@@ -402,6 +402,7 @@ class CameraFragment : Fragment() {
     // --- Mode Switch Logic ---
     private var isPreviewLutEnabled = false
     private var isRawSupported = false
+    private var useConcurrentBinding = true
 
     /** Initialize CameraX, and prepare to bind the camera use cases  */
     private suspend fun setUpCamera() {
@@ -426,15 +427,14 @@ class CameraFragment : Fragment() {
         }
 
         // Build and bind the camera use cases
-        bindCameraUseCases(isCaptureMode = false)
+        bindCameraUseCases(forceCaptureMode = false)
     }
 
     /**
      * Declare and bind preview, capture and analysis use cases
-     * @param isCaptureMode If true, bind ImageCapture (RAW) and standard Preview (No Effect).
-     *                      If false, bind Preview (With Effect) and ImageAnalysis.
+     * @param forceCaptureMode If true, forces binding ImageCapture (RAW) and disables Effect (Fallback mode).
      */
-    private fun bindCameraUseCases(isCaptureMode: Boolean) {
+    private fun bindCameraUseCases(forceCaptureMode: Boolean) {
 
         // Get screen metrics used to setup camera for full screen resolution
         val metrics = windowMetricsCalculator.computeCurrentWindowMetrics(requireActivity()).bounds
@@ -480,7 +480,10 @@ class CameraFragment : Fragment() {
             .build()
 
         // Configure LUT Processor and Effect
-        val effect = if (isPreviewLutEnabled && !isCaptureMode) {
+        // Effect is enabled if flag is set, unless we are forced into Capture Mode (which implies fallback active)
+        val shouldBindEffect = isPreviewLutEnabled && (useConcurrentBinding || !forceCaptureMode)
+
+        val effect = if (shouldBindEffect) {
              object : CameraEffect(
                 PREVIEW,
                 cameraExecutor,
@@ -493,8 +496,8 @@ class CameraFragment : Fragment() {
             null
         }
 
-        if (isPreviewLutEnabled) {
-            // Sync Log setting if effect is active (or will be)
+        if (shouldBindEffect) {
+            // Sync Log setting
             val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
             val targetLogName = prefs.getString(SettingsFragment.KEY_TARGET_LOG, "None")
             val targetLogIndex = SettingsFragment.LOG_CURVES.indexOf(targetLogName)
@@ -502,7 +505,10 @@ class CameraFragment : Fragment() {
         }
 
         // ImageCapture
-        imageCapture = if (isCaptureMode) {
+        // Bind if concurrent mode is on, OR if we are forced into Capture Mode
+        val shouldBindCapture = useConcurrentBinding || forceCaptureMode || !isRawSupported // Always bind if not RAW (JPG path)
+
+        imageCapture = if (shouldBindCapture) {
             val imageCaptureBuilder = ImageCapture.Builder()
                 .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
                 .setResolutionSelector(resolutionSelector)
@@ -581,6 +587,13 @@ class CameraFragment : Fragment() {
             observeCameraState(camera?.cameraInfo!!)
         } catch (exc: Exception) {
             Log.e(TAG, "Use case binding failed", exc)
+
+            // Fallback Logic
+            if (useConcurrentBinding && isRawSupported && isPreviewLutEnabled) {
+                Log.w(TAG, "Concurrent binding failed. Falling back to Mode Switch.")
+                useConcurrentBinding = false
+                bindCameraUseCases(forceCaptureMode) // Retry without concurrent
+            }
         }
     }
 
@@ -657,7 +670,7 @@ class CameraFragment : Fragment() {
 
                  // If we were using preview LUT, we need to unbind the effect now
                  lifecycleScope.launch {
-                     bindCameraUseCases(isCaptureMode = false)
+                     bindCameraUseCases(forceCaptureMode = false)
                  }
              } else {
                  list.visibility = View.VISIBLE
@@ -666,7 +679,7 @@ class CameraFragment : Fragment() {
 
                  // Enable effect
                  lifecycleScope.launch {
-                     bindCameraUseCases(isCaptureMode = false)
+                     bindCameraUseCases(forceCaptureMode = false)
                  }
              }
         }
@@ -693,10 +706,10 @@ class CameraFragment : Fragment() {
                                 // 2. Queue for Processing
                                 lifecycleScope.launch {
                                     processingChannel.send(holder)
-                                    // If we switched modes, switch back after capture data is secured
-                                    if (isPreviewLutEnabled) {
+                                    // If we switched modes (forceCaptureMode was true), switch back
+                                    if (isPreviewLutEnabled && !useConcurrentBinding) {
                                         withContext(Dispatchers.Main) {
-                                            bindCameraUseCases(isCaptureMode = false)
+                                            bindCameraUseCases(forceCaptureMode = false)
                                         }
                                     }
                                 }
@@ -726,9 +739,9 @@ class CameraFragment : Fragment() {
                             lifecycleScope.launch(Dispatchers.Main) {
                                 cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
                                 cameraUiContainerBinding?.cameraCaptureButton?.alpha = 1.0f
-                                // Switch back on error
-                                if (isPreviewLutEnabled) {
-                                    bindCameraUseCases(isCaptureMode = false)
+                                // Switch back on error if we were in fallback mode
+                                if (isPreviewLutEnabled && !useConcurrentBinding) {
+                                    bindCameraUseCases(forceCaptureMode = false)
                                 }
                             }
                         }
@@ -755,38 +768,24 @@ class CameraFragment : Fragment() {
                 }
             }
 
-            // Mode Switch Logic
-            if (isPreviewLutEnabled && isRawSupported) {
-                // We are in Preview Mode (Effect enabled), need to switch to Capture Mode (RAW enabled, Effect disabled)
+            // Capture Logic
+            if (imageCapture != null) {
+                // Concurrent Mode (ImageCapture is already bound)
+                performCapture(imageCapture!!)
+            } else if (isPreviewLutEnabled && isRawSupported) {
+                // Fallback: Mode Switch required
                 lifecycleScope.launch(Dispatchers.Main) {
-                    bindCameraUseCases(isCaptureMode = true)
-                    // Wait for binding to settle (heuristic) or check ImageCapture availability
-                    // Currently bindCameraUseCases is synchronous regarding binding call, but hardware takes time.
-                    // Ideally we listen to CameraState, but for simplicity we try immediately after binding returns.
-                    // Wait a frame or two
+                    bindCameraUseCases(forceCaptureMode = true)
                     delay(100)
-
                     imageCapture?.let { performCapture(it) } ?: run {
-                        Log.e(TAG, "ImageCapture failed to bind")
+                        Log.e(TAG, "ImageCapture failed to bind in fallback")
                         processingSemaphore.release()
-                        bindCameraUseCases(isCaptureMode = false) // Revert
+                        bindCameraUseCases(forceCaptureMode = false) // Revert
                     }
                 }
             } else {
-                // Standard mode or RAW not supported (fallback logic in bindCameraUseCases would handle ImageCapture if not RAW)
-                // However, our bind logic only adds ImageCapture if isCaptureMode=true OR if we change logic to always add it if not RAW.
-                // Current logic: ImageCapture is ONLY added if isCaptureMode=true.
-                // So if isPreviewLutEnabled=false, we still need to be in "CaptureMode" state effectively (ImageCapture bound).
-                // Let's adjust: If isPreviewLutEnabled=false, we bind ImageCapture always.
-                // See bindCameraUseCases update below.
-
-                imageCapture?.let { performCapture(it) } ?: run {
-                     // If imageCapture is null, it means we are in a state where it wasn't bound.
-                     // If we are not in LUT preview mode, we should have it bound.
-                     // The only case is if isRawSupported is false, but then we don't support RAW anyway.
-                     processingSemaphore.release()
-                     Toast.makeText(requireContext(), "Camera not ready for capture.", Toast.LENGTH_SHORT).show()
-                }
+                 processingSemaphore.release()
+                 Toast.makeText(requireContext(), "Camera not ready for capture.", Toast.LENGTH_SHORT).show()
             }
         }
 
@@ -804,7 +803,7 @@ class CameraFragment : Fragment() {
                     CameraSelector.LENS_FACING_FRONT
                 }
                 // Re-bind use cases to update selected camera
-                bindCameraUseCases(isCaptureMode = false)
+                bindCameraUseCases(forceCaptureMode = false)
             }
         }
 
@@ -977,7 +976,6 @@ class CameraFragment : Fragment() {
         )
     }
 
-    // ... processImageAsync ... (omitted since it wasn't modified in logic, but included in full file write)
     @androidx.annotation.OptIn(androidx.camera.camera2.interop.ExperimentalCamera2Interop::class)
     private suspend fun processImageAsync(context: Context, image: RawImageHolder) = kotlinx.coroutines.withContext(Dispatchers.IO) {
         val contentResolver = context.contentResolver
