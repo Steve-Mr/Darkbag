@@ -19,11 +19,27 @@ jobs:
     - name: Grant execute permission for gradlew
       run: chmod +x gradlew
 
+    - name: Decode Keystore
+      if: ${{ secrets.KEYSTORE != '' }}
+      env:
+        ENCODED_STRING: ${{ secrets.KEYSTORE }}
+      run: |
+        echo $ENCODED_STRING | base64 --decode > keystore.jks
+
+    - name: Decode Keystore Properties
+      if: ${{ secrets.KEY_PROPERTIES != '' }}
+      env:
+        ENCODED_STRING: ${{ secrets.KEY_PROPERTIES }}
+      run: |
+        echo $ENCODED_STRING | base64 --decode > keystore.properties
+
     - name: Build with Gradle
-      run: ./gradlew assembleDebug
+      run: ./gradlew assembleDebug assembleRelease
 
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
-        name: app-debug
-        path: app/build/outputs/apk/debug/app-debug.apk
+        name: app-release
+        path: |
+          app/build/outputs/apk/debug/*.apk
+          app/build/outputs/apk/release/*.apk
