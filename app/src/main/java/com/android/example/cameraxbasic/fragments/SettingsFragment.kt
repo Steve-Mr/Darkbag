@@ -146,6 +146,11 @@ class SettingsFragment : Fragment() {
         binding.cbSaveJpg.setOnCheckedChangeListener { _, isChecked ->
             prefs.edit().putBoolean(KEY_SAVE_JPG, isChecked).apply()
         }
+
+        binding.switchManualControls.isChecked = prefs.getBoolean(KEY_MANUAL_CONTROLS, false)
+        binding.switchManualControls.setOnCheckedChangeListener { _, isChecked ->
+            prefs.edit().putBoolean(KEY_MANUAL_CONTROLS, isChecked).apply()
+        }
     }
 
     override fun onDestroyView() {
@@ -160,6 +165,7 @@ class SettingsFragment : Fragment() {
         const val KEY_SAVE_TIFF = "save_tiff"
         const val KEY_SAVE_JPG = "save_jpg"
         const val KEY_USE_GPU = "use_gpu"
+        const val KEY_MANUAL_CONTROLS = "enable_manual_controls"
 
         val LOG_CURVES = listOf(
             "None",
