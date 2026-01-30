@@ -1113,6 +1113,7 @@ class CameraFragment : Fragment() {
             isManualFocus = true
             applyManualControls()
             updateManualPanel() // Update slider position
+            updateTabColors()
         }
 
         binding.btnFocusFar?.setOnClickListener {
@@ -1120,6 +1121,7 @@ class CameraFragment : Fragment() {
             isManualFocus = true
             applyManualControls()
             updateManualPanel()
+            updateTabColors()
         }
 
         // Tap to Focus on ViewFinder
@@ -1137,6 +1139,9 @@ class CameraFragment : Fragment() {
                 if (activeManualTab == "Focus") {
                      updateManualPanel()
                 }
+
+                // Update text color for Focus Tab (Reset to auto color)
+                updateTabColors()
 
                 camera?.cameraControl?.startFocusAndMetering(action)
                 view.performClick()
@@ -1197,6 +1202,7 @@ class CameraFragment : Fragment() {
             }
         }
         applyManualControls()
+        updateTabColors()
     }
 
     private fun resetCurrentManualParameter() {
@@ -1214,6 +1220,18 @@ class CameraFragment : Fragment() {
         }
         applyManualControls()
         updateManualPanel()
+        updateTabColors()
+    }
+
+    private fun updateTabColors() {
+        val binding = cameraUiContainerBinding ?: return
+        val activeColor = Color.YELLOW
+        val inactiveColor = Color.WHITE
+
+        binding.btnTabFocus?.setTextColor(if (isManualFocus) activeColor else inactiveColor)
+        binding.btnTabIso?.setTextColor(if (isManualExposure) activeColor else inactiveColor)
+        binding.btnTabShutter?.setTextColor(if (isManualExposure) activeColor else inactiveColor)
+        binding.btnTabEv?.setTextColor(if (!isManualExposure && currentEvIndex != 0) activeColor else inactiveColor)
     }
 
     private fun updateManualPanel() {
