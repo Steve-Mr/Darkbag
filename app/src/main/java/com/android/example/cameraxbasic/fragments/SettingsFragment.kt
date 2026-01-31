@@ -75,10 +75,7 @@ class SettingsFragment : Fragment() {
             lutPicker.launch(arrayOf("*/*"))
         }
 
-        binding.switchLivePreview.isChecked = prefs.getBoolean(KEY_ENABLE_LUT_PREVIEW, false)
-        binding.switchLivePreview.setOnCheckedChangeListener { _, isChecked ->
-            prefs.edit().putBoolean(KEY_ENABLE_LUT_PREVIEW, isChecked).apply()
-        }
+        binding.switchLivePreview.visibility = View.GONE
     }
 
     private fun updateLutList() {

@@ -263,6 +263,10 @@ class LutSurfaceProcessor : SurfaceProcessor {
             GLES30.glActiveTexture(GLES30.GL_TEXTURE1)
             GLES30.glBindTexture(GLES30.GL_TEXTURE_3D, lutTextureId)
             GLES30.glUniform1i(GLES30.glGetUniformLocation(program, "uLut"), 1)
+        } else {
+             // Bind default/empty to avoid warnings, though shader branch skips it
+             GLES30.glActiveTexture(GLES30.GL_TEXTURE1)
+             GLES30.glBindTexture(GLES30.GL_TEXTURE_3D, 0)
         }
         GLES30.glUniform1i(GLES30.glGetUniformLocation(program, "uLutSize"), currentLutSize)
         GLES30.glUniform1i(GLES30.glGetUniformLocation(program, "uLogType"), currentLogType)

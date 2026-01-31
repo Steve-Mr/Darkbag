@@ -701,15 +701,17 @@ class CameraFragment : Fragment() {
         // Initialize Manual Controls
         initManualControls()
 
-        // LUT Selector
-        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        if (prefs.getBoolean(SettingsFragment.KEY_ENABLE_LUT_PREVIEW, false)) {
-            cameraUiContainerBinding?.lutButton?.visibility = View.VISIBLE
-            cameraUiContainerBinding?.lutButton?.setOnClickListener {
-                showLutSelector()
-            }
-        } else {
-            cameraUiContainerBinding?.lutButton?.visibility = View.GONE
+        // LUT Selector (Always visible now)
+        cameraUiContainerBinding?.lutButton?.visibility = View.VISIBLE
+        cameraUiContainerBinding?.lutButton?.setOnClickListener {
+             // Toggle LUT List Visibility
+             val lutList = cameraUiContainerBinding?.lutList
+             if (lutList?.visibility == View.VISIBLE) {
+                 lutList.visibility = View.GONE
+             } else {
+                 lutList?.visibility = View.VISIBLE
+                 refreshLutList()
+             }
         }
 
         // Listener for button used to view the most recent photo
@@ -1458,46 +1460,68 @@ class CameraFragment : Fragment() {
         }
     }
 
-    private fun showLutSelector() {
-        val luts = lutManager.getLuts()
-        val names = mutableListOf("None")
-        names.addAll(luts.map { it.nameWithoutExtension })
+    private fun refreshLutList() {
+        val binding = cameraUiContainerBinding ?: return
+        val rv = binding.lutList ?: return
 
-        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        val currentName = prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, null)
-        var checkedItem = 0
-        if (currentName != null) {
-            val idx = luts.indexOfFirst { it.name == currentName }
-            if (idx != -1) checkedItem = idx + 1
+        // Ensure LayoutManager
+        if (rv.layoutManager == null) {
+            rv.layoutManager = androidx.recyclerview.widget.LinearLayoutManager(requireContext())
         }
 
-        android.app.AlertDialog.Builder(requireContext())
-            .setTitle("Select LUT")
-            .setSingleChoiceItems(names.toTypedArray(), checkedItem) { dialog, which ->
-                if (which == 0) {
+        val luts = lutManager.getLuts()
+        val adapter = LutPreviewAdapter(luts)
+        rv.adapter = adapter
+    }
+
+    private inner class LutPreviewAdapter(val luts: List<File>) : androidx.recyclerview.widget.RecyclerView.Adapter<LutPreviewAdapter.ViewHolder>() {
+
+        inner class ViewHolder(view: View) : androidx.recyclerview.widget.RecyclerView.ViewHolder(view) {
+            val text: android.widget.TextView = view.findViewById(android.R.id.text1)
+        }
+
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
+            val view = LayoutInflater.from(parent.context).inflate(android.R.layout.simple_list_item_1, parent, false)
+            view.setBackgroundColor(Color.TRANSPARENT)
+            return ViewHolder(view)
+        }
+
+        override fun onBindViewHolder(holder: ViewHolder, position: Int) {
+            val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+            val currentName = prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, null)
+
+            holder.text.setTextColor(Color.WHITE)
+            holder.text.textSize = 12f
+            holder.text.setPadding(10, 10, 10, 10)
+
+            if (position == 0) {
+                holder.text.text = "None"
+                if (currentName == null) holder.text.setTextColor(Color.YELLOW)
+                holder.itemView.setOnClickListener {
                     prefs.edit().remove(SettingsFragment.KEY_ACTIVE_LUT).apply()
-                } else {
-                    val selectedFile = luts[which - 1]
-                    prefs.edit().putString(SettingsFragment.KEY_ACTIVE_LUT, selectedFile.name).apply()
+                    updateLiveLut()
+                    notifyDataSetChanged()
+                    cameraUiContainerBinding?.lutList?.visibility = View.GONE
                 }
-                updateLiveLut()
-                dialog.dismiss()
+            } else {
+                val file = luts[position - 1]
+                holder.text.text = file.nameWithoutExtension
+                if (currentName == file.name) holder.text.setTextColor(Color.YELLOW)
+                holder.itemView.setOnClickListener {
+                    prefs.edit().putString(SettingsFragment.KEY_ACTIVE_LUT, file.name).apply()
+                    updateLiveLut()
+                    notifyDataSetChanged()
+                    cameraUiContainerBinding?.lutList?.visibility = View.GONE
+                }
             }
-            .setNegativeButton("Cancel", null)
-            .show()
+        }
+
+        override fun getItemCount() = luts.size + 1
     }
 
     private fun updateLiveLut() {
         val proc = lutProcessor ?: return
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        val enabled = prefs.getBoolean(SettingsFragment.KEY_ENABLE_LUT_PREVIEW, false)
-
-        if (!enabled) {
-            lifecycleScope.launch(Dispatchers.IO) {
-                proc.updateLut(null, 0, 0)
-            }
-            return
-        }
 
         val activeLutName = prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, null)
         val targetLogName = prefs.getString(SettingsFragment.KEY_TARGET_LOG, "None")
