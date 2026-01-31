@@ -134,6 +134,7 @@ class LutSurfaceProcessor : SurfaceProcessor {
              releaseGl()
              thread.quitSafely()
         }
+        executor.shutdown()
     }
 
     private fun initGl() {
@@ -238,9 +239,10 @@ class LutSurfaceProcessor : SurfaceProcessor {
 
     private fun createProgram() {
         val vs = """
-            attribute vec4 aPosition;
-            attribute vec4 aTexCoord;
-            varying vec2 vTexCoord;
+            #version 300 es
+            in vec4 aPosition;
+            in vec4 aTexCoord;
+            out vec2 vTexCoord;
             void main() {
                 gl_Position = aPosition;
                 vTexCoord = aTexCoord.xy;
@@ -248,14 +250,18 @@ class LutSurfaceProcessor : SurfaceProcessor {
         """.trimIndent()
 
         val fs = """
-            #extension GL_OES_EGL_image_external : require
+            #version 300 es
+            #extension GL_OES_EGL_image_external_essl3 : require
             precision mediump float;
             precision mediump sampler3D;
+
             uniform samplerExternalOES uTexture;
             uniform sampler3D uLut;
             uniform int uLutSize;
             uniform int uLogType;
-            varying vec2 vTexCoord;
+
+            in vec2 vTexCoord;
+            out vec4 outColor;
 
             float apply_log(float x, int type) {
                 if (x < 0.0) x = 0.0;
@@ -281,7 +287,8 @@ class LutSurfaceProcessor : SurfaceProcessor {
             }
 
             void main() {
-                vec4 color = texture2D(uTexture, vTexCoord);
+                // Use texture() for ES 3.0
+                vec4 color = texture(uTexture, vTexCoord);
 
                 // 1. Linearize (sRGB -> Linear)
                 vec3 linear = pow(color.rgb, vec3(2.2));
@@ -294,11 +301,11 @@ class LutSurfaceProcessor : SurfaceProcessor {
 
                 // 3. Apply LUT
                 if (uLutSize > 0) {
-                     gl_FragColor = vec4(texture(uLut, logColor).rgb, 1.0);
+                     outColor = vec4(texture(uLut, logColor).rgb, 1.0);
                 } else {
                      // If no LUT, pass through (maybe show Log?)
                      // Or just show original sRGB for usability
-                     gl_FragColor = color;
+                     outColor = color;
                 }
             }
         """.trimIndent()

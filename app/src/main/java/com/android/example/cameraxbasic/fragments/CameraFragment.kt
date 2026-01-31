@@ -73,6 +73,7 @@ import com.android.example.cameraxbasic.utils.ANIMATION_SLOW_MILLIS
 import com.android.example.cameraxbasic.utils.MediaStoreUtils
 import com.android.example.cameraxbasic.utils.LutManager
 import com.android.example.cameraxbasic.processor.LutSurfaceProcessor
+import com.android.example.cameraxbasic.processor.LutCameraEffect
 import com.android.example.cameraxbasic.utils.simulateClick
 import com.bumptech.glide.Glide
 import com.bumptech.glide.request.RequestOptions
@@ -219,16 +220,6 @@ class CameraFragment : Fragment() {
             }
         }
 
-        // LUT Selector
-        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        if (prefs.getBoolean(SettingsFragment.KEY_ENABLE_LUT_PREVIEW, false)) {
-            cameraUiContainerBinding?.lutButton?.visibility = View.VISIBLE
-            cameraUiContainerBinding?.lutButton?.setOnClickListener {
-                showLutSelector()
-            }
-        } else {
-            cameraUiContainerBinding?.lutButton?.visibility = View.GONE
-        }
     }
 
     /**
@@ -518,7 +509,7 @@ class CameraFragment : Fragment() {
             if (lutProcessor == null) {
                 lutProcessor = LutSurfaceProcessor()
             }
-            val effect = CameraEffect(
+            val effect = LutCameraEffect(
                 CameraEffect.PREVIEW,
                 cameraExecutor,
                 lutProcessor!!
@@ -685,6 +676,17 @@ class CameraFragment : Fragment() {
 
         // Initialize Manual Controls
         initManualControls()
+
+        // LUT Selector
+        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        if (prefs.getBoolean(SettingsFragment.KEY_ENABLE_LUT_PREVIEW, false)) {
+            cameraUiContainerBinding?.lutButton?.visibility = View.VISIBLE
+            cameraUiContainerBinding?.lutButton?.setOnClickListener {
+                showLutSelector()
+            }
+        } else {
+            cameraUiContainerBinding?.lutButton?.visibility = View.GONE
+        }
 
         // Listener for button used to view the most recent photo
         cameraUiContainerBinding?.photoViewButton?.setOnClickListener {
