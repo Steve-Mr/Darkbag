@@ -35,4 +35,14 @@
     <string name="lut_delete_message">Are you sure you want to delete %1$s?</string>
     <string name="btn_rename">Rename</string>
     <string name="btn_delete">Del</string>
+    <string name="my_lut">My LUT</string>
+    <string name="del">Del</string>
+    <string name="jpeg">JPEG</string>
+    <string name="tiff_16_bit">TIFF (16-bit)</string>
+    <string name="output_format">Output Format</string>
+    <string name="import_luts">Import LUTs</string>
+    <string name="target_log_curve">Target Log Curve</string>
+    <string name="_3d_lut_management">3D LUT Management</string>
+    <string name="processing_settings">Processing Settings</string>
+    <string name="back">Back</string>
 </resources>

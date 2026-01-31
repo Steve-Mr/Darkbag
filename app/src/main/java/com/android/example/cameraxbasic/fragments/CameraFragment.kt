@@ -46,7 +46,6 @@ import androidx.camera.camera2.interop.CaptureRequestOptions
 import androidx.camera.camera2.interop.Camera2CameraControl
 import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.camera2.interop.Camera2CameraInfo
-import androidx.camera.camera2.interop.Camera2Interop
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.core.UseCaseGroup
 import android.hardware.camera2.params.RggbChannelVector
@@ -81,13 +80,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.isActive
-import kotlinx.coroutines.delay
 import java.nio.ByteBuffer
 import java.text.SimpleDateFormat
 import java.util.*
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
-import kotlin.math.abs
 import kotlin.math.min
 
 /** Helper type alias used for analysis use case callbacks */
@@ -487,15 +484,6 @@ class CameraFragment : Fragment() {
             // during the lifecycle of this use case
             .setTargetRotation(rotation)
             .build()
-            // The analyzer can then be assigned to the instance
-                .also {
-                    it.setAnalyzer(cameraExecutor, LuminosityAnalyzer { luma ->
-                        // Values returned from our analyzer are passed to the attached listener
-                        // We log image analysis results here - you should do something useful
-                        // instead!
-                        Log.d(TAG, "Average luminosity: $luma")
-                    })
-                }
 
         // Must unbind the use-cases before rebinding them
         cameraProvider.unbindAll()
