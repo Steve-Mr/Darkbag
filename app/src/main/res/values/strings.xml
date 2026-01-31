@@ -30,4 +30,7 @@
     <string name="delete_dialog">Delete current photo?</string>
     <string name="delete_title">Confirm</string>
     <string name="enable_manual_controls">Enable Manual Controls</string>
+    <string name="default_focal_length_title">Default Focal Length</string>
+    <string name="zoom_1x">1x</string>
+    <string name="zoom_2x">2x</string>
 </resources>

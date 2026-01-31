@@ -21,4 +21,6 @@
     <color name="icActive">#FFFFFFFF</color>
     <color name="icFocused">#DDFFFFFF</color>
     <color name="icPressed">#AAFFFFFF</color>
+    <color name="zoom_button_active">#FFFFFF00</color>
+    <color name="zoom_button_inactive">#FFFFFFFF</color>
 </resources>

@@ -134,6 +134,12 @@ class CameraFragment : Fragment() {
     private var currentExposureTime = 10_000_000L // 10ms
     private var currentEvIndex = 0
 
+    // Zoom State
+    private var defaultFocalLength = 24
+    private var currentFocalLength = -1
+    private var is2xMode = false
+    private var zoomJob: kotlinx.coroutines.Job? = null
+
     /** Orientation listener to track device rotation independently of UI rotation */
     private val orientationEventListener by lazy {
         object : OrientationEventListener(requireContext()) {
@@ -174,7 +180,8 @@ class CameraFragment : Fragment() {
         val width: Int,
         val height: Int,
         val timestamp: Long,
-        val rotationDegrees: Int
+        val rotationDegrees: Int,
+        val zoomRatio: Float
     ) {
         override fun equals(other: Any?): Boolean {
             if (this === other) return true
@@ -187,6 +194,7 @@ class CameraFragment : Fragment() {
             if (height != other.height) return false
             if (timestamp != other.timestamp) return false
             if (rotationDegrees != other.rotationDegrees) return false
+            if (zoomRatio != other.zoomRatio) return false
 
             return true
         }
@@ -197,6 +205,7 @@ class CameraFragment : Fragment() {
             result = 31 * result + height
             result = 31 * result + timestamp.hashCode()
             result = 31 * result + rotationDegrees
+            result = 31 * result + zoomRatio.hashCode()
             return result
         }
     }
@@ -308,6 +317,14 @@ class CameraFragment : Fragment() {
 
         // Initialize MediaStoreUtils for fetching this app's images
         mediaStoreUtils = MediaStoreUtils(requireContext())
+
+        // Initialize Zoom Default
+        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val defaultStr = prefs.getString(SettingsFragment.KEY_DEFAULT_FOCAL_LENGTH, "24") ?: "24"
+        defaultFocalLength = defaultStr.toIntOrNull() ?: 24
+        if (currentFocalLength == -1) {
+            currentFocalLength = defaultFocalLength
+        }
 
         // Start processing consumer
         viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
@@ -471,7 +488,9 @@ class CameraFragment : Fragment() {
                         // Values returned from our analyzer are passed to the attached listener
                         // We log image analysis results here - you should do something useful
                         // instead!
-                        Log.d(TAG, "Average luminosity: $luma")
+                        // Values returned from our analyzer are passed to the attached listener
+                        // We log image analysis results here - you should do something useful
+                        // instead!
                     })
                 }
 
@@ -492,6 +511,10 @@ class CameraFragment : Fragment() {
             // Attach the viewfinder's surface provider to preview use case
             preview?.setSurfaceProvider(fragmentCameraBinding.viewFinder.surfaceProvider)
             observeCameraState(camera?.cameraInfo!!)
+
+            // Restore Zoom
+            updateZoom(false)
+
         } catch (exc: Exception) {
             Log.e(TAG, "Use case binding failed", exc)
         }
@@ -556,7 +579,13 @@ class CameraFragment : Fragment() {
                         override fun onCaptureSuccess(image: ImageProxy) {
                             try {
                                 // 1. Immediate Copy (Free the pipeline)
-                                val holder = copyImageToHolder(image)
+                                // Capture current zoom state safely on main thread (or effectively so, since this callback is usually on main/camera thread)
+                                // But to be safe, we access the volatile/state vars.
+                                // Actually, onCaptureSuccess is called on cameraExecutor. Accessing is2xMode/currentFocalLength might be slightly racy if main thread changes it.
+                                // However, user is clicking capture, so state shouldn't change *during* capture ideally.
+                                val currentZoom = if (is2xMode) 2.0f else (currentFocalLength / 24.0f)
+
+                                val holder = copyImageToHolder(image, currentZoom)
                                 image.close() // Close ASAP
 
                                 // 2. Queue for Processing
@@ -638,6 +667,9 @@ class CameraFragment : Fragment() {
 
         // Initialize Manual Controls
         initManualControls()
+
+        // Initialize Zoom Controls
+        initZoomControls()
 
         // Listener for button used to view the most recent photo
         cameraUiContainerBinding?.photoViewButton?.setOnClickListener {
@@ -759,7 +791,7 @@ class CameraFragment : Fragment() {
         }
     }
 
-    private fun copyImageToHolder(image: ImageProxy): RawImageHolder {
+    private fun copyImageToHolder(image: ImageProxy, zoomRatio: Float): RawImageHolder {
         val plane = image.planes[0]
         val buffer = plane.buffer
         val width = image.width
@@ -801,7 +833,8 @@ class CameraFragment : Fragment() {
             width = width,
             height = height,
             timestamp = image.imageInfo.timestamp,
-            rotationDegrees = image.imageInfo.rotationDegrees
+            rotationDegrees = image.imageInfo.rotationDegrees,
+            zoomRatio = zoomRatio
         )
     }
 
@@ -809,6 +842,8 @@ class CameraFragment : Fragment() {
     private suspend fun processImageAsync(context: Context, image: RawImageHolder) = kotlinx.coroutines.withContext(Dispatchers.IO) {
         val contentResolver = context.contentResolver
         val dngName = SimpleDateFormat(FILENAME, Locale.US).format(System.currentTimeMillis())
+
+        Log.d(TAG, "Processing Image: Timestamp=${image.timestamp}, ZoomRatio=${image.zoomRatio}, Rotation=${image.rotationDegrees}")
 
         val cam = camera ?: return@withContext
         val camera2Info = Camera2CameraInfo.from(cam.cameraInfo)
@@ -937,6 +972,51 @@ class CameraFragment : Fragment() {
                  processedBitmap = BitmapFactory.decodeFile(bmpPath)
             }
 
+            // Check for digital zoom cropping
+            if (processedBitmap != null) {
+                // Get SCALER_CROP_REGION to determine if we need to crop the output
+                // Note: captureResult is TotalCaptureResult
+                val cropRegion = captureResult.get(android.hardware.camera2.CaptureResult.SCALER_CROP_REGION)
+                val activeArray = chars.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
+
+                // Determine zoom factor: Prioritize UI state passed in Holder, fallback to Metadata
+                // Why? Because metadata SCALER_CROP_REGION sometimes returns full array even if zoom is active on some devices/impls
+                var zoomFactor = 1.0f
+                var source = "None"
+
+                if (image.zoomRatio > 1.05f) {
+                    zoomFactor = image.zoomRatio
+                    source = "UI_State"
+                } else if (cropRegion != null && activeArray != null) {
+                    val metaZoom = activeArray.width().toFloat() / cropRegion.width().toFloat()
+                    if (metaZoom > 1.05f) {
+                        zoomFactor = metaZoom
+                        source = "Metadata"
+                    }
+                }
+
+                Log.d(TAG, "Digital Zoom Check: Source=$source, Factor=$zoomFactor, HolderRatio=${image.zoomRatio}, MetadataRegion=$cropRegion")
+
+                if (zoomFactor > 1.05f) {
+                     val newWidth = (processedBitmap.width / zoomFactor).toInt()
+                     val newHeight = (processedBitmap.height / zoomFactor).toInt()
+                     val x = (processedBitmap.width - newWidth) / 2
+                     val y = (processedBitmap.height - newHeight) / 2
+
+                     // Ensure bounds are safe
+                     val safeX = max(0, x)
+                     val safeY = max(0, y)
+                     val safeWidth = min(newWidth, processedBitmap.width - safeX)
+                     val safeHeight = min(newHeight, processedBitmap.height - safeY)
+
+                     val croppedBitmap = android.graphics.Bitmap.createBitmap(processedBitmap, safeX, safeY, safeWidth, safeHeight)
+
+                     processedBitmap = croppedBitmap
+
+                     Log.d(TAG, "Applied Digital Zoom Crop: NewSize=${safeWidth}x${safeHeight}")
+                }
+            }
+
             // 4. Save DNG (with Thumbnail)
             val dngCreatorReal = android.hardware.camera2.DngCreator(chars, captureResult)
             try {
@@ -985,11 +1065,43 @@ class CameraFragment : Fragment() {
                             }
                             Log.d(TAG, "Saved DNG to $dngUri")
 
+                            // Inject DNG Crop Metadata if Zoomed
+                            // Must be done BEFORE setting IS_PENDING = 0 to avoid file locks
+                            if (image.zoomRatio > 1.05f) {
+                                try {
+                                    // ExifInterface needs a FileDescriptor or File.
+                                    // Since we wrote to a Stream, we need to open it again as FD.
+                                    contentResolver.openFileDescriptor(dngUri, "rw")?.use { pfd ->
+                                        val exif = androidx.exifinterface.media.ExifInterface(pfd.fileDescriptor)
+
+                                        // Calculate Crop
+                                        val fullWidth = image.width
+                                        val fullHeight = image.height
+                                        val cropWidth = (fullWidth / image.zoomRatio).toInt()
+                                        val cropHeight = (fullHeight / image.zoomRatio).toInt()
+
+                                        // Ensure even coordinates for Bayer pattern alignment
+                                        val x = ((fullWidth - cropWidth) / 2) / 2 * 2
+                                        val y = ((fullHeight - cropHeight) / 2) / 2 * 2
+
+                                        // Set Tags (50719 DefaultCropSize, 50720 DefaultCropOrigin)
+                                        // These are rational/short pairs usually, usually stored as "W H" or "N D" strings in ExifInterface
+                                        exif.setAttribute("DefaultCropSize", "$cropWidth $cropHeight")
+                                        exif.setAttribute("DefaultCropOrigin", "$x $y")
+                                        exif.saveAttributes()
+                                        Log.d(TAG, "Injected DNG Crop: Size=$cropWidth $cropHeight, Origin=$x $y")
+                                    }
+                                } catch (e: Exception) {
+                                    Log.e(TAG, "Failed to inject DNG crop metadata", e)
+                                }
+                            }
+
                             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                                 dngValues.clear()
                                 dngValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
                                 contentResolver.update(dngUri, dngValues, null, null)
                             }
+
                         } else {
                             Log.e(TAG, "Failed to open OutputStream for $dngUri")
                             contentResolver.delete(dngUri, null, null)
@@ -1332,6 +1444,90 @@ class CameraFragment : Fragment() {
                     binding.seekbarManual?.progress = (ratio * max).toInt()
                     binding.tvManualValue?.text = "$currentEvIndex"
                 }
+            }
+        }
+    }
+
+    private fun initZoomControls() {
+        val binding = cameraUiContainerBinding ?: return
+
+        binding.btnZoomToggle?.setOnClickListener {
+            if (is2xMode) {
+                is2xMode = false
+                currentFocalLength = defaultFocalLength
+            } else {
+                currentFocalLength = when (currentFocalLength) {
+                    24 -> 28
+                    28 -> 35
+                    35 -> 24
+                    else -> 24
+                }
+            }
+            updateZoom(true)
+        }
+
+        binding.btnZoom2x?.setOnClickListener {
+            if (!is2xMode) {
+                is2xMode = true
+                updateZoom(true)
+            }
+        }
+
+        // Set initial UI state
+        updateZoomUI(false)
+    }
+
+    private fun updateZoom(animate: Boolean) {
+        val targetRatio = if (is2xMode) {
+            2.0f
+        } else {
+            currentFocalLength / 24.0f
+        }
+
+        val maxZoom = camera?.cameraInfo?.zoomState?.value?.maxZoomRatio ?: 8.0f // Default high enough if null
+        val ratio = targetRatio.coerceAtMost(maxZoom)
+
+        camera?.cameraControl?.setZoomRatio(ratio)
+        updateZoomUI(animate)
+    }
+
+    private fun updateZoomUI(animate: Boolean) {
+        val binding = cameraUiContainerBinding ?: return
+        val activeColor = androidx.core.content.ContextCompat.getColor(requireContext(), R.color.zoom_button_active)
+        val inactiveColor = androidx.core.content.ContextCompat.getColor(requireContext(), R.color.zoom_button_inactive)
+
+        if (is2xMode) {
+            binding.btnZoom2x?.setTextColor(activeColor)
+            binding.btnZoomToggle?.setTextColor(inactiveColor)
+
+            // If we just switched to 2x, we might want to ensure 1x label is generic or last state?
+            // Requirement: "user at 2x clicks 1x returns to default".
+            // Label can just remain "1x" or whatever it was?
+            // Let's reset it to "1x" for clarity as "Standard".
+            binding.btnZoomToggle?.text = "1x"
+            zoomJob?.cancel()
+        } else {
+            binding.btnZoom2x?.setTextColor(inactiveColor)
+            binding.btnZoomToggle?.setTextColor(activeColor)
+
+            zoomJob?.cancel()
+            val labelX = when (currentFocalLength) {
+                24 -> "1x"
+                28 -> "1.2x"
+                35 -> "1.5x"
+                else -> "1x"
+            }
+
+            if (animate) {
+                 zoomJob = lifecycleScope.launch(Dispatchers.Main) {
+                     val labelMm = "${currentFocalLength}mm"
+
+                     binding.btnZoomToggle?.text = labelMm
+                     delay(500)
+                     binding.btnZoomToggle?.text = labelX
+                 }
+            } else {
+                 binding.btnZoomToggle?.text = labelX
             }
         }
     }
