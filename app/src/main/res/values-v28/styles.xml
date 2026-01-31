@@ -18,6 +18,11 @@
 
     <!-- Base application theme. -->
     <style name="AppTheme" parent="Theme.Material3.DayNight.NoActionBar">
+        <!-- Explicitly set color attributes to satisfy ThemeEnforcement -->
+        <item name="colorPrimary">@color/colorPrimary</item>
+        <item name="colorPrimaryDark">@color/colorPrimaryDark</item>
+        <item name="colorAccent">@color/colorAccent</item>
+
         <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
         <!-- Edge-to-edge is handled in MainActivity.kt -->
         <item name="android:statusBarColor">@android:color/transparent</item>
