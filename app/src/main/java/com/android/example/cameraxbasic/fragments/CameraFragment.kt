@@ -580,6 +580,9 @@ class CameraFragment : Fragment() {
             // Restore Zoom
             updateZoom(false)
 
+            // Apply Settings
+            applyCameraControls()
+
         } catch (exc: Exception) {
             Log.e(TAG, "Use case binding failed", exc)
         }
@@ -1299,7 +1302,7 @@ class CameraFragment : Fragment() {
 
                 // If in manual focus mode, tapping switch to AF
                 isManualFocus = false
-                applyManualControls() // Apply change (clear manual focus override)
+                applyCameraControls() // Apply change (clear manual focus override)
 
                 // Also reset Focus UI if active
                 if (activeManualTab == "Focus") {
@@ -1388,7 +1391,7 @@ class CameraFragment : Fragment() {
         binding.btnFocusNear?.setOnClickListener {
             currentFocusDistance = minFocusDistance
             isManualFocus = true
-            applyManualControls()
+            applyCameraControls()
             updateManualPanel() // Update slider position
             updateTabColors()
         }
@@ -1396,7 +1399,7 @@ class CameraFragment : Fragment() {
         binding.btnFocusFar?.setOnClickListener {
             currentFocusDistance = 0.0f
             isManualFocus = true
-            applyManualControls()
+            applyCameraControls()
             updateManualPanel()
             updateTabColors()
         }
@@ -1454,7 +1457,7 @@ class CameraFragment : Fragment() {
                  }
             }
         }
-        applyManualControls()
+        applyCameraControls()
         updateTabColors()
     }
 
@@ -1471,7 +1474,7 @@ class CameraFragment : Fragment() {
                 currentEvIndex = 0
             }
         }
-        applyManualControls()
+        applyCameraControls()
         updateManualPanel()
         updateTabColors()
     }
@@ -1629,10 +1632,20 @@ class CameraFragment : Fragment() {
         }
     }
 
-    private fun applyManualControls() {
+    private fun applyCameraControls() {
         val cameraControl = camera?.cameraControl ?: return
         val camera2Control = Camera2CameraControl.from(cameraControl)
         val builder = CaptureRequestOptions.Builder()
+
+        // Global Settings: Anti-Banding
+        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val antiBandingMode = when (prefs.getString(SettingsFragment.KEY_ANTIBANDING, "Auto")) {
+            "50Hz" -> CaptureRequest.CONTROL_AE_ANTIBANDING_MODE_50HZ
+            "60Hz" -> CaptureRequest.CONTROL_AE_ANTIBANDING_MODE_60HZ
+            "Off" -> CaptureRequest.CONTROL_AE_ANTIBANDING_MODE_OFF
+            else -> CaptureRequest.CONTROL_AE_ANTIBANDING_MODE_AUTO
+        }
+        builder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_ANTIBANDING_MODE, antiBandingMode)
 
         // Focus
         if (isManualFocus) {

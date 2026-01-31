@@ -58,6 +58,7 @@ class SettingsFragment : Fragment() {
 
         setupSpinner()
         setupFocalLengthSpinner()
+        setupAntibandingSpinner()
         setupLutList()
         setupCheckboxes()
 
@@ -119,6 +120,26 @@ class SettingsFragment : Fragment() {
         binding.spinnerDefaultFocalLength.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
                 prefs.edit().putString(KEY_DEFAULT_FOCAL_LENGTH, FOCAL_LENGTHS[position]).apply()
+            }
+
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+    }
+
+    private fun setupAntibandingSpinner() {
+        val adapter = ArrayAdapter(requireContext(), android.R.layout.simple_spinner_item, ANTIBANDING_MODES)
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        binding.spinnerAntibanding.adapter = adapter
+
+        val savedMode = prefs.getString(KEY_ANTIBANDING, "Auto")
+        val position = ANTIBANDING_MODES.indexOf(savedMode)
+        if (position >= 0) {
+            binding.spinnerAntibanding.setSelection(position)
+        }
+
+        binding.spinnerAntibanding.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                prefs.edit().putString(KEY_ANTIBANDING, ANTIBANDING_MODES[position]).apply()
             }
 
             override fun onNothingSelected(parent: AdapterView<*>?) {}
@@ -262,8 +283,10 @@ class SettingsFragment : Fragment() {
         const val KEY_MANUAL_CONTROLS = "enable_manual_controls"
         const val KEY_ENABLE_LUT_PREVIEW = "enable_lut_preview"
         const val KEY_DEFAULT_FOCAL_LENGTH = "default_focal_length"
+        const val KEY_ANTIBANDING = "antibanding_mode"
 
         val FOCAL_LENGTHS = listOf("24", "28", "35")
+        val ANTIBANDING_MODES = listOf("Auto", "50Hz", "60Hz", "Off")
 
         val LOG_CURVES = listOf(
             "None",

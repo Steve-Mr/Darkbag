@@ -36,6 +36,7 @@
     <string name="btn_rename">Rename</string>
     <string name="btn_delete">Del</string>
     <string name="default_focal_length_title">Default Focal Length</string>
+    <string name="antibanding_title">Anti-Banding</string>
     <string name="zoom_1x">1x</string>
     <string name="zoom_2x">2x</string>
 </resources>
