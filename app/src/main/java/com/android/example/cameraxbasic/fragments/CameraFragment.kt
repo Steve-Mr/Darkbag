@@ -1466,8 +1466,8 @@ class CameraFragment : Fragment() {
 
     private fun updateZoomUI(animate: Boolean) {
         val binding = cameraUiContainerBinding ?: return
-        val activeColor = Color.YELLOW
-        val inactiveColor = Color.WHITE
+        val activeColor = androidx.core.content.ContextCompat.getColor(requireContext(), R.color.zoom_button_active)
+        val inactiveColor = androidx.core.content.ContextCompat.getColor(requireContext(), R.color.zoom_button_inactive)
 
         if (is2xMode) {
             binding.btnZoom2x?.setTextColor(activeColor)
@@ -1484,27 +1484,22 @@ class CameraFragment : Fragment() {
             binding.btnZoomToggle?.setTextColor(activeColor)
 
             zoomJob?.cancel()
+            val labelX = when (currentFocalLength) {
+                24 -> "1x"
+                28 -> "1.2x"
+                35 -> "1.5x"
+                else -> "1x"
+            }
+
             if (animate) {
                  zoomJob = lifecycleScope.launch(Dispatchers.Main) {
                      val labelMm = "${currentFocalLength}mm"
-                     val labelX = when (currentFocalLength) {
-                         24 -> "1x"
-                         28 -> "1.2x"
-                         35 -> "1.5x"
-                         else -> "1x"
-                     }
 
                      binding.btnZoomToggle?.text = labelMm
                      delay(500)
                      binding.btnZoomToggle?.text = labelX
                  }
             } else {
-                 val labelX = when (currentFocalLength) {
-                         24 -> "1x"
-                         28 -> "1.2x"
-                         35 -> "1.5x"
-                         else -> "1x"
-                     }
                  binding.btnZoomToggle?.text = labelX
             }
         }
