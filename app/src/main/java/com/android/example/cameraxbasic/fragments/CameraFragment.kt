@@ -435,7 +435,11 @@ class CameraFragment : Fragment() {
             .build()
 
         // Configure AutoFitTextureView
-        fragmentCameraBinding.viewFinder.setAspectRatio(4, 3)
+        if (metrics.width() < metrics.height()) {
+            fragmentCameraBinding.viewFinder.setAspectRatio(3, 4)
+        } else {
+            fragmentCameraBinding.viewFinder.setAspectRatio(4, 3)
+        }
 
         // Preview
         preview = Preview.Builder()
