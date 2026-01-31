@@ -1,6 +1,6 @@
 package com.android.example.cameraxbasic.fragments
 
-import android.app.AlertDialog
+import androidx.appcompat.app.AlertDialog
 import android.content.Context
 import android.content.SharedPreferences
 import android.net.Uri
@@ -154,7 +154,11 @@ class SettingsFragment : Fragment() {
 
             val isActive = file.name == activeLutName
             if (isActive) {
-                holder.tvName.setTextColor(ContextCompat.getColor(requireContext(), android.R.color.holo_blue_light))
+                // Use a theme color or a standard material color
+                val typedValue = android.util.TypedValue()
+                val theme = holder.itemView.context.theme
+                theme.resolveAttribute(android.R.attr.colorPrimary, typedValue, true)
+                holder.tvName.setTextColor(typedValue.data)
             } else {
                 holder.tvName.setTextColor(ContextCompat.getColor(requireContext(), android.R.color.white))
             }
@@ -190,10 +194,10 @@ class SettingsFragment : Fragment() {
     private fun showRenameDialog(file: File) {
         val input = EditText(context)
         input.setText(file.nameWithoutExtension)
-        AlertDialog.Builder(context)
-            .setTitle("Rename LUT")
+        AlertDialog.Builder(requireContext())
+            .setTitle(R.string.lut_rename_title)
             .setView(input)
-            .setPositiveButton("OK") { _, _ ->
+            .setPositiveButton(android.R.string.ok) { _, _ ->
                 val newName = input.text.toString()
                 if (lutManager.renameLut(file, newName)) {
                     // If active, update pref
@@ -205,15 +209,15 @@ class SettingsFragment : Fragment() {
                     Toast.makeText(context, "Invalid name or file exists", Toast.LENGTH_SHORT).show()
                 }
             }
-            .setNegativeButton("Cancel", null)
+            .setNegativeButton(android.R.string.cancel, null)
             .show()
     }
 
     private fun showDeleteDialog(file: File) {
-        AlertDialog.Builder(context)
-            .setTitle("Delete LUT")
-            .setMessage("Are you sure you want to delete ${file.nameWithoutExtension}?")
-            .setPositiveButton("Delete") { _, _ ->
+        AlertDialog.Builder(requireContext())
+            .setTitle(R.string.lut_delete_title)
+            .setMessage(getString(R.string.lut_delete_message, file.nameWithoutExtension))
+            .setPositiveButton(R.string.btn_delete) { _, _ ->
                 if (lutManager.deleteLut(file)) {
                     if (prefs.getString(KEY_ACTIVE_LUT, null) == file.name) {
                         prefs.edit().remove(KEY_ACTIVE_LUT).apply()
@@ -221,7 +225,7 @@ class SettingsFragment : Fragment() {
                     updateLutList()
                 }
             }
-            .setNegativeButton("Cancel", null)
+            .setNegativeButton(android.R.string.cancel, null)
             .show()
     }
 

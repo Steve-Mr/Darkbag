@@ -30,4 +30,9 @@
     <string name="delete_dialog">Delete current photo?</string>
     <string name="delete_title">Confirm</string>
     <string name="enable_manual_controls">Enable Manual Controls</string>
+    <string name="lut_rename_title">Rename LUT</string>
+    <string name="lut_delete_title">Delete LUT</string>
+    <string name="lut_delete_message">Are you sure you want to delete %1$s?</string>
+    <string name="btn_rename">Rename</string>
+    <string name="btn_delete">Del</string>
 </resources>

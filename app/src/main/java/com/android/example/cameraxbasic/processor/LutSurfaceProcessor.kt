@@ -93,6 +93,12 @@ class LutSurfaceProcessor : SurfaceProcessor {
                 surface.release()
                 inputSurfaceTexture?.release()
                 inputSurfaceTexture = null
+                handler.post {
+                    if (inputTextureId != 0) {
+                        GLES30.glDeleteTextures(1, intArrayOf(inputTextureId), 0)
+                        inputTextureId = 0
+                    }
+                }
             }
         }
     }
@@ -403,11 +409,31 @@ class LutSurfaceProcessor : SurfaceProcessor {
     }
 
     private fun releaseGl() {
+        if (program != 0) {
+            GLES30.glDeleteProgram(program)
+            program = 0
+        }
+        val textures = IntArray(3)
+        var count = 0
+        if (inputTextureId != 0) textures[count++] = inputTextureId
+        if (lutTextureId != 0) textures[count++] = lutTextureId
+        if (dummyLutTextureId != 0) textures[count++] = dummyLutTextureId
+
+        if (count > 0) {
+            GLES30.glDeleteTextures(count, textures, 0)
+        }
+        inputTextureId = 0
+        lutTextureId = 0
+        dummyLutTextureId = 0
+
         if (eglDisplay != EGL14.EGL_NO_DISPLAY) {
              EGL14.eglMakeCurrent(eglDisplay, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT)
              if (eglSurface != EGL14.EGL_NO_SURFACE) EGL14.eglDestroySurface(eglDisplay, eglSurface)
              if (eglContext != EGL14.EGL_NO_CONTEXT) EGL14.eglDestroyContext(eglDisplay, eglContext)
              EGL14.eglTerminate(eglDisplay)
         }
+        eglDisplay = EGL14.EGL_NO_DISPLAY
+        eglContext = EGL14.EGL_NO_CONTEXT
+        eglSurface = EGL14.EGL_NO_SURFACE
     }
 }

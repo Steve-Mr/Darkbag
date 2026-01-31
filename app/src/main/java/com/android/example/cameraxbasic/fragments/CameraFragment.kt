@@ -80,6 +80,7 @@ import com.bumptech.glide.request.RequestOptions
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.delay
 import java.nio.ByteBuffer
 import java.text.SimpleDateFormat
@@ -121,6 +122,7 @@ class CameraFragment : Fragment() {
 
     private var lutProcessor: LutSurfaceProcessor? = null
     private lateinit var lutManager: LutManager
+    private var activeLutJob: kotlinx.coroutines.Job? = null
 
     private val displayManager by lazy {
         requireContext().getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
@@ -1527,7 +1529,8 @@ class CameraFragment : Fragment() {
         val targetLogName = prefs.getString(SettingsFragment.KEY_TARGET_LOG, "None")
         val targetLogIndex = SettingsFragment.LOG_CURVES.indexOf(targetLogName)
 
-        lifecycleScope.launch(Dispatchers.IO) {
+        activeLutJob?.cancel()
+        activeLutJob = lifecycleScope.launch(Dispatchers.IO) {
             var lutData: FloatArray? = null
             var size = 0
             if (activeLutName != null) {
@@ -1540,7 +1543,9 @@ class CameraFragment : Fragment() {
                     }
                 }
             }
-            proc.updateLut(lutData, size, targetLogIndex)
+            if (isActive) {
+                proc.updateLut(lutData, size, targetLogIndex)
+            }
         }
     }
 

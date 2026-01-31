@@ -85,22 +85,38 @@ LUT3D load_lut(const char* path) {
     std::ifstream file(path);
     if (!file.is_open()) return lut;
 
+    // Security limits to prevent DoS
+    const size_t MAX_LINE_LENGTH = 1024;
+    const size_t MAX_DATA_POINTS = 64 * 64 * 64; // Limit to standard 64^3 LUT size (approx 262k entries)
+
     std::string line;
     while (std::getline(file, line)) {
+        if (line.length() > MAX_LINE_LENGTH) continue; // Skip overly long lines
         if (line.empty() || line[0] == '#') continue;
         if (line.rfind("TITLE", 0) == 0 || line.rfind("DOMAIN", 0) == 0 || line.rfind("LUT_1D", 0) == 0) continue;
+
         if (line.find("LUT_3D_SIZE") != std::string::npos) {
             std::stringstream ss(line);
             std::string temp;
             ss >> temp >> lut.size;
-            if (lut.size > 0 && lut.size <= 256) lut.data.reserve(lut.size * lut.size * lut.size);
-            else lut.size = 0;
+            // Enforce size limits
+            if (lut.size > 0 && lut.size <= 64) {
+                 lut.data.reserve(lut.size * lut.size * lut.size);
+            } else {
+                 lut.size = 0; // Invalid or too large
+                 return lut;
+            }
             continue;
         }
+
+        if (lut.data.size() >= MAX_DATA_POINTS) break; // Hard stop
+
         std::stringstream ss(line);
         float r, g, b;
         if (ss >> r >> g >> b) lut.data.push_back({r, g, b});
     }
+
+    // Strict validation of data count
     if (lut.size > 0 && lut.data.size() != (size_t)(lut.size * lut.size * lut.size)) {
         lut.size = 0; lut.data.clear();
     }
