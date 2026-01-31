@@ -71,7 +71,7 @@ class LutManager(private val context: Context) {
                     }
                 }
             } catch (e: Exception) {
-                android.util.Log.e("LutManager", "Failed to get filename from content URI", e)
+                // Ignore
             } finally {
                 cursor?.close()
             }

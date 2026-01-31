@@ -57,6 +57,7 @@ class SettingsFragment : Fragment() {
         lutManager = LutManager(requireContext())
 
         setupSpinner()
+        setupFocalLengthSpinner()
         setupLutList()
         setupCheckboxes()
 
@@ -99,6 +100,27 @@ class SettingsFragment : Fragment() {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
                 prefs.edit().putString(KEY_TARGET_LOG, LOG_CURVES[position]).apply()
             }
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+    }
+
+    private fun setupFocalLengthSpinner() {
+        val adapter = ArrayAdapter(requireContext(), android.R.layout.simple_spinner_item, FOCAL_LENGTHS)
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        binding.spinnerDefaultFocalLength.adapter = adapter
+
+        // Stored as String "24", "28", "35"
+        val savedFocalLength = prefs.getString(KEY_DEFAULT_FOCAL_LENGTH, "24")
+        val position = FOCAL_LENGTHS.indexOf(savedFocalLength)
+        if (position >= 0) {
+            binding.spinnerDefaultFocalLength.setSelection(position)
+        }
+
+        binding.spinnerDefaultFocalLength.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                prefs.edit().putString(KEY_DEFAULT_FOCAL_LENGTH, FOCAL_LENGTHS[position]).apply()
+            }
+
             override fun onNothingSelected(parent: AdapterView<*>?) {}
         }
     }
@@ -239,6 +261,9 @@ class SettingsFragment : Fragment() {
         const val KEY_USE_GPU = "use_gpu"
         const val KEY_MANUAL_CONTROLS = "enable_manual_controls"
         const val KEY_ENABLE_LUT_PREVIEW = "enable_lut_preview"
+        const val KEY_DEFAULT_FOCAL_LENGTH = "default_focal_length"
+
+        val FOCAL_LENGTHS = listOf("24", "28", "35")
 
         val LOG_CURVES = listOf(
             "None",
