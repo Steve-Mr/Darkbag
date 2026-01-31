@@ -4,7 +4,6 @@ import android.graphics.SurfaceTexture
 import android.opengl.*
 import android.os.Handler
 import android.os.HandlerThread
-import android.os.Looper
 import android.util.Log
 import android.view.Surface
 import androidx.camera.core.SurfaceOutput
@@ -13,7 +12,6 @@ import androidx.camera.core.SurfaceRequest
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
-import java.util.concurrent.Executor
 import java.util.concurrent.Executors
 
 class LutSurfaceProcessor : SurfaceProcessor {
@@ -38,6 +36,8 @@ class LutSurfaceProcessor : SurfaceProcessor {
     private var currentLutSize = 0
     private var currentLogType = 0
 
+    private val transformMatrix = FloatArray(16)
+
     // Full screen quad
     private val vertexData = floatArrayOf(
         -1f, -1f, 0f, 0f,
@@ -56,20 +56,25 @@ class LutSurfaceProcessor : SurfaceProcessor {
         handler.post { initGl() }
     }
 
+    // CameraX SurfaceProcessor interface
     override fun onInputSurface(request: SurfaceRequest) {
         handler.post {
-            // Create texture
-            val textures = IntArray(1)
-            GLES30.glGenTextures(1, textures, 0)
-            inputTextureId = textures[0]
+            // Create texture if not exists
+            if (inputTextureId == 0) {
+                val textures = IntArray(1)
+                GLES30.glGenTextures(1, textures, 0)
+                inputTextureId = textures[0]
 
-            // External texture for Camera input
-            GLES30.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, inputTextureId)
-            GLES30.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_NEAREST)
-            GLES30.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_NEAREST)
-            GLES30.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE)
-            GLES30.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE)
+                GLES30.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, inputTextureId)
+                GLES30.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_NEAREST)
+                GLES30.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_NEAREST)
+                GLES30.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE)
+                GLES30.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE)
+            }
 
+            // If we already have a SurfaceTexture, release it?
+            // CameraX creates a new request typically when stream changes.
+            inputSurfaceTexture?.release()
             inputSurfaceTexture = SurfaceTexture(inputTextureId)
             inputSurfaceTexture?.setDefaultBufferSize(request.resolution.width, request.resolution.height)
             inputSurfaceTexture?.setOnFrameAvailableListener({
@@ -81,21 +86,40 @@ class LutSurfaceProcessor : SurfaceProcessor {
                 surface.release()
                 inputSurfaceTexture?.release()
                 inputSurfaceTexture = null
-                // cleanup texture?
             }
         }
     }
 
     override fun onOutputSurface(output: SurfaceOutput) {
         handler.post {
-            outputSurface = output.getSurface(executor) {
+            val s = output.getSurface(executor) {
+                // Handle close request if needed, though we manage EGL surface based on outputSurface var
+                if (outputSurface != null) {
+                    outputSurface = null
+                    releaseEglSurface()
+                }
+            }
+            setOutputSurfaceInternal(s, output.size.width, output.size.height)
+        }
+    }
+
+    // Direct Surface binding (TextureView)
+    fun setOutputSurface(surface: Surface?, w: Int, h: Int) {
+        handler.post {
+            if (surface == null) {
                 outputSurface = null
                 releaseEglSurface()
+            } else {
+                setOutputSurfaceInternal(surface, w, h)
             }
-            width = output.size.width
-            height = output.size.height
-            createEglSurface(outputSurface!!)
         }
+    }
+
+    private fun setOutputSurfaceInternal(surface: Surface, w: Int, h: Int) {
+        outputSurface = surface
+        width = w
+        height = h
+        createEglSurface(surface)
     }
 
     fun updateLut(lutData: FloatArray?, size: Int, logType: Int) {
@@ -143,7 +167,7 @@ class LutSurfaceProcessor : SurfaceProcessor {
         EGL14.eglInitialize(eglDisplay, version, 0, version, 1)
 
         val attribs = intArrayOf(
-            EGL14.EGL_RENDERABLE_TYPE, EGL14.EGL_OPENGL_ES2_BIT, // ES 3 uses ES 2 bit in EGL 1.4? Or specific bit? Usually implied or handled by context creation.
+            EGL14.EGL_RENDERABLE_TYPE, EGL14.EGL_OPENGL_ES2_BIT,
             EGL14.EGL_RED_SIZE, 8,
             EGL14.EGL_GREEN_SIZE, 8,
             EGL14.EGL_BLUE_SIZE, 8,
@@ -158,9 +182,6 @@ class LutSurfaceProcessor : SurfaceProcessor {
         val ctxAttribs = intArrayOf(EGL14.EGL_CONTEXT_CLIENT_VERSION, 3, EGL14.EGL_NONE)
         eglContext = EGL14.eglCreateContext(eglDisplay, eglConfig, EGL14.EGL_NO_CONTEXT, ctxAttribs, 0)
 
-        // Create a dummy pbuffer to make context current?
-        // Or just wait for OutputSurface?
-        // We need context current to create textures.
         val surfAttribs = intArrayOf(EGL14.EGL_WIDTH, 1, EGL14.EGL_HEIGHT, 1, EGL14.EGL_NONE)
         eglSurface = EGL14.eglCreatePbufferSurface(eglDisplay, eglConfig, surfAttribs, 0)
         EGL14.eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext)
@@ -170,7 +191,6 @@ class LutSurfaceProcessor : SurfaceProcessor {
 
     private fun createEglSurface(surface: Surface) {
         if (eglDisplay == EGL14.EGL_NO_DISPLAY) return
-        // Destroy old surface
         if (eglSurface != EGL14.EGL_NO_SURFACE) {
              EGL14.eglMakeCurrent(eglDisplay, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT)
              EGL14.eglDestroySurface(eglDisplay, eglSurface)
@@ -178,6 +198,11 @@ class LutSurfaceProcessor : SurfaceProcessor {
 
         val surfaceAttribs = intArrayOf(EGL14.EGL_NONE)
         eglSurface = EGL14.eglCreateWindowSurface(eglDisplay, eglConfig, surface, surfaceAttribs, 0)
+        if (eglSurface == null || eglSurface == EGL14.EGL_NO_SURFACE) {
+             val error = EGL14.eglGetError()
+             Log.e("LutProcessor", "eglCreateWindowSurface failed: $error")
+             return
+        }
         EGL14.eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext)
     }
 
@@ -193,12 +218,7 @@ class LutSurfaceProcessor : SurfaceProcessor {
         if (eglSurface == EGL14.EGL_NO_SURFACE || inputSurfaceTexture == null) return
 
         inputSurfaceTexture?.updateTexImage()
-        // Transform matrix?
-        // val transform = FloatArray(16)
-        // inputSurfaceTexture?.getTransformMatrix(transform)
-        // Usually passed to shader to handle orientation.
-        // But CameraX handles orientation via SurfaceProcessor rotation degrees or we just draw full quad?
-        // We'll stick to full quad for now.
+        inputSurfaceTexture?.getTransformMatrix(transformMatrix)
 
         GLES30.glViewport(0, 0, width, height)
         GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
@@ -208,6 +228,8 @@ class LutSurfaceProcessor : SurfaceProcessor {
         GLES30.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, inputTextureId)
         GLES30.glUniform1i(GLES30.glGetUniformLocation(program, "uTexture"), 0)
 
+        GLES30.glUniformMatrix4fv(GLES30.glGetUniformLocation(program, "uTextureMatrix"), 1, false, transformMatrix, 0)
+
         if (currentLutSize > 0 && lutTextureId != 0) {
             GLES30.glActiveTexture(GLES30.GL_TEXTURE1)
             GLES30.glBindTexture(GLES30.GL_TEXTURE_3D, lutTextureId)
@@ -216,7 +238,6 @@ class LutSurfaceProcessor : SurfaceProcessor {
         GLES30.glUniform1i(GLES30.glGetUniformLocation(program, "uLutSize"), currentLutSize)
         GLES30.glUniform1i(GLES30.glGetUniformLocation(program, "uLogType"), currentLogType)
 
-        // Draw Quad
         val posHandle = GLES30.glGetAttribLocation(program, "aPosition")
         val texHandle = GLES30.glGetAttribLocation(program, "aTexCoord")
 
@@ -233,7 +254,6 @@ class LutSurfaceProcessor : SurfaceProcessor {
         GLES30.glDisableVertexAttribArray(posHandle)
         GLES30.glDisableVertexAttribArray(texHandle)
 
-        // Swap
         EGL14.eglSwapBuffers(eglDisplay, eglSurface)
     }
 
@@ -242,10 +262,12 @@ class LutSurfaceProcessor : SurfaceProcessor {
             #version 300 es
             in vec4 aPosition;
             in vec4 aTexCoord;
+            uniform mat4 uTextureMatrix;
             out vec2 vTexCoord;
             void main() {
                 gl_Position = aPosition;
-                vTexCoord = aTexCoord.xy;
+                // Apply transform matrix from SurfaceTexture
+                vTexCoord = (uTextureMatrix * aTexCoord).xy;
             }
         """.trimIndent()
 
@@ -281,30 +303,22 @@ class LutSurfaceProcessor : SurfaceProcessor {
                      if (x >= 0.01) return 0.241514 * (log(x + 0.008730) / log(10.0)) + 0.598206;
                      return 5.6 * x + 0.125;
                 }
-                // Fallback (Approximate Log / Gamma 2.2 inv?)
-                // Default: just pass through linear
                 return pow(x, 1.0/2.2);
             }
 
             void main() {
-                // Use texture() for ES 3.0
                 vec4 color = texture(uTexture, vTexCoord);
 
-                // 1. Linearize (sRGB -> Linear)
                 vec3 linear = pow(color.rgb, vec3(2.2));
 
-                // 2. Apply Target Log Curve
                 vec3 logColor;
                 logColor.r = apply_log(linear.r, uLogType);
                 logColor.g = apply_log(linear.g, uLogType);
                 logColor.b = apply_log(linear.b, uLogType);
 
-                // 3. Apply LUT
                 if (uLutSize > 0) {
                      outColor = vec4(texture(uLut, logColor).rgb, 1.0);
                 } else {
-                     // If no LUT, pass through (maybe show Log?)
-                     // Or just show original sRGB for usability
                      outColor = color;
                 }
             }

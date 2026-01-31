@@ -20,6 +20,7 @@ import android.annotation.SuppressLint
 import android.content.*
 import android.content.res.Configuration
 import android.graphics.Color
+import android.graphics.SurfaceTexture
 import android.graphics.drawable.ColorDrawable
 import android.hardware.display.DisplayManager
 import android.os.Build
@@ -30,6 +31,8 @@ import android.util.Log
 import android.view.KeyEvent
 import android.view.OrientationEventListener
 import android.view.LayoutInflater
+import android.view.Surface
+import android.view.TextureView
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
@@ -44,9 +47,7 @@ import androidx.camera.camera2.interop.Camera2CameraControl
 import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.camera2.interop.Camera2CameraInfo
 import androidx.camera.camera2.interop.Camera2Interop
-import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.lifecycle.ProcessCameraProvider
-import androidx.camera.core.CameraEffect
 import androidx.camera.core.UseCaseGroup
 import android.hardware.camera2.params.RggbChannelVector
 import android.hardware.camera2.CameraCaptureSession
@@ -73,7 +74,6 @@ import com.android.example.cameraxbasic.utils.ANIMATION_SLOW_MILLIS
 import com.android.example.cameraxbasic.utils.MediaStoreUtils
 import com.android.example.cameraxbasic.utils.LutManager
 import com.android.example.cameraxbasic.processor.LutSurfaceProcessor
-import com.android.example.cameraxbasic.processor.LutCameraEffect
 import com.android.example.cameraxbasic.utils.simulateClick
 import com.bumptech.glide.Glide
 import com.bumptech.glide.request.RequestOptions
@@ -87,7 +87,6 @@ import java.util.*
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import kotlin.math.abs
-import kotlin.math.max
 import kotlin.math.min
 
 /** Helper type alias used for analysis use case callbacks */
@@ -435,6 +434,9 @@ class CameraFragment : Fragment() {
             .setAspectRatioStrategy(AspectRatioStrategy(AspectRatio.RATIO_4_3, AspectRatioStrategy.FALLBACK_RULE_AUTO))
             .build()
 
+        // Configure AutoFitTextureView
+        fragmentCameraBinding.viewFinder.setAspectRatio(4, 3)
+
         // Preview
         preview = Preview.Builder()
             // We request aspect ratio but no resolution
@@ -497,38 +499,56 @@ class CameraFragment : Fragment() {
             removeCameraStateObservers(camera!!.cameraInfo)
         }
 
-        val useCaseGroupBuilder = UseCaseGroup.Builder()
+        // Manual pipeline for preview
+        if (lutProcessor == null) {
+            lutProcessor = LutSurfaceProcessor()
+        }
+
+        val lutBinder = object : Preview.SurfaceProvider {
+             override fun onSurfaceRequested(request: SurfaceRequest) {
+                  // Connect Camera to LutProcessor
+                  lutProcessor?.onInputSurface(request)
+             }
+        }
+
+        // Connect View to LutProcessor
+        fragmentCameraBinding.viewFinder.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
+             override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
+                  lutProcessor?.setOutputSurface(Surface(surface), width, height)
+             }
+             override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {
+                  lutProcessor?.setOutputSurface(Surface(surface), width, height)
+             }
+             override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
+                  lutProcessor?.setOutputSurface(null, 0, 0)
+                  return true
+             }
+             override fun onSurfaceTextureUpdated(surface: SurfaceTexture) {}
+        }
+
+        // Check if surface is already available
+        if (fragmentCameraBinding.viewFinder.isAvailable) {
+             val st = fragmentCameraBinding.viewFinder.surfaceTexture
+             if (st != null) {
+                 lutProcessor?.setOutputSurface(Surface(st), fragmentCameraBinding.viewFinder.width, fragmentCameraBinding.viewFinder.height)
+             }
+        }
+
+        preview?.setSurfaceProvider(cameraExecutor, lutBinder)
+        updateLiveLut() // Ensure LUT is loaded
+
+        val useCaseGroup = UseCaseGroup.Builder()
             .addUseCase(preview!!)
             .addUseCase(imageCapture!!)
             .addUseCase(imageAnalyzer!!)
-
-        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        val enableLiveLut = prefs.getBoolean(SettingsFragment.KEY_ENABLE_LUT_PREVIEW, false)
-
-        if (enableLiveLut) {
-            if (lutProcessor == null) {
-                lutProcessor = LutSurfaceProcessor()
-            }
-            val effect = LutCameraEffect(
-                CameraEffect.PREVIEW,
-                cameraExecutor,
-                lutProcessor!!
-            ) { t -> Log.e(TAG, "Effect error", t) }
-            useCaseGroupBuilder.addEffect(effect)
-            updateLiveLut()
-        } else {
-            lutProcessor?.release()
-            lutProcessor = null
-        }
+            .build()
 
         try {
             // A variable number of use-cases can be passed here -
             // camera provides access to CameraControl & CameraInfo
             camera = cameraProvider.bindToLifecycle(
-                    this, cameraSelector, useCaseGroupBuilder.build())
+                    this, cameraSelector, useCaseGroup)
 
-            // Attach the viewfinder's surface provider to preview use case
-            preview?.setSurfaceProvider(fragmentCameraBinding.viewFinder.surfaceProvider)
             observeCameraState(camera?.cameraInfo!!)
         } catch (exc: Exception) {
             Log.e(TAG, "Use case binding failed", exc)
@@ -1143,9 +1163,20 @@ class CameraFragment : Fragment() {
     }
 
     private fun setupTapToFocus() {
+        // Use DisplayOrientedMeteringPointFactory with explicit inputs since we removed PreviewView
+        val width = fragmentCameraBinding.viewFinder.width.toFloat()
+        val height = fragmentCameraBinding.viewFinder.height.toFloat()
+        val cameraInfo = camera?.cameraInfo ?: return
+
+        val factory = DisplayOrientedMeteringPointFactory(
+             fragmentCameraBinding.viewFinder.display,
+             cameraInfo,
+             width,
+             height
+        )
+
         fragmentCameraBinding.viewFinder.setOnTouchListener { view, event ->
             if (event.action == android.view.MotionEvent.ACTION_UP) {
-                val factory = fragmentCameraBinding.viewFinder.meteringPointFactory
                 val point = factory.createPoint(event.x, event.y)
                 val action = FocusMeteringAction.Builder(point).build()
 
@@ -1455,6 +1486,15 @@ class CameraFragment : Fragment() {
     private fun updateLiveLut() {
         val proc = lutProcessor ?: return
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val enabled = prefs.getBoolean(SettingsFragment.KEY_ENABLE_LUT_PREVIEW, false)
+
+        if (!enabled) {
+            lifecycleScope.launch(Dispatchers.IO) {
+                proc.updateLut(null, 0, 0)
+            }
+            return
+        }
+
         val activeLutName = prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, null)
         val targetLogName = prefs.getString(SettingsFragment.KEY_TARGET_LOG, "None")
         val targetLogIndex = SettingsFragment.LOG_CURVES.indexOf(targetLogName)
