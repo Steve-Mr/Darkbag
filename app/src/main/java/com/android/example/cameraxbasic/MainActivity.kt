@@ -20,16 +20,14 @@ import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.view.KeyEvent
+import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.WindowInsetsControllerCompat
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import com.android.example.cameraxbasic.databinding.ActivityMainBinding
+import com.google.android.material.color.DynamicColors
 
 const val KEY_EVENT_ACTION = "key_event_action"
 const val KEY_EVENT_EXTRA = "key_event_extra"
-private const val IMMERSIVE_FLAG_TIMEOUT = 500L
 
 /**
  * Main entry point into our app. This app follows the single-activity pattern, and all
@@ -40,18 +38,15 @@ class MainActivity : AppCompatActivity() {
     private lateinit var activityMainBinding: ActivityMainBinding
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        DynamicColors.applyToActivityIfAvailable(this)
         activityMainBinding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(activityMainBinding.root)
     }
 
     override fun onResume() {
         super.onResume()
-        // Before setting full screen flags, we must wait a bit to let UI settle; otherwise, we may
-        // be trying to set app to immersive mode before it's ready and the flags do not stick
-        activityMainBinding.fragmentContainer.postDelayed({
-            hideSystemUI()
-        }, IMMERSIVE_FLAG_TIMEOUT)
     }
 
     /** When key down event is triggered, relay it via local broadcast so fragments can handle it */
@@ -76,11 +71,4 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun hideSystemUI() {
-        WindowCompat.setDecorFitsSystemWindows(window, false)
-        WindowInsetsControllerCompat(window, activityMainBinding.fragmentContainer).let { controller ->
-            controller.hide(WindowInsetsCompat.Type.systemBars())
-            controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-        }
-    }
 }

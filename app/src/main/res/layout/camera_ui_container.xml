@@ -23,31 +23,39 @@
     android:layout_height="match_parent">
 
     <!-- Camera control and gallery buttons -->
-    <ImageButton
+    <com.google.android.material.button.MaterialButton
         android:id="@+id/lut_button"
+        style="@style/Widget.Material3.Button.IconButton"
         android:layout_width="@dimen/round_button_medium"
         android:layout_height="@dimen/round_button_medium"
         android:layout_marginTop="@dimen/margin_xsmall"
         android:layout_marginStart="@dimen/margin_xsmall"
         android:padding="@dimen/spacing_large"
-        android:scaleType="fitCenter"
-        android:background="@android:color/transparent"
-        app:srcCompat="@drawable/ic_lut"
+        android:insetLeft="0dp"
+        android:insetTop="0dp"
+        android:insetRight="0dp"
+        android:insetBottom="0dp"
+        app:icon="@drawable/ic_lut"
+        app:iconTint="?attr/colorOnSurface"
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         android:contentDescription="Select LUT"
         android:visibility="gone" />
 
-    <ImageButton
+    <com.google.android.material.button.MaterialButton
         android:id="@+id/settings_button"
+        style="@style/Widget.Material3.Button.IconButton"
         android:layout_width="@dimen/round_button_medium"
         android:layout_height="@dimen/round_button_medium"
         android:layout_marginTop="@dimen/margin_xsmall"
         android:layout_marginEnd="@dimen/margin_xsmall"
         android:padding="@dimen/spacing_large"
-        android:scaleType="fitCenter"
-        android:background="@android:color/transparent"
-        app:srcCompat="@drawable/ic_settings"
+        android:insetLeft="0dp"
+        android:insetTop="0dp"
+        android:insetRight="0dp"
+        android:insetBottom="0dp"
+        app:icon="@drawable/ic_settings"
+        app:iconTint="?attr/colorOnSurface"
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         android:contentDescription="@string/settings_button_alt" />
@@ -55,12 +63,13 @@
     <!-- LUT List (Vertical) -->
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/lut_list"
-        android:layout_width="120dp"
+        android:layout_width="160dp"
         android:layout_height="0dp"
         android:layout_marginStart="@dimen/margin_xsmall"
         android:layout_marginTop="@dimen/margin_xsmall"
         android:layout_marginBottom="80dp"
-        android:background="#99000000"
+        android:background="?attr/colorSurfaceContainerHigh"
+        android:elevation="4dp"
         android:visibility="gone"
         app:layout_constraintTop_toBottomOf="@id/lut_button"
         app:layout_constraintStart_toStartOf="parent"
@@ -77,32 +86,28 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent">
 
-        <Button
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/btn_zoom_toggle"
-            android:layout_width="50dp"
-            android:layout_height="50dp"
+            style="@style/Widget.Material3.Button.TonalButton"
+            android:layout_width="56dp"
+            android:layout_height="56dp"
             android:layout_marginEnd="16dp"
-            android:background="@drawable/bg_zoom_button"
             android:text="@string/zoom_1x"
-            android:textColor="@android:color/white"
             android:textSize="12sp"
             android:padding="0dp"
             android:insetTop="0dp"
-            android:insetBottom="0dp"
-            app:backgroundTint="@null" />
+            android:insetBottom="0dp" />
 
-        <Button
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/btn_zoom_2x"
-            android:layout_width="50dp"
-            android:layout_height="50dp"
-            android:background="@drawable/bg_zoom_button"
+            style="@style/Widget.Material3.Button.TonalButton"
+            android:layout_width="56dp"
+            android:layout_height="56dp"
             android:text="@string/zoom_2x"
-            android:textColor="@android:color/white"
             android:textSize="12sp"
             android:padding="0dp"
             android:insetTop="0dp"
-            android:insetBottom="0dp"
-            app:backgroundTint="@null" />
+            android:insetBottom="0dp" />
 
     </LinearLayout>
 
@@ -112,7 +117,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginBottom="16dp"
-        android:background="#99000000"
+        android:background="?attr/colorSurfaceContainer"
         android:padding="8dp"
         android:visibility="gone"
         app:layout_constraintBottom_toTopOf="@id/camera_capture_button"
@@ -120,54 +125,47 @@
         app:layout_constraintEnd_toEndOf="parent">
 
         <!-- Tabs -->
-        <LinearLayout
+        <com.google.android.material.button.MaterialButtonToggleGroup
             android:id="@+id/manual_tabs"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="horizontal"
             android:gravity="center"
+            app:selectionRequired="false"
+            app:singleSelection="true"
             app:layout_constraintTop_toTopOf="parent">
 
-            <ToggleButton
+            <com.google.android.material.button.MaterialButton
                 android:id="@+id/btn_tab_focus"
+                style="@style/Widget.Material3.Button.OutlinedButton"
                 android:layout_width="wrap_content"
-                android:layout_height="36dp"
-                android:background="@android:color/transparent"
-                android:textColor="@android:color/white"
-                android:textOn="Focus"
-                android:textOff="Focus"
+                android:layout_height="wrap_content"
+                android:text="Focus"
                 android:layout_weight="1" />
 
-            <ToggleButton
+            <com.google.android.material.button.MaterialButton
                 android:id="@+id/btn_tab_iso"
+                style="@style/Widget.Material3.Button.OutlinedButton"
                 android:layout_width="wrap_content"
-                android:layout_height="36dp"
-                android:background="@android:color/transparent"
-                android:textColor="@android:color/white"
-                android:textOn="ISO"
-                android:textOff="ISO"
+                android:layout_height="wrap_content"
+                android:text="ISO"
                 android:layout_weight="1" />
 
-            <ToggleButton
+            <com.google.android.material.button.MaterialButton
                 android:id="@+id/btn_tab_shutter"
+                style="@style/Widget.Material3.Button.OutlinedButton"
                 android:layout_width="wrap_content"
-                android:layout_height="36dp"
-                android:background="@android:color/transparent"
-                android:textColor="@android:color/white"
-                android:textOn="Sec"
-                android:textOff="Sec"
+                android:layout_height="wrap_content"
+                android:text="Sec"
                 android:layout_weight="1" />
 
-            <ToggleButton
+            <com.google.android.material.button.MaterialButton
                 android:id="@+id/btn_tab_ev"
+                style="@style/Widget.Material3.Button.OutlinedButton"
                 android:layout_width="wrap_content"
-                android:layout_height="36dp"
-                android:background="@android:color/transparent"
-                android:textColor="@android:color/white"
-                android:textOn="EV"
-                android:textOff="EV"
+                android:layout_height="wrap_content"
+                android:text="EV"
                 android:layout_weight="1" />
-        </LinearLayout>
+        </com.google.android.material.button.MaterialButtonToggleGroup>
 
         <!-- Control Panel -->
         <LinearLayout
@@ -189,25 +187,28 @@
                     android:id="@+id/tv_manual_value"
                     android:layout_width="60dp"
                     android:layout_height="wrap_content"
-                    android:textColor="@android:color/white"
+                    android:textColor="?attr/colorOnSurface"
                     android:text="Auto"
                     android:textSize="12sp"
                     android:gravity="center" />
 
-                <SeekBar
+                <com.google.android.material.slider.Slider
                     android:id="@+id/seekbar_manual"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:max="1000" />
+                    android:valueFrom="0.0"
+                    android:valueTo="1000.0"
+                    android:value="0.0" />
 
-                <Button
+                <com.google.android.material.button.MaterialButton
                     android:id="@+id/btn_manual_auto"
+                    style="@style/Widget.Material3.Button.TextButton"
                     android:layout_width="wrap_content"
                     android:layout_height="36dp"
                     android:text="Auto"
                     android:textSize="10sp"
-                    android:textColor="@android:color/white"
+                    android:textColor="?attr/colorOnSurface"
                     android:background="@android:color/transparent" />
             </LinearLayout>
 
@@ -220,39 +221,40 @@
                 android:gravity="center"
                 android:visibility="gone">
 
-                <Button
+                <com.google.android.material.button.MaterialButton
                     android:id="@+id/btn_focus_near"
+                    style="@style/Widget.Material3.Button.TextButton"
                     android:layout_width="wrap_content"
                     android:layout_height="36dp"
                     android:text="Macro"
-                    android:textSize="10sp"
-                    android:textColor="@android:color/white"
-                    android:background="@android:color/transparent" />
+                    android:textSize="10sp" />
 
-                <Button
+                <com.google.android.material.button.MaterialButton
                     android:id="@+id/btn_focus_far"
+                    style="@style/Widget.Material3.Button.TextButton"
                     android:layout_width="wrap_content"
                     android:layout_height="36dp"
                     android:text="Infinity"
-                    android:textSize="10sp"
-                    android:textColor="@android:color/white"
-                    android:background="@android:color/transparent" />
+                    android:textSize="10sp" />
             </LinearLayout>
 
         </LinearLayout>
 
     </androidx.constraintlayout.widget.ConstraintLayout>
 
-    <ImageButton
+    <com.google.android.material.button.MaterialButton
         android:id="@+id/camera_switch_button"
+        style="@style/Widget.Material3.Button.IconButton.Filled.Tonal"
         android:layout_width="@dimen/round_button_medium"
         android:layout_height="@dimen/round_button_medium"
         android:layout_marginBottom="@dimen/margin_xlarge"
         android:layout_marginStart="@dimen/margin_small"
         android:padding="@dimen/spacing_small"
-        android:scaleType="fitCenter"
-        android:background="@android:color/transparent"
-        app:srcCompat="@drawable/ic_switch"
+        android:insetLeft="0dp"
+        android:insetTop="0dp"
+        android:insetRight="0dp"
+        android:insetBottom="0dp"
+        app:icon="@drawable/ic_switch"
         app:layout_constraintLeft_toLeftOf="parent"
         app:layout_constraintBottom_toBottomOf="parent"
         android:contentDescription="@string/switch_camera_button_alt" />

@@ -38,8 +38,12 @@ import android.view.ViewGroup
 import android.widget.Toast
 import android.graphics.BitmapFactory
 import android.hardware.camera2.CameraCharacteristics
-import android.widget.SeekBar
-import android.widget.ToggleButton
+import com.google.android.material.slider.Slider
+import com.google.android.material.button.MaterialButton
+import com.google.android.material.button.MaterialButtonToggleGroup
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.updatePadding
 import androidx.camera.core.*
 import androidx.camera.core.resolutionselector.AspectRatioStrategy
 import androidx.camera.camera2.interop.CaptureRequestOptions
@@ -621,6 +625,20 @@ class CameraFragment : Fragment() {
             val thumbnailUri = mediaStoreUtils.getLatestImageFilename()
             thumbnailUri?.let {
                 setGalleryThumbnail(it)
+            }
+        }
+
+        // Apply WindowInsets to UI Container to avoid system bar overlap
+        cameraUiContainerBinding?.root?.let { rootView ->
+            ViewCompat.setOnApplyWindowInsetsListener(rootView) { view, windowInsets ->
+                val insets = windowInsets.getInsets(WindowInsetsCompat.Type.systemBars())
+                view.updatePadding(
+                    left = insets.left,
+                    top = insets.top,
+                    right = insets.right,
+                    bottom = insets.bottom
+                )
+                WindowInsetsCompat.CONSUMED
             }
         }
 
@@ -1350,38 +1368,30 @@ class CameraFragment : Fragment() {
         binding.manualControlsRoot?.visibility = View.VISIBLE
 
         // Tab Listeners
-        val tabs = mutableMapOf<ToggleButton, String>()
-        binding.btnTabFocus?.let { tabs[it] = "Focus" }
-        binding.btnTabIso?.let { tabs[it] = "ISO" }
-        binding.btnTabShutter?.let { tabs[it] = "Shutter" }
-        binding.btnTabEv?.let { tabs[it] = "EV" }
-
-        tabs.forEach { (btn, name) ->
-            btn.setOnCheckedChangeListener { _, isChecked ->
-                if (isChecked) {
-                    // Uncheck others
-                    tabs.keys.filter { it != btn }.forEach { it.isChecked = false }
-                    activeManualTab = name
-                    binding.manualPanel?.visibility = View.VISIBLE
-                    updateManualPanel()
-                } else {
-                    if (activeManualTab == name) {
-                        activeManualTab = null
-                        binding.manualPanel?.visibility = View.GONE
-                    }
+        binding.manualTabs?.addOnButtonCheckedListener { group, checkedId, isChecked ->
+            if (isChecked) {
+                when (checkedId) {
+                    R.id.btn_tab_focus -> activeManualTab = "Focus"
+                    R.id.btn_tab_iso -> activeManualTab = "ISO"
+                    R.id.btn_tab_shutter -> activeManualTab = "Shutter"
+                    R.id.btn_tab_ev -> activeManualTab = "EV"
+                }
+                binding.manualPanel?.visibility = View.VISIBLE
+                updateManualPanel()
+            } else {
+                if (group.checkedButtonId == View.NO_ID) {
+                    activeManualTab = null
+                    binding.manualPanel?.visibility = View.GONE
                 }
             }
         }
 
         // Manual Panel Listeners
-        binding.seekbarManual?.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                if (!fromUser) return
-                handleManualProgress(progress)
+        binding.seekbarManual?.addOnChangeListener { slider, value, fromUser ->
+            if (fromUser) {
+                handleManualProgress(value)
             }
-            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
-            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
-        })
+        }
 
         binding.btnManualAuto?.setOnClickListener {
             resetCurrentManualParameter()
@@ -1406,10 +1416,10 @@ class CameraFragment : Fragment() {
 
     }
 
-    private fun handleManualProgress(progress: Int) {
+    private fun handleManualProgress(value: Float) {
         val binding = cameraUiContainerBinding ?: return
-        val max = binding.seekbarManual?.max ?: 100
-        val ratio = progress.toFloat() / max
+        val max = binding.seekbarManual?.valueTo ?: 1000.0f
+        val ratio = value / max
 
         when (activeManualTab) {
             "Focus" -> {
@@ -1494,28 +1504,28 @@ class CameraFragment : Fragment() {
         val binding = cameraUiContainerBinding ?: return
         binding.focusExtras?.visibility = if (activeManualTab == "Focus") View.VISIBLE else View.GONE
 
-        val max = binding.seekbarManual?.max ?: 100
+        val max = binding.seekbarManual?.valueTo ?: 1000.0f
 
         when (activeManualTab) {
             "Focus" -> {
                 if (isManualFocus) {
                     val ratio = if (minFocusDistance > 0) currentFocusDistance / minFocusDistance else 0f
-                    binding.seekbarManual?.progress = (ratio * max).toInt()
+                    binding.seekbarManual?.value = (ratio * max).coerceIn(0f, max)
                     binding.tvManualValue?.text = String.format("%.2f", currentFocusDistance)
                 } else {
                     binding.tvManualValue?.text = "Auto"
-                    binding.seekbarManual?.progress = 0
+                    binding.seekbarManual?.value = 0.0f
                 }
             }
             "ISO" -> {
                 isoRange?.let { range ->
                     if (isManualExposure) {
                         val ratio = (currentIso - range.lower).toFloat() / (range.upper - range.lower)
-                        binding.seekbarManual?.progress = (ratio * max).toInt()
+                        binding.seekbarManual?.value = (ratio * max).coerceIn(0f, max)
                         binding.tvManualValue?.text = "$currentIso"
                     } else {
                          binding.tvManualValue?.text = "Auto"
-                         binding.seekbarManual?.progress = 0
+                         binding.seekbarManual?.value = 0.0f
                     }
                 }
             }
@@ -1525,7 +1535,7 @@ class CameraFragment : Fragment() {
                         val minVal = range.lower.toDouble()
                         val maxVal = range.upper.toDouble()
                         val ratio = Math.log(currentExposureTime.toDouble() / minVal) / Math.log(maxVal / minVal)
-                        binding.seekbarManual?.progress = (ratio * max).toInt()
+                        binding.seekbarManual?.value = (ratio * max).toFloat().coerceIn(0f, max)
                          val ms = currentExposureTime / 1_000_000.0
                          if (ms < 1000) {
                              binding.tvManualValue?.text = String.format("1/%.0fs", 1000.0/ms)
@@ -1534,14 +1544,14 @@ class CameraFragment : Fragment() {
                          }
                     } else {
                         binding.tvManualValue?.text = "Auto"
-                        binding.seekbarManual?.progress = 0
+                        binding.seekbarManual?.value = 0.0f
                     }
                 }
             }
             "EV" -> {
                 evRange?.let { range ->
                     val ratio = (currentEvIndex - range.lower).toFloat() / (range.upper - range.lower)
-                    binding.seekbarManual?.progress = (ratio * max).toInt()
+                    binding.seekbarManual?.value = (ratio * max).coerceIn(0f, max)
                     binding.tvManualValue?.text = "$currentEvIndex"
                 }
             }
