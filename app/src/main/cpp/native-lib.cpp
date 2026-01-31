@@ -137,8 +137,8 @@ Vec3 apply_lut(const LUT3D& lut, Vec3 color) {
 #define TAG_DEFAULT_CROP_SIZE 50720
 
 struct TiffEntry {
-    short tag;
-    short type;
+    unsigned short tag;
+    unsigned short type;
     int count;
     int value_or_offset;
 };
@@ -147,8 +147,8 @@ struct TiffEntry {
 int read_int(const std::vector<unsigned char>& buf, int offset) {
     return buf[offset] | (buf[offset+1] << 8) | (buf[offset+2] << 16) | (buf[offset+3] << 24);
 }
-short read_short(const std::vector<unsigned char>& buf, int offset) {
-    return buf[offset] | (buf[offset+1] << 8);
+unsigned short read_short(const std::vector<unsigned char>& buf, int offset) {
+    return (unsigned short)(buf[offset] | (buf[offset+1] << 8));
 }
 
 void patch_dng(const char* path, int cropX, int cropY, int cropW, int cropH) {
@@ -211,15 +211,15 @@ void patch_dng(const char* path, int cropX, int cropY, int cropW, int cropH) {
     for(int i=0; i<8; i++) data.push_back(p[i]);
 
     // Create New Entries
-    TiffEntry originEntry = {TAG_DEFAULT_CROP_ORIGIN, 4, 2, origin_offset}; // LONG (4)
-    TiffEntry sizeEntry = {TAG_DEFAULT_CROP_SIZE, 4, 2, size_offset}; // LONG (4)
+    TiffEntry originEntry = {(unsigned short)TAG_DEFAULT_CROP_ORIGIN, 4, 2, origin_offset}; // LONG (4)
+    TiffEntry sizeEntry = {(unsigned short)TAG_DEFAULT_CROP_SIZE, 4, 2, size_offset}; // LONG (4)
 
     entries.push_back(originEntry);
     entries.push_back(sizeEntry);
 
     // Sort entries
     std::sort(entries.begin(), entries.end(), [](const TiffEntry& a, const TiffEntry& b) {
-        return (unsigned short)a.tag < (unsigned short)b.tag;
+        return a.tag < b.tag;
     });
 
     // Write New IFD at end
@@ -272,7 +272,7 @@ void write_tiff(const char* filename, int width, int height, const std::vector<u
     short num_entries = 10 + (hasCrop ? 2 : 0);
     file.write((char*)&num_entries, 2);
 
-    auto write_entry = [&](short tag, short type, int count, int value_or_offset) {
+    auto write_entry = [&](unsigned short tag, unsigned short type, int count, int value_or_offset) {
         file.write((char*)&tag, 2);
         file.write((char*)&type, 2);
         file.write((char*)&count, 4);
@@ -308,9 +308,9 @@ void write_tiff(const char* filename, int width, int height, const std::vector<u
 
     if (hasCrop) {
         // 11. DefaultCropOrigin (50719) - LONG (4), Count 2
-        write_entry(50719, 4, 2, crop_origin_offset);
+        write_entry((unsigned short)50719, 4, 2, crop_origin_offset);
         // 12. DefaultCropSize (50720) - LONG (4), Count 2
-        write_entry(50720, 4, 2, crop_size_offset);
+        write_entry((unsigned short)50720, 4, 2, crop_size_offset);
     }
 
     int next_ifd = 0;
