@@ -66,37 +66,43 @@ class LutSurfaceProcessor : SurfaceProcessor {
             inputWidth = request.resolution.width
             inputHeight = request.resolution.height
 
-            // Create texture if not exists
-            if (inputTextureId == 0) {
-                val textures = IntArray(1)
-                GLES30.glGenTextures(1, textures, 0)
-                inputTextureId = textures[0]
+            // Always create a new texture for each request to avoid race conditions
+            val textures = IntArray(1)
+            GLES30.glGenTextures(1, textures, 0)
+            val textureId = textures[0]
 
-                GLES30.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, inputTextureId)
-                GLES30.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_NEAREST)
-                GLES30.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_NEAREST)
-                GLES30.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE)
-                GLES30.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE)
-            }
+            GLES30.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, textureId)
+            GLES30.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_NEAREST)
+            GLES30.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_NEAREST)
+            GLES30.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE)
+            GLES30.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE)
 
-            // If we already have a SurfaceTexture, release it?
-            // CameraX creates a new request typically when stream changes.
-            inputSurfaceTexture?.release()
-            inputSurfaceTexture = SurfaceTexture(inputTextureId)
-            inputSurfaceTexture?.setDefaultBufferSize(request.resolution.width, request.resolution.height)
-            inputSurfaceTexture?.setOnFrameAvailableListener({
+            val surfaceTexture = SurfaceTexture(textureId)
+            surfaceTexture.setDefaultBufferSize(request.resolution.width, request.resolution.height)
+            surfaceTexture.setOnFrameAvailableListener({
                 handler.post { drawFrame() }
             }, handler)
 
-            val surface = Surface(inputSurfaceTexture)
+            val surface = Surface(surfaceTexture)
+
+            // Update member variables for drawFrame to use
+            this.inputTextureId = textureId
+            this.inputSurfaceTexture = surfaceTexture
+
             request.provideSurface(surface, executor) { result ->
+                // Clean up ONLY the resources created for THIS request
                 surface.release()
-                inputSurfaceTexture?.release()
-                inputSurfaceTexture = null
+                surfaceTexture.release()
+
                 handler.post {
-                    if (inputTextureId != 0) {
-                        GLES30.glDeleteTextures(1, intArrayOf(inputTextureId), 0)
-                        inputTextureId = 0
+                    GLES30.glDeleteTextures(1, intArrayOf(textureId), 0)
+
+                    // Only clear the member variables if they still point to this request's resources
+                    if (this.inputTextureId == textureId) {
+                        this.inputTextureId = 0
+                    }
+                    if (this.inputSurfaceTexture === surfaceTexture) {
+                        this.inputSurfaceTexture = null
                     }
                 }
             }
