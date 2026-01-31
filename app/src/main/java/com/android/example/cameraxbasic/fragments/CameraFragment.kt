@@ -934,11 +934,37 @@ class CameraFragment : Fragment() {
             floatArrayOf(2.0f, 1.0f, 1.0f, 2.0f)
         }
 
+        // Calculate Crop Region
+        val scalerCrop = captureResult!!.get(android.hardware.camera2.CaptureResult.SCALER_CROP_REGION)
+        var cropX = 0
+        var cropY = 0
+        var cropW = image.width
+        var cropH = image.height
+
+        if (scalerCrop != null) {
+            // Align to 2x2 Bayer block (even coordinates)
+            cropX = (scalerCrop.left / 2) * 2
+            cropY = (scalerCrop.top / 2) * 2
+            cropW = (scalerCrop.width() / 2) * 2
+            cropH = (scalerCrop.height() / 2) * 2
+
+            // Clamp to image bounds
+            if (cropX < 0) cropX = 0
+            if (cropY < 0) cropY = 0
+            if (cropX + cropW > image.width) cropW = image.width - cropX
+            if (cropY + cropH > image.height) cropH = image.height - cropY
+        }
+
+        // Determine if we should physically crop in Native (Efficient JPG)
+        // or process full image (TIFF requirement)
+        val physicallyCrop = !saveTiff
+
         try {
             // Process to generate BMP/TIFF
             val result = ColorProcessor.processRaw(
                 directBuffer, image.width, image.height, packedStride, whiteLevel, blackLevel, cfa,
-                wb, ccm, targetLogIndex, nativeLutPath, tiffPath, bmpPath, useGpu
+                wb, ccm, targetLogIndex, nativeLutPath, tiffPath, bmpPath, useGpu,
+                cropX, cropY, cropW, cropH, physicallyCrop
             )
 
             if (result == 1) {
@@ -953,6 +979,24 @@ class CameraFragment : Fragment() {
             var processedBitmap: android.graphics.Bitmap? = null
             if (File(bmpPath).exists()) {
                  processedBitmap = BitmapFactory.decodeFile(bmpPath)
+            }
+
+            // If we processed the full image (TIFF mode) but have a crop, we need to crop the bitmap now
+            if (!physicallyCrop && scalerCrop != null && processedBitmap != null) {
+                 try {
+                    val safeX = max(0, min(cropX, processedBitmap.width - 1))
+                    val safeY = max(0, min(cropY, processedBitmap.height - 1))
+                    val safeW = min(cropW, processedBitmap.width - safeX)
+                    val safeH = min(cropH, processedBitmap.height - safeY)
+
+                    if (safeW > 0 && safeH > 0) {
+                         val cropped = android.graphics.Bitmap.createBitmap(processedBitmap, safeX, safeY, safeW, safeH)
+                         if (cropped != processedBitmap) {
+                             processedBitmap.recycle()
+                             processedBitmap = cropped
+                         }
+                    }
+                 } catch (e: Exception) { Log.e(TAG, "Bitmap crop failed", e) }
             }
 
             // 4. Save DNG (with Thumbnail)

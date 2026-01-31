@@ -22,6 +22,11 @@ object ColorProcessor {
      * @param outputTiffPath Output path for TIFF.
      * @param outputJpgPath Output path for JPEG.
      * @param useGpu Whether to use GPU acceleration.
+     * @param cropX Crop origin X (must be even).
+     * @param cropY Crop origin Y (must be even).
+     * @param cropW Crop width (must be even).
+     * @param cropH Crop height (must be even).
+     * @param physicallyCrop If true, output image will be cropped physically (size = cropW*cropH). If false, output is full size but crop tags are written to TIFF.
      * @return 0 for GPU Success, 1 for CPU Success (Fallback or requested), -1 for Failure.
      */
     external fun processRaw(
@@ -38,6 +43,11 @@ object ColorProcessor {
         lutPath: String?,
         outputTiffPath: String?,
         outputJpgPath: String?,
-        useGpu: Boolean
+        useGpu: Boolean,
+        cropX: Int,
+        cropY: Int,
+        cropW: Int,
+        cropH: Int,
+        physicallyCrop: Boolean
     ): Int
 }
