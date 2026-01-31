@@ -36,6 +36,9 @@ class LutSurfaceProcessor : SurfaceProcessor {
     private var currentLutSize = 0
     private var currentLogType = 0
 
+    private var inputWidth = 0
+    private var inputHeight = 0
+
     private val transformMatrix = FloatArray(16)
 
     // Full screen quad
@@ -59,6 +62,9 @@ class LutSurfaceProcessor : SurfaceProcessor {
     // CameraX SurfaceProcessor interface
     override fun onInputSurface(request: SurfaceRequest) {
         handler.post {
+            inputWidth = request.resolution.width
+            inputHeight = request.resolution.height
+
             // Create texture if not exists
             if (inputTextureId == 0) {
                 val textures = IntArray(1)
@@ -224,6 +230,29 @@ class LutSurfaceProcessor : SurfaceProcessor {
         GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
         GLES30.glUseProgram(program)
 
+        // Calculate aspect ratio correction
+        var scaleX = 1f
+        var scaleY = 1f
+        if (width > 0 && height > 0 && inputWidth > 0 && inputHeight > 0) {
+            // Check rotation (if X-axis maps to Y-axis)
+            val rotated = kotlin.math.abs(transformMatrix[1]) > kotlin.math.abs(transformMatrix[0])
+            val inW = if (rotated) inputHeight.toFloat() else inputWidth.toFloat()
+            val inH = if (rotated) inputWidth.toFloat() else inputHeight.toFloat()
+
+            val inAspect = inW / inH
+            val outAspect = width.toFloat() / height.toFloat()
+
+            if (inAspect > outAspect) {
+                // Input is wider, crop width
+                scaleX = inAspect / outAspect
+            } else {
+                // Input is taller, crop height
+                scaleY = outAspect / inAspect
+            }
+        }
+
+        GLES30.glUniform2f(GLES30.glGetUniformLocation(program, "uScale"), scaleX, scaleY)
+
         GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
         GLES30.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, inputTextureId)
         GLES30.glUniform1i(GLES30.glGetUniformLocation(program, "uTexture"), 0)
@@ -263,9 +292,10 @@ class LutSurfaceProcessor : SurfaceProcessor {
             in vec4 aPosition;
             in vec4 aTexCoord;
             uniform mat4 uTextureMatrix;
+            uniform vec2 uScale;
             out vec2 vTexCoord;
             void main() {
-                gl_Position = aPosition;
+                gl_Position = vec4(aPosition.x * uScale.x, aPosition.y * uScale.y, 0.0, 1.0);
                 // Apply transform matrix from SurfaceTexture
                 vTexCoord = (uTextureMatrix * aTexCoord).xy;
             }
