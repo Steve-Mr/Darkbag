@@ -46,6 +46,8 @@ import androidx.camera.camera2.interop.Camera2CameraInfo
 import androidx.camera.camera2.interop.Camera2Interop
 import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.core.CameraEffect
+import androidx.camera.core.UseCaseGroup
 import android.hardware.camera2.params.RggbChannelVector
 import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CaptureRequest
@@ -69,6 +71,8 @@ import com.android.example.cameraxbasic.databinding.FragmentCameraBinding
 import com.android.example.cameraxbasic.utils.ANIMATION_FAST_MILLIS
 import com.android.example.cameraxbasic.utils.ANIMATION_SLOW_MILLIS
 import com.android.example.cameraxbasic.utils.MediaStoreUtils
+import com.android.example.cameraxbasic.utils.LutManager
+import com.android.example.cameraxbasic.processor.LutSurfaceProcessor
 import com.android.example.cameraxbasic.utils.simulateClick
 import com.bumptech.glide.Glide
 import com.bumptech.glide.request.RequestOptions
@@ -114,6 +118,9 @@ class CameraFragment : Fragment() {
     private var camera: Camera? = null
     private var cameraProvider: ProcessCameraProvider? = null
     private lateinit var windowMetricsCalculator: WindowMetricsCalculator
+
+    private var lutProcessor: LutSurfaceProcessor? = null
+    private lateinit var lutManager: LutManager
 
     private val displayManager by lazy {
         requireContext().getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
@@ -211,6 +218,17 @@ class CameraFragment : Fragment() {
                 }
             }
         }
+
+        // LUT Selector
+        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        if (prefs.getBoolean(SettingsFragment.KEY_ENABLE_LUT_PREVIEW, false)) {
+            cameraUiContainerBinding?.lutButton?.visibility = View.VISIBLE
+            cameraUiContainerBinding?.lutButton?.setOnClickListener {
+                showLutSelector()
+            }
+        } else {
+            cameraUiContainerBinding?.lutButton?.visibility = View.GONE
+        }
     }
 
     /**
@@ -256,6 +274,9 @@ class CameraFragment : Fragment() {
 
         // Shut down our background executor
         cameraExecutor.shutdown()
+
+        lutProcessor?.release()
+        lutProcessor = null
 
         // Unregister the broadcast receivers and listeners
         broadcastManager.unregisterReceiver(volumeDownReceiver)
@@ -308,6 +329,8 @@ class CameraFragment : Fragment() {
 
         // Initialize MediaStoreUtils for fetching this app's images
         mediaStoreUtils = MediaStoreUtils(requireContext())
+
+        lutManager = LutManager(requireContext())
 
         // Start processing consumer
         viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
@@ -483,11 +506,35 @@ class CameraFragment : Fragment() {
             removeCameraStateObservers(camera!!.cameraInfo)
         }
 
+        val useCaseGroupBuilder = UseCaseGroup.Builder()
+            .addUseCase(preview!!)
+            .addUseCase(imageCapture!!)
+            .addUseCase(imageAnalyzer!!)
+
+        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val enableLiveLut = prefs.getBoolean(SettingsFragment.KEY_ENABLE_LUT_PREVIEW, false)
+
+        if (enableLiveLut) {
+            if (lutProcessor == null) {
+                lutProcessor = LutSurfaceProcessor()
+            }
+            val effect = CameraEffect(
+                CameraEffect.PREVIEW,
+                cameraExecutor,
+                lutProcessor!!
+            ) { t -> Log.e(TAG, "Effect error", t) }
+            useCaseGroupBuilder.addEffect(effect)
+            updateLiveLut()
+        } else {
+            lutProcessor?.release()
+            lutProcessor = null
+        }
+
         try {
             // A variable number of use-cases can be passed here -
             // camera provides access to CameraControl & CameraInfo
             camera = cameraProvider.bindToLifecycle(
-                    this, cameraSelector, preview, imageCapture, imageAnalyzer)
+                    this, cameraSelector, useCaseGroupBuilder.build())
 
             // Attach the viewfinder's surface provider to preview use case
             preview?.setSurfaceProvider(fragmentCameraBinding.viewFinder.surfaceProvider)
@@ -848,20 +895,32 @@ class CameraFragment : Fragment() {
         val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
         val targetLogName = prefs.getString(SettingsFragment.KEY_TARGET_LOG, "None")
         val targetLogIndex = SettingsFragment.LOG_CURVES.indexOf(targetLogName)
-        val lutPath = prefs.getString(SettingsFragment.KEY_LUT_URI, null)
 
+        // Use Active LUT filename if present, else fallback to legacy
+        val activeLutName = prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, null)
         var nativeLutPath: String? = null
-        if (lutPath != null) {
-            if (lutPath.startsWith("content://")) {
-                val lutFile = File(context.cacheDir, "temp_lut.cube")
-                try {
-                    contentResolver.openInputStream(Uri.parse(lutPath))?.use { input ->
-                        FileOutputStream(lutFile).use { output -> input.copyTo(output) }
-                    }
-                    nativeLutPath = lutFile.absolutePath
-                } catch (e: Exception) { Log.e(TAG, "Failed to load LUT", e) }
-            } else {
-                nativeLutPath = lutPath
+
+        if (activeLutName != null) {
+            val lutFile = File(File(context.filesDir, "luts"), activeLutName)
+            if (lutFile.exists()) {
+                nativeLutPath = lutFile.absolutePath
+            }
+        }
+
+        if (nativeLutPath == null) {
+            val lutPath = prefs.getString(SettingsFragment.KEY_LUT_URI, null)
+            if (lutPath != null) {
+                if (lutPath.startsWith("content://")) {
+                    val lutFile = File(context.cacheDir, "temp_lut.cube")
+                    try {
+                        contentResolver.openInputStream(Uri.parse(lutPath))?.use { input ->
+                            FileOutputStream(lutFile).use { output -> input.copyTo(output) }
+                        }
+                        nativeLutPath = lutFile.absolutePath
+                    } catch (e: Exception) { Log.e(TAG, "Failed to load LUT", e) }
+                } else {
+                    nativeLutPath = lutPath
+                }
             }
         }
 
@@ -1359,6 +1418,59 @@ class CameraFragment : Fragment() {
         // EV
         if (!isManualExposure) {
              cameraControl.setExposureCompensationIndex(currentEvIndex)
+        }
+    }
+
+    private fun showLutSelector() {
+        val luts = lutManager.getLuts()
+        val names = mutableListOf("None")
+        names.addAll(luts.map { it.nameWithoutExtension })
+
+        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val currentName = prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, null)
+        var checkedItem = 0
+        if (currentName != null) {
+            val idx = luts.indexOfFirst { it.name == currentName }
+            if (idx != -1) checkedItem = idx + 1
+        }
+
+        android.app.AlertDialog.Builder(requireContext())
+            .setTitle("Select LUT")
+            .setSingleChoiceItems(names.toTypedArray(), checkedItem) { dialog, which ->
+                if (which == 0) {
+                    prefs.edit().remove(SettingsFragment.KEY_ACTIVE_LUT).apply()
+                } else {
+                    val selectedFile = luts[which - 1]
+                    prefs.edit().putString(SettingsFragment.KEY_ACTIVE_LUT, selectedFile.name).apply()
+                }
+                updateLiveLut()
+                dialog.dismiss()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun updateLiveLut() {
+        val proc = lutProcessor ?: return
+        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val activeLutName = prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, null)
+        val targetLogName = prefs.getString(SettingsFragment.KEY_TARGET_LOG, "None")
+        val targetLogIndex = SettingsFragment.LOG_CURVES.indexOf(targetLogName)
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            var lutData: FloatArray? = null
+            var size = 0
+            if (activeLutName != null) {
+                val file = File(lutManager.lutDir, activeLutName)
+                if (file.exists()) {
+                    lutData = ColorProcessor.loadLutData(file.absolutePath)
+                    if (lutData != null) {
+                        // size = cuberoot(len/3)
+                        size = Math.round(Math.pow((lutData.size / 3).toDouble(), 1.0/3.0)).toInt()
+                    }
+                }
+            }
+            proc.updateLut(lutData, size, targetLogIndex)
         }
     }
 

@@ -24,6 +24,21 @@
 
     <!-- Camera control and gallery buttons -->
     <ImageButton
+        android:id="@+id/lut_button"
+        android:layout_width="@dimen/round_button_medium"
+        android:layout_height="@dimen/round_button_medium"
+        android:layout_marginTop="@dimen/margin_xsmall"
+        android:layout_marginStart="@dimen/margin_xsmall"
+        android:padding="@dimen/spacing_large"
+        android:scaleType="fitCenter"
+        android:background="@android:color/transparent"
+        app:srcCompat="@drawable/ic_lut"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        android:contentDescription="Select LUT"
+        android:visibility="gone" />
+
+    <ImageButton
         android:id="@+id/settings_button"
         android:layout_width="@dimen/round_button_medium"
         android:layout_height="@dimen/round_button_medium"
