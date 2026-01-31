@@ -28,6 +28,7 @@ class LutSurfaceProcessor : SurfaceProcessor {
     private var inputSurfaceTexture: SurfaceTexture? = null
     private var inputTextureId = 0
     private var lutTextureId = 0
+    private var dummyLutTextureId = 0
     private var program = 0
     private var outputSurface: Surface? = null
     private var width = 0
@@ -193,6 +194,26 @@ class LutSurfaceProcessor : SurfaceProcessor {
         EGL14.eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext)
 
         createProgram()
+        createDummyLut()
+    }
+
+    private fun createDummyLut() {
+        val texs = IntArray(1)
+        GLES30.glGenTextures(1, texs, 0)
+        dummyLutTextureId = texs[0]
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_3D, dummyLutTextureId)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_3D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_NEAREST)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_3D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_NEAREST)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_3D, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_3D, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_3D, GLES30.GL_TEXTURE_WRAP_R, GLES30.GL_CLAMP_TO_EDGE)
+        // 2x2x2 black volume
+        val size = 2
+        val buffer = ByteBuffer.allocateDirect(size * size * size * 3 * 4).order(ByteOrder.nativeOrder()).asFloatBuffer()
+        for (i in 0 until size*size*size*3) buffer.put(0f)
+        buffer.position(0)
+        GLES30.glTexImage3D(GLES30.GL_TEXTURE_3D, 0, GLES30.GL_RGB16F, size, size, size, 0, GLES30.GL_RGB, GLES30.GL_FLOAT, buffer)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_3D, 0)
     }
 
     private fun createEglSurface(surface: Surface) {
@@ -264,9 +285,10 @@ class LutSurfaceProcessor : SurfaceProcessor {
             GLES30.glBindTexture(GLES30.GL_TEXTURE_3D, lutTextureId)
             GLES30.glUniform1i(GLES30.glGetUniformLocation(program, "uLut"), 1)
         } else {
-             // Bind default/empty to avoid warnings, though shader branch skips it
+             // Bind dummy to avoid warnings
              GLES30.glActiveTexture(GLES30.GL_TEXTURE1)
-             GLES30.glBindTexture(GLES30.GL_TEXTURE_3D, 0)
+             GLES30.glBindTexture(GLES30.GL_TEXTURE_3D, dummyLutTextureId)
+             GLES30.glUniform1i(GLES30.glGetUniformLocation(program, "uLut"), 1)
         }
         GLES30.glUniform1i(GLES30.glGetUniformLocation(program, "uLutSize"), currentLutSize)
         GLES30.glUniform1i(GLES30.glGetUniformLocation(program, "uLogType"), currentLogType)
