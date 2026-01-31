@@ -40,4 +40,11 @@ object ColorProcessor {
         outputJpgPath: String?,
         useGpu: Boolean
     ): Int
+
+    /**
+     * Loads a .cube LUT file into a flat float array (RGB interleaved).
+     * @param lutPath Path to .cube file.
+     * @return Float array of size N^3 * 3, or null if loading failed.
+     */
+    external fun loadLutData(lutPath: String): FloatArray?
 }

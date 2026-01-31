@@ -20,6 +20,7 @@ import android.annotation.SuppressLint
 import android.content.*
 import android.content.res.Configuration
 import android.graphics.Color
+import android.graphics.SurfaceTexture
 import android.graphics.drawable.ColorDrawable
 import android.hardware.display.DisplayManager
 import android.os.Build
@@ -30,6 +31,8 @@ import android.util.Log
 import android.view.KeyEvent
 import android.view.OrientationEventListener
 import android.view.LayoutInflater
+import android.view.Surface
+import android.view.TextureView
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
@@ -44,8 +47,8 @@ import androidx.camera.camera2.interop.Camera2CameraControl
 import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.camera2.interop.Camera2CameraInfo
 import androidx.camera.camera2.interop.Camera2Interop
-import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.core.UseCaseGroup
 import android.hardware.camera2.params.RggbChannelVector
 import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CaptureRequest
@@ -69,12 +72,15 @@ import com.android.example.cameraxbasic.databinding.FragmentCameraBinding
 import com.android.example.cameraxbasic.utils.ANIMATION_FAST_MILLIS
 import com.android.example.cameraxbasic.utils.ANIMATION_SLOW_MILLIS
 import com.android.example.cameraxbasic.utils.MediaStoreUtils
+import com.android.example.cameraxbasic.utils.LutManager
+import com.android.example.cameraxbasic.processor.LutSurfaceProcessor
 import com.android.example.cameraxbasic.utils.simulateClick
 import com.bumptech.glide.Glide
 import com.bumptech.glide.request.RequestOptions
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.delay
 import java.nio.ByteBuffer
 import java.text.SimpleDateFormat
@@ -82,8 +88,8 @@ import java.util.*
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import kotlin.math.abs
-import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.max
 
 /** Helper type alias used for analysis use case callbacks */
 typealias LumaListener = (luma: Double) -> Unit
@@ -114,6 +120,10 @@ class CameraFragment : Fragment() {
     private var camera: Camera? = null
     private var cameraProvider: ProcessCameraProvider? = null
     private lateinit var windowMetricsCalculator: WindowMetricsCalculator
+
+    private var lutProcessor: LutSurfaceProcessor? = null
+    private lateinit var lutManager: LutManager
+    private var activeLutJob: kotlinx.coroutines.Job? = null
 
     private val displayManager by lazy {
         requireContext().getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
@@ -220,6 +230,7 @@ class CameraFragment : Fragment() {
                 }
             }
         }
+
     }
 
     /**
@@ -265,6 +276,9 @@ class CameraFragment : Fragment() {
 
         // Shut down our background executor
         cameraExecutor.shutdown()
+
+        lutProcessor?.release()
+        lutProcessor = null
 
         // Unregister the broadcast receivers and listeners
         broadcastManager.unregisterReceiver(volumeDownReceiver)
@@ -317,6 +331,8 @@ class CameraFragment : Fragment() {
 
         // Initialize MediaStoreUtils for fetching this app's images
         mediaStoreUtils = MediaStoreUtils(requireContext())
+
+        lutManager = LutManager(requireContext())
 
         // Initialize Zoom Default
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
@@ -438,6 +454,13 @@ class CameraFragment : Fragment() {
             .setAspectRatioStrategy(AspectRatioStrategy(AspectRatio.RATIO_4_3, AspectRatioStrategy.FALLBACK_RULE_AUTO))
             .build()
 
+        // Configure AutoFitTextureView
+        if (metrics.width() < metrics.height()) {
+            fragmentCameraBinding.viewFinder.setAspectRatio(3, 4)
+        } else {
+            fragmentCameraBinding.viewFinder.setAspectRatio(4, 3)
+        }
+
         // Preview
         preview = Preview.Builder()
             // We request aspect ratio but no resolution
@@ -502,14 +525,56 @@ class CameraFragment : Fragment() {
             removeCameraStateObservers(camera!!.cameraInfo)
         }
 
+        // Manual pipeline for preview
+        if (lutProcessor == null) {
+            lutProcessor = LutSurfaceProcessor()
+        }
+
+        val lutBinder = object : Preview.SurfaceProvider {
+             override fun onSurfaceRequested(request: SurfaceRequest) {
+                  // Connect Camera to LutProcessor
+                  lutProcessor?.onInputSurface(request)
+             }
+        }
+
+        // Connect View to LutProcessor
+        fragmentCameraBinding.viewFinder.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
+             override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
+                  lutProcessor?.setOutputSurface(Surface(surface), width, height)
+             }
+             override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {
+                  lutProcessor?.setOutputSurface(Surface(surface), width, height)
+             }
+             override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
+                  lutProcessor?.setOutputSurface(null, 0, 0)
+                  return true
+             }
+             override fun onSurfaceTextureUpdated(surface: SurfaceTexture) {}
+        }
+
+        // Check if surface is already available
+        if (fragmentCameraBinding.viewFinder.isAvailable) {
+             val st = fragmentCameraBinding.viewFinder.surfaceTexture
+             if (st != null) {
+                 lutProcessor?.setOutputSurface(Surface(st), fragmentCameraBinding.viewFinder.width, fragmentCameraBinding.viewFinder.height)
+             }
+        }
+
+        preview?.setSurfaceProvider(cameraExecutor, lutBinder)
+        updateLiveLut() // Ensure LUT is loaded
+
+        val useCaseGroup = UseCaseGroup.Builder()
+            .addUseCase(preview!!)
+            .addUseCase(imageCapture!!)
+            .addUseCase(imageAnalyzer!!)
+            .build()
+
         try {
             // A variable number of use-cases can be passed here -
             // camera provides access to CameraControl & CameraInfo
             camera = cameraProvider.bindToLifecycle(
-                    this, cameraSelector, preview, imageCapture, imageAnalyzer)
+                    this, cameraSelector, useCaseGroup)
 
-            // Attach the viewfinder's surface provider to preview use case
-            preview?.setSurfaceProvider(fragmentCameraBinding.viewFinder.surfaceProvider)
             observeCameraState(camera?.cameraInfo!!)
 
             // Restore Zoom
@@ -579,10 +644,6 @@ class CameraFragment : Fragment() {
                         override fun onCaptureSuccess(image: ImageProxy) {
                             try {
                                 // 1. Immediate Copy (Free the pipeline)
-                                // Capture current zoom state safely on main thread (or effectively so, since this callback is usually on main/camera thread)
-                                // But to be safe, we access the volatile/state vars.
-                                // Actually, onCaptureSuccess is called on cameraExecutor. Accessing is2xMode/currentFocalLength might be slightly racy if main thread changes it.
-                                // However, user is clicking capture, so state shouldn't change *during* capture ideally.
                                 val currentZoom = if (is2xMode) 2.0f else (currentFocalLength / 24.0f)
 
                                 val holder = copyImageToHolder(image, currentZoom)
@@ -667,6 +728,19 @@ class CameraFragment : Fragment() {
 
         // Initialize Manual Controls
         initManualControls()
+
+        // LUT Selector (Always visible now)
+        cameraUiContainerBinding?.lutButton?.visibility = View.VISIBLE
+        cameraUiContainerBinding?.lutButton?.setOnClickListener {
+             // Toggle LUT List Visibility
+             val lutList = cameraUiContainerBinding?.lutList
+             if (lutList?.visibility == View.VISIBLE) {
+                 lutList.visibility = View.GONE
+             } else {
+                 lutList?.visibility = View.VISIBLE
+                 refreshLutList()
+             }
+        }
 
         // Initialize Zoom Controls
         initZoomControls()
@@ -883,20 +957,32 @@ class CameraFragment : Fragment() {
         val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
         val targetLogName = prefs.getString(SettingsFragment.KEY_TARGET_LOG, "None")
         val targetLogIndex = SettingsFragment.LOG_CURVES.indexOf(targetLogName)
-        val lutPath = prefs.getString(SettingsFragment.KEY_LUT_URI, null)
 
+        // Use Active LUT filename if present, else fallback to legacy
+        val activeLutName = prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, null)
         var nativeLutPath: String? = null
-        if (lutPath != null) {
-            if (lutPath.startsWith("content://")) {
-                val lutFile = File(context.cacheDir, "temp_lut.cube")
-                try {
-                    contentResolver.openInputStream(Uri.parse(lutPath))?.use { input ->
-                        FileOutputStream(lutFile).use { output -> input.copyTo(output) }
-                    }
-                    nativeLutPath = lutFile.absolutePath
-                } catch (e: Exception) { Log.e(TAG, "Failed to load LUT", e) }
-            } else {
-                nativeLutPath = lutPath
+
+        if (activeLutName != null) {
+            val lutFile = File(File(context.filesDir, "luts"), activeLutName)
+            if (lutFile.exists()) {
+                nativeLutPath = lutFile.absolutePath
+            }
+        }
+
+        if (nativeLutPath == null) {
+            val lutPath = prefs.getString(SettingsFragment.KEY_LUT_URI, null)
+            if (lutPath != null) {
+                if (lutPath.startsWith("content://")) {
+                    val lutFile = File(context.cacheDir, "temp_lut.cube")
+                    try {
+                        contentResolver.openInputStream(Uri.parse(lutPath))?.use { input ->
+                            FileOutputStream(lutFile).use { output -> input.copyTo(output) }
+                        }
+                        nativeLutPath = lutFile.absolutePath
+                    } catch (e: Exception) { Log.e(TAG, "Failed to load LUT", e) }
+                } else {
+                    nativeLutPath = lutPath
+                }
             }
         }
 
@@ -1194,9 +1280,20 @@ class CameraFragment : Fragment() {
     }
 
     private fun setupTapToFocus() {
+        // Use DisplayOrientedMeteringPointFactory with explicit inputs since we removed PreviewView
+        val width = fragmentCameraBinding.viewFinder.width.toFloat()
+        val height = fragmentCameraBinding.viewFinder.height.toFloat()
+        val cameraInfo = camera?.cameraInfo ?: return
+
+        val factory = DisplayOrientedMeteringPointFactory(
+             fragmentCameraBinding.viewFinder.display,
+             cameraInfo,
+             width,
+             height
+        )
+
         fragmentCameraBinding.viewFinder.setOnTouchListener { view, event ->
             if (event.action == android.view.MotionEvent.ACTION_UP) {
-                val factory = fragmentCameraBinding.viewFinder.meteringPointFactory
                 val point = factory.createPoint(event.x, event.y)
                 val action = FocusMeteringAction.Builder(point).build()
 
@@ -1555,6 +1652,93 @@ class CameraFragment : Fragment() {
         // EV
         if (!isManualExposure) {
              cameraControl.setExposureCompensationIndex(currentEvIndex)
+        }
+    }
+
+    private fun refreshLutList() {
+        val binding = cameraUiContainerBinding ?: return
+        val rv = binding.lutList ?: return
+
+        // Ensure LayoutManager
+        if (rv.layoutManager == null) {
+            rv.layoutManager = androidx.recyclerview.widget.LinearLayoutManager(requireContext())
+        }
+
+        val luts = lutManager.getLuts()
+        val adapter = LutPreviewAdapter(luts)
+        rv.adapter = adapter
+    }
+
+    private inner class LutPreviewAdapter(val luts: List<File>) : androidx.recyclerview.widget.RecyclerView.Adapter<LutPreviewAdapter.ViewHolder>() {
+
+        inner class ViewHolder(view: View) : androidx.recyclerview.widget.RecyclerView.ViewHolder(view) {
+            val text: android.widget.TextView = view.findViewById(android.R.id.text1)
+        }
+
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
+            val view = LayoutInflater.from(parent.context).inflate(android.R.layout.simple_list_item_1, parent, false)
+            view.setBackgroundColor(Color.TRANSPARENT)
+            return ViewHolder(view)
+        }
+
+        override fun onBindViewHolder(holder: ViewHolder, position: Int) {
+            val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+            val currentName = prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, null)
+
+            holder.text.setTextColor(Color.WHITE)
+            holder.text.textSize = 12f
+            holder.text.setPadding(10, 10, 10, 10)
+
+            if (position == 0) {
+                holder.text.text = "None"
+                if (currentName == null) holder.text.setTextColor(Color.YELLOW)
+                holder.itemView.setOnClickListener {
+                    prefs.edit().remove(SettingsFragment.KEY_ACTIVE_LUT).apply()
+                    updateLiveLut()
+                    notifyDataSetChanged()
+                    cameraUiContainerBinding?.lutList?.visibility = View.GONE
+                }
+            } else {
+                val file = luts[position - 1]
+                holder.text.text = file.nameWithoutExtension
+                if (currentName == file.name) holder.text.setTextColor(Color.YELLOW)
+                holder.itemView.setOnClickListener {
+                    prefs.edit().putString(SettingsFragment.KEY_ACTIVE_LUT, file.name).apply()
+                    updateLiveLut()
+                    notifyDataSetChanged()
+                    cameraUiContainerBinding?.lutList?.visibility = View.GONE
+                }
+            }
+        }
+
+        override fun getItemCount() = luts.size + 1
+    }
+
+    private fun updateLiveLut() {
+        val proc = lutProcessor ?: return
+        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+
+        val activeLutName = prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, null)
+        val targetLogName = prefs.getString(SettingsFragment.KEY_TARGET_LOG, "None")
+        val targetLogIndex = SettingsFragment.LOG_CURVES.indexOf(targetLogName)
+
+        activeLutJob?.cancel()
+        activeLutJob = lifecycleScope.launch(Dispatchers.IO) {
+            var lutData: FloatArray? = null
+            var size = 0
+            if (activeLutName != null) {
+                val file = File(lutManager.lutDir, activeLutName)
+                if (file.exists()) {
+                    lutData = ColorProcessor.loadLutData(file.absolutePath)
+                    if (lutData != null) {
+                        // size = cuberoot(len/3)
+                        size = Math.round(Math.pow((lutData.size / 3).toDouble(), 1.0/3.0)).toInt()
+                    }
+                }
+            }
+            if (isActive) {
+                proc.updateLut(lutData, size, targetLogIndex)
+            }
         }
     }
 
