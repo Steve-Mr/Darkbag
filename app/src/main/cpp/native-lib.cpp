@@ -131,6 +131,132 @@ Vec3 apply_lut(const LUT3D& lut, Vec3 color) {
     return { c0.r * (1-db) + c1.r * db, c0.g * (1-db) + c1.g * db, c0.b * (1-db) + c1.b * db };
 }
 
+// --- DNG Patcher ---
+// Simplified TIFF parser to find the IFD and append/update 50719/50720 tags
+#define TAG_DEFAULT_CROP_ORIGIN 50719
+#define TAG_DEFAULT_CROP_SIZE 50720
+
+struct TiffEntry {
+    short tag;
+    short type;
+    int count;
+    int value_or_offset;
+};
+
+// Helper to read integer types
+int read_int(const std::vector<unsigned char>& buf, int offset) {
+    return buf[offset] | (buf[offset+1] << 8) | (buf[offset+2] << 16) | (buf[offset+3] << 24);
+}
+short read_short(const std::vector<unsigned char>& buf, int offset) {
+    return buf[offset] | (buf[offset+1] << 8);
+}
+
+void patch_dng(const char* path, int cropX, int cropY, int cropW, int cropH) {
+    std::ifstream file(path, std::ios::binary | std::ios::ate);
+    if (!file.is_open()) { LOGE("Failed to open DNG for patching"); return; }
+
+    std::streamsize size = file.tellg();
+    file.seekg(0, std::ios::beg);
+
+    std::vector<unsigned char> data(size);
+    if (!file.read((char*)data.data(), size)) { LOGE("Failed to read DNG"); return; }
+    file.close();
+
+    // Check Header (Little Endian 'II')
+    if (data[0] != 'I' || data[1] != 'I') { LOGE("DNG not Little Endian, patcher supports LE only"); return; }
+
+    int ifd_offset = read_int(data, 4);
+    if (ifd_offset >= size) { LOGE("Invalid IFD offset"); return; }
+
+    short num_entries = read_short(data, ifd_offset);
+
+    std::vector<TiffEntry> entries;
+    int current_pos = ifd_offset + 2;
+
+    bool hasOrigin = false;
+    bool hasSize = false;
+
+    // Read existing entries
+    for (int i=0; i<num_entries; i++) {
+        TiffEntry entry;
+        entry.tag = read_short(data, current_pos);
+        entry.type = read_short(data, current_pos + 2);
+        entry.count = read_int(data, current_pos + 4);
+        entry.value_or_offset = read_int(data, current_pos + 8);
+
+        // Filter out existing crop tags if any (we will replace them)
+        if (entry.tag == TAG_DEFAULT_CROP_ORIGIN) { hasOrigin = true; continue; }
+        if (entry.tag == TAG_DEFAULT_CROP_SIZE) { hasSize = true; continue; }
+
+        entries.push_back(entry);
+        current_pos += 12;
+    }
+
+    int next_ifd_link = read_int(data, current_pos);
+
+    // Append New Data to End of Buffer
+    int new_data_offset = data.size();
+
+    int origin[2] = {cropX, cropY};
+    int dim[2] = {cropW, cropH};
+
+    // Append Origin Data
+    int origin_offset = data.size();
+    unsigned char* p = (unsigned char*)origin;
+    for(int i=0; i<8; i++) data.push_back(p[i]);
+
+    // Append Size Data
+    int size_offset = data.size();
+    p = (unsigned char*)dim;
+    for(int i=0; i<8; i++) data.push_back(p[i]);
+
+    // Create New Entries
+    TiffEntry originEntry = {TAG_DEFAULT_CROP_ORIGIN, 4, 2, origin_offset}; // LONG (4)
+    TiffEntry sizeEntry = {TAG_DEFAULT_CROP_SIZE, 4, 2, size_offset}; // LONG (4)
+
+    entries.push_back(originEntry);
+    entries.push_back(sizeEntry);
+
+    // Sort entries
+    std::sort(entries.begin(), entries.end(), [](const TiffEntry& a, const TiffEntry& b) {
+        return (unsigned short)a.tag < (unsigned short)b.tag;
+    });
+
+    // Write New IFD at end
+    int new_ifd_offset = data.size();
+
+    short new_count = entries.size();
+    data.push_back(new_count & 0xFF);
+    data.push_back((new_count >> 8) & 0xFF);
+
+    for (const auto& entry : entries) {
+        data.push_back(entry.tag & 0xFF); data.push_back((entry.tag >> 8) & 0xFF);
+        data.push_back(entry.type & 0xFF); data.push_back((entry.type >> 8) & 0xFF);
+        data.push_back(entry.count & 0xFF); data.push_back((entry.count >> 8) & 0xFF); data.push_back((entry.count >> 16) & 0xFF); data.push_back((entry.count >> 24) & 0xFF);
+        data.push_back(entry.value_or_offset & 0xFF); data.push_back((entry.value_or_offset >> 8) & 0xFF); data.push_back((entry.value_or_offset >> 16) & 0xFF); data.push_back((entry.value_or_offset >> 24) & 0xFF);
+    }
+
+    // Next IFD Link
+    data.push_back(next_ifd_link & 0xFF);
+    data.push_back((next_ifd_link >> 8) & 0xFF);
+    data.push_back((next_ifd_link >> 16) & 0xFF);
+    data.push_back((next_ifd_link >> 24) & 0xFF);
+
+    // Update Header
+    data[4] = new_ifd_offset & 0xFF;
+    data[5] = (new_ifd_offset >> 8) & 0xFF;
+    data[6] = (new_ifd_offset >> 16) & 0xFF;
+    data[7] = (new_ifd_offset >> 24) & 0xFF;
+
+    // Write back
+    std::ofstream outfile(path, std::ios::binary | std::ios::trunc);
+    outfile.write((char*)data.data(), data.size());
+    outfile.close();
+
+    LOGD("Patched DNG metadata at %s", path);
+}
+
+
 // --- TIFF Writer ---
 
 void write_tiff(const char* filename, int width, int height, const std::vector<unsigned short>& data, int cropX, int cropY, int cropW, int cropH) {
@@ -830,4 +956,16 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processRaw(
     if (outputJpgPath) env->ReleaseStringUTFChars(outputJpgPath, jpg_path_cstr);
 
     return result;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_android_example_cameraxbasic_processor_ColorProcessor_patchDngMetadata(
+        JNIEnv* env,
+        jobject /* this */,
+        jstring dngPath,
+        jint cropX, jint cropY, jint cropW, jint cropH) {
+
+    const char* path = env->GetStringUTFChars(dngPath, 0);
+    patch_dng(path, cropX, cropY, cropW, cropH);
+    env->ReleaseStringUTFChars(dngPath, path);
 }

@@ -50,4 +50,12 @@ object ColorProcessor {
         cropH: Int,
         physicallyCrop: Boolean
     ): Int
+
+    external fun patchDngMetadata(
+        dngPath: String,
+        cropX: Int,
+        cropY: Int,
+        cropW: Int,
+        cropH: Int
+    )
 }

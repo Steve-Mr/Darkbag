@@ -936,6 +936,10 @@ class CameraFragment : Fragment() {
 
         // Calculate Crop Region
         val scalerCrop = captureResult!!.get(android.hardware.camera2.CaptureResult.SCALER_CROP_REGION)
+        val activeArray = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
+
+        Log.d(TAG, "ProcessImage: ScalerCrop=$scalerCrop, ActiveArray=$activeArray, ImageSize=${image.width}x${image.height}")
+
         var cropX = 0
         var cropY = 0
         var cropW = image.width
@@ -954,6 +958,8 @@ class CameraFragment : Fragment() {
             if (cropX + cropW > image.width) cropW = image.width - cropX
             if (cropY + cropH > image.height) cropH = image.height - cropY
         }
+
+        Log.d(TAG, "Calculated Crop: X=$cropX Y=$cropY W=$cropW H=$cropH")
 
         // Determine if we should physically crop in Native (Efficient JPG)
         // or process full image (TIFF requirement)
@@ -999,8 +1005,10 @@ class CameraFragment : Fragment() {
                  } catch (e: Exception) { Log.e(TAG, "Bitmap crop failed", e) }
             }
 
-            // 4. Save DNG (with Thumbnail)
+            // 4. Save DNG (with Thumbnail) - Write to TEMP file first for patching
             val dngCreatorReal = android.hardware.camera2.DngCreator(chars, captureResult)
+            val tempDngFile = File(context.cacheDir, "$dngName.dng")
+
             try {
                 val orientation = when (image.rotationDegrees) {
                     90 -> ExifInterface.ORIENTATION_ROTATE_90
@@ -1010,23 +1018,31 @@ class CameraFragment : Fragment() {
                 }
                 dngCreatorReal.setOrientation(orientation)
 
-                // Set Thumbnail if available (Resize to max 256x256)
+                // Set Thumbnail
                 if (processedBitmap != null) {
                     val maxThumbSize = 256
                     val scale = min(maxThumbSize.toDouble() / processedBitmap.width, maxThumbSize.toDouble() / processedBitmap.height)
                     val thumbWidth = (processedBitmap.width * scale).toInt()
                     val thumbHeight = (processedBitmap.height * scale).toInt()
-
                     val thumbBitmap = if (scale < 1.0) {
                         android.graphics.Bitmap.createScaledBitmap(processedBitmap, thumbWidth, thumbHeight, true)
-                    } else {
-                        processedBitmap
-                    }
-
+                    } else { processedBitmap }
                     dngCreatorReal.setThumbnail(thumbBitmap)
                 }
 
-                // Insert DNG into MediaStore
+                // Write to TEMP file
+                FileOutputStream(tempDngFile).use { out ->
+                    val inputStream = java.io.ByteArrayInputStream(image.data)
+                    dngCreatorReal.writeInputStream(out, android.util.Size(image.width, image.height), inputStream, 0)
+                }
+
+                // PATCH DNG METADATA (If Crop exists)
+                if (scalerCrop != null && (cropW < image.width || cropH < image.height)) {
+                    Log.d(TAG, "Patching DNG Metadata...")
+                    ColorProcessor.patchDngMetadata(tempDngFile.absolutePath, cropX, cropY, cropW, cropH)
+                }
+
+                // COPY to MediaStore
                 val dngValues = ContentValues().apply {
                     put(MediaStore.MediaColumns.DISPLAY_NAME, "$dngName.dng")
                     put(MediaStore.MediaColumns.MIME_TYPE, "image/x-adobe-dng")
@@ -1037,36 +1053,21 @@ class CameraFragment : Fragment() {
                 }
                 val dngUri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, dngValues)
                 if (dngUri != null) {
-                    try {
-                        val dngOut = contentResolver.openOutputStream(dngUri)
-                        if (dngOut != null) {
-                            dngOut.use { out ->
-                                // Use ByteArrayInputStream for the raw data
-                                val inputStream = java.io.ByteArrayInputStream(image.data)
-                                dngCreatorReal.writeInputStream(out, android.util.Size(image.width, image.height), inputStream, 0)
-                            }
-                            Log.d(TAG, "Saved DNG to $dngUri")
-
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                                dngValues.clear()
-                                dngValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
-                                contentResolver.update(dngUri, dngValues, null, null)
-                            }
-                        } else {
-                            Log.e(TAG, "Failed to open OutputStream for $dngUri")
-                            contentResolver.delete(dngUri, null, null)
-                        }
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Error writing DNG to MediaStore", e)
-                        contentResolver.delete(dngUri, null, null)
+                     contentResolver.openOutputStream(dngUri)?.use { out ->
+                        java.io.FileInputStream(tempDngFile).copyTo(out)
                     }
-                } else {
-                    Log.e(TAG, "Failed to create MediaStore entry for DNG")
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        dngValues.clear()
+                        dngValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                        contentResolver.update(dngUri, dngValues, null, null)
+                    }
+                    Log.d(TAG, "Saved DNG to $dngUri")
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to save DNG", e)
+                Log.e(TAG, "Failed to save/patch DNG", e)
             } finally {
                 dngCreatorReal.close()
+                if (tempDngFile.exists()) tempDngFile.delete()
             }
 
             // 5. Save TIFF
