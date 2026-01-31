@@ -252,7 +252,8 @@ void calculateCombinedMatrix(const float* ccm, const float* wb, float* combinedM
 
 // --- CPU Processing ---
 bool processCpu(
-    uint16_t* rawData, int width, int height, int stride,
+    uint16_t* rawData, int inputWidth, int inputHeight, int stride,
+    int cropX, int cropY, int cropW, int cropH,
     int whiteLevel, int blackLevel, int cfaPattern,
     float* wb, float* combinedMat, int targetLog, const LUT3D& lut,
     std::vector<unsigned short>& outputImage
@@ -266,48 +267,55 @@ bool processCpu(
     int stride_pixels = stride / 2;
 
     #pragma omp parallel for
-    for (int y = 0; y < height - 1; y++) {
-        for (int x = 0; x < width - 1; x++) {
+    for (int y = 0; y < cropH; y++) {
+        for (int x = 0; x < cropW; x++) {
+            int srcX = cropX + x;
+            int srcY = cropY + y;
+
+            // Safety check
+            if (srcX >= inputWidth || srcY >= inputHeight) continue;
+
             float r, g, b;
-            bool is_r = ((x & 1) == r_x) && ((y & 1) == r_y);
-            bool is_b = ((x & 1) == b_x) && ((y & 1) == b_y);
+            bool is_r = ((srcX & 1) == r_x) && ((srcY & 1) == r_y);
+            bool is_b = ((srcX & 1) == b_x) && ((srcY & 1) == b_y);
             bool is_g = !is_r && !is_b;
 
-            float val = (float)rawData[y * stride_pixels + x];
+            float val = (float)rawData[srcY * stride_pixels + srcX];
 
             if (is_g) {
                 g = val;
                 float r_sum = 0, b_sum = 0; int r_cnt = 0, b_cnt = 0;
-                if (x>0) { float v = rawData[y * stride_pixels + (x-1)]; if (((x-1)&1)==r_x) { r_sum+=v; r_cnt++; } else { b_sum+=v; b_cnt++; } }
-                if (x<width-1) { float v = rawData[y * stride_pixels + (x+1)]; if (((x+1)&1)==r_x) { r_sum+=v; r_cnt++; } else { b_sum+=v; b_cnt++; } }
-                if (y>0) { float v = rawData[(y-1) * stride_pixels + x]; if (((y-1)&1)==r_y) { r_sum+=v; r_cnt++; } else { b_sum+=v; b_cnt++; } }
-                if (y<height-1) { float v = rawData[(y+1) * stride_pixels + x]; if (((y+1)&1)==r_y) { r_sum+=v; r_cnt++; } else { b_sum+=v; b_cnt++; } }
+                // Check neighbors in input coordinates
+                if (srcX>0) { float v = rawData[srcY * stride_pixels + (srcX-1)]; if (((srcX-1)&1)==r_x) { r_sum+=v; r_cnt++; } else { b_sum+=v; b_cnt++; } }
+                if (srcX<inputWidth-1) { float v = rawData[srcY * stride_pixels + (srcX+1)]; if (((srcX+1)&1)==r_x) { r_sum+=v; r_cnt++; } else { b_sum+=v; b_cnt++; } }
+                if (srcY>0) { float v = rawData[(srcY-1) * stride_pixels + srcX]; if (((srcY-1)&1)==r_y) { r_sum+=v; r_cnt++; } else { b_sum+=v; b_cnt++; } }
+                if (srcY<inputHeight-1) { float v = rawData[(srcY+1) * stride_pixels + srcX]; if (((srcY+1)&1)==r_y) { r_sum+=v; r_cnt++; } else { b_sum+=v; b_cnt++; } }
                 r = (r_cnt > 0) ? r_sum / r_cnt : 0;
                 b = (b_cnt > 0) ? b_sum / b_cnt : 0;
             } else if (is_r) {
                 r = val;
                 float g_sum = 0, b_sum = 0; int g_cnt = 0, b_cnt = 0;
-                if (x>0) { g_sum += rawData[y*stride_pixels+x-1]; g_cnt++; }
-                if (x<width-1) { g_sum += rawData[y*stride_pixels+x+1]; g_cnt++; }
-                if (y>0) { g_sum += rawData[(y-1)*stride_pixels+x]; g_cnt++; }
-                if (y<height-1) { g_sum += rawData[(y+1)*stride_pixels+x]; g_cnt++; }
-                if (x>0 && y>0) { b_sum += rawData[(y-1)*stride_pixels+x-1]; b_cnt++; }
-                if (x<width-1 && y>0) { b_sum += rawData[(y-1)*stride_pixels+x+1]; b_cnt++; }
-                if (x>0 && y<height-1) { b_sum += rawData[(y+1)*stride_pixels+x-1]; b_cnt++; }
-                if (x<width-1 && y<height-1) { b_sum += rawData[(y+1)*stride_pixels+x+1]; b_cnt++; }
+                if (srcX>0) { g_sum += rawData[srcY*stride_pixels+srcX-1]; g_cnt++; }
+                if (srcX<inputWidth-1) { g_sum += rawData[srcY*stride_pixels+srcX+1]; g_cnt++; }
+                if (srcY>0) { g_sum += rawData[(srcY-1)*stride_pixels+srcX]; g_cnt++; }
+                if (srcY<inputHeight-1) { g_sum += rawData[(srcY+1)*stride_pixels+srcX]; g_cnt++; }
+                if (srcX>0 && srcY>0) { b_sum += rawData[(srcY-1)*stride_pixels+srcX-1]; b_cnt++; }
+                if (srcX<inputWidth-1 && srcY>0) { b_sum += rawData[(srcY-1)*stride_pixels+srcX+1]; b_cnt++; }
+                if (srcX>0 && srcY<inputHeight-1) { b_sum += rawData[(srcY+1)*stride_pixels+srcX-1]; b_cnt++; }
+                if (srcX<inputWidth-1 && srcY<inputHeight-1) { b_sum += rawData[(srcY+1)*stride_pixels+srcX+1]; b_cnt++; }
                 g = (g_cnt>0) ? g_sum/g_cnt : 0;
                 b = (b_cnt>0) ? b_sum/b_cnt : 0;
             } else { // is_b
                 b = val;
                 float g_sum = 0, r_sum = 0; int g_cnt = 0, r_cnt = 0;
-                if (x>0) { g_sum += rawData[y*stride_pixels+x-1]; g_cnt++; }
-                if (x<width-1) { g_sum += rawData[y*stride_pixels+x+1]; g_cnt++; }
-                if (y>0) { g_sum += rawData[(y-1)*stride_pixels+x]; g_cnt++; }
-                if (y<height-1) { g_sum += rawData[(y+1)*stride_pixels+x]; g_cnt++; }
-                if (x>0 && y>0) { r_sum += rawData[(y-1)*stride_pixels+x-1]; r_cnt++; }
-                if (x<width-1 && y>0) { r_sum += rawData[(y-1)*stride_pixels+x+1]; r_cnt++; }
-                if (x>0 && y<height-1) { r_sum += rawData[(y+1)*stride_pixels+x-1]; r_cnt++; }
-                if (x<width-1 && y<height-1) { r_sum += rawData[(y+1)*stride_pixels+x+1]; r_cnt++; }
+                if (srcX>0) { g_sum += rawData[srcY*stride_pixels+srcX-1]; g_cnt++; }
+                if (srcX<inputWidth-1) { g_sum += rawData[srcY*stride_pixels+srcX+1]; g_cnt++; }
+                if (srcY>0) { g_sum += rawData[(srcY-1)*stride_pixels+srcX]; g_cnt++; }
+                if (srcY<inputHeight-1) { g_sum += rawData[(srcY+1)*stride_pixels+srcX]; g_cnt++; }
+                if (srcX>0 && srcY>0) { r_sum += rawData[(srcY-1)*stride_pixels+srcX-1]; r_cnt++; }
+                if (srcX<inputWidth-1 && srcY>0) { r_sum += rawData[(srcY-1)*stride_pixels+srcX+1]; r_cnt++; }
+                if (srcX>0 && srcY<inputHeight-1) { r_sum += rawData[(srcY+1)*stride_pixels+srcX-1]; r_cnt++; }
+                if (srcX<inputWidth-1 && srcY<inputHeight-1) { r_sum += rawData[(srcY+1)*stride_pixels+srcX+1]; r_cnt++; }
                 g = (g_cnt>0) ? g_sum/g_cnt : 0;
                 r = (r_cnt>0) ? r_sum/r_cnt : 0;
             }
@@ -331,9 +339,9 @@ bool processCpu(
             Vec3 res = {X, Y, Z};
             if (lut.size > 0) res = apply_lut(lut, res);
 
-            outputImage[(y * width + x) * 3 + 0] = (unsigned short)std::max(0.0f, std::min(65535.0f, res.r * 65535.0f));
-            outputImage[(y * width + x) * 3 + 1] = (unsigned short)std::max(0.0f, std::min(65535.0f, res.g * 65535.0f));
-            outputImage[(y * width + x) * 3 + 2] = (unsigned short)std::max(0.0f, std::min(65535.0f, res.b * 65535.0f));
+            outputImage[(y * cropW + x) * 3 + 0] = (unsigned short)std::max(0.0f, std::min(65535.0f, res.r * 65535.0f));
+            outputImage[(y * cropW + x) * 3 + 1] = (unsigned short)std::max(0.0f, std::min(65535.0f, res.g * 65535.0f));
+            outputImage[(y * cropW + x) * 3 + 2] = (unsigned short)std::max(0.0f, std::min(65535.0f, res.b * 65535.0f));
         }
     }
     return true;
@@ -348,8 +356,12 @@ uniform mediump usampler2D uInput;
 layout(rgba16ui, binding = 1) writeonly uniform mediump uimage2D uOutput;
 uniform mediump sampler3D uLut;
 
-uniform int uWidth;
-uniform int uHeight;
+uniform int uOutputWidth;
+uniform int uOutputHeight;
+uniform int uInputWidth;
+uniform int uInputHeight;
+uniform ivec2 uCropOffset;
+
 uniform float uBlackLevel;
 uniform float uWhiteLevel;
 uniform int uCfaPattern;
@@ -388,13 +400,14 @@ float apply_log(float x, int type) {
 
 void main() {
     ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
-    if (pos.x >= uWidth || pos.y >= uHeight) return;
+    if (pos.x >= uOutputWidth || pos.y >= uOutputHeight) return;
 
-    // Bayer Decode (Simple Bilinear)
-    int x = pos.x;
-    int y = pos.y;
+    // Use cropped coordinates for output, but source coordinates for input
+    ivec2 srcPos = pos + uCropOffset;
 
-    // Determine CFA
+    if (srcPos.x >= uInputWidth || srcPos.y >= uInputHeight) return; // Safety
+
+    // Determine CFA based on Source Position
     // 0=RGGB, 1=GRBG, 2=GBRG, 3=BGGR
     int r_x, r_y, b_x, b_y;
     if (uCfaPattern == 0) { r_x=0; r_y=0; b_x=1; b_y=1; }
@@ -402,16 +415,12 @@ void main() {
     else if (uCfaPattern == 2) { r_x=0; r_y=1; b_x=1; b_y=0; }
     else { r_x=1; r_y=1; b_x=0; b_y=0; }
 
-    bool is_r = ((x & 1) == r_x) && ((y & 1) == r_y);
-    bool is_b = ((x & 1) == b_x) && ((y & 1) == b_y);
+    bool is_r = ((srcPos.x & 1) == r_x) && ((srcPos.y & 1) == r_y);
+    bool is_b = ((srcPos.x & 1) == b_x) && ((srcPos.y & 1) == b_y);
     bool is_g = !is_r && !is_b;
 
-    float val = float(texelFetch(uInput, pos, 0).r);
+    float val = float(texelFetch(uInput, srcPos, 0).r);
     float r = 0.0, g = 0.0, b = 0.0;
-
-    // Note: Boundary checks omitted for brevity in shader, usually texture repeating/clamping handles it
-    // But texelFetch needs checks. We just clamp coord.
-    ivec2 sz = ivec2(uWidth, uHeight);
 
     if (is_g) {
         g = val;
@@ -420,11 +429,11 @@ void main() {
         float b_sum = 0.0; int b_cnt = 0;
         // Neighbors: (x-1, y), (x+1, y), (x, y-1), (x, y+1)
         ivec2 coords[4];
-        coords[0] = ivec2(x-1, y); coords[1] = ivec2(x+1, y);
-        coords[2] = ivec2(x, y-1); coords[3] = ivec2(x, y+1);
+        coords[0] = ivec2(srcPos.x-1, srcPos.y); coords[1] = ivec2(srcPos.x+1, srcPos.y);
+        coords[2] = ivec2(srcPos.x, srcPos.y-1); coords[3] = ivec2(srcPos.x, srcPos.y+1);
 
         for (int i=0; i<4; i++) {
-            if (coords[i].x >= 0 && coords[i].x < uWidth && coords[i].y >= 0 && coords[i].y < uHeight) {
+            if (coords[i].x >= 0 && coords[i].x < uInputWidth && coords[i].y >= 0 && coords[i].y < uInputHeight) {
                 float v = float(texelFetch(uInput, coords[i], 0).r);
                 bool n_is_r = ((coords[i].x & 1) == r_x) && ((coords[i].y & 1) == r_y);
                 if (n_is_r) { r_sum += v; r_cnt++; } else { b_sum += v; b_cnt++; }
@@ -440,20 +449,20 @@ void main() {
 
         // G neighbors (cross)
         ivec2 c_cross[4];
-        c_cross[0] = ivec2(x-1, y); c_cross[1] = ivec2(x+1, y);
-        c_cross[2] = ivec2(x, y-1); c_cross[3] = ivec2(x, y+1);
+        c_cross[0] = ivec2(srcPos.x-1, srcPos.y); c_cross[1] = ivec2(srcPos.x+1, srcPos.y);
+        c_cross[2] = ivec2(srcPos.x, srcPos.y-1); c_cross[3] = ivec2(srcPos.x, srcPos.y+1);
         for(int i=0; i<4; i++) {
-             if (c_cross[i].x >= 0 && c_cross[i].x < uWidth && c_cross[i].y >= 0 && c_cross[i].y < uHeight) {
+             if (c_cross[i].x >= 0 && c_cross[i].x < uInputWidth && c_cross[i].y >= 0 && c_cross[i].y < uInputHeight) {
                  g_sum += float(texelFetch(uInput, c_cross[i], 0).r); g_cnt++;
              }
         }
 
         // B neighbors (diag)
         ivec2 c_diag[4];
-        c_diag[0] = ivec2(x-1, y-1); c_diag[1] = ivec2(x+1, y-1);
-        c_diag[2] = ivec2(x-1, y+1); c_diag[3] = ivec2(x+1, y+1);
+        c_diag[0] = ivec2(srcPos.x-1, srcPos.y-1); c_diag[1] = ivec2(srcPos.x+1, srcPos.y-1);
+        c_diag[2] = ivec2(srcPos.x-1, srcPos.y+1); c_diag[3] = ivec2(srcPos.x+1, srcPos.y+1);
         for(int i=0; i<4; i++) {
-             if (c_diag[i].x >= 0 && c_diag[i].x < uWidth && c_diag[i].y >= 0 && c_diag[i].y < uHeight) {
+             if (c_diag[i].x >= 0 && c_diag[i].x < uInputWidth && c_diag[i].y >= 0 && c_diag[i].y < uInputHeight) {
                  b_sum += float(texelFetch(uInput, c_diag[i], 0).r); b_cnt++;
              }
         }
@@ -467,19 +476,19 @@ void main() {
 
         // G neighbors (cross)
         ivec2 c_cross[4];
-        c_cross[0] = ivec2(x-1, y); c_cross[1] = ivec2(x+1, y);
-        c_cross[2] = ivec2(x, y-1); c_cross[3] = ivec2(x, y+1);
+        c_cross[0] = ivec2(srcPos.x-1, srcPos.y); c_cross[1] = ivec2(srcPos.x+1, srcPos.y);
+        c_cross[2] = ivec2(srcPos.x, srcPos.y-1); c_cross[3] = ivec2(srcPos.x, srcPos.y+1);
         for(int i=0; i<4; i++) {
-             if (c_cross[i].x >= 0 && c_cross[i].x < uWidth && c_cross[i].y >= 0 && c_cross[i].y < uHeight) {
+             if (c_cross[i].x >= 0 && c_cross[i].x < uInputWidth && c_cross[i].y >= 0 && c_cross[i].y < uInputHeight) {
                  g_sum += float(texelFetch(uInput, c_cross[i], 0).r); g_cnt++;
              }
         }
         // R neighbors (diag)
         ivec2 c_diag[4];
-        c_diag[0] = ivec2(x-1, y-1); c_diag[1] = ivec2(x+1, y-1);
-        c_diag[2] = ivec2(x-1, y+1); c_diag[3] = ivec2(x+1, y+1);
+        c_diag[0] = ivec2(srcPos.x-1, srcPos.y-1); c_diag[1] = ivec2(srcPos.x+1, srcPos.y-1);
+        c_diag[2] = ivec2(srcPos.x-1, srcPos.y+1); c_diag[3] = ivec2(srcPos.x+1, srcPos.y+1);
         for(int i=0; i<4; i++) {
-             if (c_diag[i].x >= 0 && c_diag[i].x < uWidth && c_diag[i].y >= 0 && c_diag[i].y < uHeight) {
+             if (c_diag[i].x >= 0 && c_diag[i].x < uInputWidth && c_diag[i].y >= 0 && c_diag[i].y < uInputHeight) {
                  r_sum += float(texelFetch(uInput, c_diag[i], 0).r); r_cnt++;
              }
         }
@@ -543,7 +552,8 @@ GLuint createShader(GLenum type, const char* src) {
 }
 
 bool processGpu(
-    uint16_t* rawData, int width, int height, int stride,
+    uint16_t* rawData, int inputWidth, int inputHeight, int stride,
+    int cropX, int cropY, int cropW, int cropH,
     int whiteLevel, int blackLevel, int cfaPattern,
     float* wb, float* combinedMat, int targetLog, const LUT3D& lut,
     std::vector<unsigned short>& outputImage
@@ -608,7 +618,7 @@ bool processGpu(
     // Input (R16UI)
     glGenTextures(1, &texInput);
     glBindTexture(GL_TEXTURE_2D, texInput);
-    glTexStorage2D(GL_TEXTURE_2D, 1, GL_R16UI, width, height);
+    glTexStorage2D(GL_TEXTURE_2D, 1, GL_R16UI, inputWidth, inputHeight);
     // Upload packed raw data (assume strict packing for GPU for simplicity, or we unpack row by row)
     // The JNI caller passes a buffer. We can't use it directly if stride != width*2.
     // We already pack it in CameraFragment?
@@ -617,7 +627,7 @@ bool processGpu(
     // If not, we need to repack. But CameraFragment::copyImageToHolder handles packing!
     // So usually rawData is tightly packed.
     glPixelStorei(GL_UNPACK_ROW_LENGTH, stride / 2);
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_RED_INTEGER, GL_UNSIGNED_SHORT, rawData);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, inputWidth, inputHeight, GL_RED_INTEGER, GL_UNSIGNED_SHORT, rawData);
     glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
@@ -625,7 +635,7 @@ bool processGpu(
     // Output (RGBA16UI)
     glGenTextures(1, &texOutput);
     glBindTexture(GL_TEXTURE_2D, texOutput);
-    glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA16UI, width, height);
+    glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA16UI, cropW, cropH);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
@@ -657,8 +667,12 @@ bool processGpu(
         glUniform1i(glGetUniformLocation(program, "uLut"), 2);
     }
 
-    glUniform1i(glGetUniformLocation(program, "uWidth"), width);
-    glUniform1i(glGetUniformLocation(program, "uHeight"), height);
+    glUniform1i(glGetUniformLocation(program, "uOutputWidth"), cropW);
+    glUniform1i(glGetUniformLocation(program, "uOutputHeight"), cropH);
+    glUniform1i(glGetUniformLocation(program, "uInputWidth"), inputWidth);
+    glUniform1i(glGetUniformLocation(program, "uInputHeight"), inputHeight);
+    glUniform2i(glGetUniformLocation(program, "uCropOffset"), cropX, cropY);
+
     glUniform1f(glGetUniformLocation(program, "uWhiteLevel"), (float)whiteLevel);
     glUniform1f(glGetUniformLocation(program, "uBlackLevel"), (float)blackLevel);
     glUniform1i(glGetUniformLocation(program, "uCfaPattern"), cfaPattern);
@@ -668,7 +682,7 @@ bool processGpu(
     glUniform1i(glGetUniformLocation(program, "uLutSize"), lut.size);
 
     // 5. Dispatch
-    glDispatchCompute((width + 15) / 16, (height + 15) / 16, 1);
+    glDispatchCompute((cropW + 15) / 16, (cropH + 15) / 16, 1);
     glMemoryBarrier(GL_FRAMEBUFFER_BARRIER_BIT);
 
     // 6. Readback
@@ -694,13 +708,13 @@ bool processGpu(
     }
 
     // Read pixels (RGBA)
-    std::vector<unsigned short> tempBuffer(width * height * 4);
-    glReadPixels(0, 0, width, height, GL_RGBA_INTEGER, GL_UNSIGNED_SHORT, tempBuffer.data());
+    std::vector<unsigned short> tempBuffer(cropW * cropH * 4);
+    glReadPixels(0, 0, cropW, cropH, GL_RGBA_INTEGER, GL_UNSIGNED_SHORT, tempBuffer.data());
 
     // Compact RGBA -> RGB
     // OMP here too?
     #pragma omp parallel for
-    for (int i = 0; i < width * height; i++) {
+    for (int i = 0; i < cropW * cropH; i++) {
         outputImage[i * 3 + 0] = tempBuffer[i * 4 + 0];
         outputImage[i * 3 + 1] = tempBuffer[i * 4 + 1];
         outputImage[i * 3 + 2] = tempBuffer[i * 4 + 2];
@@ -740,9 +754,13 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processRaw(
         jstring lutPath,
         jstring outputTiffPath,
         jstring outputJpgPath,
+        jint cropX,
+        jint cropY,
+        jint cropW,
+        jint cropH,
         jboolean useGpu) {
 
-    LOGD("Native processRaw started. UseGPU: %d", useGpu);
+    LOGD("Native processRaw started. UseGPU: %d. Crop: %d,%d %dx%d", useGpu, cropX, cropY, cropW, cropH);
 
     uint16_t* rawData = (uint16_t*)env->GetDirectBufferAddress(rawBuffer);
     if (!rawData) { LOGE("Failed to get buffer address"); return -1; }
@@ -766,19 +784,20 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processRaw(
     float combinedMat[9];
     calculateCombinedMatrix(colorMat, wb, combinedMat);
 
-    std::vector<unsigned short> outputImage(width * height * 3);
+    // Output size is based on Crop
+    std::vector<unsigned short> outputImage(cropW * cropH * 3);
 
     int result = 0; // 0=Success GPU, 1=Success CPU, -1=Error
 
     if (useGpu) {
-        bool success = processGpu(rawData, width, height, stride, whiteLevel, blackLevel, cfaPattern, wb, combinedMat, targetLog, lut, outputImage);
+        bool success = processGpu(rawData, width, height, stride, cropX, cropY, cropW, cropH, whiteLevel, blackLevel, cfaPattern, wb, combinedMat, targetLog, lut, outputImage);
         if (!success) {
             LOGE("GPU processing failed, falling back to CPU");
             result = 1;
-            processCpu(rawData, width, height, stride, whiteLevel, blackLevel, cfaPattern, wb, combinedMat, targetLog, lut, outputImage);
+            processCpu(rawData, width, height, stride, cropX, cropY, cropW, cropH, whiteLevel, blackLevel, cfaPattern, wb, combinedMat, targetLog, lut, outputImage);
         }
     } else {
-        processCpu(rawData, width, height, stride, whiteLevel, blackLevel, cfaPattern, wb, combinedMat, targetLog, lut, outputImage);
+        processCpu(rawData, width, height, stride, cropX, cropY, cropW, cropH, whiteLevel, blackLevel, cfaPattern, wb, combinedMat, targetLog, lut, outputImage);
         // User requested CPU, so this is a success case that should not trigger a fallback warning.
         result = 0;
     }
@@ -787,8 +806,8 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processRaw(
     const char* tiff_path_cstr = (outputTiffPath) ? env->GetStringUTFChars(outputTiffPath, 0) : nullptr;
     const char* jpg_path_cstr = (outputJpgPath) ? env->GetStringUTFChars(outputJpgPath, 0) : nullptr;
 
-    if (tiff_path_cstr) write_tiff(tiff_path_cstr, width, height, outputImage);
-    if (jpg_path_cstr) write_bmp(jpg_path_cstr, width, height, outputImage);
+    if (tiff_path_cstr) write_tiff(tiff_path_cstr, cropW, cropH, outputImage);
+    if (jpg_path_cstr) write_bmp(jpg_path_cstr, cropW, cropH, outputImage);
 
     // Release
     env->ReleaseFloatArrayElements(wbGains, wb, 0);
@@ -798,4 +817,206 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processRaw(
     if (outputJpgPath) env->ReleaseStringUTFChars(outputJpgPath, jpg_path_cstr);
 
     return result;
+}
+
+// --- DNG Patcher ---
+
+// Helper to read/write integers with specific endianness (Assuming Little Endian System for now)
+// DNGs from Android are typically Little Endian (II)
+struct TiffStream {
+    std::fstream& fs;
+    bool isLE;
+
+    template<typename T>
+    T read(uint32_t offset) {
+        fs.seekg(offset);
+        T val;
+        fs.read((char*)&val, sizeof(T));
+        return val; // Add swapping if needed
+    }
+
+    template<typename T>
+    void write(uint32_t offset, T val) {
+        fs.seekp(offset);
+        fs.write((char*)&val, sizeof(T));
+    }
+
+    uint16_t readU16(uint32_t offset) { return read<uint16_t>(offset); }
+    uint32_t readU32(uint32_t offset) { return read<uint32_t>(offset); }
+
+    void writeU16(uint32_t offset, uint16_t val) { write<uint16_t>(offset, val); }
+    void writeU32(uint32_t offset, uint32_t val) { write<uint32_t>(offset, val); }
+};
+
+struct IfdEntry {
+    uint16_t tag;
+    uint16_t type;
+    uint32_t count;
+    uint32_t value; // or offset
+};
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_android_example_cameraxbasic_processor_ColorProcessor_patchDngMetadata(
+        JNIEnv* env,
+        jobject /* this */,
+        jstring dngPath,
+        jint cropX,
+        jint cropY,
+        jint cropW,
+        jint cropH) {
+    const char* path = env->GetStringUTFChars(dngPath, 0);
+    LOGD("Patching DNG at %s with crop %d,%d %dx%d", path, cropX, cropY, cropW, cropH);
+
+    std::fstream fs(path, std::ios::in | std::ios::out | std::ios::binary);
+    if (!fs.is_open()) {
+        LOGE("Failed to open DNG file");
+        env->ReleaseStringUTFChars(dngPath, path);
+        return -1;
+    }
+
+    // 1. Check Header
+    char header[4];
+    fs.read(header, 4);
+    bool isLE = (header[0] == 'I' && header[1] == 'I');
+    if (!isLE) {
+        LOGE("Only Little Endian DNGs supported for patching");
+        env->ReleaseStringUTFChars(dngPath, path);
+        return -2;
+    }
+
+    TiffStream ts { fs, isLE };
+    uint32_t ifd0Offset = ts.readU32(4);
+
+    // 2. Parse IFD0 to find SubIFDs (Tag 330)
+    uint16_t numEntries0 = ts.readU16(ifd0Offset);
+    uint32_t subIfdsOffset = 0;
+    uint32_t subIfdsCount = 0;
+
+    for (int i=0; i<numEntries0; ++i) {
+        uint32_t entryOffset = ifd0Offset + 2 + i * 12;
+        uint16_t tag = ts.readU16(entryOffset);
+        if (tag == 330) { // SubIFDs
+            uint16_t type = ts.readU16(entryOffset + 2);
+            subIfdsCount = ts.readU32(entryOffset + 4);
+            uint32_t val = ts.readU32(entryOffset + 8);
+
+            if (subIfdsCount == 1 && (type == 4 || type == 3)) {
+                 // Value fits in field? If Type=LONG, size=4. 1*4=4. Fits.
+                 // So val IS the offset to SubIFD.
+                 subIfdsOffset = val; // Single SubIFD
+                 // We need to patch this single pointer?
+                 // Wait, we need the location of this pointer in the file to update it later.
+                 // The pointer IS the value field of THIS entry.
+                 // So we can update this entry later.
+            } else {
+                 // Offset to array of offsets
+                 subIfdsOffset = val;
+            }
+            break;
+        }
+    }
+
+    if (subIfdsOffset == 0) {
+        LOGE("No SubIFDs tag found in IFD0");
+        env->ReleaseStringUTFChars(dngPath, path);
+        return -3;
+    }
+
+    // 3. Collect SubIFD Offsets
+    std::vector<uint32_t> subIfdOffsets;
+    if (subIfdsCount == 1) {
+        // subIfdsOffset is the offset to the SubIFD itself (if we optimized above)
+        // Re-verify logic: If Count=1, Value=Offset to IFD.
+        subIfdOffsets.push_back(subIfdsOffset);
+    } else {
+        // subIfdsOffset is offset to list of offsets
+        for (int i=0; i<subIfdsCount; ++i) {
+             subIfdOffsets.push_back(ts.readU32(subIfdsOffset + i * 4));
+        }
+    }
+
+    // 4. Patch each SubIFD
+    // We assume the SubIFD pointed to is the Raw Image.
+    // We will create a NEW IFD at the end of file and update the pointer.
+
+    for (int k=0; k<subIfdOffsets.size(); ++k) {
+        uint32_t oldIfdOffset = subIfdOffsets[k];
+        uint16_t numEntries = ts.readU16(oldIfdOffset);
+
+        std::vector<IfdEntry> entries;
+        for (int i=0; i<numEntries; ++i) {
+            uint32_t off = oldIfdOffset + 2 + i * 12;
+            IfdEntry e;
+            e.tag = ts.readU16(off);
+            e.type = ts.readU16(off + 2);
+            e.count = ts.readU32(off + 4);
+            e.value = ts.readU32(off + 8);
+
+            // Filter existing crop tags to avoid duplicates
+            if (e.tag != 50719 && e.tag != 50720) {
+                entries.push_back(e);
+            }
+        }
+
+        // Add New Tags (SHORT)
+        // DefaultCropOrigin (50719)
+        IfdEntry origin;
+        origin.tag = 50719;
+        origin.type = 3; // SHORT
+        origin.count = 2;
+        // Value: cropX (low), cropY (high)
+        origin.value = (uint16_t)cropX | ((uint32_t)cropY << 16);
+        entries.push_back(origin);
+
+        // DefaultCropSize (50720)
+        IfdEntry size;
+        size.tag = 50720;
+        size.type = 3; // SHORT
+        size.count = 2;
+        size.value = (uint16_t)cropW | ((uint32_t)cropH << 16);
+        entries.push_back(size);
+
+        // Sort
+        std::sort(entries.begin(), entries.end(), [](const IfdEntry& a, const IfdEntry& b){
+            return a.tag < b.tag;
+        });
+
+        // Write New IFD at EOF
+        fs.seekp(0, std::ios::end);
+        uint32_t newIfdOffset = (uint32_t)fs.tellp();
+
+        uint16_t newCount = (uint16_t)entries.size();
+        ts.writeU16(newIfdOffset, newCount);
+
+        for (int i=0; i<entries.size(); ++i) {
+            uint32_t off = newIfdOffset + 2 + i * 12;
+            ts.writeU16(off, entries[i].tag);
+            ts.writeU16(off + 2, entries[i].type);
+            ts.writeU32(off + 4, entries[i].count);
+            ts.writeU32(off + 8, entries[i].value);
+        }
+
+        // Write NextIFD (0)
+        ts.writeU32(newIfdOffset + 2 + entries.size() * 12, 0);
+
+        // Update Pointer to this IFD
+        if (subIfdsCount == 1) {
+            // Find the Tag 330 in IFD0 again and update its value
+             // This is slightly inefficient but safe.
+             for (int i=0; i<numEntries0; ++i) {
+                uint32_t entryOffset = ifd0Offset + 2 + i * 12;
+                uint16_t tag = ts.readU16(entryOffset);
+                if (tag == 330) {
+                     ts.writeU32(entryOffset + 8, newIfdOffset);
+                     break;
+                }
+             }
+        } else {
+             // Update the array
+             ts.writeU32(subIfdsOffset + k * 4, newIfdOffset);
+        }
+    }
+
+    env->ReleaseStringUTFChars(dngPath, path);
+    return 0;
 }

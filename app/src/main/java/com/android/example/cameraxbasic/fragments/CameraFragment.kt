@@ -905,6 +905,65 @@ class CameraFragment : Fragment() {
         val blackLevel = blackLevelPattern?.getOffsetForIndex(0,0) ?: 0
         val cfa = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_COLOR_FILTER_ARRANGEMENT) ?: 0
 
+        // Calculate Crop
+        val activeArray = chars.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE) ?: android.graphics.Rect(0, 0, image.width, image.height)
+        val scalerCrop = captureResult.get(android.hardware.camera2.CaptureResult.SCALER_CROP_REGION) ?: activeArray
+
+        // Map Scaler Crop (relative to active array) to Image Coordinates
+        // Assuming Image is the Active Array (or pre-correction).
+        // If Image is larger (e.g. includes optical black), we might need offset.
+        // Typically RAW buffers from Camera2 are the pixel array.
+        // We assume 0,0 of Image corresponds to 0,0 of ActiveArray for simplicity or use ActiveArray.left.
+        // Usually scalerCrop is within ActiveArray.
+
+        // Coordinates for DNG (Relative to Active Array)
+        var dngCropX = scalerCrop.left - activeArray.left
+        var dngCropY = scalerCrop.top - activeArray.top
+        var cropW = scalerCrop.width()
+        var cropH = scalerCrop.height()
+
+        // Coordinates for Physical Processing (Relative to Buffer)
+        var physCropX = dngCropX
+        var physCropY = dngCropY
+
+        // Check if buffer includes margins (Full Sensor)
+        if (image.width > activeArray.width() + 8) { // Tolerance
+             physCropX += activeArray.left
+             physCropY += activeArray.top
+        }
+
+        // Clamp & Align Physical
+        if (physCropX < 0) physCropX = 0
+        if (physCropY < 0) physCropY = 0
+        if (physCropX + cropW > image.width) cropW = image.width - physCropX
+        if (physCropY + cropH > image.height) cropH = image.height - physCropY
+
+        physCropX = physCropX and 1.inv()
+        physCropY = physCropY and 1.inv()
+        cropW = cropW and 1.inv()
+        cropH = cropH and 1.inv()
+
+        // Sync DNG crop with clamped Physical Crop (approx)
+        // We use the same Width/Height. Origin might differ by offset.
+        // dngCropX is for metadata, so strict clamping to image bounds isn't as critical as buffer access,
+        // but we should keep them consistent.
+        // If we shifted physCropX, we should shift dngCropX?
+        // Actually, dngCropX = physCropX - activeArray.left (if full).
+        if (image.width > activeArray.width() + 8) {
+            dngCropX = physCropX - activeArray.left
+            dngCropY = physCropY - activeArray.top
+        } else {
+            dngCropX = physCropX
+            dngCropY = physCropY
+        }
+
+        // Sanity
+        if (cropW <= 0 || cropH <= 0) {
+            physCropX = 0; physCropY = 0; dngCropX = 0; dngCropY = 0;
+            cropW = if (image.width > activeArray.width() + 8) activeArray.width() else image.width
+            cropH = if (image.height > activeArray.height() + 8) activeArray.height() else image.height
+        }
+
         val colorTransform = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_COLOR_TRANSFORM1)
             ?: chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_FORWARD_MATRIX1)
 
@@ -938,7 +997,8 @@ class CameraFragment : Fragment() {
             // Process to generate BMP/TIFF
             val result = ColorProcessor.processRaw(
                 directBuffer, image.width, image.height, packedStride, whiteLevel, blackLevel, cfa,
-                wb, ccm, targetLogIndex, nativeLutPath, tiffPath, bmpPath, useGpu
+                wb, ccm, targetLogIndex, nativeLutPath, tiffPath, bmpPath,
+                physCropX, physCropY, cropW, cropH, useGpu
             )
 
             if (result == 1) {
@@ -1001,24 +1061,58 @@ class CameraFragment : Fragment() {
                                 val inputStream = java.io.ByteArrayInputStream(image.data)
                                 dngCreatorReal.writeInputStream(out, android.util.Size(image.width, image.height), inputStream, 0)
                             }
-                            Log.d(TAG, "Saved DNG to $dngUri")
 
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                            // Patch DNG with Crop Metadata
+                            // We need the file path. content:// URI doesn't give direct path easily.
+                            // However, we can patch the pending file if we can access it.
+                            // Wait, opening as OutputStream truncates? No, we just wrote it.
+                            // To patch, we need Random Access (File).
+                            // MediaStore URIs are hard to random access via std::fstream unless we use a file descriptor.
+                            // But Android 10+ (scoped storage) restricts this.
+                            //
+                            // Alternative: Write to temp file first (like we did for TIFF), Patch it, then copy to URI.
+                            // The DNG writing above writes directly to dngUri.
+                            // I should change logic to write to temp file, patch, then copy.
+
+                            // IMPLEMENTATION CHANGE: Write to temp file first.
+                        } else {
+                            Log.e(TAG, "Failed to open OutputStream for $dngUri")
+                        }
+                    } catch (e: Exception) {
+                         Log.e(TAG, "Error writing DNG stream", e)
+                    }
+                }
+
+                // Temp file approach for DNG Patching
+                val tempDng = File(context.cacheDir, "$dngName.dng")
+                try {
+                     FileOutputStream(tempDng).use { out ->
+                         val inputStream = java.io.ByteArrayInputStream(image.data)
+                         dngCreatorReal.writeInputStream(out, android.util.Size(image.width, image.height), inputStream, 0)
+                     }
+
+                     // Patch
+                     ColorProcessor.patchDngMetadata(tempDng.absolutePath, dngCropX, dngCropY, cropW, cropH)
+
+                     // Copy to MediaStore
+                     if (dngUri != null) {
+                         contentResolver.openOutputStream(dngUri)?.use { out ->
+                             java.io.FileInputStream(tempDng).copyTo(out)
+                         }
+                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                                 dngValues.clear()
                                 dngValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
                                 contentResolver.update(dngUri, dngValues, null, null)
                             }
-                        } else {
-                            Log.e(TAG, "Failed to open OutputStream for $dngUri")
-                            contentResolver.delete(dngUri, null, null)
-                        }
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Error writing DNG to MediaStore", e)
-                        contentResolver.delete(dngUri, null, null)
-                    }
-                } else {
-                    Log.e(TAG, "Failed to create MediaStore entry for DNG")
+                         Log.d(TAG, "Saved Patched DNG to $dngUri")
+                     }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error processing DNG", e)
+                    if (dngUri != null) contentResolver.delete(dngUri, null, null)
+                } finally {
+                    if (tempDng.exists()) tempDng.delete()
                 }
+
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to save DNG", e)
             } finally {

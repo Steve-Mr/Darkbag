@@ -38,6 +38,18 @@ object ColorProcessor {
         lutPath: String?,
         outputTiffPath: String?,
         outputJpgPath: String?,
+        cropX: Int,
+        cropY: Int,
+        cropW: Int,
+        cropH: Int,
         useGpu: Boolean
+    ): Int
+
+    external fun patchDngMetadata(
+        dngPath: String,
+        cropX: Int,
+        cropY: Int,
+        cropW: Int,
+        cropH: Int
     ): Int
 }
