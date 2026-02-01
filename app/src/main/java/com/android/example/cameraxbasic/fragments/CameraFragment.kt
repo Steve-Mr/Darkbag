@@ -41,6 +41,7 @@ import android.hardware.camera2.CameraCharacteristics
 import com.google.android.material.slider.Slider
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.button.MaterialButtonToggleGroup
+import com.google.android.material.color.MaterialColors
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.updatePadding
@@ -754,11 +755,11 @@ class CameraFragment : Fragment() {
         cameraUiContainerBinding?.lutButton?.visibility = View.VISIBLE
         cameraUiContainerBinding?.lutButton?.setOnClickListener {
              // Toggle LUT List Visibility
-             val lutList = cameraUiContainerBinding?.lutList
-             if (lutList?.visibility == View.VISIBLE) {
-                 lutList.visibility = View.GONE
+             val lutListContainer = cameraUiContainerBinding?.lutListContainer
+             if (lutListContainer?.visibility == View.VISIBLE) {
+                 lutListContainer.visibility = View.GONE
              } else {
-                 lutList?.visibility = View.VISIBLE
+                 lutListContainer?.visibility = View.VISIBLE
                  refreshLutList()
              }
         }
@@ -1708,28 +1709,31 @@ class CameraFragment : Fragment() {
             val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
             val currentName = prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, null)
 
-            holder.text.setTextColor(Color.WHITE)
+            val colorOnSurface = MaterialColors.getColor(holder.itemView, com.google.android.material.R.attr.colorOnSurface)
+            val colorPrimary = MaterialColors.getColor(holder.itemView, com.google.android.material.R.attr.colorPrimary)
+
+            holder.text.setTextColor(colorOnSurface)
             holder.text.textSize = 12f
             holder.text.setPadding(10, 10, 10, 10)
 
             if (position == 0) {
                 holder.text.text = "None"
-                if (currentName == null) holder.text.setTextColor(Color.YELLOW)
+                if (currentName == null) holder.text.setTextColor(colorPrimary)
                 holder.itemView.setOnClickListener {
                     prefs.edit().remove(SettingsFragment.KEY_ACTIVE_LUT).apply()
                     updateLiveLut()
                     notifyDataSetChanged()
-                    cameraUiContainerBinding?.lutList?.visibility = View.GONE
+                    cameraUiContainerBinding?.lutListContainer?.visibility = View.GONE
                 }
             } else {
                 val file = luts[position - 1]
                 holder.text.text = file.nameWithoutExtension
-                if (currentName == file.name) holder.text.setTextColor(Color.YELLOW)
+                if (currentName == file.name) holder.text.setTextColor(colorPrimary)
                 holder.itemView.setOnClickListener {
                     prefs.edit().putString(SettingsFragment.KEY_ACTIVE_LUT, file.name).apply()
                     updateLiveLut()
                     notifyDataSetChanged()
-                    cameraUiContainerBinding?.lutList?.visibility = View.GONE
+                    cameraUiContainerBinding?.lutListContainer?.visibility = View.GONE
                 }
             }
         }

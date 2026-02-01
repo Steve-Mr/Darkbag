@@ -8,7 +8,6 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.EditText
@@ -23,6 +22,7 @@ import androidx.recyclerview.widget.RecyclerView
 import com.android.example.cameraxbasic.R
 import com.android.example.cameraxbasic.databinding.FragmentSettingsBinding
 import com.android.example.cameraxbasic.utils.LutManager
+import com.google.android.material.color.MaterialColors
 import java.io.File
 
 class SettingsFragment : Fragment() {
@@ -56,9 +56,7 @@ class SettingsFragment : Fragment() {
         prefs = requireContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         lutManager = LutManager(requireContext())
 
-        setupSpinner()
-        setupFocalLengthSpinner()
-        setupAntibandingSpinner()
+        setupMenus()
         setupLutList()
         setupCheckboxes()
 
@@ -77,7 +75,10 @@ class SettingsFragment : Fragment() {
             lutPicker.launch(arrayOf("*/*"))
         }
 
-        binding.switchLivePreview.visibility = View.GONE
+        binding.switchLivePreview.isChecked = prefs.getBoolean(KEY_ENABLE_LUT_PREVIEW, true)
+        binding.switchLivePreview.setOnCheckedChangeListener { _, isChecked ->
+             prefs.edit().putBoolean(KEY_ENABLE_LUT_PREVIEW, isChecked).apply()
+        }
     }
 
     private fun updateLutList() {
@@ -86,63 +87,32 @@ class SettingsFragment : Fragment() {
         lutAdapter.submitList(luts, activeLut)
     }
 
-    private fun setupSpinner() {
-        val adapter = ArrayAdapter(requireContext(), android.R.layout.simple_spinner_item, LOG_CURVES)
-        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-        binding.spinnerTargetLog.adapter = adapter
-
+    private fun setupMenus() {
+        // Target Log Curve
+        val logAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, LOG_CURVES)
+        binding.menuTargetLog.setAdapter(logAdapter)
         val savedLog = prefs.getString(KEY_TARGET_LOG, "None")
-        val position = LOG_CURVES.indexOf(savedLog)
-        if (position >= 0) {
-            binding.spinnerTargetLog.setSelection(position)
+        binding.menuTargetLog.setText(savedLog, false)
+        binding.menuTargetLog.setOnItemClickListener { _, _, position, _ ->
+            prefs.edit().putString(KEY_TARGET_LOG, LOG_CURVES[position]).apply()
         }
 
-        binding.spinnerTargetLog.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                prefs.edit().putString(KEY_TARGET_LOG, LOG_CURVES[position]).apply()
-            }
-            override fun onNothingSelected(parent: AdapterView<*>?) {}
-        }
-    }
-
-    private fun setupFocalLengthSpinner() {
-        val adapter = ArrayAdapter(requireContext(), android.R.layout.simple_spinner_item, FOCAL_LENGTHS)
-        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-        binding.spinnerDefaultFocalLength.adapter = adapter
-
-        // Stored as String "24", "28", "35"
-        val savedFocalLength = prefs.getString(KEY_DEFAULT_FOCAL_LENGTH, "24")
-        val position = FOCAL_LENGTHS.indexOf(savedFocalLength)
-        if (position >= 0) {
-            binding.spinnerDefaultFocalLength.setSelection(position)
+        // Default Focal Length
+        val focalAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, FOCAL_LENGTHS)
+        binding.menuDefaultFocalLength.setAdapter(focalAdapter)
+        val savedFocal = prefs.getString(KEY_DEFAULT_FOCAL_LENGTH, "24")
+        binding.menuDefaultFocalLength.setText(savedFocal, false)
+        binding.menuDefaultFocalLength.setOnItemClickListener { _, _, position, _ ->
+            prefs.edit().putString(KEY_DEFAULT_FOCAL_LENGTH, FOCAL_LENGTHS[position]).apply()
         }
 
-        binding.spinnerDefaultFocalLength.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                prefs.edit().putString(KEY_DEFAULT_FOCAL_LENGTH, FOCAL_LENGTHS[position]).apply()
-            }
-
-            override fun onNothingSelected(parent: AdapterView<*>?) {}
-        }
-    }
-
-    private fun setupAntibandingSpinner() {
-        val adapter = ArrayAdapter(requireContext(), android.R.layout.simple_spinner_item, ANTIBANDING_MODES)
-        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-        binding.spinnerAntibanding.adapter = adapter
-
-        val savedMode = prefs.getString(KEY_ANTIBANDING, "Auto")
-        val position = ANTIBANDING_MODES.indexOf(savedMode)
-        if (position >= 0) {
-            binding.spinnerAntibanding.setSelection(position)
-        }
-
-        binding.spinnerAntibanding.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                prefs.edit().putString(KEY_ANTIBANDING, ANTIBANDING_MODES[position]).apply()
-            }
-
-            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        // Antibanding
+        val antibandingAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, ANTIBANDING_MODES)
+        binding.menuAntibanding.setAdapter(antibandingAdapter)
+        val savedAntibanding = prefs.getString(KEY_ANTIBANDING, "Auto")
+        binding.menuAntibanding.setText(savedAntibanding, false)
+        binding.menuAntibanding.setOnItemClickListener { _, _, position, _ ->
+            prefs.edit().putString(KEY_ANTIBANDING, ANTIBANDING_MODES[position]).apply()
         }
     }
 
@@ -197,13 +167,11 @@ class SettingsFragment : Fragment() {
 
             val isActive = file.name == activeLutName
             if (isActive) {
-                // Use a theme color or a standard material color
-                val typedValue = android.util.TypedValue()
-                val theme = holder.itemView.context.theme
-                theme.resolveAttribute(android.R.attr.colorPrimary, typedValue, true)
-                holder.tvName.setTextColor(typedValue.data)
+                val colorPrimary = MaterialColors.getColor(holder.itemView, androidx.appcompat.R.attr.colorPrimary)
+                holder.tvName.setTextColor(colorPrimary)
             } else {
-                holder.tvName.setTextColor(ContextCompat.getColor(requireContext(), android.R.color.white))
+                val colorOnSurface = MaterialColors.getColor(holder.itemView, com.google.android.material.R.attr.colorOnSurface)
+                holder.tvName.setTextColor(colorOnSurface)
             }
 
             holder.itemView.setOnClickListener {
@@ -275,8 +243,8 @@ class SettingsFragment : Fragment() {
     companion object {
         const val PREFS_NAME = "camera_settings"
         const val KEY_TARGET_LOG = "target_log"
-        const val KEY_LUT_URI = "lut_uri" // Legacy, keeping to avoid errors if referenced elsewhere
-        const val KEY_ACTIVE_LUT = "active_lut_filename" // New key for filename
+        const val KEY_LUT_URI = "lut_uri"
+        const val KEY_ACTIVE_LUT = "active_lut_filename"
         const val KEY_SAVE_TIFF = "save_tiff"
         const val KEY_SAVE_JPG = "save_jpg"
         const val KEY_USE_GPU = "use_gpu"
