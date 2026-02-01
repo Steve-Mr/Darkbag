@@ -92,9 +92,9 @@ class LutSurfaceProcessor : SurfaceProcessor {
             request.provideSurface(surface, executor) { result ->
                 // Clean up ONLY the resources created for THIS request
                 surface.release()
-                surfaceTexture.release()
 
                 handler.post {
+                    surfaceTexture.release()
                     GLES30.glDeleteTextures(1, intArrayOf(textureId), 0)
 
                     // Only clear the member variables if they still point to this request's resources
