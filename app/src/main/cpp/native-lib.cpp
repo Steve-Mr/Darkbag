@@ -80,9 +80,11 @@ const float* get_color_matrix(int logType) {
     switch (logType) {
         case 0: return XYZ_TO_SRGB;       // None -> Standard sRGB
         case 1: return XYZ_TO_AWG;        // Arri LogC3
-        case 2: return XYZ_TO_REC2020;    // F-Log
-        case 3: return XYZ_TO_REC2020;    // F-Log2
-        case 4: return XYZ_TO_REC2020;    // F-Log2 C (Assumed)
+        // Use sRGB for F-Log/F-Log2 to match Preview pipeline (which is sRGB based)
+        // and prevent gamut mismatch when using LUTs designed for sRGB/Preview.
+        case 2: return XYZ_TO_SRGB;       // F-Log (Modified from Rec2020)
+        case 3: return XYZ_TO_SRGB;       // F-Log2 (Modified from Rec2020)
+        case 4: return XYZ_TO_SRGB;       // F-Log2 C (Modified from Rec2020)
         case 5: return XYZ_TO_SGAMUT3;    // S-Log3
         case 6: return XYZ_TO_SGAMUT3_CINE; // S-Log3.Cine
         case 7: return XYZ_TO_VGAMUT;     // V-Log
