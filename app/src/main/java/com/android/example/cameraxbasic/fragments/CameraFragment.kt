@@ -41,6 +41,8 @@ import android.hardware.camera2.CameraCharacteristics
 import com.google.android.material.slider.Slider
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.button.MaterialButtonToggleGroup
+import kotlin.math.max
+import kotlin.math.min
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.updatePadding
@@ -1103,52 +1105,18 @@ class CameraFragment : Fragment() {
 
         val finalCcm: FloatArray
 
+        // We need to track if we used ForwardMatrix (Native) or ColorMatrix (Balanced)
+        var isDerivedFromForwardMatrix = false
+
         if (fm1 != null && fm2 != null) {
+             isDerivedFromForwardMatrix = true
              // Dual Illuminant Interpolation
-             // 1. Calculate Standard Gains for Interpolation (Approximate)
-             // Since we don't have the actual calibration gains easily without calculation, we estimate:
-             // Ref1 (Tungsten) -> Low Temp -> High R gain, Low B gain
-             // Ref2 (Daylight) -> High Temp -> Low R gain, High B gain
-             // We use a simplified projection based on current WB gains.
-
-             // Define proxy gains for Tungsten (approx 2850K) and Daylight (approx 5500K-6500K)
-             // Typically R/B ratio: Tungsten ~ 2.5, Daylight ~ 0.8
-             // Gains (1/Neutral): Tungsten -> R=1.0, B=2.5? No.
-             // Tungsten Light is Reddish. Sensor sees lots of Red.
-             // Neutral Point (Sensor response to white) has High Red, Low Blue.
-             // Gains (multiplier to make it white) -> Low Red Gain, High Blue Gain.
-             // Wait:
-             // Tungsten (Red heavy): Sensor R is high. Gain R is LOW. Sensor B is low. Gain B is HIGH.
-             // Daylight (Blue heavy): Sensor R is low. Gain R is HIGH. Sensor B is high. Gain B is LOW.
-
-             // Let's use approximate proxy gains if we can't derive them.
-             // Better approach: Just assume bounds.
-             // But ColorUtils.calculateInterpolationWeight expects reference gains.
-
-             // Let's use hardcoded typical gains for weighting if we can't find calibration data.
-             // Or simpler: Use CCT approximation logic.
-             // R gain / B gain ratio.
-             // Tungsten: GainR < GainB. Ratio < 1.
-             // Daylight: GainR > GainB. Ratio > 1.
-
-             // Let's rely on ColorUtils.calculateInterpolationWeight with "typical" reference values
-             // to get a 't' factor.
-
              // Gains: [R, G, B] (Assuming G=1 normalized)
              val gNorm = (wb[1] + wb[2]) / 2.0f
              val rNorm = wb[0] / gNorm
              val bNorm = wb[3] / gNorm
 
-             // Note: Silicon is sensitive to IR/Red.
-             // Daylight: R is weak? Silicon is usually R sensitive.
-             // Actually, usually R gain is > 1.0 and B gain is > 1.0.
-
-             // Let's use a simpler "Ratio" interpolation for robustness.
-             // t = (Ratio - RatioTungsten) / (RatioDaylight - RatioTungsten)
-             // Ratio = B_gain / R_gain.
-             // Tungsten: B_gain >> R_gain (e.g. 2.5 / 1.0 = 2.5)
-             // Daylight: B_gain ~ R_gain (e.g. 1.5 / 2.0 = 0.75)
-
+             // Interpolation logic based on ratio of Blue/Red gain
              val ratio = bNorm / rNorm
              val ratioTungsten = 2.5f
              val ratioDaylight = 0.8f
@@ -1158,7 +1126,7 @@ class CameraFragment : Fragment() {
 
              Log.d(TAG, "Interpolation: Ratio=$ratio, Weight=$weight (0=Tungsten, 1=Daylight)")
 
-             // Interpolate Forward Matrices
+             // Interpolate Forward Matrices (XYZ -> Sensor Native)
              val fmInterp = ColorUtils.interpolateMatrices(fm1, fm2, weight)
 
              // Interpolate Calibration Matrices (if available, else Identity)
