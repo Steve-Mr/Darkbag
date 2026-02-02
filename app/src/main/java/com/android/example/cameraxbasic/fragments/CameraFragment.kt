@@ -1026,7 +1026,18 @@ class CameraFragment : Fragment() {
 
         val whiteLevel = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_WHITE_LEVEL) ?: 1023
         val blackLevelPattern = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_BLACK_LEVEL_PATTERN)
-        val blackLevel = blackLevelPattern?.getOffsetForIndex(0,0) ?: 0
+
+        // Calculate average black level to mitigate per-channel variance
+        val blackLevel = if (blackLevelPattern != null) {
+            val b0 = blackLevelPattern.getOffsetForIndex(0, 0)
+            val b1 = blackLevelPattern.getOffsetForIndex(1, 0)
+            val b2 = blackLevelPattern.getOffsetForIndex(0, 1)
+            val b3 = blackLevelPattern.getOffsetForIndex(1, 1)
+            (b0 + b1 + b2 + b3) / 4
+        } else {
+            0
+        }
+
         val cfa = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_COLOR_FILTER_ARRANGEMENT) ?: 0
 
         val colorTransform = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_COLOR_TRANSFORM1)
@@ -1045,7 +1056,18 @@ class CameraFragment : Fragment() {
             ccm[0]=1f; ccm[4]=1f; ccm[8]=1f;
         }
 
+        // Logging CCM
+        Log.d(TAG, "CCM: ${ccm.joinToString(", ")}")
+
         val neutral = captureResult.get(android.hardware.camera2.CaptureResult.SENSOR_NEUTRAL_COLOR_POINT) as? RggbChannelVector
+
+        // Logging Neutral
+        if (neutral != null) {
+            Log.d(TAG, "Neutral Point: R=${neutral.red}, Ge=${neutral.greenEven}, Go=${neutral.greenOdd}, B=${neutral.blue}")
+        } else {
+            Log.w(TAG, "Neutral Point is NULL, using fallback WB")
+        }
+
         val wb = if (neutral != null) {
             val rVal = neutral.red
             val gEvenVal = neutral.greenEven
