@@ -1027,15 +1027,16 @@ class CameraFragment : Fragment() {
         val whiteLevel = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_WHITE_LEVEL) ?: 1023
         val blackLevelPattern = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_BLACK_LEVEL_PATTERN)
 
-        // Calculate average black level to mitigate per-channel variance
-        val blackLevel = if (blackLevelPattern != null) {
-            val b0 = blackLevelPattern.getOffsetForIndex(0, 0)
-            val b1 = blackLevelPattern.getOffsetForIndex(1, 0)
-            val b2 = blackLevelPattern.getOffsetForIndex(0, 1)
-            val b3 = blackLevelPattern.getOffsetForIndex(1, 1)
-            (b0 + b1 + b2 + b3) / 4
+        // Pass full black level pattern to handle per-channel variance
+        val blackLevels = if (blackLevelPattern != null) {
+            floatArrayOf(
+                blackLevelPattern.getOffsetForIndex(0, 0).toFloat(),
+                blackLevelPattern.getOffsetForIndex(1, 0).toFloat(),
+                blackLevelPattern.getOffsetForIndex(0, 1).toFloat(),
+                blackLevelPattern.getOffsetForIndex(1, 1).toFloat()
+            )
         } else {
-            0
+            floatArrayOf(0f, 0f, 0f, 0f)
         }
 
         val cfa = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_COLOR_FILTER_ARRANGEMENT) ?: 0
@@ -1079,13 +1080,13 @@ class CameraFragment : Fragment() {
             val b = if (bVal > 0) 1.0f / bVal else 1.0f
             floatArrayOf(r, g, g, b)
         } else {
-            floatArrayOf(2.0f, 1.0f, 1.0f, 2.0f)
+            floatArrayOf(1.5f, 1.0f, 1.0f, 1.5f)
         }
 
         try {
             // Process to generate BMP/TIFF
             val result = ColorProcessor.processRaw(
-                directBuffer, image.width, image.height, packedStride, whiteLevel, blackLevel, cfa,
+                directBuffer, image.width, image.height, packedStride, whiteLevel, blackLevels, cfa,
                 wb, ccm, targetLogIndex, nativeLutPath, tiffPath, bmpPath, useGpu
             )
 

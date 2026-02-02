@@ -13,7 +13,7 @@ object ColorProcessor {
      * @param height Image height.
      * @param stride Row stride in bytes.
      * @param whiteLevel Sensor white level.
-     * @param blackLevel Sensor black level (average).
+     * @param blackLevels Sensor black level pattern [0,0, 1,0, 0,1, 1,1] corresponding to 2x2 block.
      * @param cfaPattern 0=RGGB, 1=GRBG, 2=GBRG, 3=BGGR.
      * @param wbGains White balance gains [R, G_even, G_odd, B].
      * @param ccm Color Correction Matrix (3x3) transforming CameraRGB to XYZ.
@@ -30,7 +30,7 @@ object ColorProcessor {
         height: Int,
         stride: Int,
         whiteLevel: Int,
-        blackLevel: Int,
+        blackLevels: FloatArray,
         cfaPattern: Int,
         wbGains: FloatArray,
         ccm: FloatArray,

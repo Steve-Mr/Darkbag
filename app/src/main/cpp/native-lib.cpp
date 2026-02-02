@@ -350,7 +350,7 @@ void calculateCombinedMatrix(const float* ccm, const float* wb, const float* xyz
 // --- CPU Processing ---
 bool processCpu(
     uint16_t* rawData, int width, int height, int stride,
-    int whiteLevel, int blackLevel, int cfaPattern,
+    int whiteLevel, float* blackLevels, int cfaPattern,
     float* wb, float* combinedMat, int targetLog, const LUT3D& lut,
     std::vector<unsigned short>& outputImage
 ) {
@@ -362,6 +362,14 @@ bool processCpu(
 
     int stride_pixels = stride / 2;
 
+    // Helper lambda to fetch and normalize
+    auto fetch_norm = [&](int px, int py) -> float {
+         float v = (float)rawData[py * stride_pixels + px];
+         int idx = (px & 1) + ((py & 1) << 1);
+         float bl = blackLevels[idx];
+         return std::max(0.0f, (v - bl) / (whiteLevel - bl));
+    };
+
     #pragma omp parallel for
     for (int y = 0; y < height - 1; y++) {
         for (int x = 0; x < width - 1; x++) {
@@ -370,50 +378,47 @@ bool processCpu(
             bool is_b = ((x & 1) == b_x) && ((y & 1) == b_y);
             bool is_g = !is_r && !is_b;
 
-            float val = (float)rawData[y * stride_pixels + x];
+            float val = fetch_norm(x, y);
 
             if (is_g) {
                 g = val;
                 float r_sum = 0, b_sum = 0; int r_cnt = 0, b_cnt = 0;
-                if (x>0) { float v = rawData[y * stride_pixels + (x-1)]; if (((x-1)&1)==r_x) { r_sum+=v; r_cnt++; } else { b_sum+=v; b_cnt++; } }
-                if (x<width-1) { float v = rawData[y * stride_pixels + (x+1)]; if (((x+1)&1)==r_x) { r_sum+=v; r_cnt++; } else { b_sum+=v; b_cnt++; } }
-                if (y>0) { float v = rawData[(y-1) * stride_pixels + x]; if (((y-1)&1)==r_y) { r_sum+=v; r_cnt++; } else { b_sum+=v; b_cnt++; } }
-                if (y<height-1) { float v = rawData[(y+1) * stride_pixels + x]; if (((y+1)&1)==r_y) { r_sum+=v; r_cnt++; } else { b_sum+=v; b_cnt++; } }
+                if (x>0) { float v = fetch_norm(x-1, y); if (((x-1)&1)==r_x) { r_sum+=v; r_cnt++; } else { b_sum+=v; b_cnt++; } }
+                if (x<width-1) { float v = fetch_norm(x+1, y); if (((x+1)&1)==r_x) { r_sum+=v; r_cnt++; } else { b_sum+=v; b_cnt++; } }
+                if (y>0) { float v = fetch_norm(x, y-1); if (((y-1)&1)==r_y) { r_sum+=v; r_cnt++; } else { b_sum+=v; b_cnt++; } }
+                if (y<height-1) { float v = fetch_norm(x, y+1); if (((y+1)&1)==r_y) { r_sum+=v; r_cnt++; } else { b_sum+=v; b_cnt++; } }
                 r = (r_cnt > 0) ? r_sum / r_cnt : 0;
                 b = (b_cnt > 0) ? b_sum / b_cnt : 0;
             } else if (is_r) {
                 r = val;
                 float g_sum = 0, b_sum = 0; int g_cnt = 0, b_cnt = 0;
-                // Simplified bilinear for brevity
-                if (x>0) { g_sum += rawData[y*stride_pixels+x-1]; g_cnt++; }
-                if (x<width-1) { g_sum += rawData[y*stride_pixels+x+1]; g_cnt++; }
-                if (y>0) { g_sum += rawData[(y-1)*stride_pixels+x]; g_cnt++; }
-                if (y<height-1) { g_sum += rawData[(y+1)*stride_pixels+x]; g_cnt++; }
-                if (x>0 && y>0) { b_sum += rawData[(y-1)*stride_pixels+x-1]; b_cnt++; }
-                if (x<width-1 && y>0) { b_sum += rawData[(y-1)*stride_pixels+x+1]; b_cnt++; }
-                if (x>0 && y<height-1) { b_sum += rawData[(y+1)*stride_pixels+x-1]; b_cnt++; }
-                if (x<width-1 && y<height-1) { b_sum += rawData[(y+1)*stride_pixels+x+1]; b_cnt++; }
+                // Simplified bilinear
+                if (x>0) { g_sum += fetch_norm(x-1, y); g_cnt++; }
+                if (x<width-1) { g_sum += fetch_norm(x+1, y); g_cnt++; }
+                if (y>0) { g_sum += fetch_norm(x, y-1); g_cnt++; }
+                if (y<height-1) { g_sum += fetch_norm(x, y+1); g_cnt++; }
+                if (x>0 && y>0) { b_sum += fetch_norm(x-1, y-1); b_cnt++; }
+                if (x<width-1 && y>0) { b_sum += fetch_norm(x+1, y-1); b_cnt++; }
+                if (x>0 && y<height-1) { b_sum += fetch_norm(x-1, y+1); b_cnt++; }
+                if (x<width-1 && y<height-1) { b_sum += fetch_norm(x+1, y+1); b_cnt++; }
                 g = (g_cnt>0) ? g_sum/g_cnt : 0;
                 b = (b_cnt>0) ? b_sum/b_cnt : 0;
             } else { // is_b
                 b = val;
                 float g_sum = 0, r_sum = 0; int g_cnt = 0, r_cnt = 0;
-                if (x>0) { g_sum += rawData[y*stride_pixels+x-1]; g_cnt++; }
-                if (x<width-1) { g_sum += rawData[y*stride_pixels+x+1]; g_cnt++; }
-                if (y>0) { g_sum += rawData[(y-1)*stride_pixels+x]; g_cnt++; }
-                if (y<height-1) { g_sum += rawData[(y+1)*stride_pixels+x]; g_cnt++; }
-                if (x>0 && y>0) { r_sum += rawData[(y-1)*stride_pixels+x-1]; r_cnt++; }
-                if (x<width-1 && y>0) { r_sum += rawData[(y-1)*stride_pixels+x+1]; r_cnt++; }
-                if (x>0 && y<height-1) { r_sum += rawData[(y+1)*stride_pixels+x-1]; r_cnt++; }
-                if (x<width-1 && y<height-1) { r_sum += rawData[(y+1)*stride_pixels+x+1]; r_cnt++; }
+                if (x>0) { g_sum += fetch_norm(x-1, y); g_cnt++; }
+                if (x<width-1) { g_sum += fetch_norm(x+1, y); g_cnt++; }
+                if (y>0) { g_sum += fetch_norm(x, y-1); g_cnt++; }
+                if (y<height-1) { g_sum += fetch_norm(x, y+1); g_cnt++; }
+                if (x>0 && y>0) { r_sum += fetch_norm(x-1, y-1); r_cnt++; }
+                if (x<width-1 && y>0) { r_sum += fetch_norm(x+1, y-1); r_cnt++; }
+                if (x>0 && y<height-1) { r_sum += fetch_norm(x-1, y+1); r_cnt++; }
+                if (x<width-1 && y<height-1) { r_sum += fetch_norm(x+1, y+1); r_cnt++; }
                 g = (g_cnt>0) ? g_sum/g_cnt : 0;
                 r = (r_cnt>0) ? r_sum/r_cnt : 0;
             }
 
-            float range = (float)(whiteLevel - blackLevel);
-            r = std::max(0.0f, (r - blackLevel) / range);
-            g = std::max(0.0f, (g - blackLevel) / range);
-            b = std::max(0.0f, (b - blackLevel) / range);
+            // Normalization already done in fetch_norm
 
             float g_gain = (wb[1] + wb[2]) / 2.0f;
             r *= wb[0]; g *= g_gain; b *= wb[3];
@@ -448,7 +453,7 @@ uniform mediump sampler3D uLut;
 
 uniform int uWidth;
 uniform int uHeight;
-uniform float uBlackLevel;
+uniform vec4 uBlackLevels;
 uniform float uWhiteLevel;
 uniform int uCfaPattern;
 uniform vec4 uWbGains; // R, G_even, G_odd, B
@@ -508,11 +513,19 @@ float apply_log(float x, int type) {
     return pow(x, 1.0/2.2);
 }
 
+float fetch_norm(ivec2 p) {
+    if (p.x < 0 || p.x >= uWidth || p.y < 0 || p.y >= uHeight) return 0.0;
+    float v = float(texelFetch(uInput, p, 0).r);
+    int idx = (p.x & 1) + ((p.y & 1) * 2);
+    float bl = uBlackLevels[idx];
+    return max(0.0, (v - bl) / (uWhiteLevel - bl));
+}
+
 void main() {
     ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
     if (pos.x >= uWidth || pos.y >= uHeight) return;
 
-    // Bayer Decode (Simplified)
+    // Bayer Decode
     int x = pos.x;
     int y = pos.y;
     int r_x, r_y, b_x, b_y;
@@ -525,12 +538,8 @@ void main() {
     bool is_b = ((x & 1) == b_x) && ((y & 1) == b_y);
     bool is_g = !is_r && !is_b;
 
-    float val = float(texelFetch(uInput, pos, 0).r);
+    float val = fetch_norm(pos);
     float r = 0.0, g = 0.0, b = 0.0;
-
-    // (Bilinear Interpolation Logic omitted for brevity, keeping existing structure)
-    // For simplicity in this replacement, I'll copy the previous logic exactly
-    // but formatted for this string.
 
     if (is_g) {
         g = val;
@@ -541,7 +550,7 @@ void main() {
         coords[2] = ivec2(x, y-1); coords[3] = ivec2(x, y+1);
         for (int i=0; i<4; i++) {
             if (coords[i].x >= 0 && coords[i].x < uWidth && coords[i].y >= 0 && coords[i].y < uHeight) {
-                float v = float(texelFetch(uInput, coords[i], 0).r);
+                float v = fetch_norm(coords[i]);
                 bool n_is_r = ((coords[i].x & 1) == r_x) && ((coords[i].y & 1) == r_y);
                 if (n_is_r) { r_sum += v; r_cnt++; } else { b_sum += v; b_cnt++; }
             }
@@ -557,7 +566,7 @@ void main() {
         c_cross[2] = ivec2(x, y-1); c_cross[3] = ivec2(x, y+1);
         for(int i=0; i<4; i++) {
              if (c_cross[i].x >= 0 && c_cross[i].x < uWidth && c_cross[i].y >= 0 && c_cross[i].y < uHeight) {
-                 g_sum += float(texelFetch(uInput, c_cross[i], 0).r); g_cnt++;
+                 g_sum += fetch_norm(c_cross[i]); g_cnt++;
              }
         }
         ivec2 c_diag[4];
@@ -565,7 +574,7 @@ void main() {
         c_diag[2] = ivec2(x-1, y+1); c_diag[3] = ivec2(x+1, y+1);
         for(int i=0; i<4; i++) {
              if (c_diag[i].x >= 0 && c_diag[i].x < uWidth && c_diag[i].y >= 0 && c_diag[i].y < uHeight) {
-                 b_sum += float(texelFetch(uInput, c_diag[i], 0).r); b_cnt++;
+                 b_sum += fetch_norm(c_diag[i]); b_cnt++;
              }
         }
         g = (g_cnt > 0) ? g_sum / float(g_cnt) : 0.0;
@@ -579,7 +588,7 @@ void main() {
         c_cross[2] = ivec2(x, y-1); c_cross[3] = ivec2(x, y+1);
         for(int i=0; i<4; i++) {
              if (c_cross[i].x >= 0 && c_cross[i].x < uWidth && c_cross[i].y >= 0 && c_cross[i].y < uHeight) {
-                 g_sum += float(texelFetch(uInput, c_cross[i], 0).r); g_cnt++;
+                 g_sum += fetch_norm(c_cross[i]); g_cnt++;
              }
         }
         ivec2 c_diag[4];
@@ -587,17 +596,14 @@ void main() {
         c_diag[2] = ivec2(x-1, y+1); c_diag[3] = ivec2(x+1, y+1);
         for(int i=0; i<4; i++) {
              if (c_diag[i].x >= 0 && c_diag[i].x < uWidth && c_diag[i].y >= 0 && c_diag[i].y < uHeight) {
-                 r_sum += float(texelFetch(uInput, c_diag[i], 0).r); r_cnt++;
+                 r_sum += fetch_norm(c_diag[i]); r_cnt++;
              }
         }
         g = (g_cnt > 0) ? g_sum / float(g_cnt) : 0.0;
         r = (r_cnt > 0) ? r_sum / float(r_cnt) : 0.0;
     }
 
-    float range = uWhiteLevel - uBlackLevel;
-    r = max(0.0, (r - uBlackLevel) / range);
-    g = max(0.0, (g - uBlackLevel) / range);
-    b = max(0.0, (b - uBlackLevel) / range);
+    // Normalization already done in fetch_norm
 
     float g_gain = (uWbGains.y + uWbGains.z) * 0.5;
     r *= uWbGains.x;
@@ -646,13 +652,10 @@ GLuint createShader(GLenum type, const char* src) {
 
 bool processGpu(
     uint16_t* rawData, int width, int height, int stride,
-    int whiteLevel, int blackLevel, int cfaPattern,
+    int whiteLevel, float* blackLevels, int cfaPattern,
     float* wb, float* combinedMat, int targetLog, const LUT3D& lut,
     std::vector<unsigned short>& outputImage
 ) {
-    // (Existing EGL/GL setup code same as before, truncated for brevity implies I should keep it.)
-    // Since I am replacing the whole file, I MUST include the implementation.
-
     EGLDisplay display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
     if (display == EGL_NO_DISPLAY) { LOGE("EGL no display"); return false; }
     EGLint major, minor;
@@ -747,7 +750,7 @@ bool processGpu(
     glUniform1i(glGetUniformLocation(program, "uWidth"), width);
     glUniform1i(glGetUniformLocation(program, "uHeight"), height);
     glUniform1f(glGetUniformLocation(program, "uWhiteLevel"), (float)whiteLevel);
-    glUniform1f(glGetUniformLocation(program, "uBlackLevel"), (float)blackLevel);
+    glUniform4fv(glGetUniformLocation(program, "uBlackLevels"), 1, blackLevels);
     glUniform1i(glGetUniformLocation(program, "uCfaPattern"), cfaPattern);
     glUniform4f(glGetUniformLocation(program, "uWbGains"), wb[0], wb[1], wb[2], wb[3]);
     glUniformMatrix3fv(glGetUniformLocation(program, "uCombinedMat"), 1, GL_TRUE, combinedMat);
@@ -810,7 +813,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processRaw(
         jint height,
         jint stride,
         jint whiteLevel,
-        jint blackLevel,
+        jfloatArray blackLevels,
         jint cfaPattern,
         jfloatArray wbGains,
         jfloatArray ccm,
@@ -827,9 +830,12 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processRaw(
 
     float* wb = env->GetFloatArrayElements(wbGains, 0);
     float* colorMat = env->GetFloatArrayElements(ccm, 0);
-    if (!wb || !colorMat) {
+    float* bl = env->GetFloatArrayElements(blackLevels, 0);
+
+    if (!wb || !colorMat || !bl) {
          if (wb) env->ReleaseFloatArrayElements(wbGains, wb, 0);
          if (colorMat) env->ReleaseFloatArrayElements(ccm, colorMat, 0);
+         if (bl) env->ReleaseFloatArrayElements(blackLevels, bl, 0);
          return -1;
     }
 
@@ -852,14 +858,14 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processRaw(
     int result = 0;
 
     if (useGpu) {
-        bool success = processGpu(rawData, width, height, stride, whiteLevel, blackLevel, cfaPattern, wb, combinedMat, targetLog, lut, outputImage);
+        bool success = processGpu(rawData, width, height, stride, whiteLevel, bl, cfaPattern, wb, combinedMat, targetLog, lut, outputImage);
         if (!success) {
             LOGE("GPU processing failed, falling back to CPU");
             result = 1;
-            processCpu(rawData, width, height, stride, whiteLevel, blackLevel, cfaPattern, wb, combinedMat, targetLog, lut, outputImage);
+            processCpu(rawData, width, height, stride, whiteLevel, bl, cfaPattern, wb, combinedMat, targetLog, lut, outputImage);
         }
     } else {
-        processCpu(rawData, width, height, stride, whiteLevel, blackLevel, cfaPattern, wb, combinedMat, targetLog, lut, outputImage);
+        processCpu(rawData, width, height, stride, whiteLevel, bl, cfaPattern, wb, combinedMat, targetLog, lut, outputImage);
         result = 0;
     }
 
@@ -872,6 +878,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processRaw(
 
     env->ReleaseFloatArrayElements(wbGains, wb, 0);
     env->ReleaseFloatArrayElements(ccm, colorMat, 0);
+    env->ReleaseFloatArrayElements(blackLevels, bl, 0);
     if (lutPath) env->ReleaseStringUTFChars(lutPath, lut_path_cstr);
     if (outputTiffPath) env->ReleaseStringUTFChars(outputTiffPath, tiff_path_cstr);
     if (outputJpgPath) env->ReleaseStringUTFChars(outputJpgPath, jpg_path_cstr);
