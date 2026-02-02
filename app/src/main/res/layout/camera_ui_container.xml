@@ -7,6 +7,19 @@
     android:layout_height="match_parent"
     android:layoutDirection="ltr">
 
+    <!-- Transparent Touch Overlay for dismissing menus -->
+    <View
+        android:id="@+id/touch_overlay"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:clickable="true"
+        android:focusable="true"
+        android:visibility="gone"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toTopOf="@id/manual_controls_root"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
     <!-- Top Controls -->
     <com.google.android.material.button.MaterialButton
         android:id="@+id/lut_button"
@@ -124,7 +137,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:gravity="center"
-                app:selectionRequired="true"
+                app:selectionRequired="false"
                 app:singleSelection="true">
 
                 <com.google.android.material.button.MaterialButton
@@ -237,6 +250,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_margin="@dimen/margin_medium"
+        android:alpha="0.9"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent">
@@ -244,7 +258,7 @@
         <androidx.constraintlayout.widget.ConstraintLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:paddingVertical="@dimen/padding_medium"
+            android:paddingVertical="@dimen/padding_small"
             android:paddingHorizontal="@dimen/padding_large">
 
             <ImageButton

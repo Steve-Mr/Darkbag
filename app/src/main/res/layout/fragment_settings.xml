@@ -7,27 +7,33 @@
     android:background="?attr/colorSurface"
     android:fitsSystemWindows="true">
 
+    <com.google.android.material.appbar.AppBarLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="?attr/colorSurface">
+
+        <com.google.android.material.appbar.MaterialToolbar
+            android:id="@+id/toolbar"
+            android:layout_width="match_parent"
+            android:layout_height="?attr/actionBarSize"
+            app:navigationIcon="@drawable/ic_back"
+            app:title="Settings"
+            app:titleCentered="true" />
+
+    </com.google.android.material.appbar.AppBarLayout>
+
     <androidx.core.widget.NestedScrollView
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:clipToPadding="false"
-        android:paddingBottom="@dimen/margin_xlarge">
+        android:paddingBottom="@dimen/margin_xlarge"
+        app:layout_behavior="@string/appbar_scrolling_view_behavior">
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
             android:padding="@dimen/margin_medium">
-
-            <!-- Header -->
-            <TextView
-                android:id="@+id/tv_settings_title"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="Settings"
-                android:textAppearance="@style/TextAppearance.Material3.DisplaySmall"
-                android:textColor="?attr/colorOnSurface"
-                android:layout_marginBottom="@dimen/margin_large" />
 
             <!-- Processing Section -->
             <TextView
@@ -107,28 +113,12 @@
                     <Space android:layout_width="match_parent" android:layout_height="@dimen/spacing_large" />
 
                     <com.google.android.material.button.MaterialButton
-                        android:id="@+id/btn_import_lut"
+                        android:id="@+id/btn_manage_luts"
                         style="@style/Widget.Material3.Button.TonalButton"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="Import LUTs"
+                        android:text="Manage LUTs"
                         app:icon="@drawable/ic_lut" />
-
-                    <Space android:layout_width="match_parent" android:layout_height="@dimen/spacing_medium" />
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="Installed LUTs"
-                        android:textAppearance="@style/TextAppearance.Material3.LabelLarge"
-                        android:layout_marginBottom="@dimen/spacing_small" />
-
-                    <androidx.recyclerview.widget.RecyclerView
-                        android:id="@+id/rv_luts"
-                        android:layout_width="match_parent"
-                        android:layout_height="200dp"
-                        android:background="?attr/colorSurfaceContainerHigh"
-                        android:padding="4dp" />
 
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
@@ -231,14 +221,6 @@
 
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btn_back"
-                style="@style/Widget.Material3.Button.OutlinedButton"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="Back to Camera"
-                android:layout_marginBottom="@dimen/margin_xlarge"/>
 
         </LinearLayout>
 

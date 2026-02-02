@@ -129,6 +129,7 @@ class CameraFragment : Fragment() {
     private var lutProcessor: LutSurfaceProcessor? = null
     private lateinit var lutManager: LutManager
     private var activeLutJob: kotlinx.coroutines.Job? = null
+    private var lutAdapter: LutPreviewAdapter? = null
 
     private val displayManager by lazy {
         requireContext().getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
@@ -466,6 +467,19 @@ class CameraFragment : Fragment() {
             fragmentCameraBinding.viewFinder.setAspectRatio(4, 3)
         }
 
+        // Adjust viewFinder to "lift" it, avoiding the control island which is now semitransparent overlay
+        // We add bottom margin to the view finder.
+        // Assuming island height roughly 120dp + margin
+        // We can do this programmatically or better, via constraints.
+        // Since we are reusing the same layout, we might just set padding/margin here if needed.
+        // However, user asked to "lift" it.
+        // The viewFinder is inside a ConstraintLayout in fragment_camera.xml.
+        // We can update its layoutparams.
+        val bottomMargin = resources.getDimensionPixelSize(R.dimen.control_panel_height)
+        val params = fragmentCameraBinding.viewFinder.layoutParams as androidx.constraintlayout.widget.ConstraintLayout.LayoutParams
+        params.setMargins(0, 0, 0, bottomMargin)
+        fragmentCameraBinding.viewFinder.layoutParams = params
+
         // Preview
         preview = Preview.Builder()
             // We request aspect ratio but no resolution
@@ -643,6 +657,26 @@ class CameraFragment : Fragment() {
             }
         }
 
+        // Touch overlay to dismiss menus
+        cameraUiContainerBinding?.touchOverlay?.setOnClickListener {
+            // Close LUT list
+            if (cameraUiContainerBinding?.lutListContainer?.visibility == View.VISIBLE) {
+                cameraUiContainerBinding?.lutListContainer?.visibility = View.GONE
+                it.visibility = View.GONE
+            }
+
+            // Close Manual Controls if open (and reset tab selection if desired, or just hide panel)
+            // Ideally we just hide the panel and uncheck tabs if that's the desired UX.
+            // Or just hide the panel and keep state?
+            // "Clicking on tab again collapses" was requested. "Clicking outside closes" also.
+            if (cameraUiContainerBinding?.manualPanel?.visibility == View.VISIBLE) {
+                 cameraUiContainerBinding?.manualPanel?.visibility = View.GONE
+                 cameraUiContainerBinding?.manualTabs?.clearChecked()
+                 activeManualTab = null
+                 it.visibility = View.GONE
+            }
+        }
+
         // Listener for settings button
         cameraUiContainerBinding?.settingsButton?.setOnClickListener {
             Navigation.findNavController(requireActivity(), R.id.fragment_container)
@@ -758,8 +792,10 @@ class CameraFragment : Fragment() {
              val lutListContainer = cameraUiContainerBinding?.lutListContainer
              if (lutListContainer?.visibility == View.VISIBLE) {
                  lutListContainer.visibility = View.GONE
+                 cameraUiContainerBinding?.touchOverlay?.visibility = View.GONE
              } else {
                  lutListContainer?.visibility = View.VISIBLE
+                 cameraUiContainerBinding?.touchOverlay?.visibility = View.VISIBLE
                  refreshLutList()
              }
         }
@@ -1371,6 +1407,14 @@ class CameraFragment : Fragment() {
         // Tab Listeners
         binding.manualTabs?.addOnButtonCheckedListener { group, checkedId, isChecked ->
             if (isChecked) {
+                // If checking the same tab as active, we might want to toggle off?
+                // MaterialButtonToggleGroup single selection mode makes it hard to deselect by clicking same item
+                // unless selectionRequired=false. We set selectionRequired=false in XML.
+
+                // However, the listener fires when checked state changes.
+                // If I click "Focus" while it's checked, it might uncheck it.
+                // Let's rely on isChecked.
+
                 when (checkedId) {
                     R.id.btn_tab_focus -> activeManualTab = "Focus"
                     R.id.btn_tab_iso -> activeManualTab = "ISO"
@@ -1378,11 +1422,14 @@ class CameraFragment : Fragment() {
                     R.id.btn_tab_ev -> activeManualTab = "EV"
                 }
                 binding.manualPanel?.visibility = View.VISIBLE
+                binding.touchOverlay?.visibility = View.VISIBLE
                 updateManualPanel()
             } else {
+                // If unchecking, and no other button is checked
                 if (group.checkedButtonId == View.NO_ID) {
                     activeManualTab = null
                     binding.manualPanel?.visibility = View.GONE
+                    binding.touchOverlay?.visibility = View.GONE
                 }
             }
         }
@@ -1689,8 +1736,8 @@ class CameraFragment : Fragment() {
         }
 
         val luts = lutManager.getLuts()
-        val adapter = LutPreviewAdapter(luts)
-        rv.adapter = adapter
+        lutAdapter = LutPreviewAdapter(luts)
+        rv.adapter = lutAdapter
     }
 
     private inner class LutPreviewAdapter(val luts: List<File>) : androidx.recyclerview.widget.RecyclerView.Adapter<LutPreviewAdapter.ViewHolder>() {
@@ -1720,20 +1767,34 @@ class CameraFragment : Fragment() {
                 holder.text.text = "None"
                 if (currentName == null) holder.text.setTextColor(colorPrimary)
                 holder.itemView.setOnClickListener {
+                    // Update Prefs
                     prefs.edit().remove(SettingsFragment.KEY_ACTIVE_LUT).apply()
                     updateLiveLut()
-                    notifyDataSetChanged()
+
+                    // Optimized Notify
+                    val oldPosition = if (currentName != null) luts.indexOfFirst { it.name == currentName } + 1 else 0
+                    notifyItemChanged(oldPosition)
+                    notifyItemChanged(0)
+
                     cameraUiContainerBinding?.lutListContainer?.visibility = View.GONE
+                    cameraUiContainerBinding?.touchOverlay?.visibility = View.GONE
                 }
             } else {
                 val file = luts[position - 1]
                 holder.text.text = file.nameWithoutExtension
                 if (currentName == file.name) holder.text.setTextColor(colorPrimary)
                 holder.itemView.setOnClickListener {
+                    // Update Prefs
                     prefs.edit().putString(SettingsFragment.KEY_ACTIVE_LUT, file.name).apply()
                     updateLiveLut()
-                    notifyDataSetChanged()
+
+                    // Optimized Notify
+                    val oldPosition = if (currentName != null) luts.indexOfFirst { it.name == currentName } + 1 else 0
+                    notifyItemChanged(oldPosition)
+                    notifyItemChanged(position)
+
                     cameraUiContainerBinding?.lutListContainer?.visibility = View.GONE
+                    cameraUiContainerBinding?.touchOverlay?.visibility = View.GONE
                 }
             }
         }

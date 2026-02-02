@@ -15,6 +15,8 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.fragment.app.Fragment
 import androidx.navigation.Navigation
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -30,21 +32,6 @@ class SettingsFragment : Fragment() {
     private var _binding: FragmentSettingsBinding? = null
     private val binding get() = _binding!!
     private lateinit var prefs: SharedPreferences
-    private lateinit var lutManager: LutManager
-    private lateinit var lutAdapter: LutAdapter
-
-    private val lutPicker = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris: List<Uri> ->
-        if (uris.isEmpty()) return@registerForActivityResult
-        var imported = 0
-        uris.forEach { if (lutManager.importLut(it)) imported++ }
-
-        if (imported > 0) {
-            Toast.makeText(context, "Imported $imported LUTs", Toast.LENGTH_SHORT).show()
-            updateLutList()
-        } else {
-            Toast.makeText(context, "No valid LUTs imported", Toast.LENGTH_SHORT).show()
-        }
-    }
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
         _binding = FragmentSettingsBinding.inflate(inflater, container, false)
@@ -54,37 +41,31 @@ class SettingsFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         prefs = requireContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        lutManager = LutManager(requireContext())
 
+        // Apply Edge-to-Edge Insets
+        ViewCompat.setOnApplyWindowInsetsListener(view) { v, insets ->
+            val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom)
+            WindowInsetsCompat.CONSUMED
+        }
+
+        setupToolbar()
         setupMenus()
-        setupLutList()
         setupCheckboxes()
+        setupNavigation()
+    }
 
-        binding.btnBack.setOnClickListener {
-            Navigation.findNavController(requireActivity(), R.id.fragment_container).navigateUp()
+    private fun setupToolbar() {
+        binding.toolbar.setNavigationOnClickListener {
+             Navigation.findNavController(requireActivity(), R.id.fragment_container).navigateUp()
         }
     }
 
-    private fun setupLutList() {
-        binding.rvLuts.layoutManager = LinearLayoutManager(context)
-        lutAdapter = LutAdapter()
-        binding.rvLuts.adapter = lutAdapter
-        updateLutList()
-
-        binding.btnImportLut.setOnClickListener {
-            lutPicker.launch(arrayOf("*/*"))
+    private fun setupNavigation() {
+        binding.btnManageLuts.setOnClickListener {
+             Navigation.findNavController(requireActivity(), R.id.fragment_container)
+                 .navigate(SettingsFragmentDirections.actionSettingsToLutManagement())
         }
-
-        binding.switchLivePreview.isChecked = prefs.getBoolean(KEY_ENABLE_LUT_PREVIEW, true)
-        binding.switchLivePreview.setOnCheckedChangeListener { _, isChecked ->
-             prefs.edit().putBoolean(KEY_ENABLE_LUT_PREVIEW, isChecked).apply()
-        }
-    }
-
-    private fun updateLutList() {
-        val luts = lutManager.getLuts()
-        val activeLut = prefs.getString(KEY_ACTIVE_LUT, null)
-        lutAdapter.submitList(luts, activeLut)
     }
 
     private fun setupMenus() {
@@ -122,6 +103,11 @@ class SettingsFragment : Fragment() {
             prefs.edit().putBoolean(KEY_USE_GPU, isChecked).apply()
         }
 
+        binding.switchLivePreview.isChecked = prefs.getBoolean(KEY_ENABLE_LUT_PREVIEW, true)
+        binding.switchLivePreview.setOnCheckedChangeListener { _, isChecked ->
+             prefs.edit().putBoolean(KEY_ENABLE_LUT_PREVIEW, isChecked).apply()
+        }
+
         binding.cbSaveTiff.isChecked = prefs.getBoolean(KEY_SAVE_TIFF, true)
         binding.cbSaveJpg.isChecked = prefs.getBoolean(KEY_SAVE_JPG, true)
 
@@ -142,102 +128,6 @@ class SettingsFragment : Fragment() {
     override fun onDestroyView() {
         super.onDestroyView()
         _binding = null
-    }
-
-    private inner class LutAdapter : RecyclerView.Adapter<LutAdapter.LutViewHolder>() {
-        private var luts: List<File> = emptyList()
-        private var activeLutName: String? = null
-
-        fun submitList(newList: List<File>, active: String?) {
-            luts = newList
-            activeLutName = active
-            notifyDataSetChanged()
-        }
-
-        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): LutViewHolder {
-            val view = LayoutInflater.from(parent.context).inflate(R.layout.item_lut, parent, false)
-            return LutViewHolder(view)
-        }
-
-        override fun onBindViewHolder(holder: LutViewHolder, position: Int) {
-            val file = luts[position]
-            val displayName = file.nameWithoutExtension
-
-            holder.tvName.text = displayName
-
-            val isActive = file.name == activeLutName
-            if (isActive) {
-                val colorPrimary = MaterialColors.getColor(holder.itemView, androidx.appcompat.R.attr.colorPrimary)
-                holder.tvName.setTextColor(colorPrimary)
-            } else {
-                val colorOnSurface = MaterialColors.getColor(holder.itemView, com.google.android.material.R.attr.colorOnSurface)
-                holder.tvName.setTextColor(colorOnSurface)
-            }
-
-            holder.itemView.setOnClickListener {
-                if (isActive) {
-                    // Deselect
-                    prefs.edit().remove(KEY_ACTIVE_LUT).apply()
-                } else {
-                    prefs.edit().putString(KEY_ACTIVE_LUT, file.name).apply()
-                }
-                updateLutList()
-            }
-
-            holder.btnRename.setOnClickListener {
-                showRenameDialog(file)
-            }
-
-            holder.btnDelete.setOnClickListener {
-                showDeleteDialog(file)
-            }
-        }
-
-        override fun getItemCount() = luts.size
-
-        inner class LutViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
-            val tvName: TextView = itemView.findViewById(R.id.tv_lut_name)
-            val btnRename: Button = itemView.findViewById(R.id.btn_rename)
-            val btnDelete: Button = itemView.findViewById(R.id.btn_delete)
-        }
-    }
-
-    private fun showRenameDialog(file: File) {
-        val input = EditText(context)
-        input.setText(file.nameWithoutExtension)
-        AlertDialog.Builder(requireContext())
-            .setTitle(R.string.lut_rename_title)
-            .setView(input)
-            .setPositiveButton(android.R.string.ok) { _, _ ->
-                val newName = input.text.toString()
-                if (lutManager.renameLut(file, newName)) {
-                    // If active, update pref
-                    if (prefs.getString(KEY_ACTIVE_LUT, null) == file.name) {
-                        prefs.edit().putString(KEY_ACTIVE_LUT, "$newName.cube").apply()
-                    }
-                    updateLutList()
-                } else {
-                    Toast.makeText(context, "Invalid name or file exists", Toast.LENGTH_SHORT).show()
-                }
-            }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
-    }
-
-    private fun showDeleteDialog(file: File) {
-        AlertDialog.Builder(requireContext())
-            .setTitle(R.string.lut_delete_title)
-            .setMessage(getString(R.string.lut_delete_message, file.nameWithoutExtension))
-            .setPositiveButton(R.string.btn_delete) { _, _ ->
-                if (lutManager.deleteLut(file)) {
-                    if (prefs.getString(KEY_ACTIVE_LUT, null) == file.name) {
-                        prefs.edit().remove(KEY_ACTIVE_LUT).apply()
-                    }
-                    updateLutList()
-                }
-            }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
     }
 
     companion object {
