@@ -1015,54 +1015,29 @@ class CameraFragment : Fragment() {
         val tiffPath = tiffFile?.absolutePath
         val bmpPath = File(context.cacheDir, "temp_${dngName}.bmp").absolutePath // Unique temp name
 
-        // 3. Process Color (Generate BMP for JPG and Thumbnail)
-        // We need a DirectByteBuffer for JNI
-        val directBuffer = ByteBuffer.allocateDirect(image.data.size)
-        directBuffer.put(image.data)
-        directBuffer.rewind()
-
-        // Stride is now exactly width * 2 because we packed it
-        val packedStride = image.width * 2
-
-        val whiteLevel = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_WHITE_LEVEL) ?: 1023
-        val blackLevelPattern = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_BLACK_LEVEL_PATTERN)
-        val blackLevel = blackLevelPattern?.getOffsetForIndex(0,0) ?: 0
-        val cfa = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_COLOR_FILTER_ARRANGEMENT) ?: 0
-
-        val colorTransform = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_COLOR_TRANSFORM1)
-            ?: chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_FORWARD_MATRIX1)
-
-        val ccm = FloatArray(9)
-        if (colorTransform != null) {
-            val rawMat = IntArray(18)
-            colorTransform.copyElements(rawMat, 0)
-            for (i in 0 until 9) {
-                val num = rawMat[i * 2]
-                val den = rawMat[i * 2 + 1]
-                ccm[i] = if (den != 0) num.toFloat() / den.toFloat() else 0f
-            }
-        } else {
-            ccm[0]=1f; ccm[4]=1f; ccm[8]=1f;
-        }
-
-        val neutral = captureResult.get(android.hardware.camera2.CaptureResult.SENSOR_NEUTRAL_COLOR_POINT) as? RggbChannelVector
-        val wb = if (neutral != null) {
-            val rVal = neutral.red
-            val gEvenVal = neutral.greenEven
-            val bVal = neutral.blue
-            val r = if (rVal > 0) 1.0f / rVal else 1.0f
-            val g = if (gEvenVal > 0) 1.0f / gEvenVal else 1.0f
-            val b = if (bVal > 0) 1.0f / bVal else 1.0f
-            floatArrayOf(r, g, g, b)
-        } else {
-            floatArrayOf(2.0f, 1.0f, 1.0f, 2.0f)
-        }
+        // 3. Generate DNG in Memory (for LibRaw and Saving)
+        val dngCreatorReal = android.hardware.camera2.DngCreator(chars, captureResult)
+        // Store DNG bytes in memory
+        val dngOutputStream = java.io.ByteArrayOutputStream()
+        var dngBytes: ByteArray? = null
 
         try {
-            // Process to generate BMP/TIFF
+            val orientation = when (image.rotationDegrees) {
+                90 -> ExifInterface.ORIENTATION_ROTATE_90
+                180 -> ExifInterface.ORIENTATION_ROTATE_180
+                270 -> ExifInterface.ORIENTATION_ROTATE_270
+                else -> ExifInterface.ORIENTATION_NORMAL
+            }
+            dngCreatorReal.setOrientation(orientation)
+
+            // Write DNG to memory (no thumbnail yet)
+            val inputStream = java.io.ByteArrayInputStream(image.data)
+            dngCreatorReal.writeInputStream(dngOutputStream, android.util.Size(image.width, image.height), inputStream, 0)
+            dngBytes = dngOutputStream.toByteArray()
+
+            // 4. Process with LibRaw
             val result = ColorProcessor.processRaw(
-                directBuffer, image.width, image.height, packedStride, whiteLevel, blackLevel, cfa,
-                wb, ccm, targetLogIndex, nativeLutPath, tiffPath, bmpPath, useGpu
+                dngBytes, targetLogIndex, nativeLutPath, tiffPath, bmpPath, useGpu
             )
 
             if (result == 1) {
@@ -1124,107 +1099,95 @@ class CameraFragment : Fragment() {
                 }
             }
 
-            // 4. Save DNG (with Thumbnail)
-            val dngCreatorReal = android.hardware.camera2.DngCreator(chars, captureResult)
-            try {
-                val orientation = when (image.rotationDegrees) {
-                    90 -> ExifInterface.ORIENTATION_ROTATE_90
-                    180 -> ExifInterface.ORIENTATION_ROTATE_180
-                    270 -> ExifInterface.ORIENTATION_ROTATE_270
-                    else -> ExifInterface.ORIENTATION_NORMAL
+            // 5. Save DNG to Disk (with Thumbnail)
+            // Note: We reuse dngCreatorReal instance. We need to set the thumbnail now.
+            if (processedBitmap != null) {
+                val maxThumbSize = 256
+                val scale = min(maxThumbSize.toDouble() / processedBitmap.width, maxThumbSize.toDouble() / processedBitmap.height)
+                val thumbWidth = (processedBitmap.width * scale).toInt()
+                val thumbHeight = (processedBitmap.height * scale).toInt()
+
+                val thumbBitmap = if (scale < 1.0) {
+                    android.graphics.Bitmap.createScaledBitmap(processedBitmap, thumbWidth, thumbHeight, true)
+                } else {
+                    processedBitmap
                 }
-                dngCreatorReal.setOrientation(orientation)
+                dngCreatorReal.setThumbnail(thumbBitmap)
+            }
 
-                // Set Thumbnail if available (Resize to max 256x256)
-                if (processedBitmap != null) {
-                    val maxThumbSize = 256
-                    val scale = min(maxThumbSize.toDouble() / processedBitmap.width, maxThumbSize.toDouble() / processedBitmap.height)
-                    val thumbWidth = (processedBitmap.width * scale).toInt()
-                    val thumbHeight = (processedBitmap.height * scale).toInt()
-
-                    val thumbBitmap = if (scale < 1.0) {
-                        android.graphics.Bitmap.createScaledBitmap(processedBitmap, thumbWidth, thumbHeight, true)
-                    } else {
-                        processedBitmap
-                    }
-
-                    dngCreatorReal.setThumbnail(thumbBitmap)
+            // Insert DNG into MediaStore
+            val dngValues = ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, "$dngName.dng")
+                put(MediaStore.MediaColumns.MIME_TYPE, "image/x-adobe-dng")
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/Darkbag")
+                    put(MediaStore.MediaColumns.IS_PENDING, 1)
                 }
-
-                // Insert DNG into MediaStore
-                val dngValues = ContentValues().apply {
-                    put(MediaStore.MediaColumns.DISPLAY_NAME, "$dngName.dng")
-                    put(MediaStore.MediaColumns.MIME_TYPE, "image/x-adobe-dng")
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                        put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/Darkbag")
-                        put(MediaStore.MediaColumns.IS_PENDING, 1)
-                    }
-                }
-                val dngUri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, dngValues)
-                if (dngUri != null) {
-                    try {
-                        val dngOut = contentResolver.openOutputStream(dngUri)
-                        if (dngOut != null) {
-                            dngOut.use { out ->
-                                // Use ByteArrayInputStream for the raw data
-                                val inputStream = java.io.ByteArrayInputStream(image.data)
-                                dngCreatorReal.writeInputStream(out, android.util.Size(image.width, image.height), inputStream, 0)
-                            }
-                            Log.d(TAG, "Saved DNG to $dngUri")
-
-                            // Inject DNG Crop Metadata if Zoomed
-                            // Must be done BEFORE setting IS_PENDING = 0 to avoid file locks
-                            if (image.zoomRatio > 1.05f) {
-                                try {
-                                    // ExifInterface needs a FileDescriptor or File.
-                                    // Since we wrote to a Stream, we need to open it again as FD.
-                                    contentResolver.openFileDescriptor(dngUri, "rw")?.use { pfd ->
-                                        val exif = androidx.exifinterface.media.ExifInterface(pfd.fileDescriptor)
-
-                                        // Calculate Crop
-                                        val fullWidth = image.width
-                                        val fullHeight = image.height
-                                        val cropWidth = (fullWidth / image.zoomRatio).toInt()
-                                        val cropHeight = (fullHeight / image.zoomRatio).toInt()
-
-                                        // Ensure even coordinates for Bayer pattern alignment
-                                        val x = ((fullWidth - cropWidth) / 2) / 2 * 2
-                                        val y = ((fullHeight - cropHeight) / 2) / 2 * 2
-
-                                        // Set Tags (50719 DefaultCropSize, 50720 DefaultCropOrigin)
-                                        // These are rational/short pairs usually, usually stored as "W H" or "N D" strings in ExifInterface
-                                        exif.setAttribute("DefaultCropSize", "$cropWidth $cropHeight")
-                                        exif.setAttribute("DefaultCropOrigin", "$x $y")
-                                        exif.saveAttributes()
-                                        Log.d(TAG, "Injected DNG Crop: Size=$cropWidth $cropHeight, Origin=$x $y")
-                                    }
-                                } catch (e: Exception) {
-                                    Log.e(TAG, "Failed to inject DNG crop metadata", e)
-                                }
-                            }
-
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                                dngValues.clear()
-                                dngValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
-                                contentResolver.update(dngUri, dngValues, null, null)
-                            }
-
-                        } else {
-                            Log.e(TAG, "Failed to open OutputStream for $dngUri")
-                            contentResolver.delete(dngUri, null, null)
+            }
+            val dngUri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, dngValues)
+            if (dngUri != null) {
+                try {
+                    val dngOut = contentResolver.openOutputStream(dngUri)
+                    if (dngOut != null) {
+                        dngOut.use { out ->
+                            // Use ByteArrayInputStream for the raw data AGAIN?
+                            // No, DngCreator writes the DNG. We need to call writeInputStream again.
+                            // The thumbnail was set on the dngCreatorReal object.
+                            // We write again.
+                            val inputStream2 = java.io.ByteArrayInputStream(image.data)
+                            dngCreatorReal.writeInputStream(out, android.util.Size(image.width, image.height), inputStream2, 0)
                         }
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Error writing DNG to MediaStore", e)
+                        Log.d(TAG, "Saved DNG to $dngUri")
+
+                        // Inject DNG Crop Metadata if Zoomed
+                        // Must be done BEFORE setting IS_PENDING = 0 to avoid file locks
+                        if (image.zoomRatio > 1.05f) {
+                            try {
+                                contentResolver.openFileDescriptor(dngUri, "rw")?.use { pfd ->
+                                    val exif = androidx.exifinterface.media.ExifInterface(pfd.fileDescriptor)
+
+                                    // Calculate Crop
+                                    val fullWidth = image.width
+                                    val fullHeight = image.height
+                                    val cropWidth = (fullWidth / image.zoomRatio).toInt()
+                                    val cropHeight = (fullHeight / image.zoomRatio).toInt()
+
+                                    // Ensure even coordinates for Bayer pattern alignment
+                                    val x = ((fullWidth - cropWidth) / 2) / 2 * 2
+                                    val y = ((fullHeight - cropHeight) / 2) / 2 * 2
+
+                                    exif.setAttribute("DefaultCropSize", "$cropWidth $cropHeight")
+                                    exif.setAttribute("DefaultCropOrigin", "$x $y")
+                                    exif.saveAttributes()
+                                    Log.d(TAG, "Injected DNG Crop: Size=$cropWidth $cropHeight, Origin=$x $y")
+                                }
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Failed to inject DNG crop metadata", e)
+                            }
+                        }
+
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                            dngValues.clear()
+                            dngValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                            contentResolver.update(dngUri, dngValues, null, null)
+                        }
+
+                    } else {
+                        Log.e(TAG, "Failed to open OutputStream for $dngUri")
                         contentResolver.delete(dngUri, null, null)
                     }
-                } else {
-                    Log.e(TAG, "Failed to create MediaStore entry for DNG")
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error writing DNG to MediaStore", e)
+                    contentResolver.delete(dngUri, null, null)
                 }
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to save DNG", e)
-            } finally {
-                dngCreatorReal.close()
+            } else {
+                Log.e(TAG, "Failed to create MediaStore entry for DNG")
             }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to save DNG", e)
+        } finally {
+            dngCreatorReal.close()
+        }
 
             // 5. Save TIFF
             if (tiffFile != null && tiffFile.exists()) {

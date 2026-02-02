@@ -8,15 +8,7 @@ object ColorProcessor {
     }
 
     /**
-     * @param rawBuffer Direct ByteBuffer containing 16-bit raw data (Bayer).
-     * @param width Image width.
-     * @param height Image height.
-     * @param stride Row stride in bytes.
-     * @param whiteLevel Sensor white level.
-     * @param blackLevel Sensor black level (average).
-     * @param cfaPattern 0=RGGB, 1=GRBG, 2=GBRG, 3=BGGR.
-     * @param wbGains White balance gains [R, G_even, G_odd, B].
-     * @param ccm Color Correction Matrix (3x3) transforming CameraRGB to XYZ.
+     * @param dngData Byte array containing the full DNG file.
      * @param targetLog Index of target log curve.
      * @param lutPath Path to .cube file.
      * @param outputTiffPath Output path for TIFF.
@@ -25,15 +17,7 @@ object ColorProcessor {
      * @return 0 for GPU Success, 1 for CPU Success (Fallback or requested), -1 for Failure.
      */
     external fun processRaw(
-        rawBuffer: ByteBuffer,
-        width: Int,
-        height: Int,
-        stride: Int,
-        whiteLevel: Int,
-        blackLevel: Int,
-        cfaPattern: Int,
-        wbGains: FloatArray,
-        ccm: FloatArray,
+        dngData: ByteArray,
         targetLog: Int,
         lutPath: String?,
         outputTiffPath: String?,

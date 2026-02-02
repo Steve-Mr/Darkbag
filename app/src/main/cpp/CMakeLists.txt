@@ -2,10 +2,21 @@ cmake_minimum_required(VERSION 3.10.2)
 
 project("cameraxbasic")
 
+# LibRaw Configuration
+set(CMAKE_CXX_STANDARD 11)
+add_definitions(-DNO_LCMS -DNO_JASPER -DNO_JPEG)
+
+include_directories(libraw)
+
+file(GLOB_RECURSE LIBRAW_SOURCES
+    "libraw/src/*.cpp"
+)
+
 add_library(
         native-lib
         SHARED
-        native-lib.cpp)
+        native-lib.cpp
+        ${LIBRAW_SOURCES})
 
 find_library(
         log-lib
@@ -24,8 +35,6 @@ target_link_libraries(
         ${log-lib}
         ${jnigraphics-lib}
         ${android-lib}
-        GLESv3
-        EGL
         -fopenmp
         -static-openmp)
 
