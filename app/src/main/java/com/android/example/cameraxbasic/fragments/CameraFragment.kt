@@ -26,7 +26,7 @@ import android.hardware.display.DisplayManager
 import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
-import android.media.ExifInterface
+import androidx.exifinterface.media.ExifInterface
 import android.util.Log
 import android.view.KeyEvent
 import android.view.OrientationEventListener
@@ -62,6 +62,8 @@ import com.android.example.cameraxbasic.processor.ColorProcessor
 import java.io.File
 import java.io.FileOutputStream
 import android.net.Uri
+import androidx.annotation.OptIn
+import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.core.view.setPadding
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
@@ -179,7 +181,8 @@ class CameraFragment : Fragment() {
     private lateinit var cameraExecutor: ExecutorService
 
     // Cache for CaptureResults to match with ImageProxy timestamps
-    private val captureResults = java.util.Collections.synchronizedMap(object : java.util.LinkedHashMap<Long, TotalCaptureResult>() {
+    private val captureResults = java.util.Collections.synchronizedMap(object :
+        LinkedHashMap<Long, TotalCaptureResult>() {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, TotalCaptureResult>?): Boolean {
             return size > 300
         }
@@ -269,7 +272,7 @@ class CameraFragment : Fragment() {
         // user could have removed them while the app was in paused state.
         if (!PermissionsFragment.hasPermissions(requireContext())) {
             Navigation.findNavController(requireActivity(), R.id.fragment_container).navigate(
-                    CameraFragmentDirections.actionCameraToPermissions()
+                CameraFragmentDirections.actionCameraToPermissions()
             )
         }
     }
@@ -290,9 +293,9 @@ class CameraFragment : Fragment() {
     }
 
     override fun onCreateView(
-            inflater: LayoutInflater,
-            container: ViewGroup?,
-            savedInstanceState: Bundle?
+        inflater: LayoutInflater,
+        container: ViewGroup?,
+        savedInstanceState: Bundle?
     ): View {
         _fragmentCameraBinding = FragmentCameraBinding.inflate(inflater, container, false)
         return fragmentCameraBinding.root
@@ -339,7 +342,8 @@ class CameraFragment : Fragment() {
         lutManager = LutManager(requireContext())
 
         // Initialize Zoom Default
-        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val prefs =
+            requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
         val defaultStr = prefs.getString(SettingsFragment.KEY_DEFAULT_FOCAL_LENGTH, "24") ?: "24"
         defaultFocalLength = defaultStr.toIntOrNull() ?: 24
         if (currentFocalLength == -1) {
@@ -419,6 +423,7 @@ class CameraFragment : Fragment() {
     }
 
     /** Declare and bind preview, capture and analysis use cases */
+    @OptIn(ExperimentalCamera2Interop::class)
     private fun bindCameraUseCases() {
 
         // Get screen metrics used to setup camera for full screen resolution
@@ -429,7 +434,7 @@ class CameraFragment : Fragment() {
 
         // CameraProvider
         val cameraProvider = cameraProvider
-                ?: throw IllegalStateException("Camera initialization failed.")
+            ?: throw IllegalStateException("Camera initialization failed.")
 
         // CameraSelector
         val cameraSelector = CameraSelector.Builder().requireLensFacing(lensFacing).build()
@@ -439,9 +444,13 @@ class CameraFragment : Fragment() {
         // Fetch Characteristics for Manual Control
         try {
             val camera2Info = Camera2CameraInfo.from(cameraInfo)
-            isoRange = camera2Info.getCameraCharacteristic(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
-            exposureTimeRange = camera2Info.getCameraCharacteristic(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
-            minFocusDistance = camera2Info.getCameraCharacteristic(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE) ?: 0.0f
+            isoRange =
+                camera2Info.getCameraCharacteristic(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
+            exposureTimeRange =
+                camera2Info.getCameraCharacteristic(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
+            minFocusDistance =
+                camera2Info.getCameraCharacteristic(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE)
+                    ?: 0.0f
             evRange = cameraInfo.exposureState.exposureCompensationRange
 
             // Initialize defaults if ranges are valid
@@ -451,11 +460,17 @@ class CameraFragment : Fragment() {
             Log.e(TAG, "Failed to fetch camera characteristics", e)
         }
         val capabilities = ImageCapture.getImageCaptureCapabilities(cameraInfo)
-        val isRawSupported = capabilities.supportedOutputFormats.contains(ImageCapture.OUTPUT_FORMAT_RAW)
+        val isRawSupported =
+            capabilities.supportedOutputFormats.contains(ImageCapture.OUTPUT_FORMAT_RAW)
 
         // Force 4:3 aspect ratio to match typical sensor output and avoid cropping in preview
         val resolutionSelector = ResolutionSelector.Builder()
-            .setAspectRatioStrategy(AspectRatioStrategy(AspectRatio.RATIO_4_3, AspectRatioStrategy.FALLBACK_RULE_AUTO))
+            .setAspectRatioStrategy(
+                AspectRatioStrategy(
+                    AspectRatio.RATIO_4_3,
+                    AspectRatioStrategy.FALLBACK_RULE_AUTO
+                )
+            )
             .build()
 
         // Configure AutoFitTextureView
@@ -492,7 +507,8 @@ class CameraFragment : Fragment() {
                     request: CaptureRequest,
                     result: TotalCaptureResult
                 ) {
-                    val timestamp = result.get(android.hardware.camera2.CaptureResult.SENSOR_TIMESTAMP)
+                    val timestamp =
+                        result.get(android.hardware.camera2.CaptureResult.SENSOR_TIMESTAMP)
                     if (timestamp != null) {
                         captureResults[timestamp] = result
                     }
@@ -510,16 +526,16 @@ class CameraFragment : Fragment() {
             .setTargetRotation(rotation)
             .build()
             // The analyzer can then be assigned to the instance
-                .also {
-                    it.setAnalyzer(cameraExecutor, LuminosityAnalyzer { luma ->
-                        // Values returned from our analyzer are passed to the attached listener
-                        // We log image analysis results here - you should do something useful
-                        // instead!
-                        // Values returned from our analyzer are passed to the attached listener
-                        // We log image analysis results here - you should do something useful
-                        // instead!
-                    })
-                }
+            .also {
+                it.setAnalyzer(cameraExecutor, LuminosityAnalyzer { luma ->
+                    // Values returned from our analyzer are passed to the attached listener
+                    // We log image analysis results here - you should do something useful
+                    // instead!
+                    // Values returned from our analyzer are passed to the attached listener
+                    // We log image analysis results here - you should do something useful
+                    // instead!
+                })
+            }
 
         // Must unbind the use-cases before rebinding them
         cameraProvider.unbindAll()
@@ -535,33 +551,49 @@ class CameraFragment : Fragment() {
         }
 
         val lutBinder = object : Preview.SurfaceProvider {
-             override fun onSurfaceRequested(request: SurfaceRequest) {
-                  // Connect Camera to LutProcessor
-                  lutProcessor?.onInputSurface(request)
-             }
+            override fun onSurfaceRequested(request: SurfaceRequest) {
+                // Connect Camera to LutProcessor
+                lutProcessor?.onInputSurface(request)
+            }
         }
 
         // Connect View to LutProcessor
-        fragmentCameraBinding.viewFinder.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
-             override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
-                  lutProcessor?.setOutputSurface(Surface(surface), width, height)
-             }
-             override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {
-                  lutProcessor?.setOutputSurface(Surface(surface), width, height)
-             }
-             override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
-                  lutProcessor?.setOutputSurface(null, 0, 0)
-                  return true
-             }
-             override fun onSurfaceTextureUpdated(surface: SurfaceTexture) {}
-        }
+        fragmentCameraBinding.viewFinder.surfaceTextureListener =
+            object : TextureView.SurfaceTextureListener {
+                override fun onSurfaceTextureAvailable(
+                    surface: SurfaceTexture,
+                    width: Int,
+                    height: Int
+                ) {
+                    lutProcessor?.setOutputSurface(Surface(surface), width, height)
+                }
+
+                override fun onSurfaceTextureSizeChanged(
+                    surface: SurfaceTexture,
+                    width: Int,
+                    height: Int
+                ) {
+                    lutProcessor?.setOutputSurface(Surface(surface), width, height)
+                }
+
+                override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
+                    lutProcessor?.setOutputSurface(null, 0, 0)
+                    return true
+                }
+
+                override fun onSurfaceTextureUpdated(surface: SurfaceTexture) {}
+            }
 
         // Check if surface is already available
         if (fragmentCameraBinding.viewFinder.isAvailable) {
-             val st = fragmentCameraBinding.viewFinder.surfaceTexture
-             if (st != null) {
-                 lutProcessor?.setOutputSurface(Surface(st), fragmentCameraBinding.viewFinder.width, fragmentCameraBinding.viewFinder.height)
-             }
+            val st = fragmentCameraBinding.viewFinder.surfaceTexture
+            if (st != null) {
+                lutProcessor?.setOutputSurface(
+                    Surface(st),
+                    fragmentCameraBinding.viewFinder.width,
+                    fragmentCameraBinding.viewFinder.height
+                )
+            }
         }
 
         preview?.setSurfaceProvider(cameraExecutor, lutBinder)
@@ -577,7 +609,8 @@ class CameraFragment : Fragment() {
             // A variable number of use-cases can be passed here -
             // camera provides access to CameraControl & CameraInfo
             camera = cameraProvider.bindToLifecycle(
-                    this, cameraSelector, useCaseGroup)
+                this, cameraSelector, useCaseGroup
+            )
 
             observeCameraState(camera?.cameraInfo!!)
 
@@ -615,9 +648,9 @@ class CameraFragment : Fragment() {
         }
 
         cameraUiContainerBinding = CameraUiContainerBinding.inflate(
-                LayoutInflater.from(requireContext()),
-                fragmentCameraBinding.root,
-                true
+            LayoutInflater.from(requireContext()),
+            fragmentCameraBinding.root,
+            true
         )
 
         // In the background, load latest photo taken (if any) for gallery thumbnail
@@ -652,7 +685,11 @@ class CameraFragment : Fragment() {
         cameraUiContainerBinding?.cameraCaptureButton?.setOnClickListener {
             // Check concurrency limit
             if (!processingSemaphore.tryAcquire()) {
-                Toast.makeText(requireContext(), "Processing queue full, please wait...", Toast.LENGTH_SHORT).show()
+                Toast.makeText(
+                    requireContext(),
+                    "Processing queue full, please wait...",
+                    Toast.LENGTH_SHORT
+                ).show()
                 return@setOnClickListener
             }
 
@@ -661,48 +698,57 @@ class CameraFragment : Fragment() {
 
                 if (imageCapture.outputFormat == ImageCapture.OUTPUT_FORMAT_RAW) {
                     // RAW Capture with Processing
-                    imageCapture.takePicture(cameraExecutor, object : ImageCapture.OnImageCapturedCallback() {
-                        override fun onCaptureSuccess(image: ImageProxy) {
-                            try {
-                                // 1. Immediate Copy (Free the pipeline)
-                                val currentZoom = if (is2xMode) 2.0f else (currentFocalLength / 24.0f)
+                    imageCapture.takePicture(
+                        cameraExecutor,
+                        object : ImageCapture.OnImageCapturedCallback() {
+                            override fun onCaptureSuccess(image: ImageProxy) {
+                                try {
+                                    // 1. Immediate Copy (Free the pipeline)
+                                    val currentZoom =
+                                        if (is2xMode) 2.0f else (currentFocalLength / 24.0f)
 
-                                val holder = copyImageToHolder(image, currentZoom)
-                                image.close() // Close ASAP
+                                    val holder = copyImageToHolder(image, currentZoom)
+                                    image.close() // Close ASAP
 
-                                // 2. Queue for Processing
-                                lifecycleScope.launch {
-                                    processingChannel.send(holder)
+                                    // 2. Queue for Processing
+                                    lifecycleScope.launch {
+                                        processingChannel.send(holder)
+                                    }
+                                } catch (e: OutOfMemoryError) {
+                                    Log.e(TAG, "OOM during capture copy", e)
+                                    image.close()
+                                    processingSemaphore.release()
+                                    lifecycleScope.launch(Dispatchers.Main) {
+                                        Toast.makeText(
+                                            requireContext(),
+                                            "Memory full, photo not saved",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                        cameraUiContainerBinding?.cameraCaptureButton?.isEnabled =
+                                            true
+                                        cameraUiContainerBinding?.cameraCaptureButton?.alpha = 1.0f
+                                    }
+                                } catch (e: Exception) {
+                                    Log.e(TAG, "Error during capture copy", e)
+                                    image.close()
+                                    processingSemaphore.release()
+                                    lifecycleScope.launch(Dispatchers.Main) {
+                                        cameraUiContainerBinding?.cameraCaptureButton?.isEnabled =
+                                            true
+                                        cameraUiContainerBinding?.cameraCaptureButton?.alpha = 1.0f
+                                    }
                                 }
-                            } catch (e: OutOfMemoryError) {
-                                Log.e(TAG, "OOM during capture copy", e)
-                                image.close()
-                                processingSemaphore.release()
-                                lifecycleScope.launch(Dispatchers.Main) {
-                                    Toast.makeText(requireContext(), "Memory full, photo not saved", Toast.LENGTH_SHORT).show()
-                                    cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
-                                    cameraUiContainerBinding?.cameraCaptureButton?.alpha = 1.0f
-                                }
-                            } catch (e: Exception) {
-                                Log.e(TAG, "Error during capture copy", e)
-                                image.close()
+                            }
+
+                            override fun onError(exception: ImageCaptureException) {
+                                Log.e(TAG, "Photo capture failed: ${exception.message}", exception)
                                 processingSemaphore.release()
                                 lifecycleScope.launch(Dispatchers.Main) {
                                     cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
                                     cameraUiContainerBinding?.cameraCaptureButton?.alpha = 1.0f
                                 }
                             }
-                        }
-
-                        override fun onError(exception: ImageCaptureException) {
-                            Log.e(TAG, "Photo capture failed: ${exception.message}", exception)
-                            processingSemaphore.release()
-                            lifecycleScope.launch(Dispatchers.Main) {
-                                cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
-                                cameraUiContainerBinding?.cameraCaptureButton?.alpha = 1.0f
-                            }
-                        }
-                    })
+                        })
 
                     // Optimistic UI update: disable button if we think we might be full,
                     // though the semaphore check handles the hard limit.
@@ -714,7 +760,11 @@ class CameraFragment : Fragment() {
 
                 } else {
                     processingSemaphore.release() // Not raw, release immediately (logic for JPG path)
-                    Toast.makeText(requireContext(), "RAW capture is not supported on this device.", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(
+                        requireContext(),
+                        "RAW capture is not supported on this device.",
+                        Toast.LENGTH_SHORT
+                    ).show()
                 }
 
                 // We can only change the foreground Drawable using API level 23+ API
@@ -723,7 +773,8 @@ class CameraFragment : Fragment() {
                     fragmentCameraBinding.root.postDelayed({
                         fragmentCameraBinding.root.foreground = ColorDrawable(Color.WHITE)
                         fragmentCameraBinding.root.postDelayed(
-                                { fragmentCameraBinding.root.foreground = null }, ANIMATION_FAST_MILLIS)
+                            { fragmentCameraBinding.root.foreground = null }, ANIMATION_FAST_MILLIS
+                        )
                     }, ANIMATION_SLOW_MILLIS)
                 }
             }
@@ -753,14 +804,14 @@ class CameraFragment : Fragment() {
         // LUT Selector (Always visible now)
         cameraUiContainerBinding?.lutButton?.visibility = View.VISIBLE
         cameraUiContainerBinding?.lutButton?.setOnClickListener {
-             // Toggle LUT List Visibility
-             val lutList = cameraUiContainerBinding?.lutList
-             if (lutList?.visibility == View.VISIBLE) {
-                 lutList.visibility = View.GONE
-             } else {
-                 lutList?.visibility = View.VISIBLE
-                 refreshLutList()
-             }
+            // Toggle LUT List Visibility
+            val lutList = cameraUiContainerBinding?.lutList
+            if (lutList?.visibility == View.VISIBLE) {
+                lutList.visibility = View.GONE
+            } else {
+                lutList?.visibility = View.VISIBLE
+                refreshLutList()
+            }
         }
 
         // Initialize Zoom Controls
@@ -778,7 +829,11 @@ class CameraFragment : Fragment() {
                     try {
                         startActivity(intent)
                     } catch (e: ActivityNotFoundException) {
-                        Toast.makeText(requireContext(), "No gallery app installed", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(
+                            requireContext(),
+                            "No gallery app installed",
+                            Toast.LENGTH_SHORT
+                        ).show()
                     }
                 }
             }
@@ -788,7 +843,8 @@ class CameraFragment : Fragment() {
     /** Enabled or disabled a button to switch cameras depending on the available cameras */
     private fun updateCameraSwitchButton() {
         try {
-            cameraUiContainerBinding?.cameraSwitchButton?.isEnabled = hasBackCamera() && hasFrontCamera()
+            cameraUiContainerBinding?.cameraSwitchButton?.isEnabled =
+                hasBackCamera() && hasFrontCamera()
         } catch (exception: CameraInfoUnavailableException) {
             cameraUiContainerBinding?.cameraSwitchButton?.isEnabled = false
         }
@@ -903,10 +959,10 @@ class CameraFragment : Fragment() {
         if (rowStride == rowLength) {
             // Fast path: Data is already tightly packed
             if (buffer.remaining() == dataLength) {
-                 buffer.get(cleanData)
+                buffer.get(cleanData)
             } else {
-                 // Buffer might be larger (e.g. alignment), only get what we need
-                 buffer.get(cleanData, 0, dataLength)
+                // Buffer might be larger (e.g. alignment), only get what we need
+                buffer.get(cleanData, 0, dataLength)
             }
         } else {
             // Slow path: Remove padding bytes from each row
@@ -934,334 +990,353 @@ class CameraFragment : Fragment() {
     }
 
     @androidx.annotation.OptIn(androidx.camera.camera2.interop.ExperimentalCamera2Interop::class)
-    private suspend fun processImageAsync(context: Context, image: RawImageHolder) = kotlinx.coroutines.withContext(Dispatchers.IO) {
-        val contentResolver = context.contentResolver
-        val dngName = SimpleDateFormat(FILENAME, Locale.US).format(System.currentTimeMillis())
+    private suspend fun processImageAsync(context: Context, image: RawImageHolder) =
+        kotlinx.coroutines.withContext(Dispatchers.IO) {
+            try {
+                val contentResolver = context.contentResolver
+                val dngName =
+                    SimpleDateFormat(FILENAME, Locale.US).format(System.currentTimeMillis())
 
-        Log.d(TAG, "Processing Image: Timestamp=${image.timestamp}, ZoomRatio=${image.zoomRatio}, Rotation=${image.rotationDegrees}")
+                Log.d(
+                    TAG,
+                    "Processing Image: Timestamp=${image.timestamp}, ZoomRatio=${image.zoomRatio}, Rotation=${image.rotationDegrees}"
+                )
 
-        val cam = camera ?: return@withContext
-        val camera2Info = Camera2CameraInfo.from(cam.cameraInfo)
-        val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as android.hardware.camera2.CameraManager
-        val chars = cameraManager.getCameraCharacteristics(camera2Info.cameraId)
+                val cam = camera ?: return@withContext
+                val camera2Info = Camera2CameraInfo.from(cam.cameraInfo)
+                val cameraManager =
+                    context.getSystemService(Context.CAMERA_SERVICE) as android.hardware.camera2.CameraManager
+                val chars = cameraManager.getCameraCharacteristics(camera2Info.cameraId)
 
-        // 1. Wait for Metadata
-        var attempts = 0
-        var captureResult: TotalCaptureResult? = null
-        val tolerance = 5_000_000L // 5ms in nanoseconds
+                // 1. Wait for Metadata
+                var attempts = 0
+                var captureResult: TotalCaptureResult? = null
+                val tolerance = 5_000_000L // 5ms in nanoseconds
 
-        while (attempts < 25) { // Wait up to 5 seconds
-            // Try exact match
-            captureResult = captureResults[image.timestamp]
-
-            // Try fuzzy match
-            if (captureResult == null) {
-                 synchronized(captureResults) {
-                    captureResult = captureResults.entries.find {
-                        kotlin.math.abs(it.key - image.timestamp) < tolerance
-                    }?.value
-                 }
-            }
-
-            if (captureResult != null) break
-
-            kotlinx.coroutines.delay(200)
-            attempts++
-        }
-
-        if (captureResult == null) {
-            Log.e(TAG, "Timed out waiting for CaptureResult for timestamp ${image.timestamp}")
-            return@withContext
-        }
-
-        // 2. Prepare Settings
-        val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        val targetLogName = prefs.getString(SettingsFragment.KEY_TARGET_LOG, "None")
-        val targetLogIndex = SettingsFragment.LOG_CURVES.indexOf(targetLogName)
-
-        // Use Active LUT filename if present, else fallback to legacy
-        val activeLutName = prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, null)
-        var nativeLutPath: String? = null
-
-        if (activeLutName != null) {
-            val lutFile = File(File(context.filesDir, "luts"), activeLutName)
-            if (lutFile.exists()) {
-                nativeLutPath = lutFile.absolutePath
-            }
-        }
-
-        if (nativeLutPath == null) {
-            val lutPath = prefs.getString(SettingsFragment.KEY_LUT_URI, null)
-            if (lutPath != null) {
-                if (lutPath.startsWith("content://")) {
-                    val lutFile = File(context.cacheDir, "temp_lut.cube")
-                    try {
-                        contentResolver.openInputStream(Uri.parse(lutPath))?.use { input ->
-                            FileOutputStream(lutFile).use { output -> input.copyTo(output) }
+                while (attempts < 25) { // Wait up to 5 seconds
+                    captureResult = captureResults[image.timestamp]
+                    if (captureResult == null) {
+                        synchronized(captureResults) {
+                            captureResult = captureResults.entries.find {
+                                kotlin.math.abs(it.key - image.timestamp) < tolerance
+                            }?.value
                         }
+                    }
+                    if (captureResult != null) break
+                    kotlinx.coroutines.delay(200)
+                    attempts++
+                }
+
+                if (captureResult == null) {
+                    Log.e(
+                        TAG,
+                        "Timed out waiting for CaptureResult for timestamp ${image.timestamp}"
+                    )
+                    return@withContext
+                }
+
+                // 2. Prepare Settings
+                val prefs =
+                    context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                val targetLogName = prefs.getString(SettingsFragment.KEY_TARGET_LOG, "None")
+                val targetLogIndex = SettingsFragment.LOG_CURVES.indexOf(targetLogName)
+
+                // Use Active LUT filename if present, else fallback to legacy
+                val activeLutName = prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, null)
+                var nativeLutPath: String? = null
+
+                if (activeLutName != null) {
+                    val lutFile = File(File(context.filesDir, "luts"), activeLutName)
+                    if (lutFile.exists()) {
                         nativeLutPath = lutFile.absolutePath
-                    } catch (e: Exception) { Log.e(TAG, "Failed to load LUT", e) }
-                } else {
-                    nativeLutPath = lutPath
-                }
-            }
-        }
-
-        val saveTiff = prefs.getBoolean(SettingsFragment.KEY_SAVE_TIFF, true)
-        val saveJpg = prefs.getBoolean(SettingsFragment.KEY_SAVE_JPG, true)
-        val useGpu = prefs.getBoolean(SettingsFragment.KEY_USE_GPU, false)
-
-        val tiffFile = if (saveTiff) File(context.cacheDir, "$dngName.tiff") else null
-        val tiffPath = tiffFile?.absolutePath
-        val bmpPath = File(context.cacheDir, "temp_${dngName}.bmp").absolutePath // Unique temp name
-
-        // 3. Generate DNG in Memory (for LibRaw and Saving)
-        val dngCreatorReal = android.hardware.camera2.DngCreator(chars, captureResult)
-        // Store DNG bytes in memory
-        val dngOutputStream = java.io.ByteArrayOutputStream()
-        var dngBytes: ByteArray? = null
-
-        try {
-            val orientation = when (image.rotationDegrees) {
-                90 -> ExifInterface.ORIENTATION_ROTATE_90
-                180 -> ExifInterface.ORIENTATION_ROTATE_180
-                270 -> ExifInterface.ORIENTATION_ROTATE_270
-                else -> ExifInterface.ORIENTATION_NORMAL
-            }
-            dngCreatorReal.setOrientation(orientation)
-
-            // Write DNG to memory (no thumbnail yet)
-            val inputStream = java.io.ByteArrayInputStream(image.data)
-            dngCreatorReal.writeInputStream(dngOutputStream, android.util.Size(image.width, image.height), inputStream, 0)
-            dngBytes = dngOutputStream.toByteArray()
-
-            // 4. Process with LibRaw
-            val result = ColorProcessor.processRaw(
-                dngBytes, targetLogIndex, nativeLutPath, tiffPath, bmpPath, useGpu
-            )
-
-            if (result == 1) {
-                withContext(Dispatchers.Main) {
-                    Toast.makeText(context, "GPU processing failed. Fallback to CPU used.", Toast.LENGTH_LONG).show()
-                }
-            } else if (result < 0) {
-                throw RuntimeException("ColorProcessor returned error code $result")
-            }
-
-            // Load the processed image (BMP) for thumbnail and JPG saving
-            var processedBitmap: android.graphics.Bitmap? = null
-            if (File(bmpPath).exists()) {
-                 processedBitmap = BitmapFactory.decodeFile(bmpPath)
-            }
-
-            // Check for digital zoom cropping
-            if (processedBitmap != null) {
-                // Get SCALER_CROP_REGION to determine if we need to crop the output
-                // Note: captureResult is TotalCaptureResult
-                val cropRegion = captureResult.get(android.hardware.camera2.CaptureResult.SCALER_CROP_REGION)
-                val activeArray = chars.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
-
-                // Determine zoom factor: Prioritize UI state passed in Holder, fallback to Metadata
-                // Why? Because metadata SCALER_CROP_REGION sometimes returns full array even if zoom is active on some devices/impls
-                var zoomFactor = 1.0f
-                var source = "None"
-
-                if (image.zoomRatio > 1.05f) {
-                    zoomFactor = image.zoomRatio
-                    source = "UI_State"
-                } else if (cropRegion != null && activeArray != null) {
-                    val metaZoom = activeArray.width().toFloat() / cropRegion.width().toFloat()
-                    if (metaZoom > 1.05f) {
-                        zoomFactor = metaZoom
-                        source = "Metadata"
                     }
                 }
 
-                Log.d(TAG, "Digital Zoom Check: Source=$source, Factor=$zoomFactor, HolderRatio=${image.zoomRatio}, MetadataRegion=$cropRegion")
-
-                if (zoomFactor > 1.05f) {
-                     val newWidth = (processedBitmap.width / zoomFactor).toInt()
-                     val newHeight = (processedBitmap.height / zoomFactor).toInt()
-                     val x = (processedBitmap.width - newWidth) / 2
-                     val y = (processedBitmap.height - newHeight) / 2
-
-                     // Ensure bounds are safe
-                     val safeX = max(0, x)
-                     val safeY = max(0, y)
-                     val safeWidth = min(newWidth, processedBitmap.width - safeX)
-                     val safeHeight = min(newHeight, processedBitmap.height - safeY)
-
-                     val croppedBitmap = android.graphics.Bitmap.createBitmap(processedBitmap, safeX, safeY, safeWidth, safeHeight)
-
-                     processedBitmap = croppedBitmap
-
-                     Log.d(TAG, "Applied Digital Zoom Crop: NewSize=${safeWidth}x${safeHeight}")
-                }
-            }
-
-            // 5. Save DNG to Disk (with Thumbnail)
-            // Note: We reuse dngCreatorReal instance. We need to set the thumbnail now.
-            if (processedBitmap != null) {
-                val maxThumbSize = 256
-                val scale = min(maxThumbSize.toDouble() / processedBitmap.width, maxThumbSize.toDouble() / processedBitmap.height)
-                val thumbWidth = (processedBitmap.width * scale).toInt()
-                val thumbHeight = (processedBitmap.height * scale).toInt()
-
-                val thumbBitmap = if (scale < 1.0) {
-                    android.graphics.Bitmap.createScaledBitmap(processedBitmap, thumbWidth, thumbHeight, true)
-                } else {
-                    processedBitmap
-                }
-                dngCreatorReal.setThumbnail(thumbBitmap)
-            }
-
-            // Insert DNG into MediaStore
-            val dngValues = ContentValues().apply {
-                put(MediaStore.MediaColumns.DISPLAY_NAME, "$dngName.dng")
-                put(MediaStore.MediaColumns.MIME_TYPE, "image/x-adobe-dng")
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/Darkbag")
-                    put(MediaStore.MediaColumns.IS_PENDING, 1)
-                }
-            }
-            val dngUri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, dngValues)
-            if (dngUri != null) {
-                try {
-                    val dngOut = contentResolver.openOutputStream(dngUri)
-                    if (dngOut != null) {
-                        dngOut.use { out ->
-                            // Use ByteArrayInputStream for the raw data AGAIN?
-                            // No, DngCreator writes the DNG. We need to call writeInputStream again.
-                            // The thumbnail was set on the dngCreatorReal object.
-                            // We write again.
-                            val inputStream2 = java.io.ByteArrayInputStream(image.data)
-                            dngCreatorReal.writeInputStream(out, android.util.Size(image.width, image.height), inputStream2, 0)
-                        }
-                        Log.d(TAG, "Saved DNG to $dngUri")
-
-                        // Inject DNG Crop Metadata if Zoomed
-                        // Must be done BEFORE setting IS_PENDING = 0 to avoid file locks
-                        if (image.zoomRatio > 1.05f) {
+                if (nativeLutPath == null) {
+                    val lutPath = prefs.getString(SettingsFragment.KEY_LUT_URI, null)
+                    if (lutPath != null) {
+                        if (lutPath.startsWith("content://")) {
+                            val lutFile = File(context.cacheDir, "temp_lut.cube")
                             try {
-                                contentResolver.openFileDescriptor(dngUri, "rw")?.use { pfd ->
-                                    val exif = androidx.exifinterface.media.ExifInterface(pfd.fileDescriptor)
-
-                                    // Calculate Crop
-                                    val fullWidth = image.width
-                                    val fullHeight = image.height
-                                    val cropWidth = (fullWidth / image.zoomRatio).toInt()
-                                    val cropHeight = (fullHeight / image.zoomRatio).toInt()
-
-                                    // Ensure even coordinates for Bayer pattern alignment
-                                    val x = ((fullWidth - cropWidth) / 2) / 2 * 2
-                                    val y = ((fullHeight - cropHeight) / 2) / 2 * 2
-
-                                    exif.setAttribute("DefaultCropSize", "$cropWidth $cropHeight")
-                                    exif.setAttribute("DefaultCropOrigin", "$x $y")
-                                    exif.saveAttributes()
-                                    Log.d(TAG, "Injected DNG Crop: Size=$cropWidth $cropHeight, Origin=$x $y")
+                                contentResolver.openInputStream(Uri.parse(lutPath))?.use { input ->
+                                    FileOutputStream(lutFile).use { output -> input.copyTo(output) }
                                 }
+                                nativeLutPath = lutFile.absolutePath
                             } catch (e: Exception) {
-                                Log.e(TAG, "Failed to inject DNG crop metadata", e)
+                                Log.e(TAG, "Failed to load LUT", e)
+                            }
+                        } else {
+                            nativeLutPath = lutPath
+                        }
+                    }
+                }
+
+                val saveTiff = prefs.getBoolean(SettingsFragment.KEY_SAVE_TIFF, true)
+                val saveJpg = prefs.getBoolean(SettingsFragment.KEY_SAVE_JPG, true)
+                val useGpu = prefs.getBoolean(SettingsFragment.KEY_USE_GPU, false)
+
+                val tiffFile = if (saveTiff) File(context.cacheDir, "$dngName.tiff") else null
+                val tiffPath = tiffFile?.absolutePath
+                val bmpPath = File(context.cacheDir, "temp_${dngName}.bmp").absolutePath
+
+                // 3. Generate DNG in Memory (for LibRaw and Saving)
+                android.hardware.camera2.DngCreator(chars, captureResult).use { dngCreatorReal ->
+
+                    // Store DNG bytes in memory
+                    val dngOutputStream = java.io.ByteArrayOutputStream()
+                    var dngBytes: ByteArray? = null
+
+                    val orientation = when (image.rotationDegrees) {
+                        90 -> ExifInterface.ORIENTATION_ROTATE_90
+                        180 -> ExifInterface.ORIENTATION_ROTATE_180
+                        270 -> ExifInterface.ORIENTATION_ROTATE_270
+                        else -> ExifInterface.ORIENTATION_NORMAL
+                    }
+                    dngCreatorReal.setOrientation(orientation)
+
+                    // Write DNG to memory (no thumbnail yet)
+                    val inputStream = java.io.ByteArrayInputStream(image.data)
+                    dngCreatorReal.writeInputStream(
+                        dngOutputStream,
+                        android.util.Size(image.width, image.height),
+                        inputStream,
+                        0
+                    )
+                    dngBytes = dngOutputStream.toByteArray()
+
+                    // 4. Process with LibRaw
+                    val result = ColorProcessor.processRaw(
+                        dngBytes, targetLogIndex, nativeLutPath, tiffPath, bmpPath, useGpu
+                    )
+
+                    if (result == 1) {
+                        withContext(Dispatchers.Main) {
+                            Toast.makeText(
+                                context,
+                                "GPU processing failed. Fallback to CPU used.",
+                                Toast.LENGTH_LONG
+                            ).show()
+                        }
+                    } else if (result < 0) {
+                        throw RuntimeException("ColorProcessor returned error code $result")
+                    }
+
+                    // Load the processed image (BMP) for thumbnail and JPG saving
+                    var processedBitmap: android.graphics.Bitmap? = null
+                    if (File(bmpPath).exists()) {
+                        processedBitmap = BitmapFactory.decodeFile(bmpPath)
+                    }
+
+                    // Check for digital zoom cropping
+                    if (processedBitmap != null) {
+                        val cropRegion =
+                            captureResult.get(android.hardware.camera2.CaptureResult.SCALER_CROP_REGION)
+                        val activeArray =
+                            chars.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
+
+                        var zoomFactor = 1.0f
+                        if (image.zoomRatio > 1.05f) {
+                            zoomFactor = image.zoomRatio
+                        } else if (cropRegion != null && activeArray != null) {
+                            val metaZoom =
+                                activeArray.width().toFloat() / cropRegion.width().toFloat()
+                            if (metaZoom > 1.05f) {
+                                zoomFactor = metaZoom
                             }
                         }
 
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                            dngValues.clear()
-                            dngValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
-                            contentResolver.update(dngUri, dngValues, null, null)
+                        if (zoomFactor > 1.05f) {
+                            val newWidth = (processedBitmap.width / zoomFactor).toInt()
+                            val newHeight = (processedBitmap.height / zoomFactor).toInt()
+                            val x = (processedBitmap.width - newWidth) / 2
+                            val y = (processedBitmap.height - newHeight) / 2
+
+                            val safeX = max(0, x)
+                            val safeY = max(0, y)
+                            val safeWidth = min(newWidth, processedBitmap.width - safeX)
+                            val safeHeight = min(newHeight, processedBitmap.height - safeY)
+
+                            processedBitmap = android.graphics.Bitmap.createBitmap(
+                                processedBitmap,
+                                safeX,
+                                safeY,
+                                safeWidth,
+                                safeHeight
+                            )
                         }
-
-                    } else {
-                        Log.e(TAG, "Failed to open OutputStream for $dngUri")
-                        contentResolver.delete(dngUri, null, null)
                     }
-                } catch (e: Exception) {
-                    Log.e(TAG, "Error writing DNG to MediaStore", e)
-                    contentResolver.delete(dngUri, null, null)
-                }
-            } else {
-                Log.e(TAG, "Failed to create MediaStore entry for DNG")
+
+                    // 5. Save DNG to Disk (with Thumbnail)
+                    if (processedBitmap != null) {
+                        val maxThumbSize = 256
+                        val scale = min(
+                            maxThumbSize.toDouble() / processedBitmap.width,
+                            maxThumbSize.toDouble() / processedBitmap.height
+                        )
+                        val thumbWidth = (processedBitmap.width * scale).toInt()
+                        val thumbHeight = (processedBitmap.height * scale).toInt()
+
+                        val thumbBitmap = if (scale < 1.0) {
+                            android.graphics.Bitmap.createScaledBitmap(
+                                processedBitmap,
+                                thumbWidth,
+                                thumbHeight,
+                                true
+                            )
+                        } else {
+                            processedBitmap
+                        }
+                        dngCreatorReal.setThumbnail(thumbBitmap)
+                    }
+
+                    // Insert DNG into MediaStore
+                    val dngValues = ContentValues().apply {
+                        put(MediaStore.MediaColumns.DISPLAY_NAME, "$dngName.dng")
+                        put(MediaStore.MediaColumns.MIME_TYPE, "image/x-adobe-dng")
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                            put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/Darkbag")
+                            put(MediaStore.MediaColumns.IS_PENDING, 1)
+                        }
+                    }
+                    val dngUri = contentResolver.insert(
+                        MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                        dngValues
+                    )
+                    if (dngUri != null) {
+                        try {
+                            contentResolver.openOutputStream(dngUri)?.use { out ->
+                                val inputStream2 = java.io.ByteArrayInputStream(image.data)
+                                dngCreatorReal.writeInputStream(
+                                    out,
+                                    android.util.Size(image.width, image.height),
+                                    inputStream2,
+                                    0
+                                )
+                            }
+
+                            if (image.zoomRatio > 1.05f) {
+                                try {
+                                    contentResolver.openFileDescriptor(dngUri, "rw")?.use { pfd ->
+                                        val exif =
+                                            androidx.exifinterface.media.ExifInterface(pfd.fileDescriptor)
+                                        val fullWidth = image.width
+                                        val fullHeight = image.height
+                                        val cropWidth = (fullWidth / image.zoomRatio).toInt()
+                                        val cropHeight = (fullHeight / image.zoomRatio).toInt()
+                                        val x = ((fullWidth - cropWidth) / 2) / 2 * 2
+                                        val y = ((fullHeight - cropHeight) / 2) / 2 * 2
+
+                                        exif.setAttribute(
+                                            "DefaultCropSize",
+                                            "$cropWidth $cropHeight"
+                                        )
+                                        exif.setAttribute("DefaultCropOrigin", "$x $y")
+                                        exif.saveAttributes()
+                                    }
+                                } catch (e: Exception) {
+                                    Log.e(TAG, "Failed to inject DNG crop metadata", e)
+                                }
+                            }
+
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                dngValues.clear()
+                                dngValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                                contentResolver.update(dngUri, dngValues, null, null)
+                            }
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Error writing DNG to MediaStore", e)
+                            contentResolver.delete(dngUri, null, null)
+                        }
+                    }
+
+                    // 5. Save TIFF
+                    if (tiffFile != null && tiffFile.exists()) {
+                        val tiffValues = ContentValues().apply {
+                            put(MediaStore.MediaColumns.DISPLAY_NAME, "$dngName.tiff")
+                            put(MediaStore.MediaColumns.MIME_TYPE, "image/tiff")
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/Darkbag")
+                                put(MediaStore.MediaColumns.IS_PENDING, 1)
+                            }
+                        }
+                        val tiffUri = contentResolver.insert(
+                            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                            tiffValues
+                        )
+                        if (tiffUri != null) {
+                            contentResolver.openOutputStream(tiffUri)?.use { out ->
+                                java.io.FileInputStream(tiffFile).copyTo(out)
+                            }
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                tiffValues.clear()
+                                tiffValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                                contentResolver.update(tiffUri, tiffValues, null, null)
+                            }
+                        }
+                        tiffFile.delete()
+                    }
+
+                    // 6. Save JPG
+                    var finalJpgUri: Uri? = null
+                    if (saveJpg && processedBitmap != null) {
+                        val jpgValues = ContentValues().apply {
+                            put(MediaStore.MediaColumns.DISPLAY_NAME, "$dngName.jpg")
+                            put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/Darkbag")
+                                put(MediaStore.MediaColumns.IS_PENDING, 1)
+                            }
+                        }
+                        val jpgUri = contentResolver.insert(
+                            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                            jpgValues
+                        )
+                        if (jpgUri != null) {
+                            finalJpgUri = jpgUri
+                            contentResolver.openOutputStream(jpgUri)?.use { out ->
+                                val matrix = android.graphics.Matrix()
+                                matrix.postRotate(image.rotationDegrees.toFloat())
+                                val rotatedBitmap = android.graphics.Bitmap.createBitmap(
+                                    processedBitmap,
+                                    0,
+                                    0,
+                                    processedBitmap.width,
+                                    processedBitmap.height,
+                                    matrix,
+                                    true
+                                )
+                                rotatedBitmap.compress(
+                                    android.graphics.Bitmap.CompressFormat.JPEG,
+                                    90,
+                                    out
+                                )
+                            }
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                jpgValues.clear()
+                                jpgValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                                contentResolver.update(jpgUri, jpgValues, null, null)
+                            }
+                        }
+                    }
+
+                    // Clean up BMP
+                    if (File(bmpPath).exists()) File(bmpPath).delete()
+
+                    // 7. Update UI
+                    withContext(Dispatchers.Main) {
+                        if (saveJpg && finalJpgUri != null) {
+                            setGalleryThumbnail(finalJpgUri.toString())
+                        } else {
+                            mediaStoreUtils.getLatestImageFilename()
+                                ?.let { setGalleryThumbnail(it) }
+                        }
+                    }
+                } // End of dngCreatorReal.use
+
+            } catch (e: Exception) {
+                Log.e(TAG, "Error in background processing", e)
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to save DNG", e)
-        } finally {
-            dngCreatorReal.close()
         }
-
-            // 5. Save TIFF
-            if (tiffFile != null && tiffFile.exists()) {
-                val tiffValues = ContentValues().apply {
-                    put(MediaStore.MediaColumns.DISPLAY_NAME, "$dngName.tiff")
-                    put(MediaStore.MediaColumns.MIME_TYPE, "image/tiff")
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                        put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/Darkbag")
-                        put(MediaStore.MediaColumns.IS_PENDING, 1)
-                    }
-                }
-                val tiffUri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, tiffValues)
-                if (tiffUri != null) {
-                    contentResolver.openOutputStream(tiffUri)?.use { out ->
-                        java.io.FileInputStream(tiffFile).copyTo(out)
-                    }
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                        tiffValues.clear()
-                        tiffValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
-                        contentResolver.update(tiffUri, tiffValues, null, null)
-                    }
-                }
-                tiffFile.delete()
-            }
-
-            // 6. Save JPG
-            var finalJpgUri: Uri? = null
-            if (saveJpg && processedBitmap != null) {
-                 val jpgValues = ContentValues().apply {
-                    put(MediaStore.MediaColumns.DISPLAY_NAME, "$dngName.jpg")
-                    put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                        put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/Darkbag")
-                        put(MediaStore.MediaColumns.IS_PENDING, 1)
-                    }
-                }
-                val jpgUri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, jpgValues)
-                if (jpgUri != null) {
-                    finalJpgUri = jpgUri
-                    contentResolver.openOutputStream(jpgUri)?.use { out ->
-                        // Apply rotation
-                        val matrix = android.graphics.Matrix()
-                        matrix.postRotate(image.rotationDegrees.toFloat())
-                        val rotatedBitmap = android.graphics.Bitmap.createBitmap(processedBitmap, 0, 0, processedBitmap.width, processedBitmap.height, matrix, true)
-                        rotatedBitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, out)
-                    }
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                        jpgValues.clear()
-                        jpgValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
-                        contentResolver.update(jpgUri, jpgValues, null, null)
-                    }
-                }
-            }
-
-            // Clean up BMP
-            if (File(bmpPath).exists()) File(bmpPath).delete()
-
-            // 7. Update UI (Thumbnail)
-            // Use finalJpgUri if available, otherwise DNG or TIFF uri (requires finding them again or logic change)
-            // But we can just use the path or the URI we just created.
-            // Simplified: Refresh thumbnail on main thread using the filename we just generated
-            kotlinx.coroutines.withContext(Dispatchers.Main) {
-                if (saveJpg && finalJpgUri != null) {
-                    setGalleryThumbnail(finalJpgUri.toString())
-                } else {
-                    // Fallback to DNG if JPG not saved? Or just the latest file.
-                     mediaStoreUtils.getLatestImageFilename()?.let { setGalleryThumbnail(it) }
-                }
-            }
-
-        } catch (e: Exception) {
-            Log.e(TAG, "Error in background processing", e)
-        }
-    }
 
     private fun setupTapToFocus() {
         // Use DisplayOrientedMeteringPointFactory with explicit inputs since we removed PreviewView
@@ -1270,10 +1345,10 @@ class CameraFragment : Fragment() {
         val cameraInfo = camera?.cameraInfo ?: return
 
         val factory = DisplayOrientedMeteringPointFactory(
-             fragmentCameraBinding.viewFinder.display,
-             cameraInfo,
-             width,
-             height
+            fragmentCameraBinding.viewFinder.display,
+            cameraInfo,
+            width,
+            height
         )
 
         fragmentCameraBinding.viewFinder.setOnTouchListener { view, event ->
@@ -1323,7 +1398,8 @@ class CameraFragment : Fragment() {
     }
 
     private fun initManualControls() {
-        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val prefs =
+            requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
         val enabled = prefs.getBoolean(SettingsFragment.KEY_MANUAL_CONTROLS, false)
         if (!enabled) return
 
@@ -1391,6 +1467,7 @@ class CameraFragment : Fragment() {
                 isManualFocus = true
                 binding.tvManualValue?.text = String.format("%.2f", currentFocusDistance)
             }
+
             "ISO" -> {
                 isoRange?.let { range ->
                     currentIso = (range.lower + (range.upper - range.lower) * ratio).toInt()
@@ -1398,36 +1475,42 @@ class CameraFragment : Fragment() {
                     binding.tvManualValue?.text = "$currentIso"
                 }
             }
+
             "Shutter" -> {
                 exposureTimeRange?.let { range ->
-                     // Logarithmic scale
-                     // v = min * (max/min)^ratio
-                     val minVal = range.lower.toDouble()
-                     val maxVal = range.upper.toDouble()
-                     val res = minVal * Math.pow(maxVal / minVal, ratio.toDouble())
-                     currentExposureTime = res.toLong()
-                     isManualExposure = true
+                    // Logarithmic scale
+                    // v = min * (max/min)^ratio
+                    val minVal = range.lower.toDouble()
+                    val maxVal = range.upper.toDouble()
+                    val res = minVal * Math.pow(maxVal / minVal, ratio.toDouble())
+                    currentExposureTime = res.toLong()
+                    isManualExposure = true
 
-                     // Format text
-                     val ms = currentExposureTime / 1_000_000.0
-                     if (ms < 1000) {
-                         binding.tvManualValue?.text = String.format("1/%.0fs", 1000.0/ms)
-                     } else {
-                         binding.tvManualValue?.text = String.format("%.1fs", ms/1000.0)
-                     }
+                    // Format text
+                    val ms = currentExposureTime / 1_000_000.0
+                    if (ms < 1000) {
+                        binding.tvManualValue?.text = String.format("1/%.0fs", 1000.0 / ms)
+                    } else {
+                        binding.tvManualValue?.text = String.format("%.1fs", ms / 1000.0)
+                    }
                 }
             }
+
             "EV" -> {
-                 evRange?.let { range ->
-                     currentEvIndex = (range.lower + (range.upper - range.lower) * ratio).toInt()
-                     // EV doesn't set isManualExposure flag as it works in Auto.
-                     // But if isManualExposure is TRUE, EV does nothing.
-                     if (isManualExposure) {
-                         Toast.makeText(requireContext(), "EV disabled in Manual Exposure", Toast.LENGTH_SHORT).show()
-                     } else {
-                         binding.tvManualValue?.text = "$currentEvIndex"
-                     }
-                 }
+                evRange?.let { range ->
+                    currentEvIndex = (range.lower + (range.upper - range.lower) * ratio).toInt()
+                    // EV doesn't set isManualExposure flag as it works in Auto.
+                    // But if isManualExposure is TRUE, EV does nothing.
+                    if (isManualExposure) {
+                        Toast.makeText(
+                            requireContext(),
+                            "EV disabled in Manual Exposure",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    } else {
+                        binding.tvManualValue?.text = "$currentEvIndex"
+                    }
+                }
             }
         }
         applyCameraControls()
@@ -1435,14 +1518,16 @@ class CameraFragment : Fragment() {
     }
 
     private fun resetCurrentManualParameter() {
-         when (activeManualTab) {
+        when (activeManualTab) {
             "Focus" -> {
                 isManualFocus = false
                 camera?.cameraControl?.cancelFocusAndMetering()
             }
+
             "ISO", "Shutter" -> {
                 isManualExposure = false
             }
+
             "EV" -> {
                 currentEvIndex = 0
             }
@@ -1465,14 +1550,16 @@ class CameraFragment : Fragment() {
 
     private fun updateManualPanel() {
         val binding = cameraUiContainerBinding ?: return
-        binding.focusExtras?.visibility = if (activeManualTab == "Focus") View.VISIBLE else View.GONE
+        binding.focusExtras?.visibility =
+            if (activeManualTab == "Focus") View.VISIBLE else View.GONE
 
         val max = binding.seekbarManual?.valueTo ?: 1000.0f
 
         when (activeManualTab) {
             "Focus" -> {
                 if (isManualFocus) {
-                    val ratio = if (minFocusDistance > 0) currentFocusDistance / minFocusDistance else 0f
+                    val ratio =
+                        if (minFocusDistance > 0) currentFocusDistance / minFocusDistance else 0f
                     binding.seekbarManual?.value = (ratio * max).coerceIn(0f, max)
                     binding.tvManualValue?.text = String.format("%.2f", currentFocusDistance)
                 } else {
@@ -1480,40 +1567,46 @@ class CameraFragment : Fragment() {
                     binding.seekbarManual?.value = 0.0f
                 }
             }
+
             "ISO" -> {
                 isoRange?.let { range ->
                     if (isManualExposure) {
-                        val ratio = (currentIso - range.lower).toFloat() / (range.upper - range.lower)
+                        val ratio =
+                            (currentIso - range.lower).toFloat() / (range.upper - range.lower)
                         binding.seekbarManual?.value = (ratio * max).coerceIn(0f, max)
                         binding.tvManualValue?.text = "$currentIso"
-                    } else {
-                         binding.tvManualValue?.text = "Auto"
-                         binding.seekbarManual?.value = 0.0f
-                    }
-                }
-            }
-            "Shutter" -> {
-                exposureTimeRange?.let { range ->
-                    if (isManualExposure) {
-                        val minVal = range.lower.toDouble()
-                        val maxVal = range.upper.toDouble()
-                        val ratio = Math.log(currentExposureTime.toDouble() / minVal) / Math.log(maxVal / minVal)
-                        binding.seekbarManual?.value = (ratio * max).toFloat().coerceIn(0f, max)
-                         val ms = currentExposureTime / 1_000_000.0
-                         if (ms < 1000) {
-                             binding.tvManualValue?.text = String.format("1/%.0fs", 1000.0/ms)
-                         } else {
-                             binding.tvManualValue?.text = String.format("%.1fs", ms/1000.0)
-                         }
                     } else {
                         binding.tvManualValue?.text = "Auto"
                         binding.seekbarManual?.value = 0.0f
                     }
                 }
             }
+
+            "Shutter" -> {
+                exposureTimeRange?.let { range ->
+                    if (isManualExposure) {
+                        val minVal = range.lower.toDouble()
+                        val maxVal = range.upper.toDouble()
+                        val ratio =
+                            Math.log(currentExposureTime.toDouble() / minVal) / Math.log(maxVal / minVal)
+                        binding.seekbarManual?.value = (ratio * max).toFloat().coerceIn(0f, max)
+                        val ms = currentExposureTime / 1_000_000.0
+                        if (ms < 1000) {
+                            binding.tvManualValue?.text = String.format("1/%.0fs", 1000.0 / ms)
+                        } else {
+                            binding.tvManualValue?.text = String.format("%.1fs", ms / 1000.0)
+                        }
+                    } else {
+                        binding.tvManualValue?.text = "Auto"
+                        binding.seekbarManual?.value = 0.0f
+                    }
+                }
+            }
+
             "EV" -> {
                 evRange?.let { range ->
-                    val ratio = (currentEvIndex - range.lower).toFloat() / (range.upper - range.lower)
+                    val ratio =
+                        (currentEvIndex - range.lower).toFloat() / (range.upper - range.lower)
                     binding.seekbarManual?.value = (ratio * max).coerceIn(0f, max)
                     binding.tvManualValue?.text = "$currentEvIndex"
                 }
@@ -1557,7 +1650,8 @@ class CameraFragment : Fragment() {
             currentFocalLength / 24.0f
         }
 
-        val maxZoom = camera?.cameraInfo?.zoomState?.value?.maxZoomRatio ?: 8.0f // Default high enough if null
+        val maxZoom = camera?.cameraInfo?.zoomState?.value?.maxZoomRatio
+            ?: 8.0f // Default high enough if null
         val ratio = targetRatio.coerceAtMost(maxZoom)
 
         camera?.cameraControl?.setZoomRatio(ratio)
@@ -1566,8 +1660,14 @@ class CameraFragment : Fragment() {
 
     private fun updateZoomUI(animate: Boolean) {
         val binding = cameraUiContainerBinding ?: return
-        val activeColor = androidx.core.content.ContextCompat.getColor(requireContext(), R.color.zoom_button_active)
-        val inactiveColor = androidx.core.content.ContextCompat.getColor(requireContext(), R.color.zoom_button_inactive)
+        val activeColor = androidx.core.content.ContextCompat.getColor(
+            requireContext(),
+            R.color.zoom_button_active
+        )
+        val inactiveColor = androidx.core.content.ContextCompat.getColor(
+            requireContext(),
+            R.color.zoom_button_inactive
+        )
 
         if (is2xMode) {
             binding.btnZoom2x?.setTextColor(activeColor)
@@ -1592,26 +1692,28 @@ class CameraFragment : Fragment() {
             }
 
             if (animate) {
-                 zoomJob = lifecycleScope.launch(Dispatchers.Main) {
-                     val labelMm = "${currentFocalLength}mm"
+                zoomJob = lifecycleScope.launch(Dispatchers.Main) {
+                    val labelMm = "${currentFocalLength}mm"
 
-                     binding.btnZoomToggle?.text = labelMm
-                     delay(500)
-                     binding.btnZoomToggle?.text = labelX
-                 }
+                    binding.btnZoomToggle?.text = labelMm
+                    delay(500)
+                    binding.btnZoomToggle?.text = labelX
+                }
             } else {
-                 binding.btnZoomToggle?.text = labelX
+                binding.btnZoomToggle?.text = labelX
             }
         }
     }
 
+    @OptIn(ExperimentalCamera2Interop::class)
     private fun applyCameraControls() {
         val cameraControl = camera?.cameraControl ?: return
         val camera2Control = Camera2CameraControl.from(cameraControl)
         val builder = CaptureRequestOptions.Builder()
 
         // Global Settings: Anti-Banding
-        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val prefs =
+            requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
         val antiBandingMode = when (prefs.getString(SettingsFragment.KEY_ANTIBANDING, "Auto")) {
             "50Hz" -> CaptureRequest.CONTROL_AE_ANTIBANDING_MODE_50HZ
             "60Hz" -> CaptureRequest.CONTROL_AE_ANTIBANDING_MODE_60HZ
@@ -1622,22 +1724,34 @@ class CameraFragment : Fragment() {
 
         // Focus
         if (isManualFocus) {
-            builder.setCaptureRequestOption(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF)
-            builder.setCaptureRequestOption(CaptureRequest.LENS_FOCUS_DISTANCE, currentFocusDistance)
+            builder.setCaptureRequestOption(
+                CaptureRequest.CONTROL_AF_MODE,
+                CaptureRequest.CONTROL_AF_MODE_OFF
+            )
+            builder.setCaptureRequestOption(
+                CaptureRequest.LENS_FOCUS_DISTANCE,
+                currentFocusDistance
+            )
         }
 
         // Exposure
         if (isManualExposure) {
-            builder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
+            builder.setCaptureRequestOption(
+                CaptureRequest.CONTROL_AE_MODE,
+                CaptureRequest.CONTROL_AE_MODE_OFF
+            )
             builder.setCaptureRequestOption(CaptureRequest.SENSOR_SENSITIVITY, currentIso)
-            builder.setCaptureRequestOption(CaptureRequest.SENSOR_EXPOSURE_TIME, currentExposureTime)
+            builder.setCaptureRequestOption(
+                CaptureRequest.SENSOR_EXPOSURE_TIME,
+                currentExposureTime
+            )
         }
 
         camera2Control.setCaptureRequestOptions(builder.build())
 
         // EV
         if (!isManualExposure) {
-             cameraControl.setExposureCompensationIndex(currentEvIndex)
+            cameraControl.setExposureCompensationIndex(currentEvIndex)
         }
     }
 
@@ -1655,20 +1769,26 @@ class CameraFragment : Fragment() {
         rv.adapter = adapter
     }
 
-    private inner class LutPreviewAdapter(val luts: List<File>) : androidx.recyclerview.widget.RecyclerView.Adapter<LutPreviewAdapter.ViewHolder>() {
+    private inner class LutPreviewAdapter(val luts: List<File>) :
+        androidx.recyclerview.widget.RecyclerView.Adapter<LutPreviewAdapter.ViewHolder>() {
 
-        inner class ViewHolder(view: View) : androidx.recyclerview.widget.RecyclerView.ViewHolder(view) {
+        inner class ViewHolder(view: View) :
+            androidx.recyclerview.widget.RecyclerView.ViewHolder(view) {
             val text: android.widget.TextView = view.findViewById(android.R.id.text1)
         }
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
-            val view = LayoutInflater.from(parent.context).inflate(android.R.layout.simple_list_item_1, parent, false)
+            val view = LayoutInflater.from(parent.context)
+                .inflate(android.R.layout.simple_list_item_1, parent, false)
             view.setBackgroundColor(Color.TRANSPARENT)
             return ViewHolder(view)
         }
 
         override fun onBindViewHolder(holder: ViewHolder, position: Int) {
-            val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+            val prefs = requireContext().getSharedPreferences(
+                SettingsFragment.PREFS_NAME,
+                Context.MODE_PRIVATE
+            )
             val currentName = prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, null)
 
             holder.text.setTextColor(Color.WHITE)
@@ -1702,7 +1822,8 @@ class CameraFragment : Fragment() {
 
     private fun updateLiveLut() {
         val proc = lutProcessor ?: return
-        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val prefs =
+            requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
 
         val activeLutName = prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, null)
         val targetLogName = prefs.getString(SettingsFragment.KEY_TARGET_LOG, "None")
@@ -1718,7 +1839,8 @@ class CameraFragment : Fragment() {
                     lutData = ColorProcessor.loadLutData(file.absolutePath)
                     if (lutData != null) {
                         // size = cuberoot(len/3)
-                        size = Math.round(Math.pow((lutData.size / 3).toDouble(), 1.0/3.0)).toInt()
+                        size =
+                            Math.round(Math.pow((lutData.size / 3).toDouble(), 1.0 / 3.0)).toInt()
                     }
                 }
             }
