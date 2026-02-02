@@ -385,7 +385,8 @@ class LutSurfaceProcessor : SurfaceProcessor {
                 logColor.b = apply_log(linear.b, uLogType);
 
                 if (uLutSize > 0) {
-                     outColor = vec4(texture(uLut, logColor).rgb, 1.0);
+                     // Swap R and B for texture lookup to match LUT memory layout (X=Blue)
+                     outColor = vec4(texture(uLut, vec3(logColor.b, logColor.g, logColor.r)).rgb, 1.0);
                 } else {
                      outColor = color;
                 }

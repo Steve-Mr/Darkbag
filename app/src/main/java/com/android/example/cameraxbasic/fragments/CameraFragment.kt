@@ -1045,17 +1045,25 @@ class CameraFragment : Fragment() {
             ccm[0]=1f; ccm[4]=1f; ccm[8]=1f;
         }
 
-        val neutral = captureResult.get(android.hardware.camera2.CaptureResult.SENSOR_NEUTRAL_COLOR_POINT) as? RggbChannelVector
-        val wb = if (neutral != null) {
-            val rVal = neutral.red
-            val gEvenVal = neutral.greenEven
-            val bVal = neutral.blue
-            val r = if (rVal > 0) 1.0f / rVal else 1.0f
-            val g = if (gEvenVal > 0) 1.0f / gEvenVal else 1.0f
-            val b = if (bVal > 0) 1.0f / bVal else 1.0f
-            floatArrayOf(r, g, g, b)
+        // Try Color Correction Gains first (As Shot)
+        val ccGains = captureResult.get(android.hardware.camera2.CaptureResult.COLOR_CORRECTION_GAINS)
+        val wb = if (ccGains != null) {
+            floatArrayOf(ccGains.red, ccGains.greenEven, ccGains.greenOdd, ccGains.blue)
         } else {
-            floatArrayOf(2.0f, 1.0f, 1.0f, 2.0f)
+            // Fallback to Neutral Color Point (Scene White Balance)
+            val neutral = captureResult.get(android.hardware.camera2.CaptureResult.SENSOR_NEUTRAL_COLOR_POINT)
+            // neutral is Rational[] of size 3 (R, G, B)
+            if (neutral != null && neutral.size == 3) {
+                val rVal = neutral[0].toFloat()
+                val gVal = neutral[1].toFloat()
+                val bVal = neutral[2].toFloat()
+                val r = if (rVal > 0) 1.0f / rVal else 1.0f
+                val g = if (gVal > 0) 1.0f / gVal else 1.0f
+                val b = if (bVal > 0) 1.0f / bVal else 1.0f
+                floatArrayOf(r, g, g, b)
+            } else {
+                floatArrayOf(2.0f, 1.0f, 1.0f, 2.0f)
+            }
         }
 
         try {

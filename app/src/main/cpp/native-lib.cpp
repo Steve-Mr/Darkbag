@@ -133,7 +133,9 @@ Vec3 apply_lut(const LUT3D& lut, Vec3 color) {
     int g0 = (int)g; int g1 = std::min(g0 + 1, lut.size - 1);
     int b0 = (int)b; int b1 = std::min(b0 + 1, lut.size - 1);
     float dr = r - r0; float dg = g - g0; float db = b - b0;
-    auto idx = [&](int x, int y, int z) { return x + y * lut.size + z * lut.size * lut.size; };
+    // Fix: .cube format has Blue changing fastest (Z), then Green (Y), then Red (X).
+    // So linear index = b + g * size + r * size * size.
+    auto idx = [&](int x, int y, int z) { return z + y * lut.size + x * lut.size * lut.size; };
     Vec3 c000 = lut.data[idx(r0, g0, b0)]; Vec3 c100 = lut.data[idx(r1, g0, b0)];
     Vec3 c010 = lut.data[idx(r0, g1, b0)]; Vec3 c110 = lut.data[idx(r1, g1, b0)];
     Vec3 c001 = lut.data[idx(r0, g0, b1)]; Vec3 c101 = lut.data[idx(r1, g0, b1)];
@@ -523,8 +525,8 @@ void main() {
     if (uLutSize > 0) {
         // Texture lookup
         // 3D Texture expects normalized coords [0,1]
-        // We assume LUT texture handles linear interpolation
-        res = texture(uLut, res).rgb;
+        // LUT memory layout is X=Blue, Y=Green, Z=Red. So we must sample as (B, G, R).
+        res = texture(uLut, vec3(res.z, res.y, res.x)).rgb;
     }
 
     // Output
