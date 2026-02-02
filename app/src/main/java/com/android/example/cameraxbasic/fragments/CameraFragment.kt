@@ -482,19 +482,6 @@ class CameraFragment : Fragment() {
             fragmentCameraBinding.viewFinder.setAspectRatio(4, 3)
         }
 
-        // Adjust viewFinder to "lift" it, avoiding the control island which is now semitransparent overlay
-        // We add bottom margin to the view finder.
-        // Assuming island height roughly 120dp + margin
-        // We can do this programmatically or better, via constraints.
-        // Since we are reusing the same layout, we might just set padding/margin here if needed.
-        // However, user asked to "lift" it.
-        // The viewFinder is inside a ConstraintLayout in fragment_camera.xml.
-        // We can update its layoutparams.
-        val bottomMargin = resources.getDimensionPixelSize(R.dimen.control_panel_height)
-        val params = fragmentCameraBinding.viewFinder.layoutParams as androidx.constraintlayout.widget.ConstraintLayout.LayoutParams
-        params.setMargins(0, 0, 0, bottomMargin)
-        fragmentCameraBinding.viewFinder.layoutParams = params
-
         // Preview
         preview = Preview.Builder()
             // We request aspect ratio but no resolution
@@ -1395,7 +1382,12 @@ class CameraFragment : Fragment() {
                 updateTabColors()
 
                 camera?.cameraControl?.startFocusAndMetering(action)
-                showFocusRing(event.x, event.y)
+
+                // Calculate screen coordinates for Focus Ring (which is in root layout)
+                // view.x/y is relative to root. event.x/y is relative to view.
+                val screenX = view.x + event.x
+                val screenY = view.y + event.y
+                showFocusRing(screenX, screenY)
                 view.performClick()
             }
             true
