@@ -1040,8 +1040,10 @@ class CameraFragment : Fragment() {
 
         val cfa = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_COLOR_FILTER_ARRANGEMENT) ?: 0
 
-        val colorTransform = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_COLOR_TRANSFORM1)
-            ?: chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_FORWARD_MATRIX1)
+        // Prioritize SENSOR_FORWARD_MATRIX1 (Camera -> XYZ) for correct color development.
+        // SENSOR_COLOR_TRANSFORM1 is XYZ -> Camera, which causes green tint if used as-is.
+        val colorTransform = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_FORWARD_MATRIX1)
+            ?: chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_COLOR_TRANSFORM1)
 
         val ccm = FloatArray(9)
         if (colorTransform != null) {
