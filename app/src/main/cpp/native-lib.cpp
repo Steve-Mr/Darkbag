@@ -8,19 +8,11 @@
 #include <sstream>
 #include <iostream>
 #include <memory>
-#include <EGL/egl.h>
-#include <GLES3/gl31.h>
+#include <libraw/libraw.h>
 
 #define TAG "ColorProcessorNative"
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
-
-// Constants
-const float PROPHOTO_RGB_D50[9] = {
-    1.3459433f, -0.2556075f, -0.0511118f,
-    -0.5445989f, 1.5081673f, 0.0205351f,
-    0.0f, 0.0f, 1.2118128f
-};
 
 struct Vec3 {
     float r, g, b;
@@ -240,580 +232,139 @@ void write_bmp(const char* filename, int width, int height, const std::vector<un
     file.close();
 }
 
-// --- Common ---
-void calculateCombinedMatrix(const float* ccm, const float* wb, float* combinedMat) {
-     // CCM is Cam -> XYZ. ProPhoto is XYZ -> Pro.
-     // Total: Raw * WB * CCM * ProPhoto
-     // Simplified to just 3x3 matmul on CPU, shader does v * M.
-     // Note: Standard pipeline:
-     // 1. Linearize (Raw - Black) / (White - Black)
-     // 2. White Balance (Diagonal Matrix)
-     // 3. CCM (Color Matrix) -> XYZ
-     // 4. XYZ -> RGB (ProPhoto)
-     // Combined M = ProPhoto * CCM.
-     // WB is separate.
-
-    auto matMul = [](const float* a, const float* b, float* res) {
-        for (int i=0; i<3; ++i) {
-            for (int j=0; j<3; ++j) {
-                res[i*3+j] = 0;
-                for (int k=0; k<3; ++k) res[i*3+j] += a[i*3+k] * b[k*3+j];
-            }
-        }
-    };
-    float xyzToPro[9];
-    std::copy(std::begin(PROPHOTO_RGB_D50), std::end(PROPHOTO_RGB_D50), std::begin(xyzToPro));
-    matMul(xyzToPro, ccm, combinedMat);
-}
-
-// --- CPU Processing ---
-bool processCpu(
-    uint16_t* rawData, int width, int height, int stride,
-    int whiteLevel, int blackLevel, int cfaPattern,
-    float* wb, float* combinedMat, int targetLog, const LUT3D& lut,
+void processLibRawOutput(
+    libraw_processed_image_t* image,
+    int targetLog,
+    const LUT3D& lut,
     std::vector<unsigned short>& outputImage
 ) {
-    int r_x, r_y, b_x, b_y;
-    if (cfaPattern == 0) { r_x=0; r_y=0; b_x=1; b_y=1; }
-    else if (cfaPattern == 1) { r_x=1; r_y=0; b_x=0; b_y=1; }
-    else if (cfaPattern == 2) { r_x=0; r_y=1; b_x=1; b_y=0; }
-    else { r_x=1; r_y=1; b_x=0; b_y=0; }
+    int width = image->width;
+    int height = image->height;
+    unsigned short* data = (unsigned short*)image->data; // 16-bit
 
-    int stride_pixels = stride / 2;
+    outputImage.resize(width * height * 3);
 
-    #pragma omp parallel for
-    for (int y = 0; y < height - 1; y++) {
-        for (int x = 0; x < width - 1; x++) {
-            float r, g, b;
-            bool is_r = ((x & 1) == r_x) && ((y & 1) == r_y);
-            bool is_b = ((x & 1) == b_x) && ((y & 1) == b_y);
-            bool is_g = !is_r && !is_b;
-
-            float val = (float)rawData[y * stride_pixels + x];
-
-            if (is_g) {
-                g = val;
-                float r_sum = 0, b_sum = 0; int r_cnt = 0, b_cnt = 0;
-                if (x>0) { float v = rawData[y * stride_pixels + (x-1)]; if (((x-1)&1)==r_x) { r_sum+=v; r_cnt++; } else { b_sum+=v; b_cnt++; } }
-                if (x<width-1) { float v = rawData[y * stride_pixels + (x+1)]; if (((x+1)&1)==r_x) { r_sum+=v; r_cnt++; } else { b_sum+=v; b_cnt++; } }
-                if (y>0) { float v = rawData[(y-1) * stride_pixels + x]; if (((y-1)&1)==r_y) { r_sum+=v; r_cnt++; } else { b_sum+=v; b_cnt++; } }
-                if (y<height-1) { float v = rawData[(y+1) * stride_pixels + x]; if (((y+1)&1)==r_y) { r_sum+=v; r_cnt++; } else { b_sum+=v; b_cnt++; } }
-                r = (r_cnt > 0) ? r_sum / r_cnt : 0;
-                b = (b_cnt > 0) ? b_sum / b_cnt : 0;
-            } else if (is_r) {
-                r = val;
-                float g_sum = 0, b_sum = 0; int g_cnt = 0, b_cnt = 0;
-                if (x>0) { g_sum += rawData[y*stride_pixels+x-1]; g_cnt++; }
-                if (x<width-1) { g_sum += rawData[y*stride_pixels+x+1]; g_cnt++; }
-                if (y>0) { g_sum += rawData[(y-1)*stride_pixels+x]; g_cnt++; }
-                if (y<height-1) { g_sum += rawData[(y+1)*stride_pixels+x]; g_cnt++; }
-                if (x>0 && y>0) { b_sum += rawData[(y-1)*stride_pixels+x-1]; b_cnt++; }
-                if (x<width-1 && y>0) { b_sum += rawData[(y-1)*stride_pixels+x+1]; b_cnt++; }
-                if (x>0 && y<height-1) { b_sum += rawData[(y+1)*stride_pixels+x-1]; b_cnt++; }
-                if (x<width-1 && y<height-1) { b_sum += rawData[(y+1)*stride_pixels+x+1]; b_cnt++; }
-                g = (g_cnt>0) ? g_sum/g_cnt : 0;
-                b = (b_cnt>0) ? b_sum/b_cnt : 0;
-            } else { // is_b
-                b = val;
-                float g_sum = 0, r_sum = 0; int g_cnt = 0, r_cnt = 0;
-                if (x>0) { g_sum += rawData[y*stride_pixels+x-1]; g_cnt++; }
-                if (x<width-1) { g_sum += rawData[y*stride_pixels+x+1]; g_cnt++; }
-                if (y>0) { g_sum += rawData[(y-1)*stride_pixels+x]; g_cnt++; }
-                if (y<height-1) { g_sum += rawData[(y+1)*stride_pixels+x]; g_cnt++; }
-                if (x>0 && y>0) { r_sum += rawData[(y-1)*stride_pixels+x-1]; r_cnt++; }
-                if (x<width-1 && y>0) { r_sum += rawData[(y-1)*stride_pixels+x+1]; r_cnt++; }
-                if (x>0 && y<height-1) { r_sum += rawData[(y+1)*stride_pixels+x-1]; r_cnt++; }
-                if (x<width-1 && y<height-1) { r_sum += rawData[(y+1)*stride_pixels+x+1]; r_cnt++; }
-                g = (g_cnt>0) ? g_sum/g_cnt : 0;
-                r = (r_cnt>0) ? r_sum/r_cnt : 0;
-            }
-
-            float range = (float)(whiteLevel - blackLevel);
-            r = std::max(0.0f, (r - blackLevel) / range);
-            g = std::max(0.0f, (g - blackLevel) / range);
-            b = std::max(0.0f, (b - blackLevel) / range);
-
-            float g_gain = (wb[1] + wb[2]) / 2.0f;
-            r *= wb[0]; g *= g_gain; b *= wb[3];
-
-            float X = combinedMat[0]*r + combinedMat[1]*g + combinedMat[2]*b;
-            float Y = combinedMat[3]*r + combinedMat[4]*g + combinedMat[5]*b;
-            float Z = combinedMat[6]*r + combinedMat[7]*g + combinedMat[8]*b;
-
-            X = apply_log(X, targetLog);
-            Y = apply_log(Y, targetLog);
-            Z = apply_log(Z, targetLog);
-
-            Vec3 res = {X, Y, Z};
-            if (lut.size > 0) res = apply_lut(lut, res);
-
-            outputImage[(y * width + x) * 3 + 0] = (unsigned short)std::max(0.0f, std::min(65535.0f, res.r * 65535.0f));
-            outputImage[(y * width + x) * 3 + 1] = (unsigned short)std::max(0.0f, std::min(65535.0f, res.g * 65535.0f));
-            outputImage[(y * width + x) * 3 + 2] = (unsigned short)std::max(0.0f, std::min(65535.0f, res.b * 65535.0f));
-        }
-    }
-    return true;
-}
-
-// --- GPU Processing ---
-
-const char* COMPUTE_SHADER_SRC = R"(#version 310 es
-layout(local_size_x = 16, local_size_y = 16) in;
-
-uniform mediump usampler2D uInput;
-layout(rgba16ui, binding = 1) writeonly uniform mediump uimage2D uOutput;
-uniform mediump sampler3D uLut;
-
-uniform int uWidth;
-uniform int uHeight;
-uniform float uBlackLevel;
-uniform float uWhiteLevel;
-uniform int uCfaPattern;
-uniform vec4 uWbGains; // R, G_even, G_odd, B
-uniform mat3 uCombinedMat;
-uniform int uTargetLog;
-uniform int uLutSize; // 0 if none
-
-// Log Functions (simplified for GLSL)
-float arri_logc3(float x) {
-    if (x > 0.010591) return 0.247190 * log(5.555556 * x + 0.052272) / log(10.0) + 0.385537;
-    return 5.367655 * x + 0.092809;
-}
-float s_log3(float x) {
-    if (x >= 0.01125) return (420.0 + log((x + 0.01) / 0.19) / log(10.0) * 261.5) / 1023.0;
-    return (x * 171.21029 + 95.0) / 1023.0;
-}
-float f_log(float x) {
-    if (x >= 0.00089) return 0.344676 * log(0.555556 * x + 0.009468) / log(10.0) + 0.790453;
-    return 8.52 * x + 0.0929;
-}
-float vlog(float x) {
-    if (x >= 0.01) return 0.241514 * log(x + 0.008730) / log(10.0) + 0.598206;
-    return 5.6 * x + 0.125;
-}
-
-float apply_log(float x, int type) {
-    if (x < 0.0) x = 0.0;
-    if (type == 1) return arri_logc3(x);
-    if (type == 2 || type == 3) return f_log(x);
-    if (type == 5 || type == 6) return s_log3(x);
-    if (type == 7) return vlog(x);
-    if (type == 0) return x;
-    return pow(x, 1.0/2.2);
-}
-
-void main() {
-    ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
-    if (pos.x >= uWidth || pos.y >= uHeight) return;
-
-    // Bayer Decode (Simple Bilinear)
-    int x = pos.x;
-    int y = pos.y;
-
-    // Determine CFA
-    // 0=RGGB, 1=GRBG, 2=GBRG, 3=BGGR
-    int r_x, r_y, b_x, b_y;
-    if (uCfaPattern == 0) { r_x=0; r_y=0; b_x=1; b_y=1; }
-    else if (uCfaPattern == 1) { r_x=1; r_y=0; b_x=0; b_y=1; }
-    else if (uCfaPattern == 2) { r_x=0; r_y=1; b_x=1; b_y=0; }
-    else { r_x=1; r_y=1; b_x=0; b_y=0; }
-
-    bool is_r = ((x & 1) == r_x) && ((y & 1) == r_y);
-    bool is_b = ((x & 1) == b_x) && ((y & 1) == b_y);
-    bool is_g = !is_r && !is_b;
-
-    float val = float(texelFetch(uInput, pos, 0).r);
-    float r = 0.0, g = 0.0, b = 0.0;
-
-    // Note: Boundary checks omitted for brevity in shader, usually texture repeating/clamping handles it
-    // But texelFetch needs checks. We just clamp coord.
-    ivec2 sz = ivec2(uWidth, uHeight);
-
-    if (is_g) {
-        g = val;
-        // R neighbors
-        float r_sum = 0.0; int r_cnt = 0;
-        float b_sum = 0.0; int b_cnt = 0;
-        // Neighbors: (x-1, y), (x+1, y), (x, y-1), (x, y+1)
-        ivec2 coords[4];
-        coords[0] = ivec2(x-1, y); coords[1] = ivec2(x+1, y);
-        coords[2] = ivec2(x, y-1); coords[3] = ivec2(x, y+1);
-
-        for (int i=0; i<4; i++) {
-            if (coords[i].x >= 0 && coords[i].x < uWidth && coords[i].y >= 0 && coords[i].y < uHeight) {
-                float v = float(texelFetch(uInput, coords[i], 0).r);
-                bool n_is_r = ((coords[i].x & 1) == r_x) && ((coords[i].y & 1) == r_y);
-                if (n_is_r) { r_sum += v; r_cnt++; } else { b_sum += v; b_cnt++; }
-            }
-        }
-        r = (r_cnt > 0) ? r_sum / float(r_cnt) : 0.0;
-        b = (b_cnt > 0) ? b_sum / float(b_cnt) : 0.0;
-    }
-    else if (is_r) {
-        r = val;
-        float g_sum = 0.0; int g_cnt = 0;
-        float b_sum = 0.0; int b_cnt = 0;
-
-        // G neighbors (cross)
-        ivec2 c_cross[4];
-        c_cross[0] = ivec2(x-1, y); c_cross[1] = ivec2(x+1, y);
-        c_cross[2] = ivec2(x, y-1); c_cross[3] = ivec2(x, y+1);
-        for(int i=0; i<4; i++) {
-             if (c_cross[i].x >= 0 && c_cross[i].x < uWidth && c_cross[i].y >= 0 && c_cross[i].y < uHeight) {
-                 g_sum += float(texelFetch(uInput, c_cross[i], 0).r); g_cnt++;
-             }
-        }
-
-        // B neighbors (diag)
-        ivec2 c_diag[4];
-        c_diag[0] = ivec2(x-1, y-1); c_diag[1] = ivec2(x+1, y-1);
-        c_diag[2] = ivec2(x-1, y+1); c_diag[3] = ivec2(x+1, y+1);
-        for(int i=0; i<4; i++) {
-             if (c_diag[i].x >= 0 && c_diag[i].x < uWidth && c_diag[i].y >= 0 && c_diag[i].y < uHeight) {
-                 b_sum += float(texelFetch(uInput, c_diag[i], 0).r); b_cnt++;
-             }
-        }
-        g = (g_cnt > 0) ? g_sum / float(g_cnt) : 0.0;
-        b = (b_cnt > 0) ? b_sum / float(b_cnt) : 0.0;
-    }
-    else { // is_b
-        b = val;
-        float g_sum = 0.0; int g_cnt = 0;
-        float r_sum = 0.0; int r_cnt = 0;
-
-        // G neighbors (cross)
-        ivec2 c_cross[4];
-        c_cross[0] = ivec2(x-1, y); c_cross[1] = ivec2(x+1, y);
-        c_cross[2] = ivec2(x, y-1); c_cross[3] = ivec2(x, y+1);
-        for(int i=0; i<4; i++) {
-             if (c_cross[i].x >= 0 && c_cross[i].x < uWidth && c_cross[i].y >= 0 && c_cross[i].y < uHeight) {
-                 g_sum += float(texelFetch(uInput, c_cross[i], 0).r); g_cnt++;
-             }
-        }
-        // R neighbors (diag)
-        ivec2 c_diag[4];
-        c_diag[0] = ivec2(x-1, y-1); c_diag[1] = ivec2(x+1, y-1);
-        c_diag[2] = ivec2(x-1, y+1); c_diag[3] = ivec2(x+1, y+1);
-        for(int i=0; i<4; i++) {
-             if (c_diag[i].x >= 0 && c_diag[i].x < uWidth && c_diag[i].y >= 0 && c_diag[i].y < uHeight) {
-                 r_sum += float(texelFetch(uInput, c_diag[i], 0).r); r_cnt++;
-             }
-        }
-        g = (g_cnt > 0) ? g_sum / float(g_cnt) : 0.0;
-        r = (r_cnt > 0) ? r_sum / float(r_cnt) : 0.0;
-    }
-
-    // Process
-    float range = uWhiteLevel - uBlackLevel;
-    r = max(0.0, (r - uBlackLevel) / range);
-    g = max(0.0, (g - uBlackLevel) / range);
-    b = max(0.0, (b - uBlackLevel) / range);
-
-    float g_gain = (uWbGains.y + uWbGains.z) * 0.5;
-    r *= uWbGains.x;
-    g *= g_gain;
-    b *= uWbGains.w;
-
-    vec3 res = uCombinedMat * vec3(r, g, b);
-
-    res.x = apply_log(res.x, uTargetLog);
-    res.y = apply_log(res.y, uTargetLog);
-    res.z = apply_log(res.z, uTargetLog);
-
-    if (uLutSize > 0) {
-        // Texture lookup
-        // 3D Texture expects normalized coords [0,1]
-        // We assume LUT texture handles linear interpolation
-        res = texture(uLut, res).rgb;
-    }
-
-    // Output
-    uvec4 outVal;
-    outVal.r = uint(clamp(res.r * 65535.0, 0.0, 65535.0));
-    outVal.g = uint(clamp(res.g * 65535.0, 0.0, 65535.0));
-    outVal.b = uint(clamp(res.b * 65535.0, 0.0, 65535.0));
-    outVal.a = 65535u;
-
-    imageStore(uOutput, pos, outVal);
-}
-)";
-
-GLuint createShader(GLenum type, const char* src) {
-    GLuint shader = glCreateShader(type);
-    glShaderSource(shader, 1, &src, nullptr);
-    glCompileShader(shader);
-    GLint compiled;
-    glGetShaderiv(shader, GL_COMPILE_STATUS, &compiled);
-    if (!compiled) {
-        GLint len;
-        glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &len);
-        if (len > 0) {
-            std::vector<char> log(len);
-            glGetShaderInfoLog(shader, len, nullptr, log.data());
-            LOGE("Shader compile error: %s", log.data());
-        }
-        glDeleteShader(shader);
-        return 0;
-    }
-    return shader;
-}
-
-bool processGpu(
-    uint16_t* rawData, int width, int height, int stride,
-    int whiteLevel, int blackLevel, int cfaPattern,
-    float* wb, float* combinedMat, int targetLog, const LUT3D& lut,
-    std::vector<unsigned short>& outputImage
-) {
-    LOGD("Initializing GPU processing...");
-
-    // 1. EGL Setup
-    EGLDisplay display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
-    if (display == EGL_NO_DISPLAY) { LOGE("EGL no display"); return false; }
-    EGLint major, minor;
-    if (!eglInitialize(display, &major, &minor)) { LOGE("EGL init failed"); return false; }
-
-    const EGLint configAttribs[] = {
-        EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT,
-        EGL_SURFACE_TYPE, EGL_PBUFFER_BIT,
-        EGL_NONE
-    };
-    EGLConfig config;
-    EGLint numConfigs;
-    if (!eglChooseConfig(display, configAttribs, &config, 1, &numConfigs) || numConfigs == 0) {
-        LOGE("EGL choose config failed"); return false;
-    }
-
-    const EGLint ctxAttribs[] = { EGL_CONTEXT_CLIENT_VERSION, 3, EGL_NONE };
-    EGLContext context = eglCreateContext(display, config, EGL_NO_CONTEXT, ctxAttribs);
-    if (context == EGL_NO_CONTEXT) { LOGE("EGL create context failed"); return false; }
-
-    const EGLint pbufferAttribs[] = { EGL_WIDTH, 1, EGL_HEIGHT, 1, EGL_NONE };
-    EGLSurface surface = eglCreatePbufferSurface(display, config, pbufferAttribs);
-    if (surface == EGL_NO_SURFACE) { LOGE("EGL create surface failed"); eglDestroyContext(display, context); return false; }
-
-    if (!eglMakeCurrent(display, surface, surface, context)) {
-        LOGE("EGL make current failed");
-        eglDestroySurface(display, surface); eglDestroyContext(display, context); return false;
-    }
-
-    // 2. GL Objects
-    GLuint program = glCreateProgram();
-    GLuint cs = createShader(GL_COMPUTE_SHADER, COMPUTE_SHADER_SRC);
-    if (!cs) {
-        eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
-        eglDestroySurface(display, surface); eglDestroyContext(display, context);
-        return false;
-    }
-    glAttachShader(program, cs);
-    glLinkProgram(program);
-    GLint linked;
-    glGetProgramiv(program, GL_LINK_STATUS, &linked);
-    if (!linked) {
-        LOGE("Program link failed");
-        glDeleteShader(cs); glDeleteProgram(program);
-        eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
-        eglDestroySurface(display, surface); eglDestroyContext(display, context);
-        return false;
-    }
-
-    glUseProgram(program);
-
-    // 3. Textures
-    GLuint texInput, texOutput, texLut = 0;
-
-    // Input (R16UI)
-    glGenTextures(1, &texInput);
-    glBindTexture(GL_TEXTURE_2D, texInput);
-    glTexStorage2D(GL_TEXTURE_2D, 1, GL_R16UI, width, height);
-    // Upload packed raw data (assume strict packing for GPU for simplicity, or we unpack row by row)
-    // The JNI caller passes a buffer. We can't use it directly if stride != width*2.
-    // We already pack it in CameraFragment?
-    // "stride" param passed to JNI is bytes.
-    // If stride == width*2, we can upload.
-    // If not, we need to repack. But CameraFragment::copyImageToHolder handles packing!
-    // So usually rawData is tightly packed.
-    glPixelStorei(GL_UNPACK_ROW_LENGTH, stride / 2);
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_RED_INTEGER, GL_UNSIGNED_SHORT, rawData);
-    glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-
-    // Output (RGBA16UI)
-    glGenTextures(1, &texOutput);
-    glBindTexture(GL_TEXTURE_2D, texOutput);
-    glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA16UI, width, height);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-
-    // LUT (3D)
-    if (lut.size > 0) {
-        glGenTextures(1, &texLut);
-        glBindTexture(GL_TEXTURE_3D, texLut);
-        // RGB32F or RGB16F. RGB32F is safer for precision.
-        glTexStorage3D(GL_TEXTURE_3D, 1, GL_RGB16F, lut.size, lut.size, lut.size);
-        glTexSubImage3D(GL_TEXTURE_3D, 0, 0, 0, 0, lut.size, lut.size, lut.size, GL_RGB, GL_FLOAT, lut.data.data());
-        glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    }
-
-    // 4. Uniforms
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, texInput);
-    glUniform1i(glGetUniformLocation(program, "uInput"), 0);
-
-    glBindImageTexture(1, texOutput, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16UI);
-    glUniform1i(glGetUniformLocation(program, "uOutput"), 1);
-
-    if (texLut) {
-        glActiveTexture(GL_TEXTURE2);
-        glBindTexture(GL_TEXTURE_3D, texLut);
-        glUniform1i(glGetUniformLocation(program, "uLut"), 2);
-    }
-
-    glUniform1i(glGetUniformLocation(program, "uWidth"), width);
-    glUniform1i(glGetUniformLocation(program, "uHeight"), height);
-    glUniform1f(glGetUniformLocation(program, "uWhiteLevel"), (float)whiteLevel);
-    glUniform1f(glGetUniformLocation(program, "uBlackLevel"), (float)blackLevel);
-    glUniform1i(glGetUniformLocation(program, "uCfaPattern"), cfaPattern);
-    glUniform4f(glGetUniformLocation(program, "uWbGains"), wb[0], wb[1], wb[2], wb[3]);
-    glUniformMatrix3fv(glGetUniformLocation(program, "uCombinedMat"), 1, GL_TRUE, combinedMat);
-    glUniform1i(glGetUniformLocation(program, "uTargetLog"), targetLog);
-    glUniform1i(glGetUniformLocation(program, "uLutSize"), lut.size);
-
-    // 5. Dispatch
-    glDispatchCompute((width + 15) / 16, (height + 15) / 16, 1);
-    glMemoryBarrier(GL_FRAMEBUFFER_BARRIER_BIT);
-
-    // 6. Readback
-    // Attach to FBO
-    GLuint fbo;
-    glGenFramebuffers(1, &fbo);
-    glBindFramebuffer(GL_READ_FRAMEBUFFER, fbo);
-    glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texOutput, 0);
-
-    if (glCheckFramebufferStatus(GL_READ_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
-        LOGE("FBO incomplete");
-        glDeleteFramebuffers(1, &fbo);
-        glDeleteTextures(1, &texInput);
-        glDeleteTextures(1, &texOutput);
-        if (texLut) glDeleteTextures(1, &texLut);
-        glDeleteProgram(program);
-        glDeleteShader(cs);
-
-        eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
-        eglDestroySurface(display, surface);
-        eglDestroyContext(display, context);
-        return false;
-    }
-
-    // Read pixels (RGBA)
-    std::vector<unsigned short> tempBuffer(width * height * 4);
-    glReadPixels(0, 0, width, height, GL_RGBA_INTEGER, GL_UNSIGNED_SHORT, tempBuffer.data());
-
-    // Compact RGBA -> RGB
-    // OMP here too?
     #pragma omp parallel for
     for (int i = 0; i < width * height; i++) {
-        outputImage[i * 3 + 0] = tempBuffer[i * 4 + 0];
-        outputImage[i * 3 + 1] = tempBuffer[i * 4 + 1];
-        outputImage[i * 3 + 2] = tempBuffer[i * 4 + 2];
+        float r = data[i * 3 + 0] / 65535.0f;
+        float g = data[i * 3 + 1] / 65535.0f;
+        float b = data[i * 3 + 2] / 65535.0f;
+
+        // Apply Log
+        r = apply_log(r, targetLog);
+        g = apply_log(g, targetLog);
+        b = apply_log(b, targetLog);
+
+        Vec3 res = {r, g, b};
+        if (lut.size > 0) res = apply_lut(lut, res);
+
+        outputImage[i * 3 + 0] = (unsigned short)std::max(0.0f, std::min(65535.0f, res.r * 65535.0f));
+        outputImage[i * 3 + 1] = (unsigned short)std::max(0.0f, std::min(65535.0f, res.g * 65535.0f));
+        outputImage[i * 3 + 2] = (unsigned short)std::max(0.0f, std::min(65535.0f, res.b * 65535.0f));
     }
-
-    // Cleanup
-    glDeleteFramebuffers(1, &fbo);
-    glDeleteTextures(1, &texInput);
-    glDeleteTextures(1, &texOutput);
-    if (texLut) glDeleteTextures(1, &texLut);
-    glDeleteProgram(program);
-    glDeleteShader(cs);
-
-    eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
-    eglDestroySurface(display, surface);
-    eglDestroyContext(display, context);
-
-    LOGD("GPU processing finished");
-    return true;
 }
-
 
 extern "C" JNIEXPORT jint JNICALL
 Java_com_android_example_cameraxbasic_processor_ColorProcessor_processRaw(
         JNIEnv* env,
         jobject /* this */,
-        jobject rawBuffer,
-        jint width,
-        jint height,
-        jint stride,
-        jint whiteLevel,
-        jint blackLevel,
-        jint cfaPattern,
-        jfloatArray wbGains,
-        jfloatArray ccm,
+        jbyteArray dngData,
         jint targetLog,
         jstring lutPath,
         jstring outputTiffPath,
         jstring outputJpgPath,
-        jboolean useGpu) {
+        jboolean useGpu // Ignored in new pipeline
+) {
+    LOGD("Native processRaw started using LibRaw.");
 
-    LOGD("Native processRaw started. UseGPU: %d", useGpu);
+    // Get DNG Bytes
+    jsize len = env->GetArrayLength(dngData);
+    if (len <= 0) return -1;
 
-    uint16_t* rawData = (uint16_t*)env->GetDirectBufferAddress(rawBuffer);
-    if (!rawData) { LOGE("Failed to get buffer address"); return -1; }
+    unsigned char* buf = new unsigned char[len];
+    env->GetByteArrayRegion(dngData, 0, len, (jbyte*)buf);
 
-    float* wb = env->GetFloatArrayElements(wbGains, 0);
-    float* colorMat = env->GetFloatArrayElements(ccm, 0);
-    if (!wb || !colorMat) {
-         if (wb) env->ReleaseFloatArrayElements(wbGains, wb, 0);
-         if (colorMat) env->ReleaseFloatArrayElements(ccm, colorMat, 0);
-         return -1;
+    // LibRaw Processing
+    LibRaw RawProcessor;
+
+    // Open buffer
+    if (RawProcessor.open_buffer(buf, len) != LIBRAW_SUCCESS) {
+        LOGE("LibRaw open_buffer failed");
+        delete[] buf;
+        return -1;
     }
 
+    // Unpack
+    if (RawProcessor.unpack() != LIBRAW_SUCCESS) {
+        LOGE("LibRaw unpack failed");
+        RawProcessor.recycle();
+        delete[] buf;
+        return -1;
+    }
+
+    // Configure params
+    RawProcessor.imgdata.params.output_bps = 16;
+    RawProcessor.imgdata.params.gamm[0] = 1.0;
+    RawProcessor.imgdata.params.gamm[1] = 1.0;
+    RawProcessor.imgdata.params.no_auto_bright = 1;
+    RawProcessor.imgdata.params.use_camera_wb = 1;
+    RawProcessor.imgdata.params.output_color = 4; // ProPhotoRGB
+
+    // Process
+    if (RawProcessor.dcraw_process() != LIBRAW_SUCCESS) {
+        LOGE("LibRaw dcraw_process failed");
+        RawProcessor.recycle();
+        delete[] buf;
+        return -1;
+    }
+
+    // Get Mem Image
+    int ret = 0;
+    libraw_processed_image_t* image = RawProcessor.dcraw_make_mem_image(&ret);
+    if (!image) {
+        LOGE("LibRaw make_mem_image failed: %d", ret);
+        RawProcessor.recycle();
+        delete[] buf;
+        return -1;
+    }
+
+    // Check Format
+    if (image->type != LIBRAW_IMAGE_BITMAP || image->colors != 3 || image->bits != 16) {
+        LOGE("LibRaw output format mismatch: Type=%d, Colors=%d, Bits=%d", image->type, image->colors, image->bits);
+        LibRaw::dcraw_clear_mem(image);
+        RawProcessor.recycle();
+        delete[] buf;
+        return -1;
+    }
+
+    // Load LUT
     const char* lut_path_cstr = (lutPath) ? env->GetStringUTFChars(lutPath, 0) : nullptr;
     LUT3D lut;
     if (lut_path_cstr) {
         lut = load_lut(lut_path_cstr);
-        LOGD("Loaded LUT size: %d", lut.size);
+        env->ReleaseStringUTFChars(lutPath, lut_path_cstr);
     }
 
-    // Pre-calculate combined matrix
-    float combinedMat[9];
-    calculateCombinedMatrix(colorMat, wb, combinedMat);
+    // Process Output (Log + LUT)
+    std::vector<unsigned short> finalImage;
+    processLibRawOutput(image, targetLog, lut, finalImage);
 
-    std::vector<unsigned short> outputImage(width * height * 3);
-
-    int result = 0; // 0=Success GPU, 1=Success CPU, -1=Error
-
-    if (useGpu) {
-        bool success = processGpu(rawData, width, height, stride, whiteLevel, blackLevel, cfaPattern, wb, combinedMat, targetLog, lut, outputImage);
-        if (!success) {
-            LOGE("GPU processing failed, falling back to CPU");
-            result = 1;
-            processCpu(rawData, width, height, stride, whiteLevel, blackLevel, cfaPattern, wb, combinedMat, targetLog, lut, outputImage);
-        }
-    } else {
-        processCpu(rawData, width, height, stride, whiteLevel, blackLevel, cfaPattern, wb, combinedMat, targetLog, lut, outputImage);
-        // User requested CPU, so this is a success case that should not trigger a fallback warning.
-        result = 0;
-    }
-
-    // Save outputs
+    // Save
     const char* tiff_path_cstr = (outputTiffPath) ? env->GetStringUTFChars(outputTiffPath, 0) : nullptr;
     const char* jpg_path_cstr = (outputJpgPath) ? env->GetStringUTFChars(outputJpgPath, 0) : nullptr;
 
-    if (tiff_path_cstr) write_tiff(tiff_path_cstr, width, height, outputImage);
-    if (jpg_path_cstr) write_bmp(jpg_path_cstr, width, height, outputImage);
+    if (tiff_path_cstr) write_tiff(tiff_path_cstr, image->width, image->height, finalImage);
+    if (jpg_path_cstr) write_bmp(jpg_path_cstr, image->width, image->height, finalImage);
 
-    // Release
-    env->ReleaseFloatArrayElements(wbGains, wb, 0);
-    env->ReleaseFloatArrayElements(ccm, colorMat, 0);
-    if (lutPath) env->ReleaseStringUTFChars(lutPath, lut_path_cstr);
     if (outputTiffPath) env->ReleaseStringUTFChars(outputTiffPath, tiff_path_cstr);
     if (outputJpgPath) env->ReleaseStringUTFChars(outputJpgPath, jpg_path_cstr);
 
-    return result;
+    // Cleanup
+    LibRaw::dcraw_clear_mem(image);
+    RawProcessor.recycle();
+    delete[] buf;
+
+    return 0;
 }
 
 extern "C" JNIEXPORT jfloatArray JNICALL
