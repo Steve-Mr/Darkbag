@@ -8,9 +8,14 @@ add_definitions(-DNO_LCMS -DNO_JASPER -DNO_JPEG)
 
 include_directories(libraw)
 
+# Glob all sources
 file(GLOB_RECURSE LIBRAW_SOURCES
     "libraw/src/*.cpp"
 )
+
+# Filter out placeholder/conflicting files
+# *_ph.cpp files are usually "placeholders" or specific implementation alternatives that conflict with the standard ones
+list(FILTER LIBRAW_SOURCES EXCLUDE REGEX ".*_ph\\.cpp$")
 
 add_library(
         native-lib
