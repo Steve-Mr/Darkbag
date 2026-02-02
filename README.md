@@ -29,4 +29,4 @@ Alternatively, test running configurations can be added to Android Studio for co
 
 ## Acknowledgments
 
-This project uses [LibRaw](https://www.libraw.org/) for RAW image processing. We would like to thank the LibRaw team for their excellent library.
+This project uses [LibRaw](https://www.libraw.org/) for RAW image processing. Thanks to the LibRaw team for providing this library.
