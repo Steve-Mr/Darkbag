@@ -1,0 +1,25 @@
+                     processedBitmap = croppedBitmap
+
+                     Log.d(TAG, "Applied Digital Zoom Crop: NewSize=${safeWidth}x${safeHeight}")
+                }
+            }
+
+            // 5. Save DNG to Disk (with Thumbnail)
+            // Note: We reuse dngCreatorReal instance. We need to set the thumbnail now.
+            if (processedBitmap != null) {
+                val maxThumbSize = 256
+                val scale = min(maxThumbSize.toDouble() / processedBitmap.width, maxThumbSize.toDouble() / processedBitmap.height)
+                val thumbWidth = (processedBitmap.width * scale).toInt()
+                val thumbHeight = (processedBitmap.height * scale).toInt()
+
+                val thumbBitmap = if (scale < 1.0) {
+                    android.graphics.Bitmap.createScaledBitmap(processedBitmap, thumbWidth, thumbHeight, true)
+                } else {
+                    processedBitmap
+                }
+                dngCreatorReal.setThumbnail(thumbBitmap)
+            }
+
+            // Insert DNG into MediaStore
+            val dngValues = ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, "$dngName.dng")
