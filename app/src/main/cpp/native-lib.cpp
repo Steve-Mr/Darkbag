@@ -21,11 +21,18 @@ struct Vec3 {
 
 // --- Color Conversion Matrices (XYZ D50 -> Target RGB D65) ---
 
+// [New] XYZ D50 -> sRGB D65 (Bradford Adaptation baked in)
+const float XYZ_TO_SRGB[9] = {
+     3.1338561f, -1.6168667f, -0.4906146f,
+    -0.9787684f,  1.9161415f,  0.0334540f,
+     0.0719453f, -0.2289914f,  1.4052427f
+};
+
 // Generated Matrices
 const float XYZ_TO_REC2020[9] = {
-    1.64727856f, -0.39359694f, -0.23598106f,
-    -0.68261476f, 1.64760981f, 0.01281589f,
-    0.02966404f, -0.06291913f, 1.25343115f
+    1.6473375f, -0.3935676f, -0.2359959f,
+    -0.6826035f, 1.6475887f, 0.0128188f,
+    0.0296522f, -0.0628993f, 1.2531278f
 };
 
 const float XYZ_TO_SGAMUT3[9] = {
@@ -71,6 +78,7 @@ const float XYZ_TO_RED_WIDE[9] = {
 
 const float* get_color_matrix(int logType) {
     switch (logType) {
+        case 0: return XYZ_TO_SRGB;       // None -> Standard sRGB
         case 1: return XYZ_TO_AWG;        // Arri LogC3
         case 2: return XYZ_TO_REC2020;    // F-Log
         case 3: return XYZ_TO_REC2020;    // F-Log2
@@ -186,7 +194,7 @@ float apply_log(float x, int type) {
         case 10: return n_log(x);
         case 11: return d_log(x);
         case 12: return log3g10(x);
-        case 0: return x;
+        case 0: return pow(x, 1.0f/2.2f); // Apply Gamma 2.2 for None (sRGB)
         default: return pow(x, 1.0f/2.2f);
     }
 }
@@ -496,7 +504,7 @@ float apply_log(float x, int type) {
     if (type == 9) return canon_log3(x);
     if (type == 11) return d_log(x);
     if (type == 12) return log3g10(x);
-    if (type == 0) return x;
+    if (type == 0) return pow(x, 1.0/2.2); // Apply Gamma 2.2 for None (sRGB)
     return pow(x, 1.0/2.2);
 }
 
