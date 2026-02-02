@@ -59,6 +59,7 @@ import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.TotalCaptureResult
 import androidx.concurrent.futures.await
 import com.android.example.cameraxbasic.processor.ColorProcessor
+import com.android.example.cameraxbasic.utils.ColorUtils
 import java.io.File
 import java.io.FileOutputStream
 import android.net.Uri
@@ -1041,53 +1042,177 @@ class CameraFragment : Fragment() {
 
         val cfa = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_COLOR_FILTER_ARRANGEMENT) ?: 0
 
-        // Prioritize SENSOR_FORWARD_MATRIX1 (Camera -> XYZ) for correct color development.
-        // SENSOR_COLOR_TRANSFORM1 is XYZ -> Camera, which causes green tint if used as-is.
-        val colorTransform = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_FORWARD_MATRIX1)
-            ?: chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_COLOR_TRANSFORM1)
-
-        val ccm = FloatArray(9)
-        if (colorTransform != null) {
-            val rawMat = IntArray(18)
-            colorTransform.copyElements(rawMat, 0)
-            for (i in 0 until 9) {
-                val num = rawMat[i * 2]
-                val den = rawMat[i * 2 + 1]
-                ccm[i] = if (den != 0) num.toFloat() / den.toFloat() else 0f
-            }
-        } else {
-            ccm[0]=1f; ccm[4]=1f; ccm[8]=1f;
-        }
-
-        // Logging CCM
-        Log.d(TAG, "CCM: ${ccm.joinToString(", ")}")
-
+        // --- White Balance Extraction ---
         val neutral = captureResult.get(android.hardware.camera2.CaptureResult.SENSOR_NEUTRAL_COLOR_POINT) as? RggbChannelVector
 
-        // Logging Neutral
         if (neutral != null) {
             Log.d(TAG, "Neutral Point: R=${neutral.red}, Ge=${neutral.greenEven}, Go=${neutral.greenOdd}, B=${neutral.blue}")
         } else {
             Log.w(TAG, "Neutral Point is NULL, using fallback WB")
         }
 
+        // WB Gains: [R, Ge, Go, B]
         val wb = if (neutral != null) {
             val rVal = neutral.red
-            val gEvenVal = neutral.greenEven
+            val geVal = neutral.greenEven
+            val goVal = neutral.greenOdd
             val bVal = neutral.blue
+
             val r = if (rVal > 0) 1.0f / rVal else 1.0f
-            val g = if (gEvenVal > 0) 1.0f / gEvenVal else 1.0f
+            val ge = if (geVal > 0) 1.0f / geVal else 1.0f
+            val go = if (goVal > 0) 1.0f / goVal else 1.0f
             val b = if (bVal > 0) 1.0f / bVal else 1.0f
-            floatArrayOf(r, g, g, b)
+            floatArrayOf(r, ge, go, b)
         } else {
             floatArrayOf(1.5f, 1.0f, 1.0f, 1.5f)
         }
+
+        // --- Color Matrix Extraction & Interpolation ---
+
+        // Helper to convert Rational ColorSpaceTransform to FloatArray
+        fun convertRationalMatrix(rationalMat: android.hardware.camera2.params.ColorSpaceTransform?): FloatArray? {
+            if (rationalMat == null) return null
+            val res = FloatArray(9)
+            val rawMat = IntArray(18)
+            rationalMat.copyElements(rawMat, 0)
+            for (i in 0 until 9) {
+                val num = rawMat[i * 2]
+                val den = rawMat[i * 2 + 1]
+                res[i] = if (den != 0) num.toFloat() / den.toFloat() else 0f
+            }
+            return res
+        }
+
+        // Fetch Matrices (Illuminant 1 & 2)
+        // ForwardMatrix (XYZ -> Sensor RGB)
+        val fm1 = convertRationalMatrix(chars.get(CameraCharacteristics.SENSOR_FORWARD_MATRIX1))
+        val fm2 = convertRationalMatrix(chars.get(CameraCharacteristics.SENSOR_FORWARD_MATRIX2))
+
+        // CalibrationTransform (Sensor RGB -> Sensor RGB)
+        val cal1 = convertRationalMatrix(chars.get(CameraCharacteristics.SENSOR_CALIBRATION_TRANSFORM1))
+        val cal2 = convertRationalMatrix(chars.get(CameraCharacteristics.SENSOR_CALIBRATION_TRANSFORM2))
+
+        // Reference Illuminants (e.g., 17=A, 21=D65, etc.)
+        // We use them to establish standard gains for interpolation
+        val ref1 = chars.get(CameraCharacteristics.SENSOR_REFERENCE_ILLUMINANT1) ?: 17 // Tungsten
+        val ref2 = chars.get(CameraCharacteristics.SENSOR_REFERENCE_ILLUMINANT2) ?: 21 // D65
+
+        // Fallbacks
+        val colTrans1 = convertRationalMatrix(chars.get(CameraCharacteristics.SENSOR_COLOR_TRANSFORM1))
+        val colTrans2 = convertRationalMatrix(chars.get(CameraCharacteristics.SENSOR_COLOR_TRANSFORM2))
+
+        val finalCcm: FloatArray
+
+        if (fm1 != null && fm2 != null) {
+             // Dual Illuminant Interpolation
+             // 1. Calculate Standard Gains for Interpolation (Approximate)
+             // Since we don't have the actual calibration gains easily without calculation, we estimate:
+             // Ref1 (Tungsten) -> Low Temp -> High R gain, Low B gain
+             // Ref2 (Daylight) -> High Temp -> Low R gain, High B gain
+             // We use a simplified projection based on current WB gains.
+
+             // Define proxy gains for Tungsten (approx 2850K) and Daylight (approx 5500K-6500K)
+             // Typically R/B ratio: Tungsten ~ 2.5, Daylight ~ 0.8
+             // Gains (1/Neutral): Tungsten -> R=1.0, B=2.5? No.
+             // Tungsten Light is Reddish. Sensor sees lots of Red.
+             // Neutral Point (Sensor response to white) has High Red, Low Blue.
+             // Gains (multiplier to make it white) -> Low Red Gain, High Blue Gain.
+             // Wait:
+             // Tungsten (Red heavy): Sensor R is high. Gain R is LOW. Sensor B is low. Gain B is HIGH.
+             // Daylight (Blue heavy): Sensor R is low. Gain R is HIGH. Sensor B is high. Gain B is LOW.
+
+             // Let's use approximate proxy gains if we can't derive them.
+             // Better approach: Just assume bounds.
+             // But ColorUtils.calculateInterpolationWeight expects reference gains.
+
+             // Let's use hardcoded typical gains for weighting if we can't find calibration data.
+             // Or simpler: Use CCT approximation logic.
+             // R gain / B gain ratio.
+             // Tungsten: GainR < GainB. Ratio < 1.
+             // Daylight: GainR > GainB. Ratio > 1.
+
+             // Let's rely on ColorUtils.calculateInterpolationWeight with "typical" reference values
+             // to get a 't' factor.
+
+             // Gains: [R, G, B] (Assuming G=1 normalized)
+             val gNorm = (wb[1] + wb[2]) / 2.0f
+             val rNorm = wb[0] / gNorm
+             val bNorm = wb[3] / gNorm
+
+             // Note: Silicon is sensitive to IR/Red.
+             // Daylight: R is weak? Silicon is usually R sensitive.
+             // Actually, usually R gain is > 1.0 and B gain is > 1.0.
+
+             // Let's use a simpler "Ratio" interpolation for robustness.
+             // t = (Ratio - RatioTungsten) / (RatioDaylight - RatioTungsten)
+             // Ratio = B_gain / R_gain.
+             // Tungsten: B_gain >> R_gain (e.g. 2.5 / 1.0 = 2.5)
+             // Daylight: B_gain ~ R_gain (e.g. 1.5 / 2.0 = 0.75)
+
+             val ratio = bNorm / rNorm
+             val ratioTungsten = 2.5f
+             val ratioDaylight = 0.8f
+
+             val t = (ratio - ratioTungsten) / (ratioDaylight - ratioTungsten)
+             val weight = max(0.0f, min(1.0f, t))
+
+             Log.d(TAG, "Interpolation: Ratio=$ratio, Weight=$weight (0=Tungsten, 1=Daylight)")
+
+             // Interpolate Forward Matrices
+             val fmInterp = ColorUtils.interpolateMatrices(fm1, fm2, weight)
+
+             // Interpolate Calibration Matrices (if available, else Identity)
+             val calInterp = if (cal1 != null && cal2 != null) {
+                 ColorUtils.interpolateMatrices(cal1, cal2, weight)
+             } else {
+                 floatArrayOf(1f,0f,0f, 0f,1f,0f, 0f,0f,1f)
+             }
+
+             // Full FM = FM_interp * Cal_interp
+             // Note: Order depends on DNG spec. Usually Sensor = FM * XYZ.
+             // With Calibration: Sensor = FM * Cal * XYZ? Or Cal * FM * XYZ?
+             // DNG Spec: "CameraToXYZ = Inverse(ColorMatrix * CalibrationMatrix)" or similar.
+             // ForwardMatrix maps XYZ to Sensor.
+             // Sensor = ForwardMatrix * XYZ.
+             // With calibration: Sensor = CalibrationMatrix * ForwardMatrix * XYZ ?
+             // Usually CalibrationMatrix corrects the "Reference" ForwardMatrix for the specific unit.
+             // So: Sensor = CalibrationMatrix * ReferenceForwardMatrix * XYZ.
+             // Therefore: CombinedForward = Cal * RefFM.
+
+             val fmCombined = ColorUtils.multiplyMatrices(calInterp, fmInterp)
+
+             // We need Camera -> XYZ.
+             // Camera = FM * XYZ  =>  XYZ = Inv(FM) * Camera.
+             // So CCM = Inv(FM).
+
+             finalCcm = ColorUtils.invert3x3(fmCombined)
+
+        } else if (fm1 != null) {
+             // Only one FM
+             val cal = cal1 ?: floatArrayOf(1f,0f,0f, 0f,1f,0f, 0f,0f,1f)
+             val fmCombined = ColorUtils.multiplyMatrices(cal, fm1)
+             finalCcm = ColorUtils.invert3x3(fmCombined)
+        } else {
+             // Fallback to ColorTransform (XYZ -> Camera in Android/DNG usually, but acts as Camera->XYZ in some contexts?)
+             // Android Doc: "transform from the CIE XYZ color space to the camera sensor color space" (XYZ -> Camera).
+             // So we must invert it to get Camera -> XYZ.
+
+             val ct = colTrans1 ?: floatArrayOf(1f,0f,0f, 0f,1f,0f, 0f,0f,1f)
+             // Check if it's already Camera->XYZ?
+             // Usually AC tag is XYZ->Camera.
+             // Let's invert it.
+             finalCcm = ColorUtils.invert3x3(ct)
+             Log.w(TAG, "Using fallback ColorTransform (Inverted)")
+        }
+
+        // Logging CCM
+        Log.d(TAG, "Final CCM (Camera->XYZ): ${finalCcm.joinToString(", ")}")
 
         try {
             // Process to generate BMP/TIFF
             val result = ColorProcessor.processRaw(
                 directBuffer, image.width, image.height, packedStride, whiteLevel, blackLevels, cfa,
-                wb, ccm, targetLogIndex, nativeLutPath, tiffPath, bmpPath, useGpu
+                wb, finalCcm, targetLogIndex, nativeLutPath, tiffPath, bmpPath, useGpu
             )
 
             if (result == 1) {
