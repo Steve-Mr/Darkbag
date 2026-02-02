@@ -1294,18 +1294,7 @@ class CameraFragment : Fragment() {
                         if (jpgUri != null) {
                             finalJpgUri = jpgUri
                             contentResolver.openOutputStream(jpgUri)?.use { out ->
-                                val matrix = android.graphics.Matrix()
-                                matrix.postRotate(image.rotationDegrees.toFloat())
-                                val rotatedBitmap = android.graphics.Bitmap.createBitmap(
-                                    processedBitmap,
-                                    0,
-                                    0,
-                                    processedBitmap.width,
-                                    processedBitmap.height,
-                                    matrix,
-                                    true
-                                )
-                                rotatedBitmap.compress(
+                                processedBitmap.compress(
                                     android.graphics.Bitmap.CompressFormat.JPEG,
                                     90,
                                     out
