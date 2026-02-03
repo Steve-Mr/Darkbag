@@ -1900,12 +1900,13 @@ class CameraFragment : Fragment() {
         val activeLutName = prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, null)
         val targetLogName = prefs.getString(SettingsFragment.KEY_TARGET_LOG, "None")
         val targetLogIndex = SettingsFragment.LOG_CURVES.indexOf(targetLogName)
+        val isPreviewEnabled = prefs.getBoolean(SettingsFragment.KEY_ENABLE_LUT_PREVIEW, true)
 
         activeLutJob?.cancel()
         activeLutJob = lifecycleScope.launch(Dispatchers.IO) {
             var lutData: FloatArray? = null
             var size = 0
-            if (activeLutName != null) {
+            if (isPreviewEnabled && activeLutName != null) {
                 val file = File(lutManager.lutDir, activeLutName)
                 if (file.exists()) {
                     lutData = ColorProcessor.loadLutData(file.absolutePath)
