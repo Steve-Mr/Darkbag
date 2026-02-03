@@ -113,7 +113,6 @@ add_library(
         HdrPlusJNI.cpp
         ColorPipe.cpp
         ${LIBRAW_SOURCES}
-        "${GENERATED_LIB}" # Force dependency on generated lib
 )
 
 # Ensure the generation happens before native-lib compilation
@@ -123,6 +122,16 @@ find_library(
         log-lib
         log)
 
+# Link against the generated Halide pipeline static library
+target_link_libraries(
+        native-lib
+        "${GENERATED_LIB}"
+        ${log-lib}
+        ${jnigraphics-lib}
+        ${android-lib}
+        -fopenmp
+        -static-openmp)
+
 find_library(
         jnigraphics-lib
         jnigraphics)
@@ -131,13 +140,6 @@ find_library(
         android-lib
         android)
 
-target_link_libraries(
-        native-lib
-        ${log-lib}
-        ${jnigraphics-lib}
-        ${android-lib}
-        -fopenmp
-        -static-openmp)
 
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fopenmp")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fopenmp")

@@ -733,6 +733,13 @@ class CameraFragment : Fragment() {
 
         // Listener for button used to capture photo
         cameraUiContainerBinding?.cameraCaptureButton?.setOnClickListener {
+            // TODO: Integrate HDR+ Burst Trigger here
+            // Example:
+            // if (isHdrPlusMode) {
+            //     triggerHdrPlusBurst()
+            //     return@setOnClickListener
+            // }
+
             // Check concurrency limit
             if (!processingSemaphore.tryAcquire()) {
                 Toast.makeText(

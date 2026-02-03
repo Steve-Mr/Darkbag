@@ -44,13 +44,6 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     LOGD("Processing %d frames.", numFrames);
 
     // 1. Prepare Inputs for Halide
-    // Halide expects a 3D buffer for inputs: [width, height, numFrames]
-    // We need to copy/map the ByteBuffer data into a structure Halide can read.
-    // Assuming the DNG data passed here is RAW Bayer data (uint16_t).
-
-    // Allocate a large buffer to hold all frames contiguously for simplicity with Halide::Buffer
-    // (Or create a Halide::Buffer that wraps the individual pointers if strides allow,
-    // but copying to a contiguous block is safer to avoid JNI pinning issues with many buffers).
     std::vector<uint16_t> rawData(width * height * numFrames);
 
     for (int i = 0; i < numFrames; i++) {
@@ -60,8 +53,6 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
             LOGE("Failed to get direct buffer address for frame %d", i);
             return -1;
         }
-        // Copy frame `i` into the Z-slice `i` of rawData
-        // Halide storage order (default): x (stride 1), y (stride width), z (stride width*height)
         std::copy(src, src + (width * height), rawData.data() + (i * width * height));
     }
 
@@ -76,56 +67,24 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     env->ReleaseFloatArrayElements(whiteBalance, wbData, JNI_ABORT);
 
     jfloat* ccmData = env->GetFloatArrayElements(ccm, nullptr);
-    Buffer<float> ccmBuf(width, height); // Wait, the pipeline expects ccm as a buffer?
-    // Looking at hdrplus_pipeline_generator.cpp: Input<Halide::Buffer<float>> ccm{"ccm", 2};
-    // It seems to expect a 2D buffer (likely 3x3 or similar dimensions).
-    // Let's create a small buffer for the CCM.
-    // Assuming 3x3 matrix.
     std::vector<float> ccmVec(9);
     for(int i=0; i<9; ++i) ccmVec[i] = ccmData[i];
     env->ReleaseFloatArrayElements(ccm, ccmData, JNI_ABORT);
 
     Buffer<float> ccmHalideBuf(ccmVec.data(), 3, 3);
 
+    // 3. Prepare Output Buffer (16-bit Linear RGB)
+    // The generator now outputs uint16_t in planar format (Halide default: x, y, c)
+    // However, for efficiency, let's try to ask for interleaved if possible, or handle planar.
+    // Halide Buffer default construction with 3 dims is usually [x, y, c] or [c, x, y] depending on how you read it.
+    // Let's assume standard planar: width, height, channels.
 
-    // 3. Prepare Output Buffer
-    // Output is RGB (3 channels), uint8_t in the original pipeline?
-    // Wait, the original pipeline `finish.cpp` outputs `u8bit_interleaved`.
-    // BUT for our Log/LUT pipeline, we ideally wanted 16-bit linear.
-    // The Generator currently calls `finish` which does tone mapping and outputs uint8.
-    // **CRITICAL DECISION**: The user asked to integrate into the Log/LUT pipeline.
-    // If the Halide pipeline bakes in tone mapping and Gamma, applying Log afterwards is wrong.
-    //
-    // However, changing the pipeline requires modifying the Generator logic significantly.
-    // Plan Refinement:
-    // The current `hdrplus_pipeline_generator.cpp` I wrote calls `finish`.
-    // `finish` calls `tone_map`, `gamma_correct`, etc.
-    // To support the user's request ("HDR+ into Log/LUT"), we should probably STOP the Halide pipeline
-    // after Demosaic/Denoise/WB and output 16-bit Linear RGB.
-    //
-    // Let's stick to the current generator for now (which outputs 8-bit sRGB-ish).
-    // If we want 16-bit linear, we need to modify the generator.
-    // Let's assume for this task step we run the pipeline as-is.
-    // But wait, the user specifically asked: "hdr+ 的方式能否融入色域转换—log曲线—lut这个处理流程中"
-    // (Can HDR+ integration be merged into the gamut->log->lut flow?)
-    //
-    // To do this properly, the Halide pipeline should output Linear RGB (before ToneMap/Gamma).
-    // The `finish` function in `hdr-plus` does everything.
-    // We should modify `hdrplus_pipeline_generator.cpp` to NOT call `finish`, but stop earlier.
-    //
-    // For now, let's implement the JNI. We can tweak the generator in a subsequent fix if needed.
-    // The current generator outputs `uint8_t` (sRGB).
-
-    Buffer<uint8_t> outputBuf(3, width, height); // Interleaved: 3, Width, Height usually means [c, x, y] stride order?
-    // `u8bit_interleaved` in finish.cpp: output(c, x, y)
-    // So dimension 0 is C (3), dim 1 is X (width), dim 2 is Y (height).
+    // We allocate a buffer for 16-bit output.
+    Buffer<uint16_t> outputBuf(width, height, 3);
 
     // 4. Run Pipeline
-    // Function signature from generated header:
-    // int hdrplus_pipeline(halide_buffer_t *_inputs_buffer, uint16_t _black_point, uint16_t _white_point, float _white_balance_r, float _white_balance_g0, float _white_balance_g1, float _white_balance_b, int32_t _cfa_pattern, halide_buffer_t *_ccm_buffer, float _compression, float _gain, halide_buffer_t *_output_buffer);
-
-    float compression = 1.0f; // Default
-    float gain = 1.0f;        // Default
+    float compression = 1.0f; // Unused now in our modified generator
+    float gain = 1.0f;        // Unused now
 
     int result = hdrplus_pipeline(
         inputBuf,
@@ -147,29 +106,68 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     LOGD("Halide pipeline finished.");
 
     // 5. Post-Processing (Log + LUT)
-    // Since the output is already 8-bit sRGB (baked), applying Log/LUT now is double-processing if the user wants "Raw -> Log".
-    // However, if we treat the HDR output as the "Raw" equivalent (linear), we need to change the generator.
-    // Assuming we proceed with the current output:
-    // We convert 8-bit back to float, apply Log? No, that's bad.
+    // Now we have 16-bit Linear RGB in outputBuf.
+    // We need to convert this to the format expected by processLibRawOutput/ColorPipe.
+    // ColorPipe expects a libraw_processed_image_t-like structure or just raw RGB data.
+    // Let's reuse the logic: Apply Log -> Apply LUT -> Save.
 
-    // Let's save the result directly for now as per the "Basic HDR+ support" goal.
-    // If the user wants specific Log integration, we should modify the generator.
-    // For this step, I will implement the saving of the result.
+    // Load LUT
+    const char* lut_path_cstr = (lutPath) ? env->GetStringUTFChars(lutPath, 0) : nullptr;
+    LUT3D lut;
+    if (lut_path_cstr) {
+        lut = load_lut(lut_path_cstr);
+        env->ReleaseStringUTFChars(lutPath, lut_path_cstr);
+    }
 
-    // Copy Halide output to vector for saving
+    // Process Output
     std::vector<unsigned short> finalImage(width * height * 3);
 
-    // Copy and cast 8-bit to 16-bit for our Writer (which expects 16-bit)
-    // Also, Handle layout: Halide [C, X, Y] -> Interleaved [RGB, RGB] ?
-    // Check `u8bit_interleaved`: output(c, x, y).
-    // Halide default planar: x, y, c.
-    // But `u8bit_interleaved` explicitly makes `c` the first dimension (stride 1).
-    // So it is effectively interleaved: C varies fastest.
-    // outputBuf.data() should point to R,G,B,R,G,B...
+    // Halide Output is Planar (x, y, c) or (c, x, y)?
+    // By default Halide uses planar x, y, c (stride[0]=1, stride[1]=width, stride[2]=width*height).
+    // Let's verify strides if we could, but assuming standard Generator compilation.
+    // We need to interleave it for TIFF writer (R,G,B, R,G,B...)
 
-    uint8_t* outPtr = outputBuf.data();
-    for (int i = 0; i < width * height * 3; i++) {
-        finalImage[i] = (unsigned short)(outPtr[i] * 257); // Scale 8-bit to 16-bit range approx
+    const uint16_t* ptrR = outputBuf.data() + 0 * width * height; // Channel 0?
+    // Wait, Halide dim order is x, y, c.
+    // If outputBuf(x, y, c), then C is the 3rd dimension.
+    // So distinct planes.
+    // Let's assume Channel 0=R, 1=G, 2=B (based on srgb implementation).
+
+    // Pointer arithmetic depends on strides.
+    // outputBuf.dim(2).stride() usually is width*height.
+    int stride_x = outputBuf.dim(0).stride();
+    int stride_y = outputBuf.dim(1).stride();
+    int stride_c = outputBuf.dim(2).stride();
+    const uint16_t* raw_ptr = outputBuf.data();
+
+    #pragma omp parallel for
+    for (int y = 0; y < height; y++) {
+        for (int x = 0; x < width; x++) {
+             // Read Halide Planar
+             uint16_t r_val = raw_ptr[x * stride_x + y * stride_y + 0 * stride_c];
+             uint16_t g_val = raw_ptr[x * stride_x + y * stride_y + 1 * stride_c];
+             uint16_t b_val = raw_ptr[x * stride_x + y * stride_y + 2 * stride_c];
+
+             // Normalize to 0.0-1.0 float
+             float r = r_val / 65535.0f;
+             float g = g_val / 65535.0f;
+             float b = b_val / 65535.0f;
+
+             // Apply Log Curve
+             r = apply_log(r, targetLog);
+             g = apply_log(g, targetLog);
+             b = apply_log(b, targetLog);
+
+             // Apply LUT
+             Vec3 c = {r, g, b};
+             if (lut.size > 0) c = apply_lut(lut, c);
+
+             // Write Interleaved (16-bit)
+             int idx = (y * width + x) * 3;
+             finalImage[idx + 0] = (unsigned short)std::max(0.0f, std::min(65535.0f, c.r * 65535.0f));
+             finalImage[idx + 1] = (unsigned short)std::max(0.0f, std::min(65535.0f, c.g * 65535.0f));
+             finalImage[idx + 2] = (unsigned short)std::max(0.0f, std::min(65535.0f, c.b * 65535.0f));
+        }
     }
 
     // Save
