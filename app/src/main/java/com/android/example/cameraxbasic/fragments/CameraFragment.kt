@@ -1887,6 +1887,7 @@ class CameraFragment : Fragment() {
         private const val RATIO_16_9_VALUE = 16.0 / 9.0
         private const val FOCUS_RING_DISPLAY_TIME_MS = 500L
         private const val FOCUS_RING_FADE_OUT_DURATION_MS = 300L
+        private const val DEBUG_HDR_PLUS = true
     }
     private fun takeSinglePicture(imageCapture: ImageCapture) {
         if (imageCapture.outputFormat == ImageCapture.OUTPUT_FORMAT_RAW) {
@@ -2026,18 +2027,37 @@ class CameraFragment : Fragment() {
     }
 
     private fun processHdrPlusBurst(frames: List<ImageProxy>) {
+        val currentZoom = if (is2xMode) 2.0f else (currentFocalLength / 24.0f)
+        val context = requireContext()
+
         lifecycleScope.launch(Dispatchers.IO) {
             var fallbackSent = false
             try {
+                Log.d(TAG, "processHdrPlusBurst started with ${frames.size} frames.")
+
                 // 1. Prepare buffers
                 val width = frames[0].width
                 val height = frames[0].height
 
                 val buffers = frames.map { it.planes[0].buffer }.toTypedArray()
 
+                // Need characteristics for static info
+                var chars: CameraCharacteristics? = null
+                val cam = camera
+                val camInfo = cam?.cameraInfo
+                if (camInfo is Camera2CameraInfo) {
+                    chars = Camera2CameraInfo.extractCameraCharacteristics(camInfo)
+                }
+
                 // 2. Metadata (WB, CCM, BlackLevel)
                 val timestamp = frames[0].imageInfo.timestamp
-                val result = captureResults.entries.find { abs(it.key - timestamp) < 5_000_000L }?.value
+                var result = captureResults.entries.find { abs(it.key - timestamp) < 5_000_000L }?.value
+
+                // Wait slightly if result is missing (unlikely given the sequential capture delay, but safe)
+                if (result == null) {
+                     delay(200)
+                     result = captureResults.entries.find { abs(it.key - timestamp) < 5_000_000L }?.value
+                }
 
                 // Default values if metadata missing
                 var whiteLevel = 1023
@@ -2050,12 +2070,7 @@ class CameraFragment : Fragment() {
                 )
                 var cfa = 1 // RGGB
 
-                // Need characteristics for static info
-                val cam = camera
-                val camInfo = cam?.cameraInfo
-                if (camInfo is Camera2CameraInfo) {
-                    val chars = Camera2CameraInfo.extractCameraCharacteristics(camInfo)
-
+                if (chars != null) {
                     whiteLevel = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_WHITE_LEVEL) ?: 1023
                     val bl = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_BLACK_LEVEL_PATTERN)
                     if (bl != null) blackLevel = bl.getOffsetForIndex(0, 0)
@@ -2085,26 +2100,80 @@ class CameraFragment : Fragment() {
                     }
                 }
 
-                // 3. Settings (Log/LUT)
-                val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                Log.d(TAG, "Metadata: WL=$whiteLevel, BL=$blackLevel, WB=${wb.joinToString()}, CFA=$cfa")
+
+                // 3. Debug Saving (Intermediate DNGs)
+                if (DEBUG_HDR_PLUS && chars != null && result != null) {
+                    try {
+                        val debugDir = File(context.getExternalFilesDir(null), "debug_hdrplus")
+                        if (!debugDir.exists()) debugDir.mkdirs()
+                        val ts = System.currentTimeMillis()
+
+                        frames.forEachIndexed { index, image ->
+                            val dngFile = File(debugDir, "frame_${ts}_$index.dng")
+                            android.hardware.camera2.DngCreator(chars, result).use { dngCreator ->
+                                dngCreator.setOrientation(ExifInterface.ORIENTATION_NORMAL) // Raw usually normal
+                                FileOutputStream(dngFile).use { fos ->
+                                    val buffer = image.planes[0].buffer
+                                    buffer.rewind()
+                                    // Need to copy buffer because DngCreator reads it, but we also need it for JNI.
+                                    // To avoid deep copy of everything, we just rely on buffer position reset.
+                                    // BUT DngCreator might read from current position.
+                                    // Let's create a stream from the buffer.
+                                    // DirectByteBuffer -> InputStream?
+                                    // Safest is to use the byte array method if we extracted it, but we have DirectBuffers here.
+                                    // We can just use writeInputStream with a wrapper.
+
+                                    // Note: DngCreator consumes the stream.
+                                    // We need to be careful not to mess up the buffer for JNI.
+                                    // Let's duplicate the buffer for DNG writing if needed, or save/restore position.
+                                    val duplicate = buffer.duplicate()
+                                    duplicate.rewind()
+                                    val byteData = ByteArray(duplicate.remaining())
+                                    duplicate.get(byteData)
+                                    val bis = java.io.ByteArrayInputStream(byteData)
+
+                                    dngCreator.writeInputStream(fos, android.util.Size(width, height), bis, 0)
+                                }
+                            }
+                            Log.d(TAG, "Saved debug frame to ${dngFile.absolutePath}")
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to save debug frames", e)
+                    }
+                }
+
+                // 4. Settings (Log/LUT)
+                val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
                 val targetLogName = prefs.getString(SettingsFragment.KEY_TARGET_LOG, "None")
                 val targetLogIndex = SettingsFragment.LOG_CURVES.indexOf(targetLogName)
                 val activeLutName = prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, null)
                 var nativeLutPath: String? = null
                 if (activeLutName != null) {
-                    val lutFile = File(File(requireContext().filesDir, "luts"), activeLutName)
+                    val lutFile = File(File(context.filesDir, "luts"), activeLutName)
                     if (lutFile.exists()) nativeLutPath = lutFile.absolutePath
                 }
 
-                // 4. Output Path
+                Log.d(TAG, "Settings: Log=$targetLogName ($targetLogIndex), LUT=$nativeLutPath")
+
+                // 5. Output Path
                 val dngName = SimpleDateFormat(FILENAME, Locale.US).format(System.currentTimeMillis()) + "_HDRPLUS"
                 val saveTiff = prefs.getBoolean(SettingsFragment.KEY_SAVE_TIFF, true)
                 val saveJpg = prefs.getBoolean(SettingsFragment.KEY_SAVE_JPG, true)
 
-                val tiffPath = if(saveTiff) File(requireContext().cacheDir, "$dngName.tiff").absolutePath else null
-                val jpgPath = if(saveJpg) File(requireContext().cacheDir, "$dngName.bmp").absolutePath else null // Write BMP first then compress
+                val tiffFile = File(context.cacheDir, "$dngName.tiff")
+                val tiffPath = if(saveTiff) tiffFile.absolutePath else null
 
-                // 5. JNI Call
+                val bmpFile = File(context.cacheDir, "$dngName.bmp")
+                val bmpPath = bmpFile.absolutePath // JNI writes BMP here
+
+                Log.d(TAG, "Output Paths: BMP=$bmpPath, TIFF=$tiffPath")
+
+                // 6. JNI Call
+                val startTime = System.currentTimeMillis()
+                // Ensure buffers are rewound just in case
+                buffers.forEach { it.rewind() }
+
                 val ret = ColorProcessor.processHdrPlus(
                     buffers,
                     width, height,
@@ -2113,16 +2182,125 @@ class CameraFragment : Fragment() {
                     targetLogIndex,
                     nativeLutPath,
                     tiffPath,
-                    jpgPath
+                    bmpPath
                 )
 
+                Log.d(TAG, "JNI processHdrPlus returned $ret in ${System.currentTimeMillis() - startTime}ms")
+
                 if (ret == 0) {
+                    // Success!
                     withContext(Dispatchers.Main) {
-                        Toast.makeText(requireContext(), "HDR+ Processed!", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "HDR+ Processed!", Toast.LENGTH_SHORT).show()
                     }
 
-                    // Post-save: Move to MediaStore (Simplified for this patch, assume user sees Toast)
-                    // Real app should mimic processImageAsync's MediaStore insertion here for the generated TIFF/JPG.
+                    val contentResolver = context.contentResolver
+
+                    // Process and Save JPEG (from BMP)
+                    var finalJpgUri: Uri? = null
+                    if (bmpFile.exists()) {
+                         var processedBitmap: android.graphics.Bitmap? = null
+                         try {
+                             processedBitmap = BitmapFactory.decodeFile(bmpPath)
+                         } catch (e: Exception) {
+                             Log.e(TAG, "Failed to decode BMP", e)
+                         }
+
+                         if (processedBitmap != null) {
+                             // Apply Digital Zoom Crop
+                             // (Mirroring processImageAsync logic)
+                             if (currentZoom > 1.05f) {
+                                 val newWidth = (processedBitmap.width / currentZoom).toInt()
+                                 val newHeight = (processedBitmap.height / currentZoom).toInt()
+                                 val x = (processedBitmap.width - newWidth) / 2
+                                 val y = (processedBitmap.height - newHeight) / 2
+                                 val safeX = max(0, x)
+                                 val safeY = max(0, y)
+                                 val safeWidth = min(newWidth, processedBitmap.width - safeX)
+                                 val safeHeight = min(newHeight, processedBitmap.height - safeY)
+                                 processedBitmap = android.graphics.Bitmap.createBitmap(
+                                     processedBitmap, safeX, safeY, safeWidth, safeHeight
+                                 )
+                             }
+
+                             // Save to MediaStore
+                             val jpgValues = ContentValues().apply {
+                                 put(MediaStore.MediaColumns.DISPLAY_NAME, "$dngName.jpg")
+                                 put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+                                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                     put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/Darkbag")
+                                     put(MediaStore.MediaColumns.IS_PENDING, 1)
+                                 }
+                             }
+                             val jpgUri = contentResolver.insert(
+                                 MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                                 jpgValues
+                             )
+                             if (jpgUri != null) {
+                                 finalJpgUri = jpgUri
+                                 try {
+                                     contentResolver.openOutputStream(jpgUri)?.use { out ->
+                                         processedBitmap.compress(
+                                             android.graphics.Bitmap.CompressFormat.JPEG,
+                                             95,
+                                             out
+                                         )
+                                     }
+                                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                         jpgValues.clear()
+                                         jpgValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                                         contentResolver.update(jpgUri, jpgValues, null, null)
+                                     }
+                                     Log.d(TAG, "Saved JPEG to $jpgUri")
+                                 } catch (e: Exception) {
+                                     Log.e(TAG, "Failed to save JPEG", e)
+                                     contentResolver.delete(jpgUri, null, null)
+                                 }
+                             }
+                         }
+                         // Clean up BMP
+                         bmpFile.delete()
+                    } else {
+                         Log.e(TAG, "BMP file not found at $bmpPath")
+                    }
+
+                    // Save TIFF
+                    if (saveTiff && tiffFile.exists()) {
+                        val tiffValues = ContentValues().apply {
+                            put(MediaStore.MediaColumns.DISPLAY_NAME, "$dngName.tiff")
+                            put(MediaStore.MediaColumns.MIME_TYPE, "image/tiff")
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/Darkbag")
+                                put(MediaStore.MediaColumns.IS_PENDING, 1)
+                            }
+                        }
+                        val tiffUri = contentResolver.insert(
+                            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                            tiffValues
+                        )
+                        if (tiffUri != null) {
+                            try {
+                                contentResolver.openOutputStream(tiffUri)?.use { out ->
+                                    java.io.FileInputStream(tiffFile).copyTo(out)
+                                }
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                    tiffValues.clear()
+                                    tiffValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                                    contentResolver.update(tiffUri, tiffValues, null, null)
+                                }
+                                Log.d(TAG, "Saved TIFF to $tiffUri")
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Failed to save TIFF", e)
+                            }
+                        }
+                        tiffFile.delete()
+                    }
+
+                    // Update UI
+                    withContext(Dispatchers.Main) {
+                        if (finalJpgUri != null) {
+                            setGalleryThumbnail(finalJpgUri.toString())
+                        }
+                    }
 
                 } else {
                     throw RuntimeException("JNI processing returned error code: $ret")
@@ -2131,14 +2309,13 @@ class CameraFragment : Fragment() {
             } catch (e: Exception) {
                 Log.e(TAG, "HDR+ processing failed, falling back to single shot", e)
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(requireContext(), "HDR+ failed, saving single frame...", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, "HDR+ failed, saving single frame...", Toast.LENGTH_SHORT).show()
                 }
 
                 // Fallback: Use the first frame as a single shot
                 if (frames.isNotEmpty()) {
                     try {
                         val firstFrame = frames[0]
-                        val currentZoom = if (is2xMode) 2.0f else (currentFocalLength / 24.0f)
                         val holder = copyImageToHolder(firstFrame, currentZoom)
                         processingChannel.send(holder)
                         fallbackSent = true
