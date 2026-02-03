@@ -1973,29 +1973,48 @@ class CameraFragment : Fragment() {
         // Reset helper
         hdrPlusBurstHelper?.reset()
 
-        Toast.makeText(requireContext(), "Capturing HDR+ Burst...", Toast.LENGTH_SHORT).show()
-
-        // Very simple burst: Call takePicture N times.
-        // Note: Real burst usually requires Camera2 API burst capture requests for speed.
-        // CameraX doesn't expose burst capture directly in ImageCapture yet (as of 1.3).
-        // Calling takePicture repeatedly is slow but functionally correct for a draft.
-        val burstSize = 8
-        for (i in 0 until burstSize) {
-            imageCapture.takePicture(
-                cameraExecutor,
-                object : ImageCapture.OnImageCapturedCallback() {
-                    override fun onCaptureSuccess(image: ImageProxy) {
-                        hdrPlusBurstHelper?.addFrame(image)
-                    }
-
-                    override fun onError(exception: ImageCaptureException) {
-                        Log.e(TAG, "Burst frame failed: ${exception.message}")
-                        // If one fails, we might hang waiting for N frames.
-                        // Ideally HdrPlusBurst should have a timeout or error handling.
-                    }
-                }
-            )
+        lifecycleScope.launch(Dispatchers.Main) {
+            Toast.makeText(requireContext(), "Capturing HDR+ Burst...", Toast.LENGTH_SHORT).show()
         }
+
+        Log.d(TAG, "Starting HDR+ Burst (Sequential)")
+
+        // Sequential burst to avoid overloading CameraX request queue
+        val burstSize = 8
+        recursiveBurstCapture(imageCapture, burstSize, 0)
+    }
+
+    private fun recursiveBurstCapture(imageCapture: ImageCapture, totalFrames: Int, currentFrame: Int) {
+        if (currentFrame >= totalFrames) {
+            Log.d(TAG, "HDR+ Burst Capture sequence complete.")
+            return
+        }
+
+        Log.d(TAG, "Capturing burst frame ${currentFrame + 1}/$totalFrames")
+        imageCapture.takePicture(
+            cameraExecutor,
+            object : ImageCapture.OnImageCapturedCallback() {
+                override fun onCaptureSuccess(image: ImageProxy) {
+                    Log.d(TAG, "Burst frame ${currentFrame + 1} captured successfully.")
+                    hdrPlusBurstHelper?.addFrame(image)
+                    // Trigger next frame immediately
+                    recursiveBurstCapture(imageCapture, totalFrames, currentFrame + 1)
+                }
+
+                override fun onError(exception: ImageCaptureException) {
+                    Log.e(TAG, "Burst frame ${currentFrame + 1} failed: ${exception.message}")
+                    // Abort burst on error? Or try next?
+                    // If we abort, the helper never finishes.
+                    // For now, let's try next, but the helper won't reach count.
+                    // Better to reset/abort.
+                    lifecycleScope.launch(Dispatchers.Main) {
+                        Toast.makeText(requireContext(), "Burst failed at frame ${currentFrame + 1}", Toast.LENGTH_SHORT).show()
+                    }
+                    hdrPlusBurstHelper?.reset()
+                    processingSemaphore.release() // Release lock since we are aborting
+                }
+            }
+        )
     }
 
     private fun processHdrPlusBurst(frames: List<ImageProxy>) {
