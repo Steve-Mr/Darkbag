@@ -26,3 +26,7 @@ Alternatively, test running configurations can be added to Android Studio for co
 1. For Robolectric select `Android JUnit`, for connected device select `Android Instrumented Tests`.
 1. Select `app` module and `com.android.example.cameraxbasic.MainInstrumentedTest` class.
 1. Optional: Give the run configuration a name, like `test robolectric` or `test device`
+
+## Acknowledgments
+
+This project uses [LibRaw](https://www.libraw.org/) for RAW image processing. Thanks to the LibRaw team for providing this library.
