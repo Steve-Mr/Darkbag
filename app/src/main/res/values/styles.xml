@@ -18,14 +18,35 @@
 
     <!-- Base application theme. -->
     <style name="AppTheme" parent="Theme.Material3.DayNight.NoActionBar">
-        <!-- Explicitly set color attributes to satisfy ThemeEnforcement -->
-        <item name="colorPrimary">@color/colorPrimary</item>
-        <item name="colorPrimaryDark">@color/colorPrimaryDark</item>
-        <item name="colorAccent">@color/colorAccent</item>
-
         <!-- Edge-to-edge is handled in MainActivity.kt -->
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
+
+        <!-- Typography -->
+        <item name="android:fontFamily">sans-serif-medium</item>
+    </style>
+
+    <!-- Expressive Button Style -->
+    <style name="Widget.App.Button.Expressive" parent="Widget.Material3.Button">
+        <item name="cornerRadius">@dimen/radius_large</item>
+        <item name="android:paddingVertical">@dimen/spacing_medium</item>
+        <item name="android:paddingHorizontal">@dimen/spacing_large</item>
+        <item name="android:textAppearance">@style/TextAppearance.Material3.LabelLarge</item>
+    </style>
+
+    <!-- Large Expressive Icon Button -->
+    <style name="Widget.App.Button.IconButton.Large" parent="Widget.Material3.Button.IconButton">
+        <item name="android:minWidth">@dimen/round_button_medium</item>
+        <item name="android:minHeight">@dimen/round_button_medium</item>
+        <item name="iconSize">32dp</item>
+    </style>
+
+    <!-- Control Container Card -->
+    <style name="Widget.App.Card.ControlPanel" parent="Widget.Material3.CardView.Filled">
+        <item name="materialThemeOverlay">@style/ThemeOverlay.Material3.DynamicColors.Dark</item>
+        <item name="cardCornerRadius">@dimen/radius_xlarge</item>
+        <item name="cardBackgroundColor">?attr/colorSurfaceContainer</item>
+        <item name="strokeWidth">0dp</item>
     </style>
 
 </resources>

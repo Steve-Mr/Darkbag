@@ -1,41 +1,50 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<com.google.android.material.card.MaterialCardView
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    style="@style/Widget.Material3.CardView.Outlined"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:orientation="horizontal"
-    android:padding="8dp"
-    android:gravity="center_vertical"
-    android:background="?android:attr/selectableItemBackground">
+    android:layout_marginBottom="8dp"
+    app:cardCornerRadius="@dimen/radius_medium"
+    app:strokeWidth="1dp"
+    app:strokeColor="?attr/colorOutlineVariant">
 
-    <TextView
-        android:id="@+id/tv_lut_name"
-        android:layout_width="0dp"
+    <LinearLayout
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_weight="1"
-        android:text="My LUT"
-        android:textColor="@android:color/white"
-        android:textSize="16sp" />
+        android:orientation="horizontal"
+        android:paddingStart="@dimen/padding_medium"
+        android:paddingEnd="@dimen/padding_small"
+        android:paddingVertical="@dimen/padding_small"
+        android:gravity="center_vertical">
 
-    <Button
-        android:id="@+id/btn_rename"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="@string/btn_rename"
-        android:textSize="12sp"
-        android:padding="4dp"
-        android:minHeight="0dp"
-        android:minWidth="0dp"
-        android:layout_marginEnd="8dp"/>
+        <TextView
+            android:id="@+id/tv_lut_name"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="My LUT"
+            android:textAppearance="@style/TextAppearance.Material3.BodyLarge"
+            android:textColor="?attr/colorOnSurface" />
 
-    <Button
-        android:id="@+id/btn_delete"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Del"
-        android:textSize="12sp"
-        android:padding="4dp"
-        android:minHeight="0dp"
-        android:minWidth="0dp"
-        android:backgroundTint="@android:color/holo_red_dark"/>
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_rename"
+            style="@style/Widget.Material3.Button.IconButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            app:icon="@drawable/ic_settings"
+            android:contentDescription="Rename LUT" />
 
-</LinearLayout>
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_delete"
+            style="@style/Widget.Material3.Button.IconButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            app:icon="@drawable/ic_delete"
+            app:iconTint="?attr/colorError"
+            android:contentDescription="Delete LUT" />
+
+    </LinearLayout>
+
+</com.google.android.material.card.MaterialCardView>

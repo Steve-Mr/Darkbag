@@ -15,12 +15,12 @@
   ~ limitations under the License.
   -->
 <resources>
-    <color name="colorPrimary">#3F51B5</color>
-    <color name="colorPrimaryDark">#303F9F</color>
-    <color name="colorAccent">#FF4081</color>
+    <!-- Legacy colors kept for selectors, but updated to be neutral -->
     <color name="icActive">#FFFFFFFF</color>
     <color name="icFocused">#DDFFFFFF</color>
     <color name="icPressed">#AAFFFFFF</color>
-    <color name="zoom_button_active">#FFFFFF00</color>
-    <color name="zoom_button_inactive">#FFFFFFFF</color>
+
+    <!-- Zoom button states (will be replaced by logic but kept for safety) -->
+    <color name="zoom_button_active">#FFD600</color> <!-- Material Yellow -->
+    <color name="zoom_button_inactive">#FFFFFF</color>
 </resources>
