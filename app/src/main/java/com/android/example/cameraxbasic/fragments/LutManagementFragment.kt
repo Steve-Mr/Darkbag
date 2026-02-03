@@ -59,6 +59,20 @@ class LutManagementFragment : Fragment() {
         lutManager = LutManager(requireContext())
         prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
 
+        // Apply Edge-to-Edge Insets
+        ViewCompat.setOnApplyWindowInsetsListener(binding.appBar) { v, insets ->
+            val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            v.setPadding(v.paddingLeft, systemBars.top, v.paddingRight, v.paddingBottom)
+            insets
+        }
+
+        val initialBottom = binding.rvLutManagement.paddingBottom
+        ViewCompat.setOnApplyWindowInsetsListener(binding.rvLutManagement) { v, insets ->
+            val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            v.setPadding(v.paddingLeft, v.paddingTop, v.paddingRight, initialBottom + systemBars.bottom)
+            insets
+        }
+
         binding.toolbar.setNavigationOnClickListener {
              Navigation.findNavController(requireActivity(), R.id.fragment_container).navigateUp()
         }
