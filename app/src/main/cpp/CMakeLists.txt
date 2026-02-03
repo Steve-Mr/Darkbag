@@ -75,14 +75,14 @@ add_custom_command(
 # Run the generator to produce the target object file
 # We target arm-64-android.
 set(HALIDE_TARGET "arm-64-android")
-set(GENERATED_HEADER "${GENERATOR_OUTPUT_DIR}/hdrplus_pipeline.h")
-set(GENERATED_LIB "${GENERATOR_OUTPUT_DIR}/hdrplus_pipeline.a") # Static lib output
+set(GENERATED_HEADER "${GENERATOR_OUTPUT_DIR}/hdrplus_raw_pipeline.h")
+set(GENERATED_LIB "${GENERATOR_OUTPUT_DIR}/hdrplus_raw_pipeline.a") # Static lib output
 
 add_custom_command(
     OUTPUT "${GENERATED_HEADER}" "${GENERATED_LIB}"
     COMMAND "${GENERATOR_EXEC}"
-            -g hdrplus_pipeline
-            -f hdrplus_pipeline
+            -g hdrplus_raw_pipeline
+            -f hdrplus_raw_pipeline
             -e static_library,h
             -o "${GENERATOR_OUTPUT_DIR}"
             target=${HALIDE_TARGET}

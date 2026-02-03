@@ -6,7 +6,7 @@
 #include <libraw/libraw.h>
 #include <HalideBuffer.h>
 #include "ColorPipe.h"
-#include "hdrplus_pipeline.h" // Generated header
+#include "hdrplus_raw_pipeline.h" // Generated header
 
 #define TAG "HdrPlusJNI"
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, TAG, __VA_ARGS__)
@@ -15,7 +15,7 @@
 using namespace Halide::Runtime;
 
 // Declare external function from the generated library
-extern "C" int hdrplus_pipeline(halide_buffer_t *_inputs_buffer, uint16_t _black_point, uint16_t _white_point, float _white_balance_r, float _white_balance_g0, float _white_balance_g1, float _white_balance_b, int32_t _cfa_pattern, halide_buffer_t *_ccm_buffer, float _compression, float _gain, halide_buffer_t *_output_buffer);
+extern "C" int hdrplus_raw_pipeline(halide_buffer_t *_inputs_buffer, uint16_t _black_point, uint16_t _white_point, float _white_balance_r, float _white_balance_g0, float _white_balance_g1, float _white_balance_b, int32_t _cfa_pattern, halide_buffer_t *_ccm_buffer, float _compression, float _gain, halide_buffer_t *_output_buffer);
 
 extern "C" JNIEXPORT jint JNICALL
 Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
@@ -86,7 +86,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     float compression = 1.0f; // Unused now in our modified generator
     float gain = 1.0f;        // Unused now
 
-    int result = hdrplus_pipeline(
+    int result = hdrplus_raw_pipeline(
         inputBuf,
         (uint16_t)blackLevel,
         (uint16_t)whiteLevel,
