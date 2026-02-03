@@ -14,9 +14,6 @@
 
 using namespace Halide::Runtime;
 
-// Declare external function from the generated library
-extern "C" int hdrplus_raw_pipeline(halide_buffer_t *_inputs_buffer, uint16_t _black_point, uint16_t _white_point, float _white_balance_r, float _white_balance_g0, float _white_balance_g1, float _white_balance_b, int32_t _cfa_pattern, halide_buffer_t *_ccm_buffer, float _compression, float _gain, halide_buffer_t *_output_buffer);
-
 extern "C" JNIEXPORT jint JNICALL
 Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
         JNIEnv* env,

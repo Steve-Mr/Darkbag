@@ -9,6 +9,15 @@ CameraXbasic aims to demonstrate how to use CameraX APIs written in Kotlin.
 - **RAW Processing**: Native processing using LibRaw.
 - **HDR+ Support**: Burst mode computational photography.
 
+## HDR+ Usage
+
+To use the HDR+ feature:
+1. Ensure your device supports RAW capture (CameraX/Camera2 API Level Full/Level 3).
+2. Tap the **HDR+** toggle in the camera interface to enable it (icon turns blue).
+3. Press the shutter button. The app will capture a burst of 3 RAW frames.
+4. The frames are aligned and merged using the [timothybrooks/hdr-plus](https://github.com/timothybrooks/hdr-plus) algorithm (implemented in Halide) to reduce noise and increase dynamic range.
+5. The result is saved as a new RAW (DNG) file, along with optional TIFF/JPG outputs.
+
 ## Build
 
 To build the app directly from the command line, run:

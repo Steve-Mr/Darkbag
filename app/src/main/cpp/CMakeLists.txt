@@ -26,7 +26,7 @@ include_directories(${HALIDE_INCLUDE_DIR})
 
 set(HDRPLUS_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/hdr-plus/src")
 set(HDRPLUS_GENERATOR_SRC
-    "${HDRPLUS_SRC_DIR}/hdrplus_pipeline_generator.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/hdrplus_pipeline_generator.cpp"
     "${HDRPLUS_SRC_DIR}/align.cpp"
     "${HDRPLUS_SRC_DIR}/merge.cpp"
     "${HDRPLUS_SRC_DIR}/finish.cpp"
