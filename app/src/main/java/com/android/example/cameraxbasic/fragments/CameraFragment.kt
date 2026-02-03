@@ -1689,14 +1689,8 @@ class CameraFragment : Fragment() {
 
     private fun updateZoomUI(animate: Boolean) {
         val binding = cameraUiContainerBinding ?: return
-        val activeColor = androidx.core.content.ContextCompat.getColor(
-            requireContext(),
-            R.color.zoom_button_active
-        )
-        val inactiveColor = androidx.core.content.ContextCompat.getColor(
-            requireContext(),
-            R.color.zoom_button_inactive
-        )
+        val activeColor = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorPrimary)
+        val inactiveColor = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnSurface)
 
         if (is2xMode) {
             binding.btnZoom2x?.setTextColor(activeColor)

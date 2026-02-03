@@ -73,6 +73,16 @@ class LutManagementFragment : Fragment() {
             insets
         }
 
+        val initialFabMargin = resources.getDimensionPixelSize(R.dimen.margin_medium)
+        ViewCompat.setOnApplyWindowInsetsListener(binding.fabImport) { v, insets ->
+            val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            val params = v.layoutParams as ViewGroup.MarginLayoutParams
+            params.bottomMargin = initialFabMargin + systemBars.bottom
+            params.rightMargin = initialFabMargin + systemBars.right
+            v.layoutParams = params
+            insets
+        }
+
         binding.toolbar.setNavigationOnClickListener {
              Navigation.findNavController(requireActivity(), R.id.fragment_container).navigateUp()
         }
