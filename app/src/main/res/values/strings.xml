@@ -39,4 +39,5 @@
     <string name="antibanding_title">Anti-Banding</string>
     <string name="zoom_1x">1x</string>
     <string name="zoom_2x">2x</string>
+    <string name="toggle_flash">Toggle Flash</string>
 </resources>

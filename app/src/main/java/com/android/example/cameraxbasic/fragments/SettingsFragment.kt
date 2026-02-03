@@ -149,6 +149,7 @@ class SettingsFragment : Fragment() {
         const val KEY_ENABLE_LUT_PREVIEW = "enable_lut_preview"
         const val KEY_DEFAULT_FOCAL_LENGTH = "default_focal_length"
         const val KEY_ANTIBANDING = "antibanding_mode"
+        const val KEY_FLASH_MODE = "flash_mode"
 
         val FOCAL_LENGTHS = listOf("24", "28", "35")
         val ANTIBANDING_MODES = listOf("Auto", "50Hz", "60Hz", "Off")
