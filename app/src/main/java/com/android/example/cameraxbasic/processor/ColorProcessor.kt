@@ -31,4 +31,22 @@ object ColorProcessor {
      * @return Float array of size N^3 * 3, or null if loading failed.
      */
     external fun loadLutData(lutPath: String): FloatArray?
+
+    /**
+     * Processes a burst of RAW frames using the HDR+ pipeline.
+     */
+    external fun processHdrPlus(
+        dngBuffers: Array<ByteBuffer>,
+        width: Int,
+        height: Int,
+        whiteLevel: Int,
+        blackLevel: Int,
+        whiteBalance: FloatArray, // [r, g0, g1, b]
+        ccm: FloatArray,          // [3x3]
+        cfaPattern: Int,
+        targetLog: Int,
+        lutPath: String?,
+        outputTiffPath: String?,
+        outputJpgPath: String?
+    ): Int
 }

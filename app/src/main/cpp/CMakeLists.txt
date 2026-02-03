@@ -3,9 +3,98 @@ cmake_minimum_required(VERSION 3.10.2)
 project("cameraxbasic")
 
 # LibRaw Configuration
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD 17)
 add_definitions(-DNO_LCMS -DNO_JASPER -DNO_JPEG)
 
+# Setup Halide (Host)
+include(download_halide.cmake)
+include_directories(${HALIDE_INCLUDE_DIR})
+
+# --- HDR+ Generator (Host Tool) ---
+# We need to compile the generator for the HOST machine (x86_64), not the target (Android).
+# However, CMake inside Android Studio is cross-compiling.
+# To cleanly handle this, we can define the generator sources here but must ensure
+# they are built with the host compiler.
+#
+# A common trick in Android builds is to trust that the user (or a pre-step)
+# has built the generator, or use a separate CMake instance.
+# BUT, for simplicity in this integration, we will rely on AOT compilation
+# invoked manually or via a custom command if we can ensure the host toolchain is available.
+#
+# Given the constraints, we will define the generator source and use a custom command
+# that invokes 'c++' (system compiler) directly to build the generator.
+
+set(HDRPLUS_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/hdr-plus/src")
+set(HDRPLUS_GENERATOR_SRC
+    "${HDRPLUS_SRC_DIR}/hdrplus_pipeline_generator.cpp"
+    "${HDRPLUS_SRC_DIR}/align.cpp"
+    "${HDRPLUS_SRC_DIR}/merge.cpp"
+    "${HDRPLUS_SRC_DIR}/finish.cpp"
+    "${HDRPLUS_SRC_DIR}/util.cpp"
+    "${HALIDE_ROOT}/share/Halide/tools/GenGen.cpp"
+)
+
+set(GENERATOR_EXEC "${CMAKE_BINARY_DIR}/hdrplus_generator")
+
+# Create a dummy target for the library to satisfy CMake's dependency graph
+# BEFORE the custom command runs.
+# Actually, the error "The dependency target ... does not exist" suggests
+# CMake wants a known target or file.
+# The issue might be that add_dependencies expects a TARGET name, not a file path.
+# But we are passing a file path to add_library.
+# Let's fix this by using a custom target for the generation.
+
+add_custom_target(generate_hdrplus_halide DEPENDS "${GENERATED_LIB}" "${GENERATED_HEADER}")
+set(GENERATOR_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
+file(MAKE_DIRECTORY ${GENERATOR_OUTPUT_DIR})
+
+# We use a custom command to build the generator using the HOST compiler (/usr/bin/c++)
+# We link against the downloaded Halide (Host) library.
+# Note: We need to set RPATH or LD_LIBRARY_PATH for the generator to run.
+#
+# IMPORTANT: Halide v21 uses a new registration mechanism. We need to link against libHalide_GenGen.a
+# or include GenGen.cpp manually. The distribution seems to provide libHalide_GenGen.a.
+# However, `GenGen.cpp` is NOT in `share/Halide/tools/` in this specific tarball layout (based on `find` output).
+#
+# We will check if `libHalide_GenGen.a` exists in `lib/`. The `find` output shows:
+# .../lib/libHalide_GenGen.a
+#
+# So we link against `Halide_GenGen` (which contains the main entry point for generators).
+# We remove the manual `GenGen.cpp` inclusion from the source list and link the static lib instead.
+
+list(REMOVE_ITEM HDRPLUS_GENERATOR_SRC "${HALIDE_ROOT}/share/Halide/tools/GenGen.cpp")
+
+add_custom_command(
+    OUTPUT "${GENERATOR_EXEC}"
+    COMMAND c++ -std=c++17 ${HDRPLUS_GENERATOR_SRC}
+            -I"${HDRPLUS_SRC_DIR}"
+            -I"${HALIDE_INCLUDE_DIR}"
+            -L"${HALIDE_LIB_DIR}"
+            -lHalide -lHalide_GenGen -lpthread -ldl -lz
+            -Wl,-rpath,"${HALIDE_LIB_DIR}"
+            -o "${GENERATOR_EXEC}"
+    DEPENDS ${HDRPLUS_GENERATOR_SRC}
+    COMMENT "Building Halide Generator (Host)"
+)
+
+# Run the generator to produce the target object file
+# We target arm-64-android.
+set(HALIDE_TARGET "arm-64-android")
+set(GENERATED_HEADER "${GENERATOR_OUTPUT_DIR}/hdrplus_pipeline.h")
+set(GENERATED_LIB "${GENERATOR_OUTPUT_DIR}/hdrplus_pipeline.a") # Static lib output
+
+add_custom_command(
+    OUTPUT "${GENERATED_HEADER}" "${GENERATED_LIB}"
+    COMMAND "${GENERATOR_EXEC}"
+            -g hdrplus_pipeline
+            -o "${GENERATOR_OUTPUT_DIR}"
+            target=${HALIDE_TARGET}
+    DEPENDS "${GENERATOR_EXEC}"
+    COMMENT "Running Halide Generator for ${HALIDE_TARGET}"
+)
+
+# Expose generated files to the build
+include_directories(${GENERATOR_OUTPUT_DIR})
 include_directories(libraw)
 
 # Glob all sources
@@ -21,7 +110,14 @@ add_library(
         native-lib
         SHARED
         native-lib.cpp
-        ${LIBRAW_SOURCES})
+        HdrPlusJNI.cpp
+        ColorPipe.cpp
+        ${LIBRAW_SOURCES}
+        "${GENERATED_LIB}" # Force dependency on generated lib
+)
+
+# Ensure the generation happens before native-lib compilation
+add_dependencies(native-lib generate_hdrplus_halide)
 
 find_library(
         log-lib

@@ -2,6 +2,13 @@
 
 CameraXbasic aims to demonstrate how to use CameraX APIs written in Kotlin.
 
+## Features
+- **Manual Camera Controls**: ISO, Shutter Speed, Focus.
+- **Log Curves**: Support for F-Log2, S-Log3, Canon Log, etc.
+- **LUT Support**: Import and apply 3D LUTs (.cube) to previews and captured images.
+- **RAW Processing**: Native processing using LibRaw.
+- **HDR+ Support**: Burst mode computational photography.
+
 ## Build
 
 To build the app directly from the command line, run:
@@ -29,4 +36,6 @@ Alternatively, test running configurations can be added to Android Studio for co
 
 ## Acknowledgments
 
-This project uses [LibRaw](https://www.libraw.org/) for RAW image processing. Thanks to the LibRaw team for providing this library.
+*   **[LibRaw](https://www.libraw.org/)**: For RAW image decoding and processing.
+*   **[timothybrooks/hdr-plus](https://github.com/timothybrooks/hdr-plus)**: For the HDR+ alignment and merging algorithm implementation.
+*   **[Halide](https://halide-lang.org/)**: For high-performance image processing kernels used in the HDR+ pipeline.
