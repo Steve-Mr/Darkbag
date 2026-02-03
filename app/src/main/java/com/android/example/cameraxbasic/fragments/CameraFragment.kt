@@ -147,6 +147,7 @@ class CameraFragment : Fragment() {
 
     // HDR+ State
     private var isHdrPlusEnabled = false
+    private var isBurstActive = false
     private var hdrPlusBurstHelper: HdrPlusBurst? = null
 
     private var minFocusDistance = 0.0f
@@ -364,7 +365,7 @@ class CameraFragment : Fragment() {
 
         // Initialize HDR+ Burst Helper
         hdrPlusBurstHelper = HdrPlusBurst(
-            frameCount = 8, // Fixed frame count for now
+            frameCount = 3, // Reduced to 3 for stability
             onBurstComplete = { frames ->
                 processHdrPlusBurst(frames)
             }
@@ -1970,6 +1971,12 @@ class CameraFragment : Fragment() {
     }
 
     private fun triggerHdrPlusBurst(imageCapture: ImageCapture) {
+        if (isBurstActive) {
+            Log.d(TAG, "Burst already active, ignoring trigger")
+            return
+        }
+        isBurstActive = true
+
         // Reset helper
         hdrPlusBurstHelper?.reset()
 
@@ -1980,7 +1987,7 @@ class CameraFragment : Fragment() {
         Log.d(TAG, "Starting HDR+ Burst (Sequential)")
 
         // Sequential burst to avoid overloading CameraX request queue
-        val burstSize = 8
+        val burstSize = 3
         recursiveBurstCapture(imageCapture, burstSize, 0)
     }
 
@@ -2011,6 +2018,7 @@ class CameraFragment : Fragment() {
                         Toast.makeText(requireContext(), "Burst failed at frame ${currentFrame + 1}", Toast.LENGTH_SHORT).show()
                     }
                     hdrPlusBurstHelper?.reset()
+                    isBurstActive = false // Reset active flag
                     processingSemaphore.release() // Release lock since we are aborting
                 }
             }
@@ -2140,6 +2148,7 @@ class CameraFragment : Fragment() {
                 }
             } finally {
                 frames.forEach { it.close() }
+                isBurstActive = false // Burst processing complete
                 // Release semaphore ONLY if we didn't hand off the work to the channel
                 if (!fallbackSent) {
                     processingSemaphore.release()
