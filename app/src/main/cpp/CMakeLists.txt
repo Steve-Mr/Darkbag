@@ -38,13 +38,8 @@ set(GENERATOR_EXEC "${CMAKE_BINARY_DIR}/hdrplus_generator")
 
 # Create a dummy target for the library to satisfy CMake's dependency graph
 # BEFORE the custom command runs.
-# Actually, the error "The dependency target ... does not exist" suggests
-# CMake wants a known target or file.
-# The issue might be that add_dependencies expects a TARGET name, not a file path.
-# But we are passing a file path to add_library.
-# Let's fix this by using a custom target for the generation.
-
 add_custom_target(generate_hdrplus_halide DEPENDS "${GENERATED_LIB}" "${GENERATED_HEADER}")
+
 set(GENERATOR_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
 file(MAKE_DIRECTORY ${GENERATOR_OUTPUT_DIR})
 
@@ -87,6 +82,8 @@ add_custom_command(
     OUTPUT "${GENERATED_HEADER}" "${GENERATED_LIB}"
     COMMAND "${GENERATOR_EXEC}"
             -g hdrplus_pipeline
+            -f hdrplus_pipeline
+            -e static_library,h
             -o "${GENERATOR_OUTPUT_DIR}"
             target=${HALIDE_TARGET}
     DEPENDS "${GENERATOR_EXEC}"
@@ -113,6 +110,7 @@ add_library(
         HdrPlusJNI.cpp
         ColorPipe.cpp
         ${LIBRAW_SOURCES}
+        "${GENERATED_LIB}"
 )
 
 # Ensure the generation happens before native-lib compilation
@@ -122,7 +120,14 @@ find_library(
         log-lib
         log)
 
-# Link against the generated Halide pipeline static library
+find_library(
+        jnigraphics-lib
+        jnigraphics)
+
+find_library(
+        android-lib
+        android)
+
 target_link_libraries(
         native-lib
         "${GENERATED_LIB}"
@@ -131,14 +136,6 @@ target_link_libraries(
         ${android-lib}
         -fopenmp
         -static-openmp)
-
-find_library(
-        jnigraphics-lib
-        jnigraphics)
-
-find_library(
-        android-lib
-        android)
 
 
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fopenmp")
