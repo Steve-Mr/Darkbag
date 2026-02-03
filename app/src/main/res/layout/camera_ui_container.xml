@@ -48,6 +48,21 @@
         app:layout_constraintEnd_toEndOf="parent"
         android:contentDescription="@string/settings_button_alt" />
 
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/flash_button"
+        style="@style/Widget.App.Button.IconButton.Large"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_margin="@dimen/margin_medium"
+        app:icon="@drawable/ic_flash_off"
+        app:iconTint="?attr/colorOnSurface"
+        android:backgroundTint="?attr/colorSurfaceContainerHigh"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:contentDescription="@string/toggle_flash"
+        android:visibility="gone" />
+
     <!-- LUT List Container -->
     <com.google.android.material.card.MaterialCardView
         android:id="@+id/lut_list_container"

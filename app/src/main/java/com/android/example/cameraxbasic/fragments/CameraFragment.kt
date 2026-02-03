@@ -142,6 +142,9 @@ class CameraFragment : Fragment() {
     private var isManualExposure = false
     private var activeManualTab: String? = null
 
+    // Flash State
+    private var isFlashEnabled = false
+
     private var minFocusDistance = 0.0f
     private var isoRange: android.util.Range<Int>? = null
     private var exposureTimeRange: android.util.Range<Long>? = null
@@ -352,6 +355,9 @@ class CameraFragment : Fragment() {
             currentFocalLength = defaultFocalLength
         }
 
+        // Initialize Flash State
+        isFlashEnabled = prefs.getBoolean(SettingsFragment.KEY_FLASH_MODE, false)
+
         // Start processing consumer
         viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
             for (holder in processingChannel) {
@@ -495,6 +501,7 @@ class CameraFragment : Fragment() {
             .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
             .setResolutionSelector(resolutionSelector)
             .setTargetRotation(rotation)
+            .setFlashMode(if (isFlashEnabled) ImageCapture.FLASH_MODE_ON else ImageCapture.FLASH_MODE_OFF)
             .apply {
                 if (isRawSupported) {
                     setOutputFormat(ImageCapture.OUTPUT_FORMAT_RAW)
@@ -614,6 +621,13 @@ class CameraFragment : Fragment() {
                 this, cameraSelector, useCaseGroup
             )
 
+            // Check Flash Availability
+            if (camera?.cameraInfo?.hasFlashUnit() == true) {
+                cameraUiContainerBinding?.flashButton?.visibility = View.VISIBLE
+            } else {
+                cameraUiContainerBinding?.flashButton?.visibility = View.GONE
+            }
+
             observeCameraState(camera?.cameraInfo!!)
 
             // Restore Zoom
@@ -701,6 +715,20 @@ class CameraFragment : Fragment() {
         cameraUiContainerBinding?.settingsButton?.setOnClickListener {
             Navigation.findNavController(requireActivity(), R.id.fragment_container)
                 .navigate(CameraFragmentDirections.actionCameraToSettings())
+        }
+
+        // Flash Button
+        cameraUiContainerBinding?.flashButton?.let { btn ->
+            updateFlashIcon(btn)
+            btn.setOnClickListener {
+                isFlashEnabled = !isFlashEnabled
+                // Save pref
+                requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                    .edit().putBoolean(SettingsFragment.KEY_FLASH_MODE, isFlashEnabled).apply()
+                updateFlashIcon(btn)
+                // Update UseCase dynamically
+                imageCapture?.flashMode = if (isFlashEnabled) ImageCapture.FLASH_MODE_ON else ImageCapture.FLASH_MODE_OFF
+            }
         }
 
         // Listener for button used to capture photo
@@ -1864,6 +1892,10 @@ class CameraFragment : Fragment() {
         }
 
         override fun getItemCount() = luts.size + 1
+    }
+
+    private fun updateFlashIcon(btn: MaterialButton) {
+        btn.setIconResource(if (isFlashEnabled) R.drawable.ic_flash_on else R.drawable.ic_flash_off)
     }
 
     private fun updateLiveLut() {
