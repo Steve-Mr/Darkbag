@@ -47,6 +47,7 @@ object ColorProcessor {
         targetLog: Int,
         lutPath: String?,
         outputTiffPath: String?,
-        outputJpgPath: String?
+        outputJpgPath: String?,
+        outputDngPath: String?
     ): Int
 }

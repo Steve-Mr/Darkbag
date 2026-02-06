@@ -29,7 +29,8 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
         jint targetLog,
         jstring lutPath,
         jstring outputTiffPath,
-        jstring outputJpgPath
+        jstring outputJpgPath,
+        jstring outputDngPath
 ) {
     LOGD("Native processHdrPlus started.");
 
@@ -157,12 +158,15 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     // Save
     const char* tiff_path_cstr = (outputTiffPath) ? env->GetStringUTFChars(outputTiffPath, 0) : nullptr;
     const char* jpg_path_cstr = (outputJpgPath) ? env->GetStringUTFChars(outputJpgPath, 0) : nullptr;
+    const char* dng_path_cstr = (outputDngPath) ? env->GetStringUTFChars(outputDngPath, 0) : nullptr;
 
     if (tiff_path_cstr) write_tiff(tiff_path_cstr, width, height, finalImage);
     if (jpg_path_cstr) write_bmp(jpg_path_cstr, width, height, finalImage);
+    if (dng_path_cstr) write_dng(dng_path_cstr, width, height, finalImage, whiteLevel);
 
     if (outputTiffPath) env->ReleaseStringUTFChars(outputTiffPath, tiff_path_cstr);
     if (outputJpgPath) env->ReleaseStringUTFChars(outputJpgPath, jpg_path_cstr);
+    if (outputDngPath) env->ReleaseStringUTFChars(outputDngPath, dng_path_cstr);
 
     return 0;
 }

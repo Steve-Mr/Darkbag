@@ -2184,7 +2184,11 @@ class CameraFragment : Fragment() {
                 val bmpFile = File(context.cacheDir, "$dngName.bmp")
                 val bmpPath = bmpFile.absolutePath // JNI writes BMP here
 
-                Log.d(TAG, "Output Paths: BMP=$bmpPath, TIFF=$tiffPath")
+                // Save Linear DNG (as requested)
+                val linearDngFile = File(context.cacheDir, "${dngName}_linear.dng")
+                val linearDngPath = linearDngFile.absolutePath
+
+                Log.d(TAG, "Output Paths: BMP=$bmpPath, TIFF=$tiffPath, DNG=$linearDngPath")
 
                 // 6. JNI Call
                 val startTime = System.currentTimeMillis()
@@ -2199,7 +2203,8 @@ class CameraFragment : Fragment() {
                     targetLogIndex,
                     nativeLutPath,
                     tiffPath,
-                    bmpPath
+                    bmpPath,
+                    linearDngPath
                 )
 
                 Log.d(TAG, "JNI processHdrPlus returned $ret in ${System.currentTimeMillis() - startTime}ms")
@@ -2310,6 +2315,38 @@ class CameraFragment : Fragment() {
                             }
                         }
                         tiffFile.delete()
+                    }
+
+                    // Save Linear DNG
+                    if (linearDngFile.exists()) {
+                        val dngValues = ContentValues().apply {
+                            put(MediaStore.MediaColumns.DISPLAY_NAME, "${dngName}_linear.dng")
+                            put(MediaStore.MediaColumns.MIME_TYPE, "image/x-adobe-dng")
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/Darkbag")
+                                put(MediaStore.MediaColumns.IS_PENDING, 1)
+                            }
+                        }
+                        val dngUri = contentResolver.insert(
+                            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                            dngValues
+                        )
+                        if (dngUri != null) {
+                            try {
+                                contentResolver.openOutputStream(dngUri)?.use { out ->
+                                    java.io.FileInputStream(linearDngFile).copyTo(out)
+                                }
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                    dngValues.clear()
+                                    dngValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                                    contentResolver.update(dngUri, dngValues, null, null)
+                                }
+                                Log.d(TAG, "Saved Linear DNG to $dngUri")
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Failed to save Linear DNG", e)
+                            }
+                        }
+                        linearDngFile.delete()
                     }
 
                     // Update UI

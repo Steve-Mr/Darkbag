@@ -174,6 +174,93 @@ void write_tiff(const char* filename, int width, int height, const std::vector<u
     file.close();
 }
 
+void write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel) {
+    std::ofstream file(filename, std::ios::binary);
+    if (!file.is_open()) return;
+
+    // Header (Little Endian)
+    char header[8] = {'I', 'I', 42, 0, 8, 0, 0, 0};
+    file.write(header, 8);
+
+    // DNG Tags
+    // Need to include standard TIFF tags + DNG specific tags
+    // 1. Width (256)
+    // 2. Height (257)
+    // 3. BitsPerSample (258)
+    // 4. Compression (259)
+    // 5. Photometric (262)
+    // 6. StripOffsets (273)
+    // 7. SamplesPerPixel (277)
+    // 8. RowsPerStrip (278)
+    // 9. StripByteCounts (279)
+    // 10. PlanarConfig (284)
+    // 11. DNGVersion (50706)
+    // 12. UniqueCameraModel (50708)
+    // 13. CalibrationIlluminant1 (50778)
+    // 14. WhiteLevel (50717)
+
+    short num_entries = 14;
+    file.write((char*)&num_entries, 2);
+
+    auto write_entry = [&](short tag, short type, int count, int value_or_offset) {
+        file.write((char*)&tag, 2);
+        file.write((char*)&type, 2);
+        file.write((char*)&count, 4);
+        file.write((char*)&value_or_offset, 4);
+    };
+
+    // Calculate Offsets
+    // Entry = 12 bytes
+    // Total IFD = 2 + 14*12 + 4 = 174 bytes
+    // Data starts at 8 + 174 = 182
+    int data_offset = 8 + 2 + num_entries * 12 + 4;
+    int img_size = width * height * 6;
+
+    // Metadata Offsets (Placed after image data)
+    int meta_offset = data_offset + img_size;
+    int bps_offset = meta_offset;         // 6 bytes
+    int dng_ver_offset = bps_offset + 6;  // 4 bytes
+    int model_offset = dng_ver_offset + 4; // 12 bytes ("HDR+ Linear\0")
+
+    // Sorted Tags
+    write_entry(256, 3, 1, width);
+    write_entry(257, 3, 1, height);
+    write_entry(258, 3, 3, bps_offset);
+    write_entry(259, 3, 1, 1); // No Compression
+    write_entry(262, 3, 1, 2); // RGB
+    write_entry(273, 4, 1, data_offset);
+    write_entry(277, 3, 1, 3);
+    write_entry(278, 3, 1, height);
+    write_entry(279, 4, 1, img_size);
+    write_entry(284, 3, 1, 1); // Chunky
+
+    // DNG Tags (Sorted by Tag ID)
+    write_entry((short)50706, 1, 4, dng_ver_offset); // DNGVersion
+    write_entry((short)50708, 2, 12, model_offset);  // UniqueCameraModel
+    write_entry((short)50717, 3, 1, whiteLevel);     // WhiteLevel
+    write_entry((short)50778, 3, 1, 21);             // CalibrationIlluminant1 (D65)
+
+    int next_ifd = 0;
+    file.write((char*)&next_ifd, 4);
+
+    // Write Image Data
+    file.write((char*)data.data(), img_size);
+
+    // Write Metadata
+    // BitsPerSample
+    short bps[3] = {16, 16, 16};
+    file.write((char*)bps, 6);
+
+    // DNGVersion (1, 4, 0, 0)
+    char dng_ver[4] = {1, 4, 0, 0};
+    file.write(dng_ver, 4);
+
+    // UniqueCameraModel
+    file.write("HDR+ Linear\0", 12);
+
+    file.close();
+}
+
 void write_bmp(const char* filename, int width, int height, const std::vector<unsigned short>& data) {
     std::ofstream file(filename, std::ios::binary);
     if (!file.is_open()) return;
