@@ -1,6 +1,10 @@
 #include "ColorPipe.h"
 #include <tiffio.h>
 
+#include <tiffio.h>
+#include <vector>
+
+// Define missing tags if needed (Standard EXIF tags)
 #ifndef TIFFTAG_EXPOSURETIME
 #define TIFFTAG_EXPOSURETIME 33434
 #endif
@@ -10,6 +14,31 @@
 #ifndef TIFFTAG_ISOSPEEDRATINGS
 #define TIFFTAG_ISOSPEEDRATINGS 34855
 #endif
+
+// Define DNG Tags (Custom Tags 507xx)
+#define TIFFTAG_DNGVERSION 50706
+#define TIFFTAG_DNGBACKWARDVERSION 50707
+#define TIFFTAG_UNIQUECAMERAMODEL 50708
+#define TIFFTAG_COLORMATRIX1 50721
+#define TIFFTAG_ASSHOTNEUTRAL 50728
+#define TIFFTAG_CALIBRATIONILLUMINANT1 50778
+
+static const TIFFFieldInfo dng_field_info[] = {
+    { TIFFTAG_DNGVERSION, 4, 4, TIFF_BYTE, FIELD_CUSTOM, 1, 0, "DNGVersion" },
+    { TIFFTAG_DNGBACKWARDVERSION, 4, 4, TIFF_BYTE, FIELD_CUSTOM, 1, 0, "DNGBackwardVersion" },
+    { TIFFTAG_UNIQUECAMERAMODEL, -1, -1, TIFF_ASCII, FIELD_CUSTOM, 1, 0, "UniqueCameraModel" },
+    { TIFFTAG_COLORMATRIX1, -1, -1, TIFF_RATIONAL, FIELD_CUSTOM, 1, 1, "ColorMatrix1" },
+    { TIFFTAG_ASSHOTNEUTRAL, -1, -1, TIFF_RATIONAL, FIELD_CUSTOM, 1, 1, "AsShotNeutral" },
+    { TIFFTAG_CALIBRATIONILLUMINANT1, 1, 1, TIFF_SHORT, FIELD_CUSTOM, 1, 0, "CalibrationIlluminant1" },
+    // EXIF Tags
+    { TIFFTAG_EXPOSURETIME, 1, 1, TIFF_RATIONAL, FIELD_CUSTOM, 1, 0, "ExposureTime" },
+    { TIFFTAG_FNUMBER, 1, 1, TIFF_RATIONAL, FIELD_CUSTOM, 1, 0, "FNumber" },
+    { TIFFTAG_ISOSPEEDRATINGS, -1, -1, TIFF_SHORT, FIELD_CUSTOM, 1, 1, "ISOSpeedRatings" }
+};
+
+static void DNGTagExtender(TIFF *tif) {
+    TIFFMergeFieldInfo(tif, dng_field_info, sizeof(dng_field_info) / sizeof(dng_field_info[0]));
+}
 
 // --- Log Curves (CPU) ---
 float arri_logc3(float x) {
@@ -188,6 +217,9 @@ bool write_tiff(const char* filename, int width, int height, const std::vector<u
 }
 
 bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, int iso, long exposureTime, float fNumber) {
+    // Register DNG tags
+    TIFFSetTagExtender(DNGTagExtender);
+
     TIFF* tif = TIFFOpen(filename, "w");
     if (!tif) return false;
 
