@@ -1032,23 +1032,7 @@ class CameraFragment : Fragment() {
                 val chars = cameraManager.getCameraCharacteristics(camera2Info.cameraId)
 
                 // 1. Wait for Metadata
-                var attempts = 0
-                var captureResult: TotalCaptureResult? = null
-                val tolerance = 5_000_000L // 5ms in nanoseconds
-
-                while (attempts < 25) { // Wait up to 5 seconds
-                    captureResult = captureResults[image.timestamp]
-                    if (captureResult == null) {
-                        synchronized(captureResults) {
-                            captureResult = captureResults.entries.find {
-                                kotlin.math.abs(it.key - image.timestamp) < tolerance
-                            }?.value
-                        }
-                    }
-                    if (captureResult != null) break
-                    kotlinx.coroutines.delay(200)
-                    attempts++
-                }
+                val captureResult = findCaptureResult(image.timestamp)
 
                 if (captureResult == null) {
                     Log.e(
@@ -2048,13 +2032,29 @@ class CameraFragment : Fragment() {
         )
     }
 
+    private suspend fun findCaptureResult(timestamp: Long, tolerance: Long = 5_000_000L): TotalCaptureResult? {
+        // 1. Check cache first for an immediate match.
+        captureResults.entries.find { abs(it.key - timestamp) < tolerance }?.value?.let { return it }
+
+        // 2. If not in cache, wait on the flow with a timeout.
+        return withTimeoutOrNull(3000) {
+            captureResultFlow.first { res ->
+                val ts = res.get(android.hardware.camera2.CaptureResult.SENSOR_TIMESTAMP)
+                ts != null && abs(ts - timestamp) < tolerance
+            }
+        }
+    }
+
     private fun processHdrPlusBurst(frames: List<ImageProxy>) {
         val currentZoom = if (is2xMode) 2.0f else (currentFocalLength / 24.0f)
 
         lifecycleScope.launch(Dispatchers.IO) {
             var fallbackSent = false
             try {
-                val context = context ?: return@launch
+                val context = context ?: run {
+                    Log.w(TAG, "processHdrPlusBurst aborted: Fragment context is null.")
+                    return@launch
+                }
 
                 Log.d(TAG, "processHdrPlusBurst started with ${frames.size} frames.")
 
@@ -2074,19 +2074,7 @@ class CameraFragment : Fragment() {
 
                 // 2. Metadata (WB, CCM, BlackLevel)
                 val timestamp = frames[0].imageInfo.timestamp
-                val tolerance = 5_000_000L // 5ms
-
-                // Strategy: Check map -> If missing, wait on flow with timeout
-                var result = captureResults.entries.find { abs(it.key - timestamp) < tolerance }?.value
-
-                if (result == null) {
-                    result = withTimeoutOrNull(3000) { // Wait up to 3 seconds
-                        captureResultFlow.first { res ->
-                            val ts = res.get(android.hardware.camera2.CaptureResult.SENSOR_TIMESTAMP)
-                            ts != null && abs(ts - timestamp) < tolerance
-                        }
-                    }
-                }
+                val result = findCaptureResult(timestamp)
 
                 // Default values
                 var whiteLevel = 1023
