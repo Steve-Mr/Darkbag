@@ -1,4 +1,56 @@
 #include "ColorPipe.h"
+#include <tiffio.h>
+
+#include <tiffio.h>
+#include <vector>
+#include <ctime>
+
+// Define missing tags if needed (Standard EXIF tags)
+#ifndef TIFFTAG_EXPOSURETIME
+#define TIFFTAG_EXPOSURETIME 33434
+#endif
+#ifndef TIFFTAG_FNUMBER
+#define TIFFTAG_FNUMBER 33437
+#endif
+#ifndef TIFFTAG_ISOSPEEDRATINGS
+#define TIFFTAG_ISOSPEEDRATINGS 34855
+#endif
+#ifndef TIFFTAG_FOCALLENGTH
+#define TIFFTAG_FOCALLENGTH 37386
+#endif
+
+// 确保定义 LinearRaw (如果 libtiff 头文件没包含)
+#ifndef PHOTOMETRIC_LINEAR_RAW
+#define PHOTOMETRIC_LINEAR_RAW 34892
+#endif
+
+// Define DNG Tags (Custom Tags 507xx)
+#define TIFFTAG_DNGVERSION 50706
+#define TIFFTAG_DNGBACKWARDVERSION 50707
+#define TIFFTAG_UNIQUECAMERAMODEL 50708
+#define TIFFTAG_BLACKLEVEL 50714
+#define TIFFTAG_WHITELEVEL 50717
+#define TIFFTAG_COLORMATRIX1 50721
+#define TIFFTAG_ASSHOTNEUTRAL 50728
+#define TIFFTAG_CALIBRATIONILLUMINANT1 50778
+#define TIFFTAG_OPCODELIST1 51008
+#define TIFFTAG_OPCODELIST2 51009
+#define TIFFTAG_OPCODELIST3 51022
+
+static const TIFFFieldInfo dng_field_info[] = {
+    { TIFFTAG_DNGVERSION, 4, 4, TIFF_BYTE, FIELD_CUSTOM, 1, 0, "DNGVersion" },
+    { TIFFTAG_DNGBACKWARDVERSION, 4, 4, TIFF_BYTE, FIELD_CUSTOM, 1, 0, "DNGBackwardVersion" },
+    { TIFFTAG_UNIQUECAMERAMODEL, -1, -1, TIFF_ASCII, FIELD_CUSTOM, 1, 0, "UniqueCameraModel" },
+    { TIFFTAG_BLACKLEVEL, -1, -1, TIFF_LONG, FIELD_CUSTOM, 1, 1, "BlackLevel" },
+    { TIFFTAG_WHITELEVEL, -1, -1, TIFF_LONG, FIELD_CUSTOM, 1, 1, "WhiteLevel" },
+    { TIFFTAG_COLORMATRIX1, -1, -1, TIFF_RATIONAL, FIELD_CUSTOM, 1, 1, "ColorMatrix1" },
+    { TIFFTAG_ASSHOTNEUTRAL, -1, -1, TIFF_RATIONAL, FIELD_CUSTOM, 1, 1, "AsShotNeutral" },
+    { TIFFTAG_CALIBRATIONILLUMINANT1, 1, 1, TIFF_SHORT, FIELD_CUSTOM, 1, 0, "CalibrationIlluminant1" }
+};
+
+static void DNGTagExtender(TIFF *tif) {
+    TIFFMergeFieldInfo(tif, dng_field_info, sizeof(dng_field_info) / sizeof(dng_field_info[0]));
+}
 
 // --- Log Curves (CPU) ---
 float arri_logc3(float x) {
@@ -176,141 +228,90 @@ bool write_tiff(const char* filename, int width, int height, const std::vector<u
     return result;
 }
 
-bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel) {
-    std::ofstream file(filename, std::ios::binary);
-    if (!file.is_open()) return false;
+bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, int iso, long exposureTime, float fNumber, float focalLength, long captureTimeMillis, const std::vector<float>& ccm) {
+    // Register DNG tags
+    TIFFSetTagExtender(DNGTagExtender);
 
-    // 1. DNG Header (Little Endian)
-    char header[8] = {'I', 'I', 42, 0, 8, 0, 0, 0};
-    file.write(header, 8);
+    TIFF* tif = TIFFOpen(filename, "w");
+    if (!tif) return false;
 
-    // 2. Calculate Offsets
-    // Entry = 12 bytes.
-    // 3 Mandatory Exposure Tags: ExposureTime, FNumber, ISO
-    // New IFD Size:
-    // Base 16 tags + 3 Exposure tags = 19 tags
-    // Total IFD Size = 2 + 19*12 + 4 = 234 bytes
+    // Basic Tags
+    TIFFSetField(tif, TIFFTAG_IMAGEWIDTH, width);
+    TIFFSetField(tif, TIFFTAG_IMAGELENGTH, height);
+    TIFFSetField(tif, TIFFTAG_BITSPERSAMPLE, 16);
+    TIFFSetField(tif, TIFFTAG_COMPRESSION, COMPRESSION_NONE);
 
-    // ALIGNMENT FIX:
-    // data_offset must be even (TIFF spec). 8 + 234 = 242 (Even, OK)
-    // However, for safety and 4-byte alignment preference in some readers:
-    // 242 is not div by 4. 244 is.
-    // Let's add 2 bytes of padding after IFD.
+    // [Critical] Use LinearRaw
+    TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_LINEAR_RAW);
 
-    short num_entries = 19;
-    int ifd_size = 2 + num_entries * 12 + 4; // 234
-    int padding = 2; // Pad to 236 -> Offset 244 (divisible by 4)
+    TIFFSetField(tif, TIFFTAG_SAMPLESPERPIXEL, 3);
+    TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG);
+    TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, height);
 
-    int data_offset = 8 + ifd_size + padding;
-    int img_size = width * height * 6; // 16-bit * 3 channels
+    // [Critical] Add NewSubfileType = 0 (Full resolution image)
+    TIFFSetField(tif, TIFFTAG_SUBFILETYPE, 0);
 
-    // Metadata Offsets (Placed after image data)
-    int off_bps = data_offset + img_size;
-    int off_mod = off_bps + 6;    // BPS is 6 bytes
-    // off_mod (Camera Model) is 12 bytes
-    int off_mat = off_mod + 12;
-    // off_mat (ColorMatrix1) is 72 bytes
-    int off_neu = off_mat + 72;
-    // off_neu (AsShotNeutral) is 24 bytes
-    // Total meta after image: 6 + 12 + 72 + 24 = 114 bytes
+    // Standard Metadata
+    static const char* make = "Google";
+    TIFFSetField(tif, TIFFTAG_MAKE, make);
 
-    // Helper lambda
-    auto write_entry = [&](short tag, short type, int count, int value_or_offset) {
-        file.write((char*)&tag, 2);
-        file.write((char*)&type, 2);
-        file.write((char*)&count, 4);
-        file.write((char*)&value_or_offset, 4);
-    };
+    static const char* model = "HDR+ Device";
+    TIFFSetField(tif, TIFFTAG_MODEL, model);
 
-    auto write_rational = [&](int num, int den) {
-        file.write((char*)&num, 4);
-        file.write((char*)&den, 4);
-    };
+    static const char* software = "CameraXBasic HDR+";
+    TIFFSetField(tif, TIFFTAG_SOFTWARE, software);
 
-    // 3. Write IFD Count
-    file.write((char*)&num_entries, 2);
+    // DateTime (306)
+    time_t raw_time = (time_t)(captureTimeMillis / 1000);
+    struct tm * timeinfo = localtime(&raw_time);
+    char buffer[20];
+    strftime(buffer, 20, "%Y:%m:%d %H:%M:%S", timeinfo);
+    TIFFSetField(tif, TIFFTAG_DATETIME, buffer);
 
-    // 4. Write Tags (Must be sorted by Tag ID)
-    write_entry(256, 3, 1, width);               // Width
-    write_entry(257, 3, 1, height);              // Height
-    write_entry(258, 3, 3, off_bps);             // BitsPerSample (Offset)
-    write_entry(259, 3, 1, 1);                   // Compression: None
-    write_entry(262, 3, 1, 2);                   // Photometric: RGB (Linear Raw)
-    write_entry(273, 4, 1, data_offset);         // StripOffsets
-    write_entry(277, 3, 1, 3);                   // SamplesPerPixel: 3
-    write_entry(278, 3, 1, height);              // RowsPerStrip
-    write_entry(279, 4, 1, img_size);            // StripByteCounts
-    write_entry(284, 3, 1, 1);                   // PlanarConfig: Chunky
+    // DNG Tags
+    static const uint8_t dng_version[] = {1, 4, 0, 0};
+    TIFFSetField(tif, TIFFTAG_DNGVERSION, dng_version);
 
-    // EXIF Tags (Dummy values to satisfy Lightroom)
-    // ExposureTime (33434) - RATIONAL - Inline? No, 8 bytes > 4. Need offset.
-    // FNumber (33437) - RATIONAL - Need offset.
-    // ISOSpeedRatings (34855) - SHORT - Inline OK.
+    static const uint8_t dng_backward_version[] = {1, 1, 0, 0};
+    TIFFSetField(tif, TIFFTAG_DNGBACKWARDVERSION, dng_backward_version);
 
-    // Re-calc offsets for new RATIONALs
-    int off_exp = off_neu + 24; // After AsShotNeutral
-    int off_fnum = off_exp + 8; // After ExposureTime
+    TIFFSetField(tif, TIFFTAG_UNIQUECAMERAMODEL, model);
 
-    write_entry((short)33434, 5, 1, off_exp);    // ExposureTime (1/30)
-    write_entry((short)33437, 5, 1, off_fnum);   // FNumber (f/1.8)
-    write_entry((short)34855, 3, 1, 100);        // ISO (100)
+    // White/Black Level (Critical for Readers)
+    uint32_t white_level_val = (uint32_t)whiteLevel; // Default 65535 or from sensor
+    if (white_level_val == 0) white_level_val = 65535;
+    TIFFSetField(tif, TIFFTAG_WHITELEVEL, 1, &white_level_val);
 
-    // DNG Specific Tags
-    // DNGVersion (Tag 50706): 1.4.0.0
-    int dng_ver_val = 1 | (4 << 8);
-    write_entry((short)50706, 1, 4, dng_ver_val);
+    uint32_t black_level_val = 0; // Already subtracted in pipeline
+    TIFFSetField(tif, TIFFTAG_BLACKLEVEL, 1, &black_level_val);
 
-    write_entry((short)50708, 2, 12, off_mod);   // UniqueCameraModel
+    // [Critical] Write real CCM
+    TIFFSetField(tif, TIFFTAG_COLORMATRIX1, 9, ccm.data());
 
-    // WhiteLevel (Tag 50717): Forced to 65535 (16-bit full scale)
-    write_entry((short)50717, 3, 1, 65535);
+    // AsShotNeutral is {1,1,1} because data is already WB'd (Linear)
+    static const float as_shot_neutral[] = {1.0f, 1.0f, 1.0f};
+    TIFFSetField(tif, TIFFTAG_ASSHOTNEUTRAL, 3, as_shot_neutral);
 
-    write_entry((short)50721, 10, 9, off_mat);   // ColorMatrix1
-    write_entry((short)50728, 5, 3, off_neu);    // AsShotNeutral
-    write_entry((short)50778, 3, 1, 21);         // CalibrationIlluminant1: D65
+    TIFFSetField(tif, TIFFTAG_CALIBRATIONILLUMINANT1, 21); // D65
 
-    // 5. Next IFD Pointer (0)
-    int next_ifd = 0;
-    file.write((char*)&next_ifd, 4);
+    // EXIF Metadata - Use correct standard libtiff types/pointers
+    float exposureTimeSec = (float)exposureTime / 1000000000.0f;
+    TIFFSetField(tif, TIFFTAG_EXPOSURETIME, exposureTimeSec);
+    TIFFSetField(tif, TIFFTAG_FNUMBER, fNumber);
+    TIFFSetField(tif, TIFFTAG_FOCALLENGTH, focalLength);
 
-    // PADDING (2 bytes)
-    short pad = 0;
-    file.write((char*)&pad, 2);
+    // ISO: Pass count and address because standard libtiff definition is variable length array
+    unsigned short iso_short = (unsigned short)iso;
+    TIFFSetField(tif, TIFFTAG_ISOSPEEDRATINGS, 1, &iso_short);
 
-    // 6. Write Image Data
-    file.write((char*)data.data(), img_size);
+    // Write Data
+    if (TIFFWriteEncodedStrip(tif, 0, (void*)data.data(), width * height * 3 * sizeof(unsigned short)) < 0) {
+        TIFFClose(tif);
+        return false;
+    }
 
-    // 7. Write Metadata Data at calculated offsets
-
-    // BitsPerSample (3 * SHORT)
-    short bps[3] = {16, 16, 16};
-    file.write((char*)bps, 6);
-
-    // UniqueCameraModel (12 bytes)
-    file.write("HDR+ Linear\0", 12);
-
-    // ColorMatrix1 (Identity) - 9 * SRATIONAL (8 bytes)
-    int one[2] = {1, 1};
-    int zero[2] = {0, 1};
-    // Row 1
-    file.write((char*)one, 8); file.write((char*)zero, 8); file.write((char*)zero, 8);
-    // Row 2
-    file.write((char*)zero, 8); file.write((char*)one, 8); file.write((char*)zero, 8);
-    // Row 3
-    file.write((char*)zero, 8); file.write((char*)zero, 8); file.write((char*)one, 8);
-
-    // AsShotNeutral (1.0, 1.0, 1.0) - 3 * RATIONAL
-    file.write((char*)one, 8); file.write((char*)one, 8); file.write((char*)one, 8);
-
-    // ExposureTime (1, 30)
-    write_rational(1, 30);
-
-    // FNumber (18, 10) -> f/1.8
-    write_rational(18, 10);
-
-    bool result = file.good();
-    file.close();
-    return result;
+    TIFFClose(tif);
+    return true;
 }
 
 bool write_bmp(const char* filename, int width, int height, const std::vector<unsigned short>& data) {

@@ -44,6 +44,11 @@ object ColorProcessor {
         whiteBalance: FloatArray, // [r, g0, g1, b]
         ccm: FloatArray,          // [3x3]
         cfaPattern: Int,
+        iso: Int,
+        exposureTime: Long,
+        fNumber: Float,
+        focalLength: Float,
+        captureTimeMillis: Long,
         targetLog: Int,
         lutPath: String?,
         outputTiffPath: String?,

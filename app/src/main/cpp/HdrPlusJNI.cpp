@@ -26,6 +26,11 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
         jfloatArray whiteBalance, // [r, g0, g1, b]
         jfloatArray ccm,          // [3x3] or [3x4] flat
         jint cfaPattern,
+        jint iso,
+        jlong exposureTime,
+        jfloat fNumber,
+        jfloat focalLength,
+        jlong captureTimeMillis,
         jint targetLog,
         jstring lutPath,
         jstring outputTiffPath,
@@ -69,7 +74,12 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     for(int i=0; i<9; ++i) ccmVec[i] = ccmData[i];
     env->ReleaseFloatArrayElements(ccm, ccmData, JNI_ABORT);
 
-    Buffer<float> ccmHalideBuf(ccmVec.data(), 3, 3);
+    std::vector<float> identityCCM = {
+        1.0f, 0.0f, 0.0f,
+        0.0f, 1.0f, 0.0f,
+        0.0f, 0.0f, 1.0f
+    };
+    Buffer<float> ccmHalideBuf(identityCCM.data(), 3, 3);
 
     // 3. Prepare Output Buffer (16-bit Linear RGB)
     Buffer<uint16_t> outputBuf(width, height, 3);
@@ -172,7 +182,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
 
     if (tiff_path_cstr) tiff_ok = write_tiff(tiff_path_cstr, width, height, finalImage);
     if (jpg_path_cstr) bmp_ok = write_bmp(jpg_path_cstr, width, height, bmpImage); // Use processed buffer
-    if (dng_path_cstr) dng_ok = write_dng(dng_path_cstr, width, height, finalImage, whiteLevel);
+    if (dng_path_cstr) dng_ok = write_dng(dng_path_cstr, width, height, finalImage, whiteLevel, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec);
 
     if (outputTiffPath) env->ReleaseStringUTFChars(outputTiffPath, tiff_path_cstr);
     if (outputJpgPath) env->ReleaseStringUTFChars(outputJpgPath, jpg_path_cstr);
