@@ -2067,31 +2067,25 @@ class CameraFragment : Fragment() {
                 }
 
                 // 2. Metadata (WB, CCM, BlackLevel)
-                // White Balance Handling:
-                // We extract the color correction gains (Red, GreenEven, GreenOdd, Blue) from the Camera2 CaptureResult.
-                // These values are passed to the native JNI layer ('whiteBalance' array).
-                // Inside the Halide pipeline (hdrplus_raw_pipeline), these gains are applied to the raw data *during* processing.
-                // This ensures the final merged output is already white-balanced.
-                // Note: The subsequent Log/LUT application (now disabled for HDR+) would operate on this already balanced data.
                 val timestamp = frames[0].imageInfo.timestamp
                 var result = captureResults.entries.find { abs(it.key - timestamp) < 5_000_000L }?.value
 
-                // Wait slightly if result is missing (unlikely given the sequential capture delay, but safe)
+                // Wait slightly if result is missing
                 if (result == null) {
                      delay(200)
                      result = captureResults.entries.find { abs(it.key - timestamp) < 5_000_000L }?.value
                 }
 
-                // Default values if metadata missing
+                // Default values
                 var whiteLevel = 1023
-                var blackLevel = 64 // typical 10-bit
+                var blackLevel = 64
                 var wb = floatArrayOf(2.0f, 1.0f, 1.0f, 1.5f)
                 var ccm = floatArrayOf(
                     2.0f, -1.0f, 0.0f,
                     -0.5f, 2.0f, -0.5f,
                     0.0f, -1.0f, 2.0f
                 )
-                var cfa = 1 // RGGB
+                var cfa = 0 // Default RGGB
 
                 if (chars != null) {
                     whiteLevel = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_WHITE_LEVEL) ?: 1023
@@ -2099,7 +2093,7 @@ class CameraFragment : Fragment() {
                     if (bl != null) blackLevel = bl.getOffsetForIndex(0, 0)
 
                     val cfaEnum = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_COLOR_FILTER_ARRANGEMENT)
-                    if (cfaEnum != null) cfa = cfaEnum + 1
+                    if (cfaEnum != null) cfa = cfaEnum // Pass Raw Enum (0..3)
                 }
 
                 result?.let { r ->
@@ -2235,73 +2229,82 @@ class CameraFragment : Fragment() {
                 Log.d(TAG, "JNI processHdrPlus returned $ret in ${System.currentTimeMillis() - startTime}ms")
 
                 if (ret == 0) {
-                    // Success!
-                    withContext(Dispatchers.Main) {
-                        Toast.makeText(context, "HDR+ Processed!", Toast.LENGTH_SHORT).show()
-                    }
-
                     val contentResolver = context.contentResolver
 
                     // Process and Save JPEG (from BMP)
                     var finalJpgUri: Uri? = null
+
                     if (bmpFile.exists()) {
                          var processedBitmap: android.graphics.Bitmap? = null
                          try {
                              processedBitmap = BitmapFactory.decodeFile(bmpPath)
-                         } catch (e: Exception) {
-                             Log.e(TAG, "Failed to decode BMP", e)
+                         } catch (t: Throwable) {
+                             Log.e(TAG, "Failed to decode BMP (OOM?)", t)
                          }
 
                          if (processedBitmap != null) {
-                             // Apply Digital Zoom Crop
-                             // (Mirroring processImageAsync logic)
-                             if (currentZoom > 1.05f) {
-                                 val newWidth = (processedBitmap.width / currentZoom).toInt()
-                                 val newHeight = (processedBitmap.height / currentZoom).toInt()
-                                 val x = (processedBitmap.width - newWidth) / 2
-                                 val y = (processedBitmap.height - newHeight) / 2
-                                 val safeX = max(0, x)
-                                 val safeY = max(0, y)
-                                 val safeWidth = min(newWidth, processedBitmap.width - safeX)
-                                 val safeHeight = min(newHeight, processedBitmap.height - safeY)
-                                 processedBitmap = android.graphics.Bitmap.createBitmap(
-                                     processedBitmap, safeX, safeY, safeWidth, safeHeight
-                                 )
-                             }
+                             try {
+                                 // Apply Digital Zoom Crop
+                                 if (currentZoom > 1.05f) {
+                                     val newWidth = (processedBitmap.width / currentZoom).toInt()
+                                     val newHeight = (processedBitmap.height / currentZoom).toInt()
+                                     val x = (processedBitmap.width - newWidth) / 2
+                                     val y = (processedBitmap.height - newHeight) / 2
+                                     val safeX = max(0, x)
+                                     val safeY = max(0, y)
+                                     val safeWidth = min(newWidth, processedBitmap.width - safeX)
+                                     val safeHeight = min(newHeight, processedBitmap.height - safeY)
 
-                             // Save to MediaStore
-                             val jpgValues = ContentValues().apply {
-                                 put(MediaStore.MediaColumns.DISPLAY_NAME, "$dngName.jpg")
-                                 put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
-                                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                                     put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/Darkbag")
-                                     put(MediaStore.MediaColumns.IS_PENDING, 1)
-                                 }
-                             }
-                             val jpgUri = contentResolver.insert(
-                                 MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                                 jpgValues
-                             )
-                             if (jpgUri != null) {
-                                 finalJpgUri = jpgUri
-                                 try {
-                                     contentResolver.openOutputStream(jpgUri)?.use { out ->
-                                         processedBitmap.compress(
-                                             android.graphics.Bitmap.CompressFormat.JPEG,
-                                             95,
-                                             out
-                                         )
+                                     val croppedBitmap = android.graphics.Bitmap.createBitmap(
+                                         processedBitmap, safeX, safeY, safeWidth, safeHeight
+                                     )
+                                     if (croppedBitmap != processedBitmap) {
+                                         processedBitmap.recycle()
+                                         processedBitmap = croppedBitmap
                                      }
+                                 }
+
+                                 // Save to MediaStore
+                                 val jpgValues = ContentValues().apply {
+                                     put(MediaStore.MediaColumns.DISPLAY_NAME, "$dngName.jpg")
+                                     put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
                                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                                         jpgValues.clear()
-                                         jpgValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
-                                         contentResolver.update(jpgUri, jpgValues, null, null)
+                                         put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/Darkbag")
+                                         put(MediaStore.MediaColumns.IS_PENDING, 1)
                                      }
-                                     Log.d(TAG, "Saved JPEG to $jpgUri")
-                                 } catch (e: Exception) {
-                                     Log.e(TAG, "Failed to save JPEG", e)
-                                     contentResolver.delete(jpgUri, null, null)
                                  }
+                                 val jpgUri = contentResolver.insert(
+                                     MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                                     jpgValues
+                                 )
+                                 if (jpgUri != null) {
+                                     finalJpgUri = jpgUri
+                                     try {
+                                         contentResolver.openOutputStream(jpgUri)?.use { out ->
+                                             processedBitmap.compress(
+                                                 android.graphics.Bitmap.CompressFormat.JPEG,
+                                                 95,
+                                                 out
+                                             )
+                                         }
+                                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                             jpgValues.clear()
+                                             jpgValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                                             contentResolver.update(jpgUri, jpgValues, null, null)
+                                         }
+                                         Log.i(TAG, "Saved HDR+ JPEG to $jpgUri")
+                                     } catch (e: Exception) {
+                                         Log.e(TAG, "Failed to save JPEG stream", e)
+                                         contentResolver.delete(jpgUri, null, null)
+                                         finalJpgUri = null
+                                     }
+                                 } else {
+                                     Log.e(TAG, "Failed to insert JPEG into MediaStore")
+                                 }
+                             } catch (t: Throwable) {
+                                 Log.e(TAG, "Error during bitmap processing/saving", t)
+                             } finally {
+                                 processedBitmap?.recycle()
                              }
                          }
                          // Clean up BMP
@@ -2377,7 +2380,10 @@ class CameraFragment : Fragment() {
                     // Update UI
                     withContext(Dispatchers.Main) {
                         if (finalJpgUri != null) {
+                            Toast.makeText(context, "HDR+ Saved!", Toast.LENGTH_SHORT).show()
                             setGalleryThumbnail(finalJpgUri.toString())
+                        } else {
+                            Toast.makeText(context, "HDR+ Save Failed", Toast.LENGTH_SHORT).show()
                         }
                     }
 

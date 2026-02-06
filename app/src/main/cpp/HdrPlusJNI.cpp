@@ -72,17 +72,21 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     Buffer<float> ccmHalideBuf(ccmVec.data(), 3, 3);
 
     // 3. Prepare Output Buffer (16-bit Linear RGB)
-    // The generator now outputs uint16_t in planar format (Halide default: x, y, c)
-    // However, for efficiency, let's try to ask for interleaved if possible, or handle planar.
-    // Halide Buffer default construction with 3 dims is usually [x, y, c] or [c, x, y] depending on how you read it.
-    // Let's assume standard planar: width, height, channels.
-
-    // We allocate a buffer for 16-bit output.
     Buffer<uint16_t> outputBuf(width, height, 3);
 
     // 4. Run Pipeline
     float compression = 1.0f; // Unused now in our modified generator
     float gain = 1.0f;        // Unused now
+
+    // Fix for Red/Blue Swap (Bayer Phase Mismatch)
+    // Assuming RGGB (0) <-> BGGR (3) mismatch
+    if (cfaPattern == 0) {
+        cfaPattern = 3; // Force BGGR
+        LOGD("Swapped CFA: RGGB -> BGGR");
+    } else if (cfaPattern == 3) {
+        cfaPattern = 0; // Force RGGB
+        LOGD("Swapped CFA: BGGR -> RGGB");
+    }
 
     int result = hdrplus_raw_pipeline(
         inputBuf,
@@ -104,10 +108,6 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     LOGD("Halide pipeline finished.");
 
     // 5. Post-Processing (Log + LUT)
-    // Now we have 16-bit Linear RGB in outputBuf.
-    // We need to convert this to the format expected by processLibRawOutput/ColorPipe.
-    // ColorPipe expects a libraw_processed_image_t-like structure or just raw RGB data.
-    // Let's reuse the logic: Apply Log -> Apply LUT -> Save.
 
     // Load LUT
     const char* lut_path_cstr = (lutPath) ? env->GetStringUTFChars(lutPath, 0) : nullptr;
@@ -118,40 +118,14 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     }
 
     // Process Output
-    // finalImage for DNG/TIFF (Linear)
     std::vector<unsigned short> finalImage(width * height * 3);
-    // bmpImage for JPG (Gamma Corrected, WB Applied)
     std::vector<unsigned short> bmpImage(width * height * 3);
 
-    // Halide Output is Planar (x, y, c) or (c, x, y)?
-    // By default Halide uses planar x, y, c (stride[0]=1, stride[1]=width, stride[2]=width*height).
-    // Let's verify strides if we could, but assuming standard Generator compilation.
-    // We need to interleave it for TIFF writer (R,G,B, R,G,B...)
-
-    const uint16_t* ptrR = outputBuf.data() + 0 * width * height; // Channel 0?
-    // Wait, Halide dim order is x, y, c.
-    // If outputBuf(x, y, c), then C is the 3rd dimension.
-    // So distinct planes.
-    // Let's assume Channel 0=R, 1=G, 2=B (based on srgb implementation).
-
-    // Pointer arithmetic depends on strides.
-    // outputBuf.dim(2).stride() usually is width*height.
+    // Halide Output is Planar x, y, c
     int stride_x = outputBuf.dim(0).stride();
     int stride_y = outputBuf.dim(1).stride();
     int stride_c = outputBuf.dim(2).stride();
     const uint16_t* raw_ptr = outputBuf.data();
-
-    // Prepare Manual White Balance multipliers (Assuming Halide didn't apply them or we want to fix yellow)
-    // "Yellow" means lacking Blue. Normal gains might be R=2.0, B=2.0. If image is yellow, B is too low.
-    // Let's apply the passed WB gains to the BMP path.
-    // Note: wb_g0 and wb_g1 are usually ~1.0. wb_r and wb_b are > 1.0.
-    float gain_r = wb_r;
-    float gain_g = (wb_g0 + wb_g1) / 2.0f;
-    float gain_b = wb_b;
-
-    // Invert? If 'whiteBalance' argument contains "Gains to make it white", then we multiply.
-    // If it contains "AsShotNeutral", we divide.
-    // Camera2 returns "ColorCorrectionGains" which are multipliers. So multiply is correct.
 
     #pragma omp parallel for
     for (int y = 0; y < height; y++) {
@@ -169,11 +143,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
 
              // Prepare for BMP/JPG
              // 1. Digital Gain (Recover Brightness from Headroom)
-             // Headroom factor was 0.25, so gain is 4.0.
              float digital_gain = 4.0f;
-
-             // Halide output is already WB'd and CCM'd (to Linear sRGB).
-             // We just need to normalize, apply gain, and apply gamma.
 
              float norm_r = std::min(1.0f, (float)r_val / 65535.0f * digital_gain);
              float norm_g = std::min(1.0f, (float)g_val / 65535.0f * digital_gain);
@@ -196,13 +166,24 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     const char* jpg_path_cstr = (outputJpgPath) ? env->GetStringUTFChars(outputJpgPath, 0) : nullptr;
     const char* dng_path_cstr = (outputDngPath) ? env->GetStringUTFChars(outputDngPath, 0) : nullptr;
 
-    if (tiff_path_cstr) write_tiff(tiff_path_cstr, width, height, finalImage);
-    if (jpg_path_cstr) write_bmp(jpg_path_cstr, width, height, bmpImage); // Use processed buffer
-    if (dng_path_cstr) write_dng(dng_path_cstr, width, height, finalImage, whiteLevel);
+    bool tiff_ok = true;
+    bool bmp_ok = true;
+    bool dng_ok = true;
+
+    if (tiff_path_cstr) tiff_ok = write_tiff(tiff_path_cstr, width, height, finalImage);
+    if (jpg_path_cstr) bmp_ok = write_bmp(jpg_path_cstr, width, height, bmpImage); // Use processed buffer
+    if (dng_path_cstr) dng_ok = write_dng(dng_path_cstr, width, height, finalImage, whiteLevel);
 
     if (outputTiffPath) env->ReleaseStringUTFChars(outputTiffPath, tiff_path_cstr);
     if (outputJpgPath) env->ReleaseStringUTFChars(outputJpgPath, jpg_path_cstr);
     if (outputDngPath) env->ReleaseStringUTFChars(outputDngPath, dng_path_cstr);
+
+    if (!bmp_ok) {
+        LOGE("Failed to write BMP file.");
+        return -2;
+    }
+    if (!tiff_ok) LOGE("Failed to write TIFF file.");
+    if (!dng_ok) LOGE("Failed to write DNG file.");
 
     return 0;
 }

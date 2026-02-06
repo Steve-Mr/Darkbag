@@ -118,9 +118,9 @@ Vec3 apply_lut(const LUT3D& lut, Vec3 color) {
 
 // --- TIFF Writer ---
 
-void write_tiff(const char* filename, int width, int height, const std::vector<unsigned short>& data) {
+bool write_tiff(const char* filename, int width, int height, const std::vector<unsigned short>& data) {
     std::ofstream file(filename, std::ios::binary);
-    if (!file.is_open()) return;
+    if (!file.is_open()) return false;
 
     // Header
     char header[8] = {'I', 'I', 42, 0, 8, 0, 0, 0}; // Little endian, offset 8
@@ -171,12 +171,14 @@ void write_tiff(const char* filename, int width, int height, const std::vector<u
     short bps[3] = {16, 16, 16};
     file.write((char*)bps, 6);
 
+    bool result = file.good();
     file.close();
+    return result;
 }
 
-void write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel) {
+bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel) {
     std::ofstream file(filename, std::ios::binary);
-    if (!file.is_open()) return;
+    if (!file.is_open()) return false;
 
     // Header (Little Endian)
     char header[8] = {'I', 'I', 42, 0, 8, 0, 0, 0};
@@ -271,12 +273,14 @@ void write_dng(const char* filename, int width, int height, const std::vector<un
     // AsShotNeutral (1.0, 1.0, 1.0) - 3 RATIONALS
     file.write((char*)one, 8); file.write((char*)one, 8); file.write((char*)one, 8);
 
+    bool result = file.good();
     file.close();
+    return result;
 }
 
-void write_bmp(const char* filename, int width, int height, const std::vector<unsigned short>& data) {
+bool write_bmp(const char* filename, int width, int height, const std::vector<unsigned short>& data) {
     std::ofstream file(filename, std::ios::binary);
-    if (!file.is_open()) return;
+    if (!file.is_open()) return false;
 
     int padded_width = (width * 3 + 3) & (~3);
     int size = 54 + padded_width * height;
@@ -306,5 +310,8 @@ void write_bmp(const char* filename, int width, int height, const std::vector<un
         }
         file.write((char*)line.data(), padded_width);
     }
+
+    bool result = file.good();
     file.close();
+    return result;
 }
