@@ -180,30 +180,25 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
     std::ofstream file(filename, std::ios::binary);
     if (!file.is_open()) return false;
 
-    // Header (Little Endian)
+    // 1. DNG Header (Little Endian)
     char header[8] = {'I', 'I', 42, 0, 8, 0, 0, 0};
     file.write(header, 8);
 
-    // DNG Tags
-    // Need to include standard TIFF tags + DNG specific tags
-    // 1. Width (256)
-    // 2. Height (257)
-    // 3. BitsPerSample (258)
-    // 4. Compression (259)
-    // 5. Photometric (262)
-    // 6. StripOffsets (273)
-    // 7. SamplesPerPixel (277)
-    // 8. RowsPerStrip (278)
-    // 9. StripByteCounts (279)
-    // 10. PlanarConfig (284)
-    // 11. DNGVersion (50706)
-    // 12. UniqueCameraModel (50708)
-    // 13. CalibrationIlluminant1 (50778)
-    // 14. WhiteLevel (50717)
-
+    // 2. Calculate Offsets
+    // Entry = 12 bytes. Total IFD = 2 + 16*12 + 4 = 198 bytes.
+    // Data starts at 8 + 198 = 206
     short num_entries = 16;
-    file.write((char*)&num_entries, 2);
+    int data_offset = 8 + 2 + num_entries * 12 + 4;
+    int img_size = width * height * 6; // 16-bit * 3 channels
 
+    // Metadata Offsets (Placed after image data)
+    int off_bps = data_offset + img_size;
+    // int off_ver = off_bps + 6; // [Removed] Version no longer needs offset
+    int off_mod = off_bps + 6;    // Adjusted: Immediately after bps
+    int off_mat = off_mod + 12;
+    int off_neu = off_mat + 72;
+
+    // Helper lambda
     auto write_entry = [&](short tag, short type, int count, int value_or_offset) {
         file.write((char*)&tag, 2);
         file.write((char*)&type, 2);
@@ -211,66 +206,66 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
         file.write((char*)&value_or_offset, 4);
     };
 
-    // Calculate Offsets
-    // Entry = 12 bytes
-    // Total IFD = 2 + 16*12 + 4 = 198 bytes
-    // Data starts at 8 + 198 = 206
-    int data_offset = 8 + 2 + num_entries * 12 + 4;
-    int img_size = width * height * 6;
+    // 3. Write IFD Count
+    file.write((char*)&num_entries, 2);
 
-    // Metadata Offsets (Placed after image data)
-    int off_bps = data_offset + img_size;
-    int off_ver = off_bps + 6;
-    int off_mod = off_ver + 4;
-    int off_mat = off_mod + 12;
-    int off_neu = off_mat + 72; // Matrix is 72 bytes
+    // 4. Write Tags (Must be sorted by Tag ID)
+    write_entry(256, 3, 1, width);               // Width
+    write_entry(257, 3, 1, height);              // Height
+    write_entry(258, 3, 3, off_bps);             // BitsPerSample (Offset)
+    write_entry(259, 3, 1, 1);                   // Compression: None
+    write_entry(262, 3, 1, 2);                   // Photometric: RGB (Linear Raw)
+    write_entry(273, 4, 1, data_offset);         // StripOffsets
+    write_entry(277, 3, 1, 3);                   // SamplesPerPixel: 3
+    write_entry(278, 3, 1, height);              // RowsPerStrip
+    write_entry(279, 4, 1, img_size);            // StripByteCounts
+    write_entry(284, 3, 1, 1);                   // PlanarConfig: Chunky
 
-    // Sorted Tags
-    write_entry(256, 3, 1, width);
-    write_entry(257, 3, 1, height);
-    write_entry(258, 3, 3, off_bps);
-    write_entry(259, 3, 1, 1); // No Compression
-    write_entry(262, 3, 1, 2); // RGB
-    write_entry(273, 4, 1, data_offset);
-    write_entry(277, 3, 1, 3);
-    write_entry(278, 3, 1, height);
-    write_entry(279, 4, 1, img_size);
-    write_entry(284, 3, 1, 1); // Chunky
+    // DNG Specific Tags
+    // [Fix 1] DNGVersion (Tag 50706): Direct value write 1.4.0.0 (Little Endian: 0x01, 0x04, 0x00, 0x00)
+    // 0x00000401 = 1 | (4 << 8)
+    int dng_ver_val = 1 | (4 << 8);
+    write_entry((short)50706, 1, 4, dng_ver_val);
 
-    // DNG Tags (Sorted by Tag ID)
-    write_entry((short)50706, 1, 4, off_ver); // DNGVersion
-    write_entry((short)50708, 2, 12, off_mod);  // UniqueCameraModel
-    write_entry((short)50717, 3, 1, whiteLevel);     // WhiteLevel
-    write_entry((short)50721, 10, 9, off_mat); // ColorMatrix1 (SRATIONAL)
-    write_entry((short)50728, 5, 3, off_neu); // AsShotNeutral (RATIONAL)
-    write_entry((short)50778, 3, 1, 21);             // CalibrationIlluminant1 (D65)
+    write_entry((short)50708, 2, 12, off_mod);   // UniqueCameraModel
 
+    // [Fix 2] WhiteLevel (Tag 50717): Forced to 65535 (16-bit full scale)
+    // Ignore passed whiteLevel (which is for sensor raw)
+    write_entry((short)50717, 3, 1, 65535);
+
+    write_entry((short)50721, 10, 9, off_mat);   // ColorMatrix1
+    write_entry((short)50728, 5, 3, off_neu);    // AsShotNeutral
+    write_entry((short)50778, 3, 1, 21);         // CalibrationIlluminant1: D65
+
+    // 5. Next IFD Pointer (0)
     int next_ifd = 0;
     file.write((char*)&next_ifd, 4);
 
-    // Write Image Data
+    // 6. Write Image Data
     file.write((char*)data.data(), img_size);
 
-    // Write Metadata
-    // BitsPerSample
+    // 7. Write Metadata Data at calculated offsets
+
+    // BitsPerSample (3 * SHORT)
     short bps[3] = {16, 16, 16};
     file.write((char*)bps, 6);
 
-    // DNGVersion (1, 4, 0, 0)
-    char dng_ver[4] = {1, 4, 0, 0};
-    file.write(dng_ver, 4);
+    // [Removed] DNGVersion data no longer needed
 
-    // UniqueCameraModel
+    // UniqueCameraModel (12 bytes)
     file.write("HDR+ Linear\0", 12);
 
-    // ColorMatrix1 (Identity) - 9 SRATIONALS
+    // ColorMatrix1 (Identity) - 9 * SRATIONAL (8 bytes) = 72 bytes
     int one[2] = {1, 1};
     int zero[2] = {0, 1};
+    // Row 1
     file.write((char*)one, 8); file.write((char*)zero, 8); file.write((char*)zero, 8);
+    // Row 2
     file.write((char*)zero, 8); file.write((char*)one, 8); file.write((char*)zero, 8);
+    // Row 3
     file.write((char*)zero, 8); file.write((char*)zero, 8); file.write((char*)one, 8);
 
-    // AsShotNeutral (1.0, 1.0, 1.0) - 3 RATIONALS
+    // AsShotNeutral (1.0, 1.0, 1.0) - 3 * RATIONAL (8 bytes) = 24 bytes
     file.write((char*)one, 8); file.write((char*)one, 8); file.write((char*)one, 8);
 
     bool result = file.good();
