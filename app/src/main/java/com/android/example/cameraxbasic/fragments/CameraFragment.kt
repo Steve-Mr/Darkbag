@@ -1901,7 +1901,6 @@ class CameraFragment : Fragment() {
         private const val RATIO_16_9_VALUE = 16.0 / 9.0
         private const val FOCUS_RING_DISPLAY_TIME_MS = 500L
         private const val FOCUS_RING_FADE_OUT_DURATION_MS = 300L
-        private const val DEBUG_HDR_PLUS = true
     }
     private fun takeSinglePicture(imageCapture: ImageCapture) {
         if (imageCapture.outputFormat == ImageCapture.OUTPUT_FORMAT_RAW) {
@@ -2131,66 +2130,6 @@ class CameraFragment : Fragment() {
                 }
 
                 Log.d(TAG, "Metadata: WL=$whiteLevel, BL=$blackLevel, WB=${wb.joinToString()}, CFA=$cfa")
-
-                // 3. Debug Saving (Intermediate DNGs)
-                if (DEBUG_HDR_PLUS && chars != null && result != null) {
-                    try {
-                        val ts = System.currentTimeMillis()
-                        val contentResolver = context.contentResolver
-                        // Base name for this session (matches final image)
-                        val baseName = SimpleDateFormat(FILENAME, Locale.US).format(ts)
-
-                        frames.forEachIndexed { index, image ->
-                            val fileName = "${baseName}_INPUT_${index + 1}.dng"
-
-                            val dngValues = ContentValues().apply {
-                                put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
-                                put(MediaStore.MediaColumns.MIME_TYPE, "image/x-adobe-dng")
-                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                                    put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/Darkbag")
-                                    put(MediaStore.MediaColumns.IS_PENDING, 1)
-                                }
-                            }
-
-                            val dngUri = contentResolver.insert(
-                                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                                dngValues
-                            )
-
-                            if (dngUri != null) {
-                                try {
-                                    contentResolver.openOutputStream(dngUri)?.use { fos ->
-                                        android.hardware.camera2.DngCreator(chars, result).use { dngCreator ->
-                                            dngCreator.setOrientation(ExifInterface.ORIENTATION_NORMAL)
-
-                                            val buffer = image.planes[0].buffer
-                                            buffer.rewind()
-                                            val duplicate = buffer.duplicate()
-                                            duplicate.rewind()
-                                            val byteData = ByteArray(duplicate.remaining())
-                                            duplicate.get(byteData)
-                                            val bis = java.io.ByteArrayInputStream(byteData)
-
-                                            dngCreator.writeInputStream(fos, android.util.Size(width, height), bis, 0)
-                                        }
-                                    }
-
-                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                                        dngValues.clear()
-                                        dngValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
-                                        contentResolver.update(dngUri, dngValues, null, null)
-                                    }
-                                    Log.d(TAG, "Saved input frame $index to MediaStore: $dngUri")
-                                } catch (e: Exception) {
-                                    Log.e(TAG, "Failed to save input frame $index", e)
-                                    contentResolver.delete(dngUri, null, null)
-                                }
-                            }
-                        }
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Failed to save debug frames", e)
-                    }
-                }
 
                 // 4. Settings (Log/LUT)
                 val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
