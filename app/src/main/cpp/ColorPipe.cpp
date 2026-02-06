@@ -3,6 +3,7 @@
 
 #include <tiffio.h>
 #include <vector>
+#include <ctime>
 
 // Define missing tags if needed (Standard EXIF tags)
 #ifndef TIFFTAG_EXPOSURETIME
@@ -40,7 +41,7 @@ static const TIFFFieldInfo dng_field_info[] = {
     // EXIF Tags
     { TIFFTAG_EXPOSURETIME, 1, 1, TIFF_RATIONAL, FIELD_CUSTOM, 1, 0, "ExposureTime" },
     { TIFFTAG_FNUMBER, 1, 1, TIFF_RATIONAL, FIELD_CUSTOM, 1, 0, "FNumber" },
-    { TIFFTAG_ISOSPEEDRATINGS, -1, -1, TIFF_SHORT, FIELD_CUSTOM, 1, 1, "ISOSpeedRatings" },
+    { TIFFTAG_ISOSPEEDRATINGS, 1, 1, TIFF_SHORT, FIELD_CUSTOM, 1, 0, "ISOSpeedRatings" },
     { TIFFTAG_FOCALLENGTH, 1, 1, TIFF_RATIONAL, FIELD_CUSTOM, 1, 0, "FocalLength" }
 };
 
@@ -224,7 +225,7 @@ bool write_tiff(const char* filename, int width, int height, const std::vector<u
     return result;
 }
 
-bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, int iso, long exposureTime, float fNumber, float focalLength) {
+bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, int iso, long exposureTime, float fNumber, float focalLength, long captureTimeMillis) {
     // Register DNG tags
     TIFFSetTagExtender(DNGTagExtender);
 
@@ -251,8 +252,12 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
     static const char* software = "CameraXBasic HDR+";
     TIFFSetField(tif, TIFFTAG_SOFTWARE, software);
 
-    // DateTime (306) - TODO: Pass from Java for exact capture time.
-    // Format: "YYYY:MM:DD HH:MM:SS"
+    // DateTime (306)
+    time_t raw_time = (time_t)(captureTimeMillis / 1000);
+    struct tm * timeinfo = localtime(&raw_time);
+    char buffer[20];
+    strftime(buffer, 20, "%Y:%m:%d %H:%M:%S", timeinfo);
+    TIFFSetField(tif, TIFFTAG_DATETIME, buffer);
 
     // DNG Tags
     static const uint8_t dng_version[] = {1, 4, 0, 0};
@@ -291,7 +296,7 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
     TIFFSetField(tif, TIFFTAG_FOCALLENGTH, focalLength);
 
     unsigned short iso_short = (unsigned short)iso;
-    TIFFSetField(tif, TIFFTAG_ISOSPEEDRATINGS, 1, &iso_short);
+    TIFFSetField(tif, TIFFTAG_ISOSPEEDRATINGS, iso_short);
 
     // Write Data
     if (TIFFWriteEncodedStrip(tif, 0, (void*)data.data(), width * height * 3 * sizeof(unsigned short)) < 0) {

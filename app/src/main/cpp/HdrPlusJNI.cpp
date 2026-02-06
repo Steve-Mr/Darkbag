@@ -30,6 +30,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
         jlong exposureTime,
         jfloat fNumber,
         jfloat focalLength,
+        jlong captureTimeMillis,
         jint targetLog,
         jstring lutPath,
         jstring outputTiffPath,
@@ -176,7 +177,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
 
     if (tiff_path_cstr) tiff_ok = write_tiff(tiff_path_cstr, width, height, finalImage);
     if (jpg_path_cstr) bmp_ok = write_bmp(jpg_path_cstr, width, height, bmpImage); // Use processed buffer
-    if (dng_path_cstr) dng_ok = write_dng(dng_path_cstr, width, height, finalImage, whiteLevel, iso, exposureTime, fNumber, focalLength);
+    if (dng_path_cstr) dng_ok = write_dng(dng_path_cstr, width, height, finalImage, whiteLevel, iso, exposureTime, fNumber, focalLength, captureTimeMillis);
 
     if (outputTiffPath) env->ReleaseStringUTFChars(outputTiffPath, tiff_path_cstr);
     if (outputJpgPath) env->ReleaseStringUTFChars(outputJpgPath, jpg_path_cstr);
