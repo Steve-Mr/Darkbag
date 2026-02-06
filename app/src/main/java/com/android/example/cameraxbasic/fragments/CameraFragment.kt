@@ -89,6 +89,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.flow.first
 import java.nio.ByteBuffer
 import java.text.SimpleDateFormat
 import java.util.*
@@ -197,6 +201,13 @@ class CameraFragment : Fragment() {
             return size > 300
         }
     })
+
+    // SharedFlow to broadcast CaptureResults for reactive synchronization
+    private val captureResultFlow = MutableSharedFlow<TotalCaptureResult>(
+        replay = 10,
+        extraBufferCapacity = 64,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST
+    )
 
     // Rate limiting semaphore to prevent OOM
     private val processingSemaphore = kotlinx.coroutines.sync.Semaphore(2)
@@ -543,6 +554,7 @@ class CameraFragment : Fragment() {
                     if (timestamp != null) {
                         captureResults[timestamp] = result
                     }
+                    captureResultFlow.tryEmit(result)
                 }
             })
 
@@ -2040,16 +2052,11 @@ class CameraFragment : Fragment() {
     private fun processHdrPlusBurst(frames: List<ImageProxy>) {
         val currentZoom = if (is2xMode) 2.0f else (currentFocalLength / 24.0f)
 
-        // Ensure fragment is attached before accessing context
-        if (!isAdded) {
-            frames.forEach { it.close() }
-            return
-        }
-        val context = requireContext()
-
         lifecycleScope.launch(Dispatchers.IO) {
             var fallbackSent = false
             try {
+                val context = context ?: return@launch
+
                 Log.d(TAG, "processHdrPlusBurst started with ${frames.size} frames.")
 
                 // 1. Prepare buffers
@@ -2068,12 +2075,18 @@ class CameraFragment : Fragment() {
 
                 // 2. Metadata (WB, CCM, BlackLevel)
                 val timestamp = frames[0].imageInfo.timestamp
-                var result = captureResults.entries.find { abs(it.key - timestamp) < 5_000_000L }?.value
+                val tolerance = 5_000_000L // 5ms
 
-                // Wait slightly if result is missing
+                // Strategy: Check map -> If missing, wait on flow with timeout
+                var result = captureResults.entries.find { abs(it.key - timestamp) < tolerance }?.value
+
                 if (result == null) {
-                     delay(200)
-                     result = captureResults.entries.find { abs(it.key - timestamp) < 5_000_000L }?.value
+                    result = withTimeoutOrNull(3000) { // Wait up to 3 seconds
+                        captureResultFlow.first { res ->
+                            val ts = res.get(android.hardware.camera2.CaptureResult.SENSOR_TIMESTAMP)
+                            ts != null && abs(ts - timestamp) < tolerance
+                        }
+                    }
                 }
 
                 // Default values
@@ -2348,6 +2361,7 @@ class CameraFragment : Fragment() {
                                 Log.d(TAG, "Saved TIFF to $tiffUri")
                             } catch (e: Exception) {
                                 Log.e(TAG, "Failed to save TIFF", e)
+                                contentResolver.delete(tiffUri, null, null)
                             }
                         }
                         tiffFile.delete()
