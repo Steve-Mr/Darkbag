@@ -15,7 +15,8 @@ namespace {
 Func black_white_level(Func input, const Expr bp, const Expr wp) {
   Func output("black_white_level_output");
   Var x, y;
-  Expr white_factor = 65535.f / (wp - bp);
+  // Reserve headroom (0.25x) for White Balance to prevent clipping
+  Expr white_factor = (65535.f / (wp - bp)) * 0.25f;
   output(x, y) = u16_sat((i32(input(x, y)) - bp) * white_factor);
   return output;
 }
@@ -224,7 +225,7 @@ public:
     int denoise_passes = 1;
     Func chroma_denoised_output = chroma_denoise(demosaic_output, inputs.width(), inputs.height(), denoise_passes);
 
-    Func linear_rgb_output = srgb(demosaic_output, ccm);
+    Func linear_rgb_output = srgb(chroma_denoised_output, ccm);
     output = linear_rgb_output;
   }
 };
