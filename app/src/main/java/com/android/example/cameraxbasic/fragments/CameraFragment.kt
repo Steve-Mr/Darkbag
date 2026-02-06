@@ -89,6 +89,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.flow.first
 import java.nio.ByteBuffer
 import java.text.SimpleDateFormat
 import java.util.*
@@ -197,6 +201,13 @@ class CameraFragment : Fragment() {
             return size > 300
         }
     })
+
+    // SharedFlow to broadcast CaptureResults for reactive synchronization
+    private val captureResultFlow = MutableSharedFlow<TotalCaptureResult>(
+        replay = 10,
+        extraBufferCapacity = 64,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST
+    )
 
     // Rate limiting semaphore to prevent OOM
     private val processingSemaphore = kotlinx.coroutines.sync.Semaphore(2)
@@ -543,6 +554,7 @@ class CameraFragment : Fragment() {
                     if (timestamp != null) {
                         captureResults[timestamp] = result
                     }
+                    captureResultFlow.tryEmit(result)
                 }
             })
 
@@ -1020,23 +1032,7 @@ class CameraFragment : Fragment() {
                 val chars = cameraManager.getCameraCharacteristics(camera2Info.cameraId)
 
                 // 1. Wait for Metadata
-                var attempts = 0
-                var captureResult: TotalCaptureResult? = null
-                val tolerance = 5_000_000L // 5ms in nanoseconds
-
-                while (attempts < 25) { // Wait up to 5 seconds
-                    captureResult = captureResults[image.timestamp]
-                    if (captureResult == null) {
-                        synchronized(captureResults) {
-                            captureResult = captureResults.entries.find {
-                                kotlin.math.abs(it.key - image.timestamp) < tolerance
-                            }?.value
-                        }
-                    }
-                    if (captureResult != null) break
-                    kotlinx.coroutines.delay(200)
-                    attempts++
-                }
+                val captureResult = findCaptureResult(image.timestamp)
 
                 if (captureResult == null) {
                     Log.e(
@@ -1889,7 +1885,6 @@ class CameraFragment : Fragment() {
         private const val RATIO_16_9_VALUE = 16.0 / 9.0
         private const val FOCUS_RING_DISPLAY_TIME_MS = 500L
         private const val FOCUS_RING_FADE_OUT_DURATION_MS = 300L
-        private const val DEBUG_HDR_PLUS = true
     }
     private fun takeSinglePicture(imageCapture: ImageCapture) {
         if (imageCapture.outputFormat == ImageCapture.OUTPUT_FORMAT_RAW) {
@@ -2037,19 +2032,30 @@ class CameraFragment : Fragment() {
         )
     }
 
+    private suspend fun findCaptureResult(timestamp: Long, tolerance: Long = 5_000_000L): TotalCaptureResult? {
+        // 1. Check cache first for an immediate match.
+        captureResults.entries.find { abs(it.key - timestamp) < tolerance }?.value?.let { return it }
+
+        // 2. If not in cache, wait on the flow with a timeout.
+        return withTimeoutOrNull(3000) {
+            captureResultFlow.first { res ->
+                val ts = res.get(android.hardware.camera2.CaptureResult.SENSOR_TIMESTAMP)
+                ts != null && abs(ts - timestamp) < tolerance
+            }
+        }
+    }
+
     private fun processHdrPlusBurst(frames: List<ImageProxy>) {
         val currentZoom = if (is2xMode) 2.0f else (currentFocalLength / 24.0f)
-
-        // Ensure fragment is attached before accessing context
-        if (!isAdded) {
-            frames.forEach { it.close() }
-            return
-        }
-        val context = requireContext()
 
         lifecycleScope.launch(Dispatchers.IO) {
             var fallbackSent = false
             try {
+                val context = context ?: run {
+                    Log.w(TAG, "processHdrPlusBurst aborted: Fragment context is null.")
+                    return@launch
+                }
+
                 Log.d(TAG, "processHdrPlusBurst started with ${frames.size} frames.")
 
                 // 1. Prepare buffers
@@ -2068,13 +2074,7 @@ class CameraFragment : Fragment() {
 
                 // 2. Metadata (WB, CCM, BlackLevel)
                 val timestamp = frames[0].imageInfo.timestamp
-                var result = captureResults.entries.find { abs(it.key - timestamp) < 5_000_000L }?.value
-
-                // Wait slightly if result is missing
-                if (result == null) {
-                     delay(200)
-                     result = captureResults.entries.find { abs(it.key - timestamp) < 5_000_000L }?.value
-                }
+                val result = findCaptureResult(timestamp)
 
                 // Default values
                 var whiteLevel = 1023
@@ -2118,66 +2118,6 @@ class CameraFragment : Fragment() {
                 }
 
                 Log.d(TAG, "Metadata: WL=$whiteLevel, BL=$blackLevel, WB=${wb.joinToString()}, CFA=$cfa")
-
-                // 3. Debug Saving (Intermediate DNGs)
-                if (DEBUG_HDR_PLUS && chars != null && result != null) {
-                    try {
-                        val ts = System.currentTimeMillis()
-                        val contentResolver = context.contentResolver
-                        // Base name for this session (matches final image)
-                        val baseName = SimpleDateFormat(FILENAME, Locale.US).format(ts)
-
-                        frames.forEachIndexed { index, image ->
-                            val fileName = "${baseName}_INPUT_${index + 1}.dng"
-
-                            val dngValues = ContentValues().apply {
-                                put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
-                                put(MediaStore.MediaColumns.MIME_TYPE, "image/x-adobe-dng")
-                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                                    put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/Darkbag")
-                                    put(MediaStore.MediaColumns.IS_PENDING, 1)
-                                }
-                            }
-
-                            val dngUri = contentResolver.insert(
-                                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                                dngValues
-                            )
-
-                            if (dngUri != null) {
-                                try {
-                                    contentResolver.openOutputStream(dngUri)?.use { fos ->
-                                        android.hardware.camera2.DngCreator(chars, result).use { dngCreator ->
-                                            dngCreator.setOrientation(ExifInterface.ORIENTATION_NORMAL)
-
-                                            val buffer = image.planes[0].buffer
-                                            buffer.rewind()
-                                            val duplicate = buffer.duplicate()
-                                            duplicate.rewind()
-                                            val byteData = ByteArray(duplicate.remaining())
-                                            duplicate.get(byteData)
-                                            val bis = java.io.ByteArrayInputStream(byteData)
-
-                                            dngCreator.writeInputStream(fos, android.util.Size(width, height), bis, 0)
-                                        }
-                                    }
-
-                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                                        dngValues.clear()
-                                        dngValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
-                                        contentResolver.update(dngUri, dngValues, null, null)
-                                    }
-                                    Log.d(TAG, "Saved input frame $index to MediaStore: $dngUri")
-                                } catch (e: Exception) {
-                                    Log.e(TAG, "Failed to save input frame $index", e)
-                                    contentResolver.delete(dngUri, null, null)
-                                }
-                            }
-                        }
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Failed to save debug frames", e)
-                    }
-                }
 
                 // 4. Settings (Log/LUT)
                 val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
@@ -2348,6 +2288,7 @@ class CameraFragment : Fragment() {
                                 Log.d(TAG, "Saved TIFF to $tiffUri")
                             } catch (e: Exception) {
                                 Log.e(TAG, "Failed to save TIFF", e)
+                                contentResolver.delete(tiffUri, null, null)
                             }
                         }
                         tiffFile.delete()
