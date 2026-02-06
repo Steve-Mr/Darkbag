@@ -167,18 +167,31 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
              finalImage[idx + 1] = g_val;
              finalImage[idx + 2] = b_val;
 
-             // Prepare for BMP (Apply WB + Gamma)
+             // Prepare for BMP/JPG (Apply WB + CCM + Gamma)
+             // 1. White Balance
              float rf = (float)r_val * gain_r;
              float gf = (float)g_val * gain_g;
              float bf = (float)b_val * gain_b;
 
-             // Clip to WhiteLevel (approx 65535 or passed whiteLevel)
-             // Normalize to 0..1 for Gamma
-             float norm_r = std::min(1.0f, rf / 65535.0f);
-             float norm_g = std::min(1.0f, gf / 65535.0f);
-             float norm_b = std::min(1.0f, bf / 65535.0f);
+             // 2. Color Correction Matrix (Sensor -> XYZ -> sRGB)
+             // The passed 'ccm' (ccmVec) is usually Sensor -> XYZ or Sensor -> Calibrated.
+             // Converting fully to sRGB requires a matrix chain.
+             // BUT, often the CCM provided by simple processing pipelines is treated as Sensor -> Output.
+             // Let's try applying the provided CCM.
+             // [R']   [c0 c1 c2] [R]
+             // [G'] = [c3 c4 c5] [G]
+             // [B']   [c6 c7 c8] [B]
 
-             // Apply Gamma 2.2
+             float r_ccm = ccmVec[0] * rf + ccmVec[1] * gf + ccmVec[2] * bf;
+             float g_ccm = ccmVec[3] * rf + ccmVec[4] * gf + ccmVec[5] * bf;
+             float b_ccm = ccmVec[6] * rf + ccmVec[7] * gf + ccmVec[8] * bf;
+
+             // 3. Normalize and Clip
+             float norm_r = std::max(0.0f, std::min(1.0f, r_ccm / 65535.0f));
+             float norm_g = std::max(0.0f, std::min(1.0f, g_ccm / 65535.0f));
+             float norm_b = std::max(0.0f, std::min(1.0f, b_ccm / 65535.0f));
+
+             // 4. Gamma 2.2 (sRGB Transfer)
              norm_r = pow(norm_r, 1.0f/2.2f);
              norm_g = pow(norm_g, 1.0f/2.2f);
              norm_b = pow(norm_b, 1.0f/2.2f);
