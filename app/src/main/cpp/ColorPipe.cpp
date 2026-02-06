@@ -199,7 +199,7 @@ void write_dng(const char* filename, int width, int height, const std::vector<un
     // 13. CalibrationIlluminant1 (50778)
     // 14. WhiteLevel (50717)
 
-    short num_entries = 14;
+    short num_entries = 16;
     file.write((char*)&num_entries, 2);
 
     auto write_entry = [&](short tag, short type, int count, int value_or_offset) {
@@ -211,21 +211,22 @@ void write_dng(const char* filename, int width, int height, const std::vector<un
 
     // Calculate Offsets
     // Entry = 12 bytes
-    // Total IFD = 2 + 14*12 + 4 = 174 bytes
-    // Data starts at 8 + 174 = 182
+    // Total IFD = 2 + 16*12 + 4 = 198 bytes
+    // Data starts at 8 + 198 = 206
     int data_offset = 8 + 2 + num_entries * 12 + 4;
     int img_size = width * height * 6;
 
     // Metadata Offsets (Placed after image data)
-    int meta_offset = data_offset + img_size;
-    int bps_offset = meta_offset;         // 6 bytes
-    int dng_ver_offset = bps_offset + 6;  // 4 bytes
-    int model_offset = dng_ver_offset + 4; // 12 bytes ("HDR+ Linear\0")
+    int off_bps = data_offset + img_size;
+    int off_ver = off_bps + 6;
+    int off_mod = off_ver + 4;
+    int off_mat = off_mod + 12;
+    int off_neu = off_mat + 72; // Matrix is 72 bytes
 
     // Sorted Tags
     write_entry(256, 3, 1, width);
     write_entry(257, 3, 1, height);
-    write_entry(258, 3, 3, bps_offset);
+    write_entry(258, 3, 3, off_bps);
     write_entry(259, 3, 1, 1); // No Compression
     write_entry(262, 3, 1, 2); // RGB
     write_entry(273, 4, 1, data_offset);
@@ -235,9 +236,11 @@ void write_dng(const char* filename, int width, int height, const std::vector<un
     write_entry(284, 3, 1, 1); // Chunky
 
     // DNG Tags (Sorted by Tag ID)
-    write_entry((short)50706, 1, 4, dng_ver_offset); // DNGVersion
-    write_entry((short)50708, 2, 12, model_offset);  // UniqueCameraModel
+    write_entry((short)50706, 1, 4, off_ver); // DNGVersion
+    write_entry((short)50708, 2, 12, off_mod);  // UniqueCameraModel
     write_entry((short)50717, 3, 1, whiteLevel);     // WhiteLevel
+    write_entry((short)50721, 10, 9, off_mat); // ColorMatrix1 (SRATIONAL)
+    write_entry((short)50728, 5, 3, off_neu); // AsShotNeutral (RATIONAL)
     write_entry((short)50778, 3, 1, 21);             // CalibrationIlluminant1 (D65)
 
     int next_ifd = 0;
@@ -257,6 +260,16 @@ void write_dng(const char* filename, int width, int height, const std::vector<un
 
     // UniqueCameraModel
     file.write("HDR+ Linear\0", 12);
+
+    // ColorMatrix1 (Identity) - 9 SRATIONALS
+    int one[2] = {1, 1};
+    int zero[2] = {0, 1};
+    file.write((char*)one, 8); file.write((char*)zero, 8); file.write((char*)zero, 8);
+    file.write((char*)zero, 8); file.write((char*)one, 8); file.write((char*)zero, 8);
+    file.write((char*)zero, 8); file.write((char*)zero, 8); file.write((char*)one, 8);
+
+    // AsShotNeutral (1.0, 1.0, 1.0) - 3 RATIONALS
+    file.write((char*)one, 8); file.write((char*)one, 8); file.write((char*)one, 8);
 
     file.close();
 }

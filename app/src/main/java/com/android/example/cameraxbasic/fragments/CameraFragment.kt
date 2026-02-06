@@ -2039,6 +2039,12 @@ class CameraFragment : Fragment() {
 
     private fun processHdrPlusBurst(frames: List<ImageProxy>) {
         val currentZoom = if (is2xMode) 2.0f else (currentFocalLength / 24.0f)
+
+        // Ensure fragment is attached before accessing context
+        if (!isAdded) {
+            frames.forEach { it.close() }
+            return
+        }
         val context = requireContext()
 
         lifecycleScope.launch(Dispatchers.IO) {
@@ -2122,38 +2128,56 @@ class CameraFragment : Fragment() {
                 // 3. Debug Saving (Intermediate DNGs)
                 if (DEBUG_HDR_PLUS && chars != null && result != null) {
                     try {
-                        val debugDir = File(context.getExternalFilesDir(null), "debug_hdrplus")
-                        if (!debugDir.exists()) debugDir.mkdirs()
                         val ts = System.currentTimeMillis()
+                        val contentResolver = context.contentResolver
 
                         frames.forEachIndexed { index, image ->
-                            val dngFile = File(debugDir, "frame_${ts}_$index.dng")
-                            android.hardware.camera2.DngCreator(chars, result).use { dngCreator ->
-                                dngCreator.setOrientation(ExifInterface.ORIENTATION_NORMAL) // Raw usually normal
-                                FileOutputStream(dngFile).use { fos ->
-                                    val buffer = image.planes[0].buffer
-                                    buffer.rewind()
-                                    // Need to copy buffer because DngCreator reads it, but we also need it for JNI.
-                                    // To avoid deep copy of everything, we just rely on buffer position reset.
-                                    // BUT DngCreator might read from current position.
-                                    // Let's create a stream from the buffer.
-                                    // DirectByteBuffer -> InputStream?
-                                    // Safest is to use the byte array method if we extracted it, but we have DirectBuffers here.
-                                    // We can just use writeInputStream with a wrapper.
+                            val fileName = "frame_${ts}_$index.dng"
 
-                                    // Note: DngCreator consumes the stream.
-                                    // We need to be careful not to mess up the buffer for JNI.
-                                    // Let's duplicate the buffer for DNG writing if needed, or save/restore position.
-                                    val duplicate = buffer.duplicate()
-                                    duplicate.rewind()
-                                    val byteData = ByteArray(duplicate.remaining())
-                                    duplicate.get(byteData)
-                                    val bis = java.io.ByteArrayInputStream(byteData)
-
-                                    dngCreator.writeInputStream(fos, android.util.Size(width, height), bis, 0)
+                            val dngValues = ContentValues().apply {
+                                put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+                                put(MediaStore.MediaColumns.MIME_TYPE, "image/x-adobe-dng")
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                    put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/hdr_plus_debug")
+                                    put(MediaStore.MediaColumns.IS_PENDING, 1)
                                 }
                             }
-                            Log.d(TAG, "Saved debug frame to ${dngFile.absolutePath}")
+
+                            val dngUri = contentResolver.insert(
+                                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                                dngValues
+                            )
+
+                            if (dngUri != null) {
+                                try {
+                                    contentResolver.openOutputStream(dngUri)?.use { fos ->
+                                        android.hardware.camera2.DngCreator(chars, result).use { dngCreator ->
+                                            dngCreator.setOrientation(ExifInterface.ORIENTATION_NORMAL)
+
+                                            // Duplicate buffer to safe-guard JNI input
+                                            val buffer = image.planes[0].buffer
+                                            buffer.rewind()
+                                            val duplicate = buffer.duplicate()
+                                            duplicate.rewind()
+                                            val byteData = ByteArray(duplicate.remaining())
+                                            duplicate.get(byteData)
+                                            val bis = java.io.ByteArrayInputStream(byteData)
+
+                                            dngCreator.writeInputStream(fos, android.util.Size(width, height), bis, 0)
+                                        }
+                                    }
+
+                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                        dngValues.clear()
+                                        dngValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                                        contentResolver.update(dngUri, dngValues, null, null)
+                                    }
+                                    Log.d(TAG, "Saved debug frame to $dngUri")
+                                } catch (e: Exception) {
+                                    Log.e(TAG, "Failed to write debug DNG content", e)
+                                    contentResolver.delete(dngUri, null, null)
+                                }
+                            }
                         }
                     } catch (e: Exception) {
                         Log.e(TAG, "Failed to save debug frames", e)
