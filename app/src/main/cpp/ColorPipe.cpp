@@ -19,6 +19,11 @@
 #define TIFFTAG_FOCALLENGTH 37386
 #endif
 
+// 确保定义 LinearRaw (如果 libtiff 头文件没包含)
+#ifndef PHOTOMETRIC_LINEAR_RAW
+#define PHOTOMETRIC_LINEAR_RAW 34892
+#endif
+
 // Define DNG Tags (Custom Tags 507xx)
 #define TIFFTAG_DNGVERSION 50706
 #define TIFFTAG_DNGBACKWARDVERSION 50707
@@ -28,6 +33,9 @@
 #define TIFFTAG_COLORMATRIX1 50721
 #define TIFFTAG_ASSHOTNEUTRAL 50728
 #define TIFFTAG_CALIBRATIONILLUMINANT1 50778
+#define TIFFTAG_OPCODELIST1 51008
+#define TIFFTAG_OPCODELIST2 51009
+#define TIFFTAG_OPCODELIST3 51022
 
 static const TIFFFieldInfo dng_field_info[] = {
     { TIFFTAG_DNGVERSION, 4, 4, TIFF_BYTE, FIELD_CUSTOM, 1, 0, "DNGVersion" },
@@ -37,12 +45,7 @@ static const TIFFFieldInfo dng_field_info[] = {
     { TIFFTAG_WHITELEVEL, -1, -1, TIFF_LONG, FIELD_CUSTOM, 1, 1, "WhiteLevel" },
     { TIFFTAG_COLORMATRIX1, -1, -1, TIFF_RATIONAL, FIELD_CUSTOM, 1, 1, "ColorMatrix1" },
     { TIFFTAG_ASSHOTNEUTRAL, -1, -1, TIFF_RATIONAL, FIELD_CUSTOM, 1, 1, "AsShotNeutral" },
-    { TIFFTAG_CALIBRATIONILLUMINANT1, 1, 1, TIFF_SHORT, FIELD_CUSTOM, 1, 0, "CalibrationIlluminant1" },
-    // EXIF Tags
-    { TIFFTAG_EXPOSURETIME, 1, 1, TIFF_RATIONAL, FIELD_CUSTOM, 1, 0, "ExposureTime" },
-    { TIFFTAG_FNUMBER, 1, 1, TIFF_RATIONAL, FIELD_CUSTOM, 1, 0, "FNumber" },
-    { TIFFTAG_ISOSPEEDRATINGS, 1, 1, TIFF_SHORT, FIELD_CUSTOM, 1, 0, "ISOSpeedRatings" },
-    { TIFFTAG_FOCALLENGTH, 1, 1, TIFF_RATIONAL, FIELD_CUSTOM, 1, 0, "FocalLength" }
+    { TIFFTAG_CALIBRATIONILLUMINANT1, 1, 1, TIFF_SHORT, FIELD_CUSTOM, 1, 0, "CalibrationIlluminant1" }
 };
 
 static void DNGTagExtender(TIFF *tif) {
@@ -225,7 +228,7 @@ bool write_tiff(const char* filename, int width, int height, const std::vector<u
     return result;
 }
 
-bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, int iso, long exposureTime, float fNumber, float focalLength, long captureTimeMillis) {
+bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, int iso, long exposureTime, float fNumber, float focalLength, long captureTimeMillis, const std::vector<float>& ccm) {
     // Register DNG tags
     TIFFSetTagExtender(DNGTagExtender);
 
@@ -237,13 +240,19 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
     TIFFSetField(tif, TIFFTAG_IMAGELENGTH, height);
     TIFFSetField(tif, TIFFTAG_BITSPERSAMPLE, 16);
     TIFFSetField(tif, TIFFTAG_COMPRESSION, COMPRESSION_NONE);
-    TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_RGB);
+
+    // [Critical] Use LinearRaw
+    TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_LINEAR_RAW);
+
     TIFFSetField(tif, TIFFTAG_SAMPLESPERPIXEL, 3);
     TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG);
     TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, height);
 
+    // [Critical] Add NewSubfileType = 0 (Full resolution image)
+    TIFFSetField(tif, TIFFTAG_SUBFILETYPE, 0);
+
     // Standard Metadata
-    static const char* make = "Google"; // Generic fallback
+    static const char* make = "Google";
     TIFFSetField(tif, TIFFTAG_MAKE, make);
 
     static const char* model = "HDR+ Device";
@@ -270,33 +279,30 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
 
     // White/Black Level (Critical for Readers)
     uint32_t white_level_val = (uint32_t)whiteLevel; // Default 65535 or from sensor
-    // In DNG Linear, usually 16-bit range.
     if (white_level_val == 0) white_level_val = 65535;
     TIFFSetField(tif, TIFFTAG_WHITELEVEL, 1, &white_level_val);
 
     uint32_t black_level_val = 0; // Already subtracted in pipeline
     TIFFSetField(tif, TIFFTAG_BLACKLEVEL, 1, &black_level_val);
 
-    static const float color_matrix1[] = {
-        1.0f, 0.0f, 0.0f,
-        0.0f, 1.0f, 0.0f,
-        0.0f, 0.0f, 1.0f
-    };
-    TIFFSetField(tif, TIFFTAG_COLORMATRIX1, 9, color_matrix1);
+    // [Critical] Write real CCM
+    TIFFSetField(tif, TIFFTAG_COLORMATRIX1, 9, ccm.data());
 
+    // AsShotNeutral is {1,1,1} because data is already WB'd (Linear)
     static const float as_shot_neutral[] = {1.0f, 1.0f, 1.0f};
     TIFFSetField(tif, TIFFTAG_ASSHOTNEUTRAL, 3, as_shot_neutral);
 
     TIFFSetField(tif, TIFFTAG_CALIBRATIONILLUMINANT1, 21); // D65
 
-    // EXIF Metadata
+    // EXIF Metadata - Use correct standard libtiff types/pointers
     float exposureTimeSec = (float)exposureTime / 1000000000.0f;
     TIFFSetField(tif, TIFFTAG_EXPOSURETIME, exposureTimeSec);
     TIFFSetField(tif, TIFFTAG_FNUMBER, fNumber);
     TIFFSetField(tif, TIFFTAG_FOCALLENGTH, focalLength);
 
+    // ISO: Pass count and address because standard libtiff definition is variable length array
     unsigned short iso_short = (unsigned short)iso;
-    TIFFSetField(tif, TIFFTAG_ISOSPEEDRATINGS, iso_short);
+    TIFFSetField(tif, TIFFTAG_ISOSPEEDRATINGS, 1, &iso_short);
 
     // Write Data
     if (TIFFWriteEncodedStrip(tif, 0, (void*)data.data(), width * height * 3 * sizeof(unsigned short)) < 0) {
