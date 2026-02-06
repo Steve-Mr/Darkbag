@@ -118,7 +118,10 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     }
 
     // Process Output
+    // finalImage for DNG/TIFF (Linear)
     std::vector<unsigned short> finalImage(width * height * 3);
+    // bmpImage for JPG (Gamma Corrected, WB Applied)
+    std::vector<unsigned short> bmpImage(width * height * 3);
 
     // Halide Output is Planar (x, y, c) or (c, x, y)?
     // By default Halide uses planar x, y, c (stride[0]=1, stride[1]=width, stride[2]=width*height).
@@ -138,6 +141,18 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     int stride_c = outputBuf.dim(2).stride();
     const uint16_t* raw_ptr = outputBuf.data();
 
+    // Prepare Manual White Balance multipliers (Assuming Halide didn't apply them or we want to fix yellow)
+    // "Yellow" means lacking Blue. Normal gains might be R=2.0, B=2.0. If image is yellow, B is too low.
+    // Let's apply the passed WB gains to the BMP path.
+    // Note: wb_g0 and wb_g1 are usually ~1.0. wb_r and wb_b are > 1.0.
+    float gain_r = wb_r;
+    float gain_g = (wb_g0 + wb_g1) / 2.0f;
+    float gain_b = wb_b;
+
+    // Invert? If 'whiteBalance' argument contains "Gains to make it white", then we multiply.
+    // If it contains "AsShotNeutral", we divide.
+    // Camera2 returns "ColorCorrectionGains" which are multipliers. So multiply is correct.
+
     #pragma omp parallel for
     for (int y = 0; y < height; y++) {
         for (int x = 0; x < width; x++) {
@@ -146,12 +161,32 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
              uint16_t g_val = raw_ptr[x * stride_x + y * stride_y + 1 * stride_c];
              uint16_t b_val = raw_ptr[x * stride_x + y * stride_y + 2 * stride_c];
 
-             // Write Interleaved (16-bit)
-             // DISABLED LOG/LUT: Outputting linear 16-bit RGB directly.
+             // Write Interleaved (16-bit Linear) for DNG/TIFF
              int idx = (y * width + x) * 3;
              finalImage[idx + 0] = r_val;
              finalImage[idx + 1] = g_val;
              finalImage[idx + 2] = b_val;
+
+             // Prepare for BMP (Apply WB + Gamma)
+             float rf = (float)r_val * gain_r;
+             float gf = (float)g_val * gain_g;
+             float bf = (float)b_val * gain_b;
+
+             // Clip to WhiteLevel (approx 65535 or passed whiteLevel)
+             // Normalize to 0..1 for Gamma
+             float norm_r = std::min(1.0f, rf / 65535.0f);
+             float norm_g = std::min(1.0f, gf / 65535.0f);
+             float norm_b = std::min(1.0f, bf / 65535.0f);
+
+             // Apply Gamma 2.2
+             norm_r = pow(norm_r, 1.0f/2.2f);
+             norm_g = pow(norm_g, 1.0f/2.2f);
+             norm_b = pow(norm_b, 1.0f/2.2f);
+
+             // Scale back to 16-bit
+             bmpImage[idx + 0] = (unsigned short)(norm_r * 65535.0f);
+             bmpImage[idx + 1] = (unsigned short)(norm_g * 65535.0f);
+             bmpImage[idx + 2] = (unsigned short)(norm_b * 65535.0f);
         }
     }
 
@@ -161,7 +196,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     const char* dng_path_cstr = (outputDngPath) ? env->GetStringUTFChars(outputDngPath, 0) : nullptr;
 
     if (tiff_path_cstr) write_tiff(tiff_path_cstr, width, height, finalImage);
-    if (jpg_path_cstr) write_bmp(jpg_path_cstr, width, height, finalImage);
+    if (jpg_path_cstr) write_bmp(jpg_path_cstr, width, height, bmpImage); // Use processed buffer
     if (dng_path_cstr) write_dng(dng_path_cstr, width, height, finalImage, whiteLevel);
 
     if (outputTiffPath) env->ReleaseStringUTFChars(outputTiffPath, tiff_path_cstr);

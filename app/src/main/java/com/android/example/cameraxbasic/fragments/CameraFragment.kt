@@ -2129,54 +2129,35 @@ class CameraFragment : Fragment() {
                 if (DEBUG_HDR_PLUS && chars != null && result != null) {
                     try {
                         val ts = System.currentTimeMillis()
-                        val contentResolver = context.contentResolver
+                        // Use getExternalFilesDir(DIRECTORY_PICTURES) which is accessible via USB/File Manager
+                        // Path: /sdcard/Android/data/com.android.example.cameraxbasic/files/Pictures/hdr_plus_debug/
+                        val debugDir = File(context.getExternalFilesDir(android.os.Environment.DIRECTORY_PICTURES), "hdr_plus_debug")
+                        if (!debugDir.exists()) debugDir.mkdirs()
 
                         frames.forEachIndexed { index, image ->
                             val fileName = "frame_${ts}_$index.dng"
+                            val dngFile = File(debugDir, fileName)
 
-                            val dngValues = ContentValues().apply {
-                                put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
-                                put(MediaStore.MediaColumns.MIME_TYPE, "image/x-adobe-dng")
-                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                                    put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/hdr_plus_debug")
-                                    put(MediaStore.MediaColumns.IS_PENDING, 1)
-                                }
-                            }
+                            try {
+                                FileOutputStream(dngFile).use { fos ->
+                                    android.hardware.camera2.DngCreator(chars, result).use { dngCreator ->
+                                        dngCreator.setOrientation(ExifInterface.ORIENTATION_NORMAL)
 
-                            val dngUri = contentResolver.insert(
-                                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                                dngValues
-                            )
+                                        // Duplicate buffer to safe-guard JNI input
+                                        val buffer = image.planes[0].buffer
+                                        buffer.rewind()
+                                        val duplicate = buffer.duplicate()
+                                        duplicate.rewind()
+                                        val byteData = ByteArray(duplicate.remaining())
+                                        duplicate.get(byteData)
+                                        val bis = java.io.ByteArrayInputStream(byteData)
 
-                            if (dngUri != null) {
-                                try {
-                                    contentResolver.openOutputStream(dngUri)?.use { fos ->
-                                        android.hardware.camera2.DngCreator(chars, result).use { dngCreator ->
-                                            dngCreator.setOrientation(ExifInterface.ORIENTATION_NORMAL)
-
-                                            // Duplicate buffer to safe-guard JNI input
-                                            val buffer = image.planes[0].buffer
-                                            buffer.rewind()
-                                            val duplicate = buffer.duplicate()
-                                            duplicate.rewind()
-                                            val byteData = ByteArray(duplicate.remaining())
-                                            duplicate.get(byteData)
-                                            val bis = java.io.ByteArrayInputStream(byteData)
-
-                                            dngCreator.writeInputStream(fos, android.util.Size(width, height), bis, 0)
-                                        }
+                                        dngCreator.writeInputStream(fos, android.util.Size(width, height), bis, 0)
                                     }
-
-                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                                        dngValues.clear()
-                                        dngValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
-                                        contentResolver.update(dngUri, dngValues, null, null)
-                                    }
-                                    Log.d(TAG, "Saved debug frame to $dngUri")
-                                } catch (e: Exception) {
-                                    Log.e(TAG, "Failed to write debug DNG content", e)
-                                    contentResolver.delete(dngUri, null, null)
                                 }
+                                Log.d(TAG, "Saved debug frame to ${dngFile.absolutePath}")
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Failed to write debug DNG to ${dngFile.absolutePath}", e)
                             }
                         }
                     } catch (e: Exception) {
