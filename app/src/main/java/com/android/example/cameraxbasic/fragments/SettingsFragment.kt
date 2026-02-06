@@ -85,6 +85,15 @@ class SettingsFragment : Fragment() {
             prefs.edit().putString(KEY_TARGET_LOG, LOG_CURVES[position]).apply()
         }
 
+        // HDR+ Burst Frames
+        val burstAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, BURST_SIZES)
+        binding.menuHdrBurst.setAdapter(burstAdapter)
+        val savedBurst = prefs.getString(KEY_HDR_BURST_COUNT, "3")
+        binding.menuHdrBurst.setText(savedBurst, false)
+        binding.menuHdrBurst.setOnItemClickListener { _, _, position, _ ->
+            prefs.edit().putString(KEY_HDR_BURST_COUNT, BURST_SIZES[position]).apply()
+        }
+
         // Default Focal Length
         val focalAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, FOCAL_LENGTHS)
         binding.menuDefaultFocalLength.setAdapter(focalAdapter)
@@ -150,9 +159,11 @@ class SettingsFragment : Fragment() {
         const val KEY_DEFAULT_FOCAL_LENGTH = "default_focal_length"
         const val KEY_ANTIBANDING = "antibanding_mode"
         const val KEY_FLASH_MODE = "flash_mode"
+        const val KEY_HDR_BURST_COUNT = "hdr_burst_count"
 
         val FOCAL_LENGTHS = listOf("24", "28", "35")
         val ANTIBANDING_MODES = listOf("Auto", "50Hz", "60Hz", "Off")
+        val BURST_SIZES = listOf("3", "5")
 
         val LOG_CURVES = listOf(
             "None",

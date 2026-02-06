@@ -10,6 +10,36 @@ add_definitions(-DNO_LCMS -DNO_JASPER -DNO_JPEG)
 include(download_halide.cmake)
 include_directories(${HALIDE_INCLUDE_DIR})
 
+# --- LibTIFF (FetchContent) ---
+include(FetchContent)
+
+# Disable LibTIFF optional dependencies/tools to keep build minimal
+set(tiff-tools OFF CACHE BOOL "" FORCE)
+set(tiff-tests OFF CACHE BOOL "" FORCE)
+set(tiff-contrib OFF CACHE BOOL "" FORCE)
+set(tiff-docs OFF CACHE BOOL "" FORCE)
+set(tiff-install OFF CACHE BOOL "" FORCE)
+set(tiff-opengl OFF CACHE BOOL "" FORCE)
+set(ld-version-script OFF CACHE BOOL "" FORCE)
+set(cxx OFF CACHE BOOL "" FORCE)
+
+# Disable external dependencies finding
+set(CMAKE_DISABLE_FIND_PACKAGE_JPEG ON)
+set(CMAKE_DISABLE_FIND_PACKAGE_JBIG ON)
+set(CMAKE_DISABLE_FIND_PACKAGE_LERC ON)
+set(CMAKE_DISABLE_FIND_PACKAGE_LZMA ON)
+set(CMAKE_DISABLE_FIND_PACKAGE_WebP ON)
+set(CMAKE_DISABLE_FIND_PACKAGE_ZSTD ON)
+
+FetchContent_Declare(
+  libtiff
+  GIT_REPOSITORY https://gitlab.com/libtiff/libtiff.git
+  GIT_TAG        v4.6.0
+)
+
+FetchContent_MakeAvailable(libtiff)
+include_directories(${tiff_SOURCE_DIR}/libtiff ${tiff_BINARY_DIR}/libtiff)
+
 # --- HDR+ Generator (Host Tool) ---
 # We need to compile the generator for the HOST machine (x86_64), not the target (Android).
 # However, CMake inside Android Studio is cross-compiling.
@@ -131,6 +161,7 @@ find_library(
 target_link_libraries(
         native-lib
         "${GENERATED_LIB}"
+        tiff
         ${log-lib}
         ${jnigraphics-lib}
         ${android-lib}

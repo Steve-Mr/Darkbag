@@ -1,4 +1,56 @@
 #include "ColorPipe.h"
+#include <tiffio.h>
+
+#include <tiffio.h>
+#include <vector>
+#include <ctime>
+
+// Define missing tags if needed (Standard EXIF tags)
+#ifndef TIFFTAG_EXPOSURETIME
+#define TIFFTAG_EXPOSURETIME 33434
+#endif
+#ifndef TIFFTAG_FNUMBER
+#define TIFFTAG_FNUMBER 33437
+#endif
+#ifndef TIFFTAG_ISOSPEEDRATINGS
+#define TIFFTAG_ISOSPEEDRATINGS 34855
+#endif
+#ifndef TIFFTAG_FOCALLENGTH
+#define TIFFTAG_FOCALLENGTH 37386
+#endif
+
+// 确保定义 LinearRaw (如果 libtiff 头文件没包含)
+#ifndef PHOTOMETRIC_LINEAR_RAW
+#define PHOTOMETRIC_LINEAR_RAW 34892
+#endif
+
+// Define DNG Tags (Custom Tags 507xx)
+#define TIFFTAG_DNGVERSION 50706
+#define TIFFTAG_DNGBACKWARDVERSION 50707
+#define TIFFTAG_UNIQUECAMERAMODEL 50708
+#define TIFFTAG_BLACKLEVEL 50714
+#define TIFFTAG_WHITELEVEL 50717
+#define TIFFTAG_COLORMATRIX1 50721
+#define TIFFTAG_ASSHOTNEUTRAL 50728
+#define TIFFTAG_CALIBRATIONILLUMINANT1 50778
+#define TIFFTAG_OPCODELIST1 51008
+#define TIFFTAG_OPCODELIST2 51009
+#define TIFFTAG_OPCODELIST3 51022
+
+static const TIFFFieldInfo dng_field_info[] = {
+    { TIFFTAG_DNGVERSION, 4, 4, TIFF_BYTE, FIELD_CUSTOM, 1, 0, "DNGVersion" },
+    { TIFFTAG_DNGBACKWARDVERSION, 4, 4, TIFF_BYTE, FIELD_CUSTOM, 1, 0, "DNGBackwardVersion" },
+    { TIFFTAG_UNIQUECAMERAMODEL, -1, -1, TIFF_ASCII, FIELD_CUSTOM, 1, 0, "UniqueCameraModel" },
+    { TIFFTAG_BLACKLEVEL, -1, -1, TIFF_LONG, FIELD_CUSTOM, 1, 1, "BlackLevel" },
+    { TIFFTAG_WHITELEVEL, -1, -1, TIFF_LONG, FIELD_CUSTOM, 1, 1, "WhiteLevel" },
+    { TIFFTAG_COLORMATRIX1, -1, -1, TIFF_RATIONAL, FIELD_CUSTOM, 1, 1, "ColorMatrix1" },
+    { TIFFTAG_ASSHOTNEUTRAL, -1, -1, TIFF_RATIONAL, FIELD_CUSTOM, 1, 1, "AsShotNeutral" },
+    { TIFFTAG_CALIBRATIONILLUMINANT1, 1, 1, TIFF_SHORT, FIELD_CUSTOM, 1, 0, "CalibrationIlluminant1" }
+};
+
+static void DNGTagExtender(TIFF *tif) {
+    TIFFMergeFieldInfo(tif, dng_field_info, sizeof(dng_field_info) / sizeof(dng_field_info[0]));
+}
 
 // --- Log Curves (CPU) ---
 float arri_logc3(float x) {
@@ -118,9 +170,9 @@ Vec3 apply_lut(const LUT3D& lut, Vec3 color) {
 
 // --- TIFF Writer ---
 
-void write_tiff(const char* filename, int width, int height, const std::vector<unsigned short>& data) {
+bool write_tiff(const char* filename, int width, int height, const std::vector<unsigned short>& data) {
     std::ofstream file(filename, std::ios::binary);
-    if (!file.is_open()) return;
+    if (!file.is_open()) return false;
 
     // Header
     char header[8] = {'I', 'I', 42, 0, 8, 0, 0, 0}; // Little endian, offset 8
@@ -171,12 +223,100 @@ void write_tiff(const char* filename, int width, int height, const std::vector<u
     short bps[3] = {16, 16, 16};
     file.write((char*)bps, 6);
 
+    bool result = file.good();
     file.close();
+    return result;
 }
 
-void write_bmp(const char* filename, int width, int height, const std::vector<unsigned short>& data) {
+bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, int iso, long exposureTime, float fNumber, float focalLength, long captureTimeMillis, const std::vector<float>& ccm) {
+    // Register DNG tags
+    TIFFSetTagExtender(DNGTagExtender);
+
+    TIFF* tif = TIFFOpen(filename, "w");
+    if (!tif) return false;
+
+    // Basic Tags
+    TIFFSetField(tif, TIFFTAG_IMAGEWIDTH, width);
+    TIFFSetField(tif, TIFFTAG_IMAGELENGTH, height);
+    TIFFSetField(tif, TIFFTAG_BITSPERSAMPLE, 16);
+    TIFFSetField(tif, TIFFTAG_COMPRESSION, COMPRESSION_NONE);
+
+    // [Critical] Use LinearRaw
+    TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_LINEAR_RAW);
+
+    TIFFSetField(tif, TIFFTAG_SAMPLESPERPIXEL, 3);
+    TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG);
+    TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, height);
+
+    // [Critical] Add NewSubfileType = 0 (Full resolution image)
+    TIFFSetField(tif, TIFFTAG_SUBFILETYPE, 0);
+
+    // Standard Metadata
+    static const char* make = "Google";
+    TIFFSetField(tif, TIFFTAG_MAKE, make);
+
+    static const char* model = "HDR+ Device";
+    TIFFSetField(tif, TIFFTAG_MODEL, model);
+
+    static const char* software = "CameraXBasic HDR+";
+    TIFFSetField(tif, TIFFTAG_SOFTWARE, software);
+
+    // DateTime (306)
+    time_t raw_time = (time_t)(captureTimeMillis / 1000);
+    struct tm * timeinfo = localtime(&raw_time);
+    char buffer[20];
+    strftime(buffer, 20, "%Y:%m:%d %H:%M:%S", timeinfo);
+    TIFFSetField(tif, TIFFTAG_DATETIME, buffer);
+
+    // DNG Tags
+    static const uint8_t dng_version[] = {1, 4, 0, 0};
+    TIFFSetField(tif, TIFFTAG_DNGVERSION, dng_version);
+
+    static const uint8_t dng_backward_version[] = {1, 1, 0, 0};
+    TIFFSetField(tif, TIFFTAG_DNGBACKWARDVERSION, dng_backward_version);
+
+    TIFFSetField(tif, TIFFTAG_UNIQUECAMERAMODEL, model);
+
+    // White/Black Level (Critical for Readers)
+    uint32_t white_level_val = (uint32_t)whiteLevel; // Default 65535 or from sensor
+    if (white_level_val == 0) white_level_val = 65535;
+    TIFFSetField(tif, TIFFTAG_WHITELEVEL, 1, &white_level_val);
+
+    uint32_t black_level_val = 0; // Already subtracted in pipeline
+    TIFFSetField(tif, TIFFTAG_BLACKLEVEL, 1, &black_level_val);
+
+    // [Critical] Write real CCM
+    TIFFSetField(tif, TIFFTAG_COLORMATRIX1, 9, ccm.data());
+
+    // AsShotNeutral is {1,1,1} because data is already WB'd (Linear)
+    static const float as_shot_neutral[] = {1.0f, 1.0f, 1.0f};
+    TIFFSetField(tif, TIFFTAG_ASSHOTNEUTRAL, 3, as_shot_neutral);
+
+    TIFFSetField(tif, TIFFTAG_CALIBRATIONILLUMINANT1, 21); // D65
+
+    // EXIF Metadata - Use correct standard libtiff types/pointers
+    float exposureTimeSec = (float)exposureTime / 1000000000.0f;
+    TIFFSetField(tif, TIFFTAG_EXPOSURETIME, exposureTimeSec);
+    TIFFSetField(tif, TIFFTAG_FNUMBER, fNumber);
+    TIFFSetField(tif, TIFFTAG_FOCALLENGTH, focalLength);
+
+    // ISO: Pass count and address because standard libtiff definition is variable length array
+    unsigned short iso_short = (unsigned short)iso;
+    TIFFSetField(tif, TIFFTAG_ISOSPEEDRATINGS, 1, &iso_short);
+
+    // Write Data
+    if (TIFFWriteEncodedStrip(tif, 0, (void*)data.data(), width * height * 3 * sizeof(unsigned short)) < 0) {
+        TIFFClose(tif);
+        return false;
+    }
+
+    TIFFClose(tif);
+    return true;
+}
+
+bool write_bmp(const char* filename, int width, int height, const std::vector<unsigned short>& data) {
     std::ofstream file(filename, std::ios::binary);
-    if (!file.is_open()) return;
+    if (!file.is_open()) return false;
 
     int padded_width = (width * 3 + 3) & (~3);
     int size = 54 + padded_width * height;
@@ -206,5 +346,8 @@ void write_bmp(const char* filename, int width, int height, const std::vector<un
         }
         file.write((char*)line.data(), padded_width);
     }
+
+    bool result = file.good();
     file.close();
+    return result;
 }

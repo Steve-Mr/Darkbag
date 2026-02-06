@@ -26,10 +26,16 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
         jfloatArray whiteBalance, // [r, g0, g1, b]
         jfloatArray ccm,          // [3x3] or [3x4] flat
         jint cfaPattern,
+        jint iso,
+        jlong exposureTime,
+        jfloat fNumber,
+        jfloat focalLength,
+        jlong captureTimeMillis,
         jint targetLog,
         jstring lutPath,
         jstring outputTiffPath,
-        jstring outputJpgPath
+        jstring outputJpgPath,
+        jstring outputDngPath
 ) {
     LOGD("Native processHdrPlus started.");
 
@@ -68,20 +74,29 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     for(int i=0; i<9; ++i) ccmVec[i] = ccmData[i];
     env->ReleaseFloatArrayElements(ccm, ccmData, JNI_ABORT);
 
-    Buffer<float> ccmHalideBuf(ccmVec.data(), 3, 3);
+    std::vector<float> identityCCM = {
+        1.0f, 0.0f, 0.0f,
+        0.0f, 1.0f, 0.0f,
+        0.0f, 0.0f, 1.0f
+    };
+    Buffer<float> ccmHalideBuf(identityCCM.data(), 3, 3);
 
     // 3. Prepare Output Buffer (16-bit Linear RGB)
-    // The generator now outputs uint16_t in planar format (Halide default: x, y, c)
-    // However, for efficiency, let's try to ask for interleaved if possible, or handle planar.
-    // Halide Buffer default construction with 3 dims is usually [x, y, c] or [c, x, y] depending on how you read it.
-    // Let's assume standard planar: width, height, channels.
-
-    // We allocate a buffer for 16-bit output.
     Buffer<uint16_t> outputBuf(width, height, 3);
 
     // 4. Run Pipeline
     float compression = 1.0f; // Unused now in our modified generator
     float gain = 1.0f;        // Unused now
+
+    // Fix for Red/Blue Swap (Bayer Phase Mismatch)
+    // Assuming RGGB (0) <-> BGGR (3) mismatch
+    if (cfaPattern == 0) {
+        cfaPattern = 3; // Force BGGR
+        LOGD("Swapped CFA: RGGB -> BGGR");
+    } else if (cfaPattern == 3) {
+        cfaPattern = 0; // Force RGGB
+        LOGD("Swapped CFA: BGGR -> RGGB");
+    }
 
     int result = hdrplus_raw_pipeline(
         inputBuf,
@@ -103,10 +118,6 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     LOGD("Halide pipeline finished.");
 
     // 5. Post-Processing (Log + LUT)
-    // Now we have 16-bit Linear RGB in outputBuf.
-    // We need to convert this to the format expected by processLibRawOutput/ColorPipe.
-    // ColorPipe expects a libraw_processed_image_t-like structure or just raw RGB data.
-    // Let's reuse the logic: Apply Log -> Apply LUT -> Save.
 
     // Load LUT
     const char* lut_path_cstr = (lutPath) ? env->GetStringUTFChars(lutPath, 0) : nullptr;
@@ -118,20 +129,9 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
 
     // Process Output
     std::vector<unsigned short> finalImage(width * height * 3);
+    std::vector<unsigned short> bmpImage(width * height * 3);
 
-    // Halide Output is Planar (x, y, c) or (c, x, y)?
-    // By default Halide uses planar x, y, c (stride[0]=1, stride[1]=width, stride[2]=width*height).
-    // Let's verify strides if we could, but assuming standard Generator compilation.
-    // We need to interleave it for TIFF writer (R,G,B, R,G,B...)
-
-    const uint16_t* ptrR = outputBuf.data() + 0 * width * height; // Channel 0?
-    // Wait, Halide dim order is x, y, c.
-    // If outputBuf(x, y, c), then C is the 3rd dimension.
-    // So distinct planes.
-    // Let's assume Channel 0=R, 1=G, 2=B (based on srgb implementation).
-
-    // Pointer arithmetic depends on strides.
-    // outputBuf.dim(2).stride() usually is width*height.
+    // Halide Output is Planar x, y, c
     int stride_x = outputBuf.dim(0).stride();
     int stride_y = outputBuf.dim(1).stride();
     int stride_c = outputBuf.dim(2).stride();
@@ -145,37 +145,55 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
              uint16_t g_val = raw_ptr[x * stride_x + y * stride_y + 1 * stride_c];
              uint16_t b_val = raw_ptr[x * stride_x + y * stride_y + 2 * stride_c];
 
-             // Normalize to 0.0-1.0 float
-             float r = r_val / 65535.0f;
-             float g = g_val / 65535.0f;
-             float b = b_val / 65535.0f;
-
-             // Apply Log Curve
-             r = apply_log(r, targetLog);
-             g = apply_log(g, targetLog);
-             b = apply_log(b, targetLog);
-
-             // Apply LUT
-             Vec3 c = {r, g, b};
-             if (lut.size > 0) c = apply_lut(lut, c);
-
-             // Write Interleaved (16-bit)
+             // Write Interleaved (16-bit Linear) for DNG/TIFF
              int idx = (y * width + x) * 3;
-             finalImage[idx + 0] = (unsigned short)std::max(0.0f, std::min(65535.0f, c.r * 65535.0f));
-             finalImage[idx + 1] = (unsigned short)std::max(0.0f, std::min(65535.0f, c.g * 65535.0f));
-             finalImage[idx + 2] = (unsigned short)std::max(0.0f, std::min(65535.0f, c.b * 65535.0f));
+             finalImage[idx + 0] = r_val;
+             finalImage[idx + 1] = g_val;
+             finalImage[idx + 2] = b_val;
+
+             // Prepare for BMP/JPG
+             // 1. Digital Gain (Recover Brightness from Headroom)
+             float digital_gain = 4.0f;
+
+             float norm_r = std::min(1.0f, (float)r_val / 65535.0f * digital_gain);
+             float norm_g = std::min(1.0f, (float)g_val / 65535.0f * digital_gain);
+             float norm_b = std::min(1.0f, (float)b_val / 65535.0f * digital_gain);
+
+             // 2. Gamma 2.2 (Linear sRGB -> sRGB)
+             norm_r = pow(norm_r, 1.0f/2.2f);
+             norm_g = pow(norm_g, 1.0f/2.2f);
+             norm_b = pow(norm_b, 1.0f/2.2f);
+
+             // Scale back to 16-bit
+             bmpImage[idx + 0] = (unsigned short)(norm_r * 65535.0f);
+             bmpImage[idx + 1] = (unsigned short)(norm_g * 65535.0f);
+             bmpImage[idx + 2] = (unsigned short)(norm_b * 65535.0f);
         }
     }
 
     // Save
     const char* tiff_path_cstr = (outputTiffPath) ? env->GetStringUTFChars(outputTiffPath, 0) : nullptr;
     const char* jpg_path_cstr = (outputJpgPath) ? env->GetStringUTFChars(outputJpgPath, 0) : nullptr;
+    const char* dng_path_cstr = (outputDngPath) ? env->GetStringUTFChars(outputDngPath, 0) : nullptr;
 
-    if (tiff_path_cstr) write_tiff(tiff_path_cstr, width, height, finalImage);
-    if (jpg_path_cstr) write_bmp(jpg_path_cstr, width, height, finalImage);
+    bool tiff_ok = true;
+    bool bmp_ok = true;
+    bool dng_ok = true;
+
+    if (tiff_path_cstr) tiff_ok = write_tiff(tiff_path_cstr, width, height, finalImage);
+    if (jpg_path_cstr) bmp_ok = write_bmp(jpg_path_cstr, width, height, bmpImage); // Use processed buffer
+    if (dng_path_cstr) dng_ok = write_dng(dng_path_cstr, width, height, finalImage, whiteLevel, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec);
 
     if (outputTiffPath) env->ReleaseStringUTFChars(outputTiffPath, tiff_path_cstr);
     if (outputJpgPath) env->ReleaseStringUTFChars(outputJpgPath, jpg_path_cstr);
+    if (outputDngPath) env->ReleaseStringUTFChars(outputDngPath, dng_path_cstr);
+
+    if (!bmp_ok) {
+        LOGE("Failed to write BMP file.");
+        return -2;
+    }
+    if (!tiff_ok) LOGE("Failed to write TIFF file.");
+    if (!dng_ok) LOGE("Failed to write DNG file.");
 
     return 0;
 }
