@@ -185,18 +185,34 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
     file.write(header, 8);
 
     // 2. Calculate Offsets
-    // Entry = 12 bytes. Total IFD = 2 + 16*12 + 4 = 198 bytes.
-    // Data starts at 8 + 198 = 206
-    short num_entries = 16;
-    int data_offset = 8 + 2 + num_entries * 12 + 4;
+    // Entry = 12 bytes.
+    // 3 Mandatory Exposure Tags: ExposureTime, FNumber, ISO
+    // New IFD Size:
+    // Base 16 tags + 3 Exposure tags = 19 tags
+    // Total IFD Size = 2 + 19*12 + 4 = 234 bytes
+
+    // ALIGNMENT FIX:
+    // data_offset must be even (TIFF spec). 8 + 234 = 242 (Even, OK)
+    // However, for safety and 4-byte alignment preference in some readers:
+    // 242 is not div by 4. 244 is.
+    // Let's add 2 bytes of padding after IFD.
+
+    short num_entries = 19;
+    int ifd_size = 2 + num_entries * 12 + 4; // 234
+    int padding = 2; // Pad to 236 -> Offset 244 (divisible by 4)
+
+    int data_offset = 8 + ifd_size + padding;
     int img_size = width * height * 6; // 16-bit * 3 channels
 
     // Metadata Offsets (Placed after image data)
     int off_bps = data_offset + img_size;
-    // int off_ver = off_bps + 6; // [Removed] Version no longer needs offset
-    int off_mod = off_bps + 6;    // Adjusted: Immediately after bps
+    int off_mod = off_bps + 6;    // BPS is 6 bytes
+    // off_mod (Camera Model) is 12 bytes
     int off_mat = off_mod + 12;
+    // off_mat (ColorMatrix1) is 72 bytes
     int off_neu = off_mat + 72;
+    // off_neu (AsShotNeutral) is 24 bytes
+    // Total meta after image: 6 + 12 + 72 + 24 = 114 bytes
 
     // Helper lambda
     auto write_entry = [&](short tag, short type, int count, int value_or_offset) {
@@ -204,6 +220,11 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
         file.write((char*)&type, 2);
         file.write((char*)&count, 4);
         file.write((char*)&value_or_offset, 4);
+    };
+
+    auto write_rational = [&](int num, int den) {
+        file.write((char*)&num, 4);
+        file.write((char*)&den, 4);
     };
 
     // 3. Write IFD Count
@@ -221,16 +242,27 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
     write_entry(279, 4, 1, img_size);            // StripByteCounts
     write_entry(284, 3, 1, 1);                   // PlanarConfig: Chunky
 
+    // EXIF Tags (Dummy values to satisfy Lightroom)
+    // ExposureTime (33434) - RATIONAL - Inline? No, 8 bytes > 4. Need offset.
+    // FNumber (33437) - RATIONAL - Need offset.
+    // ISOSpeedRatings (34855) - SHORT - Inline OK.
+
+    // Re-calc offsets for new RATIONALs
+    int off_exp = off_neu + 24; // After AsShotNeutral
+    int off_fnum = off_exp + 8; // After ExposureTime
+
+    write_entry((short)33434, 5, 1, off_exp);    // ExposureTime (1/30)
+    write_entry((short)33437, 5, 1, off_fnum);   // FNumber (f/1.8)
+    write_entry((short)34855, 3, 1, 100);        // ISO (100)
+
     // DNG Specific Tags
-    // [Fix 1] DNGVersion (Tag 50706): Direct value write 1.4.0.0 (Little Endian: 0x01, 0x04, 0x00, 0x00)
-    // 0x00000401 = 1 | (4 << 8)
+    // DNGVersion (Tag 50706): 1.4.0.0
     int dng_ver_val = 1 | (4 << 8);
     write_entry((short)50706, 1, 4, dng_ver_val);
 
     write_entry((short)50708, 2, 12, off_mod);   // UniqueCameraModel
 
-    // [Fix 2] WhiteLevel (Tag 50717): Forced to 65535 (16-bit full scale)
-    // Ignore passed whiteLevel (which is for sensor raw)
+    // WhiteLevel (Tag 50717): Forced to 65535 (16-bit full scale)
     write_entry((short)50717, 3, 1, 65535);
 
     write_entry((short)50721, 10, 9, off_mat);   // ColorMatrix1
@@ -241,6 +273,10 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
     int next_ifd = 0;
     file.write((char*)&next_ifd, 4);
 
+    // PADDING (2 bytes)
+    short pad = 0;
+    file.write((char*)&pad, 2);
+
     // 6. Write Image Data
     file.write((char*)data.data(), img_size);
 
@@ -250,12 +286,10 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
     short bps[3] = {16, 16, 16};
     file.write((char*)bps, 6);
 
-    // [Removed] DNGVersion data no longer needed
-
     // UniqueCameraModel (12 bytes)
     file.write("HDR+ Linear\0", 12);
 
-    // ColorMatrix1 (Identity) - 9 * SRATIONAL (8 bytes) = 72 bytes
+    // ColorMatrix1 (Identity) - 9 * SRATIONAL (8 bytes)
     int one[2] = {1, 1};
     int zero[2] = {0, 1};
     // Row 1
@@ -265,8 +299,14 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
     // Row 3
     file.write((char*)zero, 8); file.write((char*)zero, 8); file.write((char*)one, 8);
 
-    // AsShotNeutral (1.0, 1.0, 1.0) - 3 * RATIONAL (8 bytes) = 24 bytes
+    // AsShotNeutral (1.0, 1.0, 1.0) - 3 * RATIONAL
     file.write((char*)one, 8); file.write((char*)one, 8); file.write((char*)one, 8);
+
+    // ExposureTime (1, 30)
+    write_rational(1, 30);
+
+    // FNumber (18, 10) -> f/1.8
+    write_rational(18, 10);
 
     bool result = file.good();
     file.close();
