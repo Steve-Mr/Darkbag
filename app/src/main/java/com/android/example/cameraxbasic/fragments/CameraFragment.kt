@@ -2196,6 +2196,7 @@ class CameraFragment : Fragment() {
                 val iso = result?.get(android.hardware.camera2.CaptureResult.SENSOR_SENSITIVITY) ?: 100
                 val exposureTime = result?.get(android.hardware.camera2.CaptureResult.SENSOR_EXPOSURE_TIME) ?: 10_000_000L
                 val fNumber = result?.get(android.hardware.camera2.CaptureResult.LENS_APERTURE) ?: 1.8f
+                val focalLength = result?.get(android.hardware.camera2.CaptureResult.LENS_FOCAL_LENGTH) ?: 0.0f
 
                 // 5. Output Path
                 val dngName = SimpleDateFormat(FILENAME, Locale.US).format(System.currentTimeMillis()) + "_HDRPLUS"
@@ -2224,7 +2225,7 @@ class CameraFragment : Fragment() {
                     width, height,
                     whiteLevel, blackLevel,
                     wb, ccm, cfa,
-                    iso, exposureTime, fNumber,
+                    iso, exposureTime, fNumber, focalLength,
                     targetLogIndex,
                     nativeLutPath,
                     tiffPath,

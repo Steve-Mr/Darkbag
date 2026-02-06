@@ -14,11 +14,16 @@
 #ifndef TIFFTAG_ISOSPEEDRATINGS
 #define TIFFTAG_ISOSPEEDRATINGS 34855
 #endif
+#ifndef TIFFTAG_FOCALLENGTH
+#define TIFFTAG_FOCALLENGTH 37386
+#endif
 
 // Define DNG Tags (Custom Tags 507xx)
 #define TIFFTAG_DNGVERSION 50706
 #define TIFFTAG_DNGBACKWARDVERSION 50707
 #define TIFFTAG_UNIQUECAMERAMODEL 50708
+#define TIFFTAG_BLACKLEVEL 50714
+#define TIFFTAG_WHITELEVEL 50717
 #define TIFFTAG_COLORMATRIX1 50721
 #define TIFFTAG_ASSHOTNEUTRAL 50728
 #define TIFFTAG_CALIBRATIONILLUMINANT1 50778
@@ -27,13 +32,16 @@ static const TIFFFieldInfo dng_field_info[] = {
     { TIFFTAG_DNGVERSION, 4, 4, TIFF_BYTE, FIELD_CUSTOM, 1, 0, "DNGVersion" },
     { TIFFTAG_DNGBACKWARDVERSION, 4, 4, TIFF_BYTE, FIELD_CUSTOM, 1, 0, "DNGBackwardVersion" },
     { TIFFTAG_UNIQUECAMERAMODEL, -1, -1, TIFF_ASCII, FIELD_CUSTOM, 1, 0, "UniqueCameraModel" },
+    { TIFFTAG_BLACKLEVEL, -1, -1, TIFF_LONG, FIELD_CUSTOM, 1, 1, "BlackLevel" },
+    { TIFFTAG_WHITELEVEL, -1, -1, TIFF_LONG, FIELD_CUSTOM, 1, 1, "WhiteLevel" },
     { TIFFTAG_COLORMATRIX1, -1, -1, TIFF_RATIONAL, FIELD_CUSTOM, 1, 1, "ColorMatrix1" },
     { TIFFTAG_ASSHOTNEUTRAL, -1, -1, TIFF_RATIONAL, FIELD_CUSTOM, 1, 1, "AsShotNeutral" },
     { TIFFTAG_CALIBRATIONILLUMINANT1, 1, 1, TIFF_SHORT, FIELD_CUSTOM, 1, 0, "CalibrationIlluminant1" },
     // EXIF Tags
     { TIFFTAG_EXPOSURETIME, 1, 1, TIFF_RATIONAL, FIELD_CUSTOM, 1, 0, "ExposureTime" },
     { TIFFTAG_FNUMBER, 1, 1, TIFF_RATIONAL, FIELD_CUSTOM, 1, 0, "FNumber" },
-    { TIFFTAG_ISOSPEEDRATINGS, -1, -1, TIFF_SHORT, FIELD_CUSTOM, 1, 1, "ISOSpeedRatings" }
+    { TIFFTAG_ISOSPEEDRATINGS, -1, -1, TIFF_SHORT, FIELD_CUSTOM, 1, 1, "ISOSpeedRatings" },
+    { TIFFTAG_FOCALLENGTH, 1, 1, TIFF_RATIONAL, FIELD_CUSTOM, 1, 0, "FocalLength" }
 };
 
 static void DNGTagExtender(TIFF *tif) {
@@ -216,7 +224,7 @@ bool write_tiff(const char* filename, int width, int height, const std::vector<u
     return result;
 }
 
-bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, int iso, long exposureTime, float fNumber) {
+bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, int iso, long exposureTime, float fNumber, float focalLength) {
     // Register DNG tags
     TIFFSetTagExtender(DNGTagExtender);
 
@@ -233,18 +241,36 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
     TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG);
     TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, height);
 
-    // DNG Tags
+    // Standard Metadata
+    static const char* make = "Google"; // Generic fallback
+    TIFFSetField(tif, TIFFTAG_MAKE, make);
+
+    static const char* model = "HDR+ Device";
+    TIFFSetField(tif, TIFFTAG_MODEL, model);
+
     static const char* software = "CameraXBasic HDR+";
     TIFFSetField(tif, TIFFTAG_SOFTWARE, software);
 
+    // DateTime (306) - TODO: Pass from Java for exact capture time.
+    // Format: "YYYY:MM:DD HH:MM:SS"
+
+    // DNG Tags
     static const uint8_t dng_version[] = {1, 4, 0, 0};
     TIFFSetField(tif, TIFFTAG_DNGVERSION, dng_version);
 
     static const uint8_t dng_backward_version[] = {1, 1, 0, 0};
     TIFFSetField(tif, TIFFTAG_DNGBACKWARDVERSION, dng_backward_version);
 
-    static const char* model = "HDR+ Linear";
     TIFFSetField(tif, TIFFTAG_UNIQUECAMERAMODEL, model);
+
+    // White/Black Level (Critical for Readers)
+    uint32_t white_level_val = (uint32_t)whiteLevel; // Default 65535 or from sensor
+    // In DNG Linear, usually 16-bit range.
+    if (white_level_val == 0) white_level_val = 65535;
+    TIFFSetField(tif, TIFFTAG_WHITELEVEL, 1, &white_level_val);
+
+    uint32_t black_level_val = 0; // Already subtracted in pipeline
+    TIFFSetField(tif, TIFFTAG_BLACKLEVEL, 1, &black_level_val);
 
     static const float color_matrix1[] = {
         1.0f, 0.0f, 0.0f,
@@ -258,10 +284,11 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
 
     TIFFSetField(tif, TIFFTAG_CALIBRATIONILLUMINANT1, 21); // D65
 
-    // Metadata
+    // EXIF Metadata
     float exposureTimeSec = (float)exposureTime / 1000000000.0f;
     TIFFSetField(tif, TIFFTAG_EXPOSURETIME, exposureTimeSec);
     TIFFSetField(tif, TIFFTAG_FNUMBER, fNumber);
+    TIFFSetField(tif, TIFFTAG_FOCALLENGTH, focalLength);
 
     unsigned short iso_short = (unsigned short)iso;
     TIFFSetField(tif, TIFFTAG_ISOSPEEDRATINGS, 1, &iso_short);

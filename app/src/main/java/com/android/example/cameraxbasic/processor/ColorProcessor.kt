@@ -47,6 +47,7 @@ object ColorProcessor {
         iso: Int,
         exposureTime: Long,
         fNumber: Float,
+        focalLength: Float,
         targetLog: Int,
         lutPath: String?,
         outputTiffPath: String?,
