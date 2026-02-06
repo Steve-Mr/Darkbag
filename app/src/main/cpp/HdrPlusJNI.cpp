@@ -145,25 +145,12 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
              uint16_t g_val = raw_ptr[x * stride_x + y * stride_y + 1 * stride_c];
              uint16_t b_val = raw_ptr[x * stride_x + y * stride_y + 2 * stride_c];
 
-             // Normalize to 0.0-1.0 float
-             float r = r_val / 65535.0f;
-             float g = g_val / 65535.0f;
-             float b = b_val / 65535.0f;
-
-             // Apply Log Curve
-             r = apply_log(r, targetLog);
-             g = apply_log(g, targetLog);
-             b = apply_log(b, targetLog);
-
-             // Apply LUT
-             Vec3 c = {r, g, b};
-             if (lut.size > 0) c = apply_lut(lut, c);
-
              // Write Interleaved (16-bit)
+             // DISABLED LOG/LUT: Outputting linear 16-bit RGB directly.
              int idx = (y * width + x) * 3;
-             finalImage[idx + 0] = (unsigned short)std::max(0.0f, std::min(65535.0f, c.r * 65535.0f));
-             finalImage[idx + 1] = (unsigned short)std::max(0.0f, std::min(65535.0f, c.g * 65535.0f));
-             finalImage[idx + 2] = (unsigned short)std::max(0.0f, std::min(65535.0f, c.b * 65535.0f));
+             finalImage[idx + 0] = r_val;
+             finalImage[idx + 1] = g_val;
+             finalImage[idx + 2] = b_val;
         }
     }
 

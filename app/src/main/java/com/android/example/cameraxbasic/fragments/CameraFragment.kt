@@ -364,8 +364,10 @@ class CameraFragment : Fragment() {
         isFlashEnabled = prefs.getBoolean(SettingsFragment.KEY_FLASH_MODE, false)
 
         // Initialize HDR+ Burst Helper
+        // Burst count is now dynamic, but we initialize with default.
+        // It will be updated/reset in triggerHdrPlusBurst
         hdrPlusBurstHelper = HdrPlusBurst(
-            frameCount = 3, // Reduced to 3 for stability
+            frameCount = 3,
             onBurstComplete = { frames ->
                 processHdrPlusBurst(frames)
             }
@@ -1978,17 +1980,26 @@ class CameraFragment : Fragment() {
         }
         isBurstActive = true
 
-        // Reset helper
-        hdrPlusBurstHelper?.reset()
+        // 1. Get Burst Size Preference
+        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val burstSizeStr = prefs.getString(SettingsFragment.KEY_HDR_BURST_COUNT, "3") ?: "3"
+        val burstSize = burstSizeStr.toIntOrNull() ?: 3
+
+        // 2. Re-initialize helper with correct count
+        hdrPlusBurstHelper = HdrPlusBurst(
+            frameCount = burstSize,
+            onBurstComplete = { frames ->
+                processHdrPlusBurst(frames)
+            }
+        )
 
         lifecycleScope.launch(Dispatchers.Main) {
-            Toast.makeText(requireContext(), "Capturing HDR+ Burst...", Toast.LENGTH_SHORT).show()
+            Toast.makeText(requireContext(), "Capturing HDR+ Burst ($burstSize frames)...", Toast.LENGTH_SHORT).show()
         }
 
-        Log.d(TAG, "Starting HDR+ Burst (Sequential)")
+        Log.d(TAG, "Starting HDR+ Burst (Sequential, $burstSize frames)")
 
         // Sequential burst to avoid overloading CameraX request queue
-        val burstSize = 3
         recursiveBurstCapture(imageCapture, burstSize, 0)
     }
 
@@ -2050,6 +2061,12 @@ class CameraFragment : Fragment() {
                 }
 
                 // 2. Metadata (WB, CCM, BlackLevel)
+                // White Balance Handling:
+                // We extract the color correction gains (Red, GreenEven, GreenOdd, Blue) from the Camera2 CaptureResult.
+                // These values are passed to the native JNI layer ('whiteBalance' array).
+                // Inside the Halide pipeline (hdrplus_raw_pipeline), these gains are applied to the raw data *during* processing.
+                // This ensures the final merged output is already white-balanced.
+                // Note: The subsequent Log/LUT application (now disabled for HDR+) would operate on this already balanced data.
                 val timestamp = frames[0].imageInfo.timestamp
                 var result = captureResults.entries.find { abs(it.key - timestamp) < 5_000_000L }?.value
 
