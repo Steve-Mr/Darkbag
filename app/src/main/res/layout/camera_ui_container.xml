@@ -63,6 +63,18 @@
         android:contentDescription="@string/toggle_flash"
         android:visibility="gone" />
 
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/hdr_plus_toggle"
+        style="@style/Widget.Material3.Button.TonalButton"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/margin_medium"
+        android:text="HDR+"
+        android:visibility="gone"
+        app:layout_constraintTop_toBottomOf="@id/settings_button"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_marginEnd="@dimen/margin_medium" />
+
     <!-- LUT List Container -->
     <com.google.android.material.card.MaterialCardView
         android:id="@+id/lut_list_container"

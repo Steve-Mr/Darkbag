@@ -1,3 +1,6 @@
 [submodule "app/src/main/cpp/libraw"]
 	path = app/src/main/cpp/libraw
 	url = https://github.com/LibRaw/LibRaw.git
+[submodule "app/src/main/cpp/hdr-plus"]
+	path = app/src/main/cpp/hdr-plus
+	url = https://github.com/timothybrooks/hdr-plus

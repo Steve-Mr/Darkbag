@@ -38,6 +38,7 @@ import android.view.ViewGroup
 import android.widget.Toast
 import android.graphics.BitmapFactory
 import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CaptureResult
 import com.google.android.material.slider.Slider
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.button.MaterialButtonToggleGroup
@@ -81,6 +82,7 @@ import com.android.example.cameraxbasic.utils.ANIMATION_SLOW_MILLIS
 import com.android.example.cameraxbasic.utils.MediaStoreUtils
 import com.android.example.cameraxbasic.utils.LutManager
 import com.android.example.cameraxbasic.processor.LutSurfaceProcessor
+import com.android.example.cameraxbasic.utils.ExposureUtils
 import com.android.example.cameraxbasic.utils.simulateClick
 import com.bumptech.glide.Glide
 import com.bumptech.glide.request.RequestOptions
@@ -89,6 +91,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.flow.first
 import java.nio.ByteBuffer
 import java.text.SimpleDateFormat
 import java.util.*
@@ -145,6 +151,12 @@ class CameraFragment : Fragment() {
     // Flash State
     private var isFlashEnabled = false
 
+    // HDR+ State
+    private var isHdrPlusEnabled = false
+    private var isBurstActive = false
+    private var hdrPlusBurstHelper: HdrPlusBurst? = null
+    private var lastHdrPlusConfig: ExposureUtils.ExposureConfig? = null // Cache for instant trigger
+
     private var minFocusDistance = 0.0f
     private var isoRange: android.util.Range<Int>? = null
     private var exposureTimeRange: android.util.Range<Long>? = null
@@ -192,6 +204,13 @@ class CameraFragment : Fragment() {
             return size > 300
         }
     })
+
+    // SharedFlow to broadcast CaptureResults for reactive synchronization
+    private val captureResultFlow = MutableSharedFlow<TotalCaptureResult>(
+        replay = 10,
+        extraBufferCapacity = 64,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST
+    )
 
     // Rate limiting semaphore to prevent OOM
     private val processingSemaphore = kotlinx.coroutines.sync.Semaphore(2)
@@ -358,6 +377,16 @@ class CameraFragment : Fragment() {
         // Initialize Flash State
         isFlashEnabled = prefs.getBoolean(SettingsFragment.KEY_FLASH_MODE, false)
 
+        // Initialize HDR+ Burst Helper
+        // Burst count is now dynamic, but we initialize with default.
+        // It will be updated/reset in triggerHdrPlusBurst
+        hdrPlusBurstHelper = HdrPlusBurst(
+            frameCount = 3,
+            onBurstComplete = { frames ->
+                processHdrPlusBurst(frames, 1.0f)
+            }
+        )
+
         // Start processing consumer
         viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
             for (holder in processingChannel) {
@@ -471,6 +500,13 @@ class CameraFragment : Fragment() {
         val isRawSupported =
             capabilities.supportedOutputFormats.contains(ImageCapture.OUTPUT_FORMAT_RAW)
 
+        // Enable HDR+ UI if RAW is supported
+        if (isRawSupported) {
+            cameraUiContainerBinding?.hdrPlusToggle?.visibility = View.VISIBLE
+            isHdrPlusEnabled = true
+            updateHdrPlusUi()
+        }
+
         // Force 4:3 aspect ratio to match typical sensor output and avoid cropping in preview
         val resolutionSelector = ResolutionSelector.Builder()
             .setAspectRatioStrategy(
@@ -520,6 +556,25 @@ class CameraFragment : Fragment() {
                         result.get(android.hardware.camera2.CaptureResult.SENSOR_TIMESTAMP)
                     if (timestamp != null) {
                         captureResults[timestamp] = result
+                    }
+                    captureResultFlow.tryEmit(result)
+
+                    // Background Calculation for HDR+ Latency Optimization
+                    if (isHdrPlusEnabled && !isBurstActive && !isManualExposure) {
+                        lifecycleScope.launch(Dispatchers.Default) {
+                            val iso = result.get(CaptureResult.SENSOR_SENSITIVITY) ?: 100
+                            val time = result.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: 10_000_000L
+
+                            // Safe check for ranges, default if null
+                            val validIsoRange = isoRange ?: android.util.Range(100, 3200)
+                            val validTimeRange = exposureTimeRange ?: android.util.Range(1000L, 1_000_000_000L)
+                            val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                            val underexposureMode = prefs.getString(SettingsFragment.KEY_HDR_UNDEREXPOSURE_MODE, "Dynamic (Experimental)") ?: "Dynamic (Experimental)"
+
+                            lastHdrPlusConfig = ExposureUtils.calculateHdrPlusExposure(
+                                iso, time, validIsoRange, validTimeRange, underexposureMode
+                            )
+                        }
                     }
                 }
             })
@@ -747,90 +802,19 @@ class CameraFragment : Fragment() {
             imageCapture?.let { imageCapture ->
 
                 if (imageCapture.outputFormat == ImageCapture.OUTPUT_FORMAT_RAW) {
-                    // RAW Capture with Processing
-                    imageCapture.takePicture(
-                        cameraExecutor,
-                        object : ImageCapture.OnImageCapturedCallback() {
-                            override fun onCaptureSuccess(image: ImageProxy) {
-                                try {
-                                    // 1. Immediate Copy (Free the pipeline)
-                                    val currentZoom =
-                                        if (is2xMode) 2.0f else (currentFocalLength / 24.0f)
-
-                                    val holder = copyImageToHolder(image, currentZoom)
-                                    image.close() // Close ASAP
-
-                                    // 2. Queue for Processing
-                                    lifecycleScope.launch {
-                                        processingChannel.send(holder)
-                                    }
-                                } catch (e: OutOfMemoryError) {
-                                    Log.e(TAG, "OOM during capture copy", e)
-                                    image.close()
-                                    processingSemaphore.release()
-                                    lifecycleScope.launch(Dispatchers.Main) {
-                                        Toast.makeText(
-                                            requireContext(),
-                                            "Memory full, photo not saved",
-                                            Toast.LENGTH_SHORT
-                                        ).show()
-                                        cameraUiContainerBinding?.cameraCaptureButton?.isEnabled =
-                                            true
-                                        cameraUiContainerBinding?.cameraCaptureButton?.alpha = 1.0f
-                                    }
-                                } catch (e: Exception) {
-                                    Log.e(TAG, "Error during capture copy", e)
-                                    image.close()
-                                    processingSemaphore.release()
-                                    lifecycleScope.launch(Dispatchers.Main) {
-                                        cameraUiContainerBinding?.cameraCaptureButton?.isEnabled =
-                                            true
-                                        cameraUiContainerBinding?.cameraCaptureButton?.alpha = 1.0f
-                                    }
-                                }
-                            }
-
-                            override fun onError(exception: ImageCaptureException) {
-                                Log.e(TAG, "Photo capture failed: ${exception.message}", exception)
-                                processingSemaphore.release()
-                                lifecycleScope.launch(Dispatchers.Main) {
-                                    cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
-                                    cameraUiContainerBinding?.cameraCaptureButton?.alpha = 1.0f
-                                }
-                            }
-                        })
-
-                    // Optimistic UI update: disable button if we think we might be full,
-                    // though the semaphore check handles the hard limit.
-                    // We can also dim the button to indicate "busy" if usage is high.
-                    if (processingSemaphore.availablePermits == 0) {
-                        cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = false
-                        cameraUiContainerBinding?.cameraCaptureButton?.alpha = 0.5f
+                    if (isHdrPlusEnabled) {
+                        // Trigger Burst
+                        triggerHdrPlusBurst(imageCapture)
+                    } else {
+                        // Standard Single RAW Capture with Processing
+                        takeSinglePicture(imageCapture)
                     }
-
                 } else {
-                    processingSemaphore.release() // Not raw, release immediately (logic for JPG path)
-                    Toast.makeText(
-                        requireContext(),
-                        "RAW capture is not supported on this device.",
-                        Toast.LENGTH_SHORT
-                    ).show()
-                }
-
-                // We can only change the foreground Drawable using API level 23+ API
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                    // Display flash animation to indicate that photo was captured
-                    fragmentCameraBinding.root.postDelayed({
-                        fragmentCameraBinding.root.foreground = ColorDrawable(Color.WHITE)
-                        fragmentCameraBinding.root.postDelayed(
-                            { fragmentCameraBinding.root.foreground = null }, ANIMATION_FAST_MILLIS
-                        )
-                    }, ANIMATION_SLOW_MILLIS)
+                    // JPEG Capture
+                    takeSinglePicture(imageCapture)
                 }
             }
         }
-
-        // Setup for button used to switch cameras
         cameraUiContainerBinding?.cameraSwitchButton?.let {
 
             // Disable the button until the camera is set up
@@ -850,6 +834,14 @@ class CameraFragment : Fragment() {
 
         // Initialize Manual Controls
         initManualControls()
+
+        // HDR+ Toggle
+        cameraUiContainerBinding?.hdrPlusToggle?.let { toggle ->
+            toggle.setOnClickListener {
+                isHdrPlusEnabled = !isHdrPlusEnabled
+                updateHdrPlusUi()
+            }
+        }
 
         // LUT Selector (Always visible now)
         cameraUiContainerBinding?.lutButton?.visibility = View.VISIBLE
@@ -1061,23 +1053,7 @@ class CameraFragment : Fragment() {
                 val chars = cameraManager.getCameraCharacteristics(camera2Info.cameraId)
 
                 // 1. Wait for Metadata
-                var attempts = 0
-                var captureResult: TotalCaptureResult? = null
-                val tolerance = 5_000_000L // 5ms in nanoseconds
-
-                while (attempts < 25) { // Wait up to 5 seconds
-                    captureResult = captureResults[image.timestamp]
-                    if (captureResult == null) {
-                        synchronized(captureResults) {
-                            captureResult = captureResults.entries.find {
-                                kotlin.math.abs(it.key - image.timestamp) < tolerance
-                            }?.value
-                        }
-                    }
-                    if (captureResult != null) break
-                    kotlinx.coroutines.delay(200)
-                    attempts++
-                }
+                val captureResult = findCaptureResult(image.timestamp)
 
                 if (captureResult == null) {
                     Log.e(
@@ -1931,5 +1907,603 @@ class CameraFragment : Fragment() {
         private const val RATIO_16_9_VALUE = 16.0 / 9.0
         private const val FOCUS_RING_DISPLAY_TIME_MS = 500L
         private const val FOCUS_RING_FADE_OUT_DURATION_MS = 300L
+        private const val AE_SETTLE_DELAY_MS = 50L
+    }
+    private fun takeSinglePicture(imageCapture: ImageCapture) {
+        if (imageCapture.outputFormat == ImageCapture.OUTPUT_FORMAT_RAW) {
+            // RAW Capture with Processing
+            imageCapture.takePicture(
+                cameraExecutor,
+                object : ImageCapture.OnImageCapturedCallback() {
+                    override fun onCaptureSuccess(image: ImageProxy) {
+                        try {
+                            // 1. Immediate Copy (Free the pipeline)
+                            val currentZoom =
+                                if (is2xMode) 2.0f else (currentFocalLength / 24.0f)
+
+                            val holder = copyImageToHolder(image, currentZoom)
+                            image.close() // Close ASAP
+
+                            // 2. Queue for Processing
+                            lifecycleScope.launch {
+                                processingChannel.send(holder)
+                            }
+                        } catch (e: OutOfMemoryError) {
+                            Log.e(TAG, "OOM during capture copy", e)
+                            image.close()
+                            processingSemaphore.release()
+                            lifecycleScope.launch(Dispatchers.Main) {
+                                Toast.makeText(
+                                    requireContext(),
+                                    "Memory full, photo not saved",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                                cameraUiContainerBinding?.cameraCaptureButton?.isEnabled =
+                                    true
+                                cameraUiContainerBinding?.cameraCaptureButton?.alpha = 1.0f
+                            }
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Error during capture copy", e)
+                            image.close()
+                            processingSemaphore.release()
+                            lifecycleScope.launch(Dispatchers.Main) {
+                                cameraUiContainerBinding?.cameraCaptureButton?.isEnabled =
+                                    true
+                                cameraUiContainerBinding?.cameraCaptureButton?.alpha = 1.0f
+                            }
+                        }
+                    }
+
+                    override fun onError(exception: ImageCaptureException) {
+                        Log.e(TAG, "Photo capture failed: ${exception.message}", exception)
+                        processingSemaphore.release()
+                        lifecycleScope.launch(Dispatchers.Main) {
+                            cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
+                            cameraUiContainerBinding?.cameraCaptureButton?.alpha = 1.0f
+                        }
+                    }
+                })
+
+            // Optimistic UI update
+            if (processingSemaphore.availablePermits == 0) {
+                cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = false
+                cameraUiContainerBinding?.cameraCaptureButton?.alpha = 0.5f
+            }
+
+        } else {
+            processingSemaphore.release() // Not raw, release immediately (logic for JPG path)
+            Toast.makeText(
+                requireContext(),
+                "RAW capture is not supported on this device.",
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+
+        // We can only change the foreground Drawable using API level 23+ API
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            // Display flash animation to indicate that photo was captured
+            fragmentCameraBinding.root.postDelayed({
+                fragmentCameraBinding.root.foreground = ColorDrawable(Color.WHITE)
+                fragmentCameraBinding.root.postDelayed(
+                    { fragmentCameraBinding.root.foreground = null }, ANIMATION_FAST_MILLIS
+                )
+            }, ANIMATION_SLOW_MILLIS)
+        }
+    }
+
+    private fun triggerHdrPlusBurst(imageCapture: ImageCapture) {
+        if (isBurstActive) {
+            Log.d(TAG, "Burst already active, ignoring trigger")
+            return
+        }
+        isBurstActive = true
+
+        lifecycleScope.launch(Dispatchers.Main) {
+            try {
+                // 1. Get Calculated Exposure (Instant)
+                // Use cached config if available to skip calculation delay
+                val config = lastHdrPlusConfig ?: run {
+                    // Fallback if cache empty
+                    val result = captureResultFlow.replayCache.lastOrNull() ?: captureResultFlow.first()
+                    val currentIso = result.get(CaptureResult.SENSOR_SENSITIVITY) ?: 100
+                    val currentTime = result.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: 10_000_000L
+                    val validIsoRange = isoRange ?: android.util.Range(100, 3200)
+                    val validTimeRange = exposureTimeRange ?: android.util.Range(1000L, 1_000_000_000L)
+                    val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                    val underexposureMode = prefs.getString(SettingsFragment.KEY_HDR_UNDEREXPOSURE_MODE, "Dynamic (Experimental)") ?: "Dynamic (Experimental)"
+                    ExposureUtils.calculateHdrPlusExposure(
+                        currentIso,
+                        currentTime,
+                        validIsoRange,
+                        validTimeRange,
+                        underexposureMode
+                    )
+                }
+
+                Log.d(
+                    TAG,
+                    "HDR+ Exposure: TargetISO=${config.iso}, TargetTime=${config.exposureTime}, DigitalGain=${config.digitalGain}"
+                )
+
+                // 2. Apply Manual Exposure for Burst
+                val cameraControl = camera?.cameraControl
+                if (cameraControl != null) {
+                    val camera2Control = Camera2CameraControl.from(cameraControl)
+                    val builder = CaptureRequestOptions.Builder()
+                    builder.setCaptureRequestOption(
+                        CaptureRequest.CONTROL_AE_MODE,
+                        CaptureRequest.CONTROL_AE_MODE_OFF
+                    )
+                    builder.setCaptureRequestOption(CaptureRequest.SENSOR_SENSITIVITY, config.iso)
+                    builder.setCaptureRequestOption(
+                        CaptureRequest.SENSOR_EXPOSURE_TIME,
+                        config.exposureTime
+                    )
+                    camera2Control.setCaptureRequestOptions(builder.build()).await()
+                }
+
+                // Slight delay to ensure AE settles
+                delay(AE_SETTLE_DELAY_MS)
+
+                // 3. Get Burst Size Preference
+                val prefs = requireContext().getSharedPreferences(
+                    SettingsFragment.PREFS_NAME,
+                    Context.MODE_PRIVATE
+                )
+                val burstSizeStr = prefs.getString(SettingsFragment.KEY_HDR_BURST_COUNT, "3") ?: "3"
+                val burstSize = burstSizeStr.toIntOrNull() ?: 3
+
+                // 4. Re-initialize helper with correct count & gain
+                hdrPlusBurstHelper = HdrPlusBurst(
+                    frameCount = burstSize,
+                    onBurstComplete = { frames ->
+                        processHdrPlusBurst(frames, config.digitalGain)
+                    }
+                )
+
+                Toast.makeText(
+                    requireContext(),
+                    "Capturing HDR+ Burst ($burstSize frames)...",
+                    Toast.LENGTH_SHORT
+                ).show()
+
+                Log.d(TAG, "Starting HDR+ Burst (Sequential, $burstSize frames)")
+
+                // Sequential burst to avoid overloading CameraX request queue
+                recursiveBurstCapture(imageCapture, burstSize, 0)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to start HDR+ burst", e)
+                Toast.makeText(
+                    requireContext(),
+                    "HDR+ setup failed: ${e.message}",
+                    Toast.LENGTH_LONG
+                ).show()
+                // Ensure state is cleaned up on failure
+                isBurstActive = false
+                processingSemaphore.release()
+                // Attempt to restore camera controls
+                applyCameraControls()
+            }
+        }
+    }
+
+    private fun recursiveBurstCapture(imageCapture: ImageCapture, totalFrames: Int, currentFrame: Int) {
+        if (currentFrame >= totalFrames) {
+            Log.d(TAG, "HDR+ Burst Capture sequence complete.")
+            // Restore Auto Exposure (or previous state)
+            lifecycleScope.launch(Dispatchers.Main) {
+                applyCameraControls()
+            }
+            return
+        }
+
+        Log.d(TAG, "Capturing burst frame ${currentFrame + 1}/$totalFrames")
+        imageCapture.takePicture(
+            cameraExecutor,
+            object : ImageCapture.OnImageCapturedCallback() {
+                override fun onCaptureSuccess(image: ImageProxy) {
+                    Log.d(TAG, "Burst frame ${currentFrame + 1} captured successfully.")
+                    val helper = hdrPlusBurstHelper
+                    if (helper != null) {
+                        helper.addFrame(image)
+                    } else {
+                        Log.e(TAG, "HdrPlusBurst helper is null, closing image manually.")
+                        image.close()
+                    }
+                    // Trigger next frame immediately
+                    recursiveBurstCapture(imageCapture, totalFrames, currentFrame + 1)
+                }
+
+                override fun onError(exception: ImageCaptureException) {
+                    Log.e(TAG, "Burst frame ${currentFrame + 1} failed: ${exception.message}")
+                    // Abort burst on error? Or try next?
+                    // If we abort, the helper never finishes.
+                    // For now, let's try next, but the helper won't reach count.
+                    // Better to reset/abort.
+                    lifecycleScope.launch(Dispatchers.Main) {
+                        Toast.makeText(requireContext(), "Burst failed at frame ${currentFrame + 1}", Toast.LENGTH_SHORT).show()
+                        // Restore AE on failure too
+                        applyCameraControls()
+                    }
+                    hdrPlusBurstHelper?.reset()
+                    isBurstActive = false // Reset active flag
+                    processingSemaphore.release() // Release lock since we are aborting
+                }
+            }
+        )
+    }
+
+    private suspend fun findCaptureResult(timestamp: Long, tolerance: Long = 5_000_000L): TotalCaptureResult? {
+        // 1. Check cache first for an immediate match.
+        captureResults.entries.find { abs(it.key - timestamp) < tolerance }?.value?.let { return it }
+
+        // 2. If not in cache, wait on the flow with a timeout.
+        return withTimeoutOrNull(3000) {
+            captureResultFlow.first { res ->
+                val ts = res.get(android.hardware.camera2.CaptureResult.SENSOR_TIMESTAMP)
+                ts != null && abs(ts - timestamp) < tolerance
+            }
+        }
+    }
+
+    private fun processHdrPlusBurst(frames: List<HdrFrame>, digitalGain: Float) {
+        val currentZoom = if (is2xMode) 2.0f else (currentFocalLength / 24.0f)
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            var fallbackSent = false
+            try {
+                val context = context ?: run {
+                    Log.w(TAG, "processHdrPlusBurst aborted: Fragment context is null.")
+                    return@launch
+                }
+
+                Log.d(TAG, "processHdrPlusBurst started with ${frames.size} frames. DigitalGain=$digitalGain")
+
+                // 1. Prepare buffers
+                val width = frames[0].width
+                val height = frames[0].height
+                val rotationDegrees = frames[0].rotationDegrees
+
+                val buffers = frames.map { it.buffer!! }.toTypedArray()
+
+                // Need characteristics for static info
+                var chars: CameraCharacteristics? = null
+                val cam = camera
+                val camInfo = cam?.cameraInfo
+                if (camInfo is Camera2CameraInfo) {
+                    chars = Camera2CameraInfo.extractCameraCharacteristics(camInfo)
+                }
+
+                // 2. Metadata (WB, CCM, BlackLevel)
+                val timestamp = frames[0].timestamp
+                val result = findCaptureResult(timestamp)
+
+                // Default values
+                var whiteLevel = 1023
+                var blackLevel = 64
+                var wb = floatArrayOf(2.0f, 1.0f, 1.0f, 1.5f)
+                var ccm = floatArrayOf(
+                    2.0f, -1.0f, 0.0f,
+                    -0.5f, 2.0f, -0.5f,
+                    0.0f, -1.0f, 2.0f
+                )
+                var cfa = 0 // Default RGGB
+
+                if (chars != null) {
+                    whiteLevel = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_WHITE_LEVEL) ?: 1023
+                    val bl = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_BLACK_LEVEL_PATTERN)
+                    if (bl != null) blackLevel = bl.getOffsetForIndex(0, 0)
+
+                    val cfaEnum = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_COLOR_FILTER_ARRANGEMENT)
+                    if (cfaEnum != null) cfa = cfaEnum // Pass Raw Enum (0..3)
+                }
+
+                result?.let { r ->
+                    val wbVec = r.get(android.hardware.camera2.CaptureResult.COLOR_CORRECTION_GAINS)
+                    if (wbVec != null) {
+                        wb[0] = wbVec.red
+                        wb[1] = wbVec.greenEven
+                        wb[2] = wbVec.greenOdd
+                        wb[3] = wbVec.blue
+                    }
+
+                    val ccmMat = r.get(android.hardware.camera2.CaptureResult.COLOR_CORRECTION_TRANSFORM)
+                    if (ccmMat != null) {
+                        var idx = 0
+                        for(row in 0 until 3) {
+                            for(col in 0 until 3) {
+                                val rat = ccmMat.getElement(col, row)
+                                ccm[idx++] = rat.toFloat()
+                            }
+                        }
+                    }
+                }
+
+                Log.d(TAG, "Metadata: WL=$whiteLevel, BL=$blackLevel, WB=${wb.joinToString()}, CFA=$cfa")
+
+                // 4. Settings (Log/LUT)
+                val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                val targetLogName = prefs.getString(SettingsFragment.KEY_TARGET_LOG, "None")
+                val targetLogIndex = SettingsFragment.LOG_CURVES.indexOf(targetLogName)
+                val activeLutName = prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, null)
+                var nativeLutPath: String? = null
+                if (activeLutName != null) {
+                    val lutFile = File(File(context.filesDir, "luts"), activeLutName)
+                    if (lutFile.exists()) nativeLutPath = lutFile.absolutePath
+                }
+
+                Log.d(TAG, "Settings: Log=$targetLogName ($targetLogIndex), LUT=$nativeLutPath")
+
+                // Extract Real Metadata
+                val iso = result?.get(android.hardware.camera2.CaptureResult.SENSOR_SENSITIVITY) ?: 100
+                val exposureTime = result?.get(android.hardware.camera2.CaptureResult.SENSOR_EXPOSURE_TIME) ?: 10_000_000L
+                val fNumber = result?.get(android.hardware.camera2.CaptureResult.LENS_APERTURE) ?: 1.8f
+                val focalLength = result?.get(android.hardware.camera2.CaptureResult.LENS_FOCAL_LENGTH) ?: 0.0f
+                val captureTime = System.currentTimeMillis()
+
+                // 5. Output Path
+                val dngName = SimpleDateFormat(FILENAME, Locale.US).format(System.currentTimeMillis()) + "_HDRPLUS"
+                val saveTiff = prefs.getBoolean(SettingsFragment.KEY_SAVE_TIFF, true)
+                val saveJpg = prefs.getBoolean(SettingsFragment.KEY_SAVE_JPG, true)
+
+                val tiffFile = File(context.cacheDir, "$dngName.tiff")
+                val tiffPath = if(saveTiff) tiffFile.absolutePath else null
+
+                val bmpFile = File(context.cacheDir, "$dngName.bmp")
+                val bmpPath = bmpFile.absolutePath // JNI writes BMP here
+
+                // Save Linear DNG (as requested)
+                val linearDngFile = File(context.cacheDir, "${dngName}_linear.dng")
+                val linearDngPath = linearDngFile.absolutePath
+
+                Log.d(TAG, "Output Paths: BMP=$bmpPath, TIFF=$tiffPath, DNG=$linearDngPath")
+
+                // 6. JNI Call
+                val startTime = System.currentTimeMillis()
+                // Ensure buffers are rewound just in case
+                buffers.forEach { it.rewind() }
+
+                val ret = ColorProcessor.processHdrPlus(
+                    buffers,
+                    width, height,
+                    rotationDegrees,
+                    whiteLevel, blackLevel,
+                    wb, ccm, cfa,
+                    iso, exposureTime, fNumber, focalLength, captureTime,
+                    targetLogIndex,
+                    nativeLutPath,
+                    tiffPath,
+                    bmpPath,
+                    linearDngPath,
+                    digitalGain
+                )
+
+                Log.d(TAG, "JNI processHdrPlus returned $ret in ${System.currentTimeMillis() - startTime}ms")
+
+                if (ret == 0) {
+                    val contentResolver = context.contentResolver
+
+                    // Process and Save JPEG (from BMP)
+                    var finalJpgUri: Uri? = null
+
+                    if (bmpFile.exists()) {
+                         var processedBitmap: android.graphics.Bitmap? = null
+                         try {
+                             processedBitmap = BitmapFactory.decodeFile(bmpPath)
+
+                             // Rotate if needed (bake in rotation)
+                             if (processedBitmap != null && rotationDegrees != 0) {
+                                 val matrix = android.graphics.Matrix()
+                                 matrix.postRotate(rotationDegrees.toFloat())
+                                 val rotated = android.graphics.Bitmap.createBitmap(
+                                     processedBitmap, 0, 0, processedBitmap.width, processedBitmap.height, matrix, true
+                                 )
+                                 if (rotated != processedBitmap) {
+                                     processedBitmap.recycle()
+                                     processedBitmap = rotated
+                                 }
+                             }
+                         } catch (t: Throwable) {
+                             Log.e(TAG, "Failed to decode or rotate bitmap", t)
+                         }
+
+                         if (processedBitmap != null) {
+                             try {
+                                 // Apply Digital Zoom Crop
+                                 if (currentZoom > 1.05f) {
+                                     val newWidth = (processedBitmap.width / currentZoom).toInt()
+                                     val newHeight = (processedBitmap.height / currentZoom).toInt()
+                                     val x = (processedBitmap.width - newWidth) / 2
+                                     val y = (processedBitmap.height - newHeight) / 2
+                                     val safeX = max(0, x)
+                                     val safeY = max(0, y)
+                                     val safeWidth = min(newWidth, processedBitmap.width - safeX)
+                                     val safeHeight = min(newHeight, processedBitmap.height - safeY)
+
+                                     val croppedBitmap = android.graphics.Bitmap.createBitmap(
+                                         processedBitmap, safeX, safeY, safeWidth, safeHeight
+                                     )
+                                     if (croppedBitmap != processedBitmap) {
+                                         processedBitmap.recycle()
+                                         processedBitmap = croppedBitmap
+                                     }
+                                 }
+
+                                 // Save to MediaStore
+                                 val jpgValues = ContentValues().apply {
+                                     put(MediaStore.MediaColumns.DISPLAY_NAME, "$dngName.jpg")
+                                     put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+                                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                         put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/Darkbag")
+                                         put(MediaStore.MediaColumns.IS_PENDING, 1)
+                                     }
+                                 }
+                                 val jpgUri = contentResolver.insert(
+                                     MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                                     jpgValues
+                                 )
+                                 if (jpgUri != null) {
+                                     finalJpgUri = jpgUri
+                                     try {
+                                         contentResolver.openOutputStream(jpgUri)?.use { out ->
+                                             processedBitmap.compress(
+                                                 android.graphics.Bitmap.CompressFormat.JPEG,
+                                                 95,
+                                                 out
+                                             )
+                                         }
+                                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                             jpgValues.clear()
+                                             jpgValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                                             contentResolver.update(jpgUri, jpgValues, null, null)
+                                         }
+                                         Log.i(TAG, "Saved HDR+ JPEG to $jpgUri")
+                                     } catch (e: Exception) {
+                                         Log.e(TAG, "Failed to save JPEG stream", e)
+                                         contentResolver.delete(jpgUri, null, null)
+                                         finalJpgUri = null
+                                     }
+                                 } else {
+                                     Log.e(TAG, "Failed to insert JPEG into MediaStore")
+                                 }
+                             } catch (t: Throwable) {
+                                 Log.e(TAG, "Error during bitmap processing/saving", t)
+                             } finally {
+                                 processedBitmap?.recycle()
+                             }
+                         }
+                         // Clean up BMP
+                         bmpFile.delete()
+                    } else {
+                         Log.e(TAG, "BMP file not found at $bmpPath")
+                    }
+
+                    // Save TIFF
+                    if (saveTiff && tiffFile.exists()) {
+                        val tiffValues = ContentValues().apply {
+                            put(MediaStore.MediaColumns.DISPLAY_NAME, "$dngName.tiff")
+                            put(MediaStore.MediaColumns.MIME_TYPE, "image/tiff")
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/Darkbag")
+                                put(MediaStore.MediaColumns.IS_PENDING, 1)
+                            }
+                        }
+                        val tiffUri = contentResolver.insert(
+                            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                            tiffValues
+                        )
+                        if (tiffUri != null) {
+                            try {
+                                contentResolver.openOutputStream(tiffUri)?.use { out ->
+                                    java.io.FileInputStream(tiffFile).copyTo(out)
+                                }
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                    tiffValues.clear()
+                                    tiffValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                                    contentResolver.update(tiffUri, tiffValues, null, null)
+                                }
+                                Log.d(TAG, "Saved TIFF to $tiffUri")
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Failed to save TIFF", e)
+                                contentResolver.delete(tiffUri, null, null)
+                            }
+                        }
+                        tiffFile.delete()
+                    }
+
+                    // Save Linear DNG
+                    if (linearDngFile.exists()) {
+                        val dngValues = ContentValues().apply {
+                            put(MediaStore.MediaColumns.DISPLAY_NAME, "${dngName}_linear.dng")
+                            put(MediaStore.MediaColumns.MIME_TYPE, "image/x-adobe-dng")
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/Darkbag")
+                                put(MediaStore.MediaColumns.IS_PENDING, 1)
+                            }
+                        }
+                        val dngUri = contentResolver.insert(
+                            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                            dngValues
+                        )
+                        if (dngUri != null) {
+                            try {
+                                contentResolver.openOutputStream(dngUri)?.use { out ->
+                                    java.io.FileInputStream(linearDngFile).copyTo(out)
+                                }
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                    dngValues.clear()
+                                    dngValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                                    contentResolver.update(dngUri, dngValues, null, null)
+                                }
+                                Log.d(TAG, "Saved Linear DNG to $dngUri")
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Failed to save Linear DNG", e)
+                            }
+                        }
+                        linearDngFile.delete()
+                    }
+
+                    // Update UI
+                    withContext(Dispatchers.Main) {
+                        if (finalJpgUri != null) {
+                            Toast.makeText(context, "HDR+ Saved!", Toast.LENGTH_SHORT).show()
+                            setGalleryThumbnail(finalJpgUri.toString())
+                        } else {
+                            Toast.makeText(context, "HDR+ Save Failed", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+
+                } else {
+                    throw RuntimeException("JNI processing returned error code: $ret")
+                }
+
+            } catch (e: Exception) {
+                Log.e(TAG, "HDR+ processing failed, falling back to single shot", e)
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, "HDR+ failed, saving single frame...", Toast.LENGTH_SHORT).show()
+                }
+
+                // Fallback: Use the first frame as a single shot
+                if (frames.isNotEmpty()) {
+                    try {
+                        val firstFrame = frames[0]
+                        val data = ByteArray(firstFrame.buffer!!.remaining())
+                        firstFrame.buffer!!.rewind()
+                        firstFrame.buffer!!.get(data)
+
+                        val holder = RawImageHolder(
+                            data = data,
+                            width = firstFrame.width,
+                            height = firstFrame.height,
+                            timestamp = firstFrame.timestamp,
+                            rotationDegrees = firstFrame.rotationDegrees,
+                            zoomRatio = currentZoom
+                        )
+                        processingChannel.send(holder)
+                        fallbackSent = true
+                    } catch (fallbackEx: Exception) {
+                        Log.e(TAG, "Fallback failed", fallbackEx)
+                    }
+                }
+            } finally {
+                frames.forEach { it.close() }
+                isBurstActive = false // Burst processing complete
+                // Release semaphore ONLY if we didn't hand off the work to the channel
+                if (!fallbackSent) {
+                    processingSemaphore.release()
+                }
+            }
+        }
+    }
+    private fun updateHdrPlusUi() {
+        cameraUiContainerBinding?.hdrPlusToggle?.let { toggle ->
+            val color = if (isHdrPlusEnabled)
+                MaterialColors.getColor(toggle, com.google.android.material.R.attr.colorPrimary)
+            else
+                MaterialColors.getColor(toggle, com.google.android.material.R.attr.colorOnSurface)
+
+            toggle.setTextColor(color)
+            toggle.isChecked = isHdrPlusEnabled
+        }
     }
 }
