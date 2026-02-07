@@ -21,6 +21,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
         jobjectArray dngBuffers, // Array of ByteBuffers
         jint width,
         jint height,
+        jint orientation,
         jint whiteLevel,
         jint blackLevel,
         jfloatArray whiteBalance, // [r, g0, g1, b]
@@ -201,7 +202,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     // Pass the clipped/scaled white level (16383) to DNG writer
     // This ensures viewers map 0-16383 to 0-100% brightness, restoring correct exposure.
     int dngWhiteLevel = 16383;
-    if (dng_path_cstr) dng_ok = write_dng(dng_path_cstr, width, height, finalImage, dngWhiteLevel, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec);
+    if (dng_path_cstr) dng_ok = write_dng(dng_path_cstr, width, height, finalImage, dngWhiteLevel, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation);
 
     if (outputTiffPath) env->ReleaseStringUTFChars(outputTiffPath, tiff_path_cstr);
     if (outputJpgPath) env->ReleaseStringUTFChars(outputJpgPath, jpg_path_cstr);

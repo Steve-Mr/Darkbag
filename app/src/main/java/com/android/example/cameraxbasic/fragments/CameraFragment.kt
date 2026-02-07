@@ -2067,6 +2067,7 @@ class CameraFragment : Fragment() {
                 // 1. Prepare buffers
                 val width = frames[0].width
                 val height = frames[0].height
+                val rotationDegrees = frames[0].rotationDegrees
 
                 val buffers = frames.map { it.buffer!! }.toTypedArray()
 
@@ -2170,6 +2171,7 @@ class CameraFragment : Fragment() {
                 val ret = ColorProcessor.processHdrPlus(
                     buffers,
                     width, height,
+                    rotationDegrees,
                     whiteLevel, blackLevel,
                     wb, ccm, cfa,
                     iso, exposureTime, fNumber, focalLength, captureTime,
@@ -2192,6 +2194,19 @@ class CameraFragment : Fragment() {
                          var processedBitmap: android.graphics.Bitmap? = null
                          try {
                              processedBitmap = BitmapFactory.decodeFile(bmpPath)
+
+                             // Rotate if needed (bake in rotation)
+                             if (processedBitmap != null && rotationDegrees != 0) {
+                                 val matrix = android.graphics.Matrix()
+                                 matrix.postRotate(rotationDegrees.toFloat())
+                                 val rotated = android.graphics.Bitmap.createBitmap(
+                                     processedBitmap, 0, 0, processedBitmap.width, processedBitmap.height, matrix, true
+                                 )
+                                 if (rotated != processedBitmap) {
+                                     processedBitmap.recycle()
+                                     processedBitmap = rotated
+                                 }
+                             }
                          } catch (t: Throwable) {
                              Log.e(TAG, "Failed to decode BMP (OOM?)", t)
                          }

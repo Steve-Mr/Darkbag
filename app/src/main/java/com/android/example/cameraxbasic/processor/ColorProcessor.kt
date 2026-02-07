@@ -39,6 +39,7 @@ object ColorProcessor {
         dngBuffers: Array<ByteBuffer>,
         width: Int,
         height: Int,
+        orientation: Int,
         whiteLevel: Int,
         blackLevel: Int,
         whiteBalance: FloatArray, // [r, g0, g1, b]
