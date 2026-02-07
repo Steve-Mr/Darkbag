@@ -163,7 +163,7 @@ class SettingsFragment : Fragment() {
 
         val FOCAL_LENGTHS = listOf("24", "28", "35")
         val ANTIBANDING_MODES = listOf("Auto", "50Hz", "60Hz", "Off")
-        val BURST_SIZES = listOf("3", "5")
+        val BURST_SIZES = listOf("3", "4", "5", "6", "7", "8")
 
         val LOG_CURVES = listOf(
             "None",
