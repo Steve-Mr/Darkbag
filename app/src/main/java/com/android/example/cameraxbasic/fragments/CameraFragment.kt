@@ -155,6 +155,7 @@ class CameraFragment : Fragment() {
     private var isHdrPlusEnabled = false
     private var isBurstActive = false
     private var hdrPlusBurstHelper: HdrPlusBurst? = null
+    private var lastHdrPlusConfig: ExposureUtils.ExposureConfig? = null // Cache for instant trigger
 
     private var minFocusDistance = 0.0f
     private var isoRange: android.util.Range<Int>? = null
@@ -557,6 +558,22 @@ class CameraFragment : Fragment() {
                         captureResults[timestamp] = result
                     }
                     captureResultFlow.tryEmit(result)
+
+                    // Background Calculation for HDR+ Latency Optimization
+                    if (isHdrPlusEnabled && !isBurstActive && !isManualExposure) {
+                        lifecycleScope.launch(Dispatchers.Default) {
+                            val iso = result.get(CaptureResult.SENSOR_SENSITIVITY) ?: 100
+                            val time = result.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: 10_000_000L
+
+                            // Safe check for ranges, default if null
+                            val validIsoRange = isoRange ?: android.util.Range(100, 3200)
+                            val validTimeRange = exposureTimeRange ?: android.util.Range(1000L, 1_000_000_000L)
+
+                            lastHdrPlusConfig = ExposureUtils.calculateHdrPlusExposure(
+                                iso, time, validIsoRange, validTimeRange
+                            )
+                        }
+                    }
                 }
             })
 
@@ -1978,20 +1995,21 @@ class CameraFragment : Fragment() {
         isBurstActive = true
 
         lifecycleScope.launch(Dispatchers.Main) {
-            // 1. Get Current State & Calculate Exposure
-            val result = captureResultFlow.replayCache.lastOrNull() ?: captureResultFlow.first()
-            val currentIso = result.get(CaptureResult.SENSOR_SENSITIVITY) ?: 100
-            val currentTime = result.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: 10_000_000L
+            // 1. Get Calculated Exposure (Instant)
+            // Use cached config if available to skip calculation delay
+            var config = lastHdrPlusConfig
 
-            val validIsoRange = isoRange ?: android.util.Range(100, 3200)
-            val validTimeRange = exposureTimeRange ?: android.util.Range(1000L, 1_000_000_000L)
+            if (config == null) {
+                // Fallback if cache empty
+                val result = captureResultFlow.replayCache.lastOrNull() ?: captureResultFlow.first()
+                val currentIso = result.get(CaptureResult.SENSOR_SENSITIVITY) ?: 100
+                val currentTime = result.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: 10_000_000L
+                val validIsoRange = isoRange ?: android.util.Range(100, 3200)
+                val validTimeRange = exposureTimeRange ?: android.util.Range(1000L, 1_000_000_000L)
+                config = ExposureUtils.calculateHdrPlusExposure(currentIso, currentTime, validIsoRange, validTimeRange)
+            }
 
-            // Use ExposureUtils to determine strategy
-            val config = ExposureUtils.calculateHdrPlusExposure(
-                currentIso, currentTime, validIsoRange, validTimeRange
-            )
-
-            Log.d(TAG, "HDR+ Exposure: TargetISO=${config.iso}, TargetTime=${config.exposureTime}, DigitalGain=${config.digitalGain}")
+            Log.d(TAG, "HDR+ Exposure: TargetISO=${config!!.iso}, TargetTime=${config.exposureTime}, DigitalGain=${config.digitalGain}")
 
             // 2. Apply Manual Exposure for Burst
             val cameraControl = camera?.cameraControl
@@ -2004,8 +2022,11 @@ class CameraFragment : Fragment() {
                 camera2Control.setCaptureRequestOptions(builder.build())
             }
 
-            // Slight delay to ensure AE settles
-            delay(50)
+            // Reduced delay as calculations are pre-done.
+            // Camera hardware still needs ~30ms to apply gain, but we can't avoid that without repeating requests.
+            // But we removed the flow collection delay.
+            // 30ms is usually enough for 1-2 frames at 30fps.
+            delay(30)
 
             // 3. Get Burst Size Preference
             val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
@@ -2016,7 +2037,7 @@ class CameraFragment : Fragment() {
             hdrPlusBurstHelper = HdrPlusBurst(
                 frameCount = burstSize,
                 onBurstComplete = { frames ->
-                    processHdrPlusBurst(frames, config.digitalGain)
+                    processHdrPlusBurst(frames, config!!.digitalGain)
                 }
             )
 

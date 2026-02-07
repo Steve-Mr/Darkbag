@@ -44,21 +44,28 @@ object ExposureUtils {
 
         // 2. Determine Dynamic Underexposure Factor
         // Logic:
-        // - Bright Scene (Low ISO): Underexpose significantly (e.g., -2 EV) to protect highlights.
-        // - Dark Scene (High ISO): Underexpose less or not at all (0 EV) to avoid noise.
+        // - Very Bright Scene (ISO <= 50): Underexpose extremely (up to -4 EV) to recover highlights in harsh sun.
+        // - Bright Scene (ISO <= 100): Underexpose significantly (-2 to -3 EV).
+        // - Dark Scene (ISO >= 800): Underexpose less or not at all (0 EV) to avoid noise.
         //
-        // Heuristic:
-        // If ISO <= 100 (Bright): Factor = 0.25 (-2 stops)
-        // If ISO >= 800 (Dark): Factor = 1.0 (0 stops)
-        // Linear interpolation in between.
+        // New Heuristic (Extended Dynamic Range):
+        // If ISO <= 50: Factor = 0.0625 (-4 EV)
+        // If ISO <= 100: Factor = 0.125 (-3 EV) -> Linear interp 50-100
+        // If ISO >= 800: Factor = 1.0 (0 EV)
+        // Interpolate in between.
 
         val underexposeFactor = when {
-            currentIso <= 100 -> 0.25f // -2 EV
+            currentIso <= 50 -> 0.0625f // -4 EV
+            currentIso <= 100 -> {
+                // Interpolate -4 EV to -3 EV
+                val ratio = (currentIso - 50) / (100.0f - 50.0f)
+                0.0625f + (ratio * (0.125f - 0.0625f))
+            }
             currentIso >= 800 -> 1.0f  // 0 EV
             else -> {
-                // Interpolate
+                // Interpolate -3 EV to 0 EV
                 val ratio = (currentIso - 100) / (800.0f - 100.0f)
-                0.25f + (ratio * 0.75f)
+                0.125f + (ratio * (1.0f - 0.125f))
             }
         }
 
