@@ -568,9 +568,11 @@ class CameraFragment : Fragment() {
                             // Safe check for ranges, default if null
                             val validIsoRange = isoRange ?: android.util.Range(100, 3200)
                             val validTimeRange = exposureTimeRange ?: android.util.Range(1000L, 1_000_000_000L)
+                            val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                            val underexposureMode = prefs.getString(SettingsFragment.KEY_HDR_UNDEREXPOSURE_MODE, "Dynamic (Experimental)") ?: "Dynamic (Experimental)"
 
                             lastHdrPlusConfig = ExposureUtils.calculateHdrPlusExposure(
-                                iso, time, validIsoRange, validTimeRange
+                                iso, time, validIsoRange, validTimeRange, underexposureMode
                             )
                         }
                     }
@@ -1999,9 +2001,7 @@ class CameraFragment : Fragment() {
             try {
                 // 1. Get Calculated Exposure (Instant)
                 // Use cached config if available to skip calculation delay
-                var config = lastHdrPlusConfig
-
-                if (config == null) {
+                val config = lastHdrPlusConfig ?: run {
                     // Fallback if cache empty
                     val result = captureResultFlow.replayCache.lastOrNull() ?: captureResultFlow.first()
                     val currentIso = result.get(CaptureResult.SENSOR_SENSITIVITY) ?: 100
@@ -2010,7 +2010,7 @@ class CameraFragment : Fragment() {
                     val validTimeRange = exposureTimeRange ?: android.util.Range(1000L, 1_000_000_000L)
                     val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
                     val underexposureMode = prefs.getString(SettingsFragment.KEY_HDR_UNDEREXPOSURE_MODE, "Dynamic (Experimental)") ?: "Dynamic (Experimental)"
-                    config = ExposureUtils.calculateHdrPlusExposure(
+                    ExposureUtils.calculateHdrPlusExposure(
                         currentIso,
                         currentTime,
                         validIsoRange,
@@ -2021,7 +2021,7 @@ class CameraFragment : Fragment() {
 
                 Log.d(
                     TAG,
-                    "HDR+ Exposure: TargetISO=${config!!.iso}, TargetTime=${config.exposureTime}, DigitalGain=${config.digitalGain}"
+                    "HDR+ Exposure: TargetISO=${config.iso}, TargetTime=${config.exposureTime}, DigitalGain=${config.digitalGain}"
                 )
 
                 // 2. Apply Manual Exposure for Burst
@@ -2056,7 +2056,7 @@ class CameraFragment : Fragment() {
                 hdrPlusBurstHelper = HdrPlusBurst(
                     frameCount = burstSize,
                     onBurstComplete = { frames ->
-                        processHdrPlusBurst(frames, config!!.digitalGain)
+                        processHdrPlusBurst(frames, config.digitalGain)
                     }
                 )
 
