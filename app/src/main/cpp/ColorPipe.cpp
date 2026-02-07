@@ -228,7 +228,7 @@ bool write_tiff(const char* filename, int width, int height, const std::vector<u
     return result;
 }
 
-bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, int iso, long exposureTime, float fNumber, float focalLength, long captureTimeMillis, const std::vector<float>& ccm) {
+bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, int iso, long exposureTime, float fNumber, float focalLength, long captureTimeMillis, const std::vector<float>& ccm, int orientation) {
     // Register DNG tags
     TIFFSetTagExtender(DNGTagExtender);
 
@@ -240,6 +240,16 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
     TIFFSetField(tif, TIFFTAG_IMAGELENGTH, height);
     TIFFSetField(tif, TIFFTAG_BITSPERSAMPLE, 16);
     TIFFSetField(tif, TIFFTAG_COMPRESSION, COMPRESSION_NONE);
+
+    // Orientation
+    uint16_t tiffOrientation = 1;
+    switch (orientation) {
+        case 90: tiffOrientation = 6; break;
+        case 180: tiffOrientation = 3; break;
+        case 270: tiffOrientation = 8; break;
+        default: tiffOrientation = 1; break;
+    }
+    TIFFSetField(tif, TIFFTAG_ORIENTATION, tiffOrientation);
 
     // [Critical] Use LinearRaw
     TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_LINEAR_RAW);
