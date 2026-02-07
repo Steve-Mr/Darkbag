@@ -81,6 +81,7 @@ import com.android.example.cameraxbasic.utils.ANIMATION_SLOW_MILLIS
 import com.android.example.cameraxbasic.utils.MediaStoreUtils
 import com.android.example.cameraxbasic.utils.LutManager
 import com.android.example.cameraxbasic.processor.LutSurfaceProcessor
+import com.android.example.cameraxbasic.utils.ExposureUtils
 import com.android.example.cameraxbasic.utils.simulateClick
 import com.bumptech.glide.Glide
 import com.bumptech.glide.request.RequestOptions
@@ -380,7 +381,7 @@ class CameraFragment : Fragment() {
         hdrPlusBurstHelper = HdrPlusBurst(
             frameCount = 3,
             onBurstComplete = { frames ->
-                processHdrPlusBurst(frames)
+                processHdrPlusBurst(frames, 1.0f)
             }
         )
 
@@ -1975,32 +1976,65 @@ class CameraFragment : Fragment() {
         }
         isBurstActive = true
 
-        // 1. Get Burst Size Preference
-        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        val burstSizeStr = prefs.getString(SettingsFragment.KEY_HDR_BURST_COUNT, "3") ?: "3"
-        val burstSize = burstSizeStr.toIntOrNull() ?: 3
-
-        // 2. Re-initialize helper with correct count
-        hdrPlusBurstHelper = HdrPlusBurst(
-            frameCount = burstSize,
-            onBurstComplete = { frames ->
-                processHdrPlusBurst(frames)
-            }
-        )
-
         lifecycleScope.launch(Dispatchers.Main) {
+            // 1. Get Current State & Calculate Exposure
+            val result = captureResultFlow.replayCache.lastOrNull() ?: captureResultFlow.first()
+            val currentIso = result.get(CaptureResult.SENSOR_SENSITIVITY) ?: 100
+            val currentTime = result.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: 10_000_000L
+
+            val validIsoRange = isoRange ?: android.util.Range(100, 3200)
+            val validTimeRange = exposureTimeRange ?: android.util.Range(1000L, 1_000_000_000L)
+
+            // Use ExposureUtils to determine strategy
+            val config = ExposureUtils.calculateHdrPlusExposure(
+                currentIso, currentTime, validIsoRange, validTimeRange
+            )
+
+            Log.d(TAG, "HDR+ Exposure: TargetISO=${config.iso}, TargetTime=${config.exposureTime}, DigitalGain=${config.digitalGain}")
+
+            // 2. Apply Manual Exposure for Burst
+            val cameraControl = camera?.cameraControl
+            if (cameraControl != null) {
+                val camera2Control = Camera2CameraControl.from(cameraControl)
+                val builder = CaptureRequestOptions.Builder()
+                builder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
+                builder.setCaptureRequestOption(CaptureRequest.SENSOR_SENSITIVITY, config.iso)
+                builder.setCaptureRequestOption(CaptureRequest.SENSOR_EXPOSURE_TIME, config.exposureTime)
+                camera2Control.setCaptureRequestOptions(builder.build())
+            }
+
+            // Slight delay to ensure AE settles
+            delay(50)
+
+            // 3. Get Burst Size Preference
+            val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+            val burstSizeStr = prefs.getString(SettingsFragment.KEY_HDR_BURST_COUNT, "3") ?: "3"
+            val burstSize = burstSizeStr.toIntOrNull() ?: 3
+
+            // 4. Re-initialize helper with correct count & gain
+            hdrPlusBurstHelper = HdrPlusBurst(
+                frameCount = burstSize,
+                onBurstComplete = { frames ->
+                    processHdrPlusBurst(frames, config.digitalGain)
+                }
+            )
+
             Toast.makeText(requireContext(), "Capturing HDR+ Burst ($burstSize frames)...", Toast.LENGTH_SHORT).show()
+
+            Log.d(TAG, "Starting HDR+ Burst (Sequential, $burstSize frames)")
+
+            // Sequential burst to avoid overloading CameraX request queue
+            recursiveBurstCapture(imageCapture, burstSize, 0)
         }
-
-        Log.d(TAG, "Starting HDR+ Burst (Sequential, $burstSize frames)")
-
-        // Sequential burst to avoid overloading CameraX request queue
-        recursiveBurstCapture(imageCapture, burstSize, 0)
     }
 
     private fun recursiveBurstCapture(imageCapture: ImageCapture, totalFrames: Int, currentFrame: Int) {
         if (currentFrame >= totalFrames) {
             Log.d(TAG, "HDR+ Burst Capture sequence complete.")
+            // Restore Auto Exposure (or previous state)
+            lifecycleScope.launch(Dispatchers.Main) {
+                applyCameraControls()
+            }
             return
         }
 
@@ -2029,6 +2063,8 @@ class CameraFragment : Fragment() {
                     // Better to reset/abort.
                     lifecycleScope.launch(Dispatchers.Main) {
                         Toast.makeText(requireContext(), "Burst failed at frame ${currentFrame + 1}", Toast.LENGTH_SHORT).show()
+                        // Restore AE on failure too
+                        applyCameraControls()
                     }
                     hdrPlusBurstHelper?.reset()
                     isBurstActive = false // Reset active flag
@@ -2051,7 +2087,7 @@ class CameraFragment : Fragment() {
         }
     }
 
-    private fun processHdrPlusBurst(frames: List<HdrFrame>) {
+    private fun processHdrPlusBurst(frames: List<HdrFrame>, digitalGain: Float) {
         val currentZoom = if (is2xMode) 2.0f else (currentFocalLength / 24.0f)
 
         lifecycleScope.launch(Dispatchers.IO) {
@@ -2062,7 +2098,7 @@ class CameraFragment : Fragment() {
                     return@launch
                 }
 
-                Log.d(TAG, "processHdrPlusBurst started with ${frames.size} frames.")
+                Log.d(TAG, "processHdrPlusBurst started with ${frames.size} frames. DigitalGain=$digitalGain")
 
                 // 1. Prepare buffers
                 val width = frames[0].width
@@ -2179,7 +2215,8 @@ class CameraFragment : Fragment() {
                     nativeLutPath,
                     tiffPath,
                     bmpPath,
-                    linearDngPath
+                    linearDngPath,
+                    digitalGain
                 )
 
                 Log.d(TAG, "JNI processHdrPlus returned $ret in ${System.currentTimeMillis() - startTime}ms")
