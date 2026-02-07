@@ -54,6 +54,7 @@ object ColorProcessor {
         lutPath: String?,
         outputTiffPath: String?,
         outputJpgPath: String?,
-        outputDngPath: String?
+        outputDngPath: String?,
+        digitalGain: Float
     ): Int
 }

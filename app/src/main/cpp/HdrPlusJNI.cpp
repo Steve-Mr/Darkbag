@@ -36,7 +36,8 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
         jstring lutPath,
         jstring outputTiffPath,
         jstring outputJpgPath,
-        jstring outputDngPath
+        jstring outputDngPath,
+        jfloat digitalGain
 ) {
     LOGD("Native processHdrPlus started.");
 
@@ -169,12 +170,14 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
              finalImage[idx + 2] = std::min(b_val, clip_limit);
 
              // Prepare for BMP/JPG
-             // 1. Digital Gain (Recover Brightness from Headroom)
-             float digital_gain = 4.0f;
+             // 1. Digital Gain (Recover Brightness from Headroom + Underexposure)
+             // Pipeline has 0.25x scaling (Headroom).
+             // digitalGain handles Underexposure compensation.
+             float total_gain = 4.0f * digitalGain;
 
-             float norm_r = std::min(1.0f, (float)r_val / 65535.0f * digital_gain);
-             float norm_g = std::min(1.0f, (float)g_val / 65535.0f * digital_gain);
-             float norm_b = std::min(1.0f, (float)b_val / 65535.0f * digital_gain);
+             float norm_r = std::min(1.0f, (float)r_val / 65535.0f * total_gain);
+             float norm_g = std::min(1.0f, (float)g_val / 65535.0f * total_gain);
+             float norm_b = std::min(1.0f, (float)b_val / 65535.0f * total_gain);
 
              // 2. Gamma 2.2 (Linear sRGB -> sRGB)
              norm_r = pow(norm_r, 1.0f/2.2f);

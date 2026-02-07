@@ -38,6 +38,7 @@ import android.view.ViewGroup
 import android.widget.Toast
 import android.graphics.BitmapFactory
 import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CaptureResult
 import com.google.android.material.slider.Slider
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.button.MaterialButtonToggleGroup
@@ -81,6 +82,7 @@ import com.android.example.cameraxbasic.utils.ANIMATION_SLOW_MILLIS
 import com.android.example.cameraxbasic.utils.MediaStoreUtils
 import com.android.example.cameraxbasic.utils.LutManager
 import com.android.example.cameraxbasic.processor.LutSurfaceProcessor
+import com.android.example.cameraxbasic.utils.ExposureUtils
 import com.android.example.cameraxbasic.utils.simulateClick
 import com.bumptech.glide.Glide
 import com.bumptech.glide.request.RequestOptions
@@ -153,6 +155,7 @@ class CameraFragment : Fragment() {
     private var isHdrPlusEnabled = false
     private var isBurstActive = false
     private var hdrPlusBurstHelper: HdrPlusBurst? = null
+    private var lastHdrPlusConfig: ExposureUtils.ExposureConfig? = null // Cache for instant trigger
 
     private var minFocusDistance = 0.0f
     private var isoRange: android.util.Range<Int>? = null
@@ -380,7 +383,7 @@ class CameraFragment : Fragment() {
         hdrPlusBurstHelper = HdrPlusBurst(
             frameCount = 3,
             onBurstComplete = { frames ->
-                processHdrPlusBurst(frames)
+                processHdrPlusBurst(frames, 1.0f)
             }
         )
 
@@ -555,6 +558,24 @@ class CameraFragment : Fragment() {
                         captureResults[timestamp] = result
                     }
                     captureResultFlow.tryEmit(result)
+
+                    // Background Calculation for HDR+ Latency Optimization
+                    if (isHdrPlusEnabled && !isBurstActive && !isManualExposure) {
+                        lifecycleScope.launch(Dispatchers.Default) {
+                            val iso = result.get(CaptureResult.SENSOR_SENSITIVITY) ?: 100
+                            val time = result.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: 10_000_000L
+
+                            // Safe check for ranges, default if null
+                            val validIsoRange = isoRange ?: android.util.Range(100, 3200)
+                            val validTimeRange = exposureTimeRange ?: android.util.Range(1000L, 1_000_000_000L)
+                            val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                            val underexposureMode = prefs.getString(SettingsFragment.KEY_HDR_UNDEREXPOSURE_MODE, "Dynamic (Experimental)") ?: "Dynamic (Experimental)"
+
+                            lastHdrPlusConfig = ExposureUtils.calculateHdrPlusExposure(
+                                iso, time, validIsoRange, validTimeRange, underexposureMode
+                            )
+                        }
+                    }
                 }
             })
 
@@ -1885,6 +1906,7 @@ class CameraFragment : Fragment() {
         private const val RATIO_16_9_VALUE = 16.0 / 9.0
         private const val FOCUS_RING_DISPLAY_TIME_MS = 500L
         private const val FOCUS_RING_FADE_OUT_DURATION_MS = 300L
+        private const val AE_SETTLE_DELAY_MS = 50L
     }
     private fun takeSinglePicture(imageCapture: ImageCapture) {
         if (imageCapture.outputFormat == ImageCapture.OUTPUT_FORMAT_RAW) {
@@ -1975,32 +1997,102 @@ class CameraFragment : Fragment() {
         }
         isBurstActive = true
 
-        // 1. Get Burst Size Preference
-        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        val burstSizeStr = prefs.getString(SettingsFragment.KEY_HDR_BURST_COUNT, "3") ?: "3"
-        val burstSize = burstSizeStr.toIntOrNull() ?: 3
-
-        // 2. Re-initialize helper with correct count
-        hdrPlusBurstHelper = HdrPlusBurst(
-            frameCount = burstSize,
-            onBurstComplete = { frames ->
-                processHdrPlusBurst(frames)
-            }
-        )
-
         lifecycleScope.launch(Dispatchers.Main) {
-            Toast.makeText(requireContext(), "Capturing HDR+ Burst ($burstSize frames)...", Toast.LENGTH_SHORT).show()
+            try {
+                // 1. Get Calculated Exposure (Instant)
+                // Use cached config if available to skip calculation delay
+                val config = lastHdrPlusConfig ?: run {
+                    // Fallback if cache empty
+                    val result = captureResultFlow.replayCache.lastOrNull() ?: captureResultFlow.first()
+                    val currentIso = result.get(CaptureResult.SENSOR_SENSITIVITY) ?: 100
+                    val currentTime = result.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: 10_000_000L
+                    val validIsoRange = isoRange ?: android.util.Range(100, 3200)
+                    val validTimeRange = exposureTimeRange ?: android.util.Range(1000L, 1_000_000_000L)
+                    val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                    val underexposureMode = prefs.getString(SettingsFragment.KEY_HDR_UNDEREXPOSURE_MODE, "Dynamic (Experimental)") ?: "Dynamic (Experimental)"
+                    ExposureUtils.calculateHdrPlusExposure(
+                        currentIso,
+                        currentTime,
+                        validIsoRange,
+                        validTimeRange,
+                        underexposureMode
+                    )
+                }
+
+                Log.d(
+                    TAG,
+                    "HDR+ Exposure: TargetISO=${config.iso}, TargetTime=${config.exposureTime}, DigitalGain=${config.digitalGain}"
+                )
+
+                // 2. Apply Manual Exposure for Burst
+                val cameraControl = camera?.cameraControl
+                if (cameraControl != null) {
+                    val camera2Control = Camera2CameraControl.from(cameraControl)
+                    val builder = CaptureRequestOptions.Builder()
+                    builder.setCaptureRequestOption(
+                        CaptureRequest.CONTROL_AE_MODE,
+                        CaptureRequest.CONTROL_AE_MODE_OFF
+                    )
+                    builder.setCaptureRequestOption(CaptureRequest.SENSOR_SENSITIVITY, config.iso)
+                    builder.setCaptureRequestOption(
+                        CaptureRequest.SENSOR_EXPOSURE_TIME,
+                        config.exposureTime
+                    )
+                    camera2Control.setCaptureRequestOptions(builder.build()).await()
+                }
+
+                // Slight delay to ensure AE settles
+                delay(AE_SETTLE_DELAY_MS)
+
+                // 3. Get Burst Size Preference
+                val prefs = requireContext().getSharedPreferences(
+                    SettingsFragment.PREFS_NAME,
+                    Context.MODE_PRIVATE
+                )
+                val burstSizeStr = prefs.getString(SettingsFragment.KEY_HDR_BURST_COUNT, "3") ?: "3"
+                val burstSize = burstSizeStr.toIntOrNull() ?: 3
+
+                // 4. Re-initialize helper with correct count & gain
+                hdrPlusBurstHelper = HdrPlusBurst(
+                    frameCount = burstSize,
+                    onBurstComplete = { frames ->
+                        processHdrPlusBurst(frames, config.digitalGain)
+                    }
+                )
+
+                Toast.makeText(
+                    requireContext(),
+                    "Capturing HDR+ Burst ($burstSize frames)...",
+                    Toast.LENGTH_SHORT
+                ).show()
+
+                Log.d(TAG, "Starting HDR+ Burst (Sequential, $burstSize frames)")
+
+                // Sequential burst to avoid overloading CameraX request queue
+                recursiveBurstCapture(imageCapture, burstSize, 0)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to start HDR+ burst", e)
+                Toast.makeText(
+                    requireContext(),
+                    "HDR+ setup failed: ${e.message}",
+                    Toast.LENGTH_LONG
+                ).show()
+                // Ensure state is cleaned up on failure
+                isBurstActive = false
+                processingSemaphore.release()
+                // Attempt to restore camera controls
+                applyCameraControls()
+            }
         }
-
-        Log.d(TAG, "Starting HDR+ Burst (Sequential, $burstSize frames)")
-
-        // Sequential burst to avoid overloading CameraX request queue
-        recursiveBurstCapture(imageCapture, burstSize, 0)
     }
 
     private fun recursiveBurstCapture(imageCapture: ImageCapture, totalFrames: Int, currentFrame: Int) {
         if (currentFrame >= totalFrames) {
             Log.d(TAG, "HDR+ Burst Capture sequence complete.")
+            // Restore Auto Exposure (or previous state)
+            lifecycleScope.launch(Dispatchers.Main) {
+                applyCameraControls()
+            }
             return
         }
 
@@ -2029,6 +2121,8 @@ class CameraFragment : Fragment() {
                     // Better to reset/abort.
                     lifecycleScope.launch(Dispatchers.Main) {
                         Toast.makeText(requireContext(), "Burst failed at frame ${currentFrame + 1}", Toast.LENGTH_SHORT).show()
+                        // Restore AE on failure too
+                        applyCameraControls()
                     }
                     hdrPlusBurstHelper?.reset()
                     isBurstActive = false // Reset active flag
@@ -2051,7 +2145,7 @@ class CameraFragment : Fragment() {
         }
     }
 
-    private fun processHdrPlusBurst(frames: List<HdrFrame>) {
+    private fun processHdrPlusBurst(frames: List<HdrFrame>, digitalGain: Float) {
         val currentZoom = if (is2xMode) 2.0f else (currentFocalLength / 24.0f)
 
         lifecycleScope.launch(Dispatchers.IO) {
@@ -2062,7 +2156,7 @@ class CameraFragment : Fragment() {
                     return@launch
                 }
 
-                Log.d(TAG, "processHdrPlusBurst started with ${frames.size} frames.")
+                Log.d(TAG, "processHdrPlusBurst started with ${frames.size} frames. DigitalGain=$digitalGain")
 
                 // 1. Prepare buffers
                 val width = frames[0].width
@@ -2179,7 +2273,8 @@ class CameraFragment : Fragment() {
                     nativeLutPath,
                     tiffPath,
                     bmpPath,
-                    linearDngPath
+                    linearDngPath,
+                    digitalGain
                 )
 
                 Log.d(TAG, "JNI processHdrPlus returned $ret in ${System.currentTimeMillis() - startTime}ms")
