@@ -2208,7 +2208,7 @@ class CameraFragment : Fragment() {
                                  }
                              }
                          } catch (t: Throwable) {
-                             Log.e(TAG, "Failed to decode BMP (OOM?)", t)
+                             Log.e(TAG, "Failed to decode or rotate bitmap", t)
                          }
 
                          if (processedBitmap != null) {
