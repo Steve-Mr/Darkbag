@@ -130,8 +130,10 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     }
 
     // Process Output
+    // finalImage: Linear RGB (clipped) for DNG
     std::vector<unsigned short> finalImage(width * height * 3);
-    std::vector<unsigned short> bmpImage(width * height * 3);
+    // processedImage: Log/LUT processed for TIFF/BMP
+    std::vector<unsigned short> processedImage(width * height * 3);
 
     // Halide Output is Planar x, y, c
     int stride_x = outputBuf.dim(0).stride();
@@ -161,7 +163,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
              uint16_t g_val = raw_ptr[x * stride_x + y * stride_y + 1 * stride_c];
              uint16_t b_val = raw_ptr[x * stride_x + y * stride_y + 2 * stride_c];
 
-             // Write Interleaved (16-bit Linear) for DNG/TIFF
+             // Write Interleaved (16-bit Linear) for DNG
              int idx = (y * width + x) * 3;
 
              // Clipping to fix Pink Highlights (R > G saturation)
@@ -169,25 +171,42 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
              finalImage[idx + 1] = std::min(g_val, clip_limit);
              finalImage[idx + 2] = std::min(b_val, clip_limit);
 
-             // Prepare for BMP/JPG
+             // Prepare for BMP/TIFF (Log/LUT Pipeline)
              // 1. Digital Gain (Recover Brightness from Headroom + Underexposure)
              // Pipeline has 0.25x scaling (Headroom).
              // digitalGain handles Underexposure compensation.
              float total_gain = 4.0f * digitalGain;
 
-             float norm_r = std::min(1.0f, (float)r_val / 65535.0f * total_gain);
-             float norm_g = std::min(1.0f, (float)g_val / 65535.0f * total_gain);
-             float norm_b = std::min(1.0f, (float)b_val / 65535.0f * total_gain);
+             float norm_r = std::max(0.0f, std::min(1.0f, (float)r_val / 65535.0f * total_gain));
+             float norm_g = std::max(0.0f, std::min(1.0f, (float)g_val / 65535.0f * total_gain));
+             float norm_b = std::max(0.0f, std::min(1.0f, (float)b_val / 65535.0f * total_gain));
 
-             // 2. Gamma 2.2 (Linear sRGB -> sRGB)
-             norm_r = pow(norm_r, 1.0f/2.2f);
-             norm_g = pow(norm_g, 1.0f/2.2f);
-             norm_b = pow(norm_b, 1.0f/2.2f);
+             // 2. Log / Gamma
+             if (targetLog == 0) {
+                 // Standard Gamma 2.2 (Fallback if "None" selected)
+                 norm_r = pow(norm_r, 1.0f/2.2f);
+                 norm_g = pow(norm_g, 1.0f/2.2f);
+                 norm_b = pow(norm_b, 1.0f/2.2f);
+             } else {
+                 // Specific Log Curve
+                 norm_r = apply_log(norm_r, targetLog);
+                 norm_g = apply_log(norm_g, targetLog);
+                 norm_b = apply_log(norm_b, targetLog);
+             }
+
+             // 3. LUT
+             if (lut.size > 0) {
+                 Vec3 color = {norm_r, norm_g, norm_b};
+                 color = apply_lut(lut, color);
+                 norm_r = color.r;
+                 norm_g = color.g;
+                 norm_b = color.b;
+             }
 
              // Scale back to 16-bit
-             bmpImage[idx + 0] = (unsigned short)(norm_r * 65535.0f);
-             bmpImage[idx + 1] = (unsigned short)(norm_g * 65535.0f);
-             bmpImage[idx + 2] = (unsigned short)(norm_b * 65535.0f);
+             processedImage[idx + 0] = (unsigned short)std::max(0.0f, std::min(65535.0f, norm_r * 65535.0f));
+             processedImage[idx + 1] = (unsigned short)std::max(0.0f, std::min(65535.0f, norm_g * 65535.0f));
+             processedImage[idx + 2] = (unsigned short)std::max(0.0f, std::min(65535.0f, norm_b * 65535.0f));
         }
     }
 
@@ -200,8 +219,13 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     bool bmp_ok = true;
     bool dng_ok = true;
 
-    if (tiff_path_cstr) tiff_ok = write_tiff(tiff_path_cstr, width, height, finalImage);
-    if (jpg_path_cstr) bmp_ok = write_bmp(jpg_path_cstr, width, height, bmpImage); // Use processed buffer
+    // TIFF uses processed Image (Log+LUT)
+    if (tiff_path_cstr) tiff_ok = write_tiff(tiff_path_cstr, width, height, processedImage);
+
+    // BMP (for JPG) uses processed Image (Log+LUT)
+    if (jpg_path_cstr) bmp_ok = write_bmp(jpg_path_cstr, width, height, processedImage);
+
+    // DNG uses finalImage (Linear, Clipped)
     // Pass the clipped/scaled white level (16383) to DNG writer
     // This ensures viewers map 0-16383 to 0-100% brightness, restoring correct exposure.
     int dngWhiteLevel = 16383;
