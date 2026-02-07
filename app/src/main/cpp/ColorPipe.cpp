@@ -278,7 +278,12 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
     TIFFSetField(tif, TIFFTAG_UNIQUECAMERAMODEL, model);
 
     // White/Black Level (Critical for Readers)
-    uint32_t white_level_val = (uint32_t)whiteLevel; // Default 65535 or from sensor
+    // The pipeline scales values by 0.25x to preserve headroom.
+    // We must set the WhiteLevel tag to match this scaled range (approx 16383 for 16-bit).
+    // If passed whiteLevel is full range (e.g. 1023 or 65535), we divide by 4.
+    // However, the caller (JNI) might already be passing the scaled value.
+    // Let's assume the caller handles the scaling logic and passes the correct "effective white level" for the DNG.
+    uint32_t white_level_val = (uint32_t)whiteLevel;
     if (white_level_val == 0) white_level_val = 65535;
     TIFFSetField(tif, TIFFTAG_WHITELEVEL, 1, &white_level_val);
 

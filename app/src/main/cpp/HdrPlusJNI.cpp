@@ -138,14 +138,18 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     const uint16_t* raw_ptr = outputBuf.data();
 
     // Determine clipping limit for Linear DNG
-    // Halide output is already black-level subtracted.
-    // We clip to the effective white range to prevent channel overflow (R > G_sat) caused by WB gains.
-    // Using (whiteLevel - blackLevel) is mathematically safest if inputs were raw,
-    // but here we just ensure we don't exceed the sensor's logical white point.
-    uint16_t clip_limit = (uint16_t)whiteLevel;
-    if (blackLevel > 0 && whiteLevel > blackLevel) {
-        clip_limit = (uint16_t)(whiteLevel - blackLevel);
-    }
+    // The pipeline scales data by 0.25x (see hdrplus_pipeline_generator.cpp).
+    // So the "logical white level" is also scaled by 0.25x.
+    // We must clamp to this *scaled* white level to prevent R/B > G overflows relative to the display range.
+    // Note: If whiteLevel is passed as 1023 (10-bit), 0.25x is ~255.
+    // BUT the pipeline maps 0-1023 -> 0-65535 BEFORE the 0.25x scale.
+    // Let's check hdrplus_pipeline_generator.cpp again.
+    // `white_factor = (65535.f / (wp - bp)) * 0.25f;`
+    // `output = (input - bp) * white_factor`
+    // This means FULL input range maps to 65535 * 0.25 = 16383.
+    // So the max valid value is ALWAYS approx 16383, regardless of input bit depth.
+
+    uint16_t clip_limit = 16383; // 65535 / 4
 
     #pragma omp parallel for
     for (int y = 0; y < height; y++) {
@@ -194,7 +198,10 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
 
     if (tiff_path_cstr) tiff_ok = write_tiff(tiff_path_cstr, width, height, finalImage);
     if (jpg_path_cstr) bmp_ok = write_bmp(jpg_path_cstr, width, height, bmpImage); // Use processed buffer
-    if (dng_path_cstr) dng_ok = write_dng(dng_path_cstr, width, height, finalImage, whiteLevel, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec);
+    // Pass the clipped/scaled white level (16383) to DNG writer
+    // This ensures viewers map 0-16383 to 0-100% brightness, restoring correct exposure.
+    int dngWhiteLevel = 16383;
+    if (dng_path_cstr) dng_ok = write_dng(dng_path_cstr, width, height, finalImage, dngWhiteLevel, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec);
 
     if (outputTiffPath) env->ReleaseStringUTFChars(outputTiffPath, tiff_path_cstr);
     if (outputJpgPath) env->ReleaseStringUTFChars(outputJpgPath, jpg_path_cstr);
