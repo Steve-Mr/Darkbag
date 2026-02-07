@@ -10,6 +10,14 @@ import kotlin.math.pow
 
 object ExposureUtils {
 
+    private const val ISO_THRESHOLD_VERY_BRIGHT = 50
+    private const val ISO_THRESHOLD_BRIGHT = 100
+    private const val ISO_THRESHOLD_DARK = 800
+
+    private const val FACTOR_VERY_BRIGHT = 0.0625f // -4 EV
+    private const val FACTOR_BRIGHT = 0.125f       // -3 EV
+    private const val FACTOR_DARK = 1.0f           // 0 EV
+
     data class ExposureConfig(
         val iso: Int,
         val exposureTime: Long, // nanoseconds
@@ -24,13 +32,15 @@ object ExposureUtils {
      * @param currentTime Current Exposure Time (ns) from auto-exposure.
      * @param isoRange Supported ISO range of the camera.
      * @param timeRange Supported Exposure Time range of the camera.
+     * @param underexposureMode Mode for underexposure: "0 EV", "-1 EV", "-2 EV", or "Dynamic (Experimental)".
      * @return ExposureConfig with target ISO, Time, and required Digital Gain.
      */
     fun calculateHdrPlusExposure(
         currentIso: Int,
         currentTime: Long,
         isoRange: Range<Int>,
-        timeRange: Range<Long>
+        timeRange: Range<Long>,
+        underexposureMode: String = "Dynamic (Experimental)"
     ): ExposureConfig {
         val minIso = isoRange.lower
         val maxIso = isoRange.upper
@@ -42,30 +52,30 @@ object ExposureUtils {
         // Note: Real brightness depends on aperture (f-number), but usually fixed on mobile.
         val baselineTotalExposure = currentIso.toDouble() * currentTime.toDouble()
 
-        // 2. Determine Dynamic Underexposure Factor
-        // Logic:
-        // - Very Bright Scene (ISO <= 50): Underexpose extremely (up to -4 EV) to recover highlights in harsh sun.
-        // - Bright Scene (ISO <= 100): Underexpose significantly (-2 to -3 EV).
-        // - Dark Scene (ISO >= 800): Underexpose less or not at all (0 EV) to avoid noise.
-        //
-        // New Heuristic (Extended Dynamic Range):
-        // If ISO <= 50: Factor = 0.0625 (-4 EV)
-        // If ISO <= 100: Factor = 0.125 (-3 EV) -> Linear interp 50-100
-        // If ISO >= 800: Factor = 1.0 (0 EV)
-        // Interpolate in between.
-
-        val underexposeFactor = when {
-            currentIso <= 50 -> 0.0625f // -4 EV
-            currentIso <= 100 -> {
-                // Interpolate -4 EV to -3 EV
-                val ratio = (currentIso - 50) / (100.0f - 50.0f)
-                0.0625f + (ratio * (0.125f - 0.0625f))
-            }
-            currentIso >= 800 -> 1.0f  // 0 EV
+        // 2. Determine Underexposure Factor
+        val underexposeFactor = when (underexposureMode) {
+            "0 EV" -> 1.0f
+            "-1 EV" -> 0.5f
+            "-2 EV" -> 0.25f
             else -> {
-                // Interpolate -3 EV to 0 EV
-                val ratio = (currentIso - 100) / (800.0f - 100.0f)
-                0.125f + (ratio * (1.0f - 0.125f))
+                // Dynamic Logic:
+                // - Very Bright Scene (ISO <= 50): Underexpose extremely (up to -4 EV)
+                // - Bright Scene (ISO <= 100): Underexpose significantly (-2 to -3 EV).
+                // - Dark Scene (ISO >= 800): Underexpose less or not at all (0 EV) to avoid noise.
+                when {
+                    currentIso <= ISO_THRESHOLD_VERY_BRIGHT -> FACTOR_VERY_BRIGHT // -4 EV
+                    currentIso <= ISO_THRESHOLD_BRIGHT -> {
+                        // Interpolate -4 EV to -3 EV
+                        val ratio = (currentIso - ISO_THRESHOLD_VERY_BRIGHT) / (ISO_THRESHOLD_BRIGHT.toFloat() - ISO_THRESHOLD_VERY_BRIGHT.toFloat())
+                        FACTOR_VERY_BRIGHT + (ratio * (FACTOR_BRIGHT - FACTOR_VERY_BRIGHT))
+                    }
+                    currentIso >= ISO_THRESHOLD_DARK -> FACTOR_DARK  // 0 EV
+                    else -> {
+                        // Interpolate -3 EV to 0 EV
+                        val ratio = (currentIso - ISO_THRESHOLD_BRIGHT) / (ISO_THRESHOLD_DARK.toFloat() - ISO_THRESHOLD_BRIGHT.toFloat())
+                        FACTOR_BRIGHT + (ratio * (FACTOR_DARK - FACTOR_BRIGHT))
+                    }
+                }
             }
         }
 
