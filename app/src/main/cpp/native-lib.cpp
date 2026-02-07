@@ -15,38 +15,6 @@
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 
-void processLibRawOutput(
-    libraw_processed_image_t* image,
-    int targetLog,
-    const LUT3D& lut,
-    std::vector<unsigned short>& outputImage
-) {
-    int width = image->width;
-    int height = image->height;
-    unsigned short* data = (unsigned short*)image->data; // 16-bit
-
-    outputImage.resize(width * height * 3);
-
-    #pragma omp parallel for
-    for (int i = 0; i < width * height; i++) {
-        float r = data[i * 3 + 0] / 65535.0f;
-        float g = data[i * 3 + 1] / 65535.0f;
-        float b = data[i * 3 + 2] / 65535.0f;
-
-        // Apply Log
-        r = apply_log(r, targetLog);
-        g = apply_log(g, targetLog);
-        b = apply_log(b, targetLog);
-
-        Vec3 res = {r, g, b};
-        if (lut.size > 0) res = apply_lut(lut, res);
-
-        outputImage[i * 3 + 0] = (unsigned short)std::max(0.0f, std::min(65535.0f, res.r * 65535.0f));
-        outputImage[i * 3 + 1] = (unsigned short)std::max(0.0f, std::min(65535.0f, res.g * 65535.0f));
-        outputImage[i * 3 + 2] = (unsigned short)std::max(0.0f, std::min(65535.0f, res.b * 65535.0f));
-    }
-}
-
 extern "C" JNIEXPORT jint JNICALL
 Java_com_android_example_cameraxbasic_processor_ColorProcessor_processRaw(
         JNIEnv* env,
@@ -128,17 +96,28 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processRaw(
         env->ReleaseStringUTFChars(lutPath, lut_path_cstr);
     }
 
-    // Process Output (Log + LUT)
-    std::vector<unsigned short> finalImage;
-    processLibRawOutput(image, targetLog, lut, finalImage);
+    // Copy LibRaw data to std::vector for shared processing
+    std::vector<unsigned short> rawImage(image->width * image->height * 3);
+    unsigned short* src = (unsigned short*)image->data;
+    std::copy(src, src + (image->width * image->height * 3), rawImage.begin());
 
-    // Save
+    // Paths
     const char* tiff_path_cstr = (outputTiffPath) ? env->GetStringUTFChars(outputTiffPath, 0) : nullptr;
     const char* jpg_path_cstr = (outputJpgPath) ? env->GetStringUTFChars(outputJpgPath, 0) : nullptr;
 
-    if (tiff_path_cstr) write_tiff(tiff_path_cstr, image->width, image->height, finalImage);
-    if (jpg_path_cstr) write_bmp(jpg_path_cstr, image->width, image->height, finalImage);
+    // Use Shared Pipeline (Gain = 1.0 for standard LibRaw output)
+    process_and_save_image(
+        rawImage,
+        image->width,
+        image->height,
+        1.0f,
+        targetLog,
+        lut,
+        tiff_path_cstr,
+        jpg_path_cstr
+    );
 
+    // Release Strings
     if (outputTiffPath) env->ReleaseStringUTFChars(outputTiffPath, tiff_path_cstr);
     if (outputJpgPath) env->ReleaseStringUTFChars(outputJpgPath, jpg_path_cstr);
 

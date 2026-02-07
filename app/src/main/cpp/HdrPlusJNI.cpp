@@ -132,8 +132,6 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     // Process Output
     // finalImage: Linear RGB (clipped) for DNG
     std::vector<unsigned short> finalImage(width * height * 3);
-    // processedImage: Log/LUT processed for TIFF/BMP
-    std::vector<unsigned short> processedImage(width * height * 3);
 
     // Halide Output is Planar x, y, c
     int stride_x = outputBuf.dim(0).stride();
@@ -142,17 +140,6 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     const uint16_t* raw_ptr = outputBuf.data();
 
     // Determine clipping limit for Linear DNG
-    // The pipeline scales data by 0.25x (see hdrplus_pipeline_generator.cpp).
-    // So the "logical white level" is also scaled by 0.25x.
-    // We must clamp to this *scaled* white level to prevent R/B > G overflows relative to the display range.
-    // Note: If whiteLevel is passed as 1023 (10-bit), 0.25x is ~255.
-    // BUT the pipeline maps 0-1023 -> 0-65535 BEFORE the 0.25x scale.
-    // Let's check hdrplus_pipeline_generator.cpp again.
-    // `white_factor = (65535.f / (wp - bp)) * 0.25f;`
-    // `output = (input - bp) * white_factor`
-    // This means FULL input range maps to 65535 * 0.25 = 16383.
-    // So the max valid value is ALWAYS approx 16383, regardless of input bit depth.
-
     uint16_t clip_limit = 16383; // 65535 / 4
 
     #pragma omp parallel for
@@ -170,76 +157,40 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
              finalImage[idx + 0] = std::min(r_val, clip_limit);
              finalImage[idx + 1] = std::min(g_val, clip_limit);
              finalImage[idx + 2] = std::min(b_val, clip_limit);
-
-             // Prepare for BMP/TIFF (Log/LUT Pipeline)
-             // 1. Digital Gain (Recover Brightness from Headroom + Underexposure)
-             // Pipeline has 0.25x scaling (Headroom).
-             // digitalGain handles Underexposure compensation.
-             float total_gain = 4.0f * digitalGain;
-
-             float norm_r = std::max(0.0f, std::min(1.0f, (float)r_val / 65535.0f * total_gain));
-             float norm_g = std::max(0.0f, std::min(1.0f, (float)g_val / 65535.0f * total_gain));
-             float norm_b = std::max(0.0f, std::min(1.0f, (float)b_val / 65535.0f * total_gain));
-
-             // 2. Log / Gamma
-             if (targetLog == 0) {
-                 // Standard Gamma 2.2 (Fallback if "None" selected)
-                 norm_r = pow(norm_r, 1.0f/2.2f);
-                 norm_g = pow(norm_g, 1.0f/2.2f);
-                 norm_b = pow(norm_b, 1.0f/2.2f);
-             } else {
-                 // Specific Log Curve
-                 norm_r = apply_log(norm_r, targetLog);
-                 norm_g = apply_log(norm_g, targetLog);
-                 norm_b = apply_log(norm_b, targetLog);
-             }
-
-             // 3. LUT
-             if (lut.size > 0) {
-                 Vec3 color = {norm_r, norm_g, norm_b};
-                 color = apply_lut(lut, color);
-                 norm_r = color.r;
-                 norm_g = color.g;
-                 norm_b = color.b;
-             }
-
-             // Scale back to 16-bit
-             processedImage[idx + 0] = (unsigned short)std::max(0.0f, std::min(65535.0f, norm_r * 65535.0f));
-             processedImage[idx + 1] = (unsigned short)std::max(0.0f, std::min(65535.0f, norm_g * 65535.0f));
-             processedImage[idx + 2] = (unsigned short)std::max(0.0f, std::min(65535.0f, norm_b * 65535.0f));
         }
     }
 
-    // Save
+    // Prepare paths
     const char* tiff_path_cstr = (outputTiffPath) ? env->GetStringUTFChars(outputTiffPath, 0) : nullptr;
     const char* jpg_path_cstr = (outputJpgPath) ? env->GetStringUTFChars(outputJpgPath, 0) : nullptr;
     const char* dng_path_cstr = (outputDngPath) ? env->GetStringUTFChars(outputDngPath, 0) : nullptr;
 
-    bool tiff_ok = true;
-    bool bmp_ok = true;
     bool dng_ok = true;
 
-    // TIFF uses processed Image (Log+LUT)
-    if (tiff_path_cstr) tiff_ok = write_tiff(tiff_path_cstr, width, height, processedImage);
-
-    // BMP (for JPG) uses processed Image (Log+LUT)
-    if (jpg_path_cstr) bmp_ok = write_bmp(jpg_path_cstr, width, height, processedImage);
-
-    // DNG uses finalImage (Linear, Clipped)
-    // Pass the clipped/scaled white level (16383) to DNG writer
-    // This ensures viewers map 0-16383 to 0-100% brightness, restoring correct exposure.
+    // Save DNG (Raw Path)
     int dngWhiteLevel = 16383;
-    if (dng_path_cstr) dng_ok = write_dng(dng_path_cstr, width, height, finalImage, dngWhiteLevel, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation);
+    if (dng_path_cstr) {
+        dng_ok = write_dng(dng_path_cstr, width, height, finalImage, dngWhiteLevel, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation);
+    }
 
+    // Save Processed Images (Log/LUT Path)
+    // Pass finalImage (Linear) + Gain + Logic to shared pipeline
+    process_and_save_image(
+        finalImage,
+        width,
+        height,
+        4.0f * digitalGain, // Gain to account for 0.25x headroom + exposure
+        targetLog,
+        lut,
+        tiff_path_cstr,
+        jpg_path_cstr
+    );
+
+    // Release Strings
     if (outputTiffPath) env->ReleaseStringUTFChars(outputTiffPath, tiff_path_cstr);
     if (outputJpgPath) env->ReleaseStringUTFChars(outputJpgPath, jpg_path_cstr);
     if (outputDngPath) env->ReleaseStringUTFChars(outputDngPath, dng_path_cstr);
 
-    if (!bmp_ok) {
-        LOGE("Failed to write BMP file.");
-        return -2;
-    }
-    if (!tiff_ok) LOGE("Failed to write TIFF file.");
     if (!dng_ok) LOGE("Failed to write DNG file.");
 
     return 0;
