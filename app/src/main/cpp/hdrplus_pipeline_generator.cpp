@@ -12,17 +12,12 @@ namespace {
 
 // --- Inlined Helper Functions from finish.cpp ---
 
-// Define maximum value for 0.25x scaled data (65535 / 4 approx 16383)
-// We use a slightly safer limit to ensure dampening kicks in reliably.
-constexpr int kMaxVal = 16383;
-
 Func black_white_level(Func input, const Expr bp, const Expr wp) {
   Func output("black_white_level_output");
   Var x, y;
   // Reserve headroom (0.25x) for White Balance to prevent clipping
   Expr white_factor = (65535.f / (wp - bp)) * 0.25f;
-  // Clamp output to kMaxVal to ensure input to White Balance never exceeds the dampening threshold
-  output(x, y) = min(u16(kMaxVal), u16_sat((i32(input(x, y)) - bp) * white_factor));
+  output(x, y) = u16_sat((i32(input(x, y)) - bp) * white_factor);
   return output;
 }
 
@@ -32,13 +27,11 @@ Func white_balance(Func input, Expr width, Expr height,
   Var x, y;
   RDom r(0, width / 2, 0, height / 2);
 
-  // Highlight Dampening to prevent Pink Highlights
-  // We transition White Balance gains to 1.0 as pixel values approach saturation.
-  // This forces R=G=B (White) at the peak, instead of R>G (Pink).
-
-  float saturation_point = (float)kMaxVal;
-  // Start dampening at 75% of max value to ensure smooth transition
-  float knee_point = saturation_point * 0.75f;
+  // Proposal A: Highlight Dampening
+  // Saturation point is where 0.25x headroom hits max u16 (approx 16383)
+  float saturation_point = 16383.0f;
+  // Knee point where we start fading out the WB gain
+  float knee_point = 15000.0f;
 
   auto apply_wb_safe = [&](Expr val, Expr gain) {
       Expr f_val = f32(val);

@@ -137,6 +137,16 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     int stride_c = outputBuf.dim(2).stride();
     const uint16_t* raw_ptr = outputBuf.data();
 
+    // Determine clipping limit for Linear DNG
+    // Halide output is already black-level subtracted.
+    // We clip to the effective white range to prevent channel overflow (R > G_sat) caused by WB gains.
+    // Using (whiteLevel - blackLevel) is mathematically safest if inputs were raw,
+    // but here we just ensure we don't exceed the sensor's logical white point.
+    uint16_t clip_limit = (uint16_t)whiteLevel;
+    if (blackLevel > 0 && whiteLevel > blackLevel) {
+        clip_limit = (uint16_t)(whiteLevel - blackLevel);
+    }
+
     #pragma omp parallel for
     for (int y = 0; y < height; y++) {
         for (int x = 0; x < width; x++) {
@@ -147,9 +157,11 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
 
              // Write Interleaved (16-bit Linear) for DNG/TIFF
              int idx = (y * width + x) * 3;
-             finalImage[idx + 0] = r_val;
-             finalImage[idx + 1] = g_val;
-             finalImage[idx + 2] = b_val;
+
+             // Clipping to fix Pink Highlights (R > G saturation)
+             finalImage[idx + 0] = std::min(r_val, clip_limit);
+             finalImage[idx + 1] = std::min(g_val, clip_limit);
+             finalImage[idx + 2] = std::min(b_val, clip_limit);
 
              // Prepare for BMP/JPG
              // 1. Digital Gain (Recover Brightness from Headroom)
