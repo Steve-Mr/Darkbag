@@ -2045,7 +2045,7 @@ class CameraFragment : Fragment() {
         }
     }
 
-    private fun processHdrPlusBurst(frames: List<ImageProxy>) {
+    private fun processHdrPlusBurst(frames: List<HdrFrame>) {
         val currentZoom = if (is2xMode) 2.0f else (currentFocalLength / 24.0f)
 
         lifecycleScope.launch(Dispatchers.IO) {
@@ -2062,7 +2062,7 @@ class CameraFragment : Fragment() {
                 val width = frames[0].width
                 val height = frames[0].height
 
-                val buffers = frames.map { it.planes[0].buffer }.toTypedArray()
+                val buffers = frames.map { it.buffer }.toTypedArray()
 
                 // Need characteristics for static info
                 var chars: CameraCharacteristics? = null
@@ -2073,7 +2073,7 @@ class CameraFragment : Fragment() {
                 }
 
                 // 2. Metadata (WB, CCM, BlackLevel)
-                val timestamp = frames[0].imageInfo.timestamp
+                val timestamp = frames[0].timestamp
                 val result = findCaptureResult(timestamp)
 
                 // Default values
@@ -2350,7 +2350,18 @@ class CameraFragment : Fragment() {
                 if (frames.isNotEmpty()) {
                     try {
                         val firstFrame = frames[0]
-                        val holder = copyImageToHolder(firstFrame, currentZoom)
+                        val data = ByteArray(firstFrame.buffer.remaining())
+                        firstFrame.buffer.rewind()
+                        firstFrame.buffer.get(data)
+
+                        val holder = RawImageHolder(
+                            data = data,
+                            width = firstFrame.width,
+                            height = firstFrame.height,
+                            timestamp = firstFrame.timestamp,
+                            rotationDegrees = firstFrame.rotationDegrees,
+                            zoomRatio = currentZoom
+                        )
                         processingChannel.send(holder)
                         fallbackSent = true
                     } catch (fallbackEx: Exception) {
