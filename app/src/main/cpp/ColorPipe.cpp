@@ -1,7 +1,6 @@
 #include "ColorPipe.h"
 #include <tiffio.h>
 
-#include <tiffio.h>
 #include <vector>
 #include <ctime>
 
@@ -166,6 +165,78 @@ Vec3 apply_lut(const LUT3D& lut, Vec3 color) {
     Vec3 c0 = { c00.r * (1-dg) + c10.r * dg, c00.g * (1-dg) + c10.g * dg, c00.b * (1-dg) + c10.b * dg };
     Vec3 c1 = { c01.r * (1-dg) + c11.r * dg, c01.g * (1-dg) + c11.g * dg, c01.b * (1-dg) + c11.b * dg };
     return { c0.r * (1-db) + c1.r * db, c0.g * (1-db) + c1.g * db, c0.b * (1-db) + c1.b * db };
+}
+
+// --- Shared Pipeline Implementation ---
+void process_and_save_image(
+    const std::vector<unsigned short>& inputImage,
+    int width,
+    int height,
+    float gain,
+    int targetLog,
+    const LUT3D& lut,
+    const char* tiffPath,
+    const char* jpgPath
+) {
+    // 1. Prepare Output Buffer
+    std::vector<unsigned short> processedImage(width * height * 3);
+
+    // 2. Process Pixels (Digital Gain -> Log/Gamma -> LUT)
+    #pragma omp parallel for
+    for (int i = 0; i < width * height; i++) {
+        unsigned short r_val = inputImage[i * 3 + 0];
+        unsigned short g_val = inputImage[i * 3 + 1];
+        unsigned short b_val = inputImage[i * 3 + 2];
+
+        // 2a. Digital Gain & Normalization
+        // Normalize to [0, 1] based on 16-bit range, then apply gain
+        // Clamp to 0.0f, but allow > 1.0f for Log curves (HDR data)
+        float norm_r = std::max(0.0f, (float)r_val / 65535.0f * gain);
+        float norm_g = std::max(0.0f, (float)g_val / 65535.0f * gain);
+        float norm_b = std::max(0.0f, (float)b_val / 65535.0f * gain);
+
+        // Clamp to 1.0 for Gamma/Rec709, but not necessarily for Log?
+        // Standard LogC3 etc expect 0.18 gray but handle highlights.
+        // For simplicity and safety (as per previous logic), we clamp to 1.0 BEFORE
+        // processing unless it's a specific Log that expects extended range.
+        // The previous implementation in HdrPlusJNI.cpp clamped to 1.0.
+        // The native-lib implementation divided by 65535.0f (implicit 1.0 max if data is 16-bit).
+        // Let's clamp to 1.0 to prevent weird artifacts in LUTs/Gamma.
+        norm_r = std::min(1.0f, norm_r);
+        norm_g = std::min(1.0f, norm_g);
+        norm_b = std::min(1.0f, norm_b);
+
+        // 2b. Log / Gamma
+        if (targetLog == 0) {
+            // Standard Gamma 2.2 (Fallback if "None" selected)
+            norm_r = pow(norm_r, 1.0f/2.2f);
+            norm_g = pow(norm_g, 1.0f/2.2f);
+            norm_b = pow(norm_b, 1.0f/2.2f);
+        } else {
+            // Specific Log Curve
+            norm_r = apply_log(norm_r, targetLog);
+            norm_g = apply_log(norm_g, targetLog);
+            norm_b = apply_log(norm_b, targetLog);
+        }
+
+        // 2c. LUT
+        if (lut.size > 0) {
+            Vec3 color = {norm_r, norm_g, norm_b};
+            color = apply_lut(lut, color);
+            norm_r = color.r;
+            norm_g = color.g;
+            norm_b = color.b;
+        }
+
+        // 3. Scale back to 16-bit
+        processedImage[i * 3 + 0] = (unsigned short)std::max(0.0f, std::min(65535.0f, norm_r * 65535.0f));
+        processedImage[i * 3 + 1] = (unsigned short)std::max(0.0f, std::min(65535.0f, norm_g * 65535.0f));
+        processedImage[i * 3 + 2] = (unsigned short)std::max(0.0f, std::min(65535.0f, norm_b * 65535.0f));
+    }
+
+    // 4. Save Files
+    if (tiffPath) write_tiff(tiffPath, width, height, processedImage);
+    if (jpgPath) write_bmp(jpgPath, width, height, processedImage);
 }
 
 // --- TIFF Writer ---
