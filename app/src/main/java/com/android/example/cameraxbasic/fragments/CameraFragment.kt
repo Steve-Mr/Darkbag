@@ -2060,6 +2060,13 @@ class CameraFragment : Fragment() {
                     }
                 )
 
+                // Initialize UI for Burst
+                cameraUiContainerBinding?.captureProgress?.max = burstSize
+                cameraUiContainerBinding?.captureProgress?.progress = 0
+                cameraUiContainerBinding?.captureProgress?.visibility = View.VISIBLE
+                cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = false
+                cameraUiContainerBinding?.cameraCaptureButton?.alpha = 0.5f
+
                 Toast.makeText(
                     requireContext(),
                     "Capturing HDR+ Burst ($burstSize frames)...",
@@ -2078,6 +2085,9 @@ class CameraFragment : Fragment() {
                     Toast.LENGTH_LONG
                 ).show()
                 // Ensure state is cleaned up on failure
+                cameraUiContainerBinding?.captureProgress?.visibility = View.GONE
+                cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
+                cameraUiContainerBinding?.cameraCaptureButton?.alpha = 1.0f
                 isBurstActive = false
                 processingSemaphore.release()
                 // Attempt to restore camera controls
@@ -2092,6 +2102,11 @@ class CameraFragment : Fragment() {
             // Restore Auto Exposure (or previous state)
             lifecycleScope.launch(Dispatchers.Main) {
                 applyCameraControls()
+                // Reset Burst Active state immediately to allow background processing
+                isBurstActive = false
+                cameraUiContainerBinding?.captureProgress?.visibility = View.GONE
+                cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
+                cameraUiContainerBinding?.cameraCaptureButton?.alpha = 1.0f
             }
             return
         }
@@ -2102,12 +2117,39 @@ class CameraFragment : Fragment() {
             object : ImageCapture.OnImageCapturedCallback() {
                 override fun onCaptureSuccess(image: ImageProxy) {
                     Log.d(TAG, "Burst frame ${currentFrame + 1} captured successfully.")
+
+                    lifecycleScope.launch(Dispatchers.Main) {
+                        cameraUiContainerBinding?.captureProgress?.progress = currentFrame + 1
+                    }
+
                     val helper = hdrPlusBurstHelper
                     if (helper != null) {
-                        helper.addFrame(image)
+                        try {
+                            helper.addFrame(image)
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Failed to add frame to burst", e)
+                            lifecycleScope.launch(Dispatchers.Main) {
+                                Toast.makeText(requireContext(), "Burst failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                                applyCameraControls()
+                                cameraUiContainerBinding?.captureProgress?.visibility = View.GONE
+                                cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
+                                cameraUiContainerBinding?.cameraCaptureButton?.alpha = 1.0f
+                            }
+                            isBurstActive = false
+                            processingSemaphore.release()
+                            return
+                        }
                     } else {
                         Log.e(TAG, "HdrPlusBurst helper is null, closing image manually.")
                         image.close()
+                        lifecycleScope.launch(Dispatchers.Main) {
+                            cameraUiContainerBinding?.captureProgress?.visibility = View.GONE
+                            cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
+                            cameraUiContainerBinding?.cameraCaptureButton?.alpha = 1.0f
+                        }
+                        isBurstActive = false
+                        processingSemaphore.release()
+                        return
                     }
                     // Trigger next frame immediately
                     recursiveBurstCapture(imageCapture, totalFrames, currentFrame + 1)
@@ -2123,6 +2165,9 @@ class CameraFragment : Fragment() {
                         Toast.makeText(requireContext(), "Burst failed at frame ${currentFrame + 1}", Toast.LENGTH_SHORT).show()
                         // Restore AE on failure too
                         applyCameraControls()
+                        cameraUiContainerBinding?.captureProgress?.visibility = View.GONE
+                        cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
+                        cameraUiContainerBinding?.cameraCaptureButton?.alpha = 1.0f
                     }
                     hdrPlusBurstHelper?.reset()
                     isBurstActive = false // Reset active flag
@@ -2486,7 +2531,6 @@ class CameraFragment : Fragment() {
                 }
             } finally {
                 frames.forEach { it.close() }
-                isBurstActive = false // Burst processing complete
                 // Release semaphore ONLY if we didn't hand off the work to the channel
                 if (!fallbackSent) {
                     processingSemaphore.release()
