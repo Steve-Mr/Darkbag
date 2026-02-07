@@ -10,6 +10,14 @@ import kotlin.math.pow
 
 object ExposureUtils {
 
+    private const val ISO_THRESHOLD_VERY_BRIGHT = 50
+    private const val ISO_THRESHOLD_BRIGHT = 100
+    private const val ISO_THRESHOLD_DARK = 800
+
+    private const val FACTOR_VERY_BRIGHT = 0.0625f // -4 EV
+    private const val FACTOR_BRIGHT = 0.125f       // -3 EV
+    private const val FACTOR_DARK = 1.0f           // 0 EV
+
     data class ExposureConfig(
         val iso: Int,
         val exposureTime: Long, // nanoseconds
@@ -55,17 +63,17 @@ object ExposureUtils {
         // Interpolate in between.
 
         val underexposeFactor = when {
-            currentIso <= 50 -> 0.0625f // -4 EV
-            currentIso <= 100 -> {
+            currentIso <= ISO_THRESHOLD_VERY_BRIGHT -> FACTOR_VERY_BRIGHT // -4 EV
+            currentIso <= ISO_THRESHOLD_BRIGHT -> {
                 // Interpolate -4 EV to -3 EV
-                val ratio = (currentIso - 50) / (100.0f - 50.0f)
-                0.0625f + (ratio * (0.125f - 0.0625f))
+                val ratio = (currentIso - ISO_THRESHOLD_VERY_BRIGHT) / (ISO_THRESHOLD_BRIGHT.toFloat() - ISO_THRESHOLD_VERY_BRIGHT.toFloat())
+                FACTOR_VERY_BRIGHT + (ratio * (FACTOR_BRIGHT - FACTOR_VERY_BRIGHT))
             }
-            currentIso >= 800 -> 1.0f  // 0 EV
+            currentIso >= ISO_THRESHOLD_DARK -> FACTOR_DARK  // 0 EV
             else -> {
                 // Interpolate -3 EV to 0 EV
-                val ratio = (currentIso - 100) / (800.0f - 100.0f)
-                0.125f + (ratio * (1.0f - 0.125f))
+                val ratio = (currentIso - ISO_THRESHOLD_BRIGHT) / (ISO_THRESHOLD_DARK.toFloat() - ISO_THRESHOLD_BRIGHT.toFloat())
+                FACTOR_BRIGHT + (ratio * (FACTOR_DARK - FACTOR_BRIGHT))
             }
         }
 
