@@ -94,6 +94,15 @@ class SettingsFragment : Fragment() {
             prefs.edit().putString(KEY_HDR_BURST_COUNT, BURST_SIZES[position]).apply()
         }
 
+        // HDR+ Underexposure
+        val underexposureAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, HDR_UNDEREXPOSURE_MODES)
+        binding.menuHdrUnderexposure.setAdapter(underexposureAdapter)
+        val savedUnderexposure = prefs.getString(KEY_HDR_UNDEREXPOSURE_MODE, "Dynamic")
+        binding.menuHdrUnderexposure.setText(savedUnderexposure, false)
+        binding.menuHdrUnderexposure.setOnItemClickListener { _, _, position, _ ->
+            prefs.edit().putString(KEY_HDR_UNDEREXPOSURE_MODE, HDR_UNDEREXPOSURE_MODES[position]).apply()
+        }
+
         // Default Focal Length
         val focalAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, FOCAL_LENGTHS)
         binding.menuDefaultFocalLength.setAdapter(focalAdapter)
@@ -160,10 +169,12 @@ class SettingsFragment : Fragment() {
         const val KEY_ANTIBANDING = "antibanding_mode"
         const val KEY_FLASH_MODE = "flash_mode"
         const val KEY_HDR_BURST_COUNT = "hdr_burst_count"
+        const val KEY_HDR_UNDEREXPOSURE_MODE = "hdr_underexposure_mode"
 
         val FOCAL_LENGTHS = listOf("24", "28", "35")
         val ANTIBANDING_MODES = listOf("Auto", "50Hz", "60Hz", "Off")
         val BURST_SIZES = listOf("3", "4", "5", "6", "7", "8")
+        val HDR_UNDEREXPOSURE_MODES = listOf("0 EV", "-1 EV", "-2 EV", "Dynamic (Experimental)")
 
         val LOG_CURVES = listOf(
             "None",

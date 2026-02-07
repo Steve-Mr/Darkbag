@@ -2008,11 +2008,14 @@ class CameraFragment : Fragment() {
                     val currentTime = result.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: 10_000_000L
                     val validIsoRange = isoRange ?: android.util.Range(100, 3200)
                     val validTimeRange = exposureTimeRange ?: android.util.Range(1000L, 1_000_000_000L)
+                    val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                    val underexposureMode = prefs.getString(SettingsFragment.KEY_HDR_UNDEREXPOSURE_MODE, "Dynamic (Experimental)") ?: "Dynamic (Experimental)"
                     config = ExposureUtils.calculateHdrPlusExposure(
                         currentIso,
                         currentTime,
                         validIsoRange,
-                        validTimeRange
+                        validTimeRange,
+                        underexposureMode
                     )
                 }
 
