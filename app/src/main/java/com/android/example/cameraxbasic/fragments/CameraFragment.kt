@@ -2356,9 +2356,9 @@ class CameraFragment : Fragment() {
                 if (frames.isNotEmpty()) {
                     try {
                         val firstFrame = frames[0]
-                        val data = ByteArray(firstFrame.buffer.remaining())
-                        firstFrame.buffer.rewind()
-                        firstFrame.buffer.get(data)
+                        val data = ByteArray(firstFrame.buffer!!.remaining())
+                        firstFrame.buffer!!.rewind()
+                        firstFrame.buffer!!.get(data)
 
                         val holder = RawImageHolder(
                             data = data,

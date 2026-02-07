@@ -137,6 +137,20 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     int stride_c = outputBuf.dim(2).stride();
     const uint16_t* raw_ptr = outputBuf.data();
 
+    // Determine clipping limit for Linear DNG
+    // The pipeline scales data by 0.25x (see hdrplus_pipeline_generator.cpp).
+    // So the "logical white level" is also scaled by 0.25x.
+    // We must clamp to this *scaled* white level to prevent R/B > G overflows relative to the display range.
+    // Note: If whiteLevel is passed as 1023 (10-bit), 0.25x is ~255.
+    // BUT the pipeline maps 0-1023 -> 0-65535 BEFORE the 0.25x scale.
+    // Let's check hdrplus_pipeline_generator.cpp again.
+    // `white_factor = (65535.f / (wp - bp)) * 0.25f;`
+    // `output = (input - bp) * white_factor`
+    // This means FULL input range maps to 65535 * 0.25 = 16383.
+    // So the max valid value is ALWAYS approx 16383, regardless of input bit depth.
+
+    uint16_t clip_limit = 16383; // 65535 / 4
+
     #pragma omp parallel for
     for (int y = 0; y < height; y++) {
         for (int x = 0; x < width; x++) {
@@ -147,9 +161,11 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
 
              // Write Interleaved (16-bit Linear) for DNG/TIFF
              int idx = (y * width + x) * 3;
-             finalImage[idx + 0] = r_val;
-             finalImage[idx + 1] = g_val;
-             finalImage[idx + 2] = b_val;
+
+             // Clipping to fix Pink Highlights (R > G saturation)
+             finalImage[idx + 0] = std::min(r_val, clip_limit);
+             finalImage[idx + 1] = std::min(g_val, clip_limit);
+             finalImage[idx + 2] = std::min(b_val, clip_limit);
 
              // Prepare for BMP/JPG
              // 1. Digital Gain (Recover Brightness from Headroom)
@@ -182,7 +198,10 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
 
     if (tiff_path_cstr) tiff_ok = write_tiff(tiff_path_cstr, width, height, finalImage);
     if (jpg_path_cstr) bmp_ok = write_bmp(jpg_path_cstr, width, height, bmpImage); // Use processed buffer
-    if (dng_path_cstr) dng_ok = write_dng(dng_path_cstr, width, height, finalImage, whiteLevel, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec);
+    // Pass the clipped/scaled white level (16383) to DNG writer
+    // This ensures viewers map 0-16383 to 0-100% brightness, restoring correct exposure.
+    int dngWhiteLevel = 16383;
+    if (dng_path_cstr) dng_ok = write_dng(dng_path_cstr, width, height, finalImage, dngWhiteLevel, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec);
 
     if (outputTiffPath) env->ReleaseStringUTFChars(outputTiffPath, tiff_path_cstr);
     if (outputJpgPath) env->ReleaseStringUTFChars(outputJpgPath, jpg_path_cstr);
