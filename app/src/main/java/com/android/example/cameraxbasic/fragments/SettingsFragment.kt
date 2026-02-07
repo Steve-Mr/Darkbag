@@ -139,6 +139,11 @@ class SettingsFragment : Fragment() {
         binding.switchManualControls.setOnCheckedChangeListener { _, isChecked ->
             prefs.edit().putBoolean(KEY_MANUAL_CONTROLS, isChecked).apply()
         }
+
+        binding.switchFastExposure.isChecked = prefs.getBoolean(KEY_EXPERIMENTAL_FAST_EXPOSURE, false)
+        binding.switchFastExposure.setOnCheckedChangeListener { _, isChecked ->
+            prefs.edit().putBoolean(KEY_EXPERIMENTAL_FAST_EXPOSURE, isChecked).apply()
+        }
     }
 
     override fun onDestroyView() {
@@ -160,6 +165,7 @@ class SettingsFragment : Fragment() {
         const val KEY_ANTIBANDING = "antibanding_mode"
         const val KEY_FLASH_MODE = "flash_mode"
         const val KEY_HDR_BURST_COUNT = "hdr_burst_count"
+        const val KEY_EXPERIMENTAL_FAST_EXPOSURE = "experimental_fast_exposure"
 
         val FOCAL_LENGTHS = listOf("24", "28", "35")
         val ANTIBANDING_MODES = listOf("Auto", "50Hz", "60Hz", "Off")

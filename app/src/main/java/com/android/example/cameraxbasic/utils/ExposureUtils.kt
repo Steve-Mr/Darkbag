@@ -32,45 +32,93 @@ object ExposureUtils {
         isoRange: Range<Int>,
         timeRange: Range<Long>
     ): ExposureConfig {
+        // 1. Calculate Baseline Total Exposure (Brightness)
+        val baselineTotalExposure = currentIso.toDouble() * currentTime.toDouble()
+        return calculateHdrPlusExposureInternal(baselineTotalExposure, currentIso, isoRange, timeRange)
+    }
+
+    /**
+     * Calculates the target exposure configuration based on a closed-loop analysis of the scene.
+     *
+     * @param currentIso The ISO used for the analyzed frame.
+     * @param currentTime The Exposure Time used for the analyzed frame.
+     * @param measuredLuma The average luma (0-255) measured from the frame.
+     * @param targetLuma The target average luma (e.g. 110.0) we want to achieve.
+     * @param isoRange Supported ISO range.
+     * @param timeRange Supported Time range.
+     */
+    fun calculateClosedLoopExposure(
+        currentIso: Int,
+        currentTime: Long,
+        measuredLuma: Double,
+        targetLuma: Double,
+        isoRange: Range<Int>,
+        timeRange: Range<Long>
+    ): ExposureConfig {
+        // 1. Calculate Scene Brightness Factor (Luma per Exposure Unit)
+        val safeTime = currentTime.coerceAtLeast(1L)
+        val currentExposure = currentIso.toDouble() * safeTime.toDouble()
+
+        // Avoid division by zero or extremely low values
+        val brightnessFactor = if (measuredLuma > 0.001) measuredLuma / currentExposure else 0.0
+
+        // 2. Calculate Baseline Total Exposure needed to hit Target Luma
+        // Target = Brightness * NewExposure => NewExposure = Target / Brightness
+        val baselineTotalExposure = if (brightnessFactor > 1e-12) {
+            targetLuma / brightnessFactor
+        } else {
+             // Fallback for pitch black: Max exposure
+             isoRange.upper.toDouble() * timeRange.upper.toDouble()
+        }
+
+        // 3. Estimate "Auto ISO" for Heuristic
+        // We need an ISO value to plug into the heuristic "If ISO <= 50, underexpose...".
+        // We assume a standard shutter speed of 10ms (1/100s) to map total exposure to an equivalent ISO.
+        val estimatedIso = (baselineTotalExposure / 10_000_000.0).toInt().coerceIn(isoRange.lower, isoRange.upper)
+
+        return calculateHdrPlusExposureInternal(baselineTotalExposure, estimatedIso, isoRange, timeRange)
+    }
+
+    private fun calculateHdrPlusExposureInternal(
+        baselineTotalExposure: Double,
+        referenceIso: Int,
+        isoRange: Range<Int>,
+        timeRange: Range<Long>
+    ): ExposureConfig {
         val minIso = isoRange.lower
         val maxIso = isoRange.upper
         val minTime = timeRange.lower
         val maxTime = timeRange.upper
 
-        // 1. Calculate Baseline Total Exposure (Brightness)
-        // We use a simple product of ISO * Time as a proxy for total light collected.
-        // Note: Real brightness depends on aperture (f-number), but usually fixed on mobile.
-        val baselineTotalExposure = currentIso.toDouble() * currentTime.toDouble()
-
         // 2. Determine Dynamic Underexposure Factor
         // Logic:
-        // - Very Bright Scene (ISO <= 50): Underexpose extremely (up to -4 EV) to recover highlights in harsh sun.
+        // - Very Bright Scene (ISO <= 50): Underexpose extremely (up to -4 EV) to recover highlights.
         // - Bright Scene (ISO <= 100): Underexpose significantly (-2 to -3 EV).
-        // - Dark Scene (ISO >= 800): Underexpose less or not at all (0 EV) to avoid noise.
-        //
-        // New Heuristic (Extended Dynamic Range):
-        // If ISO <= 50: Factor = 0.0625 (-4 EV)
-        // If ISO <= 100: Factor = 0.125 (-3 EV) -> Linear interp 50-100
-        // If ISO >= 800: Factor = 1.0 (0 EV)
-        // Interpolate in between.
+        // - Dark Scene (ISO >= 800): Underexpose less or not at all (0 EV).
 
         val underexposeFactor = when {
-            currentIso <= 50 -> 0.0625f // -4 EV
-            currentIso <= 100 -> {
+            referenceIso <= 50 -> 0.0625f // -4 EV
+            referenceIso <= 100 -> {
                 // Interpolate -4 EV to -3 EV
-                val ratio = (currentIso - 50) / (100.0f - 50.0f)
+                val ratio = (referenceIso - 50) / (100.0f - 50.0f)
                 0.0625f + (ratio * (0.125f - 0.0625f))
             }
-            currentIso >= 800 -> 1.0f  // 0 EV
+            referenceIso >= 800 -> 1.0f  // 0 EV
             else -> {
                 // Interpolate -3 EV to 0 EV
-                val ratio = (currentIso - 100) / (800.0f - 100.0f)
+                val ratio = (referenceIso - 100) / (800.0f - 100.0f)
                 0.125f + (ratio * (1.0f - 0.125f))
             }
         }
 
-        val targetTotalExposure = baselineTotalExposure * underexposeFactor
-        val digitalGain = 1.0f / underexposeFactor
+        // Apply Gain Cap to prevent excessive noise in preview (requested by plan)
+        // Cap digital gain at 16x (which implies min underexpose factor of 1/16 = 0.0625)
+        // Since our heuristic goes down to 0.0625 (-4 EV), this is already within limits.
+        // But let's be safe.
+        val safeUnderexposeFactor = max(underexposeFactor, 1.0f / 16.0f)
+
+        val targetTotalExposure = baselineTotalExposure * safeUnderexposeFactor
+        val digitalGain = 1.0f / safeUnderexposeFactor
 
         // 3. Exposure Factorization (The "Payload" Strategy)
         // Goal: Achieve targetTotalExposure using specific constraints.
@@ -89,36 +137,27 @@ object ExposureUtils {
         fun currentExposure(): Double = targetIso.toDouble() * targetTime.toDouble()
 
         // Stage 1: Increase Time up to 8ms, keeping ISO at Min
-        // We want: minIso * T = targetTotalExposure => T = target / minIso
         val neededTimeS1 = (targetTotalExposure / minIso).toLong()
         targetTime = neededTimeS1.coerceIn(minTime, timeLimit8ms)
         targetIso = minIso
 
         if (currentExposure() < targetTotalExposure) {
             // Stage 2: Increase ISO up to 4x, keeping Time at 8ms
-            // We want: I * 8ms = targetTotalExposure => I = target / 8ms
             val neededIsoS2 = (targetTotalExposure / timeLimit8ms).toInt()
             targetIso = neededIsoS2.coerceIn(minIso, isoLimit4x)
             targetTime = timeLimit8ms // Locked at 8ms
 
             if (currentExposure() < targetTotalExposure) {
                 // Stage 3: Increase both Time and ISO beyond limits
-                // The prompt says "increase both... log space proportional".
-                // Simple implementation:
-                // Distribute the remaining required gain equally between Time and ISO?
-                // Or prioritize Time up to a hard limit (e.g. 100ms) then ISO?
-                // Prompt: "Simultaneously increase... until limits (100ms, 96x gain)".
-
                 val remainingFactor = targetTotalExposure / currentExposure()
                 // Split factor: sqrt(factor) to ISO, sqrt(factor) to Time
-                // This keeps them balanced in log space.
                 val splitFactor = kotlin.math.sqrt(remainingFactor)
 
                 val neededIsoS3 = (targetIso * splitFactor).toInt()
                 val neededTimeS3 = (targetTime * splitFactor).toLong()
 
                 targetIso = neededIsoS3.coerceIn(minIso, maxIso)
-                targetTime = neededTimeS3.coerceIn(minTime, maxTime) // Camera max, not 100ms hard limit
+                targetTime = neededTimeS3.coerceIn(minTime, maxTime)
             }
         }
 

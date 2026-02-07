@@ -40,6 +40,8 @@ class LutSurfaceProcessor : SurfaceProcessor {
     private var inputWidth = 0
     private var inputHeight = 0
 
+    private var exposureCompensation = 1.0f
+
     private val transformMatrix = FloatArray(16)
 
     // Full screen quad
@@ -139,6 +141,12 @@ class LutSurfaceProcessor : SurfaceProcessor {
         width = w
         height = h
         createEglSurface(surface)
+    }
+
+    fun setExposureCompensation(gain: Float) {
+        handler.post {
+            exposureCompensation = gain
+        }
     }
 
     fun updateLut(lutData: FloatArray?, size: Int, logType: Int) {
@@ -304,6 +312,7 @@ class LutSurfaceProcessor : SurfaceProcessor {
         }
         GLES30.glUniform1i(GLES30.glGetUniformLocation(program, "uLutSize"), currentLutSize)
         GLES30.glUniform1i(GLES30.glGetUniformLocation(program, "uLogType"), currentLogType)
+        GLES30.glUniform1f(GLES30.glGetUniformLocation(program, "uGain"), exposureCompensation)
 
         val posHandle = GLES30.glGetAttribLocation(program, "aPosition")
         val texHandle = GLES30.glGetAttribLocation(program, "aTexCoord")
@@ -349,6 +358,7 @@ class LutSurfaceProcessor : SurfaceProcessor {
             uniform sampler3D uLut;
             uniform int uLutSize;
             uniform int uLogType;
+            uniform float uGain;
 
             in vec2 vTexCoord;
             out vec4 outColor;
@@ -379,6 +389,9 @@ class LutSurfaceProcessor : SurfaceProcessor {
 
                 vec3 linear = pow(color.rgb, vec3(2.2));
 
+                // Apply Exposure Compensation (Digital Gain)
+                linear *= uGain;
+
                 vec3 logColor;
                 logColor.r = apply_log(linear.r, uLogType);
                 logColor.g = apply_log(linear.g, uLogType);
@@ -387,7 +400,8 @@ class LutSurfaceProcessor : SurfaceProcessor {
                 if (uLutSize > 0) {
                      outColor = vec4(texture(uLut, logColor).rgb, 1.0);
                 } else {
-                     outColor = color;
+                     // No LUT: Gamma correct back to sRGB for display
+                     outColor = vec4(pow(linear, vec3(1.0/2.2)), 1.0);
                 }
             }
         """.trimIndent()

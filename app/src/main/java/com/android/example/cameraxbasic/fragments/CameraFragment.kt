@@ -83,6 +83,7 @@ import com.android.example.cameraxbasic.utils.MediaStoreUtils
 import com.android.example.cameraxbasic.utils.LutManager
 import com.android.example.cameraxbasic.processor.LutSurfaceProcessor
 import com.android.example.cameraxbasic.utils.ExposureUtils
+import com.android.example.cameraxbasic.utils.ExposureController
 import com.android.example.cameraxbasic.utils.simulateClick
 import com.bumptech.glide.Glide
 import com.bumptech.glide.request.RequestOptions
@@ -105,7 +106,7 @@ import kotlin.math.min
 import kotlin.math.max
 
 /** Helper type alias used for analysis use case callbacks */
-typealias LumaListener = (luma: Double) -> Unit
+typealias LumaListener = (luma: Double, iso: Int?, time: Long?) -> Unit
 
 /**
  * Main fragment for this app. Implements all camera operations including:
@@ -156,6 +157,8 @@ class CameraFragment : Fragment() {
     private var isBurstActive = false
     private var hdrPlusBurstHelper: HdrPlusBurst? = null
     private var lastHdrPlusConfig: ExposureUtils.ExposureConfig? = null // Cache for instant trigger
+    private var isFastExposureEnabled = false
+    private val exposureController = ExposureController()
 
     private var minFocusDistance = 0.0f
     private var isoRange: android.util.Range<Int>? = null
@@ -298,6 +301,15 @@ class CameraFragment : Fragment() {
             Navigation.findNavController(requireActivity(), R.id.fragment_container).navigate(
                 CameraFragmentDirections.actionCameraToPermissions()
             )
+        }
+
+        // Update Fast Exposure Preference
+        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        isFastExposureEnabled = prefs.getBoolean(SettingsFragment.KEY_EXPERIMENTAL_FAST_EXPOSURE, false)
+        if (!isFastExposureEnabled) {
+             exposureController.reset()
+             // Reset Exposure Compensation
+             lutProcessor?.setExposureCompensation(1.0f)
         }
     }
 
@@ -589,13 +601,12 @@ class CameraFragment : Fragment() {
             .build()
             // The analyzer can then be assigned to the instance
             .also {
-                it.setAnalyzer(cameraExecutor, LuminosityAnalyzer { luma ->
-                    // Values returned from our analyzer are passed to the attached listener
-                    // We log image analysis results here - you should do something useful
-                    // instead!
-                    // Values returned from our analyzer are passed to the attached listener
-                    // We log image analysis results here - you should do something useful
-                    // instead!
+                it.setAnalyzer(cameraExecutor, LuminosityAnalyzer { luma, iso, time ->
+                    if (isFastExposureEnabled && iso != null && time != null) {
+                         lifecycleScope.launch(Dispatchers.Main) {
+                             updateClosedLoopExposure(luma, iso, time)
+                         }
+                    }
                 })
             }
 
@@ -977,8 +988,22 @@ class CameraFragment : Fragment() {
             // Compute average luminance for the image
             val luma = pixels.average()
 
+            // Extract Metadata
+            var iso: Int? = null
+            var time: Long? = null
+            try {
+                // Use ExperimentalCamera2Interop to get CaptureResult
+                val result = androidx.camera.camera2.interop.Camera2Interop.getCaptureResult(image)
+                if (result != null) {
+                    iso = result.get(CaptureResult.SENSOR_SENSITIVITY)
+                    time = result.get(CaptureResult.SENSOR_EXPOSURE_TIME)
+                }
+            } catch (e: Exception) {
+                // Ignore
+            }
+
             // Call all listeners with new value
-            listeners.forEach { it(luma) }
+            listeners.forEach { it(luma, iso, time) }
 
             image.close()
         }
@@ -1905,6 +1930,34 @@ class CameraFragment : Fragment() {
         private const val FOCUS_RING_DISPLAY_TIME_MS = 500L
         private const val FOCUS_RING_FADE_OUT_DURATION_MS = 300L
     }
+
+    private fun updateClosedLoopExposure(luma: Double, iso: Int, time: Long) {
+        if (!isFastExposureEnabled) return
+        if (isBurstActive) return
+
+        val validIsoRange = isoRange ?: android.util.Range(100, 3200)
+        val validTimeRange = exposureTimeRange ?: android.util.Range(1000L, 1_000_000_000L)
+
+        val config = exposureController.update(luma, iso, time, validIsoRange, validTimeRange)
+
+        // Cache it for immediate capture
+        lastHdrPlusConfig = config
+
+        // Apply to Camera (Manual)
+        val cameraControl = camera?.cameraControl
+        if (cameraControl != null) {
+            val camera2Control = Camera2CameraControl.from(cameraControl)
+            val builder = CaptureRequestOptions.Builder()
+            builder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
+            builder.setCaptureRequestOption(CaptureRequest.SENSOR_SENSITIVITY, config.iso)
+            builder.setCaptureRequestOption(CaptureRequest.SENSOR_EXPOSURE_TIME, config.exposureTime)
+            camera2Control.setCaptureRequestOptions(builder.build())
+        }
+
+        // Apply to Preview
+        lutProcessor?.setExposureCompensation(config.digitalGain)
+    }
+
     private fun takeSinglePicture(imageCapture: ImageCapture) {
         if (imageCapture.outputFormat == ImageCapture.OUTPUT_FORMAT_RAW) {
             // RAW Capture with Processing
@@ -2011,22 +2064,22 @@ class CameraFragment : Fragment() {
 
             Log.d(TAG, "HDR+ Exposure: TargetISO=${config!!.iso}, TargetTime=${config.exposureTime}, DigitalGain=${config.digitalGain}")
 
-            // 2. Apply Manual Exposure for Burst
-            val cameraControl = camera?.cameraControl
-            if (cameraControl != null) {
-                val camera2Control = Camera2CameraControl.from(cameraControl)
-                val builder = CaptureRequestOptions.Builder()
-                builder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
-                builder.setCaptureRequestOption(CaptureRequest.SENSOR_SENSITIVITY, config.iso)
-                builder.setCaptureRequestOption(CaptureRequest.SENSOR_EXPOSURE_TIME, config.exposureTime)
-                camera2Control.setCaptureRequestOptions(builder.build())
+            // 2. Apply Manual Exposure for Burst (Only if not already in Fast Exposure mode)
+            if (!isFastExposureEnabled) {
+                val cameraControl = camera?.cameraControl
+                if (cameraControl != null) {
+                    val camera2Control = Camera2CameraControl.from(cameraControl)
+                    val builder = CaptureRequestOptions.Builder()
+                    builder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
+                    builder.setCaptureRequestOption(CaptureRequest.SENSOR_SENSITIVITY, config.iso)
+                    builder.setCaptureRequestOption(CaptureRequest.SENSOR_EXPOSURE_TIME, config.exposureTime)
+                    camera2Control.setCaptureRequestOptions(builder.build())
+                }
+                // Delay for sensor settle
+                delay(30)
+            } else {
+                Log.d(TAG, "Fast Exposure enabled: Skipping sensor settle delay.")
             }
-
-            // Reduced delay as calculations are pre-done.
-            // Camera hardware still needs ~30ms to apply gain, but we can't avoid that without repeating requests.
-            // But we removed the flow collection delay.
-            // 30ms is usually enough for 1-2 frames at 30fps.
-            delay(30)
 
             // 3. Get Burst Size Preference
             val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
