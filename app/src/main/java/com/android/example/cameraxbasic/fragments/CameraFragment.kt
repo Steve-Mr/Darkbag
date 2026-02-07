@@ -2010,7 +2010,13 @@ class CameraFragment : Fragment() {
             object : ImageCapture.OnImageCapturedCallback() {
                 override fun onCaptureSuccess(image: ImageProxy) {
                     Log.d(TAG, "Burst frame ${currentFrame + 1} captured successfully.")
-                    hdrPlusBurstHelper?.addFrame(image)
+                    val helper = hdrPlusBurstHelper
+                    if (helper != null) {
+                        helper.addFrame(image)
+                    } else {
+                        Log.e(TAG, "HdrPlusBurst helper is null, closing image manually.")
+                        image.close()
+                    }
                     // Trigger next frame immediately
                     recursiveBurstCapture(imageCapture, totalFrames, currentFrame + 1)
                 }
@@ -2062,7 +2068,7 @@ class CameraFragment : Fragment() {
                 val width = frames[0].width
                 val height = frames[0].height
 
-                val buffers = frames.map { it.buffer }.toTypedArray()
+                val buffers = frames.map { it.buffer!! }.toTypedArray()
 
                 // Need characteristics for static info
                 var chars: CameraCharacteristics? = null

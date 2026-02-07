@@ -8,18 +8,17 @@ import java.nio.ByteBuffer
  * Uses a Direct ByteBuffer to store pixel data off-heap to prevent OOM.
  */
 data class HdrFrame(
-    val buffer: ByteBuffer,
+    var buffer: ByteBuffer?,
     val width: Int,
     val height: Int,
     val timestamp: Long,
     val rotationDegrees: Int
 ) {
     /**
-     * Explicitly clears the buffer.
-     * Although Direct ByteBuffers are GC'd, this is a placeholder for potential future manual management.
+     * Explicitly clears the buffer reference to assist GC.
      */
     fun close() {
-        // No-op for standard ByteBuffer, but useful for tracking lifecycle.
+        buffer = null
     }
 }
 
@@ -45,10 +44,8 @@ class HdrPlusBurst(
                     frames.clear() // Ownership transferred to consumer
                 }
             } catch (e: Exception) {
-                // If allocation fails (OOM), we should probably clear and abort,
-                // but let's just log (though we don't have a logger here easily without TAG).
-                // Ideally, we rethrow so the caller knows.
-                image.close()
+                // If allocation fails (OOM), we clear and abort.
+                // Do NOT call image.close() here, as it's handled in finally block.
                 frames.forEach { it.close() }
                 frames.clear()
                 throw e
