@@ -4,3 +4,7 @@
 [submodule "app/src/main/cpp/hdr-plus"]
 	path = app/src/main/cpp/hdr-plus
 	url = https://github.com/timothybrooks/hdr-plus
+[submodule "app/src/main/cpp/steve-hdr-plus"]
+	path = app/src/main/cpp/steve-hdr-plus
+	url = https://github.com/Steve-Mr/hdr-plus.git
+	branch = main

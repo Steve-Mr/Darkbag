@@ -113,6 +113,15 @@
                             android:text="Dynamic" />
                     </com.google.android.material.textfield.TextInputLayout>
 
+                    <Space android:layout_width="match_parent" android:layout_height="@dimen/spacing_medium" />
+
+                    <com.google.android.material.materialswitch.MaterialSwitch
+                        android:id="@+id/switch_use_steve_pipeline"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Experimental Pipeline (Steve)"
+                        android:textSize="16sp" />
+
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 

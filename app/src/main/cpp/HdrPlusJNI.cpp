@@ -7,6 +7,7 @@
 #include <HalideBuffer.h>
 #include "ColorPipe.h"
 #include "hdrplus_raw_pipeline.h" // Generated header
+#include "steve_hdrplus_pipeline.h" // Generated header from Steve's fork
 
 #define TAG "HdrPlusJNI"
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, TAG, __VA_ARGS__)
@@ -37,9 +38,10 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
         jstring outputTiffPath,
         jstring outputJpgPath,
         jstring outputDngPath,
-        jfloat digitalGain
+        jfloat digitalGain,
+        jboolean useStevePipeline
 ) {
-    LOGD("Native processHdrPlus started.");
+    LOGD("Native processHdrPlus started. Use Experimental Pipeline: %d", useStevePipeline);
 
     int numFrames = env->GetArrayLength(dngBuffers);
     if (numFrames < 2) {
@@ -100,17 +102,32 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
         LOGD("Swapped CFA: BGGR -> RGGB");
     }
 
-    int result = hdrplus_raw_pipeline(
-        inputBuf,
-        (uint16_t)blackLevel,
-        (uint16_t)whiteLevel,
-        wb_r, wb_g0, wb_g1, wb_b,
-        cfaPattern,
-        ccmHalideBuf,
-        compression,
-        gain,
-        outputBuf
-    );
+    int result = 0;
+    if (useStevePipeline) {
+        result = steve_hdrplus_pipeline(
+            inputBuf,
+            (uint16_t)blackLevel,
+            (uint16_t)whiteLevel,
+            wb_r, wb_g0, wb_g1, wb_b,
+            cfaPattern,
+            ccmHalideBuf,
+            compression,
+            gain,
+            outputBuf
+        );
+    } else {
+        result = hdrplus_raw_pipeline(
+            inputBuf,
+            (uint16_t)blackLevel,
+            (uint16_t)whiteLevel,
+            wb_r, wb_g0, wb_g1, wb_b,
+            cfaPattern,
+            ccmHalideBuf,
+            compression,
+            gain,
+            outputBuf
+        );
+    }
 
     if (result != 0) {
         LOGE("Halide execution failed with code %d", result);

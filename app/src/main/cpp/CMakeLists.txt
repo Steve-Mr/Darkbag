@@ -68,7 +68,7 @@ set(GENERATOR_EXEC "${CMAKE_BINARY_DIR}/hdrplus_generator")
 
 # Create a dummy target for the library to satisfy CMake's dependency graph
 # BEFORE the custom command runs.
-add_custom_target(generate_hdrplus_halide DEPENDS "${GENERATED_LIB}" "${GENERATED_HEADER}")
+# Removed old target definition to use the consolidated one later
 
 set(GENERATOR_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
 file(MAKE_DIRECTORY ${GENERATOR_OUTPUT_DIR})
@@ -102,11 +102,39 @@ add_custom_command(
     COMMENT "Building Halide Generator (Host)"
 )
 
+# --- Steve-Mr HDR+ Generator (Host Tool) ---
+set(STEVE_HDRPLUS_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/steve-hdr-plus/src")
+set(STEVE_HDRPLUS_GENERATOR_SRC
+    "${STEVE_HDRPLUS_SRC_DIR}/hdrplus_raw_pipeline_generator.cpp"
+    "${STEVE_HDRPLUS_SRC_DIR}/align.cpp"
+    "${STEVE_HDRPLUS_SRC_DIR}/merge.cpp"
+    "${STEVE_HDRPLUS_SRC_DIR}/finish.cpp"
+    "${STEVE_HDRPLUS_SRC_DIR}/util.cpp"
+)
+
+set(STEVE_GENERATOR_EXEC "${CMAKE_BINARY_DIR}/steve_hdrplus_generator")
+
+add_custom_command(
+    OUTPUT "${STEVE_GENERATOR_EXEC}"
+    COMMAND c++ -std=c++17 ${STEVE_HDRPLUS_GENERATOR_SRC}
+            -I"${STEVE_HDRPLUS_SRC_DIR}"
+            -I"${HALIDE_INCLUDE_DIR}"
+            -L"${HALIDE_LIB_DIR}"
+            -lHalide -lHalide_GenGen -lpthread -ldl -lz
+            -Wl,-rpath,"${HALIDE_LIB_DIR}"
+            -o "${STEVE_GENERATOR_EXEC}"
+    DEPENDS ${STEVE_HDRPLUS_GENERATOR_SRC}
+    COMMENT "Building Steve HDR+ Generator (Host)"
+)
+
 # Run the generator to produce the target object file
 # We target arm-64-android.
 set(HALIDE_TARGET "arm-64-android")
 set(GENERATED_HEADER "${GENERATOR_OUTPUT_DIR}/hdrplus_raw_pipeline.h")
 set(GENERATED_LIB "${GENERATOR_OUTPUT_DIR}/hdrplus_raw_pipeline.a") # Static lib output
+
+set(STEVE_GENERATED_HEADER "${GENERATOR_OUTPUT_DIR}/steve_hdrplus_pipeline.h")
+set(STEVE_GENERATED_LIB "${GENERATOR_OUTPUT_DIR}/steve_hdrplus_pipeline.a")
 
 add_custom_command(
     OUTPUT "${GENERATED_HEADER}" "${GENERATED_LIB}"
@@ -119,6 +147,22 @@ add_custom_command(
     DEPENDS "${GENERATOR_EXEC}"
     COMMENT "Running Halide Generator for ${HALIDE_TARGET}"
 )
+
+# Run Steve's Generator with a different function name
+add_custom_command(
+    OUTPUT "${STEVE_GENERATED_HEADER}" "${STEVE_GENERATED_LIB}"
+    COMMAND "${STEVE_GENERATOR_EXEC}"
+            -g hdrplus_raw_pipeline
+            -f steve_hdrplus_pipeline
+            -e static_library,h
+            -o "${GENERATOR_OUTPUT_DIR}"
+            target=${HALIDE_TARGET}
+    DEPENDS "${STEVE_GENERATOR_EXEC}"
+    COMMENT "Running Steve HDR+ Generator for ${HALIDE_TARGET}"
+)
+
+# Update dependency target to include both
+add_custom_target(generate_all_pipelines DEPENDS "${GENERATED_LIB}" "${GENERATED_HEADER}" "${STEVE_GENERATED_LIB}" "${STEVE_GENERATED_HEADER}")
 
 # Expose generated files to the build
 include_directories(${GENERATOR_OUTPUT_DIR})
@@ -141,10 +185,11 @@ add_library(
         ColorPipe.cpp
         ${LIBRAW_SOURCES}
         "${GENERATED_LIB}"
+        "${STEVE_GENERATED_LIB}"
 )
 
 # Ensure the generation happens before native-lib compilation
-add_dependencies(native-lib generate_hdrplus_halide)
+add_dependencies(native-lib generate_all_pipelines)
 
 find_library(
         log-lib
@@ -161,6 +206,7 @@ find_library(
 target_link_libraries(
         native-lib
         "${GENERATED_LIB}"
+        "${STEVE_GENERATED_LIB}"
         tiff
         ${log-lib}
         ${jnigraphics-lib}
