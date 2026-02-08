@@ -1259,21 +1259,15 @@ class CameraFragment : Fragment() {
                             }
                             dngThumbnail?.let { thumbnail ->
                                 try {
-                                    val jpegOutput = java.io.ByteArrayOutputStream()
-                                    thumbnail.compress(
-                                        android.graphics.Bitmap.CompressFormat.JPEG,
-                                        90,
-                                        jpegOutput
-                                    )
                                     contentResolver.openFileDescriptor(dngUri, "rw")?.use { pfd ->
                                         val exif =
                                             androidx.exifinterface.media.ExifInterface(pfd.fileDescriptor)
-                                        exif.setCompressedThumbnail(jpegOutput.toByteArray())
+                                        exif.setThumbnail(thumbnail)
                                         exif.saveAttributes()
                                     }
-                                    Log.d(TAG, "JPEG thumbnail embedded via ExifInterface.")
+                                    Log.d(TAG, "Thumbnail embedded via ExifInterface.")
                                 } catch (e: Exception) {
-                                    Log.e(TAG, "Failed to embed JPEG thumbnail via ExifInterface", e)
+                                    Log.e(TAG, "Failed to embed thumbnail via ExifInterface", e)
                                 }
                             }
                             // Inject crop metadata if zoomed
