@@ -156,6 +156,7 @@ class CameraFragment : Fragment() {
     private var isBurstActive = false
     private var hdrPlusBurstHelper: HdrPlusBurst? = null
     private var lastHdrPlusConfig: ExposureUtils.ExposureConfig? = null // Cache for instant trigger
+    private var burstStartTime: Long = 0L // Profiling
 
     private var minFocusDistance = 0.0f
     private var isoRange: android.util.Range<Int>? = null
@@ -2119,6 +2120,7 @@ class CameraFragment : Fragment() {
             return
         }
         isBurstActive = true
+        burstStartTime = System.currentTimeMillis()
 
         lifecycleScope.launch(Dispatchers.Main) {
             try {
@@ -2315,6 +2317,8 @@ class CameraFragment : Fragment() {
 
     private fun processHdrPlusBurst(frames: List<HdrFrame>, digitalGain: Float) {
         val currentZoom = if (is2xMode) 2.0f else (currentFocalLength / 24.0f)
+        val startTime = burstStartTime
+        val captureEndTime = System.currentTimeMillis()
 
         lifecycleScope.launch(Dispatchers.IO) {
             var fallbackSent = false
@@ -2428,9 +2432,11 @@ class CameraFragment : Fragment() {
                 Log.d(TAG, "Output Paths: BMP=$bmpPath, TIFF=$tiffPath, DNG=$linearDngPath")
 
                 // 6. JNI Call
-                val startTime = System.currentTimeMillis()
+                val jniStartTime = System.currentTimeMillis()
                 // Ensure buffers are rewound just in case
                 buffers.forEach { it.rewind() }
+
+                val debugStats = LongArray(1) // [0]: Halide Time
 
                 val ret = ColorProcessor.processHdrPlus(
                     buffers,
@@ -2445,12 +2451,15 @@ class CameraFragment : Fragment() {
                     bmpPath,
                     linearDngPath,
                     digitalGain,
-                    useStevePipeline
+                    useStevePipeline,
+                    debugStats
                 )
 
-                Log.d(TAG, "JNI processHdrPlus returned $ret in ${System.currentTimeMillis() - startTime}ms")
+                val jniEndTime = System.currentTimeMillis()
+                Log.d(TAG, "JNI processHdrPlus returned $ret in ${jniEndTime - jniStartTime}ms")
 
                 if (ret == 0) {
+                    val saveStartTime = System.currentTimeMillis()
                     val finalJpgUri = saveProcessedImage(
                         context,
                         bmpPath,
@@ -2462,6 +2471,27 @@ class CameraFragment : Fragment() {
                         saveJpg,
                         saveTiff
                     )
+                    val saveEndTime = System.currentTimeMillis()
+
+                    // Log Statistics
+                    val totalTime = saveEndTime - startTime
+                    val captureTime = captureEndTime - startTime
+                    val waitTime = jniStartTime - captureEndTime
+                    val jniTime = jniEndTime - jniStartTime
+                    val halideTime = debugStats[0]
+                    val saveTime = saveEndTime - saveStartTime
+
+                    val logMsg = """
+                        [Total: ${totalTime}ms]
+                        Capture: ${captureTime}ms
+                        Wait: ${waitTime}ms
+                        JNI (Total): ${jniTime}ms
+                          - Halide: ${halideTime}ms
+                        Save (IO/Compress): ${saveTime}ms
+                    """.trimIndent()
+
+                    Log.i(TAG, logMsg)
+                    com.android.example.cameraxbasic.utils.DebugLogManager.addLog(logMsg)
 
                     // Update UI
                     withContext(Dispatchers.Main) {

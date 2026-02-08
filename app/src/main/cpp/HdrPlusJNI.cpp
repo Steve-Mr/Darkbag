@@ -3,6 +3,7 @@
 #include <vector>
 #include <string>
 #include <memory>
+#include <chrono> // For timing
 #include <libraw/libraw.h>
 #include <HalideBuffer.h>
 #include "ColorPipe.h"
@@ -39,7 +40,8 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
         jstring outputJpgPath,
         jstring outputDngPath,
         jfloat digitalGain,
-        jboolean useStevePipeline
+        jboolean useStevePipeline,
+        jlongArray debugStats
 ) {
     LOGD("Native processHdrPlus started. Use Experimental Pipeline: %d", useStevePipeline);
 
@@ -103,6 +105,8 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     }
 
     int result = 0;
+    auto halideStart = std::chrono::high_resolution_clock::now();
+
     if (useStevePipeline) {
         result = steve_hdrplus_pipeline(
             inputBuf,
@@ -127,6 +131,14 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
             gain,
             outputBuf
         );
+    }
+
+    auto halideEnd = std::chrono::high_resolution_clock::now();
+    auto durationMs = std::chrono::duration_cast<std::chrono::milliseconds>(halideEnd - halideStart).count();
+
+    if (debugStats != nullptr) {
+        jlong stats[] = {(jlong)durationMs};
+        env->SetLongArrayRegion(debugStats, 0, 1, stats);
     }
 
     if (result != 0) {
