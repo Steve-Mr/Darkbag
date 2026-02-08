@@ -7,6 +7,7 @@
 #include <libraw/libraw.h>
 #include <HalideBuffer.h>
 #include "ColorPipe.h"
+#include "ColorMatrices.h"
 #include "hdrplus_raw_pipeline.h" // Generated header
 
 #define TAG "HdrPlusJNI"
@@ -186,8 +187,37 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
         dng_ok = write_dng(dng_path_cstr, width, height, finalImage, dngWhiteLevel, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation);
     }
 
+    // --- Color Space Conversion (Camera Native -> ProPhoto RGB) ---
+    // Construct M_Cam_to_XYZ from ccmVec (Input is Camera -> XYZ)
+    Mat3x3 M_Cam_to_XYZ;
+    int ccmIdx = 0;
+    for (int i = 0; i < 3; ++i) {
+        for (int j = 0; j < 3; ++j) {
+            M_Cam_to_XYZ.m[i][j] = ccmVec[ccmIdx++];
+        }
+    }
+
+    // Calculate Combined Matrix: M_Cam_to_Pro = M_XYZ_to_Pro * M_Cam_to_XYZ
+    Mat3x3 M_Cam_to_Pro = mat_mul(M_XYZ_D50_to_ProPhoto, M_Cam_to_XYZ);
+
+    // Apply in-place to finalImage
+    #pragma omp parallel for
+    for (int i = 0; i < width * height; i++) {
+        float r = (float)finalImage[i * 3 + 0];
+        float g = (float)finalImage[i * 3 + 1];
+        float b = (float)finalImage[i * 3 + 2];
+
+        float r_out = M_Cam_to_Pro.m[0][0] * r + M_Cam_to_Pro.m[0][1] * g + M_Cam_to_Pro.m[0][2] * b;
+        float g_out = M_Cam_to_Pro.m[1][0] * r + M_Cam_to_Pro.m[1][1] * g + M_Cam_to_Pro.m[1][2] * b;
+        float b_out = M_Cam_to_Pro.m[2][0] * r + M_Cam_to_Pro.m[2][1] * g + M_Cam_to_Pro.m[2][2] * b;
+
+        finalImage[i * 3 + 0] = (unsigned short)std::max(0.0f, std::min(65535.0f, r_out));
+        finalImage[i * 3 + 1] = (unsigned short)std::max(0.0f, std::min(65535.0f, g_out));
+        finalImage[i * 3 + 2] = (unsigned short)std::max(0.0f, std::min(65535.0f, b_out));
+    }
+
     // Save Processed Images (Log/LUT Path)
-    // Pass finalImage (Linear) + Gain + Logic to shared pipeline
+    // Pass finalImage (now ProPhoto RGB Linear) + Gain + Logic to shared pipeline
     process_and_save_image(
         finalImage,
         width,

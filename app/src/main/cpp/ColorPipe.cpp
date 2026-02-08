@@ -1,4 +1,5 @@
 #include "ColorPipe.h"
+#include "ColorMatrices.h"
 #include <tiffio.h>
 
 #include <vector>
@@ -195,25 +196,46 @@ void process_and_save_image(
         float norm_g = std::max(0.0f, (float)g_val / 65535.0f * gain);
         float norm_b = std::max(0.0f, (float)b_val / 65535.0f * gain);
 
-        // Clamp to 1.0 for Gamma/Rec709, but not necessarily for Log?
-        // Standard LogC3 etc expect 0.18 gray but handle highlights.
-        // For simplicity and safety (as per previous logic), we clamp to 1.0 BEFORE
-        // processing unless it's a specific Log that expects extended range.
-        // The previous implementation in HdrPlusJNI.cpp clamped to 1.0.
-        // The native-lib implementation divided by 65535.0f (implicit 1.0 max if data is 16-bit).
-        // Let's clamp to 1.0 to prevent weird artifacts in LUTs/Gamma.
-        norm_r = std::min(1.0f, norm_r);
-        norm_g = std::min(1.0f, norm_g);
-        norm_b = std::min(1.0f, norm_b);
+        // 2b. Color Space Conversion (ProPhoto RGB -> Target Log Gamut)
+        // Note: Input is assumed to be ProPhoto RGB Linear
+        const Mat3x3* gamutMat = &M_ProPhoto_D50_to_Rec709_D65;
+        switch (targetLog) {
+            case 1: gamutMat = &M_ProPhoto_D50_to_AWG_D65; break; // Arri LogC3
+            case 2:
+            case 3: gamutMat = &M_ProPhoto_D50_to_Rec2020_D65; break; // F-Log
+            case 5:
+            case 6: gamutMat = &M_ProPhoto_D50_to_SG3_D65; break; // S-Log3
+            case 7: gamutMat = &M_ProPhoto_D50_to_VG_D65; break; // V-Log
+            default: gamutMat = &M_ProPhoto_D50_to_Rec709_D65; break; // None/Gamma
+        }
 
-        // 2b. Log / Gamma
+        // Apply Matrix
+        float r_lin = gamutMat->m[0][0] * norm_r + gamutMat->m[0][1] * norm_g + gamutMat->m[0][2] * norm_b;
+        float g_lin = gamutMat->m[1][0] * norm_r + gamutMat->m[1][1] * norm_g + gamutMat->m[1][2] * norm_b;
+        float b_lin = gamutMat->m[2][0] * norm_r + gamutMat->m[2][1] * norm_g + gamutMat->m[2][2] * norm_b;
+
+        norm_r = r_lin;
+        norm_g = g_lin;
+        norm_b = b_lin;
+
+        // 2c. Log / Gamma
         if (targetLog == 0) {
             // Standard Gamma 2.2 (Fallback if "None" selected)
+            // Clamp to [0, 1] for SDR
+            norm_r = std::max(0.0f, std::min(1.0f, norm_r));
+            norm_g = std::max(0.0f, std::min(1.0f, norm_g));
+            norm_b = std::max(0.0f, std::min(1.0f, norm_b));
+
             norm_r = pow(norm_r, 1.0f/2.2f);
             norm_g = pow(norm_g, 1.0f/2.2f);
             norm_b = pow(norm_b, 1.0f/2.2f);
         } else {
             // Specific Log Curve
+            // Clamp negative values, but allow > 1.0 for HDR
+            norm_r = std::max(0.0f, norm_r);
+            norm_g = std::max(0.0f, norm_g);
+            norm_b = std::max(0.0f, norm_b);
+
             norm_r = apply_log(norm_r, targetLog);
             norm_g = apply_log(norm_g, targetLog);
             norm_b = apply_log(norm_b, targetLog);
