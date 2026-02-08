@@ -68,7 +68,7 @@ set(GENERATOR_EXEC "${CMAKE_BINARY_DIR}/hdrplus_generator")
 
 # Create a dummy target for the library to satisfy CMake's dependency graph
 # BEFORE the custom command runs.
-add_custom_target(generate_hdrplus_halide DEPENDS "${GENERATED_LIB}" "${GENERATED_HEADER}")
+# Removed old target definition to use the consolidated one later
 
 set(GENERATOR_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
 file(MAKE_DIRECTORY ${GENERATOR_OUTPUT_DIR})
@@ -119,6 +119,9 @@ add_custom_command(
     DEPENDS "${GENERATOR_EXEC}"
     COMMENT "Running Halide Generator for ${HALIDE_TARGET}"
 )
+
+# Update dependency target
+add_custom_target(generate_hdrplus_halide DEPENDS "${GENERATED_LIB}" "${GENERATED_HEADER}")
 
 # Expose generated files to the build
 include_directories(${GENERATOR_OUTPUT_DIR})

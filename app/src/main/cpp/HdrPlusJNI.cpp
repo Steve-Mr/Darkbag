@@ -3,6 +3,7 @@
 #include <vector>
 #include <string>
 #include <memory>
+#include <chrono> // For timing
 #include <libraw/libraw.h>
 #include <HalideBuffer.h>
 #include "ColorPipe.h"
@@ -37,7 +38,8 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
         jstring outputTiffPath,
         jstring outputJpgPath,
         jstring outputDngPath,
-        jfloat digitalGain
+        jfloat digitalGain,
+        jlongArray debugStats
 ) {
     LOGD("Native processHdrPlus started.");
 
@@ -100,7 +102,10 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
         LOGD("Swapped CFA: BGGR -> RGGB");
     }
 
-    int result = hdrplus_raw_pipeline(
+    int result = 0;
+    auto halideStart = std::chrono::high_resolution_clock::now();
+
+    result = hdrplus_raw_pipeline(
         inputBuf,
         (uint16_t)blackLevel,
         (uint16_t)whiteLevel,
@@ -111,6 +116,14 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
         gain,
         outputBuf
     );
+
+    auto halideEnd = std::chrono::high_resolution_clock::now();
+    auto durationMs = std::chrono::duration_cast<std::chrono::milliseconds>(halideEnd - halideStart).count();
+
+    if (debugStats != nullptr) {
+        jlong stats[] = {(jlong)durationMs};
+        env->SetLongArrayRegion(debugStats, 0, 1, stats);
+    }
 
     if (result != 0) {
         LOGE("Halide execution failed with code %d", result);

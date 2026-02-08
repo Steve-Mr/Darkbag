@@ -300,6 +300,20 @@
                 app:layout_constraintStart_toStartOf="parent"
                 app:layout_constraintEnd_toEndOf="parent" />
 
+            <com.google.android.material.progressindicator.CircularProgressIndicator
+                android:id="@+id/capture_progress"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:indeterminate="false"
+                android:visibility="gone"
+                app:indicatorSize="@dimen/shutter_button_size"
+                app:trackThickness="4dp"
+                app:indicatorColor="?attr/colorPrimary"
+                app:layout_constraintTop_toTopOf="@id/camera_capture_button"
+                app:layout_constraintBottom_toBottomOf="@id/camera_capture_button"
+                app:layout_constraintStart_toStartOf="@id/camera_capture_button"
+                app:layout_constraintEnd_toEndOf="@id/camera_capture_button" />
+
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/camera_switch_button"
                 style="@style/Widget.App.Button.IconButton.Large"

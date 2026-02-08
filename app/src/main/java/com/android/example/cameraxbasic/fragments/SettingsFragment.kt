@@ -60,6 +60,14 @@ class SettingsFragment : Fragment() {
         setupMenus()
         setupCheckboxes()
         setupNavigation()
+        updateDebugStats()
+    }
+
+    private fun updateDebugStats() {
+        val logs = com.android.example.cameraxbasic.utils.DebugLogManager.getLogs()
+        if (logs.isNotEmpty()) {
+            binding.tvDebugStats.text = logs
+        }
     }
 
     private fun setupToolbar() {

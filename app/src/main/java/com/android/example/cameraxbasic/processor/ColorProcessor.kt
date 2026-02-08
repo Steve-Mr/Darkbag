@@ -55,6 +55,7 @@ object ColorProcessor {
         outputTiffPath: String?,
         outputJpgPath: String?,
         outputDngPath: String?,
-        digitalGain: Float
+        digitalGain: Float,
+        debugStats: LongArray? // [0]: Halide Time (ms)
     ): Int
 }
