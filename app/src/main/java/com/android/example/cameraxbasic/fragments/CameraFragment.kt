@@ -153,7 +153,7 @@ class CameraFragment : Fragment() {
 
     // HDR+ State
     private var isHdrPlusEnabled = false
-    private var isBurstActive = false
+    @Volatile private var isBurstActive = false
     private var hdrPlusBurstHelper: HdrPlusBurst? = null
     private var lastHdrPlusConfig: ExposureUtils.ExposureConfig? = null // Cache for instant trigger
     private var burstStartTime: Long = 0L // Profiling
@@ -2210,10 +2210,7 @@ class CameraFragment : Fragment() {
                     Toast.LENGTH_LONG
                 ).show()
                 // Ensure state is cleaned up on failure
-                cameraUiContainerBinding?.captureProgress?.visibility = View.GONE
-                cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
-                cameraUiContainerBinding?.cameraCaptureButton?.alpha = 1.0f
-                isBurstActive = false
+                resetBurstUi()
                 processingSemaphore.release()
                 // Attempt to restore camera controls
                 applyCameraControls()
@@ -2228,10 +2225,7 @@ class CameraFragment : Fragment() {
             lifecycleScope.launch(Dispatchers.Main) {
                 applyCameraControls()
                 // Reset Burst Active state immediately to allow background processing
-                isBurstActive = false
-                cameraUiContainerBinding?.captureProgress?.visibility = View.GONE
-                cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
-                cameraUiContainerBinding?.cameraCaptureButton?.alpha = 1.0f
+                resetBurstUi()
             }
             return
         }
@@ -2251,29 +2245,23 @@ class CameraFragment : Fragment() {
                     if (helper != null) {
                         try {
                             helper.addFrame(image)
-                        } catch (e: Exception) {
+                        } catch (e: Throwable) {
                             Log.e(TAG, "Failed to add frame to burst", e)
                             lifecycleScope.launch(Dispatchers.Main) {
                                 Toast.makeText(requireContext(), "Burst failed: ${e.message}", Toast.LENGTH_SHORT).show()
                                 applyCameraControls()
-                                cameraUiContainerBinding?.captureProgress?.visibility = View.GONE
-                                cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
-                                cameraUiContainerBinding?.cameraCaptureButton?.alpha = 1.0f
+                                resetBurstUi()
+                                processingSemaphore.release()
                             }
-                            isBurstActive = false
-                            processingSemaphore.release()
                             return
                         }
                     } else {
                         Log.e(TAG, "HdrPlusBurst helper is null, closing image manually.")
                         image.close()
                         lifecycleScope.launch(Dispatchers.Main) {
-                            cameraUiContainerBinding?.captureProgress?.visibility = View.GONE
-                            cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
-                            cameraUiContainerBinding?.cameraCaptureButton?.alpha = 1.0f
+                            resetBurstUi()
+                            processingSemaphore.release()
                         }
-                        isBurstActive = false
-                        processingSemaphore.release()
                         return
                     }
                     // Trigger next frame immediately
@@ -2544,6 +2532,10 @@ class CameraFragment : Fragment() {
                 // Release semaphore ONLY if we didn't hand off the work to the channel
                 if (!fallbackSent) {
                     processingSemaphore.release()
+                    // Refresh UI state (button availability) on Main thread after releasing slot
+                    lifecycleScope.launch(Dispatchers.Main) {
+                        resetBurstUi()
+                    }
                 }
             }
         }
@@ -2557,6 +2549,24 @@ class CameraFragment : Fragment() {
 
             toggle.setTextColor(color)
             toggle.isChecked = isHdrPlusEnabled
+        }
+    }
+
+    private fun resetBurstUi() {
+        // Run on Main Thread
+        cameraUiContainerBinding?.captureProgress?.visibility = View.GONE
+        isBurstActive = false
+
+        // Check if we can enable the button (processing limit)
+        if (processingSemaphore.availablePermits > 0) {
+            cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
+            cameraUiContainerBinding?.cameraCaptureButton?.alpha = 1.0f
+        } else {
+            // Keep disabled or show busy state if needed, but standard logic
+            // only disables if 0 permits. Here we just re-enable if possible.
+            // If full, it remains disabled (or we should explicitly disable to be safe).
+            cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = false
+            cameraUiContainerBinding?.cameraCaptureButton?.alpha = 0.5f
         }
     }
 }
