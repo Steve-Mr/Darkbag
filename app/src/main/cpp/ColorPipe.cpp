@@ -406,6 +406,13 @@ bool write_dng(
     unsigned short iso_short = (unsigned short)iso;
     TIFFSetField(tif, TIFFTAG_ISOSPEEDRATINGS, 1, &iso_short);
 
+    toff_t subifd_offsets[1] = {0};
+    const bool hasThumbnail =
+        (thumbnailData != nullptr && thumbnailWidth > 0 && thumbnailHeight > 0);
+    if (hasThumbnail) {
+        TIFFSetField(tif, TIFFTAG_SUBIFD, 1, subifd_offsets);
+    }
+
     // Write Data
     if (TIFFWriteEncodedStrip(tif, 0, (void*)data.data(), width * height * 3 * sizeof(unsigned short)) < 0) {
         TIFFClose(tif);
@@ -417,7 +424,8 @@ bool write_dng(
         return false;
     }
 
-    if (thumbnailData != nullptr && thumbnailWidth > 0 && thumbnailHeight > 0) {
+    if (hasThumbnail) {
+        TIFFCreateDirectory(tif);
         TIFFSetField(tif, TIFFTAG_IMAGEWIDTH, thumbnailWidth);
         TIFFSetField(tif, TIFFTAG_IMAGELENGTH, thumbnailHeight);
         TIFFSetField(tif, TIFFTAG_BITSPERSAMPLE, 8);
