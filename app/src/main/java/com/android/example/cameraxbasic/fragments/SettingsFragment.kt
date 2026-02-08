@@ -111,12 +111,6 @@ class SettingsFragment : Fragment() {
             prefs.edit().putString(KEY_HDR_UNDEREXPOSURE_MODE, HDR_UNDEREXPOSURE_MODES[position]).apply()
         }
 
-        // Steve Pipeline
-        binding.switchUseStevePipeline.isChecked = prefs.getBoolean(KEY_USE_STEVE_PIPELINE, false)
-        binding.switchUseStevePipeline.setOnCheckedChangeListener { _, isChecked ->
-            prefs.edit().putBoolean(KEY_USE_STEVE_PIPELINE, isChecked).apply()
-        }
-
         // Default Focal Length
         val focalAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, FOCAL_LENGTHS)
         binding.menuDefaultFocalLength.setAdapter(focalAdapter)
@@ -184,7 +178,6 @@ class SettingsFragment : Fragment() {
         const val KEY_FLASH_MODE = "flash_mode"
         const val KEY_HDR_BURST_COUNT = "hdr_burst_count"
         const val KEY_HDR_UNDEREXPOSURE_MODE = "hdr_underexposure_mode"
-        const val KEY_USE_STEVE_PIPELINE = "use_steve_pipeline"
 
         val FOCAL_LENGTHS = listOf("24", "28", "35")
         val ANTIBANDING_MODES = listOf("Auto", "50Hz", "60Hz", "Off")

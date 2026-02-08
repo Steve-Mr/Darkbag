@@ -8,7 +8,6 @@
 #include <HalideBuffer.h>
 #include "ColorPipe.h"
 #include "hdrplus_raw_pipeline.h" // Generated header
-#include "steve_hdrplus_pipeline.h" // Generated header from Steve's fork
 
 #define TAG "HdrPlusJNI"
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, TAG, __VA_ARGS__)
@@ -40,10 +39,9 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
         jstring outputJpgPath,
         jstring outputDngPath,
         jfloat digitalGain,
-        jboolean useStevePipeline,
         jlongArray debugStats
 ) {
-    LOGD("Native processHdrPlus started. Use Experimental Pipeline: %d", useStevePipeline);
+    LOGD("Native processHdrPlus started.");
 
     int numFrames = env->GetArrayLength(dngBuffers);
     if (numFrames < 2) {
@@ -107,31 +105,17 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     int result = 0;
     auto halideStart = std::chrono::high_resolution_clock::now();
 
-    if (useStevePipeline) {
-        result = steve_hdrplus_pipeline(
-            inputBuf,
-            (uint16_t)blackLevel,
-            (uint16_t)whiteLevel,
-            wb_r, wb_g0, wb_g1, wb_b,
-            cfaPattern,
-            ccmHalideBuf,
-            compression,
-            gain,
-            outputBuf
-        );
-    } else {
-        result = hdrplus_raw_pipeline(
-            inputBuf,
-            (uint16_t)blackLevel,
-            (uint16_t)whiteLevel,
-            wb_r, wb_g0, wb_g1, wb_b,
-            cfaPattern,
-            ccmHalideBuf,
-            compression,
-            gain,
-            outputBuf
-        );
-    }
+    result = hdrplus_raw_pipeline(
+        inputBuf,
+        (uint16_t)blackLevel,
+        (uint16_t)whiteLevel,
+        wb_r, wb_g0, wb_g1, wb_b,
+        cfaPattern,
+        ccmHalideBuf,
+        compression,
+        gain,
+        outputBuf
+    );
 
     auto halideEnd = std::chrono::high_resolution_clock::now();
     auto durationMs = std::chrono::duration_cast<std::chrono::milliseconds>(halideEnd - halideStart).count();

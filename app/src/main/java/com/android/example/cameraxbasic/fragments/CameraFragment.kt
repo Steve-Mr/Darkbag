@@ -2397,7 +2397,6 @@ class CameraFragment : Fragment() {
                 val targetLogName = prefs.getString(SettingsFragment.KEY_TARGET_LOG, "None")
                 val targetLogIndex = SettingsFragment.LOG_CURVES.indexOf(targetLogName)
                 val activeLutName = prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, null)
-                val useStevePipeline = prefs.getBoolean(SettingsFragment.KEY_USE_STEVE_PIPELINE, false)
 
                 var nativeLutPath: String? = null
                 if (activeLutName != null) {
@@ -2405,7 +2404,7 @@ class CameraFragment : Fragment() {
                     if (lutFile.exists()) nativeLutPath = lutFile.absolutePath
                 }
 
-                Log.d(TAG, "Settings: Log=$targetLogName ($targetLogIndex), LUT=$nativeLutPath, StevePipe=$useStevePipeline")
+                Log.d(TAG, "Settings: Log=$targetLogName ($targetLogIndex), LUT=$nativeLutPath")
 
                 // Extract Real Metadata
                 val iso = result?.get(android.hardware.camera2.CaptureResult.SENSOR_SENSITIVITY) ?: 100
@@ -2451,7 +2450,6 @@ class CameraFragment : Fragment() {
                     bmpPath,
                     linearDngPath,
                     digitalGain,
-                    useStevePipeline,
                     debugStats
                 )
 
