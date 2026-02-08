@@ -3,6 +3,7 @@
 #include <vector>
 #include <string>
 #include <memory>
+#include <algorithm>
 #include <libraw/libraw.h>
 #include <HalideBuffer.h>
 #include "ColorPipe.h"
@@ -167,10 +168,61 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
 
     bool dng_ok = true;
 
+    std::vector<unsigned char> thumbnailData;
+    int thumbnailWidth = 0;
+    int thumbnailHeight = 0;
+
+    if (dng_path_cstr) {
+        const int maxThumbSize = 256;
+        float scale = std::min(
+            1.0f,
+            std::min(
+                maxThumbSize / static_cast<float>(width),
+                maxThumbSize / static_cast<float>(height)
+            )
+        );
+        thumbnailWidth = std::max(1, static_cast<int>(width * scale));
+        thumbnailHeight = std::max(1, static_cast<int>(height * scale));
+        thumbnailData.resize(static_cast<size_t>(thumbnailWidth) * thumbnailHeight * 3);
+
+        for (int y = 0; y < thumbnailHeight; y++) {
+            const int srcY = std::min(height - 1, static_cast<int>(y / scale));
+            for (int x = 0; x < thumbnailWidth; x++) {
+                const int srcX = std::min(width - 1, static_cast<int>(x / scale));
+                const int srcIdx = (srcY * width + srcX) * 3;
+                const int dstIdx = (y * thumbnailWidth + x) * 3;
+
+                for (int c = 0; c < 3; c++) {
+                    int value = finalImage[srcIdx + c];
+                    value = std::min(value, 16383);
+                    thumbnailData[dstIdx + c] = static_cast<unsigned char>(
+                        (value * 255 + 16383 / 2) / 16383
+                    );
+                }
+            }
+        }
+    }
+
     // Save DNG (Raw Path)
     int dngWhiteLevel = 16383;
     if (dng_path_cstr) {
-        dng_ok = write_dng(dng_path_cstr, width, height, finalImage, dngWhiteLevel, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation);
+        dng_ok = write_dng(
+            dng_path_cstr,
+            width,
+            height,
+            finalImage,
+            dngWhiteLevel,
+            iso,
+            exposureTime,
+            fNumber,
+            focalLength,
+            captureTimeMillis,
+            ccmVec,
+            orientation,
+            &thumbnailData,
+            thumbnailWidth,
+            thumbnailHeight
+        );
     }
 
     // Save Processed Images (Log/LUT Path)

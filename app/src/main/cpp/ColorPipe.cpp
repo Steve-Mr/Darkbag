@@ -299,7 +299,23 @@ bool write_tiff(const char* filename, int width, int height, const std::vector<u
     return result;
 }
 
-bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, int iso, long exposureTime, float fNumber, float focalLength, long captureTimeMillis, const std::vector<float>& ccm, int orientation) {
+bool write_dng(
+    const char* filename,
+    int width,
+    int height,
+    const std::vector<unsigned short>& data,
+    int whiteLevel,
+    int iso,
+    long exposureTime,
+    float fNumber,
+    float focalLength,
+    long captureTimeMillis,
+    const std::vector<float>& ccm,
+    int orientation,
+    const std::vector<unsigned char>* thumbnailData,
+    int thumbnailWidth,
+    int thumbnailHeight
+) {
     // Register DNG tags
     TIFFSetTagExtender(DNGTagExtender);
 
@@ -394,6 +410,35 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
     if (TIFFWriteEncodedStrip(tif, 0, (void*)data.data(), width * height * 3 * sizeof(unsigned short)) < 0) {
         TIFFClose(tif);
         return false;
+    }
+
+    if (!TIFFWriteDirectory(tif)) {
+        TIFFClose(tif);
+        return false;
+    }
+
+    if (thumbnailData != nullptr && thumbnailWidth > 0 && thumbnailHeight > 0) {
+        TIFFSetField(tif, TIFFTAG_IMAGEWIDTH, thumbnailWidth);
+        TIFFSetField(tif, TIFFTAG_IMAGELENGTH, thumbnailHeight);
+        TIFFSetField(tif, TIFFTAG_BITSPERSAMPLE, 8);
+        TIFFSetField(tif, TIFFTAG_COMPRESSION, COMPRESSION_NONE);
+        TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_RGB);
+        TIFFSetField(tif, TIFFTAG_SAMPLESPERPIXEL, 3);
+        TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG);
+        TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, thumbnailHeight);
+        TIFFSetField(tif, TIFFTAG_SUBFILETYPE, FILETYPE_REDUCEDIMAGE);
+        TIFFSetField(tif, TIFFTAG_ORIENTATION, tiffOrientation);
+
+        const tsize_t thumbBytes = static_cast<tsize_t>(thumbnailWidth) * thumbnailHeight * 3;
+        if (TIFFWriteEncodedStrip(tif, 0, (void*)thumbnailData->data(), thumbBytes) < 0) {
+            TIFFClose(tif);
+            return false;
+        }
+
+        if (!TIFFWriteDirectory(tif)) {
+            TIFFClose(tif);
+            return false;
+        }
     }
 
     TIFFClose(tif);

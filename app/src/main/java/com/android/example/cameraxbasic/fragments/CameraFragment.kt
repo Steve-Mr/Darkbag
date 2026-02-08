@@ -1113,6 +1113,7 @@ class CameraFragment : Fragment() {
                     // Store DNG bytes in memory
                     val dngOutputStream = java.io.ByteArrayOutputStream()
                     var dngBytes: ByteArray? = null
+                    var dngThumbnail: android.graphics.Bitmap? = null
 
                     val orientation = when (image.rotationDegrees) {
                         90 -> ExifInterface.ORIENTATION_ROTATE_90
@@ -1201,7 +1202,7 @@ class CameraFragment : Fragment() {
                             val thumbWidth = (bitmap.width * scale).toInt()
                             val thumbHeight = (bitmap.height * scale).toInt()
 
-                            val thumbBitmap = if (scale < 1.0) {
+                            dngThumbnail = if (scale < 1.0) {
                                 android.graphics.Bitmap.createScaledBitmap(
                                     bitmap,
                                     thumbWidth,
@@ -1209,12 +1210,11 @@ class CameraFragment : Fragment() {
                                     true
                                 )
                             } else {
-                                bitmap
+                                android.graphics.Bitmap.createBitmap(bitmap)
                             }
-                            dngCreatorReal.setThumbnail(thumbBitmap)
-                            Log.d(TAG, "DNG Thumbnail set: ${thumbWidth}x${thumbHeight}")
+                            Log.d(TAG, "DNG Thumbnail prepared: ${thumbWidth}x${thumbHeight}")
                         } catch (e: Exception) {
-                            Log.e(TAG, "Failed to set DNG thumbnail", e)
+                            Log.e(TAG, "Failed to prepare DNG thumbnail", e)
                         }
                     }
 
@@ -1235,13 +1235,27 @@ class CameraFragment : Fragment() {
                     if (dngUri != null) {
                         try {
                             contentResolver.openOutputStream(dngUri)?.use { out ->
-                                val inputStream2 = java.io.ByteArrayInputStream(image.data)
-                                dngCreatorReal.writeInputStream(
-                                    out,
-                                    android.util.Size(image.width, image.height),
-                                    inputStream2,
-                                    0
-                                )
+                                android.hardware.camera2.DngCreator(
+                                    chars,
+                                    captureResult
+                                ).use { dngCreatorFinal ->
+                                    dngCreatorFinal.setOrientation(orientation)
+                                    dngThumbnail?.let { thumbnail ->
+                                        try {
+                                            dngCreatorFinal.setThumbnail(thumbnail)
+                                            Log.d(TAG, "DNG Thumbnail set on final writer.")
+                                        } catch (e: Exception) {
+                                            Log.e(TAG, "Failed to set DNG thumbnail on final writer", e)
+                                        }
+                                    }
+                                    val inputStream2 = java.io.ByteArrayInputStream(image.data)
+                                    dngCreatorFinal.writeInputStream(
+                                        out,
+                                        android.util.Size(image.width, image.height),
+                                        inputStream2,
+                                        0
+                                    )
+                                }
                             }
                             // Inject crop metadata if zoomed
                             if (zoomFactor > 1.05f) {
@@ -1276,6 +1290,9 @@ class CameraFragment : Fragment() {
                         } catch (e: Exception) {
                             Log.e(TAG, "Error writing DNG to MediaStore", e)
                             contentResolver.delete(dngUri, null, null)
+                        } finally {
+                            dngThumbnail?.recycle()
+                            dngThumbnail = null
                         }
                     }
 
