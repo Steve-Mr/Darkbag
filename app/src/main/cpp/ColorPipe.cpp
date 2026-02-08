@@ -421,7 +421,8 @@ bool write_dng(
         TIFFSetField(tif, TIFFTAG_IMAGEWIDTH, thumbnailWidth);
         TIFFSetField(tif, TIFFTAG_IMAGELENGTH, thumbnailHeight);
         TIFFSetField(tif, TIFFTAG_BITSPERSAMPLE, 8);
-        TIFFSetField(tif, TIFFTAG_COMPRESSION, COMPRESSION_NONE);
+        TIFFSetField(tif, TIFFTAG_COMPRESSION, COMPRESSION_JPEG);
+        TIFFSetField(tif, TIFFTAG_JPEGQUALITY, 90);
         TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_RGB);
         TIFFSetField(tif, TIFFTAG_SAMPLESPERPIXEL, 3);
         TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG);
