@@ -1174,18 +1174,16 @@ class CameraFragment : Fragment() {
                     }
 
                     // 5. Shared Save Logic
-                    // For standard pipeline, rotation is handled by LibRaw or metadata?
-                    // LibRaw usually outputs unrotated data unless we tell it.
-                    // `ColorProcessor` uses `dcraw_process` but doesn't rotate?
-                    // Wait, `process_and_save_image` in C++ writes BMP. It's usually unrotated unless user orientation passed.
-                    // LibRaw doesn't rotate by default.
-                    // So we pass `image.rotationDegrees` to save helper.
+                    // For standard pipeline, the image should be saved as-is (unrotated pixels) because
+                    // JPEG EXIF orientation handles the display, or LibRaw output is already oriented.
+                    // Passing rotationDegrees caused double rotation or unwanted rotation.
+                    // We pass 0 for rotation here to match original behavior.
 
                     // Note: `saveProcessedImage` is suspending.
                     val finalJpgUri = saveProcessedImage(
                         context,
                         bmpPath,
-                        image.rotationDegrees,
+                        0, // Rotation disabled for standard pipeline
                         zoomFactor,
                         dngName,
                         null, // No Linear DNG here
@@ -1193,26 +1191,31 @@ class CameraFragment : Fragment() {
                         saveJpg,
                         saveTiff
                     ) { bitmap ->
-                        // Generate Thumbnail for DNG
-                        val maxThumbSize = 256
-                        val scale = min(
-                            maxThumbSize.toDouble() / bitmap.width,
-                            maxThumbSize.toDouble() / bitmap.height
-                        )
-                        val thumbWidth = (bitmap.width * scale).toInt()
-                        val thumbHeight = (bitmap.height * scale).toInt()
-
-                        val thumbBitmap = if (scale < 1.0) {
-                            android.graphics.Bitmap.createScaledBitmap(
-                                bitmap,
-                                thumbWidth,
-                                thumbHeight,
-                                true
+                        try {
+                            // Generate Thumbnail for DNG
+                            val maxThumbSize = 256
+                            val scale = min(
+                                maxThumbSize.toDouble() / bitmap.width,
+                                maxThumbSize.toDouble() / bitmap.height
                             )
-                        } else {
-                            bitmap
+                            val thumbWidth = (bitmap.width * scale).toInt()
+                            val thumbHeight = (bitmap.height * scale).toInt()
+
+                            val thumbBitmap = if (scale < 1.0) {
+                                android.graphics.Bitmap.createScaledBitmap(
+                                    bitmap,
+                                    thumbWidth,
+                                    thumbHeight,
+                                    true
+                                )
+                            } else {
+                                bitmap
+                            }
+                            dngCreatorReal.setThumbnail(thumbBitmap)
+                            Log.d(TAG, "DNG Thumbnail set: ${thumbWidth}x${thumbHeight}")
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Failed to set DNG thumbnail", e)
                         }
-                        dngCreatorReal.setThumbnail(thumbBitmap)
                     }
 
                     // 6. Save Standard RAW DNG (specific to this pipeline)
