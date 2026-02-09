@@ -104,6 +104,9 @@ const Matrix3x3 M_sRGB_D65_to_XYZ = {
     0.01933082f, 0.11919478f, 0.95053215f
 };
 
+// XYZ_D65 -> sRGB (Needed for ColorMatrix1 if CCM is sRGB-based)
+const Matrix3x3 M_XYZ_to_sRGB_D65 = invert(M_sRGB_D65_to_XYZ);
+
 // ProPhoto_D50 (RGB -> XYZ)
 const Matrix3x3 M_ProPhoto_D50_to_XYZ = {
     0.79766723f, 0.13519223f, 0.03135253f,
@@ -284,20 +287,20 @@ void process_and_save_image(
     std::vector<unsigned short> processedImage(width * height * 3);
 
     // Prepare Matrices
-    Matrix3x3 sensor_to_XYZ = {0};
+    Matrix3x3 sensor_to_sRGB = {0};
     Matrix3x3 effective_CCM = {0};
 
     if (sourceColorSpace == 1 && ccm && wb) {
         // Source is Camera Native (WB'd).
-        // ccm: Sensor_Raw -> XYZ D50.
+        // ccm: Sensor_Raw -> sRGB (Observed behavior)
         // wb: White Balance Gains.
         //
-        // We want XYZ.
+        // We want sRGB.
         // Input: Camera_WB.
-        // Relationship: Camera_WB = Camera_Raw * Scale_WB.
-        //               Camera_Raw = Camera_WB * Diagonal(1/Scale_WB).
-        //               XYZ = CCM * Camera_Raw.
-        //               XYZ = CCM * Diagonal(1/Scale_WB) * Camera_WB.
+        // Camera_WB = Camera_Raw * Scale_WB.
+        // Camera_Raw = Camera_WB * Diagonal(1/Scale_WB).
+        // sRGB = CCM * Camera_Raw.
+        // sRGB = CCM * Diagonal(1/Scale_WB) * Camera_WB.
         //
         // So EffectiveCCM = CCM * Diagonal(1/Scale_WB).
 
@@ -331,14 +334,13 @@ void process_and_save_image(
         Vec3 color = {norm_r, norm_g, norm_b};
 
         if (sourceColorSpace == 1) { // Camera Native (HDR+)
-            // Step 1: Apply Effective CCM (Sensor_WB -> XYZ D50)
+            // Step 1: Apply Effective CCM (Sensor_WB -> sRGB)
             if (ccm && wb) {
                 color = multiply(effective_CCM, color);
             }
-            // Step 2: XYZ D50 -> XYZ D65 (ChromAdapt)
-            // Skip Bradford adaptation if we suspect input is already D65 (or close)
-            // The "Green Wall" issue suggests we are double-adapting.
-            // color = multiply(M_Bradford_D50_to_D65, color);
+            // Step 2: sRGB -> XYZ (D65)
+            // Since we assume the CCM outputs sRGB (not XYZ), we MUST convert to XYZ.
+            color = multiply(M_sRGB_D65_to_XYZ, color);
 
         } else if (sourceColorSpace == 0) { // ProPhoto (LibRaw)
             // Step 1: ProPhoto D50 -> XYZ D50
@@ -518,12 +520,19 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
     uint32_t black_level_val = 0; // Already subtracted in pipeline
     TIFFSetField(tif, TIFFTAG_BLACKLEVEL, 1, &black_level_val);
 
-    // [Critical] Calculate ColorMatrix1
-    // ColorMatrix1: XYZ -> Camera Native (where 'Camera Native' is the WB'd data)
-    // Formula: ColorMatrix1 = Diagonal(WB) * Inverse(CCM)
-    // CCM is Sensor_Raw -> XYZ.
-    // Inverse(CCM) is XYZ -> Sensor_Raw.
-    // Diagonal(WB) maps Sensor_Raw -> Sensor_WB.
+    // [Critical] Calculate ColorMatrix1 (Assuming CCM is Sensor->sRGB, not Sensor->XYZ)
+    // ColorMatrix1: XYZ -> Camera Native (WB'd)
+    //
+    // Known:
+    // sRGB = CCM * Camera_Raw
+    // sRGB = XYZ_to_sRGB * XYZ
+    // So: CCM * Camera_Raw = XYZ_to_sRGB * XYZ
+    // Camera_Raw = Inv(CCM) * XYZ_to_sRGB * XYZ
+    //
+    // Camera_WB = Diagonal(WB) * Camera_Raw
+    // Camera_WB = Diagonal(WB) * Inv(CCM) * XYZ_to_sRGB * XYZ
+    //
+    // So ColorMatrix1 = Diagonal(WB) * Inv(CCM) * XYZ_to_sRGB.
 
     Matrix3x3 ccmMat;
     for(int i=0; i<9; ++i) ccmMat.m[i] = ccm[i];
@@ -537,6 +546,7 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
     };
 
     Matrix3x3 colorMatrix1 = multiply(scaleMat, invCcm);
+    colorMatrix1 = multiply(colorMatrix1, M_XYZ_to_sRGB_D65);
 
     TIFFSetField(tif, TIFFTAG_COLORMATRIX1, 9, colorMatrix1.m);
 
@@ -544,8 +554,7 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
     static const float as_shot_neutral[] = {1.0f, 1.0f, 1.0f};
     TIFFSetField(tif, TIFFTAG_ASSHOTNEUTRAL, 3, as_shot_neutral);
 
-    // Calibration Illuminant 1 = D65 (21). Standard Android CCM is D50, but we want to avoid reader D50->D65 adaptation if the data is already green-ish.
-    // Let's test with D65 to match our hypothesis.
+    // Calibration Illuminant 1 = D65 (21). Standard sRGB D65.
     TIFFSetField(tif, TIFFTAG_CALIBRATIONILLUMINANT1, 21);
 
     // EXIF Metadata - Use correct standard libtiff types/pointers
