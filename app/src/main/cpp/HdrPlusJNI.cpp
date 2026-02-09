@@ -10,9 +10,10 @@
 #include <HalideBuffer.h>
 #include "ColorPipe.h"
 
-// Included generated headers for both versions
+// Included generated headers for all versions
 #include "hdrplus_raw_pipeline_cpu.h"
-#include "hdrplus_raw_pipeline_gpu.h"
+#include "hdrplus_raw_pipeline_opencl.h"
+#include "hdrplus_raw_pipeline_vulkan.h"
 
 #define TAG "HdrPlusJNI"
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, TAG, __VA_ARGS__)
@@ -20,16 +21,17 @@
 
 using namespace Halide::Runtime;
 
-// Check for OpenCL availability at runtime
+// Runtime availability checks
 bool is_opencl_available() {
     void* handle = dlopen("libOpenCL.so", RTLD_LAZY);
-    if (!handle) {
-        handle = dlopen("libPVROCL.so", RTLD_LAZY);
-    }
-    if (handle) {
-        dlclose(handle);
-        return true;
-    }
+    if (!handle) handle = dlopen("libPVROCL.so", RTLD_LAZY);
+    if (handle) { dlclose(handle); return true; }
+    return false;
+}
+
+bool is_vulkan_available() {
+    void* handle = dlopen("libvulkan.so", RTLD_LAZY);
+    if (handle) { dlclose(handle); return true; }
     return false;
 }
 
@@ -38,7 +40,7 @@ extern "C" void halide_print(void *user_context, const char *msg) {
     __android_log_print(ANDROID_LOG_DEBUG, "HalideRuntime", "%s", msg);
 }
 
-// Custom error handler to avoid abort()
+// Custom error handler
 extern "C" void halide_error(void *user_context, const char *msg) {
     __android_log_print(ANDROID_LOG_ERROR, "HalideRuntime", "Halide Error: %s", msg);
 }
@@ -67,21 +69,18 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
         jstring outputJpgPath,
         jstring outputDngPath,
         jfloat digitalGain,
-        jboolean useGpu,
+        jint gpuBackend,
         jlongArray debugStats
 ) {
-    LOGD("Native processHdrPlus started. Requested useGpu=%d", useGpu);
+    LOGD("Native processHdrPlus started. Requested gpuBackend=%d", gpuBackend);
 
-    bool actualUseGpu = false;
-    if (useGpu) {
-        if (is_opencl_available()) {
-            actualUseGpu = true;
-            LOGD("OpenCL detected. Using GPU pipeline.");
-        } else {
-            LOGD("OpenCL NOT detected. Falling back to CPU pipeline.");
-        }
-    } else {
-        LOGD("Using CPU pipeline (requested).");
+    int actualBackend = 0; // 0: CPU, 1: OpenCL, 2: Vulkan
+    if (gpuBackend == 1) {
+        if (is_opencl_available()) actualBackend = 1;
+        else LOGD("OpenCL requested but not available. Fallback to CPU.");
+    } else if (gpuBackend == 2) {
+        if (is_vulkan_available()) actualBackend = 2;
+        else LOGD("Vulkan requested but not available. Fallback to CPU.");
     }
 
     int numFrames = env->GetArrayLength(dngBuffers);
@@ -95,10 +94,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     for (int i = 0; i < numFrames; i++) {
         jobject bufObj = env->GetObjectArrayElement(dngBuffers, i);
         uint16_t* src = (uint16_t*)env->GetDirectBufferAddress(bufObj);
-        if (!src) {
-            LOGE("Failed to get direct buffer address for frame %d", i);
-            return -1;
-        }
+        if (!src) { LOGE("Failed to get direct buffer address for frame %d", i); return -1; }
         std::copy(src, src + (width * height), rawData.data() + (i * width * height));
     }
     Buffer<uint16_t> inputBuf(rawData.data(), width, height, numFrames);
@@ -123,8 +119,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     Buffer<float> m_xyz_to_target_buf(xyz_to_target.m, 3, 3);
 
     const char* lut_path_cstr = (lutPath) ? env->GetStringUTFChars(lutPath, 0) : nullptr;
-    LUT3D lut;
-    bool has_lut = false;
+    LUT3D lut; bool has_lut = false;
     if (lut_path_cstr) {
         lut = load_lut(lut_path_cstr);
         env->ReleaseStringUTFChars(lutPath, lut_path_cstr);
@@ -132,8 +127,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     }
 
     std::vector<float> dummyLutData(3 * 2 * 2 * 2, 0.0f);
-    Buffer<float> lutBuf;
-    int lut_size = 0;
+    Buffer<float> lutBuf; int lut_size = 0;
     if (has_lut) {
         lutBuf = Buffer<float>((float*)lut.data.data(), 3, lut.size, lut.size, lut.size);
         lut_size = lut.size;
@@ -153,8 +147,15 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     auto halideStart = std::chrono::high_resolution_clock::now();
     int result = 0;
 
-    if (actualUseGpu) {
-        result = hdrplus_raw_pipeline_gpu(
+    if (actualBackend == 1) {
+        result = hdrplus_raw_pipeline_opencl(
+            inputBuf, (uint16_t)blackLevel, (uint16_t)whiteLevel,
+            wb_r, wb_g0, wb_g1, wb_b, cfaPattern, ccmHalideBuf,
+            digitalGain, targetLog, m_srgb_to_xyz_buf, m_xyz_to_target_buf,
+            lutBuf, lut_size, has_lut, outputLinear, outputFinal
+        );
+    } else if (actualBackend == 2) {
+        result = hdrplus_raw_pipeline_vulkan(
             inputBuf, (uint16_t)blackLevel, (uint16_t)whiteLevel,
             wb_r, wb_g0, wb_g1, wb_b, cfaPattern, ccmHalideBuf,
             digitalGain, targetLog, m_srgb_to_xyz_buf, m_xyz_to_target_buf,
@@ -171,18 +172,13 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
 
     auto halideEnd = std::chrono::high_resolution_clock::now();
     auto durationMs = std::chrono::duration_cast<std::chrono::milliseconds>(halideEnd - halideStart).count();
-
     if (debugStats != nullptr) {
         jlong stats[] = {(jlong)durationMs};
         env->SetLongArrayRegion(debugStats, 0, 1, stats);
     }
 
-    if (result != 0) {
-        LOGE("Halide execution failed with code %d", result);
-        return -1;
-    }
-
-    LOGD("Halide pipeline finished in %ld ms.", (long)durationMs);
+    if (result != 0) { LOGE("Halide execution failed with code %d", result); return -1; }
+    LOGD("Halide pipeline finished in %ld ms. Backend: %d", (long)durationMs, actualBackend);
 
     // 5. Parallel Post-Processing & Saving
     const char* tiff_path_cstr = (outputTiffPath) ? env->GetStringUTFChars(outputTiffPath, 0) : nullptr;
@@ -225,18 +221,14 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
         if (!dng_path_cstr) return true;
         return write_dng(dng_path_cstr, width, height, linearInterleaved, 65535, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation);
     });
-
     auto img_task = std::async(std::launch::async, [&]() {
         save_processed_image_simple(finalInterleaved, width, height, tiff_path_cstr, jpg_path_cstr, orientation);
     });
-
-    bool dng_ok = dng_task.get();
-    img_task.wait();
+    bool dng_ok = dng_task.get(); img_task.wait();
 
     if (outputTiffPath) env->ReleaseStringUTFChars(outputTiffPath, tiff_path_cstr);
     if (outputJpgPath) env->ReleaseStringUTFChars(outputJpgPath, jpg_path_cstr);
     if (outputDngPath) env->ReleaseStringUTFChars(outputDngPath, dng_path_cstr);
-
     if (!dng_ok) LOGE("Failed to write DNG file.");
     return 0;
 }

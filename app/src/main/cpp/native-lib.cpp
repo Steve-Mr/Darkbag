@@ -24,7 +24,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processRaw(
         jstring lutPath,
         jstring outputTiffPath,
         jstring outputJpgPath,
-        jboolean useGpu // Ignored in new pipeline
+        jint gpuBackend // Ignored in new pipeline
 ) {
     LOGD("Native processRaw started using LibRaw.");
 

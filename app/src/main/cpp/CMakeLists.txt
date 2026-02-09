@@ -84,26 +84,44 @@ add_custom_command(
     COMMENT "Running Halide Generator for CPU"
 )
 
-# --- Generate GPU Pipeline ---
-set(HALIDE_TARGET_GPU "arm-64-android-opencl-no_runtime")
-set(GENERATED_HEADER_GPU "${GENERATOR_OUTPUT_DIR}/hdrplus_raw_pipeline_gpu.h")
-set(GENERATED_LIB_GPU "${GENERATOR_OUTPUT_DIR}/hdrplus_raw_pipeline_gpu.a")
+# --- Generate GPU Pipeline (OpenCL) ---
+set(HALIDE_TARGET_OPENCL "arm-64-android-opencl-no_runtime")
+set(GENERATED_HEADER_OPENCL "${GENERATOR_OUTPUT_DIR}/hdrplus_raw_pipeline_opencl.h")
+set(GENERATED_LIB_OPENCL "${GENERATOR_OUTPUT_DIR}/hdrplus_raw_pipeline_opencl.a")
 
 add_custom_command(
-    OUTPUT "${GENERATED_HEADER_GPU}" "${GENERATED_LIB_GPU}"
+    OUTPUT "${GENERATED_HEADER_OPENCL}" "${GENERATED_LIB_OPENCL}"
     COMMAND "${GENERATOR_EXEC}"
             -g hdrplus_raw_pipeline
-            -f hdrplus_raw_pipeline_gpu
+            -f hdrplus_raw_pipeline_opencl
             -e static_library,h
             -o "${GENERATOR_OUTPUT_DIR}"
-            target=${HALIDE_TARGET_GPU}
+            target=${HALIDE_TARGET_OPENCL}
     DEPENDS "${GENERATOR_EXEC}"
     COMMENT "Running Halide Generator for GPU (OpenCL)"
 )
 
+# --- Generate GPU Pipeline (Vulkan) ---
+# Added vk_int16 feature as required by the pipeline (uses uint16_t)
+set(HALIDE_TARGET_VULKAN "arm-64-android-vulkan-vk_int16-no_runtime")
+set(GENERATED_HEADER_VULKAN "${GENERATOR_OUTPUT_DIR}/hdrplus_raw_pipeline_vulkan.h")
+set(GENERATED_LIB_VULKAN "${GENERATOR_OUTPUT_DIR}/hdrplus_raw_pipeline_vulkan.a")
+
+add_custom_command(
+    OUTPUT "${GENERATED_HEADER_VULKAN}" "${GENERATED_LIB_VULKAN}"
+    COMMAND "${GENERATOR_EXEC}"
+            -g hdrplus_raw_pipeline
+            -f hdrplus_raw_pipeline_vulkan
+            -e static_library,h
+            -o "${GENERATOR_OUTPUT_DIR}"
+            target=${HALIDE_TARGET_VULKAN}
+    DEPENDS "${GENERATOR_EXEC}"
+    COMMENT "Running Halide Generator for GPU (Vulkan)"
+)
+
 # --- Generate Standalone Runtime ---
-# Runtime should support OpenCL so it includes the necessary device API calls
-set(HALIDE_TARGET_RUNTIME "arm-64-android-opencl")
+# Runtime should support all backends
+set(HALIDE_TARGET_RUNTIME "arm-64-android-opencl-vulkan")
 set(GENERATED_RUNTIME "${GENERATOR_OUTPUT_DIR}/halide_runtime.a")
 
 add_custom_command(
@@ -119,7 +137,8 @@ add_custom_command(
 
 add_custom_target(generate_hdrplus_halide DEPENDS
     "${GENERATED_LIB_CPU}" "${GENERATED_HEADER_CPU}"
-    "${GENERATED_LIB_GPU}" "${GENERATED_HEADER_GPU}"
+    "${GENERATED_LIB_OPENCL}" "${GENERATED_HEADER_OPENCL}"
+    "${GENERATED_LIB_VULKAN}" "${GENERATED_HEADER_VULKAN}"
     "${GENERATED_RUNTIME}"
 )
 
@@ -137,7 +156,8 @@ add_library(
         ColorPipe.cpp
         ${LIBRAW_SOURCES}
         "${GENERATED_LIB_CPU}"
-        "${GENERATED_LIB_GPU}"
+        "${GENERATED_LIB_OPENCL}"
+        "${GENERATED_LIB_VULKAN}"
         "${GENERATED_RUNTIME}"
 )
 
@@ -150,7 +170,8 @@ find_library(android-lib android)
 target_link_libraries(
         native-lib
         "${GENERATED_LIB_CPU}"
-        "${GENERATED_LIB_GPU}"
+        "${GENERATED_LIB_OPENCL}"
+        "${GENERATED_LIB_VULKAN}"
         "${GENERATED_RUNTIME}"
         tiff
         ${log-lib}

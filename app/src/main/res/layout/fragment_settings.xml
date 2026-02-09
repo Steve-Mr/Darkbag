@@ -58,14 +58,21 @@
                     android:orientation="vertical"
                     android:padding="@dimen/padding_medium">
 
-                    <com.google.android.material.materialswitch.MaterialSwitch
-                        android:id="@+id/switch_use_gpu"
+                    <com.google.android.material.textfield.TextInputLayout
+                        style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="GPU Acceleration"
-                        android:textSize="16sp" />
+                        android:hint="GPU Backend">
 
-                    <Space android:layout_width="match_parent" android:layout_height="@dimen/spacing_large" />
+                        <AutoCompleteTextView
+                            android:id="@+id/menu_gpu_backend"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:inputType="none"
+                            android:text="None" />
+                    </com.google.android.material.textfield.TextInputLayout>
+
+                    <Space android:layout_width="match_parent" android:layout_height="@dimen/spacing_medium" />
 
                     <com.google.android.material.textfield.TextInputLayout
                         style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"

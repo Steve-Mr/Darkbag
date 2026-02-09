@@ -1102,7 +1102,8 @@ class CameraFragment : Fragment() {
 
                 val saveTiff = prefs.getBoolean(SettingsFragment.KEY_SAVE_TIFF, true)
                 val saveJpg = prefs.getBoolean(SettingsFragment.KEY_SAVE_JPG, true)
-                val useGpu = prefs.getBoolean(SettingsFragment.KEY_USE_GPU, false)
+                val gpuBackendStr = prefs.getString(SettingsFragment.KEY_GPU_BACKEND, "None")
+                val gpuBackend = SettingsFragment.GPU_BACKENDS.indexOf(gpuBackendStr).coerceAtLeast(0)
 
                 val tiffFile = if (saveTiff) File(context.cacheDir, "$dngName.tiff") else null
                 val tiffPath = tiffFile?.absolutePath
@@ -1135,7 +1136,7 @@ class CameraFragment : Fragment() {
 
                     // 4. Process with LibRaw
                     val result = ColorProcessor.processRaw(
-                        dngBytes, targetLogIndex, nativeLutPath, tiffPath, bmpPath, useGpu
+                        dngBytes, targetLogIndex, nativeLutPath, tiffPath, bmpPath, gpuBackend
                     )
 
                     if (result == 1) {
@@ -2425,7 +2426,8 @@ class CameraFragment : Fragment() {
 
                 val debugStats = LongArray(1) // [0]: Halide Time
 
-                val useGpu = prefs.getBoolean(SettingsFragment.KEY_USE_GPU, false)
+                val gpuBackendStr = prefs.getString(SettingsFragment.KEY_GPU_BACKEND, "None")
+                val gpuBackend = SettingsFragment.GPU_BACKENDS.indexOf(gpuBackendStr).coerceAtLeast(0)
                 val ret = ColorProcessor.processHdrPlus(
                     buffers,
                     width, height,
@@ -2439,7 +2441,7 @@ class CameraFragment : Fragment() {
                     bmpPath,
                     linearDngPath,
                     digitalGain,
-                    useGpu,
+                    gpuBackend,
                     debugStats
                 )
 

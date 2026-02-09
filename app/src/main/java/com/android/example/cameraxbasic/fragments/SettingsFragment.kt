@@ -128,14 +128,18 @@ class SettingsFragment : Fragment() {
         binding.menuAntibanding.setOnItemClickListener { _, _, position, _ ->
             prefs.edit().putString(KEY_ANTIBANDING, ANTIBANDING_MODES[position]).apply()
         }
+
+        // GPU Backend
+        val gpuAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, GPU_BACKENDS)
+        binding.menuGpuBackend.setAdapter(gpuAdapter)
+        val savedGpu = prefs.getString(KEY_GPU_BACKEND, "None")
+        binding.menuGpuBackend.setText(savedGpu, false)
+        binding.menuGpuBackend.setOnItemClickListener { _, _, position, _ ->
+            prefs.edit().putString(KEY_GPU_BACKEND, GPU_BACKENDS[position]).apply()
+        }
     }
 
     private fun setupCheckboxes() {
-        binding.switchUseGpu.isChecked = prefs.getBoolean(KEY_USE_GPU, false)
-        binding.switchUseGpu.setOnCheckedChangeListener { _, isChecked ->
-            prefs.edit().putBoolean(KEY_USE_GPU, isChecked).apply()
-        }
-
         binding.switchLivePreview.isChecked = prefs.getBoolean(KEY_ENABLE_LUT_PREVIEW, true)
         binding.switchLivePreview.setOnCheckedChangeListener { _, isChecked ->
              prefs.edit().putBoolean(KEY_ENABLE_LUT_PREVIEW, isChecked).apply()
@@ -170,7 +174,7 @@ class SettingsFragment : Fragment() {
         const val KEY_ACTIVE_LUT = "active_lut_filename"
         const val KEY_SAVE_TIFF = "save_tiff"
         const val KEY_SAVE_JPG = "save_jpg"
-        const val KEY_USE_GPU = "use_gpu"
+        const val KEY_GPU_BACKEND = "gpu_backend"
         const val KEY_MANUAL_CONTROLS = "enable_manual_controls"
         const val KEY_ENABLE_LUT_PREVIEW = "enable_lut_preview"
         const val KEY_DEFAULT_FOCAL_LENGTH = "default_focal_length"
@@ -183,6 +187,7 @@ class SettingsFragment : Fragment() {
         val ANTIBANDING_MODES = listOf("Auto", "50Hz", "60Hz", "Off")
         val BURST_SIZES = listOf("3", "4", "5", "6", "7", "8")
         val HDR_UNDEREXPOSURE_MODES = listOf("0 EV", "-1 EV", "-2 EV", "Dynamic (Experimental)")
+        val GPU_BACKENDS = listOf("None", "OpenCL", "Vulkan")
 
         val LOG_CURVES = listOf(
             "None",

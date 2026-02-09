@@ -22,7 +22,7 @@ object ColorProcessor {
         lutPath: String?,
         outputTiffPath: String?,
         outputJpgPath: String?,
-        useGpu: Boolean
+        gpuBackend: Int
     ): Int
 
     /**
@@ -56,7 +56,7 @@ object ColorProcessor {
         outputJpgPath: String?,
         outputDngPath: String?,
         digitalGain: Float,
-        useGpu: Boolean,
+        gpuBackend: Int,
         debugStats: LongArray? // [0]: Halide Time (ms)
     ): Int
 }
