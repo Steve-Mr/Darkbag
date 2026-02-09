@@ -51,11 +51,11 @@ inline Mat3x3 mat_inv(const Mat3x3& M) {
 
 // Diagonal Matrix (Scale)
 inline Mat3x3 mat_diag(float r, float g, float b) {
-    return {{{
-        {r, 0.0f, 0.0f},
-        {0.0f, g, 0.0f},
-        {0.0f, 0.0f, b}
-    }}};
+    Mat3x3 R;
+    R.m[0][0] = r; R.m[0][1] = 0.0f; R.m[0][2] = 0.0f;
+    R.m[1][0] = 0.0f; R.m[1][1] = g; R.m[1][2] = 0.0f;
+    R.m[2][0] = 0.0f; R.m[2][1] = 0.0f; R.m[2][2] = b;
+    return R;
 }
 
 // --- Pre-calculated Matrices ---
