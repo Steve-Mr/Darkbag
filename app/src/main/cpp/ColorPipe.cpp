@@ -321,7 +321,7 @@ bool write_tiff(const char* filename, int width, int height, const std::vector<u
     return result;
 }
 
-bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, int iso, long exposureTime, float fNumber, float focalLength, long captureTimeMillis, const std::vector<float>& ccm, int orientation) {
+bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, int iso, long exposureTime, float fNumber, float focalLength, long captureTimeMillis, const std::vector<float>& ccm, const std::vector<float>& wbGains, int orientation) {
     // Register DNG tags
     TIFFSetTagExtender(DNGTagExtender);
 
@@ -393,8 +393,47 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
     uint32_t black_level_val = 0; // Already subtracted in pipeline
     TIFFSetField(tif, TIFFTAG_BLACKLEVEL, 1, &black_level_val);
 
-    // [Critical] Write real CCM
-    TIFFSetField(tif, TIFFTAG_COLORMATRIX1, 9, ccm.data());
+    // [Critical] Write real CCM (XYZ -> Camera_WB)
+    // The data is already White Balanced (Camera_WB), so we need a ColorMatrix that goes XYZ -> Camera_WB.
+    // The input `ccm` is XYZ -> Camera_Native.
+    // Camera_WB = Camera_Native * WB_Gains.
+    // Thus: New_CCM = Diag(WB) * CCM.
+    // Note: ccm is 3x3 row-major.
+
+    // Calculate Modified CCM
+    std::vector<float> modifiedCCM(9);
+    // WB Gains are usually [R, G, B].
+    // Assuming wbGains is [R_gain, G_gain, B_gain].
+    // Actually the input from HdrPlusJNI is often [r, g0, g1, b] or [r, g, b].
+    // Let's assume standard RGB gain order.
+    // ccm is:
+    // [0 1 2] -> R row
+    // [3 4 5] -> G row
+    // [6 7 8] -> B row
+
+    float r_gain = (wbGains.size() > 0) ? wbGains[0] : 1.0f;
+    float g_gain = (wbGains.size() > 1) ? wbGains[1] : 1.0f;
+    float b_gain = (wbGains.size() > 2) ? wbGains[2] : 1.0f;
+    // If wbGains has 4 elements (RGGB), average G?
+    if (wbGains.size() == 4) {
+        g_gain = (wbGains[1] + wbGains[2]) / 2.0f;
+        b_gain = wbGains[3];
+    }
+
+    // Row 0 (Red)
+    modifiedCCM[0] = ccm[0] * r_gain;
+    modifiedCCM[1] = ccm[1] * r_gain;
+    modifiedCCM[2] = ccm[2] * r_gain;
+    // Row 1 (Green)
+    modifiedCCM[3] = ccm[3] * g_gain;
+    modifiedCCM[4] = ccm[4] * g_gain;
+    modifiedCCM[5] = ccm[5] * g_gain;
+    // Row 2 (Blue)
+    modifiedCCM[6] = ccm[6] * b_gain;
+    modifiedCCM[7] = ccm[7] * b_gain;
+    modifiedCCM[8] = ccm[8] * b_gain;
+
+    TIFFSetField(tif, TIFFTAG_COLORMATRIX1, 9, modifiedCCM.data());
 
     // AsShotNeutral is {1,1,1} because data is already WB'd (Linear)
     static const float as_shot_neutral[] = {1.0f, 1.0f, 1.0f};

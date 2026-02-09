@@ -181,25 +181,45 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
 
     bool dng_ok = true;
 
-    // Save DNG (Raw Path)
+    // Prepare WB Gains Vector for DNG Writer and Matrix Calculation
+    std::vector<float> wbGains = {wb_r, (wb_g0 + wb_g1) / 2.0f, wb_b};
+    // Use 4-component vector if needed for writer, but 3 for Matrix diagonal.
+    std::vector<float> wbGainsFull = {wb_r, wb_g0, wb_g1, wb_b};
+
+    // Save DNG (Raw Path) - finalImage is in Camera_WB space
+    // We pass the WB gains so write_dng can adjust the ColorMatrix1 tag.
     int dngWhiteLevel = 16383;
     if (dng_path_cstr) {
-        dng_ok = write_dng(dng_path_cstr, width, height, finalImage, dngWhiteLevel, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation);
+        dng_ok = write_dng(dng_path_cstr, width, height, finalImage, dngWhiteLevel, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, wbGainsFull, orientation);
     }
 
-    // --- Color Space Conversion (Camera Native -> ProPhoto RGB) ---
-    // Construct M_Cam_to_XYZ from ccmVec (Input is Camera -> XYZ)
-    Mat3x3 M_Cam_to_XYZ;
+    // --- Color Space Conversion (Camera WB -> ProPhoto RGB) ---
+
+    // 1. Construct M_XYZ_to_CamNative from ccmVec (Input ccmVec is XYZ -> Camera_Native)
+    // Note: The previous assumption that ccmVec was Camera->XYZ was INCORRECT.
+    // DNG Standard: ColorMatrix1 maps XYZ to Reference Camera Native.
+    Mat3x3 M_XYZ_to_CamNative;
     int ccmIdx = 0;
     for (int i = 0; i < 3; ++i) {
         for (int j = 0; j < 3; ++j) {
-            M_Cam_to_XYZ.m[i][j] = ccmVec[ccmIdx++];
+            M_XYZ_to_CamNative.m[i][j] = ccmVec[ccmIdx++];
         }
     }
 
-    // Calculate Combined Matrix: M_Cam_to_Pro = M_XYZ_to_Pro * M_Cam_to_XYZ
-    Mat3x3 M_Cam_to_Pro = mat_mul(M_XYZ_D50_to_ProPhoto, M_Cam_to_XYZ);
+    // 2. Invert to get M_CamNative_to_XYZ
+    Mat3x3 M_CamNative_to_XYZ = mat_inv(M_XYZ_to_CamNative);
 
+    // 3. Construct M_CamWB_to_CamNative (Undo White Balance)
+    // Camera_WB = Camera_Native * WB_Gains
+    // Camera_Native = Camera_WB * (1/WB_Gains)
+    // Matrix is diagonal of inverse gains.
+    Mat3x3 M_CamWB_to_CamNative = mat_diag(1.0f / wb_r, 1.0f / ((wb_g0+wb_g1)/2.0f), 1.0f / wb_b);
+
+    // 4. Calculate Combined Matrix:
+    // Chain: Camera_WB -> Camera_Native -> XYZ -> ProPhoto
+    // M = M_XYZ_to_Pro * M_CamNative_to_XYZ * M_CamWB_to_CamNative
+    Mat3x3 M_Temp = mat_mul(M_CamNative_to_XYZ, M_CamWB_to_CamNative);
+    Mat3x3 M_CamWB_to_Pro = mat_mul(M_XYZ_D50_to_ProPhoto, M_Temp);
     // Apply in-place to finalImage
     #pragma omp parallel for
     for (int i = 0; i < width * height; i++) {
@@ -207,9 +227,9 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
         float g = (float)finalImage[i * 3 + 1];
         float b = (float)finalImage[i * 3 + 2];
 
-        float r_out = M_Cam_to_Pro.m[0][0] * r + M_Cam_to_Pro.m[0][1] * g + M_Cam_to_Pro.m[0][2] * b;
-        float g_out = M_Cam_to_Pro.m[1][0] * r + M_Cam_to_Pro.m[1][1] * g + M_Cam_to_Pro.m[1][2] * b;
-        float b_out = M_Cam_to_Pro.m[2][0] * r + M_Cam_to_Pro.m[2][1] * g + M_Cam_to_Pro.m[2][2] * b;
+        float r_out = M_CamWB_to_Pro.m[0][0] * r + M_CamWB_to_Pro.m[0][1] * g + M_CamWB_to_Pro.m[0][2] * b;
+        float g_out = M_CamWB_to_Pro.m[1][0] * r + M_CamWB_to_Pro.m[1][1] * g + M_CamWB_to_Pro.m[1][2] * b;
+        float b_out = M_CamWB_to_Pro.m[2][0] * r + M_CamWB_to_Pro.m[2][1] * g + M_CamWB_to_Pro.m[2][2] * b;
 
         finalImage[i * 3 + 0] = (unsigned short)std::max(0.0f, std::min(65535.0f, r_out));
         finalImage[i * 3 + 1] = (unsigned short)std::max(0.0f, std::min(65535.0f, g_out));

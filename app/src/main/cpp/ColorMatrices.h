@@ -29,6 +29,35 @@ inline void mat_vec(const Mat3x3& M, float in[3], float out[3]) {
     out[2] = M.m[2][0] * in[0] + M.m[2][1] * in[1] + M.m[2][2] * in[2];
 }
 
+// Matrix Inversion (3x3)
+inline Mat3x3 mat_inv(const Mat3x3& M) {
+    float det = M.m[0][0] * (M.m[1][1] * M.m[2][2] - M.m[1][2] * M.m[2][1]) -
+                M.m[0][1] * (M.m[1][0] * M.m[2][2] - M.m[1][2] * M.m[2][0]) +
+                M.m[0][2] * (M.m[1][0] * M.m[2][1] - M.m[1][1] * M.m[2][0]);
+
+    float invDet = 1.0f / det;
+    Mat3x3 R;
+    R.m[0][0] = (M.m[1][1] * M.m[2][2] - M.m[1][2] * M.m[2][1]) * invDet;
+    R.m[0][1] = (M.m[0][2] * M.m[2][1] - M.m[0][1] * M.m[2][2]) * invDet;
+    R.m[0][2] = (M.m[0][1] * M.m[1][2] - M.m[0][2] * M.m[1][1]) * invDet;
+    R.m[1][0] = (M.m[1][2] * M.m[2][0] - M.m[1][0] * M.m[2][2]) * invDet;
+    R.m[1][1] = (M.m[0][0] * M.m[2][2] - M.m[0][2] * M.m[2][0]) * invDet;
+    R.m[1][2] = (M.m[0][2] * M.m[1][0] - M.m[0][0] * M.m[1][2]) * invDet;
+    R.m[2][0] = (M.m[1][0] * M.m[2][1] - M.m[1][1] * M.m[2][0]) * invDet;
+    R.m[2][1] = (M.m[0][1] * M.m[2][0] - M.m[0][0] * M.m[2][1]) * invDet;
+    R.m[2][2] = (M.m[0][0] * M.m[1][1] - M.m[0][1] * M.m[1][0]) * invDet;
+    return R;
+}
+
+// Diagonal Matrix (Scale)
+inline Mat3x3 mat_diag(float r, float g, float b) {
+    return {{{
+        {r, 0.0f, 0.0f},
+        {0.0f, g, 0.0f},
+        {0.0f, 0.0f, b}
+    }}};
+}
+
 // --- Pre-calculated Matrices ---
 
 // XYZ (D50) -> ProPhoto RGB (D50)
