@@ -336,7 +336,9 @@ void process_and_save_image(
                 color = multiply(effective_CCM, color);
             }
             // Step 2: XYZ D50 -> XYZ D65 (ChromAdapt)
-            color = multiply(M_Bradford_D50_to_D65, color);
+            // Skip Bradford adaptation if we suspect input is already D65 (or close)
+            // The "Green Wall" issue suggests we are double-adapting.
+            // color = multiply(M_Bradford_D50_to_D65, color);
 
         } else if (sourceColorSpace == 0) { // ProPhoto (LibRaw)
             // Step 1: ProPhoto D50 -> XYZ D50
@@ -542,8 +544,9 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
     static const float as_shot_neutral[] = {1.0f, 1.0f, 1.0f};
     TIFFSetField(tif, TIFFTAG_ASSHOTNEUTRAL, 3, as_shot_neutral);
 
-    // Calibration Illuminant 1 = D50 (23). Standard Android CCM is D50.
-    TIFFSetField(tif, TIFFTAG_CALIBRATIONILLUMINANT1, 23);
+    // Calibration Illuminant 1 = D65 (21). Standard Android CCM is D50, but we want to avoid reader D50->D65 adaptation if the data is already green-ish.
+    // Let's test with D65 to match our hypothesis.
+    TIFFSetField(tif, TIFFTAG_CALIBRATIONILLUMINANT1, 21);
 
     // EXIF Metadata - Use correct standard libtiff types/pointers
     float exposureTimeSec = (float)exposureTime / 1000000000.0f;
