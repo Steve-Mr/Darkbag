@@ -71,6 +71,10 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     float wb_g0 = wbData[1];
     float wb_g1 = wbData[2];
     float wb_b = wbData[3];
+
+    // Store WB in vector for ColorPipe
+    std::vector<float> wbVec = {wb_r, wb_g0, wb_g1, wb_b};
+
     env->ReleaseFloatArrayElements(whiteBalance, wbData, JNI_ABORT);
 
     jfloat* ccmData = env->GetFloatArrayElements(ccm, nullptr);
@@ -188,7 +192,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     // Save DNG (Raw Path)
     int dngWhiteLevel = 65535; // Full 16-bit range now
     if (dng_path_cstr) {
-        dng_ok = write_dng(dng_path_cstr, width, height, finalImage, dngWhiteLevel, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation);
+        dng_ok = write_dng(dng_path_cstr, width, height, finalImage, dngWhiteLevel, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, wbVec, orientation);
     }
 
     // Save Processed Images (Log/LUT Path)
@@ -203,7 +207,8 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
         tiff_path_cstr,
         jpg_path_cstr,
         1, // sourceColorSpace = Camera Native (requires ccm)
-        ccmVec.data() // CCM (Sensor -> sRGB) from Camera2 API
+        ccmVec.data(), // CCM (Sensor -> XYZ) from Camera2 API
+        wbVec.data()   // WB Gains (for ScaleMatrix)
     );
 
     // Release Strings

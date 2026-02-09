@@ -60,6 +60,18 @@ Vec3 multiply(const Matrix3x3& mat, const Vec3& v) {
     };
 }
 
+Matrix3x3 multiply(const Matrix3x3& a, const Matrix3x3& b) {
+    Matrix3x3 res;
+    for (int r = 0; r < 3; ++r) {
+        for (int c = 0; c < 3; ++c) {
+            res.m[r * 3 + c] = a.m[r * 3 + 0] * b.m[0 * 3 + c] +
+                               a.m[r * 3 + 1] * b.m[1 * 3 + c] +
+                               a.m[r * 3 + 2] * b.m[2 * 3 + c];
+        }
+    }
+    return res;
+}
+
 Matrix3x3 invert(const Matrix3x3& src) {
     float det = src.m[0] * (src.m[4] * src.m[8] - src.m[7] * src.m[5]) -
                 src.m[1] * (src.m[3] * src.m[8] - src.m[5] * src.m[6]) +
@@ -265,16 +277,40 @@ void process_and_save_image(
     const char* tiffPath,
     const char* jpgPath,
     int sourceColorSpace,
-    const float* ccm
+    const float* ccm,
+    const float* wb
 ) {
     // 1. Prepare Output Buffer
     std::vector<unsigned short> processedImage(width * height * 3);
 
-    // Prepare CCM matrix if needed
-    Matrix3x3 sensor_to_sRGB = {0};
-    if (ccm) {
-        // Copy flat array to matrix
-        for(int i=0; i<9; ++i) sensor_to_sRGB.m[i] = ccm[i];
+    // Prepare Matrices
+    Matrix3x3 sensor_to_XYZ = {0};
+    Matrix3x3 effective_CCM = {0};
+
+    if (sourceColorSpace == 1 && ccm && wb) {
+        // Source is Camera Native (WB'd).
+        // ccm: Sensor_Raw -> XYZ D50.
+        // wb: White Balance Gains.
+        //
+        // We want XYZ.
+        // Input: Camera_WB.
+        // Relationship: Camera_WB = Camera_Raw * Scale_WB.
+        //               Camera_Raw = Camera_WB * Diagonal(1/Scale_WB).
+        //               XYZ = CCM * Camera_Raw.
+        //               XYZ = CCM * Diagonal(1/Scale_WB) * Camera_WB.
+        //
+        // So EffectiveCCM = CCM * Diagonal(1/Scale_WB).
+
+        Matrix3x3 ccmMat;
+        for(int i=0; i<9; ++i) ccmMat.m[i] = ccm[i];
+
+        Matrix3x3 scaleMat = {
+            1.0f/wb[0], 0.0f,       0.0f,
+            0.0f,       1.0f/wb[1], 0.0f, // wb[1] is G0
+            0.0f,       0.0f,       1.0f/wb[3]
+        };
+
+        effective_CCM = multiply(ccmMat, scaleMat);
     }
 
     // 2. Process Pixels
@@ -295,13 +331,11 @@ void process_and_save_image(
         Vec3 color = {norm_r, norm_g, norm_b};
 
         if (sourceColorSpace == 1) { // Camera Native (HDR+)
-            // Step 1: Apply Camera2 CCM (Sensor -> XYZ D50)
-            // Note: Android COLOR_CORRECTION_TRANSFORM typically maps to XYZ D50.
-            if (ccm) {
-                color = multiply(sensor_to_sRGB, color); // sensor_to_sRGB holds the CCM
+            // Step 1: Apply Effective CCM (Sensor_WB -> XYZ D50)
+            if (ccm && wb) {
+                color = multiply(effective_CCM, color);
             }
             // Step 2: XYZ D50 -> XYZ D65 (ChromAdapt)
-            // Since target gamuts expect D65 white point, we adapt.
             color = multiply(M_Bradford_D50_to_D65, color);
 
         } else if (sourceColorSpace == 0) { // ProPhoto (LibRaw)
@@ -415,7 +449,7 @@ bool write_tiff(const char* filename, int width, int height, const std::vector<u
     return result;
 }
 
-bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, int iso, long exposureTime, float fNumber, float focalLength, long captureTimeMillis, const std::vector<float>& ccm, int orientation) {
+bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, int iso, long exposureTime, float fNumber, float focalLength, long captureTimeMillis, const std::vector<float>& ccm, const std::vector<float>& wb, int orientation) {
     // Register DNG tags
     TIFFSetTagExtender(DNGTagExtender);
 
@@ -482,21 +516,34 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
     uint32_t black_level_val = 0; // Already subtracted in pipeline
     TIFFSetField(tif, TIFFTAG_BLACKLEVEL, 1, &black_level_val);
 
-    // [Critical] Write real CCM (XYZ -> Camera Native)
-    // The input 'ccm' is typically Sensor -> XYZ (Android format).
-    // DNG ColorMatrix1 requires XYZ -> Sensor.
-    // So we must invert it.
+    // [Critical] Calculate ColorMatrix1
+    // ColorMatrix1: XYZ -> Camera Native (where 'Camera Native' is the WB'd data)
+    // Formula: ColorMatrix1 = Diagonal(WB) * Inverse(CCM)
+    // CCM is Sensor_Raw -> XYZ.
+    // Inverse(CCM) is XYZ -> Sensor_Raw.
+    // Diagonal(WB) maps Sensor_Raw -> Sensor_WB.
+
     Matrix3x3 ccmMat;
     for(int i=0; i<9; ++i) ccmMat.m[i] = ccm[i];
+
     Matrix3x3 invCcm = invert(ccmMat);
 
-    TIFFSetField(tif, TIFFTAG_COLORMATRIX1, 9, invCcm.m);
+    Matrix3x3 scaleMat = {
+        wb[0], 0.0f, 0.0f,
+        0.0f, wb[1], 0.0f,
+        0.0f, 0.0f, wb[3]
+    };
 
-    // AsShotNeutral is {1,1,1} because data is already WB'd (Linear)
+    Matrix3x3 colorMatrix1 = multiply(scaleMat, invCcm);
+
+    TIFFSetField(tif, TIFFTAG_COLORMATRIX1, 9, colorMatrix1.m);
+
+    // AsShotNeutral is {1,1,1} because data is already WB'd
     static const float as_shot_neutral[] = {1.0f, 1.0f, 1.0f};
     TIFFSetField(tif, TIFFTAG_ASSHOTNEUTRAL, 3, as_shot_neutral);
 
-    TIFFSetField(tif, TIFFTAG_CALIBRATIONILLUMINANT1, 21); // D65 (Standard Illuminant for most transforms)
+    // Calibration Illuminant 1 = D50 (23). Standard Android CCM is D50.
+    TIFFSetField(tif, TIFFTAG_CALIBRATIONILLUMINANT1, 23);
 
     // EXIF Metadata - Use correct standard libtiff types/pointers
     float exposureTimeSec = (float)exposureTime / 1000000000.0f;
