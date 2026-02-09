@@ -38,8 +38,8 @@ Vec3 apply_lut(const LUT3D& lut, Vec3 color);
 
 // --- Shared Pipeline ---
 // sourceColorSpace: 0 = ProPhoto RGB (LibRaw), 1 = Camera Native (HDR+)
-// ccm: 3x3 matrix (row-major) for Camera Native -> XYZ D50 conversion (only used if sourceColorSpace == 1)
-// wb: 4-element array [r, g0, g1, b] (only used if sourceColorSpace == 1)
+// ccm: 3x3 matrix (row-major) for Camera Native -> sRGB D65 conversion (only used if sourceColorSpace == 1)
+// wb: 4-element array [r, g0, g1, b] (Unused in current HDR+ pipeline as CCM includes WB compensation)
 void process_and_save_image(
     const std::vector<unsigned short>& inputImage,
     int width,
@@ -57,8 +57,8 @@ void process_and_save_image(
 // --- File Writers ---
 bool write_tiff(const char* filename, int width, int height, const std::vector<unsigned short>& data);
 
-// wb: 4-element array [r, g0, g1, b]
-bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, int iso, long exposureTime, float fNumber, float focalLength, long captureTimeMillis, const std::vector<float>& ccm, const std::vector<float>& wb, int orientation);
+// Note: wb parameter removed as it's unused in current DNG logic (CCM handles WB->sRGB mapping)
+bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, int iso, long exposureTime, float fNumber, float focalLength, long captureTimeMillis, const std::vector<float>& ccm, int orientation);
 
 bool write_bmp(const char* filename, int width, int height, const std::vector<unsigned short>& data);
 

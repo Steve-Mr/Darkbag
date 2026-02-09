@@ -298,7 +298,7 @@ void process_and_save_image(
     Matrix3x3 sensor_to_sRGB = {0};
     Matrix3x3 effective_CCM = {0};
 
-    if (sourceColorSpace == 1 && ccm && wb) {
+    if (sourceColorSpace == 1 && ccm) {
         // Source is Camera Native (WB'd).
         // ccm: Sensor_WB -> sRGB (Observed behavior)
         // wb: White Balance Gains (Ignored for CCM setup as CCM includes WB compensation implicitly).
@@ -310,7 +310,7 @@ void process_and_save_image(
         // So EffectiveCCM = CCM.
 
         Matrix3x3 ccmMat;
-        for(int i=0; i<9; ++i) ccmMat.m[i] = ccm[i];
+        std::copy(ccm, ccm + 9, ccmMat.m);
 
         effective_CCM = ccmMat;
     }
@@ -452,7 +452,7 @@ bool write_tiff(const char* filename, int width, int height, const std::vector<u
     return result;
 }
 
-bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, int iso, long exposureTime, float fNumber, float focalLength, long captureTimeMillis, const std::vector<float>& ccm, const std::vector<float>& wb, int orientation) {
+bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, int iso, long exposureTime, float fNumber, float focalLength, long captureTimeMillis, const std::vector<float>& ccm, int orientation) {
     // Register DNG tags
     TIFFSetTagExtender(DNGTagExtender);
 
@@ -530,7 +530,7 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
     // So ColorMatrix1 = Inv(CCM) * XYZ_to_sRGB.
 
     Matrix3x3 ccmMat;
-    for(int i=0; i<9; ++i) ccmMat.m[i] = ccm[i];
+    std::copy(ccm.data(), ccm.data() + 9, ccmMat.m);
 
     Matrix3x3 invCcm = invert(ccmMat);
 
