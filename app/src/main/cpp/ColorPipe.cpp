@@ -292,28 +292,19 @@ void process_and_save_image(
 
     if (sourceColorSpace == 1 && ccm && wb) {
         // Source is Camera Native (WB'd).
-        // ccm: Sensor_Raw -> sRGB (Observed behavior)
-        // wb: White Balance Gains.
+        // ccm: Sensor_WB -> sRGB (Observed behavior)
+        // wb: White Balance Gains (Ignored for CCM setup as CCM includes WB compensation implicitly).
         //
         // We want sRGB.
         // Input: Camera_WB.
-        // Camera_WB = Camera_Raw * Scale_WB.
-        // Camera_Raw = Camera_WB * Diagonal(1/Scale_WB).
-        // sRGB = CCM * Camera_Raw.
-        // sRGB = CCM * Diagonal(1/Scale_WB) * Camera_WB.
+        // sRGB = CCM * Camera_WB.
         //
-        // So EffectiveCCM = CCM * Diagonal(1/Scale_WB).
+        // So EffectiveCCM = CCM.
 
         Matrix3x3 ccmMat;
         for(int i=0; i<9; ++i) ccmMat.m[i] = ccm[i];
 
-        Matrix3x3 scaleMat = {
-            1.0f/wb[0], 0.0f,       0.0f,
-            0.0f,       1.0f/wb[1], 0.0f, // wb[1] is G0
-            0.0f,       0.0f,       1.0f/wb[3]
-        };
-
-        effective_CCM = multiply(ccmMat, scaleMat);
+        effective_CCM = ccmMat;
     }
 
     // 2. Process Pixels
@@ -335,7 +326,7 @@ void process_and_save_image(
 
         if (sourceColorSpace == 1) { // Camera Native (HDR+)
             // Step 1: Apply Effective CCM (Sensor_WB -> sRGB)
-            if (ccm && wb) {
+            if (ccm) {
                 color = multiply(effective_CCM, color);
             }
             // Step 2: sRGB -> XYZ (D65)
@@ -520,33 +511,22 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
     uint32_t black_level_val = 0; // Already subtracted in pipeline
     TIFFSetField(tif, TIFFTAG_BLACKLEVEL, 1, &black_level_val);
 
-    // [Critical] Calculate ColorMatrix1 (Assuming CCM is Sensor->sRGB, not Sensor->XYZ)
+    // [Critical] Calculate ColorMatrix1 (Assuming CCM is Sensor_WB -> sRGB)
     // ColorMatrix1: XYZ -> Camera Native (WB'd)
     //
     // Known:
-    // sRGB = CCM * Camera_Raw
+    // sRGB = CCM * Camera_WB
+    // Camera_WB = Inv(CCM) * sRGB
     // sRGB = XYZ_to_sRGB * XYZ
-    // So: CCM * Camera_Raw = XYZ_to_sRGB * XYZ
-    // Camera_Raw = Inv(CCM) * XYZ_to_sRGB * XYZ
     //
-    // Camera_WB = Diagonal(WB) * Camera_Raw
-    // Camera_WB = Diagonal(WB) * Inv(CCM) * XYZ_to_sRGB * XYZ
-    //
-    // So ColorMatrix1 = Diagonal(WB) * Inv(CCM) * XYZ_to_sRGB.
+    // So ColorMatrix1 = Inv(CCM) * XYZ_to_sRGB.
 
     Matrix3x3 ccmMat;
     for(int i=0; i<9; ++i) ccmMat.m[i] = ccm[i];
 
     Matrix3x3 invCcm = invert(ccmMat);
 
-    Matrix3x3 scaleMat = {
-        wb[0], 0.0f, 0.0f,
-        0.0f, wb[1], 0.0f,
-        0.0f, 0.0f, wb[3]
-    };
-
-    Matrix3x3 colorMatrix1 = multiply(scaleMat, invCcm);
-    colorMatrix1 = multiply(colorMatrix1, M_XYZ_to_sRGB_D65);
+    Matrix3x3 colorMatrix1 = multiply(invCcm, M_XYZ_to_sRGB_D65);
 
     TIFFSetField(tif, TIFFTAG_COLORMATRIX1, 9, colorMatrix1.m);
 
