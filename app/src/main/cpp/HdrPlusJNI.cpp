@@ -197,7 +197,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
         finalImage,
         width,
         height,
-        4.0f * digitalGain, // Gain to account for 0.25x headroom + exposure
+        digitalGain, // Gain to account for exposure (Data is already scaled 4x)
         targetLog,
         lut,
         tiff_path_cstr,
