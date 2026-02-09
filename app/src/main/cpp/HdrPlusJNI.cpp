@@ -192,7 +192,6 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     // Save DNG (Raw Path)
     int dngWhiteLevel = 65535; // Full 16-bit range now
     if (dng_path_cstr) {
-        // [MODIFIED]: Removed unused wbVec argument
         dng_ok = write_dng(dng_path_cstr, width, height, finalImage, dngWhiteLevel, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation);
     }
 
@@ -209,7 +208,8 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
         jpg_path_cstr,
         1, // sourceColorSpace = Camera Native (requires ccm)
         ccmVec.data(), // CCM (Sensor -> XYZ) from Camera2 API
-        wbVec.data()   // WB Gains (Currently unused in HDR+ path, but kept for API)
+        wbVec.data(),   // WB Gains (Currently unused in HDR+ path, but kept for API)
+        orientation // Pass orientation for TIFF writing
     );
 
     // Release Strings

@@ -289,7 +289,8 @@ void process_and_save_image(
     const char* jpgPath,
     int sourceColorSpace,
     const float* ccm,
-    const float* wb
+    const float* wb,
+    int orientation
 ) {
     // 1. Prepare Output Buffer
     std::vector<unsigned short> processedImage(width * height * 3);
@@ -388,13 +389,13 @@ void process_and_save_image(
     }
 
     // 4. Save Files
-    if (tiffPath) write_tiff(tiffPath, width, height, processedImage);
+    if (tiffPath) write_tiff(tiffPath, width, height, processedImage, orientation);
     if (jpgPath) write_bmp(jpgPath, width, height, processedImage);
 }
 
 // --- TIFF Writer ---
 
-bool write_tiff(const char* filename, int width, int height, const std::vector<unsigned short>& data) {
+bool write_tiff(const char* filename, int width, int height, const std::vector<unsigned short>& data, int orientation) {
     std::ofstream file(filename, std::ios::binary);
     if (!file.is_open()) return false;
 
@@ -403,7 +404,7 @@ bool write_tiff(const char* filename, int width, int height, const std::vector<u
     file.write(header, 8);
 
     // IFD
-    short num_entries = 10;
+    short num_entries = 11; // Increased to 11 for Orientation
     file.write((char*)&num_entries, 2);
 
     auto write_entry = [&](short tag, short type, int count, int value_or_offset) {
@@ -426,15 +427,25 @@ bool write_tiff(const char* filename, int width, int height, const std::vector<u
     write_entry(259, 3, 1, 1);
     // 5. Photometric (262) - 2 (RGB)
     write_entry(262, 3, 1, 2);
-    // 6. StripOffsets (273) - data_offset
+    // 6. Orientation (274)
+    short tiffOrientation = 1;
+    switch (orientation) {
+        case 90: tiffOrientation = 6; break;
+        case 180: tiffOrientation = 3; break;
+        case 270: tiffOrientation = 8; break;
+        default: tiffOrientation = 1; break;
+    }
+    write_entry(274, 3, 1, tiffOrientation);
+
+    // 7. StripOffsets (273) - data_offset
     write_entry(273, 4, 1, data_offset);
-    // 7. SamplesPerPixel (277) - 3
+    // 8. SamplesPerPixel (277) - 3
     write_entry(277, 3, 1, 3);
-    // 8. RowsPerStrip (278) - height
+    // 9. RowsPerStrip (278) - height
     write_entry(278, 3, 1, height);
-    // 9. StripByteCounts (279) - width * height * 6
+    // 10. StripByteCounts (279) - width * height * 6
     write_entry(279, 4, 1, width * height * 6);
-    // 10. PlanarConfig (284) - 1 (Chunky)
+    // 11. PlanarConfig (284) - 1 (Chunky)
     write_entry(284, 3, 1, 1);
 
     int next_ifd = 0;

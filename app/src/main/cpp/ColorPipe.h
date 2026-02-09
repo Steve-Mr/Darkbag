@@ -51,11 +51,12 @@ void process_and_save_image(
     const char* jpgPath,
     int sourceColorSpace = 0,
     const float* ccm = nullptr,
-    const float* wb = nullptr
+    const float* wb = nullptr,
+    int orientation = 0
 );
 
 // --- File Writers ---
-bool write_tiff(const char* filename, int width, int height, const std::vector<unsigned short>& data);
+bool write_tiff(const char* filename, int width, int height, const std::vector<unsigned short>& data, int orientation = 0);
 
 // Note: wb parameter removed as it's unused in current DNG logic (CCM handles WB->sRGB mapping)
 bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, int iso, long exposureTime, float fNumber, float focalLength, long captureTimeMillis, const std::vector<float>& ccm, int orientation);
