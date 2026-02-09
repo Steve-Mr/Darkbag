@@ -103,8 +103,9 @@ add_custom_command(
 )
 
 # Run the generator to produce the target object file
-# We target arm-64-android.
-set(HALIDE_TARGET "arm-64-android")
+# We target arm-64-android with OpenCL support.
+# We include both CPU and GPU (OpenCL) targets for automatic runtime selection.
+set(HALIDE_TARGET "arm-64-android-opencl,arm-64-android")
 set(GENERATED_HEADER "${GENERATOR_OUTPUT_DIR}/hdrplus_raw_pipeline.h")
 set(GENERATED_LIB "${GENERATOR_OUTPUT_DIR}/hdrplus_raw_pipeline.a") # Static lib output
 

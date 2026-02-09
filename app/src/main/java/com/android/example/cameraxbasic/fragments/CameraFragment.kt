@@ -2425,6 +2425,7 @@ class CameraFragment : Fragment() {
 
                 val debugStats = LongArray(1) // [0]: Halide Time
 
+                val useGpu = prefs.getBoolean(SettingsFragment.KEY_USE_GPU, false)
                 val ret = ColorProcessor.processHdrPlus(
                     buffers,
                     width, height,
@@ -2438,6 +2439,7 @@ class CameraFragment : Fragment() {
                     bmpPath,
                     linearDngPath,
                     digitalGain,
+                    useGpu,
                     debugStats
                 )
 

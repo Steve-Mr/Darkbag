@@ -51,6 +51,22 @@ static void DNGTagExtender(TIFF *tif) {
     TIFFMergeFieldInfo(tif, dng_field_info, sizeof(dng_field_info) / sizeof(dng_field_info[0]));
 }
 
+Matrix3x3 get_srgb_to_xyz_matrix() {
+    return M_sRGB_D65_to_XYZ;
+}
+
+Matrix3x3 get_xyz_to_target_matrix(int targetLog) {
+    switch (targetLog) {
+        case 1: return M_XYZ_to_AlexaWideGamut_D65;
+        case 2:
+        case 3: return M_XYZ_to_Rec2020_D65;
+        case 5:
+        case 6: return M_XYZ_to_SGamut3Cine_D65;
+        case 7: return M_XYZ_to_VGamut_D65;
+        default: return M_XYZ_to_Rec709_D65;
+    }
+}
+
 // --- Matrix Math ---
 Vec3 multiply(const Matrix3x3& mat, const Vec3& v) {
     return {
@@ -389,6 +405,18 @@ void process_and_save_image(
     }
 
     // 4. Save Files
+    if (tiffPath) write_tiff(tiffPath, width, height, processedImage, orientation);
+    if (jpgPath) write_bmp(jpgPath, width, height, processedImage);
+}
+
+void save_processed_image_simple(
+    const std::vector<unsigned short>& processedImage,
+    int width,
+    int height,
+    const char* tiffPath,
+    const char* jpgPath,
+    int orientation
+) {
     if (tiffPath) write_tiff(tiffPath, width, height, processedImage, orientation);
     if (jpgPath) write_bmp(jpgPath, width, height, processedImage);
 }

@@ -3,7 +3,8 @@
 #include <vector>
 #include <string>
 #include <memory>
-#include <chrono> // For timing
+#include <chrono>
+#include <future> // For std::async
 #include <libraw/libraw.h>
 #include <HalideBuffer.h>
 #include "ColorPipe.h"
@@ -39,18 +40,21 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
         jstring outputJpgPath,
         jstring outputDngPath,
         jfloat digitalGain,
+        jboolean useGpu,
         jlongArray debugStats
 ) {
-    LOGD("Native processHdrPlus started.");
+    LOGD("Native processHdrPlus started. useGpu=%d", useGpu);
 
     int numFrames = env->GetArrayLength(dngBuffers);
     if (numFrames < 2) {
         LOGE("HDR+ requires at least 2 frames.");
         return -1;
     }
-    LOGD("Processing %d frames.", numFrames);
 
     // 1. Prepare Inputs for Halide
+    // To minimize memory, we can wrap the direct buffers instead of copying if possible,
+    // but Halide 3D buffer expects contiguous data for the 3rd dimension usually.
+    // Our rawData is interleaved in the 3rd dimension (frames).
     std::vector<uint16_t> rawData(width * height * numFrames);
 
     for (int i = 0; i < numFrames; i++) {
@@ -71,10 +75,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     float wb_g0 = wbData[1];
     float wb_g1 = wbData[2];
     float wb_b = wbData[3];
-
-    // Store WB in vector for ColorPipe
     std::vector<float> wbVec = {wb_r, wb_g0, wb_g1, wb_b};
-
     env->ReleaseFloatArrayElements(whiteBalance, wbData, JNI_ABORT);
 
     jfloat* ccmData = env->GetFloatArrayElements(ccm, nullptr);
@@ -82,43 +83,69 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     for(int i=0; i<9; ++i) ccmVec[i] = ccmData[i];
     env->ReleaseFloatArrayElements(ccm, ccmData, JNI_ABORT);
 
-    std::vector<float> identityCCM = {
-        1.0f, 0.0f, 0.0f,
-        0.0f, 1.0f, 0.0f,
-        0.0f, 0.0f, 1.0f
-    };
-    Buffer<float> ccmHalideBuf(identityCCM.data(), 3, 3);
+    // CCM for Halide (Sensor_WB -> sRGB)
+    Buffer<float> ccmHalideBuf(ccmVec.data(), 3, 3);
 
-    // 3. Prepare Output Buffer (16-bit Linear RGB)
-    Buffer<uint16_t> outputBuf(width, height, 3);
+    // Post-processing Matrices
+    Matrix3x3 srgb_to_xyz = get_srgb_to_xyz_matrix();
+    Buffer<float> m_srgb_to_xyz_buf(srgb_to_xyz.m, 3, 3);
 
-    // 4. Run Pipeline
-    float compression = 1.0f; // Unused now in our modified generator
-    float gain = 1.0f;        // Unused now
+    Matrix3x3 xyz_to_target = get_xyz_to_target_matrix(targetLog);
+    Buffer<float> m_xyz_to_target_buf(xyz_to_target.m, 3, 3);
 
-    // Fix for Red/Blue Swap (Bayer Phase Mismatch)
-    // Assuming RGGB (0) <-> BGGR (3) mismatch
-    if (cfaPattern == 0) {
-        cfaPattern = 3; // Force BGGR
-        LOGD("Swapped CFA: RGGB -> BGGR");
-    } else if (cfaPattern == 3) {
-        cfaPattern = 0; // Force RGGB
-        LOGD("Swapped CFA: BGGR -> RGGB");
+    // LUT
+    const char* lut_path_cstr = (lutPath) ? env->GetStringUTFChars(lutPath, 0) : nullptr;
+    LUT3D lut;
+    bool has_lut = false;
+    if (lut_path_cstr) {
+        lut = load_lut(lut_path_cstr);
+        env->ReleaseStringUTFChars(lutPath, lut_path_cstr);
+        if (lut.size > 0) has_lut = true;
     }
 
-    int result = 0;
+    // Prepare LUT buffer for Halide
+    std::vector<float> dummyLutData(3 * 2 * 2 * 2, 0.0f);
+    Buffer<float> lutBuf;
+    int lut_size = 0;
+    if (has_lut) {
+        // Halide buffer from lut.data (interleaved Vec3)
+        // lut.data is vector<Vec3>, Vec3 is {f, f, f}.
+        // We want (c, r, g, b)
+        lutBuf = Buffer<float>((float*)lut.data.data(), 3, lut.size, lut.size, lut.size);
+        lut_size = lut.size;
+    } else {
+        lutBuf = Buffer<float>(dummyLutData.data(), 3, 2, 2, 2);
+        lut_size = 2;
+    }
+
+    // 3. Prepare Output Buffers
+    Buffer<uint16_t> outputLinear(width, height, 3);
+    Buffer<uint16_t> outputFinal(width, height, 3);
+
+    // 4. Run Pipeline
+    // Fix for Red/Blue Swap (Bayer Phase Mismatch)
+    if (cfaPattern == 0) cfaPattern = 3;
+    else if (cfaPattern == 3) cfaPattern = 0;
+
     auto halideStart = std::chrono::high_resolution_clock::now();
 
-    result = hdrplus_raw_pipeline(
+    int result = hdrplus_raw_pipeline(
         inputBuf,
         (uint16_t)blackLevel,
         (uint16_t)whiteLevel,
         wb_r, wb_g0, wb_g1, wb_b,
         cfaPattern,
         ccmHalideBuf,
-        compression,
-        gain,
-        outputBuf
+        digitalGain,
+        targetLog,
+        m_srgb_to_xyz_buf,
+        m_xyz_to_target_buf,
+        lutBuf,
+        lut_size,
+        has_lut,
+        useGpu,
+        outputLinear,
+        outputFinal
     );
 
     auto halideEnd = std::chrono::high_resolution_clock::now();
@@ -134,83 +161,69 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
         return -1;
     }
 
-    LOGD("Halide pipeline finished.");
+    LOGD("Halide pipeline finished in %ld ms.", (long)durationMs);
 
-    // 5. Post-Processing (Log + LUT)
+    // 5. Parallel Post-Processing & Saving
 
-    // Load LUT
-    const char* lut_path_cstr = (lutPath) ? env->GetStringUTFChars(lutPath, 0) : nullptr;
-    LUT3D lut;
-    if (lut_path_cstr) {
-        lut = load_lut(lut_path_cstr);
-        env->ReleaseStringUTFChars(lutPath, lut_path_cstr);
-    }
-
-    // Process Output
-    // finalImage: Linear RGB (clipped) for DNG
-    std::vector<unsigned short> finalImage(width * height * 3);
-
-    // Halide Output is Planar x, y, c
-    int stride_x = outputBuf.dim(0).stride();
-    int stride_y = outputBuf.dim(1).stride();
-    int stride_c = outputBuf.dim(2).stride();
-    const uint16_t* raw_ptr = outputBuf.data();
-
-    // Determine clipping limit for Linear DNG
-    // We scale data by 4x to fill 16-bit range, effectively moving the white point from 16383 to 65532.
-    // This fixes issues where some DNG viewers ignore WhiteLevel for LinearRaw and assume 65535.
-    uint16_t clip_limit = 16383; // Original limit
-
-    #pragma omp parallel for
-    for (int y = 0; y < height; y++) {
-        for (int x = 0; x < width; x++) {
-             // Read Halide Planar
-             uint16_t r_val = raw_ptr[x * stride_x + y * stride_y + 0 * stride_c];
-             uint16_t g_val = raw_ptr[x * stride_x + y * stride_y + 1 * stride_c];
-             uint16_t b_val = raw_ptr[x * stride_x + y * stride_y + 2 * stride_c];
-
-             // Clipping to fix Pink Highlights (R > G saturation)
-             r_val = std::min(r_val, clip_limit);
-             g_val = std::min(g_val, clip_limit);
-             b_val = std::min(b_val, clip_limit);
-
-             // Write Interleaved (16-bit Linear) for DNG, Scaled by 4x
-             int idx = (y * width + x) * 3;
-             finalImage[idx + 0] = r_val << 2;
-             finalImage[idx + 1] = g_val << 2;
-             finalImage[idx + 2] = b_val << 2;
-        }
-    }
-
-    // Prepare paths
+    // Prepare path strings
     const char* tiff_path_cstr = (outputTiffPath) ? env->GetStringUTFChars(outputTiffPath, 0) : nullptr;
     const char* jpg_path_cstr = (outputJpgPath) ? env->GetStringUTFChars(outputJpgPath, 0) : nullptr;
     const char* dng_path_cstr = (outputDngPath) ? env->GetStringUTFChars(outputDngPath, 0) : nullptr;
 
-    bool dng_ok = true;
+    // Linear Image for DNG (outputLinear is Planar, needs to be Interleaved and Scaled 4x)
+    std::vector<uint16_t> linearInterleaved(width * height * 3);
+    {
+        const uint16_t* ptr = outputLinear.data();
+        int stride_x = outputLinear.dim(0).stride();
+        int stride_y = outputLinear.dim(1).stride();
+        int stride_c = outputLinear.dim(2).stride();
+        uint16_t clip_limit = 16383;
 
-    // Save DNG (Raw Path)
-    int dngWhiteLevel = 65535; // Full 16-bit range now
-    if (dng_path_cstr) {
-        dng_ok = write_dng(dng_path_cstr, width, height, finalImage, dngWhiteLevel, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation);
+        #pragma omp parallel for
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                uint16_t r = std::min(ptr[x * stride_x + y * stride_y + 0 * stride_c], clip_limit);
+                uint16_t g = std::min(ptr[x * stride_x + y * stride_y + 1 * stride_c], clip_limit);
+                uint16_t b = std::min(ptr[x * stride_x + y * stride_y + 2 * stride_c], clip_limit);
+                int idx = (y * width + x) * 3;
+                linearInterleaved[idx + 0] = r << 2;
+                linearInterleaved[idx + 1] = g << 2;
+                linearInterleaved[idx + 2] = b << 2;
+            }
+        }
     }
 
-    // Save Processed Images (Log/LUT Path)
-    // Pass finalImage (Linear) + Gain + Logic to shared pipeline
-    process_and_save_image(
-        finalImage,
-        width,
-        height,
-        digitalGain, // Gain to account for exposure (Data is already scaled 4x)
-        targetLog,
-        lut,
-        tiff_path_cstr,
-        jpg_path_cstr,
-        1, // sourceColorSpace = Camera Native (requires ccm)
-        ccmVec.data(), // CCM (Sensor -> XYZ) from Camera2 API
-        wbVec.data(),   // WB Gains (Currently unused in HDR+ path, but kept for API)
-        orientation // Pass orientation for TIFF writing
-    );
+    // Final Image for JPEG/TIFF (outputFinal is Planar, needs to be Interleaved)
+    std::vector<uint16_t> finalInterleaved(width * height * 3);
+    {
+        const uint16_t* ptr = outputFinal.data();
+        int stride_x = outputFinal.dim(0).stride();
+        int stride_y = outputFinal.dim(1).stride();
+        int stride_c = outputFinal.dim(2).stride();
+
+        #pragma omp parallel for
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                int idx = (y * width + x) * 3;
+                finalInterleaved[idx + 0] = ptr[x * stride_x + y * stride_y + 0 * stride_c];
+                finalInterleaved[idx + 1] = ptr[x * stride_x + y * stride_y + 1 * stride_c];
+                finalInterleaved[idx + 2] = ptr[x * stride_x + y * stride_y + 2 * stride_c];
+            }
+        }
+    }
+
+    // Parallel Saving
+    auto dng_task = std::async(std::launch::async, [&]() {
+        if (!dng_path_cstr) return true;
+        return write_dng(dng_path_cstr, width, height, linearInterleaved, 65535, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation);
+    });
+
+    auto img_task = std::async(std::launch::async, [&]() {
+        save_processed_image_simple(finalInterleaved, width, height, tiff_path_cstr, jpg_path_cstr, orientation);
+    });
+
+    bool dng_ok = dng_task.get();
+    img_task.wait();
 
     // Release Strings
     if (outputTiffPath) env->ReleaseStringUTFChars(outputTiffPath, tiff_path_cstr);

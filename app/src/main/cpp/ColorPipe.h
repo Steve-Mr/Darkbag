@@ -36,6 +36,9 @@ struct LUT3D {
 LUT3D load_lut(const char* path);
 Vec3 apply_lut(const LUT3D& lut, Vec3 color);
 
+Matrix3x3 get_srgb_to_xyz_matrix();
+Matrix3x3 get_xyz_to_target_matrix(int targetLog);
+
 // --- Shared Pipeline ---
 // sourceColorSpace: 0 = ProPhoto RGB (LibRaw), 1 = Camera Native (HDR+)
 // ccm: 3x3 matrix (row-major) for Camera Native -> sRGB D65 conversion (only used if sourceColorSpace == 1)
@@ -52,6 +55,16 @@ void process_and_save_image(
     int sourceColorSpace = 0,
     const float* ccm = nullptr,
     const float* wb = nullptr,
+    int orientation = 0
+);
+
+// Simplified version for already processed data (Log/LUT already applied)
+void save_processed_image_simple(
+    const std::vector<unsigned short>& processedImage,
+    int width,
+    int height,
+    const char* tiffPath,
+    const char* jpgPath,
     int orientation = 0
 );
 

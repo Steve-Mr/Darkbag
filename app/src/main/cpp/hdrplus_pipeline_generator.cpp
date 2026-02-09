@@ -10,6 +10,64 @@ using namespace Halide::ConciseCasts;
 
 namespace {
 
+// --- Post-Processing Helper Functions ---
+
+Expr apply_srgb_oetf(Expr x) {
+    return select(x <= 0.0031308f, 12.92f * x, 1.055f * pow(x, 1.0f / 2.4f) - 0.055f);
+}
+
+Expr apply_arri_logc3(Expr x) {
+    float cut = 0.010591f;
+    float a = 5.555556f;
+    float b = 0.052272f;
+    float c = 0.247190f;
+    float d = 0.385537f;
+    float e = 5.367655f;
+    float f = 0.092809f;
+    return select(x > cut, c * log10(a * x + b) + d, e * x + f);
+}
+
+Expr apply_s_log3(Expr x) {
+    return select(x >= 0.01125000f, (420.0f + log10((x + 0.01f) / (0.18f + 0.01f)) * 261.5f) / 1023.0f,
+                  (x * 171.2102946929f + 95.0f) / 1023.0f);
+}
+
+Expr apply_f_log(Expr x) {
+    float a = 0.555556f;
+    float b = 0.009468f;
+    float c = 0.344676f;
+    float d = 0.790453f;
+    float cut = 0.00089f;
+    return select(x >= cut, c * log10(a * x + b) + d, 8.52f * x + 0.0929f);
+}
+
+Expr apply_vlog(Expr x) {
+    float cut = 0.01f;
+    float c = 0.241514f;
+    float b = 0.008730f;
+    float d = 0.598206f;
+    return select(x >= cut, c * log10(x + b) + d, 5.6f * x + 0.125f);
+}
+
+Expr apply_log(Expr x, Expr type) {
+    Expr val = max(0.0f, x);
+    return select(type == 1, apply_arri_logc3(val),
+                  type == 2 || type == 3, apply_f_log(val),
+                  type == 5 || type == 6, apply_s_log3(val),
+                  type == 7, apply_vlog(val),
+                  apply_srgb_oetf(val));
+}
+
+// Matrix multiplication helper
+Func multiply_3x3(Func input, Buffer<float> mat, std::string name) {
+    Func output(name);
+    Var x, y, c;
+    output(x, y, c) = mat(0, c) * input(x, y, 0) +
+                      mat(1, c) * input(x, y, 1) +
+                      mat(2, c) * input(x, y, 2);
+    return output;
+}
+
 // --- Inlined Helper Functions from finish.cpp ---
 
 Func black_white_level(Func input, const Expr bp, const Expr wp) {
@@ -220,13 +278,24 @@ public:
   Input<int> cfa_pattern{"cfa_pattern"};
   Input<Buffer<float>> ccm{"ccm", 2};
 
-  Input<float> compression{"compression"};
-  Input<float> gain{"gain"};
+  // Post-processing inputs
+  Input<float> digital_gain{"digital_gain"};
+  Input<int> target_log{"target_log"};
+  Input<Buffer<float>> m_srgb_to_xyz{"m_srgb_to_xyz", 2};
+  Input<Buffer<float>> m_xyz_to_target{"m_xyz_to_target", 2};
+  Input<Buffer<float>> lut{"lut", 4}; // (c, r, g, b)
+  Input<int> lut_size{"lut_size"};
+  Input<bool> has_lut{"has_lut"};
+  Input<bool> use_gpu_input{"use_gpu_input"};
 
-  // 16-bit Linear RGB output
-  Output<Buffer<uint16_t>> output{"output", 3};
+  // Outputs
+  Output<Buffer<uint16_t>> output_linear{"output_linear", 3};
+  Output<Buffer<uint16_t>> output_final{"output_final", 3};
 
   void generate() {
+    Var x, y, c;
+
+    // 1. Raw Pipeline
     Func alignment = align(inputs, inputs.width(), inputs.height());
     Func merged = merge(inputs, inputs.width(), inputs.height(),
                         inputs.dim(2).extent(), alignment);
@@ -241,8 +310,86 @@ public:
     int denoise_passes = 1;
     Func chroma_denoised_output = chroma_denoise(demosaic_output, inputs.width(), inputs.height(), denoise_passes);
 
-    Func linear_rgb_output = srgb(chroma_denoised_output, ccm);
-    output = linear_rgb_output;
+    // Linear RGB (Sensor_WB -> sRGB)
+    Func linear_srgb = srgb(chroma_denoised_output, ccm);
+
+    // Output 1: Linear Raw for DNG (scaled by 4x in JNI, so we just output as is)
+    // Wait, HdrPlusJNI.cpp does:
+    // finalImage[idx + 0] = r_val << 2;
+    // So Halide output is effectively 14-bit.
+    output_linear(x, y, c) = linear_srgb(x, y, c);
+
+    // 2. Post-processing Pipeline
+    // 2a. Digital Gain & Normalization
+    Func normalized("normalized");
+    normalized(x, y, c) = (f32(linear_srgb(x, y, c)) / 65535.0f) * digital_gain;
+
+    // 2b. Color Space Conversion: sRGB -> XYZ -> Target Gamut
+    Func xyz = multiply_3x3(normalized, m_srgb_to_xyz, "xyz");
+    Func target_gamut = multiply_3x3(xyz, m_xyz_to_target, "target_gamut");
+
+    // 2c. Log Curve
+    Func logged("logged");
+    logged(x, y, c) = apply_log(target_gamut(x, y, c), target_log);
+
+    // 2d. 3D LUT (Trilinear Interpolation)
+    Func final_color("final_color");
+
+    Expr scale = f32(lut_size - 1);
+        Expr r = clamp(logged(x, y, 0), 0.0f, 1.0f) * scale;
+        Expr g = clamp(logged(x, y, 1), 0.0f, 1.0f) * scale;
+        Expr b = clamp(logged(x, y, 2), 0.0f, 1.0f) * scale;
+
+        Expr r0 = cast<int>(r); Expr r1 = min(r0 + 1, lut_size - 1);
+        Expr g0 = cast<int>(g); Expr g1 = min(g0 + 1, lut_size - 1);
+        Expr b0 = cast<int>(b); Expr b1 = min(b0 + 1, lut_size - 1);
+
+        Expr dr = r - r0; Expr dg = g - g0; Expr db = b - b0;
+
+        auto lookup = [&](Expr ri, Expr gi, Expr bi, Expr ci) {
+            return lut(ci, ri, gi, bi);
+        };
+
+        Expr c000 = lookup(r0, g0, b0, c); Expr c100 = lookup(r1, g0, b0, c);
+        Expr c010 = lookup(r0, g1, b0, c); Expr c110 = lookup(r1, g1, b0, c);
+        Expr c001 = lookup(r0, g0, b1, c); Expr c101 = lookup(r1, g0, b1, c);
+        Expr c011 = lookup(r0, g1, b1, c); Expr c111 = lookup(r1, g1, b1, c);
+
+        Expr c00 = c000 * (1.0f - dr) + c100 * dr;
+        Expr c10 = c010 * (1.0f - dr) + c110 * dr;
+        Expr c01 = c001 * (1.0f - dr) + c101 * dr;
+        Expr c11 = c011 * (1.0f - dr) + c111 * dr;
+
+        Expr c0 = c00 * (1.0f - dg) + c10 * dg;
+        Expr c1 = c01 * (1.0f - dg) + c11 * dg;
+
+        Expr lut_val = c0 * (1.0f - db) + c1 * db;
+        final_color(x, y, c) = select(has_lut, lut_val, logged(x, y, c));
+
+    // Output 2: Final Processed Image
+    output_final(x, y, c) = u16_sat(final_color(x, y, c) * 65535.0f);
+
+    // --- Scheduling ---
+    Target target = get_target();
+    if (target.has_gpu_feature()) {
+        // GPU Specialization
+        output_linear.specialize(use_gpu_input).gpu_tile(x, y, 16, 16);
+        output_final.specialize(use_gpu_input).gpu_tile(x, y, 16, 16);
+        linear_srgb.specialize(use_gpu_input).compute_at(output_linear, Var::gpu_blocks_x).gpu_threads(x, y);
+
+        // CPU Fallback within GPU target (if use_gpu_input is false)
+        output_linear.specialize(!use_gpu_input).parallel(y).vectorize(x, 16);
+        output_final.specialize(!use_gpu_input).parallel(y).vectorize(x, 16);
+    } else {
+        // CPU-only Target
+        output_linear.compute_root().parallel(y).vectorize(x, 16);
+        output_final.compute_root().parallel(y).vectorize(x, 16);
+        linear_srgb.compute_root().parallel(y).vectorize(x, 16);
+        normalized.compute_at(output_final, y).vectorize(x, 16);
+        xyz.compute_at(output_final, y).vectorize(x, 16);
+        target_gamut.compute_at(output_final, y).vectorize(x, 16);
+        logged.compute_at(output_final, y).vectorize(x, 16);
+    }
   }
 };
 
