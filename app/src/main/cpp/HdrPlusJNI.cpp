@@ -153,7 +153,9 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     const uint16_t* raw_ptr = outputBuf.data();
 
     // Determine clipping limit for Linear DNG
-    uint16_t clip_limit = 16383; // 65535 / 4
+    // We scale data by 4x to fill 16-bit range, effectively moving the white point from 16383 to 65532.
+    // This fixes issues where some DNG viewers ignore WhiteLevel for LinearRaw and assume 65535.
+    uint16_t clip_limit = 16383; // Original limit
 
     #pragma omp parallel for
     for (int y = 0; y < height; y++) {
@@ -163,13 +165,16 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
              uint16_t g_val = raw_ptr[x * stride_x + y * stride_y + 1 * stride_c];
              uint16_t b_val = raw_ptr[x * stride_x + y * stride_y + 2 * stride_c];
 
-             // Write Interleaved (16-bit Linear) for DNG
-             int idx = (y * width + x) * 3;
-
              // Clipping to fix Pink Highlights (R > G saturation)
-             finalImage[idx + 0] = std::min(r_val, clip_limit);
-             finalImage[idx + 1] = std::min(g_val, clip_limit);
-             finalImage[idx + 2] = std::min(b_val, clip_limit);
+             r_val = std::min(r_val, clip_limit);
+             g_val = std::min(g_val, clip_limit);
+             b_val = std::min(b_val, clip_limit);
+
+             // Write Interleaved (16-bit Linear) for DNG, Scaled by 4x
+             int idx = (y * width + x) * 3;
+             finalImage[idx + 0] = r_val << 2;
+             finalImage[idx + 1] = g_val << 2;
+             finalImage[idx + 2] = b_val << 2;
         }
     }
 
@@ -181,7 +186,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     bool dng_ok = true;
 
     // Save DNG (Raw Path)
-    int dngWhiteLevel = 16383;
+    int dngWhiteLevel = 65535; // Full 16-bit range now
     if (dng_path_cstr) {
         dng_ok = write_dng(dng_path_cstr, width, height, finalImage, dngWhiteLevel, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation);
     }
