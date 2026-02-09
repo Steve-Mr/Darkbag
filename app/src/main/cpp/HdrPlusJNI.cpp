@@ -4,12 +4,15 @@
 #include <string>
 #include <memory>
 #include <chrono>
-#include <future> // For std::async
+#include <future>
 #include <dlfcn.h>
 #include <libraw/libraw.h>
 #include <HalideBuffer.h>
 #include "ColorPipe.h"
-#include "hdrplus_raw_pipeline.h" // Generated header
+
+// Included generated headers for both versions
+#include "hdrplus_raw_pipeline_cpu.h"
+#include "hdrplus_raw_pipeline_gpu.h"
 
 #define TAG "HdrPlusJNI"
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, TAG, __VA_ARGS__)
@@ -19,13 +22,10 @@ using namespace Halide::Runtime;
 
 // Check for OpenCL availability at runtime
 bool is_opencl_available() {
-    // Try to load libOpenCL.so
     void* handle = dlopen("libOpenCL.so", RTLD_LAZY);
     if (!handle) {
-        // Some devices might use different names or paths, but libOpenCL.so is the standard for Android
-        handle = dlopen("libPVROCL.so", RTLD_LAZY); // PowerVR
+        handle = dlopen("libPVROCL.so", RTLD_LAZY);
     }
-
     if (handle) {
         dlclose(handle);
         return true;
@@ -41,21 +41,20 @@ extern "C" void halide_print(void *user_context, const char *msg) {
 // Custom error handler to avoid abort()
 extern "C" void halide_error(void *user_context, const char *msg) {
     __android_log_print(ANDROID_LOG_ERROR, "HalideRuntime", "Halide Error: %s", msg);
-    // Note: Most Halide errors are fatal, but we at least get the log before abort/crash
 }
 
 extern "C" JNIEXPORT jint JNICALL
 Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
         JNIEnv* env,
         jobject /* this */,
-        jobjectArray dngBuffers, // Array of ByteBuffers
+        jobjectArray dngBuffers,
         jint width,
         jint height,
         jint orientation,
         jint whiteLevel,
         jint blackLevel,
-        jfloatArray whiteBalance, // [r, g0, g1, b]
-        jfloatArray ccm,          // [3x3] or [3x4] flat
+        jfloatArray whiteBalance,
+        jfloatArray ccm,
         jint cfaPattern,
         jint iso,
         jlong exposureTime,
@@ -71,12 +70,18 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
         jboolean useGpu,
         jlongArray debugStats
 ) {
-    LOGD("Native processHdrPlus started. useGpu=%d", useGpu);
+    LOGD("Native processHdrPlus started. Requested useGpu=%d", useGpu);
 
-    // Override useGpu if OpenCL is not available
-    if (useGpu && !is_opencl_available()) {
-        LOGD("OpenCL not detected on this device. Forcing CPU fallback.");
-        useGpu = JNI_FALSE;
+    bool actualUseGpu = false;
+    if (useGpu) {
+        if (is_opencl_available()) {
+            actualUseGpu = true;
+            LOGD("OpenCL detected. Using GPU pipeline.");
+        } else {
+            LOGD("OpenCL NOT detected. Falling back to CPU pipeline.");
+        }
+    } else {
+        LOGD("Using CPU pipeline (requested).");
     }
 
     int numFrames = env->GetArrayLength(dngBuffers);
@@ -86,11 +91,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     }
 
     // 1. Prepare Inputs for Halide
-    // To minimize memory, we can wrap the direct buffers instead of copying if possible,
-    // but Halide 3D buffer expects contiguous data for the 3rd dimension usually.
-    // Our rawData is interleaved in the 3rd dimension (frames).
     std::vector<uint16_t> rawData(width * height * numFrames);
-
     for (int i = 0; i < numFrames; i++) {
         jobject bufObj = env->GetObjectArrayElement(dngBuffers, i);
         uint16_t* src = (uint16_t*)env->GetDirectBufferAddress(bufObj);
@@ -100,15 +101,11 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
         }
         std::copy(src, src + (width * height), rawData.data() + (i * width * height));
     }
-
     Buffer<uint16_t> inputBuf(rawData.data(), width, height, numFrames);
 
     // 2. Prepare Metadata
     jfloat* wbData = env->GetFloatArrayElements(whiteBalance, nullptr);
-    float wb_r = wbData[0];
-    float wb_g0 = wbData[1];
-    float wb_g1 = wbData[2];
-    float wb_b = wbData[3];
+    float wb_r = wbData[0], wb_g0 = wbData[1], wb_g1 = wbData[2], wb_b = wbData[3];
     std::vector<float> wbVec = {wb_r, wb_g0, wb_g1, wb_b};
     env->ReleaseFloatArrayElements(whiteBalance, wbData, JNI_ABORT);
 
@@ -117,17 +114,14 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     for(int i=0; i<9; ++i) ccmVec[i] = ccmData[i];
     env->ReleaseFloatArrayElements(ccm, ccmData, JNI_ABORT);
 
-    // CCM for Halide (Sensor_WB -> sRGB)
     Buffer<float> ccmHalideBuf(ccmVec.data(), 3, 3);
 
-    // Post-processing Matrices
     Matrix3x3 srgb_to_xyz = get_srgb_to_xyz_matrix();
     Buffer<float> m_srgb_to_xyz_buf(srgb_to_xyz.m, 3, 3);
 
     Matrix3x3 xyz_to_target = get_xyz_to_target_matrix(targetLog);
     Buffer<float> m_xyz_to_target_buf(xyz_to_target.m, 3, 3);
 
-    // LUT
     const char* lut_path_cstr = (lutPath) ? env->GetStringUTFChars(lutPath, 0) : nullptr;
     LUT3D lut;
     bool has_lut = false;
@@ -137,14 +131,10 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
         if (lut.size > 0) has_lut = true;
     }
 
-    // Prepare LUT buffer for Halide
     std::vector<float> dummyLutData(3 * 2 * 2 * 2, 0.0f);
     Buffer<float> lutBuf;
     int lut_size = 0;
     if (has_lut) {
-        // Halide buffer from lut.data (interleaved Vec3)
-        // lut.data is vector<Vec3>, Vec3 is {f, f, f}.
-        // We want (c, r, g, b)
         lutBuf = Buffer<float>((float*)lut.data.data(), 3, lut.size, lut.size, lut.size);
         lut_size = lut.size;
     } else {
@@ -157,30 +147,27 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     Buffer<uint16_t> outputFinal(width, height, 3);
 
     // 4. Run Pipeline
-    // Fix for Red/Blue Swap (Bayer Phase Mismatch)
     if (cfaPattern == 0) cfaPattern = 3;
     else if (cfaPattern == 3) cfaPattern = 0;
 
     auto halideStart = std::chrono::high_resolution_clock::now();
+    int result = 0;
 
-    int result = hdrplus_raw_pipeline(
-        inputBuf,
-        (uint16_t)blackLevel,
-        (uint16_t)whiteLevel,
-        wb_r, wb_g0, wb_g1, wb_b,
-        cfaPattern,
-        ccmHalideBuf,
-        digitalGain,
-        targetLog,
-        m_srgb_to_xyz_buf,
-        m_xyz_to_target_buf,
-        lutBuf,
-        lut_size,
-        has_lut,
-        useGpu,
-        outputLinear,
-        outputFinal
-    );
+    if (actualUseGpu) {
+        result = hdrplus_raw_pipeline_gpu(
+            inputBuf, (uint16_t)blackLevel, (uint16_t)whiteLevel,
+            wb_r, wb_g0, wb_g1, wb_b, cfaPattern, ccmHalideBuf,
+            digitalGain, targetLog, m_srgb_to_xyz_buf, m_xyz_to_target_buf,
+            lutBuf, lut_size, has_lut, outputLinear, outputFinal
+        );
+    } else {
+        result = hdrplus_raw_pipeline_cpu(
+            inputBuf, (uint16_t)blackLevel, (uint16_t)whiteLevel,
+            wb_r, wb_g0, wb_g1, wb_b, cfaPattern, ccmHalideBuf,
+            digitalGain, targetLog, m_srgb_to_xyz_buf, m_xyz_to_target_buf,
+            lutBuf, lut_size, has_lut, outputLinear, outputFinal
+        );
+    }
 
     auto halideEnd = std::chrono::high_resolution_clock::now();
     auto durationMs = std::chrono::duration_cast<std::chrono::milliseconds>(halideEnd - halideStart).count();
@@ -198,21 +185,15 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     LOGD("Halide pipeline finished in %ld ms.", (long)durationMs);
 
     // 5. Parallel Post-Processing & Saving
-
-    // Prepare path strings
     const char* tiff_path_cstr = (outputTiffPath) ? env->GetStringUTFChars(outputTiffPath, 0) : nullptr;
     const char* jpg_path_cstr = (outputJpgPath) ? env->GetStringUTFChars(outputJpgPath, 0) : nullptr;
     const char* dng_path_cstr = (outputDngPath) ? env->GetStringUTFChars(outputDngPath, 0) : nullptr;
 
-    // Linear Image for DNG (outputLinear is Planar, needs to be Interleaved and Scaled 4x)
     std::vector<uint16_t> linearInterleaved(width * height * 3);
     {
         const uint16_t* ptr = outputLinear.data();
-        int stride_x = outputLinear.dim(0).stride();
-        int stride_y = outputLinear.dim(1).stride();
-        int stride_c = outputLinear.dim(2).stride();
+        int stride_x = outputLinear.dim(0).stride(), stride_y = outputLinear.dim(1).stride(), stride_c = outputLinear.dim(2).stride();
         uint16_t clip_limit = 16383;
-
         #pragma omp parallel for
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
@@ -220,21 +201,15 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
                 uint16_t g = std::min(ptr[x * stride_x + y * stride_y + 1 * stride_c], clip_limit);
                 uint16_t b = std::min(ptr[x * stride_x + y * stride_y + 2 * stride_c], clip_limit);
                 int idx = (y * width + x) * 3;
-                linearInterleaved[idx + 0] = r << 2;
-                linearInterleaved[idx + 1] = g << 2;
-                linearInterleaved[idx + 2] = b << 2;
+                linearInterleaved[idx + 0] = r << 2; linearInterleaved[idx + 1] = g << 2; linearInterleaved[idx + 2] = b << 2;
             }
         }
     }
 
-    // Final Image for JPEG/TIFF (outputFinal is Planar, needs to be Interleaved)
     std::vector<uint16_t> finalInterleaved(width * height * 3);
     {
         const uint16_t* ptr = outputFinal.data();
-        int stride_x = outputFinal.dim(0).stride();
-        int stride_y = outputFinal.dim(1).stride();
-        int stride_c = outputFinal.dim(2).stride();
-
+        int stride_x = outputFinal.dim(0).stride(), stride_y = outputFinal.dim(1).stride(), stride_c = outputFinal.dim(2).stride();
         #pragma omp parallel for
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
@@ -246,7 +221,6 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
         }
     }
 
-    // Parallel Saving
     auto dng_task = std::async(std::launch::async, [&]() {
         if (!dng_path_cstr) return true;
         return write_dng(dng_path_cstr, width, height, linearInterleaved, 65535, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation);
@@ -259,12 +233,10 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     bool dng_ok = dng_task.get();
     img_task.wait();
 
-    // Release Strings
     if (outputTiffPath) env->ReleaseStringUTFChars(outputTiffPath, tiff_path_cstr);
     if (outputJpgPath) env->ReleaseStringUTFChars(outputJpgPath, jpg_path_cstr);
     if (outputDngPath) env->ReleaseStringUTFChars(outputDngPath, dng_path_cstr);
 
     if (!dng_ok) LOGE("Failed to write DNG file.");
-
     return 0;
 }

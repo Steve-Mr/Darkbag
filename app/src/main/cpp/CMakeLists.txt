@@ -41,19 +41,6 @@ FetchContent_MakeAvailable(libtiff)
 include_directories(${tiff_SOURCE_DIR}/libtiff ${tiff_BINARY_DIR}/libtiff)
 
 # --- HDR+ Generator (Host Tool) ---
-# We need to compile the generator for the HOST machine (x86_64), not the target (Android).
-# However, CMake inside Android Studio is cross-compiling.
-# To cleanly handle this, we can define the generator sources here but must ensure
-# they are built with the host compiler.
-#
-# A common trick in Android builds is to trust that the user (or a pre-step)
-# has built the generator, or use a separate CMake instance.
-# BUT, for simplicity in this integration, we will rely on AOT compilation
-# invoked manually or via a custom command if we can ensure the host toolchain is available.
-#
-# Given the constraints, we will define the generator source and use a custom command
-# that invokes 'c++' (system compiler) directly to build the generator.
-
 set(HDRPLUS_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/hdr-plus/src")
 set(HDRPLUS_GENERATOR_SRC
     "${CMAKE_CURRENT_SOURCE_DIR}/hdrplus_pipeline_generator.cpp"
@@ -61,33 +48,11 @@ set(HDRPLUS_GENERATOR_SRC
     "${HDRPLUS_SRC_DIR}/merge.cpp"
     "${HDRPLUS_SRC_DIR}/finish.cpp"
     "${HDRPLUS_SRC_DIR}/util.cpp"
-    "${HALIDE_ROOT}/share/Halide/tools/GenGen.cpp"
 )
 
 set(GENERATOR_EXEC "${CMAKE_BINARY_DIR}/hdrplus_generator")
-
-# Create a dummy target for the library to satisfy CMake's dependency graph
-# BEFORE the custom command runs.
-# Removed old target definition to use the consolidated one later
-
 set(GENERATOR_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
 file(MAKE_DIRECTORY ${GENERATOR_OUTPUT_DIR})
-
-# We use a custom command to build the generator using the HOST compiler (/usr/bin/c++)
-# We link against the downloaded Halide (Host) library.
-# Note: We need to set RPATH or LD_LIBRARY_PATH for the generator to run.
-#
-# IMPORTANT: Halide v21 uses a new registration mechanism. We need to link against libHalide_GenGen.a
-# or include GenGen.cpp manually. The distribution seems to provide libHalide_GenGen.a.
-# However, `GenGen.cpp` is NOT in `share/Halide/tools/` in this specific tarball layout (based on `find` output).
-#
-# We will check if `libHalide_GenGen.a` exists in `lib/`. The `find` output shows:
-# .../lib/libHalide_GenGen.a
-#
-# So we link against `Halide_GenGen` (which contains the main entry point for generators).
-# We remove the manual `GenGen.cpp` inclusion from the source list and link the static lib instead.
-
-list(REMOVE_ITEM HDRPLUS_GENERATOR_SRC "${HALIDE_ROOT}/share/Halide/tools/GenGen.cpp")
 
 add_custom_command(
     OUTPUT "${GENERATOR_EXEC}"
@@ -102,25 +67,44 @@ add_custom_command(
     COMMENT "Building Halide Generator (Host)"
 )
 
-# Run the generator to produce the target object file
-# We target arm-64-android with OpenCL support.
-# We include both CPU and GPU (OpenCL) targets for automatic runtime selection.
-set(HALIDE_TARGET "arm-64-android-opencl,arm-64-android")
-set(GENERATED_HEADER "${GENERATOR_OUTPUT_DIR}/hdrplus_raw_pipeline.h")
-set(GENERATED_LIB "${GENERATOR_OUTPUT_DIR}/hdrplus_raw_pipeline.a") # Static lib output
-set(GENERATED_RUNTIME "${GENERATOR_OUTPUT_DIR}/halide_runtime.a")
+# --- Generate CPU Pipeline ---
+set(HALIDE_TARGET_CPU "arm-64-android-no_runtime")
+set(GENERATED_HEADER_CPU "${GENERATOR_OUTPUT_DIR}/hdrplus_raw_pipeline_cpu.h")
+set(GENERATED_LIB_CPU "${GENERATOR_OUTPUT_DIR}/hdrplus_raw_pipeline_cpu.a")
 
 add_custom_command(
-    OUTPUT "${GENERATED_HEADER}" "${GENERATED_LIB}"
+    OUTPUT "${GENERATED_HEADER_CPU}" "${GENERATED_LIB_CPU}"
     COMMAND "${GENERATOR_EXEC}"
             -g hdrplus_raw_pipeline
-            -f hdrplus_raw_pipeline
+            -f hdrplus_raw_pipeline_cpu
             -e static_library,h
             -o "${GENERATOR_OUTPUT_DIR}"
-            target=${HALIDE_TARGET}
+            target=${HALIDE_TARGET_CPU}
     DEPENDS "${GENERATOR_EXEC}"
-    COMMENT "Running Halide Generator for ${HALIDE_TARGET}"
+    COMMENT "Running Halide Generator for CPU"
 )
+
+# --- Generate GPU Pipeline ---
+set(HALIDE_TARGET_GPU "arm-64-android-opencl-no_runtime")
+set(GENERATED_HEADER_GPU "${GENERATOR_OUTPUT_DIR}/hdrplus_raw_pipeline_gpu.h")
+set(GENERATED_LIB_GPU "${GENERATOR_OUTPUT_DIR}/hdrplus_raw_pipeline_gpu.a")
+
+add_custom_command(
+    OUTPUT "${GENERATED_HEADER_GPU}" "${GENERATED_LIB_GPU}"
+    COMMAND "${GENERATOR_EXEC}"
+            -g hdrplus_raw_pipeline
+            -f hdrplus_raw_pipeline_gpu
+            -e static_library,h
+            -o "${GENERATOR_OUTPUT_DIR}"
+            target=${HALIDE_TARGET_GPU}
+    DEPENDS "${GENERATOR_EXEC}"
+    COMMENT "Running Halide Generator for GPU (OpenCL)"
+)
+
+# --- Generate Standalone Runtime ---
+# Runtime should support OpenCL so it includes the necessary device API calls
+set(HALIDE_TARGET_RUNTIME "arm-64-android-opencl")
+set(GENERATED_RUNTIME "${GENERATOR_OUTPUT_DIR}/halide_runtime.a")
 
 add_custom_command(
     OUTPUT "${GENERATED_RUNTIME}"
@@ -128,25 +112,21 @@ add_custom_command(
             -r halide_runtime
             -e static_library
             -o "${GENERATOR_OUTPUT_DIR}"
-            target=${HALIDE_TARGET}
+            target=${HALIDE_TARGET_RUNTIME}
     DEPENDS "${GENERATOR_EXEC}"
-    COMMENT "Running Halide Generator to produce runtime"
+    COMMENT "Running Halide Generator for Runtime"
 )
 
-# Update dependency target
-add_custom_target(generate_hdrplus_halide DEPENDS "${GENERATED_LIB}" "${GENERATED_HEADER}" "${GENERATED_RUNTIME}")
+add_custom_target(generate_hdrplus_halide DEPENDS
+    "${GENERATED_LIB_CPU}" "${GENERATED_HEADER_CPU}"
+    "${GENERATED_LIB_GPU}" "${GENERATED_HEADER_GPU}"
+    "${GENERATED_RUNTIME}"
+)
 
-# Expose generated files to the build
 include_directories(${GENERATOR_OUTPUT_DIR})
 include_directories(libraw)
 
-# Glob all sources
-file(GLOB_RECURSE LIBRAW_SOURCES
-    "libraw/src/*.cpp"
-)
-
-# Filter out placeholder/conflicting files
-# *_ph.cpp files are usually "placeholders" or specific implementation alternatives that conflict with the standard ones
+file(GLOB_RECURSE LIBRAW_SOURCES "libraw/src/*.cpp")
 list(FILTER LIBRAW_SOURCES EXCLUDE REGEX ".*_ph\\.cpp$")
 
 add_library(
@@ -156,36 +136,29 @@ add_library(
         HdrPlusJNI.cpp
         ColorPipe.cpp
         ${LIBRAW_SOURCES}
-        "${GENERATED_LIB}"
+        "${GENERATED_LIB_CPU}"
+        "${GENERATED_LIB_GPU}"
         "${GENERATED_RUNTIME}"
 )
 
-# Ensure the generation happens before native-lib compilation
 add_dependencies(native-lib generate_hdrplus_halide)
 
-find_library(
-        log-lib
-        log)
-
-find_library(
-        jnigraphics-lib
-        jnigraphics)
-
-find_library(
-        android-lib
-        android)
+find_library(log-lib log)
+find_library(jnigraphics-lib jnigraphics)
+find_library(android-lib android)
 
 target_link_libraries(
         native-lib
-        "${GENERATED_LIB}"
+        "${GENERATED_LIB_CPU}"
+        "${GENERATED_LIB_GPU}"
         "${GENERATED_RUNTIME}"
         tiff
         ${log-lib}
         ${jnigraphics-lib}
         ${android-lib}
         -fopenmp
-        -static-openmp)
-
+        -static-openmp
+)
 
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fopenmp")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fopenmp")

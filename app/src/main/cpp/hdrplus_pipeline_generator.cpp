@@ -63,9 +63,8 @@ Expr apply_log(Expr x, Expr type) {
 }
 
 // Matrix multiplication helper
-Func multiply_3x3(Func input, Func mat, std::string name) {
+Func multiply_3x3(Func input, Func mat, std::string name, Var x, Var y, Var c) {
     Func output(name);
-    Var x("x"), y("y"), c("c");
     output(x, y, c) = mat(0, c) * input(x, y, 0) +
                       mat(1, c) * input(x, y, 1) +
                       mat(2, c) * input(x, y, 2);
@@ -74,9 +73,8 @@ Func multiply_3x3(Func input, Func mat, std::string name) {
 
 // --- Inlined Helper Functions from finish.cpp ---
 
-Func black_white_level(Func input, const Expr bp, const Expr wp) {
+Func black_white_level(Func input, const Expr bp, const Expr wp, Var x, Var y) {
   Func output("black_white_level_output");
-  Var x("x"), y("y");
   // Reserve headroom (0.25x) for White Balance to prevent clipping
   Expr white_factor = (65535.f / (wp - bp)) * 0.25f;
   output(x, y) = u16_sat((i32(input(x, y)) - bp) * white_factor);
@@ -84,9 +82,8 @@ Func black_white_level(Func input, const Expr bp, const Expr wp) {
 }
 
 Func white_balance(Func input, Expr width, Expr height,
-                   const CompiletimeWhiteBalance &wb) {
+                   const CompiletimeWhiteBalance &wb, Var x, Var y) {
   Func output("white_balance_output");
-  Var x("x"), y("y");
   RDom r(0, width / 2, 0, height / 2);
 
   // Proposal A: Highlight Dampening
@@ -118,7 +115,7 @@ Func white_balance(Func input, Expr width, Expr height,
   return output;
 }
 
-Func demosaic(Func input, Expr width, Expr height) {
+Func demosaic(Func input, Expr width, Expr height, Var x, Var y, Var c) {
   Buffer<int32_t> f0(5, 5, "demosaic_f0");
   Buffer<int32_t> f1(5, 5, "demosaic_f1");
   Buffer<int32_t> f2(5, 5, "demosaic_f2");
@@ -135,7 +132,6 @@ Func demosaic(Func input, Expr width, Expr height) {
   Func d3("demosaic_3");
   Func output("demosaic_output");
 
-  Var x("x"), y("y"), c("c");
   RDom r0(-2, 5, -2, 5);
 
   Func input_mirror = BoundaryConditions::mirror_interior(
@@ -178,14 +174,14 @@ Func demosaic(Func input, Expr width, Expr height) {
   return output;
 }
 
-Func bilateral_filter(Func input, Expr width, Expr height) {
+Func bilateral_filter(Func input, Expr width, Expr height, Var x, Var y, Var c) {
   Buffer<float> k(7, 7, "gauss_kernel");
   k.translate({-3, -3});
   Func weights("bilateral_weights");
   Func total_weights("bilateral_total_weights");
   Func bilateral("bilateral");
   Func output("bilateral_filter_output");
-  Var x("x"), y("y"), dx("dx"), dy("dy"), c("c");
+  Var dx, dy;
   RDom r(-3, 7, -3, 7);
 
   k.fill(0.f);
@@ -216,9 +212,8 @@ Func bilateral_filter(Func input, Expr width, Expr height) {
   return output;
 }
 
-Func desaturate_noise(Func input, Expr width, Expr height) {
+Func desaturate_noise(Func input, Expr width, Expr height, Var x, Var y, Var c) {
   Func output("desaturate_noise_output");
-  Var x("x"), y("y"), c("c");
   Func input_mirror = BoundaryConditions::mirror_image(input, {Range(0, width), Range(0, height)});
   Func blur = gauss_15x15(gauss_15x15(input_mirror, "desaturate_noise_blur1"), "desaturate_noise_blur2");
   float factor = 1.4f;
@@ -230,39 +225,36 @@ Func desaturate_noise(Func input, Expr width, Expr height) {
   return output;
 }
 
-Func increase_saturation(Func input, float strength) {
+Func increase_saturation(Func input, float strength, Var x, Var y, Var c) {
   Func output("increase_saturation_output");
-  Var x("x"), y("y"), c("c");
   output(x, y, c) = strength * input(x, y, c);
   output(x, y, 0) = input(x, y, 0);
   output.compute_root().parallel(y).vectorize(x, 16);
   return output;
 }
 
-Func chroma_denoise(Func input, Expr width, Expr height, int num_passes) {
+Func chroma_denoise(Func input, Expr width, Expr height, int num_passes, Var x, Var y, Var c) {
   Func output = rgb_to_yuv(input);
   int pass = 0;
-  if (num_passes > 0) output = bilateral_filter(output, width, height);
+  if (num_passes > 0) output = bilateral_filter(output, width, height, x, y, c);
   pass++;
   while (pass < num_passes) {
-    output = desaturate_noise(output, width, height);
+    output = desaturate_noise(output, width, height, x, y, c);
     pass++;
   }
-  if (num_passes > 2) output = increase_saturation(output, 1.1f);
+  if (num_passes > 2) output = increase_saturation(output, 1.1f, x, y, c);
   return yuv_to_rgb(output);
 }
 
-Func srgb(Func input, Func srgb_matrix) {
+Func srgb_func(Func input, Func srgb_matrix, Var x, Var y, Var c) {
   Func output("srgb_output");
-  Var x("x"), y("y"), c("c");
   RDom r(0, 3);
   output(x, y, c) = u16_sat(sum(srgb_matrix(r, c) * input(x, y, r)));
   return output;
 }
 
-Func shift_bayer_to_rggb(Func input, const Expr cfa_pattern) {
+Func shift_bayer_to_rggb(Func input, const Expr cfa_pattern, Var x, Var y) {
   Func output("rggb_input");
-  Var x("x"), y("y");
   output(x, y) = select(cfa_pattern == int(CfaPattern::CFA_RGGB), input(x, y),
                         cfa_pattern == int(CfaPattern::CFA_GRBG), input(x + 1, y),
                         cfa_pattern == int(CfaPattern::CFA_GBRG), input(x, y + 1),
@@ -290,7 +282,6 @@ public:
   Input<Buffer<float>> lut{"lut", 4}; // (c, r, g, b)
   Input<int> lut_size{"lut_size"};
   Input<bool> has_lut{"has_lut"};
-  Input<bool> use_gpu_input{"use_gpu_input"};
 
   // Outputs
   Output<Buffer<uint16_t>> output_linear{"output_linear", 3};
@@ -306,21 +297,18 @@ public:
     CompiletimeWhiteBalance wb{white_balance_r, white_balance_g0,
                                white_balance_g1, white_balance_b};
 
-    Func bayer_shifted = shift_bayer_to_rggb(merged, cfa_pattern);
-    Func black_white_level_output = black_white_level(bayer_shifted, black_point, white_point);
-    Func white_balance_output = white_balance(black_white_level_output, inputs.width(), inputs.height(), wb);
-    Func demosaic_output = demosaic(white_balance_output, inputs.width(), inputs.height());
+    Func bayer_shifted = shift_bayer_to_rggb(merged, cfa_pattern, x, y);
+    Func black_white_level_output = black_white_level(bayer_shifted, black_point, white_point, x, y);
+    Func white_balance_output = white_balance(black_white_level_output, inputs.width(), inputs.height(), wb, x, y);
+    Func demosaic_output = demosaic(white_balance_output, inputs.width(), inputs.height(), x, y, c);
 
     int denoise_passes = 1;
-    Func chroma_denoised_output = chroma_denoise(demosaic_output, inputs.width(), inputs.height(), denoise_passes);
+    Func chroma_denoised_output = chroma_denoise(demosaic_output, inputs.width(), inputs.height(), denoise_passes, x, y, c);
 
     // Linear RGB (Sensor_WB -> sRGB)
-    Func linear_srgb = srgb(chroma_denoised_output, ccm);
+    Func linear_srgb = srgb_func(chroma_denoised_output, ccm, x, y, c);
 
-    // Output 1: Linear Raw for DNG (scaled by 4x in JNI, so we just output as is)
-    // Wait, HdrPlusJNI.cpp does:
-    // finalImage[idx + 0] = r_val << 2;
-    // So Halide output is effectively 14-bit.
+    // Output 1: Linear Raw for DNG
     output_linear(x, y, c) = linear_srgb(x, y, c);
 
     // 2. Post-processing Pipeline
@@ -329,8 +317,8 @@ public:
     normalized(x, y, c) = (f32(linear_srgb(x, y, c)) / 65535.0f) * digital_gain;
 
     // 2b. Color Space Conversion: sRGB -> XYZ -> Target Gamut
-    Func xyz = multiply_3x3(normalized, m_srgb_to_xyz, "xyz");
-    Func target_gamut = multiply_3x3(xyz, m_xyz_to_target, "target_gamut");
+    Func xyz = multiply_3x3(normalized, m_srgb_to_xyz, "xyz", x, y, c);
+    Func target_gamut = multiply_3x3(xyz, m_xyz_to_target, "target_gamut", x, y, c);
 
     // 2c. Log Curve
     Func logged("logged");
@@ -340,35 +328,35 @@ public:
     Func final_color("final_color");
 
     Expr scale = f32(lut_size - 1);
-        Expr r_val = clamp(logged(x, y, 0), 0.0f, 1.0f) * scale;
-        Expr g_val = clamp(logged(x, y, 1), 0.0f, 1.0f) * scale;
-        Expr b_val = clamp(logged(x, y, 2), 0.0f, 1.0f) * scale;
+    Expr r_v = clamp(logged(x, y, 0), 0.0f, 1.0f) * scale;
+    Expr g_v = clamp(logged(x, y, 1), 0.0f, 1.0f) * scale;
+    Expr b_v = clamp(logged(x, y, 2), 0.0f, 1.0f) * scale;
 
-        Expr r0 = cast<int>(r_val); Expr r1 = min(r0 + 1, lut_size - 1);
-        Expr g0 = cast<int>(g_val); Expr g1 = min(g0 + 1, lut_size - 1);
-        Expr b0 = cast<int>(b_val); Expr b1 = min(b0 + 1, lut_size - 1);
+    Expr r0 = cast<int>(r_v); Expr r1 = min(r0 + 1, lut_size - 1);
+    Expr g0 = cast<int>(g_v); Expr g1 = min(g0 + 1, lut_size - 1);
+    Expr b0 = cast<int>(b_v); Expr b1 = min(b0 + 1, lut_size - 1);
 
-        Expr dr = r_val - r0; Expr dg = g_val - g0; Expr db = b_val - b0;
+    Expr dr = r_v - r0; Expr dg = g_v - g0; Expr db = b_v - b0;
 
-        auto lookup = [&](Expr ri, Expr gi, Expr bi, Expr ci) {
-            return lut(ci, ri, gi, bi);
-        };
+    auto lookup = [&](Expr ri, Expr gi, Expr bi, Expr ci) {
+        return lut(ci, ri, gi, bi);
+    };
 
-        Expr c000 = lookup(r0, g0, b0, c); Expr c100 = lookup(r1, g0, b0, c);
-        Expr c010 = lookup(r0, g1, b0, c); Expr c110 = lookup(r1, g1, b0, c);
-        Expr c001 = lookup(r0, g0, b1, c); Expr c101 = lookup(r1, g0, b1, c);
-        Expr c011 = lookup(r0, g1, b1, c); Expr c111 = lookup(r1, g1, b1, c);
+    Expr c000 = lookup(r0, g0, b0, c); Expr c100 = lookup(r1, g0, b0, c);
+    Expr c010 = lookup(r0, g1, b0, c); Expr c110 = lookup(r1, g1, b0, c);
+    Expr c001 = lookup(r0, g0, b1, c); Expr c101 = lookup(r1, g0, b1, c);
+    Expr c011 = lookup(r0, g1, b1, c); Expr c111 = lookup(r1, g1, b1, c);
 
-        Expr c00 = c000 * (1.0f - dr) + c100 * dr;
-        Expr c10 = c010 * (1.0f - dr) + c110 * dr;
-        Expr c01 = c001 * (1.0f - dr) + c101 * dr;
-        Expr c11 = c011 * (1.0f - dr) + c111 * dr;
+    Expr c00 = c000 * (1.0f - dr) + c100 * dr;
+    Expr c10 = c010 * (1.0f - dr) + c110 * dr;
+    Expr c01 = c001 * (1.0f - dr) + c101 * dr;
+    Expr c11 = c011 * (1.0f - dr) + c111 * dr;
 
-        Expr c0 = c00 * (1.0f - dg) + c10 * dg;
-        Expr c1 = c01 * (1.0f - dg) + c11 * dg;
+    Expr c0 = c00 * (1.0f - dg) + c10 * dg;
+    Expr c1 = c01 * (1.0f - dg) + c11 * dg;
 
-        Expr lut_res = c0 * (1.0f - db) + c1 * db;
-        final_color(x, y, c) = select(has_lut, lut_res, logged(x, y, c));
+    Expr lut_res = c0 * (1.0f - db) + c1 * db;
+    final_color(x, y, c) = select(has_lut, lut_res, logged(x, y, c));
 
     // Output 2: Final Processed Image
     output_final(x, y, c) = u16_sat(final_color(x, y, c) * 65535.0f);
@@ -377,15 +365,9 @@ public:
     Target target = get_target();
     if (target.has_gpu_feature()) {
         Var tx("tx"), ty("ty");
-        // GPU Specialization
-        output_linear.specialize(use_gpu_input).gpu_tile(x, y, tx, ty, 16, 16);
-        output_final.specialize(use_gpu_input).gpu_tile(x, y, tx, ty, 16, 16);
-
-        // CPU Fallback within GPU target (if use_gpu_input is false)
-        output_linear.specialize(!use_gpu_input).parallel(y).vectorize(x, 16);
-        output_final.specialize(!use_gpu_input).parallel(y).vectorize(x, 16);
+        output_linear.gpu_tile(x, y, tx, ty, 16, 16);
+        output_final.gpu_tile(x, y, tx, ty, 16, 16);
     } else {
-        // CPU-only Target
         output_linear.compute_root().parallel(y).vectorize(x, 16);
         output_final.compute_root().parallel(y).vectorize(x, 16);
         linear_srgb.compute_root().parallel(y).vectorize(x, 16);
