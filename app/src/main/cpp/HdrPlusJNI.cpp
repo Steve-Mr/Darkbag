@@ -186,28 +186,38 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     // Use 4-component vector if needed for writer, but 3 for Matrix diagonal.
     std::vector<float> wbGainsFull = {wb_r, wb_g0, wb_g1, wb_b};
 
+    // --- CCM Matrix Setup ---
+    // Android returns COLOR_CORRECTION_TRANSFORM which is Sensor (Camera Native) -> XYZ.
+    // DNG requires ColorMatrix1 which is XYZ -> Sensor (Camera Native).
+
+    // 1. Construct M_CamNative_to_XYZ from ccmVec
+    Mat3x3 M_CamNative_to_XYZ;
+    int ccmIdx = 0;
+    for (int i = 0; i < 3; ++i) {
+        for (int j = 0; j < 3; ++j) {
+            M_CamNative_to_XYZ.m[i][j] = ccmVec[ccmIdx++];
+        }
+    }
+
+    // 2. Calculate M_XYZ_to_CamNative (Inverse of Android CCM) for DNG
+    Mat3x3 M_XYZ_to_CamNative = mat_inv(M_CamNative_to_XYZ);
+    std::vector<float> dngCcmVec(9);
+    ccmIdx = 0;
+    for (int i = 0; i < 3; ++i) {
+        for (int j = 0; j < 3; ++j) {
+            dngCcmVec[ccmIdx++] = M_XYZ_to_CamNative.m[i][j];
+        }
+    }
+
     // Save DNG (Raw Path) - finalImage is in Camera_WB space
     // We pass the WB gains so write_dng can adjust the ColorMatrix1 tag.
     int dngWhiteLevel = 16383;
     if (dng_path_cstr) {
-        dng_ok = write_dng(dng_path_cstr, width, height, finalImage, dngWhiteLevel, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, wbGainsFull, orientation);
+        // Pass dngCcmVec (XYZ->Sensor) instead of raw ccmVec
+        dng_ok = write_dng(dng_path_cstr, width, height, finalImage, dngWhiteLevel, iso, exposureTime, fNumber, focalLength, captureTimeMillis, dngCcmVec, wbGainsFull, orientation);
     }
 
     // --- Color Space Conversion (Camera WB -> ProPhoto RGB) ---
-
-    // 1. Construct M_XYZ_to_CamNative from ccmVec (Input ccmVec is XYZ -> Camera_Native)
-    // Note: The previous assumption that ccmVec was Camera->XYZ was INCORRECT.
-    // DNG Standard: ColorMatrix1 maps XYZ to Reference Camera Native.
-    Mat3x3 M_XYZ_to_CamNative;
-    int ccmIdx = 0;
-    for (int i = 0; i < 3; ++i) {
-        for (int j = 0; j < 3; ++j) {
-            M_XYZ_to_CamNative.m[i][j] = ccmVec[ccmIdx++];
-        }
-    }
-
-    // 2. Invert to get M_CamNative_to_XYZ
-    Mat3x3 M_CamNative_to_XYZ = mat_inv(M_XYZ_to_CamNative);
 
     // 3. Construct M_CamWB_to_CamNative (Undo White Balance)
     // Camera_WB = Camera_Native * WB_Gains
