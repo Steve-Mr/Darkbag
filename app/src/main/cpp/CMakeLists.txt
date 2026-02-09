@@ -108,6 +108,7 @@ add_custom_command(
 set(HALIDE_TARGET "arm-64-android-opencl,arm-64-android")
 set(GENERATED_HEADER "${GENERATOR_OUTPUT_DIR}/hdrplus_raw_pipeline.h")
 set(GENERATED_LIB "${GENERATOR_OUTPUT_DIR}/hdrplus_raw_pipeline.a") # Static lib output
+set(GENERATED_RUNTIME "${GENERATOR_OUTPUT_DIR}/halide_runtime.a")
 
 add_custom_command(
     OUTPUT "${GENERATED_HEADER}" "${GENERATED_LIB}"
@@ -121,8 +122,19 @@ add_custom_command(
     COMMENT "Running Halide Generator for ${HALIDE_TARGET}"
 )
 
+add_custom_command(
+    OUTPUT "${GENERATED_RUNTIME}"
+    COMMAND "${GENERATOR_EXEC}"
+            -r halide_runtime
+            -e static_library
+            -o "${GENERATOR_OUTPUT_DIR}"
+            target=${HALIDE_TARGET}
+    DEPENDS "${GENERATOR_EXEC}"
+    COMMENT "Running Halide Generator to produce runtime"
+)
+
 # Update dependency target
-add_custom_target(generate_hdrplus_halide DEPENDS "${GENERATED_LIB}" "${GENERATED_HEADER}")
+add_custom_target(generate_hdrplus_halide DEPENDS "${GENERATED_LIB}" "${GENERATED_HEADER}" "${GENERATED_RUNTIME}")
 
 # Expose generated files to the build
 include_directories(${GENERATOR_OUTPUT_DIR})
@@ -145,6 +157,7 @@ add_library(
         ColorPipe.cpp
         ${LIBRAW_SOURCES}
         "${GENERATED_LIB}"
+        "${GENERATED_RUNTIME}"
 )
 
 # Ensure the generation happens before native-lib compilation
@@ -165,6 +178,7 @@ find_library(
 target_link_libraries(
         native-lib
         "${GENERATED_LIB}"
+        "${GENERATED_RUNTIME}"
         tiff
         ${log-lib}
         ${jnigraphics-lib}

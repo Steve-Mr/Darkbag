@@ -24,11 +24,13 @@ Expr apply_arri_logc3(Expr x) {
     float d = 0.385537f;
     float e = 5.367655f;
     float f = 0.092809f;
-    return select(x > cut, c * log10(a * x + b) + d, e * x + f);
+    Expr log10_val = log(a * x + b) / 2.302585f;
+    return select(x > cut, c * log10_val + d, e * x + f);
 }
 
 Expr apply_s_log3(Expr x) {
-    return select(x >= 0.01125000f, (420.0f + log10((x + 0.01f) / (0.18f + 0.01f)) * 261.5f) / 1023.0f,
+    Expr log10_val = log((x + 0.01f) / (0.18f + 0.01f)) / 2.302585f;
+    return select(x >= 0.01125000f, (420.0f + log10_val * 261.5f) / 1023.0f,
                   (x * 171.2102946929f + 95.0f) / 1023.0f);
 }
 
@@ -38,7 +40,8 @@ Expr apply_f_log(Expr x) {
     float c = 0.344676f;
     float d = 0.790453f;
     float cut = 0.00089f;
-    return select(x >= cut, c * log10(a * x + b) + d, 8.52f * x + 0.0929f);
+    Expr log10_val = log(a * x + b) / 2.302585f;
+    return select(x >= cut, c * log10_val + d, 8.52f * x + 0.0929f);
 }
 
 Expr apply_vlog(Expr x) {
@@ -46,7 +49,8 @@ Expr apply_vlog(Expr x) {
     float c = 0.241514f;
     float b = 0.008730f;
     float d = 0.598206f;
-    return select(x >= cut, c * log10(x + b) + d, 5.6f * x + 0.125f);
+    Expr log10_val = log(x + b) / 2.302585f;
+    return select(x >= cut, c * log10_val + d, 5.6f * x + 0.125f);
 }
 
 Expr apply_log(Expr x, Expr type) {
@@ -59,9 +63,9 @@ Expr apply_log(Expr x, Expr type) {
 }
 
 // Matrix multiplication helper
-Func multiply_3x3(Func input, Buffer<float> mat, std::string name) {
+Func multiply_3x3(Func input, Func mat, std::string name) {
     Func output(name);
-    Var x, y, c;
+    Var x("x"), y("y"), c("c");
     output(x, y, c) = mat(0, c) * input(x, y, 0) +
                       mat(1, c) * input(x, y, 1) +
                       mat(2, c) * input(x, y, 2);
@@ -72,7 +76,7 @@ Func multiply_3x3(Func input, Buffer<float> mat, std::string name) {
 
 Func black_white_level(Func input, const Expr bp, const Expr wp) {
   Func output("black_white_level_output");
-  Var x, y;
+  Var x("x"), y("y");
   // Reserve headroom (0.25x) for White Balance to prevent clipping
   Expr white_factor = (65535.f / (wp - bp)) * 0.25f;
   output(x, y) = u16_sat((i32(input(x, y)) - bp) * white_factor);
@@ -82,7 +86,7 @@ Func black_white_level(Func input, const Expr bp, const Expr wp) {
 Func white_balance(Func input, Expr width, Expr height,
                    const CompiletimeWhiteBalance &wb) {
   Func output("white_balance_output");
-  Var x, y;
+  Var x("x"), y("y");
   RDom r(0, width / 2, 0, height / 2);
 
   // Proposal A: Highlight Dampening
@@ -131,7 +135,7 @@ Func demosaic(Func input, Expr width, Expr height) {
   Func d3("demosaic_3");
   Func output("demosaic_output");
 
-  Var x, y, c;
+  Var x("x"), y("y"), c("c");
   RDom r0(-2, 5, -2, 5);
 
   Func input_mirror = BoundaryConditions::mirror_interior(
@@ -181,7 +185,7 @@ Func bilateral_filter(Func input, Expr width, Expr height) {
   Func total_weights("bilateral_total_weights");
   Func bilateral("bilateral");
   Func output("bilateral_filter_output");
-  Var x, y, dx, dy, c;
+  Var x("x"), y("y"), dx("dx"), dy("dy"), c("c");
   RDom r(-3, 7, -3, 7);
 
   k.fill(0.f);
@@ -214,7 +218,7 @@ Func bilateral_filter(Func input, Expr width, Expr height) {
 
 Func desaturate_noise(Func input, Expr width, Expr height) {
   Func output("desaturate_noise_output");
-  Var x, y, c;
+  Var x("x"), y("y"), c("c");
   Func input_mirror = BoundaryConditions::mirror_image(input, {Range(0, width), Range(0, height)});
   Func blur = gauss_15x15(gauss_15x15(input_mirror, "desaturate_noise_blur1"), "desaturate_noise_blur2");
   float factor = 1.4f;
@@ -228,7 +232,7 @@ Func desaturate_noise(Func input, Expr width, Expr height) {
 
 Func increase_saturation(Func input, float strength) {
   Func output("increase_saturation_output");
-  Var x, y, c;
+  Var x("x"), y("y"), c("c");
   output(x, y, c) = strength * input(x, y, c);
   output(x, y, 0) = input(x, y, 0);
   output.compute_root().parallel(y).vectorize(x, 16);
@@ -250,7 +254,7 @@ Func chroma_denoise(Func input, Expr width, Expr height, int num_passes) {
 
 Func srgb(Func input, Func srgb_matrix) {
   Func output("srgb_output");
-  Var x, y, c;
+  Var x("x"), y("y"), c("c");
   RDom r(0, 3);
   output(x, y, c) = u16_sat(sum(srgb_matrix(r, c) * input(x, y, r)));
   return output;
@@ -258,7 +262,7 @@ Func srgb(Func input, Func srgb_matrix) {
 
 Func shift_bayer_to_rggb(Func input, const Expr cfa_pattern) {
   Func output("rggb_input");
-  Var x, y, c;
+  Var x("x"), y("y");
   output(x, y) = select(cfa_pattern == int(CfaPattern::CFA_RGGB), input(x, y),
                         cfa_pattern == int(CfaPattern::CFA_GRBG), input(x + 1, y),
                         cfa_pattern == int(CfaPattern::CFA_GBRG), input(x, y + 1),
@@ -293,7 +297,7 @@ public:
   Output<Buffer<uint16_t>> output_final{"output_final", 3};
 
   void generate() {
-    Var x, y, c;
+    Var x("x"), y("y"), c("c");
 
     // 1. Raw Pipeline
     Func alignment = align(inputs, inputs.width(), inputs.height());
@@ -336,15 +340,15 @@ public:
     Func final_color("final_color");
 
     Expr scale = f32(lut_size - 1);
-        Expr r = clamp(logged(x, y, 0), 0.0f, 1.0f) * scale;
-        Expr g = clamp(logged(x, y, 1), 0.0f, 1.0f) * scale;
-        Expr b = clamp(logged(x, y, 2), 0.0f, 1.0f) * scale;
+        Expr r_val = clamp(logged(x, y, 0), 0.0f, 1.0f) * scale;
+        Expr g_val = clamp(logged(x, y, 1), 0.0f, 1.0f) * scale;
+        Expr b_val = clamp(logged(x, y, 2), 0.0f, 1.0f) * scale;
 
-        Expr r0 = cast<int>(r); Expr r1 = min(r0 + 1, lut_size - 1);
-        Expr g0 = cast<int>(g); Expr g1 = min(g0 + 1, lut_size - 1);
-        Expr b0 = cast<int>(b); Expr b1 = min(b0 + 1, lut_size - 1);
+        Expr r0 = cast<int>(r_val); Expr r1 = min(r0 + 1, lut_size - 1);
+        Expr g0 = cast<int>(g_val); Expr g1 = min(g0 + 1, lut_size - 1);
+        Expr b0 = cast<int>(b_val); Expr b1 = min(b0 + 1, lut_size - 1);
 
-        Expr dr = r - r0; Expr dg = g - g0; Expr db = b - b0;
+        Expr dr = r_val - r0; Expr dg = g_val - g0; Expr db = b_val - b0;
 
         auto lookup = [&](Expr ri, Expr gi, Expr bi, Expr ci) {
             return lut(ci, ri, gi, bi);
@@ -363,8 +367,8 @@ public:
         Expr c0 = c00 * (1.0f - dg) + c10 * dg;
         Expr c1 = c01 * (1.0f - dg) + c11 * dg;
 
-        Expr lut_val = c0 * (1.0f - db) + c1 * db;
-        final_color(x, y, c) = select(has_lut, lut_val, logged(x, y, c));
+        Expr lut_res = c0 * (1.0f - db) + c1 * db;
+        final_color(x, y, c) = select(has_lut, lut_res, logged(x, y, c));
 
     // Output 2: Final Processed Image
     output_final(x, y, c) = u16_sat(final_color(x, y, c) * 65535.0f);
@@ -372,10 +376,10 @@ public:
     // --- Scheduling ---
     Target target = get_target();
     if (target.has_gpu_feature()) {
+        Var tx("tx"), ty("ty");
         // GPU Specialization
-        output_linear.specialize(use_gpu_input).gpu_tile(x, y, 16, 16);
-        output_final.specialize(use_gpu_input).gpu_tile(x, y, 16, 16);
-        linear_srgb.specialize(use_gpu_input).compute_at(output_linear, Var::gpu_blocks_x).gpu_threads(x, y);
+        output_linear.specialize(use_gpu_input).gpu_tile(x, y, tx, ty, 16, 16);
+        output_final.specialize(use_gpu_input).gpu_tile(x, y, tx, ty, 16, 16);
 
         // CPU Fallback within GPU target (if use_gpu_input is false)
         output_linear.specialize(!use_gpu_input).parallel(y).vectorize(x, 16);

@@ -32,39 +32,23 @@
 #define TIFFTAG_COLORMATRIX1 50721
 #define TIFFTAG_ASSHOTNEUTRAL 50728
 #define TIFFTAG_CALIBRATIONILLUMINANT1 50778
-#define TIFFTAG_OPCODELIST1 51008
+#define TIFFTAG_OPCOCELIST1 51008
 #define TIFFTAG_OPCODELIST2 51009
 #define TIFFTAG_OPCODELIST3 51022
 
 static const TIFFFieldInfo dng_field_info[] = {
-    { TIFFTAG_DNGVERSION, 4, 4, TIFF_BYTE, FIELD_CUSTOM, 1, 0, "DNGVersion" },
-    { TIFFTAG_DNGBACKWARDVERSION, 4, 4, TIFF_BYTE, FIELD_CUSTOM, 1, 0, "DNGBackwardVersion" },
-    { TIFFTAG_UNIQUECAMERAMODEL, -1, -1, TIFF_ASCII, FIELD_CUSTOM, 1, 0, "UniqueCameraModel" },
-    { TIFFTAG_BLACKLEVEL, -1, -1, TIFF_LONG, FIELD_CUSTOM, 1, 1, "BlackLevel" },
-    { TIFFTAG_WHITELEVEL, -1, -1, TIFF_LONG, FIELD_CUSTOM, 1, 1, "WhiteLevel" },
-    { TIFFTAG_COLORMATRIX1, -1, -1, TIFF_RATIONAL, FIELD_CUSTOM, 1, 1, "ColorMatrix1" },
-    { TIFFTAG_ASSHOTNEUTRAL, -1, -1, TIFF_RATIONAL, FIELD_CUSTOM, 1, 1, "AsShotNeutral" },
-    { TIFFTAG_CALIBRATIONILLUMINANT1, 1, 1, TIFF_SHORT, FIELD_CUSTOM, 1, 0, "CalibrationIlluminant1" }
+    { TIFFTAG_DNGVERSION, 4, 4, TIFF_BYTE, FIELD_CUSTOM, 1, 0, (char*)"DNGVersion" },
+    { TIFFTAG_DNGBACKWARDVERSION, 4, 4, TIFF_BYTE, FIELD_CUSTOM, 1, 0, (char*)"DNGBackwardVersion" },
+    { TIFFTAG_UNIQUECAMERAMODEL, -1, -1, TIFF_ASCII, FIELD_CUSTOM, 1, 0, (char*)"UniqueCameraModel" },
+    { TIFFTAG_BLACKLEVEL, -1, -1, TIFF_LONG, FIELD_CUSTOM, 1, 1, (char*)"BlackLevel" },
+    { TIFFTAG_WHITELEVEL, -1, -1, TIFF_LONG, FIELD_CUSTOM, 1, 1, (char*)"WhiteLevel" },
+    { TIFFTAG_COLORMATRIX1, -1, -1, TIFF_RATIONAL, FIELD_CUSTOM, 1, 1, (char*)"ColorMatrix1" },
+    { TIFFTAG_ASSHOTNEUTRAL, -1, -1, TIFF_RATIONAL, FIELD_CUSTOM, 1, 1, (char*)"AsShotNeutral" },
+    { TIFFTAG_CALIBRATIONILLUMINANT1, 1, 1, TIFF_SHORT, FIELD_CUSTOM, 1, 0, (char*)"CalibrationIlluminant1" }
 };
 
 static void DNGTagExtender(TIFF *tif) {
     TIFFMergeFieldInfo(tif, dng_field_info, sizeof(dng_field_info) / sizeof(dng_field_info[0]));
-}
-
-Matrix3x3 get_srgb_to_xyz_matrix() {
-    return M_sRGB_D65_to_XYZ;
-}
-
-Matrix3x3 get_xyz_to_target_matrix(int targetLog) {
-    switch (targetLog) {
-        case 1: return M_XYZ_to_AlexaWideGamut_D65;
-        case 2:
-        case 3: return M_XYZ_to_Rec2020_D65;
-        case 5:
-        case 6: return M_XYZ_to_SGamut3Cine_D65;
-        case 7: return M_XYZ_to_VGamut_D65;
-        default: return M_XYZ_to_Rec709_D65;
-    }
 }
 
 // --- Matrix Math ---
@@ -167,6 +151,22 @@ const Matrix3x3 M_Bradford_D50_to_D65 = {
     -0.02831194f, 1.00994706f, 0.02102750f,
     0.01231027f, -0.02050341f, 1.33023150f
 };
+
+Matrix3x3 get_srgb_to_xyz_matrix() {
+    return M_sRGB_D65_to_XYZ;
+}
+
+Matrix3x3 get_xyz_to_target_matrix(int targetLog) {
+    switch (targetLog) {
+        case 1: return M_XYZ_to_AlexaWideGamut_D65;
+        case 2:
+        case 3: return M_XYZ_to_Rec2020_D65;
+        case 5:
+        case 6: return M_XYZ_to_SGamut3Cine_D65;
+        case 7: return M_XYZ_to_VGamut_D65;
+        default: return M_XYZ_to_Rec709_D65;
+    }
+}
 
 // --- Log Curves (CPU) ---
 float srgb_oetf(float x) {
