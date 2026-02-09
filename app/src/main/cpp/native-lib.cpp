@@ -114,7 +114,9 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processRaw(
         targetLog,
         lut,
         tiff_path_cstr,
-        jpg_path_cstr
+        jpg_path_cstr,
+        0, // sourceColorSpace = ProPhoto (LibRaw output_color=4)
+        nullptr // ccm is not used for ProPhoto path
     );
 
     // Release Strings

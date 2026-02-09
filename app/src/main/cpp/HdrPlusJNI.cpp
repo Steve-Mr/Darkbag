@@ -196,7 +196,9 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
         targetLog,
         lut,
         tiff_path_cstr,
-        jpg_path_cstr
+        jpg_path_cstr,
+        1, // sourceColorSpace = Camera Native (requires ccm)
+        ccmVec.data() // CCM (Sensor -> sRGB) from Camera2 API
     );
 
     // Release Strings

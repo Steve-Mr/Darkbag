@@ -18,7 +18,7 @@
 #define TIFFTAG_FOCALLENGTH 37386
 #endif
 
-// 确保定义 LinearRaw (如果 libtiff 头文件没包含)
+// Define LinearRaw
 #ifndef PHOTOMETRIC_LINEAR_RAW
 #define PHOTOMETRIC_LINEAR_RAW 34892
 #endif
@@ -50,6 +50,69 @@ static const TIFFFieldInfo dng_field_info[] = {
 static void DNGTagExtender(TIFF *tif) {
     TIFFMergeFieldInfo(tif, dng_field_info, sizeof(dng_field_info) / sizeof(dng_field_info[0]));
 }
+
+// --- Matrix Math ---
+Vec3 multiply(const Matrix3x3& mat, const Vec3& v) {
+    return {
+        mat.m[0] * v.r + mat.m[1] * v.g + mat.m[2] * v.b,
+        mat.m[3] * v.r + mat.m[4] * v.g + mat.m[5] * v.b,
+        mat.m[6] * v.r + mat.m[7] * v.g + mat.m[8] * v.b
+    };
+}
+
+// --- Color Matrices ---
+
+// sRGB_D65 (RGB -> XYZ)
+const Matrix3x3 M_sRGB_D65_to_XYZ = {
+    0.41239080f, 0.35758434f, 0.18048079f,
+    0.21263901f, 0.71516868f, 0.07219232f,
+    0.01933082f, 0.11919478f, 0.95053215f
+};
+
+// ProPhoto_D50 (RGB -> XYZ)
+const Matrix3x3 M_ProPhoto_D50_to_XYZ = {
+    0.79766723f, 0.13519223f, 0.03135253f,
+    0.28803745f, 0.71187688f, 0.00008566f,
+    0.00000000f, 0.00000000f, 0.82518828f
+};
+
+// XYZ -> Target Matrices
+const Matrix3x3 M_XYZ_to_AlexaWideGamut_D65 = {
+    1.99234198f, -0.57196805f, -0.29536100f,
+    -0.79989925f, 1.74791391f, 0.01134474f,
+    0.00760860f, -0.02558954f, 0.93508164f
+};
+
+const Matrix3x3 M_XYZ_to_SGamut3Cine_D65 = {
+    1.84677897f, -0.52598612f, -0.21054521f,
+    -0.44415326f, 1.25944290f, 0.14939997f,
+    0.04085542f, 0.01564089f, 0.86820725f
+};
+
+const Matrix3x3 M_XYZ_to_VGamut_D65 = {
+    1.59387222f, -0.31417914f, -0.18431177f,
+    -0.51815173f, 1.35539124f, 0.12587867f,
+    0.01117945f, 0.00319413f, 0.90553536f
+};
+
+const Matrix3x3 M_XYZ_to_Rec2020_D65 = {
+    1.71665119f, -0.35567078f, -0.25336628f,
+    -0.66668435f, 1.61648124f, 0.01576855f,
+    0.01763986f, -0.04277061f, 0.94210312f
+};
+
+const Matrix3x3 M_XYZ_to_Rec709_D65 = {
+    3.24096994f, -1.53738318f, -0.49861076f,
+    -0.96924364f, 1.87596750f, 0.04155506f,
+    0.05563008f, -0.20397696f, 1.05697151f
+};
+
+// Bradford Adaptation D50 -> D65
+const Matrix3x3 M_Bradford_D50_to_D65 = {
+    0.95553939f, -0.02305835f, 0.06322404f,
+    -0.02831194f, 1.00994706f, 0.02102750f,
+    0.01231027f, -0.02050341f, 1.33023150f
+};
 
 // --- Log Curves (CPU) ---
 float arri_logc3(float x) {
@@ -85,7 +148,9 @@ float vlog(float x) {
     else return 5.6f * x + 0.125f;
 }
 float apply_log(float x, int type) {
-    if (x < 0) x = 0;
+    // Note: Log curves handle x < 0 usually by clipping or linear extension.
+    // We clamp slightly above 0 if needed, but linear extension is better for noise.
+    if (x < 0) x = 0; // Simple safety
     switch (type) {
         case 1: return arri_logc3(x);
         case 2: return f_log(x);
@@ -93,8 +158,10 @@ float apply_log(float x, int type) {
         case 5: return s_log3(x);
         case 6: return s_log3(x);
         case 7: return vlog(x);
-        case 0: return x;
-        default: return pow(x, 1.0f/2.2f);
+        case 0: // Standard
+            // Apply standard Gamma 2.2 (Rec.709 OETF approximation)
+            return (x > 0.0f) ? pow(x, 1.0f/2.2f) : 0.0f;
+        default: return (x > 0.0f) ? pow(x, 1.0f/2.2f) : 0.0f;
     }
 }
 
@@ -105,13 +172,12 @@ LUT3D load_lut(const char* path) {
     std::ifstream file(path);
     if (!file.is_open()) return lut;
 
-    // Security limits to prevent DoS
     const size_t MAX_LINE_LENGTH = 1024;
-    const size_t MAX_DATA_POINTS = 64 * 64 * 64; // Limit to standard 64^3 LUT size (approx 262k entries)
+    const size_t MAX_DATA_POINTS = 64 * 64 * 64;
 
     std::string line;
     while (std::getline(file, line)) {
-        if (line.length() > MAX_LINE_LENGTH) continue; // Skip overly long lines
+        if (line.length() > MAX_LINE_LENGTH) continue;
         if (line.empty() || line[0] == '#') continue;
         if (line.rfind("TITLE", 0) == 0 || line.rfind("DOMAIN", 0) == 0 || line.rfind("LUT_1D", 0) == 0) continue;
 
@@ -119,24 +185,22 @@ LUT3D load_lut(const char* path) {
             std::stringstream ss(line);
             std::string temp;
             ss >> temp >> lut.size;
-            // Enforce size limits
             if (lut.size > 0 && lut.size <= 64) {
                  lut.data.reserve(lut.size * lut.size * lut.size);
             } else {
-                 lut.size = 0; // Invalid or too large
+                 lut.size = 0;
                  return lut;
             }
             continue;
         }
 
-        if (lut.data.size() >= MAX_DATA_POINTS) break; // Hard stop
+        if (lut.data.size() >= MAX_DATA_POINTS) break;
 
         std::stringstream ss(line);
         float r, g, b;
         if (ss >> r >> g >> b) lut.data.push_back({r, g, b});
     }
 
-    // Strict validation of data count
     if (lut.size > 0 && lut.data.size() != (size_t)(lut.size * lut.size * lut.size)) {
         lut.size = 0; lut.data.clear();
     }
@@ -176,12 +240,21 @@ void process_and_save_image(
     int targetLog,
     const LUT3D& lut,
     const char* tiffPath,
-    const char* jpgPath
+    const char* jpgPath,
+    int sourceColorSpace,
+    const float* ccm
 ) {
     // 1. Prepare Output Buffer
     std::vector<unsigned short> processedImage(width * height * 3);
 
-    // 2. Process Pixels (Digital Gain -> Log/Gamma -> LUT)
+    // Prepare CCM matrix if needed
+    Matrix3x3 sensor_to_sRGB = {0};
+    if (ccm) {
+        // Copy flat array to matrix
+        for(int i=0; i<9; ++i) sensor_to_sRGB.m[i] = ccm[i];
+    }
+
+    // 2. Process Pixels
     #pragma omp parallel for
     for (int i = 0; i < width * height; i++) {
         unsigned short r_val = inputImage[i * 3 + 0];
@@ -190,48 +263,66 @@ void process_and_save_image(
 
         // 2a. Digital Gain & Normalization
         // Normalize to [0, 1] based on 16-bit range, then apply gain
-        // Clamp to 0.0f, but allow > 1.0f for Log curves (HDR data)
-        float norm_r = std::max(0.0f, (float)r_val / 65535.0f * gain);
-        float norm_g = std::max(0.0f, (float)g_val / 65535.0f * gain);
-        float norm_b = std::max(0.0f, (float)b_val / 65535.0f * gain);
+        // NO CLAMPING here to preserve high dynamic range for Log/WideGamut
+        float norm_r = (float)r_val / 65535.0f * gain;
+        float norm_g = (float)g_val / 65535.0f * gain;
+        float norm_b = (float)b_val / 65535.0f * gain;
 
-        // Clamp to 1.0 for Gamma/Rec709, but not necessarily for Log?
-        // Standard LogC3 etc expect 0.18 gray but handle highlights.
-        // For simplicity and safety (as per previous logic), we clamp to 1.0 BEFORE
-        // processing unless it's a specific Log that expects extended range.
-        // The previous implementation in HdrPlusJNI.cpp clamped to 1.0.
-        // The native-lib implementation divided by 65535.0f (implicit 1.0 max if data is 16-bit).
-        // Let's clamp to 1.0 to prevent weird artifacts in LUTs/Gamma.
-        norm_r = std::min(1.0f, norm_r);
-        norm_g = std::min(1.0f, norm_g);
-        norm_b = std::min(1.0f, norm_b);
+        // 2b. Color Space Conversion -> XYZ (D65)
+        Vec3 color = {norm_r, norm_g, norm_b};
 
-        // 2b. Log / Gamma
-        if (targetLog == 0) {
-            // Standard Gamma 2.2 (Fallback if "None" selected)
-            norm_r = pow(norm_r, 1.0f/2.2f);
-            norm_g = pow(norm_g, 1.0f/2.2f);
-            norm_b = pow(norm_b, 1.0f/2.2f);
-        } else {
-            // Specific Log Curve
-            norm_r = apply_log(norm_r, targetLog);
-            norm_g = apply_log(norm_g, targetLog);
-            norm_b = apply_log(norm_b, targetLog);
+        if (sourceColorSpace == 1) { // Camera Native (HDR+)
+            // Step 1: Apply Camera2 CCM (Assumed Sensor -> sRGB Linear D65 from COLOR_CORRECTION_TRANSFORM)
+            if (ccm) {
+                color = multiply(sensor_to_sRGB, color);
+            }
+            // Step 2: sRGB Linear D65 -> XYZ D65
+            color = multiply(M_sRGB_D65_to_XYZ, color);
+
+        } else if (sourceColorSpace == 0) { // ProPhoto (LibRaw)
+            // Step 1: ProPhoto D50 -> XYZ D50
+            color = multiply(M_ProPhoto_D50_to_XYZ, color);
+            // Step 2: Chromatic Adaptation D50 -> D65
+            color = multiply(M_Bradford_D50_to_D65, color);
         }
 
-        // 2c. LUT
+        // 2c. XYZ (D65) -> Target Gamut (D65)
+        switch (targetLog) {
+            case 1: // ARRI LogC3 -> Alexa Wide Gamut
+                color = multiply(M_XYZ_to_AlexaWideGamut_D65, color);
+                break;
+            case 2: // F-Log -> Rec.2020
+            case 3:
+                color = multiply(M_XYZ_to_Rec2020_D65, color);
+                break;
+            case 5: // S-Log3 -> S-Gamut3.Cine
+            case 6:
+                color = multiply(M_XYZ_to_SGamut3Cine_D65, color);
+                break;
+            case 7: // V-Log -> V-Gamut
+                color = multiply(M_XYZ_to_VGamut_D65, color);
+                break;
+            case 0: // Standard -> Rec.709
+            default:
+                // Default to Rec.709 for standard display
+                color = multiply(M_XYZ_to_Rec709_D65, color);
+                break;
+        }
+
+        // 2d. Log / Gamma
+        color.r = apply_log(color.r, targetLog);
+        color.g = apply_log(color.g, targetLog);
+        color.b = apply_log(color.b, targetLog);
+
+        // 2e. LUT
         if (lut.size > 0) {
-            Vec3 color = {norm_r, norm_g, norm_b};
             color = apply_lut(lut, color);
-            norm_r = color.r;
-            norm_g = color.g;
-            norm_b = color.b;
         }
 
         // 3. Scale back to 16-bit
-        processedImage[i * 3 + 0] = (unsigned short)std::max(0.0f, std::min(65535.0f, norm_r * 65535.0f));
-        processedImage[i * 3 + 1] = (unsigned short)std::max(0.0f, std::min(65535.0f, norm_g * 65535.0f));
-        processedImage[i * 3 + 2] = (unsigned short)std::max(0.0f, std::min(65535.0f, norm_b * 65535.0f));
+        processedImage[i * 3 + 0] = (unsigned short)std::max(0.0f, std::min(65535.0f, color.r * 65535.0f));
+        processedImage[i * 3 + 1] = (unsigned short)std::max(0.0f, std::min(65535.0f, color.g * 65535.0f));
+        processedImage[i * 3 + 2] = (unsigned short)std::max(0.0f, std::min(65535.0f, color.b * 65535.0f));
     }
 
     // 4. Save Files
@@ -359,11 +450,6 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
     TIFFSetField(tif, TIFFTAG_UNIQUECAMERAMODEL, model);
 
     // White/Black Level (Critical for Readers)
-    // The pipeline scales values by 0.25x to preserve headroom.
-    // We must set the WhiteLevel tag to match this scaled range (approx 16383 for 16-bit).
-    // If passed whiteLevel is full range (e.g. 1023 or 65535), we divide by 4.
-    // However, the caller (JNI) might already be passing the scaled value.
-    // Let's assume the caller handles the scaling logic and passes the correct "effective white level" for the DNG.
     uint32_t white_level_val = (uint32_t)whiteLevel;
     if (white_level_val == 0) white_level_val = 65535;
     TIFFSetField(tif, TIFFTAG_WHITELEVEL, 1, &white_level_val);
@@ -386,7 +472,6 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
     TIFFSetField(tif, TIFFTAG_FNUMBER, fNumber);
     TIFFSetField(tif, TIFFTAG_FOCALLENGTH, focalLength);
 
-    // ISO: Pass count and address because standard libtiff definition is variable length array
     unsigned short iso_short = (unsigned short)iso;
     TIFFSetField(tif, TIFFTAG_ISOSPEEDRATINGS, 1, &iso_short);
 
