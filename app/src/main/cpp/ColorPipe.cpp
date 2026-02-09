@@ -60,6 +60,29 @@ Vec3 multiply(const Matrix3x3& mat, const Vec3& v) {
     };
 }
 
+Matrix3x3 invert(const Matrix3x3& src) {
+    float det = src.m[0] * (src.m[4] * src.m[8] - src.m[7] * src.m[5]) -
+                src.m[1] * (src.m[3] * src.m[8] - src.m[5] * src.m[6]) +
+                src.m[2] * (src.m[3] * src.m[7] - src.m[4] * src.m[6]);
+
+    if (std::abs(det) < 1e-6f) return src; // Degenerate fallback
+
+    float invDet = 1.0f / det;
+    Matrix3x3 res;
+
+    res.m[0] = (src.m[4] * src.m[8] - src.m[5] * src.m[7]) * invDet;
+    res.m[1] = (src.m[2] * src.m[7] - src.m[1] * src.m[8]) * invDet;
+    res.m[2] = (src.m[1] * src.m[5] - src.m[2] * src.m[4]) * invDet;
+    res.m[3] = (src.m[5] * src.m[6] - src.m[3] * src.m[8]) * invDet;
+    res.m[4] = (src.m[0] * src.m[8] - src.m[2] * src.m[6]) * invDet;
+    res.m[5] = (src.m[2] * src.m[3] - src.m[0] * src.m[5]) * invDet;
+    res.m[6] = (src.m[3] * src.m[7] - src.m[4] * src.m[6]) * invDet;
+    res.m[7] = (src.m[1] * src.m[6] - src.m[0] * src.m[7]) * invDet;
+    res.m[8] = (src.m[0] * src.m[4] - src.m[1] * src.m[3]) * invDet;
+
+    return res;
+}
+
 // --- Color Matrices ---
 
 // sRGB_D65 (RGB -> XYZ)
@@ -272,12 +295,14 @@ void process_and_save_image(
         Vec3 color = {norm_r, norm_g, norm_b};
 
         if (sourceColorSpace == 1) { // Camera Native (HDR+)
-            // Step 1: Apply Camera2 CCM (Assumed Sensor -> sRGB Linear D65 from COLOR_CORRECTION_TRANSFORM)
+            // Step 1: Apply Camera2 CCM (Sensor -> XYZ D50)
+            // Note: Android COLOR_CORRECTION_TRANSFORM typically maps to XYZ D50.
             if (ccm) {
-                color = multiply(sensor_to_sRGB, color);
+                color = multiply(sensor_to_sRGB, color); // sensor_to_sRGB holds the CCM
             }
-            // Step 2: sRGB Linear D65 -> XYZ D65
-            color = multiply(M_sRGB_D65_to_XYZ, color);
+            // Step 2: XYZ D50 -> XYZ D65 (ChromAdapt)
+            // Since target gamuts expect D65 white point, we adapt.
+            color = multiply(M_Bradford_D50_to_D65, color);
 
         } else if (sourceColorSpace == 0) { // ProPhoto (LibRaw)
             // Step 1: ProPhoto D50 -> XYZ D50
@@ -457,14 +482,21 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
     uint32_t black_level_val = 0; // Already subtracted in pipeline
     TIFFSetField(tif, TIFFTAG_BLACKLEVEL, 1, &black_level_val);
 
-    // [Critical] Write real CCM
-    TIFFSetField(tif, TIFFTAG_COLORMATRIX1, 9, ccm.data());
+    // [Critical] Write real CCM (XYZ -> Camera Native)
+    // The input 'ccm' is typically Sensor -> XYZ (Android format).
+    // DNG ColorMatrix1 requires XYZ -> Sensor.
+    // So we must invert it.
+    Matrix3x3 ccmMat;
+    for(int i=0; i<9; ++i) ccmMat.m[i] = ccm[i];
+    Matrix3x3 invCcm = invert(ccmMat);
+
+    TIFFSetField(tif, TIFFTAG_COLORMATRIX1, 9, invCcm.m);
 
     // AsShotNeutral is {1,1,1} because data is already WB'd (Linear)
     static const float as_shot_neutral[] = {1.0f, 1.0f, 1.0f};
     TIFFSetField(tif, TIFFTAG_ASSHOTNEUTRAL, 3, as_shot_neutral);
 
-    TIFFSetField(tif, TIFFTAG_CALIBRATIONILLUMINANT1, 21); // D65
+    TIFFSetField(tif, TIFFTAG_CALIBRATIONILLUMINANT1, 21); // D65 (Standard Illuminant for most transforms)
 
     // EXIF Metadata - Use correct standard libtiff types/pointers
     float exposureTimeSec = (float)exposureTime / 1000000000.0f;

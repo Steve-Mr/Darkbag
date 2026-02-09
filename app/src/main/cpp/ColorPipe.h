@@ -18,6 +18,7 @@ struct Matrix3x3 {
 };
 
 Vec3 multiply(const Matrix3x3& mat, const Vec3& v);
+Matrix3x3 invert(const Matrix3x3& src);
 
 // --- Log Curves ---
 float arri_logc3(float x);
