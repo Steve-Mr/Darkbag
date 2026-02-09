@@ -153,6 +153,14 @@ const Matrix3x3 M_Bradford_D50_to_D65 = {
 };
 
 // --- Log Curves (CPU) ---
+float srgb_oetf(float x) {
+    if (x <= 0.0031308f) {
+        return 12.92f * x;
+    } else {
+        return 1.055f * pow(x, 1.0f / 2.4f) - 0.055f;
+    }
+}
+
 float arri_logc3(float x) {
     const float cut = 0.010591f;
     const float a = 5.555556f;
@@ -196,10 +204,10 @@ float apply_log(float x, int type) {
         case 5: return s_log3(x);
         case 6: return s_log3(x);
         case 7: return vlog(x);
-        case 0: // Standard
-            // Apply standard Gamma 2.2 (Rec.709 OETF approximation)
-            return (x > 0.0f) ? pow(x, 1.0f/2.2f) : 0.0f;
-        default: return (x > 0.0f) ? pow(x, 1.0f/2.2f) : 0.0f;
+        case 0: // Standard -> sRGB
+            // Apply standard sRGB OETF (More punchy than 1/2.2)
+            return srgb_oetf(x);
+        default: return srgb_oetf(x);
     }
 }
 
