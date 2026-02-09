@@ -5,6 +5,7 @@
 #include <memory>
 #include <chrono>
 #include <future> // For std::async
+#include <dlfcn.h>
 #include <libraw/libraw.h>
 #include <HalideBuffer.h>
 #include "ColorPipe.h"
@@ -15,6 +16,33 @@
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 
 using namespace Halide::Runtime;
+
+// Check for OpenCL availability at runtime
+bool is_opencl_available() {
+    // Try to load libOpenCL.so
+    void* handle = dlopen("libOpenCL.so", RTLD_LAZY);
+    if (!handle) {
+        // Some devices might use different names or paths, but libOpenCL.so is the standard for Android
+        handle = dlopen("libPVROCL.so", RTLD_LAZY); // PowerVR
+    }
+
+    if (handle) {
+        dlclose(handle);
+        return true;
+    }
+    return false;
+}
+
+// Redirect Halide output to Android Logcat
+extern "C" void halide_print(void *user_context, const char *msg) {
+    __android_log_print(ANDROID_LOG_DEBUG, "HalideRuntime", "%s", msg);
+}
+
+// Custom error handler to avoid abort()
+extern "C" void halide_error(void *user_context, const char *msg) {
+    __android_log_print(ANDROID_LOG_ERROR, "HalideRuntime", "Halide Error: %s", msg);
+    // Note: Most Halide errors are fatal, but we at least get the log before abort/crash
+}
 
 extern "C" JNIEXPORT jint JNICALL
 Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
@@ -44,6 +72,12 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
         jlongArray debugStats
 ) {
     LOGD("Native processHdrPlus started. useGpu=%d", useGpu);
+
+    // Override useGpu if OpenCL is not available
+    if (useGpu && !is_opencl_available()) {
+        LOGD("OpenCL not detected on this device. Forcing CPU fallback.");
+        useGpu = JNI_FALSE;
+    }
 
     int numFrames = env->GetArrayLength(dngBuffers);
     if (numFrames < 2) {
