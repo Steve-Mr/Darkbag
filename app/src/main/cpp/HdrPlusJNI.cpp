@@ -25,13 +25,21 @@ using namespace Halide::Runtime;
 bool is_opencl_available() {
     void* handle = dlopen("libOpenCL.so", RTLD_LAZY);
     if (!handle) handle = dlopen("libPVROCL.so", RTLD_LAZY);
-    if (handle) { dlclose(handle); return true; }
+    if (handle) {
+        void* sym = dlsym(handle, "clGetPlatformIDs");
+        if (sym) { dlclose(handle); return true; }
+        dlclose(handle);
+    }
     return false;
 }
 
 bool is_vulkan_available() {
     void* handle = dlopen("libvulkan.so", RTLD_LAZY);
-    if (handle) { dlclose(handle); return true; }
+    if (handle) {
+        void* sym = dlsym(handle, "vkCreateInstance");
+        if (sym) { dlclose(handle); return true; }
+        dlclose(handle);
+    }
     return false;
 }
 
@@ -75,12 +83,14 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     LOGD("Native processHdrPlus started. Requested gpuBackend=%d", gpuBackend);
 
     int actualBackend = 0; // 0: CPU, 1: OpenCL, 2: Vulkan
+    int returnCode = 0;    // 0: Success, 1: Fallback (Unavailable), 2: Fallback (Runtime Error)
+
     if (gpuBackend == 1) {
         if (is_opencl_available()) actualBackend = 1;
-        else LOGD("OpenCL requested but not available. Fallback to CPU.");
+        else { actualBackend = 0; returnCode = 1; LOGD("OpenCL not available. Fallback to CPU."); }
     } else if (gpuBackend == 2) {
         if (is_vulkan_available()) actualBackend = 2;
-        else LOGD("Vulkan requested but not available. Fallback to CPU.");
+        else { actualBackend = 0; returnCode = 1; LOGD("Vulkan not available. Fallback to CPU."); }
     }
 
     int numFrames = env->GetArrayLength(dngBuffers);
@@ -145,7 +155,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     else if (cfaPattern == 3) cfaPattern = 0;
 
     auto halideStart = std::chrono::high_resolution_clock::now();
-    int result = 0;
+    int result = -1;
 
     if (actualBackend == 1) {
         result = hdrplus_raw_pipeline_opencl(
@@ -161,7 +171,15 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
             digitalGain, targetLog, m_srgb_to_xyz_buf, m_xyz_to_target_buf,
             lutBuf, lut_size, has_lut, outputLinear, outputFinal
         );
-    } else {
+    }
+
+    if (actualBackend != 0 && result != 0) {
+        LOGE("GPU execution failed (%d). Falling back to CPU.", result);
+        actualBackend = 0;
+        returnCode = 2;
+    }
+
+    if (actualBackend == 0) {
         result = hdrplus_raw_pipeline_cpu(
             inputBuf, (uint16_t)blackLevel, (uint16_t)whiteLevel,
             wb_r, wb_g0, wb_g1, wb_b, cfaPattern, ccmHalideBuf,
@@ -230,5 +248,5 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     if (outputJpgPath) env->ReleaseStringUTFChars(outputJpgPath, jpg_path_cstr);
     if (outputDngPath) env->ReleaseStringUTFChars(outputDngPath, dng_path_cstr);
     if (!dng_ok) LOGE("Failed to write DNG file.");
-    return 0;
+    return returnCode;
 }

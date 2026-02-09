@@ -2448,7 +2448,14 @@ class CameraFragment : Fragment() {
                 val jniEndTime = System.currentTimeMillis()
                 Log.d(TAG, "JNI processHdrPlus returned $ret in ${jniEndTime - jniStartTime}ms")
 
-                if (ret == 0) {
+                if (ret >= 0) {
+                    if (ret == 1 || ret == 2) {
+                        withContext(Dispatchers.Main) {
+                            val msg = if (ret == 1) "GPU backend not available. Used CPU fallback."
+                                     else "GPU processing failed. Used CPU fallback."
+                            Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                        }
+                    }
                     val saveStartTime = System.currentTimeMillis()
                     val finalJpgUri = saveProcessedImage(
                         context,
