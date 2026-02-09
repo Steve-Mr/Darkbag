@@ -1,4 +1,5 @@
 #include "ColorPipe.h"
+#include "ColorMatrices.h"
 #include <tiffio.h>
 
 #include <vector>
@@ -181,7 +182,10 @@ void process_and_save_image(
     // 1. Prepare Output Buffer
     std::vector<unsigned short> processedImage(width * height * 3);
 
-    // 2. Process Pixels (Digital Gain -> Log/Gamma -> LUT)
+    // Get Conversion Matrix
+    const float* targetMatrix = get_prophoto_to_target_matrix(targetLog);
+
+    // 2. Process Pixels (Digital Gain -> Color Space Conversion -> Log/Gamma -> LUT)
     #pragma omp parallel for
     for (int i = 0; i < width * height; i++) {
         unsigned short r_val = inputImage[i * 3 + 0];
@@ -195,18 +199,15 @@ void process_and_save_image(
         float norm_g = std::max(0.0f, (float)g_val / 65535.0f * gain);
         float norm_b = std::max(0.0f, (float)b_val / 65535.0f * gain);
 
-        // Clamp to 1.0 for Gamma/Rec709, but not necessarily for Log?
-        // Standard LogC3 etc expect 0.18 gray but handle highlights.
-        // For simplicity and safety (as per previous logic), we clamp to 1.0 BEFORE
-        // processing unless it's a specific Log that expects extended range.
-        // The previous implementation in HdrPlusJNI.cpp clamped to 1.0.
-        // The native-lib implementation divided by 65535.0f (implicit 1.0 max if data is 16-bit).
-        // Let's clamp to 1.0 to prevent weird artifacts in LUTs/Gamma.
-        norm_r = std::min(1.0f, norm_r);
-        norm_g = std::min(1.0f, norm_g);
-        norm_b = std::min(1.0f, norm_b);
+        // 2b. Color Space Conversion (ProPhoto -> Target)
+        float in[3] = {norm_r, norm_g, norm_b};
+        float out[3];
+        mat_vec_mult(targetMatrix, in, out);
+        norm_r = out[0];
+        norm_g = out[1];
+        norm_b = out[2];
 
-        // 2b. Log / Gamma
+        // 2c. Log / Gamma
         if (targetLog == 0) {
             // Standard Gamma 2.2 (Fallback if "None" selected)
             norm_r = pow(norm_r, 1.0f/2.2f);

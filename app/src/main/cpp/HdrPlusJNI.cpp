@@ -7,6 +7,7 @@
 #include <libraw/libraw.h>
 #include <HalideBuffer.h>
 #include "ColorPipe.h"
+#include "ColorMatrices.h"
 #include "hdrplus_raw_pipeline.h" // Generated header
 
 #define TAG "HdrPlusJNI"
@@ -181,13 +182,63 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     bool dng_ok = true;
 
     // Save DNG (Raw Path)
+    // The DNG ColorMatrix1 tag requires XYZ -> Sensor matrix.
+    // The ccmVec passed from Android is Sensor -> XYZ.
+    // We must invert it.
+    float ccm_arr[9];
+    for(int i=0; i<9; i++) ccm_arr[i] = ccmVec[i];
+
+    float dng_color_matrix[9];
+    std::vector<float> dngCcmVec(9);
+
+    if (mat_inv(ccm_arr, dng_color_matrix)) {
+        for(int i=0; i<9; i++) dngCcmVec[i] = dng_color_matrix[i];
+    } else {
+        // Fallback to identity or original if singular (unlikely)
+        dngCcmVec = ccmVec;
+    }
+
     int dngWhiteLevel = 16383;
     if (dng_path_cstr) {
-        dng_ok = write_dng(dng_path_cstr, width, height, finalImage, dngWhiteLevel, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation);
+        dng_ok = write_dng(dng_path_cstr, width, height, finalImage, dngWhiteLevel, iso, exposureTime, fNumber, focalLength, captureTimeMillis, dngCcmVec, orientation);
+    }
+
+    // Convert Camera Native -> ProPhoto RGB
+    // M_Sensor_to_Pro = M_XYZ_to_Pro * CCM * M_WB_inv
+    // CCM is Sensor -> XYZ
+    // We need to account for the fact that finalImage is already White Balanced.
+    // finalImage ~= Sensor * WB
+    // Sensor ~= finalImage / WB
+    // XYZ = CCM * Sensor = CCM * (finalImage / WB)
+    // Pro = M_XYZ_to_Pro * CCM * diag(1/WB) * finalImage
+
+    float m_sensor_to_pro[9];
+    float m_wb_inv[9];
+    float wb_inv_vec[3] = {1.0f/wb_r, 1.0f/((wb_g0+wb_g1)/2.0f), 1.0f/wb_b};
+    mat_diag(wb_inv_vec, m_wb_inv);
+
+    float temp_mat[9];
+    mat_mat_mult(M_XYZ_D50_to_ProPhoto, ccm_arr, temp_mat); // Temp = M_XYZ * CCM
+    mat_mat_mult(temp_mat, m_wb_inv, m_sensor_to_pro);      // Final = Temp * WB_inv
+
+    #pragma omp parallel for
+    for (int i = 0; i < width * height; i++) {
+        float r = (float)finalImage[i*3+0];
+        float g = (float)finalImage[i*3+1];
+        float b = (float)finalImage[i*3+2];
+
+        float in[3] = {r, g, b};
+        float out[3];
+
+        mat_vec_mult(m_sensor_to_pro, in, out);
+
+        finalImage[i*3+0] = (unsigned short)std::max(0.0f, std::min(65535.0f, out[0]));
+        finalImage[i*3+1] = (unsigned short)std::max(0.0f, std::min(65535.0f, out[1]));
+        finalImage[i*3+2] = (unsigned short)std::max(0.0f, std::min(65535.0f, out[2]));
     }
 
     // Save Processed Images (Log/LUT Path)
-    // Pass finalImage (Linear) + Gain + Logic to shared pipeline
+    // Pass finalImage (Linear ProPhoto) + Gain + Logic to shared pipeline
     process_and_save_image(
         finalImage,
         width,
