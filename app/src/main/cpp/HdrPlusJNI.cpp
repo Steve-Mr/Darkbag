@@ -25,11 +25,11 @@ using namespace Halide::Runtime;
 
 // Runtime availability checks
 bool is_opencl_available() {
+    // Note: OpenCL is not a public Android NDK API.
+    // We attempt to load it using only names, respecting Android 7.0+ restrictions.
     void* handle = dlopen("libOpenCL.so", RTLD_LAZY);
     if (!handle) handle = dlopen("libPVROCL.so", RTLD_LAZY);
-    if (!handle) handle = dlopen("/system/lib64/libOpenCL.so", RTLD_LAZY);
-    if (!handle) handle = dlopen("/vendor/lib64/libOpenCL.so", RTLD_LAZY);
-    if (!handle) handle = dlopen("/vendor/lib64/egl/libGLES_mali.so", RTLD_LAZY); // Mali often exports OpenCL here
+    if (!handle) handle = dlopen("libGLES_mali.so", RTLD_LAZY);
 
     if (handle) {
         void* sym = dlsym(handle, "clGetPlatformIDs");
@@ -41,15 +41,15 @@ bool is_opencl_available() {
         LOGE("OpenCL library found but clGetPlatformIDs NOT resolved!");
         dlclose(handle);
     } else {
-        LOGE("OpenCL library NOT found via dlopen!");
+        LOGE("OpenCL library NOT found via dlopen (name-only)!");
     }
     return false;
 }
 
 bool is_vulkan_available() {
+    // Vulkan IS a public NDK API (API 24+).
+    // Using only the library name ensures the Android linker uses the public library.
     void* handle = dlopen("libvulkan.so", RTLD_LAZY);
-    if (!handle) handle = dlopen("/system/lib64/libvulkan.so", RTLD_LAZY);
-    if (!handle) handle = dlopen("/vendor/lib64/libvulkan.so", RTLD_LAZY);
 
     if (handle) {
         void* sym = dlsym(handle, "vkCreateInstance");
@@ -61,7 +61,7 @@ bool is_vulkan_available() {
         LOGE("Vulkan library found but vkCreateInstance NOT resolved!");
         dlclose(handle);
     } else {
-        LOGE("Vulkan library (libvulkan.so) NOT found via dlopen!");
+        LOGE("Vulkan library (libvulkan.so) NOT found via dlopen (name-only)!");
     }
     return false;
 }
@@ -74,6 +74,35 @@ extern "C" void halide_print(void *user_context, const char *msg) {
 // Custom error handler
 extern "C" void halide_error(void *user_context, const char *msg) {
     __android_log_print(ANDROID_LOG_ERROR, "HalideRuntime", "Halide Error: %s", msg);
+}
+
+// Ensure Halide's Vulkan runtime can find the symbols by providing a custom getter.
+// This is especially useful on Android to bypass library path issues.
+extern "C" void* halide_vulkan_get_library_symbol(void *user_context, const char *name) {
+    void* handle = dlopen("libvulkan.so", RTLD_LAZY);
+    if (!handle) {
+        LOGE("halide_vulkan_get_library_symbol: libvulkan.so not found!");
+        return nullptr;
+    }
+    void* sym = dlsym(handle, name);
+    if (!sym) LOGE("halide_vulkan_get_library_symbol: %s not found!", name);
+    dlclose(handle);
+    return sym;
+}
+
+// Same for OpenCL if needed
+extern "C" void* halide_opencl_get_library_symbol(void *user_context, const char *name) {
+    void* handle = dlopen("libOpenCL.so", RTLD_LAZY);
+    if (!handle) handle = dlopen("libPVROCL.so", RTLD_LAZY);
+    if (!handle) handle = dlopen("libGLES_mali.so", RTLD_LAZY);
+    if (!handle) {
+        LOGE("halide_opencl_get_library_symbol: OpenCL libraries not found!");
+        return nullptr;
+    }
+    void* sym = dlsym(handle, name);
+    if (!sym) LOGE("halide_opencl_get_library_symbol: %s not found!", name);
+    dlclose(handle);
+    return sym;
 }
 
 extern "C" JNIEXPORT jint JNICALL

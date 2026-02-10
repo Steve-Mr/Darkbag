@@ -177,6 +177,7 @@ target_link_libraries(
         ${jnigraphics-lib}
         ${android-lib}
         ${vulkan-lib}
+        dl
         -fopenmp
         -static-openmp
 )
