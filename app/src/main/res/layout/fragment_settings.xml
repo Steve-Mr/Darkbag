@@ -37,32 +37,6 @@
             android:orientation="vertical"
             android:padding="@dimen/margin_medium">
 
-            <!-- Processing Section -->
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="Processing"
-                android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                android:textColor="?attr/colorPrimary"
-                android:layout_marginBottom="@dimen/spacing_medium" />
-
-            <com.google.android.material.card.MaterialCardView
-                style="@style/Widget.Material3.CardView.Filled"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginBottom="@dimen/margin_medium">
-
-                <TextView
-                    android:id="@+id/tv_debug_stats"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:padding="@dimen/padding_medium"
-                    android:fontFamily="monospace"
-                    android:textSize="12sp"
-                    android:text="No logs yet."
-                    android:textIsSelectable="true" />
-            </com.google.android.material.card.MaterialCardView>
-
             <!-- 3D LUTs Section -->
             <TextView
                 android:layout_width="match_parent"
@@ -236,7 +210,7 @@
                         android:id="@+id/tv_debug_stats"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                                                android:fontFamily="monospace"
+                        android:fontFamily="monospace"
                         android:textSize="12sp"
                         android:text="No logs yet."
                         android:textIsSelectable="true" />
