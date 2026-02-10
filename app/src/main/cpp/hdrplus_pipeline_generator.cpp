@@ -52,15 +52,11 @@ Func white_balance(Func input, Expr width, Expr height,
   output(r.x * 2, r.y * 2 + 1) = apply_wb_safe(input(r.x * 2, r.y * 2 + 1), wb.g1);
   output(r.x * 2 + 1, r.y * 2 + 1) = apply_wb_safe(input(r.x * 2 + 1, r.y * 2 + 1), wb.b);
 
-  Var yo("yo"), yi("yi");
-  output.compute_root()
-      .split(y, yo, yi, kTileY)
-      .parallel(yo)
-      .vectorize(x, kVec);
-  output.update(0).split(r.y, yo, yi, kTileY).parallel(yo);
-  output.update(1).split(r.y, yo, yi, kTileY).parallel(yo);
-  output.update(2).split(r.y, yo, yi, kTileY).parallel(yo);
-  output.update(3).split(r.y, yo, yi, kTileY).parallel(yo);
+  output.compute_root().parallel(y).vectorize(x, kVec);
+  output.update(0).parallel(r.y);
+  output.update(1).parallel(r.y);
+  output.update(2).parallel(r.y);
+  output.update(3).parallel(r.y);
   return output;
 }
 
