@@ -113,10 +113,6 @@ Func demosaic(Func input, Expr width, Expr height) {
              input(x, y));
 
   Var xo("xo"), yo("yo"), xi("xi"), yi("yi");
-  d0.compute_root().tile(x, y, xo, yo, xi, yi, kTileX, kTileY).parallel(yo).vectorize(xi, kVec);
-  d1.compute_root().tile(x, y, xo, yo, xi, yi, kTileX, kTileY).parallel(yo).vectorize(xi, kVec);
-  d2.compute_root().tile(x, y, xo, yo, xi, yi, kTileX, kTileY).parallel(yo).vectorize(xi, kVec);
-  d3.compute_root().tile(x, y, xo, yo, xi, yi, kTileX, kTileY).parallel(yo).vectorize(xi, kVec);
 
   output.compute_root()
       .tile(x, y, xo, yo, xi, yi, kTileX, kTileY)
@@ -125,6 +121,11 @@ Func demosaic(Func input, Expr width, Expr height) {
       .vectorize(xi, kVec)
       .align_bounds(x, 2)
       .align_bounds(y, 2);
+
+  d0.compute_at(output, yi).vectorize(x, kVec);
+  d1.compute_at(output, yi).vectorize(x, kVec);
+  d2.compute_at(output, yi).vectorize(x, kVec);
+  d3.compute_at(output, yi).vectorize(x, kVec);
   return output;
 }
 

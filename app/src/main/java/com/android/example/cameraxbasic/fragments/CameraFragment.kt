@@ -262,7 +262,6 @@ class CameraFragment : Fragment() {
                 }
             }
         }
-
     }
 
     /**
@@ -387,6 +386,32 @@ class CameraFragment : Fragment() {
                 processHdrPlusBurst(frames, 1.0f)
             }
         )
+
+        // Listen for background save completions from JNI
+        viewLifecycleOwner.lifecycleScope.launch {
+            ColorProcessor.backgroundSaveFlow.collect { event ->
+                Log.d(TAG, "Received background save complete event: ${event.baseName}")
+                withContext(Dispatchers.IO) {
+                    try {
+                        saveProcessedImage(
+                            requireContext(),
+                            null,
+                            null,
+                            0,
+                            1.0f,
+                            event.baseName,
+                            event.dngPath,
+                            event.tiffPath,
+                            false,
+                            event.saveTiff
+                        )
+                        Log.i(TAG, "Background MediaStore export finished for ${event.baseName}")
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Background MediaStore export failed for ${event.baseName}", e)
+                    }
+                }
+            }
+        }
 
         // Start processing consumer
         viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
@@ -1183,6 +1208,7 @@ class CameraFragment : Fragment() {
                     // Note: `saveProcessedImage` is suspending.
                     val finalJpgUri = saveProcessedImage(
                         context,
+                        null,
                         bmpPath,
                         0, // Rotation disabled for standard pipeline
                         zoomFactor,
@@ -1302,6 +1328,7 @@ class CameraFragment : Fragment() {
      */
     private suspend fun saveProcessedImage(
         context: Context,
+        inputBitmap: android.graphics.Bitmap?,
         bmpPath: String?,
         rotationDegrees: Int,
         zoomFactor: Float,
@@ -1314,14 +1341,11 @@ class CameraFragment : Fragment() {
     ): Uri? {
         val contentResolver = context.contentResolver
         var finalJpgUri: Uri? = null
-        val bmpFile = bmpPath?.let { File(it) }
 
-        // 1. Process BMP -> JPG
-        if (bmpFile?.exists() == true) {
-            var processedBitmap: android.graphics.Bitmap? = null
+        // 1. Process Input Bitmap or BMP File -> JPG
+        if (inputBitmap != null || bmpPath != null) {
+            var processedBitmap: android.graphics.Bitmap? = inputBitmap ?: (bmpPath?.let { BitmapFactory.decodeFile(it) })
             try {
-                processedBitmap = BitmapFactory.decodeFile(bmpPath)
-
                 // Rotate if needed
                 if (processedBitmap != null && rotationDegrees != 0) {
                     val matrix = android.graphics.Matrix()
@@ -1361,7 +1385,7 @@ class CameraFragment : Fragment() {
                 }
 
                 // Save JPG
-                if (saveJpg && processedBitmap != null) {
+                if (saveJpg) {
                     val jpgValues = ContentValues().apply {
                         put(MediaStore.MediaColumns.DISPLAY_NAME, "$baseName.jpg")
                         put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
@@ -1401,9 +1425,12 @@ class CameraFragment : Fragment() {
                 Log.e(TAG, "Error processing bitmap", t)
             } finally {
                 processedBitmap?.recycle()
+                if (inputBitmap != null && processedBitmap != inputBitmap) {
+                    inputBitmap.recycle()
+                }
+                // Cleanup BMP if it was used
+                bmpPath?.let { File(it).delete() }
             }
-            // Cleanup BMP
-            bmpFile?.delete()
         }
 
         // 2. Save TIFF
@@ -2410,21 +2437,23 @@ class CameraFragment : Fragment() {
                 val tiffFile = File(context.cacheDir, "$dngName.tiff")
                 val tiffPath = if(saveTiff) tiffFile.absolutePath else null
 
-                val bmpFile = File(context.cacheDir, "$dngName.bmp")
-                val bmpPath = if (saveJpg) bmpFile.absolutePath else null // JNI writes BMP only when JPEG is enabled
+                // Allocate direct Bitmap for faster processing (instead of intermediate BMP file)
+                val outputBitmap = if (saveJpg) {
+                    android.graphics.Bitmap.createBitmap(width, height, android.graphics.Bitmap.Config.ARGB_8888)
+                } else null
 
                 // Save Linear DNG (as requested)
                 val linearDngFile = File(context.cacheDir, "${dngName}_linear.dng")
                 val linearDngPath = linearDngFile.absolutePath
 
-                Log.d(TAG, "Output Paths: BMP=$bmpPath, TIFF=$tiffPath, DNG=$linearDngPath")
+                Log.d(TAG, "Output Paths: TIFF=$tiffPath, DNG=$linearDngPath")
 
                 // 6. JNI Call
                 val jniStartTime = System.currentTimeMillis()
                 // Ensure buffers are rewound just in case
                 buffers.forEach { it.rewind() }
 
-                val debugStats = LongArray(7) // [0]=Halide [1]=Copy [2]=Post [3]=DNG Encode [4]=Save [5]=DNG Wait [6]=NativeTotal
+                val debugStats = LongArray(12) // Expanded for stage profiling
 
                 val ret = ColorProcessor.processHdrPlus(
                     buffers,
@@ -2436,10 +2465,12 @@ class CameraFragment : Fragment() {
                     targetLogIndex,
                     nativeLutPath,
                     tiffPath,
-                    bmpPath,
+                    null, // bmpPath no longer used
                     linearDngPath,
                     digitalGain,
-                    debugStats
+                    debugStats,
+                    outputBitmap,
+                    hqBackgroundExport
                 )
 
                 val jniEndTime = System.currentTimeMillis()
@@ -2448,9 +2479,12 @@ class CameraFragment : Fragment() {
                 if (ret == 0) {
                     val saveStartTime = System.currentTimeMillis()
                     val finalJpgUri = if (hqBackgroundExport) {
+                        // In background mode, we only care about the JPEG/Bitmap here.
+                        // Heavy I/O for TIFF/DNG is handled by JNI background thread and reported via Flow.
                         saveProcessedImage(
                             context,
-                            bmpPath,
+                            outputBitmap,
+                            null,
                             rotationDegrees,
                             currentZoom,
                             dngName,
@@ -2462,7 +2496,8 @@ class CameraFragment : Fragment() {
                     } else {
                         saveProcessedImage(
                             context,
-                            bmpPath,
+                            outputBitmap,
+                            null,
                             rotationDegrees,
                             currentZoom,
                             dngName,
@@ -2473,27 +2508,6 @@ class CameraFragment : Fragment() {
                         )
                     }
                     val saveEndTime = System.currentTimeMillis()
-
-                    if (hqBackgroundExport) {
-                        viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
-                            try {
-                                saveProcessedImage(
-                                    context,
-                                    null,
-                                    0,
-                                    1.0f,
-                                    dngName,
-                                    linearDngPath,
-                                    tiffPath,
-                                    false,
-                                    saveTiff
-                                )
-                                Log.i(TAG, "HDR+ background HQ export finished: TIFF=$saveTiff, DNG=true")
-                            } catch (e: Exception) {
-                                Log.e(TAG, "HDR+ background HQ export failed", e)
-                            }
-                        }
-                    }
 
                     // Log Statistics
                     val totalTime = saveEndTime - startTime
@@ -2517,6 +2531,11 @@ class CameraFragment : Fragment() {
                           - Native Total: ${nativeTotalTime}ms
                           - Copy: ${copyTime}ms
                           - Halide: ${halideTime}ms
+                            * Align: ${debugStats[7]}ms
+                            * Merge: ${debugStats[8]}ms
+                            * Demosaic: ${debugStats[9]}ms
+                            * Denoise: ${debugStats[10]}ms
+                            * sRGB: ${debugStats[11]}ms
                           - Post: ${postTime}ms
                           - DNG Encode: ${dngEncodeTime}ms
                           - Save(Log/TIFF/BMP): ${nativeSaveTime}ms

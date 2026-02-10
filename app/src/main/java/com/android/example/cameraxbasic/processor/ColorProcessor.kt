@@ -2,10 +2,21 @@ package com.android.example.cameraxbasic.processor
 
 import java.nio.ByteBuffer
 
+import kotlinx.coroutines.flow.MutableSharedFlow
+
 object ColorProcessor {
     init {
         System.loadLibrary("native-lib")
     }
+
+    val backgroundSaveFlow = MutableSharedFlow<BackgroundSaveEvent>(extraBufferCapacity = 10)
+
+    data class BackgroundSaveEvent(
+        val baseName: String,
+        val tiffPath: String?,
+        val dngPath: String?,
+        val saveTiff: Boolean
+    )
 
     /**
      * @param dngData Byte array containing the full DNG file.
@@ -34,7 +45,21 @@ object ColorProcessor {
 
     /**
      * Processes a burst of RAW frames using the HDR+ pipeline.
+     * @param outputBitmap Optional Bitmap to receive the processed preview (faster than BMP file).
      */
+    /**
+     * Callback for background export completion. Called from JNI thread.
+     */
+    @JvmStatic
+    fun onBackgroundSaveComplete(
+        baseName: String,
+        tiffPath: String?,
+        dngPath: String?,
+        saveTiff: Boolean
+    ) {
+        backgroundSaveFlow.tryEmit(BackgroundSaveEvent(baseName, tiffPath, dngPath, saveTiff))
+    }
+
     external fun processHdrPlus(
         dngBuffers: Array<ByteBuffer>,
         width: Int,
@@ -56,6 +81,8 @@ object ColorProcessor {
         outputJpgPath: String?,
         outputDngPath: String?,
         digitalGain: Float,
-        debugStats: LongArray? // [0] Halide, [1] Copy, [2] Post, [3] DNG Encode, [4] Save, [5] DNG Wait, [6] Total (ms)
+        debugStats: LongArray?, // [0] Halide, [1] Copy, [2] Post, [3] DNG Encode, [4] Save, [5] DNG Wait, [6] Total, [7] Align, [8] Merge, [9] Demosaic, [10] Denoise, [11] sRGB
+        outputBitmap: android.graphics.Bitmap? = null,
+        isAsync: Boolean = false
     ): Int
 }

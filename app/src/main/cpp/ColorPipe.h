@@ -52,7 +52,8 @@ void process_and_save_image(
     int sourceColorSpace = 0,
     const float* ccm = nullptr,
     const float* wb = nullptr,
-    int orientation = 0
+    int orientation = 0,
+    unsigned char* out_rgb_buffer = nullptr
 );
 
 // --- File Writers ---

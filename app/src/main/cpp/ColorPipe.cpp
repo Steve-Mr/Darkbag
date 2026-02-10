@@ -3,6 +3,7 @@
 
 #include <vector>
 #include <ctime>
+#include <future>
 
 // Define missing tags if needed (Standard EXIF tags)
 #ifndef TIFFTAG_EXPOSURETIME
@@ -290,7 +291,8 @@ void process_and_save_image(
     int sourceColorSpace,
     const float* ccm,
     const float* wb,
-    int orientation
+    int orientation,
+    unsigned char* out_rgb_buffer
 ) {
     // 1. Prepare Output Buffer
     std::vector<unsigned short> processedImage(width * height * 3);
@@ -386,11 +388,33 @@ void process_and_save_image(
         processedImage[i * 3 + 0] = (unsigned short)std::max(0.0f, std::min(65535.0f, color.r * 65535.0f));
         processedImage[i * 3 + 1] = (unsigned short)std::max(0.0f, std::min(65535.0f, color.g * 65535.0f));
         processedImage[i * 3 + 2] = (unsigned short)std::max(0.0f, std::min(65535.0f, color.b * 65535.0f));
+
+        // 3b. Fill 8-bit buffer if provided (Assume RGBA_8888 for Android Bitmap)
+        if (out_rgb_buffer) {
+            out_rgb_buffer[i * 4 + 0] = (unsigned char)(processedImage[i * 3 + 0] >> 8);
+            out_rgb_buffer[i * 4 + 1] = (unsigned char)(processedImage[i * 3 + 1] >> 8);
+            out_rgb_buffer[i * 4 + 2] = (unsigned char)(processedImage[i * 3 + 2] >> 8);
+            out_rgb_buffer[i * 4 + 3] = 255; // Alpha
+        }
     }
 
-    // 4. Save Files
-    if (tiffPath) write_tiff(tiffPath, width, height, processedImage, orientation);
-    if (jpgPath) write_bmp(jpgPath, width, height, processedImage);
+    // 4. Save Files (Parallelized)
+    std::vector<std::future<bool>> tasks;
+    if (tiffPath) {
+        tasks.push_back(std::async(std::launch::async, [=, &processedImage]() {
+            return write_tiff(tiffPath, width, height, processedImage, orientation);
+        }));
+    }
+    if (jpgPath) {
+        tasks.push_back(std::async(std::launch::async, [=, &processedImage]() {
+            return write_bmp(jpgPath, width, height, processedImage);
+        }));
+    }
+
+    // Wait for tasks to complete before returning, unless we are fine with them being background.
+    // In this shared pipeline, we wait to ensure consistency.
+    // The JNI layer will handle higher-level backgrounding.
+    for (auto& t : tasks) t.get();
 }
 
 // --- TIFF Writer ---

@@ -8,6 +8,7 @@
 #include <thread>
 #include <future>
 #include <utility>
+#include <android/bitmap.h>
 #include <libraw/libraw.h>
 #include <HalideBuffer.h>
 #include <HalideRuntime.h>
@@ -21,6 +22,58 @@
 using namespace Halide::Runtime;
 
 namespace {
+JavaVM* g_jvm = nullptr;
+jclass g_colorProcessorClass = nullptr;
+// Thread-local storage for Halide profiling report
+thread_local std::string halide_report_buffer;
+
+extern "C" void halide_print(void* user_context, const char* str) {
+    halide_report_buffer += str;
+}
+
+struct HalideStageStats {
+    long align = 0;
+    long merge = 0;
+    long demosaic = 0;
+    long denoise = 0;
+    long srgb = 0;
+};
+
+HalideStageStats parseHalideReport(const std::string& report) {
+    HalideStageStats stats;
+    std::string line;
+    std::stringstream ss(report);
+    while (std::getline(ss, line)) {
+        // Simple heuristic: look for Func names and extract ms
+        // Halide profiler output format: "  <func_name>: <time>ms (<percentage>%)"
+        auto extract_ms = [&](const std::string& key) -> long {
+            if (line.find(key) != std::string::npos) {
+                size_t colon = line.find(':');
+                if (colon != std::string::npos) {
+                    size_t ms_pos = line.find("ms", colon);
+                    if (ms_pos != std::string::npos) {
+                        std::string val_str = line.substr(colon + 1, ms_pos - colon - 1);
+                        try {
+                            return (long)std::stof(val_str);
+                        } catch (...) { return 0; }
+                    }
+                }
+            }
+            return -1;
+        };
+
+        long ms;
+        if ((ms = extract_ms("alignment")) != -1) { stats.align += ms; continue; }
+        if ((ms = extract_ms("merge_")) != -1) { stats.merge += ms; continue; }
+        if ((ms = extract_ms("layer_")) != -1) { stats.align += ms; continue; } // Catch layer_0, layer_1, etc.
+        if ((ms = extract_ms("demosaic_")) != -1) { stats.demosaic += ms; continue; }
+        if ((ms = extract_ms("bilateral")) != -1) { stats.denoise += ms; continue; }
+        if ((ms = extract_ms("desaturate_noise")) != -1) { stats.denoise += ms; continue; }
+        if ((ms = extract_ms("srgb_output")) != -1) { stats.srgb += ms; continue; }
+    }
+    return stats;
+}
+
 void fillDebugStats(JNIEnv* env,
                     jlongArray debugStats,
                     jlong copyMs,
@@ -29,12 +82,13 @@ void fillDebugStats(JNIEnv* env,
                     jlong dngEncodeMs,
                     jlong saveMs,
                     jlong dngJoinWaitMs,
-                    jlong totalMs) {
+                    jlong totalMs,
+                    const HalideStageStats& stageStats) {
     if (debugStats == nullptr) return;
     const jsize len = env->GetArrayLength(debugStats);
     if (len <= 0) return;
 
-    // Backward compatible layout:
+    // Expanded layout:
     // [0] halideMs (legacy)
     // [1] copyMs
     // [2] postProcessMs (planar -> interleaved)
@@ -42,7 +96,12 @@ void fillDebugStats(JNIEnv* env,
     // [4] logPathSaveMs (process + save tiff/bmp)
     // [5] dngJoinWaitMs (time waiting at dngTask.get())
     // [6] totalNativeMs
-    jlong stats[7] = {
+    // [7] Stage: Align
+    // [8] Stage: Merge
+    // [9] Stage: Demosaic
+    // [10] Stage: Denoise
+    // [11] Stage: sRGB
+    jlong stats[12] = {
             halideMs,
             copyMs,
             postProcessMs,
@@ -50,11 +109,25 @@ void fillDebugStats(JNIEnv* env,
             saveMs,
             dngJoinWaitMs,
             totalMs,
+            stageStats.align,
+            stageStats.merge,
+            stageStats.demosaic,
+            stageStats.denoise,
+            stageStats.srgb
     };
 
-    env->SetLongArrayRegion(debugStats, 0, std::min<jsize>(len, 7), stats);
+    env->SetLongArrayRegion(debugStats, 0, std::min<jsize>(len, 12), stats);
 }
 } // namespace
+
+extern "C" jint JNI_OnLoad(JavaVM* vm, void* reserved) {
+    g_jvm = vm;
+    JNIEnv* env;
+    if (vm->GetEnv((void**)&env, JNI_VERSION_1_6) != JNI_OK) return JNI_ERR;
+    jclass clazz = env->FindClass("com/android/example/cameraxbasic/processor/ColorProcessor");
+    if (clazz) g_colorProcessorClass = (jclass)env->NewGlobalRef(clazz);
+    return JNI_VERSION_1_6;
+}
 
 extern "C" JNIEXPORT jint JNICALL
 Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
@@ -80,7 +153,9 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
         jstring outputJpgPath,
         jstring outputDngPath,
         jfloat digitalGain,
-        jlongArray debugStats
+        jlongArray debugStats,
+        jobject outputBitmap,
+        jboolean isAsync
 ) {
     LOGD("Native processHdrPlus started.");
     auto nativeStart = std::chrono::high_resolution_clock::now();
@@ -185,10 +260,10 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
 
     auto halideEnd = std::chrono::high_resolution_clock::now();
 
-    #if !defined(NDEBUG)
+    halide_report_buffer.clear();
     halide_profiler_report(nullptr);
+    HalideStageStats stageStats = parseHalideReport(halide_report_buffer);
     halide_profiler_reset();
-    #endif
 
     auto durationMs = std::chrono::duration_cast<std::chrono::milliseconds>(halideEnd - halideStart).count();
 
@@ -200,6 +275,15 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     LOGD("Halide pipeline finished.");
 
     // 5. Post-Processing (Log + LUT)
+
+    // Lock Bitmap if provided
+    unsigned char* bitmapPixels = nullptr;
+    if (outputBitmap) {
+        if (AndroidBitmap_lockPixels(env, outputBitmap, (void**)&bitmapPixels) < 0) {
+            LOGE("Failed to lock bitmap pixels.");
+            bitmapPixels = nullptr;
+        }
+    }
 
     // Load LUT
     const char* lut_path_cstr = (lutPath) ? env->GetStringUTFChars(lutPath, 0) : nullptr;
@@ -253,68 +337,126 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     const char* jpg_path_cstr = (outputJpgPath) ? env->GetStringUTFChars(outputJpgPath, 0) : nullptr;
     const char* dng_path_cstr = (outputDngPath) ? env->GetStringUTFChars(outputDngPath, 0) : nullptr;
 
-    bool dng_ok = true;
+    // Prepare for Background I/O (Copy strings before releasing)
+    std::string tiffPathStr = (tiff_path_cstr) ? tiff_path_cstr : "";
+    std::string jpgPathStr = (jpg_path_cstr) ? jpg_path_cstr : "";
+    std::string dngPathStr = (dng_path_cstr) ? dng_path_cstr : "";
+    std::string dngName(dng_path_cstr ? dng_path_cstr : "");
 
-    // Save DNG (Raw Path)
-    int dngWhiteLevel = 65535; // Full 16-bit range now
-    auto dngTask = std::async(std::launch::async, [&]() {
-        auto dngEncodeStart = std::chrono::high_resolution_clock::now();
-        bool ok = true;
-        if (dng_path_cstr) {
-            ok = write_dng(dng_path_cstr, width, height, finalImage, dngWhiteLevel, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation);
-        }
-        auto dngEncodeEnd = std::chrono::high_resolution_clock::now();
-        auto dngEncodeMs = std::chrono::duration_cast<std::chrono::milliseconds>(dngEncodeEnd - dngEncodeStart).count();
-        return std::make_pair(ok, dngEncodeMs);
-    });
-
-    // Save Processed Images (Log/LUT Path)
-    // Pass finalImage (Linear) + Gain + Logic to shared pipeline
-    auto saveStart = std::chrono::high_resolution_clock::now();
-    if (tiff_path_cstr || jpg_path_cstr) {
-        process_and_save_image(
-            finalImage,
-            width,
-            height,
-            digitalGain, // Gain to account for exposure (Data is already scaled 4x)
-            targetLog,
-            lut,
-            tiff_path_cstr,
-            jpg_path_cstr,
-            1, // sourceColorSpace = Camera Native (requires ccm)
-            ccmVec.data(), // CCM (Sensor -> XYZ) from Camera2 API
-            wbVec.data(),   // WB Gains (Currently unused in HDR+ path, but kept for API)
-            orientation // Pass orientation for TIFF writing
-        );
-    }
-    auto saveEnd = std::chrono::high_resolution_clock::now();
-    auto saveDurationMs = std::chrono::duration_cast<std::chrono::milliseconds>(saveEnd - saveStart).count();
-
-    auto dngWaitStart = std::chrono::high_resolution_clock::now();
-    auto dngResult = dngTask.get();
-    auto dngWaitEnd = std::chrono::high_resolution_clock::now();
-    dng_ok = dngResult.first;
-    auto dngEncodeMs = dngResult.second;
-    auto dngJoinWaitMs = std::chrono::duration_cast<std::chrono::milliseconds>(dngWaitEnd - dngWaitStart).count();
-
-    // Release Strings
+    // Release JNI Strings early
     if (outputTiffPath) env->ReleaseStringUTFChars(outputTiffPath, tiff_path_cstr);
     if (outputJpgPath) env->ReleaseStringUTFChars(outputJpgPath, jpg_path_cstr);
     if (outputDngPath) env->ReleaseStringUTFChars(outputDngPath, dng_path_cstr);
 
-    if (!dng_ok) LOGE("Failed to write DNG file.");
+    // DNG White Level
+    int dngWhiteLevel = 65535; // Full 16-bit range now
+
+    // Save Processed Images (Log/LUT Path)
+    auto saveStart = std::chrono::high_resolution_clock::now();
+
+    // 1. Synchronous Processing for Bitmap (Fast path for JPEG/Preview)
+    if (bitmapPixels) {
+        process_and_save_image(
+            finalImage,
+            width,
+            height,
+            digitalGain,
+            targetLog,
+            lut,
+            nullptr, // No TIFF path for sync call
+            nullptr, // No JPG path for sync call
+            1,
+            ccmVec.data(),
+            wbVec.data(),
+            orientation,
+            bitmapPixels
+        );
+        AndroidBitmap_unlockPixels(env, outputBitmap);
+    }
+
+    auto saveEnd = std::chrono::high_resolution_clock::now();
+    auto saveDurationMs = std::chrono::duration_cast<std::chrono::milliseconds>(saveEnd - saveStart).count();
+
+    // 2. Background I/O for TIFF, BMP, and DNG
+    // We move the heavy I/O to a background thread and return to Java immediately.
+    // This allows the UI to show the result while saving continues.
+    size_t lastSlash = dngName.find_last_of('/');
+    std::string baseName = (lastSlash != std::string::npos) ? dngName.substr(lastSlash + 1) : "HDRPLUS";
+    if (baseName.find(".dng") != std::string::npos) baseName = baseName.substr(0, baseName.find(".dng"));
+    if (baseName.find("_linear") != std::string::npos) baseName = baseName.substr(0, baseName.find("_linear"));
+
+    // Decide whether to run I/O asynchronously.
+    bool runAsync = (bool)isAsync;
+    bool hasBgTasks = !tiffPathStr.empty() || !jpgPathStr.empty() || !dngPathStr.empty();
+
+    if (hasBgTasks) {
+        auto saveFunc = [
+            finalImage = std::move(finalImage), // Move large buffer
+            width, height, digitalGain, targetLog, lut,
+            tiffPathStr, jpgPathStr, dngPathStr, baseName,
+            ccmVec, wbVec, orientation,
+            dngWhiteLevel, iso, exposureTime, fNumber, focalLength, captureTimeMillis
+        ]() mutable {
+            LOGD("Background save task started.");
+
+            // Save DNG
+            if (!dngPathStr.empty()) {
+                write_dng(dngPathStr.c_str(), width, height, finalImage, dngWhiteLevel, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation);
+            }
+
+            // Save TIFF/BMP
+            if (!tiffPathStr.empty() || !jpgPathStr.empty()) {
+                process_and_save_image(
+                    finalImage, width, height, digitalGain, targetLog, lut,
+                    tiffPathStr.empty() ? nullptr : tiffPathStr.c_str(),
+                    jpgPathStr.empty() ? nullptr : jpgPathStr.c_str(),
+                    1, ccmVec.data(), wbVec.data(), orientation, nullptr
+                );
+            }
+            LOGD("Background save task finished.");
+
+            // Notify Java if running asynchronously
+            if (g_jvm && g_colorProcessorClass) {
+                JNIEnv* env;
+                if (g_jvm->AttachCurrentThread(&env, nullptr) == JNI_OK) {
+                    jmethodID method = env->GetStaticMethodID(g_colorProcessorClass, "onBackgroundSaveComplete", "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Z)V");
+                    if (method) {
+                        jstring jBaseName = env->NewStringUTF(baseName.c_str());
+                        jstring jTiffPath = tiffPathStr.empty() ? nullptr : env->NewStringUTF(tiffPathStr.c_str());
+                        jstring jDngPath = dngPathStr.empty() ? nullptr : env->NewStringUTF(dngPathStr.c_str());
+
+                        env->CallStaticVoidMethod(g_colorProcessorClass, method, jBaseName, jTiffPath, jDngPath, !tiffPathStr.empty());
+
+                        if (jBaseName) env->DeleteLocalRef(jBaseName);
+                        if (jTiffPath) env->DeleteLocalRef(jTiffPath);
+                        if (jDngPath) env->DeleteLocalRef(jDngPath);
+                    }
+                    g_jvm->DetachCurrentThread();
+                }
+            }
+        };
+
+        if (runAsync) {
+            std::thread(std::move(saveFunc)).detach();
+        } else {
+            saveFunc();
+        }
+    }
 
     auto nativeEnd = std::chrono::high_resolution_clock::now();
     auto totalDurationMs = std::chrono::duration_cast<std::chrono::milliseconds>(nativeEnd - nativeStart).count();
+
+    // Since we backgrounded the I/O, these stats will reflect only the synchronous part.
     fillDebugStats(env,
                    debugStats,
                    (jlong)copyDurationMs,
                    (jlong)durationMs,
                    (jlong)postDurationMs,
-                   (jlong)dngEncodeMs,
+                   0, // DNG Encode ms (now in background)
                    (jlong)saveDurationMs,
-                   (jlong)dngJoinWaitMs,
-                   (jlong)totalDurationMs);
+                   0, // DNG Join wait ms (now in background)
+                   (jlong)totalDurationMs,
+                   stageStats);
 
     return 0;
 }
