@@ -1402,7 +1402,7 @@ class CameraFragment : Fragment() {
                         finalJpgUri = jpgUri
                         try {
                             contentResolver.openOutputStream(jpgUri)?.use { out ->
-                                processedBitmap.compress(
+                                processedBitmap?.compress(
                                     android.graphics.Bitmap.CompressFormat.JPEG,
                                     95,
                                     out
