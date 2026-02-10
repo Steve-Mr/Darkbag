@@ -1482,8 +1482,9 @@ class CameraFragment : Fragment() {
                 bmpPath?.let { File(it).delete() }
             }
         }
+    }
 
-        // 2. Save TIFF
+    // 2. Save TIFF
         if (saveTiff && tiffPath != null) {
             val tiffFile = File(tiffPath)
             if (tiffFile.exists()) {
