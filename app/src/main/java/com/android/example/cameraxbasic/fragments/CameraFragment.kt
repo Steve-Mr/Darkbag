@@ -1302,7 +1302,7 @@ class CameraFragment : Fragment() {
      */
     private suspend fun saveProcessedImage(
         context: Context,
-        bmpPath: String,
+        bmpPath: String?,
         rotationDegrees: Int,
         zoomFactor: Float,
         baseName: String,
@@ -1314,10 +1314,10 @@ class CameraFragment : Fragment() {
     ): Uri? {
         val contentResolver = context.contentResolver
         var finalJpgUri: Uri? = null
-        val bmpFile = File(bmpPath)
+        val bmpFile = bmpPath?.let { File(it) }
 
         // 1. Process BMP -> JPG
-        if (bmpFile.exists()) {
+        if (bmpFile?.exists() == true) {
             var processedBitmap: android.graphics.Bitmap? = null
             try {
                 processedBitmap = BitmapFactory.decodeFile(bmpPath)
@@ -1403,7 +1403,7 @@ class CameraFragment : Fragment() {
                 processedBitmap?.recycle()
             }
             // Cleanup BMP
-            bmpFile.delete()
+            bmpFile?.delete()
         }
 
         // 2. Save TIFF
@@ -2410,7 +2410,7 @@ class CameraFragment : Fragment() {
                 val tiffPath = if(saveTiff) tiffFile.absolutePath else null
 
                 val bmpFile = File(context.cacheDir, "$dngName.bmp")
-                val bmpPath = bmpFile.absolutePath // JNI writes BMP here
+                val bmpPath = if (saveJpg) bmpFile.absolutePath else null // JNI writes BMP only when JPEG is enabled
 
                 // Save Linear DNG (as requested)
                 val linearDngFile = File(context.cacheDir, "${dngName}_linear.dng")
@@ -2423,7 +2423,7 @@ class CameraFragment : Fragment() {
                 // Ensure buffers are rewound just in case
                 buffers.forEach { it.rewind() }
 
-                val debugStats = LongArray(1) // [0]: Halide Time
+                val debugStats = LongArray(6) // [0]=Halide [1]=Copy [2]=Post [3]=DNG [4]=Save [5]=NativeTotal
 
                 val ret = ColorProcessor.processHdrPlus(
                     buffers,
@@ -2465,6 +2465,11 @@ class CameraFragment : Fragment() {
                     val waitTime = jniStartTime - captureEndTime
                     val jniTime = jniEndTime - jniStartTime
                     val halideTime = debugStats[0]
+                    val copyTime = debugStats[1]
+                    val postTime = debugStats[2]
+                    val dngTime = debugStats[3]
+                    val nativeSaveTime = debugStats[4]
+                    val nativeTotalTime = debugStats[5]
                     val saveTime = saveEndTime - saveStartTime
 
                     val logMsg = """
@@ -2472,7 +2477,12 @@ class CameraFragment : Fragment() {
                         Capture: ${captureTime}ms
                         Wait: ${waitTime}ms
                         JNI (Total): ${jniTime}ms
+                          - Native Total: ${nativeTotalTime}ms
+                          - Copy: ${copyTime}ms
                           - Halide: ${halideTime}ms
+                          - Post: ${postTime}ms
+                          - DNG: ${dngTime}ms
+                          - Save(Log/TIFF/BMP): ${nativeSaveTime}ms
                         Save (IO/Compress): ${saveTime}ms
                     """.trimIndent()
 

@@ -10,6 +10,10 @@ using namespace Halide::ConciseCasts;
 
 namespace {
 
+constexpr int kVec = 8;
+constexpr int kTileX = 128;
+constexpr int kTileY = 32;
+
 // --- Inlined Helper Functions from finish.cpp ---
 
 Func black_white_level(Func input, const Expr bp, const Expr wp) {
@@ -48,11 +52,15 @@ Func white_balance(Func input, Expr width, Expr height,
   output(r.x * 2, r.y * 2 + 1) = apply_wb_safe(input(r.x * 2, r.y * 2 + 1), wb.g1);
   output(r.x * 2 + 1, r.y * 2 + 1) = apply_wb_safe(input(r.x * 2 + 1, r.y * 2 + 1), wb.b);
 
-  output.compute_root().parallel(y).vectorize(x, 16);
-  output.update(0).parallel(r.y);
-  output.update(1).parallel(r.y);
-  output.update(2).parallel(r.y);
-  output.update(3).parallel(r.y);
+  Var yo("yo"), yi("yi");
+  output.compute_root()
+      .split(y, yo, yi, kTileY)
+      .parallel(yo)
+      .vectorize(x, kVec);
+  output.update(0).split(r.y, yo, yi, kTileY).parallel(yo);
+  output.update(1).split(r.y, yo, yi, kTileY).parallel(yo);
+  output.update(2).split(r.y, yo, yi, kTileY).parallel(yo);
+  output.update(3).split(r.y, yo, yi, kTileY).parallel(yo);
   return output;
 }
 
@@ -107,12 +115,19 @@ Func demosaic(Func input, Expr width, Expr height) {
              at_B && R_row && B_col, d2(x, y), at_B && R_row && R_col, d3(x, y),
              input(x, y));
 
-  d0.compute_root().parallel(y).vectorize(x, 16);
-  d1.compute_root().parallel(y).vectorize(x, 16);
-  d2.compute_root().parallel(y).vectorize(x, 16);
-  d3.compute_root().parallel(y).vectorize(x, 16);
+  Var xo("xo"), yo("yo"), xi("xi"), yi("yi");
+  d0.compute_root().tile(x, y, xo, yo, xi, yi, kTileX, kTileY).parallel(yo).vectorize(xi, kVec);
+  d1.compute_root().tile(x, y, xo, yo, xi, yi, kTileX, kTileY).parallel(yo).vectorize(xi, kVec);
+  d2.compute_root().tile(x, y, xo, yo, xi, yi, kTileX, kTileY).parallel(yo).vectorize(xi, kVec);
+  d3.compute_root().tile(x, y, xo, yo, xi, yi, kTileX, kTileY).parallel(yo).vectorize(xi, kVec);
 
-  output.compute_root().parallel(y).align_bounds(x, 2).unroll(x, 2).align_bounds(y, 2).unroll(y, 2).vectorize(x, 16);
+  output.compute_root()
+      .tile(x, y, xo, yo, xi, yi, kTileX, kTileY)
+      .reorder(c, xi, yi, xo, yo)
+      .parallel(yo)
+      .vectorize(xi, kVec)
+      .align_bounds(x, 2)
+      .align_bounds(y, 2);
   return output;
 }
 
@@ -147,10 +162,14 @@ Func bilateral_filter(Func input, Expr width, Expr height) {
   output(x, y, 1) = bilateral(x, y, 1);
   output(x, y, 2) = bilateral(x, y, 2);
 
-  weights.compute_at(output, y).vectorize(x, 16);
-  output.compute_root().parallel(y).vectorize(x, 16);
-  output.update(0).parallel(y).vectorize(x, 16);
-  output.update(1).parallel(y).vectorize(x, 16);
+  Var xo("xo"), yo("yo"), xi("xi"), yi("yi");
+  weights.compute_at(output, yo).vectorize(x, kVec);
+  output.compute_root()
+      .tile(x, y, xo, yo, xi, yi, kTileX, kTileY)
+      .parallel(yo)
+      .vectorize(xi, kVec);
+  output.update(0).tile(x, y, xo, yo, xi, yi, kTileX, kTileY).parallel(yo).vectorize(xi, kVec);
+  output.update(1).tile(x, y, xo, yo, xi, yi, kTileX, kTileY).parallel(yo).vectorize(xi, kVec);
   return output;
 }
 
@@ -164,7 +183,8 @@ Func desaturate_noise(Func input, Expr width, Expr height) {
   output(x, y, c) = input(x, y, c);
   output(x, y, 1) = select((abs(blur(x, y, 1)) / abs(input(x, y, 1)) < factor) && (abs(input(x, y, 1)) < threshold) && (abs(blur(x, y, 1)) < threshold), .7f * blur(x, y, 1) + .3f * input(x, y, 1), input(x, y, 1));
   output(x, y, 2) = select((abs(blur(x, y, 2)) / abs(input(x, y, 2)) < factor) && (abs(input(x, y, 2)) < threshold) && (abs(blur(x, y, 2)) < threshold), .7f * blur(x, y, 2) + .3f * input(x, y, 2), input(x, y, 2));
-  output.compute_root().parallel(y).vectorize(x, 16);
+  Var xo("xo"), yo("yo"), xi("xi"), yi("yi");
+  output.compute_root().tile(x, y, xo, yo, xi, yi, kTileX, kTileY).parallel(yo).vectorize(xi, kVec);
   return output;
 }
 
@@ -173,7 +193,8 @@ Func increase_saturation(Func input, float strength) {
   Var x, y, c;
   output(x, y, c) = strength * input(x, y, c);
   output(x, y, 0) = input(x, y, 0);
-  output.compute_root().parallel(y).vectorize(x, 16);
+  Var xo("xo"), yo("yo"), xi("xi"), yi("yi");
+  output.compute_root().tile(x, y, xo, yo, xi, yi, kTileX, kTileY).parallel(yo).vectorize(xi, kVec);
   return output;
 }
 

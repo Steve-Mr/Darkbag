@@ -63,6 +63,12 @@ class SettingsFragment : Fragment() {
         updateDebugStats()
     }
 
+
+    override fun onResume() {
+        super.onResume()
+        updateDebugStats()
+    }
+
     private fun updateDebugStats() {
         val logs = com.android.example.cameraxbasic.utils.DebugLogManager.getLogs()
         if (logs.isNotEmpty()) {
