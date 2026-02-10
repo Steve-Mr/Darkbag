@@ -712,6 +712,14 @@ class CameraFragment : Fragment() {
 
             observeCameraState(camera?.cameraInfo!!)
 
+            // Pre-initialize JNI memory pool with current resolution and burst size
+            val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+            val burstSizeStr = prefs.getString(SettingsFragment.KEY_HDR_BURST_COUNT, "8") ?: "8"
+            val burstSize = burstSizeStr.toIntOrNull() ?: 8
+            imageCapture?.resolutionInfo?.resolution?.let { res ->
+                ColorProcessor.initMemoryPool(res.width, res.height, burstSize)
+            }
+
             // Restore Zoom
             updateZoom(false)
 
@@ -1343,9 +1351,21 @@ class CameraFragment : Fragment() {
         val contentResolver = context.contentResolver
         var finalJpgUri: Uri? = null
 
-        // 1. Process Input Bitmap or BMP File -> JPG
+        // 1. Process Input Bitmap or JPEG File from JNI -> Final MediaStore JPG
         if (inputBitmap != null || bmpPath != null) {
-            var processedBitmap: android.graphics.Bitmap? = inputBitmap ?: (bmpPath?.let { BitmapFactory.decodeFile(it) })
+            var isNativeJpeg = bmpPath != null && !bmpPath.endsWith(".bmp") // Simple heuristic
+
+            var processedBitmap: android.graphics.Bitmap? = null
+
+            // If it's already a JPEG from JNI and we don't need rotation/crop, we can potentially skip decoding.
+            // But we almost always need rotation/crop if zoomFactor > 1 or rotation != 0.
+
+            if (inputBitmap != null) {
+                processedBitmap = inputBitmap
+            } else if (bmpPath != null) {
+                processedBitmap = BitmapFactory.decodeFile(bmpPath)
+            }
+
             try {
                 // Rotate if needed
                 if (processedBitmap != null && rotationDegrees != 0) {
@@ -2205,6 +2225,7 @@ class CameraFragment : Fragment() {
                 val burstSizeStr = prefs.getString(SettingsFragment.KEY_HDR_BURST_COUNT, "3") ?: "3"
                 val burstSize = burstSizeStr.toIntOrNull() ?: 3
 
+
                 // 4. Re-initialize helper with correct count & gain
                 hdrPlusBurstHelper = HdrPlusBurst(
                     frameCount = burstSize,
@@ -2226,10 +2247,12 @@ class CameraFragment : Fragment() {
                     Toast.LENGTH_SHORT
                 ).show()
 
-                Log.d(TAG, "Starting HDR+ Burst (Sequential, $burstSize frames)")
+                Log.d(TAG, "Starting HDR+ Burst (Pipelined, $burstSize frames)")
 
-                // Sequential burst to avoid overloading CameraX request queue
-                recursiveBurstCapture(imageCapture, burstSize, 0)
+                // Pipelined burst: Trigger all captures at once to fill the camera pipeline
+                for (i in 0 until burstSize) {
+                    captureBurstFrame(imageCapture, burstSize, i)
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to start HDR+ burst", e)
                 Toast.makeText(
@@ -2246,19 +2269,8 @@ class CameraFragment : Fragment() {
         }
     }
 
-    private fun recursiveBurstCapture(imageCapture: ImageCapture, totalFrames: Int, currentFrame: Int) {
-        if (currentFrame >= totalFrames) {
-            Log.d(TAG, "HDR+ Burst Capture sequence complete.")
-            // Restore Auto Exposure (or previous state)
-            lifecycleScope.launch(Dispatchers.Main) {
-                applyCameraControls()
-                // Reset Burst Active state immediately to allow background processing
-                resetBurstUi()
-            }
-            return
-        }
-
-        Log.d(TAG, "Capturing burst frame ${currentFrame + 1}/$totalFrames")
+    private fun captureBurstFrame(imageCapture: ImageCapture, totalFrames: Int, currentFrame: Int) {
+        Log.d(TAG, "Triggering burst frame ${currentFrame + 1}/$totalFrames")
         imageCapture.takePicture(
             cameraExecutor,
             object : ImageCapture.OnImageCapturedCallback() {
@@ -2266,7 +2278,14 @@ class CameraFragment : Fragment() {
                     Log.d(TAG, "Burst frame ${currentFrame + 1} captured successfully.")
 
                     lifecycleScope.launch(Dispatchers.Main) {
-                        cameraUiContainerBinding?.captureProgress?.progress = currentFrame + 1
+                        cameraUiContainerBinding?.captureProgress?.progress =
+                            (cameraUiContainerBinding?.captureProgress?.progress ?: 0) + 1
+
+                        if ((cameraUiContainerBinding?.captureProgress?.progress ?: 0) >= totalFrames) {
+                            Log.d(TAG, "HDR+ Burst Capture sequence complete.")
+                            applyCameraControls()
+                            resetBurstUi()
+                        }
                     }
 
                     val helper = hdrPlusBurstHelper
@@ -2284,35 +2303,20 @@ class CameraFragment : Fragment() {
                             return
                         }
                     } else {
-                        Log.e(TAG, "HdrPlusBurst helper is null, closing image manually.")
                         image.close()
-                        lifecycleScope.launch(Dispatchers.Main) {
-                            resetBurstUi()
-                            processingSemaphore.release()
-                        }
-                        return
                     }
-                    // Trigger next frame immediately
-                    recursiveBurstCapture(imageCapture, totalFrames, currentFrame + 1)
                 }
 
                 override fun onError(exception: ImageCaptureException) {
                     Log.e(TAG, "Burst frame ${currentFrame + 1} failed: ${exception.message}")
-                    // Abort burst on error? Or try next?
-                    // If we abort, the helper never finishes.
-                    // For now, let's try next, but the helper won't reach count.
-                    // Better to reset/abort.
                     lifecycleScope.launch(Dispatchers.Main) {
                         Toast.makeText(requireContext(), "Burst failed at frame ${currentFrame + 1}", Toast.LENGTH_SHORT).show()
-                        // Restore AE on failure too
                         applyCameraControls()
-                        cameraUiContainerBinding?.captureProgress?.visibility = View.GONE
-                        cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
-                        cameraUiContainerBinding?.cameraCaptureButton?.alpha = 1.0f
+                        resetBurstUi()
+                        processingSemaphore.release()
                     }
                     hdrPlusBurstHelper?.reset()
-                    isBurstActive = false // Reset active flag
-                    processingSemaphore.release() // Release lock since we are aborting
+                    isBurstActive = false
                 }
             }
         )
@@ -2438,11 +2442,10 @@ class CameraFragment : Fragment() {
                 val tiffFile = File(context.cacheDir, "$dngName.tiff")
                 val tiffPath = if(saveTiff) tiffFile.absolutePath else null
                 val tempRawFile = File(context.cacheDir, "$dngName.tmp.raw")
+                val tempJpgFile = File(context.cacheDir, "$dngName.tmp.jpg")
 
-                // Allocate direct Bitmap for faster processing (instead of intermediate BMP file)
-                val outputBitmap = if (saveJpg) {
-                    android.graphics.Bitmap.createBitmap(width, height, android.graphics.Bitmap.Config.ARGB_8888)
-                } else null
+                // We now use Native JPEG compression (libjpeg-turbo) instead of allocating a large Bitmap in Java
+                val outputBitmap: android.graphics.Bitmap? = null
 
                 // Save Linear DNG (as requested)
                 val linearDngFile = File(context.cacheDir, "${dngName}_linear.dng")
@@ -2473,7 +2476,7 @@ class CameraFragment : Fragment() {
                     targetLogIndex,
                     nativeLutPath,
                     if (hqBackgroundExport) null else tiffPath,
-                    null, // bmpPath no longer used
+                    tempJpgFile.absolutePath, // Pass path for Native JPEG compression
                     if (hqBackgroundExport) null else linearDngPath,
                     digitalGain,
                     debugStats,
@@ -2488,7 +2491,7 @@ class CameraFragment : Fragment() {
                 if (ret == 0) {
                     val saveStartTime = System.currentTimeMillis()
                     val finalJpgUri = if (hqBackgroundExport) {
-                        // Enqueue WorkManager
+                        // Enqueue WorkManager for TIFF/DNG
                         val workData = androidx.work.Data.Builder()
                             .putString("tempRawPath", tempRawFile.absolutePath)
                             .putInt("width", width)
@@ -2515,10 +2518,11 @@ class CameraFragment : Fragment() {
                             .build()
                         androidx.work.WorkManager.getInstance(context).enqueue(workRequest)
 
+                        // Still call saveProcessedImage to handle rotation/crop of the Native JPEG and add to MediaStore
                         saveProcessedImage(
                             context,
-                            outputBitmap,
                             null,
+                            tempJpgFile.absolutePath,
                             rotationDegrees,
                             currentZoom,
                             dngName,
@@ -2530,8 +2534,8 @@ class CameraFragment : Fragment() {
                     } else {
                         saveProcessedImage(
                             context,
-                            outputBitmap,
                             null,
+                            tempJpgFile.absolutePath,
                             rotationDegrees,
                             currentZoom,
                             dngName,

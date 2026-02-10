@@ -11,6 +11,8 @@ object ColorProcessor {
 
     val backgroundSaveFlow = MutableSharedFlow<BackgroundSaveEvent>(extraBufferCapacity = 10)
 
+    external fun initMemoryPool(width: Int, height: Int, frames: Int)
+
     data class BackgroundSaveEvent(
         val baseName: String,
         val tiffPath: String?,

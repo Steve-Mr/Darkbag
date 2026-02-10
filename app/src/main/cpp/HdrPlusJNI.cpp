@@ -129,6 +129,25 @@ void fillDebugStats(JNIEnv* env,
 
     env->SetLongArrayRegion(debugStats, 0, std::min<jsize>(len, 15), stats);
 }
+
+struct GlobalBuffers {
+    Buffer<uint16_t> inputPool;
+    Buffer<uint16_t> outputPool;
+    bool isInitialized = false;
+
+    void ensureCapacity(int w, int h, int frames) {
+        if (!isInitialized || inputPool.width() < w || inputPool.height() < h || inputPool.dim(2).extent() < frames) {
+            // Allocate new buffers. Note: Halide buffers do not zero-initialize by default.
+            inputPool = Buffer<uint16_t>(w, h, frames);
+            outputPool = Buffer<uint16_t>(w, h, 3);
+            isInitialized = true;
+            LOGD("Memory pool (re)allocated: %d x %d x %d", w, h, frames);
+        }
+    }
+};
+
+GlobalBuffers g_hdrPlusBuffers;
+
 } // namespace
 
 extern "C" jint JNI_OnLoad(JavaVM* vm, void* reserved) {
@@ -138,6 +157,18 @@ extern "C" jint JNI_OnLoad(JavaVM* vm, void* reserved) {
     jclass clazz = env->FindClass("com/android/example/cameraxbasic/processor/ColorProcessor");
     if (clazz) g_colorProcessorClass = (jclass)env->NewGlobalRef(clazz);
     return JNI_VERSION_1_6;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_android_example_cameraxbasic_processor_ColorProcessor_initMemoryPool(
+        JNIEnv* env,
+        jobject /* this */,
+        jint width,
+        jint height,
+        jint frames
+) {
+    LOGD("Initializing memory pool: %dx%d, %d frames", width, height, frames);
+    g_hdrPlusBuffers.ensureCapacity(width, height, frames);
 }
 
 extern "C" JNIEXPORT jint JNICALL
@@ -264,7 +295,9 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     LOGD("Processing %d frames.", numFrames);
 
     // 1. Prepare Inputs for Halide
-    std::vector<uint16_t> rawData(width * height * numFrames);
+    g_hdrPlusBuffers.ensureCapacity(width, height, numFrames);
+    uint16_t* rawDataPtr = g_hdrPlusBuffers.inputPool.data();
+
     std::vector<uint16_t*> framePtrs(numFrames, nullptr);
 
     for (int i = 0; i < numFrames; i++) {
@@ -282,12 +315,12 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     auto copyStart = std::chrono::high_resolution_clock::now();
     #pragma omp parallel for
     for (int i = 0; i < numFrames; i++) {
-        std::memcpy(rawData.data() + (static_cast<size_t>(i) * width * height), framePtrs[i], frameSizeBytes);
+        std::memcpy(rawDataPtr + (static_cast<size_t>(i) * width * height), framePtrs[i], frameSizeBytes);
     }
     auto copyEnd = std::chrono::high_resolution_clock::now();
     auto copyDurationMs = std::chrono::duration_cast<std::chrono::milliseconds>(copyEnd - copyStart).count();
 
-    Buffer<uint16_t> inputBuf(rawData.data(), width, height, numFrames);
+    Buffer<uint16_t> inputBuf = g_hdrPlusBuffers.inputPool;
 
     // 2. Prepare Metadata
     jfloat* wbData = env->GetFloatArrayElements(whiteBalance, nullptr);
@@ -314,7 +347,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     Buffer<float> ccmHalideBuf(identityCCM.data(), 3, 3);
 
     // 3. Prepare Output Buffer (16-bit Linear RGB)
-    Buffer<uint16_t> outputBuf(width, height, 3);
+    Buffer<uint16_t> outputBuf = g_hdrPlusBuffers.outputPool;
     auto jniPrepEnd = std::chrono::high_resolution_clock::now();
     auto jniPrepMs = std::chrono::duration_cast<std::chrono::milliseconds>(jniPrepEnd - jniPrepStart).count();
 

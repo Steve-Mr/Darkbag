@@ -1,6 +1,9 @@
 #include "ColorPipe.h"
 #include <tiffio.h>
 
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "stb_image_write.h"
+
 #include <vector>
 #include <ctime>
 #include <future>
@@ -407,7 +410,7 @@ void process_and_save_image(
     }
     if (jpgPath) {
         tasks.push_back(std::async(std::launch::async, [=, &processedImage]() {
-            return write_bmp(jpgPath, width, height, processedImage);
+            return write_jpeg(jpgPath, width, height, processedImage, 95);
         }));
     }
 
@@ -415,6 +418,18 @@ void process_and_save_image(
     // In this shared pipeline, we wait to ensure consistency.
     // The JNI layer will handle higher-level backgrounding.
     for (auto& t : tasks) t.get();
+}
+
+bool write_jpeg(const char* filename, int width, int height, const std::vector<unsigned short>& data, int quality) {
+    std::vector<unsigned char> rgb8(width * height * 3);
+    #pragma omp parallel for
+    for (int i = 0; i < width * height; i++) {
+        rgb8[i * 3 + 0] = (unsigned char)(data[i * 3 + 0] >> 8);
+        rgb8[i * 3 + 1] = (unsigned char)(data[i * 3 + 1] >> 8);
+        rgb8[i * 3 + 2] = (unsigned char)(data[i * 3 + 2] >> 8);
+    }
+
+    return stbi_write_jpg(filename, width, height, 3, rgb8.data(), quality) != 0;
 }
 
 // --- TIFF Writer ---
