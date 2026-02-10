@@ -2405,6 +2405,7 @@ class CameraFragment : Fragment() {
                 val dngName = SimpleDateFormat(FILENAME, Locale.US).format(System.currentTimeMillis()) + "_HDRPLUS"
                 val saveTiff = prefs.getBoolean(SettingsFragment.KEY_SAVE_TIFF, true)
                 val saveJpg = prefs.getBoolean(SettingsFragment.KEY_SAVE_JPG, true)
+                val hqBackgroundExport = prefs.getBoolean(SettingsFragment.KEY_HQ_BACKGROUND_EXPORT, false)
 
                 val tiffFile = File(context.cacheDir, "$dngName.tiff")
                 val tiffPath = if(saveTiff) tiffFile.absolutePath else null
@@ -2446,18 +2447,53 @@ class CameraFragment : Fragment() {
 
                 if (ret == 0) {
                     val saveStartTime = System.currentTimeMillis()
-                    val finalJpgUri = saveProcessedImage(
-                        context,
-                        bmpPath,
-                        rotationDegrees,
-                        currentZoom,
-                        dngName,
-                        linearDngPath,
-                        tiffPath,
-                        saveJpg,
-                        saveTiff
-                    )
+                    val finalJpgUri = if (hqBackgroundExport) {
+                        saveProcessedImage(
+                            context,
+                            bmpPath,
+                            rotationDegrees,
+                            currentZoom,
+                            dngName,
+                            null,
+                            null,
+                            saveJpg,
+                            false
+                        )
+                    } else {
+                        saveProcessedImage(
+                            context,
+                            bmpPath,
+                            rotationDegrees,
+                            currentZoom,
+                            dngName,
+                            linearDngPath,
+                            tiffPath,
+                            saveJpg,
+                            saveTiff
+                        )
+                    }
                     val saveEndTime = System.currentTimeMillis()
+
+                    if (hqBackgroundExport) {
+                        viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
+                            try {
+                                saveProcessedImage(
+                                    context,
+                                    null,
+                                    0,
+                                    1.0f,
+                                    dngName,
+                                    linearDngPath,
+                                    tiffPath,
+                                    false,
+                                    saveTiff
+                                )
+                                Log.i(TAG, "HDR+ background HQ export finished: TIFF=$saveTiff, DNG=true")
+                            } catch (e: Exception) {
+                                Log.e(TAG, "HDR+ background HQ export failed", e)
+                            }
+                        }
+                    }
 
                     // Log Statistics
                     val totalTime = saveEndTime - startTime
@@ -2486,6 +2522,7 @@ class CameraFragment : Fragment() {
                           - Save(Log/TIFF/BMP): ${nativeSaveTime}ms
                           - DNG Wait(get): ${dngWaitTime}ms
                         Save (IO/Compress): ${saveTime}ms
+                        HQ Export Mode: ${if (hqBackgroundExport) "Background" else "Inline"}
                     """.trimIndent()
 
                     Log.i(TAG, logMsg)
