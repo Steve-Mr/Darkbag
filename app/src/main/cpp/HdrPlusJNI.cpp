@@ -133,6 +133,7 @@ void fillDebugStats(JNIEnv* env,
 struct GlobalBuffers {
     Buffer<uint16_t> inputPool;
     Buffer<uint16_t> outputPool;
+    std::vector<uint16_t> interleavedPool;
     bool isInitialized = false;
 
     void ensureCapacity(int w, int h, int frames) {
@@ -140,6 +141,7 @@ struct GlobalBuffers {
             // Allocate new buffers. Note: Halide buffers do not zero-initialize by default.
             inputPool = Buffer<uint16_t>(w, h, frames);
             outputPool = Buffer<uint16_t>(w, h, 3);
+            interleavedPool.resize(static_cast<size_t>(w) * h * 3);
             isInitialized = true;
             LOGD("Memory pool (re)allocated: %d x %d x %d", w, h, frames);
         }
@@ -203,8 +205,9 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_exportHdrPlus(
         return -1;
     }
 
-    std::vector<unsigned short> finalImage(width * height * 3);
-    in.read((char*)finalImage.data(), finalImage.size() * sizeof(unsigned short));
+    g_hdrPlusBuffers.ensureCapacity(width, height, 1);
+    std::vector<uint16_t>& finalImage = g_hdrPlusBuffers.interleavedPool;
+    in.read((char*)finalImage.data(), finalImage.size() * sizeof(uint16_t));
     in.close();
     // Delete temp file after reading
     std::remove(temp_path_cstr);
@@ -426,7 +429,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
 
     // Process Output
     // finalImage: Linear RGB (clipped) for DNG
-    std::vector<unsigned short> finalImage(width * height * 3);
+    std::vector<uint16_t>& finalImage = g_hdrPlusBuffers.interleavedPool;
 
     // Halide Output is Planar x, y, c
     int stride_x = outputBuf.dim(0).stride();
@@ -532,8 +535,18 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     }
 
     if (hasBgTasks) {
+        // Since we are using g_hdrPlusBuffers.interleavedPool, we must COPY it
+        // if we are running in background to avoid it being overwritten by the next capture.
+        // However, the user wants "High Speed", and we have a Semaphore(2) in Kotlin.
+        // If we use WorkManager, the data is already saved to disk as tempRaw.
+        // So we don't need finalImage in the closure if we only use it for saving tempRaw.
+
+        // Wait, saveFunc currently uses finalImage for DNG and TIFF saving.
+        // If we use HQ Background Export (WorkManager), tiffPathStr and dngPathStr will be empty here.
+        // Let's check CameraFragment.kt.
+
         auto saveFunc = [
-            finalImage = std::move(finalImage), // Move large buffer
+            finalImageData = runAsync ? finalImage : std::vector<uint16_t>(), // Only copy if async
             width, height, digitalGain, targetLog, lut,
             tiffPathStr, jpgPathStr, dngPathStr, baseName,
             ccmVec, wbVec, orientation,
@@ -543,13 +556,13 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
 
             // Save DNG
             if (!dngPathStr.empty()) {
-                write_dng(dngPathStr.c_str(), width, height, finalImage, dngWhiteLevel, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation);
+                write_dng(dngPathStr.c_str(), width, height, runAsync ? finalImageData : finalImage, dngWhiteLevel, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation);
             }
 
             // Save TIFF/BMP
             if (!tiffPathStr.empty() || !jpgPathStr.empty()) {
                 process_and_save_image(
-                    finalImage, width, height, digitalGain, targetLog, lut,
+                    runAsync ? finalImageData : finalImage, width, height, digitalGain, targetLog, lut,
                     tiffPathStr.empty() ? nullptr : tiffPathStr.c_str(),
                     jpgPathStr.empty() ? nullptr : jpgPathStr.c_str(),
                     1, ccmVec.data(), wbVec.data(), orientation, nullptr
@@ -557,10 +570,19 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
             }
             LOGD("Background save task finished.");
 
-            // Notify Java if running asynchronously
-            if (g_jvm && g_colorProcessorClass) {
-                JNIEnv* env;
-                if (g_jvm->AttachCurrentThread(&env, nullptr) == JNI_OK) {
+            // Notify Java ONLY if running asynchronously (legacy mode).
+            // In synchronous mode, Kotlin handles the saving itself after return.
+            if (runAsync && g_jvm && g_colorProcessorClass) {
+                JNIEnv* env = nullptr;
+                bool isAttached = false;
+                int getEnvStat = g_jvm->GetEnv((void**)&env, JNI_VERSION_1_6);
+                if (getEnvStat == JNI_EDETACHED) {
+                    if (g_jvm->AttachCurrentThread(&env, nullptr) == JNI_OK) {
+                        isAttached = true;
+                    }
+                }
+
+                if (env) {
                     jmethodID method = env->GetStaticMethodID(g_colorProcessorClass, "onBackgroundSaveComplete", "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Z)V");
                     if (method) {
                         jstring jBaseName = env->NewStringUTF(baseName.c_str());
@@ -573,7 +595,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
                         if (jTiffPath) env->DeleteLocalRef(jTiffPath);
                         if (jDngPath) env->DeleteLocalRef(jDngPath);
                     }
-                    g_jvm->DetachCurrentThread();
+                    if (isAttached) g_jvm->DetachCurrentThread();
                 }
             }
         };

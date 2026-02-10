@@ -2310,13 +2310,15 @@ class CameraFragment : Fragment() {
                 override fun onError(exception: ImageCaptureException) {
                     Log.e(TAG, "Burst frame ${currentFrame + 1} failed: ${exception.message}")
                     lifecycleScope.launch(Dispatchers.Main) {
-                        Toast.makeText(requireContext(), "Burst failed at frame ${currentFrame + 1}", Toast.LENGTH_SHORT).show()
-                        applyCameraControls()
-                        resetBurstUi()
-                        processingSemaphore.release()
+                        if (isBurstActive) {
+                            Toast.makeText(requireContext(), "Burst failed at frame ${currentFrame + 1}", Toast.LENGTH_SHORT).show()
+                            applyCameraControls()
+                            resetBurstUi()
+                            processingSemaphore.release()
+                            hdrPlusBurstHelper?.reset()
+                            isBurstActive = false
+                        }
                     }
-                    hdrPlusBurstHelper?.reset()
-                    isBurstActive = false
                 }
             }
         )
@@ -2637,7 +2639,10 @@ class CameraFragment : Fragment() {
                     }
                 }
             } finally {
-                frames.forEach { it.close() }
+                frames.forEach {
+                    HdrPlusBurst.releaseBuffer(it.buffer)
+                    it.close()
+                }
                 // Release semaphore ONLY if we didn't hand off the work to the channel
                 if (!fallbackSent) {
                     processingSemaphore.release()
