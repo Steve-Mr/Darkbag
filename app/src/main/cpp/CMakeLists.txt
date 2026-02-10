@@ -102,7 +102,6 @@ add_custom_command(
 )
 
 # --- Generate GPU Pipeline (Vulkan) ---
-# Added vk_int16 feature as required by the pipeline (uses uint16_t)
 set(HALIDE_TARGET_VULKAN "arm-64-android-vulkan-vk_int16-no_runtime")
 set(GENERATED_HEADER_VULKAN "${GENERATOR_OUTPUT_DIR}/hdrplus_raw_pipeline_vulkan.h")
 set(GENERATED_LIB_VULKAN "${GENERATOR_OUTPUT_DIR}/hdrplus_raw_pipeline_vulkan.a")
@@ -120,7 +119,6 @@ add_custom_command(
 )
 
 # --- Generate Standalone Runtime ---
-# Runtime should support all backends
 set(HALIDE_TARGET_RUNTIME "arm-64-android-opencl-vulkan")
 set(GENERATED_RUNTIME "${GENERATOR_OUTPUT_DIR}/halide_runtime.a")
 
