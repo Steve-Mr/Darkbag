@@ -1,8 +1,6 @@
 package com.android.example.cameraxbasic.fragments
 
 import androidx.appcompat.app.AlertDialog
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Context
 import android.content.SharedPreferences
 import android.net.Uri
@@ -62,7 +60,6 @@ class SettingsFragment : Fragment() {
         setupMenus()
         setupCheckboxes()
         setupNavigation()
-        setupDebugActions()
         updateDebugStats()
     }
 
@@ -72,19 +69,6 @@ class SettingsFragment : Fragment() {
         updateDebugStats()
     }
 
-
-    private fun setupDebugActions() {
-        binding.btnCopyDebugStats.setOnClickListener {
-            val logs = binding.tvDebugStats.text?.toString().orEmpty()
-            if (logs.isBlank() || logs == "No logs yet.") {
-                Toast.makeText(requireContext(), "No debug logs to copy", Toast.LENGTH_SHORT).show()
-                return@setOnClickListener
-            }
-            val clipboard = requireContext().getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-            clipboard.setPrimaryClip(ClipData.newPlainText("Darkbag Debug Logs", logs))
-            Toast.makeText(requireContext(), "Debug logs copied", Toast.LENGTH_SHORT).show()
-        }
-    }
 
     private fun updateDebugStats() {
         val logs = com.android.example.cameraxbasic.utils.DebugLogManager.getLogs()

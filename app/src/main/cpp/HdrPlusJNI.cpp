@@ -184,6 +184,12 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     );
 
     auto halideEnd = std::chrono::high_resolution_clock::now();
+
+    #if !defined(NDEBUG)
+    halide_profiler_report(nullptr);
+    halide_profiler_reset();
+    #endif
+
     auto durationMs = std::chrono::duration_cast<std::chrono::milliseconds>(halideEnd - halideStart).count();
 
     if (result != 0) {
@@ -265,20 +271,22 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     // Save Processed Images (Log/LUT Path)
     // Pass finalImage (Linear) + Gain + Logic to shared pipeline
     auto saveStart = std::chrono::high_resolution_clock::now();
-    process_and_save_image(
-        finalImage,
-        width,
-        height,
-        digitalGain, // Gain to account for exposure (Data is already scaled 4x)
-        targetLog,
-        lut,
-        tiff_path_cstr,
-        jpg_path_cstr,
-        1, // sourceColorSpace = Camera Native (requires ccm)
-        ccmVec.data(), // CCM (Sensor -> XYZ) from Camera2 API
-        wbVec.data(),   // WB Gains (Currently unused in HDR+ path, but kept for API)
-        orientation // Pass orientation for TIFF writing
-    );
+    if (tiff_path_cstr || jpg_path_cstr) {
+        process_and_save_image(
+            finalImage,
+            width,
+            height,
+            digitalGain, // Gain to account for exposure (Data is already scaled 4x)
+            targetLog,
+            lut,
+            tiff_path_cstr,
+            jpg_path_cstr,
+            1, // sourceColorSpace = Camera Native (requires ccm)
+            ccmVec.data(), // CCM (Sensor -> XYZ) from Camera2 API
+            wbVec.data(),   // WB Gains (Currently unused in HDR+ path, but kept for API)
+            orientation // Pass orientation for TIFF writing
+        );
+    }
     auto saveEnd = std::chrono::high_resolution_clock::now();
     auto saveDurationMs = std::chrono::duration_cast<std::chrono::milliseconds>(saveEnd - saveStart).count();
 

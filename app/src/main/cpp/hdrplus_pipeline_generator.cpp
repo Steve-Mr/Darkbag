@@ -22,6 +22,7 @@ Func black_white_level(Func input, const Expr bp, const Expr wp) {
   // Reserve headroom (0.25x) for White Balance to prevent clipping
   Expr white_factor = (65535.f / (wp - bp)) * 0.25f;
   output(x, y) = u16_sat((i32(input(x, y)) - bp) * white_factor);
+  output.compute_root().parallel(y).vectorize(x, kVec);
   return output;
 }
 
@@ -212,6 +213,8 @@ Func srgb(Func input, Func srgb_matrix) {
   Var x, y, c;
   RDom r(0, 3);
   output(x, y, c) = u16_sat(sum(srgb_matrix(r, c) * input(x, y, r)));
+  Var xo("xo"), yo("yo"), xi("xi"), yi("yi");
+  output.compute_root().tile(x, y, xo, yo, xi, yi, kTileX, kTileY).parallel(yo).vectorize(xi, kVec);
   return output;
 }
 
