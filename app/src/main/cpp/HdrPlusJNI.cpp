@@ -3,9 +3,13 @@
 #include <vector>
 #include <string>
 #include <memory>
+#include <cstring>
 #include <chrono> // For timing
+#include <thread>
+#include <future>
 #include <libraw/libraw.h>
 #include <HalideBuffer.h>
+#include <HalideRuntime.h>
 #include "ColorPipe.h"
 #include "hdrplus_raw_pipeline.h" // Generated header
 
@@ -14,6 +18,39 @@
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 
 using namespace Halide::Runtime;
+
+namespace {
+void fillDebugStats(JNIEnv* env,
+                    jlongArray debugStats,
+                    jlong copyMs,
+                    jlong halideMs,
+                    jlong postProcessMs,
+                    jlong dngMs,
+                    jlong saveMs,
+                    jlong totalMs) {
+    if (debugStats == nullptr) return;
+    const jsize len = env->GetArrayLength(debugStats);
+    if (len <= 0) return;
+
+    // Backward compatible layout:
+    // [0] halideMs (legacy)
+    // [1] copyMs
+    // [2] postProcessMs (planar -> interleaved)
+    // [3] dngMs
+    // [4] logPathSaveMs (process + save tiff/jpg)
+    // [5] totalNativeMs
+    jlong stats[6] = {
+            halideMs,
+            copyMs,
+            postProcessMs,
+            dngMs,
+            saveMs,
+            totalMs,
+    };
+
+    env->SetLongArrayRegion(debugStats, 0, std::min<jsize>(len, 6), stats);
+}
+} // namespace
 
 extern "C" JNIEXPORT jint JNICALL
 Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
@@ -42,6 +79,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
         jlongArray debugStats
 ) {
     LOGD("Native processHdrPlus started.");
+    auto nativeStart = std::chrono::high_resolution_clock::now();
 
     int numFrames = env->GetArrayLength(dngBuffers);
     if (numFrames < 2) {
@@ -52,16 +90,27 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
 
     // 1. Prepare Inputs for Halide
     std::vector<uint16_t> rawData(width * height * numFrames);
+    std::vector<uint16_t*> framePtrs(numFrames, nullptr);
 
     for (int i = 0; i < numFrames; i++) {
         jobject bufObj = env->GetObjectArrayElement(dngBuffers, i);
         uint16_t* src = (uint16_t*)env->GetDirectBufferAddress(bufObj);
+        env->DeleteLocalRef(bufObj);
         if (!src) {
             LOGE("Failed to get direct buffer address for frame %d", i);
             return -1;
         }
-        std::copy(src, src + (width * height), rawData.data() + (i * width * height));
+        framePtrs[i] = src;
     }
+
+    const size_t frameSizeBytes = static_cast<size_t>(width) * static_cast<size_t>(height) * sizeof(uint16_t);
+    auto copyStart = std::chrono::high_resolution_clock::now();
+    #pragma omp parallel for
+    for (int i = 0; i < numFrames; i++) {
+        std::memcpy(rawData.data() + (static_cast<size_t>(i) * width * height), framePtrs[i], frameSizeBytes);
+    }
+    auto copyEnd = std::chrono::high_resolution_clock::now();
+    auto copyDurationMs = std::chrono::duration_cast<std::chrono::milliseconds>(copyEnd - copyStart).count();
 
     Buffer<uint16_t> inputBuf(rawData.data(), width, height, numFrames);
 
@@ -106,6 +155,15 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
         LOGD("Swapped CFA: BGGR -> RGGB");
     }
 
+    static bool halideThreadsConfigured = false;
+    if (!halideThreadsConfigured) {
+        int cpuThreads = static_cast<int>(std::thread::hardware_concurrency());
+        if (cpuThreads <= 0) cpuThreads = 4;
+        halide_set_num_threads(cpuThreads);
+        halideThreadsConfigured = true;
+        LOGD("Configured Halide thread pool: %d", cpuThreads);
+    }
+
     int result = 0;
     auto halideStart = std::chrono::high_resolution_clock::now();
 
@@ -123,11 +181,6 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
 
     auto halideEnd = std::chrono::high_resolution_clock::now();
     auto durationMs = std::chrono::duration_cast<std::chrono::milliseconds>(halideEnd - halideStart).count();
-
-    if (debugStats != nullptr) {
-        jlong stats[] = {(jlong)durationMs};
-        env->SetLongArrayRegion(debugStats, 0, 1, stats);
-    }
 
     if (result != 0) {
         LOGE("Halide execution failed with code %d", result);
@@ -161,6 +214,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     // This fixes issues where some DNG viewers ignore WhiteLevel for LinearRaw and assume 65535.
     uint16_t clip_limit = 16383; // Original limit
 
+    auto postStart = std::chrono::high_resolution_clock::now();
     #pragma omp parallel for
     for (int y = 0; y < height; y++) {
         for (int x = 0; x < width; x++) {
@@ -181,6 +235,8 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
              finalImage[idx + 2] = b_val << 2;
         }
     }
+    auto postEnd = std::chrono::high_resolution_clock::now();
+    auto postDurationMs = std::chrono::duration_cast<std::chrono::milliseconds>(postEnd - postStart).count();
 
     // Prepare paths
     const char* tiff_path_cstr = (outputTiffPath) ? env->GetStringUTFChars(outputTiffPath, 0) : nullptr;
@@ -188,15 +244,20 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     const char* dng_path_cstr = (outputDngPath) ? env->GetStringUTFChars(outputDngPath, 0) : nullptr;
 
     bool dng_ok = true;
+    auto dngStart = std::chrono::high_resolution_clock::now();
 
     // Save DNG (Raw Path)
     int dngWhiteLevel = 65535; // Full 16-bit range now
-    if (dng_path_cstr) {
-        dng_ok = write_dng(dng_path_cstr, width, height, finalImage, dngWhiteLevel, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation);
-    }
+    auto dngTask = std::async(std::launch::async, [&]() {
+        if (dng_path_cstr) {
+            return write_dng(dng_path_cstr, width, height, finalImage, dngWhiteLevel, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation);
+        }
+        return true;
+    });
 
     // Save Processed Images (Log/LUT Path)
     // Pass finalImage (Linear) + Gain + Logic to shared pipeline
+    auto saveStart = std::chrono::high_resolution_clock::now();
     process_and_save_image(
         finalImage,
         width,
@@ -211,6 +272,12 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
         wbVec.data(),   // WB Gains (Currently unused in HDR+ path, but kept for API)
         orientation // Pass orientation for TIFF writing
     );
+    auto saveEnd = std::chrono::high_resolution_clock::now();
+    auto saveDurationMs = std::chrono::duration_cast<std::chrono::milliseconds>(saveEnd - saveStart).count();
+
+    dng_ok = dngTask.get();
+    auto dngEnd = std::chrono::high_resolution_clock::now();
+    auto dngDurationMs = std::chrono::duration_cast<std::chrono::milliseconds>(dngEnd - dngStart).count();
 
     // Release Strings
     if (outputTiffPath) env->ReleaseStringUTFChars(outputTiffPath, tiff_path_cstr);
@@ -218,6 +285,17 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     if (outputDngPath) env->ReleaseStringUTFChars(outputDngPath, dng_path_cstr);
 
     if (!dng_ok) LOGE("Failed to write DNG file.");
+
+    auto nativeEnd = std::chrono::high_resolution_clock::now();
+    auto totalDurationMs = std::chrono::duration_cast<std::chrono::milliseconds>(nativeEnd - nativeStart).count();
+    fillDebugStats(env,
+                   debugStats,
+                   (jlong)copyDurationMs,
+                   (jlong)durationMs,
+                   (jlong)postDurationMs,
+                   (jlong)dngDurationMs,
+                   (jlong)saveDurationMs,
+                   (jlong)totalDurationMs);
 
     return 0;
 }
