@@ -1,10 +1,14 @@
 package com.android.example.cameraxbasic.processor
 
 import java.nio.ByteBuffer
-
+import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.flow.MutableSharedFlow
 
 object ColorProcessor {
+    // Limit concurrent background HQ exports to prevent OOM.
+    // Each 12MP image processing consumes significant RAM.
+    val exportSemaphore = Semaphore(1)
+
     init {
         System.loadLibrary("native-lib")
     }
@@ -17,7 +21,9 @@ object ColorProcessor {
         val baseName: String,
         val tiffPath: String?,
         val dngPath: String?,
-        val saveTiff: Boolean
+        val jpgPath: String?,
+        val saveTiff: Boolean,
+        val targetUri: String? = null
     )
 
     /**
@@ -57,9 +63,11 @@ object ColorProcessor {
         baseName: String,
         tiffPath: String?,
         dngPath: String?,
-        saveTiff: Boolean
+        jpgPath: String? = null,
+        saveTiff: Boolean,
+        targetUri: String? = null
     ) {
-        backgroundSaveFlow.tryEmit(BackgroundSaveEvent(baseName, tiffPath, dngPath, saveTiff))
+        backgroundSaveFlow.tryEmit(BackgroundSaveEvent(baseName, tiffPath, dngPath, jpgPath, saveTiff, targetUri))
     }
 
     external fun exportHdrPlus(
@@ -79,7 +87,8 @@ object ColorProcessor {
         focalLength: Float,
         captureTimeMillis: Long,
         ccm: FloatArray,
-        whiteBalance: FloatArray
+        whiteBalance: FloatArray,
+        zoomFactor: Float = 1.0f
     ): Int
 
     external fun processHdrPlus(
@@ -106,6 +115,7 @@ object ColorProcessor {
         debugStats: LongArray?, // [0] Halide, [1] Copy, [2] Post, [3] DNG Encode, [4] Save, [5] DNG Wait, [6] Total, [7] Align, [8] Merge, [9] Demosaic, [10] Denoise, [11] sRGB, [12] JNI Prep, [13] BlackWhite, [14] WB
         outputBitmap: android.graphics.Bitmap? = null,
         isAsync: Boolean = false,
-        tempRawPath: String? = null
+        tempRawPath: String? = null,
+        zoomFactor: Float = 1.0f
     ): Int
 }

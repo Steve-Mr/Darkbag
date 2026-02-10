@@ -44,25 +44,41 @@ struct HalideStageStats {
 
 HalideStageStats parseHalideReport(const std::string& report) {
     HalideStageStats stats;
-    std::regex re("([\\w\\.]+):\\s*([\\d\\.]+)(ms|s)");
-    std::smatch match;
+    // Robust regex to capture Stage Name, Value, and Unit (ms or s)
+    // Example: "  srgb_output: 80.5ms (1.2%)"
+    std::regex re("([\\w\\._]+):\\s*([\\d\\.]+)\\s*(ms|s)");
 
     std::string line;
     std::stringstream ss(report);
+    LOGD("Full Halide Profiler Report:\n%s", report.c_str());
+
     while (std::getline(ss, line)) {
+        std::smatch match;
         if (std::regex_search(line, match, re)) {
             std::string name = match[1].str();
             float val = std::stof(match[2].str());
             std::string unit = match[3].str();
-            long ms = (unit == "s") ? (long)(val * 1000) : (long)val;
+            long ms = (unit == "s") ? (long)(val * 1000.0f) : (long)val;
 
-            if (name.find("alignment") != std::string::npos || name.find("layer_") != std::string::npos) stats.align += ms;
-            else if (name.find("merge_") != std::string::npos) stats.merge += ms;
-            else if (name.find("black_white_level") != std::string::npos) stats.black_white += ms;
-            else if (name.find("white_balance") != std::string::npos) stats.white_balance += ms;
-            else if (name.find("demosaic") != std::string::npos) stats.demosaic += ms;
-            else if (name.find("bilateral") != std::string::npos || name.find("desaturate_noise") != std::string::npos) stats.denoise += ms;
-            else if (name.find("srgb_output") != std::string::npos) stats.srgb += ms;
+            if (name.find("alignment") != std::string::npos ||
+                name.find("layer_") != std::string::npos ||
+                name.find("scores") != std::string::npos) {
+                stats.align += ms;
+            } else if (name.find("merge_") != std::string::npos) {
+                stats.merge += ms;
+            } else if (name.find("black_white") != std::string::npos) {
+                stats.black_white += ms;
+            } else if (name.find("white_balance") != std::string::npos) {
+                stats.white_balance += ms;
+            } else if (name.find("demosaic") != std::string::npos) {
+                stats.demosaic += ms;
+            } else if (name.find("bilateral") != std::string::npos ||
+                       name.find("desaturate") != std::string::npos ||
+                       name.find("gauss") != std::string::npos) {
+                stats.denoise += ms;
+            } else if (name.find("srgb") != std::string::npos) {
+                stats.srgb += ms;
+            }
         }
     }
     return stats;
@@ -183,7 +199,8 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_exportHdrPlus(
         jfloat focalLength,
         jlong captureTimeMillis,
         jfloatArray ccm,
-        jfloatArray whiteBalance
+        jfloatArray whiteBalance,
+        jfloat zoomFactor
 ) {
     LOGD("Native exportHdrPlus started.");
 
@@ -236,7 +253,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_exportHdrPlus(
             finalImage, width, height, digitalGain, targetLog, lut,
             tiff_path_cstr, jpg_path_cstr,
             1, ccmVec.data(), wbVec.data(), orientation, nullptr,
-            false, 1 // Not preview, no downsample
+            false, 1, zoomFactor
         );
     }
 
@@ -275,7 +292,8 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
         jlongArray debugStats,
         jobject outputBitmap,
         jboolean isAsync,
-        jstring tempRawPath
+        jstring tempRawPath,
+        jfloat zoomFactor
 ) {
     LOGD("Native processHdrPlus started.");
     auto nativeStart = std::chrono::high_resolution_clock::now();
@@ -560,7 +578,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
                     tiffPathStr.empty() ? nullptr : tiffPathStr.c_str(),
                     jpgPathStr.empty() ? nullptr : jpgPathStr.c_str(),
                     1, ccmVec.data(), wbVec.data(), orientation, nullptr,
-                    isPrev, isPrev ? 4 : 1
+                isPrev, isPrev ? 4 : 1, zoomFactor
                 );
             }
             LOGD("Background save task finished.");
@@ -578,17 +596,19 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
                 }
 
                 if (env) {
-                    jmethodID method = env->GetStaticMethodID(g_colorProcessorClass, "onBackgroundSaveComplete", "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Z)V");
+                    jmethodID method = env->GetStaticMethodID(g_colorProcessorClass, "onBackgroundSaveComplete", "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ZLjava/lang/String;)V");
                     if (method) {
                         jstring jBaseName = env->NewStringUTF(baseName.c_str());
                         jstring jTiffPath = tiffPathStr.empty() ? nullptr : env->NewStringUTF(tiffPathStr.c_str());
                         jstring jDngPath = dngPathStr.empty() ? nullptr : env->NewStringUTF(dngPathStr.c_str());
+                        jstring jJpgPath = jpgPathStr.empty() ? nullptr : env->NewStringUTF(jpgPathStr.c_str());
 
-                        env->CallStaticVoidMethod(g_colorProcessorClass, method, jBaseName, jTiffPath, jDngPath, !tiffPathStr.empty());
+                        env->CallStaticVoidMethod(g_colorProcessorClass, method, jBaseName, jTiffPath, jDngPath, jJpgPath, !tiffPathStr.empty(), nullptr);
 
                         if (jBaseName) env->DeleteLocalRef(jBaseName);
                         if (jTiffPath) env->DeleteLocalRef(jTiffPath);
                         if (jDngPath) env->DeleteLocalRef(jDngPath);
+                        if (jJpgPath) env->DeleteLocalRef(jJpgPath);
                     }
                     if (isAttached) g_jvm->DetachCurrentThread();
                 }

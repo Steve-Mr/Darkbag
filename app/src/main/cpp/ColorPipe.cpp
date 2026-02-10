@@ -297,40 +297,30 @@ void process_and_save_image(
     int orientation,
     unsigned char* out_rgb_buffer,
     bool isPreview,
-    int downsampleFactor
+    int downsampleFactor,
+    float zoomFactor
 ) {
     // 1. Setup Dimensions
-    int outW = width / downsampleFactor;
-    int outH = height / downsampleFactor;
+    // Calculate cropped dimensions if zoomFactor > 1.0
+    int cropW = (zoomFactor > 1.05f) ? (int)(width / zoomFactor) : width;
+    int cropH = (zoomFactor > 1.05f) ? (int)(height / zoomFactor) : height;
+    int startX = (width - cropW) / 2;
+    int startY = (height - cropH) / 2;
+
+    int outW = cropW / downsampleFactor;
+    int outH = cropH / downsampleFactor;
+
     bool swapDims = (orientation == 90 || orientation == 270);
-    int finalW = swapDims ? outH : outW;
-    int finalH = swapDims ? outW : outH;
+    int rotatedW = swapDims ? outH : outW;
+    int rotatedH = swapDims ? outW : outH;
 
     // Prepare Matrices
-    Matrix3x3 sensor_to_sRGB = {0};
     Matrix3x3 effective_CCM = {0};
-
     if (sourceColorSpace == 1 && ccm) {
-        // Source is Camera Native (WB'd).
-        // ccm: Sensor_WB -> sRGB (Observed behavior)
-        // wb: White Balance Gains (Ignored for CCM setup as CCM includes WB compensation implicitly).
-        //
-        // We want sRGB.
-        // Input: Camera_WB.
-        // sRGB = CCM * Camera_WB.
-        //
-        // So EffectiveCCM = CCM.
-
-        Matrix3x3 ccmMat;
-        std::copy(ccm, ccm + 9, ccmMat.m);
-
-        effective_CCM = ccmMat;
+        std::copy(ccm, ccm + 9, effective_CCM.m);
     }
 
     // 2. Process Pixels
-    std::vector<unsigned short> processedImage;
-    std::vector<unsigned char> previewRgb8;
-
     auto process_pixel = [&](int x, int y) -> Vec3 {
         int idx = (y * width + x) * 3;
         unsigned short r_val = inputImage[idx + 0];
@@ -344,79 +334,66 @@ void process_and_save_image(
         Vec3 color = {norm_r, norm_g, norm_b};
 
         if (sourceColorSpace == 1) {
-            // Step 1: Apply Effective CCM (Sensor_WB -> sRGB)
-            if (ccm) {
-                color = multiply(effective_CCM, color);
-            }
-            // Step 2: sRGB -> XYZ (D65)
-            // Since we assume the CCM outputs sRGB (not XYZ), we MUST convert to XYZ.
+            if (ccm) color = multiply(effective_CCM, color);
             color = multiply(M_sRGB_D65_to_XYZ, color);
-
-        } else if (sourceColorSpace == 0) { // ProPhoto (LibRaw)
-            // Step 1: ProPhoto D50 -> XYZ D50
+        } else if (sourceColorSpace == 0) {
             color = multiply(M_ProPhoto_D50_to_XYZ, color);
-            // Step 2: Chromatic Adaptation D50 -> D65
             color = multiply(M_Bradford_D50_to_D65, color);
         }
 
-        // 2c. XYZ (D65) -> Target Gamut (D65)
         switch (targetLog) {
-            case 1: // ARRI LogC3 -> Alexa Wide Gamut
-                color = multiply(M_XYZ_to_AlexaWideGamut_D65, color);
-                break;
-            case 2: // F-Log -> Rec.2020
-            case 3:
-                color = multiply(M_XYZ_to_Rec2020_D65, color);
-                break;
-            case 5: // S-Log3 -> S-Gamut3.Cine
-            case 6:
-                color = multiply(M_XYZ_to_SGamut3Cine_D65, color);
-                break;
-            case 7: // V-Log -> V-Gamut
-                color = multiply(M_XYZ_to_VGamut_D65, color);
-                break;
-            case 0: // Standard -> Rec.709
-            default:
-                // Default to Rec.709 for standard display
-                color = multiply(M_XYZ_to_Rec709_D65, color);
-                break;
+            case 1: color = multiply(M_XYZ_to_AlexaWideGamut_D65, color); break;
+            case 2: case 3: color = multiply(M_XYZ_to_Rec2020_D65, color); break;
+            case 5: case 6: color = multiply(M_XYZ_to_SGamut3Cine_D65, color); break;
+            case 7: color = multiply(M_XYZ_to_VGamut_D65, color); break;
+            default: color = multiply(M_XYZ_to_Rec709_D65, color); break;
         }
 
-        // 2d. Log / Gamma
         color.r = apply_log(color.r, targetLog);
         color.g = apply_log(color.g, targetLog);
         color.b = apply_log(color.b, targetLog);
 
-        // 2e. LUT
-        if (lut.size > 0) {
-            color = apply_lut(lut, color);
-        }
-
+        if (lut.size > 0) color = apply_lut(lut, color);
         return color;
     };
 
-    if (isPreview && !tiffPath) {
-        // Path A: Fast preview with optional downsampling and rotation
-        previewRgb8.resize(finalW * finalH * 3);
+    // Buffer for rotated/processed result (JPEG/Bitmap path)
+    std::vector<unsigned char> rotatedRgb8;
+    if (jpgPath || out_rgb_buffer) {
+        rotatedRgb8.resize(rotatedW * rotatedH * 3);
         #pragma omp parallel for
-        for (int py = 0; py < finalH; py++) {
-            for (int px = 0; px < finalW; px++) {
+        for (int py = 0; py < rotatedH; py++) {
+            for (int px = 0; px < rotatedW; px++) {
                 int sx, sy;
-                if (orientation == 90) { sx = py; sy = (finalW - 1) - px; }
-                else if (orientation == 180) { sx = (finalW - 1) - px; sy = (finalH - 1) - py; }
-                else if (orientation == 270) { sx = (finalH - 1) - py; sy = px; }
+                if (orientation == 90) { sx = py; sy = (rotatedW - 1) - px; }
+                else if (orientation == 180) { sx = (rotatedW - 1) - px; sy = (rotatedH - 1) - py; }
+                else if (orientation == 270) { sx = (rotatedH - 1) - py; sy = px; }
                 else { sx = px; sy = py; }
 
-                Vec3 color = process_pixel(sx * downsampleFactor, sy * downsampleFactor);
-                int outIdx = (py * finalW + px) * 3;
-                previewRgb8[outIdx + 0] = (unsigned char)std::max(0.0f, std::min(255.0f, color.r * 255.0f));
-                previewRgb8[outIdx + 1] = (unsigned char)std::max(0.0f, std::min(255.0f, color.g * 255.0f));
-                previewRgb8[outIdx + 2] = (unsigned char)std::max(0.0f, std::min(255.0f, color.b * 255.0f));
+                // Apply crop offset and downsampling
+                int finalX = startX + sx * downsampleFactor;
+                int finalY = startY + sy * downsampleFactor;
+
+                Vec3 color = process_pixel(std::min(finalX, width - 1), std::min(finalY, height - 1));
+                int outIdx = (py * rotatedW + px) * 3;
+                rotatedRgb8[outIdx + 0] = (unsigned char)std::max(0.0f, std::min(255.0f, color.r * 255.0f));
+                rotatedRgb8[outIdx + 1] = (unsigned char)std::max(0.0f, std::min(255.0f, color.g * 255.0f));
+                rotatedRgb8[outIdx + 2] = (unsigned char)std::max(0.0f, std::min(255.0f, color.b * 255.0f));
+
+                if (out_rgb_buffer) {
+                    int bIdx = (py * rotatedW + px) * 4;
+                    out_rgb_buffer[bIdx + 0] = rotatedRgb8[outIdx + 0];
+                    out_rgb_buffer[bIdx + 1] = rotatedRgb8[outIdx + 1];
+                    out_rgb_buffer[bIdx + 2] = rotatedRgb8[outIdx + 2];
+                    out_rgb_buffer[bIdx + 3] = 255;
+                }
             }
         }
-    } else {
-        // Path B: Full resolution (for TIFF or HQ JPEG)
-        processedImage.resize(width * height * 3);
+    }
+
+    // Path B: Full resolution (for TIFF only - keep unrotated pixels + tag)
+    if (tiffPath) {
+        std::vector<unsigned short> processedImage(width * height * 3);
         #pragma omp parallel for
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
@@ -425,28 +402,13 @@ void process_and_save_image(
                 processedImage[idx + 0] = (unsigned short)std::max(0.0f, std::min(65535.0f, color.r * 65535.0f));
                 processedImage[idx + 1] = (unsigned short)std::max(0.0f, std::min(65535.0f, color.g * 65535.0f));
                 processedImage[idx + 2] = (unsigned short)std::max(0.0f, std::min(65535.0f, color.b * 65535.0f));
-
-                if (out_rgb_buffer) {
-                    int bIdx = (y * width + x) * 4;
-                    out_rgb_buffer[bIdx + 0] = (unsigned char)(processedImage[idx + 0] >> 8);
-                    out_rgb_buffer[bIdx + 1] = (unsigned char)(processedImage[idx + 1] >> 8);
-                    out_rgb_buffer[bIdx + 2] = (unsigned char)(processedImage[idx + 2] >> 8);
-                    out_rgb_buffer[bIdx + 3] = 255;
-                }
             }
         }
-    }
-
-    // 4. Save Files
-    if (tiffPath) {
         write_tiff(tiffPath, width, height, processedImage, orientation);
     }
+
     if (jpgPath) {
-        if (isPreview && !previewRgb8.empty()) {
-            stbi_write_jpg(jpgPath, finalW, finalH, 3, previewRgb8.data(), 95);
-        } else {
-            write_jpeg(jpgPath, width, height, processedImage, 95);
-        }
+        stbi_write_jpg(jpgPath, rotatedW, rotatedH, 3, rotatedRgb8.data(), 95);
     }
 }
 

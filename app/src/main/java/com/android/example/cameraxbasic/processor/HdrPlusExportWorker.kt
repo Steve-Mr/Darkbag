@@ -2,17 +2,20 @@ package com.android.example.cameraxbasic.processor
 
 import android.content.Context
 import android.util.Log
-import androidx.work.Worker
+import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
 
-class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Worker(context, params) {
+class HdrPlusExportWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
 
-    override fun doWork(): Result {
-        val tempRawPath = inputData.getString("tempRawPath") ?: return Result.failure()
+    override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
+        val tempRawPath = inputData.getString("tempRawPath") ?: return@withContext Result.failure()
         val width = inputData.getInt("width", 0)
         val height = inputData.getInt("height", 0)
         val orientation = inputData.getInt("orientation", 0)
         val digitalGain = inputData.getFloat("digitalGain", 1.0f)
+        val zoomFactor = inputData.getFloat("zoomFactor", 1.0f)
         val targetLog = inputData.getInt("targetLog", 0)
         val lutPath = inputData.getString("lutPath")
         val tiffPath = inputData.getString("tiffPath")
@@ -27,20 +30,28 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Worker(c
         val whiteBalance = inputData.getFloatArray("whiteBalance") ?: floatArrayOf()
         val baseName = inputData.getString("baseName") ?: "HDRPLUS"
         val saveTiff = inputData.getBoolean("saveTiff", true)
+        val targetUri = inputData.getString("targetUri")
 
-        Log.d(TAG, "Background Export Worker started for $baseName")
+        Log.d(TAG, "Background Export Worker started for $baseName (targetUri=$targetUri). Waiting for permit...")
 
-        val ret = ColorProcessor.exportHdrPlus(
-            tempRawPath, width, height, orientation, digitalGain, targetLog,
-            lutPath, tiffPath, jpgPath, dngPath,
-            iso, exposureTime, fNumber, focalLength, captureTimeMillis,
-            ccm, whiteBalance
-        )
+        ColorProcessor.exportSemaphore.acquire()
+        val ret = try {
+            ColorProcessor.exportHdrPlus(
+                tempRawPath, width, height, orientation, digitalGain, targetLog,
+                lutPath, tiffPath, jpgPath, dngPath,
+                iso, exposureTime, fNumber, focalLength, captureTimeMillis,
+                ccm, whiteBalance, zoomFactor
+            )
+        } finally {
+            // Clean up temp RAW file immediately after processing
+            try { java.io.File(tempRawPath).delete() } catch (e: Exception) { Log.e(TAG, "Failed to delete temp RAW", e) }
+            ColorProcessor.exportSemaphore.release()
+        }
 
-        return if (ret == 0) {
+        if (ret == 0) {
             Log.d(TAG, "Background Export Worker finished successfully for $baseName")
             // Notify completion via same flow as JNI background thread for MediaStore consistency
-            ColorProcessor.onBackgroundSaveComplete(baseName, tiffPath, dngPath, saveTiff)
+            ColorProcessor.onBackgroundSaveComplete(baseName, tiffPath, dngPath, jpgPath, saveTiff, targetUri)
             Result.success()
         } else {
             Log.e(TAG, "Background Export Worker failed with code $ret")

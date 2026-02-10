@@ -391,20 +391,22 @@ class CameraFragment : Fragment() {
         // Listen for background save completions from JNI
         viewLifecycleOwner.lifecycleScope.launch {
             ColorProcessor.backgroundSaveFlow.collect { event ->
-                Log.d(TAG, "Received background save complete event: ${event.baseName}")
+                Log.d(TAG, "Received background save complete event: ${event.baseName} (targetUri=${event.targetUri})")
                 withContext(Dispatchers.IO) {
                     try {
+                        val targetUri = event.targetUri?.let { Uri.parse(it) }
                         saveProcessedImage(
                             requireContext(),
                             null,
-                            null,
+                            event.jpgPath,
                             0,
                             1.0f,
                             event.baseName,
                             event.dngPath,
                             event.tiffPath,
-                            false,
-                            event.saveTiff
+                            event.jpgPath != null,
+                            event.saveTiff,
+                            targetUri = targetUri
                         )
                         Log.i(TAG, "Background MediaStore export finished for ${event.baseName}")
                     } catch (e: Exception) {
@@ -1346,6 +1348,7 @@ class CameraFragment : Fragment() {
         tiffPath: String?,
         saveJpg: Boolean,
         saveTiff: Boolean,
+        targetUri: Uri? = null,
         onBitmapReady: ((android.graphics.Bitmap) -> Unit)? = null
     ): Uri? {
         val contentResolver = context.contentResolver
@@ -1358,30 +1361,35 @@ class CameraFragment : Fragment() {
 
             if (isNativeJpeg && !needsBitmapProcessing && saveJpg) {
                 // FAST PATH: Directly use JNI-generated JPEG
-                val jpgValues = ContentValues().apply {
-                    put(MediaStore.MediaColumns.DISPLAY_NAME, "$baseName.jpg")
-                    put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                        put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/Darkbag")
-                        put(MediaStore.MediaColumns.IS_PENDING, 1)
+                var jpgUri = targetUri
+                if (jpgUri == null) {
+                    val jpgValues = ContentValues().apply {
+                        put(MediaStore.MediaColumns.DISPLAY_NAME, "$baseName.jpg")
+                        put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                            put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/Darkbag")
+                            put(MediaStore.MediaColumns.IS_PENDING, 1)
+                        }
                     }
+                    jpgUri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, jpgValues)
                 }
-                val jpgUri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, jpgValues)
+
                 if (jpgUri != null) {
                     finalJpgUri = jpgUri
                     try {
-                        contentResolver.openOutputStream(jpgUri)?.use { out ->
+                        contentResolver.openOutputStream(jpgUri, "rwt")?.use { out ->
                             File(bmpPath!!).inputStream().use { it.copyTo(out) }
                         }
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                            jpgValues.clear()
-                            jpgValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                        if (targetUri == null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                            val jpgValues = ContentValues().apply {
+                                put(MediaStore.MediaColumns.IS_PENDING, 0)
+                            }
                             contentResolver.update(jpgUri, jpgValues, null, null)
                         }
-                        Log.i(TAG, "Saved JNI-JPEG directly to $jpgUri (Fast path)")
+                        Log.i(TAG, "Saved JNI-JPEG directly to $jpgUri (Fast path, targetUri=$targetUri)")
                     } catch (e: Exception) {
                         Log.e(TAG, "Failed to copy JNI-JPEG", e)
-                        contentResolver.delete(jpgUri, null, null)
+                        if (targetUri == null) contentResolver.delete(jpgUri, null, null)
                         finalJpgUri = null
                     }
                 }
@@ -1436,37 +1444,42 @@ class CameraFragment : Fragment() {
 
                 // Save JPG
                 if (saveJpg) {
-                    val jpgValues = ContentValues().apply {
-                        put(MediaStore.MediaColumns.DISPLAY_NAME, "$baseName.jpg")
-                        put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                            put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/Darkbag")
-                            put(MediaStore.MediaColumns.IS_PENDING, 1)
+                    var jpgUri = targetUri
+                    if (jpgUri == null) {
+                        val jpgValues = ContentValues().apply {
+                            put(MediaStore.MediaColumns.DISPLAY_NAME, "$baseName.jpg")
+                            put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/Darkbag")
+                                put(MediaStore.MediaColumns.IS_PENDING, 1)
+                            }
                         }
+                        jpgUri = contentResolver.insert(
+                            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                            jpgValues
+                        )
                     }
-                    val jpgUri = contentResolver.insert(
-                        MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                        jpgValues
-                    )
+
                     if (jpgUri != null) {
                         finalJpgUri = jpgUri
                         try {
-                            contentResolver.openOutputStream(jpgUri)?.use { out ->
+                            contentResolver.openOutputStream(jpgUri, "rwt")?.use { out ->
                                 processedBitmap?.compress(
                                     android.graphics.Bitmap.CompressFormat.JPEG,
                                     95,
                                     out
                                 )
                             }
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                                jpgValues.clear()
-                                jpgValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                            if (targetUri == null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                val jpgValues = ContentValues().apply {
+                                    put(MediaStore.MediaColumns.IS_PENDING, 0)
+                                }
                                 contentResolver.update(jpgUri, jpgValues, null, null)
                             }
-                            Log.i(TAG, "Saved JPEG to $jpgUri")
+                            Log.i(TAG, "Saved JPEG to $jpgUri (targetUri=$targetUri)")
                         } catch (e: Exception) {
                             Log.e(TAG, "Failed to save JPEG stream", e)
-                            contentResolver.delete(jpgUri, null, null)
+                            if (targetUri == null) contentResolver.delete(jpgUri, null, null)
                             finalJpgUri = null
                         }
                     }
@@ -2393,9 +2406,6 @@ class CameraFragment : Fragment() {
                 var chars: CameraCharacteristics? = null
                 val cam = camera
                 val camInfo = cam?.cameraInfo
-                if (camInfo is Camera2CameraInfo) {
-                    chars = Camera2CameraInfo.extractCameraCharacteristics(camInfo)
-                }
 
                 // 2. Metadata (WB, CCM, BlackLevel)
                 val timestamp = frames[0].timestamp
@@ -2412,13 +2422,12 @@ class CameraFragment : Fragment() {
                 )
                 var cfa = 0 // Default RGGB
 
-                if (chars != null) {
-                    whiteLevel = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_WHITE_LEVEL) ?: 1023
-                    val bl = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_BLACK_LEVEL_PATTERN)
+                if (camInfo != null) {
+                    val camera2Info = Camera2CameraInfo.from(camInfo)
+                    whiteLevel = camera2Info.getCameraCharacteristic(CameraCharacteristics.SENSOR_INFO_WHITE_LEVEL) ?: 1023
+                    val bl = camera2Info.getCameraCharacteristic(CameraCharacteristics.SENSOR_BLACK_LEVEL_PATTERN)
                     if (bl != null) blackLevel = bl.getOffsetForIndex(0, 0)
-
-                    val cfaEnum = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_COLOR_FILTER_ARRANGEMENT)
-                    if (cfaEnum != null) cfa = cfaEnum // Pass Raw Enum (0..3)
+                    cfa = camera2Info.getCameraCharacteristic(CameraCharacteristics.SENSOR_INFO_COLOR_FILTER_ARRANGEMENT) ?: 0
                 }
 
                 result?.let { r ->
@@ -2514,7 +2523,8 @@ class CameraFragment : Fragment() {
                     debugStats,
                     outputBitmap,
                     false, // Force sync JNI call to get the result, but we'll make it fast.
-                    if (hqBackgroundExport) tempRawFile.absolutePath else null
+                    if (hqBackgroundExport) tempRawFile.absolutePath else null,
+                    zoomFactor = currentZoom
                 )
 
                 val jniEndTime = System.currentTimeMillis()
@@ -2523,17 +2533,33 @@ class CameraFragment : Fragment() {
                 if (ret == 0) {
                     val saveStartTime = System.currentTimeMillis()
                     val finalJpgUri = if (hqBackgroundExport) {
-                        // Enqueue WorkManager for TIFF/DNG
+                        // 1. Save Fast Preview JPEG to MediaStore immediately
+                        val previewUri = saveProcessedImage(
+                            context,
+                            null,
+                            tempJpgFile.absolutePath,
+                            0, // Rotation ALREADY DONE in JNI
+                            1.0f, // Crop ALREADY DONE in JNI
+                            dngName,
+                            null,
+                            null,
+                            saveJpg,
+                            false
+                        )
+
+                        // 2. Enqueue WorkManager for HQ Export (TIFF/DNG + HQ JPEG replacement)
                         val workData = androidx.work.Data.Builder()
                             .putString("tempRawPath", tempRawFile.absolutePath)
                             .putInt("width", width)
                             .putInt("height", height)
                             .putInt("orientation", rotationDegrees)
                             .putFloat("digitalGain", digitalGain)
+                            .putFloat("zoomFactor", currentZoom)
                             .putInt("targetLog", targetLogIndex)
                             .putString("lutPath", nativeLutPath)
                             .putString("tiffPath", tiffPath)
                             .putString("dngPath", linearDngPath)
+                            .putString("jpgPath", tempJpgFile.absolutePath) // Use same path for HQ output
                             .putInt("iso", iso)
                             .putLong("exposureTime", exposureTime)
                             .putFloat("fNumber", fNumber)
@@ -2543,6 +2569,7 @@ class CameraFragment : Fragment() {
                             .putFloatArray("whiteBalance", wb)
                             .putString("baseName", dngName)
                             .putBoolean("saveTiff", saveTiff)
+                            .putString("targetUri", previewUri?.toString())
                             .build()
 
                         val workRequest = androidx.work.OneTimeWorkRequestBuilder<HdrPlusExportWorker>()
@@ -2550,26 +2577,14 @@ class CameraFragment : Fragment() {
                             .build()
                         androidx.work.WorkManager.getInstance(context).enqueue(workRequest)
 
-                        // Still call saveProcessedImage to handle rotation/crop of the Native JPEG and add to MediaStore
-                        saveProcessedImage(
-                            context,
-                            null,
-                            tempJpgFile.absolutePath,
-                            0, // Rotation ALREADY DONE in JNI
-                            currentZoom,
-                            dngName,
-                            null,
-                            null,
-                            saveJpg,
-                            false
-                        )
+                        previewUri
                     } else {
                         saveProcessedImage(
                             context,
                             null,
                             tempJpgFile.absolutePath,
                             0, // Rotation ALREADY DONE in JNI
-                            currentZoom,
+                            1.0f, // Crop ALREADY DONE in JNI
                             dngName,
                             linearDngPath,
                             tiffPath,

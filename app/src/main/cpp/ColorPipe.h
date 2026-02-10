@@ -55,7 +55,8 @@ void process_and_save_image(
     int orientation = 0,
     unsigned char* out_rgb_buffer = nullptr,
     bool isPreview = false,
-    int downsampleFactor = 1
+    int downsampleFactor = 1,
+    float zoomFactor = 1.0f
 );
 
 // --- File Writers ---
