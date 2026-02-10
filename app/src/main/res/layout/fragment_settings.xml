@@ -279,14 +279,31 @@
                 android:layout_height="wrap_content"
                 android:layout_marginBottom="@dimen/margin_medium">
 
-                <TextView
-                    android:id="@+id/tv_debug_stats"
+                <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:padding="@dimen/padding_medium"
-                    android:fontFamily="monospace"
-                    android:textSize="12sp"
-                    android:text="No logs yet." />
+                    android:orientation="vertical"
+                    android:padding="@dimen/padding_medium">
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btn_copy_debug_stats"
+                        style="@style/Widget.Material3.Button.TonalButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Copy Logs"
+                        app:icon="@android:drawable/ic_menu_copy" />
+
+                    <TextView
+                        android:id="@+id/tv_debug_stats"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="@dimen/spacing_small"
+                        android:fontFamily="monospace"
+                        android:textSize="12sp"
+                        android:text="No logs yet."
+                        android:textIsSelectable="true" />
+
+                </LinearLayout>
 
             </com.google.android.material.card.MaterialCardView>
 
