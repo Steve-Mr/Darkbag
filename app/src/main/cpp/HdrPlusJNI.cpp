@@ -7,6 +7,7 @@
 #include <chrono> // For timing
 #include <thread>
 #include <future>
+#include <utility>
 #include <libraw/libraw.h>
 #include <HalideBuffer.h>
 #include <HalideRuntime.h>
@@ -25,8 +26,9 @@ void fillDebugStats(JNIEnv* env,
                     jlong copyMs,
                     jlong halideMs,
                     jlong postProcessMs,
-                    jlong dngMs,
+                    jlong dngEncodeMs,
                     jlong saveMs,
+                    jlong dngJoinWaitMs,
                     jlong totalMs) {
     if (debugStats == nullptr) return;
     const jsize len = env->GetArrayLength(debugStats);
@@ -36,19 +38,21 @@ void fillDebugStats(JNIEnv* env,
     // [0] halideMs (legacy)
     // [1] copyMs
     // [2] postProcessMs (planar -> interleaved)
-    // [3] dngMs
-    // [4] logPathSaveMs (process + save tiff/jpg)
-    // [5] totalNativeMs
-    jlong stats[6] = {
+    // [3] dngEncodeMs (time spent inside write_dng)
+    // [4] logPathSaveMs (process + save tiff/bmp)
+    // [5] dngJoinWaitMs (time waiting at dngTask.get())
+    // [6] totalNativeMs
+    jlong stats[7] = {
             halideMs,
             copyMs,
             postProcessMs,
-            dngMs,
+            dngEncodeMs,
             saveMs,
+            dngJoinWaitMs,
             totalMs,
     };
 
-    env->SetLongArrayRegion(debugStats, 0, std::min<jsize>(len, 6), stats);
+    env->SetLongArrayRegion(debugStats, 0, std::min<jsize>(len, 7), stats);
 }
 } // namespace
 
@@ -244,15 +248,18 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     const char* dng_path_cstr = (outputDngPath) ? env->GetStringUTFChars(outputDngPath, 0) : nullptr;
 
     bool dng_ok = true;
-    auto dngStart = std::chrono::high_resolution_clock::now();
 
     // Save DNG (Raw Path)
     int dngWhiteLevel = 65535; // Full 16-bit range now
     auto dngTask = std::async(std::launch::async, [&]() {
+        auto dngEncodeStart = std::chrono::high_resolution_clock::now();
+        bool ok = true;
         if (dng_path_cstr) {
-            return write_dng(dng_path_cstr, width, height, finalImage, dngWhiteLevel, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation);
+            ok = write_dng(dng_path_cstr, width, height, finalImage, dngWhiteLevel, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation);
         }
-        return true;
+        auto dngEncodeEnd = std::chrono::high_resolution_clock::now();
+        auto dngEncodeMs = std::chrono::duration_cast<std::chrono::milliseconds>(dngEncodeEnd - dngEncodeStart).count();
+        return std::make_pair(ok, dngEncodeMs);
     });
 
     // Save Processed Images (Log/LUT Path)
@@ -275,9 +282,12 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     auto saveEnd = std::chrono::high_resolution_clock::now();
     auto saveDurationMs = std::chrono::duration_cast<std::chrono::milliseconds>(saveEnd - saveStart).count();
 
-    dng_ok = dngTask.get();
-    auto dngEnd = std::chrono::high_resolution_clock::now();
-    auto dngDurationMs = std::chrono::duration_cast<std::chrono::milliseconds>(dngEnd - dngStart).count();
+    auto dngWaitStart = std::chrono::high_resolution_clock::now();
+    auto dngResult = dngTask.get();
+    auto dngWaitEnd = std::chrono::high_resolution_clock::now();
+    dng_ok = dngResult.first;
+    auto dngEncodeMs = dngResult.second;
+    auto dngJoinWaitMs = std::chrono::duration_cast<std::chrono::milliseconds>(dngWaitEnd - dngWaitStart).count();
 
     // Release Strings
     if (outputTiffPath) env->ReleaseStringUTFChars(outputTiffPath, tiff_path_cstr);
@@ -293,8 +303,9 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
                    (jlong)copyDurationMs,
                    (jlong)durationMs,
                    (jlong)postDurationMs,
-                   (jlong)dngDurationMs,
+                   (jlong)dngEncodeMs,
                    (jlong)saveDurationMs,
+                   (jlong)dngJoinWaitMs,
                    (jlong)totalDurationMs);
 
     return 0;

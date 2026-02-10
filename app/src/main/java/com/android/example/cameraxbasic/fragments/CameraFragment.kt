@@ -2423,7 +2423,7 @@ class CameraFragment : Fragment() {
                 // Ensure buffers are rewound just in case
                 buffers.forEach { it.rewind() }
 
-                val debugStats = LongArray(6) // [0]=Halide [1]=Copy [2]=Post [3]=DNG [4]=Save [5]=NativeTotal
+                val debugStats = LongArray(7) // [0]=Halide [1]=Copy [2]=Post [3]=DNG Encode [4]=Save [5]=DNG Wait [6]=NativeTotal
 
                 val ret = ColorProcessor.processHdrPlus(
                     buffers,
@@ -2467,9 +2467,10 @@ class CameraFragment : Fragment() {
                     val halideTime = debugStats[0]
                     val copyTime = debugStats[1]
                     val postTime = debugStats[2]
-                    val dngTime = debugStats[3]
+                    val dngEncodeTime = debugStats[3]
                     val nativeSaveTime = debugStats[4]
-                    val nativeTotalTime = debugStats[5]
+                    val dngWaitTime = debugStats[5]
+                    val nativeTotalTime = debugStats[6]
                     val saveTime = saveEndTime - saveStartTime
 
                     val logMsg = """
@@ -2481,8 +2482,9 @@ class CameraFragment : Fragment() {
                           - Copy: ${copyTime}ms
                           - Halide: ${halideTime}ms
                           - Post: ${postTime}ms
-                          - DNG: ${dngTime}ms
+                          - DNG Encode: ${dngEncodeTime}ms
                           - Save(Log/TIFF/BMP): ${nativeSaveTime}ms
+                          - DNG Wait(get): ${dngWaitTime}ms
                         Save (IO/Compress): ${saveTime}ms
                     """.trimIndent()
 

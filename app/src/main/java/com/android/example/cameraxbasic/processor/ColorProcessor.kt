@@ -56,6 +56,6 @@ object ColorProcessor {
         outputJpgPath: String?,
         outputDngPath: String?,
         digitalGain: Float,
-        debugStats: LongArray? // [0] Halide, [1] Copy, [2] Post, [3] DNG, [4] Save, [5] Total (ms)
+        debugStats: LongArray? // [0] Halide, [1] Copy, [2] Post, [3] DNG Encode, [4] Save, [5] DNG Wait, [6] Total (ms)
     ): Int
 }
