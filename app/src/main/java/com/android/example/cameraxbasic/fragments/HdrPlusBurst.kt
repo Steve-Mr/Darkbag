@@ -2,6 +2,7 @@ package com.android.example.cameraxbasic.fragments
 
 import androidx.camera.core.ImageProxy
 import java.nio.ByteBuffer
+import java.util.concurrent.ConcurrentLinkedQueue
 
 /**
  * Data class to hold a single frame of RAW data for HDR+ processing.
@@ -21,8 +22,6 @@ data class HdrFrame(
         buffer = null
     }
 }
-
-import java.util.concurrent.ConcurrentLinkedQueue
 
 /**
  * Helper class to manage HDR+ burst capture.

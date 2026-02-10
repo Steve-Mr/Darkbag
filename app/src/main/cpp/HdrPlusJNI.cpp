@@ -547,6 +547,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
 
         auto saveFunc = [
             finalImageData = runAsync ? finalImage : std::vector<uint16_t>(), // Only copy if async
+            runAsync,
             width, height, digitalGain, targetLog, lut,
             tiffPathStr, jpgPathStr, dngPathStr, baseName,
             ccmVec, wbVec, orientation,
