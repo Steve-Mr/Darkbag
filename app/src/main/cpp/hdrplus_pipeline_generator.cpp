@@ -13,7 +13,7 @@ namespace {
 // --- Post-Processing Helper Functions ---
 
 Expr apply_srgb_oetf(Expr x) {
-    return select(x <= 0.0031308f, 12.92f * x, 1.055f * pow(x, 1.0f / 2.4f) - 0.055f);
+    return select(x <= 0.0031308f, 12.92f * x, 1.055f * fast_pow(x, 1.0f / 2.4f) - 0.055f);
 }
 
 Expr apply_arri_logc3(Expr x) {
@@ -24,12 +24,12 @@ Expr apply_arri_logc3(Expr x) {
     float d = 0.385537f;
     float e = 5.367655f;
     float f = 0.092809f;
-    Expr log10_val = log(a * x + b) / 2.302585f;
+    Expr log10_val = fast_log(a * x + b) / 2.302585f;
     return select(x > cut, c * log10_val + d, e * x + f);
 }
 
 Expr apply_s_log3(Expr x) {
-    Expr log10_val = log((x + 0.01f) / (0.18f + 0.01f)) / 2.302585f;
+    Expr log10_val = fast_log((x + 0.01f) / (0.18f + 0.01f)) / 2.302585f;
     return select(x >= 0.01125000f, (420.0f + log10_val * 261.5f) / 1023.0f,
                   (x * 171.2102946929f + 95.0f) / 1023.0f);
 }
@@ -40,7 +40,7 @@ Expr apply_f_log(Expr x) {
     float c = 0.344676f;
     float d = 0.790453f;
     float cut = 0.00089f;
-    Expr log10_val = log(a * x + b) / 2.302585f;
+    Expr log10_val = fast_log(a * x + b) / 2.302585f;
     return select(x >= cut, c * log10_val + d, 8.52f * x + 0.0929f);
 }
 
@@ -49,7 +49,7 @@ Expr apply_vlog(Expr x) {
     float c = 0.241514f;
     float b = 0.008730f;
     float d = 0.598206f;
-    Expr log10_val = log(x + b) / 2.302585f;
+    Expr log10_val = fast_log(x + b) / 2.302585f;
     return select(x >= cut, c * log10_val + d, 5.6f * x + 0.125f);
 }
 
@@ -215,6 +215,9 @@ public:
     final_color(x, y, c) = select(has_lut, lut_res, logged(x, y, c));
     output_final(x, y, c) = u16_sat(final_color(x, y, c) * 65535.0f);
 
+    output_linear.dim(2).set_bounds(0, 3);
+    output_final.dim(2).set_bounds(0, 3);
+
     Target target = get_target();
     if (target.has_gpu_feature()) {
         Var xi("xi"), yi("yi");
@@ -225,16 +228,48 @@ public:
         output_linear.gpu_tile(x, y, xi, yi, 16, 16);
         output_final.gpu_tile(x, y, xi, yi, 16, 16);
     } else {
-        white_balance_output.compute_root().parallel(y).vectorize(x, 16);
-        demosaic_output.compute_root().parallel(demosaic_output.args()[1]).vectorize(demosaic_output.args()[0], 16);
-        chroma_denoised_output.compute_root().parallel(chroma_denoised_output.args()[1]).vectorize(chroma_denoised_output.args()[0], 16);
-        linear_srgb.compute_root().parallel(linear_srgb.args()[1]).vectorize(linear_srgb.args()[0], 16);
-        output_linear.compute_root().parallel(output_linear.args()[1]).vectorize(output_linear.args()[0], 16);
-        output_final.compute_root().parallel(output_final.args()[1]).vectorize(output_final.args()[0], 16);
-        normalized.compute_at(output_final, output_final.args()[1]).vectorize(output_final.args()[0], 16);
-        xyz.compute_at(output_final, output_final.args()[1]).vectorize(output_final.args()[0], 16);
-        target_gamut.compute_at(output_final, output_final.args()[1]).vectorize(output_final.args()[0], 16);
-        logged.compute_at(output_final, output_final.args()[1]).vectorize(output_final.args()[0], 16);
+        Var xi("xi"), yi("yi");
+        // CPU Schedule - High Performance ARM Neon
+        int vec_width = 8; // Optimal for 16-bit and 32-bit float on Neon
+        int tile_w = 128;
+        int tile_h = 64;
+
+        white_balance_output.compute_root()
+            .tile(x, y, xi, yi, tile_w, tile_h)
+            .parallel(y)
+            .vectorize(xi, vec_width);
+
+        demosaic_output.compute_root()
+            .tile(demosaic_output.args()[0], demosaic_output.args()[1], xi, yi, tile_w, tile_h)
+            .parallel(yi)
+            .vectorize(xi, vec_width);
+
+        chroma_denoised_output.compute_root()
+            .tile(chroma_denoised_output.args()[0], chroma_denoised_output.args()[1], xi, yi, tile_w, tile_h)
+            .parallel(yi)
+            .vectorize(xi, vec_width);
+
+        linear_srgb.compute_root()
+            .tile(linear_srgb.args()[0], linear_srgb.args()[1], xi, yi, tile_w, tile_h)
+            .parallel(yi)
+            .vectorize(xi, vec_width);
+
+        output_linear.compute_root()
+            .tile(output_linear.args()[0], output_linear.args()[1], xi, yi, tile_w, tile_h)
+            .parallel(yi)
+            .vectorize(xi, vec_width);
+
+        output_final.compute_root()
+            .tile(output_final.args()[0], output_final.args()[1], xi, yi, tile_w, tile_h)
+            .parallel(yi)
+            .vectorize(xi, vec_width);
+
+        // Fuse post-processing into output_final to avoid memory traffic
+        normalized.compute_at(output_final, xi).vectorize(normalized.args()[0]);
+        xyz.compute_at(output_final, xi).vectorize(xyz.args()[0]).unroll(xyz.args()[2]);
+        target_gamut.compute_at(output_final, xi).vectorize(target_gamut.args()[0]).unroll(target_gamut.args()[2]);
+        logged.compute_at(output_final, xi).vectorize(logged.args()[0]).unroll(logged.args()[2]);
+        final_color.compute_at(output_final, xi).vectorize(final_color.args()[0]).unroll(final_color.args()[2]);
     }
   }
 };
