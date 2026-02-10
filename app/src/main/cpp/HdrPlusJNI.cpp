@@ -8,6 +8,8 @@
 #include <dlfcn.h>
 #include <libraw/libraw.h>
 #include <HalideBuffer.h>
+#include <HalideRuntimeVulkan.h>
+#include <HalideRuntimeOpenCL.h>
 #include "ColorPipe.h"
 
 // Included generated headers for all versions
@@ -25,20 +27,41 @@ using namespace Halide::Runtime;
 bool is_opencl_available() {
     void* handle = dlopen("libOpenCL.so", RTLD_LAZY);
     if (!handle) handle = dlopen("libPVROCL.so", RTLD_LAZY);
+    if (!handle) handle = dlopen("/system/lib64/libOpenCL.so", RTLD_LAZY);
+    if (!handle) handle = dlopen("/vendor/lib64/libOpenCL.so", RTLD_LAZY);
+    if (!handle) handle = dlopen("/vendor/lib64/egl/libGLES_mali.so", RTLD_LAZY); // Mali often exports OpenCL here
+
     if (handle) {
         void* sym = dlsym(handle, "clGetPlatformIDs");
-        if (sym) { dlclose(handle); return true; }
+        if (sym) {
+            LOGD("OpenCL library found and clGetPlatformIDs resolved.");
+            dlclose(handle);
+            return true;
+        }
+        LOGE("OpenCL library found but clGetPlatformIDs NOT resolved!");
         dlclose(handle);
+    } else {
+        LOGE("OpenCL library NOT found via dlopen!");
     }
     return false;
 }
 
 bool is_vulkan_available() {
     void* handle = dlopen("libvulkan.so", RTLD_LAZY);
+    if (!handle) handle = dlopen("/system/lib64/libvulkan.so", RTLD_LAZY);
+    if (!handle) handle = dlopen("/vendor/lib64/libvulkan.so", RTLD_LAZY);
+
     if (handle) {
         void* sym = dlsym(handle, "vkCreateInstance");
-        if (sym) { dlclose(handle); return true; }
+        if (sym) {
+            LOGD("Vulkan library found and vkCreateInstance resolved.");
+            dlclose(handle);
+            return true;
+        }
+        LOGE("Vulkan library found but vkCreateInstance NOT resolved!");
         dlclose(handle);
+    } else {
+        LOGE("Vulkan library (libvulkan.so) NOT found via dlopen!");
     }
     return false;
 }
@@ -86,11 +109,26 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     int returnCode = 0;    // 0: Success, 1: Fallback (Unavailable), 2: Fallback (Runtime Error)
 
     if (gpuBackend == 1) {
-        if (is_opencl_available()) actualBackend = 1;
-        else { actualBackend = 0; returnCode = 1; LOGD("OpenCL not available. Fallback to CPU."); }
+        if (is_opencl_available()) {
+            actualBackend = 1;
+            LOGD("Selected OpenCL backend.");
+        } else {
+            actualBackend = 0;
+            returnCode = 1;
+            LOGE("OpenCL requested but not available. Falling back to CPU.");
+        }
     } else if (gpuBackend == 2) {
-        if (is_vulkan_available()) actualBackend = 2;
-        else { actualBackend = 0; returnCode = 1; LOGD("Vulkan not available. Fallback to CPU."); }
+        if (is_vulkan_available()) {
+            actualBackend = 2;
+            LOGD("Selected Vulkan backend.");
+        } else {
+            actualBackend = 0;
+            returnCode = 1;
+            LOGE("Vulkan requested but not available. Falling back to CPU.");
+        }
+    } else {
+        actualBackend = 0;
+        LOGD("Selected CPU backend.");
     }
 
     int numFrames = env->GetArrayLength(dngBuffers);
@@ -156,6 +194,24 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
 
     auto halideStart = std::chrono::high_resolution_clock::now();
     int result = -1;
+
+    if (actualBackend == 1) {
+        const halide_device_interface_t* ocl_interface = halide_opencl_device_interface();
+        if (!ocl_interface) {
+            LOGE("OpenCL device interface is not available. Falling back to CPU.");
+            actualBackend = 0;
+            returnCode = 2;
+        }
+    }
+
+    if (actualBackend == 2) {
+        const halide_device_interface_t* vk_interface = halide_vulkan_device_interface();
+        if (!vk_interface) {
+            LOGE("Vulkan device interface is not available. Falling back to CPU.");
+            actualBackend = 0;
+            returnCode = 2;
+        }
+    }
 
     if (actualBackend == 1) {
         result = hdrplus_raw_pipeline_opencl(

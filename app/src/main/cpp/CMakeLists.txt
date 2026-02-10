@@ -119,7 +119,7 @@ add_custom_command(
 )
 
 # --- Generate Standalone Runtime ---
-set(HALIDE_TARGET_RUNTIME "arm-64-android-opencl-vulkan")
+set(HALIDE_TARGET_RUNTIME "arm-64-android-opencl-vulkan-vk_int16")
 set(GENERATED_RUNTIME "${GENERATOR_OUTPUT_DIR}/halide_runtime.a")
 
 add_custom_command(
@@ -164,6 +164,7 @@ add_dependencies(native-lib generate_hdrplus_halide)
 find_library(log-lib log)
 find_library(jnigraphics-lib jnigraphics)
 find_library(android-lib android)
+find_library(vulkan-lib vulkan)
 
 target_link_libraries(
         native-lib
@@ -175,6 +176,7 @@ target_link_libraries(
         ${log-lib}
         ${jnigraphics-lib}
         ${android-lib}
+        ${vulkan-lib}
         -fopenmp
         -static-openmp
 )
