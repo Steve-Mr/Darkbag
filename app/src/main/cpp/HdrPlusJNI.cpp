@@ -559,7 +559,8 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
             width, height, digitalGain, targetLog, lut,
             tiffPathStr, jpgPathStr, dngPathStr, baseName,
             ccmVec, wbVec, orientation,
-            dngWhiteLevel, iso, exposureTime, fNumber, focalLength, captureTimeMillis
+            dngWhiteLevel, iso, exposureTime, fNumber, focalLength, captureTimeMillis,
+            zoomFactor
         ]() mutable {
             LOGD("Background save task started.");
 
