@@ -61,6 +61,7 @@ import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.TotalCaptureResult
 import androidx.concurrent.futures.await
 import com.android.example.cameraxbasic.processor.ColorProcessor
+import com.android.example.cameraxbasic.processor.HdrPlusExportWorker
 import java.io.File
 import java.io.FileOutputStream
 import android.net.Uri
@@ -2436,6 +2437,7 @@ class CameraFragment : Fragment() {
 
                 val tiffFile = File(context.cacheDir, "$dngName.tiff")
                 val tiffPath = if(saveTiff) tiffFile.absolutePath else null
+                val tempRawFile = File(context.cacheDir, "$dngName.tmp.raw")
 
                 // Allocate direct Bitmap for faster processing (instead of intermediate BMP file)
                 val outputBitmap = if (saveJpg) {
@@ -2453,7 +2455,13 @@ class CameraFragment : Fragment() {
                 // Ensure buffers are rewound just in case
                 buffers.forEach { it.rewind() }
 
-                val debugStats = LongArray(12) // Expanded for stage profiling
+                val debugStats = LongArray(15) // Expanded for stage profiling
+
+                // If HQ background export is enabled, we still call JNI but it will also save a temp raw file.
+                // We'll modify JNI to do this if dngPath is provided but isAsync is true?
+                // No, let's keep it simple: JNI processHdrPlus will always return the result.
+                // If isAsync is true, JNI currently does its own background thread.
+                // We want to REPLACE it with WorkManager for "Stability".
 
                 val ret = ColorProcessor.processHdrPlus(
                     buffers,
@@ -2464,13 +2472,14 @@ class CameraFragment : Fragment() {
                     iso, exposureTime, fNumber, focalLength, captureTime,
                     targetLogIndex,
                     nativeLutPath,
-                    tiffPath,
+                    if (hqBackgroundExport) null else tiffPath,
                     null, // bmpPath no longer used
-                    linearDngPath,
+                    if (hqBackgroundExport) null else linearDngPath,
                     digitalGain,
                     debugStats,
                     outputBitmap,
-                    hqBackgroundExport
+                    false, // Force sync JNI call to get the result, but we'll make it fast.
+                    if (hqBackgroundExport) tempRawFile.absolutePath else null
                 )
 
                 val jniEndTime = System.currentTimeMillis()
@@ -2479,8 +2488,33 @@ class CameraFragment : Fragment() {
                 if (ret == 0) {
                     val saveStartTime = System.currentTimeMillis()
                     val finalJpgUri = if (hqBackgroundExport) {
-                        // In background mode, we only care about the JPEG/Bitmap here.
-                        // Heavy I/O for TIFF/DNG is handled by JNI background thread and reported via Flow.
+                        // Enqueue WorkManager
+                        val workData = androidx.work.Data.Builder()
+                            .putString("tempRawPath", tempRawFile.absolutePath)
+                            .putInt("width", width)
+                            .putInt("height", height)
+                            .putInt("orientation", rotationDegrees)
+                            .putFloat("digitalGain", digitalGain)
+                            .putInt("targetLog", targetLogIndex)
+                            .putString("lutPath", nativeLutPath)
+                            .putString("tiffPath", tiffPath)
+                            .putString("dngPath", linearDngPath)
+                            .putInt("iso", iso)
+                            .putLong("exposureTime", exposureTime)
+                            .putFloat("fNumber", fNumber)
+                            .putFloat("focalLength", focalLength)
+                            .putLong("captureTimeMillis", captureTime)
+                            .putFloatArray("ccm", ccm)
+                            .putFloatArray("whiteBalance", wb)
+                            .putString("baseName", dngName)
+                            .putBoolean("saveTiff", saveTiff)
+                            .build()
+
+                        val workRequest = androidx.work.OneTimeWorkRequestBuilder<HdrPlusExportWorker>()
+                            .setInputData(workData)
+                            .build()
+                        androidx.work.WorkManager.getInstance(context).enqueue(workRequest)
+
                         saveProcessedImage(
                             context,
                             outputBitmap,
@@ -2529,10 +2563,13 @@ class CameraFragment : Fragment() {
                         Wait: ${waitTime}ms
                         JNI (Total): ${jniTime}ms
                           - Native Total: ${nativeTotalTime}ms
+                          - JNI Prep: ${debugStats[12]}ms
                           - Copy: ${copyTime}ms
                           - Halide: ${halideTime}ms
                             * Align: ${debugStats[7]}ms
                             * Merge: ${debugStats[8]}ms
+                            * BlackWhite: ${debugStats[13]}ms
+                            * WB: ${debugStats[14]}ms
                             * Demosaic: ${debugStats[9]}ms
                             * Denoise: ${debugStats[10]}ms
                             * sRGB: ${debugStats[11]}ms

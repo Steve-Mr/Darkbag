@@ -34,6 +34,8 @@ extern "C" void halide_print(void* user_context, const char* str) {
 struct HalideStageStats {
     long align = 0;
     long merge = 0;
+    long black_white = 0;
+    long white_balance = 0;
     long demosaic = 0;
     long denoise = 0;
     long srgb = 0;
@@ -64,9 +66,11 @@ HalideStageStats parseHalideReport(const std::string& report) {
 
         long ms;
         if ((ms = extract_ms("alignment")) != -1) { stats.align += ms; continue; }
+        if ((ms = extract_ms("layer_")) != -1) { stats.align += ms; continue; }
         if ((ms = extract_ms("merge_")) != -1) { stats.merge += ms; continue; }
-        if ((ms = extract_ms("layer_")) != -1) { stats.align += ms; continue; } // Catch layer_0, layer_1, etc.
-        if ((ms = extract_ms("demosaic_")) != -1) { stats.demosaic += ms; continue; }
+        if ((ms = extract_ms("black_white_level")) != -1) { stats.black_white += ms; continue; }
+        if ((ms = extract_ms("white_balance")) != -1) { stats.white_balance += ms; continue; }
+        if ((ms = extract_ms("demosaic")) != -1) { stats.demosaic += ms; continue; }
         if ((ms = extract_ms("bilateral")) != -1) { stats.denoise += ms; continue; }
         if ((ms = extract_ms("desaturate_noise")) != -1) { stats.denoise += ms; continue; }
         if ((ms = extract_ms("srgb_output")) != -1) { stats.srgb += ms; continue; }
@@ -83,6 +87,7 @@ void fillDebugStats(JNIEnv* env,
                     jlong saveMs,
                     jlong dngJoinWaitMs,
                     jlong totalMs,
+                    jlong jniOverheadMs,
                     const HalideStageStats& stageStats) {
     if (debugStats == nullptr) return;
     const jsize len = env->GetArrayLength(debugStats);
@@ -101,7 +106,10 @@ void fillDebugStats(JNIEnv* env,
     // [9] Stage: Demosaic
     // [10] Stage: Denoise
     // [11] Stage: sRGB
-    jlong stats[12] = {
+    // [12] JNI Overhead
+    // [13] Stage: BlackWhite
+    // [14] Stage: WB
+    jlong stats[15] = {
             halideMs,
             copyMs,
             postProcessMs,
@@ -113,10 +121,13 @@ void fillDebugStats(JNIEnv* env,
             stageStats.merge,
             stageStats.demosaic,
             stageStats.denoise,
-            stageStats.srgb
+            stageStats.srgb,
+            jniOverheadMs,
+            stageStats.black_white,
+            stageStats.white_balance
     };
 
-    env->SetLongArrayRegion(debugStats, 0, std::min<jsize>(len, 12), stats);
+    env->SetLongArrayRegion(debugStats, 0, std::min<jsize>(len, 15), stats);
 }
 } // namespace
 
@@ -127,6 +138,89 @@ extern "C" jint JNI_OnLoad(JavaVM* vm, void* reserved) {
     jclass clazz = env->FindClass("com/android/example/cameraxbasic/processor/ColorProcessor");
     if (clazz) g_colorProcessorClass = (jclass)env->NewGlobalRef(clazz);
     return JNI_VERSION_1_6;
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_android_example_cameraxbasic_processor_ColorProcessor_exportHdrPlus(
+        JNIEnv* env,
+        jobject /* this */,
+        jstring tempRawPath,
+        jint width,
+        jint height,
+        jint orientation,
+        jfloat digitalGain,
+        jint targetLog,
+        jstring lutPath,
+        jstring tiffPath,
+        jstring jpgPath,
+        jstring dngPath,
+        jint iso,
+        jlong exposureTime,
+        jfloat fNumber,
+        jfloat focalLength,
+        jlong captureTimeMillis,
+        jfloatArray ccm,
+        jfloatArray whiteBalance
+) {
+    LOGD("Native exportHdrPlus started.");
+
+    const char* temp_path_cstr = env->GetStringUTFChars(tempRawPath, 0);
+    std::ifstream in(temp_path_cstr, std::ios::binary);
+    if (!in.is_open()) {
+        LOGE("Failed to open temp raw file: %s", temp_path_cstr);
+        env->ReleaseStringUTFChars(tempRawPath, temp_path_cstr);
+        return -1;
+    }
+
+    std::vector<unsigned short> finalImage(width * height * 3);
+    in.read((char*)finalImage.data(), finalImage.size() * sizeof(unsigned short));
+    in.close();
+    // Delete temp file after reading
+    std::remove(temp_path_cstr);
+    env->ReleaseStringUTFChars(tempRawPath, temp_path_cstr);
+
+    // Prepare Metadata
+    jfloat* wbData = env->GetFloatArrayElements(whiteBalance, nullptr);
+    std::vector<float> wbVec = {wbData[0], wbData[1], wbData[2], wbData[3]};
+    env->ReleaseFloatArrayElements(whiteBalance, wbData, JNI_ABORT);
+
+    jfloat* ccmData = env->GetFloatArrayElements(ccm, nullptr);
+    std::vector<float> ccmVec(9);
+    for(int i=0; i<9; ++i) ccmVec[i] = ccmData[i];
+    env->ReleaseFloatArrayElements(ccm, ccmData, JNI_ABORT);
+
+    // Load LUT
+    const char* lut_path_cstr = (lutPath) ? env->GetStringUTFChars(lutPath, 0) : nullptr;
+    LUT3D lut;
+    if (lut_path_cstr) {
+        lut = load_lut(lut_path_cstr);
+        env->ReleaseStringUTFChars(lutPath, lut_path_cstr);
+    }
+
+    const char* tiff_path_cstr = (tiffPath) ? env->GetStringUTFChars(tiffPath, 0) : nullptr;
+    const char* jpg_path_cstr = (jpgPath) ? env->GetStringUTFChars(jpgPath, 0) : nullptr;
+    const char* dng_path_cstr = (dngPath) ? env->GetStringUTFChars(dngPath, 0) : nullptr;
+
+    // Save DNG
+    if (dng_path_cstr) {
+        write_dng(dng_path_cstr, width, height, finalImage, 65535, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation);
+    }
+
+    // Save TIFF/BMP
+    if (tiff_path_cstr || jpg_path_cstr) {
+        process_and_save_image(
+            finalImage, width, height, digitalGain, targetLog, lut,
+            tiff_path_cstr, jpg_path_cstr,
+            1, ccmVec.data(), wbVec.data(), orientation, nullptr
+        );
+    }
+
+    if (tiffPath) env->ReleaseStringUTFChars(tiffPath, tiff_path_cstr);
+    if (jpgPath) env->ReleaseStringUTFChars(jpgPath, jpg_path_cstr);
+    if (dngPath) env->ReleaseStringUTFChars(dngPath, dng_path_cstr);
+
+    LOGD("Native exportHdrPlus finished.");
+    return 0;
 }
 
 extern "C" JNIEXPORT jint JNICALL
@@ -155,11 +249,13 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
         jfloat digitalGain,
         jlongArray debugStats,
         jobject outputBitmap,
-        jboolean isAsync
+        jboolean isAsync,
+        jstring tempRawPath
 ) {
     LOGD("Native processHdrPlus started.");
     auto nativeStart = std::chrono::high_resolution_clock::now();
 
+    auto jniPrepStart = std::chrono::high_resolution_clock::now();
     int numFrames = env->GetArrayLength(dngBuffers);
     if (numFrames < 2) {
         LOGE("HDR+ requires at least 2 frames.");
@@ -219,6 +315,8 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
 
     // 3. Prepare Output Buffer (16-bit Linear RGB)
     Buffer<uint16_t> outputBuf(width, height, 3);
+    auto jniPrepEnd = std::chrono::high_resolution_clock::now();
+    auto jniPrepMs = std::chrono::duration_cast<std::chrono::milliseconds>(jniPrepEnd - jniPrepStart).count();
 
     // 4. Run Pipeline
     float compression = 1.0f; // Unused now in our modified generator
@@ -389,6 +487,17 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     bool runAsync = (bool)isAsync;
     bool hasBgTasks = !tiffPathStr.empty() || !jpgPathStr.empty() || !dngPathStr.empty();
 
+    const char* temp_raw_path_cstr = (tempRawPath) ? env->GetStringUTFChars(tempRawPath, 0) : nullptr;
+    if (temp_raw_path_cstr) {
+        std::ofstream out(temp_raw_path_cstr, std::ios::binary);
+        if (out.is_open()) {
+            out.write((char*)finalImage.data(), finalImage.size() * sizeof(unsigned short));
+            out.close();
+            LOGD("Saved intermediate RAW to %s", temp_raw_path_cstr);
+        }
+        env->ReleaseStringUTFChars(tempRawPath, temp_raw_path_cstr);
+    }
+
     if (hasBgTasks) {
         auto saveFunc = [
             finalImage = std::move(finalImage), // Move large buffer
@@ -456,6 +565,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
                    (jlong)saveDurationMs,
                    0, // DNG Join wait ms (now in background)
                    (jlong)totalDurationMs,
+                   (jlong)jniPrepMs,
                    stageStats);
 
     return 0;
