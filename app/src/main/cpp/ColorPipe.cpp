@@ -295,10 +295,16 @@ void process_and_save_image(
     const float* ccm,
     const float* wb,
     int orientation,
-    unsigned char* out_rgb_buffer
+    unsigned char* out_rgb_buffer,
+    bool isPreview,
+    int downsampleFactor
 ) {
-    // 1. Prepare Output Buffer
-    std::vector<unsigned short> processedImage(width * height * 3);
+    // 1. Setup Dimensions
+    int outW = width / downsampleFactor;
+    int outH = height / downsampleFactor;
+    bool swapDims = (orientation == 90 || orientation == 270);
+    int finalW = swapDims ? outH : outW;
+    int finalH = swapDims ? outW : outH;
 
     // Prepare Matrices
     Matrix3x3 sensor_to_sRGB = {0};
@@ -322,23 +328,22 @@ void process_and_save_image(
     }
 
     // 2. Process Pixels
-    #pragma omp parallel for
-    for (int i = 0; i < width * height; i++) {
-        unsigned short r_val = inputImage[i * 3 + 0];
-        unsigned short g_val = inputImage[i * 3 + 1];
-        unsigned short b_val = inputImage[i * 3 + 2];
+    std::vector<unsigned short> processedImage;
+    std::vector<unsigned char> previewRgb8;
 
-        // 2a. Digital Gain & Normalization
-        // Normalize to [0, 1] based on 16-bit range, then apply gain
-        // NO CLAMPING here to preserve high dynamic range for Log/WideGamut
+    auto process_pixel = [&](int x, int y) -> Vec3 {
+        int idx = (y * width + x) * 3;
+        unsigned short r_val = inputImage[idx + 0];
+        unsigned short g_val = inputImage[idx + 1];
+        unsigned short b_val = inputImage[idx + 2];
+
         float norm_r = (float)r_val / 65535.0f * gain;
         float norm_g = (float)g_val / 65535.0f * gain;
         float norm_b = (float)b_val / 65535.0f * gain;
 
-        // 2b. Color Space Conversion -> XYZ (D65)
         Vec3 color = {norm_r, norm_g, norm_b};
 
-        if (sourceColorSpace == 1) { // Camera Native (HDR+)
+        if (sourceColorSpace == 1) {
             // Step 1: Apply Effective CCM (Sensor_WB -> sRGB)
             if (ccm) {
                 color = multiply(effective_CCM, color);
@@ -387,37 +392,62 @@ void process_and_save_image(
             color = apply_lut(lut, color);
         }
 
-        // 3. Scale back to 16-bit
-        processedImage[i * 3 + 0] = (unsigned short)std::max(0.0f, std::min(65535.0f, color.r * 65535.0f));
-        processedImage[i * 3 + 1] = (unsigned short)std::max(0.0f, std::min(65535.0f, color.g * 65535.0f));
-        processedImage[i * 3 + 2] = (unsigned short)std::max(0.0f, std::min(65535.0f, color.b * 65535.0f));
+        return color;
+    };
 
-        // 3b. Fill 8-bit buffer if provided (Assume RGBA_8888 for Android Bitmap)
-        if (out_rgb_buffer) {
-            out_rgb_buffer[i * 4 + 0] = (unsigned char)(processedImage[i * 3 + 0] >> 8);
-            out_rgb_buffer[i * 4 + 1] = (unsigned char)(processedImage[i * 3 + 1] >> 8);
-            out_rgb_buffer[i * 4 + 2] = (unsigned char)(processedImage[i * 3 + 2] >> 8);
-            out_rgb_buffer[i * 4 + 3] = 255; // Alpha
+    if (isPreview && !tiffPath) {
+        // Path A: Fast preview with optional downsampling and rotation
+        previewRgb8.resize(finalW * finalH * 3);
+        #pragma omp parallel for
+        for (int py = 0; py < finalH; py++) {
+            for (int px = 0; px < finalW; px++) {
+                int sx, sy;
+                if (orientation == 90) { sx = py; sy = (finalW - 1) - px; }
+                else if (orientation == 180) { sx = (finalW - 1) - px; sy = (finalH - 1) - py; }
+                else if (orientation == 270) { sx = (finalH - 1) - py; sy = px; }
+                else { sx = px; sy = py; }
+
+                Vec3 color = process_pixel(sx * downsampleFactor, sy * downsampleFactor);
+                int outIdx = (py * finalW + px) * 3;
+                previewRgb8[outIdx + 0] = (unsigned char)std::max(0.0f, std::min(255.0f, color.r * 255.0f));
+                previewRgb8[outIdx + 1] = (unsigned char)std::max(0.0f, std::min(255.0f, color.g * 255.0f));
+                previewRgb8[outIdx + 2] = (unsigned char)std::max(0.0f, std::min(255.0f, color.b * 255.0f));
+            }
+        }
+    } else {
+        // Path B: Full resolution (for TIFF or HQ JPEG)
+        processedImage.resize(width * height * 3);
+        #pragma omp parallel for
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                Vec3 color = process_pixel(x, y);
+                int idx = (y * width + x) * 3;
+                processedImage[idx + 0] = (unsigned short)std::max(0.0f, std::min(65535.0f, color.r * 65535.0f));
+                processedImage[idx + 1] = (unsigned short)std::max(0.0f, std::min(65535.0f, color.g * 65535.0f));
+                processedImage[idx + 2] = (unsigned short)std::max(0.0f, std::min(65535.0f, color.b * 65535.0f));
+
+                if (out_rgb_buffer) {
+                    int bIdx = (y * width + x) * 4;
+                    out_rgb_buffer[bIdx + 0] = (unsigned char)(processedImage[idx + 0] >> 8);
+                    out_rgb_buffer[bIdx + 1] = (unsigned char)(processedImage[idx + 1] >> 8);
+                    out_rgb_buffer[bIdx + 2] = (unsigned char)(processedImage[idx + 2] >> 8);
+                    out_rgb_buffer[bIdx + 3] = 255;
+                }
+            }
         }
     }
 
-    // 4. Save Files (Parallelized)
-    std::vector<std::future<bool>> tasks;
+    // 4. Save Files
     if (tiffPath) {
-        tasks.push_back(std::async(std::launch::async, [=, &processedImage]() {
-            return write_tiff(tiffPath, width, height, processedImage, orientation);
-        }));
+        write_tiff(tiffPath, width, height, processedImage, orientation);
     }
     if (jpgPath) {
-        tasks.push_back(std::async(std::launch::async, [=, &processedImage]() {
-            return write_jpeg(jpgPath, width, height, processedImage, 95);
-        }));
+        if (isPreview && !previewRgb8.empty()) {
+            stbi_write_jpg(jpgPath, finalW, finalH, 3, previewRgb8.data(), 95);
+        } else {
+            write_jpeg(jpgPath, width, height, processedImage, 95);
+        }
     }
-
-    // Wait for tasks to complete before returning, unless we are fine with them being background.
-    // In this shared pipeline, we wait to ensure consistency.
-    // The JNI layer will handle higher-level backgrounding.
-    for (auto& t : tasks) t.get();
 }
 
 bool write_jpeg(const char* filename, int width, int height, const std::vector<unsigned short>& data, int quality) {
@@ -428,7 +458,6 @@ bool write_jpeg(const char* filename, int width, int height, const std::vector<u
         rgb8[i * 3 + 1] = (unsigned char)(data[i * 3 + 1] >> 8);
         rgb8[i * 3 + 2] = (unsigned char)(data[i * 3 + 2] >> 8);
     }
-
     return stbi_write_jpg(filename, width, height, 3, rgb8.data(), quality) != 0;
 }
 

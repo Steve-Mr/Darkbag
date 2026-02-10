@@ -1353,22 +1353,51 @@ class CameraFragment : Fragment() {
 
         // 1. Process Input Bitmap or JPEG File from JNI -> Final MediaStore JPG
         if (inputBitmap != null || bmpPath != null) {
-            var isNativeJpeg = bmpPath != null && !bmpPath.endsWith(".bmp") // Simple heuristic
+            val isNativeJpeg = bmpPath != null && bmpPath.endsWith(".jpg")
+            val needsBitmapProcessing = rotationDegrees != 0 || zoomFactor > 1.05f || inputBitmap != null
 
-            var processedBitmap: android.graphics.Bitmap? = null
+            if (isNativeJpeg && !needsBitmapProcessing && saveJpg) {
+                // FAST PATH: Directly use JNI-generated JPEG
+                val jpgValues = ContentValues().apply {
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, "$baseName.jpg")
+                    put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/Darkbag")
+                        put(MediaStore.MediaColumns.IS_PENDING, 1)
+                    }
+                }
+                val jpgUri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, jpgValues)
+                if (jpgUri != null) {
+                    finalJpgUri = jpgUri
+                    try {
+                        contentResolver.openOutputStream(jpgUri)?.use { out ->
+                            File(bmpPath!!).inputStream().use { it.copyTo(out) }
+                        }
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                            jpgValues.clear()
+                            jpgValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                            contentResolver.update(jpgUri, jpgValues, null, null)
+                        }
+                        Log.i(TAG, "Saved JNI-JPEG directly to $jpgUri (Fast path)")
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to copy JNI-JPEG", e)
+                        contentResolver.delete(jpgUri, null, null)
+                        finalJpgUri = null
+                    }
+                }
+                File(bmpPath!!).delete()
+            } else {
+                // SLOW PATH: Decode, Rotate, Crop, Encode
+                var processedBitmap: android.graphics.Bitmap? = null
+                if (inputBitmap != null) {
+                    processedBitmap = inputBitmap
+                } else if (bmpPath != null) {
+                    processedBitmap = BitmapFactory.decodeFile(bmpPath)
+                }
 
-            // If it's already a JPEG from JNI and we don't need rotation/crop, we can potentially skip decoding.
-            // But we almost always need rotation/crop if zoomFactor > 1 or rotation != 0.
-
-            if (inputBitmap != null) {
-                processedBitmap = inputBitmap
-            } else if (bmpPath != null) {
-                processedBitmap = BitmapFactory.decodeFile(bmpPath)
-            }
-
-            try {
-                // Rotate if needed
-                if (processedBitmap != null && rotationDegrees != 0) {
+                try {
+                    // Rotate if needed
+                    if (processedBitmap != null && rotationDegrees != 0) {
                     val matrix = android.graphics.Matrix()
                     matrix.postRotate(rotationDegrees.toFloat())
                     val rotated = android.graphics.Bitmap.createBitmap(
@@ -2471,7 +2500,7 @@ class CameraFragment : Fragment() {
                 val ret = ColorProcessor.processHdrPlus(
                     buffers,
                     width, height,
-                    rotationDegrees,
+                    rotationDegrees, // JNI will use this to rotate the preview JPEG
                     whiteLevel, blackLevel,
                     wb, ccm, cfa,
                     iso, exposureTime, fNumber, focalLength, captureTime,
@@ -2525,7 +2554,7 @@ class CameraFragment : Fragment() {
                             context,
                             null,
                             tempJpgFile.absolutePath,
-                            rotationDegrees,
+                            0, // Rotation ALREADY DONE in JNI
                             currentZoom,
                             dngName,
                             null,
@@ -2538,7 +2567,7 @@ class CameraFragment : Fragment() {
                             context,
                             null,
                             tempJpgFile.absolutePath,
-                            rotationDegrees,
+                            0, // Rotation ALREADY DONE in JNI
                             currentZoom,
                             dngName,
                             linearDngPath,

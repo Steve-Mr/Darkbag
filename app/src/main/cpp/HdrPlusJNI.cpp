@@ -8,6 +8,7 @@
 #include <thread>
 #include <future>
 #include <utility>
+#include <regex>
 #include <android/bitmap.h>
 #include <libraw/libraw.h>
 #include <HalideBuffer.h>
@@ -43,37 +44,26 @@ struct HalideStageStats {
 
 HalideStageStats parseHalideReport(const std::string& report) {
     HalideStageStats stats;
+    std::regex re("([\\w\\.]+):\\s*([\\d\\.]+)(ms|s)");
+    std::smatch match;
+
     std::string line;
     std::stringstream ss(report);
     while (std::getline(ss, line)) {
-        // Simple heuristic: look for Func names and extract ms
-        // Halide profiler output format: "  <func_name>: <time>ms (<percentage>%)"
-        auto extract_ms = [&](const std::string& key) -> long {
-            if (line.find(key) != std::string::npos) {
-                size_t colon = line.find(':');
-                if (colon != std::string::npos) {
-                    size_t ms_pos = line.find("ms", colon);
-                    if (ms_pos != std::string::npos) {
-                        std::string val_str = line.substr(colon + 1, ms_pos - colon - 1);
-                        try {
-                            return (long)std::stof(val_str);
-                        } catch (...) { return 0; }
-                    }
-                }
-            }
-            return -1;
-        };
+        if (std::regex_search(line, match, re)) {
+            std::string name = match[1].str();
+            float val = std::stof(match[2].str());
+            std::string unit = match[3].str();
+            long ms = (unit == "s") ? (long)(val * 1000) : (long)val;
 
-        long ms;
-        if ((ms = extract_ms("alignment")) != -1) { stats.align += ms; continue; }
-        if ((ms = extract_ms("layer_")) != -1) { stats.align += ms; continue; }
-        if ((ms = extract_ms("merge_")) != -1) { stats.merge += ms; continue; }
-        if ((ms = extract_ms("black_white_level")) != -1) { stats.black_white += ms; continue; }
-        if ((ms = extract_ms("white_balance")) != -1) { stats.white_balance += ms; continue; }
-        if ((ms = extract_ms("demosaic")) != -1) { stats.demosaic += ms; continue; }
-        if ((ms = extract_ms("bilateral")) != -1) { stats.denoise += ms; continue; }
-        if ((ms = extract_ms("desaturate_noise")) != -1) { stats.denoise += ms; continue; }
-        if ((ms = extract_ms("srgb_output")) != -1) { stats.srgb += ms; continue; }
+            if (name.find("alignment") != std::string::npos || name.find("layer_") != std::string::npos) stats.align += ms;
+            else if (name.find("merge_") != std::string::npos) stats.merge += ms;
+            else if (name.find("black_white_level") != std::string::npos) stats.black_white += ms;
+            else if (name.find("white_balance") != std::string::npos) stats.white_balance += ms;
+            else if (name.find("demosaic") != std::string::npos) stats.demosaic += ms;
+            else if (name.find("bilateral") != std::string::npos || name.find("desaturate_noise") != std::string::npos) stats.denoise += ms;
+            else if (name.find("srgb_output") != std::string::npos) stats.srgb += ms;
+        }
     }
     return stats;
 }
@@ -240,12 +230,13 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_exportHdrPlus(
         write_dng(dng_path_cstr, width, height, finalImage, 65535, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation);
     }
 
-    // Save TIFF/BMP
+    // Save TIFF/BMP (High Quality Export path)
     if (tiff_path_cstr || jpg_path_cstr) {
         process_and_save_image(
             finalImage, width, height, digitalGain, targetLog, lut,
             tiff_path_cstr, jpg_path_cstr,
-            1, ccmVec.data(), wbVec.data(), orientation, nullptr
+            1, ccmVec.data(), wbVec.data(), orientation, nullptr,
+            false, 1 // Not preview, no downsample
         );
     }
 
@@ -488,7 +479,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     // Save Processed Images (Log/LUT Path)
     auto saveStart = std::chrono::high_resolution_clock::now();
 
-    // 1. Synchronous Processing for Bitmap (Fast path for JPEG/Preview)
+    // 1. Synchronous Processing for Bitmap (Legacy Preview)
     if (bitmapPixels) {
         process_and_save_image(
             finalImage,
@@ -503,13 +494,11 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
             ccmVec.data(),
             wbVec.data(),
             orientation,
-            bitmapPixels
+            bitmapPixels,
+            true, 4 // Fast preview, 4x downsample
         );
         AndroidBitmap_unlockPixels(env, outputBitmap);
     }
-
-    auto saveEnd = std::chrono::high_resolution_clock::now();
-    auto saveDurationMs = std::chrono::duration_cast<std::chrono::milliseconds>(saveEnd - saveStart).count();
 
     // 2. Background I/O for TIFF, BMP, and DNG
     // We move the heavy I/O to a background thread and return to Java immediately.
@@ -548,6 +537,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
         auto saveFunc = [
             finalImageData = runAsync ? finalImage : std::vector<uint16_t>(), // Only copy if async
             runAsync,
+            &finalImage, // Capture by reference for synchronous path
             width, height, digitalGain, targetLog, lut,
             tiffPathStr, jpgPathStr, dngPathStr, baseName,
             ccmVec, wbVec, orientation,
@@ -562,11 +552,15 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
 
             // Save TIFF/BMP
             if (!tiffPathStr.empty() || !jpgPathStr.empty()) {
+                // If it's a preview JPG (not async), use downsampling and rotation.
+                // If it's a background HQ task (async), use full resolution.
+                bool isPrev = !runAsync;
                 process_and_save_image(
                     runAsync ? finalImageData : finalImage, width, height, digitalGain, targetLog, lut,
                     tiffPathStr.empty() ? nullptr : tiffPathStr.c_str(),
                     jpgPathStr.empty() ? nullptr : jpgPathStr.c_str(),
-                    1, ccmVec.data(), wbVec.data(), orientation, nullptr
+                    1, ccmVec.data(), wbVec.data(), orientation, nullptr,
+                    isPrev, isPrev ? 4 : 1
                 );
             }
             LOGD("Background save task finished.");
@@ -607,6 +601,9 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
             saveFunc();
         }
     }
+
+    auto saveEnd = std::chrono::high_resolution_clock::now();
+    auto saveDurationMs = std::chrono::duration_cast<std::chrono::milliseconds>(saveEnd - saveStart).count();
 
     auto nativeEnd = std::chrono::high_resolution_clock::now();
     auto totalDurationMs = std::chrono::duration_cast<std::chrono::milliseconds>(nativeEnd - nativeStart).count();

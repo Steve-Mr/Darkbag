@@ -53,7 +53,9 @@ void process_and_save_image(
     const float* ccm = nullptr,
     const float* wb = nullptr,
     int orientation = 0,
-    unsigned char* out_rgb_buffer = nullptr
+    unsigned char* out_rgb_buffer = nullptr,
+    bool isPreview = false,
+    int downsampleFactor = 1
 );
 
 // --- File Writers ---
