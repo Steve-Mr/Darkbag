@@ -1343,6 +1343,66 @@ class CameraFragment : Fragment() {
      * Shared helper to handle Bitmap post-processing (Rotate, Crop, Compress) and Saving (JPG, TIFF, LinearDNG).
      * Deletes input temp files after saving.
      */
+    /**
+     * Helper to encapsulate MediaStore JPEG saving/updating.
+     */
+    private fun saveJpegToMediaStore(
+        context: Context,
+        displayName: String,
+        targetUri: Uri?,
+        width: Int? = null,
+        height: Int? = null,
+        writeData: (java.io.OutputStream) -> Unit
+    ): Uri? {
+        val contentResolver = context.contentResolver
+        val jpgValues = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
+            put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/Darkbag")
+                put(MediaStore.MediaColumns.IS_PENDING, 1)
+            }
+            width?.let { put(MediaStore.MediaColumns.WIDTH, it) }
+            height?.let { put(MediaStore.MediaColumns.HEIGHT, it) }
+        }
+
+        var uri = targetUri
+        val isReplacement = uri != null
+
+        if (uri == null) {
+            uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, jpgValues)
+        } else {
+            contentResolver.update(uri, jpgValues, null, null)
+        }
+
+        if (uri != null) {
+            try {
+                contentResolver.openOutputStream(uri, "wt")?.use { out ->
+                    writeData(out)
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    jpgValues.clear()
+                    jpgValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                    contentResolver.update(uri, jpgValues, null, null)
+                }
+                if (isReplacement) {
+                    Log.i(TAG, "Replaced JPEG at $uri")
+                } else {
+                    Log.i(TAG, "Saved JPEG to $uri")
+                }
+                return uri
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to write JPEG to MediaStore", e)
+                if (!isReplacement) contentResolver.delete(uri, null, null)
+            }
+        }
+        return null
+    }
+
+    /**
+     * Shared helper to handle Bitmap post-processing (Rotate, Crop, Compress) and Saving (JPG, TIFF, LinearDNG).
+     * Deletes input temp files after saving.
+     */
     private suspend fun saveProcessedImage(
         context: Context,
         inputBitmap: android.graphics.Bitmap?,
@@ -1367,46 +1427,8 @@ class CameraFragment : Fragment() {
 
             if (isNativeJpeg && !needsBitmapProcessing && saveJpg) {
                 // FAST PATH: Directly use JNI-generated JPEG
-                val displayName = "$baseName.jpg"
-                var jpgUri = targetUri
-                val isReplacement = jpgUri != null
-
-                val jpgValues = ContentValues().apply {
-                    put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
-                    put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                        put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/Darkbag")
-                        put(MediaStore.MediaColumns.IS_PENDING, 1)
-                    }
-                }
-
-                if (jpgUri == null) {
-                    jpgUri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, jpgValues)
-                } else {
-                    contentResolver.update(jpgUri, jpgValues, null, null)
-                }
-
-                if (jpgUri != null) {
-                    finalJpgUri = jpgUri
-                    try {
-                        contentResolver.openOutputStream(jpgUri, "wt")?.use { out ->
-                            File(bmpPath!!).inputStream().use { it.copyTo(out) }
-                        }
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                            jpgValues.clear()
-                            jpgValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
-                            contentResolver.update(jpgUri, jpgValues, null, null)
-                        }
-                        if (isReplacement) {
-                            Log.i(TAG, "Replaced JNI-JPEG at $jpgUri (Fast path)")
-                        } else {
-                            Log.i(TAG, "Saved JNI-JPEG directly to $jpgUri (Fast path)")
-                        }
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Failed to copy JNI-JPEG", e)
-                        if (!isReplacement) contentResolver.delete(jpgUri, null, null)
-                        finalJpgUri = null
-                    }
+                finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri) { out ->
+                    File(bmpPath!!).inputStream().use { it.copyTo(out) }
                 }
                 File(bmpPath!!).delete()
             } else {
@@ -1459,71 +1481,28 @@ class CameraFragment : Fragment() {
 
                     // Save JPG
                     if (saveJpg) {
-                        val displayName = "$baseName.jpg"
-                        var jpgUri = targetUri
-                        val isReplacement = jpgUri != null
-
-                        val jpgValues = ContentValues().apply {
-                            put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
-                            put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                                put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/Darkbag")
-                                put(MediaStore.MediaColumns.IS_PENDING, 1)
-                            }
-                            processedBitmap?.let {
-                                put(MediaStore.MediaColumns.WIDTH, it.width)
-                                put(MediaStore.MediaColumns.HEIGHT, it.height)
-                            }
-                        }
-
-                        if (jpgUri == null) {
-                            jpgUri = contentResolver.insert(
-                                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                                jpgValues
-                            )
-                        } else {
-                            contentResolver.update(jpgUri, jpgValues, null, null)
-                        }
-
-                        if (jpgUri != null) {
-                            finalJpgUri = jpgUri
-                            try {
-                                contentResolver.openOutputStream(jpgUri, "wt")?.use { out ->
-                                    processedBitmap?.compress(
-                                        android.graphics.Bitmap.CompressFormat.JPEG,
-                                        95,
-                                        out
-                                    )
-                                }
-                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                                    jpgValues.clear()
-                                    jpgValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
-                                    contentResolver.update(jpgUri, jpgValues, null, null)
-                                }
-                                if (isReplacement) {
-                                    Log.i(TAG, "Replaced JPEG at $jpgUri")
-                                } else {
-                                    Log.i(TAG, "Saved JPEG to $jpgUri")
-                                }
-                            } catch (e: Exception) {
-                                Log.e(TAG, "Failed to save JPEG stream", e)
-                                if (!isReplacement) contentResolver.delete(jpgUri, null, null)
-                                finalJpgUri = null
-                            }
+                        finalJpgUri = saveJpegToMediaStore(
+                            context,
+                            "$baseName.jpg",
+                            targetUri,
+                            processedBitmap?.width,
+                            processedBitmap?.height
+                        ) { out ->
+                            processedBitmap?.compress(android.graphics.Bitmap.CompressFormat.JPEG, 95, out)
                         }
                     }
-            } catch (t: Throwable) {
-                Log.e(TAG, "Error processing bitmap", t)
-            } finally {
-                processedBitmap?.recycle()
-                if (inputBitmap != null && processedBitmap != inputBitmap) {
-                    inputBitmap.recycle()
+                } catch (t: Throwable) {
+                    Log.e(TAG, "Error processing bitmap", t)
+                } finally {
+                    processedBitmap?.recycle()
+                    if (inputBitmap != null && processedBitmap != inputBitmap) {
+                        inputBitmap.recycle()
+                    }
+                    // Cleanup BMP if it was used
+                    bmpPath?.let { File(it).delete() }
                 }
-                // Cleanup BMP if it was used
-                bmpPath?.let { File(it).delete() }
             }
         }
-    }
 
     // 2. Save TIFF
         if (saveTiff && tiffPath != null) {

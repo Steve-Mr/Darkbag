@@ -25,8 +25,16 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Worker(c
         val fNumber = inputData.getFloat("fNumber", 1.8f)
         val focalLength = inputData.getFloat("focalLength", 0.0f)
         val captureTimeMillis = inputData.getLong("captureTimeMillis", 0L)
-        val ccm = inputData.getFloatArray("ccm") ?: floatArrayOf()
-        val whiteBalance = inputData.getFloatArray("whiteBalance") ?: floatArrayOf()
+        val ccm = inputData.getFloatArray("ccm")
+        if (ccm == null || ccm.size != 9) {
+            Log.e(TAG, "Missing or malformed CCM array.")
+            return Result.failure()
+        }
+        val whiteBalance = inputData.getFloatArray("whiteBalance")
+        if (whiteBalance == null || whiteBalance.size != 4) {
+            Log.e(TAG, "Missing or malformed WhiteBalance array.")
+            return Result.failure()
+        }
         val baseName = inputData.getString("baseName") ?: "HDRPLUS"
         val saveTiff = inputData.getBoolean("saveTiff", true)
         val saveJpg = inputData.getBoolean("saveJpg", true)
