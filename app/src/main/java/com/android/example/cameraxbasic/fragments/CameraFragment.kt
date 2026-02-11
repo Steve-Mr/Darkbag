@@ -1814,10 +1814,19 @@ class CameraFragment : Fragment() {
     private fun initLensControls() {
         val binding = cameraUiContainerBinding ?: return
         val container = binding.lensControlsContainer ?: return
+        val scroll = binding.lensControlsScroll ?: return
+
+        // Log CameraX seen IDs
+        cameraProvider?.availableCameraInfos?.forEach { info ->
+            val id = Camera2CameraInfo.from(info).cameraId
+            Log.d(TAG, "CameraX availableCameraInfo ID: $id")
+        }
+
         availableLenses = cameraRepository.enumerateCameras()
+        Log.d(TAG, "Available Lenses identified: ${availableLenses.size}")
 
         if (availableLenses.size > 1) {
-            container.visibility = View.VISIBLE
+            scroll.visibility = View.VISIBLE
             binding.zoomControlsContainer?.visibility = View.GONE
 
             container.removeAllViews()
@@ -1856,7 +1865,7 @@ class CameraFragment : Fragment() {
             }
             updateLensUI()
         } else {
-            container.visibility = View.GONE
+            scroll.visibility = View.GONE
             binding.zoomControlsContainer?.visibility = View.VISIBLE
         }
     }

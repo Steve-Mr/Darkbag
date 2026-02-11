@@ -102,18 +102,26 @@
     </com.google.android.material.card.MaterialCardView>
 
     <!-- Physical Lens Controls -->
-    <LinearLayout
-        android:id="@+id/lens_controls_container"
+    <HorizontalScrollView
+        android:id="@+id/lens_controls_scroll"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:orientation="horizontal"
         android:layout_marginBottom="@dimen/margin_medium"
+        android:scrollbars="none"
+        android:visibility="gone"
         app:layout_constraintBottom_toTopOf="@id/manual_controls_root"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"
-        android:visibility="gone">
-        <!-- Dynamically populated -->
-    </LinearLayout>
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <LinearLayout
+            android:id="@+id/lens_controls_container"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:paddingHorizontal="@dimen/margin_medium">
+            <!-- Dynamically populated -->
+        </LinearLayout>
+    </HorizontalScrollView>
 
     <!-- Zoom Controls (Legacy/Digital) -->
     <LinearLayout
