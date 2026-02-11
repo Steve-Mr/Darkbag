@@ -18,6 +18,7 @@
 
 #define TAG "HdrPlusJNI"
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, TAG, __VA_ARGS__)
+#define LOGW(...) __android_log_print(ANDROID_LOG_WARN, TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 
 using namespace Halide::Runtime;
@@ -30,6 +31,10 @@ thread_local std::string halide_report_buffer;
 
 extern "C" void halide_print(void* user_context, const char* str) {
     halide_report_buffer += str;
+}
+
+extern "C" void halide_error(void* user_context, const char* str) {
+    LOGE("HALIDE ERROR: %s", str);
 }
 
 struct HalideStageStats {
@@ -164,6 +169,12 @@ extern "C" jint JNI_OnLoad(JavaVM* vm, void* reserved) {
     if (vm->GetEnv((void**)&env, JNI_VERSION_1_6) != JNI_OK) return JNI_ERR;
     jclass clazz = env->FindClass("com/android/example/cameraxbasic/processor/ColorProcessor");
     if (clazz) g_colorProcessorClass = (jclass)env->NewGlobalRef(clazz);
+
+    // Register Halide Handlers
+    halide_set_error_handler(halide_error);
+    halide_set_custom_print(halide_print);
+    LOGD("JNI_OnLoad: Halide error/print handlers registered.");
+
     return JNI_VERSION_1_6;
 }
 
@@ -340,7 +351,29 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
              (int)rawDataPtr[0], (int)rawDataPtr[width + 1], width/2, height/2, (int)rawDataPtr[(height/2)*width + (width/2)]);
     }
 
-    // Mark host data as dirty
+    // --- Signal Probe & Normalization ---
+    uint16_t minV = 0xFFFF, maxV = 0;
+    size_t nonZeroCount = 0;
+    for (size_t i = 0; i < std::min<size_t>(1000000, static_cast<size_t>(width)*height); ++i) {
+        uint16_t v = rawDataPtr[i];
+        if (v < minV) minV = v;
+        if (v > maxV) maxV = v;
+        if (v > 0) nonZeroCount++;
+    }
+    LOGD("Input Signal Check (Frame 0): Min=%d, Max=%d, NonZero=%zu/1M", minV, maxV, nonZeroCount);
+
+    // If input is 10-bit (WL < 2048), scale to 16-bit to ensure high signal strength
+    if (whiteLevel < 2048) {
+        LOGD("Normalization: Scaling 10-bit signal to 16-bit (<< 6)");
+        #pragma omp parallel for
+        for (size_t i = 0; i < static_cast<size_t>(numFrames) * width * height; ++i) {
+            rawDataPtr[i] <<= 6;
+        }
+        blackLevel <<= 6;
+        whiteLevel = 65535;
+        LOGD("Adjusted WL=%d, BL=%d", whiteLevel, blackLevel);
+    }
+
     inputBuf.set_host_dirty();
 
     // 2. Prepare Metadata
@@ -371,6 +404,20 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     // 3. Prepare Output Buffer (16-bit Linear RGB)
     // Instead of wrapping a pool pointer, let Halide allocate a fresh buffer to avoid Gralloc/Re-use issues
     Buffer<uint16_t> outputBuf(width, height, 3);
+    // Pattern initialization to detect if Halide writes anything
+    outputBuf.fill(0x7FFF);
+    outputBuf.set_host_dirty();
+
+    LOGD("Input Buffer: %dx%dx%d, strides: %d, %d, %d",
+         inputBuf.dim(0).extent(), inputBuf.dim(1).extent(), inputBuf.dim(2).extent(),
+         inputBuf.dim(0).stride(), inputBuf.dim(1).stride(), inputBuf.dim(2).stride());
+    LOGD("Output Buffer: %dx%dx%d, strides: %d, %d, %d",
+         outputBuf.dim(0).extent(), outputBuf.dim(1).extent(), outputBuf.dim(2).extent(),
+         outputBuf.dim(0).stride(), outputBuf.dim(1).stride(), outputBuf.dim(2).stride());
+
+    // Host dirty flags are enough to trigger automatic GPU upload in Halide AOT
+    inputBuf.set_host_dirty();
+    ccmHalideBuf.set_host_dirty();
 
     auto jniPrepEnd = std::chrono::high_resolution_clock::now();
     auto jniPrepMs = std::chrono::duration_cast<std::chrono::milliseconds>(jniPrepEnd - jniPrepStart).count();
@@ -380,15 +427,10 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     float gain = 1.0f;        // Unused now
 
     // Fix for Red/Blue Swap (Bayer Phase Mismatch)
-    // Assuming RGGB (0) <-> BGGR (3) mismatch
-    LOGD("Input CFA Pattern: %d", cfaPattern);
-    if (cfaPattern == 0) {
-        cfaPattern = 3; // Force BGGR
-        LOGD("Swapped CFA: RGGB -> BGGR (Applied fix)");
-    } else if (cfaPattern == 3) {
-        cfaPattern = 0; // Force RGGB
-        LOGD("Swapped CFA: BGGR -> RGGB (Applied fix)");
-    }
+    // Previous logs showed CFA=3 (BGGR) working.
+    // Current logs show CFA=3 reported by camera, but we were swapping it to 0.
+    // Let's stick exactly to what the camera reports for this test.
+    LOGD("Using Camera CFA Pattern: %d (No automatic swapping)", cfaPattern);
 
     static bool halideThreadsConfigured = false;
     if (!halideThreadsConfigured) {
@@ -422,9 +464,38 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
 
     LOGD("Halide Result Code: %d, Time: %ld ms, copy_to_host: %d, device_handle: %llu",
          result, (long)halideMs, copyRet, (unsigned long long)outputBuf.raw_buffer()->device);
+
+    bool allZeros = true;
     if (outputBuf.data()) {
         LOGD("Halide Output Sample [0,0]: %d, %d, %d", (int)outputBuf(0, 0, 0), (int)outputBuf(0, 0, 1), (int)outputBuf(0, 0, 2));
         LOGD("Halide Output Sample [mid,mid]: %d, %d, %d", (int)outputBuf(width/2, height/2, 0), (int)outputBuf(width/2, height/2, 1), (int)outputBuf(width/2, height/2, 2));
+
+        // Simple check if it's all zeros (or still the pattern)
+        if (outputBuf(width/2, height/2, 0) != 0 && outputBuf(width/2, height/2, 0) != 0x7FFF) {
+            allZeros = false;
+        }
+    }
+
+    if (allZeros) {
+        LOGW("Halide output is all zero! Applying DIAGNOSTIC BYPASS + PATTERN");
+        const uint16_t* src0 = inputBuf.data();
+        #pragma omp parallel for
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                // Read RAW Frame 0
+                uint16_t raw_val = src0[y * width + x];
+
+                // Add a faint synthetic gradient to the middle to verify I/O
+                uint16_t synth = (uint16_t)((x % 256) << 8);
+
+                // Output: Red = RAW, Green = Synthetic, Blue = Half-RAW
+                outputBuf(x, y, 0) = raw_val;
+                outputBuf(x, y, 1) = synth;
+                outputBuf(x, y, 2) = raw_val / 2;
+            }
+        }
+        LOGD("Bypass Sample [mid,mid]: R=%d, G=%d, B=%d",
+             (int)outputBuf(width/2, height/2, 0), (int)outputBuf(width/2, height/2, 1), (int)outputBuf(width/2, height/2, 2));
     }
 
     halide_report_buffer.clear();

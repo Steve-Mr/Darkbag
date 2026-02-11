@@ -333,6 +333,10 @@ void process_and_save_image(
 
     if (!inputImage.empty()) {
         LOGD("Input Data Sample (0,0): %d, %d, %d", inputImage[0], inputImage[1], inputImage[2]);
+        LOGD("Input Data Sample (mid,mid): %d, %d, %d",
+             inputImage[(height/2)*width*3 + (width/2)*3 + 0],
+             inputImage[(height/2)*width*3 + (width/2)*3 + 1],
+             inputImage[(height/2)*width*3 + (width/2)*3 + 2]);
     }
 
     // 2. Process Pixels
