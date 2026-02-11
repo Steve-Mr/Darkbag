@@ -8,14 +8,15 @@ import android.util.Log
 import kotlin.math.sqrt
 
 data class LensInfo(
-    val id: String,          // The ID to use for CameraX binding (Logical or Independent Physical)
-    val physicalId: String?, // The physical ID to set via Camera2Interop (if id is Logical)
+    val id: String,          // The ID to use for CameraX binding (must be known to CameraX)
+    val physicalId: String?, // The physical ID to set via Camera2Interop (if locking a sensor)
     val sensorId: String,    // A unique identifier for the physical sensor (for deduplication)
     val name: String,
     val focalLength: Float,
     val equivalentFocalLength: Float,
     val multiplier: Float,
-    val type: LensType
+    val type: LensType,
+    val isLogicalAuto: Boolean = false // True if this represents the system-controlled logical camera
 )
 
 enum class LensType {
@@ -29,118 +30,100 @@ class CameraRepository(private val context: Context) {
     private val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
     private val TAG = "CameraRepository"
 
-    fun enumerateCameras(): List<LensInfo> {
-        val discoveredSensors = mutableMapOf<String, LensInfo>()
-        val allIds = mutableSetOf<String>()
-
-        // 1. Collect all possible IDs (Public + Probed)
-        allIds.addAll(cameraManager.cameraIdList)
-        for (i in 0..63) {
-            allIds.add(i.toString())
-        }
-
-        Log.d(TAG, "Probing Camera IDs: ${allIds.sortedBy { it.toIntOrNull() ?: 999 }}")
-
-        // 2. First pass: Find characteristics and identify relationships
+    fun enumerateCameras(cameraXIds: Set<String>): List<LensInfo> {
+        val availableLenses = mutableListOf<LensInfo>()
         val idToChars = mutableMapOf<String, CameraCharacteristics>()
-        val logicalToPhysical = mutableMapOf<String, Set<String>>()
-        val physicalToLogical = mutableMapOf<String, String>()
 
-        for (id in allIds) {
+        // 1. Aggressive Probe to find all physical sensors and their characteristics
+        val probeIds = mutableSetOf<String>()
+        probeIds.addAll(cameraManager.cameraIdList)
+        for (i in 0..63) probeIds.add(i.toString())
+
+        for (id in probeIds) {
             try {
-                val chars = cameraManager.getCameraCharacteristics(id)
-                idToChars[id] = chars
-
-                val capabilities = chars.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
-                    capabilities?.contains(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_LOGICAL_MULTI_CAMERA) == true) {
-                    val physicalIds = chars.physicalCameraIds
-                    logicalToPhysical[id] = physicalIds
-                    for (pId in physicalIds) {
-                        physicalToLogical[pId] = id
-                    }
-                    Log.d(TAG, "ID $id is LOGICAL. Physical IDs: $physicalIds")
-                } else {
-                    Log.d(TAG, "ID $id is PHYSICAL or Independent.")
-                }
-            } catch (e: Exception) {
-                // Ignore IDs that don't exist
-            }
+                idToChars[id] = cameraManager.getCameraCharacteristics(id)
+            } catch (e: Exception) {}
         }
 
-        // 3. Find the main wide camera for baseline multiplier
+        // 2. Find baseline Eq Focal (Wide) for multipliers
         var mainWideEqFocal = 24f
         val backCameraIds = idToChars.filter { (_, chars) ->
             chars.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK
         }.keys
-
-        // Usually ID 0 is the main one. If not, pick the one with "1.0x" focal length (~4-5mm)
         val mainId = if (backCameraIds.contains("0")) "0" else backCameraIds.firstOrNull()
         mainId?.let { id ->
             mainWideEqFocal = calculateEquivalentFocalLength(idToChars[id]!!)
-            Log.d(TAG, "Baseline Main Camera ID: $id, Eq Focal: $mainWideEqFocal")
         }
 
-        // 4. Create LensInfo for all discovered physical sensors
-        // Strategy:
-        // - For each logical camera, add its physical components.
-        // - For each independent camera, add it if not already added as a physical component.
+        // 3. For each ID CameraX knows about, extract its capabilities
+        for (id in cameraXIds) {
+            val chars = idToChars[id] ?: continue
+            val facing = chars.get(CameraCharacteristics.LENS_FACING)
+            if (facing != CameraCharacteristics.LENS_FACING_BACK) continue
 
-        fun addSensor(bindId: String, physicalId: String?, chars: CameraCharacteristics) {
-            val sensorUniqueId = physicalId ?: bindId
-            if (discoveredSensors.containsKey(sensorUniqueId)) return
+            val capabilities = chars.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES)
+            val isLogical = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
+                    capabilities?.contains(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_LOGICAL_MULTI_CAMERA) == true
 
-            val eqFocal = calculateEquivalentFocalLength(chars)
-            val focalLengths = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
-            val f = if (focalLengths != null && focalLengths.isNotEmpty()) focalLengths[0] else 0f
-            val multiplier = eqFocal / mainWideEqFocal
+            val physicalIds = if (isLogical && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                chars.physicalCameraIds
+            } else emptySet()
 
-            val type = when {
-                eqFocal < 22f -> LensType.ULTRA_WIDE
-                eqFocal < 35f -> LensType.WIDE
-                else -> LensType.TELE
+            if (isLogical) {
+                // Add "Auto" lens for logical camera
+                availableLenses.add(createLensInfo(id, null, chars, mainWideEqFocal, isAuto = true))
+
+                // Add each physical component
+                for (pId in physicalIds) {
+                    val pChars = idToChars[pId] ?: try {
+                        cameraManager.getCameraCharacteristics(pId)
+                    } catch (e: Exception) { null }
+
+                    if (pChars != null) {
+                        availableLenses.add(createLensInfo(id, pId, pChars, mainWideEqFocal))
+                    }
+                }
+            } else {
+                // Independent Physical Camera
+                availableLenses.add(createLensInfo(id, null, chars, mainWideEqFocal))
             }
-
-            val name = String.format("%.1fx", multiplier)
-
-            discoveredSensors[sensorUniqueId] = LensInfo(
-                id = bindId,
-                physicalId = physicalId,
-                sensorId = sensorUniqueId,
-                name = name,
-                focalLength = f,
-                equivalentFocalLength = eqFocal,
-                multiplier = multiplier,
-                type = type
-            )
-            Log.d(TAG, "Added Lens: $name (Bind=$bindId, Physical=$physicalId, Sensor=$sensorUniqueId, EqFocal=$eqFocal)")
         }
 
-        // Add from logical cameras first (preferred binding)
-        for ((lId, pIds) in logicalToPhysical) {
-            if (idToChars[lId]?.get(CameraCharacteristics.LENS_FACING) != CameraCharacteristics.LENS_FACING_BACK) continue
-            for (pId in pIds) {
-                try {
-                    val pChars = idToChars[pId] ?: cameraManager.getCameraCharacteristics(pId)
-                    addSensor(lId, pId, pChars)
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to get characteristics for physical ID $pId under logical $lId", e)
+        // Deduplicate sensors by focal length if they have the same multiplier/name
+        // (sometimes same sensor is exposed multiple times)
+        val sortedLenses = availableLenses.sortedWith(compareBy({ !it.isLogicalAuto }, { it.equivalentFocalLength }))
+
+        val uniqueLenses = mutableListOf<LensInfo>()
+        for (lens in sortedLenses) {
+            if (lens.isLogicalAuto) {
+                uniqueLenses.add(lens)
+            } else {
+                // For physical lenses, try to avoid adding the same focal length twice if it belongs to the same bindId
+                if (uniqueLenses.none { it.id == lens.id && it.physicalId == lens.physicalId && !it.isLogicalAuto }) {
+                    uniqueLenses.add(lens)
                 }
             }
         }
 
-        // Add independent cameras
-        for (id in backCameraIds) {
-            // Only add if not already part of a logical camera we added, OR if it's the logical ID itself acting as a single camera
-            if (!physicalToLogical.containsKey(id) && !logicalToPhysical.containsKey(id)) {
-                addSensor(id, null, idToChars[id]!!)
-            } else if (logicalToPhysical.containsKey(id) && discoveredSensors.none { it.value.id == id }) {
-                // If it's a logical ID but we haven't added any sensors for it (unlikely), add it as-is
-                addSensor(id, null, idToChars[id]!!)
-            }
+        return uniqueLenses
+    }
+
+    private fun createLensInfo(id: String, physicalId: String?, chars: CameraCharacteristics, mainFocal35mm: Float, isAuto: Boolean = false): LensInfo {
+        val eqFocal = calculateEquivalentFocalLength(chars)
+        val focalLengths = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
+        val f = if (focalLengths != null && focalLengths.isNotEmpty()) focalLengths[0] else 0f
+        val multiplier = eqFocal / mainFocal35mm
+
+        val type = when {
+            eqFocal < 22f -> LensType.ULTRA_WIDE
+            eqFocal < 35f -> LensType.WIDE
+            else -> LensType.TELE
         }
 
-        return discoveredSensors.values.sortedBy { it.equivalentFocalLength }
+        val name = if (isAuto) "Auto" else String.format("%.1fx", multiplier)
+        val sensorId = physicalId ?: id
+
+        return LensInfo(id, physicalId, sensorId, name, f, eqFocal, multiplier, type, isAuto)
     }
 
     private fun calculateEquivalentFocalLength(chars: CameraCharacteristics): Float {
