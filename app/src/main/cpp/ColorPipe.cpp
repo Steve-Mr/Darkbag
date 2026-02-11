@@ -1,5 +1,10 @@
 #include "ColorPipe.h"
 #include <tiffio.h>
+#include <android/log.h>
+
+#define TAG "ColorPipe"
+#define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, TAG, __VA_ARGS__)
+#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
@@ -451,6 +456,7 @@ void process_and_save_image(
 }
 
 bool write_jpeg(const char* filename, int width, int height, const std::vector<unsigned short>& data, int quality) {
+    LOGD("write_jpeg: %s (%dx%d)", filename, width, height);
     std::vector<unsigned char> rgb8(width * height * 3);
     #pragma omp parallel for
     for (int i = 0; i < width * height; i++) {
@@ -464,6 +470,7 @@ bool write_jpeg(const char* filename, int width, int height, const std::vector<u
 // --- TIFF Writer ---
 
 bool write_tiff(const char* filename, int width, int height, const std::vector<unsigned short>& data, int orientation) {
+    LOGD("write_tiff: %s (%dx%d)", filename, width, height);
     std::ofstream file(filename, std::ios::binary);
     if (!file.is_open()) return false;
 
@@ -532,6 +539,7 @@ bool write_tiff(const char* filename, int width, int height, const std::vector<u
 }
 
 bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, int iso, long exposureTime, float fNumber, float focalLength, long captureTimeMillis, const std::vector<float>& ccm, int orientation) {
+    LOGD("write_dng: %s (%dx%d)", filename, width, height);
     // Register DNG tags
     TIFFSetTagExtender(DNGTagExtender);
 
