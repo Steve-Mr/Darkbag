@@ -451,6 +451,11 @@ class CameraFragment : Fragment() {
     private suspend fun setUpCamera() {
         cameraProvider = ProcessCameraProvider.getInstance(requireContext()).await()
 
+        // Initialize Physical Lens Controls now that provider is ready
+        withContext(Dispatchers.Main) {
+            initLensControls()
+        }
+
         // Select lensFacing depending on the available cameras
         lensFacing = when {
             hasBackCamera() -> CameraSelector.LENS_FACING_BACK
@@ -899,9 +904,6 @@ class CameraFragment : Fragment() {
 
         // Initialize Zoom Controls
         initZoomControls()
-
-        // Initialize Physical Lens Controls
-        initLensControls()
 
         // Listener for button used to view the most recent photo
         cameraUiContainerBinding?.photoViewButton?.setOnClickListener {
@@ -1857,10 +1859,21 @@ class CameraFragment : Fragment() {
                     cornerRadius = resources.getDimensionPixelSize(R.dimen.radius_full)
 
                     setOnClickListener {
-                        if (currentLens?.physicalId != lens.physicalId || currentLens?.id != lens.id || currentLens?.isLogicalAuto != lens.isLogicalAuto) {
+                        val oldLens = currentLens
+                        if (oldLens?.physicalId != lens.physicalId || oldLens?.id != lens.id ||
+                            oldLens?.isLogicalAuto != lens.isLogicalAuto || oldLens?.isZoomPreset != lens.isZoomPreset ||
+                            oldLens?.targetZoomRatio != lens.targetZoomRatio) {
+
                             currentLens = lens
                             updateLensUI()
-                            bindCameraUseCases()
+
+                            // If we just changed the binding (ID or Physical ID), rebind
+                            if (oldLens?.id != lens.id || oldLens?.physicalId != lens.physicalId) {
+                                bindCameraUseCases()
+                            } else if (lens.isZoomPreset || lens.isLogicalAuto) {
+                                // Just a zoom change on the same logical camera
+                                updateZoom(true)
+                            }
                         }
                     }
                 }
@@ -1902,7 +1915,9 @@ class CameraFragment : Fragment() {
             }
         }
 
-        binding.zoomControlsContainer?.visibility = if (currentLens?.isLogicalAuto == true) View.VISIBLE else View.GONE
+        // Show zoom buttons (1x, 2x) only in logical auto mode or if it's a zoom preset (which is also logical)
+        binding.zoomControlsContainer?.visibility =
+            if (currentLens?.isLogicalAuto == true || currentLens?.isZoomPreset == true) View.VISIBLE else View.GONE
     }
 
     private fun initZoomControls() {
@@ -1935,10 +1950,14 @@ class CameraFragment : Fragment() {
     }
 
     private fun updateZoom(animate: Boolean) {
-        // If we are NOT in logical auto mode, we might want to perform digital zoom on the physical sensor
-        // However, most users expect 1x/2x to switch physical lenses when in Auto.
-        // If a physical lens is locked, we'll allow digital zoom on it.
+        // Handle explicit Zoom Presets
+        if (currentLens?.isZoomPreset == true && currentLens?.targetZoomRatio != null) {
+            camera?.cameraControl?.setZoomRatio(currentLens!!.targetZoomRatio!!)
+            updateZoomUI(animate)
+            return
+        }
 
+        // Handle standard 1x/2x/Focal length switching
         val targetRatio = if (is2xMode) {
             2.0f
         } else {

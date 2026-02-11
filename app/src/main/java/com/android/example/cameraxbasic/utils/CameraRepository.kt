@@ -5,18 +5,22 @@ import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.os.Build
 import android.util.Log
+import android.util.Range
 import kotlin.math.sqrt
 
 data class LensInfo(
-    val id: String,          // The ID to use for CameraX binding (must be known to CameraX)
-    val physicalId: String?, // The physical ID to set via Camera2Interop (if locking a sensor)
-    val sensorId: String,    // A unique identifier for the physical sensor (for deduplication)
+    val id: String,          // The ID to use for CameraX binding
+    val physicalId: String?, // The physical ID to set via Camera2Interop
+    val sensorId: String,    // A unique identifier for the physical sensor
     val name: String,
     val focalLength: Float,
     val equivalentFocalLength: Float,
     val multiplier: Float,
     val type: LensType,
-    val isLogicalAuto: Boolean = false // True if this represents the system-controlled logical camera
+    val isLogicalAuto: Boolean = false,
+    val zoomRange: Range<Float>? = null,
+    val isZoomPreset: Boolean = false,
+    val targetZoomRatio: Float? = null
 )
 
 enum class LensType {
@@ -34,18 +38,20 @@ class CameraRepository(private val context: Context) {
         val availableLenses = mutableListOf<LensInfo>()
         val idToChars = mutableMapOf<String, CameraCharacteristics>()
 
-        // 1. Aggressive Probe to find all physical sensors and their characteristics
+        // 1. Aggressive Probe
         val probeIds = mutableSetOf<String>()
         probeIds.addAll(cameraManager.cameraIdList)
         for (i in 0..63) probeIds.add(i.toString())
 
         for (id in probeIds) {
             try {
-                idToChars[id] = cameraManager.getCameraCharacteristics(id)
+                val chars = cameraManager.getCameraCharacteristics(id)
+                idToChars[id] = chars
+                Log.d(TAG, "Probed ID $id: Facing=${chars.get(CameraCharacteristics.LENS_FACING)}")
             } catch (e: Exception) {}
         }
 
-        // 2. Find baseline Eq Focal (Wide) for multipliers
+        // 2. Baseline for Multipliers
         var mainWideEqFocal = 24f
         val backCameraIds = idToChars.filter { (_, chars) ->
             chars.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK
@@ -55,7 +61,7 @@ class CameraRepository(private val context: Context) {
             mainWideEqFocal = calculateEquivalentFocalLength(idToChars[id]!!)
         }
 
-        // 3. For each ID CameraX knows about, extract its capabilities
+        // 3. Process CameraX IDs
         for (id in cameraXIds) {
             val chars = idToChars[id] ?: continue
             val facing = chars.get(CameraCharacteristics.LENS_FACING)
@@ -65,53 +71,60 @@ class CameraRepository(private val context: Context) {
             val isLogical = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
                     capabilities?.contains(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_LOGICAL_MULTI_CAMERA) == true
 
-            val physicalIds = if (isLogical && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                chars.physicalCameraIds
-            } else emptySet()
+            val zoomRange = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                chars.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
+            } else null
 
             if (isLogical) {
-                // Add "Auto" lens for logical camera
-                availableLenses.add(createLensInfo(id, null, chars, mainWideEqFocal, isAuto = true))
+                // Add "Auto" lens
+                availableLenses.add(createLensInfo(id, null, chars, mainWideEqFocal, isAuto = true, zoomRange = zoomRange))
 
-                // Add each physical component
-                for (pId in physicalIds) {
-                    val pChars = idToChars[pId] ?: try {
-                        cameraManager.getCameraCharacteristics(pId)
-                    } catch (e: Exception) { null }
+                // Add common zoom presets for the logical camera
+                val presets = listOf(0.7f, 2.7f, 3.0f)
+                for (p in presets) {
+                    if (zoomRange == null || (p >= zoomRange.lower && p <= zoomRange.upper)) {
+                        availableLenses.add(createLensInfo(id, null, chars, mainWideEqFocal, name = "${p}x", isPreset = true, targetZoom = p))
+                    }
+                }
 
-                    if (pChars != null) {
-                        availableLenses.add(createLensInfo(id, pId, pChars, mainWideEqFocal))
+                // Add physical components
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    for (pId in chars.physicalCameraIds) {
+                        val pChars = idToChars[pId] ?: try {
+                            cameraManager.getCameraCharacteristics(pId)
+                        } catch (e: Exception) { null }
+
+                        if (pChars != null) {
+                            availableLenses.add(createLensInfo(id, pId, pChars, mainWideEqFocal))
+                        }
                     }
                 }
             } else {
-                // Independent Physical Camera
                 availableLenses.add(createLensInfo(id, null, chars, mainWideEqFocal))
             }
         }
 
-        // Deduplicate sensors by focal length if they have the same multiplier/name
-        // (sometimes same sensor is exposed multiple times)
-        val sortedLenses = availableLenses.sortedWith(compareBy({ !it.isLogicalAuto }, { it.equivalentFocalLength }))
-
-        val uniqueLenses = mutableListOf<LensInfo>()
-        for (lens in sortedLenses) {
-            if (lens.isLogicalAuto) {
-                uniqueLenses.add(lens)
-            } else {
-                // For physical lenses, try to avoid adding the same focal length twice if it belongs to the same bindId
-                if (uniqueLenses.none { it.id == lens.id && it.physicalId == lens.physicalId && !it.isLogicalAuto }) {
-                    uniqueLenses.add(lens)
-                }
-            }
-        }
-
-        return uniqueLenses
+        return availableLenses.sortedWith(compareBy(
+            { !it.isLogicalAuto },
+            { !it.isZoomPreset },
+            { it.targetZoomRatio ?: 0f },
+            { it.equivalentFocalLength }
+        ))
     }
 
-    private fun createLensInfo(id: String, physicalId: String?, chars: CameraCharacteristics, mainFocal35mm: Float, isAuto: Boolean = false): LensInfo {
+    private fun createLensInfo(
+        id: String,
+        physicalId: String?,
+        chars: CameraCharacteristics,
+        mainFocal35mm: Float,
+        isAuto: Boolean = false,
+        name: String? = null,
+        isPreset: Boolean = false,
+        targetZoom: Float? = null,
+        zoomRange: Range<Float>? = null
+    ): LensInfo {
         val eqFocal = calculateEquivalentFocalLength(chars)
-        val focalLengths = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
-        val f = if (focalLengths != null && focalLengths.isNotEmpty()) focalLengths[0] else 0f
+        val f = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.firstOrNull() ?: 0f
         val multiplier = eqFocal / mainFocal35mm
 
         val type = when {
@@ -120,10 +133,10 @@ class CameraRepository(private val context: Context) {
             else -> LensType.TELE
         }
 
-        val name = if (isAuto) "Auto" else String.format("%.1fx", multiplier)
-        val sensorId = physicalId ?: id
+        val finalName = name ?: if (isAuto) "Auto" else String.format("%.1fx", multiplier)
+        val sensorId = physicalId ?: "$id-${targetZoom ?: 0f}"
 
-        return LensInfo(id, physicalId, sensorId, name, f, eqFocal, multiplier, type, isAuto)
+        return LensInfo(id, physicalId, sensorId, finalName, f, eqFocal, multiplier, type, isAuto, zoomRange, isPreset, targetZoom)
     }
 
     private fun calculateEquivalentFocalLength(chars: CameraCharacteristics): Float {
