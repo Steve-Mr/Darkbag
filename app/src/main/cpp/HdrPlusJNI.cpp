@@ -9,6 +9,10 @@
 #include <future>
 #include <utility>
 #include <regex>
+#include <fstream>
+#include <sstream>
+#include <iostream>
+#include <cstdio>
 #include <android/bitmap.h>
 #include <libraw/libraw.h>
 #include <HalideBuffer.h>
@@ -197,7 +201,14 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_exportHdrPlus(
 
     g_hdrPlusBuffers.ensureCapacity(width, height, 1);
     std::vector<uint16_t>& finalImage = g_hdrPlusBuffers.interleavedPool;
-    in.read((char*)finalImage.data(), finalImage.size() * sizeof(uint16_t));
+    size_t dataSize = (size_t)width * height * 3;
+    in.read((char*)finalImage.data(), dataSize * sizeof(uint16_t));
+    if (!in) {
+        LOGE("Failed to read complete temp raw data. Read %zu bytes", in.gcount());
+        in.close();
+        env->ReleaseStringUTFChars(tempRawPath, temp_path_cstr);
+        return -1;
+    }
     in.close();
     // Delete temp file after reading
     std::remove(temp_path_cstr);
@@ -227,11 +238,14 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_exportHdrPlus(
 
     // Save DNG
     if (dng_path_cstr) {
-        write_dng(dng_path_cstr, width, height, finalImage, 65535, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation);
+        LOGD("Exporting DNG to %s", dng_path_cstr);
+        bool dng_ok = write_dng(dng_path_cstr, width, height, finalImage, 65535, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation);
+        if (!dng_ok) LOGE("Failed to write DNG: %s", dng_path_cstr);
     }
 
     // Save TIFF/BMP (High Quality Export path)
     if (tiff_path_cstr || jpg_path_cstr) {
+        LOGD("Exporting TIFF/JPG: TIFF=%s, JPG=%s", tiff_path_cstr ? tiff_path_cstr : "null", jpg_path_cstr ? jpg_path_cstr : "null");
         process_and_save_image(
             finalImage, width, height, digitalGain, targetLog, lut,
             tiff_path_cstr, jpg_path_cstr,
@@ -516,12 +530,17 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     if (temp_raw_path_cstr) {
         std::ofstream out(temp_raw_path_cstr, std::ios::binary);
         if (out.is_open()) {
-            out.write((char*)finalImage.data(), finalImage.size() * sizeof(unsigned short));
+            size_t dataSize = (size_t)width * height * 3;
+            out.write((char*)finalImage.data(), dataSize * sizeof(unsigned short));
             out.close();
-            LOGD("Saved intermediate RAW to %s", temp_raw_path_cstr);
+            LOGD("Saved intermediate RAW to %s (%zu bytes)", temp_raw_path_cstr, dataSize * 2);
+        } else {
+            LOGE("Failed to open temp raw file for writing: %s", temp_raw_path_cstr);
         }
         env->ReleaseStringUTFChars(tempRawPath, temp_raw_path_cstr);
     }
+
+    LOGD("hasBgTasks: %d, runAsync: %d, jpgPath: %s", hasBgTasks, runAsync, jpgPathStr.c_str());
 
     if (hasBgTasks) {
         // Since we are using g_hdrPlusBuffers.interleavedPool, we must COPY it
