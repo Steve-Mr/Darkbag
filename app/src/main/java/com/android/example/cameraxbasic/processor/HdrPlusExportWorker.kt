@@ -1,13 +1,15 @@
 package com.android.example.cameraxbasic.processor
 
 import android.content.Context
+import android.net.Uri
 import android.util.Log
-import androidx.work.Worker
+import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
+import com.android.example.cameraxbasic.utils.ImageSaver
 
-class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Worker(context, params) {
+class HdrPlusExportWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
 
-    override fun doWork(): Result {
+    override suspend fun doWork(): Result {
         val tempRawPath = inputData.getString("tempRawPath") ?: return Result.failure()
         val width = inputData.getInt("width", 0)
         val height = inputData.getInt("height", 0)
@@ -49,9 +51,29 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Worker(c
         )
 
         return if (ret == 0) {
-            Log.d(TAG, "Background Export Worker finished successfully for $baseName")
-            // Notify completion via same flow as JNI background thread for MediaStore consistency
-            ColorProcessor.onBackgroundSaveComplete(baseName, tiffPath, dngPath, jpgPath, targetUri, zoomFactor, orientation, saveTiff, saveJpg)
+            Log.d(TAG, "Background Export Worker finished JNI processing for $baseName")
+
+            // Robustly finalize MediaStore export directly from Worker
+            val finalUri = ImageSaver.saveProcessedImage(
+                applicationContext,
+                null,
+                jpgPath,
+                orientation,
+                zoomFactor,
+                baseName,
+                dngPath,
+                tiffPath,
+                saveJpg,
+                saveTiff,
+                targetUri?.let { Uri.parse(it) }
+            )
+
+            Log.d(TAG, "Background Export Worker finished successfully for $baseName. finalUri=$finalUri")
+
+            // Still notify UI for thumbnail update if possible
+            ColorProcessor.onBackgroundSaveComplete(
+                baseName, tiffPath, dngPath, jpgPath, targetUri, zoomFactor, orientation, saveTiff, saveJpg
+            )
             Result.success()
         } else {
             Log.e(TAG, "Background Export Worker failed with code $ret")

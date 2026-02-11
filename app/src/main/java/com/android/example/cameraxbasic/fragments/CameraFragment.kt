@@ -61,8 +61,10 @@ import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.TotalCaptureResult
 import androidx.concurrent.futures.await
+import com.android.example.cameraxbasic.MainApplication
 import com.android.example.cameraxbasic.processor.ColorProcessor
 import com.android.example.cameraxbasic.processor.HdrPlusExportWorker
+import com.android.example.cameraxbasic.utils.ImageSaver
 import java.io.File
 import java.io.FileOutputStream
 import android.net.Uri
@@ -389,14 +391,22 @@ class CameraFragment : Fragment() {
             }
         )
 
-        // Listen for background save completions from JNI
+        // Listen for background save completions from JNI or WorkManager
+        // This collector now primarily handles UI updates (thumbnails)
+        // because WorkManager-based export handles its own MediaStore saving.
         viewLifecycleOwner.lifecycleScope.launch {
             ColorProcessor.backgroundSaveFlow.collect { event ->
                 Log.d(TAG, "Received background save complete event: ${event.baseName}")
-                withContext(Dispatchers.IO) {
+
+                // If it's a legacy JNI async task, we still need to save it to MediaStore here.
+                // If it's from WorkManager, the saving is already done, but we don't know for sure.
+                // However, saveProcessedImage is idempotent-ish (it will update or insert).
+                // To be safe and robust, we run it in applicationScope.
+
+                (requireContext().applicationContext as MainApplication).applicationScope.launch(Dispatchers.IO) {
                     try {
-                        val finalUri = saveProcessedImage(
-                            requireContext(),
+                        val finalUri = ImageSaver.saveProcessedImage(
+                            requireContext().applicationContext,
                             null,
                             event.jpgPath,
                             event.orientation,
@@ -421,11 +431,11 @@ class CameraFragment : Fragment() {
             }
         }
 
-        // Start processing consumer
-        viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
+        // Start processing consumer using applicationScope to ensure it finishes if fragment is closed
+        (requireContext().applicationContext as MainApplication).applicationScope.launch(Dispatchers.IO) {
             for (holder in processingChannel) {
                 try {
-                    processImageAsync(requireContext(), holder)
+                    processImageAsync(requireContext().applicationContext, holder)
                 } catch (e: Exception) {
                     Log.e(TAG, "Error processing image from channel", e)
                 } finally {
@@ -1077,7 +1087,7 @@ class CameraFragment : Fragment() {
 
     @androidx.annotation.OptIn(androidx.camera.camera2.interop.ExperimentalCamera2Interop::class)
     private suspend fun processImageAsync(context: Context, image: RawImageHolder) =
-        kotlinx.coroutines.withContext(Dispatchers.IO) {
+        withContext(Dispatchers.IO) {
             try {
                 val contentResolver = context.contentResolver
                 val dngName =
@@ -1221,8 +1231,8 @@ class CameraFragment : Fragment() {
                     // Passing rotationDegrees caused double rotation or unwanted rotation.
                     // We pass 0 for rotation here to match original behavior.
 
-                    // Note: `saveProcessedImage` is suspending.
-                    val finalJpgUri = saveProcessedImage(
+                    // Note: `ImageSaver.saveProcessedImage` is suspending.
+                    val finalJpgUri = ImageSaver.saveProcessedImage(
                         context,
                         null,
                         bmpPath,
@@ -1339,243 +1349,6 @@ class CameraFragment : Fragment() {
         }
 
 
-    /**
-     * Shared helper to handle Bitmap post-processing (Rotate, Crop, Compress) and Saving (JPG, TIFF, LinearDNG).
-     * Deletes input temp files after saving.
-     */
-    /**
-     * Helper to encapsulate MediaStore JPEG saving/updating.
-     */
-    private fun saveJpegToMediaStore(
-        context: Context,
-        displayName: String,
-        targetUri: Uri?,
-        width: Int? = null,
-        height: Int? = null,
-        writeData: (java.io.OutputStream) -> Unit
-    ): Uri? {
-        val contentResolver = context.contentResolver
-        val jpgValues = ContentValues().apply {
-            put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
-            put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/Darkbag")
-                put(MediaStore.MediaColumns.IS_PENDING, 1)
-            }
-            width?.let { put(MediaStore.MediaColumns.WIDTH, it) }
-            height?.let { put(MediaStore.MediaColumns.HEIGHT, it) }
-        }
-
-        var uri = targetUri
-        val isReplacement = uri != null
-
-        if (uri == null) {
-            uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, jpgValues)
-        } else {
-            contentResolver.update(uri, jpgValues, null, null)
-        }
-
-        if (uri != null) {
-            try {
-                contentResolver.openOutputStream(uri, "wt")?.use { out ->
-                    writeData(out)
-                }
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    jpgValues.clear()
-                    jpgValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
-                    contentResolver.update(uri, jpgValues, null, null)
-                }
-                if (isReplacement) {
-                    Log.i(TAG, "Replaced JPEG at $uri")
-                } else {
-                    Log.i(TAG, "Saved JPEG to $uri")
-                }
-                return uri
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to write JPEG to MediaStore", e)
-                if (!isReplacement) contentResolver.delete(uri, null, null)
-            }
-        }
-        return null
-    }
-
-    /**
-     * Shared helper to handle Bitmap post-processing (Rotate, Crop, Compress) and Saving (JPG, TIFF, LinearDNG).
-     * Deletes input temp files after saving.
-     */
-    private suspend fun saveProcessedImage(
-        context: Context,
-        inputBitmap: android.graphics.Bitmap?,
-        bmpPath: String?,
-        rotationDegrees: Int,
-        zoomFactor: Float,
-        baseName: String,
-        linearDngPath: String?,
-        tiffPath: String?,
-        saveJpg: Boolean,
-        saveTiff: Boolean,
-        targetUri: Uri? = null,
-        onBitmapReady: ((android.graphics.Bitmap) -> Unit)? = null
-    ): Uri? {
-        val contentResolver = context.contentResolver
-        var finalJpgUri: Uri? = null
-
-        // 1. Process Input Bitmap or JPEG File from JNI -> Final MediaStore JPG
-        if (inputBitmap != null || bmpPath != null) {
-            val isNativeJpeg = bmpPath != null && bmpPath.endsWith(".jpg")
-            val needsBitmapProcessing = rotationDegrees != 0 || zoomFactor > 1.05f || inputBitmap != null
-
-            if (isNativeJpeg && !needsBitmapProcessing && saveJpg) {
-                // FAST PATH: Directly use JNI-generated JPEG
-                finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri) { out ->
-                    File(bmpPath!!).inputStream().use { it.copyTo(out) }
-                }
-                File(bmpPath!!).delete()
-            } else {
-                // SLOW PATH: Decode, Rotate, Crop, Encode
-                var processedBitmap: android.graphics.Bitmap? = null
-                if (inputBitmap != null) {
-                    processedBitmap = inputBitmap
-                } else if (bmpPath != null) {
-                    processedBitmap = BitmapFactory.decodeFile(bmpPath)
-                }
-
-                try {
-                    // Rotate if needed
-                    if (processedBitmap != null && rotationDegrees != 0) {
-                        val matrix = android.graphics.Matrix()
-                        matrix.postRotate(rotationDegrees.toFloat())
-                        val rotated = android.graphics.Bitmap.createBitmap(
-                            processedBitmap, 0, 0, processedBitmap.width, processedBitmap.height, matrix, true
-                        )
-                        if (rotated != processedBitmap) {
-                            processedBitmap.recycle()
-                            processedBitmap = rotated
-                        }
-                    }
-
-                    // Crop if needed (Digital Zoom)
-                    if (processedBitmap != null && zoomFactor > 1.05f) {
-                        val newWidth = (processedBitmap.width / zoomFactor).toInt()
-                        val newHeight = (processedBitmap.height / zoomFactor).toInt()
-                        val x = (processedBitmap.width - newWidth) / 2
-                        val y = (processedBitmap.height - newHeight) / 2
-                        val safeX = max(0, x)
-                        val safeY = max(0, y)
-                        val safeWidth = min(newWidth, processedBitmap.width - safeX)
-                        val safeHeight = min(newHeight, processedBitmap.height - safeY)
-
-                        val croppedBitmap = android.graphics.Bitmap.createBitmap(
-                            processedBitmap, safeX, safeY, safeWidth, safeHeight
-                        )
-                        if (croppedBitmap != processedBitmap) {
-                            processedBitmap.recycle()
-                            processedBitmap = croppedBitmap
-                        }
-                    }
-
-                    // Invoke callback for thumbnail generation or other usage before compression/recycling
-                    if (processedBitmap != null) {
-                        onBitmapReady?.invoke(processedBitmap)
-                    }
-
-                    // Save JPG
-                    if (saveJpg) {
-                        finalJpgUri = saveJpegToMediaStore(
-                            context,
-                            "$baseName.jpg",
-                            targetUri,
-                            processedBitmap?.width,
-                            processedBitmap?.height
-                        ) { out ->
-                            processedBitmap?.compress(android.graphics.Bitmap.CompressFormat.JPEG, 95, out)
-                        }
-                    }
-                } catch (t: Throwable) {
-                    Log.e(TAG, "Error processing bitmap", t)
-                } finally {
-                    processedBitmap?.recycle()
-                    if (inputBitmap != null && processedBitmap != inputBitmap) {
-                        inputBitmap.recycle()
-                    }
-                    // Cleanup BMP if it was used
-                    bmpPath?.let { File(it).delete() }
-                }
-            }
-        }
-
-    // 2. Save TIFF
-        if (saveTiff && tiffPath != null) {
-            val tiffFile = File(tiffPath)
-            if (tiffFile.exists()) {
-                val tiffValues = ContentValues().apply {
-                    put(MediaStore.MediaColumns.DISPLAY_NAME, "$baseName.tiff")
-                    put(MediaStore.MediaColumns.MIME_TYPE, "image/tiff")
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                        put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/Darkbag")
-                        put(MediaStore.MediaColumns.IS_PENDING, 1)
-                    }
-                }
-                val tiffUri = contentResolver.insert(
-                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                    tiffValues
-                )
-                if (tiffUri != null) {
-                    try {
-                        contentResolver.openOutputStream(tiffUri)?.use { out ->
-                            java.io.FileInputStream(tiffFile).copyTo(out)
-                        }
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                            tiffValues.clear()
-                            tiffValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
-                            contentResolver.update(tiffUri, tiffValues, null, null)
-                        }
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Failed to save TIFF", e)
-                        contentResolver.delete(tiffUri, null, null)
-                    }
-                }
-                tiffFile.delete()
-            }
-        }
-
-        // 3. Save Linear DNG (HDR+ only usually)
-        if (linearDngPath != null) {
-            val dngFile = File(linearDngPath)
-            if (dngFile.exists()) {
-                val dngValues = ContentValues().apply {
-                    put(MediaStore.MediaColumns.DISPLAY_NAME, "${baseName}_linear.dng")
-                    put(MediaStore.MediaColumns.MIME_TYPE, "image/x-adobe-dng")
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                        put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/Darkbag")
-                        put(MediaStore.MediaColumns.IS_PENDING, 1)
-                    }
-                }
-                val dngUri = contentResolver.insert(
-                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                    dngValues
-                )
-                if (dngUri != null) {
-                    try {
-                        contentResolver.openOutputStream(dngUri)?.use { out ->
-                            java.io.FileInputStream(dngFile).copyTo(out)
-                        }
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                            dngValues.clear()
-                            dngValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
-                            contentResolver.update(dngUri, dngValues, null, null)
-                        }
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Failed to save Linear DNG", e)
-                        contentResolver.delete(dngUri, null, null)
-                    }
-                }
-                dngFile.delete()
-            }
-        }
-
-        return finalJpgUri
-    }
 
     private fun setupTapToFocus() {
         // Use DisplayOrientedMeteringPointFactory with explicit inputs since we removed PreviewView
@@ -2391,14 +2164,12 @@ class CameraFragment : Fragment() {
         val currentZoom = if (is2xMode) 2.0f else (currentFocalLength / 24.0f)
         val startTime = burstStartTime
         val captureEndTime = System.currentTimeMillis()
+        val appContext = context?.applicationContext ?: return
 
-        lifecycleScope.launch(Dispatchers.IO) {
+        (appContext as MainApplication).applicationScope.launch(Dispatchers.IO) {
             var fallbackSent = false
             try {
-                val context = context ?: run {
-                    Log.w(TAG, "processHdrPlusBurst aborted: Fragment context is null.")
-                    return@launch
-                }
+                val context = appContext
 
                 Log.d(TAG, "processHdrPlusBurst started with ${frames.size} frames. DigitalGain=$digitalGain")
 
@@ -2541,7 +2312,7 @@ class CameraFragment : Fragment() {
                     val saveStartTime = System.currentTimeMillis()
 
                     // Save the FAST (downsampled) JPEG immediately to UI and MediaStore
-                    val finalJpgUri = saveProcessedImage(
+                    val finalJpgUri = ImageSaver.saveProcessedImage(
                         context,
                         null,
                         tempJpgFile.absolutePath,
