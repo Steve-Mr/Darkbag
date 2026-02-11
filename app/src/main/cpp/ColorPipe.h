@@ -53,7 +53,9 @@ void process_and_save_image(
     const float* ccm = nullptr,
     const float* wb = nullptr,
     int orientation = 0,
-    unsigned char* out_rgb_buffer = nullptr
+    unsigned char* out_rgb_buffer = nullptr,
+    bool isPreview = false,
+    int downsampleFactor = 1
 );
 
 // --- File Writers ---
@@ -63,5 +65,7 @@ bool write_tiff(const char* filename, int width, int height, const std::vector<u
 bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, int iso, long exposureTime, float fNumber, float focalLength, long captureTimeMillis, const std::vector<float>& ccm, int orientation);
 
 bool write_bmp(const char* filename, int width, int height, const std::vector<unsigned short>& data);
+
+bool write_jpeg(const char* filename, int width, int height, const std::vector<unsigned short>& data, int quality);
 
 #endif // COLOR_PIPE_H

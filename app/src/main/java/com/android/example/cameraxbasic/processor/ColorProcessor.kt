@@ -11,11 +11,18 @@ object ColorProcessor {
 
     val backgroundSaveFlow = MutableSharedFlow<BackgroundSaveEvent>(extraBufferCapacity = 10)
 
+    external fun initMemoryPool(width: Int, height: Int, frames: Int)
+
     data class BackgroundSaveEvent(
         val baseName: String,
         val tiffPath: String?,
         val dngPath: String?,
-        val saveTiff: Boolean
+        val jpgPath: String?,
+        val targetUri: String?,
+        val zoomFactor: Float,
+        val orientation: Int,
+        val saveTiff: Boolean,
+        val saveJpg: Boolean
     )
 
     /**
@@ -55,10 +62,35 @@ object ColorProcessor {
         baseName: String,
         tiffPath: String?,
         dngPath: String?,
-        saveTiff: Boolean
+        jpgPath: String?,
+        targetUri: String?,
+        zoomFactor: Float,
+        orientation: Int,
+        saveTiff: Boolean,
+        saveJpg: Boolean
     ) {
-        backgroundSaveFlow.tryEmit(BackgroundSaveEvent(baseName, tiffPath, dngPath, saveTiff))
+        backgroundSaveFlow.tryEmit(BackgroundSaveEvent(baseName, tiffPath, dngPath, jpgPath, targetUri, zoomFactor, orientation, saveTiff, saveJpg))
     }
+
+    external fun exportHdrPlus(
+        tempRawPath: String,
+        width: Int,
+        height: Int,
+        orientation: Int,
+        digitalGain: Float,
+        targetLog: Int,
+        lutPath: String?,
+        tiffPath: String?,
+        jpgPath: String?,
+        dngPath: String?,
+        iso: Int,
+        exposureTime: Long,
+        fNumber: Float,
+        focalLength: Float,
+        captureTimeMillis: Long,
+        ccm: FloatArray,
+        whiteBalance: FloatArray
+    ): Int
 
     external fun processHdrPlus(
         dngBuffers: Array<ByteBuffer>,
@@ -81,8 +113,9 @@ object ColorProcessor {
         outputJpgPath: String?,
         outputDngPath: String?,
         digitalGain: Float,
-        debugStats: LongArray?, // [0] Halide, [1] Copy, [2] Post, [3] DNG Encode, [4] Save, [5] DNG Wait, [6] Total, [7] Align, [8] Merge, [9] Demosaic, [10] Denoise, [11] sRGB
+        debugStats: LongArray?, // [0] Halide, [1] Copy, [2] Post, [3] DNG Encode, [4] Save, [5] DNG Wait, [6] Total, [7] Align, [8] Merge, [9] Demosaic, [10] Denoise, [11] sRGB, [12] JNI Prep, [13] BlackWhite, [14] WB
         outputBitmap: android.graphics.Bitmap? = null,
-        isAsync: Boolean = false
+        isAsync: Boolean = false,
+        tempRawPath: String? = null
     ): Int
 }

@@ -8,6 +8,11 @@
 #include <thread>
 #include <future>
 #include <utility>
+#include <regex>
+#include <fstream>
+#include <sstream>
+#include <iostream>
+#include <cstdio>
 #include <android/bitmap.h>
 #include <libraw/libraw.h>
 #include <HalideBuffer.h>
@@ -34,6 +39,8 @@ extern "C" void halide_print(void* user_context, const char* str) {
 struct HalideStageStats {
     long align = 0;
     long merge = 0;
+    long black_white = 0;
+    long white_balance = 0;
     long demosaic = 0;
     long denoise = 0;
     long srgb = 0;
@@ -41,35 +48,26 @@ struct HalideStageStats {
 
 HalideStageStats parseHalideReport(const std::string& report) {
     HalideStageStats stats;
+    std::regex re("([\\w\\.]+):\\s*([\\d\\.]+)(ms|s)");
+    std::smatch match;
+
     std::string line;
     std::stringstream ss(report);
     while (std::getline(ss, line)) {
-        // Simple heuristic: look for Func names and extract ms
-        // Halide profiler output format: "  <func_name>: <time>ms (<percentage>%)"
-        auto extract_ms = [&](const std::string& key) -> long {
-            if (line.find(key) != std::string::npos) {
-                size_t colon = line.find(':');
-                if (colon != std::string::npos) {
-                    size_t ms_pos = line.find("ms", colon);
-                    if (ms_pos != std::string::npos) {
-                        std::string val_str = line.substr(colon + 1, ms_pos - colon - 1);
-                        try {
-                            return (long)std::stof(val_str);
-                        } catch (...) { return 0; }
-                    }
-                }
-            }
-            return -1;
-        };
+        if (std::regex_search(line, match, re)) {
+            std::string name = match[1].str();
+            float val = std::stof(match[2].str());
+            std::string unit = match[3].str();
+            long ms = (unit == "s") ? (long)(val * 1000) : (long)val;
 
-        long ms;
-        if ((ms = extract_ms("alignment")) != -1) { stats.align += ms; continue; }
-        if ((ms = extract_ms("merge_")) != -1) { stats.merge += ms; continue; }
-        if ((ms = extract_ms("layer_")) != -1) { stats.align += ms; continue; } // Catch layer_0, layer_1, etc.
-        if ((ms = extract_ms("demosaic_")) != -1) { stats.demosaic += ms; continue; }
-        if ((ms = extract_ms("bilateral")) != -1) { stats.denoise += ms; continue; }
-        if ((ms = extract_ms("desaturate_noise")) != -1) { stats.denoise += ms; continue; }
-        if ((ms = extract_ms("srgb_output")) != -1) { stats.srgb += ms; continue; }
+            if (name.find("alignment") != std::string::npos || name.find("layer_") != std::string::npos) stats.align += ms;
+            else if (name.find("merge_") != std::string::npos) stats.merge += ms;
+            else if (name.find("black_white_level") != std::string::npos) stats.black_white += ms;
+            else if (name.find("white_balance") != std::string::npos) stats.white_balance += ms;
+            else if (name.find("demosaic") != std::string::npos) stats.demosaic += ms;
+            else if (name.find("bilateral") != std::string::npos || name.find("desaturate_noise") != std::string::npos) stats.denoise += ms;
+            else if (name.find("srgb_output") != std::string::npos) stats.srgb += ms;
+        }
     }
     return stats;
 }
@@ -83,6 +81,7 @@ void fillDebugStats(JNIEnv* env,
                     jlong saveMs,
                     jlong dngJoinWaitMs,
                     jlong totalMs,
+                    jlong jniOverheadMs,
                     const HalideStageStats& stageStats) {
     if (debugStats == nullptr) return;
     const jsize len = env->GetArrayLength(debugStats);
@@ -101,7 +100,10 @@ void fillDebugStats(JNIEnv* env,
     // [9] Stage: Demosaic
     // [10] Stage: Denoise
     // [11] Stage: sRGB
-    jlong stats[12] = {
+    // [12] JNI Overhead
+    // [13] Stage: BlackWhite
+    // [14] Stage: WB
+    jlong stats[15] = {
             halideMs,
             copyMs,
             postProcessMs,
@@ -113,11 +115,35 @@ void fillDebugStats(JNIEnv* env,
             stageStats.merge,
             stageStats.demosaic,
             stageStats.denoise,
-            stageStats.srgb
+            stageStats.srgb,
+            jniOverheadMs,
+            stageStats.black_white,
+            stageStats.white_balance
     };
 
-    env->SetLongArrayRegion(debugStats, 0, std::min<jsize>(len, 12), stats);
+    env->SetLongArrayRegion(debugStats, 0, std::min<jsize>(len, 15), stats);
 }
+
+struct GlobalBuffers {
+    Buffer<uint16_t> inputPool;
+    Buffer<uint16_t> outputPool;
+    std::vector<uint16_t> interleavedPool;
+    bool isInitialized = false;
+
+    void ensureCapacity(int w, int h, int frames) {
+        if (!isInitialized || inputPool.width() < w || inputPool.height() < h || inputPool.dim(2).extent() < frames) {
+            // Allocate new buffers. Note: Halide buffers do not zero-initialize by default.
+            inputPool = Buffer<uint16_t>(w, h, frames);
+            outputPool = Buffer<uint16_t>(w, h, 3);
+            interleavedPool.resize(static_cast<size_t>(w) * h * 3);
+            isInitialized = true;
+            LOGD("Memory pool (re)allocated: %d x %d x %d", w, h, frames);
+        }
+    }
+};
+
+GlobalBuffers g_hdrPlusBuffers;
+
 } // namespace
 
 extern "C" jint JNI_OnLoad(JavaVM* vm, void* reserved) {
@@ -127,6 +153,113 @@ extern "C" jint JNI_OnLoad(JavaVM* vm, void* reserved) {
     jclass clazz = env->FindClass("com/android/example/cameraxbasic/processor/ColorProcessor");
     if (clazz) g_colorProcessorClass = (jclass)env->NewGlobalRef(clazz);
     return JNI_VERSION_1_6;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_android_example_cameraxbasic_processor_ColorProcessor_initMemoryPool(
+        JNIEnv* env,
+        jobject /* this */,
+        jint width,
+        jint height,
+        jint frames
+) {
+    LOGD("Initializing memory pool: %dx%d, %d frames", width, height, frames);
+    g_hdrPlusBuffers.ensureCapacity(width, height, frames);
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_android_example_cameraxbasic_processor_ColorProcessor_exportHdrPlus(
+        JNIEnv* env,
+        jobject /* this */,
+        jstring tempRawPath,
+        jint width,
+        jint height,
+        jint orientation,
+        jfloat digitalGain,
+        jint targetLog,
+        jstring lutPath,
+        jstring tiffPath,
+        jstring jpgPath,
+        jstring dngPath,
+        jint iso,
+        jlong exposureTime,
+        jfloat fNumber,
+        jfloat focalLength,
+        jlong captureTimeMillis,
+        jfloatArray ccm,
+        jfloatArray whiteBalance
+) {
+    LOGD("Native exportHdrPlus started.");
+
+    const char* temp_path_cstr = env->GetStringUTFChars(tempRawPath, 0);
+    std::ifstream in(temp_path_cstr, std::ios::binary);
+    if (!in.is_open()) {
+        LOGE("Failed to open temp raw file: %s", temp_path_cstr);
+        env->ReleaseStringUTFChars(tempRawPath, temp_path_cstr);
+        return -1;
+    }
+
+    g_hdrPlusBuffers.ensureCapacity(width, height, 1);
+    std::vector<uint16_t>& finalImage = g_hdrPlusBuffers.interleavedPool;
+    size_t dataSize = (size_t)width * height * 3;
+    in.read((char*)finalImage.data(), dataSize * sizeof(uint16_t));
+    if (!in) {
+        LOGE("Failed to read complete temp raw data. Read %zu bytes", in.gcount());
+        in.close();
+        env->ReleaseStringUTFChars(tempRawPath, temp_path_cstr);
+        return -1;
+    }
+    in.close();
+    // Delete temp file after reading
+    std::remove(temp_path_cstr);
+    env->ReleaseStringUTFChars(tempRawPath, temp_path_cstr);
+
+    // Prepare Metadata
+    jfloat* wbData = env->GetFloatArrayElements(whiteBalance, nullptr);
+    std::vector<float> wbVec = {wbData[0], wbData[1], wbData[2], wbData[3]};
+    env->ReleaseFloatArrayElements(whiteBalance, wbData, JNI_ABORT);
+
+    jfloat* ccmData = env->GetFloatArrayElements(ccm, nullptr);
+    std::vector<float> ccmVec(9);
+    for(int i=0; i<9; ++i) ccmVec[i] = ccmData[i];
+    env->ReleaseFloatArrayElements(ccm, ccmData, JNI_ABORT);
+
+    // Load LUT
+    const char* lut_path_cstr = (lutPath) ? env->GetStringUTFChars(lutPath, 0) : nullptr;
+    LUT3D lut;
+    if (lut_path_cstr) {
+        lut = load_lut(lut_path_cstr);
+        env->ReleaseStringUTFChars(lutPath, lut_path_cstr);
+    }
+
+    const char* tiff_path_cstr = (tiffPath) ? env->GetStringUTFChars(tiffPath, 0) : nullptr;
+    const char* jpg_path_cstr = (jpgPath) ? env->GetStringUTFChars(jpgPath, 0) : nullptr;
+    const char* dng_path_cstr = (dngPath) ? env->GetStringUTFChars(dngPath, 0) : nullptr;
+
+    // Save DNG
+    if (dng_path_cstr) {
+        LOGD("Exporting DNG to %s", dng_path_cstr);
+        bool dng_ok = write_dng(dng_path_cstr, width, height, finalImage, 65535, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation);
+        if (!dng_ok) LOGE("Failed to write DNG: %s", dng_path_cstr);
+    }
+
+    // Save TIFF/BMP (High Quality Export path)
+    if (tiff_path_cstr || jpg_path_cstr) {
+        LOGD("Exporting TIFF/JPG: TIFF=%s, JPG=%s", tiff_path_cstr ? tiff_path_cstr : "null", jpg_path_cstr ? jpg_path_cstr : "null");
+        process_and_save_image(
+            finalImage, width, height, digitalGain, targetLog, lut,
+            tiff_path_cstr, jpg_path_cstr,
+            1, ccmVec.data(), wbVec.data(), orientation, nullptr,
+            false, 1 // Not preview, no downsample
+        );
+    }
+
+    if (tiffPath) env->ReleaseStringUTFChars(tiffPath, tiff_path_cstr);
+    if (jpgPath) env->ReleaseStringUTFChars(jpgPath, jpg_path_cstr);
+    if (dngPath) env->ReleaseStringUTFChars(dngPath, dng_path_cstr);
+
+    LOGD("Native exportHdrPlus finished.");
+    return 0;
 }
 
 extern "C" JNIEXPORT jint JNICALL
@@ -155,11 +288,13 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
         jfloat digitalGain,
         jlongArray debugStats,
         jobject outputBitmap,
-        jboolean isAsync
+        jboolean isAsync,
+        jstring tempRawPath
 ) {
     LOGD("Native processHdrPlus started.");
     auto nativeStart = std::chrono::high_resolution_clock::now();
 
+    auto jniPrepStart = std::chrono::high_resolution_clock::now();
     int numFrames = env->GetArrayLength(dngBuffers);
     if (numFrames < 2) {
         LOGE("HDR+ requires at least 2 frames.");
@@ -168,7 +303,9 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     LOGD("Processing %d frames.", numFrames);
 
     // 1. Prepare Inputs for Halide
-    std::vector<uint16_t> rawData(width * height * numFrames);
+    g_hdrPlusBuffers.ensureCapacity(width, height, numFrames);
+    uint16_t* rawDataPtr = g_hdrPlusBuffers.inputPool.data();
+
     std::vector<uint16_t*> framePtrs(numFrames, nullptr);
 
     for (int i = 0; i < numFrames; i++) {
@@ -186,12 +323,12 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     auto copyStart = std::chrono::high_resolution_clock::now();
     #pragma omp parallel for
     for (int i = 0; i < numFrames; i++) {
-        std::memcpy(rawData.data() + (static_cast<size_t>(i) * width * height), framePtrs[i], frameSizeBytes);
+        std::memcpy(rawDataPtr + (static_cast<size_t>(i) * width * height), framePtrs[i], frameSizeBytes);
     }
     auto copyEnd = std::chrono::high_resolution_clock::now();
     auto copyDurationMs = std::chrono::duration_cast<std::chrono::milliseconds>(copyEnd - copyStart).count();
 
-    Buffer<uint16_t> inputBuf(rawData.data(), width, height, numFrames);
+    Buffer<uint16_t> inputBuf = g_hdrPlusBuffers.inputPool;
 
     // 2. Prepare Metadata
     jfloat* wbData = env->GetFloatArrayElements(whiteBalance, nullptr);
@@ -218,7 +355,9 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     Buffer<float> ccmHalideBuf(identityCCM.data(), 3, 3);
 
     // 3. Prepare Output Buffer (16-bit Linear RGB)
-    Buffer<uint16_t> outputBuf(width, height, 3);
+    Buffer<uint16_t> outputBuf = g_hdrPlusBuffers.outputPool;
+    auto jniPrepEnd = std::chrono::high_resolution_clock::now();
+    auto jniPrepMs = std::chrono::duration_cast<std::chrono::milliseconds>(jniPrepEnd - jniPrepStart).count();
 
     // 4. Run Pipeline
     float compression = 1.0f; // Unused now in our modified generator
@@ -295,7 +434,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
 
     // Process Output
     // finalImage: Linear RGB (clipped) for DNG
-    std::vector<unsigned short> finalImage(width * height * 3);
+    std::vector<uint16_t>& finalImage = g_hdrPlusBuffers.interleavedPool;
 
     // Halide Output is Planar x, y, c
     int stride_x = outputBuf.dim(0).stride();
@@ -354,7 +493,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     // Save Processed Images (Log/LUT Path)
     auto saveStart = std::chrono::high_resolution_clock::now();
 
-    // 1. Synchronous Processing for Bitmap (Fast path for JPEG/Preview)
+    // 1. Synchronous Processing for Bitmap (Legacy Preview)
     if (bitmapPixels) {
         process_and_save_image(
             finalImage,
@@ -369,13 +508,11 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
             ccmVec.data(),
             wbVec.data(),
             orientation,
-            bitmapPixels
+            bitmapPixels,
+            true, 4 // Fast preview, 4x downsample
         );
         AndroidBitmap_unlockPixels(env, outputBitmap);
     }
-
-    auto saveEnd = std::chrono::high_resolution_clock::now();
-    auto saveDurationMs = std::chrono::duration_cast<std::chrono::milliseconds>(saveEnd - saveStart).count();
 
     // 2. Background I/O for TIFF, BMP, and DNG
     // We move the heavy I/O to a background thread and return to Java immediately.
@@ -389,9 +526,37 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     bool runAsync = (bool)isAsync;
     bool hasBgTasks = !tiffPathStr.empty() || !jpgPathStr.empty() || !dngPathStr.empty();
 
+    const char* temp_raw_path_cstr = (tempRawPath) ? env->GetStringUTFChars(tempRawPath, 0) : nullptr;
+    if (temp_raw_path_cstr) {
+        std::ofstream out(temp_raw_path_cstr, std::ios::binary);
+        if (out.is_open()) {
+            size_t dataSize = (size_t)width * height * 3;
+            out.write((char*)finalImage.data(), dataSize * sizeof(unsigned short));
+            out.close();
+            LOGD("Saved intermediate RAW to %s (%zu bytes)", temp_raw_path_cstr, dataSize * 2);
+        } else {
+            LOGE("Failed to open temp raw file for writing: %s", temp_raw_path_cstr);
+        }
+        env->ReleaseStringUTFChars(tempRawPath, temp_raw_path_cstr);
+    }
+
+    LOGD("hasBgTasks: %d, runAsync: %d, jpgPath: %s", hasBgTasks, runAsync, jpgPathStr.c_str());
+
     if (hasBgTasks) {
+        // Since we are using g_hdrPlusBuffers.interleavedPool, we must COPY it
+        // if we are running in background to avoid it being overwritten by the next capture.
+        // However, the user wants "High Speed", and we have a Semaphore(2) in Kotlin.
+        // If we use WorkManager, the data is already saved to disk as tempRaw.
+        // So we don't need finalImage in the closure if we only use it for saving tempRaw.
+
+        // Wait, saveFunc currently uses finalImage for DNG and TIFF saving.
+        // If we use HQ Background Export (WorkManager), tiffPathStr and dngPathStr will be empty here.
+        // Let's check CameraFragment.kt.
+
         auto saveFunc = [
-            finalImage = std::move(finalImage), // Move large buffer
+            finalImageData = runAsync ? finalImage : std::vector<uint16_t>(), // Only copy if async
+            runAsync,
+            &finalImage, // Capture by reference for synchronous path
             width, height, digitalGain, targetLog, lut,
             tiffPathStr, jpgPathStr, dngPathStr, baseName,
             ccmVec, wbVec, orientation,
@@ -401,37 +566,52 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
 
             // Save DNG
             if (!dngPathStr.empty()) {
-                write_dng(dngPathStr.c_str(), width, height, finalImage, dngWhiteLevel, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation);
+                write_dng(dngPathStr.c_str(), width, height, runAsync ? finalImageData : finalImage, dngWhiteLevel, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation);
             }
 
             // Save TIFF/BMP
             if (!tiffPathStr.empty() || !jpgPathStr.empty()) {
+                // If it's a preview JPG (not async), use downsampling and rotation.
+                // If it's a background HQ task (async), use full resolution.
+                bool isPrev = !runAsync;
                 process_and_save_image(
-                    finalImage, width, height, digitalGain, targetLog, lut,
+                    runAsync ? finalImageData : finalImage, width, height, digitalGain, targetLog, lut,
                     tiffPathStr.empty() ? nullptr : tiffPathStr.c_str(),
                     jpgPathStr.empty() ? nullptr : jpgPathStr.c_str(),
-                    1, ccmVec.data(), wbVec.data(), orientation, nullptr
+                    1, ccmVec.data(), wbVec.data(), orientation, nullptr,
+                    isPrev, isPrev ? 4 : 1
                 );
             }
             LOGD("Background save task finished.");
 
-            // Notify Java if running asynchronously
-            if (g_jvm && g_colorProcessorClass) {
-                JNIEnv* env;
-                if (g_jvm->AttachCurrentThread(&env, nullptr) == JNI_OK) {
-                    jmethodID method = env->GetStaticMethodID(g_colorProcessorClass, "onBackgroundSaveComplete", "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Z)V");
+            // Notify Java ONLY if running asynchronously (legacy mode).
+            // In synchronous mode, Kotlin handles the saving itself after return.
+            if (runAsync && g_jvm && g_colorProcessorClass) {
+                JNIEnv* env = nullptr;
+                bool isAttached = false;
+                int getEnvStat = g_jvm->GetEnv((void**)&env, JNI_VERSION_1_6);
+                if (getEnvStat == JNI_EDETACHED) {
+                    if (g_jvm->AttachCurrentThread(&env, nullptr) == JNI_OK) {
+                        isAttached = true;
+                    }
+                }
+
+                if (env) {
+                    jmethodID method = env->GetStaticMethodID(g_colorProcessorClass, "onBackgroundSaveComplete", "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;FIZZ)V");
                     if (method) {
                         jstring jBaseName = env->NewStringUTF(baseName.c_str());
                         jstring jTiffPath = tiffPathStr.empty() ? nullptr : env->NewStringUTF(tiffPathStr.c_str());
                         jstring jDngPath = dngPathStr.empty() ? nullptr : env->NewStringUTF(dngPathStr.c_str());
+                        jstring jJpgPath = jpgPathStr.empty() ? nullptr : env->NewStringUTF(jpgPathStr.c_str());
 
-                        env->CallStaticVoidMethod(g_colorProcessorClass, method, jBaseName, jTiffPath, jDngPath, !tiffPathStr.empty());
+                        env->CallStaticVoidMethod(g_colorProcessorClass, method, jBaseName, jTiffPath, jDngPath, jJpgPath, nullptr, 1.0f, orientation, !tiffPathStr.empty(), !jpgPathStr.empty());
 
                         if (jBaseName) env->DeleteLocalRef(jBaseName);
+                        if (jJpgPath) env->DeleteLocalRef(jJpgPath);
                         if (jTiffPath) env->DeleteLocalRef(jTiffPath);
                         if (jDngPath) env->DeleteLocalRef(jDngPath);
                     }
-                    g_jvm->DetachCurrentThread();
+                    if (isAttached) g_jvm->DetachCurrentThread();
                 }
             }
         };
@@ -442,6 +622,9 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
             saveFunc();
         }
     }
+
+    auto saveEnd = std::chrono::high_resolution_clock::now();
+    auto saveDurationMs = std::chrono::duration_cast<std::chrono::milliseconds>(saveEnd - saveStart).count();
 
     auto nativeEnd = std::chrono::high_resolution_clock::now();
     auto totalDurationMs = std::chrono::duration_cast<std::chrono::milliseconds>(nativeEnd - nativeStart).count();
@@ -456,6 +639,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
                    (jlong)saveDurationMs,
                    0, // DNG Join wait ms (now in background)
                    (jlong)totalDurationMs,
+                   (jlong)jniPrepMs,
                    stageStats);
 
     return 0;
