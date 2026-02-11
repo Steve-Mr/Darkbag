@@ -43,7 +43,7 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Worker(c
         return if (ret == 0) {
             Log.d(TAG, "Background Export Worker finished successfully for $baseName")
             // Notify completion via same flow as JNI background thread for MediaStore consistency
-            ColorProcessor.onBackgroundSaveComplete(baseName, tiffPath, dngPath, jpgPath, targetUri, zoomFactor, saveTiff, saveJpg)
+            ColorProcessor.onBackgroundSaveComplete(baseName, tiffPath, dngPath, jpgPath, targetUri, zoomFactor, orientation, saveTiff, saveJpg)
             Result.success()
         } else {
             Log.e(TAG, "Background Export Worker failed with code $ret")

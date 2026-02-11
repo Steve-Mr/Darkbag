@@ -399,7 +399,7 @@ class CameraFragment : Fragment() {
                             requireContext(),
                             null,
                             event.jpgPath,
-                            0,
+                            event.orientation,
                             event.zoomFactor,
                             event.baseName,
                             event.dngPath,

@@ -20,6 +20,7 @@ object ColorProcessor {
         val jpgPath: String?,
         val targetUri: String?,
         val zoomFactor: Float,
+        val orientation: Int,
         val saveTiff: Boolean,
         val saveJpg: Boolean
     )
@@ -64,10 +65,11 @@ object ColorProcessor {
         jpgPath: String?,
         targetUri: String?,
         zoomFactor: Float,
+        orientation: Int,
         saveTiff: Boolean,
         saveJpg: Boolean
     ) {
-        backgroundSaveFlow.tryEmit(BackgroundSaveEvent(baseName, tiffPath, dngPath, jpgPath, targetUri, zoomFactor, saveTiff, saveJpg))
+        backgroundSaveFlow.tryEmit(BackgroundSaveEvent(baseName, tiffPath, dngPath, jpgPath, targetUri, zoomFactor, orientation, saveTiff, saveJpg))
     }
 
     external fun exportHdrPlus(
