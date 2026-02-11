@@ -336,10 +336,11 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     Buffer<uint16_t> inputBuf(rawDataPtr, width, height, numFrames);
 
     if (rawDataPtr) {
-        LOGD("Input RAW Sample [0,0,0]: %d, [1,1,0]: %d", (int)rawDataPtr[0], (int)rawDataPtr[width + 1]);
+        LOGD("Input RAW Sample [0,0,0]: %d, [1,1,0]: %d, middle [%d,%d,0]: %d",
+             (int)rawDataPtr[0], (int)rawDataPtr[width + 1], width/2, height/2, (int)rawDataPtr[(height/2)*width + (width/2)]);
     }
 
-    // Mark host data as dirty so Halide copies it to GPU if needed
+    // Mark host data as dirty
     inputBuf.set_host_dirty();
 
     // 2. Prepare Metadata
@@ -362,12 +363,14 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     Buffer<float> ccmHalideBuf(ccmVec.data(), 3, 3);
     ccmHalideBuf.set_host_dirty();
 
-    LOGD("Passing CCM to Halide: %.3f %.3f %.3f | %.3f %.3f %.3f | %.3f %.3f %.3f",
+    LOGD("Passing Metadata to Halide: WL=%d, BL=%d, WB={%.2f, %.2f, %.2f, %.2f}, CFA=%d",
+         whiteLevel, blackLevel, wb_r, wb_g0, wb_g1, wb_b, cfaPattern);
+    LOGD("CCM: %.3f %.3f %.3f | %.3f %.3f %.3f | %.3f %.3f %.3f",
          ccmVec[0], ccmVec[1], ccmVec[2], ccmVec[3], ccmVec[4], ccmVec[5], ccmVec[6], ccmVec[7], ccmVec[8]);
 
     // 3. Prepare Output Buffer (16-bit Linear RGB)
-    // Use direct constructor to ensure clean metadata and explicit dimensions
-    Buffer<uint16_t> outputBuf(g_hdrPlusBuffers.outputPool.data(), width, height, 3);
+    // Instead of wrapping a pool pointer, let Halide allocate a fresh buffer to avoid Gralloc/Re-use issues
+    Buffer<uint16_t> outputBuf(width, height, 3);
 
     auto jniPrepEnd = std::chrono::high_resolution_clock::now();
     auto jniPrepMs = std::chrono::duration_cast<std::chrono::milliseconds>(jniPrepEnd - jniPrepStart).count();
@@ -412,13 +415,16 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     );
 
     auto halideEnd = std::chrono::high_resolution_clock::now();
+    auto halideMs = std::chrono::duration_cast<std::chrono::milliseconds>(halideEnd - halideStart).count();
 
     // Sync back to host memory if GPU was used
-    outputBuf.copy_to_host();
+    int copyRet = outputBuf.copy_to_host();
 
-    LOGD("Metadata from Kotlin - WL: %d, BL: %d, Gain: %.2f, Zoom: %.2f", whiteLevel, blackLevel, digitalGain, zoomFactor);
+    LOGD("Halide Result Code: %d, Time: %ld ms, copy_to_host: %d, device_handle: %llu",
+         result, (long)halideMs, copyRet, (unsigned long long)outputBuf.raw_buffer()->device);
     if (outputBuf.data()) {
         LOGD("Halide Output Sample [0,0]: %d, %d, %d", (int)outputBuf(0, 0, 0), (int)outputBuf(0, 0, 1), (int)outputBuf(0, 0, 2));
+        LOGD("Halide Output Sample [mid,mid]: %d, %d, %d", (int)outputBuf(width/2, height/2, 0), (int)outputBuf(width/2, height/2, 1), (int)outputBuf(width/2, height/2, 2));
     }
 
     halide_report_buffer.clear();
@@ -463,6 +469,9 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     int stride_y = outputBuf.dim(1).stride();
     int stride_c = outputBuf.dim(2).stride();
     const uint16_t* raw_ptr = outputBuf.data();
+
+    LOGD("Output Buffer Strides: x=%d, y=%d, c=%d, Extents: %d, %d, %d",
+         stride_x, stride_y, stride_c, outputBuf.dim(0).extent(), outputBuf.dim(1).extent(), outputBuf.dim(2).extent());
 
     // Determine clipping limit for Linear DNG
     // We scale data by 4x to fill 16-bit range, effectively moving the white point from 16383 to 65532.
