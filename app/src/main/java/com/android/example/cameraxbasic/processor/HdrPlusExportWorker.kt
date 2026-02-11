@@ -17,6 +17,8 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Worker(c
         val lutPath = inputData.getString("lutPath")
         val tiffPath = inputData.getString("tiffPath")
         val jpgPath = inputData.getString("jpgPath")
+        val targetUri = inputData.getString("targetUri")
+        val zoomFactor = inputData.getFloat("zoomFactor", 1.0f)
         val dngPath = inputData.getString("dngPath")
         val iso = inputData.getInt("iso", 100)
         val exposureTime = inputData.getLong("exposureTime", 10_000_000L)
@@ -27,6 +29,7 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Worker(c
         val whiteBalance = inputData.getFloatArray("whiteBalance") ?: floatArrayOf()
         val baseName = inputData.getString("baseName") ?: "HDRPLUS"
         val saveTiff = inputData.getBoolean("saveTiff", true)
+        val saveJpg = inputData.getBoolean("saveJpg", true)
 
         Log.d(TAG, "Background Export Worker started for $baseName")
 
@@ -40,7 +43,7 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Worker(c
         return if (ret == 0) {
             Log.d(TAG, "Background Export Worker finished successfully for $baseName")
             // Notify completion via same flow as JNI background thread for MediaStore consistency
-            ColorProcessor.onBackgroundSaveComplete(baseName, tiffPath, dngPath, saveTiff)
+            ColorProcessor.onBackgroundSaveComplete(baseName, tiffPath, dngPath, jpgPath, targetUri, zoomFactor, saveTiff, saveJpg)
             Result.success()
         } else {
             Log.e(TAG, "Background Export Worker failed with code $ret")

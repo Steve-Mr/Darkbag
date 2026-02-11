@@ -578,15 +578,17 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
                 }
 
                 if (env) {
-                    jmethodID method = env->GetStaticMethodID(g_colorProcessorClass, "onBackgroundSaveComplete", "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Z)V");
+                    jmethodID method = env->GetStaticMethodID(g_colorProcessorClass, "onBackgroundSaveComplete", "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;FZZ)V");
                     if (method) {
                         jstring jBaseName = env->NewStringUTF(baseName.c_str());
                         jstring jTiffPath = tiffPathStr.empty() ? nullptr : env->NewStringUTF(tiffPathStr.c_str());
                         jstring jDngPath = dngPathStr.empty() ? nullptr : env->NewStringUTF(dngPathStr.c_str());
+                        jstring jJpgPath = jpgPathStr.empty() ? nullptr : env->NewStringUTF(jpgPathStr.c_str());
 
-                        env->CallStaticVoidMethod(g_colorProcessorClass, method, jBaseName, jTiffPath, jDngPath, !tiffPathStr.empty());
+                        env->CallStaticVoidMethod(g_colorProcessorClass, method, jBaseName, jTiffPath, jDngPath, jJpgPath, nullptr, 1.0f, !tiffPathStr.empty(), !jpgPathStr.empty());
 
                         if (jBaseName) env->DeleteLocalRef(jBaseName);
+                        if (jJpgPath) env->DeleteLocalRef(jJpgPath);
                         if (jTiffPath) env->DeleteLocalRef(jTiffPath);
                         if (jDngPath) env->DeleteLocalRef(jDngPath);
                     }
