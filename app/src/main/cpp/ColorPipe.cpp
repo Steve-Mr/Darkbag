@@ -205,7 +205,9 @@ float vlog(float x) {
 float apply_log(float x, int type) {
     // Note: Log curves handle x < 0 usually by clipping or linear extension.
     // We clamp slightly above 0 if needed, but linear extension is better for noise.
-    if (x < 0) x = 0; // Simple safety
+    // Use a robust check that also handles NaN (NaN > 0 is false)
+    x = (x > 0.0f) ? x : 0.0f;
+
     switch (type) {
         case 1: return arri_logc3(x);
         case 2: return f_log(x);
@@ -263,11 +265,19 @@ LUT3D load_lut(const char* path) {
 }
 
 Vec3 apply_lut(const LUT3D& lut, Vec3 color) {
-    if (lut.size == 0) return color;
-    float scale = (lut.size - 1);
-    float r = std::max(0.0f, std::min(1.0f, color.r)) * scale;
-    float g = std::max(0.0f, std::min(1.0f, color.g)) * scale;
-    float b = std::max(0.0f, std::min(1.0f, color.b)) * scale;
+    if (lut.size <= 0 || lut.data.empty()) return color;
+    float scale = static_cast<float>(lut.size - 1);
+
+    // Robust clamping that handles NaN
+    auto clamp01 = [](float v) {
+        if (!(v > 0.0f)) return 0.0f;
+        if (v > 1.0f) return 1.0f;
+        return v;
+    };
+
+    float r = clamp01(color.r) * scale;
+    float g = clamp01(color.g) * scale;
+    float b = clamp01(color.b) * scale;
     int r0 = (int)r; int r1 = std::min(r0 + 1, lut.size - 1);
     int g0 = (int)g; int g1 = std::min(g0 + 1, lut.size - 1);
     int b0 = (int)b; int b1 = std::min(b0 + 1, lut.size - 1);
