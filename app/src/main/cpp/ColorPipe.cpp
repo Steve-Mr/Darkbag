@@ -337,6 +337,13 @@ void process_and_save_image(
              inputImage[(height/2)*width*3 + (width/2)*3 + 0],
              inputImage[(height/2)*width*3 + (width/2)*3 + 1],
              inputImage[(height/2)*width*3 + (width/2)*3 + 2]);
+
+        // Signal range check
+        uint32_t max_val = 0;
+        for (size_t i = 0; i < std::min<size_t>(inputImage.size(), 300000); i++) {
+            if (inputImage[i] > max_val) max_val = inputImage[i];
+        }
+        LOGD("Post-scaled Input Max Signal (Approx): %u/65535", max_val);
     }
 
     // 2. Process Pixels
@@ -379,6 +386,10 @@ void process_and_save_image(
     // Buffer for rotated/processed result (JPEG/Bitmap path)
     std::vector<unsigned char> rotatedRgb8;
     if (jpgPath || out_rgb_buffer) {
+        // Log a sample pixel result
+        Vec3 midColor = process_pixel(width / 2, height / 2);
+        LOGD("Processed Mid Pixel Sample: R=%.3f, G=%.3f, B=%.3f", midColor.r, midColor.g, midColor.b);
+
         rotatedRgb8.resize(rotatedW * rotatedH * 3);
         #pragma omp parallel for
         for (int py = 0; py < rotatedH; py++) {

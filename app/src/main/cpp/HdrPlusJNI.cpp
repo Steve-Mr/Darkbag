@@ -362,18 +362,6 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     }
     LOGD("Input Signal Check (Frame 0): Min=%d, Max=%d, NonZero=%zu/1M", minV, maxV, nonZeroCount);
 
-    // If input is 10-bit (WL < 2048), scale to 16-bit to ensure high signal strength
-    if (whiteLevel < 2048) {
-        LOGD("Normalization: Scaling 10-bit signal to 16-bit (<< 6)");
-        #pragma omp parallel for
-        for (size_t i = 0; i < static_cast<size_t>(numFrames) * width * height; ++i) {
-            rawDataPtr[i] <<= 6;
-        }
-        blackLevel <<= 6;
-        whiteLevel = 65535;
-        LOGD("Adjusted WL=%d, BL=%d", whiteLevel, blackLevel);
-    }
-
     inputBuf.set_host_dirty();
 
     // 2. Prepare Metadata
@@ -423,14 +411,15 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     auto jniPrepMs = std::chrono::duration_cast<std::chrono::milliseconds>(jniPrepEnd - jniPrepStart).count();
 
     // 4. Run Pipeline
-    float compression = 1.0f; // Unused now in our modified generator
-    float gain = 1.0f;        // Unused now
+    float compression = 1.0f;
+    float gain = digitalGain;
 
     // Fix for Red/Blue Swap (Bayer Phase Mismatch)
-    // Previous logs showed CFA=3 (BGGR) working.
-    // Current logs show CFA=3 reported by camera, but we were swapping it to 0.
-    // Let's stick exactly to what the camera reports for this test.
-    LOGD("Using Camera CFA Pattern: %d (No automatic swapping)", cfaPattern);
+    // Most Moto devices require swapping RGGB(0) and BGGR(3) for this Halide pipeline.
+    int originalCfa = cfaPattern;
+    if (cfaPattern == 0) cfaPattern = 3;
+    else if (cfaPattern == 3) cfaPattern = 0;
+    LOGD("CFA Swap: %d -> %d (DigitalGain=%.3f)", originalCfa, cfaPattern, gain);
 
     static bool halideThreadsConfigured = false;
     if (!halideThreadsConfigured) {
@@ -544,30 +533,31 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     LOGD("Output Buffer Strides: x=%d, y=%d, c=%d, Extents: %d, %d, %d",
          stride_x, stride_y, stride_c, outputBuf.dim(0).extent(), outputBuf.dim(1).extent(), outputBuf.dim(2).extent());
 
-    // Determine clipping limit for Linear DNG
-    // We scale data by 4x to fill 16-bit range, effectively moving the white point from 16383 to 65532.
-    // This fixes issues where some DNG viewers ignore WhiteLevel for LinearRaw and assume 65535.
-    uint16_t clip_limit = 16383; // Original limit
+    // Determine scaling for 16-bit output.
+    // We scale the Halide output (which is in the sensor's range, roughly 0 to whiteLevel)
+    // to fill the full 16-bit range (0 to 65535).
+    float outputScale = 65535.0f / (float)whiteLevel;
+    LOGD("Output Scaling: mapping [0, %d] -> [0, 65535] (scale=%.3f)", whiteLevel, outputScale);
 
     auto postStart = std::chrono::high_resolution_clock::now();
     #pragma omp parallel for
     for (int y = 0; y < height; y++) {
         for (int x = 0; x < width; x++) {
              // Read Halide Planar
-             uint16_t r_val = raw_ptr[x * stride_x + y * stride_y + 0 * stride_c];
-             uint16_t g_val = raw_ptr[x * stride_x + y * stride_y + 1 * stride_c];
-             uint16_t b_val = raw_ptr[x * stride_x + y * stride_y + 2 * stride_c];
+             uint16_t r_raw = raw_ptr[x * stride_x + y * stride_y + 0 * stride_c];
+             uint16_t g_raw = raw_ptr[x * stride_x + y * stride_y + 1 * stride_c];
+             uint16_t b_raw = raw_ptr[x * stride_x + y * stride_y + 2 * stride_c];
 
-             // Clipping to fix Pink Highlights (R > G saturation)
-             r_val = std::min(r_val, clip_limit);
-             g_val = std::min(g_val, clip_limit);
-             b_val = std::min(b_val, clip_limit);
+             // Scale to 16-bit and clamp
+             uint16_t r_val = (uint16_t)std::min(65535.0f, std::max(0.0f, r_raw * outputScale));
+             uint16_t g_val = (uint16_t)std::min(65535.0f, std::max(0.0f, g_raw * outputScale));
+             uint16_t b_val = (uint16_t)std::min(65535.0f, std::max(0.0f, b_raw * outputScale));
 
-             // Write Interleaved (16-bit Linear) for DNG, Scaled by 4x
+             // Write Interleaved (16-bit Linear) for DNG and JPEG processing
              int idx = (y * width + x) * 3;
-             finalImage[idx + 0] = r_val << 2;
-             finalImage[idx + 1] = g_val << 2;
-             finalImage[idx + 2] = b_val << 2;
+             finalImage[idx + 0] = r_val;
+             finalImage[idx + 1] = g_val;
+             finalImage[idx + 2] = b_val;
         }
     }
     auto postEnd = std::chrono::high_resolution_clock::now();
