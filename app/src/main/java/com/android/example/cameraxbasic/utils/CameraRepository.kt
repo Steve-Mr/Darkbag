@@ -61,46 +61,48 @@ class CameraRepository(private val context: Context) {
             mainWideEqFocal = calculateEquivalentFocalLength(idToChars[id]!!)
         }
 
-        // 3. Process CameraX IDs
-        for (id in cameraXIds) {
+        // 3. Identify Anchor and All Physicals
+        val backIds = idToChars.filter { (_, chars) ->
+            chars.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK
+        }.keys
+
+        // Anchor is the first back-facing ID that CameraX actually supports
+        val anchorId = cameraXIds.find { id ->
+            idToChars[id]?.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK
+        } ?: backIds.firstOrNull() ?: return emptyList()
+
+        val anchorChars = idToChars[anchorId] ?: return emptyList()
+        val zoomRange = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            anchorChars.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
+        } else null
+
+        // A. Add "Auto" (Logical)
+        availableLenses.add(createLensInfo(anchorId, null, anchorChars, mainWideEqFocal, isAuto = true, zoomRange = zoomRange))
+
+        // B. Add common zoom presets for the anchor logical camera
+        val presets = listOf(0.6f, 0.7f, 2.0f, 2.7f, 3.0f, 5.0f)
+        for (p in presets) {
+            if (zoomRange != null && p >= zoomRange.lower && p <= zoomRange.upper) {
+                // Only add if not redundant with 1.0x (Auto handles 1.0x)
+                if (Math.abs(p - 1.0f) > 0.05f) {
+                    availableLenses.add(createLensInfo(anchorId, null, anchorChars, mainWideEqFocal, name = "${p}x", isPreset = true, targetZoom = p))
+                }
+            }
+        }
+
+        // C. Add ALL back-facing physical sensors found during probe
+        // We exclude the anchor itself from being added as "Physical ID override" if it's already "Auto"
+        for (id in backIds) {
             val chars = idToChars[id] ?: continue
-            val facing = chars.get(CameraCharacteristics.LENS_FACING)
-            if (facing != CameraCharacteristics.LENS_FACING_BACK) continue
 
-            val capabilities = chars.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES)
-            val isLogical = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
-                    capabilities?.contains(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_LOGICAL_MULTI_CAMERA) == true
+            // We create a LensInfo that binds to anchorId but overrides with physical 'id'
+            // Some devices might not allow overriding with an ID that isn't a declared physical component,
+            // but we'll try it and fallback in CameraFragment.
+            val info = createLensInfo(anchorId, id, chars, mainWideEqFocal)
 
-            val zoomRange = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                chars.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
-            } else null
-
-            if (isLogical) {
-                // Add "Auto" lens
-                availableLenses.add(createLensInfo(id, null, chars, mainWideEqFocal, isAuto = true, zoomRange = zoomRange))
-
-                // Add common zoom presets for the logical camera
-                val presets = listOf(0.7f, 2.7f, 3.0f)
-                for (p in presets) {
-                    if (zoomRange == null || (p >= zoomRange.lower && p <= zoomRange.upper)) {
-                        availableLenses.add(createLensInfo(id, null, chars, mainWideEqFocal, name = "${p}x", isPreset = true, targetZoom = p))
-                    }
-                }
-
-                // Add physical components
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                    for (pId in chars.physicalCameraIds) {
-                        val pChars = idToChars[pId] ?: try {
-                            cameraManager.getCameraCharacteristics(pId)
-                        } catch (e: Exception) { null }
-
-                        if (pChars != null) {
-                            availableLenses.add(createLensInfo(id, pId, pChars, mainWideEqFocal))
-                        }
-                    }
-                }
-            } else {
-                availableLenses.add(createLensInfo(id, null, chars, mainWideEqFocal))
+            // Avoid adding duplicates (e.g. if we already have a lens with this sensorId)
+            if (availableLenses.none { it.sensorId == info.sensorId }) {
+                availableLenses.add(info)
             }
         }
 
@@ -133,7 +135,11 @@ class CameraRepository(private val context: Context) {
             else -> LensType.TELE
         }
 
-        val finalName = name ?: if (isAuto) "Auto" else String.format("%.1fx", multiplier)
+        val finalName = name ?: when {
+            isAuto -> "Auto"
+            physicalId != null -> String.format("%.1fx (S)", multiplier)
+            else -> String.format("%.1fx (L)", multiplier)
+        }
         val sensorId = physicalId ?: "$id-${targetZoom ?: 0f}"
 
         return LensInfo(id, physicalId, sensorId, finalName, f, eqFocal, multiplier, type, isAuto, zoomRange, isPreset, targetZoom)

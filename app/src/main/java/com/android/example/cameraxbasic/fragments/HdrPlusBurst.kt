@@ -12,7 +12,8 @@ data class HdrFrame(
     val width: Int,
     val height: Int,
     val timestamp: Long,
-    val rotationDegrees: Int
+    val rotationDegrees: Int,
+    val physicalId: String? = null
 ) {
     /**
      * Explicitly clears the buffer reference to assist GC.
@@ -32,11 +33,11 @@ class HdrPlusBurst(
 ) {
     private val frames = mutableListOf<HdrFrame>()
 
-    fun addFrame(image: ImageProxy) {
+    fun addFrame(image: ImageProxy, physicalId: String? = null) {
         if (frames.size < frameCount) {
             try {
                 // Extract frame data immediately to release the ImageProxy buffer
-                val frame = copyFrame(image)
+                val frame = copyFrame(image).copy(physicalId = physicalId)
                 frames.add(frame)
 
                 if (frames.size == frameCount) {
@@ -106,12 +107,15 @@ class HdrPlusBurst(
 
         cleanData.flip() // Prepare for reading
 
+        // Note: ImageProxy doesn't directly expose physicalId in a standard way,
+        // so we must pass it from the capture context in CameraFragment.
         return HdrFrame(
             buffer = cleanData,
             width = width,
             height = height,
             timestamp = image.imageInfo.timestamp,
-            rotationDegrees = image.imageInfo.rotationDegrees
+            rotationDegrees = image.imageInfo.rotationDegrees,
+            physicalId = null // Will be set by addFrame caller if needed
         )
     }
 }

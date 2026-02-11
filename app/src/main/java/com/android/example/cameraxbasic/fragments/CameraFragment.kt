@@ -227,7 +227,8 @@ class CameraFragment : Fragment() {
         val height: Int,
         val timestamp: Long,
         val rotationDegrees: Int,
-        val zoomRatio: Float
+        val zoomRatio: Float,
+        val physicalId: String? = null
     ) {
         override fun equals(other: Any?): Boolean {
             if (this === other) return true
@@ -241,6 +242,7 @@ class CameraFragment : Fragment() {
             if (timestamp != other.timestamp) return false
             if (rotationDegrees != other.rotationDegrees) return false
             if (zoomRatio != other.zoomRatio) return false
+            if (physicalId != other.physicalId) return false
 
             return true
         }
@@ -252,6 +254,7 @@ class CameraFragment : Fragment() {
             result = 31 * result + timestamp.hashCode()
             result = 31 * result + rotationDegrees
             result = 31 * result + zoomRatio.hashCode()
+            result = 31 * result + (physicalId?.hashCode() ?: 0)
             return result
         }
     }
@@ -451,11 +454,6 @@ class CameraFragment : Fragment() {
     private suspend fun setUpCamera() {
         cameraProvider = ProcessCameraProvider.getInstance(requireContext()).await()
 
-        // Initialize Physical Lens Controls now that provider is ready
-        withContext(Dispatchers.Main) {
-            initLensControls()
-        }
-
         // Select lensFacing depending on the available cameras
         lensFacing = when {
             hasBackCamera() -> CameraSelector.LENS_FACING_BACK
@@ -485,7 +483,7 @@ class CameraFragment : Fragment() {
             ?: throw IllegalStateException("Camera initialization failed.")
 
         // CameraSelector
-        var cameraSelector = if (currentLens != null) {
+        var cameraSelector = if (lensFacing == CameraSelector.LENS_FACING_BACK && currentLens != null) {
             CameraSelector.Builder()
                 .addCameraFilter { cameraInfos ->
                     cameraInfos.filter {
@@ -564,8 +562,10 @@ class CameraFragment : Fragment() {
             // Set initial target rotation
             .setTargetRotation(rotation)
 
-        currentLens?.physicalId?.let { pId ->
-            Camera2Interop.Extender(previewBuilder).setPhysicalCameraId(pId)
+        if (lensFacing == CameraSelector.LENS_FACING_BACK) {
+            currentLens?.physicalId?.let { pId ->
+                Camera2Interop.Extender(previewBuilder).setPhysicalCameraId(pId)
+            }
         }
         preview = previewBuilder.build()
 
@@ -576,8 +576,10 @@ class CameraFragment : Fragment() {
             .setTargetRotation(rotation)
             .setFlashMode(if (isFlashEnabled) ImageCapture.FLASH_MODE_ON else ImageCapture.FLASH_MODE_OFF)
 
-        currentLens?.physicalId?.let { pId ->
-            Camera2Interop.Extender(imageCaptureBuilder).setPhysicalCameraId(pId)
+        if (lensFacing == CameraSelector.LENS_FACING_BACK) {
+            currentLens?.physicalId?.let { pId ->
+                Camera2Interop.Extender(imageCaptureBuilder).setPhysicalCameraId(pId)
+            }
         }
 
         if (isRawSupported) {
@@ -629,8 +631,10 @@ class CameraFragment : Fragment() {
             // during the lifecycle of this use case
             .setTargetRotation(rotation)
 
-        currentLens?.physicalId?.let { pId ->
-            Camera2Interop.Extender(imageAnalyzerBuilder).setPhysicalCameraId(pId)
+        if (lensFacing == CameraSelector.LENS_FACING_BACK) {
+            currentLens?.physicalId?.let { pId ->
+                Camera2Interop.Extender(imageAnalyzerBuilder).setPhysicalCameraId(pId)
+            }
         }
         imageAnalyzer = imageAnalyzerBuilder.build()
             // The analyzer can then be assigned to the instance
@@ -714,29 +718,39 @@ class CameraFragment : Fragment() {
             .build()
 
         try {
-            // A variable number of use-cases can be passed here -
-            // camera provides access to CameraControl & CameraInfo
+            // Refresh Physical Lens Controls UI for the active facing before binding
+            initLensControls()
+
             camera = cameraProvider.bindToLifecycle(
                 this, cameraSelector, useCaseGroup
             )
+        } catch (exc: Exception) {
+            Log.e(TAG, "Use case binding failed, attempting fallback", exc)
+            if (currentLens?.isLogicalAuto == false) {
+                currentLens = availableLenses.find { it.isLogicalAuto }
+                lifecycleScope.launch(Dispatchers.Main) {
+                    updateLensUI()
+                    bindCameraUseCases()
+                }
+                return
+            }
+        }
 
+        camera?.let { cam ->
             // Check Flash Availability
-            if (camera?.cameraInfo?.hasFlashUnit() == true) {
+            if (cam.cameraInfo.hasFlashUnit()) {
                 cameraUiContainerBinding?.flashButton?.visibility = View.VISIBLE
             } else {
                 cameraUiContainerBinding?.flashButton?.visibility = View.GONE
             }
 
-            observeCameraState(camera?.cameraInfo!!)
+            observeCameraState(cam.cameraInfo)
 
             // Restore Zoom
             updateZoom(false)
 
             // Apply Settings
             applyCameraControls()
-
-        } catch (exc: Exception) {
-            Log.e(TAG, "Use case binding failed", exc)
         }
     }
 
@@ -746,9 +760,17 @@ class CameraFragment : Fragment() {
 
     private fun observeCameraState(cameraInfo: CameraInfo) {
         cameraInfo.cameraState.observe(viewLifecycleOwner) { cameraState ->
-            // Camera state toasts removed as per requirement
             cameraState.error?.let { error ->
                 Log.e(TAG, "Camera State Error: ${error.code}")
+                // If camera is disabled or has a fatal error, and we are on a physical/preset lens, fallback to Auto
+                if ((error.code == CameraState.ERROR_CAMERA_DISABLED || error.code == CameraState.ERROR_CAMERA_FATAL_ERROR)
+                    && currentLens?.isLogicalAuto == false) {
+
+                    Log.w(TAG, "Camera error detected on non-auto lens, falling back")
+                    currentLens = availableLenses.find { it.isLogicalAuto }
+                    updateLensUI()
+                    bindCameraUseCases()
+                }
             }
         }
     }
@@ -1030,7 +1052,7 @@ class CameraFragment : Fragment() {
         }
     }
 
-    private fun copyImageToHolder(image: ImageProxy, zoomRatio: Float): RawImageHolder {
+    private fun copyImageToHolder(image: ImageProxy, zoomRatio: Float, physicalId: String? = null): RawImageHolder {
         val plane = image.planes[0]
         val buffer = plane.buffer
         val width = image.width
@@ -1073,7 +1095,8 @@ class CameraFragment : Fragment() {
             height = height,
             timestamp = image.imageInfo.timestamp,
             rotationDegrees = image.imageInfo.rotationDegrees,
-            zoomRatio = zoomRatio
+            zoomRatio = zoomRatio,
+            physicalId = physicalId
         )
     }
 
@@ -1110,7 +1133,9 @@ class CameraFragment : Fragment() {
                     captureResult.get(CaptureResult.LOGICAL_MULTI_CAMERA_ACTIVE_PHYSICAL_ID)
                 } else null
 
-                val chars = cameraManager.getCameraCharacteristics(activePhysicalId ?: camera2Info.cameraId)
+                val targetCharId = activePhysicalId ?: image.physicalId ?: camera2Info.cameraId
+                Log.d(TAG, "Fetching characteristics for processing using ID: $targetCharId")
+                val chars = cameraManager.getCameraCharacteristics(targetCharId)
 
                 // 2. Prepare Settings
                 val prefs =
@@ -1824,6 +1849,12 @@ class CameraFragment : Fragment() {
         val container = binding.lensControlsContainer ?: return
         val scroll = binding.lensControlsScroll ?: return
 
+        if (lensFacing != CameraSelector.LENS_FACING_BACK) {
+            scroll.visibility = View.GONE
+            binding.zoomControlsContainer?.visibility = View.GONE
+            return
+        }
+
         // Log CameraX seen IDs
         val cameraXIds = mutableSetOf<String>()
         cameraProvider?.availableCameraInfos?.forEach { info ->
@@ -2205,7 +2236,7 @@ class CameraFragment : Fragment() {
                             val currentZoom =
                                 if (is2xMode) 2.0f else (currentFocalLength / 24.0f)
 
-                            val holder = copyImageToHolder(image, currentZoom)
+                            val holder = copyImageToHolder(image, currentZoom, currentLens?.physicalId)
                             image.close() // Close ASAP
 
                             // 2. Queue for Processing
@@ -2502,7 +2533,9 @@ class CameraFragment : Fragment() {
                     result.get(CaptureResult.LOGICAL_MULTI_CAMERA_ACTIVE_PHYSICAL_ID)
                 } else null
 
-                chars = cameraManager.getCameraCharacteristics(activePhysicalId ?: camera2InfoId)
+                val targetCharId = activePhysicalId ?: frames[0].physicalId ?: camera2InfoId
+                Log.d(TAG, "Fetching HDR+ characteristics for processing using ID: $targetCharId")
+                chars = cameraManager.getCameraCharacteristics(targetCharId)
 
                 // Default values
                 var whiteLevel = 1023
