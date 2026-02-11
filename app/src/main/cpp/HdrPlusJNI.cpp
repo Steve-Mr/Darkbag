@@ -255,15 +255,16 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_exportHdrPlus(
 
     // Save DNG
     if (dng_path_cstr) {
-        write_dng(dng_path_cstr, width, height, finalImage, 65535, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation);
+        std::vector<float> identityCCM = {1, 0, 0, 0, 1, 0, 0, 0, 1};
+        write_dng(dng_path_cstr, width, height, finalImage, 65535, iso, exposureTime, fNumber, focalLength, captureTimeMillis, identityCCM, orientation);
     }
 
     // Save TIFF/BMP (High Quality Export path)
     if (tiff_path_cstr || jpg_path_cstr) {
         process_and_save_image(
-            finalImage, width, height, digitalGain, targetLog, lut,
+            finalImage, width, height, 1.0f, targetLog, lut,
             tiff_path_cstr, jpg_path_cstr,
-            1, ccmVec.data(), wbVec.data(), orientation, nullptr,
+            1, nullptr, wbVec.data(), orientation, nullptr,
             false, 1, zoomFactor
         );
     }
@@ -454,37 +455,9 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     LOGD("Halide Result Code: %d, Time: %ld ms, copy_to_host: %d, device_handle: %llu",
          result, (long)halideMs, copyRet, (unsigned long long)outputBuf.raw_buffer()->device);
 
-    bool allZeros = true;
     if (outputBuf.data()) {
         LOGD("Halide Output Sample [0,0]: %d, %d, %d", (int)outputBuf(0, 0, 0), (int)outputBuf(0, 0, 1), (int)outputBuf(0, 0, 2));
         LOGD("Halide Output Sample [mid,mid]: %d, %d, %d", (int)outputBuf(width/2, height/2, 0), (int)outputBuf(width/2, height/2, 1), (int)outputBuf(width/2, height/2, 2));
-
-        // Simple check if it's all zeros (or still the pattern)
-        if (outputBuf(width/2, height/2, 0) != 0 && outputBuf(width/2, height/2, 0) != 0x7FFF) {
-            allZeros = false;
-        }
-    }
-
-    if (allZeros) {
-        LOGW("Halide output is all zero! Applying DIAGNOSTIC BYPASS + PATTERN");
-        const uint16_t* src0 = inputBuf.data();
-        #pragma omp parallel for
-        for (int y = 0; y < height; y++) {
-            for (int x = 0; x < width; x++) {
-                // Read RAW Frame 0
-                uint16_t raw_val = src0[y * width + x];
-
-                // Add a faint synthetic gradient to the middle to verify I/O
-                uint16_t synth = (uint16_t)((x % 256) << 8);
-
-                // Output: Red = RAW, Green = Synthetic, Blue = Half-RAW
-                outputBuf(x, y, 0) = raw_val;
-                outputBuf(x, y, 1) = synth;
-                outputBuf(x, y, 2) = raw_val / 2;
-            }
-        }
-        LOGD("Bypass Sample [mid,mid]: R=%d, G=%d, B=%d",
-             (int)outputBuf(width/2, height/2, 0), (int)outputBuf(width/2, height/2, 1), (int)outputBuf(width/2, height/2, 2));
     }
 
     halide_report_buffer.clear();
@@ -534,10 +507,9 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
          stride_x, stride_y, stride_c, outputBuf.dim(0).extent(), outputBuf.dim(1).extent(), outputBuf.dim(2).extent());
 
     // Determine scaling for 16-bit output.
-    // We scale the Halide output (which is in the sensor's range, roughly 0 to whiteLevel)
-    // to fill the full 16-bit range (0 to 65535).
-    float outputScale = 65535.0f / (float)whiteLevel;
-    LOGD("Output Scaling: mapping [0, %d] -> [0, 65535] (scale=%.3f)", whiteLevel, outputScale);
+    // The Halide pipeline already handles the 4.0x rescaling to bring 0.25x headroom data back to full range.
+    float outputScale = 1.0f;
+    LOGD("Output Scaling: Halide-managed (scale=%.3f)", outputScale);
 
     auto postStart = std::chrono::high_resolution_clock::now();
     #pragma omp parallel for
@@ -591,13 +563,13 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
             finalImage,
             width,
             height,
-            digitalGain,
+            1.0f,
             targetLog,
             lut,
             nullptr, // No TIFF path for sync call
             nullptr, // No JPG path for sync call
             1,
-            ccmVec.data(),
+            nullptr,
             wbVec.data(),
             orientation,
             bitmapPixels,
@@ -654,7 +626,8 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
 
             // Save DNG
             if (!dngPathStr.empty()) {
-                write_dng(dngPathStr.c_str(), width, height, runAsync ? finalImageData : finalImage, dngWhiteLevel, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation);
+                std::vector<float> identityCCM = {1, 0, 0, 0, 1, 0, 0, 0, 1};
+                write_dng(dngPathStr.c_str(), width, height, runAsync ? finalImageData : finalImage, dngWhiteLevel, iso, exposureTime, fNumber, focalLength, captureTimeMillis, identityCCM, orientation);
             }
 
             // Save TIFF/BMP
@@ -663,10 +636,10 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
                 // If it's a background HQ task (async), use full resolution.
                 bool isPrev = !runAsync;
                 process_and_save_image(
-                    runAsync ? finalImageData : finalImage, width, height, digitalGain, targetLog, lut,
+                    runAsync ? finalImageData : finalImage, width, height, 1.0f, targetLog, lut,
                     tiffPathStr.empty() ? nullptr : tiffPathStr.c_str(),
                     jpgPathStr.empty() ? nullptr : jpgPathStr.c_str(),
-                    1, ccmVec.data(), wbVec.data(), orientation, nullptr,
+                    1, nullptr, wbVec.data(), orientation, nullptr,
                 isPrev, isPrev ? 4 : 1, zoomFactor
                 );
             }
