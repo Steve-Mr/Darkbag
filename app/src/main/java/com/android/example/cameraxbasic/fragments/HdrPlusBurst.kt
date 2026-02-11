@@ -36,26 +36,64 @@ class HdrPlusBurst(
     fun addFrame(image: ImageProxy, physicalId: String? = null) {
         if (frames.size < frameCount) {
             try {
-                // Extract frame data immediately to release the ImageProxy buffer
-                val frame = copyFrame(image).copy(physicalId = physicalId)
+                val plane = image.planes[0]
+                val frame = copyData(
+                    plane.buffer,
+                    image.width,
+                    image.height,
+                    plane.rowStride,
+                    plane.pixelStride,
+                    image.imageInfo.timestamp,
+                    image.imageInfo.rotationDegrees,
+                    physicalId
+                )
                 frames.add(frame)
 
                 if (frames.size == frameCount) {
                     onBurstComplete(frames.toList())
-                    frames.clear() // Ownership transferred to consumer
+                    frames.clear()
                 }
             } catch (e: Exception) {
-                // If allocation fails (OOM), we clear and abort.
-                // Do NOT call image.close() here, as it's handled in finally block.
                 frames.forEach { it.close() }
                 frames.clear()
                 throw e
             } finally {
-                // Always close the original image to free the camera pipeline buffer
                 image.close()
             }
         } else {
             image.close()
+        }
+    }
+
+    /**
+     * Entry point for manual Camera2 frames where we already have the buffer and metadata.
+     */
+    fun addManualFrame(
+        buffer: ByteBuffer,
+        width: Int,
+        height: Int,
+        rowStride: Int,
+        pixelStride: Int,
+        timestamp: Long,
+        rotationDegrees: Int,
+        physicalId: String? = null
+    ) {
+        if (frames.size < frameCount) {
+            try {
+                val frame = copyData(
+                    buffer, width, height, rowStride, pixelStride,
+                    timestamp, rotationDegrees, physicalId
+                )
+                frames.add(frame)
+                if (frames.size == frameCount) {
+                    onBurstComplete(frames.toList())
+                    frames.clear()
+                }
+            } catch (e: Exception) {
+                frames.forEach { it.close() }
+                frames.clear()
+                throw e
+            }
         }
     }
 
@@ -64,58 +102,51 @@ class HdrPlusBurst(
         frames.clear()
     }
 
-    private fun copyFrame(image: ImageProxy): HdrFrame {
-        val plane = image.planes[0]
-        val buffer = plane.buffer
-        val width = image.width
-        val height = image.height
-        val rowStride = plane.rowStride
-        val pixelStride = plane.pixelStride // Should be 2 for RAW16
-
-        // Calculate tight-packed size
+    private fun copyData(
+        buffer: ByteBuffer,
+        width: Int,
+        height: Int,
+        rowStride: Int,
+        pixelStride: Int,
+        timestamp: Long,
+        rotationDegrees: Int,
+        physicalId: String? = null
+    ): HdrFrame {
         val rowLength = width * pixelStride
         val dataLength = rowLength * height
-
-        // Allocate Direct ByteBuffer (Off-Heap)
         val cleanData = ByteBuffer.allocateDirect(dataLength)
 
-        // Copy logic (handling stride padding)
+        val oldPos = buffer.position()
         buffer.rewind()
         if (rowStride == rowLength) {
-            // Fast path: Data is already tightly packed
             if (buffer.remaining() == dataLength) {
                 cleanData.put(buffer)
             } else {
-                // Buffer might be larger due to alignment, limit it
                 val oldLimit = buffer.limit()
                 buffer.limit(buffer.position() + dataLength)
                 cleanData.put(buffer)
                 buffer.limit(oldLimit)
             }
         } else {
-            // Slow path: Remove padding bytes from each row
             val rowData = ByteArray(rowLength)
             for (y in 0 until height) {
                 val rowStart = y * rowStride
                 if (rowStart + rowLength > buffer.capacity()) break
-
                 buffer.position(rowStart)
                 buffer.get(rowData)
                 cleanData.put(rowData)
             }
         }
+        buffer.position(oldPos)
+        cleanData.flip()
 
-        cleanData.flip() // Prepare for reading
-
-        // Note: ImageProxy doesn't directly expose physicalId in a standard way,
-        // so we must pass it from the capture context in CameraFragment.
         return HdrFrame(
             buffer = cleanData,
             width = width,
             height = height,
-            timestamp = image.imageInfo.timestamp,
-            rotationDegrees = image.imageInfo.rotationDegrees,
-            physicalId = null // Will be set by addFrame caller if needed
+            timestamp = timestamp,
+            rotationDegrees = rotationDegrees,
+            physicalId = physicalId
         )
     }
 }

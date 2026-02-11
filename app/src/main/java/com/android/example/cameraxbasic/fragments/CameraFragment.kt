@@ -14,10 +14,16 @@
  * limitations under the License.
  */
 
+@file:SuppressLint("RestrictedApi")
 package com.android.example.cameraxbasic.fragments
 
 import android.annotation.SuppressLint
-import android.content.*
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.content.ContentValues
+import android.content.ActivityNotFoundException
 import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.SurfaceTexture
@@ -37,13 +43,6 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
 import android.graphics.BitmapFactory
-import android.hardware.camera2.CameraAccessException
-import android.hardware.camera2.CameraCaptureSession
-import android.hardware.camera2.CameraCharacteristics
-import android.hardware.camera2.CameraDevice
-import android.hardware.camera2.CaptureRequest
-import android.hardware.camera2.CaptureResult
-import android.hardware.camera2.TotalCaptureResult
 import android.media.ImageReader
 import android.os.Handler
 import android.os.HandlerThread
@@ -54,7 +53,21 @@ import com.google.android.material.color.MaterialColors
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.updatePadding
-import androidx.camera.core.*
+import androidx.camera.core.Camera
+import androidx.camera.core.CameraInfo
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.ImageCapture
+import androidx.camera.core.ImageCaptureException
+import androidx.camera.core.ImageInfo
+import androidx.camera.core.ImageProxy
+import androidx.camera.core.Preview
+import androidx.camera.core.SurfaceRequest
+import androidx.camera.core.AspectRatio
+import androidx.camera.core.CameraInfoUnavailableException
+import androidx.camera.core.CameraState
+import androidx.camera.core.FocusMeteringAction
+import androidx.camera.core.DisplayOrientedMeteringPointFactory
 import androidx.camera.core.resolutionselector.AspectRatioStrategy
 import androidx.camera.camera2.interop.CaptureRequestOptions
 import androidx.camera.camera2.interop.Camera2CameraControl
@@ -63,10 +76,6 @@ import androidx.camera.camera2.interop.Camera2CameraInfo
 import androidx.camera.camera2.interop.Camera2Interop
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.core.UseCaseGroup
-import android.hardware.camera2.params.RggbChannelVector
-import android.hardware.camera2.CameraCaptureSession
-import android.hardware.camera2.CaptureRequest
-import android.hardware.camera2.TotalCaptureResult
 import androidx.concurrent.futures.await
 import com.android.example.cameraxbasic.processor.ColorProcessor
 import java.io.File
@@ -105,7 +114,10 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.first
 import java.nio.ByteBuffer
 import java.text.SimpleDateFormat
-import java.util.*
+import java.util.Locale
+import java.util.ArrayDeque
+import java.util.ArrayList
+import java.util.LinkedHashMap
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import kotlin.math.abs
@@ -224,14 +236,14 @@ class CameraFragment : Fragment() {
 
     // Cache for CaptureResults to match with ImageProxy timestamps
     private val captureResults = java.util.Collections.synchronizedMap(object :
-        LinkedHashMap<Long, TotalCaptureResult>() {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, TotalCaptureResult>?): Boolean {
+        LinkedHashMap<Long, android.hardware.camera2.TotalCaptureResult>() {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, android.hardware.camera2.TotalCaptureResult>?): Boolean {
             return size > 300
         }
     })
 
     // SharedFlow to broadcast CaptureResults for reactive synchronization
-    private val captureResultFlow = MutableSharedFlow<TotalCaptureResult>(
+    private val captureResultFlow = MutableSharedFlow<android.hardware.camera2.TotalCaptureResult>(
         replay = 10,
         extraBufferCapacity = 64,
         onBufferOverflow = BufferOverflow.DROP_OLDEST
@@ -500,9 +512,9 @@ class CameraFragment : Fragment() {
             }
             val chars = camera2Manager.getCameraCharacteristics(targetId)
 
-            isoRange = chars.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
-            exposureTimeRange = chars.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
-            minFocusDistance = chars.get(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE) ?: 0.0f
+            isoRange = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
+            exposureTimeRange = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
+            minFocusDistance = chars.get(android.hardware.camera2.CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE) ?: 0.0f
 
             // Note: evRange depends on active session/info, usually 0 for auxiliary cameras if not using logical
             // evRange = cameraInfo.exposureState.exposureCompensationRange
@@ -626,11 +638,11 @@ class CameraFragment : Fragment() {
 
         // Add Camera2 Interop Callback to capture metadata
         androidx.camera.camera2.interop.Camera2Interop.Extender(imageCaptureBuilder)
-            .setSessionCaptureCallback(object : CameraCaptureSession.CaptureCallback() {
+            .setSessionCaptureCallback(object : android.hardware.camera2.CameraCaptureSession.CaptureCallback() {
                 override fun onCaptureCompleted(
-                    session: CameraCaptureSession,
-                    request: CaptureRequest,
-                    result: TotalCaptureResult
+                    session: android.hardware.camera2.CameraCaptureSession,
+                    request: android.hardware.camera2.CaptureRequest,
+                    result: android.hardware.camera2.TotalCaptureResult
                 ) {
                     val timestamp =
                         result.get(android.hardware.camera2.CaptureResult.SENSOR_TIMESTAMP)
@@ -642,8 +654,8 @@ class CameraFragment : Fragment() {
                     // Background Calculation for HDR+ Latency Optimization
                     if (isHdrPlusEnabled && !isBurstActive && !isManualExposure) {
                         lifecycleScope.launch(Dispatchers.Default) {
-                            val iso = result.get(CaptureResult.SENSOR_SENSITIVITY) ?: 100
-                            val time = result.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: 10_000_000L
+                            val iso = result.get(android.hardware.camera2.CaptureResult.SENSOR_SENSITIVITY) ?: 100
+                            val time = result.get(android.hardware.camera2.CaptureResult.SENSOR_EXPOSURE_TIME) ?: 10_000_000L
 
                             // Safe check for ranges, default if null
                             val validIsoRange = isoRange ?: android.util.Range(100, 3200)
@@ -1171,13 +1183,13 @@ class CameraFragment : Fragment() {
                 if (captureResult == null) {
                     Log.e(
                         TAG,
-                        "Timed out waiting for CaptureResult for timestamp ${image.timestamp}"
+                        "Timed out waiting for android.hardware.camera2.CaptureResult for timestamp ${image.timestamp}"
                     )
                     return@withContext
                 }
 
                 val activePhysicalId = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                    captureResult.get(CaptureResult.LOGICAL_MULTI_CAMERA_ACTIVE_PHYSICAL_ID)
+                    captureResult.get(android.hardware.camera2.CaptureResult.LOGICAL_MULTI_CAMERA_ACTIVE_PHYSICAL_ID)
                 } else null
 
                 val targetCharId = activePhysicalId ?: image.physicalId ?: camera2Info.cameraId
@@ -1281,7 +1293,7 @@ class CameraFragment : Fragment() {
                     val cropRegion =
                         captureResult.get(android.hardware.camera2.CaptureResult.SCALER_CROP_REGION)
                     val activeArray =
-                        chars.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
+                        chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
 
                     var zoomFactor = 1.0f
                     if (image.zoomRatio > 1.05f) {
@@ -2117,21 +2129,21 @@ class CameraFragment : Fragment() {
         val prefs =
             requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
         val antiBandingMode = when (prefs.getString(SettingsFragment.KEY_ANTIBANDING, "Auto")) {
-            "50Hz" -> CaptureRequest.CONTROL_AE_ANTIBANDING_MODE_50HZ
-            "60Hz" -> CaptureRequest.CONTROL_AE_ANTIBANDING_MODE_60HZ
-            "Off" -> CaptureRequest.CONTROL_AE_ANTIBANDING_MODE_OFF
-            else -> CaptureRequest.CONTROL_AE_ANTIBANDING_MODE_AUTO
+            "50Hz" -> android.hardware.camera2.CaptureRequest.CONTROL_AE_ANTIBANDING_MODE_50HZ
+            "60Hz" -> android.hardware.camera2.CaptureRequest.CONTROL_AE_ANTIBANDING_MODE_60HZ
+            "Off" -> android.hardware.camera2.CaptureRequest.CONTROL_AE_ANTIBANDING_MODE_OFF
+            else -> android.hardware.camera2.CaptureRequest.CONTROL_AE_ANTIBANDING_MODE_AUTO
         }
-        builder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_ANTIBANDING_MODE, antiBandingMode)
+        builder.setCaptureRequestOption(android.hardware.camera2.CaptureRequest.CONTROL_AE_ANTIBANDING_MODE, antiBandingMode)
 
         // Focus
         if (isManualFocus) {
             builder.setCaptureRequestOption(
-                CaptureRequest.CONTROL_AF_MODE,
-                CaptureRequest.CONTROL_AF_MODE_OFF
+                android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE,
+                android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE_OFF
             )
             builder.setCaptureRequestOption(
-                CaptureRequest.LENS_FOCUS_DISTANCE,
+                android.hardware.camera2.CaptureRequest.LENS_FOCUS_DISTANCE,
                 currentFocusDistance
             )
         }
@@ -2139,12 +2151,12 @@ class CameraFragment : Fragment() {
         // Exposure
         if (isManualExposure) {
             builder.setCaptureRequestOption(
-                CaptureRequest.CONTROL_AE_MODE,
-                CaptureRequest.CONTROL_AE_MODE_OFF
+                android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE,
+                android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE_OFF
             )
-            builder.setCaptureRequestOption(CaptureRequest.SENSOR_SENSITIVITY, currentIso)
+            builder.setCaptureRequestOption(android.hardware.camera2.CaptureRequest.SENSOR_SENSITIVITY, currentIso)
             builder.setCaptureRequestOption(
-                CaptureRequest.SENSOR_EXPOSURE_TIME,
+                android.hardware.camera2.CaptureRequest.SENSOR_EXPOSURE_TIME,
                 currentExposureTime
             )
         }
@@ -2164,13 +2176,13 @@ class CameraFragment : Fragment() {
         val handler = camera2Handler ?: return
 
         try {
-            val request = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
+            val request = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_PREVIEW)
             request.addTarget(surface)
             applyManualSettingsToRequest(request)
 
-            session.setRepeatingRequest(request.build(), object : CameraCaptureSession.CaptureCallback() {
-                override fun onCaptureCompleted(session: CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {
-                    val timestamp = result.get(CaptureResult.SENSOR_TIMESTAMP)
+            session.setRepeatingRequest(request.build(), object : android.hardware.camera2.CameraCaptureSession.CaptureCallback() {
+                override fun onCaptureCompleted(session: android.hardware.camera2.CameraCaptureSession, request: android.hardware.camera2.CaptureRequest, result: android.hardware.camera2.TotalCaptureResult) {
+                    val timestamp = result.get(android.hardware.camera2.CaptureResult.SENSOR_TIMESTAMP)
                     if (timestamp != null) {
                         captureResults[timestamp] = result
                     }
@@ -2405,8 +2417,8 @@ class CameraFragment : Fragment() {
                 val config = lastHdrPlusConfig ?: run {
                     // Fallback if cache empty
                     val result = captureResultFlow.replayCache.lastOrNull() ?: captureResultFlow.first()
-                    val currentIso = result.get(CaptureResult.SENSOR_SENSITIVITY) ?: 100
-                    val currentTime = result.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: 10_000_000L
+                    val currentIso = result.get(android.hardware.camera2.CaptureResult.SENSOR_SENSITIVITY) ?: 100
+                    val currentTime = result.get(android.hardware.camera2.CaptureResult.SENSOR_EXPOSURE_TIME) ?: 10_000_000L
                     val validIsoRange = isoRange ?: android.util.Range(100, 3200)
                     val validTimeRange = exposureTimeRange ?: android.util.Range(1000L, 1_000_000_000L)
                     val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
@@ -2431,12 +2443,12 @@ class CameraFragment : Fragment() {
                     val camera2Control = Camera2CameraControl.from(cameraControl)
                     val builder = CaptureRequestOptions.Builder()
                     builder.setCaptureRequestOption(
-                        CaptureRequest.CONTROL_AE_MODE,
-                        CaptureRequest.CONTROL_AE_MODE_OFF
+                        android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE,
+                        android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE_OFF
                     )
-                    builder.setCaptureRequestOption(CaptureRequest.SENSOR_SENSITIVITY, config.iso)
+                    builder.setCaptureRequestOption(android.hardware.camera2.CaptureRequest.SENSOR_SENSITIVITY, config.iso)
                     builder.setCaptureRequestOption(
-                        CaptureRequest.SENSOR_EXPOSURE_TIME,
+                        android.hardware.camera2.CaptureRequest.SENSOR_EXPOSURE_TIME,
                         config.exposureTime
                     )
                     camera2Control.setCaptureRequestOptions(builder.build()).await()
@@ -2566,7 +2578,7 @@ class CameraFragment : Fragment() {
         )
     }
 
-    private suspend fun findCaptureResult(timestamp: Long, tolerance: Long = 5_000_000L): TotalCaptureResult? {
+    private suspend fun findCaptureResult(timestamp: Long, tolerance: Long = 5_000_000L): android.hardware.camera2.TotalCaptureResult? {
         // 1. Check cache first for an immediate match.
         captureResults.entries.find { abs(it.key - timestamp) < tolerance }?.value?.let { return it }
 
@@ -2606,7 +2618,7 @@ class CameraFragment : Fragment() {
                 val result = findCaptureResult(timestamp)
 
                 // Need characteristics for static info
-                var chars: CameraCharacteristics? = null
+                var chars: android.hardware.camera2.CameraCharacteristics? = null
                 val cam = camera
                 val camInfo = cam?.cameraInfo
 
@@ -2614,7 +2626,7 @@ class CameraFragment : Fragment() {
                 val camera2InfoId = if (camInfo != null) Camera2CameraInfo.from(camInfo).cameraId else "0"
 
                 val activePhysicalId = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && result != null) {
-                    result.get(CaptureResult.LOGICAL_MULTI_CAMERA_ACTIVE_PHYSICAL_ID)
+                    result.get(android.hardware.camera2.CaptureResult.LOGICAL_MULTI_CAMERA_ACTIVE_PHYSICAL_ID)
                 } else null
 
                 val targetCharId = activePhysicalId ?: frames[0].physicalId ?: camera2InfoId
@@ -2844,17 +2856,17 @@ class CameraFragment : Fragment() {
         camera2Handler = Handler(camera2Thread!!.looper)
 
         try {
-            camera2Manager.openCamera(cameraId, object : CameraDevice.StateCallback() {
-                override fun onOpened(device: CameraDevice) {
+            camera2Manager.openCamera(cameraId, object : android.hardware.camera2.CameraDevice.StateCallback() {
+                override fun onOpened(device: android.hardware.camera2.CameraDevice) {
                     camera2Device = device
                     createCamera2CaptureSession()
                 }
 
-                override fun onDisconnected(device: CameraDevice) {
+                override fun onDisconnected(device: android.hardware.camera2.CameraDevice) {
                     closeCamera2()
                 }
 
-                override fun onError(device: CameraDevice, error: Int) {
+                override fun onError(device: android.hardware.camera2.CameraDevice, error: Int) {
                     Log.e(TAG, "Camera2 open error: $error")
                     closeCamera2()
                     // Fallback to Auto
@@ -2865,7 +2877,7 @@ class CameraFragment : Fragment() {
                     }
                 }
             }, camera2Handler)
-        } catch (e: CameraAccessException) {
+        } catch (e: android.hardware.camera2.CameraAccessException) {
             Log.e(TAG, "Failed to open Camera2", e)
         }
     }
@@ -2876,7 +2888,7 @@ class CameraFragment : Fragment() {
 
         // 1. Setup RAW ImageReader
         val chars = camera2Manager.getCameraCharacteristics(device.id)
-        val map = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+        val map = chars.get(android.hardware.camera2.CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
         val rawSizes = map?.getOutputSizes(android.graphics.ImageFormat.RAW_SENSOR)
         val size = rawSizes?.maxByOrNull { it.width * it.height } ?: android.util.Size(4000, 3000)
 
@@ -2896,20 +2908,20 @@ class CameraFragment : Fragment() {
             val surfaces = listOf(surface, rawImageReader!!.surface)
 
             try {
-                device.createCaptureSession(surfaces, object : CameraCaptureSession.StateCallback() {
-                    override fun onConfigured(session: CameraCaptureSession) {
+                device.createCaptureSession(surfaces, object : android.hardware.camera2.CameraCaptureSession.StateCallback() {
+                    override fun onConfigured(session: android.hardware.camera2.CameraCaptureSession) {
                         camera2Session = session
                         try {
-                            val request = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
+                            val request = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_PREVIEW)
                             request.addTarget(surface)
 
                             // Apply default AF/AE
-                            request.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
-                            request.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+                            request.set(android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE, android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
+                            request.set(android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE, android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE_ON)
 
-                            session.setRepeatingRequest(request.build(), object : CameraCaptureSession.CaptureCallback() {
-                                override fun onCaptureCompleted(session: CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {
-                                    val timestamp = result.get(CaptureResult.SENSOR_TIMESTAMP)
+                            session.setRepeatingRequest(request.build(), object : android.hardware.camera2.CameraCaptureSession.CaptureCallback() {
+                                override fun onCaptureCompleted(session: android.hardware.camera2.CameraCaptureSession, request: android.hardware.camera2.CaptureRequest, result: android.hardware.camera2.TotalCaptureResult) {
+                                    val timestamp = result.get(android.hardware.camera2.CaptureResult.SENSOR_TIMESTAMP)
                                     if (timestamp != null) {
                                         captureResults[timestamp] = result
                                     }
@@ -2921,7 +2933,7 @@ class CameraFragment : Fragment() {
                         }
                     }
 
-                    override fun onConfigureFailed(session: CameraCaptureSession) {
+                    override fun onConfigureFailed(session: android.hardware.camera2.CameraCaptureSession) {
                         Log.e(TAG, "Camera2 session config failed")
                     }
                 }, handler)
@@ -2938,7 +2950,7 @@ class CameraFragment : Fragment() {
         val handler = camera2Handler ?: return
 
         try {
-            val request = device.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE)
+            val request = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_STILL_CAPTURE)
             request.addTarget(reader.surface)
 
             // Apply current manual settings
@@ -2961,8 +2973,8 @@ class CameraFragment : Fragment() {
                 }
             }, handler)
 
-            session.capture(request.build(), object : CameraCaptureSession.CaptureCallback() {
-                override fun onCaptureStarted(session: CameraCaptureSession, request: CaptureRequest, timestamp: Long, frameNumber: Long) {
+            session.capture(request.build(), object : android.hardware.camera2.CameraCaptureSession.CaptureCallback() {
+                override fun onCaptureStarted(session: android.hardware.camera2.CameraCaptureSession, request: android.hardware.camera2.CaptureRequest, timestamp: Long, frameNumber: Long) {
                     // Flash animation
                     lifecycleScope.launch(Dispatchers.Main) {
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
@@ -2972,8 +2984,8 @@ class CameraFragment : Fragment() {
                     }
                 }
 
-                override fun onCaptureCompleted(session: CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {
-                    val timestamp = result.get(CaptureResult.SENSOR_TIMESTAMP)
+                override fun onCaptureCompleted(session: android.hardware.camera2.CameraCaptureSession, request: android.hardware.camera2.CaptureRequest, result: android.hardware.camera2.TotalCaptureResult) {
+                    val timestamp = result.get(android.hardware.camera2.CaptureResult.SENSOR_TIMESTAMP)
                     if (timestamp != null) {
                         captureResults[timestamp] = result
                     }
@@ -3015,9 +3027,9 @@ class CameraFragment : Fragment() {
                 cameraUiContainerBinding?.cameraCaptureButton?.alpha = 0.5f
             }
 
-            val burstRequests = mutableListOf<CaptureRequest>()
+            val burstRequests = mutableListOf<android.hardware.camera2.CaptureRequest>()
             for (i in 0 until burstSize) {
-                val request = device.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE)
+                val request = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_STILL_CAPTURE)
                 request.addTarget(reader.surface)
                 applyManualSettingsToRequest(request)
                 burstRequests.add(request.build())
@@ -3027,7 +3039,21 @@ class CameraFragment : Fragment() {
             reader.setOnImageAvailableListener({ r ->
                 val image = r.acquireNextImage() ?: return@setOnImageAvailableListener
                 try {
-                    hdrPlusBurstHelper?.addFrame(wrapAndroidImage(image), currentLens?.id)
+                    val plane = image.planes[0]
+                    val chars = camera2Manager.getCameraCharacteristics(currentLens?.id ?: "0")
+                    val sensorOrientation = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
+
+                    hdrPlusBurstHelper?.addManualFrame(
+                        plane.buffer,
+                        image.width,
+                        image.height,
+                        plane.rowStride,
+                        plane.pixelStride,
+                        image.timestamp,
+                        sensorOrientation,
+                        currentLens?.id
+                    )
+                    image.close()
                     framesCaptured++
                     lifecycleScope.launch(Dispatchers.Main) {
                         cameraUiContainerBinding?.captureProgress?.progress = framesCaptured
@@ -3041,15 +3067,15 @@ class CameraFragment : Fragment() {
                 }
             }, handler)
 
-            session.captureBurst(burstRequests, object : CameraCaptureSession.CaptureCallback() {
-                override fun onCaptureCompleted(session: CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {
-                    val timestamp = result.get(CaptureResult.SENSOR_TIMESTAMP)
+            session.captureBurst(burstRequests, object : android.hardware.camera2.CameraCaptureSession.CaptureCallback() {
+                override fun onCaptureCompleted(session: android.hardware.camera2.CameraCaptureSession, request: android.hardware.camera2.CaptureRequest, result: android.hardware.camera2.TotalCaptureResult) {
+                    val timestamp = result.get(android.hardware.camera2.CaptureResult.SENSOR_TIMESTAMP)
                     if (timestamp != null) {
                         captureResults[timestamp] = result
                     }
                     captureResultFlow.tryEmit(result)
                 }
-                override fun onCaptureSequenceCompleted(session: CameraCaptureSession, sequenceId: Int, frameNumber: Long) {
+                override fun onCaptureSequenceCompleted(session: android.hardware.camera2.CameraCaptureSession, sequenceId: Int, frameNumber: Long) {
                     Log.d(TAG, "Camera2 Burst capture sequence completed")
                 }
             }, handler)
@@ -3084,7 +3110,7 @@ class CameraFragment : Fragment() {
         }
 
         val chars = camera2Manager.getCameraCharacteristics(physicalId ?: "0")
-        val sensorOrientation = chars.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
+        val sensorOrientation = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
 
         return RawImageHolder(
             data = data,
@@ -3097,43 +3123,16 @@ class CameraFragment : Fragment() {
         )
     }
 
-    private fun wrapAndroidImage(image: android.media.Image): ImageProxy {
-         return object : ImageProxy {
-             override fun close() = image.close()
-             override fun getFormat() = image.format
-             override fun getHeight() = image.height
-             override fun getWidth() = image.width
-             override fun getImageInfo() = object : ImageInfo {
-                 override fun getTagBundle() = TagBundle.emptyBundle()
-                 override fun getTimestamp() = image.timestamp
-                 override fun getRotationDegrees(): Int {
-                     val chars = camera2Manager.getCameraCharacteristics(currentLens?.id ?: "0")
-                     return chars.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
-                 }
-                 override fun populateExifData(builder: androidx.camera.core.impl.utils.ExifData.Builder) {}
-             }
-             override fun getPlanes() = image.planes.map { p ->
-                 object : ImageProxy.PlaneProxy {
-                     override fun getBuffer() = p.buffer
-                     override fun getPixelStride() = p.pixelStride
-                     override fun getRowStride() = p.rowStride
-                 }
-             }.toTypedArray()
-             override fun getImage() = image
-             override fun getCropRect() = android.graphics.Rect(0, 0, image.width, image.height)
-             override fun setCropRect(rect: android.graphics.Rect?) {}
-         }
-    }
 
-    private fun applyManualSettingsToRequest(request: CaptureRequest.Builder) {
+    private fun applyManualSettingsToRequest(request: android.hardware.camera2.CaptureRequest.Builder) {
         if (isManualExposure) {
-            request.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
-            request.set(CaptureRequest.SENSOR_SENSITIVITY, currentIso)
-            request.set(CaptureRequest.SENSOR_EXPOSURE_TIME, currentExposureTime)
+            request.set(android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE, android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE_OFF)
+            request.set(android.hardware.camera2.CaptureRequest.SENSOR_SENSITIVITY, currentIso)
+            request.set(android.hardware.camera2.CaptureRequest.SENSOR_EXPOSURE_TIME, currentExposureTime)
         }
         if (isManualFocus) {
-            request.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF)
-            request.set(CaptureRequest.LENS_FOCUS_DISTANCE, currentFocusDistance)
+            request.set(android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE, android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE_OFF)
+            request.set(android.hardware.camera2.CaptureRequest.LENS_FOCUS_DISTANCE, currentFocusDistance)
         }
     }
 
