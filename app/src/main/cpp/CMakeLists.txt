@@ -116,6 +116,8 @@ add_custom_command(
             -e static_library,h
             -o "${GENERATOR_OUTPUT_DIR}"
             target=${HALIDE_TARGET}
+            use_optimized_schedule=true
+            use_gpu=false
     DEPENDS "${GENERATOR_EXEC}"
     COMMENT "Running Halide Generator for ${HALIDE_TARGET}"
 )
