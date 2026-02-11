@@ -29,7 +29,7 @@ float apply_log(float x, int type);
 
 // --- LUT ---
 struct LUT3D {
-    int size;
+    int size = 0;
     std::vector<Vec3> data;
 };
 

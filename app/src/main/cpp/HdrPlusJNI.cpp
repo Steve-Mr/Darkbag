@@ -6,6 +6,7 @@
 #include <cstring>
 #include <chrono> // For timing
 #include <thread>
+#include <mutex>
 #include <future>
 #include <utility>
 #include <regex>
@@ -22,6 +23,7 @@
 
 #define TAG "HdrPlusJNI"
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, TAG, __VA_ARGS__)
+#define LOGW(...) __android_log_print(ANDROID_LOG_WARN, TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 
 using namespace Halide::Runtime;
@@ -56,7 +58,13 @@ HalideStageStats parseHalideReport(const std::string& report) {
     while (std::getline(ss, line)) {
         if (std::regex_search(line, match, re)) {
             std::string name = match[1].str();
-            float val = std::stof(match[2].str());
+            float val = 0.0f;
+            try {
+                val = std::stof(match[2].str());
+            } catch (const std::exception& e) {
+                LOGE("Failed to parse value in halide report: %s", match[2].str().c_str());
+                continue;
+            }
             std::string unit = match[3].str();
             long ms = (unit == "s") ? (long)(val * 1000) : (long)val;
 
@@ -143,6 +151,7 @@ struct GlobalBuffers {
 };
 
 GlobalBuffers g_hdrPlusBuffers;
+std::mutex g_hdrPlusMutex;
 
 } // namespace
 
@@ -164,6 +173,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_initMemoryPool(
         jint frames
 ) {
     LOGD("Initializing memory pool: %dx%d, %d frames", width, height, frames);
+    std::lock_guard<std::mutex> lock(g_hdrPlusMutex);
     g_hdrPlusBuffers.ensureCapacity(width, height, frames);
 }
 
@@ -190,6 +200,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_exportHdrPlus(
         jfloatArray whiteBalance
 ) {
     LOGD("Native exportHdrPlus started.");
+    std::lock_guard<std::mutex> lock(g_hdrPlusMutex);
 
     const char* temp_path_cstr = env->GetStringUTFChars(tempRawPath, 0);
     std::ifstream in(temp_path_cstr, std::ios::binary);
@@ -210,8 +221,6 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_exportHdrPlus(
         return -1;
     }
     in.close();
-    // Delete temp file after reading
-    std::remove(temp_path_cstr);
     env->ReleaseStringUTFChars(tempRawPath, temp_path_cstr);
 
     // Prepare Metadata
@@ -258,6 +267,11 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_exportHdrPlus(
     if (jpgPath) env->ReleaseStringUTFChars(jpgPath, jpg_path_cstr);
     if (dngPath) env->ReleaseStringUTFChars(dngPath, dng_path_cstr);
 
+    // Delete temp file after all exports are done
+    const char* temp_path_cstr_del = env->GetStringUTFChars(tempRawPath, 0);
+    std::remove(temp_path_cstr_del);
+    env->ReleaseStringUTFChars(tempRawPath, temp_path_cstr_del);
+
     LOGD("Native exportHdrPlus finished.");
     return 0;
 }
@@ -292,6 +306,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
         jstring tempRawPath
 ) {
     LOGD("Native processHdrPlus started.");
+    std::lock_guard<std::mutex> lock(g_hdrPlusMutex);
     auto nativeStart = std::chrono::high_resolution_clock::now();
 
     auto jniPrepStart = std::chrono::high_resolution_clock::now();
@@ -533,9 +548,17 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
             size_t dataSize = (size_t)width * height * 3;
             out.write((char*)finalImage.data(), dataSize * sizeof(unsigned short));
             out.close();
-            LOGD("Saved intermediate RAW to %s (%zu bytes)", temp_raw_path_cstr, dataSize * 2);
+            if (out.good()) {
+                LOGD("Saved intermediate RAW to %s (%zu bytes)", temp_raw_path_cstr, dataSize * 2);
+            } else {
+                LOGE("Failed to write complete temp raw data to %s", temp_raw_path_cstr);
+                env->ReleaseStringUTFChars(tempRawPath, temp_raw_path_cstr);
+                return -1;
+            }
         } else {
             LOGE("Failed to open temp raw file for writing: %s", temp_raw_path_cstr);
+            env->ReleaseStringUTFChars(tempRawPath, temp_raw_path_cstr);
+            return -1;
         }
         env->ReleaseStringUTFChars(tempRawPath, temp_raw_path_cstr);
     }
@@ -617,6 +640,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
         };
 
         if (runAsync) {
+            LOGW("isAsync=true path is deprecated. Consider using WorkManager with temp RAW export instead.");
             std::thread(std::move(saveFunc)).detach();
         } else {
             saveFunc();
