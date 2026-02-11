@@ -1,5 +1,9 @@
 #include "ColorPipe.h"
 #include <tiffio.h>
+#include <android/log.h>
+
+#define TAG "ColorPipe"
+#define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, TAG, __VA_ARGS__)
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
@@ -318,6 +322,17 @@ void process_and_save_image(
     Matrix3x3 effective_CCM = {0};
     if (sourceColorSpace == 1 && ccm) {
         std::copy(ccm, ccm + 9, effective_CCM.m);
+    }
+
+    LOGD("process_and_save_image: %dx%d, gain=%.2f, log=%d, zoom=%.2f, orientation=%d, source=%d",
+         width, height, gain, targetLog, zoomFactor, orientation, sourceColorSpace);
+    if (ccm) {
+        LOGD("CCM: %.3f %.3f %.3f | %.3f %.3f %.3f | %.3f %.3f %.3f",
+             ccm[0], ccm[1], ccm[2], ccm[3], ccm[4], ccm[5], ccm[6], ccm[7], ccm[8]);
+    }
+
+    if (!inputImage.empty()) {
+        LOGD("Input Data Sample (0,0): %d, %d, %d", inputImage[0], inputImage[1], inputImage[2]);
     }
 
     // 2. Process Pixels

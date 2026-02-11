@@ -139,7 +139,7 @@ void fillDebugStats(JNIEnv* env,
 struct GlobalBuffers {
     Buffer<uint16_t> inputPool;
     Buffer<uint16_t> outputPool;
-    std::vector<uint16_t> interleavedPool;
+    // Removed interleavedPool from global singleton to avoid race conditions with Background Workers
     bool isInitialized = false;
 
     void ensureCapacity(int w, int h, int frames) {
@@ -147,13 +147,13 @@ struct GlobalBuffers {
             // Allocate new buffers. Note: Halide buffers do not zero-initialize by default.
             inputPool = Buffer<uint16_t>(w, h, frames);
             outputPool = Buffer<uint16_t>(w, h, 3);
-            interleavedPool.resize(static_cast<size_t>(w) * h * 3);
             isInitialized = true;
             LOGD("Memory pool (re)allocated: %d x %d x %d", w, h, frames);
         }
     }
 };
 
+// Guarded by processingSemaphore(1) in Kotlin to ensure exclusive access
 GlobalBuffers g_hdrPlusBuffers;
 
 } // namespace
@@ -212,8 +212,8 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_exportHdrPlus(
         return -1;
     }
 
-    g_hdrPlusBuffers.ensureCapacity(width, height, 1);
-    std::vector<uint16_t>& finalImage = g_hdrPlusBuffers.interleavedPool;
+    // Use local allocation for background export to avoid race conditions with the main capture pipeline
+    std::vector<uint16_t> finalImage(static_cast<size_t>(width) * height * 3);
     in.read((char*)finalImage.data(), finalImage.size() * sizeof(uint16_t));
     in.close();
     // Delete temp file after reading
@@ -332,7 +332,14 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     auto copyEnd = std::chrono::high_resolution_clock::now();
     auto copyDurationMs = std::chrono::duration_cast<std::chrono::milliseconds>(copyEnd - copyStart).count();
 
-    Buffer<uint16_t> inputBuf = g_hdrPlusBuffers.inputPool;
+    // Ensure Halide sees exactly the dimensions and frame count for this capture
+    Buffer<uint16_t> inputBuf = g_hdrPlusBuffers.inputPool
+            .cropped(0, 0, width)
+            .cropped(1, 0, height)
+            .cropped(2, 0, numFrames);
+
+    // Mark host data as dirty so Halide copies it to GPU if needed
+    inputBuf.set_host_dirty();
 
     // 2. Prepare Metadata
     jfloat* wbData = env->GetFloatArrayElements(whiteBalance, nullptr);
@@ -359,7 +366,11 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     Buffer<float> ccmHalideBuf(identityCCM.data(), 3, 3);
 
     // 3. Prepare Output Buffer (16-bit Linear RGB)
-    Buffer<uint16_t> outputBuf = g_hdrPlusBuffers.outputPool;
+    // Crop to current dimensions to avoid stale data at edges
+    Buffer<uint16_t> outputBuf = g_hdrPlusBuffers.outputPool
+            .cropped(0, 0, width)
+            .cropped(1, 0, height);
+
     auto jniPrepEnd = std::chrono::high_resolution_clock::now();
     auto jniPrepMs = std::chrono::duration_cast<std::chrono::milliseconds>(jniPrepEnd - jniPrepStart).count();
 
@@ -369,12 +380,13 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
 
     // Fix for Red/Blue Swap (Bayer Phase Mismatch)
     // Assuming RGGB (0) <-> BGGR (3) mismatch
+    LOGD("Input CFA Pattern: %d", cfaPattern);
     if (cfaPattern == 0) {
         cfaPattern = 3; // Force BGGR
-        LOGD("Swapped CFA: RGGB -> BGGR");
+        LOGD("Swapped CFA: RGGB -> BGGR (Applied fix)");
     } else if (cfaPattern == 3) {
         cfaPattern = 0; // Force RGGB
-        LOGD("Swapped CFA: BGGR -> RGGB");
+        LOGD("Swapped CFA: BGGR -> RGGB (Applied fix)");
     }
 
     static bool halideThreadsConfigured = false;
@@ -402,6 +414,14 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     );
 
     auto halideEnd = std::chrono::high_resolution_clock::now();
+
+    // Sync back to host memory if GPU was used
+    outputBuf.copy_to_host();
+
+    LOGD("Metadata from Kotlin - WL: %d, BL: %d, Gain: %.2f, Zoom: %.2f", whiteLevel, blackLevel, digitalGain, zoomFactor);
+    if (outputBuf.data()) {
+        LOGD("Halide Output Sample [0,0]: %d, %d, %d", (int)outputBuf(0, 0, 0), (int)outputBuf(0, 0, 1), (int)outputBuf(0, 0, 2));
+    }
 
     halide_report_buffer.clear();
     halide_profiler_report(nullptr);
@@ -437,8 +457,8 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     }
 
     // Process Output
-    // finalImage: Linear RGB (clipped) for DNG
-    std::vector<uint16_t>& finalImage = g_hdrPlusBuffers.interleavedPool;
+    // Use local allocation for interleaved result to prevent race conditions during background save
+    std::vector<uint16_t> finalImage(static_cast<size_t>(width) * height * 3);
 
     // Halide Output is Planar x, y, c
     int stride_x = outputBuf.dim(0).stride();

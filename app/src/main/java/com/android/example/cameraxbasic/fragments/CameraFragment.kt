@@ -215,8 +215,9 @@ class CameraFragment : Fragment() {
     )
 
     // Rate limiting semaphore to prevent OOM
-    private val processingSemaphore = kotlinx.coroutines.sync.Semaphore(2)
-    private val processingChannel = kotlinx.coroutines.channels.Channel<RawImageHolder>(2)
+    // Set to 1 to match the singleton JNI buffer pool capacity
+    private val processingSemaphore = kotlinx.coroutines.sync.Semaphore(1)
+    private val processingChannel = kotlinx.coroutines.channels.Channel<RawImageHolder>(1)
 
     data class RawImageHolder(
         val data: ByteArray,
