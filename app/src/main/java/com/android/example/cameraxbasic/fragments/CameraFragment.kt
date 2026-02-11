@@ -136,6 +136,10 @@ class CameraFragment : Fragment() {
 
     private var lutProcessor: LutSurfaceProcessor? = null
     private lateinit var lutManager: LutManager
+    private lateinit var cameraRepository: com.android.example.cameraxbasic.utils.CameraRepository
+    private var availableLenses: List<com.android.example.cameraxbasic.utils.LensInfo> = emptyList()
+    private var currentLens: com.android.example.cameraxbasic.utils.LensInfo? = null
+
     private var activeLutJob: kotlinx.coroutines.Job? = null
     private var lutAdapter: LutPreviewAdapter? = null
 
@@ -365,6 +369,7 @@ class CameraFragment : Fragment() {
         mediaStoreUtils = MediaStoreUtils(requireContext())
 
         lutManager = LutManager(requireContext())
+        cameraRepository = com.android.example.cameraxbasic.utils.CameraRepository(requireContext())
 
         // Initialize Zoom Default
         val prefs =
@@ -475,25 +480,41 @@ class CameraFragment : Fragment() {
             ?: throw IllegalStateException("Camera initialization failed.")
 
         // CameraSelector
-        val cameraSelector = CameraSelector.Builder().requireLensFacing(lensFacing).build()
+        val cameraSelector = if (currentLens != null) {
+            CameraSelector.Builder()
+                .addCameraFilter { cameraInfos ->
+                    cameraInfos.filter {
+                        val id = Camera2CameraInfo.from(it).cameraId
+                        id == currentLens?.id
+                    }
+                }
+                .build()
+        } else {
+            CameraSelector.Builder().requireLensFacing(lensFacing).build()
+        }
 
         val cameraInfo = cameraProvider.getCameraInfo(cameraSelector)
 
         // Fetch Characteristics for Manual Control
         try {
-            val camera2Info = Camera2CameraInfo.from(cameraInfo)
-            isoRange =
-                camera2Info.getCameraCharacteristic(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
-            exposureTimeRange =
-                camera2Info.getCameraCharacteristic(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
-            minFocusDistance =
-                camera2Info.getCameraCharacteristic(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE)
-                    ?: 0.0f
+            val manager = requireContext().getSystemService(Context.CAMERA_SERVICE) as android.hardware.camera2.CameraManager
+            val targetId = currentLens?.physicalId ?: currentLens?.id ?: Camera2CameraInfo.from(cameraInfo).cameraId
+            val chars = manager.getCameraCharacteristics(targetId)
+
+            isoRange = chars.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
+            exposureTimeRange = chars.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
+            minFocusDistance = chars.get(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE) ?: 0.0f
             evRange = cameraInfo.exposureState.exposureCompensationRange
 
-            // Initialize defaults if ranges are valid
-            isoRange?.let { currentIso = it.lower }
-            exposureTimeRange?.let { currentExposureTime = it.lower }
+            // Clamp current values to new ranges
+            isoRange?.let { currentIso = currentIso.coerceIn(it.lower, it.upper) }
+            exposureTimeRange?.let { currentExposureTime = currentExposureTime.coerceIn(it.lower, it.upper) }
+
+            // Update UI if manual panel is visible
+            lifecycleScope.launch(Dispatchers.Main) {
+                updateManualPanel()
+                updateTabColors()
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to fetch camera characteristics", e)
         }
@@ -526,12 +547,16 @@ class CameraFragment : Fragment() {
         }
 
         // Preview
-        preview = Preview.Builder()
+        val previewBuilder = Preview.Builder()
             // We request aspect ratio but no resolution
             .setResolutionSelector(resolutionSelector)
             // Set initial target rotation
             .setTargetRotation(rotation)
-            .build()
+
+        currentLens?.physicalId?.let { pId ->
+            Camera2Interop.Extender(previewBuilder).setPhysicalCameraId(pId)
+        }
+        preview = previewBuilder.build()
 
         // ImageCapture
         val imageCaptureBuilder = ImageCapture.Builder()
@@ -539,11 +564,14 @@ class CameraFragment : Fragment() {
             .setResolutionSelector(resolutionSelector)
             .setTargetRotation(rotation)
             .setFlashMode(if (isFlashEnabled) ImageCapture.FLASH_MODE_ON else ImageCapture.FLASH_MODE_OFF)
-            .apply {
-                if (isRawSupported) {
-                    setOutputFormat(ImageCapture.OUTPUT_FORMAT_RAW)
-                }
-            }
+
+        currentLens?.physicalId?.let { pId ->
+            Camera2Interop.Extender(imageCaptureBuilder).setPhysicalCameraId(pId)
+        }
+
+        if (isRawSupported) {
+            imageCaptureBuilder.setOutputFormat(ImageCapture.OUTPUT_FORMAT_RAW)
+        }
 
         // Add Camera2 Interop Callback to capture metadata
         androidx.camera.camera2.interop.Camera2Interop.Extender(imageCaptureBuilder)
@@ -583,13 +611,17 @@ class CameraFragment : Fragment() {
         imageCapture = imageCaptureBuilder.build()
 
         // ImageAnalysis
-        imageAnalyzer = ImageAnalysis.Builder()
+        val imageAnalyzerBuilder = ImageAnalysis.Builder()
             // We request aspect ratio but no resolution
             .setResolutionSelector(resolutionSelector)
             // Set initial target rotation, we will have to call this again if rotation changes
             // during the lifecycle of this use case
             .setTargetRotation(rotation)
-            .build()
+
+        currentLens?.physicalId?.let { pId ->
+            Camera2Interop.Extender(imageAnalyzerBuilder).setPhysicalCameraId(pId)
+        }
+        imageAnalyzer = imageAnalyzerBuilder.build()
             // The analyzer can then be assigned to the instance
             .also {
                 it.setAnalyzer(cameraExecutor, LuminosityAnalyzer { luma ->
@@ -862,6 +894,9 @@ class CameraFragment : Fragment() {
         // Initialize Zoom Controls
         initZoomControls()
 
+        // Initialize Physical Lens Controls
+        initLensControls()
+
         // Listener for button used to view the most recent photo
         cameraUiContainerBinding?.photoViewButton?.setOnClickListener {
             // Only navigate when the gallery has photos
@@ -1051,7 +1086,6 @@ class CameraFragment : Fragment() {
                 val camera2Info = Camera2CameraInfo.from(cam.cameraInfo)
                 val cameraManager =
                     context.getSystemService(Context.CAMERA_SERVICE) as android.hardware.camera2.CameraManager
-                val chars = cameraManager.getCameraCharacteristics(camera2Info.cameraId)
 
                 // 1. Wait for Metadata
                 val captureResult = findCaptureResult(image.timestamp)
@@ -1063,6 +1097,12 @@ class CameraFragment : Fragment() {
                     )
                     return@withContext
                 }
+
+                val activePhysicalId = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    captureResult.get(CaptureResult.LOGICAL_MULTI_CAMERA_ACTIVE_PHYSICAL_ID)
+                } else null
+
+                val chars = cameraManager.getCameraCharacteristics(activePhysicalId ?: camera2Info.cameraId)
 
                 // 2. Prepare Settings
                 val prefs =
@@ -1771,6 +1811,75 @@ class CameraFragment : Fragment() {
         }
     }
 
+    private fun initLensControls() {
+        val binding = cameraUiContainerBinding ?: return
+        val container = binding.lensControlsContainer ?: return
+        availableLenses = cameraRepository.enumerateCameras()
+
+        if (availableLenses.size > 1) {
+            container.visibility = View.VISIBLE
+            binding.zoomControlsContainer?.visibility = View.GONE
+
+            container.removeAllViews()
+
+            for (lens in availableLenses) {
+                val btn = com.google.android.material.button.MaterialButton(
+                    requireContext()
+                ).apply {
+                    layoutParams = android.widget.LinearLayout.LayoutParams(
+                        resources.getDimensionPixelSize(R.dimen.lens_button_size),
+                        resources.getDimensionPixelSize(R.dimen.lens_button_size)
+                    ).apply {
+                        marginEnd = resources.getDimensionPixelSize(R.dimen.spacing_small)
+                    }
+                    text = lens.name
+                    textSize = 12f
+                    setPadding(0, 0, 0, 0)
+                    insetTop = 0
+                    insetBottom = 0
+                    cornerRadius = resources.getDimensionPixelSize(R.dimen.radius_full)
+
+                    setOnClickListener {
+                        if (currentLens?.physicalId != lens.physicalId || currentLens?.id != lens.id) {
+                            currentLens = lens
+                            updateLensUI()
+                            bindCameraUseCases()
+                        }
+                    }
+                }
+                container.addView(btn)
+            }
+
+            // Set default lens (1.0x if possible)
+            if (currentLens == null) {
+                currentLens = availableLenses.find { it.multiplier in 0.9f..1.1f } ?: availableLenses.firstOrNull()
+            }
+            updateLensUI()
+        } else {
+            container.visibility = View.GONE
+            binding.zoomControlsContainer?.visibility = View.VISIBLE
+        }
+    }
+
+    private fun updateLensUI() {
+        val binding = cameraUiContainerBinding ?: return
+        val container = binding.lensControlsContainer ?: return
+        val activeColor = MaterialColors.getColor(container, com.google.android.material.R.attr.colorPrimary)
+        val inactiveColor = MaterialColors.getColor(container, com.google.android.material.R.attr.colorOnSurface)
+
+        for (i in 0 until container.childCount) {
+            val btn = container.getChildAt(i) as? com.google.android.material.button.MaterialButton
+            if (btn != null) {
+                val lens = availableLenses[i]
+                if (lens == currentLens) {
+                    btn.setTextColor(activeColor)
+                } else {
+                    btn.setTextColor(inactiveColor)
+                }
+            }
+        }
+    }
+
     private fun initZoomControls() {
         val binding = cameraUiContainerBinding ?: return
 
@@ -2325,17 +2434,23 @@ class CameraFragment : Fragment() {
 
                 val buffers = frames.map { it.buffer!! }.toTypedArray()
 
+                // 2. Metadata (WB, CCM, BlackLevel)
+                val timestamp = frames[0].timestamp
+                val result = findCaptureResult(timestamp)
+
                 // Need characteristics for static info
                 var chars: CameraCharacteristics? = null
                 val cam = camera
                 val camInfo = cam?.cameraInfo
-                if (camInfo is Camera2CameraInfo) {
-                    chars = Camera2CameraInfo.extractCameraCharacteristics(camInfo)
-                }
 
-                // 2. Metadata (WB, CCM, BlackLevel)
-                val timestamp = frames[0].timestamp
-                val result = findCaptureResult(timestamp)
+                val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as android.hardware.camera2.CameraManager
+                val camera2InfoId = if (camInfo != null) Camera2CameraInfo.from(camInfo).cameraId else "0"
+
+                val activePhysicalId = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && result != null) {
+                    result.get(CaptureResult.LOGICAL_MULTI_CAMERA_ACTIVE_PHYSICAL_ID)
+                } else null
+
+                chars = cameraManager.getCameraCharacteristics(activePhysicalId ?: camera2InfoId)
 
                 // Default values
                 var whiteLevel = 1023
