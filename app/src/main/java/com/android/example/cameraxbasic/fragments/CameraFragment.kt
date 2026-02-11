@@ -37,8 +37,16 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
 import android.graphics.BitmapFactory
+import android.hardware.camera2.CameraAccessException
+import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CameraDevice
+import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.CaptureResult
+import android.hardware.camera2.TotalCaptureResult
+import android.media.ImageReader
+import android.os.Handler
+import android.os.HandlerThread
 import com.google.android.material.slider.Slider
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.button.MaterialButtonToggleGroup
@@ -133,6 +141,18 @@ class CameraFragment : Fragment() {
     private var camera: Camera? = null
     private var cameraProvider: ProcessCameraProvider? = null
     private lateinit var windowMetricsCalculator: WindowMetricsCalculator
+
+    // Camera2 State
+    private var camera2Device: android.hardware.camera2.CameraDevice? = null
+    private var camera2Session: android.hardware.camera2.CameraCaptureSession? = null
+    private var camera2PreviewSurface: android.view.Surface? = null
+    private var rawImageReader: android.media.ImageReader? = null
+    private val camera2Manager by lazy {
+        requireContext().getSystemService(Context.CAMERA_SERVICE) as android.hardware.camera2.CameraManager
+    }
+
+    private var camera2Thread: HandlerThread? = null
+    private var camera2Handler: Handler? = null
 
     private var lutProcessor: LutSurfaceProcessor? = null
     private lateinit var lutManager: LutManager
@@ -471,6 +491,47 @@ class CameraFragment : Fragment() {
     /** Declare and bind preview, capture and analysis use cases */
     @OptIn(ExperimentalCamera2Interop::class)
     private fun bindCameraUseCases() {
+        // Fetch Characteristics for Manual Control
+        try {
+            val targetId = if (lensFacing == CameraSelector.LENS_FACING_BACK) {
+                 currentLens?.physicalId ?: currentLens?.id ?: "0"
+            } else {
+                 "1" // Front
+            }
+            val chars = camera2Manager.getCameraCharacteristics(targetId)
+
+            isoRange = chars.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
+            exposureTimeRange = chars.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
+            minFocusDistance = chars.get(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE) ?: 0.0f
+
+            // Note: evRange depends on active session/info, usually 0 for auxiliary cameras if not using logical
+            // evRange = cameraInfo.exposureState.exposureCompensationRange
+
+            // Clamp current values to new ranges
+            isoRange?.let { currentIso = currentIso.coerceIn(it.lower, it.upper) }
+            exposureTimeRange?.let { currentExposureTime = currentExposureTime.coerceIn(it.lower, it.upper) }
+
+            // Update UI if manual panel is visible
+            lifecycleScope.launch(Dispatchers.Main) {
+                updateManualPanel()
+                updateTabColors()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to fetch camera characteristics", e)
+        }
+
+        // If current lens requires Camera2, use the hard-switch path
+        if (lensFacing == CameraSelector.LENS_FACING_BACK && currentLens?.useCamera2 == true) {
+            Log.d(TAG, "Switching to Camera2 Engine for lens: ${currentLens?.name}")
+            cameraProvider?.unbindAll()
+            camera = null
+            initLensControls()
+            openCamera2(currentLens!!.id)
+            return
+        }
+
+        // Else, ensure Camera2 is closed and use CameraX
+        closeCamera2()
 
         // Get screen metrics used to setup camera for full screen resolution
         val metrics = windowMetricsCalculator.computeCurrentWindowMetrics(requireActivity()).bounds
@@ -504,29 +565,6 @@ class CameraFragment : Fragment() {
             cameraProvider.getCameraInfo(cameraSelector)
         }
 
-        // Fetch Characteristics for Manual Control
-        try {
-            val manager = requireContext().getSystemService(Context.CAMERA_SERVICE) as android.hardware.camera2.CameraManager
-            val targetId = currentLens?.physicalId ?: currentLens?.id ?: Camera2CameraInfo.from(cameraInfo).cameraId
-            val chars = manager.getCameraCharacteristics(targetId)
-
-            isoRange = chars.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
-            exposureTimeRange = chars.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
-            minFocusDistance = chars.get(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE) ?: 0.0f
-            evRange = cameraInfo.exposureState.exposureCompensationRange
-
-            // Clamp current values to new ranges
-            isoRange?.let { currentIso = currentIso.coerceIn(it.lower, it.upper) }
-            exposureTimeRange?.let { currentExposureTime = currentExposureTime.coerceIn(it.lower, it.upper) }
-
-            // Update UI if manual panel is visible
-            lifecycleScope.launch(Dispatchers.Main) {
-                updateManualPanel()
-                updateTabColors()
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to fetch camera characteristics", e)
-        }
         val capabilities = ImageCapture.getImageCaptureCapabilities(cameraInfo)
         val isRawSupported =
             capabilities.supportedOutputFormats.contains(ImageCapture.OUTPUT_FORMAT_RAW)
@@ -864,20 +902,29 @@ class CameraFragment : Fragment() {
                 return@setOnClickListener
             }
 
-            // Get a stable reference of the modifiable image capture use case
-            imageCapture?.let { imageCapture ->
-
-                if (imageCapture.outputFormat == ImageCapture.OUTPUT_FORMAT_RAW) {
-                    if (isHdrPlusEnabled) {
-                        // Trigger Burst
-                        triggerHdrPlusBurst(imageCapture)
+            if (currentLens?.useCamera2 == true) {
+                if (isHdrPlusEnabled) {
+                    triggerHdrPlusBurstCamera2()
+                } else {
+                    takeSinglePictureCamera2()
+                }
+            } else {
+                // Get a stable reference of the modifiable image capture use case
+                imageCapture?.let { imageCapture ->
+                    if (imageCapture.outputFormat == ImageCapture.OUTPUT_FORMAT_RAW) {
+                        if (isHdrPlusEnabled) {
+                            // Trigger Burst
+                            triggerHdrPlusBurst(imageCapture)
+                        } else {
+                            // Standard Single RAW Capture with Processing
+                            takeSinglePicture(imageCapture)
+                        }
                     } else {
-                        // Standard Single RAW Capture with Processing
+                        // JPEG Capture
                         takeSinglePicture(imageCapture)
                     }
-                } else {
-                    // JPEG Capture
-                    takeSinglePicture(imageCapture)
+                } ?: run {
+                     processingSemaphore.release()
                 }
             }
         }
@@ -1567,22 +1614,29 @@ class CameraFragment : Fragment() {
 
         fragmentCameraBinding.viewFinder.setOnTouchListener { view, event ->
             if (event.action == android.view.MotionEvent.ACTION_UP) {
-                val point = factory.createPoint(event.x, event.y)
-                val action = FocusMeteringAction.Builder(point).build()
+                if (currentLens?.useCamera2 == true) {
+                     // Camera2 manual focus / tap to focus (simplified)
+                     // For now just reset manual focus
+                     isManualFocus = false
+                     applyCameraControls()
+                } else {
+                    val point = factory.createPoint(event.x, event.y)
+                    val action = FocusMeteringAction.Builder(point).build()
 
-                // If in manual focus mode, tapping switch to AF
-                isManualFocus = false
-                applyCameraControls() // Apply change (clear manual focus override)
+                    // If in manual focus mode, tapping switch to AF
+                    isManualFocus = false
+                    applyCameraControls() // Apply change (clear manual focus override)
 
-                // Also reset Focus UI if active
-                if (activeManualTab == "Focus") {
-                    updateManualPanel()
+                    // Also reset Focus UI if active
+                    if (activeManualTab == "Focus") {
+                        updateManualPanel()
+                    }
+
+                    // Update text color for Focus Tab (Reset to auto color)
+                    updateTabColors()
+
+                    camera?.cameraControl?.startFocusAndMetering(action)
                 }
-
-                // Update text color for Focus Tab (Reset to auto color)
-                updateTabColors()
-
-                camera?.cameraControl?.startFocusAndMetering(action)
 
                 // Calculate screen coordinates for Focus Ring (which is in root layout)
                 // view.x/y is relative to root. event.x/y is relative to view.
@@ -2050,6 +2104,11 @@ class CameraFragment : Fragment() {
 
     @OptIn(ExperimentalCamera2Interop::class)
     private fun applyCameraControls() {
+        if (currentLens?.useCamera2 == true) {
+            updateCamera2RepeatingRequest()
+            return
+        }
+
         val cameraControl = camera?.cameraControl ?: return
         val camera2Control = Camera2CameraControl.from(cameraControl)
         val builder = CaptureRequestOptions.Builder()
@@ -2095,6 +2154,31 @@ class CameraFragment : Fragment() {
         // EV
         if (!isManualExposure) {
             cameraControl.setExposureCompensationIndex(currentEvIndex)
+        }
+    }
+
+    private fun updateCamera2RepeatingRequest() {
+        val session = camera2Session ?: return
+        val device = camera2Device ?: return
+        val surface = camera2PreviewSurface ?: return
+        val handler = camera2Handler ?: return
+
+        try {
+            val request = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
+            request.addTarget(surface)
+            applyManualSettingsToRequest(request)
+
+            session.setRepeatingRequest(request.build(), object : CameraCaptureSession.CaptureCallback() {
+                override fun onCaptureCompleted(session: CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {
+                    val timestamp = result.get(CaptureResult.SENSOR_TIMESTAMP)
+                    if (timestamp != null) {
+                        captureResults[timestamp] = result
+                    }
+                    captureResultFlow.tryEmit(result)
+                }
+            }, handler)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to update Camera2 repeating request", e)
         }
     }
 
@@ -2750,6 +2834,321 @@ class CameraFragment : Fragment() {
             toggle.setTextColor(color)
             toggle.isChecked = isHdrPlusEnabled
         }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun openCamera2(cameraId: String) {
+        closeCamera2()
+
+        camera2Thread = HandlerThread("Camera2Thread").apply { start() }
+        camera2Handler = Handler(camera2Thread!!.looper)
+
+        try {
+            camera2Manager.openCamera(cameraId, object : CameraDevice.StateCallback() {
+                override fun onOpened(device: CameraDevice) {
+                    camera2Device = device
+                    createCamera2CaptureSession()
+                }
+
+                override fun onDisconnected(device: CameraDevice) {
+                    closeCamera2()
+                }
+
+                override fun onError(device: CameraDevice, error: Int) {
+                    Log.e(TAG, "Camera2 open error: $error")
+                    closeCamera2()
+                    // Fallback to Auto
+                    lifecycleScope.launch(Dispatchers.Main) {
+                        currentLens = availableLenses.find { it.isLogicalAuto }
+                        updateLensUI()
+                        bindCameraUseCases()
+                    }
+                }
+            }, camera2Handler)
+        } catch (e: CameraAccessException) {
+            Log.e(TAG, "Failed to open Camera2", e)
+        }
+    }
+
+    private fun createCamera2CaptureSession() {
+        val device = camera2Device ?: return
+        val handler = camera2Handler ?: return
+
+        // 1. Setup RAW ImageReader
+        val chars = camera2Manager.getCameraCharacteristics(device.id)
+        val map = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+        val rawSizes = map?.getOutputSizes(android.graphics.ImageFormat.RAW_SENSOR)
+        val size = rawSizes?.maxByOrNull { it.width * it.height } ?: android.util.Size(4000, 3000)
+
+        rawImageReader = ImageReader.newInstance(size.width, size.height, android.graphics.ImageFormat.RAW_SENSOR, 8)
+        rawImageReader?.setOnImageAvailableListener({ reader ->
+             // Image consumption handled by capture callbacks
+        }, handler)
+
+        // 2. Setup Preview Surface via LutProcessor
+        // We use typical 4:3 preview size
+        val previewSize = map?.getOutputSizes(android.graphics.SurfaceTexture::class.java)
+            ?.filter { it.width.toFloat()/it.height.toFloat() in 1.3f..1.4f }
+            ?.maxByOrNull { it.width * it.height } ?: android.util.Size(1440, 1080)
+
+        lutProcessor?.getInputSurface(previewSize.width, previewSize.height) { surface ->
+            camera2PreviewSurface = surface
+            val surfaces = listOf(surface, rawImageReader!!.surface)
+
+            try {
+                device.createCaptureSession(surfaces, object : CameraCaptureSession.StateCallback() {
+                    override fun onConfigured(session: CameraCaptureSession) {
+                        camera2Session = session
+                        try {
+                            val request = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
+                            request.addTarget(surface)
+
+                            // Apply default AF/AE
+                            request.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
+                            request.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+
+                            session.setRepeatingRequest(request.build(), object : CameraCaptureSession.CaptureCallback() {
+                                override fun onCaptureCompleted(session: CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {
+                                    val timestamp = result.get(CaptureResult.SENSOR_TIMESTAMP)
+                                    if (timestamp != null) {
+                                        captureResults[timestamp] = result
+                                    }
+                                    captureResultFlow.tryEmit(result)
+                                }
+                            }, handler)
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Failed to start repeating request", e)
+                        }
+                    }
+
+                    override fun onConfigureFailed(session: CameraCaptureSession) {
+                        Log.e(TAG, "Camera2 session config failed")
+                    }
+                }, handler)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to create capture session", e)
+            }
+        }
+    }
+
+    private fun takeSinglePictureCamera2() {
+        val device = camera2Device ?: return
+        val session = camera2Session ?: return
+        val reader = rawImageReader ?: return
+        val handler = camera2Handler ?: return
+
+        try {
+            val request = device.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE)
+            request.addTarget(reader.surface)
+
+            // Apply current manual settings
+            applyManualSettingsToRequest(request)
+
+            // Setup image listener for this specific capture
+            reader.setOnImageAvailableListener({ r ->
+                val image = r.acquireLatestImage() ?: return@setOnImageAvailableListener
+                try {
+                    val currentZoom = 1.0f // Physical sensors usually start at 1.0x
+                    val holder = copyAndroidImageToHolder(image, currentZoom, currentLens?.id)
+                    image.close()
+                    lifecycleScope.launch {
+                        processingChannel.send(holder)
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to process Camera2 image", e)
+                    image.close()
+                    processingSemaphore.release()
+                }
+            }, handler)
+
+            session.capture(request.build(), object : CameraCaptureSession.CaptureCallback() {
+                override fun onCaptureStarted(session: CameraCaptureSession, request: CaptureRequest, timestamp: Long, frameNumber: Long) {
+                    // Flash animation
+                    lifecycleScope.launch(Dispatchers.Main) {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                             fragmentCameraBinding.root.foreground = ColorDrawable(Color.WHITE)
+                             fragmentCameraBinding.root.postDelayed({ fragmentCameraBinding.root.foreground = null }, 50)
+                        }
+                    }
+                }
+
+                override fun onCaptureCompleted(session: CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {
+                    val timestamp = result.get(CaptureResult.SENSOR_TIMESTAMP)
+                    if (timestamp != null) {
+                        captureResults[timestamp] = result
+                    }
+                    captureResultFlow.tryEmit(result)
+                }
+            }, handler)
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Camera2 capture failed", e)
+            processingSemaphore.release()
+        }
+    }
+
+    private fun triggerHdrPlusBurstCamera2() {
+        val device = camera2Device ?: return
+        val session = camera2Session ?: return
+        val reader = rawImageReader ?: return
+        val handler = camera2Handler ?: return
+
+        isBurstActive = true
+        burstStartTime = System.currentTimeMillis()
+
+        try {
+            // Get burst size
+            val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+            val burstSize = (prefs.getString(SettingsFragment.KEY_HDR_BURST_COUNT, "3") ?: "3").toIntOrNull() ?: 3
+
+            // Re-init helper
+            hdrPlusBurstHelper = HdrPlusBurst(frameCount = burstSize, onBurstComplete = { frames ->
+                processHdrPlusBurst(frames, 1.0f) // No digital gain calculation for now in C2 path
+            })
+
+            // UI
+            lifecycleScope.launch(Dispatchers.Main) {
+                cameraUiContainerBinding?.captureProgress?.max = burstSize
+                cameraUiContainerBinding?.captureProgress?.progress = 0
+                cameraUiContainerBinding?.captureProgress?.visibility = View.VISIBLE
+                cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = false
+                cameraUiContainerBinding?.cameraCaptureButton?.alpha = 0.5f
+            }
+
+            val burstRequests = mutableListOf<CaptureRequest>()
+            for (i in 0 until burstSize) {
+                val request = device.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE)
+                request.addTarget(reader.surface)
+                applyManualSettingsToRequest(request)
+                burstRequests.add(request.build())
+            }
+
+            var framesCaptured = 0
+            reader.setOnImageAvailableListener({ r ->
+                val image = r.acquireNextImage() ?: return@setOnImageAvailableListener
+                try {
+                    hdrPlusBurstHelper?.addFrame(wrapAndroidImage(image), currentLens?.id)
+                    framesCaptured++
+                    lifecycleScope.launch(Dispatchers.Main) {
+                        cameraUiContainerBinding?.captureProgress?.progress = framesCaptured
+                    }
+                    if (framesCaptured >= burstSize) {
+                        lifecycleScope.launch(Dispatchers.Main) { resetBurstUi() }
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to add C2 frame", e)
+                    image.close()
+                }
+            }, handler)
+
+            session.captureBurst(burstRequests, object : CameraCaptureSession.CaptureCallback() {
+                override fun onCaptureCompleted(session: CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {
+                    val timestamp = result.get(CaptureResult.SENSOR_TIMESTAMP)
+                    if (timestamp != null) {
+                        captureResults[timestamp] = result
+                    }
+                    captureResultFlow.tryEmit(result)
+                }
+                override fun onCaptureSequenceCompleted(session: CameraCaptureSession, sequenceId: Int, frameNumber: Long) {
+                    Log.d(TAG, "Camera2 Burst capture sequence completed")
+                }
+            }, handler)
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Camera2 burst failed", e)
+            isBurstActive = false
+            processingSemaphore.release()
+            lifecycleScope.launch(Dispatchers.Main) { resetBurstUi() }
+        }
+    }
+
+    private fun copyAndroidImageToHolder(image: android.media.Image, zoomRatio: Float, physicalId: String?): RawImageHolder {
+        val plane = image.planes[0]
+        val buffer = plane.buffer
+        val rowStride = plane.rowStride
+        val pixelStride = 2 // RAW16
+        val width = image.width
+        val height = image.height
+
+        val rowLength = width * pixelStride
+        val data = ByteArray(rowLength * height)
+
+        buffer.rewind()
+        if (rowStride == rowLength) {
+            buffer.get(data)
+        } else {
+            for (y in 0 until height) {
+                buffer.position(y * rowStride)
+                buffer.get(data, y * rowLength, rowLength)
+            }
+        }
+
+        val chars = camera2Manager.getCameraCharacteristics(physicalId ?: "0")
+        val sensorOrientation = chars.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
+
+        return RawImageHolder(
+            data = data,
+            width = width,
+            height = height,
+            timestamp = image.timestamp,
+            rotationDegrees = sensorOrientation,
+            zoomRatio = zoomRatio,
+            physicalId = physicalId
+        )
+    }
+
+    private fun wrapAndroidImage(image: android.media.Image): ImageProxy {
+         return object : ImageProxy {
+             override fun close() = image.close()
+             override fun getFormat() = image.format
+             override fun getHeight() = image.height
+             override fun getWidth() = image.width
+             override fun getImageInfo() = object : ImageInfo {
+                 override fun getTagBundle() = TagBundle.emptyBundle()
+                 override fun getTimestamp() = image.timestamp
+                 override fun getRotationDegrees(): Int {
+                     val chars = camera2Manager.getCameraCharacteristics(currentLens?.id ?: "0")
+                     return chars.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
+                 }
+                 override fun populateExifData(builder: androidx.camera.core.impl.utils.ExifData.Builder) {}
+             }
+             override fun getPlanes() = image.planes.map { p ->
+                 object : ImageProxy.PlaneProxy {
+                     override fun getBuffer() = p.buffer
+                     override fun getPixelStride() = p.pixelStride
+                     override fun getRowStride() = p.rowStride
+                 }
+             }.toTypedArray()
+             override fun getImage() = image
+             override fun getCropRect() = android.graphics.Rect(0, 0, image.width, image.height)
+             override fun setCropRect(rect: android.graphics.Rect?) {}
+         }
+    }
+
+    private fun applyManualSettingsToRequest(request: CaptureRequest.Builder) {
+        if (isManualExposure) {
+            request.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
+            request.set(CaptureRequest.SENSOR_SENSITIVITY, currentIso)
+            request.set(CaptureRequest.SENSOR_EXPOSURE_TIME, currentExposureTime)
+        }
+        if (isManualFocus) {
+            request.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF)
+            request.set(CaptureRequest.LENS_FOCUS_DISTANCE, currentFocusDistance)
+        }
+    }
+
+    private fun closeCamera2() {
+        camera2Session?.close()
+        camera2Session = null
+        camera2Device?.close()
+        camera2Device = null
+        rawImageReader?.close()
+        rawImageReader = null
+        camera2PreviewSurface = null
+        lutProcessor?.releaseInputSurface()
+        camera2Thread?.quitSafely()
+        camera2Thread = null
+        camera2Handler = null
     }
 
     private fun resetBurstUi() {

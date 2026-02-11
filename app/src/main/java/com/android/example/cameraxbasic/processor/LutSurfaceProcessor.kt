@@ -123,6 +123,48 @@ class LutSurfaceProcessor : SurfaceProcessor {
     }
 
     // Direct Surface binding (TextureView)
+    fun getInputSurface(w: Int, h: Int, onSurfaceReady: (Surface) -> Unit) {
+        handler.post {
+            inputWidth = w
+            inputHeight = h
+
+            val textures = IntArray(1)
+            GLES30.glGenTextures(1, textures, 0)
+            val textureId = textures[0]
+
+            GLES30.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, textureId)
+            GLES30.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_NEAREST)
+            GLES30.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_NEAREST)
+            GLES30.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE)
+            GLES30.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE)
+
+            val surfaceTexture = SurfaceTexture(textureId)
+            surfaceTexture.setDefaultBufferSize(w, h)
+            surfaceTexture.setOnFrameAvailableListener({
+                handler.post { drawFrame() }
+            }, handler)
+
+            val surface = Surface(surfaceTexture)
+
+            this.inputTextureId = textureId
+            this.inputSurfaceTexture = surfaceTexture
+
+            onSurfaceReady(surface)
+        }
+    }
+
+    fun releaseInputSurface() {
+        handler.post {
+            inputSurfaceTexture?.release()
+            inputSurfaceTexture = null
+            if (inputTextureId != 0) {
+                GLES30.glDeleteTextures(1, intArrayOf(inputTextureId), 0)
+                inputTextureId = 0
+            }
+        }
+    }
+
+    // Direct Surface binding (TextureView)
     fun setOutputSurface(surface: Surface?, w: Int, h: Int) {
         handler.post {
             if (surface == null) {

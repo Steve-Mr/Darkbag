@@ -20,7 +20,8 @@ data class LensInfo(
     val isLogicalAuto: Boolean = false,
     val zoomRange: Range<Float>? = null,
     val isZoomPreset: Boolean = false,
-    val targetZoomRatio: Float? = null
+    val targetZoomRatio: Float? = null,
+    val useCamera2: Boolean = false
 )
 
 enum class LensType {
@@ -91,14 +92,24 @@ class CameraRepository(private val context: Context) {
         }
 
         // C. Add ALL back-facing physical sensors found during probe
-        // We exclude the anchor itself from being added as "Physical ID override" if it's already "Auto"
         for (id in backIds) {
             val chars = idToChars[id] ?: continue
 
-            // We create a LensInfo that binds to anchorId but overrides with physical 'id'
-            // Some devices might not allow overriding with an ID that isn't a declared physical component,
-            // but we'll try it and fallback in CameraFragment.
-            val info = createLensInfo(anchorId, id, chars, mainWideEqFocal)
+            // Strategy:
+            // 1. If CameraX supports this ID directly, use CameraX (id=id, physicalId=null, useCamera2=false)
+            // 2. If CameraX doesn't support it, but it's a component of anchorId, use CameraX with physical lock (id=anchorId, physicalId=id, useCamera2=false)
+            // 3. Otherwise, use Direct Camera2 (id=id, physicalId=null, useCamera2=true)
+
+            val isCameraXDirect = cameraXIds.contains(id)
+            val isPhysicalComponent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                anchorChars.physicalCameraIds.contains(id)
+            } else false
+
+            val info = when {
+                isCameraXDirect -> createLensInfo(id, null, chars, mainWideEqFocal, useCamera2 = false)
+                isPhysicalComponent -> createLensInfo(anchorId, id, chars, mainWideEqFocal, useCamera2 = false)
+                else -> createLensInfo(id, null, chars, mainWideEqFocal, useCamera2 = true)
+            }
 
             // Avoid adding duplicates (e.g. if we already have a lens with this sensorId)
             if (availableLenses.none { it.sensorId == info.sensorId }) {
@@ -123,7 +134,8 @@ class CameraRepository(private val context: Context) {
         name: String? = null,
         isPreset: Boolean = false,
         targetZoom: Float? = null,
-        zoomRange: Range<Float>? = null
+        zoomRange: Range<Float>? = null,
+        useCamera2: Boolean = false
     ): LensInfo {
         val eqFocal = calculateEquivalentFocalLength(chars)
         val f = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.firstOrNull() ?: 0f
@@ -137,12 +149,13 @@ class CameraRepository(private val context: Context) {
 
         val finalName = name ?: when {
             isAuto -> "Auto"
+            useCamera2 -> String.format("%.1fx (S2)", multiplier)
             physicalId != null -> String.format("%.1fx (S)", multiplier)
             else -> String.format("%.1fx (L)", multiplier)
         }
-        val sensorId = physicalId ?: "$id-${targetZoom ?: 0f}"
+        val sensorId = if (useCamera2) "c2-$id" else (physicalId ?: "$id-${targetZoom ?: 0f}")
 
-        return LensInfo(id, physicalId, sensorId, finalName, f, eqFocal, multiplier, type, isAuto, zoomRange, isPreset, targetZoom)
+        return LensInfo(id, physicalId, sensorId, finalName, f, eqFocal, multiplier, type, isAuto, zoomRange, isPreset, targetZoom, useCamera2)
     }
 
     private fun calculateEquivalentFocalLength(chars: CameraCharacteristics): Float {
