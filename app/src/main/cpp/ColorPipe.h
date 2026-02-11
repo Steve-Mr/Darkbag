@@ -29,7 +29,7 @@ float apply_log(float x, int type);
 
 // --- LUT ---
 struct LUT3D {
-    int size;
+    int size = 0;
     std::vector<Vec3> data;
 };
 
@@ -52,7 +52,10 @@ void process_and_save_image(
     int sourceColorSpace = 0,
     const float* ccm = nullptr,
     const float* wb = nullptr,
-    int orientation = 0
+    int orientation = 0,
+    unsigned char* out_rgb_buffer = nullptr,
+    bool isPreview = false,
+    int downsampleFactor = 1
 );
 
 // --- File Writers ---
@@ -62,5 +65,7 @@ bool write_tiff(const char* filename, int width, int height, const std::vector<u
 bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, int iso, long exposureTime, float fNumber, float focalLength, long captureTimeMillis, const std::vector<float>& ccm, int orientation);
 
 bool write_bmp(const char* filename, int width, int height, const std::vector<unsigned short>& data);
+
+bool write_jpeg(const char* filename, int width, int height, const std::vector<unsigned short>& data, int quality);
 
 #endif // COLOR_PIPE_H

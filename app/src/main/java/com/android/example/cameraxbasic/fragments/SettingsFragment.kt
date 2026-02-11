@@ -103,7 +103,7 @@ class SettingsFragment : Fragment() {
         // HDR+ Burst Frames
         val burstAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, BURST_SIZES)
         binding.menuHdrBurst.setAdapter(burstAdapter)
-        val savedBurst = prefs.getString(KEY_HDR_BURST_COUNT, "3")
+        val savedBurst = prefs.getString(KEY_HDR_BURST_COUNT, "8")
         binding.menuHdrBurst.setText(savedBurst, false)
         binding.menuHdrBurst.setOnItemClickListener { _, _, position, _ ->
             prefs.edit().putString(KEY_HDR_BURST_COUNT, BURST_SIZES[position]).apply()
