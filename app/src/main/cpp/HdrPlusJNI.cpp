@@ -332,11 +332,12 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     auto copyEnd = std::chrono::high_resolution_clock::now();
     auto copyDurationMs = std::chrono::duration_cast<std::chrono::milliseconds>(copyEnd - copyStart).count();
 
-    // Ensure Halide sees exactly the dimensions and frame count for this capture
-    Buffer<uint16_t> inputBuf = g_hdrPlusBuffers.inputPool
-            .cropped(0, 0, width)
-            .cropped(1, 0, height)
-            .cropped(2, 0, numFrames);
+    // Use direct constructor to ensure clean metadata and explicit dimensions
+    Buffer<uint16_t> inputBuf(rawDataPtr, width, height, numFrames);
+
+    if (rawDataPtr) {
+        LOGD("Input RAW Sample [0,0,0]: %d, [1,1,0]: %d", (int)rawDataPtr[0], (int)rawDataPtr[width + 1]);
+    }
 
     // Mark host data as dirty so Halide copies it to GPU if needed
     inputBuf.set_host_dirty();
@@ -358,18 +359,15 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     for(int i=0; i<9; ++i) ccmVec[i] = ccmData[i];
     env->ReleaseFloatArrayElements(ccm, ccmData, JNI_ABORT);
 
-    std::vector<float> identityCCM = {
-        1.0f, 0.0f, 0.0f,
-        0.0f, 1.0f, 0.0f,
-        0.0f, 0.0f, 1.0f
-    };
-    Buffer<float> ccmHalideBuf(identityCCM.data(), 3, 3);
+    Buffer<float> ccmHalideBuf(ccmVec.data(), 3, 3);
+    ccmHalideBuf.set_host_dirty();
+
+    LOGD("Passing CCM to Halide: %.3f %.3f %.3f | %.3f %.3f %.3f | %.3f %.3f %.3f",
+         ccmVec[0], ccmVec[1], ccmVec[2], ccmVec[3], ccmVec[4], ccmVec[5], ccmVec[6], ccmVec[7], ccmVec[8]);
 
     // 3. Prepare Output Buffer (16-bit Linear RGB)
-    // Crop to current dimensions to avoid stale data at edges
-    Buffer<uint16_t> outputBuf = g_hdrPlusBuffers.outputPool
-            .cropped(0, 0, width)
-            .cropped(1, 0, height);
+    // Use direct constructor to ensure clean metadata and explicit dimensions
+    Buffer<uint16_t> outputBuf(g_hdrPlusBuffers.outputPool.data(), width, height, 3);
 
     auto jniPrepEnd = std::chrono::high_resolution_clock::now();
     auto jniPrepMs = std::chrono::duration_cast<std::chrono::milliseconds>(jniPrepEnd - jniPrepStart).count();
