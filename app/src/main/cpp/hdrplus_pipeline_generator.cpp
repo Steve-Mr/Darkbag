@@ -126,7 +126,7 @@ private:
   Func black_white_level(Func input, const Expr bp, const Expr wp) {
     Func output("black_white_level_output");
     // Reserve headroom (0.25x) for White Balance to prevent clipping
-    Expr white_factor = (65535.f / (wp - bp)) * 0.25f;
+    Expr white_factor = (65535.f / max(1.f, f32(wp) - f32(bp))) * 0.25f;
     output(x, y) = u16_sat((i32(input(x, y)) - bp) * white_factor);
     return output;
   }
@@ -209,7 +209,9 @@ private:
     Expr score = select(abs(input_mirror(x + dx, y + dy, c)) > threshold, 0.f, fast_exp(-dist * dist / sig2));
     weights(dx, dy, x, y, c) = k(dx, dy) * score;
     total_weights(x, y, c) = sum(weights(r.x, r.y, x, y, c));
-    bilateral(x, y, c) = sum(input_mirror(x + r.x, y + r.y, c) * weights(r.x, r.y, x, y, c)) / total_weights(x, y, c);
+    bilateral(x, y, c) = select(total_weights(x, y, c) > 0.f,
+                                sum(input_mirror(x + r.x, y + r.y, c) * weights(r.x, r.y, x, y, c)) / total_weights(x, y, c),
+                                f32(input(x, y, c)));
     output_bf(x, y, c) = f32(input(x, y, c));
     output_bf(x, y, 1) = bilateral(x, y, 1);
     output_bf(x, y, 2) = bilateral(x, y, 2);
@@ -234,8 +236,8 @@ private:
     Func blur = gauss_15x15(gauss_15x15(input_mirror, "desaturate_noise_blur1"), "desaturate_noise_blur2");
     float factor = 1.4f; float threshold = 25000.f;
     output_dn(x, y, c) = input(x, y, c);
-    output_dn(x, y, 1) = select((abs(blur(x, y, 1)) / abs(input(x, y, 1)) < factor) && (abs(input(x, y, 1)) < threshold) && (abs(blur(x, y, 1)) < threshold), .7f * blur(x, y, 1) + .3f * input(x, y, 1), input(x, y, 1));
-    output_dn(x, y, 2) = select((abs(blur(x, y, 2)) / abs(input(x, y, 2)) < factor) && (abs(input(x, y, 2)) < threshold) && (abs(blur(x, y, 2)) < threshold), .7f * blur(x, y, 2) + .3f * input(x, y, 2), input(x, y, 2));
+    output_dn(x, y, 1) = select((abs(blur(x, y, 1)) < factor * abs(input(x, y, 1))) && (abs(input(x, y, 1)) < threshold) && (abs(blur(x, y, 1)) < threshold), .7f * blur(x, y, 1) + .3f * input(x, y, 1), input(x, y, 1));
+    output_dn(x, y, 2) = select((abs(blur(x, y, 2)) < factor * abs(input(x, y, 2))) && (abs(input(x, y, 2)) < threshold) && (abs(blur(x, y, 2)) < threshold), .7f * blur(x, y, 2) + .3f * input(x, y, 2), input(x, y, 2));
 
     if (use_gpu) {
         Var tx{"tx"}, ty{"ty"};
