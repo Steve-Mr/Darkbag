@@ -60,6 +60,21 @@ class SettingsFragment : Fragment() {
         setupMenus()
         setupCheckboxes()
         setupNavigation()
+        updateDebugStats()
+    }
+
+
+    override fun onResume() {
+        super.onResume()
+        updateDebugStats()
+    }
+
+
+    private fun updateDebugStats() {
+        val logs = com.android.example.cameraxbasic.utils.DebugLogManager.getLogs()
+        if (logs.isNotEmpty()) {
+            binding.tvDebugStats.text = logs
+        }
     }
 
     private fun setupToolbar() {
@@ -83,6 +98,24 @@ class SettingsFragment : Fragment() {
         binding.menuTargetLog.setText(savedLog, false)
         binding.menuTargetLog.setOnItemClickListener { _, _, position, _ ->
             prefs.edit().putString(KEY_TARGET_LOG, LOG_CURVES[position]).apply()
+        }
+
+        // HDR+ Burst Frames
+        val burstAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, BURST_SIZES)
+        binding.menuHdrBurst.setAdapter(burstAdapter)
+        val savedBurst = prefs.getString(KEY_HDR_BURST_COUNT, "8")
+        binding.menuHdrBurst.setText(savedBurst, false)
+        binding.menuHdrBurst.setOnItemClickListener { _, _, position, _ ->
+            prefs.edit().putString(KEY_HDR_BURST_COUNT, BURST_SIZES[position]).apply()
+        }
+
+        // HDR+ Underexposure
+        val underexposureAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, HDR_UNDEREXPOSURE_MODES)
+        binding.menuHdrUnderexposure.setAdapter(underexposureAdapter)
+        val savedUnderexposure = prefs.getString(KEY_HDR_UNDEREXPOSURE_MODE, "Dynamic")
+        binding.menuHdrUnderexposure.setText(savedUnderexposure, false)
+        binding.menuHdrUnderexposure.setOnItemClickListener { _, _, position, _ ->
+            prefs.edit().putString(KEY_HDR_UNDEREXPOSURE_MODE, HDR_UNDEREXPOSURE_MODES[position]).apply()
         }
 
         // Default Focal Length
@@ -126,6 +159,11 @@ class SettingsFragment : Fragment() {
             prefs.edit().putBoolean(KEY_SAVE_JPG, isChecked).apply()
         }
 
+        binding.switchHqBackgroundExport.isChecked = prefs.getBoolean(KEY_HQ_BACKGROUND_EXPORT, false)
+        binding.switchHqBackgroundExport.setOnCheckedChangeListener { _, isChecked ->
+            prefs.edit().putBoolean(KEY_HQ_BACKGROUND_EXPORT, isChecked).apply()
+        }
+
         binding.switchManualControls.isChecked = prefs.getBoolean(KEY_MANUAL_CONTROLS, false)
         binding.switchManualControls.setOnCheckedChangeListener { _, isChecked ->
             prefs.edit().putBoolean(KEY_MANUAL_CONTROLS, isChecked).apply()
@@ -144,15 +182,20 @@ class SettingsFragment : Fragment() {
         const val KEY_ACTIVE_LUT = "active_lut_filename"
         const val KEY_SAVE_TIFF = "save_tiff"
         const val KEY_SAVE_JPG = "save_jpg"
+        const val KEY_HQ_BACKGROUND_EXPORT = "hq_background_export"
         const val KEY_USE_GPU = "use_gpu"
         const val KEY_MANUAL_CONTROLS = "enable_manual_controls"
         const val KEY_ENABLE_LUT_PREVIEW = "enable_lut_preview"
         const val KEY_DEFAULT_FOCAL_LENGTH = "default_focal_length"
         const val KEY_ANTIBANDING = "antibanding_mode"
         const val KEY_FLASH_MODE = "flash_mode"
+        const val KEY_HDR_BURST_COUNT = "hdr_burst_count"
+        const val KEY_HDR_UNDEREXPOSURE_MODE = "hdr_underexposure_mode"
 
         val FOCAL_LENGTHS = listOf("24", "28", "35")
         val ANTIBANDING_MODES = listOf("Auto", "50Hz", "60Hz", "Off")
+        val BURST_SIZES = listOf("3", "4", "5", "6", "7", "8")
+        val HDR_UNDEREXPOSURE_MODES = listOf("0 EV", "-1 EV", "-2 EV", "Dynamic (Experimental)")
 
         val LOG_CURVES = listOf(
             "None",
