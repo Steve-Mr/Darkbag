@@ -2925,7 +2925,9 @@ class CameraFragment : Fragment() {
                             height = firstFrame.height,
                             timestamp = firstFrame.timestamp,
                             rotationDegrees = firstFrame.rotationDegrees,
-                            zoomRatio = currentZoom
+                            combinedOrientation = combinedOrientation,
+                            zoomRatio = currentZoom,
+                            physicalId = firstFrame.physicalId
                         )
                         processingChannel.send(holder)
                         fallbackSent = true
