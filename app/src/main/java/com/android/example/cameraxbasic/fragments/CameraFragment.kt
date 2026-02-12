@@ -328,6 +328,8 @@ class CameraFragment : Fragment() {
     override fun onStop() {
         super.onStop()
         orientationEventListener.disable()
+        // Ensure Camera2 is closed when stopping to release hardware resources
+        closeCamera2()
     }
 
     override fun onResume() {
@@ -338,6 +340,12 @@ class CameraFragment : Fragment() {
             Navigation.findNavController(requireActivity(), R.id.fragment_container).navigate(
                 CameraFragmentDirections.actionCameraToPermissions()
             )
+            return
+        }
+
+        // Re-initialize camera if we were using Camera2 engine, as it's closed in onStop
+        if (currentLens?.useCamera2 == true) {
+            openCamera2(currentLens!!.id)
         }
     }
 
@@ -1172,11 +1180,6 @@ class CameraFragment : Fragment() {
                     "Processing Image: Timestamp=${image.timestamp}, ZoomRatio=${image.zoomRatio}, Rotation=${image.rotationDegrees}"
                 )
 
-                val cam = camera ?: return@withContext
-                val camera2Info = Camera2CameraInfo.from(cam.cameraInfo)
-                val cameraManager =
-                    context.getSystemService(Context.CAMERA_SERVICE) as android.hardware.camera2.CameraManager
-
                 // 1. Wait for Metadata
                 val captureResult = findCaptureResult(image.timestamp)
 
@@ -1188,11 +1191,17 @@ class CameraFragment : Fragment() {
                     return@withContext
                 }
 
+                val cameraManager =
+                    context.getSystemService(Context.CAMERA_SERVICE) as android.hardware.camera2.CameraManager
+
                 val activePhysicalId = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                     captureResult.get(android.hardware.camera2.CaptureResult.LOGICAL_MULTI_CAMERA_ACTIVE_PHYSICAL_ID)
                 } else null
 
-                val targetCharId = activePhysicalId ?: image.physicalId ?: camera2Info.cameraId
+                val cam = camera
+                val camera2InfoId = if (cam != null) Camera2CameraInfo.from(cam.cameraInfo).cameraId else "0"
+
+                val targetCharId = activePhysicalId ?: image.physicalId ?: camera2InfoId
                 Log.d(TAG, "Fetching characteristics for processing using ID: $targetCharId")
                 val chars = cameraManager.getCameraCharacteristics(targetCharId)
 
@@ -1913,11 +1922,10 @@ class CameraFragment : Fragment() {
     private fun initLensControls() {
         val binding = cameraUiContainerBinding ?: return
         val container = binding.lensControlsContainer ?: return
-        val scroll = binding.lensControlsScroll ?: return
+        val scroll = binding.controlsHubScroll ?: return
 
         if (lensFacing != CameraSelector.LENS_FACING_BACK) {
             scroll.visibility = View.GONE
-            binding.zoomControlsContainer?.visibility = View.GONE
             return
         }
 
@@ -1932,10 +1940,8 @@ class CameraFragment : Fragment() {
         availableLenses = cameraRepository.enumerateCameras(cameraXIds)
         Log.d(TAG, "Available Lenses identified: ${availableLenses.size}")
 
-        if (availableLenses.size > 1) {
+        if (availableLenses.isNotEmpty()) {
             scroll.visibility = View.VISIBLE
-            binding.zoomControlsContainer?.visibility = if (currentLens?.isLogicalAuto == true) View.VISIBLE else View.GONE
-
             container.removeAllViews()
 
             for (lens in availableLenses) {
@@ -1957,16 +1963,16 @@ class CameraFragment : Fragment() {
 
                     setOnClickListener {
                         val oldLens = currentLens
-                        if (oldLens?.physicalId != lens.physicalId || oldLens?.id != lens.id ||
-                            oldLens?.isLogicalAuto != lens.isLogicalAuto || oldLens?.isZoomPreset != lens.isZoomPreset ||
-                            oldLens?.targetZoomRatio != lens.targetZoomRatio) {
-
+                        if (oldLens?.sensorId != lens.sensorId) {
                             currentLens = lens
                             updateLensUI()
 
-                            // If we just changed the binding (ID or Physical ID), rebind
-                            if (oldLens?.id != lens.id || oldLens?.physicalId != lens.physicalId) {
-                                bindCameraUseCases()
+                            // If we just changed the engine or ID, rebind
+                            if (oldLens?.id != lens.id || oldLens?.physicalId != lens.physicalId || oldLens?.useCamera2 != lens.useCamera2) {
+                                // Animate the switch to mask hardware initialization
+                                animateSwitch {
+                                    bindCameraUseCases()
+                                }
                             } else if (lens.isZoomPreset || lens.isLogicalAuto) {
                                 // Just a zoom change on the same logical camera
                                 updateZoom(true)
@@ -1986,14 +1992,13 @@ class CameraFragment : Fragment() {
             updateLensUI()
         } else {
             scroll.visibility = View.GONE
-            binding.zoomControlsContainer?.visibility = View.VISIBLE
         }
     }
 
     private fun updateLensUI() {
         val binding = cameraUiContainerBinding ?: return
         val container = binding.lensControlsContainer ?: return
-        val scroll = binding.lensControlsScroll ?: return
+        val scroll = binding.controlsHubScroll ?: return
         val activeColor = MaterialColors.getColor(container, com.google.android.material.R.attr.colorPrimary)
         val inactiveColor = MaterialColors.getColor(container, com.google.android.material.R.attr.colorOnSurface)
 
@@ -2001,7 +2006,7 @@ class CameraFragment : Fragment() {
             val btn = container.getChildAt(i) as? com.google.android.material.button.MaterialButton
             if (btn != null) {
                 val lens = availableLenses[i]
-                if (lens == currentLens) {
+                if (lens.sensorId == currentLens?.sensorId) {
                     btn.setTextColor(activeColor)
                     btn.strokeWidth = resources.getDimensionPixelSize(R.dimen.stroke_small)
                     btn.strokeColor = android.content.res.ColorStateList.valueOf(activeColor)
@@ -2012,9 +2017,9 @@ class CameraFragment : Fragment() {
             }
         }
 
-        // Show zoom buttons (1x, 2x) only in logical auto mode or if it's a zoom preset (which is also logical)
+        // Show zoom buttons (1x, 2x) only for the main CameraX camera (Auto)
         binding.zoomControlsContainer?.visibility =
-            if (currentLens?.isLogicalAuto == true || currentLens?.isZoomPreset == true) View.VISIBLE else View.GONE
+            if (currentLens?.isLogicalAuto == true) View.VISIBLE else View.GONE
     }
 
     private fun initZoomControls() {
@@ -2071,6 +2076,20 @@ class CameraFragment : Fragment() {
 
         camera?.cameraControl?.setZoomRatio(ratio)
         updateZoomUI(animate)
+    }
+
+    private fun animateSwitch(onMidPoint: () -> Unit) {
+        fragmentCameraBinding.viewFinder.animate()
+            .alpha(0f)
+            .setDuration(ANIMATION_FAST_MILLIS)
+            .withEndAction {
+                onMidPoint()
+                fragmentCameraBinding.viewFinder.animate()
+                    .alpha(1f)
+                    .setDuration(ANIMATION_FAST_MILLIS)
+                    .start()
+            }
+            .start()
     }
 
     private fun updateZoomUI(animate: Boolean) {
