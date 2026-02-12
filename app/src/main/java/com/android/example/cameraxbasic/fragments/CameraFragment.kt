@@ -2108,7 +2108,11 @@ class CameraFragment : Fragment() {
                     btn.setTextColor(colorOnSurface)
                     btn.strokeWidth = 0
                     btn.text = lens.name
-                    btn.setBackgroundColor(Color.TRANSPARENT)
+                    btn.setBackgroundColor(MaterialColors.layer(
+                        MaterialColors.getColor(btn, com.google.android.material.R.attr.colorSurface),
+                        colorOnSurface,
+                        0.05f
+                    ))
                 }
             }
         }
@@ -2222,16 +2226,19 @@ class CameraFragment : Fragment() {
     }
 
     private fun animateSwitch(onMidPoint: () -> Unit) {
+        val switchDuration = 200L
         fragmentCameraBinding.viewFinder.animate()
             .alpha(0f)
-            .setDuration(ANIMATION_FAST_MILLIS)
+            .setDuration(switchDuration)
             .withEndAction {
                 // Ensure UI operations are on main thread, but try to avoid heavy work blocking next frame
                 lifecycleScope.launch(Dispatchers.Main) {
                     onMidPoint()
+                    // Small delay to allow hardware to initialize
+                    delay(100)
                     fragmentCameraBinding.viewFinder.animate()
                         .alpha(1f)
-                        .setDuration(ANIMATION_FAST_MILLIS)
+                        .setDuration(switchDuration)
                         .start()
                 }
             }
@@ -3143,9 +3150,16 @@ class CameraFragment : Fragment() {
                             request.addTarget(surface)
                             analysisImageReader?.surface?.let { request.addTarget(it) }
 
-                            // Apply default AF/AE
-                            request.set(android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE, android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
-                            request.set(android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE, android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE_ON)
+                            // Apply current Manual & Zoom settings
+                            applyManualSettingsToRequest(request)
+
+                            // Ensure default AF/AE if manual is NOT set (applyManualSettingsToRequest handles its own AE/AF modes)
+                            if (!isManualFocus) {
+                                request.set(android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE, android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
+                            }
+                            if (!isManualExposure) {
+                                // applyManualSettingsToRequest handles flash mapping inside if (!isManualExposure)
+                            }
 
                             session.setRepeatingRequest(request.build(), object : android.hardware.camera2.CameraCaptureSession.CaptureCallback() {
                                 override fun onCaptureCompleted(session: android.hardware.camera2.CameraCaptureSession, request: android.hardware.camera2.CaptureRequest, result: android.hardware.camera2.TotalCaptureResult) {
