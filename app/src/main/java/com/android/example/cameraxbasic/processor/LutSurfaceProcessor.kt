@@ -60,11 +60,19 @@ class LutSurfaceProcessor : SurfaceProcessor {
         handler.post { initGl() }
     }
 
-    // CameraX SurfaceProcessor interface
+    // CameraX SurfaceProcessor interface (Deprecated for Camera2)
     override fun onInputSurface(request: SurfaceRequest) {
+        provideInputSurface(request.resolution.width, request.resolution.height) { surface ->
+            request.provideSurface(surface, executor) {
+                releaseInputSurface(surface)
+            }
+        }
+    }
+
+    fun provideInputSurface(w: Int, h: Int, callback: (Surface) -> Unit) {
         handler.post {
-            inputWidth = request.resolution.width
-            inputHeight = request.resolution.height
+            inputWidth = w
+            inputHeight = h
 
             // Always create a new texture for each request to avoid race conditions
             val textures = IntArray(1)
@@ -78,7 +86,7 @@ class LutSurfaceProcessor : SurfaceProcessor {
             GLES30.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE)
 
             val surfaceTexture = SurfaceTexture(textureId)
-            surfaceTexture.setDefaultBufferSize(request.resolution.width, request.resolution.height)
+            surfaceTexture.setDefaultBufferSize(w, h)
             surfaceTexture.setOnFrameAvailableListener({
                 handler.post { drawFrame() }
             }, handler)
@@ -89,22 +97,22 @@ class LutSurfaceProcessor : SurfaceProcessor {
             this.inputTextureId = textureId
             this.inputSurfaceTexture = surfaceTexture
 
-            request.provideSurface(surface, executor) { result ->
-                // Clean up ONLY the resources created for THIS request
+            callback(surface)
+        }
+    }
+
+    fun releaseInputSurface(surface: Surface) {
+        handler.post {
+            if (this.inputSurfaceTexture != null) {
+                val st = this.inputSurfaceTexture!!
+                val tid = this.inputTextureId
+
+                this.inputSurfaceTexture = null
+                this.inputTextureId = 0
+
                 surface.release()
-
-                handler.post {
-                    surfaceTexture.release()
-                    GLES30.glDeleteTextures(1, intArrayOf(textureId), 0)
-
-                    // Only clear the member variables if they still point to this request's resources
-                    if (this.inputTextureId == textureId) {
-                        this.inputTextureId = 0
-                    }
-                    if (this.inputSurfaceTexture === surfaceTexture) {
-                        this.inputSurfaceTexture = null
-                    }
-                }
+                st.release()
+                GLES30.glDeleteTextures(1, intArrayOf(tid), 0)
             }
         }
     }
