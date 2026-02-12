@@ -63,6 +63,13 @@ class SettingsFragment : Fragment() {
         updateDebugStats()
     }
 
+
+    override fun onResume() {
+        super.onResume()
+        updateDebugStats()
+    }
+
+
     private fun updateDebugStats() {
         val logs = com.android.example.cameraxbasic.utils.DebugLogManager.getLogs()
         if (logs.isNotEmpty()) {
@@ -96,7 +103,7 @@ class SettingsFragment : Fragment() {
         // HDR+ Burst Frames
         val burstAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, BURST_SIZES)
         binding.menuHdrBurst.setAdapter(burstAdapter)
-        val savedBurst = prefs.getString(KEY_HDR_BURST_COUNT, "3")
+        val savedBurst = prefs.getString(KEY_HDR_BURST_COUNT, "8")
         binding.menuHdrBurst.setText(savedBurst, false)
         binding.menuHdrBurst.setOnItemClickListener { _, _, position, _ ->
             prefs.edit().putString(KEY_HDR_BURST_COUNT, BURST_SIZES[position]).apply()
@@ -152,6 +159,11 @@ class SettingsFragment : Fragment() {
             prefs.edit().putBoolean(KEY_SAVE_JPG, isChecked).apply()
         }
 
+        binding.switchHqBackgroundExport.isChecked = prefs.getBoolean(KEY_HQ_BACKGROUND_EXPORT, false)
+        binding.switchHqBackgroundExport.setOnCheckedChangeListener { _, isChecked ->
+            prefs.edit().putBoolean(KEY_HQ_BACKGROUND_EXPORT, isChecked).apply()
+        }
+
         binding.switchManualControls.isChecked = prefs.getBoolean(KEY_MANUAL_CONTROLS, false)
         binding.switchManualControls.setOnCheckedChangeListener { _, isChecked ->
             prefs.edit().putBoolean(KEY_MANUAL_CONTROLS, isChecked).apply()
@@ -170,6 +182,7 @@ class SettingsFragment : Fragment() {
         const val KEY_ACTIVE_LUT = "active_lut_filename"
         const val KEY_SAVE_TIFF = "save_tiff"
         const val KEY_SAVE_JPG = "save_jpg"
+        const val KEY_HQ_BACKGROUND_EXPORT = "hq_background_export"
         const val KEY_USE_GPU = "use_gpu"
         const val KEY_MANUAL_CONTROLS = "enable_manual_controls"
         const val KEY_ENABLE_LUT_PREVIEW = "enable_lut_preview"

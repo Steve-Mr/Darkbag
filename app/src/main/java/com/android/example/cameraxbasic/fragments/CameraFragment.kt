@@ -18,6 +18,7 @@ package com.android.example.cameraxbasic.fragments
 
 import android.annotation.SuppressLint
 import android.content.*
+import android.content.ContentUris
 import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.SurfaceTexture
@@ -60,7 +61,10 @@ import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.TotalCaptureResult
 import androidx.concurrent.futures.await
+import com.android.example.cameraxbasic.MainApplication
 import com.android.example.cameraxbasic.processor.ColorProcessor
+import com.android.example.cameraxbasic.processor.HdrPlusExportWorker
+import com.android.example.cameraxbasic.utils.ImageSaver
 import java.io.File
 import java.io.FileOutputStream
 import android.net.Uri
@@ -262,7 +266,6 @@ class CameraFragment : Fragment() {
                 }
             }
         }
-
     }
 
     /**
@@ -388,11 +391,51 @@ class CameraFragment : Fragment() {
             }
         )
 
-        // Start processing consumer
-        viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
+        // Listen for background save completions from JNI or WorkManager
+        // This collector now primarily handles UI updates (thumbnails)
+        // because WorkManager-based export handles its own MediaStore saving.
+        viewLifecycleOwner.lifecycleScope.launch {
+            ColorProcessor.backgroundSaveFlow.collect { event ->
+                Log.d(TAG, "Received background save complete event: ${event.baseName}")
+
+                // If it's a legacy JNI async task, we still need to save it to MediaStore here.
+                // If it's from WorkManager, the saving is already done, but we don't know for sure.
+                // However, saveProcessedImage is idempotent-ish (it will update or insert).
+                // To be safe and robust, we run it in applicationScope.
+
+                (requireContext().applicationContext as MainApplication).applicationScope.launch(Dispatchers.IO) {
+                    try {
+                        val finalUri = ImageSaver.saveProcessedImage(
+                            requireContext().applicationContext,
+                            null,
+                            event.jpgPath,
+                            event.orientation,
+                            event.zoomFactor,
+                            event.baseName,
+                            event.dngPath,
+                            event.tiffPath,
+                            event.saveJpg,
+                            event.saveTiff,
+                            event.targetUri?.let { Uri.parse(it) }
+                        )
+                        if (finalUri != null) {
+                            withContext(Dispatchers.Main) {
+                                setGalleryThumbnail(finalUri.toString())
+                            }
+                        }
+                        Log.i(TAG, "Background MediaStore export finished for ${event.baseName}")
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Background MediaStore export failed for ${event.baseName}", e)
+                    }
+                }
+            }
+        }
+
+        // Start processing consumer using applicationScope to ensure it finishes if fragment is closed
+        (requireContext().applicationContext as MainApplication).applicationScope.launch(Dispatchers.IO) {
             for (holder in processingChannel) {
                 try {
-                    processImageAsync(requireContext(), holder)
+                    processImageAsync(requireContext().applicationContext, holder)
                 } catch (e: Exception) {
                     Log.e(TAG, "Error processing image from channel", e)
                 } finally {
@@ -685,6 +728,14 @@ class CameraFragment : Fragment() {
             }
 
             observeCameraState(camera?.cameraInfo!!)
+
+            // Pre-initialize JNI memory pool with current resolution and burst size
+            val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+            val burstSizeStr = prefs.getString(SettingsFragment.KEY_HDR_BURST_COUNT, "8") ?: "8"
+            val burstSize = burstSizeStr.toIntOrNull() ?: 8
+            imageCapture?.resolutionInfo?.resolution?.let { res ->
+                ColorProcessor.initMemoryPool(res.width, res.height, burstSize)
+            }
 
             // Restore Zoom
             updateZoom(false)
@@ -1036,7 +1087,7 @@ class CameraFragment : Fragment() {
 
     @androidx.annotation.OptIn(androidx.camera.camera2.interop.ExperimentalCamera2Interop::class)
     private suspend fun processImageAsync(context: Context, image: RawImageHolder) =
-        kotlinx.coroutines.withContext(Dispatchers.IO) {
+        withContext(Dispatchers.IO) {
             try {
                 val contentResolver = context.contentResolver
                 val dngName =
@@ -1180,9 +1231,10 @@ class CameraFragment : Fragment() {
                     // Passing rotationDegrees caused double rotation or unwanted rotation.
                     // We pass 0 for rotation here to match original behavior.
 
-                    // Note: `saveProcessedImage` is suspending.
-                    val finalJpgUri = saveProcessedImage(
+                    // Note: `ImageSaver.saveProcessedImage` is suspending.
+                    val finalJpgUri = ImageSaver.saveProcessedImage(
                         context,
+                        null,
                         bmpPath,
                         0, // Rotation disabled for standard pipeline
                         zoomFactor,
@@ -1296,188 +1348,7 @@ class CameraFragment : Fragment() {
             }
         }
 
-    /**
-     * Shared helper to handle Bitmap post-processing (Rotate, Crop, Compress) and Saving (JPG, TIFF, LinearDNG).
-     * Deletes input temp files after saving.
-     */
-    private suspend fun saveProcessedImage(
-        context: Context,
-        bmpPath: String,
-        rotationDegrees: Int,
-        zoomFactor: Float,
-        baseName: String,
-        linearDngPath: String?,
-        tiffPath: String?,
-        saveJpg: Boolean,
-        saveTiff: Boolean,
-        onBitmapReady: ((android.graphics.Bitmap) -> Unit)? = null
-    ): Uri? {
-        val contentResolver = context.contentResolver
-        var finalJpgUri: Uri? = null
-        val bmpFile = File(bmpPath)
 
-        // 1. Process BMP -> JPG
-        if (bmpFile.exists()) {
-            var processedBitmap: android.graphics.Bitmap? = null
-            try {
-                processedBitmap = BitmapFactory.decodeFile(bmpPath)
-
-                // Rotate if needed
-                if (processedBitmap != null && rotationDegrees != 0) {
-                    val matrix = android.graphics.Matrix()
-                    matrix.postRotate(rotationDegrees.toFloat())
-                    val rotated = android.graphics.Bitmap.createBitmap(
-                        processedBitmap, 0, 0, processedBitmap.width, processedBitmap.height, matrix, true
-                    )
-                    if (rotated != processedBitmap) {
-                        processedBitmap.recycle()
-                        processedBitmap = rotated
-                    }
-                }
-
-                // Crop if needed (Digital Zoom)
-                if (processedBitmap != null && zoomFactor > 1.05f) {
-                    val newWidth = (processedBitmap.width / zoomFactor).toInt()
-                    val newHeight = (processedBitmap.height / zoomFactor).toInt()
-                    val x = (processedBitmap.width - newWidth) / 2
-                    val y = (processedBitmap.height - newHeight) / 2
-                    val safeX = max(0, x)
-                    val safeY = max(0, y)
-                    val safeWidth = min(newWidth, processedBitmap.width - safeX)
-                    val safeHeight = min(newHeight, processedBitmap.height - safeY)
-
-                    val croppedBitmap = android.graphics.Bitmap.createBitmap(
-                        processedBitmap, safeX, safeY, safeWidth, safeHeight
-                    )
-                    if (croppedBitmap != processedBitmap) {
-                        processedBitmap.recycle()
-                        processedBitmap = croppedBitmap
-                    }
-                }
-
-                // Invoke callback for thumbnail generation or other usage before compression/recycling
-                if (processedBitmap != null) {
-                    onBitmapReady?.invoke(processedBitmap)
-                }
-
-                // Save JPG
-                if (saveJpg && processedBitmap != null) {
-                    val jpgValues = ContentValues().apply {
-                        put(MediaStore.MediaColumns.DISPLAY_NAME, "$baseName.jpg")
-                        put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                            put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/Darkbag")
-                            put(MediaStore.MediaColumns.IS_PENDING, 1)
-                        }
-                    }
-                    val jpgUri = contentResolver.insert(
-                        MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                        jpgValues
-                    )
-                    if (jpgUri != null) {
-                        finalJpgUri = jpgUri
-                        try {
-                            contentResolver.openOutputStream(jpgUri)?.use { out ->
-                                processedBitmap.compress(
-                                    android.graphics.Bitmap.CompressFormat.JPEG,
-                                    95,
-                                    out
-                                )
-                            }
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                                jpgValues.clear()
-                                jpgValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
-                                contentResolver.update(jpgUri, jpgValues, null, null)
-                            }
-                            Log.i(TAG, "Saved JPEG to $jpgUri")
-                        } catch (e: Exception) {
-                            Log.e(TAG, "Failed to save JPEG stream", e)
-                            contentResolver.delete(jpgUri, null, null)
-                            finalJpgUri = null
-                        }
-                    }
-                }
-            } catch (t: Throwable) {
-                Log.e(TAG, "Error processing bitmap", t)
-            } finally {
-                processedBitmap?.recycle()
-            }
-            // Cleanup BMP
-            bmpFile.delete()
-        }
-
-        // 2. Save TIFF
-        if (saveTiff && tiffPath != null) {
-            val tiffFile = File(tiffPath)
-            if (tiffFile.exists()) {
-                val tiffValues = ContentValues().apply {
-                    put(MediaStore.MediaColumns.DISPLAY_NAME, "$baseName.tiff")
-                    put(MediaStore.MediaColumns.MIME_TYPE, "image/tiff")
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                        put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/Darkbag")
-                        put(MediaStore.MediaColumns.IS_PENDING, 1)
-                    }
-                }
-                val tiffUri = contentResolver.insert(
-                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                    tiffValues
-                )
-                if (tiffUri != null) {
-                    try {
-                        contentResolver.openOutputStream(tiffUri)?.use { out ->
-                            java.io.FileInputStream(tiffFile).copyTo(out)
-                        }
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                            tiffValues.clear()
-                            tiffValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
-                            contentResolver.update(tiffUri, tiffValues, null, null)
-                        }
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Failed to save TIFF", e)
-                        contentResolver.delete(tiffUri, null, null)
-                    }
-                }
-                tiffFile.delete()
-            }
-        }
-
-        // 3. Save Linear DNG (HDR+ only usually)
-        if (linearDngPath != null) {
-            val dngFile = File(linearDngPath)
-            if (dngFile.exists()) {
-                val dngValues = ContentValues().apply {
-                    put(MediaStore.MediaColumns.DISPLAY_NAME, "${baseName}_linear.dng")
-                    put(MediaStore.MediaColumns.MIME_TYPE, "image/x-adobe-dng")
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                        put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/Darkbag")
-                        put(MediaStore.MediaColumns.IS_PENDING, 1)
-                    }
-                }
-                val dngUri = contentResolver.insert(
-                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                    dngValues
-                )
-                if (dngUri != null) {
-                    try {
-                        contentResolver.openOutputStream(dngUri)?.use { out ->
-                            java.io.FileInputStream(dngFile).copyTo(out)
-                        }
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                            dngValues.clear()
-                            dngValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
-                            contentResolver.update(dngUri, dngValues, null, null)
-                        }
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Failed to save Linear DNG", e)
-                        contentResolver.delete(dngUri, null, null)
-                    }
-                }
-                dngFile.delete()
-            }
-        }
-
-        return finalJpgUri
-    }
 
     private fun setupTapToFocus() {
         // Use DisplayOrientedMeteringPointFactory with explicit inputs since we removed PreviewView
@@ -2177,6 +2048,7 @@ class CameraFragment : Fragment() {
                 val burstSizeStr = prefs.getString(SettingsFragment.KEY_HDR_BURST_COUNT, "3") ?: "3"
                 val burstSize = burstSizeStr.toIntOrNull() ?: 3
 
+
                 // 4. Re-initialize helper with correct count & gain
                 hdrPlusBurstHelper = HdrPlusBurst(
                     frameCount = burstSize,
@@ -2198,10 +2070,12 @@ class CameraFragment : Fragment() {
                     Toast.LENGTH_SHORT
                 ).show()
 
-                Log.d(TAG, "Starting HDR+ Burst (Sequential, $burstSize frames)")
+                Log.d(TAG, "Starting HDR+ Burst (Pipelined, $burstSize frames)")
 
-                // Sequential burst to avoid overloading CameraX request queue
-                recursiveBurstCapture(imageCapture, burstSize, 0)
+                // Pipelined burst: Trigger all captures at once to fill the camera pipeline
+                for (i in 0 until burstSize) {
+                    captureBurstFrame(imageCapture, burstSize, i)
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to start HDR+ burst", e)
                 Toast.makeText(
@@ -2218,19 +2092,8 @@ class CameraFragment : Fragment() {
         }
     }
 
-    private fun recursiveBurstCapture(imageCapture: ImageCapture, totalFrames: Int, currentFrame: Int) {
-        if (currentFrame >= totalFrames) {
-            Log.d(TAG, "HDR+ Burst Capture sequence complete.")
-            // Restore Auto Exposure (or previous state)
-            lifecycleScope.launch(Dispatchers.Main) {
-                applyCameraControls()
-                // Reset Burst Active state immediately to allow background processing
-                resetBurstUi()
-            }
-            return
-        }
-
-        Log.d(TAG, "Capturing burst frame ${currentFrame + 1}/$totalFrames")
+    private fun captureBurstFrame(imageCapture: ImageCapture, totalFrames: Int, currentFrame: Int) {
+        Log.d(TAG, "Triggering burst frame ${currentFrame + 1}/$totalFrames")
         imageCapture.takePicture(
             cameraExecutor,
             object : ImageCapture.OnImageCapturedCallback() {
@@ -2238,7 +2101,14 @@ class CameraFragment : Fragment() {
                     Log.d(TAG, "Burst frame ${currentFrame + 1} captured successfully.")
 
                     lifecycleScope.launch(Dispatchers.Main) {
-                        cameraUiContainerBinding?.captureProgress?.progress = currentFrame + 1
+                        cameraUiContainerBinding?.captureProgress?.progress =
+                            (cameraUiContainerBinding?.captureProgress?.progress ?: 0) + 1
+
+                        if ((cameraUiContainerBinding?.captureProgress?.progress ?: 0) >= totalFrames) {
+                            Log.d(TAG, "HDR+ Burst Capture sequence complete.")
+                            applyCameraControls()
+                            resetBurstUi()
+                        }
                     }
 
                     val helper = hdrPlusBurstHelper
@@ -2256,35 +2126,22 @@ class CameraFragment : Fragment() {
                             return
                         }
                     } else {
-                        Log.e(TAG, "HdrPlusBurst helper is null, closing image manually.")
                         image.close()
-                        lifecycleScope.launch(Dispatchers.Main) {
-                            resetBurstUi()
-                            processingSemaphore.release()
-                        }
-                        return
                     }
-                    // Trigger next frame immediately
-                    recursiveBurstCapture(imageCapture, totalFrames, currentFrame + 1)
                 }
 
                 override fun onError(exception: ImageCaptureException) {
                     Log.e(TAG, "Burst frame ${currentFrame + 1} failed: ${exception.message}")
-                    // Abort burst on error? Or try next?
-                    // If we abort, the helper never finishes.
-                    // For now, let's try next, but the helper won't reach count.
-                    // Better to reset/abort.
                     lifecycleScope.launch(Dispatchers.Main) {
-                        Toast.makeText(requireContext(), "Burst failed at frame ${currentFrame + 1}", Toast.LENGTH_SHORT).show()
-                        // Restore AE on failure too
-                        applyCameraControls()
-                        cameraUiContainerBinding?.captureProgress?.visibility = View.GONE
-                        cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
-                        cameraUiContainerBinding?.cameraCaptureButton?.alpha = 1.0f
+                        if (isBurstActive) {
+                            Toast.makeText(requireContext(), "Burst failed at frame ${currentFrame + 1}", Toast.LENGTH_SHORT).show()
+                            applyCameraControls()
+                            resetBurstUi()
+                            processingSemaphore.release()
+                            hdrPlusBurstHelper?.reset()
+                            isBurstActive = false
+                        }
                     }
-                    hdrPlusBurstHelper?.reset()
-                    isBurstActive = false // Reset active flag
-                    processingSemaphore.release() // Release lock since we are aborting
                 }
             }
         )
@@ -2307,14 +2164,12 @@ class CameraFragment : Fragment() {
         val currentZoom = if (is2xMode) 2.0f else (currentFocalLength / 24.0f)
         val startTime = burstStartTime
         val captureEndTime = System.currentTimeMillis()
+        val appContext = context?.applicationContext ?: return
 
-        lifecycleScope.launch(Dispatchers.IO) {
+        (appContext as MainApplication).applicationScope.launch(Dispatchers.IO) {
             var fallbackSent = false
             try {
-                val context = context ?: run {
-                    Log.w(TAG, "processHdrPlusBurst aborted: Fragment context is null.")
-                    return@launch
-                }
+                val context = appContext
 
                 Log.d(TAG, "processHdrPlusBurst started with ${frames.size} frames. DigitalGain=$digitalGain")
 
@@ -2405,40 +2260,49 @@ class CameraFragment : Fragment() {
                 val dngName = SimpleDateFormat(FILENAME, Locale.US).format(System.currentTimeMillis()) + "_HDRPLUS"
                 val saveTiff = prefs.getBoolean(SettingsFragment.KEY_SAVE_TIFF, true)
                 val saveJpg = prefs.getBoolean(SettingsFragment.KEY_SAVE_JPG, true)
+                val hqBackgroundExport = prefs.getBoolean(SettingsFragment.KEY_HQ_BACKGROUND_EXPORT, false)
 
                 val tiffFile = File(context.cacheDir, "$dngName.tiff")
                 val tiffPath = if(saveTiff) tiffFile.absolutePath else null
+                val tempRawFile = File(context.cacheDir, "$dngName.tmp.raw")
+                val tempJpgFile = File(context.cacheDir, "$dngName.tmp.jpg")
+                val fullResJpgFile = File(context.cacheDir, "${dngName}_full.jpg")
 
-                val bmpFile = File(context.cacheDir, "$dngName.bmp")
-                val bmpPath = bmpFile.absolutePath // JNI writes BMP here
+                // We now use Native JPEG compression (libjpeg-turbo) instead of allocating a large Bitmap in Java
+                val outputBitmap: android.graphics.Bitmap? = null
 
                 // Save Linear DNG (as requested)
                 val linearDngFile = File(context.cacheDir, "${dngName}_linear.dng")
                 val linearDngPath = linearDngFile.absolutePath
 
-                Log.d(TAG, "Output Paths: BMP=$bmpPath, TIFF=$tiffPath, DNG=$linearDngPath")
+                Log.d(TAG, "Output Paths: TIFF=$tiffPath, DNG=$linearDngPath")
 
                 // 6. JNI Call
                 val jniStartTime = System.currentTimeMillis()
                 // Ensure buffers are rewound just in case
                 buffers.forEach { it.rewind() }
 
-                val debugStats = LongArray(1) // [0]: Halide Time
+                val debugStats = LongArray(15) // Expanded for stage profiling
 
+                // We always call JNI to produce a FAST JPEG first, and save a temp raw file.
+                // The heavy processing (TIFF, DNG, Full-res JPEG) is delegated to WorkManager.
                 val ret = ColorProcessor.processHdrPlus(
                     buffers,
                     width, height,
-                    rotationDegrees,
+                    rotationDegrees, // JNI will use this to rotate the preview JPEG
                     whiteLevel, blackLevel,
                     wb, ccm, cfa,
                     iso, exposureTime, fNumber, focalLength, captureTime,
                     targetLogIndex,
                     nativeLutPath,
-                    tiffPath,
-                    bmpPath,
-                    linearDngPath,
+                    null, // Don't save TIFF in first pass
+                    tempJpgFile.absolutePath, // Fast (downsampled) JPEG
+                    null, // Don't save Linear DNG in first pass
                     digitalGain,
-                    debugStats
+                    debugStats,
+                    outputBitmap,
+                    false, // Force sync JNI call for the fast JPEG
+                    tempRawFile.absolutePath // Always save raw for second pass
                 )
 
                 val jniEndTime = System.currentTimeMillis()
@@ -2446,17 +2310,53 @@ class CameraFragment : Fragment() {
 
                 if (ret == 0) {
                     val saveStartTime = System.currentTimeMillis()
-                    val finalJpgUri = saveProcessedImage(
+
+                    // Save the FAST (downsampled) JPEG immediately to UI and MediaStore
+                    val finalJpgUri = ImageSaver.saveProcessedImage(
                         context,
-                        bmpPath,
-                        rotationDegrees,
+                        null,
+                        tempJpgFile.absolutePath,
+                        0, // Rotation ALREADY DONE in JNI
                         currentZoom,
                         dngName,
-                        linearDngPath,
-                        tiffPath,
+                        null,
+                        null,
                         saveJpg,
-                        saveTiff
+                        false
                     )
+
+                    // Always use WorkManager for the heavy pass (Full-res JPEG, TIFF, DNG)
+                    // This honors the "fast jpeg" requirement by showing the downsampled one first
+                    // and then silently replacing it with the full-res version.
+                    val workData = androidx.work.Data.Builder()
+                        .putString("tempRawPath", tempRawFile.absolutePath)
+                        .putInt("width", width)
+                        .putInt("height", height)
+                        .putInt("orientation", rotationDegrees)
+                        .putFloat("digitalGain", digitalGain)
+                        .putInt("targetLog", targetLogIndex)
+                        .putString("lutPath", nativeLutPath)
+                        .putString("tiffPath", tiffPath)
+                        .putString("jpgPath", if (saveJpg) fullResJpgFile.absolutePath else null)
+                        .putString("targetUri", finalJpgUri?.toString())
+                        .putFloat("zoomFactor", currentZoom)
+                        .putString("dngPath", linearDngPath)
+                        .putInt("iso", iso)
+                        .putLong("exposureTime", exposureTime)
+                        .putFloat("fNumber", fNumber)
+                        .putFloat("focalLength", focalLength)
+                        .putLong("captureTimeMillis", captureTime)
+                        .putFloatArray("ccm", ccm)
+                        .putFloatArray("whiteBalance", wb)
+                        .putString("baseName", dngName)
+                        .putBoolean("saveTiff", saveTiff)
+                        .putBoolean("saveJpg", saveJpg)
+                        .build()
+
+                    val workRequest = androidx.work.OneTimeWorkRequestBuilder<HdrPlusExportWorker>()
+                        .setInputData(workData)
+                        .build()
+                    androidx.work.WorkManager.getInstance(context).enqueue(workRequest)
                     val saveEndTime = System.currentTimeMillis()
 
                     // Log Statistics
@@ -2465,6 +2365,12 @@ class CameraFragment : Fragment() {
                     val waitTime = jniStartTime - captureEndTime
                     val jniTime = jniEndTime - jniStartTime
                     val halideTime = debugStats[0]
+                    val copyTime = debugStats[1]
+                    val postTime = debugStats[2]
+                    val dngEncodeTime = debugStats[3]
+                    val nativeSaveTime = debugStats[4]
+                    val dngWaitTime = debugStats[5]
+                    val nativeTotalTime = debugStats[6]
                     val saveTime = saveEndTime - saveStartTime
 
                     val logMsg = """
@@ -2472,8 +2378,23 @@ class CameraFragment : Fragment() {
                         Capture: ${captureTime}ms
                         Wait: ${waitTime}ms
                         JNI (Total): ${jniTime}ms
+                          - Native Total: ${nativeTotalTime}ms
+                          - JNI Prep: ${debugStats[12]}ms
+                          - Copy: ${copyTime}ms
                           - Halide: ${halideTime}ms
+                            * Align: ${debugStats[7]}ms
+                            * Merge: ${debugStats[8]}ms
+                            * BlackWhite: ${debugStats[13]}ms
+                            * WB: ${debugStats[14]}ms
+                            * Demosaic: ${debugStats[9]}ms
+                            * Denoise: ${debugStats[10]}ms
+                            * sRGB: ${debugStats[11]}ms
+                          - Post: ${postTime}ms
+                          - DNG Encode: ${dngEncodeTime}ms
+                          - Save(Log/TIFF/BMP): ${nativeSaveTime}ms
+                          - DNG Wait(get): ${dngWaitTime}ms
                         Save (IO/Compress): ${saveTime}ms
+                        HQ Export Mode: ${if (hqBackgroundExport) "Background" else "Inline"}
                     """.trimIndent()
 
                     Log.i(TAG, logMsg)
@@ -2528,7 +2449,10 @@ class CameraFragment : Fragment() {
                     }
                 }
             } finally {
-                frames.forEach { it.close() }
+                frames.forEach {
+                    HdrPlusBurst.releaseBuffer(it.buffer)
+                    it.close()
+                }
                 // Release semaphore ONLY if we didn't hand off the work to the channel
                 if (!fallbackSent) {
                     processingSemaphore.release()

@@ -1,8 +1,17 @@
 #include "ColorPipe.h"
 #include <tiffio.h>
+#include <android/log.h>
+
+#define TAG "ColorPipe"
+#define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, TAG, __VA_ARGS__)
+#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
+
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "stb_image_write.h"
 
 #include <vector>
 #include <ctime>
+#include <future>
 
 // Define missing tags if needed (Standard EXIF tags)
 #ifndef TIFFTAG_EXPOSURETIME
@@ -196,7 +205,9 @@ float vlog(float x) {
 float apply_log(float x, int type) {
     // Note: Log curves handle x < 0 usually by clipping or linear extension.
     // We clamp slightly above 0 if needed, but linear extension is better for noise.
-    if (x < 0) x = 0; // Simple safety
+    // Use a robust check that also handles NaN (NaN > 0 is false)
+    x = (x > 0.0f) ? x : 0.0f;
+
     switch (type) {
         case 1: return arri_logc3(x);
         case 2: return f_log(x);
@@ -254,11 +265,19 @@ LUT3D load_lut(const char* path) {
 }
 
 Vec3 apply_lut(const LUT3D& lut, Vec3 color) {
-    if (lut.size == 0) return color;
-    float scale = (lut.size - 1);
-    float r = std::max(0.0f, std::min(1.0f, color.r)) * scale;
-    float g = std::max(0.0f, std::min(1.0f, color.g)) * scale;
-    float b = std::max(0.0f, std::min(1.0f, color.b)) * scale;
+    if (lut.size <= 0 || lut.data.empty()) return color;
+    float scale = static_cast<float>(lut.size - 1);
+
+    // Robust clamping that handles NaN
+    auto clamp01 = [](float v) {
+        if (!(v > 0.0f)) return 0.0f;
+        if (v > 1.0f) return 1.0f;
+        return v;
+    };
+
+    float r = clamp01(color.r) * scale;
+    float g = clamp01(color.g) * scale;
+    float b = clamp01(color.b) * scale;
     int r0 = (int)r; int r1 = std::min(r0 + 1, lut.size - 1);
     int g0 = (int)g; int g1 = std::min(g0 + 1, lut.size - 1);
     int b0 = (int)b; int b1 = std::min(b0 + 1, lut.size - 1);
@@ -290,10 +309,17 @@ void process_and_save_image(
     int sourceColorSpace,
     const float* ccm,
     const float* wb,
-    int orientation
+    int orientation,
+    unsigned char* out_rgb_buffer,
+    bool isPreview,
+    int downsampleFactor
 ) {
-    // 1. Prepare Output Buffer
-    std::vector<unsigned short> processedImage(width * height * 3);
+    // 1. Setup Dimensions
+    int outW = width / downsampleFactor;
+    int outH = height / downsampleFactor;
+    bool swapDims = (orientation == 90 || orientation == 270);
+    int finalW = swapDims ? outH : outW;
+    int finalH = swapDims ? outW : outH;
 
     // Prepare Matrices
     Matrix3x3 sensor_to_sRGB = {0};
@@ -317,23 +343,22 @@ void process_and_save_image(
     }
 
     // 2. Process Pixels
-    #pragma omp parallel for
-    for (int i = 0; i < width * height; i++) {
-        unsigned short r_val = inputImage[i * 3 + 0];
-        unsigned short g_val = inputImage[i * 3 + 1];
-        unsigned short b_val = inputImage[i * 3 + 2];
+    std::vector<unsigned short> processedImage;
+    std::vector<unsigned char> previewRgb8;
 
-        // 2a. Digital Gain & Normalization
-        // Normalize to [0, 1] based on 16-bit range, then apply gain
-        // NO CLAMPING here to preserve high dynamic range for Log/WideGamut
+    auto process_pixel = [&](int x, int y) -> Vec3 {
+        size_t idx = (static_cast<size_t>(y) * width + x) * 3;
+        unsigned short r_val = inputImage[idx + 0];
+        unsigned short g_val = inputImage[idx + 1];
+        unsigned short b_val = inputImage[idx + 2];
+
         float norm_r = (float)r_val / 65535.0f * gain;
         float norm_g = (float)g_val / 65535.0f * gain;
         float norm_b = (float)b_val / 65535.0f * gain;
 
-        // 2b. Color Space Conversion -> XYZ (D65)
         Vec3 color = {norm_r, norm_g, norm_b};
 
-        if (sourceColorSpace == 1) { // Camera Native (HDR+)
+        if (sourceColorSpace == 1) {
             // Step 1: Apply Effective CCM (Sensor_WB -> sRGB)
             if (ccm) {
                 color = multiply(effective_CCM, color);
@@ -382,20 +407,80 @@ void process_and_save_image(
             color = apply_lut(lut, color);
         }
 
-        // 3. Scale back to 16-bit
-        processedImage[i * 3 + 0] = (unsigned short)std::max(0.0f, std::min(65535.0f, color.r * 65535.0f));
-        processedImage[i * 3 + 1] = (unsigned short)std::max(0.0f, std::min(65535.0f, color.g * 65535.0f));
-        processedImage[i * 3 + 2] = (unsigned short)std::max(0.0f, std::min(65535.0f, color.b * 65535.0f));
+        return color;
+    };
+
+    if (isPreview && !tiffPath) {
+        // Path A: Fast preview with optional downsampling and rotation
+        previewRgb8.resize(static_cast<size_t>(finalW) * finalH * 3);
+        #pragma omp parallel for
+        for (int py = 0; py < finalH; py++) {
+            for (int px = 0; px < finalW; px++) {
+                int sx, sy;
+                if (orientation == 90) { sx = py; sy = (finalW - 1) - px; }
+                else if (orientation == 180) { sx = (finalW - 1) - px; sy = (finalH - 1) - py; }
+                else if (orientation == 270) { sx = (finalH - 1) - py; sy = px; }
+                else { sx = px; sy = py; }
+
+                Vec3 color = process_pixel(sx * downsampleFactor, sy * downsampleFactor);
+                size_t outIdx = (static_cast<size_t>(py) * finalW + px) * 3;
+                previewRgb8[outIdx + 0] = (unsigned char)std::max(0.0f, std::min(255.0f, color.r * 255.0f));
+                previewRgb8[outIdx + 1] = (unsigned char)std::max(0.0f, std::min(255.0f, color.g * 255.0f));
+                previewRgb8[outIdx + 2] = (unsigned char)std::max(0.0f, std::min(255.0f, color.b * 255.0f));
+            }
+        }
+    } else {
+        // Path B: Full resolution (for TIFF or HQ JPEG)
+        processedImage.resize(static_cast<size_t>(width) * height * 3);
+        #pragma omp parallel for
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                Vec3 color = process_pixel(x, y);
+                size_t idx = (static_cast<size_t>(y) * width + x) * 3;
+                processedImage[idx + 0] = (unsigned short)std::max(0.0f, std::min(65535.0f, color.r * 65535.0f));
+                processedImage[idx + 1] = (unsigned short)std::max(0.0f, std::min(65535.0f, color.g * 65535.0f));
+                processedImage[idx + 2] = (unsigned short)std::max(0.0f, std::min(65535.0f, color.b * 65535.0f));
+
+                if (out_rgb_buffer) {
+                    size_t bIdx = (static_cast<size_t>(y) * width + x) * 4;
+                    out_rgb_buffer[bIdx + 0] = (unsigned char)(processedImage[idx + 0] >> 8);
+                    out_rgb_buffer[bIdx + 1] = (unsigned char)(processedImage[idx + 1] >> 8);
+                    out_rgb_buffer[bIdx + 2] = (unsigned char)(processedImage[idx + 2] >> 8);
+                    out_rgb_buffer[bIdx + 3] = 255;
+                }
+            }
+        }
     }
 
     // 4. Save Files
-    if (tiffPath) write_tiff(tiffPath, width, height, processedImage, orientation);
-    if (jpgPath) write_bmp(jpgPath, width, height, processedImage);
+    if (tiffPath) {
+        write_tiff(tiffPath, width, height, processedImage, orientation);
+    }
+    if (jpgPath) {
+        if (isPreview && !previewRgb8.empty()) {
+            stbi_write_jpg(jpgPath, finalW, finalH, 3, previewRgb8.data(), 95);
+        } else {
+            write_jpeg(jpgPath, width, height, processedImage, 95);
+        }
+    }
+}
+
+bool write_jpeg(const char* filename, int width, int height, const std::vector<unsigned short>& data, int quality) {
+    LOGD("write_jpeg: %s (%dx%d)", filename, width, height);
+    std::vector<unsigned char> rgb8(static_cast<size_t>(width) * height * 3);
+    #pragma omp parallel for
+    for (size_t i = 0; i < static_cast<size_t>(width) * height; i++) {
+        rgb8[i * 3 + 0] = (unsigned char)(data[i * 3 + 0] >> 8);
+        rgb8[i * 3 + 1] = (unsigned char)(data[i * 3 + 1] >> 8);
+        rgb8[i * 3 + 2] = (unsigned char)(data[i * 3 + 2] >> 8);
+    }
+    return stbi_write_jpg(filename, width, height, 3, rgb8.data(), quality) != 0;
 }
 
 // --- TIFF Writer ---
 
 bool write_tiff(const char* filename, int width, int height, const std::vector<unsigned short>& data, int orientation) {
+    LOGD("write_tiff: %s (%dx%d)", filename, width, height);
     std::ofstream file(filename, std::ios::binary);
     if (!file.is_open()) return false;
 
@@ -407,7 +492,7 @@ bool write_tiff(const char* filename, int width, int height, const std::vector<u
     short num_entries = 11; // Increased to 11 for Orientation
     file.write((char*)&num_entries, 2);
 
-    auto write_entry = [&](short tag, short type, int count, int value_or_offset) {
+    auto write_entry = [&](short tag, short type, int count, uint32_t value_or_offset) {
         file.write((char*)&tag, 2);
         file.write((char*)&type, 2);
         file.write((char*)&count, 4);
@@ -421,8 +506,8 @@ bool write_tiff(const char* filename, int width, int height, const std::vector<u
     // 2. Height (257)
     write_entry(257, 3, 1, height); // SHORT
     // 3. BitsPerSample (258) - R,G,B (3 values, need offset)
-    int bps_offset = data_offset + width * height * 6; // Put metadata after image data
-    write_entry(258, 3, 3, bps_offset);
+    size_t bps_offset = static_cast<size_t>(data_offset) + static_cast<size_t>(width) * height * 6; // Put metadata after image data
+    write_entry(258, 3, 3, static_cast<uint32_t>(bps_offset));
     // 4. Compression (259) - 1 (None)
     write_entry(259, 3, 1, 1);
     // 5. Photometric (262) - 2 (RGB)
@@ -444,7 +529,7 @@ bool write_tiff(const char* filename, int width, int height, const std::vector<u
     // 9. RowsPerStrip (278) - height
     write_entry(278, 3, 1, height);
     // 10. StripByteCounts (279) - width * height * 6
-    write_entry(279, 4, 1, width * height * 6);
+    write_entry(279, 4, 1, static_cast<uint32_t>(static_cast<size_t>(width) * height * 6));
     // 11. PlanarConfig (284) - 1 (Chunky)
     write_entry(284, 3, 1, 1);
 
@@ -464,6 +549,7 @@ bool write_tiff(const char* filename, int width, int height, const std::vector<u
 }
 
 bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, int iso, long exposureTime, float fNumber, float focalLength, long captureTimeMillis, const std::vector<float>& ccm, int orientation) {
+    LOGD("write_dng: %s (%dx%d)", filename, width, height);
     // Register DNG tags
     TIFFSetTagExtender(DNGTagExtender);
 
@@ -566,7 +652,7 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
     TIFFSetField(tif, TIFFTAG_ISOSPEEDRATINGS, 1, &iso_short);
 
     // Write Data
-    if (TIFFWriteEncodedStrip(tif, 0, (void*)data.data(), width * height * 3 * sizeof(unsigned short)) < 0) {
+    if (TIFFWriteEncodedStrip(tif, 0, (void*)data.data(), static_cast<size_t>(width) * height * 3 * sizeof(unsigned short)) < 0) {
         TIFFClose(tif);
         return false;
     }
@@ -579,13 +665,13 @@ bool write_bmp(const char* filename, int width, int height, const std::vector<un
     std::ofstream file(filename, std::ios::binary);
     if (!file.is_open()) return false;
 
-    int padded_width = (width * 3 + 3) & (~3);
-    int size = 54 + padded_width * height;
+    size_t padded_width = (static_cast<size_t>(width) * 3 + 3) & (~3);
+    size_t size = 54 + padded_width * height;
 
     // Header
     unsigned char header[54] = {0};
     header[0] = 'B'; header[1] = 'M';
-    *(int*)&header[2] = size;
+    *(int*)&header[2] = static_cast<int>(size);
     *(int*)&header[10] = 54;
     *(int*)&header[14] = 40;
     *(int*)&header[18] = width;
@@ -599,11 +685,11 @@ bool write_bmp(const char* filename, int width, int height, const std::vector<un
     std::vector<unsigned char> line(padded_width, 0);
     for (int y = height - 1; y >= 0; y--) {
         for (int x = 0; x < width; x++) {
-            int idx = (y * width + x) * 3;
+            size_t idx = (static_cast<size_t>(y) * width + x) * 3;
             // BMP is BGR
-            line[x*3+0] = (unsigned char)(data[idx+2] >> 8);
-            line[x*3+1] = (unsigned char)(data[idx+1] >> 8);
-            line[x*3+2] = (unsigned char)(data[idx+0] >> 8);
+            line[static_cast<size_t>(x)*3+0] = (unsigned char)(data[idx+2] >> 8);
+            line[static_cast<size_t>(x)*3+1] = (unsigned char)(data[idx+1] >> 8);
+            line[static_cast<size_t>(x)*3+2] = (unsigned char)(data[idx+0] >> 8);
         }
         file.write((char*)line.data(), padded_width);
     }

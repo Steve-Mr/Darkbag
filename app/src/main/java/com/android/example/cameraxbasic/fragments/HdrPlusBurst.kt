@@ -2,6 +2,7 @@ package com.android.example.cameraxbasic.fragments
 
 import androidx.camera.core.ImageProxy
 import java.nio.ByteBuffer
+import java.util.concurrent.ConcurrentLinkedQueue
 
 /**
  * Data class to hold a single frame of RAW data for HDR+ processing.
@@ -30,6 +31,33 @@ class HdrPlusBurst(
     private val frameCount: Int,
     private val onBurstComplete: (List<HdrFrame>) -> Unit
 ) {
+    companion object {
+        private const val MAX_POOL_SIZE = 10
+        private val bufferPool = ConcurrentLinkedQueue<ByteBuffer>()
+
+        /**
+         * Returns a Direct ByteBuffer of at least [capacity] from the pool,
+         * or allocates a new one if necessary.
+         */
+        fun acquireBuffer(capacity: Int): ByteBuffer {
+            var buffer = bufferPool.poll()
+            if (buffer == null || buffer.capacity() < capacity) {
+                buffer = ByteBuffer.allocateDirect(capacity)
+            }
+            buffer.clear()
+            return buffer
+        }
+
+        /**
+         * Returns a buffer to the pool for reuse.
+         */
+        fun releaseBuffer(buffer: ByteBuffer?) {
+            if (buffer != null && buffer.isDirect && bufferPool.size < MAX_POOL_SIZE) {
+                bufferPool.offer(buffer)
+            }
+        }
+    }
+
     private val frames = mutableListOf<HdrFrame>()
 
     fun addFrame(image: ImageProxy) {
@@ -46,7 +74,10 @@ class HdrPlusBurst(
             } catch (e: Exception) {
                 // If allocation fails (OOM), we clear and abort.
                 // Do NOT call image.close() here, as it's handled in finally block.
-                frames.forEach { it.close() }
+                frames.forEach {
+                    releaseBuffer(it.buffer)
+                    it.close()
+                }
                 frames.clear()
                 throw e
             } finally {
@@ -59,7 +90,10 @@ class HdrPlusBurst(
     }
 
     fun reset() {
-        frames.forEach { it.close() }
+        frames.forEach {
+            releaseBuffer(it.buffer)
+            it.close()
+        }
         frames.clear()
     }
 
@@ -75,8 +109,8 @@ class HdrPlusBurst(
         val rowLength = width * pixelStride
         val dataLength = rowLength * height
 
-        // Allocate Direct ByteBuffer (Off-Heap)
-        val cleanData = ByteBuffer.allocateDirect(dataLength)
+        // Use pooled Direct ByteBuffer
+        val cleanData = acquireBuffer(dataLength)
 
         // Copy logic (handling stride padding)
         buffer.rewind()
