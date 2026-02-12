@@ -607,8 +607,7 @@ class CameraFragment : Fragment() {
         // Else, ensure Camera2 is closed and use CameraX
         closeCamera2()
 
-        // Get screen metrics used to setup camera for full screen resolution
-        val metrics = windowMetricsCalculator.computeCurrentWindowMetrics(requireActivity()).bounds
+        // Use previously computed screen metrics
         Log.d(TAG, "Screen metrics: ${metrics.width()} x ${metrics.height()}")
 
         val rotation = fragmentCameraBinding.viewFinder.display.rotation
