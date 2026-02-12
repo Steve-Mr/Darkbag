@@ -469,18 +469,23 @@ class CameraFragment : Fragment() {
             }
         }
 
-        // Start processing consumer using applicationScope to ensure it finishes if fragment is closed
-        (requireContext().applicationContext as MainApplication).applicationScope.launch(Dispatchers.IO) {
+        // Start processing consumer
+        // Use viewLifecycleOwner.lifecycleScope for the listener loop to avoid leaking fragment.
+        viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
             for (holder in processingChannel) {
-                try {
-                    processImageAsync(requireContext().applicationContext, holder)
-                } catch (e: Exception) {
-                    Log.e(TAG, "Error processing image from channel", e)
-                } finally {
-                    processingSemaphore.release()
-                    withContext(Dispatchers.Main) {
-                        cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
-                        cameraUiContainerBinding?.cameraCaptureButton?.alpha = 1.0f
+                val appContext = requireContext().applicationContext
+                // Launch each task in applicationScope so it continues even if fragment is destroyed
+                (appContext as MainApplication).applicationScope.launch(Dispatchers.IO) {
+                    try {
+                        processImageAsync(appContext, holder)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error processing image from channel", e)
+                    } finally {
+                        processingSemaphore.release()
+                        withContext(Dispatchers.Main) {
+                            cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
+                            cameraUiContainerBinding?.cameraCaptureButton?.alpha = 1.0f
+                        }
                     }
                 }
             }
@@ -2996,15 +3001,18 @@ class CameraFragment : Fragment() {
                 }
             }, handler)
 
-            session.captureBurst(burstRequests, object : android.hardware.camera2.CameraCaptureSession.CaptureCallback() {
-                override fun onCaptureCompleted(session: android.hardware.camera2.CameraCaptureSession, request: android.hardware.camera2.CaptureRequest, result: android.hardware.camera2.TotalCaptureResult) {
-                    val timestamp = result.get(android.hardware.camera2.CaptureResult.SENSOR_TIMESTAMP)
-                    if (timestamp != null) {
-                        captureResults[timestamp] = result
+            // Sequential capture instead of captureBurst to comply with requirements
+            for (request in burstRequests) {
+                session.capture(request, object : android.hardware.camera2.CameraCaptureSession.CaptureCallback() {
+                    override fun onCaptureCompleted(session: android.hardware.camera2.CameraCaptureSession, request: android.hardware.camera2.CaptureRequest, result: android.hardware.camera2.TotalCaptureResult) {
+                        val timestamp = result.get(android.hardware.camera2.CaptureResult.SENSOR_TIMESTAMP)
+                        if (timestamp != null) {
+                            captureResults[timestamp] = result
+                        }
+                        captureResultFlow.tryEmit(result)
                     }
-                    captureResultFlow.tryEmit(result)
-                }
-            }, handler)
+                }, handler)
+            }
 
         } catch (e: Exception) {
             Log.e(TAG, "Camera2 burst failed", e)
