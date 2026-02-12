@@ -4,6 +4,8 @@ import android.app.Application
 import android.util.Log
 import androidx.camera.camera2.Camera2Config
 import androidx.camera.core.CameraXConfig
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
 
 /**
  * Set CameraX logging level to Log.ERROR to avoid excessive logcat messages.
@@ -11,6 +13,9 @@ import androidx.camera.core.CameraXConfig
  * for details.
  */
 class MainApplication : Application(), CameraXConfig.Provider {
+    // Global scope for background processing that should survive UI destruction
+    val applicationScope = CoroutineScope(SupervisorJob())
+
     override fun getCameraXConfig(): CameraXConfig {
         return CameraXConfig.Builder.fromConfig(Camera2Config.defaultConfig())
             .setMinimumLoggingLevel(Log.ERROR).build()

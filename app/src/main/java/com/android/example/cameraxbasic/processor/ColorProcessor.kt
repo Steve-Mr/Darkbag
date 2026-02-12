@@ -1,11 +1,28 @@
 package com.android.example.cameraxbasic.processor
 
 import java.nio.ByteBuffer
+import kotlinx.coroutines.flow.MutableSharedFlow
 
 object ColorProcessor {
     init {
         System.loadLibrary("native-lib")
     }
+
+    val backgroundSaveFlow = MutableSharedFlow<BackgroundSaveEvent>(extraBufferCapacity = 10)
+
+    external fun initMemoryPool(width: Int, height: Int, frames: Int)
+
+    data class BackgroundSaveEvent(
+        val baseName: String,
+        val tiffPath: String?,
+        val dngPath: String?,
+        val jpgPath: String?,
+        val targetUri: String?,
+        val zoomFactor: Float,
+        val orientation: Int,
+        val saveTiff: Boolean,
+        val saveJpg: Boolean
+    )
 
     /**
      * @param dngData Byte array containing the full DNG file.
@@ -33,8 +50,43 @@ object ColorProcessor {
     external fun loadLutData(lutPath: String): FloatArray?
 
     /**
-     * Processes a burst of RAW frames using the HDR+ pipeline.
+     * Callback for background export completion. Called from JNI thread.
      */
+    @JvmStatic
+    fun onBackgroundSaveComplete(
+        baseName: String,
+        tiffPath: String?,
+        dngPath: String?,
+        jpgPath: String?,
+        targetUri: String?,
+        zoomFactor: Float,
+        orientation: Int,
+        saveTiff: Boolean,
+        saveJpg: Boolean
+    ) {
+        backgroundSaveFlow.tryEmit(BackgroundSaveEvent(baseName, tiffPath, dngPath, jpgPath, targetUri, zoomFactor, orientation, saveTiff, saveJpg))
+    }
+
+    external fun exportHdrPlus(
+        tempRawPath: String,
+        width: Int,
+        height: Int,
+        orientation: Int,
+        digitalGain: Float,
+        targetLog: Int,
+        lutPath: String?,
+        tiffPath: String?,
+        jpgPath: String?,
+        dngPath: String?,
+        iso: Int,
+        exposureTime: Long,
+        fNumber: Float,
+        focalLength: Float,
+        captureTimeMillis: Long,
+        ccm: FloatArray,
+        whiteBalance: FloatArray
+    ): Int
+
     external fun processHdrPlus(
         dngBuffers: Array<ByteBuffer>,
         width: Int,
@@ -56,6 +108,9 @@ object ColorProcessor {
         outputJpgPath: String?,
         outputDngPath: String?,
         digitalGain: Float,
-        debugStats: LongArray? // [0]: Halide Time (ms)
+        debugStats: LongArray?, // [0] Halide, [1] Copy, [2] Post, [3] DNG Encode, [4] Save, [5] DNG Wait, [6] Total, [7] Align, [8] Merge, [9] Demosaic, [10] Denoise, [11] sRGB, [12] JNI Prep, [13] BlackWhite, [14] WB
+        outputBitmap: android.graphics.Bitmap? = null,
+        isAsync: Boolean = false,
+        tempRawPath: String? = null
     ): Int
 }
