@@ -140,9 +140,7 @@ class CameraRepository(private val context: Context) {
 
         val finalName = name ?: when {
             isAuto -> "Auto"
-            useCamera2 -> String.format("%.1fx (S2)", multiplier)
-            physicalId != null -> String.format("%.1fx (S)", multiplier)
-            else -> String.format("%.1fx (L)", multiplier)
+            else -> String.format("%.1fx", multiplier)
         }
         val sensorId = if (useCamera2) "c2-$id" else (physicalId ?: "$id-${targetZoom ?: 0f}")
 

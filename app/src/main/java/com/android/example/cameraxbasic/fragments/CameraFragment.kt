@@ -1948,7 +1948,10 @@ class CameraFragment : Fragment() {
             scroll.visibility = View.VISIBLE
             container.removeAllViews()
 
-            for (lens in availableLenses) {
+            // Filter out the "Auto" (Logical) lens from UI
+            val uiLenses = availableLenses.filter { !it.isLogicalAuto }
+
+            for (lens in uiLenses) {
                 val btn = com.google.android.material.button.MaterialButton(
                     requireContext()
                 ).apply {
@@ -1967,8 +1970,38 @@ class CameraFragment : Fragment() {
 
                     setOnClickListener {
                         val oldLens = currentLens
-                        if (oldLens?.sensorId != lens.sensorId) {
+                        val is1xLens = lens.multiplier in 0.95f..1.05f
+
+                        if (oldLens?.sensorId == lens.sensorId) {
+                            // Cycle logic for 1.0x lens
+                            if (is1xLens) {
+                                val hasPhysical2x = uiLenses.any { it.multiplier in 1.9f..2.1f }
+                                if (is2xMode) {
+                                    is2xMode = false
+                                    currentFocalLength = 24
+                                } else {
+                                    when (currentFocalLength) {
+                                        24 -> currentFocalLength = 28
+                                        28 -> currentFocalLength = 35
+                                        35 -> {
+                                            if (hasPhysical2x) {
+                                                currentFocalLength = 24
+                                            } else {
+                                                is2xMode = true
+                                            }
+                                        }
+                                        else -> currentFocalLength = 24
+                                    }
+                                }
+                                updateZoom(true)
+                            }
+                        } else {
+                            // Switch Lens
                             currentLens = lens
+                            // Reset zoom/focal when switching to a physical lens
+                            is2xMode = false
+                            currentFocalLength = 24
+
                             updateLensUI()
 
                             // If we just changed the engine or ID, rebind
@@ -1977,8 +2010,7 @@ class CameraFragment : Fragment() {
                                 animateSwitch {
                                     bindCameraUseCases()
                                 }
-                            } else if (lens.isZoomPreset || lens.isLogicalAuto) {
-                                // Just a zoom change on the same logical camera
+                            } else {
                                 updateZoom(true)
                             }
                         }
@@ -1987,10 +2019,10 @@ class CameraFragment : Fragment() {
                 container.addView(btn)
             }
 
-            // Set default lens (Auto if available, else 1.0x)
+            // Set default lens (Prefer 1.0x physical, avoid Auto in UI)
             if (currentLens == null) {
-                currentLens = availableLenses.find { it.isLogicalAuto }
-                    ?: availableLenses.find { it.multiplier in 0.9f..1.1f }
+                currentLens = availableLenses.find { it.multiplier in 0.95f..1.05f && !it.isLogicalAuto }
+                    ?: availableLenses.find { it.isLogicalAuto }
                     ?: availableLenses.firstOrNull()
             }
             updateLensUI()
@@ -2006,31 +2038,38 @@ class CameraFragment : Fragment() {
         val activeColor = MaterialColors.getColor(container, com.google.android.material.R.attr.colorPrimary)
         val inactiveColor = MaterialColors.getColor(container, com.google.android.material.R.attr.colorOnSurface)
 
+        val uiLenses = availableLenses.filter { !it.isLogicalAuto }
+
         for (i in 0 until container.childCount) {
             val btn = container.getChildAt(i) as? com.google.android.material.button.MaterialButton
-            if (btn != null) {
-                val lens = availableLenses[i]
+            if (btn != null && i < uiLenses.size) {
+                val lens = uiLenses[i]
                 if (lens.sensorId == currentLens?.sensorId) {
                     btn.setTextColor(activeColor)
                     btn.strokeWidth = resources.getDimensionPixelSize(R.dimen.stroke_small)
                     btn.strokeColor = android.content.res.ColorStateList.valueOf(activeColor)
+
+                    // Update label for 1.0x if active
+                    if (lens.multiplier in 0.95f..1.05f) {
+                        btn.text = when {
+                            is2xMode -> "2.0x"
+                            currentFocalLength == 28 -> "28mm"
+                            currentFocalLength == 35 -> "35mm"
+                            else -> lens.name
+                        }
+                    } else {
+                        btn.text = lens.name
+                    }
                 } else {
                     btn.setTextColor(inactiveColor)
                     btn.strokeWidth = 0
+                    btn.text = lens.name
                 }
             }
         }
 
-        // Show zoom buttons (1x, 2x) only for the main CameraX camera (Auto)
-        // OR for the 1.0x physical lens (Camera2 mode)
-        val isMainOrPhysical1x = currentLens?.isLogicalAuto == true ||
-                (currentLens?.multiplier ?: 0f) in 0.95f..1.05f
-
-        binding.zoomControlsContainer?.visibility = if (isMainOrPhysical1x) View.VISIBLE else View.GONE
-
-        // Hide 2x digital zoom button if a physical 2.0x lens exists
-        val hasPhysical2x = availableLenses.any { it.multiplier in 1.9f..2.1f && !it.isLogicalAuto }
-        binding.btnZoom2x?.visibility = if (hasPhysical2x) View.GONE else View.VISIBLE
+        // Always hide separate zoom controls since it's now integrated in the physical button
+        binding.zoomControlsContainer?.visibility = View.GONE
     }
 
     private fun initZoomControls() {
@@ -2184,6 +2223,10 @@ class CameraFragment : Fragment() {
 
     private fun updateZoomUI(animate: Boolean) {
         val binding = cameraUiContainerBinding ?: return
+
+        // Refresh lens labels (integrated zoom)
+        updateLensUI()
+
         val activeColor = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorPrimary)
         val inactiveColor = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnSurface)
 
