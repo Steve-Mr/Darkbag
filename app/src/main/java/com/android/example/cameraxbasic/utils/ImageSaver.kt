@@ -49,7 +49,12 @@ object ImageSaver {
             if (isNativeJpeg && !needsBitmapProcessing && saveJpg) {
                 // FAST PATH: Directly use JNI-generated JPEG
                 finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri) { out ->
-                    File(bmpPath!!).inputStream().use { it.copyTo(out) }
+                    val f = File(bmpPath!!)
+                    if (f.exists()) {
+                        f.inputStream().use { it.copyTo(out) }
+                    } else {
+                        Log.e(TAG, "Fast path source file missing: ${f.absolutePath}")
+                    }
                 }
                 File(bmpPath!!).delete()
             } else {
@@ -59,6 +64,9 @@ object ImageSaver {
                     processedBitmap = inputBitmap
                 } else if (bmpPath != null) {
                     processedBitmap = BitmapFactory.decodeFile(bmpPath)
+                    if (processedBitmap == null) {
+                        Log.e(TAG, "BitmapFactory.decodeFile returned null for $bmpPath")
+                    }
                 }
 
                 try {
@@ -234,6 +242,7 @@ object ImageSaver {
             try {
                 contentResolver.openOutputStream(uri, "wt")?.use { out ->
                     writeData(out)
+                    out.flush()
                 }
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     jpgValues.clear()

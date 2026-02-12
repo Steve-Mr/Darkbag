@@ -49,19 +49,20 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
             tempRawPath, width, height, orientation, digitalGain, targetLog,
             lutPath, tiffPath, jpgPath, dngPath,
             iso, exposureTime, fNumber, focalLength, captureTimeMillis,
-            ccm, whiteBalance
+            ccm, whiteBalance, zoomFactor
         )
 
         return if (ret == 0) {
             Log.d(TAG, "Background Export Worker finished JNI processing for $baseName")
 
             // Robustly finalize MediaStore export directly from Worker
+            // JNI already did rotation and zoom!
             val finalUri = ImageSaver.saveProcessedImage(
                 applicationContext,
                 null,
                 jpgPath,
-                orientation,
-                zoomFactor,
+                0, // orientation 0
+                1.0f, // zoom 1.0
                 baseName,
                 dngPath,
                 tiffPath,

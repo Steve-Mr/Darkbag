@@ -234,13 +234,15 @@ Vec3 apply_lut(const LUT3D& lut, Vec3 color) {
     return { c0.r * (1-db) + c1.r * db, c0.g * (1-db) + c1.g * db, c0.b * (1-db) + c1.b * db };
 }
 
-void process_and_save_image(
+bool process_and_save_image(
     const std::vector<unsigned short>& inputImage,
     int width, int height, float gain, int targetLog, const LUT3D& lut,
     const char* tiffPath, const char* jpgPath, int sourceColorSpace,
     const float* ccm, const float* wb, int orientation, unsigned char* out_rgb_buffer,
-    bool isPreview, int downsampleFactor
+    bool isPreview, int downsampleFactor, float zoomFactor
 ) {
+    LOGD("process_and_save_image: %dx%d, gain=%.2f, log=%d, lut=%d, tiff=%s, jpg=%s, preview=%d, ds=%d, zoom=%.2f",
+         width, height, gain, targetLog, lut.size, tiffPath ? tiffPath : "null", jpgPath ? jpgPath : "null", isPreview, downsampleFactor, zoomFactor);
     int outW = width / downsampleFactor, outH = height / downsampleFactor;
     bool swapDims = (orientation == 90 || orientation == 270);
     int finalW = swapDims ? outH : outW, finalH = swapDims ? outW : outH;
@@ -267,45 +269,110 @@ void process_and_save_image(
         if (lut.size > 0) color = apply_lut(lut, color);
         return color;
     };
-    if (isPreview && !tiffPath) {
-        previewRgb8.resize(static_cast<size_t>(finalW) * finalH * 3);
+    int cropW = (int)(width / zoomFactor);
+    int cropH = (int)(height / zoomFactor);
+    int cropX = (width - cropW) / 2;
+    int cropY = (height - cropH) / 2;
+
+    int finalW_zoomed = swapDims ? (cropH / downsampleFactor) : (cropW / downsampleFactor);
+    int finalH_zoomed = swapDims ? (cropW / downsampleFactor) : (cropH / downsampleFactor);
+
+    if (isPreview) {
+        previewRgb8.resize(static_cast<size_t>(finalW_zoomed) * finalH_zoomed * 3);
         #pragma omp parallel for
-        for (int py = 0; py < finalH; py++) {
-            for (int px = 0; px < finalW; px++) {
-                int sx, sy; if (orientation == 90) { sx = py; sy = (finalW - 1) - px; }
-                else if (orientation == 180) { sx = (finalW - 1) - px; sy = (finalH - 1) - py; }
-                else if (orientation == 270) { sx = (finalH - 1) - py; sy = px; } else { sx = px; sy = py; }
-                Vec3 color = process_pixel(sx * downsampleFactor, sy * downsampleFactor);
-                size_t outIdx = (static_cast<size_t>(py) * finalW + px) * 3;
+        for (int py = 0; py < finalH_zoomed; py++) {
+            for (int px = 0; px < finalW_zoomed; px++) {
+                int sx, sy;
+                if (orientation == 90) { sx = py; sy = (finalW_zoomed - 1) - px; }
+                else if (orientation == 180) { sx = (finalW_zoomed - 1) - px; sy = (finalH_zoomed - 1) - py; }
+                else if (orientation == 270) { sx = (finalH_zoomed - 1) - py; sy = px; }
+                else { sx = px; sy = py; }
+
+                Vec3 color = process_pixel(cropX + sx * downsampleFactor, cropY + sy * downsampleFactor);
+                size_t outIdx = (static_cast<size_t>(py) * finalW_zoomed + px) * 3;
                 previewRgb8[outIdx + 0] = (unsigned char)std::max(0.0f, std::min(255.0f, color.r * 255.0f));
                 previewRgb8[outIdx + 1] = (unsigned char)std::max(0.0f, std::min(255.0f, color.g * 255.0f));
                 previewRgb8[outIdx + 2] = (unsigned char)std::max(0.0f, std::min(255.0f, color.b * 255.0f));
             }
         }
     } else {
-        processedImage.resize(static_cast<size_t>(width) * height * 3);
+        processedImage.resize(static_cast<size_t>(finalW_zoomed) * finalH_zoomed * 3);
         #pragma omp parallel for
-        for (int y = 0; y < height; y++) {
-            for (int x = 0; x < width; x++) {
-                Vec3 color = process_pixel(x, y); size_t idx = (static_cast<size_t>(y) * width + x) * 3;
-                processedImage[idx + 0] = (unsigned short)std::max(0.0f, std::min(65535.0f, color.r * 65535.0f));
-                processedImage[idx + 1] = (unsigned short)std::max(0.0f, std::min(65535.0f, color.g * 65535.0f));
-                processedImage[idx + 2] = (unsigned short)std::max(0.0f, std::min(65535.0f, color.b * 65535.0f));
-                if (out_rgb_buffer) { size_t bIdx = (static_cast<size_t>(y) * width + x) * 4; out_rgb_buffer[bIdx+0] = (unsigned char)(processedImage[idx+0]>>8); out_rgb_buffer[bIdx+1] = (unsigned char)(processedImage[idx+1]>>8); out_rgb_buffer[bIdx+2] = (unsigned char)(processedImage[idx+2]>>8); out_rgb_buffer[bIdx+3] = 255; }
+        for (int py = 0; py < finalH_zoomed; py++) {
+            for (int px = 0; px < finalW_zoomed; px++) {
+                int sx, sy;
+                if (orientation == 90) { sx = py; sy = (finalW_zoomed - 1) - px; }
+                else if (orientation == 180) { sx = (finalW_zoomed - 1) - px; sy = (finalH_zoomed - 1) - py; }
+                else if (orientation == 270) { sx = (finalH_zoomed - 1) - py; sy = px; }
+                else { sx = px; sy = py; }
+
+                Vec3 color = process_pixel(cropX + sx, cropY + sy);
+                size_t outIdx = (static_cast<size_t>(py) * finalW_zoomed + px) * 3;
+                processedImage[outIdx + 0] = (unsigned short)std::max(0.0f, std::min(65535.0f, color.r * 65535.0f));
+                processedImage[outIdx + 1] = (unsigned short)std::max(0.0f, std::min(65535.0f, color.g * 65535.0f));
+                processedImage[outIdx + 2] = (unsigned short)std::max(0.0f, std::min(65535.0f, color.b * 65535.0f));
+
+                // Note: out_rgb_buffer is usually for preview only, but we keep it here if needed.
+                // It expects original dimensions though. This part might need adjustment if used for rotated large images.
+                if (out_rgb_buffer && !swapDims) {
+                    size_t bIdx = (static_cast<size_t>(py) * finalW + px) * 4;
+                    out_rgb_buffer[bIdx+0] = (unsigned char)(processedImage[outIdx+0]>>8);
+                    out_rgb_buffer[bIdx+1] = (unsigned char)(processedImage[outIdx+1]>>8);
+                    out_rgb_buffer[bIdx+2] = (unsigned char)(processedImage[outIdx+2]>>8);
+                    out_rgb_buffer[bIdx+3] = 255;
+                }
             }
         }
     }
-    if (tiffPath) write_tiff(tiffPath, width, height, processedImage, orientation);
-    if (jpgPath) { if (isPreview && !previewRgb8.empty()) stbi_write_jpg(jpgPath, finalW, finalH, 3, previewRgb8.data(), 95); else write_jpeg(jpgPath, width, height, processedImage, 95); }
+
+    bool tiffOk = true;
+    if (tiffPath) {
+        tiffOk = write_tiff(tiffPath, finalW_zoomed, finalH_zoomed, processedImage, 0); // orientation 0 because already rotated
+        if (!tiffOk) LOGE("write_tiff failed for %s", tiffPath);
+    }
+
+    bool jpgOk = true;
+    if (jpgPath) {
+        if (isPreview && !previewRgb8.empty()) {
+            jpgOk = stbi_write_jpg(jpgPath, finalW_zoomed, finalH_zoomed, 3, previewRgb8.data(), 95) != 0;
+        } else {
+            jpgOk = write_jpeg(jpgPath, finalW_zoomed, finalH_zoomed, processedImage, 95);
+        }
+        if (!jpgOk) LOGE("write_jpeg/stbi_write_jpg failed for %s", jpgPath);
+        else {
+            std::ifstream f(jpgPath, std::ios::binary | std::ios::ate);
+            if (f.is_open()) {
+                LOGD("Successfully wrote JPEG: %s, size: %lld bytes", jpgPath, (long long)f.tellg());
+            } else {
+                LOGE("Wrote JPEG but could not verify existence: %s", jpgPath);
+            }
+        }
+    }
+    return tiffOk && jpgOk;
 }
 
 bool write_jpeg(const char* filename, int width, int height, const std::vector<unsigned short>& data, int quality) {
-    std::vector<unsigned char> rgb8(static_cast<size_t>(width) * height * 3);
-    #pragma omp parallel for
-    for (size_t i = 0; i < static_cast<size_t>(width) * height; i++) {
-        rgb8[i * 3 + 0] = (unsigned char)(data[i * 3 + 0] >> 8); rgb8[i * 3 + 1] = (unsigned char)(data[i * 3 + 1] >> 8); rgb8[i * 3 + 2] = (unsigned char)(data[i * 3 + 2] >> 8);
+    LOGD("write_jpeg: %s, %dx%d", filename, width, height);
+    size_t total_pixels = static_cast<size_t>(width) * height;
+    std::vector<unsigned char> rgb8;
+    try {
+        rgb8.resize(total_pixels * 3);
+    } catch (const std::bad_alloc& e) {
+        LOGE("Failed to allocate memory for JPEG conversion: %zu bytes", total_pixels * 3);
+        return false;
     }
-    return stbi_write_jpg(filename, width, height, 3, rgb8.data(), quality) != 0;
+
+    #pragma omp parallel for
+    for (size_t i = 0; i < total_pixels; i++) {
+        rgb8[i * 3 + 0] = (unsigned char)(data[i * 3 + 0] >> 8);
+        rgb8[i * 3 + 1] = (unsigned char)(data[i * 3 + 1] >> 8);
+        rgb8[i * 3 + 2] = (unsigned char)(data[i * 3 + 2] >> 8);
+    }
+    int res = stbi_write_jpg(filename, width, height, 3, rgb8.data(), quality);
+    if (res == 0) {
+        LOGE("stbi_write_jpg failed for %s", filename);
+    }
+    return res != 0;
 }
 
 bool write_tiff(const char* filename, int width, int height, const std::vector<unsigned short>& data, int orientation) {

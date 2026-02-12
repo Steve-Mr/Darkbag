@@ -2612,7 +2612,8 @@ class CameraFragment : Fragment() {
                     debugStats,
                     null,
                     false,
-                    tempRawFile.absolutePath
+                    tempRawFile.absolutePath,
+                    currentZoom
                 )
 
                 val jniEndTime = System.currentTimeMillis()
@@ -2626,7 +2627,7 @@ class CameraFragment : Fragment() {
                         null,
                         tempJpgFile.absolutePath,
                         0, // Rotation ALREADY DONE in JNI
-                        currentZoom,
+                        1.0f, // Zoom ALSO DONE in JNI
                         dngName,
                         null,
                         null,

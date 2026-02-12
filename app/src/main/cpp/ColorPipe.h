@@ -38,7 +38,7 @@ LUT3D load_lut(const char* path);
 Vec3 apply_lut(const LUT3D& lut, Vec3 color);
 
 // --- Shared Pipeline ---
-void process_and_save_image(
+bool process_and_save_image(
     const std::vector<unsigned short>& inputImage,
     int width,
     int height,
@@ -53,7 +53,8 @@ void process_and_save_image(
     int orientation = 0,
     unsigned char* out_rgb_buffer = nullptr,
     bool isPreview = false,
-    int downsampleFactor = 1
+    int downsampleFactor = 1,
+    float zoomFactor = 1.0f
 );
 
 // --- File Writers ---

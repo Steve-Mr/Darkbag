@@ -122,7 +122,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_initMemoryPool(JN
 extern "C" JNIEXPORT jint JNICALL
 Java_com_android_example_cameraxbasic_processor_ColorProcessor_exportHdrPlus(
     JNIEnv* env, jobject /* this */, jstring tempRawPath, jint width, jint height, jint orientation, jfloat digitalGain, jint targetLog, jstring lutPath, jstring tiffPath, jstring jpgPath, jstring dngPath,
-    jint iso, jlong exposureTime, jfloat fNumber, jfloat focalLength, jlong captureTimeMillis, jfloatArray ccm, jfloatArray whiteBalance
+    jint iso, jlong exposureTime, jfloat fNumber, jfloat focalLength, jlong captureTimeMillis, jfloatArray ccm, jfloatArray whiteBalance, jfloat zoomFactor
 ) {
     LOGD("Native exportHdrPlus started.");
     std::lock_guard<std::mutex> lock(g_hdrPlusMutex);
@@ -168,9 +168,10 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_exportHdrPlus(
         write_dng(dng_path_cstr, width, height, finalImage, 65535, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation);
     }
 
+    bool saveOk = true;
     if (tiff_path_cstr || jpg_path_cstr) {
         LOGD("Exporting TIFF/JPG: TIFF=%s, JPG=%s", tiff_path_cstr ? tiff_path_cstr : "null", jpg_path_cstr ? jpg_path_cstr : "null");
-        process_and_save_image(finalImage, width, height, digitalGain, targetLog, lut, tiff_path_cstr, jpg_path_cstr, 1, ccmVec.data(), wbVec.data(), orientation, nullptr, false, 1);
+        saveOk = process_and_save_image(finalImage, width, height, digitalGain, targetLog, lut, tiff_path_cstr, jpg_path_cstr, 1, ccmVec.data(), wbVec.data(), orientation, nullptr, false, 1, zoomFactor);
     }
 
     if (tiffPath && tiff_path_cstr) env->ReleaseStringUTFChars(tiffPath, tiff_path_cstr);
@@ -183,15 +184,15 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_exportHdrPlus(
         env->ReleaseStringUTFChars(tempRawPath, temp_path_cstr_del);
     }
 
-    LOGD("Native exportHdrPlus finished.");
-    return 0;
+    LOGD("Native exportHdrPlus finished. Success=%d", saveOk);
+    return saveOk ? 0 : -2;
 }
 
 extern "C" JNIEXPORT jint JNICALL
 Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     JNIEnv* env, jobject /* this */, jobjectArray dngBuffers, jint width, jint height, jint orientation, jint whiteLevel, jint blackLevel, jfloatArray whiteBalance, jfloatArray ccm, jint cfaPattern,
     jint iso, jlong exposureTime, jfloat fNumber, jfloat focalLength, jlong captureTimeMillis, jint targetLog, jstring lutPath, jstring outputTiffPath, jstring outputJpgPath, jstring outputDngPath,
-    jfloat digitalGain, jlongArray debugStats, jobject outputBitmap, jboolean isAsync, jstring tempRawPath
+    jfloat digitalGain, jlongArray debugStats, jobject outputBitmap, jboolean isAsync, jstring tempRawPath, jfloat zoomFactor
 ) {
     LOGD("Native processHdrPlus started.");
     std::lock_guard<std::mutex> lock(g_hdrPlusMutex);
@@ -280,7 +281,10 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     if (outputDngPath && dng_p_cstr) env->ReleaseStringUTFChars(outputDngPath, dng_p_cstr);
 
     auto saveStart = std::chrono::high_resolution_clock::now();
-    if (bitmapPixels) { process_and_save_image(finalImage, width, height, digitalGain, targetLog, lut, nullptr, nullptr, 1, ccmVec.data(), wbVec.data(), orientation, bitmapPixels, true, 4); AndroidBitmap_unlockPixels(env, outputBitmap); }
+    if (bitmapPixels) {
+        process_and_save_image(finalImage, width, height, digitalGain, targetLog, lut, nullptr, nullptr, 1, ccmVec.data(), wbVec.data(), orientation, bitmapPixels, true, 4, zoomFactor);
+        AndroidBitmap_unlockPixels(env, outputBitmap);
+    }
 
     const char* tr_p_cstr = (tempRawPath) ? env->GetStringUTFChars(tempRawPath, 0) : nullptr;
     if (tr_p_cstr) {
@@ -289,10 +293,16 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     }
 
     if (!tiffPathStr.empty() || !jpgPathStr.empty() || !dngPathStr.empty()) {
-        auto saveFunc = [fImg = (bool)isAsync ? finalImage : std::vector<uint16_t>(), isAsync, &finalImage, width, height, digitalGain, targetLog, lut, tiffPathStr, jpgPathStr, dngPathStr, baseName, ccmVec, wbVec, orientation, iso, exposureTime, fNumber, focalLength, captureTimeMillis]() mutable {
+        auto saveFunc = [fImg = (bool)isAsync ? finalImage : std::vector<uint16_t>(), isAsync, &finalImage, width, height, digitalGain, targetLog, lut, tiffPathStr, jpgPathStr, dngPathStr, baseName, ccmVec, wbVec, orientation, iso, exposureTime, fNumber, focalLength, captureTimeMillis, zoomFactor]() mutable {
             const std::vector<uint16_t>& img = isAsync ? fImg : finalImage;
-            if (!dngPathStr.empty()) write_dng(dngPathStr.c_str(), width, height, img, 65535, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation);
-            if (!tiffPathStr.empty() || !jpgPathStr.empty()) process_and_save_image(img, width, height, digitalGain, targetLog, lut, tiffPathStr.empty()?nullptr:tiffPathStr.c_str(), jpgPathStr.empty()?nullptr:jpgPathStr.c_str(), 1, ccmVec.data(), wbVec.data(), orientation, nullptr, !isAsync, isAsync?1:4);
+            bool dngOk = true;
+            if (!dngPathStr.empty()) dngOk = write_dng(dngPathStr.c_str(), width, height, img, 65535, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation);
+
+            bool otherOk = true;
+            if (!tiffPathStr.empty() || !jpgPathStr.empty()) {
+                otherOk = process_and_save_image(img, width, height, digitalGain, targetLog, lut, tiffPathStr.empty()?nullptr:tiffPathStr.c_str(), jpgPathStr.empty()?nullptr:jpgPathStr.c_str(), 1, ccmVec.data(), wbVec.data(), orientation, nullptr, !isAsync, isAsync?1:4, zoomFactor);
+            }
+
             if (isAsync && g_jvm && g_colorProcessorClass) {
                 JNIEnv* env = nullptr; if (g_jvm->AttachCurrentThread(&env, nullptr) == JNI_OK && env) {
                     jmethodID m = env->GetStaticMethodID(g_colorProcessorClass, "onBackgroundSaveComplete", "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;FIZZ)V");

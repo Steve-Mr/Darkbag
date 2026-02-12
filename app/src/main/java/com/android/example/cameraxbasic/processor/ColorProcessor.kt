@@ -84,7 +84,8 @@ object ColorProcessor {
         focalLength: Float,
         captureTimeMillis: Long,
         ccm: FloatArray,
-        whiteBalance: FloatArray
+        whiteBalance: FloatArray,
+        zoomFactor: Float
     ): Int
 
     external fun processHdrPlus(
@@ -111,6 +112,7 @@ object ColorProcessor {
         debugStats: LongArray?, // [0] Halide, [1] Copy, [2] Post, [3] DNG Encode, [4] Save, [5] DNG Wait, [6] Total, [7] Align, [8] Merge, [9] Demosaic, [10] Denoise, [11] sRGB, [12] JNI Prep, [13] BlackWhite, [14] WB
         outputBitmap: android.graphics.Bitmap? = null,
         isAsync: Boolean = false,
-        tempRawPath: String? = null
+        tempRawPath: String? = null,
+        zoomFactor: Float
     ): Int
 }
