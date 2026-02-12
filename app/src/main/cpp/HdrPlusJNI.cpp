@@ -96,15 +96,18 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     float compression = 1.0f; // Unused now in our modified generator
     float gain = 1.0f;        // Unused now
 
-    // Fix for Red/Blue Swap (Bayer Phase Mismatch)
-    // Assuming RGGB (0) <-> BGGR (3) mismatch
-    if (cfaPattern == 0) {
-        cfaPattern = 3; // Force BGGR
-        LOGD("Swapped CFA: RGGB -> BGGR");
-    } else if (cfaPattern == 3) {
-        cfaPattern = 0; // Force RGGB
-        LOGD("Swapped CFA: BGGR -> RGGB");
+    // Map Android SENSOR_INFO_COLOR_FILTER_ARRANGEMENT to Halide CfaPattern
+    // Android: 0:RGGB, 1:GRBG, 2:GBRG, 3:BGGR
+    // Halide:  1:RGGB, 2:GRBG, 3:BGGR, 4:GBRG
+    int halideCfa = 1; // Default RGGB
+    switch (cfaPattern) {
+        case 0: halideCfa = 1; break; // RGGB
+        case 1: halideCfa = 2; break; // GRBG
+        case 2: halideCfa = 4; break; // GBRG
+        case 3: halideCfa = 3; break; // BGGR
+        default: halideCfa = 1; break;
     }
+    LOGD("CFA Mapping: Android=%d -> Halide=%d", cfaPattern, halideCfa);
 
     int result = 0;
     auto halideStart = std::chrono::high_resolution_clock::now();
@@ -114,7 +117,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
         (uint16_t)blackLevel,
         (uint16_t)whiteLevel,
         wb_r, wb_g0, wb_g1, wb_b,
-        cfaPattern,
+        halideCfa,
         ccmHalideBuf,
         compression,
         gain,
@@ -197,6 +200,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
 
     // Save Processed Images (Log/LUT Path)
     // Pass finalImage (Linear) + Gain + Logic to shared pipeline
+    LOGD("Saving processed images. Gain=%f, Log=%d, LUT=%s", digitalGain, targetLog, (lut.size > 0 ? "Yes" : "No"));
     process_and_save_image(
         finalImage,
         width,
@@ -211,6 +215,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
         wbVec.data(),   // WB Gains (Currently unused in HDR+ path, but kept for API)
         orientation // Pass orientation for TIFF writing
     );
+    LOGD("Image save logic completed.");
 
     // Release Strings
     if (outputTiffPath) env->ReleaseStringUTFChars(outputTiffPath, tiff_path_cstr);

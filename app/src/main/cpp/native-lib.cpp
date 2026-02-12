@@ -60,6 +60,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processRaw(
     RawProcessor.imgdata.params.no_auto_bright = 1;
     RawProcessor.imgdata.params.use_camera_wb = 1;
     RawProcessor.imgdata.params.output_color = 4; // ProPhotoRGB
+    RawProcessor.imgdata.params.user_flip = 0;    // Disable internal rotation to avoid double-rotation with Kotlin
 
     // Process
     if (RawProcessor.dcraw_process() != LIBRAW_SUCCESS) {

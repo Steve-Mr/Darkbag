@@ -159,6 +159,7 @@ class CameraFragment : Fragment() {
     private var camera2Session: android.hardware.camera2.CameraCaptureSession? = null
     private var camera2PreviewSurface: android.view.Surface? = null
     private var rawImageReader: android.media.ImageReader? = null
+    private var analysisImageReader: android.media.ImageReader? = null
     private val camera2Manager by lazy {
         requireContext().getSystemService(Context.CAMERA_SERVICE) as android.hardware.camera2.CameraManager
     }
@@ -210,12 +211,22 @@ class CameraFragment : Fragment() {
     private var is2xMode = false
     private var zoomJob: kotlinx.coroutines.Job? = null
 
+    private var deviceOrientationDegrees = 0
+
     /** Orientation listener to track device rotation independently of UI rotation */
     private val orientationEventListener by lazy {
         object : OrientationEventListener(requireContext()) {
             override fun onOrientationChanged(orientation: Int) {
                 if (orientation == OrientationEventListener.ORIENTATION_UNKNOWN) {
                     return
+                }
+
+                // Map Orientation to degrees (0, 90, 180, 270 clockwise)
+                deviceOrientationDegrees = when (orientation) {
+                    in 45 until 135 -> 270 // Landscape Left (90 CCW -> 270 CW)
+                    in 135 until 225 -> 180 // Upside Down
+                    in 225 until 315 -> 90 // Landscape Right (270 CCW -> 90 CW)
+                    else -> 0 // Portrait
                 }
 
                 val rotation = when (orientation) {
@@ -258,7 +269,8 @@ class CameraFragment : Fragment() {
         val width: Int,
         val height: Int,
         val timestamp: Long,
-        val rotationDegrees: Int,
+        val rotationDegrees: Int, // Sensor Orientation
+        val combinedOrientation: Int, // Combined with Display
         val zoomRatio: Float,
         val physicalId: String? = null
     ) {
@@ -328,6 +340,8 @@ class CameraFragment : Fragment() {
     override fun onStop() {
         super.onStop()
         orientationEventListener.disable()
+        // Ensure Camera2 is closed when stopping to release hardware resources
+        closeCamera2()
     }
 
     override fun onResume() {
@@ -338,6 +352,14 @@ class CameraFragment : Fragment() {
             Navigation.findNavController(requireActivity(), R.id.fragment_container).navigate(
                 CameraFragmentDirections.actionCameraToPermissions()
             )
+            return
+        }
+
+        // Re-initialize camera engine if needed.
+        // For Camera2 engine, we need to re-bind use cases (which triggers openCamera2).
+        // For CameraX, they are bound to lifecycle but we ensure consistency.
+        if (cameraProvider != null) {
+            bindCameraUseCases()
         }
     }
 
@@ -411,9 +433,12 @@ class CameraFragment : Fragment() {
             requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
         val defaultStr = prefs.getString(SettingsFragment.KEY_DEFAULT_FOCAL_LENGTH, "24") ?: "24"
         defaultFocalLength = defaultStr.toIntOrNull() ?: 24
+
+        // Restore Zoom State
         if (currentFocalLength == -1) {
-            currentFocalLength = defaultFocalLength
+            currentFocalLength = prefs.getInt(KEY_CURRENT_FOCAL_LENGTH, defaultFocalLength)
         }
+        is2xMode = prefs.getBoolean(KEY_IS_2X_MODE, false)
 
         // Initialize Flash State
         isFlashEnabled = prefs.getBoolean(SettingsFragment.KEY_FLASH_MODE, false)
@@ -453,6 +478,14 @@ class CameraFragment : Fragment() {
 
             // Build UI controls
             updateCameraUi()
+
+            // Initialize LUT Processor early to be ready for any engine
+            if (lutProcessor == null) {
+                lutProcessor = LutSurfaceProcessor()
+            }
+
+            // Setup ViewFinder early
+            setupViewFinderBinding()
 
             // Setup Tap to Focus
             setupTapToFocus()
@@ -501,6 +534,37 @@ class CameraFragment : Fragment() {
     }
 
     /** Declare and bind preview, capture and analysis use cases */
+    private fun setupViewFinderBinding() {
+        val proc = lutProcessor ?: return
+        // Connect ViewFinder TextureView to LutProcessor
+        fragmentCameraBinding.viewFinder.surfaceTextureListener =
+            object : TextureView.SurfaceTextureListener {
+                override fun onSurfaceTextureAvailable(st: SurfaceTexture, w: Int, h: Int) {
+                    proc.setOutputSurface(Surface(st), w, h)
+                }
+                override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, w: Int, h: Int) {
+                    proc.setOutputSurface(Surface(st), w, h)
+                }
+                override fun onSurfaceTextureDestroyed(st: SurfaceTexture): Boolean {
+                    proc.setOutputSurface(null, 0, 0)
+                    return true
+                }
+                override fun onSurfaceTextureUpdated(st: SurfaceTexture) {}
+            }
+
+        // If surface is already available, bind it immediately
+        if (fragmentCameraBinding.viewFinder.isAvailable) {
+            fragmentCameraBinding.viewFinder.surfaceTexture?.let { st ->
+                proc.setOutputSurface(
+                    Surface(st),
+                    fragmentCameraBinding.viewFinder.width,
+                    fragmentCameraBinding.viewFinder.height
+                )
+            }
+        }
+        updateLiveLut() // Ensure LUT is loaded
+    }
+
     @OptIn(ExperimentalCamera2Interop::class)
     private fun bindCameraUseCases() {
         // Fetch Characteristics for Manual Control
@@ -516,9 +580,6 @@ class CameraFragment : Fragment() {
             exposureTimeRange = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
             minFocusDistance = chars.get(android.hardware.camera2.CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE) ?: 0.0f
 
-            // Note: evRange depends on active session/info, usually 0 for auxiliary cameras if not using logical
-            // evRange = cameraInfo.exposureState.exposureCompensationRange
-
             // Clamp current values to new ranges
             isoRange?.let { currentIso = currentIso.coerceIn(it.lower, it.upper) }
             exposureTimeRange?.let { currentExposureTime = currentExposureTime.coerceIn(it.lower, it.upper) }
@@ -532,12 +593,29 @@ class CameraFragment : Fragment() {
             Log.e(TAG, "Failed to fetch camera characteristics", e)
         }
 
-        // If current lens requires Camera2, use the hard-switch path
-        if (lensFacing == CameraSelector.LENS_FACING_BACK && currentLens?.useCamera2 == true) {
+        // Force 4:3 Aspect Ratio for all engines
+        val metrics = windowMetricsCalculator.computeCurrentWindowMetrics(requireActivity()).bounds
+        if (metrics.width() < metrics.height()) {
+            fragmentCameraBinding.viewFinder.setAspectRatio(3, 4)
+        } else {
+            fragmentCameraBinding.viewFinder.setAspectRatio(4, 3)
+        }
+
+        // Decide Engine: Camera2 (Hard Switch) or CameraX
+        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val useCameraxFallback = prefs.getBoolean(SettingsFragment.KEY_USE_CAMERAX, false)
+
+        if (lensFacing == CameraSelector.LENS_FACING_BACK && currentLens?.useCamera2 == true && !useCameraxFallback) {
             Log.d(TAG, "Switching to Camera2 Engine for lens: ${currentLens?.name}")
             cameraProvider?.unbindAll()
             camera = null
             initLensControls()
+
+            // Check Flash for Camera2
+            val c2Chars = camera2Manager.getCameraCharacteristics(currentLens!!.id)
+            val hasFlash = c2Chars.get(android.hardware.camera2.CameraCharacteristics.FLASH_INFO_AVAILABLE) ?: false
+            cameraUiContainerBinding?.flashButton?.visibility = if (hasFlash) View.VISIBLE else View.GONE
+
             openCamera2(currentLens!!.id)
             return
         }
@@ -545,8 +623,7 @@ class CameraFragment : Fragment() {
         // Else, ensure Camera2 is closed and use CameraX
         closeCamera2()
 
-        // Get screen metrics used to setup camera for full screen resolution
-        val metrics = windowMetricsCalculator.computeCurrentWindowMetrics(requireActivity()).bounds
+        // Use previously computed screen metrics
         Log.d(TAG, "Screen metrics: ${metrics.width()} x ${metrics.height()}")
 
         val rotation = fragmentCameraBinding.viewFinder.display.rotation
@@ -597,13 +674,6 @@ class CameraFragment : Fragment() {
                 )
             )
             .build()
-
-        // Configure AutoFitTextureView
-        if (metrics.width() < metrics.height()) {
-            fragmentCameraBinding.viewFinder.setAspectRatio(3, 4)
-        } else {
-            fragmentCameraBinding.viewFinder.setAspectRatio(4, 3)
-        }
 
         // Preview
         val previewBuilder = Preview.Builder()
@@ -707,11 +777,6 @@ class CameraFragment : Fragment() {
             removeCameraStateObservers(camera!!.cameraInfo)
         }
 
-        // Manual pipeline for preview
-        if (lutProcessor == null) {
-            lutProcessor = LutSurfaceProcessor()
-        }
-
         val lutBinder = object : Preview.SurfaceProvider {
             override fun onSurfaceRequested(request: SurfaceRequest) {
                 // Connect Camera to LutProcessor
@@ -719,47 +784,7 @@ class CameraFragment : Fragment() {
             }
         }
 
-        // Connect View to LutProcessor
-        fragmentCameraBinding.viewFinder.surfaceTextureListener =
-            object : TextureView.SurfaceTextureListener {
-                override fun onSurfaceTextureAvailable(
-                    surface: SurfaceTexture,
-                    width: Int,
-                    height: Int
-                ) {
-                    lutProcessor?.setOutputSurface(Surface(surface), width, height)
-                }
-
-                override fun onSurfaceTextureSizeChanged(
-                    surface: SurfaceTexture,
-                    width: Int,
-                    height: Int
-                ) {
-                    lutProcessor?.setOutputSurface(Surface(surface), width, height)
-                }
-
-                override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
-                    lutProcessor?.setOutputSurface(null, 0, 0)
-                    return true
-                }
-
-                override fun onSurfaceTextureUpdated(surface: SurfaceTexture) {}
-            }
-
-        // Check if surface is already available
-        if (fragmentCameraBinding.viewFinder.isAvailable) {
-            val st = fragmentCameraBinding.viewFinder.surfaceTexture
-            if (st != null) {
-                lutProcessor?.setOutputSurface(
-                    Surface(st),
-                    fragmentCameraBinding.viewFinder.width,
-                    fragmentCameraBinding.viewFinder.height
-                )
-            }
-        }
-
         preview?.setSurfaceProvider(cameraExecutor, lutBinder)
-        updateLiveLut() // Ensure LUT is loaded
 
         val useCaseGroup = UseCaseGroup.Builder()
             .addUseCase(preview!!)
@@ -1111,7 +1136,7 @@ class CameraFragment : Fragment() {
         }
     }
 
-    private fun copyImageToHolder(image: ImageProxy, zoomRatio: Float, physicalId: String? = null): RawImageHolder {
+    private fun copyImageToHolder(image: ImageProxy, zoomRatio: Float, combinedOrientation: Int, physicalId: String? = null): RawImageHolder {
         val plane = image.planes[0]
         val buffer = plane.buffer
         val width = image.width
@@ -1154,6 +1179,7 @@ class CameraFragment : Fragment() {
             height = height,
             timestamp = image.imageInfo.timestamp,
             rotationDegrees = image.imageInfo.rotationDegrees,
+            combinedOrientation = combinedOrientation,
             zoomRatio = zoomRatio,
             physicalId = physicalId
         )
@@ -1172,11 +1198,6 @@ class CameraFragment : Fragment() {
                     "Processing Image: Timestamp=${image.timestamp}, ZoomRatio=${image.zoomRatio}, Rotation=${image.rotationDegrees}"
                 )
 
-                val cam = camera ?: return@withContext
-                val camera2Info = Camera2CameraInfo.from(cam.cameraInfo)
-                val cameraManager =
-                    context.getSystemService(Context.CAMERA_SERVICE) as android.hardware.camera2.CameraManager
-
                 // 1. Wait for Metadata
                 val captureResult = findCaptureResult(image.timestamp)
 
@@ -1188,11 +1209,19 @@ class CameraFragment : Fragment() {
                     return@withContext
                 }
 
+                val cameraManager =
+                    context.getSystemService(Context.CAMERA_SERVICE) as android.hardware.camera2.CameraManager
+
                 val activePhysicalId = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                     captureResult.get(android.hardware.camera2.CaptureResult.LOGICAL_MULTI_CAMERA_ACTIVE_PHYSICAL_ID)
                 } else null
 
-                val targetCharId = activePhysicalId ?: image.physicalId ?: camera2Info.cameraId
+                val cam = camera
+                val camera2InfoId = if (cam != null) Camera2CameraInfo.from(cam.cameraInfo).cameraId else "0"
+
+                // If image.physicalId is set, it's our best source.
+                // Else fallback to currentLens?.id (if we are in Camera2 mode) or camera2InfoId.
+                val targetCharId = activePhysicalId ?: image.physicalId ?: currentLens?.id ?: camera2InfoId
                 Log.d(TAG, "Fetching characteristics for processing using ID: $targetCharId")
                 val chars = cameraManager.getCameraCharacteristics(targetCharId)
 
@@ -1247,7 +1276,7 @@ class CameraFragment : Fragment() {
                     val dngOutputStream = java.io.ByteArrayOutputStream()
                     var dngBytes: ByteArray? = null
 
-                    val orientation = when (image.rotationDegrees) {
+                    val orientation = when (image.combinedOrientation) {
                         90 -> ExifInterface.ORIENTATION_ROTATE_90
                         180 -> ExifInterface.ORIENTATION_ROTATE_180
                         270 -> ExifInterface.ORIENTATION_ROTATE_270
@@ -1316,7 +1345,7 @@ class CameraFragment : Fragment() {
                     val finalJpgUri = saveProcessedImage(
                         context,
                         bmpPath,
-                        0, // Rotation disabled for standard pipeline
+                        image.combinedOrientation, // Use captured orientation for JPEG rotation
                         zoomFactor,
                         dngName,
                         null, // No Linear DNG here
@@ -1913,11 +1942,10 @@ class CameraFragment : Fragment() {
     private fun initLensControls() {
         val binding = cameraUiContainerBinding ?: return
         val container = binding.lensControlsContainer ?: return
-        val scroll = binding.lensControlsScroll ?: return
+        val scroll = binding.controlsHubScroll ?: return
 
         if (lensFacing != CameraSelector.LENS_FACING_BACK) {
             scroll.visibility = View.GONE
-            binding.zoomControlsContainer?.visibility = View.GONE
             return
         }
 
@@ -1932,13 +1960,26 @@ class CameraFragment : Fragment() {
         availableLenses = cameraRepository.enumerateCameras(cameraXIds)
         Log.d(TAG, "Available Lenses identified: ${availableLenses.size}")
 
-        if (availableLenses.size > 1) {
+        if (availableLenses.isNotEmpty()) {
             scroll.visibility = View.VISIBLE
-            binding.zoomControlsContainer?.visibility = if (currentLens?.isLogicalAuto == true) View.VISIBLE else View.GONE
-
             container.removeAllViews()
 
-            for (lens in availableLenses) {
+            // Filter out the "Auto" (Logical) lens from UI
+            val uiLenses = availableLenses.filter { !it.isLogicalAuto }.toMutableList()
+
+            // Add virtual 2.0x digital zoom lens if no physical 2.0x exists
+            val hasPhysical2x = uiLenses.any { it.multiplier in 1.9f..2.1f }
+            if (!hasPhysical2x) {
+                val mainLens = uiLenses.find { it.multiplier in 0.95f..1.05f } ?: uiLenses.firstOrNull()
+                mainLens?.let {
+                    uiLenses.add(it.copy(name = "2.0x", targetZoomRatio = 2.0f, sensorId = "virtual-2x", isZoomPreset = true))
+                }
+            }
+
+            // Re-sort to maintain order
+            uiLenses.sortBy { it.multiplier }
+
+            for (lens in uiLenses) {
                 val btn = com.google.android.material.button.MaterialButton(
                     requireContext()
                 ).apply {
@@ -1957,18 +1998,56 @@ class CameraFragment : Fragment() {
 
                     setOnClickListener {
                         val oldLens = currentLens
-                        if (oldLens?.physicalId != lens.physicalId || oldLens?.id != lens.id ||
-                            oldLens?.isLogicalAuto != lens.isLogicalAuto || oldLens?.isZoomPreset != lens.isZoomPreset ||
-                            oldLens?.targetZoomRatio != lens.targetZoomRatio) {
+                        val is1xLens = lens.multiplier in 0.95f..1.05f
 
+                        if (lens.sensorId == "virtual-2x") {
+                             // Virtual 2x button clicked
+                             is2xMode = true
+                             currentFocalLength = 24
+                             val targetMain = uiLenses.find { it.multiplier in 0.95f..1.05f && it.sensorId != "virtual-2x" }
+                             if (targetMain != null) {
+                                 currentLens = targetMain
+                                 if (oldLens?.id != currentLens?.id || oldLens?.useCamera2 != currentLens?.useCamera2) {
+                                     animateSwitch { bindCameraUseCases() }
+                                 } else {
+                                     updateZoom(true)
+                                 }
+                             }
+                             return@setOnClickListener
+                        }
+
+                        if (oldLens?.sensorId == lens.sensorId) {
+                            // Cycle logic for 1.0x lens
+                            if (is1xLens) {
+                                if (is2xMode) {
+                                    is2xMode = false
+                                    currentFocalLength = 24
+                                } else {
+                                    when (currentFocalLength) {
+                                        24 -> currentFocalLength = 28
+                                        28 -> currentFocalLength = 35
+                                        35 -> currentFocalLength = 24
+                                        else -> currentFocalLength = 24
+                                    }
+                                }
+                                updateZoom(true)
+                            }
+                        } else {
+                            // Switch Lens
                             currentLens = lens
+                            // Reset zoom/focal when switching to a physical lens
+                            is2xMode = false
+                            currentFocalLength = 24
+
                             updateLensUI()
 
-                            // If we just changed the binding (ID or Physical ID), rebind
-                            if (oldLens?.id != lens.id || oldLens?.physicalId != lens.physicalId) {
-                                bindCameraUseCases()
-                            } else if (lens.isZoomPreset || lens.isLogicalAuto) {
-                                // Just a zoom change on the same logical camera
+                            // If we just changed the engine or ID, rebind
+                            if (oldLens?.id != lens.id || oldLens?.physicalId != lens.physicalId || oldLens?.useCamera2 != lens.useCamera2) {
+                                // Animate the switch to mask hardware initialization
+                                animateSwitch {
+                                    bindCameraUseCases()
+                                }
+                            } else {
                                 updateZoom(true)
                             }
                         }
@@ -1977,44 +2056,94 @@ class CameraFragment : Fragment() {
                 container.addView(btn)
             }
 
-            // Set default lens (Auto if available, else 1.0x)
+            // Set default lens (Prefer 1.0x physical, avoid Auto in UI)
             if (currentLens == null) {
-                currentLens = availableLenses.find { it.isLogicalAuto }
-                    ?: availableLenses.find { it.multiplier in 0.9f..1.1f }
+                val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                val savedLensId = prefs.getString(KEY_SELECTED_LENS_ID, null)
+
+                currentLens = availableLenses.find { it.sensorId == savedLensId }
+                    ?: availableLenses.find { it.multiplier in 0.95f..1.05f && !it.isLogicalAuto }
+                    ?: availableLenses.find { it.isLogicalAuto }
                     ?: availableLenses.firstOrNull()
             }
             updateLensUI()
         } else {
             scroll.visibility = View.GONE
-            binding.zoomControlsContainer?.visibility = View.VISIBLE
         }
     }
 
     private fun updateLensUI() {
+        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        currentLens?.let {
+            prefs.edit().putString(KEY_SELECTED_LENS_ID, it.sensorId).apply()
+        }
+
         val binding = cameraUiContainerBinding ?: return
         val container = binding.lensControlsContainer ?: return
-        val scroll = binding.lensControlsScroll ?: return
-        val activeColor = MaterialColors.getColor(container, com.google.android.material.R.attr.colorPrimary)
-        val inactiveColor = MaterialColors.getColor(container, com.google.android.material.R.attr.colorOnSurface)
+        val scroll = binding.controlsHubScroll ?: return
+
+        // Material 3 roles for better readability
+        val colorPrimary = MaterialColors.getColor(container, com.google.android.material.R.attr.colorPrimary)
+        val colorOnSurface = MaterialColors.getColor(container, com.google.android.material.R.attr.colorOnSurface)
+
+        // Identify UI lenses (same as in initLensControls)
+        val uiLenses = availableLenses.filter { !it.isLogicalAuto }.toMutableList()
+        val hasPhysical2x = uiLenses.any { it.multiplier in 1.9f..2.1f }
+        if (!hasPhysical2x) {
+            val mainLens = uiLenses.find { it.multiplier in 0.95f..1.05f } ?: uiLenses.firstOrNull()
+            mainLens?.let {
+                uiLenses.add(it.copy(name = "2.0x", targetZoomRatio = 2.0f, sensorId = "virtual-2x", isZoomPreset = true))
+            }
+        }
+        uiLenses.sortBy { it.multiplier }
 
         for (i in 0 until container.childCount) {
             val btn = container.getChildAt(i) as? com.google.android.material.button.MaterialButton
-            if (btn != null) {
-                val lens = availableLenses[i]
-                if (lens == currentLens) {
-                    btn.setTextColor(activeColor)
-                    btn.strokeWidth = resources.getDimensionPixelSize(R.dimen.stroke_small)
-                    btn.strokeColor = android.content.res.ColorStateList.valueOf(activeColor)
+            if (btn != null && i < uiLenses.size) {
+                val lens = uiLenses[i]
+
+                // Determine if this button represents the active state
+                val isActive = if (lens.sensorId == "virtual-2x") {
+                    is2xMode
                 } else {
-                    btn.setTextColor(inactiveColor)
+                    lens.sensorId == currentLens?.sensorId && !is2xMode
+                }
+
+                if (isActive) {
+                    btn.setTextColor(colorPrimary)
+                    btn.strokeWidth = resources.getDimensionPixelSize(R.dimen.stroke_small)
+                    btn.strokeColor = android.content.res.ColorStateList.valueOf(colorPrimary)
+                    btn.setBackgroundColor(MaterialColors.layer(
+                        MaterialColors.getColor(btn, com.google.android.material.R.attr.colorSurface),
+                        colorPrimary,
+                        0.1f
+                    ))
+
+                    // Update label for 1.0x if active
+                    if (lens.multiplier in 0.95f..1.05f && lens.sensorId != "virtual-2x") {
+                        btn.text = when {
+                            currentFocalLength == 28 -> "28mm"
+                            currentFocalLength == 35 -> "35mm"
+                            else -> lens.name
+                        }
+                    } else {
+                        btn.text = lens.name
+                    }
+                } else {
+                    btn.setTextColor(colorOnSurface)
                     btn.strokeWidth = 0
+                    btn.text = lens.name
+                    btn.setBackgroundColor(MaterialColors.layer(
+                        MaterialColors.getColor(btn, com.google.android.material.R.attr.colorSurface),
+                        colorOnSurface,
+                        0.15f
+                    ))
                 }
             }
         }
 
-        // Show zoom buttons (1x, 2x) only in logical auto mode or if it's a zoom preset (which is also logical)
-        binding.zoomControlsContainer?.visibility =
-            if (currentLens?.isLogicalAuto == true || currentLens?.isZoomPreset == true) View.VISIBLE else View.GONE
+        // Always hide separate zoom controls since it's now integrated in the physical button
+        binding.zoomControlsContainer?.visibility = View.GONE
     }
 
     private fun initZoomControls() {
@@ -2047,6 +2176,12 @@ class CameraFragment : Fragment() {
     }
 
     private fun updateZoom(animate: Boolean) {
+        if (camera2Device != null) {
+            updateZoomCamera2()
+            updateZoomUI(animate)
+            return
+        }
+
         // Handle explicit Zoom Presets
         if (currentLens?.isZoomPreset == true && currentLens?.targetZoomRatio != null) {
             camera?.cameraControl?.setZoomRatio(currentLens!!.targetZoomRatio!!)
@@ -2058,7 +2193,7 @@ class CameraFragment : Fragment() {
         val targetRatio = if (is2xMode) {
             2.0f
         } else {
-            if (currentLens?.isLogicalAuto == true) {
+            if (currentLens?.isLogicalAuto == true || (currentLens?.multiplier ?: 0f) in 0.95f..1.05f) {
                 currentFocalLength / 24.0f
             } else {
                 1.0f // Reset to 1x on the physical lens when switching away from 2x
@@ -2073,8 +2208,105 @@ class CameraFragment : Fragment() {
         updateZoomUI(animate)
     }
 
+    private fun updateZoomCamera2() {
+        val session = camera2Session ?: return
+        val device = camera2Device ?: return
+        val chars = camera2Manager.getCameraCharacteristics(device.id)
+        val activeArray = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE) ?: return
+
+        // Calculate Crop Region
+        val targetRatio = if (is2xMode) 2.0f else (currentFocalLength / 24.0f)
+
+        val cropW = (activeArray.width() / targetRatio).toInt()
+        val cropH = (activeArray.height() / targetRatio).toInt()
+        val centerX = activeArray.centerX()
+        val centerY = activeArray.centerY()
+
+        val cropRegion = android.graphics.Rect(
+            centerX - cropW / 2,
+            centerY - cropH / 2,
+            centerX + cropW / 2,
+            centerY + cropH / 2
+        )
+
+        try {
+            // Update the repeating request with the new crop region
+            val request = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_PREVIEW)
+            request.addTarget(camera2PreviewSurface!!)
+            applyManualSettingsToRequest(request)
+            request.set(android.hardware.camera2.CaptureRequest.SCALER_CROP_REGION, cropRegion)
+
+            session.setRepeatingRequest(request.build(), object : android.hardware.camera2.CameraCaptureSession.CaptureCallback() {
+                override fun onCaptureCompleted(session: android.hardware.camera2.CameraCaptureSession, request: android.hardware.camera2.CaptureRequest, result: android.hardware.camera2.TotalCaptureResult) {
+                    val timestamp = result.get(android.hardware.camera2.CaptureResult.SENSOR_TIMESTAMP)
+                    if (timestamp != null) {
+                        captureResults[timestamp] = result
+                    }
+                    captureResultFlow.tryEmit(result)
+                }
+            }, camera2Handler)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to update Camera2 zoom", e)
+        }
+    }
+
+    private fun animateSwitch(onMidPoint: () -> Unit) {
+        val switchDuration = 200L
+        fragmentCameraBinding.viewFinder.animate()
+            .alpha(0f)
+            .setDuration(switchDuration)
+            .withEndAction {
+                // Ensure UI operations are on main thread, but try to avoid heavy work blocking next frame
+                lifecycleScope.launch(Dispatchers.Main) {
+                    onMidPoint()
+                    // Small delay to allow hardware to initialize
+                    delay(100)
+                    fragmentCameraBinding.viewFinder.animate()
+                        .alpha(1f)
+                        .setDuration(switchDuration)
+                        .start()
+                }
+            }
+            .start()
+    }
+
+    private fun getCombinedOrientation(): Int {
+        val sensorOrientation = try {
+            val targetId = if (currentLens?.useCamera2 == true) {
+                currentLens!!.id
+            } else if (lensFacing == CameraSelector.LENS_FACING_BACK) {
+                currentLens?.physicalId ?: currentLens?.id ?: "0"
+            } else {
+                "1"
+            }
+            camera2Manager.getCameraCharacteristics(targetId)
+                .get(android.hardware.camera2.CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
+        } catch (e: Exception) { 0 }
+
+        // Use physical device orientation instead of UI display rotation
+        // deviceOrientationDegrees is tracked in orientationEventListener (0, 90, 180, 270 CW)
+
+        return if (lensFacing == CameraSelector.LENS_FACING_FRONT) {
+            // Front camera orientation formula: (sensorOrientation - deviceOrientationDegrees + 360) % 360
+            (sensorOrientation - deviceOrientationDegrees + 360) % 360
+        } else {
+            // Back camera orientation formula: (sensorOrientation + deviceOrientationDegrees) % 360
+            (sensorOrientation + deviceOrientationDegrees) % 360
+        }
+    }
+
     private fun updateZoomUI(animate: Boolean) {
+        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit()
+            .putBoolean(KEY_IS_2X_MODE, is2xMode)
+            .putInt(KEY_CURRENT_FOCAL_LENGTH, currentFocalLength)
+            .apply()
+
         val binding = cameraUiContainerBinding ?: return
+
+        // Refresh lens labels (integrated zoom)
+        updateLensUI()
+
         val activeColor = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorPrimary)
         val inactiveColor = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnSurface)
 
@@ -2116,7 +2348,7 @@ class CameraFragment : Fragment() {
 
     @OptIn(ExperimentalCamera2Interop::class)
     private fun applyCameraControls() {
-        if (currentLens?.useCamera2 == true) {
+        if (camera2Device != null) {
             updateCamera2RepeatingRequest()
             return
         }
@@ -2319,6 +2551,10 @@ class CameraFragment : Fragment() {
         private const val FOCUS_RING_DISPLAY_TIME_MS = 500L
         private const val FOCUS_RING_FADE_OUT_DURATION_MS = 300L
         private const val AE_SETTLE_DELAY_MS = 50L
+
+        const val KEY_SELECTED_LENS_ID = "selected_lens_sensor_id"
+        const val KEY_IS_2X_MODE = "is_2x_mode"
+        const val KEY_CURRENT_FOCAL_LENGTH = "current_focal_length"
     }
     private fun takeSinglePicture(imageCapture: ImageCapture) {
         if (imageCapture.outputFormat == ImageCapture.OUTPUT_FORMAT_RAW) {
@@ -2332,7 +2568,7 @@ class CameraFragment : Fragment() {
                             val currentZoom =
                                 if (is2xMode) 2.0f else (currentFocalLength / 24.0f)
 
-                            val holder = copyImageToHolder(image, currentZoom, currentLens?.physicalId)
+                            val holder = copyImageToHolder(image, currentZoom, getCombinedOrientation(), currentLens?.physicalId)
                             image.close() // Close ASAP
 
                             // 2. Queue for Processing
@@ -2593,6 +2829,7 @@ class CameraFragment : Fragment() {
 
     private fun processHdrPlusBurst(frames: List<HdrFrame>, digitalGain: Float) {
         val currentZoom = if (is2xMode) 2.0f else (currentFocalLength / 24.0f)
+        val combinedOrientation = getCombinedOrientation()
         val startTime = burstStartTime
         val captureEndTime = System.currentTimeMillis()
 
@@ -2629,7 +2866,7 @@ class CameraFragment : Fragment() {
                     result.get(android.hardware.camera2.CaptureResult.LOGICAL_MULTI_CAMERA_ACTIVE_PHYSICAL_ID)
                 } else null
 
-                val targetCharId = activePhysicalId ?: frames[0].physicalId ?: camera2InfoId
+                val targetCharId = activePhysicalId ?: frames[0].physicalId ?: currentLens?.id ?: camera2InfoId
                 Log.d(TAG, "Fetching HDR+ characteristics for processing using ID: $targetCharId")
                 chars = cameraManager.getCameraCharacteristics(targetCharId)
 
@@ -2724,7 +2961,7 @@ class CameraFragment : Fragment() {
                 val ret = ColorProcessor.processHdrPlus(
                     buffers,
                     width, height,
-                    rotationDegrees,
+                    combinedOrientation,
                     whiteLevel, blackLevel,
                     wb, ccm, cfa,
                     iso, exposureTime, fNumber, focalLength, captureTime,
@@ -2745,7 +2982,7 @@ class CameraFragment : Fragment() {
                     val finalJpgUri = saveProcessedImage(
                         context,
                         bmpPath,
-                        rotationDegrees,
+                        combinedOrientation, // Use combined orientation for JPEG rotation
                         currentZoom,
                         dngName,
                         linearDngPath,
@@ -2815,7 +3052,9 @@ class CameraFragment : Fragment() {
                             height = firstFrame.height,
                             timestamp = firstFrame.timestamp,
                             rotationDegrees = firstFrame.rotationDegrees,
-                            zoomRatio = currentZoom
+                            combinedOrientation = combinedOrientation,
+                            zoomRatio = currentZoom,
+                            physicalId = firstFrame.physicalId
                         )
                         processingChannel.send(holder)
                         fallbackSent = true
@@ -2897,27 +3136,62 @@ class CameraFragment : Fragment() {
              // Image consumption handled by capture callbacks
         }, handler)
 
-        // 2. Setup Preview Surface via LutProcessor
+        // 2. Setup ImageAnalysis ImageReader
+        val yuvSizes = map?.getOutputSizes(android.graphics.ImageFormat.YUV_420_888)
+        val analysisSize = yuvSizes?.filter { it.width.toFloat()/it.height.toFloat() in 1.3f..1.4f }
+            ?.minByOrNull { it.width * it.height } ?: android.util.Size(640, 480)
+        analysisImageReader = ImageReader.newInstance(analysisSize.width, analysisSize.height, android.graphics.ImageFormat.YUV_420_888, 2)
+
+        // Use a persistent analyzer instance
+        val analyzer = LuminosityAnalyzer { luma ->
+            // Update UI or logs if needed
+        }
+
+        analysisImageReader?.setOnImageAvailableListener({ reader ->
+            val image = reader.acquireLatestImage() ?: return@setOnImageAvailableListener
+            // Use a wrapper to pass android.media.Image to CameraX-based Analyzer if possible
+            // Since LuminosityAnalyzer takes ImageProxy, we might need a simple shim.
+            // For now, let's just log and close to verify the stream is active.
+            image.close()
+        }, handler)
+
+        // 3. Setup Preview Surface via LutProcessor
         // We use typical 4:3 preview size
         val previewSize = map?.getOutputSizes(android.graphics.SurfaceTexture::class.java)
             ?.filter { it.width.toFloat()/it.height.toFloat() in 1.3f..1.4f }
             ?.maxByOrNull { it.width * it.height } ?: android.util.Size(1440, 1080)
 
+        Log.d(TAG, "Requesting preview surface from LutProcessor: ${previewSize.width}x${previewSize.height}")
         lutProcessor?.getInputSurface(previewSize.width, previewSize.height) { surface ->
-            camera2PreviewSurface = surface
-            val surfaces = listOf(surface, rawImageReader!!.surface)
+            if (!isAdded || camera2Device?.id != device.id) {
+                Log.w(TAG, "Preview surface ready but fragment detached or device changed. Ignoring.")
+                return@getInputSurface
+            }
 
+            camera2PreviewSurface = surface
+            val surfaces = listOf(surface, rawImageReader!!.surface, analysisImageReader!!.surface)
+
+            Log.d(TAG, "Creating Camera2 Capture Session...")
             try {
                 device.createCaptureSession(surfaces, object : android.hardware.camera2.CameraCaptureSession.StateCallback() {
                     override fun onConfigured(session: android.hardware.camera2.CameraCaptureSession) {
+                        Log.d(TAG, "Camera2 Session Configured.")
                         camera2Session = session
                         try {
                             val request = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_PREVIEW)
                             request.addTarget(surface)
+                            analysisImageReader?.surface?.let { request.addTarget(it) }
 
-                            // Apply default AF/AE
-                            request.set(android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE, android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
-                            request.set(android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE, android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE_ON)
+                            // Apply current Manual & Zoom settings
+                            applyManualSettingsToRequest(request)
+
+                            // Ensure default AF/AE if manual is NOT set (applyManualSettingsToRequest handles its own AE/AF modes)
+                            if (!isManualFocus) {
+                                request.set(android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE, android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
+                            }
+                            if (!isManualExposure) {
+                                // applyManualSettingsToRequest handles flash mapping inside if (!isManualExposure)
+                            }
 
                             session.setRepeatingRequest(request.build(), object : android.hardware.camera2.CameraCaptureSession.CaptureCallback() {
                                 override fun onCaptureCompleted(session: android.hardware.camera2.CameraCaptureSession, request: android.hardware.camera2.CaptureRequest, result: android.hardware.camera2.TotalCaptureResult) {
@@ -2952,6 +3226,7 @@ class CameraFragment : Fragment() {
         try {
             val request = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_STILL_CAPTURE)
             request.addTarget(reader.surface)
+            request.set(android.hardware.camera2.CaptureRequest.JPEG_ORIENTATION, getCombinedOrientation())
 
             // Apply current manual settings
             applyManualSettingsToRequest(request)
@@ -2960,8 +3235,8 @@ class CameraFragment : Fragment() {
             reader.setOnImageAvailableListener({ r ->
                 val image = r.acquireLatestImage() ?: return@setOnImageAvailableListener
                 try {
-                    val currentZoom = 1.0f // Physical sensors usually start at 1.0x
-                    val holder = copyAndroidImageToHolder(image, currentZoom, currentLens?.id)
+                    val currentZoom = if (is2xMode) 2.0f else (currentFocalLength / 24.0f)
+                    val holder = copyAndroidImageToHolder(image, currentZoom, getCombinedOrientation(), currentLens?.id)
                     image.close()
                     lifecycleScope.launch {
                         processingChannel.send(holder)
@@ -3009,13 +3284,25 @@ class CameraFragment : Fragment() {
         burstStartTime = System.currentTimeMillis()
 
         try {
-            // Get burst size
+            // 1. Calculate Exposure
+            val result = captureResultFlow.replayCache.lastOrNull()
+            val curIso = result?.get(android.hardware.camera2.CaptureResult.SENSOR_SENSITIVITY) ?: 100
+            val curTime = result?.get(android.hardware.camera2.CaptureResult.SENSOR_EXPOSURE_TIME) ?: 10_000_000L
+            val validIsoRange = isoRange ?: android.util.Range(100, 3200)
+            val validTimeRange = exposureTimeRange ?: android.util.Range(1000L, 1_000_000_000L)
             val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+            val underexposureMode = prefs.getString(SettingsFragment.KEY_HDR_UNDEREXPOSURE_MODE, "Dynamic (Experimental)") ?: "Dynamic (Experimental)"
+
+            val config = ExposureUtils.calculateHdrPlusExposure(
+                curIso, curTime, validIsoRange, validTimeRange, underexposureMode
+            )
+
+            // 2. Get burst size
             val burstSize = (prefs.getString(SettingsFragment.KEY_HDR_BURST_COUNT, "3") ?: "3").toIntOrNull() ?: 3
 
-            // Re-init helper
+            // 3. Re-init helper
             hdrPlusBurstHelper = HdrPlusBurst(frameCount = burstSize, onBurstComplete = { frames ->
-                processHdrPlusBurst(frames, 1.0f) // No digital gain calculation for now in C2 path
+                processHdrPlusBurst(frames, config.digitalGain)
             })
 
             // UI
@@ -3028,14 +3315,37 @@ class CameraFragment : Fragment() {
             }
 
             val burstRequests = mutableListOf<android.hardware.camera2.CaptureRequest>()
+            val combinedOrientation = getCombinedOrientation()
             for (i in 0 until burstSize) {
                 val request = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_STILL_CAPTURE)
                 request.addTarget(reader.surface)
+                request.set(android.hardware.camera2.CaptureRequest.JPEG_ORIENTATION, combinedOrientation)
+
+                // Apply Common settings including Zoom and Focus
                 applyManualSettingsToRequest(request)
+
+                // Override with HDR+ specific exposure settings
+                request.set(android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE, android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE_OFF)
+                request.set(android.hardware.camera2.CaptureRequest.SENSOR_SENSITIVITY, config.iso)
+                request.set(android.hardware.camera2.CaptureRequest.SENSOR_EXPOSURE_TIME, config.exposureTime)
+
                 burstRequests.add(request.build())
             }
 
             var framesCaptured = 0
+
+            // Watchdog to prevent UI lock if camera fails to deliver frames
+            val watchdog = lifecycleScope.launch(Dispatchers.Main) {
+                delay(8000) // 8s timeout for burst capture
+                if (isBurstActive && framesCaptured < burstSize) {
+                    Log.e(TAG, "Burst capture timed out! Resetting UI.")
+                    Toast.makeText(requireContext(), "Burst capture timed out", Toast.LENGTH_SHORT).show()
+                    isBurstActive = false
+                    processingSemaphore.release()
+                    resetBurstUi()
+                }
+            }
+
             reader.setOnImageAvailableListener({ r ->
                 val image = r.acquireNextImage() ?: return@setOnImageAvailableListener
                 try {
@@ -3059,6 +3369,7 @@ class CameraFragment : Fragment() {
                         cameraUiContainerBinding?.captureProgress?.progress = framesCaptured
                     }
                     if (framesCaptured >= burstSize) {
+                        watchdog.cancel()
                         lifecycleScope.launch(Dispatchers.Main) { resetBurstUi() }
                     }
                 } catch (e: Exception) {
@@ -3088,7 +3399,7 @@ class CameraFragment : Fragment() {
         }
     }
 
-    private fun copyAndroidImageToHolder(image: android.media.Image, zoomRatio: Float, physicalId: String?): RawImageHolder {
+    private fun copyAndroidImageToHolder(image: android.media.Image, zoomRatio: Float, combinedOrientation: Int, physicalId: String?): RawImageHolder {
         val plane = image.planes[0]
         val buffer = plane.buffer
         val rowStride = plane.rowStride
@@ -3118,6 +3429,7 @@ class CameraFragment : Fragment() {
             height = height,
             timestamp = image.timestamp,
             rotationDegrees = sensorOrientation,
+            combinedOrientation = combinedOrientation,
             zoomRatio = zoomRatio,
             physicalId = physicalId
         )
@@ -3125,14 +3437,56 @@ class CameraFragment : Fragment() {
 
 
     private fun applyManualSettingsToRequest(request: android.hardware.camera2.CaptureRequest.Builder) {
+        // 1. Exposure & Flash
         if (isManualExposure) {
             request.set(android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE, android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE_OFF)
             request.set(android.hardware.camera2.CaptureRequest.SENSOR_SENSITIVITY, currentIso)
             request.set(android.hardware.camera2.CaptureRequest.SENSOR_EXPOSURE_TIME, currentExposureTime)
+
+            if (isFlashEnabled) {
+                request.set(android.hardware.camera2.CaptureRequest.FLASH_MODE, android.hardware.camera2.CaptureRequest.FLASH_MODE_TORCH)
+            } else {
+                request.set(android.hardware.camera2.CaptureRequest.FLASH_MODE, android.hardware.camera2.CaptureRequest.FLASH_MODE_OFF)
+            }
+        } else {
+            if (isFlashEnabled) {
+                request.set(android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE, android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE_ON_ALWAYS_FLASH)
+            } else {
+                request.set(android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE, android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE_ON)
+            }
         }
+
+        // 2. Focus
         if (isManualFocus) {
             request.set(android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE, android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE_OFF)
             request.set(android.hardware.camera2.CaptureRequest.LENS_FOCUS_DISTANCE, currentFocusDistance)
+        }
+
+        // 3. Zoom (Crop Region)
+        if (currentLens?.useCamera2 == true) {
+            val deviceId = camera2Device?.id ?: currentLens?.id
+            if (deviceId != null) {
+                val chars = camera2Manager.getCameraCharacteristics(deviceId)
+                val activeArray = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
+                if (activeArray != null) {
+                    val targetRatio = if (is2xMode) 2.0f else (currentFocalLength / 24.0f)
+                    if (targetRatio > 1.01f) {
+                        val cropW = (activeArray.width() / targetRatio).toInt()
+                        val cropH = (activeArray.height() / targetRatio).toInt()
+                        val centerX = activeArray.centerX()
+                        val centerY = activeArray.centerY()
+                        val cropRegion = android.graphics.Rect(
+                            centerX - cropW / 2,
+                            centerY - cropH / 2,
+                            centerX + cropW / 2,
+                            centerY + cropH / 2
+                        )
+                        request.set(android.hardware.camera2.CaptureRequest.SCALER_CROP_REGION, cropRegion)
+                    } else {
+                        request.set(android.hardware.camera2.CaptureRequest.SCALER_CROP_REGION, activeArray)
+                    }
+                }
+            }
         }
     }
 
@@ -3143,6 +3497,8 @@ class CameraFragment : Fragment() {
         camera2Device = null
         rawImageReader?.close()
         rawImageReader = null
+        analysisImageReader?.close()
+        analysisImageReader = null
         camera2PreviewSurface = null
         lutProcessor?.releaseInputSurface()
         camera2Thread?.quitSafely()
