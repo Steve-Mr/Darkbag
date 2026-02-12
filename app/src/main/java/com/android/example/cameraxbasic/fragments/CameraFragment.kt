@@ -53,6 +53,8 @@ import android.hardware.camera2.params.OutputConfiguration
 import android.hardware.camera2.params.SessionConfiguration
 import android.media.ImageReader
 import android.graphics.ImageFormat
+import android.os.Handler
+import android.os.HandlerThread
 import com.android.example.cameraxbasic.MainApplication
 import com.android.example.cameraxbasic.processor.ColorProcessor
 import com.android.example.cameraxbasic.processor.HdrPlusExportWorker
@@ -873,7 +875,7 @@ class CameraFragment : Fragment() {
         try {
             cameraUiContainerBinding?.cameraSwitchButton?.isEnabled =
                 hasBackCamera() && hasFrontCamera()
-        } catch (exception: CameraInfoUnavailableException) {
+        } catch (exception: Exception) {
             cameraUiContainerBinding?.cameraSwitchButton?.isEnabled = false
         }
     }
@@ -1386,7 +1388,6 @@ class CameraFragment : Fragment() {
         when (activeManualTab) {
             "Focus" -> {
                 isManualFocus = false
-                camera?.cameraControl?.cancelFocusAndMetering()
             }
 
             "ISO", "Shutter" -> {
