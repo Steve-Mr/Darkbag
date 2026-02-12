@@ -156,6 +156,11 @@ class SettingsFragment : Fragment() {
         binding.switchManualControls.setOnCheckedChangeListener { _, isChecked ->
             prefs.edit().putBoolean(KEY_MANUAL_CONTROLS, isChecked).apply()
         }
+
+        binding.switchUseCamerax.isChecked = prefs.getBoolean(KEY_USE_CAMERAX, false)
+        binding.switchUseCamerax.setOnCheckedChangeListener { _, isChecked ->
+            prefs.edit().putBoolean(KEY_USE_CAMERAX, isChecked).apply()
+        }
     }
 
     override fun onDestroyView() {
@@ -178,6 +183,7 @@ class SettingsFragment : Fragment() {
         const val KEY_FLASH_MODE = "flash_mode"
         const val KEY_HDR_BURST_COUNT = "hdr_burst_count"
         const val KEY_HDR_UNDEREXPOSURE_MODE = "hdr_underexposure_mode"
+        const val KEY_USE_CAMERAX = "use_camerax_engine"
 
         val FOCAL_LENGTHS = listOf("24", "28", "35")
         val ANTIBANDING_MODES = listOf("Auto", "50Hz", "60Hz", "Off")
