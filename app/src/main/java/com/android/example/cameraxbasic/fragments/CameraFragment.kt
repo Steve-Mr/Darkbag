@@ -211,12 +211,22 @@ class CameraFragment : Fragment() {
     private var is2xMode = false
     private var zoomJob: kotlinx.coroutines.Job? = null
 
+    private var deviceOrientationDegrees = 0
+
     /** Orientation listener to track device rotation independently of UI rotation */
     private val orientationEventListener by lazy {
         object : OrientationEventListener(requireContext()) {
             override fun onOrientationChanged(orientation: Int) {
                 if (orientation == OrientationEventListener.ORIENTATION_UNKNOWN) {
                     return
+                }
+
+                // Map Orientation to degrees (0, 90, 180, 270 clockwise)
+                deviceOrientationDegrees = when (orientation) {
+                    in 45 until 135 -> 270 // Landscape Left (90 CCW -> 270 CW)
+                    in 135 until 225 -> 180 // Upside Down
+                    in 225 until 315 -> 90 // Landscape Right (270 CCW -> 90 CW)
+                    else -> 0 // Portrait
                 }
 
                 val rotation = when (orientation) {
@@ -2273,19 +2283,16 @@ class CameraFragment : Fragment() {
                 .get(android.hardware.camera2.CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
         } catch (e: Exception) { 0 }
 
-        val displayRotation = try {
-            when (fragmentCameraBinding.viewFinder.display.rotation) {
-                Surface.ROTATION_0 -> 0
-                Surface.ROTATION_90 -> 90
-                Surface.ROTATION_180 -> 180
-                Surface.ROTATION_270 -> 270
-                else -> 0
-            }
-        } catch (e: Exception) { 0 }
+        // Use physical device orientation instead of UI display rotation
+        // deviceOrientationDegrees is tracked in orientationEventListener (0, 90, 180, 270 CW)
 
-        // Combined: (Sensor + Display) % 360 for Back-facing
-        // For Front-facing it might need different logic, but focus is on back physical lenses
-        return (sensorOrientation + displayRotation) % 360
+        return if (lensFacing == CameraSelector.LENS_FACING_FRONT) {
+            // Front camera orientation formula: (sensorOrientation - deviceOrientationDegrees + 360) % 360
+            (sensorOrientation - deviceOrientationDegrees + 360) % 360
+        } else {
+            // Back camera orientation formula: (sensorOrientation + deviceOrientationDegrees) % 360
+            (sensorOrientation + deviceOrientationDegrees) % 360
+        }
     }
 
     private fun updateZoomUI(animate: Boolean) {
