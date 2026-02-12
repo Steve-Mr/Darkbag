@@ -200,6 +200,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
 
     // Save Processed Images (Log/LUT Path)
     // Pass finalImage (Linear) + Gain + Logic to shared pipeline
+    LOGD("Saving processed images. Gain=%f, Log=%d, LUT=%s", digitalGain, targetLog, (lut.size > 0 ? "Yes" : "No"));
     process_and_save_image(
         finalImage,
         width,
@@ -214,6 +215,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
         wbVec.data(),   // WB Gains (Currently unused in HDR+ path, but kept for API)
         orientation // Pass orientation for TIFF writing
     );
+    LOGD("Image save logic completed.");
 
     // Release Strings
     if (outputTiffPath) env->ReleaseStringUTFChars(outputTiffPath, tiff_path_cstr);

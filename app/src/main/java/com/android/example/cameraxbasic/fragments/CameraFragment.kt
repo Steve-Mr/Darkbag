@@ -343,9 +343,11 @@ class CameraFragment : Fragment() {
             return
         }
 
-        // Re-initialize camera if we were using Camera2 engine, as it's closed in onStop
-        if (currentLens?.useCamera2 == true) {
-            openCamera2(currentLens!!.id)
+        // Re-initialize camera engine if needed.
+        // CameraX use cases are bound to lifecycle, so they resume automatically.
+        // For Camera2 engine, we need to re-bind use cases (which triggers openCamera2).
+        if (currentLens?.useCamera2 == true && cameraProvider != null) {
+            bindCameraUseCases()
         }
     }
 
@@ -462,6 +464,14 @@ class CameraFragment : Fragment() {
             // Build UI controls
             updateCameraUi()
 
+            // Initialize LUT Processor early to be ready for any engine
+            if (lutProcessor == null) {
+                lutProcessor = LutSurfaceProcessor()
+            }
+
+            // Setup ViewFinder early
+            setupViewFinderBinding()
+
             // Setup Tap to Focus
             setupTapToFocus()
 
@@ -509,6 +519,37 @@ class CameraFragment : Fragment() {
     }
 
     /** Declare and bind preview, capture and analysis use cases */
+    private fun setupViewFinderBinding() {
+        val proc = lutProcessor ?: return
+        // Connect ViewFinder TextureView to LutProcessor
+        fragmentCameraBinding.viewFinder.surfaceTextureListener =
+            object : TextureView.SurfaceTextureListener {
+                override fun onSurfaceTextureAvailable(st: SurfaceTexture, w: Int, h: Int) {
+                    proc.setOutputSurface(Surface(st), w, h)
+                }
+                override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, w: Int, h: Int) {
+                    proc.setOutputSurface(Surface(st), w, h)
+                }
+                override fun onSurfaceTextureDestroyed(st: SurfaceTexture): Boolean {
+                    proc.setOutputSurface(null, 0, 0)
+                    return true
+                }
+                override fun onSurfaceTextureUpdated(st: SurfaceTexture) {}
+            }
+
+        // If surface is already available, bind it immediately
+        if (fragmentCameraBinding.viewFinder.isAvailable) {
+            fragmentCameraBinding.viewFinder.surfaceTexture?.let { st ->
+                proc.setOutputSurface(
+                    Surface(st),
+                    fragmentCameraBinding.viewFinder.width,
+                    fragmentCameraBinding.viewFinder.height
+                )
+            }
+        }
+        updateLiveLut() // Ensure LUT is loaded
+    }
+
     @OptIn(ExperimentalCamera2Interop::class)
     private fun bindCameraUseCases() {
         // Fetch Characteristics for Manual Control
@@ -524,9 +565,6 @@ class CameraFragment : Fragment() {
             exposureTimeRange = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
             minFocusDistance = chars.get(android.hardware.camera2.CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE) ?: 0.0f
 
-            // Note: evRange depends on active session/info, usually 0 for auxiliary cameras if not using logical
-            // evRange = cameraInfo.exposureState.exposureCompensationRange
-
             // Clamp current values to new ranges
             isoRange?.let { currentIso = currentIso.coerceIn(it.lower, it.upper) }
             exposureTimeRange?.let { currentExposureTime = currentExposureTime.coerceIn(it.lower, it.upper) }
@@ -540,7 +578,7 @@ class CameraFragment : Fragment() {
             Log.e(TAG, "Failed to fetch camera characteristics", e)
         }
 
-        // If current lens requires Camera2, use the hard-switch path
+        // Decide Engine: Camera2 (Hard Switch) or CameraX
         if (lensFacing == CameraSelector.LENS_FACING_BACK && currentLens?.useCamera2 == true) {
             Log.d(TAG, "Switching to Camera2 Engine for lens: ${currentLens?.name}")
             cameraProvider?.unbindAll()
@@ -715,11 +753,6 @@ class CameraFragment : Fragment() {
             removeCameraStateObservers(camera!!.cameraInfo)
         }
 
-        // Manual pipeline for preview
-        if (lutProcessor == null) {
-            lutProcessor = LutSurfaceProcessor()
-        }
-
         val lutBinder = object : Preview.SurfaceProvider {
             override fun onSurfaceRequested(request: SurfaceRequest) {
                 // Connect Camera to LutProcessor
@@ -727,47 +760,7 @@ class CameraFragment : Fragment() {
             }
         }
 
-        // Connect View to LutProcessor
-        fragmentCameraBinding.viewFinder.surfaceTextureListener =
-            object : TextureView.SurfaceTextureListener {
-                override fun onSurfaceTextureAvailable(
-                    surface: SurfaceTexture,
-                    width: Int,
-                    height: Int
-                ) {
-                    lutProcessor?.setOutputSurface(Surface(surface), width, height)
-                }
-
-                override fun onSurfaceTextureSizeChanged(
-                    surface: SurfaceTexture,
-                    width: Int,
-                    height: Int
-                ) {
-                    lutProcessor?.setOutputSurface(Surface(surface), width, height)
-                }
-
-                override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
-                    lutProcessor?.setOutputSurface(null, 0, 0)
-                    return true
-                }
-
-                override fun onSurfaceTextureUpdated(surface: SurfaceTexture) {}
-            }
-
-        // Check if surface is already available
-        if (fragmentCameraBinding.viewFinder.isAvailable) {
-            val st = fragmentCameraBinding.viewFinder.surfaceTexture
-            if (st != null) {
-                lutProcessor?.setOutputSurface(
-                    Surface(st),
-                    fragmentCameraBinding.viewFinder.width,
-                    fragmentCameraBinding.viewFinder.height
-                )
-            }
-        }
-
         preview?.setSurfaceProvider(cameraExecutor, lutBinder)
-        updateLiveLut() // Ensure LUT is loaded
 
         val useCaseGroup = UseCaseGroup.Builder()
             .addUseCase(preview!!)
@@ -1201,7 +1194,9 @@ class CameraFragment : Fragment() {
                 val cam = camera
                 val camera2InfoId = if (cam != null) Camera2CameraInfo.from(cam.cameraInfo).cameraId else "0"
 
-                val targetCharId = activePhysicalId ?: image.physicalId ?: camera2InfoId
+                // If image.physicalId is set, it's our best source.
+                // Else fallback to currentLens?.id (if we are in Camera2 mode) or camera2InfoId.
+                val targetCharId = activePhysicalId ?: image.physicalId ?: currentLens?.id ?: camera2InfoId
                 Log.d(TAG, "Fetching characteristics for processing using ID: $targetCharId")
                 val chars = cameraManager.getCameraCharacteristics(targetCharId)
 
@@ -2083,11 +2078,14 @@ class CameraFragment : Fragment() {
             .alpha(0f)
             .setDuration(ANIMATION_FAST_MILLIS)
             .withEndAction {
-                onMidPoint()
-                fragmentCameraBinding.viewFinder.animate()
-                    .alpha(1f)
-                    .setDuration(ANIMATION_FAST_MILLIS)
-                    .start()
+                // Ensure UI operations are on main thread, but try to avoid heavy work blocking next frame
+                lifecycleScope.launch(Dispatchers.Main) {
+                    onMidPoint()
+                    fragmentCameraBinding.viewFinder.animate()
+                        .alpha(1f)
+                        .setDuration(ANIMATION_FAST_MILLIS)
+                        .start()
+                }
             }
             .start()
     }
@@ -2648,7 +2646,7 @@ class CameraFragment : Fragment() {
                     result.get(android.hardware.camera2.CaptureResult.LOGICAL_MULTI_CAMERA_ACTIVE_PHYSICAL_ID)
                 } else null
 
-                val targetCharId = activePhysicalId ?: frames[0].physicalId ?: camera2InfoId
+                val targetCharId = activePhysicalId ?: frames[0].physicalId ?: currentLens?.id ?: camera2InfoId
                 Log.d(TAG, "Fetching HDR+ characteristics for processing using ID: $targetCharId")
                 chars = cameraManager.getCameraCharacteristics(targetCharId)
 
@@ -3028,13 +3026,25 @@ class CameraFragment : Fragment() {
         burstStartTime = System.currentTimeMillis()
 
         try {
-            // Get burst size
+            // 1. Calculate Exposure
+            val result = captureResultFlow.replayCache.lastOrNull()
+            val curIso = result?.get(android.hardware.camera2.CaptureResult.SENSOR_SENSITIVITY) ?: 100
+            val curTime = result?.get(android.hardware.camera2.CaptureResult.SENSOR_EXPOSURE_TIME) ?: 10_000_000L
+            val validIsoRange = isoRange ?: android.util.Range(100, 3200)
+            val validTimeRange = exposureTimeRange ?: android.util.Range(1000L, 1_000_000_000L)
             val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+            val underexposureMode = prefs.getString(SettingsFragment.KEY_HDR_UNDEREXPOSURE_MODE, "Dynamic (Experimental)") ?: "Dynamic (Experimental)"
+
+            val config = ExposureUtils.calculateHdrPlusExposure(
+                curIso, curTime, validIsoRange, validTimeRange, underexposureMode
+            )
+
+            // 2. Get burst size
             val burstSize = (prefs.getString(SettingsFragment.KEY_HDR_BURST_COUNT, "3") ?: "3").toIntOrNull() ?: 3
 
-            // Re-init helper
+            // 3. Re-init helper
             hdrPlusBurstHelper = HdrPlusBurst(frameCount = burstSize, onBurstComplete = { frames ->
-                processHdrPlusBurst(frames, 1.0f) // No digital gain calculation for now in C2 path
+                processHdrPlusBurst(frames, config.digitalGain)
             })
 
             // UI
@@ -3050,7 +3060,15 @@ class CameraFragment : Fragment() {
             for (i in 0 until burstSize) {
                 val request = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_STILL_CAPTURE)
                 request.addTarget(reader.surface)
-                applyManualSettingsToRequest(request)
+                // Apply HDR+ Exposure
+                request.set(android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE, android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE_OFF)
+                request.set(android.hardware.camera2.CaptureRequest.SENSOR_SENSITIVITY, config.iso)
+                request.set(android.hardware.camera2.CaptureRequest.SENSOR_EXPOSURE_TIME, config.exposureTime)
+                // Maintain Focus
+                if (isManualFocus) {
+                    request.set(android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE, android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE_OFF)
+                    request.set(android.hardware.camera2.CaptureRequest.LENS_FOCUS_DISTANCE, currentFocusDistance)
+                }
                 burstRequests.add(request.build())
             }
 
