@@ -1,6 +1,6 @@
 package com.android.example.cameraxbasic.fragments
 
-import androidx.camera.core.ImageProxy
+import android.media.Image
 import java.nio.ByteBuffer
 import java.util.concurrent.ConcurrentLinkedQueue
 
@@ -60,11 +60,11 @@ class HdrPlusBurst(
 
     private val frames = mutableListOf<HdrFrame>()
 
-    fun addFrame(image: ImageProxy) {
+    fun addFrame(image: Image, rotationDegrees: Int) {
         if (frames.size < frameCount) {
             try {
-                // Extract frame data immediately to release the ImageProxy buffer
-                val frame = copyFrame(image)
+                // Extract frame data immediately to release the Image buffer
+                val frame = copyFrame(image, rotationDegrees)
                 frames.add(frame)
 
                 if (frames.size == frameCount) {
@@ -97,7 +97,7 @@ class HdrPlusBurst(
         frames.clear()
     }
 
-    private fun copyFrame(image: ImageProxy): HdrFrame {
+    private fun copyFrame(image: Image, rotationDegrees: Int): HdrFrame {
         val plane = image.planes[0]
         val buffer = plane.buffer
         val width = image.width
@@ -144,8 +144,8 @@ class HdrPlusBurst(
             buffer = cleanData,
             width = width,
             height = height,
-            timestamp = image.imageInfo.timestamp,
-            rotationDegrees = image.imageInfo.rotationDegrees
+            timestamp = image.timestamp,
+            rotationDegrees = rotationDegrees
         )
     }
 }
