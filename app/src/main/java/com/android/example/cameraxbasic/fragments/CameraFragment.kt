@@ -576,16 +576,18 @@ class CameraFragment : Fragment() {
             }
         }, cameraHandler)
 
-        // 3. Setup HDR+ UI
-        cameraUiContainerBinding?.hdrPlusToggle?.visibility = View.VISIBLE
-        isHdrPlusEnabled = true
-        updateHdrPlusUi()
+        // 3. Setup HDR+ UI & Aspect Ratio (Main Thread)
+        lifecycleScope.launch(Dispatchers.Main) {
+            cameraUiContainerBinding?.hdrPlusToggle?.visibility = View.VISIBLE
+            isHdrPlusEnabled = true
+            updateHdrPlusUi()
 
-        // 4. Configure AutoFitTextureView Aspect Ratio
-        if (resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT) {
-            fragmentCameraBinding.viewFinder.setAspectRatio(rawSize.height, rawSize.width)
-        } else {
-            fragmentCameraBinding.viewFinder.setAspectRatio(rawSize.width, rawSize.height)
+            // 4. Configure AutoFitTextureView Aspect Ratio
+            if (resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT) {
+                fragmentCameraBinding.viewFinder.setAspectRatio(rawSize.height, rawSize.width)
+            } else {
+                fragmentCameraBinding.viewFinder.setAspectRatio(rawSize.width, rawSize.height)
+            }
         }
 
         // 5. Connect View to LutProcessor
@@ -638,9 +640,11 @@ class CameraFragment : Fragment() {
             }
         }
 
-        // Check Flash Availability
+        // Check Flash Availability (Main Thread)
         val hasFlash = chars.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) ?: false
-        cameraUiContainerBinding?.flashButton?.visibility = if (hasFlash) View.VISIBLE else View.GONE
+        lifecycleScope.launch(Dispatchers.Main) {
+            cameraUiContainerBinding?.flashButton?.visibility = if (hasFlash) View.VISIBLE else View.GONE
+        }
 
         // Pre-initialize JNI memory pool
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
@@ -1523,7 +1527,7 @@ class CameraFragment : Fragment() {
 
         previewRequestBuilder?.set(CaptureRequest.SCALER_CROP_REGION, cropRegion)
         try {
-            captureSession?.setRepeatingRequest(previewRequestBuilder!!.build(), null, null)
+            captureSession?.setRepeatingRequest(previewRequestBuilder!!.build(), null, cameraHandler)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to update zoom", e)
         }
@@ -1531,42 +1535,42 @@ class CameraFragment : Fragment() {
     }
 
     private fun updateZoomUI(animate: Boolean) {
-        val binding = cameraUiContainerBinding ?: return
-        val activeColor = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorPrimary)
-        val inactiveColor = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnSurface)
+        lifecycleScope.launch(Dispatchers.Main) {
+            val binding = cameraUiContainerBinding ?: return@launch
+            val activeColor =
+                MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorPrimary)
+            val inactiveColor =
+                MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnSurface)
 
-        if (is2xMode) {
-            binding.btnZoom2x?.setTextColor(activeColor)
-            binding.btnZoomToggle?.setTextColor(inactiveColor)
+            if (is2xMode) {
+                binding.btnZoom2x?.setTextColor(activeColor)
+                binding.btnZoomToggle?.setTextColor(inactiveColor)
 
-            // If we just switched to 2x, we might want to ensure 1x label is generic or last state?
-            // Requirement: "user at 2x clicks 1x returns to default".
-            // Label can just remain "1x" or whatever it was?
-            // Let's reset it to "1x" for clarity as "Standard".
-            binding.btnZoomToggle?.text = "1x"
-            zoomJob?.cancel()
-        } else {
-            binding.btnZoom2x?.setTextColor(inactiveColor)
-            binding.btnZoomToggle?.setTextColor(activeColor)
+                binding.btnZoomToggle?.text = "1x"
+                zoomJob?.cancel()
+            } else {
+                binding.btnZoom2x?.setTextColor(inactiveColor)
+                binding.btnZoomToggle?.setTextColor(activeColor)
 
-            zoomJob?.cancel()
-            val labelX = when (currentFocalLength) {
-                24 -> "1x"
-                28 -> "1.2x"
-                35 -> "1.5x"
-                else -> "1x"
-            }
+                zoomJob?.cancel()
+                val labelX = when (currentFocalLength) {
+                    24 -> "1x"
+                    28 -> "1.2x"
+                    35 -> "1.5x"
+                    else -> "1x"
+                }
 
-            if (animate) {
-                zoomJob = lifecycleScope.launch(Dispatchers.Main) {
-                    val labelMm = "${currentFocalLength}mm"
+                if (animate) {
+                    zoomJob = lifecycleScope.launch(Dispatchers.Main) {
+                        val labelMm = "${currentFocalLength}mm"
 
-                    binding.btnZoomToggle?.text = labelMm
-                    delay(500)
+                        binding.btnZoomToggle?.text = labelMm
+                        delay(500)
+                        binding.btnZoomToggle?.text = labelX
+                    }
+                } else {
                     binding.btnZoomToggle?.text = labelX
                 }
-            } else {
-                binding.btnZoomToggle?.text = labelX
             }
         }
     }
@@ -1606,7 +1610,7 @@ class CameraFragment : Fragment() {
         val builder = previewRequestBuilder ?: return
         applyCameraControls(builder)
         try {
-            captureSession?.setRepeatingRequest(builder.build(), null, null)
+            captureSession?.setRepeatingRequest(builder.build(), null, cameraHandler)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to apply camera controls", e)
         }
@@ -2250,19 +2254,21 @@ class CameraFragment : Fragment() {
 
     private fun resetBurstUi() {
         // Run on Main Thread
-        cameraUiContainerBinding?.captureProgress?.visibility = View.GONE
-        isBurstActive = false
+        lifecycleScope.launch(Dispatchers.Main) {
+            cameraUiContainerBinding?.captureProgress?.visibility = View.GONE
+            isBurstActive = false
 
-        // Check if we can enable the button (processing limit)
-        if (processingSemaphore.availablePermits > 0) {
-            cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
-            cameraUiContainerBinding?.cameraCaptureButton?.alpha = 1.0f
-        } else {
-            // Keep disabled or show busy state if needed, but standard logic
-            // only disables if 0 permits. Here we just re-enable if possible.
-            // If full, it remains disabled (or we should explicitly disable to be safe).
-            cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = false
-            cameraUiContainerBinding?.cameraCaptureButton?.alpha = 0.5f
+            // Check if we can enable the button (processing limit)
+            if (processingSemaphore.availablePermits > 0) {
+                cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
+                cameraUiContainerBinding?.cameraCaptureButton?.alpha = 1.0f
+            } else {
+                // Keep disabled or show busy state if needed, but standard logic
+                // only disables if 0 permits. Here we just re-enable if possible.
+                // If full, it remains disabled (or we should explicitly disable to be safe).
+                cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = false
+                cameraUiContainerBinding?.cameraCaptureButton?.alpha = 0.5f
+            }
         }
     }
 }
