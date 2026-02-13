@@ -556,19 +556,24 @@ class CameraFragment : Fragment() {
             Log.d(TAG, "CameraX availableCameraInfo ID: $id")
         }
 
-        val newLenses = cameraRepository.enumerateCameras(cameraXIds)
-        Log.d(TAG, "Available Lenses identified: ${newLenses.size}")
+        val repoFacing = if (lensFacing == CameraSelector.LENS_FACING_BACK)
+            android.hardware.camera2.CameraCharacteristics.LENS_FACING_BACK
+        else
+            android.hardware.camera2.CameraCharacteristics.LENS_FACING_FRONT
+
+        val newLenses = cameraRepository.enumerateCameras(cameraXIds, repoFacing)
+        Log.d(TAG, "Available Lenses identified: ${newLenses.size} for facing $repoFacing")
 
         // Update currentLens reference if it exists, to pick up any engine changes
         currentLens?.let { old ->
              currentLens = newLenses.find { it.sensorId == old.sensorId }
                  ?: newLenses.find { it.id == old.id && it.physicalId == old.physicalId }
-                 ?: old
+                 // Don't keep old lens if it's from a different facing
         }
 
         availableLenses = newLenses
 
-        if (currentLens == null) {
+        if (currentLens == null || availableLenses.none { it.sensorId == currentLens?.sensorId }) {
             val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
             val savedLensId = prefs.getString(KEY_SELECTED_LENS_ID, null)
 
@@ -635,6 +640,8 @@ class CameraFragment : Fragment() {
 
     @OptIn(ExperimentalCamera2Interop::class)
     private fun bindCameraUseCases() {
+        refreshLenses()
+
         // Fetch Characteristics for Manual Control
         val targetId = if (lensFacing == CameraSelector.LENS_FACING_BACK) {
              currentLens?.physicalId ?: currentLens?.id ?: "0"
@@ -2936,10 +2943,10 @@ class CameraFragment : Fragment() {
     }
 
     private fun takeSinglePictureCamera2() {
-        val device = camera2Device ?: return
-        val session = camera2Session ?: return
-        val reader = rawImageReader ?: return
-        val handler = camera2Handler ?: return
+        val device = camera2Device ?: run { processingSemaphore.release(); return }
+        val session = camera2Session ?: run { processingSemaphore.release(); return }
+        val reader = rawImageReader ?: run { processingSemaphore.release(); return }
+        val handler = camera2Handler ?: run { processingSemaphore.release(); return }
 
         try {
             val request = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_STILL_CAPTURE)
@@ -2990,10 +2997,10 @@ class CameraFragment : Fragment() {
     }
 
     private fun triggerHdrPlusBurstCamera2() {
-        val device = camera2Device ?: return
-        val session = camera2Session ?: return
-        val reader = rawImageReader ?: return
-        val handler = camera2Handler ?: return
+        val device = camera2Device ?: run { processingSemaphore.release(); return }
+        val session = camera2Session ?: run { processingSemaphore.release(); return }
+        val reader = rawImageReader ?: run { processingSemaphore.release(); return }
+        val handler = camera2Handler ?: run { processingSemaphore.release(); return }
 
         isBurstActive = true
         burstStartTime = System.currentTimeMillis()
