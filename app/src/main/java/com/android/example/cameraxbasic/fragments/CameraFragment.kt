@@ -525,7 +525,7 @@ class CameraFragment : Fragment() {
                     camera.close()
                     cameraDevice = null
                 }
-            }, null)
+            }, cameraHandler)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to open camera", e)
         }
@@ -634,7 +634,7 @@ class CameraFragment : Fragment() {
                 device.createCaptureSession(sessionConfig)
             } else {
                 @Suppress("DEPRECATION")
-                device.createCaptureSession(surfaces, stateCallback, null)
+                device.createCaptureSession(surfaces, stateCallback, cameraHandler)
             }
         }
 
@@ -680,7 +680,7 @@ class CameraFragment : Fragment() {
                         }
                     }
                 }
-            }, null)
+            }, cameraHandler)
 
             updateZoom(false)
         } catch (e: Exception) {
@@ -776,8 +776,7 @@ class CameraFragment : Fragment() {
                 requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
                     .edit().putBoolean(SettingsFragment.KEY_FLASH_MODE, isFlashEnabled).apply()
                 updateFlashIcon(btn)
-                // Apply controls to update flash mode in repeating request
-                applyCameraControls()
+                // Flash is used only in still captures, no need to update repeating request.
             }
         }
 
@@ -1748,6 +1747,10 @@ class CameraFragment : Fragment() {
             val captureBuilder = device.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE)
             captureBuilder.addTarget(reader.surface)
             applyCameraControls(captureBuilder)
+            if (isFlashEnabled) {
+                captureBuilder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON_ALWAYS_FLASH)
+                captureBuilder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_SINGLE)
+            }
 
             reader.setOnImageAvailableListener({ reader ->
                 val image = reader.acquireLatestImage()
@@ -1768,9 +1771,9 @@ class CameraFragment : Fragment() {
                         }
                     }
                 }
-            }, null)
+            }, cameraHandler)
 
-            session.capture(captureBuilder.build(), null, null)
+            session.capture(captureBuilder.build(), null, cameraHandler)
 
             if (processingSemaphore.availablePermits == 0) {
                 cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = false
@@ -1828,17 +1831,6 @@ class CameraFragment : Fragment() {
                     "HDR+ Exposure: TargetISO=${config.iso}, TargetTime=${config.exposureTime}, DigitalGain=${config.digitalGain}"
                 )
 
-                // 2. Apply Manual Exposure for Burst
-                val session = captureSession
-                if (session != null) {
-                    val builder = cameraDevice!!.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE)
-                    builder.addTarget(rawImageReader!!.surface)
-                    builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
-                    builder.set(CaptureRequest.SENSOR_SENSITIVITY, config.iso)
-                    builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, config.exposureTime)
-                    // We'll use this builder for the burst capture
-                }
-
                 // Slight delay to ensure AE settles
                 delay(AE_SETTLE_DELAY_MS)
 
@@ -1882,6 +1874,10 @@ class CameraFragment : Fragment() {
                 builder.set(CaptureRequest.SENSOR_SENSITIVITY, config.iso)
                 builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, config.exposureTime)
                 applyCameraControls(builder) // Also apply focus etc.
+                if (isFlashEnabled) {
+                    builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON_ALWAYS_FLASH)
+                    builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_SINGLE)
+                }
 
                 for (i in 0 until burstSize) {
                     burstRequests.add(builder.build())
@@ -1904,13 +1900,13 @@ class CameraFragment : Fragment() {
                             Log.e(TAG, "Failed to add burst frame", e)
                         }
                     }
-                }, null)
+                }, cameraHandler)
 
                 captureSession?.captureBurst(burstRequests, object : CameraCaptureSession.CaptureCallback() {
                     override fun onCaptureSequenceCompleted(session: CameraCaptureSession, sequenceId: Int, frameNumber: Long) {
                         Log.d(TAG, "Burst sequence completed")
                     }
-                }, null)
+                }, cameraHandler)
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to start HDR+ burst", e)
                 Toast.makeText(
