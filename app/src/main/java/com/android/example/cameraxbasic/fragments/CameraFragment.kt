@@ -133,6 +133,8 @@ class CameraFragment : Fragment() {
 
     private var cameraThread: HandlerThread? = null
     private var cameraHandler: Handler? = null
+    private var analysisThread: HandlerThread? = null
+    private var analysisHandler: Handler? = null
 
     private lateinit var windowMetricsCalculator: WindowMetricsCalculator
 
@@ -302,6 +304,8 @@ class CameraFragment : Fragment() {
         cameraExecutor.shutdown()
         cameraThread?.quitSafely()
         cameraThread = null
+        analysisThread?.quitSafely()
+        analysisThread = null
 
         lutProcessor?.release()
         lutProcessor = null
@@ -344,6 +348,8 @@ class CameraFragment : Fragment() {
         cameraExecutor = Executors.newSingleThreadExecutor()
         cameraThread = HandlerThread("CameraThread").apply { start() }
         cameraHandler = Handler(cameraThread!!.looper)
+        analysisThread = HandlerThread("AnalysisThread").apply { start() }
+        analysisHandler = Handler(analysisThread!!.looper)
 
         broadcastManager = LocalBroadcastManager.getInstance(view.context)
 
@@ -552,7 +558,10 @@ class CameraFragment : Fragment() {
         // 2. Setup ImageReaders
         val map = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
         val rawSize = map?.getOutputSizes(ImageFormat.RAW_SENSOR)?.firstOrNull() ?: android.util.Size(4032, 3024)
-        val yuvSize = map?.getOutputSizes(ImageFormat.YUV_420_888)?.firstOrNull() ?: android.util.Size(1280, 720)
+        // Pick a smaller YUV size for analysis to save power and prevent lag
+        val yuvSize = map?.getOutputSizes(ImageFormat.YUV_420_888)
+            ?.filter { it.width <= 1280 }
+            ?.firstOrNull() ?: android.util.Size(1280, 720)
 
         rawImageReader = ImageReader.newInstance(rawSize.width, rawSize.height, ImageFormat.RAW_SENSOR, 10)
         yuvImageReader = ImageReader.newInstance(yuvSize.width, yuvSize.height, ImageFormat.YUV_420_888, 2)
@@ -562,19 +571,23 @@ class CameraFragment : Fragment() {
             if (image != null) {
                 try {
                     val buffer = image.planes[0].buffer
-                    val data = ByteArray(buffer.remaining())
-                    buffer.get(data)
-                    val pixels = data.map { it.toInt() and 0xFF }
-                    val luma = pixels.average()
-                    // Analysis result logged or used for AE
-                    Log.d(TAG, "Average luminosity: $luma")
+                    var sum = 0L
+                    val count = buffer.remaining()
+                    val step = 16 // Subsample pixels for speed
+                    var sampledCount = 0
+                    for (i in 0 until count step step) {
+                        sum += buffer.get(i).toInt() and 0xFF
+                        sampledCount++
+                    }
+                    val luma = if (sampledCount > 0) sum.toDouble() / sampledCount else 0.0
+                    // Log.d(TAG, "Average luminosity: $luma")
                 } catch (e: Exception) {
                     Log.e(TAG, "Error in analysis listener", e)
                 } finally {
                     image.close()
                 }
             }
-        }, cameraHandler)
+        }, analysisHandler)
 
         // 3. Setup HDR+ UI & Aspect Ratio (Main Thread)
         lifecycleScope.launch(Dispatchers.Main) {
