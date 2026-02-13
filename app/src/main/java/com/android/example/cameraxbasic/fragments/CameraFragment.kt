@@ -542,15 +542,50 @@ class CameraFragment : Fragment() {
         updateCameraSwitchButton()
     }
 
-    /** Initialize CameraX, and prepare to bind the camera use cases  */
+    private fun refreshLenses() {
+        val cameraXIds = mutableSetOf<String>()
+        cameraProvider?.availableCameraInfos?.forEach { info ->
+            val id = Camera2CameraInfo.from(info).cameraId
+            cameraXIds.add(id)
+            Log.d(TAG, "CameraX availableCameraInfo ID: $id")
+        }
+
+        val newLenses = cameraRepository.enumerateCameras(cameraXIds)
+        Log.d(TAG, "Available Lenses identified: ${newLenses.size}")
+
+        // Update currentLens reference if it exists, to pick up any engine changes
+        currentLens?.let { old ->
+             currentLens = newLenses.find { it.sensorId == old.sensorId }
+                 ?: newLenses.find { it.id == old.id && it.physicalId == old.physicalId }
+                 ?: old
+        }
+
+        availableLenses = newLenses
+
+        if (currentLens == null) {
+            val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+            val savedLensId = prefs.getString(KEY_SELECTED_LENS_ID, null)
+
+            currentLens = availableLenses.find { it.sensorId == savedLensId }
+                ?: availableLenses.find { it.multiplier in 0.95f..1.05f && !it.isLogicalAuto }
+                ?: availableLenses.find { it.isLogicalAuto }
+                ?: availableLenses.firstOrNull()
+        }
+    }
+
+    /** Initialize Camera Engine, and prepare to bind the camera use cases  */
     private suspend fun setUpCamera() {
-        cameraProvider = ProcessCameraProvider.getInstance(requireContext()).await()
+        // Initially don't initialize cameraProvider unless needed.
+        // But we need to know lensFacing.
+        lensFacing = CameraSelector.LENS_FACING_BACK
+
+        // Initialize Lenses
+        refreshLenses()
 
         // Select lensFacing depending on the available cameras
-        lensFacing = when {
-            hasBackCamera() -> CameraSelector.LENS_FACING_BACK
-            hasFrontCamera() -> CameraSelector.LENS_FACING_FRONT
-            else -> throw IllegalStateException("Back and front camera are unavailable")
+        if (availableLenses.isEmpty()) {
+             // Fallback to front if no back lenses found or just use default check
+             lensFacing = CameraSelector.LENS_FACING_FRONT
         }
 
         // Enable or disable switching between cameras
@@ -635,30 +670,50 @@ class CameraFragment : Fragment() {
 
         if (lensFacing == CameraSelector.LENS_FACING_BACK && currentLens?.useCamera2 == true && !useCameraxFallback) {
             Log.d(TAG, "Switching to Camera2 Engine for lens: ${currentLens?.name}")
+
+            // Clean up CameraX if it was active
             cameraProvider?.unbindAll()
             camera = null
+
+            // Ensure UI is updated before opening Camera2
             initLensControls()
 
             // Check Flash for Camera2
-            val c2Chars = camera2Manager.getCameraCharacteristics(currentLens!!.id)
-            val hasFlash = c2Chars.get(android.hardware.camera2.CameraCharacteristics.FLASH_INFO_AVAILABLE) ?: false
-            cameraUiContainerBinding?.flashButton?.visibility = if (hasFlash) View.VISIBLE else View.GONE
+            try {
+                val c2Chars = camera2Manager.getCameraCharacteristics(currentLens!!.id)
+                val hasFlash = c2Chars.get(android.hardware.camera2.CameraCharacteristics.FLASH_INFO_AVAILABLE) ?: false
+                cameraUiContainerBinding?.flashButton?.visibility = if (hasFlash) View.VISIBLE else View.GONE
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to check flash for Camera2", e)
+            }
 
-            openCamera2(currentLens!!.id)
+            // Give CameraX a moment to release hardware
+            lifecycleScope.launch(Dispatchers.Main) {
+                delay(150)
+                openCamera2(currentLens!!.id)
+            }
             return
         }
 
         // Else, ensure Camera2 is closed and use CameraX
         closeCamera2()
 
+        // Initialize CameraX provider lazily if needed
+        if (cameraProvider == null) {
+            lifecycleScope.launch {
+                cameraProvider = ProcessCameraProvider.getInstance(requireContext()).await()
+                refreshLenses() // Update lenses with CameraX direct info if available
+                bindCameraUseCases() // Re-enter to bind
+            }
+            return
+        }
+
+        val cameraProvider = cameraProvider!!
+
         // Use previously computed screen metrics
         Log.d(TAG, "Screen metrics: ${metrics.width()} x ${metrics.height()}")
 
         val rotation = fragmentCameraBinding.viewFinder.display.rotation
-
-        // CameraProvider
-        val cameraProvider = cameraProvider
-            ?: throw IllegalStateException("Camera initialization failed.")
 
         // CameraSelector
         var cameraSelector = if (lensFacing == CameraSelector.LENS_FACING_BACK && currentLens != null) {
@@ -1057,12 +1112,32 @@ class CameraFragment : Fragment() {
 
     /** Returns true if the device has an available back camera. False otherwise */
     private fun hasBackCamera(): Boolean {
-        return cameraProvider?.hasCamera(CameraSelector.DEFAULT_BACK_CAMERA) ?: false
+        val provider = cameraProvider
+        if (provider != null) {
+            return provider.hasCamera(CameraSelector.DEFAULT_BACK_CAMERA)
+        }
+        // Fallback to CameraManager if CameraX is not initialized
+        return try {
+            camera2Manager.cameraIdList.any { id ->
+                val chars = camera2Manager.getCameraCharacteristics(id)
+                chars.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK
+            }
+        } catch (e: Exception) { false }
     }
 
     /** Returns true if the device has an available front camera. False otherwise */
     private fun hasFrontCamera(): Boolean {
-        return cameraProvider?.hasCamera(CameraSelector.DEFAULT_FRONT_CAMERA) ?: false
+        val provider = cameraProvider
+        if (provider != null) {
+            return provider.hasCamera(CameraSelector.DEFAULT_FRONT_CAMERA)
+        }
+        // Fallback to CameraManager if CameraX is not initialized
+        return try {
+            camera2Manager.cameraIdList.any { id ->
+                val chars = camera2Manager.getCameraCharacteristics(id)
+                chars.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_FRONT
+            }
+        } catch (e: Exception) { false }
     }
 
     /**
@@ -1693,15 +1768,7 @@ class CameraFragment : Fragment() {
             return
         }
 
-        val cameraXIds = mutableSetOf<String>()
-        cameraProvider?.availableCameraInfos?.forEach { info ->
-            val id = Camera2CameraInfo.from(info).cameraId
-            cameraXIds.add(id)
-            Log.d(TAG, "CameraX availableCameraInfo ID: $id")
-        }
-
-        availableLenses = cameraRepository.enumerateCameras(cameraXIds)
-        Log.d(TAG, "Available Lenses identified: ${availableLenses.size}")
+        refreshLenses()
 
         if (availableLenses.isNotEmpty()) {
             scroll.visibility = View.VISIBLE
