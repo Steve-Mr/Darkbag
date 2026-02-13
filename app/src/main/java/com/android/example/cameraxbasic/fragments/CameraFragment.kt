@@ -343,7 +343,7 @@ class CameraFragment : Fragment() {
         // Re-initialize camera engine if needed.
         // For Camera2 engine, we need to re-bind use cases (which triggers openCamera2).
         // For CameraX, they are bound to lifecycle but we ensure consistency.
-        if (cameraProvider != null) {
+        if (cameraProvider != null || currentLens?.useCamera2 == true) {
             bindCameraUseCases()
         }
     }
@@ -351,6 +351,14 @@ class CameraFragment : Fragment() {
     override fun onDestroyView() {
         _fragmentCameraBinding = null
         super.onDestroyView()
+
+        // Important: Unbind CameraX before releasing executors/processors
+        // to prevent RejectedExecutionException during cleanup.
+        try {
+            cameraProvider?.unbindAll()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error unbinding CameraX in onDestroyView", e)
+        }
 
         // Shut down our background executor
         cameraExecutor.shutdown()
@@ -427,6 +435,9 @@ class CameraFragment : Fragment() {
 
         // Initialize Flash State
         isFlashEnabled = prefs.getBoolean(SettingsFragment.KEY_FLASH_MODE, false)
+
+        // Initialize HDR+ State
+        isHdrPlusEnabled = prefs.getBoolean(KEY_HDR_PLUS_ENABLED, true)
 
         // Initialize HDR+ Burst Helper
         hdrPlusBurstHelper = HdrPlusBurst(
@@ -618,6 +629,7 @@ class CameraFragment : Fragment() {
              "1" // Front
         }
 
+        var isRawSupported = false
         try {
             val chars = camera2Manager.getCameraCharacteristics(targetId)
 
@@ -632,7 +644,7 @@ class CameraFragment : Fragment() {
 
             // Check for RAW support early to enable HDR+ UI
             val map = chars.get(android.hardware.camera2.CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
-            val isRawSupported = map?.getOutputFormats()?.contains(android.graphics.ImageFormat.RAW_SENSOR) == true
+            isRawSupported = map?.getOutputFormats()?.contains(android.graphics.ImageFormat.RAW_SENSOR) == true
 
             // Update UI if manual panel is visible
             lifecycleScope.launch(Dispatchers.Main) {
@@ -644,7 +656,6 @@ class CameraFragment : Fragment() {
                     updateHdrPlusUi()
                 } else {
                     cameraUiContainerBinding?.hdrPlusToggle?.visibility = View.GONE
-                    isHdrPlusEnabled = false
                 }
             }
         } catch (e: Exception) {
@@ -1042,6 +1053,8 @@ class CameraFragment : Fragment() {
         cameraUiContainerBinding?.hdrPlusToggle?.let { toggle ->
             toggle.setOnClickListener {
                 isHdrPlusEnabled = !isHdrPlusEnabled
+                requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                    .edit().putBoolean(KEY_HDR_PLUS_ENABLED, isHdrPlusEnabled).apply()
                 updateHdrPlusUi()
             }
         }
@@ -2311,6 +2324,7 @@ class CameraFragment : Fragment() {
         const val KEY_SELECTED_LENS_ID = "selected_lens_sensor_id"
         const val KEY_IS_2X_MODE = "is_2x_mode"
         const val KEY_CURRENT_FOCAL_LENGTH = "current_focal_length"
+        const val KEY_HDR_PLUS_ENABLED = "hdr_plus_enabled"
     }
 
     private fun takeSinglePicture(imageCapture: ImageCapture) {
