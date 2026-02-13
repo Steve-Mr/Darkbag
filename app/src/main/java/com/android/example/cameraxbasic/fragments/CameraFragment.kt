@@ -438,6 +438,7 @@ class CameraFragment : Fragment() {
 
         // Initialize HDR+ State
         isHdrPlusEnabled = prefs.getBoolean(KEY_HDR_PLUS_ENABLED, true)
+        updateHdrPlusUi()
 
         // Initialize HDR+ Burst Helper
         hdrPlusBurstHelper = HdrPlusBurst(
@@ -799,7 +800,7 @@ class CameraFragment : Fragment() {
                     captureResultFlow.tryEmit(result)
 
                     // Background Calculation for HDR+ Latency Optimization
-                    if (isHdrPlusEnabled && !isBurstActive && !isManualExposure) {
+                    if (isHdrPlusEnabled && !isBurstActive && !isManualExposure && isAdded) {
                         lifecycleScope.launch(Dispatchers.Default) {
                             val iso = result.get(android.hardware.camera2.CaptureResult.SENSOR_SENSITIVITY) ?: 100
                             val time = result.get(android.hardware.camera2.CaptureResult.SENSOR_EXPOSURE_TIME) ?: 10_000_000L
@@ -848,7 +849,9 @@ class CameraFragment : Fragment() {
             }
         }
 
-        preview?.setSurfaceProvider(cameraExecutor, lutBinder)
+        // Use main executor for the surface provider to avoid unbinding callbacks
+        // hitting a shut down cameraExecutor during lifecycle transitions.
+        preview?.setSurfaceProvider(androidx.core.content.ContextCompat.getMainExecutor(requireContext()), lutBinder)
 
         val useCaseGroup = UseCaseGroup.Builder()
             .addUseCase(preview!!)
