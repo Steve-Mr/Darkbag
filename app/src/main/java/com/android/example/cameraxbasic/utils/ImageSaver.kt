@@ -48,13 +48,13 @@ object ImageSaver {
 
             if (isNativeJpeg && !needsBitmapProcessing && saveJpg) {
                 // FAST PATH: Directly use JNI-generated JPEG
-                finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri) { out ->
-                    val f = File(bmpPath!!)
-                    if (f.exists()) {
+                val f = File(bmpPath!!)
+                if (f.exists() && f.length() > 0) {
+                    finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri) { out ->
                         f.inputStream().use { it.copyTo(out) }
-                    } else {
-                        Log.e(TAG, "Fast path source file missing: ${f.absolutePath}")
                     }
+                } else {
+                    Log.e(TAG, "Fast path source file missing or empty: ${f.absolutePath}, size: ${if(f.exists()) f.length() else -1}")
                 }
                 File(bmpPath!!).delete()
             } else {
@@ -110,14 +110,18 @@ object ImageSaver {
 
                     // Save JPG
                     if (saveJpg) {
-                        finalJpgUri = saveJpegToMediaStore(
-                            context,
-                            "$baseName.jpg",
-                            targetUri,
-                            processedBitmap?.width,
-                            processedBitmap?.height
-                        ) { out ->
-                            processedBitmap?.compress(Bitmap.CompressFormat.JPEG, 95, out)
+                        if (processedBitmap != null) {
+                            finalJpgUri = saveJpegToMediaStore(
+                                context,
+                                "$baseName.jpg",
+                                targetUri,
+                                processedBitmap.width,
+                                processedBitmap.height
+                            ) { out ->
+                                processedBitmap.compress(Bitmap.CompressFormat.JPEG, 95, out)
+                            }
+                        } else {
+                            Log.e(TAG, "Cannot save JPEG: processedBitmap is null (Slow Path)")
                         }
                     }
                 } catch (t: Throwable) {

@@ -74,8 +74,9 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
             Log.d(TAG, "Background Export Worker finished successfully for $baseName. finalUri=$finalUri")
 
             // Still notify UI for thumbnail update if possible
+            // We pass null for paths to signal that saving is already done
             ColorProcessor.onBackgroundSaveComplete(
-                baseName, tiffPath, dngPath, jpgPath, targetUri, zoomFactor, orientation, saveTiff, saveJpg
+                baseName, null, null, null, finalUri?.toString(), zoomFactor, orientation, saveTiff, saveJpg
             )
             Result.success()
         } else {

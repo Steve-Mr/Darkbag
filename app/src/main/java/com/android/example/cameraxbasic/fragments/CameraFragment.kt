@@ -326,7 +326,7 @@ class CameraFragment : Fragment() {
         super.onStop()
         orientationEventListener.disable()
         // Ensure Camera2 is closed when stopping to release hardware resources
-        closeCamera2()
+        releaseCamera2Resources()
     }
 
     override fun onResume() {
@@ -443,6 +443,15 @@ class CameraFragment : Fragment() {
 
                 (requireContext().applicationContext as MainApplication).applicationScope.launch(Dispatchers.IO) {
                     try {
+                        // Check if work is already done (by HdrPlusExportWorker)
+                        if (event.jpgPath == null && event.targetUri != null) {
+                            Log.d(TAG, "Work already done for ${event.baseName}, updating thumbnail only.")
+                            withContext(Dispatchers.Main) {
+                                setGalleryThumbnail(event.targetUri)
+                            }
+                            return@launch
+                        }
+
                         val finalUri = ImageSaver.saveProcessedImage(
                             requireContext().applicationContext,
                             null,
@@ -814,10 +823,13 @@ class CameraFragment : Fragment() {
             observeCameraState(camera?.cameraInfo!!)
 
             // Pre-initialize JNI memory pool with current resolution and burst size
+            // Move to background thread to avoid blocking main thread
             val burstSizeStr = prefs.getString(SettingsFragment.KEY_HDR_BURST_COUNT, "8") ?: "8"
             val burstSize = burstSizeStr.toIntOrNull() ?: 8
             imageCapture?.resolutionInfo?.resolution?.let { res ->
-                ColorProcessor.initMemoryPool(res.width, res.height, burstSize)
+                lifecycleScope.launch(Dispatchers.Default) {
+                    ColorProcessor.initMemoryPool(res.width, res.height, burstSize)
+                }
             }
 
             // Restore Zoom
@@ -2746,10 +2758,14 @@ class CameraFragment : Fragment() {
 
     @SuppressLint("MissingPermission")
     private fun openCamera2(cameraId: String) {
-        closeCamera2()
+        // Ensure previous session is closed, but keep the thread if possible
+        camera2Session?.close()
+        camera2Session = null
 
-        camera2Thread = HandlerThread("Camera2Thread").apply { start() }
-        camera2Handler = Handler(camera2Thread!!.looper)
+        if (camera2Thread == null) {
+            camera2Thread = HandlerThread("Camera2Thread").apply { start() }
+            camera2Handler = Handler(camera2Thread!!.looper)
+        }
 
         try {
             camera2Manager.openCamera(cameraId, object : android.hardware.camera2.CameraDevice.StateCallback() {
@@ -3122,6 +3138,11 @@ class CameraFragment : Fragment() {
         analysisImageReader = null
         camera2PreviewSurface = null
         lutProcessor?.releaseInputSurface()
+        // Do NOT quit the thread here to avoid "dead thread" crash during callbacks
+    }
+
+    private fun releaseCamera2Resources() {
+        closeCamera2()
         camera2Thread?.quitSafely()
         camera2Thread = null
         camera2Handler = null

@@ -249,6 +249,8 @@ bool process_and_save_image(
     Matrix3x3 effective_CCM = {0}; if (sourceColorSpace == 1 && ccm) std::copy(ccm, ccm + 9, effective_CCM.m);
     std::vector<unsigned short> processedImage; std::vector<unsigned char> previewRgb8;
     auto process_pixel = [&](int x, int y) -> Vec3 {
+        x = std::max(0, std::min(x, width - 1));
+        y = std::max(0, std::min(y, height - 1));
         size_t idx = (static_cast<size_t>(y) * width + x) * 3;
         float norm_r = (float)inputImage[idx + 0] / 65535.0f * gain;
         float norm_g = (float)inputImage[idx + 1] / 65535.0f * gain;
