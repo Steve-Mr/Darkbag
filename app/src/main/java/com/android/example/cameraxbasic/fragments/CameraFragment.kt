@@ -443,36 +443,18 @@ class CameraFragment : Fragment() {
 
                 (requireContext().applicationContext as MainApplication).applicationScope.launch(Dispatchers.IO) {
                     try {
-                        // Check if work is already done (by HdrPlusExportWorker)
-                        if (event.jpgPath == null && event.targetUri != null) {
-                            Log.d(TAG, "Work already done for ${event.baseName}, updating thumbnail only.")
+                        // For HDR+, work is already finalized by HdrPlusExportWorker.
+                        // We only need to update the thumbnail using the provided targetUri.
+                        if (event.targetUri != null) {
+                            Log.d(TAG, "Update thumbnail for ${event.baseName}: ${event.targetUri}")
                             withContext(Dispatchers.Main) {
                                 setGalleryThumbnail(event.targetUri)
                             }
-                            return@launch
+                        } else {
+                             Log.w(TAG, "Received save event for ${event.baseName} without targetUri.")
                         }
-
-                        val finalUri = ImageSaver.saveProcessedImage(
-                            requireContext().applicationContext,
-                            null,
-                            event.jpgPath,
-                            event.orientation,
-                            event.zoomFactor,
-                            event.baseName,
-                            event.dngPath,
-                            event.tiffPath,
-                            event.saveJpg,
-                            event.saveTiff,
-                            event.targetUri?.let { Uri.parse(it) }
-                        )
-                        if (finalUri != null) {
-                            withContext(Dispatchers.Main) {
-                                setGalleryThumbnail(finalUri.toString())
-                            }
-                        }
-                        Log.i(TAG, "Background MediaStore export finished for ${event.baseName}")
                     } catch (e: Exception) {
-                        Log.e(TAG, "Background MediaStore export failed for ${event.baseName}", e)
+                        Log.e(TAG, "Background UI update failed for ${event.baseName}", e)
                     }
                 }
             }
@@ -630,12 +612,13 @@ class CameraFragment : Fragment() {
     @OptIn(ExperimentalCamera2Interop::class)
     private fun bindCameraUseCases() {
         // Fetch Characteristics for Manual Control
+        val targetId = if (lensFacing == CameraSelector.LENS_FACING_BACK) {
+             currentLens?.physicalId ?: currentLens?.id ?: "0"
+        } else {
+             "1" // Front
+        }
+
         try {
-            val targetId = if (lensFacing == CameraSelector.LENS_FACING_BACK) {
-                 currentLens?.physicalId ?: currentLens?.id ?: "0"
-            } else {
-                 "1" // Front
-            }
             val chars = camera2Manager.getCameraCharacteristics(targetId)
 
             isoRange = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
@@ -647,10 +630,22 @@ class CameraFragment : Fragment() {
             isoRange?.let { currentIso = currentIso.coerceIn(it.lower, it.upper) }
             exposureTimeRange?.let { currentExposureTime = currentExposureTime.coerceIn(it.lower, it.upper) }
 
+            // Check for RAW support early to enable HDR+ UI
+            val map = chars.get(android.hardware.camera2.CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+            val isRawSupported = map?.getOutputFormats()?.contains(android.graphics.ImageFormat.RAW_SENSOR) == true
+
             // Update UI if manual panel is visible
             lifecycleScope.launch(Dispatchers.Main) {
                 updateManualPanel()
                 updateTabColors()
+
+                if (isRawSupported) {
+                    cameraUiContainerBinding?.hdrPlusToggle?.visibility = View.VISIBLE
+                    updateHdrPlusUi()
+                } else {
+                    cameraUiContainerBinding?.hdrPlusToggle?.visibility = View.GONE
+                    isHdrPlusEnabled = false
+                }
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to fetch camera characteristics", e)
@@ -737,16 +732,6 @@ class CameraFragment : Fragment() {
             cameraProvider.getCameraInfo(cameraSelector)
         }
 
-        val capabilities = ImageCapture.getImageCaptureCapabilities(cameraInfo)
-        val isRawSupported =
-            capabilities.supportedOutputFormats.contains(ImageCapture.OUTPUT_FORMAT_RAW)
-
-        // Enable HDR+ UI if RAW is supported
-        if (isRawSupported) {
-            cameraUiContainerBinding?.hdrPlusToggle?.visibility = View.VISIBLE
-            isHdrPlusEnabled = true
-            updateHdrPlusUi()
-        }
 
         // Force 4:3 aspect ratio
         val resolutionSelector = ResolutionSelector.Builder()
@@ -868,14 +853,16 @@ class CameraFragment : Fragment() {
                 this, cameraSelector, useCaseGroup
             )
 
-            // Check Flash Availability
-            if (camera?.cameraInfo?.hasFlashUnit() == true) {
-                cameraUiContainerBinding?.flashButton?.visibility = View.VISIBLE
-            } else {
-                cameraUiContainerBinding?.flashButton?.visibility = View.GONE
-            }
+            camera?.let { cam ->
+                // Check Flash Availability
+                if (cam.cameraInfo.hasFlashUnit()) {
+                    cameraUiContainerBinding?.flashButton?.visibility = View.VISIBLE
+                } else {
+                    cameraUiContainerBinding?.flashButton?.visibility = View.GONE
+                }
 
-            observeCameraState(camera?.cameraInfo!!)
+                observeCameraState(cam.cameraInfo)
+            }
 
             // Pre-initialize JNI memory pool with current resolution and burst size
             // Move to background thread to avoid blocking main thread
@@ -1797,6 +1784,7 @@ class CameraFragment : Fragment() {
                         marginEnd = resources.getDimensionPixelSize(R.dimen.spacing_small)
                     }
                     text = lens.name
+                    tag = lens
                     textSize = 10f
                     setPadding(0, 0, 0, 0)
                     insetTop = 0
@@ -1897,9 +1885,8 @@ class CameraFragment : Fragment() {
 
         for (i in 0 until container.childCount) {
             val btn = container.getChildAt(i) as? com.google.android.material.button.MaterialButton
-            if (btn != null && i < uiLenses.size) {
-                val lens = uiLenses[i]
-
+            val lens = btn?.tag as? com.android.example.cameraxbasic.utils.LensInfo
+            if (btn != null && lens != null) {
                 val isActive = if (lens.sensorId == "virtual-2x") {
                     is2xMode
                 } else {
@@ -2060,10 +2047,11 @@ class CameraFragment : Fragment() {
 
     private fun getCombinedOrientation(): Int {
         val sensorOrientation = try {
-            val targetId = if (currentLens?.useCamera2 == true) {
-                currentLens!!.id
+            val lens = currentLens
+            val targetId = if (lens?.useCamera2 == true) {
+                lens.id
             } else if (lensFacing == CameraSelector.LENS_FACING_BACK) {
-                currentLens?.physicalId ?: currentLens?.id ?: "0"
+                lens?.physicalId ?: lens?.id ?: "0"
             } else {
                 "1"
             }
@@ -2675,6 +2663,10 @@ class CameraFragment : Fragment() {
 
                 val debugStats = LongArray(15)
 
+                // Initial JNI call only produces the linear raw buffer (finalImage)
+                // which is saved to tempRawPath for the ExportWorker to pick up.
+                // We pass null for all other output paths and set isAsync=false to
+                // avoid redundant saving and callbacks from JNI.
                 val ret = ColorProcessor.processHdrPlus(
                     buffers,
                     width, height,
@@ -2684,13 +2676,13 @@ class CameraFragment : Fragment() {
                     iso, exposureTime, fNumber, focalLength, captureTime,
                     targetLogIndex,
                     nativeLutPath,
-                    null,
-                    tempJpgFile.absolutePath,
-                    null,
+                    null, // outputTiffPath
+                    null, // outputJpgPath
+                    null, // outputDngPath
                     digitalGain,
                     debugStats,
-                    null,
-                    false,
+                    null, // outputBitmap
+                    false, // isAsync (deprecated in favor of WorkManager)
                     tempRawFile.absolutePath,
                     currentZoom
                 )
@@ -2699,21 +2691,6 @@ class CameraFragment : Fragment() {
                 Log.d(TAG, "JNI processHdrPlus returned $ret in ${jniEndTime - jniStartTime}ms")
 
                 if (ret == 0) {
-                    val saveStartTime = System.currentTimeMillis()
-
-                    val finalJpgUri = ImageSaver.saveProcessedImage(
-                        context,
-                        null,
-                        tempJpgFile.absolutePath,
-                        0, // Rotation ALREADY DONE in JNI
-                        1.0f, // Zoom ALSO DONE in JNI
-                        dngName,
-                        null,
-                        null,
-                        saveJpg,
-                        false
-                    )
-
                     val workData = androidx.work.Data.Builder()
                         .putString("tempRawPath", tempRawFile.absolutePath)
                         .putInt("width", width)
@@ -2724,10 +2701,10 @@ class CameraFragment : Fragment() {
                         .putString("lutPath", nativeLutPath)
                         .putString("tiffPath", tiffPath)
                         .putString("jpgPath", if (saveJpg) fullResJpgFile.absolutePath else null)
-                        .putString("targetUri", finalJpgUri?.toString())
+                        .putString("targetUri", null) // Initial save
                         .putFloat("zoomFactor", currentZoom)
                         .putString("dngPath", linearDngPath)
-                        .putInt("iso", iso)
+                        .putInt("iso", (iso).toInt())
                         .putLong("exposureTime", exposureTime)
                         .putFloat("fNumber", fNumber)
                         .putFloat("focalLength", focalLength)
@@ -2747,8 +2724,10 @@ class CameraFragment : Fragment() {
 
                     val logMsg = """
                         [Total: ${saveEndTime - startTime}ms]
-                        Halide: ${debugStats[0]}ms
-                        Save (IO/Compress): ${saveEndTime - saveStartTime}ms
+                        JNI Prep: ${debugStats[12]}ms, Align: ${debugStats[7]}ms, Merge: ${debugStats[8]}ms
+                        Demosaic: ${debugStats[9]}ms, Denoise: ${debugStats[10]}ms, Color/Tone: ${debugStats[11]}ms
+                        Halide Total: ${debugStats[0]}ms
+                        Offload to Worker: ${saveEndTime - jniEndTime}ms
                     """.trimIndent()
 
                     Log.i(TAG, logMsg)
