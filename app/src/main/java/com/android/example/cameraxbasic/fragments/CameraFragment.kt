@@ -758,9 +758,26 @@ class CameraFragment : Fragment() {
         val cameraInfo = try {
             cameraProvider.getCameraInfo(cameraSelector)
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to get camera info for ${currentLens?.id}, falling back", e)
-            cameraSelector = CameraSelector.Builder().requireLensFacing(lensFacing).build()
-            cameraProvider.getCameraInfo(cameraSelector)
+            Log.e(TAG, "Failed to get camera info for ${currentLens?.id}", e)
+            if (useCameraxFallback) {
+                Log.w(TAG, "Fallback to generic lens facing as requested by setting")
+                cameraSelector = CameraSelector.Builder().requireLensFacing(lensFacing).build()
+                val info = cameraProvider.getCameraInfo(cameraSelector)
+
+                // Sync currentLens with actual bound camera
+                val actualId = Camera2CameraInfo.from(info).cameraId
+                val fallbackLens = availableLenses.find { it.id == actualId && it.physicalId == null }
+                if (fallbackLens != null && fallbackLens.sensorId != currentLens?.sensorId) {
+                    Log.d(TAG, "Updating currentLens to fallback: ${fallbackLens.name}")
+                    currentLens = fallbackLens
+                    updateLensUI()
+                }
+                info
+            } else {
+                Log.e(TAG, "CameraX bind failed and fallback is disabled.")
+                Toast.makeText(context, "Failed to bind to selected lens", Toast.LENGTH_SHORT).show()
+                return
+            }
         }
 
 
@@ -2433,7 +2450,15 @@ class CameraFragment : Fragment() {
         lifecycleScope.launch(Dispatchers.Main) {
             try {
                 val config = lastHdrPlusConfig ?: run {
-                    val result = captureResultFlow.replayCache.lastOrNull() ?: captureResultFlow.first()
+                    val result = captureResultFlow.replayCache.lastOrNull() ?: withTimeoutOrNull(2000) {
+                        captureResultFlow.first()
+                    }
+
+                    if (result == null) {
+                        Log.e(TAG, "Timed out waiting for capture result for HDR+ config")
+                        throw RuntimeException("Camera metadata timeout")
+                    }
+
                     val currentIso = result.get(android.hardware.camera2.CaptureResult.SENSOR_SENSITIVITY) ?: 100
                     val currentTime = result.get(android.hardware.camera2.CaptureResult.SENSOR_EXPOSURE_TIME) ?: 10_000_000L
                     val validIsoRange = isoRange ?: android.util.Range(100, 3200)
@@ -2513,6 +2538,7 @@ class CameraFragment : Fragment() {
                 ).show()
                 resetBurstUi()
                 processingSemaphore.release()
+                cameraUiContainerBinding?.processingProgress?.visibility = View.GONE
                 applyCameraControls()
             }
         }
@@ -2857,9 +2883,18 @@ class CameraFragment : Fragment() {
                     Log.e(TAG, "Camera2 open error: $error")
                     closeCamera2()
                     lifecycleScope.launch(Dispatchers.Main) {
-                        currentLens = availableLenses.find { it.isLogicalAuto }
-                        updateLensUI()
-                        bindCameraUseCases()
+                        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                        val useCameraxFallback = prefs.getBoolean(SettingsFragment.KEY_USE_CAMERAX, false)
+
+                        if (useCameraxFallback) {
+                            Log.w(TAG, "Camera2 failed, falling back to CameraX Auto")
+                            currentLens = availableLenses.find { it.isLogicalAuto }
+                            updateLensUI()
+                            bindCameraUseCases()
+                        } else {
+                            Toast.makeText(context, "Camera hardware error: $error", Toast.LENGTH_LONG).show()
+                            cameraUiContainerBinding?.processingProgress?.visibility = View.GONE
+                        }
                     }
                 }
             }, camera2Handler)
@@ -3111,7 +3146,10 @@ class CameraFragment : Fragment() {
             Log.e(TAG, "Camera2 burst failed", e)
             isBurstActive = false
             processingSemaphore.release()
-            lifecycleScope.launch(Dispatchers.Main) { resetBurstUi() }
+            lifecycleScope.launch(Dispatchers.Main) {
+                cameraUiContainerBinding?.processingProgress?.visibility = View.GONE
+                resetBurstUi()
+            }
         }
     }
 
@@ -3226,6 +3264,7 @@ class CameraFragment : Fragment() {
 
     private fun resetBurstUi() {
         cameraUiContainerBinding?.captureProgress?.visibility = View.GONE
+        cameraUiContainerBinding?.processingProgress?.visibility = View.GONE
         isBurstActive = false
 
         if (processingSemaphore.availablePermits > 0) {
