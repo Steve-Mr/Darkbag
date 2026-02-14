@@ -120,31 +120,40 @@ class SettingsFragment : Fragment() {
             prefs.edit().putString(KEY_HDR_UNDEREXPOSURE_MODE, HDR_UNDEREXPOSURE_MODES[position]).apply()
         }
 
-        // Default Focal Length (Dynamic)
-        val presets = cameraRepository.getFocalLengthPresets(emptySet())
-        val focalDisplayNames = presets.map {
-            if (it.isZoomPreset && it.name.contains("mm")) {
-                "${it.name} (${String.format("%.1fx", it.multiplier)})"
-            } else {
-                "${it.name} (${String.format("%.1f", it.equivalentFocalLength)}mm)"
+        // Default Lens (Startup)
+        val lenses = cameraRepository.getFocalLengthPresets(emptySet())
+        val lensDisplayNames = lenses.map { it.name }
+        val lensAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, lensDisplayNames)
+        binding.menuDefaultLens.setAdapter(lensAdapter)
+
+        val savedLensId = prefs.getString(KEY_DEFAULT_LENS_ID, null)
+        val initialLens = lenses.find { it.sensorId == savedLensId }
+            ?: lenses.find { it.multiplier in 0.95f..1.05f && !it.isZoomPreset }
+            ?: lenses.firstOrNull()
+
+        if (initialLens != null) {
+            val index = lenses.indexOf(initialLens)
+            binding.menuDefaultLens.setText(lensDisplayNames[index], false)
+        }
+
+        binding.menuDefaultLens.setOnItemClickListener { _, _, position, _ ->
+            val selected = lenses[position]
+            prefs.edit().putString(KEY_DEFAULT_LENS_ID, selected.sensorId).apply()
+        }
+
+        // 1.0x Default Focal Length
+        val mainWide = cameraRepository.getMainWideLens(emptySet())
+        if (mainWide != null) {
+            val presets1x = cameraRepository.get1xPresets(mainWide)
+            val names1x = presets1x.map { it.name }
+            val adapter1x = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, names1x)
+            binding.menuDefaultFocal1x.setAdapter(adapter1x)
+
+            val savedFocal1x = prefs.getString(KEY_DEFAULT_FOCAL_1X, "24mm")
+            binding.menuDefaultFocal1x.setText(savedFocal1x, false)
+            binding.menuDefaultFocal1x.setOnItemClickListener { _, _, position, _ ->
+                prefs.edit().putString(KEY_DEFAULT_FOCAL_1X, names1x[position]).apply()
             }
-        }
-        val focalAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, focalDisplayNames)
-        binding.menuDefaultFocalLength.setAdapter(focalAdapter)
-
-        val savedFocalId = prefs.getString(KEY_DEFAULT_FOCAL_ID, null)
-        val initialPreset = presets.find { it.sensorId == savedFocalId }
-            ?: presets.find { it.multiplier in 0.95f..1.05f && !it.isZoomPreset }
-            ?: presets.firstOrNull()
-
-        if (initialPreset != null) {
-            val index = presets.indexOf(initialPreset)
-            binding.menuDefaultFocalLength.setText(focalDisplayNames[index], false)
-        }
-
-        binding.menuDefaultFocalLength.setOnItemClickListener { _, _, position, _ ->
-            val selected = presets[position]
-            prefs.edit().putString(KEY_DEFAULT_FOCAL_ID, selected.sensorId).apply()
         }
 
         // Antibanding
@@ -211,8 +220,8 @@ class SettingsFragment : Fragment() {
         const val KEY_USE_GPU = "use_gpu"
         const val KEY_MANUAL_CONTROLS = "enable_manual_controls"
         const val KEY_ENABLE_LUT_PREVIEW = "enable_lut_preview"
-        const val KEY_DEFAULT_FOCAL_LENGTH = "default_focal_length"
-        const val KEY_DEFAULT_FOCAL_ID = "default_focal_preset_id"
+        const val KEY_DEFAULT_LENS_ID = "default_lens_id"
+        const val KEY_DEFAULT_FOCAL_1X = "default_focal_1x"
         const val KEY_ANTIBANDING = "antibanding_mode"
         const val KEY_FLASH_MODE = "flash_mode"
         const val KEY_HDR_BURST_COUNT = "hdr_burst_count"

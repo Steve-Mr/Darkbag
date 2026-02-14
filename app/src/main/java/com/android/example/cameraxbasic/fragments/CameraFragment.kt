@@ -215,10 +215,8 @@ class CameraFragment : Fragment() {
     }
 
     // Zoom State
-    private var defaultFocalLength = 24
-    private var currentFocalLength = -1
-    private var is2xMode = false
     private var zoomJob: kotlinx.coroutines.Job? = null
+    private var transientLensLabel: String? = null
 
     private var deviceOrientationDegrees = 0
 
@@ -448,17 +446,9 @@ class CameraFragment : Fragment() {
         lutManager = LutManager(requireContext())
         cameraRepository = com.android.example.cameraxbasic.utils.CameraRepository(requireContext())
 
-        // Initialize Zoom Default
+        // Initialize Preferences
         val prefs =
             requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        val defaultStr = prefs.getString(SettingsFragment.KEY_DEFAULT_FOCAL_LENGTH, "24") ?: "24"
-        defaultFocalLength = defaultStr.toIntOrNull() ?: 24
-
-        // Legacy Zoom State Restoration (mostly handled by KEY_SELECTED_LENS_ID now)
-        if (currentFocalLength == -1) {
-            currentFocalLength = prefs.getInt(KEY_CURRENT_FOCAL_LENGTH, defaultFocalLength)
-        }
-        is2xMode = prefs.getBoolean(KEY_IS_2X_MODE, false)
 
         // Initialize Flash State
         isFlashEnabled = prefs.getBoolean(SettingsFragment.KEY_FLASH_MODE, false)
@@ -595,12 +585,24 @@ class CameraFragment : Fragment() {
         if (currentLens == null || availableLenses.none { it.sensorId == currentLens?.sensorId }) {
             val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
             val savedLensId = prefs.getString(KEY_SELECTED_LENS_ID, null)
-            val defaultPresetId = prefs.getString(SettingsFragment.KEY_DEFAULT_FOCAL_ID, null)
+            val defaultLensId = prefs.getString(SettingsFragment.KEY_DEFAULT_LENS_ID, null)
+            val default1xFocal = prefs.getString(SettingsFragment.KEY_DEFAULT_FOCAL_1X, "24mm")
 
-            currentLens = availableLenses.find { it.sensorId == savedLensId }
-                ?: availableLenses.find { it.sensorId == defaultPresetId }
-                ?: availableLenses.find { it.multiplier in 0.95f..1.05f && !it.isZoomPreset }
-                ?: availableLenses.firstOrNull()
+            val targetLensId = savedLensId ?: defaultLensId
+            var found = availableLenses.find { it.sensorId == targetLensId }
+
+            if (found == null) {
+                found = availableLenses.find { it.multiplier in 0.95f..1.05f && !it.isZoomPreset }
+                    ?: availableLenses.firstOrNull()
+            }
+
+            // If it's a 1x lens, apply the 1x default focal length
+            if (found != null && found.multiplier in 0.95f..1.05f && !found.isZoomPreset) {
+                val presets1x = cameraRepository.get1xPresets(found)
+                currentLens = presets1x.find { it.name == default1xFocal } ?: found
+            } else {
+                currentLens = found
+            }
         }
     }
 
@@ -1851,7 +1853,11 @@ class CameraFragment : Fragment() {
             scroll.visibility = View.VISIBLE
             container.removeAllViews()
 
-            for (lens in availableLenses) {
+            // Filter out 1x sub-presets (28mm, 35mm) from the main list.
+            // Only show physical lenses and the virtual 2.0x.
+            val filteredLenses = availableLenses.filter { !it.isZoomPreset || it.sensorId.contains("2.0x") || it.sensorId.contains("virtual") }
+
+            for (lens in filteredLenses) {
                 val btn = com.google.android.material.button.MaterialButton(
                     requireContext()
                 ).apply {
@@ -1871,17 +1877,42 @@ class CameraFragment : Fragment() {
 
                     setOnClickListener {
                         val oldLens = currentLens
+                        val is1x = lens.multiplier in 0.95f..1.05f && !lens.isZoomPreset
 
-                        // Treat all presets as mutually exclusive "equal status" choices
-                        currentLens = lens
+                        if (is1x && (oldLens?.id == lens.id)) {
+                            // Cycle through 1x presets: 24mm -> 28mm -> 35mm
+                            val presets1x = cameraRepository.get1xPresets(lens)
+                            val currentName = oldLens?.name ?: "24mm"
+                            val nextIndex = when (currentName) {
+                                "24mm" -> presets1x.indexOfFirst { it.name == "28mm" }.takeIf { it != -1 } ?: 0
+                                "28mm" -> presets1x.indexOfFirst { it.name == "35mm" }.takeIf { it != -1 } ?: 0
+                                "35mm" -> 0
+                                else -> 0
+                            }
+                            currentLens = presets1x[nextIndex]
 
-                        // Reset legacy states just in case
-                        is2xMode = false
-                        currentFocalLength = 24
+                            // Visual feedback: Focal Length -> Multiplier
+                            transientLensLabel = currentLens!!.name
+                            lifecycleScope.launch(Dispatchers.Main) {
+                                delay(800)
+                                if (transientLensLabel == presets1x[nextIndex].name) {
+                                    transientLensLabel = null
+                                    updateLensUI()
+                                }
+                            }
+                        } else if (is1x) {
+                            // Switching TO 1x from another lens: Use the 1x default focal length setting
+                            val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                            val default1xFocal = prefs.getString(SettingsFragment.KEY_DEFAULT_FOCAL_1X, "24mm")
+                            val presets1x = cameraRepository.get1xPresets(lens)
+                            currentLens = presets1x.find { it.name == default1xFocal } ?: lens
+                        } else {
+                            currentLens = lens
+                        }
 
                         updateLensUI()
 
-                        if (oldLens?.id != lens.id || oldLens?.physicalId != lens.physicalId || oldLens?.useCamera2 != lens.useCamera2) {
+                        if (oldLens?.id != currentLens?.id || oldLens?.physicalId != currentLens?.physicalId || oldLens?.useCamera2 != currentLens?.useCamera2) {
                             animateSwitch {
                                 bindCameraUseCases()
                             }
@@ -1914,9 +1945,15 @@ class CameraFragment : Fragment() {
             val btn = container.getChildAt(i) as? com.google.android.material.button.MaterialButton
             val lens = btn?.tag as? com.android.example.cameraxbasic.utils.LensInfo
             if (btn != null && lens != null) {
-                val isActive = lens.sensorId == currentLens?.sensorId
+                // For the 1.0x button, it stays active if any of its sub-presets (24, 28, 35) are active
+                val isActive = lens.sensorId == currentLens?.sensorId ||
+                              (lens.multiplier in 0.95f..1.05f && currentLens?.id == lens.id && !currentLens!!.sensorId.contains("virtual"))
 
                 if (isActive) {
+                    // Update text for 1.0x button
+                    if (lens.multiplier in 0.95f..1.05f && !lens.isZoomPreset) {
+                        btn.text = transientLensLabel ?: String.format("%.1fx", currentLens?.multiplier ?: 1.0f)
+                    }
                     btn.setTextColor(colorPrimary)
                     btn.strokeWidth = resources.getDimensionPixelSize(R.dimen.stroke_small)
                     btn.strokeColor = android.content.res.ColorStateList.valueOf(colorPrimary)
@@ -1928,6 +1965,7 @@ class CameraFragment : Fragment() {
                 } else {
                     btn.setTextColor(colorOnSurface)
                     btn.strokeWidth = 0
+                    btn.text = lens.name
                     btn.setBackgroundColor(MaterialColors.layer(
                         MaterialColors.getColor(btn, com.google.android.material.R.attr.colorSurface),
                         colorOnSurface,
@@ -2076,13 +2114,6 @@ class CameraFragment : Fragment() {
     }
 
     private fun updateZoomUI(animate: Boolean) {
-        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        // Update legacy prefs for backward compatibility if needed
-        prefs.edit()
-            .putBoolean(KEY_IS_2X_MODE, is2xMode)
-            .putInt(KEY_CURRENT_FOCAL_LENGTH, currentFocalLength)
-            .apply()
-
         val binding = cameraUiContainerBinding ?: return
 
         updateLensUI()
@@ -2317,8 +2348,6 @@ class CameraFragment : Fragment() {
         private const val AE_SETTLE_DELAY_MS = 50L
 
         const val KEY_SELECTED_LENS_ID = "selected_lens_sensor_id"
-        const val KEY_IS_2X_MODE = "is_2x_mode"
-        const val KEY_CURRENT_FOCAL_LENGTH = "current_focal_length"
         const val KEY_HDR_PLUS_ENABLED = "hdr_plus_enabled"
     }
 
