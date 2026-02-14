@@ -1363,13 +1363,11 @@ class CameraFragment : Fragment() {
                     val dngOutputStream = java.io.ByteArrayOutputStream()
                     var dngBytes: ByteArray? = null
 
-                    val orientation = when (image.combinedOrientation) {
-                        90 -> ExifInterface.ORIENTATION_ROTATE_90
-                        180 -> ExifInterface.ORIENTATION_ROTATE_180
-                        270 -> ExifInterface.ORIENTATION_ROTATE_270
-                        else -> ExifInterface.ORIENTATION_NORMAL
-                    }
-                    dngCreatorReal.setOrientation(orientation)
+                    val mirror = lensFacing == CameraSelector.LENS_FACING_FRONT &&
+                            prefs.getBoolean(SettingsFragment.KEY_MIRROR_FRONT_CAMERA, true)
+
+                    val exifOrientation = ImageSaver.getExifOrientation(image.combinedOrientation, mirror)
+                    dngCreatorReal.setOrientation(exifOrientation)
 
                     val inputStream = java.io.ByteArrayInputStream(image.data)
                     dngCreatorReal.writeInputStream(
@@ -1414,9 +1412,6 @@ class CameraFragment : Fragment() {
                     }
 
                     // 5. Shared Save Logic
-                    val mirror = lensFacing == CameraSelector.LENS_FACING_FRONT &&
-                            prefs.getBoolean(SettingsFragment.KEY_MIRROR_FRONT_CAMERA, true)
-
                     val finalJpgUri = ImageSaver.saveProcessedImage(
                         context,
                         null,
@@ -1499,6 +1494,7 @@ class CameraFragment : Fragment() {
                                             "$cropWidth $cropHeight"
                                         )
                                         exif.setAttribute("DefaultCropOrigin", "$x $y")
+                                        exif.setAttribute(ExifInterface.TAG_ORIENTATION, exifOrientation.toString())
                                         exif.saveAttributes()
                                     }
                                 } catch (e: Exception) {

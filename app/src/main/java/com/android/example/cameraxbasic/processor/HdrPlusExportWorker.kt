@@ -70,7 +70,9 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
                 saveJpg,
                 saveTiff,
                 targetUri?.let { Uri.parse(it) },
-                mirror = mirror
+                mirror = mirror,
+                tiffOrientation = 0,
+                dngOrientation = orientation
             )
 
             Log.d(TAG, "Background Export Worker finished successfully for $baseName. finalUri=$finalUri")

@@ -37,6 +37,8 @@ object ImageSaver {
         saveTiff: Boolean,
         targetUri: Uri? = null,
         mirror: Boolean = false,
+        tiffOrientation: Int = rotationDegrees,
+        dngOrientation: Int = rotationDegrees,
         onBitmapReady: ((Bitmap) -> Unit)? = null
     ): Uri? {
         val contentResolver = context.contentResolver
@@ -166,6 +168,9 @@ object ImageSaver {
                         contentResolver.openOutputStream(tiffUri)?.use { out ->
                             FileInputStream(tiffFile).copyTo(out)
                         }
+
+                        updateExifOrientation(context, tiffUri, getExifOrientation(tiffOrientation, mirror))
+
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                             tiffValues.clear()
                             tiffValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
@@ -201,6 +206,9 @@ object ImageSaver {
                         contentResolver.openOutputStream(dngUri)?.use { out ->
                             FileInputStream(dngFile).copyTo(out)
                         }
+
+                        updateExifOrientation(context, dngUri, getExifOrientation(dngOrientation, mirror))
+
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                             dngValues.clear()
                             dngValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
@@ -216,6 +224,27 @@ object ImageSaver {
         }
 
         return finalJpgUri
+    }
+
+    fun getExifOrientation(rotationDegrees: Int, mirror: Boolean): Int {
+        return when (rotationDegrees) {
+            90 -> if (mirror) ExifInterface.ORIENTATION_TRANSPOSE else ExifInterface.ORIENTATION_ROTATE_90
+            180 -> if (mirror) ExifInterface.ORIENTATION_FLIP_VERTICAL else ExifInterface.ORIENTATION_ROTATE_180
+            270 -> if (mirror) ExifInterface.ORIENTATION_TRANSVERSE else ExifInterface.ORIENTATION_ROTATE_270
+            else -> if (mirror) ExifInterface.ORIENTATION_FLIP_HORIZONTAL else ExifInterface.ORIENTATION_NORMAL
+        }
+    }
+
+    private fun updateExifOrientation(context: Context, uri: Uri, orientation: Int) {
+        try {
+            context.contentResolver.openFileDescriptor(uri, "rw")?.use { pfd ->
+                val exif = ExifInterface(pfd.fileDescriptor)
+                exif.setAttribute(ExifInterface.TAG_ORIENTATION, orientation.toString())
+                exif.saveAttributes()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to update EXIF orientation for $uri", e)
+        }
     }
 
     /**
