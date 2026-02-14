@@ -192,6 +192,26 @@ class CameraFragment : Fragment() {
     private var currentExposureTime = 10_000_000L // 10ms
     private var currentEvIndex = 0
 
+    private var processingCount = 0
+
+    private fun showProcessingAnimation() {
+        lifecycleScope.launch(Dispatchers.Main) {
+            processingCount++
+            cameraUiContainerBinding?.processingProgress?.visibility = View.VISIBLE
+            Log.d(TAG, "showProcessingAnimation: count=$processingCount")
+        }
+    }
+
+    private fun hideProcessingAnimation() {
+        lifecycleScope.launch(Dispatchers.Main) {
+            processingCount = (processingCount - 1).coerceAtLeast(0)
+            if (processingCount == 0) {
+                cameraUiContainerBinding?.processingProgress?.visibility = View.GONE
+            }
+            Log.d(TAG, "hideProcessingAnimation: count=$processingCount")
+        }
+    }
+
     // Zoom State
     private var defaultFocalLength = 24
     private var currentFocalLength = -1
@@ -465,18 +485,18 @@ class CameraFragment : Fragment() {
                             withContext(Dispatchers.Main) {
                                 Toast.makeText(context, "HDR+ Saved!", Toast.LENGTH_SHORT).show()
                                 setGalleryThumbnail(event.targetUri)
-                                cameraUiContainerBinding?.processingProgress?.visibility = View.GONE
+                                hideProcessingAnimation()
                             }
                         } else {
                              Log.w(TAG, "Received save event for ${event.baseName} without targetUri.")
                              withContext(Dispatchers.Main) {
-                                 cameraUiContainerBinding?.processingProgress?.visibility = View.GONE
+                                 hideProcessingAnimation()
                              }
                         }
                     } catch (e: Exception) {
                         Log.e(TAG, "Background UI update failed for ${event.baseName}", e)
                         withContext(Dispatchers.Main) {
-                            cameraUiContainerBinding?.processingProgress?.visibility = View.GONE
+                            hideProcessingAnimation()
                         }
                     }
                 }
@@ -491,9 +511,6 @@ class CameraFragment : Fragment() {
                 // Launch each task in applicationScope so it continues even if fragment is destroyed
                 (appContext as MainApplication).applicationScope.launch(Dispatchers.IO) {
                     try {
-                        withContext(Dispatchers.Main) {
-                            cameraUiContainerBinding?.processingProgress?.visibility = View.VISIBLE
-                        }
                         processImageAsync(appContext, holder)
                     } catch (e: Exception) {
                         Log.e(TAG, "Error processing image from channel", e)
@@ -502,7 +519,7 @@ class CameraFragment : Fragment() {
                         withContext(Dispatchers.Main) {
                             cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
                             cameraUiContainerBinding?.cameraCaptureButton?.alpha = 1.0f
-                            cameraUiContainerBinding?.processingProgress?.visibility = View.GONE
+                            hideProcessingAnimation()
                         }
                     }
                 }
@@ -2393,6 +2410,7 @@ class CameraFragment : Fragment() {
                             val holder = copyImageToHolder(image, currentZoom, getCombinedOrientation(), currentLens?.physicalId)
                             image.close()
 
+                            showProcessingAnimation()
                             lifecycleScope.launch {
                                 processingChannel.send(holder)
                             }
@@ -2408,6 +2426,7 @@ class CameraFragment : Fragment() {
                                 ).show()
                                 cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
                                 cameraUiContainerBinding?.cameraCaptureButton?.alpha = 1.0f
+                                hideProcessingAnimation()
                             }
                         } catch (e: Exception) {
                             Log.e(TAG, "Error during capture copy", e)
@@ -2417,6 +2436,7 @@ class CameraFragment : Fragment() {
                                 cameraUiContainerBinding?.cameraCaptureButton?.isEnabled =
                                     true
                                 cameraUiContainerBinding?.cameraCaptureButton?.alpha = 1.0f
+                                hideProcessingAnimation()
                             }
                         }
                     }
@@ -2528,7 +2548,6 @@ class CameraFragment : Fragment() {
                 cameraUiContainerBinding?.captureProgress?.max = burstSize
                 cameraUiContainerBinding?.captureProgress?.progress = 0
                 cameraUiContainerBinding?.captureProgress?.visibility = View.VISIBLE
-                cameraUiContainerBinding?.processingProgress?.visibility = View.VISIBLE
                 cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = false
                 cameraUiContainerBinding?.cameraCaptureButton?.alpha = 0.5f
 
@@ -2552,7 +2571,6 @@ class CameraFragment : Fragment() {
                 ).show()
                 resetBurstUi()
                 processingSemaphore.release()
-                cameraUiContainerBinding?.processingProgress?.visibility = View.GONE
                 applyCameraControls()
             }
         }
@@ -2574,6 +2592,7 @@ class CameraFragment : Fragment() {
                             Log.d(TAG, "HDR+ Burst Capture sequence complete.")
                             applyCameraControls()
                             resetBurstUi()
+                            showProcessingAnimation()
                         }
                     }
 
@@ -2633,6 +2652,7 @@ class CameraFragment : Fragment() {
 
         (appContext as MainApplication).applicationScope.launch(Dispatchers.IO) {
             var fallbackSent = false
+            var isHdrPlusSuccess = false
             try {
                 val context = appContext
                 Log.d(TAG, "processHdrPlusBurst started with ${frames.size} frames. DigitalGain=$digitalGain")
@@ -2769,6 +2789,7 @@ class CameraFragment : Fragment() {
                 Log.d(TAG, "JNI processHdrPlus returned $ret in ${jniEndTime - jniStartTime}ms")
 
                 if (ret == 0) {
+                    isHdrPlusSuccess = true
                     val workData = androidx.work.Data.Builder()
                         .putString("tempRawPath", tempRawFile.absolutePath)
                         .putInt("width", width)
@@ -2815,7 +2836,6 @@ class CameraFragment : Fragment() {
                 Log.e(TAG, "HDR+ processing failed, falling back to single shot", e)
                 withContext(Dispatchers.Main) {
                     Toast.makeText(appContext, "HDR+ failed, saving single frame...", Toast.LENGTH_SHORT).show()
-                    cameraUiContainerBinding?.processingProgress?.visibility = View.GONE
                 }
 
                 if (frames.isNotEmpty()) {
@@ -2850,6 +2870,9 @@ class CameraFragment : Fragment() {
                     processingSemaphore.release()
                     lifecycleScope.launch(Dispatchers.Main) {
                         resetBurstUi()
+                        if (!isHdrPlusSuccess) {
+                            hideProcessingAnimation()
+                        }
                     }
                 }
             }
@@ -2914,7 +2937,6 @@ class CameraFragment : Fragment() {
                             bindCameraUseCases()
                         } else {
                             Toast.makeText(context, "Camera hardware error: $error. Please restart the app.", Toast.LENGTH_LONG).show()
-                            cameraUiContainerBinding?.processingProgress?.visibility = View.GONE
                         }
                     }
                 }
@@ -3017,6 +3039,7 @@ class CameraFragment : Fragment() {
                     val currentZoom = if (is2xMode) 2.0f else (currentFocalLength / 24.0f)
                     val holder = copyAndroidImageToHolder(image, currentZoom, getCombinedOrientation(), currentLens?.id)
                     image.close()
+                    showProcessingAnimation()
                     lifecycleScope.launch {
                         processingChannel.send(holder)
                     }
@@ -3084,7 +3107,6 @@ class CameraFragment : Fragment() {
                 cameraUiContainerBinding?.captureProgress?.max = burstSize
                 cameraUiContainerBinding?.captureProgress?.progress = 0
                 cameraUiContainerBinding?.captureProgress?.visibility = View.VISIBLE
-                cameraUiContainerBinding?.processingProgress?.visibility = View.VISIBLE
                 cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = false
                 cameraUiContainerBinding?.cameraCaptureButton?.alpha = 0.5f
             }
@@ -3142,7 +3164,10 @@ class CameraFragment : Fragment() {
                     }
                     if (framesCaptured >= burstSize) {
                         watchdog.cancel()
-                        lifecycleScope.launch(Dispatchers.Main) { resetBurstUi() }
+                        lifecycleScope.launch(Dispatchers.Main) {
+                            resetBurstUi()
+                            showProcessingAnimation()
+                        }
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to add C2 frame", e)
@@ -3168,7 +3193,6 @@ class CameraFragment : Fragment() {
             isBurstActive = false
             processingSemaphore.release()
             lifecycleScope.launch(Dispatchers.Main) {
-                cameraUiContainerBinding?.processingProgress?.visibility = View.GONE
                 resetBurstUi()
             }
         }
@@ -3285,7 +3309,6 @@ class CameraFragment : Fragment() {
 
     private fun resetBurstUi() {
         cameraUiContainerBinding?.captureProgress?.visibility = View.GONE
-        cameraUiContainerBinding?.processingProgress?.visibility = View.GONE
         isBurstActive = false
 
         if (processingSemaphore.availablePermits > 0) {
