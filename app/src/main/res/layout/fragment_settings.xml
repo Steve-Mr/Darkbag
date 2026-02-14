@@ -41,10 +41,10 @@
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:layout_marginBottom="@dimen/spacing_medium"
                 android:text="Processing"
                 android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                android:textColor="?attr/colorPrimary"
-                android:layout_marginBottom="@dimen/spacing_medium" />
+                android:textColor="?attr/colorPrimary" />
 
             <com.google.android.material.card.MaterialCardView
                 style="@style/Widget.Material3.CardView.Filled"
@@ -65,7 +65,9 @@
                         android:text="GPU Acceleration"
                         android:textSize="16sp" />
 
-                    <Space android:layout_width="match_parent" android:layout_height="@dimen/spacing_large" />
+                    <Space
+                        android:layout_width="match_parent"
+                        android:layout_height="@dimen/spacing_large" />
 
                     <com.google.android.material.textfield.TextInputLayout
                         style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
@@ -81,7 +83,9 @@
                             android:text="N/A" />
                     </com.google.android.material.textfield.TextInputLayout>
 
-                    <Space android:layout_width="match_parent" android:layout_height="@dimen/spacing_medium" />
+                    <Space
+                        android:layout_width="match_parent"
+                        android:layout_height="@dimen/spacing_medium" />
 
                     <com.google.android.material.textfield.TextInputLayout
                         style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
@@ -97,7 +101,9 @@
                             android:text="3" />
                     </com.google.android.material.textfield.TextInputLayout>
 
-                    <Space android:layout_width="match_parent" android:layout_height="@dimen/spacing_medium" />
+                    <Space
+                        android:layout_width="match_parent"
+                        android:layout_height="@dimen/spacing_medium" />
 
                     <com.google.android.material.textfield.TextInputLayout
                         style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
@@ -190,6 +196,14 @@
                         android:layout_height="wrap_content"
                         android:text="Save JPEG" />
 
+                    <com.google.android.material.materialswitch.MaterialSwitch
+                        android:id="@+id/switch_hq_background_export"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="@dimen/spacing_small"
+                        android:text="High-quality export in background (TIFF/DNG)"
+                        android:textSize="14sp" />
+
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
@@ -280,14 +294,23 @@
                 android:layout_height="wrap_content"
                 android:layout_marginBottom="@dimen/margin_medium">
 
-                <TextView
-                    android:id="@+id/tv_debug_stats"
+                <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:padding="@dimen/padding_medium"
-                    android:fontFamily="monospace"
-                    android:textSize="12sp"
-                    android:text="No logs yet." />
+                    android:orientation="vertical"
+                    android:padding="@dimen/padding_medium">
+
+
+                    <TextView
+                        android:id="@+id/tv_debug_stats"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:fontFamily="monospace"
+                        android:textSize="12sp"
+                        android:text="No logs yet."
+                        android:textIsSelectable="true" />
+
+                </LinearLayout>
 
             </com.google.android.material.card.MaterialCardView>
 

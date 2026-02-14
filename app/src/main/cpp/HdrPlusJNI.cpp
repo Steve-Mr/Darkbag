@@ -211,6 +211,8 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
         env->DeleteLocalRef(bufObj);
         if (!framePtrs[i]) { LOGE("Failed to get direct buffer address for frame %d", i); return -1; }
     }
+    auto copyEnd = std::chrono::high_resolution_clock::now();
+    auto copyDurationMs = std::chrono::duration_cast<std::chrono::milliseconds>(copyEnd - copyStart).count();
 
     const size_t frameSizeBytes = static_cast<size_t>(width) * static_cast<size_t>(height) * sizeof(uint16_t);
     auto copyStart = std::chrono::high_resolution_clock::now();
