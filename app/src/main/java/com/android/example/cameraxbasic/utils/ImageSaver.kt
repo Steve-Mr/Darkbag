@@ -36,7 +36,8 @@ object ImageSaver {
         saveJpg: Boolean,
         saveTiff: Boolean,
         targetUri: Uri? = null,
-        onBitmapReady: ((Bitmap) -> Unit)? = null
+        onBitmapReady: ((Bitmap) -> Unit)? = null,
+        mirror: Boolean = false
     ): Uri? {
         val contentResolver = context.contentResolver
         var finalJpgUri: Uri? = null
@@ -44,7 +45,7 @@ object ImageSaver {
         // 1. Process Input Bitmap or JPEG File from JNI -> Final MediaStore JPG
         if (inputBitmap != null || bmpPath != null) {
             val isNativeJpeg = bmpPath != null && (bmpPath.endsWith(".jpg") || bmpPath.endsWith(".jpeg"))
-            val needsBitmapProcessing = rotationDegrees != 0 || zoomFactor > 1.05f || inputBitmap != null
+            val needsBitmapProcessing = rotationDegrees != 0 || zoomFactor > 1.05f || inputBitmap != null || mirror
 
             if (isNativeJpeg && !needsBitmapProcessing && saveJpg) {
                 // FAST PATH: Directly use JNI-generated JPEG
@@ -70,10 +71,17 @@ object ImageSaver {
                 }
 
                 try {
-                    // Rotate if needed
-                    if (processedBitmap != null && rotationDegrees != 0) {
+                    // Rotate and Mirror if needed
+                    if (processedBitmap != null && (rotationDegrees != 0 || mirror)) {
                         val matrix = Matrix()
-                        matrix.postRotate(rotationDegrees.toFloat())
+                        if (rotationDegrees != 0) {
+                            matrix.postRotate(rotationDegrees.toFloat())
+                        }
+                        if (mirror) {
+                            // Mirror horizontally after rotation
+                            matrix.postScale(-1f, 1f)
+                        }
+
                         val rotated = Bitmap.createBitmap(
                             processedBitmap, 0, 0, processedBitmap.width, processedBitmap.height, matrix, true
                         )

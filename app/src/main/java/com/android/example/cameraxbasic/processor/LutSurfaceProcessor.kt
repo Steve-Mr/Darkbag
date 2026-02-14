@@ -32,6 +32,7 @@ class LutSurfaceProcessor : SurfaceProcessor {
     private var lutTextureId = 0
     private var dummyLutTextureId = 0
     private var program = 0
+    private var isMirrored = false
     private var outputSurface: Surface? = null
     private var width = 0
     private var height = 0
@@ -183,6 +184,12 @@ class LutSurfaceProcessor : SurfaceProcessor {
         width = w
         height = h
         createEglSurface(surface)
+    }
+
+    fun setMirrored(mirrored: Boolean) {
+        handler.post {
+            isMirrored = mirrored
+        }
     }
 
     fun updateLut(lutData: FloatArray?, size: Int, logType: Int) {
@@ -348,6 +355,7 @@ class LutSurfaceProcessor : SurfaceProcessor {
         }
         GLES30.glUniform1i(GLES30.glGetUniformLocation(program, "uLutSize"), currentLutSize)
         GLES30.glUniform1i(GLES30.glGetUniformLocation(program, "uLogType"), currentLogType)
+        GLES30.glUniform1i(GLES30.glGetUniformLocation(program, "uMirror"), if (isMirrored) 1 else 0)
 
         val posHandle = GLES30.glGetAttribLocation(program, "aPosition")
         val texHandle = GLES30.glGetAttribLocation(program, "aTexCoord")
@@ -375,9 +383,11 @@ class LutSurfaceProcessor : SurfaceProcessor {
             in vec4 aTexCoord;
             uniform mat4 uTextureMatrix;
             uniform vec2 uScale;
+            uniform int uMirror;
             out vec2 vTexCoord;
             void main() {
-                gl_Position = vec4(aPosition.x * uScale.x, aPosition.y * uScale.y, 0.0, 1.0);
+                float mirror = uMirror == 1 ? -1.0 : 1.0;
+                gl_Position = vec4(aPosition.x * uScale.x * mirror, aPosition.y * uScale.y, 0.0, 1.0);
                 // Apply transform matrix from SurfaceTexture
                 vTexCoord = (uTextureMatrix * aTexCoord).xy;
             }

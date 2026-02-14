@@ -42,6 +42,7 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
         val baseName = data.getString("baseName") ?: "HDRPLUS"
         val saveTiff = data.getBoolean("saveTiff", true)
         val saveJpg = data.getBoolean("saveJpg", true)
+        val mirror = data.getBoolean("mirror", false)
 
         Log.d(TAG, "Background Export Worker started for $baseName")
 
@@ -68,7 +69,8 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
                 tiffPath,
                 saveJpg,
                 saveTiff,
-                targetUri?.let { Uri.parse(it) }
+                targetUri?.let { Uri.parse(it) },
+                mirror = mirror
             )
 
             Log.d(TAG, "Background Export Worker finished successfully for $baseName. finalUri=$finalUri")
