@@ -628,7 +628,8 @@ class CameraFragment : Fragment() {
     private suspend fun setUpCamera() {
         // Initially don't initialize cameraProvider unless needed.
         // But we need to know lensFacing.
-        lensFacing = CameraSelector.LENS_FACING_BACK
+        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        lensFacing = prefs.getInt(KEY_LENS_FACING, CameraSelector.LENS_FACING_BACK)
 
         // Initialize Lenses
         withContext(Dispatchers.Default) {
@@ -1136,6 +1137,11 @@ class CameraFragment : Fragment() {
                 } else {
                     CameraSelector.LENS_FACING_FRONT
                 }
+
+                // Persist choice for session
+                val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                prefs.edit().putInt(KEY_LENS_FACING, lensFacing).apply()
+
                 // Re-bind use cases to update selected camera
                 bindCameraUseCases()
             }
@@ -2378,6 +2384,7 @@ class CameraFragment : Fragment() {
         private const val AE_SETTLE_DELAY_MS = 50L
 
         const val KEY_SELECTED_LENS_ID = "selected_lens_sensor_id"
+        const val KEY_LENS_FACING = "lens_facing"
         const val KEY_HDR_PLUS_ENABLED = "hdr_plus_enabled"
     }
 

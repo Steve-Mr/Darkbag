@@ -22,6 +22,7 @@ class MainApplication : Application(), CameraXConfig.Provider {
         val prefs = getSharedPreferences("camera_settings", android.content.Context.MODE_PRIVATE)
         prefs.edit()
             .remove("selected_lens_sensor_id")
+            .remove("lens_facing")
             .apply()
     }
 
