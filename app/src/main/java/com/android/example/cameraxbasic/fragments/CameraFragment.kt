@@ -2733,10 +2733,9 @@ class CameraFragment : Fragment() {
 
                 val debugStats = LongArray(15)
 
-                // Initial JNI call only produces the linear raw buffer (finalImage)
-                // which is saved to tempRawPath for the ExportWorker to pick up.
-                // We pass null for all other output paths and set isAsync=false to
-                // avoid redundant saving and callbacks from JNI.
+                // Initial JNI call produces:
+                // 1) intermediate linear RAW buffer (tempRawPath) for the ExportWorker,
+                // 2) optional fast downsampled JPEG (tempJpgPath) for immediate gallery update.
                 val ret = ColorProcessor.processHdrPlus(
                     buffers,
                     width, height,
@@ -2747,7 +2746,7 @@ class CameraFragment : Fragment() {
                     targetLogIndex,
                     nativeLutPath,
                     null, // outputTiffPath
-                    null, // outputJpgPath
+                    if (saveJpg) tempJpgFile.absolutePath else null, // outputJpgPath (fast preview)
                     null, // outputDngPath
                     digitalGain,
                     debugStats,
@@ -2764,6 +2763,29 @@ class CameraFragment : Fragment() {
 
                     val saveStartTime = System.currentTimeMillis()
 
+                    val fastJpegUri = if (saveJpg) {
+                        ImageSaver.saveProcessedImage(
+                            context,
+                            null,
+                            tempJpgFile.absolutePath,
+                            0, // Rotation already handled in JNI
+                            1.0f, // Zoom already handled in JNI
+                            dngName,
+                            null,
+                            null,
+                            true,
+                            false
+                        )
+                    } else {
+                        null
+                    }
+
+                    if (fastJpegUri != null) {
+                        withContext(Dispatchers.Main) {
+                            setGalleryThumbnail(fastJpegUri.toString())
+                        }
+                    }
+
                     val workData = androidx.work.Data.Builder()
                         .putString("tempRawPath", tempRawFile.absolutePath)
                         .putInt("width", width)
@@ -2774,7 +2796,7 @@ class CameraFragment : Fragment() {
                         .putString("lutPath", nativeLutPath)
                         .putString("tiffPath", tiffPath)
                         .putString("jpgPath", if (saveJpg) fullResJpgFile.absolutePath else null)
-                        .putString("targetUri", null) // Initial save
+                        .putString("targetUri", fastJpegUri?.toString()) // Replace fast JPEG in place
                         .putFloat("zoomFactor", currentZoom)
                         .putString("dngPath", linearDngPath)
                         .putInt("iso", (iso).toInt())
