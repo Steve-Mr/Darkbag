@@ -1380,7 +1380,7 @@ class CameraFragment : Fragment() {
 
                     // 4. Process with LibRaw
                     val result = ColorProcessor.processRaw(
-                        dngBytes, targetLogIndex, nativeLutPath, tiffPath, bmpPath, useGpu
+                        dngBytes, targetLogIndex, nativeLutPath, tiffPath, bmpPath, useGpu, image.combinedOrientation, mirror
                     )
 
                     if (result == 1) {
@@ -2772,6 +2772,9 @@ class CameraFragment : Fragment() {
                 // Initial JNI call produces:
                 // 1) intermediate linear RAW buffer (tempRawPath) for the ExportWorker,
                 // 2) optional fast downsampled JPEG (tempJpgPath) for immediate gallery update.
+                val mirror = lensFacing == CameraSelector.LENS_FACING_FRONT &&
+                        prefs.getBoolean(SettingsFragment.KEY_MIRROR_FRONT_CAMERA, true)
+
                 val ret = ColorProcessor.processHdrPlus(
                     buffers,
                     width, height,
@@ -2789,7 +2792,8 @@ class CameraFragment : Fragment() {
                     null, // outputBitmap
                     false, // isAsync (deprecated in favor of WorkManager)
                     tempRawFile.absolutePath,
-                    currentZoom
+                    currentZoom,
+                    mirror
                 )
 
                 val jniEndTime = System.currentTimeMillis()

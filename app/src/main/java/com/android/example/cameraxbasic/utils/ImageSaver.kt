@@ -37,8 +37,6 @@ object ImageSaver {
         saveTiff: Boolean,
         targetUri: Uri? = null,
         mirror: Boolean = false,
-        tiffOrientation: Int = rotationDegrees,
-        dngOrientation: Int = rotationDegrees,
         onBitmapReady: ((Bitmap) -> Unit)? = null
     ): Uri? {
         val contentResolver = context.contentResolver
@@ -169,8 +167,6 @@ object ImageSaver {
                             FileInputStream(tiffFile).copyTo(out)
                         }
 
-                        updateExifOrientation(context, tiffUri, getExifOrientation(tiffOrientation, mirror))
-
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                             tiffValues.clear()
                             tiffValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
@@ -206,8 +202,6 @@ object ImageSaver {
                         contentResolver.openOutputStream(dngUri)?.use { out ->
                             FileInputStream(dngFile).copyTo(out)
                         }
-
-                        updateExifOrientation(context, dngUri, getExifOrientation(dngOrientation, mirror))
 
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                             dngValues.clear()
