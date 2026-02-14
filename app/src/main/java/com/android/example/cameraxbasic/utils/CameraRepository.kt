@@ -39,22 +39,26 @@ class CameraRepository(private val context: Context) {
         // Global cache to persist across repository instances and fragment recreations
         private val idToCharsCache = mutableMapOf<String, CameraCharacteristics>()
         private var hasProbed = false
+        private val probeLock = Any()
     }
 
     private fun probeAllCameras() {
         if (hasProbed) return
-        Log.d(TAG, "Performing one-time aggressive camera probe (0-63)")
-        val probeIds = mutableSetOf<String>()
-        probeIds.addAll(cameraManager.cameraIdList)
-        for (i in 0..63) probeIds.add(i.toString())
+        synchronized(probeLock) {
+            if (hasProbed) return
+            Log.d(TAG, "Performing one-time aggressive camera probe (0-63)")
+            val probeIds = mutableSetOf<String>()
+            probeIds.addAll(cameraManager.cameraIdList)
+            for (i in 0..63) probeIds.add(i.toString())
 
-        for (id in probeIds) {
-            try {
-                val chars = cameraManager.getCameraCharacteristics(id)
-                idToCharsCache[id] = chars
-            } catch (e: Exception) {}
+            for (id in probeIds) {
+                try {
+                    val chars = cameraManager.getCameraCharacteristics(id)
+                    idToCharsCache[id] = chars
+                } catch (e: Exception) {}
+            }
+            hasProbed = true
         }
-        hasProbed = true
     }
 
     fun enumerateCameras(cameraXIds: Set<String>, facing: Int = CameraCharacteristics.LENS_FACING_BACK): List<LensInfo> {

@@ -144,7 +144,7 @@ class CameraFragment : Fragment() {
 
     // Camera2 State
     private var camera2Device: android.hardware.camera2.CameraDevice? = null
-    private var camera2Session: android.hardware.camera2.CameraCaptureSession? = null
+    @Volatile private var camera2Session: android.hardware.camera2.CameraCaptureSession? = null
     private var camera2PreviewSurface: android.view.Surface? = null
     private var rawImageReader: android.media.ImageReader? = null
     private var analysisImageReader: android.media.ImageReader? = null
@@ -3053,7 +3053,11 @@ class CameraFragment : Fragment() {
                     try {
                         device.createCaptureSession(surfaces, object : android.hardware.camera2.CameraCaptureSession.StateCallback() {
                     override fun onConfigured(session: android.hardware.camera2.CameraCaptureSession) {
-                        camera2Session = session
+                        lifecycleScope.launch(Dispatchers.Main) {
+                            camera2Lock.withLock {
+                                camera2Session = session
+                            }
+                        }
                         try {
                             val request = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_PREVIEW)
                             request.addTarget(surface)
