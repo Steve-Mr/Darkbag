@@ -577,31 +577,49 @@ class CameraFragment : Fragment() {
 
         // Update currentLens reference if it exists
         currentLens?.let { old ->
-             currentLens = newLenses.find { it.sensorId == old.sensorId }
+             var found = newLenses.find { it.sensorId == old.sensorId }
+             if (found == null) {
+                 val base1x = newLenses.find { it.multiplier in 0.95f..1.05f && !it.isZoomPreset }
+                 if (base1x != null) {
+                     found = cameraRepository.get1xPresets(base1x).find { it.sensorId == old.sensorId }
+                 }
+             }
+             currentLens = found
         }
 
         availableLenses = newLenses
 
-        if (currentLens == null || availableLenses.none { it.sensorId == currentLens?.sensorId }) {
+        if (currentLens == null) {
             val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
             val savedLensId = prefs.getString(KEY_SELECTED_LENS_ID, null)
             val defaultLensId = prefs.getString(SettingsFragment.KEY_DEFAULT_LENS_ID, null)
             val default1xFocal = prefs.getString(SettingsFragment.KEY_DEFAULT_FOCAL_1X, "24mm")
 
-            val targetLensId = savedLensId ?: defaultLensId
-            var found = availableLenses.find { it.sensorId == targetLensId }
-
-            if (found == null) {
-                found = availableLenses.find { it.multiplier in 0.95f..1.05f && !it.isZoomPreset }
-                    ?: availableLenses.firstOrNull()
+            if (savedLensId != null) {
+                var found = availableLenses.find { it.sensorId == savedLensId }
+                if (found == null) {
+                    val base1x = availableLenses.find { it.multiplier in 0.95f..1.05f && !it.isZoomPreset }
+                    if (base1x != null) {
+                        found = cameraRepository.get1xPresets(base1x).find { it.sensorId == savedLensId }
+                    }
+                }
+                currentLens = found
             }
 
-            // If it's a 1x lens, apply the 1x default focal length
-            if (found != null && found.multiplier in 0.95f..1.05f && !found.isZoomPreset) {
-                val presets1x = cameraRepository.get1xPresets(found)
-                currentLens = presets1x.find { it.name == default1xFocal } ?: found
-            } else {
-                currentLens = found
+            if (currentLens == null) {
+                val targetId = defaultLensId
+                var found = availableLenses.find { it.sensorId == targetId }
+                if (found == null) {
+                    found = availableLenses.find { it.multiplier in 0.95f..1.05f && !it.isZoomPreset }
+                        ?: availableLenses.firstOrNull()
+                }
+
+                if (found != null && found.multiplier in 0.95f..1.05f && !found.isZoomPreset) {
+                    val presets1x = cameraRepository.get1xPresets(found)
+                    currentLens = presets1x.find { it.name == default1xFocal } ?: found
+                } else {
+                    currentLens = found
+                }
             }
         }
     }
@@ -1878,8 +1896,11 @@ class CameraFragment : Fragment() {
                     setOnClickListener {
                         val oldLens = currentLens
                         val is1x = lens.multiplier in 0.95f..1.05f && !lens.isZoomPreset
+                        // Only cycle if we are already in the 1x family (24/28/35mm)
+                        val isAlreadyIn1xPresets = oldLens != null && oldLens.id == lens.id &&
+                                (oldLens.name == "24mm" || oldLens.name == "28mm" || oldLens.name == "35mm")
 
-                        if (is1x && (oldLens?.id == lens.id)) {
+                        if (is1x && isAlreadyIn1xPresets) {
                             // Cycle through 1x presets: 24mm -> 28mm -> 35mm
                             val presets1x = cameraRepository.get1xPresets(lens)
                             val currentName = oldLens?.name ?: "24mm"
