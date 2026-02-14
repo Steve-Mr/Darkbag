@@ -483,21 +483,13 @@ class CameraFragment : Fragment() {
                         if (event.targetUri != null) {
                             Log.d(TAG, "Update thumbnail for ${event.baseName}: ${event.targetUri}")
                             withContext(Dispatchers.Main) {
-                                Toast.makeText(context, "HDR+ Saved!", Toast.LENGTH_SHORT).show()
                                 setGalleryThumbnail(event.targetUri)
-                                hideProcessingAnimation()
                             }
                         } else {
                              Log.w(TAG, "Received save event for ${event.baseName} without targetUri.")
-                             withContext(Dispatchers.Main) {
-                                 hideProcessingAnimation()
-                             }
                         }
                     } catch (e: Exception) {
                         Log.e(TAG, "Background UI update failed for ${event.baseName}", e)
-                        withContext(Dispatchers.Main) {
-                            hideProcessingAnimation()
-                        }
                     }
                 }
             }
@@ -2801,10 +2793,12 @@ class CameraFragment : Fragment() {
                         null
                     }
 
-                    if (fastJpegUri != null) {
-                        withContext(Dispatchers.Main) {
+                    withContext(Dispatchers.Main) {
+                        if (fastJpegUri != null) {
                             setGalleryThumbnail(fastJpegUri.toString())
                         }
+                        Toast.makeText(context, "HDR+ Saved!", Toast.LENGTH_SHORT).show()
+                        hideProcessingAnimation()
                     }
 
                     val workData = androidx.work.Data.Builder()
