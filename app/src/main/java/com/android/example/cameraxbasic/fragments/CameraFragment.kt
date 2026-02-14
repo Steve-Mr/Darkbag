@@ -705,8 +705,6 @@ class CameraFragment : Fragment() {
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
         val useCameraxFallback = prefs.getBoolean(SettingsFragment.KEY_USE_CAMERAX, false)
 
-        lutProcessor?.setMirrored(lensFacing == CameraSelector.LENS_FACING_FRONT)
-
         if (currentLens?.useCamera2 == true && !useCameraxFallback) {
             Log.d(TAG, "Switching to Camera2 Engine for lens: ${currentLens?.name}")
 
