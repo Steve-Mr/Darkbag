@@ -218,6 +218,10 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     for (int i = 0; i < numFrames; i++) { std::memcpy(rawDataPtr + (static_cast<size_t>(i) * width * height), framePtrs[i], frameSizeBytes); }
     auto copyDurationMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - copyStart).count();
 
+    // Create properly dimensioned Halide buffers wrapping the pool memory
+    Buffer<uint16_t> inputBuf(rawDataPtr, width, height, numFrames);
+    Buffer<uint16_t> outputBuf(g_hdrPlusBuffers.outputPool.data(), width, height, 3);
+
     jfloat* wbData = env->GetFloatArrayElements(whiteBalance, nullptr);
     float wb_r = wbData[0], wb_g0 = wbData[1], wb_g1 = wbData[2], wb_b = wbData[3];
     std::vector<float> wbVec = {wb_r, wb_g0, wb_g1, wb_b};
@@ -229,7 +233,6 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
 
     std::vector<float> identityCCM = { 1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f };
     Buffer<float> ccmHalideBuf(identityCCM.data(), 3, 3);
-    Buffer<uint16_t> outputBuf = g_hdrPlusBuffers.outputPool;
     auto jniPrepMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - jniPrepStart).count();
 
     int halideCfa = 1;
@@ -242,7 +245,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     }
 
     auto halideStart = std::chrono::high_resolution_clock::now();
-    int halide_res = hdrplus_raw_pipeline(g_hdrPlusBuffers.inputPool, (uint16_t)blackLevel, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, ccmHalideBuf, 1.0f, 1.0f, outputBuf);
+    int halide_res = hdrplus_raw_pipeline(inputBuf, (uint16_t)blackLevel, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, ccmHalideBuf, 1.0f, 1.0f, outputBuf);
     auto halideDurationMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - halideStart).count();
 
     halide_report_buffer.clear(); halide_profiler_report(nullptr);
@@ -263,10 +266,15 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     #pragma omp parallel for
     for (int y = 0; y < height; y++) {
         for (int x = 0; x < width; x++) {
-             uint16_t r = std::min(raw_ptr[x*stride_x + y*stride_y + 0*stride_c], (uint16_t)16383);
-             uint16_t g = std::min(raw_ptr[x*stride_x + y*stride_y + 1*stride_c], (uint16_t)16383);
-             uint16_t b = std::min(raw_ptr[x*stride_x + y*stride_y + 2*stride_c], (uint16_t)16383);
-             int idx = (y * width + x) * 3; finalImage[idx+0] = r << 2; finalImage[idx+1] = g << 2; finalImage[idx+2] = b << 2;
+             uint16_t r = raw_ptr[x*stride_x + y*stride_y + 0*stride_c];
+             uint16_t g = raw_ptr[x*stride_x + y*stride_y + 1*stride_c];
+             uint16_t b = raw_ptr[x*stride_x + y*stride_y + 2*stride_c];
+             int idx = (y * width + x) * 3;
+             // Halide output is scaled by 0.25 (14-bit range).
+             // We shift left by 2 to restore full 16-bit range for final saving.
+             finalImage[idx+0] = (uint16_t)std::min((int)r << 2, 65535);
+             finalImage[idx+1] = (uint16_t)std::min((int)g << 2, 65535);
+             finalImage[idx+2] = (uint16_t)std::min((int)b << 2, 65535);
         }
     }
     auto postDurationMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - postStart).count();

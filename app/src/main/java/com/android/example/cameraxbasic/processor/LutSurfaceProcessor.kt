@@ -18,7 +18,9 @@ class LutSurfaceProcessor : SurfaceProcessor {
 
     private val thread = HandlerThread("GLThread")
     private val handler: Handler
-    private val executor = Executors.newSingleThreadExecutor()
+    // Executor that runs tasks on the GL thread via the handler.
+    // This is safer as it won't throw RejectedExecutionException if shut down.
+    private val handlerExecutor = java.util.concurrent.Executor { runnable -> handler.post(runnable) }
 
     private var eglDisplay = EGL14.EGL_NO_DISPLAY
     private var eglContext = EGL14.EGL_NO_CONTEXT
@@ -89,7 +91,7 @@ class LutSurfaceProcessor : SurfaceProcessor {
             this.inputTextureId = textureId
             this.inputSurfaceTexture = surfaceTexture
 
-            request.provideSurface(surface, executor) { result ->
+            request.provideSurface(surface, handlerExecutor) { result ->
                 // Clean up ONLY the resources created for THIS request
                 surface.release()
 
@@ -111,7 +113,7 @@ class LutSurfaceProcessor : SurfaceProcessor {
 
     override fun onOutputSurface(output: SurfaceOutput) {
         handler.post {
-            val s = output.getSurface(executor) {
+            val s = output.getSurface(handlerExecutor) {
                 // Handle close request if needed, though we manage EGL surface based on outputSurface var
                 if (outputSurface != null) {
                     outputSurface = null
@@ -219,7 +221,7 @@ class LutSurfaceProcessor : SurfaceProcessor {
              releaseGl()
              thread.quitSafely()
         }
-        executor.shutdown()
+        // No need to shutdown handlerExecutor as it's just a wrapper
     }
 
     private fun initGl() {
