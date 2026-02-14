@@ -32,6 +32,7 @@ class SettingsFragment : Fragment() {
     private var _binding: FragmentSettingsBinding? = null
     private val binding get() = _binding!!
     private lateinit var prefs: SharedPreferences
+    private lateinit var cameraRepository: com.android.example.cameraxbasic.utils.CameraRepository
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
         _binding = FragmentSettingsBinding.inflate(inflater, container, false)
@@ -41,6 +42,7 @@ class SettingsFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         prefs = requireContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        cameraRepository = com.android.example.cameraxbasic.utils.CameraRepository(requireContext())
 
         // Apply Edge-to-Edge Insets
         ViewCompat.setOnApplyWindowInsetsListener(binding.appBar) { v, insets ->
@@ -118,13 +120,31 @@ class SettingsFragment : Fragment() {
             prefs.edit().putString(KEY_HDR_UNDEREXPOSURE_MODE, HDR_UNDEREXPOSURE_MODES[position]).apply()
         }
 
-        // Default Focal Length
-        val focalAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, FOCAL_LENGTHS)
+        // Default Focal Length (Dynamic)
+        val presets = cameraRepository.getFocalLengthPresets(emptySet())
+        val focalDisplayNames = presets.map {
+            if (it.isZoomPreset && it.name.contains("mm")) {
+                "${it.name} (${String.format("%.1fx", it.multiplier)})"
+            } else {
+                "${it.name} (${String.format("%.1f", it.equivalentFocalLength)}mm)"
+            }
+        }
+        val focalAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, focalDisplayNames)
         binding.menuDefaultFocalLength.setAdapter(focalAdapter)
-        val savedFocal = prefs.getString(KEY_DEFAULT_FOCAL_LENGTH, "24")
-        binding.menuDefaultFocalLength.setText(savedFocal, false)
+
+        val savedFocalId = prefs.getString(KEY_DEFAULT_FOCAL_ID, null)
+        val initialPreset = presets.find { it.sensorId == savedFocalId }
+            ?: presets.find { it.multiplier in 0.95f..1.05f && !it.isZoomPreset }
+            ?: presets.firstOrNull()
+
+        if (initialPreset != null) {
+            val index = presets.indexOf(initialPreset)
+            binding.menuDefaultFocalLength.setText(focalDisplayNames[index], false)
+        }
+
         binding.menuDefaultFocalLength.setOnItemClickListener { _, _, position, _ ->
-            prefs.edit().putString(KEY_DEFAULT_FOCAL_LENGTH, FOCAL_LENGTHS[position]).apply()
+            val selected = presets[position]
+            prefs.edit().putString(KEY_DEFAULT_FOCAL_ID, selected.sensorId).apply()
         }
 
         // Antibanding
@@ -192,6 +212,7 @@ class SettingsFragment : Fragment() {
         const val KEY_MANUAL_CONTROLS = "enable_manual_controls"
         const val KEY_ENABLE_LUT_PREVIEW = "enable_lut_preview"
         const val KEY_DEFAULT_FOCAL_LENGTH = "default_focal_length"
+        const val KEY_DEFAULT_FOCAL_ID = "default_focal_preset_id"
         const val KEY_ANTIBANDING = "antibanding_mode"
         const val KEY_FLASH_MODE = "flash_mode"
         const val KEY_HDR_BURST_COUNT = "hdr_burst_count"

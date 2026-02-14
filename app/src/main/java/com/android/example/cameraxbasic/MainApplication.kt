@@ -16,6 +16,17 @@ class MainApplication : Application(), CameraXConfig.Provider {
     // Global scope for background processing that should survive UI destruction
     val applicationScope = CoroutineScope(SupervisorJob())
 
+    override fun onCreate() {
+        super.onCreate()
+        // Clear session-based camera settings on app startup
+        val prefs = getSharedPreferences("camera_settings", android.content.Context.MODE_PRIVATE)
+        prefs.edit()
+            .remove("selected_lens_sensor_id")
+            .remove("is_2x_mode")
+            .remove("current_focal_length")
+            .apply()
+    }
+
     override fun getCameraXConfig(): CameraXConfig {
         return CameraXConfig.Builder.fromConfig(Camera2Config.defaultConfig())
             .setMinimumLoggingLevel(Log.ERROR).build()

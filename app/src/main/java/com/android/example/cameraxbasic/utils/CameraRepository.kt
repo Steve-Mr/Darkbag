@@ -117,6 +117,62 @@ class CameraRepository(private val context: Context) {
         return availableLenses.sortedBy { it.multiplier }
     }
 
+    /**
+     * Returns a unified list of physical lenses and digital focal length presets (28mm, 35mm, 2.0x).
+     */
+    fun getFocalLengthPresets(cameraXIds: Set<String>, facing: Int = CameraCharacteristics.LENS_FACING_BACK): List<LensInfo> {
+        val physicalLenses = enumerateCameras(cameraXIds, facing)
+        val result = physicalLenses.filter { !it.isLogicalAuto }.toMutableList()
+
+        // Find the main wide lens (usually multiplier around 1.0)
+        val mainWide = result.find { it.multiplier in 0.95f..1.05f }
+
+        if (mainWide != null) {
+            val mainEqFocal = mainWide.equivalentFocalLength
+            val baseMultiplier = mainWide.multiplier / (mainEqFocal / mainWide.focalLength) // Not really used but for completeness
+
+            // We want to add 28mm and 35mm as presets of the main wide lens
+            // 28mm is approx 1.16x of 24mm
+            if (mainEqFocal <= 26f) { // Only if base is wider than 26mm
+                val targetEq = 28f
+                val zoom = targetEq / mainEqFocal
+                result.add(mainWide.copy(
+                    sensorId = "${mainWide.sensorId}-28mm",
+                    name = "28mm",
+                    multiplier = mainWide.multiplier * zoom,
+                    isZoomPreset = true,
+                    targetZoomRatio = zoom
+                ))
+            }
+
+            if (mainEqFocal <= 33f) { // Only if base is wider than 33mm
+                val targetEq = 35f
+                val zoom = targetEq / mainEqFocal
+                result.add(mainWide.copy(
+                    sensorId = "${mainWide.sensorId}-35mm",
+                    name = "35mm",
+                    multiplier = mainWide.multiplier * zoom,
+                    isZoomPreset = true,
+                    targetZoomRatio = zoom
+                ))
+            }
+
+            // 2.0x virtual if no physical 2x exists (between 1.8x and 2.2x)
+            val hasPhysical2x = physicalLenses.any { it.multiplier in 1.8f..2.2f }
+            if (!hasPhysical2x) {
+                result.add(mainWide.copy(
+                    sensorId = "${mainWide.sensorId}-virtual-2x",
+                    name = "2.0x",
+                    multiplier = mainWide.multiplier * 2.0f,
+                    isZoomPreset = true,
+                    targetZoomRatio = 2.0f
+                ))
+            }
+        }
+
+        return result.sortedBy { it.multiplier }
+    }
+
     private fun createLensInfo(
         id: String,
         physicalId: String?,
