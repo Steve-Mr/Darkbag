@@ -1205,16 +1205,6 @@ class CameraFragment : Fragment() {
         var framesPerSecond: Double = -1.0
             private set
 
-        /**
-         * Helper extension function used to extract a byte array from an image plane buffer
-         */
-        private fun ByteBuffer.toByteArray(): ByteArray {
-            rewind()    // Rewind the buffer to zero
-            val data = ByteArray(remaining())
-            get(data)   // Copy the buffer into a byte array
-            return data // Return the byte array
-        }
-
         override fun analyze(image: ImageProxy) {
             if (listeners.isEmpty()) {
                 image.close()
@@ -1232,10 +1222,23 @@ class CameraFragment : Fragment() {
 
             lastAnalyzedTimestamp = frameTimestamps.first
 
-            val buffer = image.planes[0].buffer
-            val data = buffer.toByteArray()
-            val pixels = data.map { it.toInt() and 0xFF }
-            val luma = pixels.average()
+            val plane = image.planes[0]
+            val buffer = plane.buffer
+            val width = image.width
+            val height = image.height
+            val rowStride = plane.rowStride
+            val pixelStride = plane.pixelStride
+
+            var sum = 0L
+            // Direct ByteBuffer iteration to avoid massive allocations (toByteArray + map + average)
+            // This reduces garbage collection pressure significantly during preview.
+            for (y in 0 until height) {
+                val rowStart = y * rowStride
+                for (x in 0 until width) {
+                    sum += buffer.get(rowStart + x * pixelStride).toLong() and 0xFF
+                }
+            }
+            val luma = sum.toDouble() / (width * height)
 
             listeners.forEach { it(luma) }
             image.close()
@@ -1261,14 +1264,14 @@ class CameraFragment : Fragment() {
                 buffer.get(cleanData, 0, dataLength)
             }
         } else {
-            val rowData = ByteArray(rowLength)
             buffer.rewind()
             for (y in 0 until height) {
                 val rowStart = y * rowStride
                 if (rowStart + rowLength > buffer.capacity()) break
                 buffer.position(rowStart)
-                buffer.get(rowData)
-                System.arraycopy(rowData, 0, cleanData, y * rowLength, rowLength)
+                // Use the more efficient bulk get(ByteArray, offset, length)
+                // to avoid allocating a temporary rowData array and extra System.arraycopy.
+                buffer.get(cleanData, y * rowLength, rowLength)
             }
         }
 
