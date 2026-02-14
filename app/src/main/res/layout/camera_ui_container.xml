@@ -368,6 +368,20 @@
                 app:layout_constraintTop_toTopOf="@id/camera_capture_button"
                 app:layout_constraintBottom_toBottomOf="@id/camera_capture_button" />
 
+            <com.google.android.material.progressindicator.CircularProgressIndicator
+                android:id="@+id/processing_progress"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:indeterminate="true"
+                android:visibility="gone"
+                app:indicatorSize="@dimen/round_button_medium"
+                app:trackThickness="4dp"
+                app:indicatorColor="?attr/colorPrimary"
+                app:layout_constraintTop_toTopOf="@id/photo_view_button"
+                app:layout_constraintBottom_toBottomOf="@id/photo_view_button"
+                app:layout_constraintStart_toStartOf="@id/photo_view_button"
+                app:layout_constraintEnd_toEndOf="@id/photo_view_button" />
+
         </androidx.constraintlayout.widget.ConstraintLayout>
 
     </com.google.android.material.card.MaterialCardView>

@@ -107,7 +107,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processRaw(
     const char* jpg_path_cstr = (outputJpgPath) ? env->GetStringUTFChars(outputJpgPath, 0) : nullptr;
 
     // Use Shared Pipeline (Gain = 1.0 for standard LibRaw output)
-    process_and_save_image(
+    bool saveOk = process_and_save_image(
         rawImage,
         image->width,
         image->height,
@@ -119,7 +119,11 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processRaw(
         0, // sourceColorSpace = ProPhoto (LibRaw output_color=4)
         nullptr, // ccm is not used for ProPhoto path
         nullptr, // wb is not used for ProPhoto path (LibRaw handles it)
-        0 // orientation = 0 (Assuming LibRaw handles rotation or it is already correct)
+        0, // orientation = 0 (Assuming LibRaw handles rotation or it is already correct)
+        nullptr, // out_rgb_buffer
+        false, // isPreview
+        1, // downsampleFactor
+        1.0f // zoomFactor
     );
 
     // Release Strings
@@ -131,7 +135,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processRaw(
     RawProcessor.recycle();
     delete[] buf;
 
-    return 0;
+    return saveOk ? 0 : -1;
 }
 
 extern "C" JNIEXPORT jfloatArray JNICALL
