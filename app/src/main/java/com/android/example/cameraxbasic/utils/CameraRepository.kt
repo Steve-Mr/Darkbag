@@ -35,11 +35,14 @@ class CameraRepository(private val context: Context) {
     private val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
     private val TAG = "CameraRepository"
 
-    fun enumerateCameras(cameraXIds: Set<String>, facing: Int = CameraCharacteristics.LENS_FACING_BACK): List<LensInfo> {
-        val availableLenses = mutableListOf<LensInfo>()
-        val idToChars = mutableMapOf<String, CameraCharacteristics>()
+    // Static cache to persist across repository instances if necessary,
+    // but here we use instance cache as it's owned by CameraFragment.
+    private val idToCharsCache = mutableMapOf<String, CameraCharacteristics>()
+    private var hasProbed = false
 
-        // 1. Aggressive Probe
+    private fun probeAllCameras() {
+        if (hasProbed) return
+        Log.d(TAG, "Performing one-time aggressive camera probe (0-63)")
         val probeIds = mutableSetOf<String>()
         probeIds.addAll(cameraManager.cameraIdList)
         for (i in 0..63) probeIds.add(i.toString())
@@ -47,12 +50,17 @@ class CameraRepository(private val context: Context) {
         for (id in probeIds) {
             try {
                 val chars = cameraManager.getCameraCharacteristics(id)
-                if (chars.get(CameraCharacteristics.LENS_FACING) == facing) {
-                    idToChars[id] = chars
-                    Log.d(TAG, "Probed ID $id: Facing=$facing")
-                }
+                idToCharsCache[id] = chars
             } catch (e: Exception) {}
         }
+        hasProbed = true
+    }
+
+    fun enumerateCameras(cameraXIds: Set<String>, facing: Int = CameraCharacteristics.LENS_FACING_BACK): List<LensInfo> {
+        probeAllCameras()
+
+        val availableLenses = mutableListOf<LensInfo>()
+        val idToChars = idToCharsCache.filter { it.value.get(CameraCharacteristics.LENS_FACING) == facing }
 
         // 2. Baseline for Multipliers
         var mainWideEqFocal = 24f

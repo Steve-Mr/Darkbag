@@ -153,6 +153,7 @@ class CameraFragment : Fragment() {
 
     private var camera2Thread: HandlerThread? = null
     private var camera2Handler: Handler? = null
+    private val camera2Lock = kotlinx.coroutines.sync.Mutex()
 
     private var lutProcessor: LutSurfaceProcessor? = null
     private lateinit var lutManager: LutManager
@@ -349,7 +350,9 @@ class CameraFragment : Fragment() {
         super.onStop()
         orientationEventListener.disable()
         // Ensure Camera2 is closed when stopping to release hardware resources
-        releaseCamera2Resources()
+        lifecycleScope.launch {
+            releaseCamera2Resources()
+        }
     }
 
     override fun onResume() {
@@ -560,7 +563,7 @@ class CameraFragment : Fragment() {
         updateCameraSwitchButton()
     }
 
-    private fun refreshLenses() {
+    private fun refreshLenses(force: Boolean = false) {
         val cameraXIds = mutableSetOf<String>()
         cameraProvider?.availableCameraInfos?.forEach { info ->
             val id = Camera2CameraInfo.from(info).cameraId
@@ -574,6 +577,11 @@ class CameraFragment : Fragment() {
             android.hardware.camera2.CameraCharacteristics.LENS_FACING_FRONT
 
         val newLenses = cameraRepository.enumerateCameras(cameraXIds, repoFacing)
+
+        if (!force && newLenses.size == availableLenses.size && newLenses.zip(availableLenses).all { it.first.sensorId == it.second.sensorId }) {
+            return // No change
+        }
+
         Log.d(TAG, "Available Lenses identified: ${newLenses.size} for facing $repoFacing")
 
         // Update currentLens reference if it exists, to pick up any engine changes
@@ -603,7 +611,9 @@ class CameraFragment : Fragment() {
         lensFacing = CameraSelector.LENS_FACING_BACK
 
         // Initialize Lenses
-        refreshLenses()
+        withContext(Dispatchers.Default) {
+            refreshLenses()
+        }
 
         // Select lensFacing depending on the available cameras
         if (availableLenses.isEmpty()) {
@@ -650,13 +660,26 @@ class CameraFragment : Fragment() {
         updateLiveLut() // Ensure LUT is loaded
     }
 
+    private var bindJob: kotlinx.coroutines.Job? = null
+
     @OptIn(ExperimentalCamera2Interop::class)
     private fun bindCameraUseCases() {
-        refreshLenses()
+        bindJob?.cancel()
+        bindJob = lifecycleScope.launch {
+            // Move heavy lens refresh to background
+            withContext(Dispatchers.Default) {
+                refreshLenses()
+            }
 
-        // Ensure Camera2 is closed if we are switching engines or lenses
-        closeCamera2()
+            // Ensure Camera2 is closed if we are switching engines or lenses
+            closeCamera2()
 
+            bindCameraUseCasesInternal()
+        }
+    }
+
+    @OptIn(ExperimentalCamera2Interop::class)
+    private suspend fun bindCameraUseCasesInternal() {
         // Fetch Characteristics for Manual Control
         val targetId = if (lensFacing == CameraSelector.LENS_FACING_BACK) {
              currentLens?.physicalId ?: currentLens?.id ?: "0"
@@ -729,10 +752,8 @@ class CameraFragment : Fragment() {
             }
 
             // Give system a moment to release hardware
-            lifecycleScope.launch(Dispatchers.Main) {
-                delay(300)
-                openCamera2(currentLens!!.id)
-            }
+            delay(300)
+            openCamera2(currentLens!!.id)
             return
         }
 
@@ -1822,7 +1843,10 @@ class CameraFragment : Fragment() {
             return
         }
 
-        refreshLenses()
+        // Use already refreshed availableLenses if possible
+        if (availableLenses.isEmpty()) {
+            refreshLenses()
+        }
 
         if (availableLenses.isNotEmpty()) {
             scroll.visibility = View.VISIBLE
@@ -2937,7 +2961,7 @@ class CameraFragment : Fragment() {
     }
 
     @SuppressLint("MissingPermission")
-    private fun openCamera2(cameraId: String) {
+    private suspend fun openCamera2(cameraId: String) {
         // Ensure previous device and session are closed
         closeCamera2()
 
@@ -2951,23 +2975,29 @@ class CameraFragment : Fragment() {
         try {
             camera2Manager.openCamera(cameraId, object : android.hardware.camera2.CameraDevice.StateCallback() {
                 override fun onOpened(device: android.hardware.camera2.CameraDevice) {
-                    camera2RetryCount = 0 // Reset on success
-                    camera2Device = device
-                    createCamera2CaptureSession()
+                    lifecycleScope.launch(Dispatchers.Main) {
+                        camera2Lock.withLock {
+                            camera2RetryCount = 0 // Reset on success
+                            camera2Device = device
+                            createCamera2CaptureSession()
+                        }
+                    }
                 }
 
                 override fun onDisconnected(device: android.hardware.camera2.CameraDevice) {
-                    closeCamera2()
+                    lifecycleScope.launch { closeCamera2() }
                 }
 
                 override fun onError(device: android.hardware.camera2.CameraDevice, error: Int) {
                     Log.e(TAG, "Camera2 open error: $error for camera $cameraId")
-                    closeCamera2()
+                    lifecycleScope.launch { closeCamera2() }
 
                     if (error == 2 && camera2RetryCount < 1) {
                          camera2RetryCount++
                          Log.i(TAG, "Retrying camera open after hardware error (attempt $camera2RetryCount)...")
-                         camera2Handler?.postDelayed({ openCamera2(cameraId) }, 500)
+                         camera2Handler?.postDelayed({
+                             lifecycleScope.launch { openCamera2(cameraId) }
+                         }, 500)
                          return
                     }
 
@@ -2995,6 +3025,8 @@ class CameraFragment : Fragment() {
         val device = camera2Device ?: return
         val handler = camera2Handler ?: return
 
+        Log.d(TAG, "Creating Camera2 Capture Session for device: ${device.id}")
+
         val chars = camera2Manager.getCameraCharacteristics(device.id)
         val map = chars.get(android.hardware.camera2.CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
         val rawSizes = map?.getOutputSizes(android.graphics.ImageFormat.RAW_SENSOR)
@@ -3018,16 +3050,18 @@ class CameraFragment : Fragment() {
 
         Log.d(TAG, "Requesting preview surface from LutProcessor: ${previewSize.width}x${previewSize.height}")
         lutProcessor?.getInputSurface(previewSize.width, previewSize.height) { surface ->
-            if (!isAdded || camera2Device?.id != device.id) {
-                Log.w(TAG, "Preview surface ready but fragment detached or device changed. Ignoring.")
-                return@getInputSurface
-            }
+            lifecycleScope.launch(Dispatchers.Main) {
+                camera2Lock.withLock {
+                    if (!isAdded || camera2Device !== device) {
+                        Log.w(TAG, "Preview surface ready but fragment detached or device changed/closed. Ignoring.")
+                        return@withLock
+                    }
 
-            camera2PreviewSurface = surface
-            val surfaces = listOf(surface, rawImageReader!!.surface, analysisImageReader!!.surface)
+                    camera2PreviewSurface = surface
+                    val surfaces = listOf(surface, rawImageReader!!.surface, analysisImageReader!!.surface)
 
-            try {
-                device.createCaptureSession(surfaces, object : android.hardware.camera2.CameraCaptureSession.StateCallback() {
+                    try {
+                        device.createCaptureSession(surfaces, object : android.hardware.camera2.CameraCaptureSession.StateCallback() {
                     override fun onConfigured(session: android.hardware.camera2.CameraCaptureSession) {
                         camera2Session = session
                         try {
@@ -3061,6 +3095,8 @@ class CameraFragment : Fragment() {
                 }, handler)
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to create capture session", e)
+            }
+                }
             }
         }
     }
@@ -3331,21 +3367,23 @@ class CameraFragment : Fragment() {
         }
     }
 
-    private fun closeCamera2() {
-        camera2Session?.close()
-        camera2Session = null
-        camera2Device?.close()
-        camera2Device = null
-        rawImageReader?.close()
-        rawImageReader = null
-        analysisImageReader?.close()
-        analysisImageReader = null
-        camera2PreviewSurface = null
-        lutProcessor?.releaseInputSurface()
-        // Do NOT quit the thread here to avoid "dead thread" crash during callbacks
+    private suspend fun closeCamera2() {
+        camera2Lock.withLock {
+            camera2Session?.close()
+            camera2Session = null
+            camera2Device?.close()
+            camera2Device = null
+            rawImageReader?.close()
+            rawImageReader = null
+            analysisImageReader?.close()
+            analysisImageReader = null
+            camera2PreviewSurface = null
+            lutProcessor?.releaseInputSurface()
+            // Do NOT quit the thread here to avoid "dead thread" crash during callbacks
+        }
     }
 
-    private fun releaseCamera2Resources() {
+    private suspend fun releaseCamera2Resources() {
         closeCamera2()
         camera2Thread?.quitSafely()
         camera2Thread = null
