@@ -94,6 +94,7 @@ import com.android.example.cameraxbasic.utils.simulateClick
 import com.bumptech.glide.Glide
 import com.bumptech.glide.request.RequestOptions
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.isActive
@@ -153,6 +154,8 @@ class CameraFragment : Fragment() {
 
     private var camera2Thread: HandlerThread? = null
     private var camera2Handler: Handler? = null
+    private var pendingCamera2OpenJob: Job? = null
+    @Volatile private var camera2SessionGeneration = 0
 
     private var lutProcessor: LutSurfaceProcessor? = null
     private lateinit var lutManager: LutManager
@@ -643,6 +646,8 @@ class CameraFragment : Fragment() {
 
     @OptIn(ExperimentalCamera2Interop::class)
     private fun bindCameraUseCases() {
+        pendingCamera2OpenJob?.cancel()
+        pendingCamera2OpenJob = null
         refreshLenses()
 
         // Ensure Camera2 is closed if we are switching engines or lenses
@@ -720,8 +725,9 @@ class CameraFragment : Fragment() {
             }
 
             // Give system a moment to release hardware
-            lifecycleScope.launch(Dispatchers.Main) {
+            pendingCamera2OpenJob = lifecycleScope.launch(Dispatchers.Main) {
                 delay(300)
+                if (!isAdded || currentLens?.id == null) return@launch
                 openCamera2(currentLens!!.id)
             }
             return
@@ -2923,6 +2929,7 @@ class CameraFragment : Fragment() {
     private fun openCamera2(cameraId: String) {
         // Ensure previous device and session are closed
         closeCamera2()
+        val generation = ++camera2SessionGeneration
 
         Log.d(TAG, "Opening Camera2: $cameraId (retryCount: $camera2RetryCount)")
 
@@ -2934,9 +2941,14 @@ class CameraFragment : Fragment() {
         try {
             camera2Manager.openCamera(cameraId, object : android.hardware.camera2.CameraDevice.StateCallback() {
                 override fun onOpened(device: android.hardware.camera2.CameraDevice) {
+                    if (generation != camera2SessionGeneration) {
+                        Log.d(TAG, "Ignoring stale onOpened callback for camera ${device.id}")
+                        device.close()
+                        return
+                    }
                     camera2RetryCount = 0 // Reset on success
                     camera2Device = device
-                    createCamera2CaptureSession()
+                    createCamera2CaptureSession(generation)
                 }
 
                 override fun onDisconnected(device: android.hardware.camera2.CameraDevice) {
@@ -2975,7 +2987,7 @@ class CameraFragment : Fragment() {
         }
     }
 
-    private fun createCamera2CaptureSession() {
+    private fun createCamera2CaptureSession(generation: Int) {
         val device = camera2Device ?: return
         val handler = camera2Handler ?: return
 
@@ -3002,8 +3014,9 @@ class CameraFragment : Fragment() {
 
         Log.d(TAG, "Requesting preview surface from LutProcessor: ${previewSize.width}x${previewSize.height}")
         lutProcessor?.getInputSurface(previewSize.width, previewSize.height) { surface ->
-            if (!isAdded || camera2Device?.id != device.id) {
+            if (!isAdded || generation != camera2SessionGeneration || camera2Device !== device) {
                 Log.w(TAG, "Preview surface ready but fragment detached or device changed. Ignoring.")
+                surface.release()
                 return@getInputSurface
             }
 
@@ -3013,6 +3026,11 @@ class CameraFragment : Fragment() {
             try {
                 device.createCaptureSession(surfaces, object : android.hardware.camera2.CameraCaptureSession.StateCallback() {
                     override fun onConfigured(session: android.hardware.camera2.CameraCaptureSession) {
+                        if (generation != camera2SessionGeneration || camera2Device !== device) {
+                            Log.w(TAG, "Ignoring stale Camera2 session configuration callback")
+                            session.close()
+                            return
+                        }
                         camera2Session = session
                         try {
                             val request = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_PREVIEW)
@@ -3044,7 +3062,11 @@ class CameraFragment : Fragment() {
                     }
                 }, handler)
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to create capture session", e)
+                if (generation != camera2SessionGeneration) {
+                    Log.w(TAG, "Stale Camera2 session creation callback ignored")
+                } else {
+                    Log.e(TAG, "Failed to create capture session", e)
+                }
             }
         }
     }
@@ -3314,6 +3336,9 @@ class CameraFragment : Fragment() {
     }
 
     private fun closeCamera2() {
+        camera2SessionGeneration++
+        pendingCamera2OpenJob?.cancel()
+        pendingCamera2OpenJob = null
         camera2Session?.close()
         camera2Session = null
         camera2Device?.close()
