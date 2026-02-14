@@ -52,7 +52,7 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
             ccm, whiteBalance, zoomFactor
         )
 
-        return if (ret == 0) {
+        if (ret == 0) {
             Log.d(TAG, "Background Export Worker finished JNI processing for $baseName")
 
             // Robustly finalize MediaStore export directly from Worker
@@ -78,10 +78,14 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
             ColorProcessor.onBackgroundSaveComplete(
                 baseName, null, null, null, finalUri?.toString(), zoomFactor, orientation, saveTiff, saveJpg
             )
-            Result.success()
+            return Result.success()
         } else {
             Log.e(TAG, "Background Export Worker failed with code $ret")
-            Result.failure()
+            // Notify UI to stop animation even on failure
+            ColorProcessor.onBackgroundSaveComplete(
+                baseName, null, null, null, null, zoomFactor, orientation, saveTiff, saveJpg
+            )
+            return Result.failure()
         }
     }
 
