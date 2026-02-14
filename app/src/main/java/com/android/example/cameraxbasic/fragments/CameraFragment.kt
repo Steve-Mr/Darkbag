@@ -248,6 +248,8 @@ class CameraFragment : Fragment() {
 
     // Rate limiting semaphore to prevent OOM
     private val processingSemaphore = kotlinx.coroutines.sync.Semaphore(2)
+
+    private var camera2RetryCount = 0
     private val processingChannel = kotlinx.coroutines.channels.Channel<RawImageHolder>(2)
 
     data class RawImageHolder(
@@ -642,6 +644,9 @@ class CameraFragment : Fragment() {
     private fun bindCameraUseCases() {
         refreshLenses()
 
+        // Ensure Camera2 is closed if we are switching engines or lenses
+        closeCamera2()
+
         // Fetch Characteristics for Manual Control
         val targetId = if (lensFacing == CameraSelector.LENS_FACING_BACK) {
              currentLens?.physicalId ?: currentLens?.id ?: "0"
@@ -713,9 +718,9 @@ class CameraFragment : Fragment() {
                 Log.e(TAG, "Failed to check flash for Camera2", e)
             }
 
-            // Give CameraX a moment to release hardware
+            // Give system a moment to release hardware
             lifecycleScope.launch(Dispatchers.Main) {
-                delay(150)
+                delay(300)
                 openCamera2(currentLens!!.id)
             }
             return
@@ -2859,9 +2864,10 @@ class CameraFragment : Fragment() {
 
     @SuppressLint("MissingPermission")
     private fun openCamera2(cameraId: String) {
-        // Ensure previous session is closed, but keep the thread if possible
-        camera2Session?.close()
-        camera2Session = null
+        // Ensure previous device and session are closed
+        closeCamera2()
+
+        Log.d(TAG, "Opening Camera2: $cameraId (retryCount: $camera2RetryCount)")
 
         if (camera2Thread == null) {
             camera2Thread = HandlerThread("Camera2Thread").apply { start() }
@@ -2871,6 +2877,7 @@ class CameraFragment : Fragment() {
         try {
             camera2Manager.openCamera(cameraId, object : android.hardware.camera2.CameraDevice.StateCallback() {
                 override fun onOpened(device: android.hardware.camera2.CameraDevice) {
+                    camera2RetryCount = 0 // Reset on success
                     camera2Device = device
                     createCamera2CaptureSession()
                 }
@@ -2880,19 +2887,27 @@ class CameraFragment : Fragment() {
                 }
 
                 override fun onError(device: android.hardware.camera2.CameraDevice, error: Int) {
-                    Log.e(TAG, "Camera2 open error: $error")
+                    Log.e(TAG, "Camera2 open error: $error for camera $cameraId")
                     closeCamera2()
+
+                    if (error == 2 && camera2RetryCount < 1) {
+                         camera2RetryCount++
+                         Log.i(TAG, "Retrying camera open after hardware error (attempt $camera2RetryCount)...")
+                         camera2Handler?.postDelayed({ openCamera2(cameraId) }, 500)
+                         return
+                    }
+
                     lifecycleScope.launch(Dispatchers.Main) {
                         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
                         val useCameraxFallback = prefs.getBoolean(SettingsFragment.KEY_USE_CAMERAX, false)
 
                         if (useCameraxFallback) {
-                            Log.w(TAG, "Camera2 failed, falling back to CameraX Auto")
+                            Log.w(TAG, "Camera2 failed after retries, falling back to CameraX Auto")
                             currentLens = availableLenses.find { it.isLogicalAuto }
                             updateLensUI()
                             bindCameraUseCases()
                         } else {
-                            Toast.makeText(context, "Camera hardware error: $error", Toast.LENGTH_LONG).show()
+                            Toast.makeText(context, "Camera hardware error: $error. Please restart the app.", Toast.LENGTH_LONG).show()
                             cameraUiContainerBinding?.processingProgress?.visibility = View.GONE
                         }
                     }
