@@ -1986,7 +1986,16 @@ class CameraFragment : Fragment() {
                 } else {
                     btn.setTextColor(colorOnSurface)
                     btn.strokeWidth = 0
-                    btn.text = lens.name
+
+                    if (lens.multiplier in 0.95f..1.05f && !lens.isZoomPreset) {
+                        val default1xFocal = prefs.getString(SettingsFragment.KEY_DEFAULT_FOCAL_1X, "24mm")
+                        val presets1x = cameraRepository.get1xPresets(lens)
+                        val defaultPreset = presets1x.find { it.name == default1xFocal } ?: lens
+                        btn.text = String.format("%.1fx", defaultPreset.multiplier)
+                    } else {
+                        btn.text = lens.name
+                    }
+
                     btn.setBackgroundColor(MaterialColors.layer(
                         MaterialColors.getColor(btn, com.google.android.material.R.attr.colorSurface),
                         colorOnSurface,
