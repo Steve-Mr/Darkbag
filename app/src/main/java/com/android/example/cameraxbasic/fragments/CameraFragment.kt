@@ -930,14 +930,6 @@ class CameraFragment : Fragment() {
                 }
             }
 
-            // Pre-initialize JNI memory pool with current resolution and burst size
-            val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-            val burstSizeStr = prefs.getString(SettingsFragment.KEY_HDR_BURST_COUNT, "8") ?: "8"
-            val burstSize = burstSizeStr.toIntOrNull() ?: 8
-            imageCapture?.resolutionInfo?.resolution?.let { res ->
-                ColorProcessor.initMemoryPool(res.width, res.height, burstSize)
-            }
-
             // Restore Zoom
             updateZoom(false)
 
@@ -2769,6 +2761,9 @@ class CameraFragment : Fragment() {
                 Log.d(TAG, "JNI processHdrPlus returned $ret in ${jniEndTime - jniStartTime}ms")
 
                 if (ret == 0) {
+
+                    val saveStartTime = System.currentTimeMillis()
+
                     val workData = androidx.work.Data.Builder()
                         .putString("tempRawPath", tempRawFile.absolutePath)
                         .putInt("width", width)
@@ -2796,12 +2791,46 @@ class CameraFragment : Fragment() {
 
                     val workRequest = androidx.work.OneTimeWorkRequestBuilder<HdrPlusExportWorker>()
                         .setInputData(workData)
+                        .build()
+                    androidx.work.WorkManager.getInstance(context).enqueue(workRequest)
+                    val saveEndTime = System.currentTimeMillis()
+
+                    // Log Statistics
+                    val totalTime = saveEndTime - startTime
+                    val captureTime = captureEndTime - startTime
+                    val waitTime = jniStartTime - captureEndTime
+                    val jniTime = jniEndTime - jniStartTime
+                    val halideTime = debugStats[0]
+                    val copyTime = debugStats[1]
+                    val postTime = debugStats[2]
+                    val dngEncodeTime = debugStats[3]
+                    val nativeSaveTime = debugStats[4]
+                    val dngWaitTime = debugStats[5]
+                    val nativeTotalTime = debugStats[6]
+                    val saveTime = saveEndTime - saveStartTime
+
                     val logMsg = """
-                        [Total: ${saveEndTime - startTime}ms]
-                        JNI Prep: ${debugStats[12]}ms, Align: ${debugStats[7]}ms, Merge: ${debugStats[8]}ms
-                        Demosaic: ${debugStats[9]}ms, Denoise: ${debugStats[10]}ms, Color/Tone: ${debugStats[11]}ms
-                        Halide Total: ${debugStats[0]}ms
-                        Save (IO/Compress): ${saveEndTime - saveStartTime}ms
+                        [Total: ${totalTime}ms]
+                        Capture: ${captureTime}ms
+                        Wait: ${waitTime}ms
+                        JNI (Total): ${jniTime}ms
+                          - Native Total: ${nativeTotalTime}ms
+                          - JNI Prep: ${debugStats[12]}ms
+                          - Copy: ${copyTime}ms
+                          - Halide: ${halideTime}ms
+                            * Align: ${debugStats[7]}ms
+                            * Merge: ${debugStats[8]}ms
+                            * BlackWhite: ${debugStats[13]}ms
+                            * WB: ${debugStats[14]}ms
+                            * Demosaic: ${debugStats[9]}ms
+                            * Denoise: ${debugStats[10]}ms
+                            * sRGB: ${debugStats[11]}ms
+                          - Post: ${postTime}ms
+                          - DNG Encode: ${dngEncodeTime}ms
+                          - Save(Log/TIFF/BMP): ${nativeSaveTime}ms
+                          - DNG Wait(get): ${dngWaitTime}ms
+                        Save (IO/Compress): ${saveTime}ms
+                        HQ Export Mode: ${if (hqBackgroundExport) "Background" else "Inline"}
                     """.trimIndent()
 
                     Log.i(TAG, logMsg)
