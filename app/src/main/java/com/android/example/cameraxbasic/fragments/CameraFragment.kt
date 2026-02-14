@@ -2786,16 +2786,12 @@ class CameraFragment : Fragment() {
 
                     val workRequest = androidx.work.OneTimeWorkRequestBuilder<HdrPlusExportWorker>()
                         .setInputData(workData)
-                        .build()
-                    androidx.work.WorkManager.getInstance(context).enqueue(workRequest)
-                    val saveEndTime = System.currentTimeMillis()
-
                     val logMsg = """
                         [Total: ${saveEndTime - startTime}ms]
                         JNI Prep: ${debugStats[12]}ms, Align: ${debugStats[7]}ms, Merge: ${debugStats[8]}ms
                         Demosaic: ${debugStats[9]}ms, Denoise: ${debugStats[10]}ms, Color/Tone: ${debugStats[11]}ms
                         Halide Total: ${debugStats[0]}ms
-                        Offload to Worker: ${saveEndTime - jniEndTime}ms
+                        Save (IO/Compress): ${saveEndTime - saveStartTime}ms
                     """.trimIndent()
 
                     Log.i(TAG, logMsg)
