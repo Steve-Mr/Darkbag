@@ -248,6 +248,8 @@ class CameraFragment : Fragment() {
 
     // Rate limiting semaphore to prevent OOM
     private val processingSemaphore = kotlinx.coroutines.sync.Semaphore(2)
+
+    private var camera2RetryCount = 0
     private val processingChannel = kotlinx.coroutines.channels.Channel<RawImageHolder>(2)
 
     data class RawImageHolder(
@@ -460,13 +462,21 @@ class CameraFragment : Fragment() {
                         if (event.targetUri != null) {
                             Log.d(TAG, "Update thumbnail for ${event.baseName}: ${event.targetUri}")
                             withContext(Dispatchers.Main) {
+                                Toast.makeText(context, "HDR+ Saved!", Toast.LENGTH_SHORT).show()
                                 setGalleryThumbnail(event.targetUri)
+                                cameraUiContainerBinding?.processingProgress?.visibility = View.GONE
                             }
                         } else {
                              Log.w(TAG, "Received save event for ${event.baseName} without targetUri.")
+                             withContext(Dispatchers.Main) {
+                                 cameraUiContainerBinding?.processingProgress?.visibility = View.GONE
+                             }
                         }
                     } catch (e: Exception) {
                         Log.e(TAG, "Background UI update failed for ${event.baseName}", e)
+                        withContext(Dispatchers.Main) {
+                            cameraUiContainerBinding?.processingProgress?.visibility = View.GONE
+                        }
                     }
                 }
             }
@@ -480,6 +490,9 @@ class CameraFragment : Fragment() {
                 // Launch each task in applicationScope so it continues even if fragment is destroyed
                 (appContext as MainApplication).applicationScope.launch(Dispatchers.IO) {
                     try {
+                        withContext(Dispatchers.Main) {
+                            cameraUiContainerBinding?.processingProgress?.visibility = View.VISIBLE
+                        }
                         processImageAsync(appContext, holder)
                     } catch (e: Exception) {
                         Log.e(TAG, "Error processing image from channel", e)
@@ -488,6 +501,7 @@ class CameraFragment : Fragment() {
                         withContext(Dispatchers.Main) {
                             cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
                             cameraUiContainerBinding?.cameraCaptureButton?.alpha = 1.0f
+                            cameraUiContainerBinding?.processingProgress?.visibility = View.GONE
                         }
                     }
                 }
@@ -544,19 +558,24 @@ class CameraFragment : Fragment() {
             Log.d(TAG, "CameraX availableCameraInfo ID: $id")
         }
 
-        val newLenses = cameraRepository.enumerateCameras(cameraXIds)
-        Log.d(TAG, "Available Lenses identified: ${newLenses.size}")
+        val repoFacing = if (lensFacing == CameraSelector.LENS_FACING_BACK)
+            android.hardware.camera2.CameraCharacteristics.LENS_FACING_BACK
+        else
+            android.hardware.camera2.CameraCharacteristics.LENS_FACING_FRONT
+
+        val newLenses = cameraRepository.enumerateCameras(cameraXIds, repoFacing)
+        Log.d(TAG, "Available Lenses identified: ${newLenses.size} for facing $repoFacing")
 
         // Update currentLens reference if it exists, to pick up any engine changes
         currentLens?.let { old ->
              currentLens = newLenses.find { it.sensorId == old.sensorId }
                  ?: newLenses.find { it.id == old.id && it.physicalId == old.physicalId }
-                 ?: old
+                 // Don't keep old lens if it's from a different facing
         }
 
         availableLenses = newLenses
 
-        if (currentLens == null) {
+        if (currentLens == null || availableLenses.none { it.sensorId == currentLens?.sensorId }) {
             val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
             val savedLensId = prefs.getString(KEY_SELECTED_LENS_ID, null)
 
@@ -623,6 +642,11 @@ class CameraFragment : Fragment() {
 
     @OptIn(ExperimentalCamera2Interop::class)
     private fun bindCameraUseCases() {
+        refreshLenses()
+
+        // Ensure Camera2 is closed if we are switching engines or lenses
+        closeCamera2()
+
         // Fetch Characteristics for Manual Control
         val targetId = if (lensFacing == CameraSelector.LENS_FACING_BACK) {
              currentLens?.physicalId ?: currentLens?.id ?: "0"
@@ -694,9 +718,9 @@ class CameraFragment : Fragment() {
                 Log.e(TAG, "Failed to check flash for Camera2", e)
             }
 
-            // Give CameraX a moment to release hardware
+            // Give system a moment to release hardware
             lifecycleScope.launch(Dispatchers.Main) {
-                delay(150)
+                delay(300)
                 openCamera2(currentLens!!.id)
             }
             return
@@ -739,9 +763,26 @@ class CameraFragment : Fragment() {
         val cameraInfo = try {
             cameraProvider.getCameraInfo(cameraSelector)
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to get camera info for ${currentLens?.id}, falling back", e)
-            cameraSelector = CameraSelector.Builder().requireLensFacing(lensFacing).build()
-            cameraProvider.getCameraInfo(cameraSelector)
+            Log.e(TAG, "Failed to get camera info for ${currentLens?.id}", e)
+            if (useCameraxFallback) {
+                Log.w(TAG, "Fallback to generic lens facing as requested by setting")
+                cameraSelector = CameraSelector.Builder().requireLensFacing(lensFacing).build()
+                val info = cameraProvider.getCameraInfo(cameraSelector)
+
+                // Sync currentLens with actual bound camera
+                val actualId = Camera2CameraInfo.from(info).cameraId
+                val fallbackLens = availableLenses.find { it.id == actualId && it.physicalId == null }
+                if (fallbackLens != null && fallbackLens.sensorId != currentLens?.sensorId) {
+                    Log.d(TAG, "Updating currentLens to fallback: ${fallbackLens.name}")
+                    currentLens = fallbackLens
+                    updateLensUI()
+                }
+                info
+            } else {
+                Log.e(TAG, "CameraX bind failed and fallback is disabled.")
+                Toast.makeText(context, "Failed to bind to selected lens", Toast.LENGTH_SHORT).show()
+                return
+            }
         }
 
 
@@ -2414,7 +2455,15 @@ class CameraFragment : Fragment() {
         lifecycleScope.launch(Dispatchers.Main) {
             try {
                 val config = lastHdrPlusConfig ?: run {
-                    val result = captureResultFlow.replayCache.lastOrNull() ?: captureResultFlow.first()
+                    val result = captureResultFlow.replayCache.lastOrNull() ?: withTimeoutOrNull(2000) {
+                        captureResultFlow.first()
+                    }
+
+                    if (result == null) {
+                        Log.e(TAG, "Timed out waiting for capture result for HDR+ config")
+                        throw RuntimeException("Camera metadata timeout")
+                    }
+
                     val currentIso = result.get(android.hardware.camera2.CaptureResult.SENSOR_SENSITIVITY) ?: 100
                     val currentTime = result.get(android.hardware.camera2.CaptureResult.SENSOR_EXPOSURE_TIME) ?: 10_000_000L
                     val validIsoRange = isoRange ?: android.util.Range(100, 3200)
@@ -2470,6 +2519,7 @@ class CameraFragment : Fragment() {
                 cameraUiContainerBinding?.captureProgress?.max = burstSize
                 cameraUiContainerBinding?.captureProgress?.progress = 0
                 cameraUiContainerBinding?.captureProgress?.visibility = View.VISIBLE
+                cameraUiContainerBinding?.processingProgress?.visibility = View.VISIBLE
                 cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = false
                 cameraUiContainerBinding?.cameraCaptureButton?.alpha = 0.5f
 
@@ -2493,6 +2543,7 @@ class CameraFragment : Fragment() {
                 ).show()
                 resetBurstUi()
                 processingSemaphore.release()
+                cameraUiContainerBinding?.processingProgress?.visibility = View.GONE
                 applyCameraControls()
             }
         }
@@ -2750,15 +2801,6 @@ class CameraFragment : Fragment() {
                     Log.i(TAG, logMsg)
                     com.android.example.cameraxbasic.utils.DebugLogManager.addLog(logMsg)
 
-                    withContext(Dispatchers.Main) {
-                        if (finalJpgUri != null) {
-                            Toast.makeText(context, "HDR+ Saved!", Toast.LENGTH_SHORT).show()
-                            setGalleryThumbnail(finalJpgUri.toString())
-                        } else {
-                            Toast.makeText(context, "HDR+ Saved!", Toast.LENGTH_SHORT).show()
-                        }
-                    }
-
                 } else {
                     throw RuntimeException("JNI processing returned error code: $ret")
                 }
@@ -2767,6 +2809,7 @@ class CameraFragment : Fragment() {
                 Log.e(TAG, "HDR+ processing failed, falling back to single shot", e)
                 withContext(Dispatchers.Main) {
                     Toast.makeText(appContext, "HDR+ failed, saving single frame...", Toast.LENGTH_SHORT).show()
+                    cameraUiContainerBinding?.processingProgress?.visibility = View.GONE
                 }
 
                 if (frames.isNotEmpty()) {
@@ -2821,9 +2864,10 @@ class CameraFragment : Fragment() {
 
     @SuppressLint("MissingPermission")
     private fun openCamera2(cameraId: String) {
-        // Ensure previous session is closed, but keep the thread if possible
-        camera2Session?.close()
-        camera2Session = null
+        // Ensure previous device and session are closed
+        closeCamera2()
+
+        Log.d(TAG, "Opening Camera2: $cameraId (retryCount: $camera2RetryCount)")
 
         if (camera2Thread == null) {
             camera2Thread = HandlerThread("Camera2Thread").apply { start() }
@@ -2833,6 +2877,7 @@ class CameraFragment : Fragment() {
         try {
             camera2Manager.openCamera(cameraId, object : android.hardware.camera2.CameraDevice.StateCallback() {
                 override fun onOpened(device: android.hardware.camera2.CameraDevice) {
+                    camera2RetryCount = 0 // Reset on success
                     camera2Device = device
                     createCamera2CaptureSession()
                 }
@@ -2842,12 +2887,29 @@ class CameraFragment : Fragment() {
                 }
 
                 override fun onError(device: android.hardware.camera2.CameraDevice, error: Int) {
-                    Log.e(TAG, "Camera2 open error: $error")
+                    Log.e(TAG, "Camera2 open error: $error for camera $cameraId")
                     closeCamera2()
+
+                    if (error == 2 && camera2RetryCount < 1) {
+                         camera2RetryCount++
+                         Log.i(TAG, "Retrying camera open after hardware error (attempt $camera2RetryCount)...")
+                         camera2Handler?.postDelayed({ openCamera2(cameraId) }, 500)
+                         return
+                    }
+
                     lifecycleScope.launch(Dispatchers.Main) {
-                        currentLens = availableLenses.find { it.isLogicalAuto }
-                        updateLensUI()
-                        bindCameraUseCases()
+                        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                        val useCameraxFallback = prefs.getBoolean(SettingsFragment.KEY_USE_CAMERAX, false)
+
+                        if (useCameraxFallback) {
+                            Log.w(TAG, "Camera2 failed after retries, falling back to CameraX Auto")
+                            currentLens = availableLenses.find { it.isLogicalAuto }
+                            updateLensUI()
+                            bindCameraUseCases()
+                        } else {
+                            Toast.makeText(context, "Camera hardware error: $error. Please restart the app.", Toast.LENGTH_LONG).show()
+                            cameraUiContainerBinding?.processingProgress?.visibility = View.GONE
+                        }
                     }
                 }
             }, camera2Handler)
@@ -2931,10 +2993,10 @@ class CameraFragment : Fragment() {
     }
 
     private fun takeSinglePictureCamera2() {
-        val device = camera2Device ?: return
-        val session = camera2Session ?: return
-        val reader = rawImageReader ?: return
-        val handler = camera2Handler ?: return
+        val device = camera2Device ?: run { processingSemaphore.release(); return }
+        val session = camera2Session ?: run { processingSemaphore.release(); return }
+        val reader = rawImageReader ?: run { processingSemaphore.release(); return }
+        val handler = camera2Handler ?: run { processingSemaphore.release(); return }
 
         try {
             val request = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_STILL_CAPTURE)
@@ -2985,10 +3047,10 @@ class CameraFragment : Fragment() {
     }
 
     private fun triggerHdrPlusBurstCamera2() {
-        val device = camera2Device ?: return
-        val session = camera2Session ?: return
-        val reader = rawImageReader ?: return
-        val handler = camera2Handler ?: return
+        val device = camera2Device ?: run { processingSemaphore.release(); return }
+        val session = camera2Session ?: run { processingSemaphore.release(); return }
+        val reader = rawImageReader ?: run { processingSemaphore.release(); return }
+        val handler = camera2Handler ?: run { processingSemaphore.release(); return }
 
         isBurstActive = true
         burstStartTime = System.currentTimeMillis()
@@ -3016,6 +3078,7 @@ class CameraFragment : Fragment() {
                 cameraUiContainerBinding?.captureProgress?.max = burstSize
                 cameraUiContainerBinding?.captureProgress?.progress = 0
                 cameraUiContainerBinding?.captureProgress?.visibility = View.VISIBLE
+                cameraUiContainerBinding?.processingProgress?.visibility = View.VISIBLE
                 cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = false
                 cameraUiContainerBinding?.cameraCaptureButton?.alpha = 0.5f
             }
@@ -3098,7 +3161,10 @@ class CameraFragment : Fragment() {
             Log.e(TAG, "Camera2 burst failed", e)
             isBurstActive = false
             processingSemaphore.release()
-            lifecycleScope.launch(Dispatchers.Main) { resetBurstUi() }
+            lifecycleScope.launch(Dispatchers.Main) {
+                cameraUiContainerBinding?.processingProgress?.visibility = View.GONE
+                resetBurstUi()
+            }
         }
     }
 
@@ -3213,6 +3279,7 @@ class CameraFragment : Fragment() {
 
     private fun resetBurstUi() {
         cameraUiContainerBinding?.captureProgress?.visibility = View.GONE
+        cameraUiContainerBinding?.processingProgress?.visibility = View.GONE
         isBurstActive = false
 
         if (processingSemaphore.availablePermits > 0) {

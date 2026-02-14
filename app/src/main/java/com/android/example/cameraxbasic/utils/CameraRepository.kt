@@ -35,7 +35,7 @@ class CameraRepository(private val context: Context) {
     private val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
     private val TAG = "CameraRepository"
 
-    fun enumerateCameras(cameraXIds: Set<String>): List<LensInfo> {
+    fun enumerateCameras(cameraXIds: Set<String>, facing: Int = CameraCharacteristics.LENS_FACING_BACK): List<LensInfo> {
         val availableLenses = mutableListOf<LensInfo>()
         val idToChars = mutableMapOf<String, CameraCharacteristics>()
 
@@ -47,59 +47,52 @@ class CameraRepository(private val context: Context) {
         for (id in probeIds) {
             try {
                 val chars = cameraManager.getCameraCharacteristics(id)
-                idToChars[id] = chars
-                Log.d(TAG, "Probed ID $id: Facing=${chars.get(CameraCharacteristics.LENS_FACING)}")
+                if (chars.get(CameraCharacteristics.LENS_FACING) == facing) {
+                    idToChars[id] = chars
+                    Log.d(TAG, "Probed ID $id: Facing=$facing")
+                }
             } catch (e: Exception) {}
         }
 
         // 2. Baseline for Multipliers
         var mainWideEqFocal = 24f
-        val backCameraIds = idToChars.filter { (_, chars) ->
-            chars.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK
-        }.keys
-        val mainId = if (backCameraIds.contains("0")) "0" else backCameraIds.firstOrNull()
+        val facingCameraIds = idToChars.keys
+        val mainId = if (facingCameraIds.contains("0")) "0" else if (facingCameraIds.contains("1")) "1" else facingCameraIds.firstOrNull()
         mainId?.let { id ->
             mainWideEqFocal = calculateEquivalentFocalLength(idToChars[id]!!)
         }
 
         // 3. Identify Anchor and All Physicals
-        val backIds = idToChars.filter { (_, chars) ->
-            chars.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK
-        }.keys
+        val currentFacingIds = idToChars.keys
 
-        // Anchor is the first back-facing ID that CameraX actually supports
+        // Anchor is the first facing-matched ID that CameraX actually supports
         val anchorId = cameraXIds.find { id ->
-            idToChars[id]?.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK
-        } ?: backIds.firstOrNull() ?: return emptyList()
+            idToChars[id]?.get(CameraCharacteristics.LENS_FACING) == facing
+        } ?: currentFacingIds.firstOrNull() ?: return emptyList()
 
         val anchorChars = idToChars[anchorId] ?: return emptyList()
         val zoomRange = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             anchorChars.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
         } else null
 
-        // A. Add ALL back-facing physical sensors found during probe
+        // A. Add ALL facing-matched physical sensors found during probe
         // We prioritize physical sensors to give the user direct hardware access.
-        for (id in backIds) {
+        for (id in currentFacingIds) {
             val chars = idToChars[id] ?: continue
 
-            // Strategy:
-            // 1. If it's the anchorId (usually the main logical camera), add it as the primary CameraX lens.
-            // 2. If CameraX supports this ID directly, use CameraX (id=id, physicalId=null, useCamera2=false).
-            // 3. If CameraX doesn't support it, but it's a component of anchorId, use CameraX with physical lock (id=anchorId, physicalId=id, useCamera2=false).
-            // 4. Otherwise, use Direct Camera2 (id=id, physicalId=null, useCamera2=true).
-
+            // Strategy: Prefer direct Camera2 for all physical/logical sensors to ensure consistent hardware control.
+            // Only use CameraX if explicitly requested via settings (handled in CameraFragment).
             val isAnchor = id == anchorId
-            val isCameraXDirect = cameraXIds.contains(id)
-            val isPhysicalComponent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                anchorChars.physicalCameraIds.contains(id)
-            } else false
 
-            val info = when {
-                isAnchor -> createLensInfo(id, null, chars, mainWideEqFocal, isAuto = true, zoomRange = zoomRange, useCamera2 = false)
-                isCameraXDirect -> createLensInfo(id, null, chars, mainWideEqFocal, useCamera2 = false)
-                isPhysicalComponent -> createLensInfo(anchorId, id, chars, mainWideEqFocal, useCamera2 = false)
-                else -> createLensInfo(id, null, chars, mainWideEqFocal, useCamera2 = true)
-            }
+            val info = createLensInfo(
+                id = id,
+                physicalId = null,
+                chars = chars,
+                mainFocal35mm = mainWideEqFocal,
+                isAuto = isAnchor,
+                zoomRange = if (isAnchor) zoomRange else null,
+                useCamera2 = true // Prefer Camera2 for everyone by default
+            )
 
             // Avoid adding duplicates (e.g. if we already have a lens with this sensorId)
             if (availableLenses.none { it.sensorId == info.sensorId }) {
@@ -109,7 +102,7 @@ class CameraRepository(private val context: Context) {
 
         // B. Ensure we have at least the anchor camera
         if (availableLenses.none { it.id == anchorId && it.physicalId == null }) {
-            availableLenses.add(createLensInfo(anchorId, null, anchorChars, mainWideEqFocal, isAuto = true, zoomRange = zoomRange))
+            availableLenses.add(createLensInfo(anchorId, null, anchorChars, mainWideEqFocal, isAuto = true, zoomRange = zoomRange, useCamera2 = true))
         }
 
         // Sort by focal length multiplier
