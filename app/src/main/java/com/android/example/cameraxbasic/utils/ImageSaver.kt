@@ -36,8 +36,8 @@ object ImageSaver {
         saveJpg: Boolean,
         saveTiff: Boolean,
         targetUri: Uri? = null,
-        onBitmapReady: ((Bitmap) -> Unit)? = null,
-        mirror: Boolean = false
+        mirror: Boolean = false,
+        onBitmapReady: ((Bitmap) -> Unit)? = null
     ): Uri? {
         val contentResolver = context.contentResolver
         var finalJpgUri: Uri? = null
