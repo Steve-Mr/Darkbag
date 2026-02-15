@@ -1378,9 +1378,9 @@ class CameraFragment : Fragment() {
                     )
                     dngBytes = dngOutputStream.toByteArray()
 
-                    // 4. Process with LibRaw
+                    // 4. Process with LibRaw (JNI does NOT rotate/mirror/zoom for Standard RAW to keep thumbnail correct)
                     val result = ColorProcessor.processRaw(
-                        dngBytes, targetLogIndex, nativeLutPath, tiffPath, bmpPath, useGpu, image.combinedOrientation, mirror
+                        dngBytes, targetLogIndex, nativeLutPath, tiffPath, bmpPath, useGpu, 0, false
                     )
 
                     if (result == 1) {
@@ -2819,7 +2819,7 @@ class CameraFragment : Fragment() {
                             null,
                             true,
                             false,
-                            mirror = mirror
+                            mirror = false // Mirroring already handled in JNI
                         )
                     } else {
                         null

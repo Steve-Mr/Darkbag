@@ -167,6 +167,8 @@ object ImageSaver {
                             FileInputStream(tiffFile).copyTo(out)
                         }
 
+                        updateExifOrientation(context, tiffUri, getExifOrientation(rotationDegrees, mirror))
+
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                             tiffValues.clear()
                             tiffValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
