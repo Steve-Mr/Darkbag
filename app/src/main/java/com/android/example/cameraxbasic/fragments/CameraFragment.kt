@@ -177,6 +177,12 @@ class CameraFragment : Fragment() {
 
     // HDR+ State
     private var isHdrPlusEnabled = false
+
+    private val shouldMirror: Boolean
+        get() = lensFacing == CameraSelector.LENS_FACING_FRONT &&
+                requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                    .getBoolean(SettingsFragment.KEY_MIRROR_FRONT_CAMERA, true)
+
     @Volatile private var isBurstActive = false
     private var hdrPlusBurstHelper: HdrPlusBurst? = null
     private var lastHdrPlusConfig: ExposureUtils.ExposureConfig? = null // Cache for instant trigger
@@ -1363,8 +1369,7 @@ class CameraFragment : Fragment() {
                     val dngOutputStream = java.io.ByteArrayOutputStream()
                     var dngBytes: ByteArray? = null
 
-                    val mirror = lensFacing == CameraSelector.LENS_FACING_FRONT &&
-                            prefs.getBoolean(SettingsFragment.KEY_MIRROR_FRONT_CAMERA, true)
+                    val mirror = shouldMirror
 
                     val exifOrientation = ImageSaver.getExifOrientation(image.combinedOrientation, mirror)
                     dngCreatorReal.setOrientation(exifOrientation)
@@ -1413,16 +1418,16 @@ class CameraFragment : Fragment() {
 
                     // 5. Shared Save Logic
                     val finalJpgUri = ImageSaver.saveProcessedImage(
-                        context,
-                        null,
-                        bmpPath,
-                        image.combinedOrientation,
-                        zoomFactor,
-                        dngName,
-                        null,
-                        tiffPath,
-                        saveJpg,
-                        saveTiff,
+                        context = context,
+                        inputBitmap = null,
+                        bmpPath = bmpPath,
+                        rotationDegrees = image.combinedOrientation,
+                        zoomFactor = zoomFactor,
+                        baseName = dngName,
+                        linearDngPath = null,
+                        tiffPath = tiffPath,
+                        saveJpg = saveJpg,
+                        saveTiff = saveTiff,
                         mirror = mirror
                     ) { bitmap ->
                         try {
@@ -2363,6 +2368,45 @@ class CameraFragment : Fragment() {
         const val KEY_HDR_PLUS_ENABLED = "hdr_plus_enabled"
     }
 
+    private fun saveJpegFallback(data: ByteArray, rotationDegrees: Int, zoomFactor: Float) {
+        val appContext = requireContext().applicationContext
+        val mirror = shouldMirror
+
+        (appContext as MainApplication).applicationScope.launch(Dispatchers.IO) {
+            try {
+                val name = SimpleDateFormat(FILENAME, Locale.US).format(System.currentTimeMillis())
+                val bmpFile = File(appContext.cacheDir, "temp_$name.jpg")
+                FileOutputStream(bmpFile).use { it.write(data) }
+
+                val uri = ImageSaver.saveProcessedImage(
+                    context = appContext,
+                    inputBitmap = null,
+                    bmpPath = bmpFile.absolutePath,
+                    rotationDegrees = rotationDegrees,
+                    zoomFactor = zoomFactor,
+                    baseName = name,
+                    linearDngPath = null,
+                    tiffPath = null,
+                    saveJpg = true,
+                    saveTiff = false,
+                    mirror = mirror
+                )
+                withContext(Dispatchers.Main) {
+                    uri?.let { setGalleryThumbnail(it.toString()) }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to save JPEG fallback", e)
+            } finally {
+                processingSemaphore.release()
+                withContext(Dispatchers.Main) {
+                    cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
+                    cameraUiContainerBinding?.cameraCaptureButton?.alpha = 1.0f
+                    hideProcessingAnimation()
+                }
+            }
+        }
+    }
+
     private fun takeSinglePicture(imageCapture: ImageCapture) {
         imageCapture.takePicture(
             cameraExecutor,
@@ -2410,50 +2454,12 @@ class CameraFragment : Fragment() {
                         val buffer = image.planes[0].buffer
                         val data = ByteArray(buffer.remaining())
                         buffer.get(data)
-                        val timestamp = image.imageInfo.timestamp
                         val rotation = image.imageInfo.rotationDegrees
                         image.close()
 
-                        val appContext = requireContext().applicationContext
-                        val combinedOrientation = getCombinedOrientation()
                         val currentZoom = if (is2xMode) 2.0f else (currentFocalLength / 24.0f)
-
-                        val mirror = lensFacing == CameraSelector.LENS_FACING_FRONT &&
-                                requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-                                    .getBoolean(SettingsFragment.KEY_MIRROR_FRONT_CAMERA, true)
-
-                        (appContext as MainApplication).applicationScope.launch(Dispatchers.IO) {
-                            try {
-                                val name = SimpleDateFormat(FILENAME, Locale.US).format(System.currentTimeMillis())
-                                val bmpFile = File(appContext.cacheDir, "temp_$name.jpg")
-                                FileOutputStream(bmpFile).use { it.write(data) }
-
-                                val uri = ImageSaver.saveProcessedImage(
-                                    appContext,
-                                    null,
-                                    bmpFile.absolutePath,
-                                    rotation,
-                                    currentZoom,
-                                    name,
-                                    null,
-                                    null,
-                                    saveJpg = true,
-                                    saveTiff = false,
-                                    mirror = mirror
-                                )
-                                withContext(Dispatchers.Main) {
-                                    uri?.let { setGalleryThumbnail(it.toString()) }
-                                }
-                            } catch (e: Exception) {
-                                Log.e(TAG, "Failed to save JPEG fallback", e)
-                            } finally {
-                                processingSemaphore.release()
-                                withContext(Dispatchers.Main) {
-                                    cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
-                                    cameraUiContainerBinding?.cameraCaptureButton?.alpha = 1.0f
-                                }
-                            }
-                        }
+                        showProcessingAnimation()
+                        saveJpegFallback(data, rotation, currentZoom)
                     }
                 }
 
@@ -2772,8 +2778,7 @@ class CameraFragment : Fragment() {
                 // Initial JNI call produces:
                 // 1) intermediate linear RAW buffer (tempRawPath) for the ExportWorker,
                 // 2) optional fast downsampled JPEG (tempJpgPath) for immediate gallery update.
-                val mirror = lensFacing == CameraSelector.LENS_FACING_FRONT &&
-                        prefs.getBoolean(SettingsFragment.KEY_MIRROR_FRONT_CAMERA, true)
+                val mirror = shouldMirror
 
                 val ret = ColorProcessor.processHdrPlus(
                     buffers,
@@ -2804,21 +2809,20 @@ class CameraFragment : Fragment() {
 
                     val saveStartTime = System.currentTimeMillis()
 
-                    val mirror = lensFacing == CameraSelector.LENS_FACING_FRONT &&
-                            prefs.getBoolean(SettingsFragment.KEY_MIRROR_FRONT_CAMERA, true)
+                    val mirror = shouldMirror
 
                     val fastJpegUri = if (saveJpg) {
                         ImageSaver.saveProcessedImage(
-                            context,
-                            null,
-                            tempJpgFile.absolutePath,
-                            0, // Rotation already handled in JNI
-                            1.0f, // Zoom already handled in JNI
-                            dngName,
-                            null,
-                            null,
-                            true,
-                            false,
+                            context = context,
+                            inputBitmap = null,
+                            bmpPath = tempJpgFile.absolutePath,
+                            rotationDegrees = 0, // Rotation already handled in JNI
+                            zoomFactor = 1.0f, // Zoom already handled in JNI
+                            baseName = dngName,
+                            linearDngPath = null,
+                            tiffPath = null,
+                            saveJpg = true,
+                            saveTiff = false,
                             mirror = false // Mirroring already handled in JNI
                         )
                     } else {
@@ -3136,44 +3140,9 @@ class CameraFragment : Fragment() {
                         buffer.get(data)
                         image.close()
 
-                        val combinedOrientation = getCombinedOrientation()
-                        val mirror = lensFacing == CameraSelector.LENS_FACING_FRONT &&
-                                requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-                                    .getBoolean(SettingsFragment.KEY_MIRROR_FRONT_CAMERA, true)
-
-                        val appContext = requireContext().applicationContext
-                        (appContext as MainApplication).applicationScope.launch(Dispatchers.IO) {
-                            try {
-                                val name = SimpleDateFormat(FILENAME, Locale.US).format(System.currentTimeMillis())
-                                val bmpFile = File(appContext.cacheDir, "temp_$name.jpg")
-                                FileOutputStream(bmpFile).use { it.write(data) }
-
-                                val uri = ImageSaver.saveProcessedImage(
-                                    appContext,
-                                    null,
-                                    bmpFile.absolutePath,
-                                    0, // Rotation already handled by Camera2 if JPEG_ORIENTATION was set
-                                    currentZoom,
-                                    name,
-                                    null,
-                                    null,
-                                    saveJpg = true,
-                                    saveTiff = false,
-                                    mirror = mirror
-                                )
-                                withContext(Dispatchers.Main) {
-                                    uri?.let { setGalleryThumbnail(it.toString()) }
-                                }
-                            } catch (e: Exception) {
-                                Log.e(TAG, "Failed to save JPEG fallback (C2)", e)
-                            } finally {
-                                processingSemaphore.release()
-                                withContext(Dispatchers.Main) {
-                                    cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
-                                    cameraUiContainerBinding?.cameraCaptureButton?.alpha = 1.0f
-                                }
-                            }
-                        }
+                        val currentZoom = if (is2xMode) 2.0f else (currentFocalLength / 24.0f)
+                        showProcessingAnimation()
+                        saveJpegFallback(data, 0, currentZoom) // Rotation handled by C2 JPEG_ORIENTATION
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to process Camera2 image", e)

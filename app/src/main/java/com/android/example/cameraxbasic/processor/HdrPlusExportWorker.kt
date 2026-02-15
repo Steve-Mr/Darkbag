@@ -59,17 +59,17 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
             // Robustly finalize MediaStore export directly from Worker
             // JNI already did rotation and zoom!
             val finalUri = ImageSaver.saveProcessedImage(
-                applicationContext,
-                null,
-                jpgPath,
-                0, // orientation 0 (already handled by JNI)
-                1.0f, // zoom 1.0 (already handled by JNI)
-                baseName,
-                dngPath,
-                tiffPath,
-                saveJpg,
-                saveTiff,
-                targetUri?.let { Uri.parse(it) },
+                context = applicationContext,
+                inputBitmap = null,
+                bmpPath = jpgPath,
+                rotationDegrees = 0, // orientation 0 (already handled by JNI)
+                zoomFactor = 1.0f, // zoom 1.0 (already handled by JNI)
+                baseName = baseName,
+                linearDngPath = dngPath,
+                tiffPath = tiffPath,
+                saveJpg = saveJpg,
+                saveTiff = saveTiff,
+                targetUri = targetUri?.let { Uri.parse(it) },
                 mirror = false // already handled by JNI
             )
 
