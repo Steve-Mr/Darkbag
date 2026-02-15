@@ -35,24 +35,37 @@ class CameraRepository(private val context: Context) {
     private val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
     private val TAG = "CameraRepository"
 
-    fun enumerateCameras(cameraXIds: Set<String>, facing: Int = CameraCharacteristics.LENS_FACING_BACK): List<LensInfo> {
-        val availableLenses = mutableListOf<LensInfo>()
-        val idToChars = mutableMapOf<String, CameraCharacteristics>()
+    companion object {
+        // Global cache to persist across repository instances and fragment recreations
+        private val idToCharsCache = mutableMapOf<String, CameraCharacteristics>()
+        private var hasProbed = false
+        private val probeLock = Any()
+    }
 
-        // 1. Aggressive Probe
-        val probeIds = mutableSetOf<String>()
-        probeIds.addAll(cameraManager.cameraIdList)
-        for (i in 0..63) probeIds.add(i.toString())
+    private fun probeAllCameras() {
+        if (hasProbed) return
+        synchronized(probeLock) {
+            if (hasProbed) return
+            Log.d(TAG, "Performing one-time aggressive camera probe (0-63)")
+            val probeIds = mutableSetOf<String>()
+            probeIds.addAll(cameraManager.cameraIdList)
+            for (i in 0..63) probeIds.add(i.toString())
 
-        for (id in probeIds) {
-            try {
-                val chars = cameraManager.getCameraCharacteristics(id)
-                if (chars.get(CameraCharacteristics.LENS_FACING) == facing) {
-                    idToChars[id] = chars
-                    Log.d(TAG, "Probed ID $id: Facing=$facing")
-                }
-            } catch (e: Exception) {}
+            for (id in probeIds) {
+                try {
+                    val chars = cameraManager.getCameraCharacteristics(id)
+                    idToCharsCache[id] = chars
+                } catch (e: Exception) {}
+            }
+            hasProbed = true
         }
+    }
+
+    fun enumerateCameras(cameraXIds: Set<String>, facing: Int = CameraCharacteristics.LENS_FACING_BACK): List<LensInfo> {
+        probeAllCameras()
+
+        val availableLenses = mutableListOf<LensInfo>()
+        val idToChars = idToCharsCache.filter { it.value.get(CameraCharacteristics.LENS_FACING) == facing }
 
         // 2. Baseline for Multipliers
         var mainWideEqFocal = 24f
@@ -107,6 +120,86 @@ class CameraRepository(private val context: Context) {
 
         // Sort by focal length multiplier
         return availableLenses.sortedBy { it.multiplier }
+    }
+
+    /**
+     * Returns a unified list of physical lenses and digital focal length presets (28mm, 35mm, 2.0x).
+     * Used for settings and UI logic.
+     */
+    fun getFocalLengthPresets(cameraXIds: Set<String>, facing: Int = CameraCharacteristics.LENS_FACING_BACK): List<LensInfo> {
+        val physicalLenses = enumerateCameras(cameraXIds, facing)
+        val result = physicalLenses.filter { !it.isLogicalAuto }.toMutableList()
+
+        // 2.0x virtual if no physical 2x exists (between 1.8x and 2.2x)
+        val hasPhysical2x = physicalLenses.any { it.multiplier in 1.8f..2.2f }
+        if (!hasPhysical2x) {
+            val mainWide = result.find { it.multiplier in 0.95f..1.05f }
+            if (mainWide != null) {
+                result.add(mainWide.copy(
+                    sensorId = "${mainWide.sensorId}-virtual-2x",
+                    name = "2.0x",
+                    multiplier = mainWide.multiplier * 2.0f,
+                    isZoomPreset = true,
+                    targetZoomRatio = 2.0f
+                ))
+            }
+        }
+
+        return result.sortedBy { it.multiplier }
+    }
+
+    /**
+     * Returns the "main wide" (1.0x) lens for a given facing.
+     */
+    fun getMainWideLens(cameraXIds: Set<String>, facing: Int = CameraCharacteristics.LENS_FACING_BACK): LensInfo? {
+        val lenses = enumerateCameras(cameraXIds, facing)
+        return lenses.find { it.multiplier in 0.95f..1.05f && !it.isLogicalAuto }
+            ?: lenses.find { it.isLogicalAuto }
+            ?: lenses.firstOrNull()
+    }
+
+    /**
+     * Returns sub-presets for the 1.0x lens (24mm, 28mm, 35mm).
+     */
+    fun get1xPresets(mainWide: LensInfo): List<LensInfo> {
+        val result = mutableListOf<LensInfo>()
+        val mainEqFocal = mainWide.equivalentFocalLength
+
+        // 24mm (Base)
+        result.add(mainWide.copy(
+            sensorId = "${mainWide.sensorId}-24mm",
+            name = "24mm",
+            multiplier = mainWide.multiplier,
+            isZoomPreset = true,
+            targetZoomRatio = 1.0f
+        ))
+
+        // 28mm
+        if (mainEqFocal <= 26f) {
+            val targetEq = 28f
+            val zoom = targetEq / mainEqFocal
+            result.add(mainWide.copy(
+                sensorId = "${mainWide.sensorId}-28mm",
+                name = "28mm",
+                multiplier = mainWide.multiplier * zoom,
+                isZoomPreset = true,
+                targetZoomRatio = zoom
+            ))
+        }
+
+        // 35mm
+        if (mainEqFocal <= 33f) {
+            val targetEq = 35f
+            val zoom = targetEq / mainEqFocal
+            result.add(mainWide.copy(
+                sensorId = "${mainWide.sensorId}-35mm",
+                name = "35mm",
+                multiplier = mainWide.multiplier * zoom,
+                isZoomPreset = true,
+                targetZoomRatio = zoom
+            ))
+        }
+        return result
     }
 
     private fun createLensInfo(
