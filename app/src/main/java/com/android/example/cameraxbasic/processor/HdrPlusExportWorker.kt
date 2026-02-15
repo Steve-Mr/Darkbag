@@ -16,6 +16,10 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
         val height = data.getInt("height", 0)
         val orientation = data.getInt("orientation", 0)
         val digitalGain = data.getFloat("digitalGain", 1.0f)
+        val lscMapPath = data.getString("lscMapPath")
+        val lscWidth = data.getInt("lscWidth", 0)
+        val lscHeight = data.getInt("lscHeight", 0)
+        val blackLevelPattern = data.getFloatArray("blackLevelPattern")
         val targetLog = data.getInt("targetLog", 0)
         val lutPath = data.getString("lutPath")
         val tiffPath = data.getString("tiffPath")
@@ -46,11 +50,29 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
 
         Log.d(TAG, "Background Export Worker started for $baseName")
 
+        val lscMap = lscMapPath?.let { path ->
+            try {
+                val file = java.io.File(path)
+                if (file.exists()) {
+                    val bytes = file.readBytes()
+                    val fb = java.nio.ByteBuffer.wrap(bytes).order(java.nio.ByteOrder.nativeOrder()).asFloatBuffer()
+                    val array = FloatArray(fb.capacity())
+                    fb.get(array)
+                    file.delete()
+                    array
+                } else null
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to load LSC map from $path", e)
+                null
+            }
+        }
+
         val ret = ColorProcessor.exportHdrPlus(
             tempRawPath, width, height, orientation, digitalGain, targetLog,
             lutPath, tiffPath, jpgPath, dngPath,
             iso, exposureTime, fNumber, focalLength, captureTimeMillis,
-            ccm, whiteBalance, zoomFactor, mirror
+            ccm, whiteBalance, zoomFactor, mirror,
+            lscMap, lscWidth, lscHeight, blackLevelPattern, true
         )
 
         if (ret == 0) {

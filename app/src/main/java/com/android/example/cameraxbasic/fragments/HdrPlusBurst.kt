@@ -14,7 +14,11 @@ data class HdrFrame(
     val height: Int,
     val timestamp: Long,
     val rotationDegrees: Int,
-    val physicalId: String? = null
+    val physicalId: String? = null,
+    var lscMap: FloatArray? = null,
+    var lscWidth: Int = 0,
+    var lscHeight: Int = 0,
+    var blackLevelPattern: FloatArray? = null
 ) {
     /**
      * Explicitly clears the buffer reference to assist GC.
@@ -101,7 +105,11 @@ class HdrPlusBurst(
         pixelStride: Int,
         timestamp: Long,
         rotationDegrees: Int,
-        physicalId: String? = null
+        physicalId: String? = null,
+        lscMap: FloatArray? = null,
+        lscWidth: Int = 0,
+        lscHeight: Int = 0,
+        blackLevelPattern: FloatArray? = null
     ) {
         if (frames.size < frameCount) {
             try {
@@ -109,6 +117,10 @@ class HdrPlusBurst(
                     buffer, width, height, rowStride, pixelStride,
                     timestamp, rotationDegrees, physicalId
                 )
+                frame.lscMap = lscMap
+                frame.lscWidth = lscWidth
+                frame.lscHeight = lscHeight
+                frame.blackLevelPattern = blackLevelPattern
                 frames.add(frame)
                 if (frames.size == frameCount) {
                     onBurstComplete(frames.toList())

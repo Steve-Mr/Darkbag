@@ -288,7 +288,11 @@ class CameraFragment : Fragment() {
         val rotationDegrees: Int, // Sensor Orientation
         val combinedOrientation: Int, // Combined with Display
         val zoomRatio: Float,
-        val physicalId: String? = null
+        val physicalId: String? = null,
+        val lscMap: FloatArray? = null,
+        val lscWidth: Int = 0,
+        val lscHeight: Int = 0,
+        val blackLevelPattern: FloatArray? = null
     ) {
         override fun equals(other: Any?): Boolean {
             if (this === other) return true
@@ -1435,7 +1439,8 @@ class CameraFragment : Fragment() {
 
                     // 4. Process with LibRaw (JNI does NOT rotate/mirror/zoom for Standard RAW to keep thumbnail correct)
                     val result = ColorProcessor.processRaw(
-                        dngBytes, targetLogIndex, nativeLutPath, tiffPath, bmpPath, useGpu, 0, false
+                        dngBytes, targetLogIndex, nativeLutPath, tiffPath, bmpPath, useGpu, 0, false,
+                        image.lscMap, image.lscWidth, image.lscHeight, image.blackLevelPattern, true
                     )
 
                     if (result == 1) {
@@ -2801,6 +2806,17 @@ class CameraFragment : Fragment() {
                 // 2) optional fast downsampled JPEG (tempJpgPath) for immediate gallery update.
                 val mirror = shouldMirror
 
+                    val lscMap = frames.firstOrNull()?.lscMap
+                    val lscPath = if (lscMap != null) {
+                        val file = java.io.File(requireContext().cacheDir, "lsc_${System.currentTimeMillis()}.bin")
+                        file.outputStream().use { os ->
+                            val bb = java.nio.ByteBuffer.allocate(lscMap.size * 4).order(java.nio.ByteOrder.nativeOrder())
+                            bb.asFloatBuffer().put(lscMap)
+                            os.write(bb.array())
+                        }
+                        file.absolutePath
+                    } else null
+
                 val ret = ColorProcessor.processHdrPlus(
                     buffers,
                     width, height,
@@ -2819,7 +2835,12 @@ class CameraFragment : Fragment() {
                     false, // isAsync (deprecated in favor of WorkManager)
                     tempRawFile.absolutePath,
                     currentZoom,
-                    mirror
+                    mirror,
+                    frames.firstOrNull()?.lscMap,
+                    frames.firstOrNull()?.lscWidth ?: 0,
+                    frames.firstOrNull()?.lscHeight ?: 0,
+                    frames.firstOrNull()?.blackLevelPattern,
+                    true // debug
                 )
 
                 val jniEndTime = System.currentTimeMillis()
@@ -2878,6 +2899,10 @@ class CameraFragment : Fragment() {
                         .putLong("captureTimeMillis", captureTime)
                         .putFloatArray("ccm", ccm)
                         .putFloatArray("whiteBalance", wb)
+                        .putString("lscMapPath", lscPath)
+                        .putInt("lscWidth", frames.firstOrNull()?.lscWidth ?: 0)
+                        .putInt("lscHeight", frames.firstOrNull()?.lscHeight ?: 0)
+                        .putFloatArray("blackLevelPattern", frames.firstOrNull()?.blackLevelPattern)
                         .putString("baseName", dngName)
                         .putBoolean("saveTiff", saveTiff)
                         .putBoolean("saveJpg", saveJpg)
@@ -3168,7 +3193,8 @@ class CameraFragment : Fragment() {
                         1.0f
                     }
                     if (image.format == android.graphics.ImageFormat.RAW_SENSOR) {
-                        val holder = copyAndroidImageToHolder(image, currentZoom, getCombinedOrientation(), currentLens?.id)
+                        val result = captureResults[image.timestamp]
+                        val holder = copyAndroidImageToHolder(image, currentZoom, getCombinedOrientation(), currentLens?.id, result)
                         image.close()
                         showProcessingAnimation()
                         lifecycleScope.launch {
@@ -3288,6 +3314,13 @@ class CameraFragment : Fragment() {
                     val chars = camera2Manager.getCameraCharacteristics(currentLens?.id ?: "0")
                     val sensorOrientation = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
 
+                    val result = captureResults[image.timestamp]
+                    val lscMap = getLscMap(result)
+                    val lscMapObj = result?.get(android.hardware.camera2.CaptureResult.STATISTICS_LENS_SHADING_CORRECTION_MAP)
+                    val lscWidth = lscMapObj?.columnCount ?: 0
+                    val lscHeight = lscMapObj?.rowCount ?: 0
+                    val blp = getBlackLevelPattern(chars)
+
                     hdrPlusBurstHelper?.addManualFrame(
                         plane.buffer,
                         image.width,
@@ -3296,7 +3329,8 @@ class CameraFragment : Fragment() {
                         plane.pixelStride,
                         image.timestamp,
                         sensorOrientation,
-                        currentLens?.id
+                        currentLens?.id,
+                        lscMap, lscWidth, lscHeight, blp
                     )
                     image.close()
                     framesCaptured++
@@ -3339,7 +3373,25 @@ class CameraFragment : Fragment() {
         }
     }
 
-    private fun copyAndroidImageToHolder(image: android.media.Image, zoomRatio: Float, combinedOrientation: Int, physicalId: String?): RawImageHolder {
+    private fun getLscMap(result: android.hardware.camera2.CaptureResult?): FloatArray? {
+        val map = result?.get(android.hardware.camera2.CaptureResult.STATISTICS_LENS_SHADING_CORRECTION_MAP) ?: return null
+        val gains = FloatArray(map.rowCount * map.columnCount * 4)
+        map.copyGainFactors(gains, 0)
+        return gains
+    }
+
+    private fun getBlackLevelPattern(chars: android.hardware.camera2.CameraCharacteristics?): FloatArray? {
+        val blp = chars?.get(android.hardware.camera2.CameraCharacteristics.SENSOR_BLACK_LEVEL_PATTERN) ?: return null
+        val bl = FloatArray(4)
+        // Order: (0,0), (1,0), (0,1), (1,1)
+        bl[0] = blp.getOffsetForIndex(0, 0)
+        bl[1] = blp.getOffsetForIndex(1, 0)
+        bl[2] = blp.getOffsetForIndex(0, 1)
+        bl[3] = blp.getOffsetForIndex(1, 1)
+        return bl
+    }
+
+    private fun copyAndroidImageToHolder(image: android.media.Image, zoomRatio: Float, combinedOrientation: Int, physicalId: String?, result: android.hardware.camera2.CaptureResult? = null): RawImageHolder {
         val plane = image.planes[0]
         val buffer = plane.buffer
         val rowStride = plane.rowStride
@@ -3363,6 +3415,12 @@ class CameraFragment : Fragment() {
         val chars = camera2Manager.getCameraCharacteristics(physicalId ?: "0")
         val sensorOrientation = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
 
+        val lscMap = getLscMap(result)
+        val lscMapObj = result?.get(android.hardware.camera2.CaptureResult.STATISTICS_LENS_SHADING_CORRECTION_MAP)
+        val lscWidth = lscMapObj?.columnCount ?: 0
+        val lscHeight = lscMapObj?.rowCount ?: 0
+        val blp = getBlackLevelPattern(chars)
+
         return RawImageHolder(
             data = data,
             width = width,
@@ -3371,7 +3429,11 @@ class CameraFragment : Fragment() {
             rotationDegrees = sensorOrientation,
             combinedOrientation = combinedOrientation,
             zoomRatio = zoomRatio,
-            physicalId = physicalId
+            physicalId = physicalId,
+            lscMap = lscMap,
+            lscWidth = lscWidth,
+            lscHeight = lscHeight,
+            blackLevelPattern = blp
         )
     }
 

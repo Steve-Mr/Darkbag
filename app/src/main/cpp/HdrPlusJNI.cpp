@@ -122,9 +122,10 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_initMemoryPool(JN
 extern "C" JNIEXPORT jint JNICALL
 Java_com_android_example_cameraxbasic_processor_ColorProcessor_exportHdrPlus(
     JNIEnv* env, jobject /* this */, jstring tempRawPath, jint width, jint height, jint orientation, jfloat digitalGain, jint targetLog, jstring lutPath, jstring tiffPath, jstring jpgPath, jstring dngPath,
-    jint iso, jlong exposureTime, jfloat fNumber, jfloat focalLength, jlong captureTimeMillis, jfloatArray ccm, jfloatArray whiteBalance, jfloat zoomFactor, jboolean mirror
+    jint iso, jlong exposureTime, jfloat fNumber, jfloat focalLength, jlong captureTimeMillis, jfloatArray ccm, jfloatArray whiteBalance, jfloat zoomFactor, jboolean mirror,
+    jfloatArray lscMap, jint lscWidth, jint lscHeight, jfloatArray blackLevelPattern, jboolean debug
 ) {
-    LOGD("Native exportHdrPlus started.");
+    LOGD("Native exportHdrPlus started. debug=%d", debug);
     std::lock_guard<std::mutex> lock(g_hdrPlusMutex);
 
     if (!tempRawPath) return -1;
@@ -165,13 +166,18 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_exportHdrPlus(
 
     if (dng_path_cstr) {
         LOGD("Exporting DNG to %s", dng_path_cstr);
-        write_dng(dng_path_cstr, width, height, finalImage, 65535, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation, (bool)mirror);
+        std::vector<float> blp;
+        if (blackLevelPattern) {
+            jsize len = env->GetArrayLength(blackLevelPattern);
+            blp.resize(len); env->GetFloatArrayRegion(blackLevelPattern, 0, len, blp.data());
+        }
+        write_dng(dng_path_cstr, width, height, finalImage, 65535, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, wbVec.data(), blp.empty() ? nullptr : blp.data(), orientation, (bool)mirror);
     }
 
     bool saveOk = true;
     if (tiff_path_cstr || jpg_path_cstr) {
         LOGD("Exporting TIFF/JPG: TIFF=%s, JPG=%s", tiff_path_cstr ? tiff_path_cstr : "null", jpg_path_cstr ? jpg_path_cstr : "null");
-        saveOk = process_and_save_image(finalImage, width, height, digitalGain, targetLog, lut, tiff_path_cstr, jpg_path_cstr, 1, ccmVec.data(), wbVec.data(), orientation, nullptr, false, 1, zoomFactor, (bool)mirror);
+        saveOk = process_and_save_image(finalImage, width, height, digitalGain, targetLog, lut, tiff_path_cstr, jpg_path_cstr, 1, ccmVec.data(), wbVec.data(), orientation, nullptr, false, 1, zoomFactor, (bool)mirror, (bool)debug);
     }
 
     if (tiffPath && tiff_path_cstr) env->ReleaseStringUTFChars(tiffPath, tiff_path_cstr);
@@ -192,9 +198,10 @@ extern "C" JNIEXPORT jint JNICALL
 Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     JNIEnv* env, jobject /* this */, jobjectArray dngBuffers, jint width, jint height, jint orientation, jint whiteLevel, jint blackLevel, jfloatArray whiteBalance, jfloatArray ccm, jint cfaPattern,
     jint iso, jlong exposureTime, jfloat fNumber, jfloat focalLength, jlong captureTimeMillis, jint targetLog, jstring lutPath, jstring outputTiffPath, jstring outputJpgPath, jstring outputDngPath,
-    jfloat digitalGain, jlongArray debugStats, jobject outputBitmap, jboolean isAsync, jstring tempRawPath, jfloat zoomFactor, jboolean mirror
+    jfloat digitalGain, jlongArray debugStats, jobject outputBitmap, jboolean isAsync, jstring tempRawPath, jfloat zoomFactor, jboolean mirror,
+    jfloatArray lscMap, jint lscWidth, jint lscHeight, jfloatArray blackLevelPattern, jboolean debug
 ) {
-    LOGD("Native processHdrPlus started.");
+    LOGD("Native processHdrPlus started. debug=%d", debug);
     std::lock_guard<std::mutex> lock(g_hdrPlusMutex);
     auto nativeStart = std::chrono::high_resolution_clock::now();
     auto jniPrepStart = std::chrono::high_resolution_clock::now();
@@ -244,8 +251,26 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
         halide_set_num_threads(cpuThreads); halideThreadsConfigured = true;
     }
 
+    std::vector<float> lscVec;
+    if (lscMap) {
+        jsize lscLen = env->GetArrayLength(lscMap);
+        lscVec.resize(lscLen);
+        env->GetFloatArrayRegion(lscMap, 0, lscLen, lscVec.data());
+    } else {
+        // Identity LSC map (all 1.0)
+        lscVec.assign(static_cast<size_t>(lscWidth > 0 ? lscWidth : 1) * (lscHeight > 0 ? lscHeight : 1) * 4, 1.0f);
+    }
+    Buffer<float> halideLscBuf(lscVec.data(), lscWidth > 0 ? lscWidth : 1, lscHeight > 0 ? lscHeight : 1, 4);
+
+    uint16_t bp_r = (uint16_t)blackLevel, bp_g0 = (uint16_t)blackLevel, bp_g1 = (uint16_t)blackLevel, bp_b = (uint16_t)blackLevel;
+    if (blackLevelPattern) {
+        float blp[4];
+        env->GetFloatArrayRegion(blackLevelPattern, 0, 4, blp);
+        bp_r = (uint16_t)blp[0]; bp_g0 = (uint16_t)blp[1]; bp_g1 = (uint16_t)blp[2]; bp_b = (uint16_t)blp[3];
+    }
+
     auto halideStart = std::chrono::high_resolution_clock::now();
-    int halide_res = hdrplus_raw_pipeline(inputBuf, (uint16_t)blackLevel, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, ccmHalideBuf, 1.0f, 1.0f, outputBuf);
+    int halide_res = hdrplus_raw_pipeline(inputBuf, bp_r, bp_g0, bp_g1, bp_b, (uint16_t)whiteLevel, halideLscBuf, wb_r, wb_g0, wb_g1, wb_b, halideCfa, ccmHalideBuf, 1.0f, 1.0f, outputBuf);
     auto halideDurationMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - halideStart).count();
 
     halide_report_buffer.clear(); halide_profiler_report(nullptr);
@@ -290,7 +315,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
 
     auto saveStart = std::chrono::high_resolution_clock::now();
     if (bitmapPixels) {
-        process_and_save_image(finalImage, width, height, digitalGain, targetLog, lut, nullptr, nullptr, 1, ccmVec.data(), wbVec.data(), orientation, bitmapPixels, true, 4, zoomFactor, (bool)mirror);
+        process_and_save_image(finalImage, width, height, digitalGain, targetLog, lut, nullptr, nullptr, 1, ccmVec.data(), wbVec.data(), orientation, bitmapPixels, true, 4, zoomFactor, (bool)mirror, (bool)debug);
         AndroidBitmap_unlockPixels(env, outputBitmap);
     }
 
@@ -300,15 +325,22 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
         env->ReleaseStringUTFChars(tempRawPath, tr_p_cstr);
     }
 
+    std::vector<float> blpVec;
+    if (blackLevelPattern) {
+        jsize blpLen = env->GetArrayLength(blackLevelPattern);
+        blpVec.resize(blpLen);
+        env->GetFloatArrayRegion(blackLevelPattern, 0, blpLen, blpVec.data());
+    }
+
     if (!tiffPathStr.empty() || !jpgPathStr.empty() || !dngPathStr.empty()) {
-        auto saveFunc = [fImg = (bool)isAsync ? finalImage : std::vector<uint16_t>(), isAsync, &finalImage, width, height, digitalGain, targetLog, lut, tiffPathStr, jpgPathStr, dngPathStr, baseName, ccmVec, wbVec, orientation, iso, exposureTime, fNumber, focalLength, captureTimeMillis, zoomFactor, mirror]() mutable {
+        auto saveFunc = [fImg = (bool)isAsync ? finalImage : std::vector<uint16_t>(), isAsync, &finalImage, width, height, digitalGain, targetLog, lut, tiffPathStr, jpgPathStr, dngPathStr, baseName, ccmVec, wbVec, blpVec, orientation, iso, exposureTime, fNumber, focalLength, captureTimeMillis, zoomFactor, mirror, debug]() mutable {
             const std::vector<uint16_t>& img = isAsync ? fImg : finalImage;
             bool dngOk = true;
-            if (!dngPathStr.empty()) dngOk = write_dng(dngPathStr.c_str(), width, height, img, 65535, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation, (bool)mirror);
+            if (!dngPathStr.empty()) dngOk = write_dng(dngPathStr.c_str(), width, height, img, 65535, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, wbVec.data(), blpVec.empty() ? nullptr : blpVec.data(), orientation, (bool)mirror);
 
             bool otherOk = true;
             if (!tiffPathStr.empty() || !jpgPathStr.empty()) {
-                otherOk = process_and_save_image(img, width, height, digitalGain, targetLog, lut, tiffPathStr.empty()?nullptr:tiffPathStr.c_str(), jpgPathStr.empty()?nullptr:jpgPathStr.c_str(), 1, ccmVec.data(), wbVec.data(), orientation, nullptr, !isAsync, isAsync?1:4, zoomFactor, (bool)mirror);
+                otherOk = process_and_save_image(img, width, height, digitalGain, targetLog, lut, tiffPathStr.empty()?nullptr:tiffPathStr.c_str(), jpgPathStr.empty()?nullptr:jpgPathStr.c_str(), 1, ccmVec.data(), wbVec.data(), orientation, nullptr, !isAsync, isAsync?1:4, zoomFactor, (bool)mirror, debug);
             }
 
             if (isAsync && g_jvm && g_colorProcessorClass) {

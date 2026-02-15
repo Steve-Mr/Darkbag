@@ -252,16 +252,25 @@ bool process_and_save_image(
     int width, int height, float gain, int targetLog, const LUT3D& lut,
     const char* tiffPath, const char* jpgPath, int sourceColorSpace,
     const float* ccm, const float* wb, int orientation, unsigned char* out_rgb_buffer,
-    bool isPreview, int downsampleFactor, float zoomFactor, bool mirror
+    bool isPreview, int downsampleFactor, float zoomFactor, bool mirror, bool debug
 ) {
-    LOGD("process_and_save_image: %dx%d, gain=%.2f, log=%d, lut=%d, tiff=%s, jpg=%s, preview=%d, ds=%d, zoom=%.2f, mirror=%d",
-         width, height, gain, targetLog, lut.size, tiffPath ? tiffPath : "null", jpgPath ? jpgPath : "null", isPreview, downsampleFactor, zoomFactor, mirror);
+    LOGD("process_and_save_image: %dx%d, gain=%.2f, log=%d, lut=%d, tiff=%s, jpg=%s, preview=%d, ds=%d, zoom=%.2f, mirror=%d, debug=%d",
+         width, height, gain, targetLog, lut.size, tiffPath ? tiffPath : "null", jpgPath ? jpgPath : "null", isPreview, downsampleFactor, zoomFactor, mirror, debug);
     int outW = width / downsampleFactor, outH = height / downsampleFactor;
     bool swapDims = (orientation == 90 || orientation == 270);
     int finalW = swapDims ? outH : outW, finalH = swapDims ? outW : outH;
     Matrix3x3 effective_CCM = {0}; if (sourceColorSpace == 1 && ccm) std::copy(ccm, ccm + 9, effective_CCM.m);
     std::vector<unsigned short> processedImage; std::vector<unsigned char> previewRgb8;
-    auto process_pixel = [&](int x, int y) -> Vec3 {
+    std::vector<unsigned short> debugA, debugB, debugC;
+
+    struct FullProcessResult {
+        Vec3 finalColor;
+        Vec3 stageA;
+        Vec3 stageB;
+        Vec3 stageC;
+    };
+
+    auto process_pixel_full = [&](int x, int y) -> FullProcessResult {
         x = std::max(0, std::min(x, width - 1));
         y = std::max(0, std::min(y, height - 1));
         size_t idx = (static_cast<size_t>(y) * width + x) * 3;
@@ -269,6 +278,8 @@ bool process_and_save_image(
         float norm_g = (float)inputImage[idx + 1] / 65535.0f * gain;
         float norm_b = (float)inputImage[idx + 2] / 65535.0f * gain;
         Vec3 color = {norm_r, norm_g, norm_b};
+
+        Vec3 sA = color;
         if (sourceColorSpace == 1) { if (ccm) color = multiply(effective_CCM, color); color = multiply(M_sRGB_D65_to_XYZ, color); }
         else if (sourceColorSpace == 0) { color = multiply(M_ProPhoto_D50_to_XYZ, color); color = multiply(M_Bradford_D50_to_D65, color); }
         switch (targetLog) {
@@ -280,10 +291,13 @@ bool process_and_save_image(
             case 7: color = multiply(M_XYZ_to_VGamut_D65, color); break;
             default: color = multiply(M_XYZ_to_Rec709_D65, color); break;
         }
+        Vec3 sB = color;
         color.r = apply_log(color.r, targetLog); color.g = apply_log(color.g, targetLog); color.b = apply_log(color.b, targetLog);
+        Vec3 sC = color;
         if (lut.size > 0) color = apply_lut(lut, color);
-        return color;
+        return {color, sA, sB, sC};
     };
+    auto process_pixel = [&](int x, int y) -> Vec3 { return process_pixel_full(x, y).finalColor; };
     int cropW = (int)(width / zoomFactor);
     int cropH = (int)(height / zoomFactor);
     int cropX = (width - cropW) / 2;
@@ -313,6 +327,11 @@ bool process_and_save_image(
         }
     } else {
         processedImage.resize(static_cast<size_t>(finalW_zoomed) * finalH_zoomed * 3);
+        if (debug) {
+            debugA.resize(processedImage.size());
+            debugB.resize(processedImage.size());
+            debugC.resize(processedImage.size());
+        }
         #pragma omp parallel for
         for (int py = 0; py < finalH_zoomed; py++) {
             for (int px = 0; px < finalW_zoomed; px++) {
@@ -323,11 +342,24 @@ bool process_and_save_image(
                 else if (orientation == 270) { sx = (finalH_zoomed - 1) - py; sy = opx; }
                 else { sx = opx; sy = py; }
 
-                Vec3 color = process_pixel(cropX + sx, cropY + sy);
+                FullProcessResult res = process_pixel_full(cropX + sx, cropY + sy);
+                Vec3 color = res.finalColor;
                 size_t outIdx = (static_cast<size_t>(py) * finalW_zoomed + px) * 3;
                 processedImage[outIdx + 0] = (unsigned short)std::max(0.0f, std::min(65535.0f, color.r * 65535.0f));
                 processedImage[outIdx + 1] = (unsigned short)std::max(0.0f, std::min(65535.0f, color.g * 65535.0f));
                 processedImage[outIdx + 2] = (unsigned short)std::max(0.0f, std::min(65535.0f, color.b * 65535.0f));
+
+                if (debug) {
+                    debugA[outIdx + 0] = (unsigned short)std::max(0.0f, std::min(65535.0f, res.stageA.r * 65535.0f));
+                    debugA[outIdx + 1] = (unsigned short)std::max(0.0f, std::min(65535.0f, res.stageA.g * 65535.0f));
+                    debugA[outIdx + 2] = (unsigned short)std::max(0.0f, std::min(65535.0f, res.stageA.b * 65535.0f));
+                    debugB[outIdx + 0] = (unsigned short)std::max(0.0f, std::min(65535.0f, res.stageB.r * 65535.0f));
+                    debugB[outIdx + 1] = (unsigned short)std::max(0.0f, std::min(65535.0f, res.stageB.g * 65535.0f));
+                    debugB[outIdx + 2] = (unsigned short)std::max(0.0f, std::min(65535.0f, res.stageB.b * 65535.0f));
+                    debugC[outIdx + 0] = (unsigned short)std::max(0.0f, std::min(65535.0f, res.stageC.r * 65535.0f));
+                    debugC[outIdx + 1] = (unsigned short)std::max(0.0f, std::min(65535.0f, res.stageC.g * 65535.0f));
+                    debugC[outIdx + 2] = (unsigned short)std::max(0.0f, std::min(65535.0f, res.stageC.b * 65535.0f));
+                }
 
                 // Note: out_rgb_buffer is usually for preview only, but we keep it here if needed.
                 // It expects original dimensions though. This part might need adjustment if used for rotated large images.
@@ -346,6 +378,18 @@ bool process_and_save_image(
     if (tiffPath) {
         tiffOk = write_tiff(tiffPath, finalW_zoomed, finalH_zoomed, processedImage, 0, false); // orientation 0 because already rotated and mirrored in pixels
         if (!tiffOk) LOGE("write_tiff failed for %s", tiffPath);
+    }
+
+    if (debug && !isPreview && jpgPath) {
+        std::string jp(jpgPath);
+        size_t dotPos = jp.find_last_of('.');
+        std::string base = (dotPos == std::string::npos) ? jp : jp.substr(0, dotPos);
+        std::string pathA = base + "_stageA.jpg";
+        std::string pathB = base + "_stageB.jpg";
+        std::string pathC = base + "_stageC.jpg";
+        write_jpeg(pathA.c_str(), finalW_zoomed, finalH_zoomed, debugA, 95);
+        write_jpeg(pathB.c_str(), finalW_zoomed, finalH_zoomed, debugB, 95);
+        write_jpeg(pathC.c_str(), finalW_zoomed, finalH_zoomed, debugC, 95);
     }
 
     bool jpgOk = true;
@@ -418,7 +462,7 @@ bool write_tiff(const char* filename, int width, int height, const std::vector<u
     bool result = file.good(); file.close(); return result;
 }
 
-bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, int iso, long exposureTime, float fNumber, float focalLength, long captureTimeMillis, const std::vector<float>& ccm, int orientation, bool mirror) {
+bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, int iso, long exposureTime, float fNumber, float focalLength, long captureTimeMillis, const std::vector<float>& ccm, const float* wb, const float* blackLevel, int orientation, bool mirror) {
     TIFFSetTagExtender(DNGTagExtender); TIFF* tif = TIFFOpen(filename, "w"); if (!tif) return false;
     TIFFSetField(tif, TIFFTAG_IMAGEWIDTH, width); TIFFSetField(tif, TIFFTAG_IMAGELENGTH, height); TIFFSetField(tif, TIFFTAG_BITSPERSAMPLE, 16); TIFFSetField(tif, TIFFTAG_COMPRESSION, COMPRESSION_NONE);
     uint16_t tiffOrientation = 1;
@@ -433,9 +477,26 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
     static const char* make = "Google"; TIFFSetField(tif, TIFFTAG_MAKE, make); static const char* model = "HDR+ Device"; TIFFSetField(tif, TIFFTAG_MODEL, model); static const char* software = "CameraXBasic HDR+"; TIFFSetField(tif, TIFFTAG_SOFTWARE, software);
     time_t raw_time = (time_t)(captureTimeMillis / 1000); struct tm * timeinfo = localtime(&raw_time); char buffer[20]; strftime(buffer, 20, "%Y:%m:%d %H:%M:%S", timeinfo); TIFFSetField(tif, TIFFTAG_DATETIME, buffer);
     static const uint8_t dng_version[] = {1, 4, 0, 0}; TIFFSetField(tif, TIFFTAG_DNGVERSION, dng_version); static const uint8_t dng_backward_version[] = {1, 1, 0, 0}; TIFFSetField(tif, TIFFTAG_DNGBACKWARDVERSION, dng_backward_version); TIFFSetField(tif, TIFFTAG_UNIQUECAMERAMODEL, model);
-    uint32_t white_level_val = (uint32_t)whiteLevel; if (white_level_val == 0) white_level_val = 65535; TIFFSetField(tif, TIFFTAG_WHITELEVEL, 1, &white_level_val); uint32_t black_level_val = 0; TIFFSetField(tif, TIFFTAG_BLACKLEVEL, 1, &black_level_val);
+    uint32_t white_level_val = (uint32_t)whiteLevel; if (white_level_val == 0) white_level_val = 65535; TIFFSetField(tif, TIFFTAG_WHITELEVEL, 1, &white_level_val);
+
+    uint32_t bl_vals[3] = {0, 0, 0};
+    if (blackLevel) {
+        bl_vals[0] = (uint32_t)blackLevel[0];
+        bl_vals[1] = (uint32_t)((blackLevel[1] + blackLevel[2]) / 2.0f);
+        bl_vals[2] = (uint32_t)blackLevel[3];
+    }
+    TIFFSetField(tif, TIFFTAG_BLACKLEVEL, 3, bl_vals);
+
     Matrix3x3 ccmMat; std::copy(ccm.data(), ccm.data() + 9, ccmMat.m); Matrix3x3 invCcm = invert(ccmMat); Matrix3x3 colorMatrix1 = multiply(invCcm, M_XYZ_to_sRGB_D65);
-    TIFFSetField(tif, TIFFTAG_COLORMATRIX1, 9, colorMatrix1.m); static const float as_shot_neutral[] = {1.0f, 1.0f, 1.0f}; TIFFSetField(tif, TIFFTAG_ASSHOTNEUTRAL, 3, as_shot_neutral);
+    TIFFSetField(tif, TIFFTAG_COLORMATRIX1, 9, colorMatrix1.m);
+
+    float as_shot_neutral[] = {1.0f, 1.0f, 1.0f};
+    if (wb) {
+        as_shot_neutral[0] = 1.0f / std::max(0.01f, wb[0]);
+        as_shot_neutral[1] = 1.0f / std::max(0.01f, (wb[1] + wb[2]) / 2.0f);
+        as_shot_neutral[2] = 1.0f / std::max(0.01f, wb[3]);
+    }
+    TIFFSetField(tif, TIFFTAG_ASSHOTNEUTRAL, 3, as_shot_neutral);
     TIFFSetField(tif, TIFFTAG_CALIBRATIONILLUMINANT1, 21); float exposureTimeSec = (float)exposureTime / 1000000000.0f; TIFFSetField(tif, TIFFTAG_EXPOSURETIME, exposureTimeSec); TIFFSetField(tif, TIFFTAG_FNUMBER, fNumber); TIFFSetField(tif, TIFFTAG_FOCALLENGTH, focalLength); unsigned short iso_short = (unsigned short)iso; TIFFSetField(tif, TIFFTAG_ISOSPEEDRATINGS, 1, &iso_short);
     if (TIFFWriteEncodedStrip(tif, 0, (void*)data.data(), static_cast<size_t>(width) * height * 3 * sizeof(unsigned short)) < 0) { TIFFClose(tif); return false; }
     TIFFClose(tif); return true;

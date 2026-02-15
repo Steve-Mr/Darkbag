@@ -43,7 +43,12 @@ object ColorProcessor {
         outputJpgPath: String?,
         useGpu: Boolean,
         orientation: Int,
-        mirror: Boolean
+        mirror: Boolean,
+        lscMap: FloatArray? = null,
+        lscWidth: Int = 0,
+        lscHeight: Int = 0,
+        blackLevelPattern: FloatArray? = null, // [R, Gr, Gb, B]
+        debug: Boolean = false
     ): Int
 
     /**
@@ -90,7 +95,12 @@ object ColorProcessor {
         ccm: FloatArray,
         whiteBalance: FloatArray,
         zoomFactor: Float,
-        mirror: Boolean
+        mirror: Boolean,
+        lscMap: FloatArray? = null,
+        lscWidth: Int = 0,
+        lscHeight: Int = 0,
+        blackLevelPattern: FloatArray? = null,
+        debug: Boolean = false
     ): Int
 
     external fun processHdrPlus(
@@ -99,7 +109,7 @@ object ColorProcessor {
         height: Int,
         orientation: Int,
         whiteLevel: Int,
-        blackLevel: Int,
+        blackLevel: Int, // Deprecated, use blackLevelPattern
         whiteBalance: FloatArray, // [r, g0, g1, b]
         ccm: FloatArray,          // [3x3]
         cfaPattern: Int,
@@ -119,6 +129,11 @@ object ColorProcessor {
         isAsync: Boolean = false,
         tempRawPath: String? = null,
         zoomFactor: Float,
-        mirror: Boolean
+        mirror: Boolean,
+        lscMap: FloatArray? = null,
+        lscWidth: Int = 0,
+        lscHeight: Int = 0,
+        blackLevelPattern: FloatArray? = null,
+        debug: Boolean = false
     ): Int
 }

@@ -55,13 +55,14 @@ bool process_and_save_image(
     bool isPreview = false,
     int downsampleFactor = 1,
     float zoomFactor = 1.0f,
-    bool mirror = false
+    bool mirror = false,
+    bool debug = false
 );
 
 // --- File Writers ---
 bool write_tiff(const char* filename, int width, int height, const std::vector<unsigned short>& data, int orientation = 0, bool mirror = false);
 
-bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, int iso, long exposureTime, float fNumber, float focalLength, long captureTimeMillis, const std::vector<float>& ccm, int orientation, bool mirror = false);
+bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, int iso, long exposureTime, float fNumber, float focalLength, long captureTimeMillis, const std::vector<float>& ccm, const float* wb, const float* blackLevel, int orientation, bool mirror = false);
 
 bool write_bmp(const char* filename, int width, int height, const std::vector<unsigned short>& data);
 

@@ -26,9 +26,14 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processRaw(
         jstring outputJpgPath,
         jboolean useGpu, // Ignored in new pipeline
         jint orientation,
-        jboolean mirror
+        jboolean mirror,
+        jfloatArray lscMap,
+        jint lscWidth,
+        jint lscHeight,
+        jfloatArray blackLevelPattern,
+        jboolean debug
 ) {
-    LOGD("Native processRaw started using LibRaw.");
+    LOGD("Native processRaw started using LibRaw. debug=%d", debug);
 
     // Get DNG Bytes
     jsize len = env->GetArrayLength(dngData);
@@ -108,6 +113,55 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processRaw(
     const char* tiff_path_cstr = (outputTiffPath) ? env->GetStringUTFChars(outputTiffPath, 0) : nullptr;
     const char* jpg_path_cstr = (outputJpgPath) ? env->GetStringUTFChars(outputJpgPath, 0) : nullptr;
 
+    // Apply LSC if provided
+    if (lscMap && lscWidth > 0 && lscHeight > 0) {
+        jsize lscLen = env->GetArrayLength(lscMap);
+        std::vector<float> lscVec(lscLen);
+        env->GetFloatArrayRegion(lscMap, 0, lscLen, lscVec.data());
+
+        int imgW = image->width;
+        int imgH = image->height;
+
+        #pragma omp parallel for
+        for (int y = 0; y < imgH; y++) {
+            float gy = (float)y * (lscHeight - 1) / (imgH - 1);
+            int iy = (int)gy;
+            float fy = gy - iy;
+            int iy1 = std::min(iy + 1, (int)lscHeight - 1);
+
+            for (int x = 0; x < imgW; x++) {
+                float gx = (float)x * (lscWidth - 1) / (imgW - 1);
+                int ix = (int)gx;
+                float fx = gx - ix;
+                int ix1 = std::min(ix + 1, (int)lscWidth - 1);
+
+                auto get_gain = [&](int lix, int liy, int c) {
+                    return lscVec[(liy * lscWidth + lix) * 4 + c];
+                };
+
+                auto lerp = [](float v0, float v1, float f) { return v0 * (1.0f - f) + v1 * f; };
+
+                float gains[3];
+                for (int c = 0; c < 3; c++) {
+                    int lc = (c == 0) ? 0 : (c == 1) ? 1 : 3; // R->R(0), G->Gr(1), B->B(3)
+                    float v00 = get_gain(ix, iy, lc);
+                    float v10 = get_gain(ix1, iy, lc);
+                    float v01 = get_gain(ix, iy1, lc);
+                    float v11 = get_gain(ix1, iy1, lc);
+                    gains[c] = lerp(lerp(v00, v10, fx), lerp(v01, v11, fx), fy);
+                }
+
+                size_t idx = (static_cast<size_t>(y) * imgW + x) * 3;
+                rawImage[idx + 0] = (unsigned short)std::min(65535.0f, rawImage[idx + 0] * gains[0]);
+                rawImage[idx + 1] = (unsigned short)std::min(65535.0f, rawImage[idx + 1] * gains[1]);
+                rawImage[idx + 2] = (unsigned short)std::min(65535.0f, rawImage[idx + 2] * gains[2]);
+            }
+        }
+    }
+
+    // TODO: Apply LSC to rawImage if lscMap is provided.
+    // Since LibRaw output is already ProPhoto RGB, we apply RGB LSC.
+
     // Use Shared Pipeline (Gain = 1.0 for standard LibRaw output)
     bool saveOk = process_and_save_image(
         rawImage,
@@ -126,7 +180,8 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processRaw(
         false, // isPreview
         1, // downsampleFactor
         1.0f, // zoomFactor
-        (bool)mirror
+        (bool)mirror,
+        (bool)debug
     );
 
     // Release Strings
