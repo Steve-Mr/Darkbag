@@ -1533,30 +1533,11 @@ class CameraFragment : Fragment() {
                                     0
                                 )
                             }
-                            // Inject crop metadata if zoomed
+                            // NOTE:
+                            // ExifInterface.saveAttributes() does not support DNG and throws by design.
+                            // DNG crop metadata injection should be done via native DNG tag writing path.
                             if (zoomFactor > 1.05f) {
-                                try {
-                                    contentResolver.openFileDescriptor(dngUri, "rw")?.use { pfd ->
-                                        val exif =
-                                            androidx.exifinterface.media.ExifInterface(pfd.fileDescriptor)
-                                        val fullWidth = image.width
-                                        val fullHeight = image.height
-                                        val cropWidth = (fullWidth / zoomFactor).toInt()
-                                        val cropHeight = (fullHeight / zoomFactor).toInt()
-                                        val x = ((fullWidth - cropWidth) / 2) / 2 * 2
-                                        val y = ((fullHeight - cropHeight) / 2) / 2 * 2
-
-                                        exif.setAttribute(
-                                            "DefaultCropSize",
-                                            "$cropWidth $cropHeight"
-                                        )
-                                        exif.setAttribute("DefaultCropOrigin", "$x $y")
-                                        exif.setAttribute(ExifInterface.TAG_ORIENTATION, exifOrientation.toString())
-                                        exif.saveAttributes()
-                                    }
-                                } catch (e: Exception) {
-                                    Log.e(TAG, "Failed to inject DNG crop metadata", e)
-                                }
+                                Log.d(TAG, "Skip DNG crop metadata injection: ExifInterface cannot save DNG attributes")
                             }
 
                             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -2668,7 +2649,9 @@ class CameraFragment : Fragment() {
     }
 
     private suspend fun findCaptureResult(timestamp: Long, tolerance: Long = 5_000_000L): TotalCaptureResult? {
-        captureResults.entries.find { abs(it.key - timestamp) < tolerance }?.value?.let { return it }
+        synchronized(captureResults) {
+            captureResults.entries.firstOrNull { abs(it.key - timestamp) < tolerance }?.value?.let { return it }
+        }
 
         return withTimeoutOrNull(3000) {
             captureResultFlow.first { res ->
