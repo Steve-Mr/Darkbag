@@ -32,6 +32,7 @@ class SettingsFragment : Fragment() {
     private var _binding: FragmentSettingsBinding? = null
     private val binding get() = _binding!!
     private lateinit var prefs: SharedPreferences
+    private lateinit var cameraRepository: com.android.example.cameraxbasic.utils.CameraRepository
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
         _binding = FragmentSettingsBinding.inflate(inflater, container, false)
@@ -41,6 +42,7 @@ class SettingsFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         prefs = requireContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        cameraRepository = com.android.example.cameraxbasic.utils.CameraRepository(requireContext())
 
         // Apply Edge-to-Edge Insets
         ViewCompat.setOnApplyWindowInsetsListener(binding.appBar) { v, insets ->
@@ -118,13 +120,40 @@ class SettingsFragment : Fragment() {
             prefs.edit().putString(KEY_HDR_UNDEREXPOSURE_MODE, HDR_UNDEREXPOSURE_MODES[position]).apply()
         }
 
-        // Default Focal Length
-        val focalAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, FOCAL_LENGTHS)
-        binding.menuDefaultFocalLength.setAdapter(focalAdapter)
-        val savedFocal = prefs.getString(KEY_DEFAULT_FOCAL_LENGTH, "24")
-        binding.menuDefaultFocalLength.setText(savedFocal, false)
-        binding.menuDefaultFocalLength.setOnItemClickListener { _, _, position, _ ->
-            prefs.edit().putString(KEY_DEFAULT_FOCAL_LENGTH, FOCAL_LENGTHS[position]).apply()
+        // Default Lens (Startup)
+        val lenses = cameraRepository.getFocalLengthPresets(emptySet())
+        val lensDisplayNames = lenses.map { it.name }
+        val lensAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, lensDisplayNames)
+        binding.menuDefaultLens.setAdapter(lensAdapter)
+
+        val savedLensId = prefs.getString(KEY_DEFAULT_LENS_ID, null)
+        val initialLens = lenses.find { it.sensorId == savedLensId }
+            ?: lenses.find { it.multiplier in 0.95f..1.05f && !it.isZoomPreset }
+            ?: lenses.firstOrNull()
+
+        if (initialLens != null) {
+            val index = lenses.indexOf(initialLens)
+            binding.menuDefaultLens.setText(lensDisplayNames[index], false)
+        }
+
+        binding.menuDefaultLens.setOnItemClickListener { _, _, position, _ ->
+            val selected = lenses[position]
+            prefs.edit().putString(KEY_DEFAULT_LENS_ID, selected.sensorId).apply()
+        }
+
+        // 1.0x Default Focal Length
+        val mainWide = cameraRepository.getMainWideLens(emptySet())
+        if (mainWide != null) {
+            val presets1x = cameraRepository.get1xPresets(mainWide)
+            val names1x = presets1x.map { it.name }
+            val adapter1x = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, names1x)
+            binding.menuDefaultFocal1x.setAdapter(adapter1x)
+
+            val savedFocal1x = prefs.getString(KEY_DEFAULT_FOCAL_1X, "24mm")
+            binding.menuDefaultFocal1x.setText(savedFocal1x, false)
+            binding.menuDefaultFocal1x.setOnItemClickListener { _, _, position, _ ->
+                prefs.edit().putString(KEY_DEFAULT_FOCAL_1X, names1x[position]).apply()
+            }
         }
 
         // Antibanding
@@ -168,6 +197,11 @@ class SettingsFragment : Fragment() {
         binding.switchManualControls.setOnCheckedChangeListener { _, isChecked ->
             prefs.edit().putBoolean(KEY_MANUAL_CONTROLS, isChecked).apply()
         }
+
+        binding.switchUseCamerax.isChecked = prefs.getBoolean(KEY_USE_CAMERAX, false)
+        binding.switchUseCamerax.setOnCheckedChangeListener { _, isChecked ->
+            prefs.edit().putBoolean(KEY_USE_CAMERAX, isChecked).apply()
+        }
     }
 
     override fun onDestroyView() {
@@ -186,11 +220,13 @@ class SettingsFragment : Fragment() {
         const val KEY_USE_GPU = "use_gpu"
         const val KEY_MANUAL_CONTROLS = "enable_manual_controls"
         const val KEY_ENABLE_LUT_PREVIEW = "enable_lut_preview"
-        const val KEY_DEFAULT_FOCAL_LENGTH = "default_focal_length"
+        const val KEY_DEFAULT_LENS_ID = "default_lens_id"
+        const val KEY_DEFAULT_FOCAL_1X = "default_focal_1x"
         const val KEY_ANTIBANDING = "antibanding_mode"
         const val KEY_FLASH_MODE = "flash_mode"
         const val KEY_HDR_BURST_COUNT = "hdr_burst_count"
         const val KEY_HDR_UNDEREXPOSURE_MODE = "hdr_underexposure_mode"
+        const val KEY_USE_CAMERAX = "use_camerax_engine"
 
         val FOCAL_LENGTHS = listOf("24", "28", "35")
         val ANTIBANDING_MODES = listOf("Auto", "50Hz", "60Hz", "Off")

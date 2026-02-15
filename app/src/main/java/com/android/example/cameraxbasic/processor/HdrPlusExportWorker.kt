@@ -10,36 +10,38 @@ import com.android.example.cameraxbasic.utils.ImageSaver
 class HdrPlusExportWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
 
     override suspend fun doWork(): Result {
-        val tempRawPath = inputData.getString("tempRawPath") ?: return Result.failure()
-        val width = inputData.getInt("width", 0)
-        val height = inputData.getInt("height", 0)
-        val orientation = inputData.getInt("orientation", 0)
-        val digitalGain = inputData.getFloat("digitalGain", 1.0f)
-        val targetLog = inputData.getInt("targetLog", 0)
-        val lutPath = inputData.getString("lutPath")
-        val tiffPath = inputData.getString("tiffPath")
-        val jpgPath = inputData.getString("jpgPath")
-        val targetUri = inputData.getString("targetUri")
-        val zoomFactor = inputData.getFloat("zoomFactor", 1.0f)
-        val dngPath = inputData.getString("dngPath")
-        val iso = inputData.getInt("iso", 100)
-        val exposureTime = inputData.getLong("exposureTime", 10_000_000L)
-        val fNumber = inputData.getFloat("fNumber", 1.8f)
-        val focalLength = inputData.getFloat("focalLength", 0.0f)
-        val captureTimeMillis = inputData.getLong("captureTimeMillis", 0L)
-        val ccm = inputData.getFloatArray("ccm")
+        val data = inputData
+        val tempRawPath = data.getString("tempRawPath") ?: return Result.failure()
+        val width = data.getInt("width", 0)
+        val height = data.getInt("height", 0)
+        val orientation = data.getInt("orientation", 0)
+        val digitalGain = data.getFloat("digitalGain", 1.0f)
+        val targetLog = data.getInt("targetLog", 0)
+        val lutPath = data.getString("lutPath")
+        val tiffPath = data.getString("tiffPath")
+        val jpgPath = data.getString("jpgPath")
+        val targetUri = data.getString("targetUri")
+        val zoomFactor = data.getFloat("zoomFactor", 1.0f)
+        val dngPath = data.getString("dngPath")
+        val iso = data.getInt("iso", 100)
+        val exposureTime = data.getLong("exposureTime", 10_000_000L)
+        val fNumber = data.getFloat("fNumber", 1.8f)
+        val focalLength = data.getFloat("focalLength", 0.0f)
+        val captureTimeMillis = data.getLong("captureTimeMillis", 0L)
+
+        val ccm = data.getFloatArray("ccm")
         if (ccm == null || ccm.size != 9) {
             Log.e(TAG, "Missing or malformed CCM array.")
             return Result.failure()
         }
-        val whiteBalance = inputData.getFloatArray("whiteBalance")
+        val whiteBalance = data.getFloatArray("whiteBalance")
         if (whiteBalance == null || whiteBalance.size != 4) {
             Log.e(TAG, "Missing or malformed WhiteBalance array.")
             return Result.failure()
         }
-        val baseName = inputData.getString("baseName") ?: "HDRPLUS"
-        val saveTiff = inputData.getBoolean("saveTiff", true)
-        val saveJpg = inputData.getBoolean("saveJpg", true)
+        val baseName = data.getString("baseName") ?: "HDRPLUS"
+        val saveTiff = data.getBoolean("saveTiff", true)
+        val saveJpg = data.getBoolean("saveJpg", true)
 
         Log.d(TAG, "Background Export Worker started for $baseName")
 
@@ -47,19 +49,20 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
             tempRawPath, width, height, orientation, digitalGain, targetLog,
             lutPath, tiffPath, jpgPath, dngPath,
             iso, exposureTime, fNumber, focalLength, captureTimeMillis,
-            ccm, whiteBalance
+            ccm, whiteBalance, zoomFactor
         )
 
-        return if (ret == 0) {
+        if (ret == 0) {
             Log.d(TAG, "Background Export Worker finished JNI processing for $baseName")
 
             // Robustly finalize MediaStore export directly from Worker
+            // JNI already did rotation and zoom!
             val finalUri = ImageSaver.saveProcessedImage(
                 applicationContext,
                 null,
                 jpgPath,
-                orientation,
-                zoomFactor,
+                0, // orientation 0
+                1.0f, // zoom 1.0
                 baseName,
                 dngPath,
                 tiffPath,
@@ -71,13 +74,18 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
             Log.d(TAG, "Background Export Worker finished successfully for $baseName. finalUri=$finalUri")
 
             // Still notify UI for thumbnail update if possible
+            // We pass null for paths to signal that saving is already done
             ColorProcessor.onBackgroundSaveComplete(
-                baseName, tiffPath, dngPath, jpgPath, targetUri, zoomFactor, orientation, saveTiff, saveJpg
+                baseName, null, null, null, finalUri?.toString(), zoomFactor, orientation, saveTiff, saveJpg
             )
-            Result.success()
+            return Result.success()
         } else {
             Log.e(TAG, "Background Export Worker failed with code $ret")
-            Result.failure()
+            // Notify UI to stop animation even on failure
+            ColorProcessor.onBackgroundSaveComplete(
+                baseName, null, null, null, null, zoomFactor, orientation, saveTiff, saveJpg
+            )
+            return Result.failure()
         }
     }
 

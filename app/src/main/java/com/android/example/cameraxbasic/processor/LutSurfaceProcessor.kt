@@ -18,7 +18,9 @@ class LutSurfaceProcessor : SurfaceProcessor {
 
     private val thread = HandlerThread("GLThread")
     private val handler: Handler
-    private val executor = Executors.newSingleThreadExecutor()
+    // Executor that runs tasks on the GL thread via the handler.
+    // This is safer as it won't throw RejectedExecutionException if shut down.
+    private val handlerExecutor = java.util.concurrent.Executor { runnable -> handler.post(runnable) }
 
     private var eglDisplay = EGL14.EGL_NO_DISPLAY
     private var eglContext = EGL14.EGL_NO_CONTEXT
@@ -89,7 +91,7 @@ class LutSurfaceProcessor : SurfaceProcessor {
             this.inputTextureId = textureId
             this.inputSurfaceTexture = surfaceTexture
 
-            request.provideSurface(surface, executor) { result ->
+            request.provideSurface(surface, handlerExecutor) { result ->
                 // Clean up ONLY the resources created for THIS request
                 surface.release()
 
@@ -111,7 +113,7 @@ class LutSurfaceProcessor : SurfaceProcessor {
 
     override fun onOutputSurface(output: SurfaceOutput) {
         handler.post {
-            val s = output.getSurface(executor) {
+            val s = output.getSurface(handlerExecutor) {
                 // Handle close request if needed, though we manage EGL surface based on outputSurface var
                 if (outputSurface != null) {
                     outputSurface = null
@@ -119,6 +121,48 @@ class LutSurfaceProcessor : SurfaceProcessor {
                 }
             }
             setOutputSurfaceInternal(s, output.size.width, output.size.height)
+        }
+    }
+
+    // Direct Surface binding (TextureView)
+    fun getInputSurface(w: Int, h: Int, onSurfaceReady: (Surface) -> Unit) {
+        handler.post {
+            inputWidth = w
+            inputHeight = h
+
+            val textures = IntArray(1)
+            GLES30.glGenTextures(1, textures, 0)
+            val textureId = textures[0]
+
+            GLES30.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, textureId)
+            GLES30.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_NEAREST)
+            GLES30.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_NEAREST)
+            GLES30.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE)
+            GLES30.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE)
+
+            val surfaceTexture = SurfaceTexture(textureId)
+            surfaceTexture.setDefaultBufferSize(w, h)
+            surfaceTexture.setOnFrameAvailableListener({
+                handler.post { drawFrame() }
+            }, handler)
+
+            val surface = Surface(surfaceTexture)
+
+            this.inputTextureId = textureId
+            this.inputSurfaceTexture = surfaceTexture
+
+            onSurfaceReady(surface)
+        }
+    }
+
+    fun releaseInputSurface() {
+        handler.post {
+            inputSurfaceTexture?.release()
+            inputSurfaceTexture = null
+            if (inputTextureId != 0) {
+                GLES30.glDeleteTextures(1, intArrayOf(inputTextureId), 0)
+                inputTextureId = 0
+            }
         }
     }
 
@@ -177,7 +221,7 @@ class LutSurfaceProcessor : SurfaceProcessor {
              releaseGl()
              thread.quitSafely()
         }
-        executor.shutdown()
+        // No need to shutdown handlerExecutor as it's just a wrapper
     }
 
     private fun initGl() {

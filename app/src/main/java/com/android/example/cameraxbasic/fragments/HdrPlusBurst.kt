@@ -13,7 +13,8 @@ data class HdrFrame(
     val width: Int,
     val height: Int,
     val timestamp: Long,
-    val rotationDegrees: Int
+    val rotationDegrees: Int,
+    val physicalId: String? = null
 ) {
     /**
      * Explicitly clears the buffer reference to assist GC.
@@ -60,11 +61,11 @@ class HdrPlusBurst(
 
     private val frames = mutableListOf<HdrFrame>()
 
-    fun addFrame(image: ImageProxy) {
+    fun addFrame(image: ImageProxy, physicalId: String? = null) {
         if (frames.size < frameCount) {
             try {
                 // Extract frame data immediately to release the ImageProxy buffer
-                val frame = copyFrame(image)
+                val frame = copyFrame(image, physicalId)
                 frames.add(frame)
 
                 if (frames.size == frameCount) {
@@ -89,6 +90,41 @@ class HdrPlusBurst(
         }
     }
 
+    /**
+     * Entry point for manual Camera2 frames where we already have the buffer and metadata.
+     */
+    fun addManualFrame(
+        buffer: ByteBuffer,
+        width: Int,
+        height: Int,
+        rowStride: Int,
+        pixelStride: Int,
+        timestamp: Long,
+        rotationDegrees: Int,
+        physicalId: String? = null
+    ) {
+        if (frames.size < frameCount) {
+            try {
+                val frame = copyData(
+                    buffer, width, height, rowStride, pixelStride,
+                    timestamp, rotationDegrees, physicalId
+                )
+                frames.add(frame)
+                if (frames.size == frameCount) {
+                    onBurstComplete(frames.toList())
+                    frames.clear()
+                }
+            } catch (e: Exception) {
+                frames.forEach {
+                    releaseBuffer(it.buffer)
+                    it.close()
+                }
+                frames.clear()
+                throw e
+            }
+        }
+    }
+
     fun reset() {
         frames.forEach {
             releaseBuffer(it.buffer)
@@ -97,14 +133,30 @@ class HdrPlusBurst(
         frames.clear()
     }
 
-    private fun copyFrame(image: ImageProxy): HdrFrame {
+    private fun copyFrame(image: ImageProxy, physicalId: String? = null): HdrFrame {
         val plane = image.planes[0]
-        val buffer = plane.buffer
-        val width = image.width
-        val height = image.height
-        val rowStride = plane.rowStride
-        val pixelStride = plane.pixelStride // Should be 2 for RAW16
+        return copyData(
+            plane.buffer,
+            image.width,
+            image.height,
+            plane.rowStride,
+            plane.pixelStride,
+            image.imageInfo.timestamp,
+            image.imageInfo.rotationDegrees,
+            physicalId
+        )
+    }
 
+    private fun copyData(
+        buffer: ByteBuffer,
+        width: Int,
+        height: Int,
+        rowStride: Int,
+        pixelStride: Int,
+        timestamp: Long,
+        rotationDegrees: Int,
+        physicalId: String? = null
+    ): HdrFrame {
         // Calculate tight-packed size
         val rowLength = width * pixelStride
         val dataLength = rowLength * height
@@ -113,6 +165,7 @@ class HdrPlusBurst(
         val cleanData = acquireBuffer(dataLength)
 
         // Copy logic (handling stride padding)
+        val oldPos = buffer.position()
         buffer.rewind()
         if (rowStride == rowLength) {
             // Fast path: Data is already tightly packed
@@ -137,15 +190,16 @@ class HdrPlusBurst(
                 cleanData.put(rowData)
             }
         }
-
+        buffer.position(oldPos)
         cleanData.flip() // Prepare for reading
 
         return HdrFrame(
             buffer = cleanData,
             width = width,
             height = height,
-            timestamp = image.imageInfo.timestamp,
-            rotationDegrees = image.imageInfo.rotationDegrees
+            timestamp = timestamp,
+            rotationDegrees = rotationDegrees,
+            physicalId = physicalId
         )
     }
 }

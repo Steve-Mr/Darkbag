@@ -101,43 +101,71 @@
             android:clipToPadding="false" />
     </com.google.android.material.card.MaterialCardView>
 
-    <!-- Zoom Controls -->
-    <LinearLayout
-        android:id="@+id/zoom_controls_container"
+    <!-- Unified Controls Hub (Zoom & Physical Lenses) -->
+    <HorizontalScrollView
+        android:id="@+id/controls_hub_scroll"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:orientation="horizontal"
         android:layout_marginBottom="@dimen/margin_medium"
+        android:scrollbars="none"
+        android:visibility="gone"
         app:layout_constraintBottom_toTopOf="@id/manual_controls_root"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent">
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btn_zoom_toggle"
-            style="@style/Widget.Material3.Button.TonalButton"
-            android:layout_width="56dp"
-            android:layout_height="56dp"
-            android:layout_marginEnd="@dimen/spacing_medium"
-            android:text="@string/zoom_1x"
-            android:textSize="14sp"
-            android:padding="0dp"
-            app:cornerRadius="@dimen/radius_full"
-            android:insetTop="0dp"
-            android:insetBottom="0dp" />
+        <LinearLayout
+            android:id="@+id/controls_hub_container"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingHorizontal="@dimen/margin_medium">
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btn_zoom_2x"
-            style="@style/Widget.Material3.Button.TonalButton"
-            android:layout_width="56dp"
-            android:layout_height="56dp"
-            android:text="@string/zoom_2x"
-            android:textSize="14sp"
-            android:padding="0dp"
-            app:cornerRadius="@dimen/radius_full"
-            android:insetTop="0dp"
-            android:insetBottom="0dp" />
+            <!-- Zoom Presets (Apply to Main Camera) -->
+            <LinearLayout
+                android:id="@+id/zoom_controls_container"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:visibility="gone">
 
-    </LinearLayout>
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_zoom_toggle"
+                    style="@style/Widget.Material3.Button.TonalButton"
+                    android:layout_width="56dp"
+                    android:layout_height="56dp"
+                    android:layout_marginEnd="@dimen/spacing_small"
+                    android:text="@string/zoom_1x"
+                    android:textSize="14sp"
+                    android:padding="0dp"
+                    app:cornerRadius="@dimen/radius_full"
+                    android:insetTop="0dp"
+                    android:insetBottom="0dp" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_zoom_2x"
+                    style="@style/Widget.Material3.Button.TonalButton"
+                    android:layout_width="56dp"
+                    android:layout_height="56dp"
+                    android:layout_marginEnd="@dimen/spacing_medium"
+                    android:text="@string/zoom_2x"
+                    android:textSize="14sp"
+                    android:padding="0dp"
+                    app:cornerRadius="@dimen/radius_full"
+                    android:insetTop="0dp"
+                    android:insetBottom="0dp" />
+            </LinearLayout>
+
+            <!-- Physical Lens Buttons (Dynamically populated) -->
+            <LinearLayout
+                android:id="@+id/lens_controls_container"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+            </LinearLayout>
+
+        </LinearLayout>
+    </HorizontalScrollView>
 
     <!-- Manual Controls Panel -->
     <com.google.android.material.card.MaterialCardView
@@ -339,6 +367,20 @@
                 app:layout_constraintEnd_toEndOf="parent"
                 app:layout_constraintTop_toTopOf="@id/camera_capture_button"
                 app:layout_constraintBottom_toBottomOf="@id/camera_capture_button" />
+
+            <com.google.android.material.progressindicator.CircularProgressIndicator
+                android:id="@+id/processing_progress"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:indeterminate="true"
+                android:visibility="gone"
+                app:indicatorSize="@dimen/round_button_medium"
+                app:trackThickness="4dp"
+                app:indicatorColor="?attr/colorPrimary"
+                app:layout_constraintTop_toTopOf="@id/photo_view_button"
+                app:layout_constraintBottom_toBottomOf="@id/photo_view_button"
+                app:layout_constraintStart_toStartOf="@id/photo_view_button"
+                app:layout_constraintEnd_toEndOf="@id/photo_view_button" />
 
         </androidx.constraintlayout.widget.ConstraintLayout>
 
