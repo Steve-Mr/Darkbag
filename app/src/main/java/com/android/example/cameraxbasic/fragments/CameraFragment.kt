@@ -2467,7 +2467,11 @@ class CameraFragment : Fragment() {
                         val rotation = image.imageInfo.rotationDegrees
                         image.close()
 
-                        val currentZoom = if (is2xMode) 2.0f else (currentFocalLength / 24.0f)
+                        val currentZoom = if (currentLens?.isZoomPreset == true && currentLens?.targetZoomRatio != null) {
+                                currentLens!!.targetZoomRatio!!
+                            } else {
+                                1.0f
+                        }
                         showProcessingAnimation()
                         saveJpegFallback(data, rotation, currentZoom)
                     }
