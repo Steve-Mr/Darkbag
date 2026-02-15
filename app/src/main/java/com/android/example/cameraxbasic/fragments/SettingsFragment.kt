@@ -207,6 +207,11 @@ class SettingsFragment : Fragment() {
         binding.switchUseCamerax.setOnCheckedChangeListener { _, isChecked ->
             prefs.edit().putBoolean(KEY_USE_CAMERAX, isChecked).apply()
         }
+
+        binding.switchHdrPlusOis.isChecked = prefs.getBoolean(KEY_HDR_PLUS_OIS, true)
+        binding.switchHdrPlusOis.setOnCheckedChangeListener { _, isChecked ->
+            prefs.edit().putBoolean(KEY_HDR_PLUS_OIS, isChecked).apply()
+        }
     }
 
     override fun onDestroyView() {
@@ -233,6 +238,7 @@ class SettingsFragment : Fragment() {
         const val KEY_HDR_UNDEREXPOSURE_MODE = "hdr_underexposure_mode"
         const val KEY_USE_CAMERAX = "use_camerax_engine"
         const val KEY_MIRROR_FRONT_CAMERA = "mirror_front_camera"
+        const val KEY_HDR_PLUS_OIS = "hdr_plus_ois_enabled"
 
         val FOCAL_LENGTHS = listOf("24", "28", "35")
         val ANTIBANDING_MODES = listOf("Auto", "50Hz", "60Hz", "Off")

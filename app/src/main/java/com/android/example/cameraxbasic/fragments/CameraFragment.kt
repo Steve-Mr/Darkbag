@@ -203,6 +203,9 @@ class CameraFragment : Fragment() {
 
     private var processingCount = 0
 
+    private var isOisSupported = false
+    private var isHdrOisEnabledPref = true
+
     private fun showProcessingAnimation() {
         lifecycleScope.launch(Dispatchers.Main) {
             processingCount++
@@ -373,6 +376,10 @@ class CameraFragment : Fragment() {
             )
             return
         }
+
+        // Refresh preferences
+        isHdrOisEnabledPref = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+            .getBoolean(SettingsFragment.KEY_HDR_PLUS_OIS, true)
 
         // Re-initialize camera engine if needed.
         // For Camera2 engine, we need to re-bind use cases (which triggers openCamera2).
@@ -728,6 +735,14 @@ class CameraFragment : Fragment() {
             // Check for RAW support early to enable HDR+ UI
             val map = chars.get(android.hardware.camera2.CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
             isRawSupported = map?.getOutputFormats()?.contains(android.graphics.ImageFormat.RAW_SENSOR) == true
+
+            // Check OIS support
+            val availableOis = chars.get(android.hardware.camera2.CameraCharacteristics.LENS_INFO_AVAILABLE_OPTICAL_STABILIZATION)
+            isOisSupported = availableOis != null && availableOis.contains(android.hardware.camera2.CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON)
+
+            // Cache HDR+ OIS preference
+            isHdrOisEnabledPref = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(SettingsFragment.KEY_HDR_PLUS_OIS, true)
 
             // Update UI if manual panel is visible
             lifecycleScope.launch(Dispatchers.Main) {
@@ -2235,6 +2250,9 @@ class CameraFragment : Fragment() {
             )
         }
 
+        // Apply Stabilization
+        applyStabilizationOptions(builder, false)
+
         camera2Control.setCaptureRequestOptions(builder.build())
 
         if (!isManualExposure) {
@@ -2571,6 +2589,8 @@ class CameraFragment : Fragment() {
                         android.hardware.camera2.CaptureRequest.SENSOR_EXPOSURE_TIME,
                         config.exposureTime
                     )
+                    // Apply OIS for HDR+ Burst
+                    applyStabilizationOptions(builder, true)
                     camera2Control.setCaptureRequestOptions(builder.build()).await()
                 }
 
@@ -3276,6 +3296,8 @@ class CameraFragment : Fragment() {
                 request.set(android.hardware.camera2.CaptureRequest.JPEG_ORIENTATION, combinedOrientation)
 
                 applyManualSettingsToRequest(request)
+                // Overwrite stabilization for HDR+ Burst specifically
+                applyStabilizationToRequest(request, true)
 
                 request.set(android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE, android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE_OFF)
                 request.set(android.hardware.camera2.CaptureRequest.SENSOR_SENSITIVITY, config.iso)
@@ -3392,7 +3414,40 @@ class CameraFragment : Fragment() {
     }
 
 
+    private fun getTargetOisMode(isHdrBurst: Boolean): Int {
+        return if (isHdrBurst && !isHdrOisEnabledPref) {
+            android.hardware.camera2.CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_OFF
+        } else {
+            android.hardware.camera2.CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON
+        }
+    }
+
+    private fun applyStabilizationOptions(builder: CaptureRequestOptions.Builder, isHdrBurst: Boolean) {
+        if (isOisSupported) {
+            val mode = getTargetOisMode(isHdrBurst)
+            builder.setCaptureRequestOption(android.hardware.camera2.CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE, mode)
+            // Explicitly disable EIS when OIS is in use to avoid conflicts
+            builder.setCaptureRequestOption(android.hardware.camera2.CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, android.hardware.camera2.CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF)
+        } else {
+            builder.setCaptureRequestOption(android.hardware.camera2.CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE, android.hardware.camera2.CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_OFF)
+        }
+    }
+
+    private fun applyStabilizationToRequest(request: android.hardware.camera2.CaptureRequest.Builder, isHdrBurst: Boolean) {
+        if (isOisSupported) {
+            val mode = getTargetOisMode(isHdrBurst)
+            request.set(android.hardware.camera2.CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE, mode)
+            request.set(android.hardware.camera2.CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, android.hardware.camera2.CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF)
+            Log.d(TAG, "OIS ${if(mode == 1) "enabled" else "disabled"} for ${if(isHdrBurst) "HDR+ Burst" else "Standard/Preview"}")
+        } else {
+            request.set(android.hardware.camera2.CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE, android.hardware.camera2.CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_OFF)
+        }
+    }
+
     private fun applyManualSettingsToRequest(request: android.hardware.camera2.CaptureRequest.Builder) {
+        // Apply Stabilization (Preview/Standard)
+        applyStabilizationToRequest(request, false)
+
         if (isManualExposure) {
             request.set(android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE, android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE_OFF)
             request.set(android.hardware.camera2.CaptureRequest.SENSOR_SENSITIVITY, currentIso)
