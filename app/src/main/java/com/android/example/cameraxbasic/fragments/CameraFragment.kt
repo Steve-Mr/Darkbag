@@ -102,6 +102,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.sync.withLock
 import java.nio.ByteBuffer
 import java.text.SimpleDateFormat
 import java.util.*
@@ -143,7 +144,7 @@ class CameraFragment : Fragment() {
 
     // Camera2 State
     private var camera2Device: android.hardware.camera2.CameraDevice? = null
-    private var camera2Session: android.hardware.camera2.CameraCaptureSession? = null
+    @Volatile private var camera2Session: android.hardware.camera2.CameraCaptureSession? = null
     private var camera2PreviewSurface: android.view.Surface? = null
     private var rawImageReader: android.media.ImageReader? = null
     private var analysisImageReader: android.media.ImageReader? = null
@@ -153,6 +154,7 @@ class CameraFragment : Fragment() {
 
     private var camera2Thread: HandlerThread? = null
     private var camera2Handler: Handler? = null
+    private val camera2Lock = kotlinx.coroutines.sync.Mutex()
 
     private var lutProcessor: LutSurfaceProcessor? = null
     private lateinit var lutManager: LutManager
@@ -213,10 +215,8 @@ class CameraFragment : Fragment() {
     }
 
     // Zoom State
-    private var defaultFocalLength = 24
-    private var currentFocalLength = -1
-    private var is2xMode = false
     private var zoomJob: kotlinx.coroutines.Job? = null
+    private var transientLensLabel: String? = null
 
     private var deviceOrientationDegrees = 0
 
@@ -349,7 +349,9 @@ class CameraFragment : Fragment() {
         super.onStop()
         orientationEventListener.disable()
         // Ensure Camera2 is closed when stopping to release hardware resources
-        releaseCamera2Resources()
+        lifecycleScope.launch {
+            releaseCamera2Resources()
+        }
     }
 
     override fun onResume() {
@@ -444,17 +446,9 @@ class CameraFragment : Fragment() {
         lutManager = LutManager(requireContext())
         cameraRepository = com.android.example.cameraxbasic.utils.CameraRepository(requireContext())
 
-        // Initialize Zoom Default
+        // Initialize Preferences
         val prefs =
             requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        val defaultStr = prefs.getString(SettingsFragment.KEY_DEFAULT_FOCAL_LENGTH, "24") ?: "24"
-        defaultFocalLength = defaultStr.toIntOrNull() ?: 24
-
-        // Restore Zoom State
-        if (currentFocalLength == -1) {
-            currentFocalLength = prefs.getInt(KEY_CURRENT_FOCAL_LENGTH, defaultFocalLength)
-        }
-        is2xMode = prefs.getBoolean(KEY_IS_2X_MODE, false)
 
         // Initialize Flash State
         isFlashEnabled = prefs.getBoolean(SettingsFragment.KEY_FLASH_MODE, false)
@@ -560,12 +554,11 @@ class CameraFragment : Fragment() {
         updateCameraSwitchButton()
     }
 
-    private fun refreshLenses() {
+    private fun refreshLenses(force: Boolean = false) {
         val cameraXIds = mutableSetOf<String>()
         cameraProvider?.availableCameraInfos?.forEach { info ->
             val id = Camera2CameraInfo.from(info).cameraId
             cameraXIds.add(id)
-            Log.d(TAG, "CameraX availableCameraInfo ID: $id")
         }
 
         val repoFacing = if (lensFacing == CameraSelector.LENS_FACING_BACK)
@@ -573,26 +566,61 @@ class CameraFragment : Fragment() {
         else
             android.hardware.camera2.CameraCharacteristics.LENS_FACING_FRONT
 
-        val newLenses = cameraRepository.enumerateCameras(cameraXIds, repoFacing)
-        Log.d(TAG, "Available Lenses identified: ${newLenses.size} for facing $repoFacing")
+        // Use unified focal length presets (includes digital ones like 28mm, 35mm, 2.0x)
+        val newLenses = cameraRepository.getFocalLengthPresets(cameraXIds, repoFacing)
 
-        // Update currentLens reference if it exists, to pick up any engine changes
+        if (!force && newLenses.size == availableLenses.size && newLenses.zip(availableLenses).all { it.first.sensorId == it.second.sensorId }) {
+            return // No change
+        }
+
+        Log.d(TAG, "Available Lenses/Presets identified: ${newLenses.size} for facing $repoFacing")
+
+        // Update currentLens reference if it exists
         currentLens?.let { old ->
-             currentLens = newLenses.find { it.sensorId == old.sensorId }
-                 ?: newLenses.find { it.id == old.id && it.physicalId == old.physicalId }
-                 // Don't keep old lens if it's from a different facing
+             var found = newLenses.find { it.sensorId == old.sensorId }
+             if (found == null) {
+                 val base1x = newLenses.find { it.multiplier in 0.95f..1.05f && !it.isZoomPreset }
+                 if (base1x != null) {
+                     found = cameraRepository.get1xPresets(base1x).find { it.sensorId == old.sensorId }
+                 }
+             }
+             currentLens = found
         }
 
         availableLenses = newLenses
 
-        if (currentLens == null || availableLenses.none { it.sensorId == currentLens?.sensorId }) {
+        if (currentLens == null) {
             val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
             val savedLensId = prefs.getString(KEY_SELECTED_LENS_ID, null)
+            val defaultLensId = prefs.getString(SettingsFragment.KEY_DEFAULT_LENS_ID, null)
+            val default1xFocal = prefs.getString(SettingsFragment.KEY_DEFAULT_FOCAL_1X, "24mm")
 
-            currentLens = availableLenses.find { it.sensorId == savedLensId }
-                ?: availableLenses.find { it.multiplier in 0.95f..1.05f && !it.isLogicalAuto }
-                ?: availableLenses.find { it.isLogicalAuto }
-                ?: availableLenses.firstOrNull()
+            if (savedLensId != null) {
+                var found = availableLenses.find { it.sensorId == savedLensId }
+                if (found == null) {
+                    val base1x = availableLenses.find { it.multiplier in 0.95f..1.05f && !it.isZoomPreset }
+                    if (base1x != null) {
+                        found = cameraRepository.get1xPresets(base1x).find { it.sensorId == savedLensId }
+                    }
+                }
+                currentLens = found
+            }
+
+            if (currentLens == null) {
+                val targetId = defaultLensId
+                var found = availableLenses.find { it.sensorId == targetId }
+                if (found == null) {
+                    found = availableLenses.find { it.multiplier in 0.95f..1.05f && !it.isZoomPreset }
+                        ?: availableLenses.firstOrNull()
+                }
+
+                if (found != null && found.multiplier in 0.95f..1.05f && !found.isZoomPreset) {
+                    val presets1x = cameraRepository.get1xPresets(found)
+                    currentLens = presets1x.find { it.name == default1xFocal } ?: found
+                } else {
+                    currentLens = found
+                }
+            }
         }
     }
 
@@ -600,10 +628,13 @@ class CameraFragment : Fragment() {
     private suspend fun setUpCamera() {
         // Initially don't initialize cameraProvider unless needed.
         // But we need to know lensFacing.
-        lensFacing = CameraSelector.LENS_FACING_BACK
+        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        lensFacing = prefs.getInt(KEY_LENS_FACING, CameraSelector.LENS_FACING_BACK)
 
         // Initialize Lenses
-        refreshLenses()
+        withContext(Dispatchers.Default) {
+            refreshLenses()
+        }
 
         // Select lensFacing depending on the available cameras
         if (availableLenses.isEmpty()) {
@@ -650,13 +681,26 @@ class CameraFragment : Fragment() {
         updateLiveLut() // Ensure LUT is loaded
     }
 
+    private var bindJob: kotlinx.coroutines.Job? = null
+
     @OptIn(ExperimentalCamera2Interop::class)
     private fun bindCameraUseCases() {
-        refreshLenses()
+        bindJob?.cancel()
+        bindJob = lifecycleScope.launch {
+            // Move heavy lens refresh to background
+            withContext(Dispatchers.Default) {
+                refreshLenses()
+            }
 
-        // Ensure Camera2 is closed if we are switching engines or lenses
-        closeCamera2()
+            // Ensure Camera2 is closed if we are switching engines or lenses
+            closeCamera2()
 
+            bindCameraUseCasesInternal()
+        }
+    }
+
+    @OptIn(ExperimentalCamera2Interop::class)
+    private suspend fun bindCameraUseCasesInternal() {
         // Fetch Characteristics for Manual Control
         val targetId = if (lensFacing == CameraSelector.LENS_FACING_BACK) {
              currentLens?.physicalId ?: currentLens?.id ?: "0"
@@ -729,10 +773,8 @@ class CameraFragment : Fragment() {
             }
 
             // Give system a moment to release hardware
-            lifecycleScope.launch(Dispatchers.Main) {
-                delay(300)
-                openCamera2(currentLens!!.id)
-            }
+            delay(300)
+            openCamera2(currentLens!!.id)
             return
         }
 
@@ -1095,6 +1137,11 @@ class CameraFragment : Fragment() {
                 } else {
                     CameraSelector.LENS_FACING_FRONT
                 }
+
+                // Persist choice for session
+                val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                prefs.edit().putInt(KEY_LENS_FACING, lensFacing).apply()
+
                 // Re-bind use cases to update selected camera
                 bindCameraUseCases()
             }
@@ -1822,25 +1869,19 @@ class CameraFragment : Fragment() {
             return
         }
 
-        refreshLenses()
+        if (availableLenses.isEmpty()) {
+            refreshLenses()
+        }
 
         if (availableLenses.isNotEmpty()) {
             scroll.visibility = View.VISIBLE
             container.removeAllViews()
 
-            val uiLenses = availableLenses.filter { !it.isLogicalAuto }.toMutableList()
+            // Filter out 1x sub-presets (28mm, 35mm) from the main list.
+            // Only show physical lenses and the virtual 2.0x.
+            val filteredLenses = availableLenses.filter { !it.isZoomPreset || it.sensorId.contains("2.0x") || it.sensorId.contains("virtual") }
 
-            val hasPhysical2x = uiLenses.any { it.multiplier in 1.9f..2.1f }
-            if (!hasPhysical2x) {
-                val mainLens = uiLenses.find { it.multiplier in 0.95f..1.05f } ?: uiLenses.firstOrNull()
-                mainLens?.let {
-                    uiLenses.add(it.copy(name = "2.0x", targetZoomRatio = 2.0f, sensorId = "virtual-2x", isZoomPreset = true))
-                }
-            }
-
-            uiLenses.sortBy { it.multiplier }
-
-            for (lens in uiLenses) {
+            for (lens in filteredLenses) {
                 val btn = com.google.android.material.button.MaterialButton(
                     requireContext()
                 ).apply {
@@ -1860,66 +1901,54 @@ class CameraFragment : Fragment() {
 
                     setOnClickListener {
                         val oldLens = currentLens
-                        val is1xLens = lens.multiplier in 0.95f..1.05f
+                        val is1x = lens.multiplier in 0.95f..1.05f && !lens.isZoomPreset
+                        // Only cycle if we are already in the 1x family (24/28/35mm)
+                        val isAlreadyIn1xPresets = oldLens != null && oldLens.id == lens.id &&
+                                (oldLens.name == "24mm" || oldLens.name == "28mm" || oldLens.name == "35mm")
 
-                        if (lens.sensorId == "virtual-2x") {
-                             is2xMode = true
-                             currentFocalLength = 24
-                             val targetMain = uiLenses.find { it.multiplier in 0.95f..1.05f && it.sensorId != "virtual-2x" }
-                             if (targetMain != null) {
-                                 currentLens = targetMain
-                                 if (oldLens?.id != currentLens?.id || oldLens?.useCamera2 != currentLens?.useCamera2) {
-                                     animateSwitch { bindCameraUseCases() }
-                                 } else {
-                                     updateZoom(true)
-                                 }
-                             }
-                             return@setOnClickListener
-                        }
-
-                        if (oldLens?.sensorId == lens.sensorId) {
-                            if (is1xLens) {
-                                if (is2xMode) {
-                                    is2xMode = false
-                                    currentFocalLength = 24
-                                } else {
-                                    when (currentFocalLength) {
-                                        24 -> currentFocalLength = 28
-                                        28 -> currentFocalLength = 35
-                                        35 -> currentFocalLength = 24
-                                        else -> currentFocalLength = 24
-                                    }
-                                }
-                                updateZoom(true)
+                        if (is1x && isAlreadyIn1xPresets) {
+                            // Cycle through 1x presets: 24mm -> 28mm -> 35mm
+                            val presets1x = cameraRepository.get1xPresets(lens)
+                            val currentName = oldLens?.name ?: "24mm"
+                            val nextIndex = when (currentName) {
+                                "24mm" -> presets1x.indexOfFirst { it.name == "28mm" }.takeIf { it != -1 } ?: 0
+                                "28mm" -> presets1x.indexOfFirst { it.name == "35mm" }.takeIf { it != -1 } ?: 0
+                                "35mm" -> 0
+                                else -> 0
                             }
+                            currentLens = presets1x[nextIndex]
+
+                            // Visual feedback: Focal Length -> Multiplier
+                            transientLensLabel = currentLens!!.name
+                            lifecycleScope.launch(Dispatchers.Main) {
+                                delay(800)
+                                if (transientLensLabel == presets1x[nextIndex].name) {
+                                    transientLensLabel = null
+                                    updateLensUI()
+                                }
+                            }
+                        } else if (is1x) {
+                            // Switching TO 1x from another lens: Use the 1x default focal length setting
+                            val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                            val default1xFocal = prefs.getString(SettingsFragment.KEY_DEFAULT_FOCAL_1X, "24mm")
+                            val presets1x = cameraRepository.get1xPresets(lens)
+                            currentLens = presets1x.find { it.name == default1xFocal } ?: lens
                         } else {
                             currentLens = lens
-                            is2xMode = false
-                            currentFocalLength = 24
+                        }
 
-                            updateLensUI()
+                        updateLensUI()
 
-                            if (oldLens?.id != lens.id || oldLens?.physicalId != lens.physicalId || oldLens?.useCamera2 != lens.useCamera2) {
-                                animateSwitch {
-                                    bindCameraUseCases()
-                                }
-                            } else {
-                                updateZoom(true)
+                        if (oldLens?.id != currentLens?.id || oldLens?.physicalId != currentLens?.physicalId || oldLens?.useCamera2 != currentLens?.useCamera2) {
+                            animateSwitch {
+                                bindCameraUseCases()
                             }
+                        } else {
+                            updateZoom(true)
                         }
                     }
                 }
                 container.addView(btn)
-            }
-
-            if (currentLens == null) {
-                val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-                val savedLensId = prefs.getString(KEY_SELECTED_LENS_ID, null)
-
-                currentLens = availableLenses.find { it.sensorId == savedLensId }
-                    ?: availableLenses.find { it.multiplier in 0.95f..1.05f && !it.isLogicalAuto }
-                    ?: availableLenses.find { it.isLogicalAuto }
-                    ?: availableLenses.firstOrNull()
             }
             updateLensUI()
         } else {
@@ -1935,32 +1964,23 @@ class CameraFragment : Fragment() {
 
         val binding = cameraUiContainerBinding ?: return
         val container = binding.lensControlsContainer ?: return
-        val scroll = binding.controlsHubScroll ?: return
 
         val colorPrimary = MaterialColors.getColor(container, com.google.android.material.R.attr.colorPrimary)
         val colorOnSurface = MaterialColors.getColor(container, com.google.android.material.R.attr.colorOnSurface)
-
-        val uiLenses = availableLenses.filter { !it.isLogicalAuto }.toMutableList()
-        val hasPhysical2x = uiLenses.any { it.multiplier in 1.9f..2.1f }
-        if (!hasPhysical2x) {
-            val mainLens = uiLenses.find { it.multiplier in 0.95f..1.05f } ?: uiLenses.firstOrNull()
-            mainLens?.let {
-                uiLenses.add(it.copy(name = "2.0x", targetZoomRatio = 2.0f, sensorId = "virtual-2x", isZoomPreset = true))
-            }
-        }
-        uiLenses.sortBy { it.multiplier }
 
         for (i in 0 until container.childCount) {
             val btn = container.getChildAt(i) as? com.google.android.material.button.MaterialButton
             val lens = btn?.tag as? com.android.example.cameraxbasic.utils.LensInfo
             if (btn != null && lens != null) {
-                val isActive = if (lens.sensorId == "virtual-2x") {
-                    is2xMode
-                } else {
-                    lens.sensorId == currentLens?.sensorId && !is2xMode
-                }
+                // For the 1.0x button, it stays active if any of its sub-presets (24, 28, 35) are active
+                val isActive = lens.sensorId == currentLens?.sensorId ||
+                              (lens.multiplier in 0.95f..1.05f && currentLens?.id == lens.id && !currentLens!!.sensorId.contains("virtual"))
 
                 if (isActive) {
+                    // Update text for 1.0x button
+                    if (lens.multiplier in 0.95f..1.05f && !lens.isZoomPreset) {
+                        btn.text = transientLensLabel ?: String.format("%.1fx", currentLens?.multiplier ?: 1.0f)
+                    }
                     btn.setTextColor(colorPrimary)
                     btn.strokeWidth = resources.getDimensionPixelSize(R.dimen.stroke_small)
                     btn.strokeColor = android.content.res.ColorStateList.valueOf(colorPrimary)
@@ -1969,20 +1989,19 @@ class CameraFragment : Fragment() {
                         colorPrimary,
                         0.1f
                     ))
-
-                    if (lens.multiplier in 0.95f..1.05f && lens.sensorId != "virtual-2x") {
-                        btn.text = when {
-                            currentFocalLength == 28 -> "28mm"
-                            currentFocalLength == 35 -> "35mm"
-                            else -> lens.name
-                        }
-                    } else {
-                        btn.text = lens.name
-                    }
                 } else {
                     btn.setTextColor(colorOnSurface)
                     btn.strokeWidth = 0
-                    btn.text = lens.name
+
+                    if (lens.multiplier in 0.95f..1.05f && !lens.isZoomPreset) {
+                        val default1xFocal = prefs.getString(SettingsFragment.KEY_DEFAULT_FOCAL_1X, "24mm")
+                        val presets1x = cameraRepository.get1xPresets(lens)
+                        val defaultPreset = presets1x.find { it.name == default1xFocal } ?: lens
+                        btn.text = String.format("%.1fx", defaultPreset.multiplier)
+                    } else {
+                        btn.text = lens.name
+                    }
+
                     btn.setBackgroundColor(MaterialColors.layer(
                         MaterialColors.getColor(btn, com.google.android.material.R.attr.colorSurface),
                         colorOnSurface,
@@ -1991,31 +2010,35 @@ class CameraFragment : Fragment() {
                 }
             }
         }
-
-        binding.zoomControlsContainer?.visibility = View.GONE
     }
 
     private fun initZoomControls() {
         val binding = cameraUiContainerBinding ?: return
 
         binding.btnZoomToggle?.setOnClickListener {
-            if (is2xMode) {
-                is2xMode = false
-                currentFocalLength = defaultFocalLength
+            val nextFocal = when {
+                currentLens?.sensorId?.endsWith("-28mm") == true -> 35
+                currentLens?.sensorId?.endsWith("-35mm") == true -> 24
+                else -> 28
+            }
+
+            val targetId = if (nextFocal == 24) {
+                 availableLenses.find { it.multiplier in 0.95f..1.05f && !it.isZoomPreset }?.sensorId
             } else {
-                currentFocalLength = when (currentFocalLength) {
-                    24 -> 28
-                    28 -> 35
-                    35 -> 24
-                    else -> 24
+                 availableLenses.find { it.sensorId.endsWith("-$nextFocal" + "mm") }?.sensorId
+            }
+
+            targetId?.let { id ->
+                availableLenses.find { it.sensorId == id }?.let {
+                    currentLens = it
+                    updateZoom(true)
                 }
             }
-            updateZoom(true)
         }
 
         binding.btnZoom2x?.setOnClickListener {
-            if (!is2xMode) {
-                is2xMode = true
+            availableLenses.find { it.multiplier in 1.9f..2.1f || it.sensorId.contains("2.0x") || it.sensorId.contains("virtual-2x") }?.let {
+                currentLens = it
                 updateZoom(true)
             }
         }
@@ -2030,24 +2053,13 @@ class CameraFragment : Fragment() {
             return
         }
 
-        if (currentLens?.isZoomPreset == true && currentLens?.targetZoomRatio != null) {
-            camera?.cameraControl?.setZoomRatio(currentLens!!.targetZoomRatio!!)
-            updateZoomUI(animate)
-            return
-        }
-
-        val targetRatio = if (is2xMode) {
-            2.0f
+        val targetRatio = if (currentLens?.isZoomPreset == true && currentLens?.targetZoomRatio != null) {
+            currentLens!!.targetZoomRatio!!
         } else {
-            if (currentLens?.isLogicalAuto == true || (currentLens?.multiplier ?: 0f) in 0.95f..1.05f) {
-                currentFocalLength / 24.0f
-            } else {
-                1.0f
-            }
+            1.0f
         }
 
-        val maxZoom = camera?.cameraInfo?.zoomState?.value?.maxZoomRatio
-            ?: 8.0f
+        val maxZoom = camera?.cameraInfo?.zoomState?.value?.maxZoomRatio ?: 8.0f
         val ratio = targetRatio.coerceAtMost(maxZoom)
 
         camera?.cameraControl?.setZoomRatio(ratio)
@@ -2060,7 +2072,11 @@ class CameraFragment : Fragment() {
         val chars = camera2Manager.getCameraCharacteristics(device.id)
         val activeArray = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE) ?: return
 
-        val targetRatio = if (is2xMode) 2.0f else (currentFocalLength / 24.0f)
+        val targetRatio = if (currentLens?.isZoomPreset == true && currentLens?.targetZoomRatio != null) {
+            currentLens!!.targetZoomRatio!!
+        } else {
+            1.0f
+        }
 
         val cropW = (activeArray.width() / targetRatio).toInt()
         val cropH = (activeArray.height() / targetRatio).toInt()
@@ -2134,12 +2150,6 @@ class CameraFragment : Fragment() {
     }
 
     private fun updateZoomUI(animate: Boolean) {
-        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit()
-            .putBoolean(KEY_IS_2X_MODE, is2xMode)
-            .putInt(KEY_CURRENT_FOCAL_LENGTH, currentFocalLength)
-            .apply()
-
         val binding = cameraUiContainerBinding ?: return
 
         updateLensUI()
@@ -2147,7 +2157,10 @@ class CameraFragment : Fragment() {
         val activeColor = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorPrimary)
         val inactiveColor = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnSurface)
 
-        if (is2xMode) {
+        val is2xActive = (currentLens?.multiplier ?: 1.0f) in 1.9f..2.1f
+        val focalEq = currentLens?.equivalentFocalLength ?: 24f
+
+        if (is2xActive) {
             binding.btnZoom2x?.setTextColor(activeColor)
             binding.btnZoomToggle?.setTextColor(inactiveColor)
 
@@ -2158,16 +2171,11 @@ class CameraFragment : Fragment() {
             binding.btnZoomToggle?.setTextColor(activeColor)
 
             zoomJob?.cancel()
-            val labelX = when (currentFocalLength) {
-                24 -> "1x"
-                28 -> "1.2x"
-                35 -> "1.5x"
-                else -> "1x"
-            }
+            val labelX = String.format("%.1fx", currentLens?.multiplier ?: 1.0f)
 
-            if (animate) {
+            if (animate && currentLens?.isZoomPreset == true) {
                 zoomJob = lifecycleScope.launch(Dispatchers.Main) {
-                    val labelMm = "${currentFocalLength}mm"
+                    val labelMm = "${focalEq.toInt()}mm"
 
                     binding.btnZoomToggle?.text = labelMm
                     delay(500)
@@ -2376,8 +2384,7 @@ class CameraFragment : Fragment() {
         private const val AE_SETTLE_DELAY_MS = 50L
 
         const val KEY_SELECTED_LENS_ID = "selected_lens_sensor_id"
-        const val KEY_IS_2X_MODE = "is_2x_mode"
-        const val KEY_CURRENT_FOCAL_LENGTH = "current_focal_length"
+        const val KEY_LENS_FACING = "lens_facing"
         const val KEY_HDR_PLUS_ENABLED = "hdr_plus_enabled"
     }
 
@@ -2388,8 +2395,11 @@ class CameraFragment : Fragment() {
                 object : ImageCapture.OnImageCapturedCallback() {
                     override fun onCaptureSuccess(image: ImageProxy) {
                         try {
-                            val currentZoom =
-                                if (is2xMode) 2.0f else (currentFocalLength / 24.0f)
+                            val currentZoom = if (currentLens?.isZoomPreset == true && currentLens?.targetZoomRatio != null) {
+                                currentLens!!.targetZoomRatio!!
+                            } else {
+                                1.0f
+                            }
 
                             val holder = copyImageToHolder(image, currentZoom, getCombinedOrientation(), currentLens?.physicalId)
                             image.close()
@@ -2628,7 +2638,11 @@ class CameraFragment : Fragment() {
     }
 
     private fun processHdrPlusBurst(frames: List<HdrFrame>, digitalGain: Float) {
-        val currentZoom = if (is2xMode) 2.0f else (currentFocalLength / 24.0f)
+        val currentZoom = if (currentLens?.isZoomPreset == true && currentLens?.targetZoomRatio != null) {
+            currentLens!!.targetZoomRatio!!
+        } else {
+            1.0f
+        }
         val combinedOrientation = getCombinedOrientation()
         val startTime = burstStartTime
         val captureEndTime = System.currentTimeMillis()
@@ -2937,7 +2951,7 @@ class CameraFragment : Fragment() {
     }
 
     @SuppressLint("MissingPermission")
-    private fun openCamera2(cameraId: String) {
+    private suspend fun openCamera2(cameraId: String) {
         // Ensure previous device and session are closed
         closeCamera2()
 
@@ -2951,23 +2965,29 @@ class CameraFragment : Fragment() {
         try {
             camera2Manager.openCamera(cameraId, object : android.hardware.camera2.CameraDevice.StateCallback() {
                 override fun onOpened(device: android.hardware.camera2.CameraDevice) {
-                    camera2RetryCount = 0 // Reset on success
-                    camera2Device = device
-                    createCamera2CaptureSession()
+                    lifecycleScope.launch(Dispatchers.Main) {
+                        camera2Lock.withLock {
+                            camera2RetryCount = 0 // Reset on success
+                            camera2Device = device
+                            createCamera2CaptureSession()
+                        }
+                    }
                 }
 
                 override fun onDisconnected(device: android.hardware.camera2.CameraDevice) {
-                    closeCamera2()
+                    lifecycleScope.launch { closeCamera2() }
                 }
 
                 override fun onError(device: android.hardware.camera2.CameraDevice, error: Int) {
                     Log.e(TAG, "Camera2 open error: $error for camera $cameraId")
-                    closeCamera2()
+                    lifecycleScope.launch { closeCamera2() }
 
                     if (error == 2 && camera2RetryCount < 1) {
                          camera2RetryCount++
                          Log.i(TAG, "Retrying camera open after hardware error (attempt $camera2RetryCount)...")
-                         camera2Handler?.postDelayed({ openCamera2(cameraId) }, 500)
+                         camera2Handler?.postDelayed({
+                             lifecycleScope.launch { openCamera2(cameraId) }
+                         }, 500)
                          return
                     }
 
@@ -2995,6 +3015,8 @@ class CameraFragment : Fragment() {
         val device = camera2Device ?: return
         val handler = camera2Handler ?: return
 
+        Log.d(TAG, "Creating Camera2 Capture Session for device: ${device.id}")
+
         val chars = camera2Manager.getCameraCharacteristics(device.id)
         val map = chars.get(android.hardware.camera2.CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
         val rawSizes = map?.getOutputSizes(android.graphics.ImageFormat.RAW_SENSOR)
@@ -3018,18 +3040,24 @@ class CameraFragment : Fragment() {
 
         Log.d(TAG, "Requesting preview surface from LutProcessor: ${previewSize.width}x${previewSize.height}")
         lutProcessor?.getInputSurface(previewSize.width, previewSize.height) { surface ->
-            if (!isAdded || camera2Device?.id != device.id) {
-                Log.w(TAG, "Preview surface ready but fragment detached or device changed. Ignoring.")
-                return@getInputSurface
-            }
+            lifecycleScope.launch(Dispatchers.Main) {
+                camera2Lock.withLock {
+                    if (!isAdded || camera2Device !== device) {
+                        Log.w(TAG, "Preview surface ready but fragment detached or device changed/closed. Ignoring.")
+                        return@withLock
+                    }
 
-            camera2PreviewSurface = surface
-            val surfaces = listOf(surface, rawImageReader!!.surface, analysisImageReader!!.surface)
+                    camera2PreviewSurface = surface
+                    val surfaces = listOf(surface, rawImageReader!!.surface, analysisImageReader!!.surface)
 
-            try {
-                device.createCaptureSession(surfaces, object : android.hardware.camera2.CameraCaptureSession.StateCallback() {
+                    try {
+                        device.createCaptureSession(surfaces, object : android.hardware.camera2.CameraCaptureSession.StateCallback() {
                     override fun onConfigured(session: android.hardware.camera2.CameraCaptureSession) {
-                        camera2Session = session
+                        lifecycleScope.launch(Dispatchers.Main) {
+                            camera2Lock.withLock {
+                                camera2Session = session
+                            }
+                        }
                         try {
                             val request = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_PREVIEW)
                             request.addTarget(surface)
@@ -3062,6 +3090,8 @@ class CameraFragment : Fragment() {
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to create capture session", e)
             }
+                }
+            }
         }
     }
 
@@ -3081,7 +3111,11 @@ class CameraFragment : Fragment() {
             reader.setOnImageAvailableListener({ r ->
                 val image = r.acquireLatestImage() ?: return@setOnImageAvailableListener
                 try {
-                    val currentZoom = if (is2xMode) 2.0f else (currentFocalLength / 24.0f)
+                    val currentZoom = if (currentLens?.isZoomPreset == true && currentLens?.targetZoomRatio != null) {
+                        currentLens!!.targetZoomRatio!!
+                    } else {
+                        1.0f
+                    }
                     val holder = copyAndroidImageToHolder(image, currentZoom, getCombinedOrientation(), currentLens?.id)
                     image.close()
                     showProcessingAnimation()
@@ -3310,7 +3344,11 @@ class CameraFragment : Fragment() {
                 val chars = camera2Manager.getCameraCharacteristics(deviceId)
                 val activeArray = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
                 if (activeArray != null) {
-                    val targetRatio = if (is2xMode) 2.0f else (currentFocalLength / 24.0f)
+                    val targetRatio = if (currentLens?.isZoomPreset == true && currentLens?.targetZoomRatio != null) {
+                        currentLens!!.targetZoomRatio!!
+                    } else {
+                        1.0f
+                    }
                     if (targetRatio > 1.01f) {
                         val cropW = (activeArray.width() / targetRatio).toInt()
                         val cropH = (activeArray.height() / targetRatio).toInt()
@@ -3331,21 +3369,23 @@ class CameraFragment : Fragment() {
         }
     }
 
-    private fun closeCamera2() {
-        camera2Session?.close()
-        camera2Session = null
-        camera2Device?.close()
-        camera2Device = null
-        rawImageReader?.close()
-        rawImageReader = null
-        analysisImageReader?.close()
-        analysisImageReader = null
-        camera2PreviewSurface = null
-        lutProcessor?.releaseInputSurface()
-        // Do NOT quit the thread here to avoid "dead thread" crash during callbacks
+    private suspend fun closeCamera2() {
+        camera2Lock.withLock {
+            camera2Session?.close()
+            camera2Session = null
+            camera2Device?.close()
+            camera2Device = null
+            rawImageReader?.close()
+            rawImageReader = null
+            analysisImageReader?.close()
+            analysisImageReader = null
+            camera2PreviewSurface = null
+            lutProcessor?.releaseInputSurface()
+            // Do NOT quit the thread here to avoid "dead thread" crash during callbacks
+        }
     }
 
-    private fun releaseCamera2Resources() {
+    private suspend fun releaseCamera2Resources() {
         closeCamera2()
         camera2Thread?.quitSafely()
         camera2Thread = null
