@@ -141,15 +141,19 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processRaw(
 
                 auto lerp = [](float v0, float v1, float f) { return v0 * (1.0f - f) + v1 * f; };
 
-                float gains[3];
-                for (int c = 0; c < 3; c++) {
-                    int lc = (c == 0) ? 0 : (c == 1) ? 1 : 3; // R->R(0), G->Gr(1), B->B(3)
+                auto get_lerped_gain = [&](int lc) {
                     float v00 = get_gain(ix, iy, lc);
                     float v10 = get_gain(ix1, iy, lc);
                     float v01 = get_gain(ix, iy1, lc);
                     float v11 = get_gain(ix1, iy1, lc);
-                    gains[c] = lerp(lerp(v00, v10, fx), lerp(v01, v11, fx), fy);
-                }
+                    return lerp(lerp(v00, v10, fx), lerp(v01, v11, fx), fy);
+                };
+
+                float gains[3];
+                gains[0] = get_lerped_gain(0); // R
+                // Average Gr(1) and Gb(2) for the demosaiced Green channel
+                gains[1] = (get_lerped_gain(1) + get_lerped_gain(2)) / 2.0f;
+                gains[2] = get_lerped_gain(3); // B
 
                 size_t idx = (static_cast<size_t>(y) * imgW + x) * 3;
                 rawImage[idx + 0] = (unsigned short)std::min(65535.0f, rawImage[idx + 0] * gains[0]);

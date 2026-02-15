@@ -280,8 +280,31 @@ bool process_and_save_image(
         Vec3 color = {norm_r, norm_g, norm_b};
 
         Vec3 sA = color;
-        if (sourceColorSpace == 1) { if (ccm) color = multiply(effective_CCM, color); color = multiply(M_sRGB_D65_to_XYZ, color); }
-        else if (sourceColorSpace == 0) { color = multiply(M_ProPhoto_D50_to_XYZ, color); color = multiply(M_Bradford_D50_to_D65, color); }
+        if (sourceColorSpace == 1) {
+            if (ccm && wb) {
+                // effective_CCM is XYZ_D50 to SensorRGB
+                // However, since the input pixels are already white-balanced (multiplied by wb),
+                // we must invert the combined (WB * CCM) transform to get back to XYZ.
+                Matrix3x3 combinedCCM = {0};
+                for (int i = 0; i < 3; i++) {
+                    float w = (i == 0) ? wb[0] : (i == 1) ? (wb[1] + wb[2]) / 2.0f : wb[3];
+                    for (int j = 0; j < 3; j++) {
+                        combinedCCM.m[i * 3 + j] = w * ccm[i * 3 + j];
+                    }
+                }
+                // 1. Transform WB-Sensor RGB to XYZ D50
+                color = multiply(invert(combinedCCM), color);
+                // 2. Chromatic adaptation from D50 to D65
+                color = multiply(M_Bradford_D50_to_D65, color);
+            } else if (ccm) {
+                color = multiply(invert(effective_CCM), color);
+                color = multiply(M_Bradford_D50_to_D65, color);
+            }
+        }
+        else if (sourceColorSpace == 0) {
+            color = multiply(M_ProPhoto_D50_to_XYZ, color);
+            color = multiply(M_Bradford_D50_to_D65, color);
+        }
         switch (targetLog) {
             case 1: color = multiply(M_XYZ_to_AlexaWideGamut_D65, color); break;
             case 2:
@@ -479,23 +502,30 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
     static const uint8_t dng_version[] = {1, 4, 0, 0}; TIFFSetField(tif, TIFFTAG_DNGVERSION, dng_version); static const uint8_t dng_backward_version[] = {1, 1, 0, 0}; TIFFSetField(tif, TIFFTAG_DNGBACKWARDVERSION, dng_backward_version); TIFFSetField(tif, TIFFTAG_UNIQUECAMERAMODEL, model);
     uint32_t white_level_val = (uint32_t)whiteLevel; if (white_level_val == 0) white_level_val = 65535; TIFFSetField(tif, TIFFTAG_WHITELEVEL, 1, &white_level_val);
 
+    // Since the pixel data already had black level subtracted in the Halide pipeline,
+    // we set the DNG BlackLevel tag to 0 to prevent double-subtraction in RAW viewers.
     uint32_t bl_vals[3] = {0, 0, 0};
-    if (blackLevel) {
-        bl_vals[0] = (uint32_t)blackLevel[0];
-        bl_vals[1] = (uint32_t)((blackLevel[1] + blackLevel[2]) / 2.0f);
-        bl_vals[2] = (uint32_t)blackLevel[3];
-    }
     TIFFSetField(tif, TIFFTAG_BLACKLEVEL, 3, bl_vals);
 
-    Matrix3x3 ccmMat; std::copy(ccm.data(), ccm.data() + 9, ccmMat.m); Matrix3x3 invCcm = invert(ccmMat); Matrix3x3 colorMatrix1 = multiply(invCcm, M_XYZ_to_sRGB_D65);
+    Matrix3x3 ccmMat; std::copy(ccm.data(), ccm.data() + 9, ccmMat.m);
+    Matrix3x3 wbMat = {0};
+    if (wb) {
+        wbMat.m[0] = wb[0];
+        wbMat.m[4] = (wb[1] + wb[2]) / 2.0f;
+        wbMat.m[8] = wb[3];
+    } else {
+        wbMat.m[0] = wbMat.m[4] = wbMat.m[8] = 1.0f;
+    }
+
+    // ColorMatrix1 in DNG maps XYZ_D50 to SensorRGB (un-white-balanced)
+    // However, since our HDR+ output is already white-balanced, we must adjust ColorMatrix1
+    // to map XYZ_D50 to White-Balanced SensorRGB to satisfy AsShotNeutral=[1,1,1]
+    Matrix3x3 colorMatrix1 = multiply(wbMat, ccmMat);
     TIFFSetField(tif, TIFFTAG_COLORMATRIX1, 9, colorMatrix1.m);
 
+    // Since the pixel data is already white-balanced in the Halide pipeline,
+    // we set AsShotNeutral to [1,1,1] to prevent double white balance in RAW viewers.
     float as_shot_neutral[] = {1.0f, 1.0f, 1.0f};
-    if (wb) {
-        as_shot_neutral[0] = 1.0f / std::max(0.01f, wb[0]);
-        as_shot_neutral[1] = 1.0f / std::max(0.01f, (wb[1] + wb[2]) / 2.0f);
-        as_shot_neutral[2] = 1.0f / std::max(0.01f, wb[3]);
-    }
     TIFFSetField(tif, TIFFTAG_ASSHOTNEUTRAL, 3, as_shot_neutral);
     TIFFSetField(tif, TIFFTAG_CALIBRATIONILLUMINANT1, 21); float exposureTimeSec = (float)exposureTime / 1000000000.0f; TIFFSetField(tif, TIFFTAG_EXPOSURETIME, exposureTimeSec); TIFFSetField(tif, TIFFTAG_FNUMBER, fNumber); TIFFSetField(tif, TIFFTAG_FOCALLENGTH, focalLength); unsigned short iso_short = (unsigned short)iso; TIFFSetField(tif, TIFFTAG_ISOSPEEDRATINGS, 1, &iso_short);
     if (TIFFWriteEncodedStrip(tif, 0, (void*)data.data(), static_cast<size_t>(width) * height * 3 * sizeof(unsigned short)) < 0) { TIFFClose(tif); return false; }

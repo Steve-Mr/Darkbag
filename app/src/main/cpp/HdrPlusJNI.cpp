@@ -243,7 +243,13 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     auto jniPrepMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - jniPrepStart).count();
 
     int halideCfa = 1;
-    switch (cfaPattern) { case 0: halideCfa = 1; break; case 1: halideCfa = 2; break; case 2: halideCfa = 4; break; case 3: halideCfa = 3; break; default: halideCfa = 1; break; }
+    switch (cfaPattern) {
+        case 0: halideCfa = 1; break; // RGGB
+        case 1: halideCfa = 2; break; // GRBG
+        case 2: halideCfa = 3; break; // GBRG
+        case 3: halideCfa = 4; break; // BGGR
+        default: halideCfa = 1; break;
+    }
 
     static bool halideThreadsConfigured = false;
     if (!halideThreadsConfigured) {
@@ -260,13 +266,24 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
         // Identity LSC map (all 1.0)
         lscVec.assign(static_cast<size_t>(lscWidth > 0 ? lscWidth : 1) * (lscHeight > 0 ? lscHeight : 1) * 4, 1.0f);
     }
-    Buffer<float> halideLscBuf(lscVec.data(), lscWidth > 0 ? lscWidth : 1, lscHeight > 0 ? lscHeight : 1, 4);
+    // Android LensShadingMap layout is (y, x, c) -> c is fastest
+    Buffer<float> halideLscBuf(lscVec.data(), 4, lscWidth > 0 ? lscWidth : 1, lscHeight > 0 ? lscHeight : 1);
 
     uint16_t bp_r = (uint16_t)blackLevel, bp_g0 = (uint16_t)blackLevel, bp_g1 = (uint16_t)blackLevel, bp_b = (uint16_t)blackLevel;
     if (blackLevelPattern && env->GetArrayLength(blackLevelPattern) >= 4) {
         float blp[4];
         env->GetFloatArrayRegion(blackLevelPattern, 0, 4, blp);
-        bp_r = (uint16_t)blp[0]; bp_g0 = (uint16_t)blp[1]; bp_g1 = (uint16_t)blp[2]; bp_b = (uint16_t)blp[3];
+        // Map 4-channel black levels to RGGB output channels based on CFA shift
+        // blp order is (0,0), (1,0), (0,1), (1,1) in original sensor coordinates.
+        if (halideCfa == 1) { // RGGB
+            bp_r = (uint16_t)blp[0]; bp_g0 = (uint16_t)blp[1]; bp_g1 = (uint16_t)blp[2]; bp_b = (uint16_t)blp[3];
+        } else if (halideCfa == 2) { // GRBG
+            bp_r = (uint16_t)blp[1]; bp_g0 = (uint16_t)blp[0]; bp_g1 = (uint16_t)blp[3]; bp_b = (uint16_t)blp[2];
+        } else if (halideCfa == 3) { // GBRG
+            bp_r = (uint16_t)blp[2]; bp_g0 = (uint16_t)blp[3]; bp_g1 = (uint16_t)blp[0]; bp_b = (uint16_t)blp[1];
+        } else if (halideCfa == 4) { // BGGR
+            bp_r = (uint16_t)blp[3]; bp_g0 = (uint16_t)blp[2]; bp_g1 = (uint16_t)blp[1]; bp_b = (uint16_t)blp[0];
+        }
     }
 
     auto halideStart = std::chrono::high_resolution_clock::now();

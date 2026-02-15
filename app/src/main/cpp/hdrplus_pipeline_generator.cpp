@@ -133,8 +133,9 @@ private:
   Func lens_shading_correction(Func input, Expr width, Expr height) {
     Func output("lsc_output");
     // Bilinear interpolation for LSC Map
-    Expr lsc_w = lsc_map.dim(0).extent();
-    Expr lsc_h = lsc_map.dim(1).extent();
+    // Layout in memory is (c, x, y) to match Android's (y, x, c) row-major data
+    Expr lsc_w = lsc_map.dim(1).extent();
+    Expr lsc_h = lsc_map.dim(2).extent();
     Expr gx = f32(x) * (f32(lsc_w - 1) / f32(width - 1));
     Expr gy = f32(y) * (f32(lsc_h - 1) / f32(height - 1));
     Expr ix = i32(gx);
@@ -150,10 +151,10 @@ private:
     // Select channel based on x, y (Assuming input is already shifted to RGGB)
     Expr chan = select(y % 2 == 0, select(x % 2 == 0, 0, 1), select(x % 2 == 0, 2, 3));
 
-    Expr v00 = lsc_map(ix, iy, chan);
-    Expr v10 = lsc_map(ix1, iy, chan);
-    Expr v01 = lsc_map(ix, iy1, chan);
-    Expr v11 = lsc_map(ix1, iy1, chan);
+    Expr v00 = lsc_map(chan, ix, iy);
+    Expr v10 = lsc_map(chan, ix1, iy);
+    Expr v01 = lsc_map(chan, ix, iy1);
+    Expr v11 = lsc_map(chan, ix1, iy1);
 
     Expr gain = lerp(lerp(v00, v10, fx), lerp(v01, v11, fx), fy);
     output(x, y) = u16_sat(f32(input(x, y)) * gain);
