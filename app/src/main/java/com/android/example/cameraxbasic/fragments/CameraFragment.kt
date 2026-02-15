@@ -237,11 +237,13 @@ class CameraFragment : Fragment() {
 
                 // Map Orientation to degrees (0, 90, 180, 270 clockwise)
                 deviceOrientationDegrees = when (orientation) {
-                    in 45 until 135 -> 270 // Landscape Left (90 CCW -> 270 CW)
+                    in 45 until 135 -> 90 // Landscape Right (90 CW)
                     in 135 until 225 -> 180 // Upside Down
-                    in 225 until 315 -> 90 // Landscape Right (270 CCW -> 90 CW)
+                    in 225 until 315 -> 270 // Landscape Left (270 CW / 90 CCW)
                     else -> 0 // Portrait
                 }
+
+                Log.d(TAG, "Device orientation: $orientation, mapped to CW: $deviceOrientationDegrees")
 
                 val rotation = when (orientation) {
                     in 45 until 135 -> android.view.Surface.ROTATION_270
@@ -2132,11 +2134,13 @@ class CameraFragment : Fragment() {
                 .get(android.hardware.camera2.CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
         } catch (e: Exception) { 0 }
 
-        return if (lensFacing == CameraSelector.LENS_FACING_FRONT) {
+        val combined = if (lensFacing == CameraSelector.LENS_FACING_FRONT) {
             (sensorOrientation - deviceOrientationDegrees + 360) % 360
         } else {
             (sensorOrientation + deviceOrientationDegrees) % 360
         }
+        Log.d(TAG, "getCombinedOrientation: sensor=$sensorOrientation, device=$deviceOrientationDegrees, facing=$lensFacing -> combined=$combined")
+        return combined
     }
 
     private fun updateZoomUI(animate: Boolean) {
