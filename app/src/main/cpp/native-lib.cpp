@@ -159,9 +159,6 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processRaw(
         }
     }
 
-    // TODO: Apply LSC to rawImage if lscMap is provided.
-    // Since LibRaw output is already ProPhoto RGB, we apply RGB LSC.
-
     // Use Shared Pipeline (Gain = 1.0 for standard LibRaw output)
     bool saveOk = process_and_save_image(
         rawImage,

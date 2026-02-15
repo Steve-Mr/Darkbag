@@ -263,7 +263,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     Buffer<float> halideLscBuf(lscVec.data(), lscWidth > 0 ? lscWidth : 1, lscHeight > 0 ? lscHeight : 1, 4);
 
     uint16_t bp_r = (uint16_t)blackLevel, bp_g0 = (uint16_t)blackLevel, bp_g1 = (uint16_t)blackLevel, bp_b = (uint16_t)blackLevel;
-    if (blackLevelPattern) {
+    if (blackLevelPattern && env->GetArrayLength(blackLevelPattern) >= 4) {
         float blp[4];
         env->GetFloatArrayRegion(blackLevelPattern, 0, 4, blp);
         bp_r = (uint16_t)blp[0]; bp_g0 = (uint16_t)blp[1]; bp_g1 = (uint16_t)blp[2]; bp_b = (uint16_t)blp[3];

@@ -8,6 +8,8 @@ object ColorProcessor {
         System.loadLibrary("native-lib")
     }
 
+    const val DEBUG_EXPORT = true // Set to true to export intermediate stages (A, B, C)
+
     val backgroundSaveFlow = MutableSharedFlow<BackgroundSaveEvent>(extraBufferCapacity = 10)
 
     external fun initMemoryPool(width: Int, height: Int, frames: Int)

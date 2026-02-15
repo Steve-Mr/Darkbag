@@ -72,7 +72,7 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
             lutPath, tiffPath, jpgPath, dngPath,
             iso, exposureTime, fNumber, focalLength, captureTimeMillis,
             ccm, whiteBalance, zoomFactor, mirror,
-            lscMap, lscWidth, lscHeight, blackLevelPattern, true
+            lscMap, lscWidth, lscHeight, blackLevelPattern, ColorProcessor.DEBUG_EXPORT
         )
 
         if (ret == 0) {

@@ -1440,7 +1440,7 @@ class CameraFragment : Fragment() {
                     // 4. Process with LibRaw (JNI does NOT rotate/mirror/zoom for Standard RAW to keep thumbnail correct)
                     val result = ColorProcessor.processRaw(
                         dngBytes, targetLogIndex, nativeLutPath, tiffPath, bmpPath, useGpu, 0, false,
-                        image.lscMap, image.lscWidth, image.lscHeight, image.blackLevelPattern, true
+                        image.lscMap, image.lscWidth, image.lscHeight, image.blackLevelPattern, ColorProcessor.DEBUG_EXPORT
                     )
 
                     if (result == 1) {
@@ -2840,7 +2840,7 @@ class CameraFragment : Fragment() {
                     frames.firstOrNull()?.lscWidth ?: 0,
                     frames.firstOrNull()?.lscHeight ?: 0,
                     frames.firstOrNull()?.blackLevelPattern,
-                    true // debug
+                    ColorProcessor.DEBUG_EXPORT
                 )
 
                 val jniEndTime = System.currentTimeMillis()
@@ -2902,7 +2902,7 @@ class CameraFragment : Fragment() {
                         .putString("lscMapPath", lscPath)
                         .putInt("lscWidth", frames.firstOrNull()?.lscWidth ?: 0)
                         .putInt("lscHeight", frames.firstOrNull()?.lscHeight ?: 0)
-                        .putFloatArray("blackLevelPattern", frames.firstOrNull()?.blackLevelPattern)
+                        .putFloatArray("blackLevelPattern", frames.firstOrNull()?.blackLevelPattern ?: FloatArray(0))
                         .putString("baseName", dngName)
                         .putBoolean("saveTiff", saveTiff)
                         .putBoolean("saveJpg", saveJpg)
@@ -3384,10 +3384,10 @@ class CameraFragment : Fragment() {
         val blp = chars?.get(android.hardware.camera2.CameraCharacteristics.SENSOR_BLACK_LEVEL_PATTERN) ?: return null
         val bl = FloatArray(4)
         // Order: (0,0), (1,0), (0,1), (1,1)
-        bl[0] = blp.getOffsetForIndex(0, 0)
-        bl[1] = blp.getOffsetForIndex(1, 0)
-        bl[2] = blp.getOffsetForIndex(0, 1)
-        bl[3] = blp.getOffsetForIndex(1, 1)
+        bl[0] = blp.getOffsetForIndex(0, 0).toFloat()
+        bl[1] = blp.getOffsetForIndex(1, 0).toFloat()
+        bl[2] = blp.getOffsetForIndex(0, 1).toFloat()
+        bl[3] = blp.getOffsetForIndex(1, 1).toFloat()
         return bl
     }
 
