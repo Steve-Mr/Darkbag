@@ -130,7 +130,7 @@ class CameraRepository(private val context: Context) {
         val physicalLenses = enumerateCameras(cameraXIds, facing)
         val result = physicalLenses.filter { !it.isLogicalAuto }.toMutableList()
 
-        // 2.0x virtual if no physical 2x exists (between 1.8x and 2.2x)
+        // 2.0x virtual if no physical 2x exists (between 1.8x and 2.2f)
         val hasPhysical2x = physicalLenses.any { it.multiplier in 1.8f..2.2f }
         if (!hasPhysical2x) {
             val mainWide = result.find { it.multiplier in 0.95f..1.05f }
@@ -139,6 +139,21 @@ class CameraRepository(private val context: Context) {
                     sensorId = "${mainWide.sensorId}-virtual-2x",
                     name = "2.0x",
                     multiplier = mainWide.multiplier * 2.0f,
+                    isZoomPreset = true,
+                    targetZoomRatio = 2.0f
+                ))
+            }
+        }
+
+        // 2x crop for the largest physical tele lens (> 1.0x) - Back camera only
+        if (facing == CameraCharacteristics.LENS_FACING_BACK) {
+            val largestTele = result.filter { it.multiplier > 1.05f && !it.isZoomPreset }.maxByOrNull { it.multiplier }
+            if (largestTele != null) {
+                val virtualMultiplier = largestTele.multiplier * 2.0f
+                result.add(largestTele.copy(
+                    sensorId = "${largestTele.sensorId}-virtual-tele-2x",
+                    name = String.format("%.1fx", virtualMultiplier),
+                    multiplier = virtualMultiplier,
                     isZoomPreset = true,
                     targetZoomRatio = 2.0f
                 ))
