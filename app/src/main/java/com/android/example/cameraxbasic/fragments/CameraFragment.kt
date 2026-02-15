@@ -235,15 +235,15 @@ class CameraFragment : Fragment() {
                     return
                 }
 
-                // Map Orientation to degrees (0, 90, 180, 270 clockwise)
+                // Map Orientation to degrees (0, 90, 180, 270 counter-clockwise)
                 deviceOrientationDegrees = when (orientation) {
-                    in 45 until 135 -> 90 // Landscape Right (90 CW)
+                    in 45 until 135 -> 90 // Landscape Left (90 CCW)
                     in 135 until 225 -> 180 // Upside Down
-                    in 225 until 315 -> 270 // Landscape Left (270 CW / 90 CCW)
+                    in 225 until 315 -> 270 // Landscape Right (270 CCW)
                     else -> 0 // Portrait
                 }
 
-                Log.d(TAG, "Device orientation: $orientation, mapped to CW: $deviceOrientationDegrees")
+                Log.d(TAG, "Device orientation: $orientation, mapped to CCW: $deviceOrientationDegrees")
 
                 val rotation = when (orientation) {
                     in 45 until 135 -> android.view.Surface.ROTATION_270
