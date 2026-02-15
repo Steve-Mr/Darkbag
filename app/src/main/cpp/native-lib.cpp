@@ -24,7 +24,9 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processRaw(
         jstring lutPath,
         jstring outputTiffPath,
         jstring outputJpgPath,
-        jboolean useGpu // Ignored in new pipeline
+        jboolean useGpu, // Ignored in new pipeline
+        jint orientation,
+        jboolean mirror
 ) {
     LOGD("Native processRaw started using LibRaw.");
 
@@ -119,11 +121,12 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processRaw(
         0, // sourceColorSpace = ProPhoto (LibRaw output_color=4)
         nullptr, // ccm is not used for ProPhoto path
         nullptr, // wb is not used for ProPhoto path (LibRaw handles it)
-        0, // orientation = 0 (Assuming LibRaw handles rotation or it is already correct)
+        (int)orientation,
         nullptr, // out_rgb_buffer
         false, // isPreview
         1, // downsampleFactor
-        1.0f // zoomFactor
+        1.0f, // zoomFactor
+        (bool)mirror
     );
 
     // Release Strings

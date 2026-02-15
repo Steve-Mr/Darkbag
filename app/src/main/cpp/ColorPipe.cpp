@@ -252,10 +252,10 @@ bool process_and_save_image(
     int width, int height, float gain, int targetLog, const LUT3D& lut,
     const char* tiffPath, const char* jpgPath, int sourceColorSpace,
     const float* ccm, const float* wb, int orientation, unsigned char* out_rgb_buffer,
-    bool isPreview, int downsampleFactor, float zoomFactor
+    bool isPreview, int downsampleFactor, float zoomFactor, bool mirror
 ) {
-    LOGD("process_and_save_image: %dx%d, gain=%.2f, log=%d, lut=%d, tiff=%s, jpg=%s, preview=%d, ds=%d, zoom=%.2f",
-         width, height, gain, targetLog, lut.size, tiffPath ? tiffPath : "null", jpgPath ? jpgPath : "null", isPreview, downsampleFactor, zoomFactor);
+    LOGD("process_and_save_image: %dx%d, gain=%.2f, log=%d, lut=%d, tiff=%s, jpg=%s, preview=%d, ds=%d, zoom=%.2f, mirror=%d",
+         width, height, gain, targetLog, lut.size, tiffPath ? tiffPath : "null", jpgPath ? jpgPath : "null", isPreview, downsampleFactor, zoomFactor, mirror);
     int outW = width / downsampleFactor, outH = height / downsampleFactor;
     bool swapDims = (orientation == 90 || orientation == 270);
     int finalW = swapDims ? outH : outW, finalH = swapDims ? outW : outH;
@@ -298,10 +298,11 @@ bool process_and_save_image(
         for (int py = 0; py < finalH_zoomed; py++) {
             for (int px = 0; px < finalW_zoomed; px++) {
                 int sx, sy;
-                if (orientation == 90) { sx = py; sy = (finalW_zoomed - 1) - px; }
-                else if (orientation == 180) { sx = (finalW_zoomed - 1) - px; sy = (finalH_zoomed - 1) - py; }
-                else if (orientation == 270) { sx = (finalH_zoomed - 1) - py; sy = px; }
-                else { sx = px; sy = py; }
+                int opx = mirror ? (finalW_zoomed - 1 - px) : px;
+                if (orientation == 90) { sx = py; sy = (finalW_zoomed - 1) - opx; }
+                else if (orientation == 180) { sx = (finalW_zoomed - 1) - opx; sy = (finalH_zoomed - 1) - py; }
+                else if (orientation == 270) { sx = (finalH_zoomed - 1) - py; sy = opx; }
+                else { sx = opx; sy = py; }
 
                 Vec3 color = process_pixel(cropX + sx * downsampleFactor, cropY + sy * downsampleFactor);
                 size_t outIdx = (static_cast<size_t>(py) * finalW_zoomed + px) * 3;
@@ -316,10 +317,11 @@ bool process_and_save_image(
         for (int py = 0; py < finalH_zoomed; py++) {
             for (int px = 0; px < finalW_zoomed; px++) {
                 int sx, sy;
-                if (orientation == 90) { sx = py; sy = (finalW_zoomed - 1) - px; }
-                else if (orientation == 180) { sx = (finalW_zoomed - 1) - px; sy = (finalH_zoomed - 1) - py; }
-                else if (orientation == 270) { sx = (finalH_zoomed - 1) - py; sy = px; }
-                else { sx = px; sy = py; }
+                int opx = mirror ? (finalW_zoomed - 1 - px) : px;
+                if (orientation == 90) { sx = py; sy = (finalW_zoomed - 1) - opx; }
+                else if (orientation == 180) { sx = (finalW_zoomed - 1) - opx; sy = (finalH_zoomed - 1) - py; }
+                else if (orientation == 270) { sx = (finalH_zoomed - 1) - py; sy = opx; }
+                else { sx = opx; sy = py; }
 
                 Vec3 color = process_pixel(cropX + sx, cropY + sy);
                 size_t outIdx = (static_cast<size_t>(py) * finalW_zoomed + px) * 3;
@@ -342,7 +344,7 @@ bool process_and_save_image(
 
     bool tiffOk = true;
     if (tiffPath) {
-        tiffOk = write_tiff(tiffPath, finalW_zoomed, finalH_zoomed, processedImage, 0); // orientation 0 because already rotated
+        tiffOk = write_tiff(tiffPath, finalW_zoomed, finalH_zoomed, processedImage, 0, false); // orientation 0 because already rotated and mirrored in pixels
         if (!tiffOk) LOGE("write_tiff failed for %s", tiffPath);
     }
 
@@ -390,7 +392,7 @@ bool write_jpeg(const char* filename, int width, int height, const std::vector<u
     return res != 0;
 }
 
-bool write_tiff(const char* filename, int width, int height, const std::vector<unsigned short>& data, int orientation) {
+bool write_tiff(const char* filename, int width, int height, const std::vector<unsigned short>& data, int orientation, bool mirror) {
     std::ofstream file(filename, std::ios::binary); if (!file.is_open()) return false;
     char header[8] = {'I', 'I', 42, 0, 8, 0, 0, 0}; file.write(header, 8);
     short num_entries = 11; file.write((char*)&num_entries, 2);
@@ -402,7 +404,13 @@ bool write_tiff(const char* filename, int width, int height, const std::vector<u
     size_t bps_offset = static_cast<size_t>(data_offset) + static_cast<size_t>(width) * height * 6;
     write_entry(258, 3, 3, static_cast<uint32_t>(bps_offset));
     write_entry(259, 3, 1, 1); write_entry(262, 3, 1, 2);
-    short tiffOrientation = 1; switch (orientation) { case 90: tiffOrientation = 6; break; case 180: tiffOrientation = 3; break; case 270: tiffOrientation = 8; break; default: tiffOrientation = 1; break; }
+    short tiffOrientation = 1;
+    switch (orientation) {
+        case 90: tiffOrientation = mirror ? 5 : 6; break;
+        case 180: tiffOrientation = mirror ? 4 : 3; break;
+        case 270: tiffOrientation = mirror ? 7 : 8; break;
+        default: tiffOrientation = mirror ? 2 : 1; break;
+    }
     write_entry(274, 3, 1, tiffOrientation); write_entry(273, 4, 1, data_offset); write_entry(277, 3, 1, 3); write_entry(278, 3, 1, height);
     write_entry(279, 4, 1, static_cast<uint32_t>(static_cast<size_t>(width) * height * 6));
     write_entry(284, 3, 1, 1); int next_ifd = 0; file.write((char*)&next_ifd, 4);
@@ -410,10 +418,16 @@ bool write_tiff(const char* filename, int width, int height, const std::vector<u
     bool result = file.good(); file.close(); return result;
 }
 
-bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, int iso, long exposureTime, float fNumber, float focalLength, long captureTimeMillis, const std::vector<float>& ccm, int orientation) {
+bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, int iso, long exposureTime, float fNumber, float focalLength, long captureTimeMillis, const std::vector<float>& ccm, int orientation, bool mirror) {
     TIFFSetTagExtender(DNGTagExtender); TIFF* tif = TIFFOpen(filename, "w"); if (!tif) return false;
     TIFFSetField(tif, TIFFTAG_IMAGEWIDTH, width); TIFFSetField(tif, TIFFTAG_IMAGELENGTH, height); TIFFSetField(tif, TIFFTAG_BITSPERSAMPLE, 16); TIFFSetField(tif, TIFFTAG_COMPRESSION, COMPRESSION_NONE);
-    uint16_t tiffOrientation = 1; switch (orientation) { case 90: tiffOrientation = 6; break; case 180: tiffOrientation = 3; break; case 270: tiffOrientation = 8; break; default: tiffOrientation = 1; break; }
+    uint16_t tiffOrientation = 1;
+    switch (orientation) {
+        case 90: tiffOrientation = mirror ? 5 : 6; break;
+        case 180: tiffOrientation = mirror ? 4 : 3; break;
+        case 270: tiffOrientation = mirror ? 7 : 8; break;
+        default: tiffOrientation = mirror ? 2 : 1; break;
+    }
     TIFFSetField(tif, TIFFTAG_ORIENTATION, tiffOrientation); TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_LINEAR_RAW);
     TIFFSetField(tif, TIFFTAG_SAMPLESPERPIXEL, 3); TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG); TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, height); TIFFSetField(tif, TIFFTAG_SUBFILETYPE, 0);
     static const char* make = "Google"; TIFFSetField(tif, TIFFTAG_MAKE, make); static const char* model = "HDR+ Device"; TIFFSetField(tif, TIFFTAG_MODEL, model); static const char* software = "CameraXBasic HDR+"; TIFFSetField(tif, TIFFTAG_SOFTWARE, software);

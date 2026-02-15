@@ -42,6 +42,7 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
         val baseName = data.getString("baseName") ?: "HDRPLUS"
         val saveTiff = data.getBoolean("saveTiff", true)
         val saveJpg = data.getBoolean("saveJpg", true)
+        val mirror = data.getBoolean("mirror", false)
 
         Log.d(TAG, "Background Export Worker started for $baseName")
 
@@ -49,7 +50,7 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
             tempRawPath, width, height, orientation, digitalGain, targetLog,
             lutPath, tiffPath, jpgPath, dngPath,
             iso, exposureTime, fNumber, focalLength, captureTimeMillis,
-            ccm, whiteBalance, zoomFactor
+            ccm, whiteBalance, zoomFactor, mirror
         )
 
         if (ret == 0) {
@@ -58,17 +59,18 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
             // Robustly finalize MediaStore export directly from Worker
             // JNI already did rotation and zoom!
             val finalUri = ImageSaver.saveProcessedImage(
-                applicationContext,
-                null,
-                jpgPath,
-                0, // orientation 0
-                1.0f, // zoom 1.0
-                baseName,
-                dngPath,
-                tiffPath,
-                saveJpg,
-                saveTiff,
-                targetUri?.let { Uri.parse(it) }
+                context = applicationContext,
+                inputBitmap = null,
+                bmpPath = jpgPath,
+                rotationDegrees = 0, // orientation 0 (already handled by JNI)
+                zoomFactor = 1.0f, // zoom 1.0 (already handled by JNI)
+                baseName = baseName,
+                linearDngPath = dngPath,
+                tiffPath = tiffPath,
+                saveJpg = saveJpg,
+                saveTiff = saveTiff,
+                targetUri = targetUri?.let { Uri.parse(it) },
+                mirror = false // already handled by JNI
             )
 
             Log.d(TAG, "Background Export Worker finished successfully for $baseName. finalUri=$finalUri")

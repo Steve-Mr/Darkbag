@@ -31,6 +31,8 @@ object ColorProcessor {
      * @param outputTiffPath Output path for TIFF.
      * @param outputJpgPath Output path for JPEG.
      * @param useGpu Whether to use GPU acceleration.
+     * @param orientation Orientation in degrees.
+     * @param mirror Whether to mirror horizontally.
      * @return 0 for GPU Success, 1 for CPU Success (Fallback or requested), -1 for Failure.
      */
     external fun processRaw(
@@ -39,7 +41,9 @@ object ColorProcessor {
         lutPath: String?,
         outputTiffPath: String?,
         outputJpgPath: String?,
-        useGpu: Boolean
+        useGpu: Boolean,
+        orientation: Int,
+        mirror: Boolean
     ): Int
 
     /**
@@ -85,7 +89,8 @@ object ColorProcessor {
         captureTimeMillis: Long,
         ccm: FloatArray,
         whiteBalance: FloatArray,
-        zoomFactor: Float
+        zoomFactor: Float,
+        mirror: Boolean
     ): Int
 
     external fun processHdrPlus(
@@ -113,6 +118,7 @@ object ColorProcessor {
         outputBitmap: android.graphics.Bitmap? = null,
         isAsync: Boolean = false,
         tempRawPath: String? = null,
-        zoomFactor: Float
+        zoomFactor: Float,
+        mirror: Boolean
     ): Int
 }

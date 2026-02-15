@@ -36,6 +36,7 @@ object ImageSaver {
         saveJpg: Boolean,
         saveTiff: Boolean,
         targetUri: Uri? = null,
+        mirror: Boolean = false,
         onBitmapReady: ((Bitmap) -> Unit)? = null
     ): Uri? {
         val contentResolver = context.contentResolver
@@ -44,7 +45,7 @@ object ImageSaver {
         // 1. Process Input Bitmap or JPEG File from JNI -> Final MediaStore JPG
         if (inputBitmap != null || bmpPath != null) {
             val isNativeJpeg = bmpPath != null && (bmpPath.endsWith(".jpg") || bmpPath.endsWith(".jpeg"))
-            val needsBitmapProcessing = rotationDegrees != 0 || zoomFactor > 1.05f || inputBitmap != null
+            val needsBitmapProcessing = rotationDegrees != 0 || zoomFactor > 1.05f || inputBitmap != null || mirror
 
             if (isNativeJpeg && !needsBitmapProcessing && saveJpg) {
                 // FAST PATH: Directly use JNI-generated JPEG
@@ -70,10 +71,17 @@ object ImageSaver {
                 }
 
                 try {
-                    // Rotate if needed
-                    if (processedBitmap != null && rotationDegrees != 0) {
+                    // Rotate and Mirror if needed
+                    if (processedBitmap != null && (rotationDegrees != 0 || mirror)) {
                         val matrix = Matrix()
-                        matrix.postRotate(rotationDegrees.toFloat())
+                        if (rotationDegrees != 0) {
+                            matrix.postRotate(rotationDegrees.toFloat())
+                        }
+                        if (mirror) {
+                            // Mirror horizontally after rotation
+                            matrix.postScale(-1f, 1f)
+                        }
+
                         val rotated = Bitmap.createBitmap(
                             processedBitmap, 0, 0, processedBitmap.width, processedBitmap.height, matrix, true
                         )
@@ -158,6 +166,9 @@ object ImageSaver {
                         contentResolver.openOutputStream(tiffUri)?.use { out ->
                             FileInputStream(tiffFile).copyTo(out)
                         }
+
+                        updateExifOrientation(context, tiffUri, getExifOrientation(rotationDegrees, mirror))
+
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                             tiffValues.clear()
                             tiffValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
@@ -193,6 +204,7 @@ object ImageSaver {
                         contentResolver.openOutputStream(dngUri)?.use { out ->
                             FileInputStream(dngFile).copyTo(out)
                         }
+
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                             dngValues.clear()
                             dngValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
@@ -208,6 +220,27 @@ object ImageSaver {
         }
 
         return finalJpgUri
+    }
+
+    fun getExifOrientation(rotationDegrees: Int, mirror: Boolean): Int {
+        return when (rotationDegrees) {
+            90 -> if (mirror) ExifInterface.ORIENTATION_TRANSPOSE else ExifInterface.ORIENTATION_ROTATE_90
+            180 -> if (mirror) ExifInterface.ORIENTATION_FLIP_VERTICAL else ExifInterface.ORIENTATION_ROTATE_180
+            270 -> if (mirror) ExifInterface.ORIENTATION_TRANSVERSE else ExifInterface.ORIENTATION_ROTATE_270
+            else -> if (mirror) ExifInterface.ORIENTATION_FLIP_HORIZONTAL else ExifInterface.ORIENTATION_NORMAL
+        }
+    }
+
+    private fun updateExifOrientation(context: Context, uri: Uri, orientation: Int) {
+        try {
+            context.contentResolver.openFileDescriptor(uri, "rw")?.use { pfd ->
+                val exif = ExifInterface(pfd.fileDescriptor)
+                exif.setAttribute(ExifInterface.TAG_ORIENTATION, orientation.toString())
+                exif.saveAttributes()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to update EXIF orientation for $uri", e)
+        }
     }
 
     /**
