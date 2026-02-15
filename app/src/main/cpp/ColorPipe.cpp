@@ -12,6 +12,7 @@
 #include <vector>
 #include <ctime>
 #include <future>
+#include <array>
 
 // Define missing tags if needed (Standard EXIF tags)
 #ifndef TIFFTAG_EXPOSURETIME
@@ -261,6 +262,95 @@ bool process_and_save_image(
     int finalW = swapDims ? outH : outW, finalH = swapDims ? outW : outH;
     Matrix3x3 effective_CCM = {0}; if (sourceColorSpace == 1 && ccm) std::copy(ccm, ccm + 9, effective_CCM.m);
     std::vector<unsigned short> processedImage; std::vector<unsigned char> previewRgb8;
+
+    // Adaptive vignette/chroma compensation (shared HDR+/non-HDR export path).
+    // This follows a common flat-field idea used in photography workflows:
+    // estimate center-vs-edge channel imbalance and apply a mild radial correction.
+    struct AdaptiveEdgeComp {
+        bool enabled = false;
+        float lumaEdgeGain = 1.0f;
+        std::array<float, 3> chromaEdgeGain{1.0f, 1.0f, 1.0f};
+        float centerX = 0.0f;
+        float centerY = 0.0f;
+        float invMaxRadius = 1.0f;
+    } edgeComp;
+
+    {
+        const float cx = 0.5f * (width - 1);
+        const float cy = 0.5f * (height - 1);
+        const float maxRadius = std::sqrt(cx * cx + cy * cy);
+
+        edgeComp.centerX = cx;
+        edgeComp.centerY = cy;
+        edgeComp.invMaxRadius = (maxRadius > 1e-6f) ? (1.0f / maxRadius) : 1.0f;
+
+        std::array<double, 3> centerSum{0.0, 0.0, 0.0};
+        std::array<double, 3> edgeSum{0.0, 0.0, 0.0};
+        int centerCount = 0;
+        int edgeCount = 0;
+
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                const float nx = (x - cx) * edgeComp.invMaxRadius;
+                const float ny = (y - cy) * edgeComp.invMaxRadius;
+                const float r = std::sqrt(nx * nx + ny * ny);
+
+                size_t idx = (static_cast<size_t>(y) * width + x) * 3;
+                float rr = static_cast<float>(inputImage[idx + 0]);
+                float gg = static_cast<float>(inputImage[idx + 1]);
+                float bb = static_cast<float>(inputImage[idx + 2]);
+
+                if (r <= 0.30f) {
+                    centerSum[0] += rr; centerSum[1] += gg; centerSum[2] += bb; centerCount++;
+                } else if (r >= 0.72f) {
+                    edgeSum[0] += rr; edgeSum[1] += gg; edgeSum[2] += bb; edgeCount++;
+                }
+            }
+        }
+
+        if (centerCount > 0 && edgeCount > 0) {
+            std::array<float, 3> centerMean{
+                static_cast<float>(centerSum[0] / centerCount),
+                static_cast<float>(centerSum[1] / centerCount),
+                static_cast<float>(centerSum[2] / centerCount)
+            };
+            std::array<float, 3> edgeMean{
+                static_cast<float>(edgeSum[0] / edgeCount),
+                static_cast<float>(edgeSum[1] / edgeCount),
+                static_cast<float>(edgeSum[2] / edgeCount)
+            };
+
+            auto safe_div = [](float a, float b) {
+                return (b > 1e-6f) ? (a / b) : 1.0f;
+            };
+
+            float centerLuma = 0.299f * centerMean[0] + 0.587f * centerMean[1] + 0.114f * centerMean[2];
+            float edgeLuma = 0.299f * edgeMean[0] + 0.587f * edgeMean[1] + 0.114f * edgeMean[2];
+
+            float centerGvsRB = safe_div(centerMean[1], 0.5f * (centerMean[0] + centerMean[2]));
+            float edgeGvsRB = safe_div(edgeMean[1], 0.5f * (edgeMean[0] + edgeMean[2]));
+
+            // Trigger only when edge is darker and greener than center.
+            bool needsComp = (edgeLuma < centerLuma * 0.95f) && (edgeGvsRB > centerGvsRB * 1.03f);
+
+            if (needsComp) {
+                constexpr float kStrength = 0.75f;
+                edgeComp.enabled = true;
+                edgeComp.lumaEdgeGain = std::clamp(1.0f + (safe_div(centerLuma, edgeLuma) - 1.0f) * kStrength, 1.0f, 1.35f);
+
+                for (int ch = 0; ch < 3; ch++) {
+                    float target = safe_div(centerMean[ch], edgeMean[ch]);
+                    float mixed = 1.0f + (target - 1.0f) * kStrength;
+                    edgeComp.chromaEdgeGain[ch] = std::clamp(mixed, 0.85f, 1.25f);
+                }
+
+                LOGD("Adaptive edge compensation enabled. LumaEdgeGain=%.3f, ChromaEdgeGain=[%.3f, %.3f, %.3f]",
+                     edgeComp.lumaEdgeGain,
+                     edgeComp.chromaEdgeGain[0], edgeComp.chromaEdgeGain[1], edgeComp.chromaEdgeGain[2]);
+            }
+        }
+    }
+
     auto process_pixel = [&](int x, int y) -> Vec3 {
         x = std::max(0, std::min(x, width - 1));
         y = std::max(0, std::min(y, height - 1));
@@ -268,6 +358,26 @@ bool process_and_save_image(
         float norm_r = (float)inputImage[idx + 0] / 65535.0f * gain;
         float norm_g = (float)inputImage[idx + 1] / 65535.0f * gain;
         float norm_b = (float)inputImage[idx + 2] / 65535.0f * gain;
+
+        if (edgeComp.enabled) {
+            const float nx = (x - edgeComp.centerX) * edgeComp.invMaxRadius;
+            const float ny = (y - edgeComp.centerY) * edgeComp.invMaxRadius;
+            float r = std::sqrt(nx * nx + ny * ny);
+
+            // Smooth radial blend: start near 55% radius and fully applied at edges.
+            float t = std::clamp((r - 0.55f) / 0.45f, 0.0f, 1.0f);
+            t = t * t * (3.0f - 2.0f * t); // smoothstep
+
+            float lumaGain = 1.0f + (edgeComp.lumaEdgeGain - 1.0f) * t;
+            float rGain = (1.0f + (edgeComp.chromaEdgeGain[0] - 1.0f) * t) * lumaGain;
+            float gGain = (1.0f + (edgeComp.chromaEdgeGain[1] - 1.0f) * t) * lumaGain;
+            float bGain = (1.0f + (edgeComp.chromaEdgeGain[2] - 1.0f) * t) * lumaGain;
+
+            norm_r *= rGain;
+            norm_g *= gGain;
+            norm_b *= bGain;
+        }
+
         Vec3 color = {norm_r, norm_g, norm_b};
         if (sourceColorSpace == 1) { if (ccm) color = multiply(effective_CCM, color); color = multiply(M_sRGB_D65_to_XYZ, color); }
         else if (sourceColorSpace == 0) { color = multiply(M_ProPhoto_D50_to_XYZ, color); color = multiply(M_Bradford_D50_to_D65, color); }
