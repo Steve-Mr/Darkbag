@@ -48,7 +48,7 @@ public:
 
     Func bayer_shifted = shift_bayer_to_rggb(merged, cfa_pattern);
     Func black_white_level_output = black_white_level(bayer_shifted, black_point_r, black_point_g0, black_point_g1, black_point_b, white_point);
-    Func lsc_output = lens_shading_correction(black_white_level_output, lsc_map, inputs.width(), inputs.height());
+    Func lsc_output = lens_shading_correction(black_white_level_output, inputs.width(), inputs.height());
     Func white_balance_output = white_balance(lsc_output, wb);
 
     // Demosaic
@@ -130,18 +130,20 @@ public:
 private:
   Var x{"x"}, y{"y"}, c{"c"}, xo{"xo"}, yo{"yo"}, xi{"xi"}, yi{"yi"};
 
-  Func lens_shading_correction(Func input, Func lsc_map, Expr width, Expr height) {
+  Func lens_shading_correction(Func input, Expr width, Expr height) {
     Func output("lsc_output");
     // Bilinear interpolation for LSC Map
-    Expr gx = f32(x) * (f32(lsc_map.width() - 1) / f32(width - 1));
-    Expr gy = f32(y) * (f32(lsc_map.height() - 1) / f32(height - 1));
+    Expr lsc_w = lsc_map.dim(0).extent();
+    Expr lsc_h = lsc_map.dim(1).extent();
+    Expr gx = f32(x) * (f32(lsc_w - 1) / f32(width - 1));
+    Expr gy = f32(y) * (f32(lsc_h - 1) / f32(height - 1));
     Expr ix = i32(gx);
     Expr iy = i32(gy);
     Expr fx = gx - ix;
     Expr fy = gy - iy;
 
-    Expr ix1 = min(ix + 1, lsc_map.width() - 1);
-    Expr iy1 = min(iy + 1, lsc_map.height() - 1);
+    Expr ix1 = min(ix + 1, lsc_w - 1);
+    Expr iy1 = min(iy + 1, lsc_h - 1);
 
     auto lerp = [](Expr v0, Expr v1, Expr f) { return v0 * (1.0f - f) + v1 * f; };
 
