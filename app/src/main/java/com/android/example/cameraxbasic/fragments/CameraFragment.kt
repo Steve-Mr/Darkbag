@@ -1855,9 +1855,18 @@ class CameraFragment : Fragment() {
             scroll.visibility = View.VISIBLE
             container.removeAllViews()
 
-            // Filter out 1x sub-presets (28mm, 35mm) from the main list.
-            // Only show physical lenses and the virtual 2.0x.
-            val filteredLenses = availableLenses.filter { !it.isZoomPreset || it.sensorId.contains("2.0x") || it.sensorId.contains("virtual") }
+            // Filter out all presets (1x sub-presets, virtual tele 2x) from the main list.
+            // We want physical lenses and the virtual 2.0x wide only.
+            val filteredLenses = availableLenses.filter {
+                !it.isZoomPreset || it.sensorId.contains("virtual-2x")
+            }.filter {
+                !it.sensorId.contains(com.android.example.cameraxbasic.utils.CameraRepository.VIRTUAL_TELE_2X_SUFFIX)
+            }
+
+            val isBackCamera = lensFacing == CameraSelector.LENS_FACING_BACK
+            val largestTele = if (isBackCamera) {
+                filteredLenses.filter { it.multiplier > 1.05f && !it.isZoomPreset }.maxByOrNull { it.multiplier }
+            } else null
 
             for (lens in filteredLenses) {
                 val btn = com.google.android.material.button.MaterialButton(
@@ -1884,6 +1893,10 @@ class CameraFragment : Fragment() {
                         val isAlreadyIn1xPresets = oldLens != null && oldLens.id == lens.id &&
                                 (oldLens.name == "24mm" || oldLens.name == "28mm" || oldLens.name == "35mm")
 
+                        // Largest Tele Cycling
+                        val isLargestTele = largestTele != null && lens.sensorId == largestTele.sensorId
+                        val isAlreadyInTelePresets = oldLens != null && (oldLens.sensorId == lens.sensorId || oldLens.sensorId == "${lens.sensorId}${com.android.example.cameraxbasic.utils.CameraRepository.VIRTUAL_TELE_2X_SUFFIX}")
+
                         if (is1x && isAlreadyIn1xPresets) {
                             // Cycle through 1x presets: 24mm -> 28mm -> 35mm
                             val presets1x = cameraRepository.get1xPresets(lens)
@@ -1905,6 +1918,11 @@ class CameraFragment : Fragment() {
                                     updateLensUI()
                                 }
                             }
+                        } else if (isLargestTele && isAlreadyInTelePresets) {
+                             // Cycle Largest Tele: Native -> 2x Crop
+                             val telePresets = cameraRepository.getTelePresets(lens)
+                             val isCurrentlyNative = oldLens?.sensorId == lens.sensorId
+                             currentLens = if (isCurrentlyNative) telePresets[1] else telePresets[0]
                         } else if (is1x) {
                             // Switching TO 1x from another lens: Use the 1x default focal length setting
                             val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
@@ -1946,19 +1964,30 @@ class CameraFragment : Fragment() {
         val colorPrimary = MaterialColors.getColor(container, com.google.android.material.R.attr.colorPrimary)
         val colorOnSurface = MaterialColors.getColor(container, com.google.android.material.R.attr.colorOnSurface)
 
+        // Identify the largest physical tele lens (Back camera only) to handle its label correctly
+        val isBackCamera = lensFacing == CameraSelector.LENS_FACING_BACK
+        val largestTele = if (isBackCamera) {
+            availableLenses.filter { it.multiplier > 1.05f && !it.isZoomPreset }.maxByOrNull { it.multiplier }
+        } else null
+
         for (i in 0 until container.childCount) {
             val btn = container.getChildAt(i) as? com.google.android.material.button.MaterialButton
             val lens = btn?.tag as? com.android.example.cameraxbasic.utils.LensInfo
             if (btn != null && lens != null) {
                 // For the 1.0x button, it stays active if any of its sub-presets (24, 28, 35) are active
+                // For the largest tele button, it stays active if its 2x virtual preset is active
                 val isActive = lens.sensorId == currentLens?.sensorId ||
-                              (lens.multiplier in 0.95f..1.05f && currentLens?.id == lens.id && !currentLens!!.sensorId.contains("virtual"))
+                              (lens.multiplier in 0.95f..1.05f && currentLens?.id == lens.id && !currentLens!!.sensorId.contains("virtual")) ||
+                              (largestTele != null && lens.sensorId == largestTele.sensorId && currentLens?.sensorId == "${largestTele.sensorId}${com.android.example.cameraxbasic.utils.CameraRepository.VIRTUAL_TELE_2X_SUFFIX}")
 
                 if (isActive) {
-                    // Update text for 1.0x button
+                    // Update text for 1.0x button or Largest Tele button
                     if (lens.multiplier in 0.95f..1.05f && !lens.isZoomPreset) {
                         btn.text = transientLensLabel ?: String.format("%.1fx", currentLens?.multiplier ?: 1.0f)
+                    } else if (largestTele != null && lens.sensorId == largestTele.sensorId) {
+                        btn.text = String.format("%.1fx", currentLens?.multiplier ?: lens.multiplier)
                     }
+
                     btn.setTextColor(colorPrimary)
                     btn.strokeWidth = resources.getDimensionPixelSize(R.dimen.stroke_small)
                     btn.strokeColor = android.content.res.ColorStateList.valueOf(colorPrimary)
