@@ -198,6 +198,11 @@ class SettingsFragment : Fragment() {
             prefs.edit().putBoolean(KEY_MANUAL_CONTROLS, isChecked).apply()
         }
 
+        binding.switchMirrorFront.isChecked = prefs.getBoolean(KEY_MIRROR_FRONT_CAMERA, true)
+        binding.switchMirrorFront.setOnCheckedChangeListener { _, isChecked ->
+            prefs.edit().putBoolean(KEY_MIRROR_FRONT_CAMERA, isChecked).apply()
+        }
+
         binding.switchUseCamerax.isChecked = prefs.getBoolean(KEY_USE_CAMERAX, false)
         binding.switchUseCamerax.setOnCheckedChangeListener { _, isChecked ->
             prefs.edit().putBoolean(KEY_USE_CAMERAX, isChecked).apply()
@@ -227,6 +232,7 @@ class SettingsFragment : Fragment() {
         const val KEY_HDR_BURST_COUNT = "hdr_burst_count"
         const val KEY_HDR_UNDEREXPOSURE_MODE = "hdr_underexposure_mode"
         const val KEY_USE_CAMERAX = "use_camerax_engine"
+        const val KEY_MIRROR_FRONT_CAMERA = "mirror_front_camera"
 
         val FOCAL_LENGTHS = listOf("24", "28", "35")
         val ANTIBANDING_MODES = listOf("Auto", "50Hz", "60Hz", "Off")

@@ -179,6 +179,12 @@ class CameraFragment : Fragment() {
 
     // HDR+ State
     private var isHdrPlusEnabled = false
+
+    private val shouldMirror: Boolean
+        get() = lensFacing == CameraSelector.LENS_FACING_FRONT &&
+                requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                    .getBoolean(SettingsFragment.KEY_MIRROR_FRONT_CAMERA, true)
+
     @Volatile private var isBurstActive = false
     private var hdrPlusBurstHelper: HdrPlusBurst? = null
     private var lastHdrPlusConfig: ExposureUtils.ExposureConfig? = null // Cache for instant trigger
@@ -188,6 +194,7 @@ class CameraFragment : Fragment() {
     private var isoRange: android.util.Range<Int>? = null
     private var exposureTimeRange: android.util.Range<Long>? = null
     private var evRange: android.util.Range<Int>? = null
+    private var isRawSupported = false
 
     private var currentFocusDistance = 0.0f
     private var currentIso = 100
@@ -702,13 +709,8 @@ class CameraFragment : Fragment() {
     @OptIn(ExperimentalCamera2Interop::class)
     private suspend fun bindCameraUseCasesInternal() {
         // Fetch Characteristics for Manual Control
-        val targetId = if (lensFacing == CameraSelector.LENS_FACING_BACK) {
-             currentLens?.physicalId ?: currentLens?.id ?: "0"
-        } else {
-             "1" // Front
-        }
+        val targetId = currentLens?.id ?: if (lensFacing == CameraSelector.LENS_FACING_BACK) "0" else "1"
 
-        var isRawSupported = false
         try {
             val chars = camera2Manager.getCameraCharacteristics(targetId)
 
@@ -753,7 +755,7 @@ class CameraFragment : Fragment() {
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
         val useCameraxFallback = prefs.getBoolean(SettingsFragment.KEY_USE_CAMERAX, false)
 
-        if (lensFacing == CameraSelector.LENS_FACING_BACK && currentLens?.useCamera2 == true && !useCameraxFallback) {
+        if (currentLens?.useCamera2 == true && !useCameraxFallback) {
             Log.d(TAG, "Switching to Camera2 Engine for lens: ${currentLens?.name}")
 
             // Clean up CameraX if it was active
@@ -799,7 +801,7 @@ class CameraFragment : Fragment() {
         val rotation = fragmentCameraBinding.viewFinder.display.rotation
 
         // CameraSelector
-        var cameraSelector = if (lensFacing == CameraSelector.LENS_FACING_BACK && currentLens != null) {
+        var cameraSelector = if (currentLens != null) {
             CameraSelector.Builder()
                 .addCameraFilter { cameraInfos ->
                     cameraInfos.filter {
@@ -853,10 +855,8 @@ class CameraFragment : Fragment() {
             .setResolutionSelector(resolutionSelector)
             .setTargetRotation(rotation)
 
-        if (lensFacing == CameraSelector.LENS_FACING_BACK) {
-            currentLens?.physicalId?.let { pId ->
-                Camera2Interop.Extender(previewBuilder).setPhysicalCameraId(pId)
-            }
+        currentLens?.physicalId?.let { pId ->
+            Camera2Interop.Extender(previewBuilder).setPhysicalCameraId(pId)
         }
         preview = previewBuilder.build()
 
@@ -867,10 +867,8 @@ class CameraFragment : Fragment() {
             .setTargetRotation(rotation)
             .setFlashMode(if (isFlashEnabled) ImageCapture.FLASH_MODE_ON else ImageCapture.FLASH_MODE_OFF)
 
-        if (lensFacing == CameraSelector.LENS_FACING_BACK) {
-            currentLens?.physicalId?.let { pId ->
-                Camera2Interop.Extender(imageCaptureBuilder).setPhysicalCameraId(pId)
-            }
+        currentLens?.physicalId?.let { pId ->
+            Camera2Interop.Extender(imageCaptureBuilder).setPhysicalCameraId(pId)
         }
 
         if (isRawSupported) {
@@ -918,10 +916,8 @@ class CameraFragment : Fragment() {
             .setResolutionSelector(resolutionSelector)
             .setTargetRotation(rotation)
 
-        if (lensFacing == CameraSelector.LENS_FACING_BACK) {
-            currentLens?.physicalId?.let { pId ->
-                Camera2Interop.Extender(imageAnalyzerBuilder).setPhysicalCameraId(pId)
-            }
+        currentLens?.physicalId?.let { pId ->
+            Camera2Interop.Extender(imageAnalyzerBuilder).setPhysicalCameraId(pId)
         }
         imageAnalyzer = imageAnalyzerBuilder.build()
             .also {
@@ -1092,6 +1088,8 @@ class CameraFragment : Fragment() {
 
         // Listener for button used to capture photo
         cameraUiContainerBinding?.cameraCaptureButton?.setOnClickListener {
+            if (isBurstActive) return@setOnClickListener
+
             // Check concurrency limit
             if (!processingSemaphore.tryAcquire()) {
                 Toast.makeText(
@@ -1103,7 +1101,7 @@ class CameraFragment : Fragment() {
             }
 
             if (currentLens?.useCamera2 == true) {
-                if (isHdrPlusEnabled) {
+                if (isHdrPlusEnabled && isRawSupported) {
                     triggerHdrPlusBurstCamera2()
                 } else {
                     takeSinglePictureCamera2()
@@ -1111,7 +1109,7 @@ class CameraFragment : Fragment() {
             } else {
                 // Get a stable reference of the modifiable image capture use case
                 imageCapture?.let { imageCapture ->
-                    if (imageCapture.outputFormat == ImageCapture.OUTPUT_FORMAT_RAW) {
+                    if (isRawSupported) {
                         if (isHdrPlusEnabled) {
                             triggerHdrPlusBurst(imageCapture)
                         } else {
@@ -1418,13 +1416,10 @@ class CameraFragment : Fragment() {
                     val dngOutputStream = java.io.ByteArrayOutputStream()
                     var dngBytes: ByteArray? = null
 
-                    val orientation = when (image.combinedOrientation) {
-                        90 -> ExifInterface.ORIENTATION_ROTATE_90
-                        180 -> ExifInterface.ORIENTATION_ROTATE_180
-                        270 -> ExifInterface.ORIENTATION_ROTATE_270
-                        else -> ExifInterface.ORIENTATION_NORMAL
-                    }
-                    dngCreatorReal.setOrientation(orientation)
+                    val mirror = shouldMirror
+
+                    val exifOrientation = ImageSaver.getExifOrientation(image.combinedOrientation, mirror)
+                    dngCreatorReal.setOrientation(exifOrientation)
 
                     val inputStream = java.io.ByteArrayInputStream(image.data)
                     dngCreatorReal.writeInputStream(
@@ -1435,9 +1430,9 @@ class CameraFragment : Fragment() {
                     )
                     dngBytes = dngOutputStream.toByteArray()
 
-                    // 4. Process with LibRaw
+                    // 4. Process with LibRaw (JNI does NOT rotate/mirror/zoom for Standard RAW to keep thumbnail correct)
                     val result = ColorProcessor.processRaw(
-                        dngBytes, targetLogIndex, nativeLutPath, tiffPath, bmpPath, useGpu
+                        dngBytes, targetLogIndex, nativeLutPath, tiffPath, bmpPath, useGpu, 0, false
                     )
 
                     if (result == 1) {
@@ -1470,16 +1465,17 @@ class CameraFragment : Fragment() {
 
                     // 5. Shared Save Logic
                     val finalJpgUri = ImageSaver.saveProcessedImage(
-                        context,
-                        null,
-                        bmpPath,
-                        image.combinedOrientation,
-                        zoomFactor,
-                        dngName,
-                        null,
-                        tiffPath,
-                        saveJpg,
-                        saveTiff
+                        context = context,
+                        inputBitmap = null,
+                        bmpPath = bmpPath,
+                        rotationDegrees = image.combinedOrientation,
+                        zoomFactor = zoomFactor,
+                        baseName = dngName,
+                        linearDngPath = null,
+                        tiffPath = tiffPath,
+                        saveJpg = saveJpg,
+                        saveTiff = saveTiff,
+                        mirror = mirror
                     ) { bitmap ->
                         try {
                             // Generate Thumbnail for DNG
@@ -1550,6 +1546,7 @@ class CameraFragment : Fragment() {
                                             "$cropWidth $cropHeight"
                                         )
                                         exif.setAttribute("DefaultCropOrigin", "$x $y")
+                                        exif.setAttribute(ExifInterface.TAG_ORIENTATION, exifOrientation.toString())
                                         exif.saveAttributes()
                                     }
                                 } catch (e: Exception) {
@@ -2131,13 +2128,8 @@ class CameraFragment : Fragment() {
     private fun getCombinedOrientation(): Int {
         val sensorOrientation = try {
             val lens = currentLens
-            val targetId = if (lens?.useCamera2 == true) {
-                lens.id
-            } else if (lensFacing == CameraSelector.LENS_FACING_BACK) {
-                lens?.physicalId ?: lens?.id ?: "0"
-            } else {
-                "1"
-            }
+            val targetId = lens?.id ?: if (lensFacing == CameraSelector.LENS_FACING_BACK) "0" else "1"
+
             camera2Manager.getCameraCharacteristics(targetId)
                 .get(android.hardware.camera2.CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
         } catch (e: Exception) { 0 }
@@ -2388,12 +2380,51 @@ class CameraFragment : Fragment() {
         const val KEY_HDR_PLUS_ENABLED = "hdr_plus_enabled"
     }
 
+    private fun saveJpegFallback(data: ByteArray, rotationDegrees: Int, zoomFactor: Float) {
+        val appContext = requireContext().applicationContext
+        val mirror = shouldMirror
+
+        (appContext as MainApplication).applicationScope.launch(Dispatchers.IO) {
+            try {
+                val name = SimpleDateFormat(FILENAME, Locale.US).format(System.currentTimeMillis())
+                val bmpFile = File(appContext.cacheDir, "temp_$name.jpg")
+                FileOutputStream(bmpFile).use { it.write(data) }
+
+                val uri = ImageSaver.saveProcessedImage(
+                    context = appContext,
+                    inputBitmap = null,
+                    bmpPath = bmpFile.absolutePath,
+                    rotationDegrees = rotationDegrees,
+                    zoomFactor = zoomFactor,
+                    baseName = name,
+                    linearDngPath = null,
+                    tiffPath = null,
+                    saveJpg = true,
+                    saveTiff = false,
+                    mirror = mirror
+                )
+                withContext(Dispatchers.Main) {
+                    uri?.let { setGalleryThumbnail(it.toString()) }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to save JPEG fallback", e)
+            } finally {
+                processingSemaphore.release()
+                withContext(Dispatchers.Main) {
+                    cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
+                    cameraUiContainerBinding?.cameraCaptureButton?.alpha = 1.0f
+                    hideProcessingAnimation()
+                }
+            }
+        }
+    }
+
     private fun takeSinglePicture(imageCapture: ImageCapture) {
-        if (imageCapture.outputFormat == ImageCapture.OUTPUT_FORMAT_RAW) {
-            imageCapture.takePicture(
-                cameraExecutor,
-                object : ImageCapture.OnImageCapturedCallback() {
-                    override fun onCaptureSuccess(image: ImageProxy) {
+        imageCapture.takePicture(
+            cameraExecutor,
+            object : ImageCapture.OnImageCapturedCallback() {
+                override fun onCaptureSuccess(image: ImageProxy) {
+                    if (image.format == android.graphics.ImageFormat.RAW_SENSOR) {
                         try {
                             val currentZoom = if (currentLens?.isZoomPreset == true && currentLens?.targetZoomRatio != null) {
                                 currentLens!!.targetZoomRatio!!
@@ -2433,30 +2464,33 @@ class CameraFragment : Fragment() {
                                 hideProcessingAnimation()
                             }
                         }
+                    } else {
+                        // JPEG/YUV fallback path
+                        val buffer = image.planes[0].buffer
+                        val data = ByteArray(buffer.remaining())
+                        buffer.get(data)
+                        val rotation = image.imageInfo.rotationDegrees
+                        image.close()
+
+                        val currentZoom = if (is2xMode) 2.0f else (currentFocalLength / 24.0f)
+                        showProcessingAnimation()
+                        saveJpegFallback(data, rotation, currentZoom)
                     }
+                }
 
-                    override fun onError(exception: ImageCaptureException) {
-                        Log.e(TAG, "Photo capture failed: ${exception.message}", exception)
-                        processingSemaphore.release()
-                        lifecycleScope.launch(Dispatchers.Main) {
-                            cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
-                            cameraUiContainerBinding?.cameraCaptureButton?.alpha = 1.0f
-                        }
+                override fun onError(exception: ImageCaptureException) {
+                    Log.e(TAG, "Photo capture failed: ${exception.message}", exception)
+                    processingSemaphore.release()
+                    lifecycleScope.launch(Dispatchers.Main) {
+                        cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
+                        cameraUiContainerBinding?.cameraCaptureButton?.alpha = 1.0f
                     }
-                })
+                }
+            })
 
-            if (processingSemaphore.availablePermits == 0) {
-                cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = false
-                cameraUiContainerBinding?.cameraCaptureButton?.alpha = 0.5f
-            }
-
-        } else {
-            processingSemaphore.release()
-            Toast.makeText(
-                requireContext(),
-                "RAW capture is not supported on this device.",
-                Toast.LENGTH_SHORT
-            ).show()
+        if (processingSemaphore.availablePermits == 0) {
+            cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = false
+            cameraUiContainerBinding?.cameraCaptureButton?.alpha = 0.5f
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
@@ -2470,6 +2504,7 @@ class CameraFragment : Fragment() {
     private fun triggerHdrPlusBurst(imageCapture: ImageCapture) {
         if (isBurstActive) {
             Log.d(TAG, "Burst already active, ignoring trigger")
+            processingSemaphore.release()
             return
         }
         isBurstActive = true
@@ -2762,6 +2797,8 @@ class CameraFragment : Fragment() {
                 // Initial JNI call produces:
                 // 1) intermediate linear RAW buffer (tempRawPath) for the ExportWorker,
                 // 2) optional fast downsampled JPEG (tempJpgPath) for immediate gallery update.
+                val mirror = shouldMirror
+
                 val ret = ColorProcessor.processHdrPlus(
                     buffers,
                     width, height,
@@ -2779,7 +2816,8 @@ class CameraFragment : Fragment() {
                     null, // outputBitmap
                     false, // isAsync (deprecated in favor of WorkManager)
                     tempRawFile.absolutePath,
-                    currentZoom
+                    currentZoom,
+                    mirror
                 )
 
                 val jniEndTime = System.currentTimeMillis()
@@ -2790,18 +2828,21 @@ class CameraFragment : Fragment() {
 
                     val saveStartTime = System.currentTimeMillis()
 
+                    val mirror = shouldMirror
+
                     val fastJpegUri = if (saveJpg) {
                         ImageSaver.saveProcessedImage(
-                            context,
-                            null,
-                            tempJpgFile.absolutePath,
-                            0, // Rotation already handled in JNI
-                            1.0f, // Zoom already handled in JNI
-                            dngName,
-                            null,
-                            null,
-                            true,
-                            false
+                            context = context,
+                            inputBitmap = null,
+                            bmpPath = tempJpgFile.absolutePath,
+                            rotationDegrees = 0, // Rotation already handled in JNI
+                            zoomFactor = 1.0f, // Zoom already handled in JNI
+                            baseName = dngName,
+                            linearDngPath = null,
+                            tiffPath = null,
+                            saveJpg = true,
+                            saveTiff = false,
+                            mirror = false // Mirroring already handled in JNI
                         )
                     } else {
                         null
@@ -2838,6 +2879,7 @@ class CameraFragment : Fragment() {
                         .putString("baseName", dngName)
                         .putBoolean("saveTiff", saveTiff)
                         .putBoolean("saveJpg", saveJpg)
+                        .putBoolean("mirror", mirror)
                         .build()
 
                     val workRequest = androidx.work.OneTimeWorkRequestBuilder<HdrPlusExportWorker>()
@@ -3019,10 +3061,17 @@ class CameraFragment : Fragment() {
 
         val chars = camera2Manager.getCameraCharacteristics(device.id)
         val map = chars.get(android.hardware.camera2.CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
-        val rawSizes = map?.getOutputSizes(android.graphics.ImageFormat.RAW_SENSOR)
-        val size = rawSizes?.maxByOrNull { it.width * it.height } ?: android.util.Size(4000, 3000)
 
-        rawImageReader = ImageReader.newInstance(size.width, size.height, android.graphics.ImageFormat.RAW_SENSOR, 8)
+        val isRawSupportedLocally = map?.getOutputFormats()?.contains(android.graphics.ImageFormat.RAW_SENSOR) == true
+        if (isRawSupportedLocally) {
+            val rawSizes = map?.getOutputSizes(android.graphics.ImageFormat.RAW_SENSOR)
+            val size = rawSizes?.maxByOrNull { it.width * it.height } ?: android.util.Size(4000, 3000)
+            rawImageReader = ImageReader.newInstance(size.width, size.height, android.graphics.ImageFormat.RAW_SENSOR, 8)
+        } else {
+            val jpegSizes = map?.getOutputSizes(android.graphics.ImageFormat.JPEG)
+            val size = jpegSizes?.maxByOrNull { it.width * it.height } ?: android.util.Size(4000, 3000)
+            rawImageReader = ImageReader.newInstance(size.width, size.height, android.graphics.ImageFormat.JPEG, 8)
+        }
 
         val yuvSizes = map?.getOutputSizes(android.graphics.ImageFormat.YUV_420_888)
         val analysisSize = yuvSizes?.filter { it.width.toFloat()/it.height.toFloat() in 1.3f..1.4f }
@@ -3116,11 +3165,23 @@ class CameraFragment : Fragment() {
                     } else {
                         1.0f
                     }
-                    val holder = copyAndroidImageToHolder(image, currentZoom, getCombinedOrientation(), currentLens?.id)
-                    image.close()
-                    showProcessingAnimation()
-                    lifecycleScope.launch {
-                        processingChannel.send(holder)
+                    if (image.format == android.graphics.ImageFormat.RAW_SENSOR) {
+                        val holder = copyAndroidImageToHolder(image, currentZoom, getCombinedOrientation(), currentLens?.id)
+                        image.close()
+                        showProcessingAnimation()
+                        lifecycleScope.launch {
+                            processingChannel.send(holder)
+                        }
+                    } else {
+                        // JPEG path
+                        val buffer = image.planes[0].buffer
+                        val data = ByteArray(buffer.remaining())
+                        buffer.get(data)
+                        image.close()
+
+                        val currentZoom = if (is2xMode) 2.0f else (currentFocalLength / 24.0f)
+                        showProcessingAnimation()
+                        saveJpegFallback(data, 0, currentZoom) // Rotation handled by C2 JPEG_ORIENTATION
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to process Camera2 image", e)

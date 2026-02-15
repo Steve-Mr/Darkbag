@@ -238,6 +238,15 @@
                     <Space android:layout_width="match_parent" android:layout_height="@dimen/spacing_medium" />
 
                     <com.google.android.material.materialswitch.MaterialSwitch
+                        android:id="@+id/switch_mirror_front"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Mirror Front Camera Photos"
+                        android:textSize="16sp" />
+
+                    <Space android:layout_width="match_parent" android:layout_height="@dimen/spacing_medium" />
+
+                    <com.google.android.material.materialswitch.MaterialSwitch
                         android:id="@+id/switch_use_camerax"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
