@@ -180,15 +180,18 @@ class HdrPlusBurst(
             }
         } else {
             // Slow path: Remove padding bytes from each row
-            val rowData = ByteArray(rowLength)
+            // Optimization: Use buffer limits and cleanData.put(buffer) to copy directly
+            // between ByteBuffers, avoiding the temporary rowData ByteArray allocation.
+            val oldLimit = buffer.limit()
             for (y in 0 until height) {
                 val rowStart = y * rowStride
                 if (rowStart + rowLength > buffer.capacity()) break
 
                 buffer.position(rowStart)
-                buffer.get(rowData)
-                cleanData.put(rowData)
+                buffer.limit(rowStart + rowLength)
+                cleanData.put(buffer)
             }
+            buffer.limit(oldLimit)
         }
         buffer.position(oldPos)
         cleanData.flip() // Prepare for reading
