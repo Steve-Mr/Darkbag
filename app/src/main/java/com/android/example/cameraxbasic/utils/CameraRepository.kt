@@ -40,6 +40,8 @@ class CameraRepository(private val context: Context) {
         private val idToCharsCache = mutableMapOf<String, CameraCharacteristics>()
         private var hasProbed = false
         private val probeLock = Any()
+
+        const val VIRTUAL_TELE_2X_SUFFIX = "-virtual-tele-2x"
     }
 
     private fun probeAllCameras() {
@@ -130,7 +132,7 @@ class CameraRepository(private val context: Context) {
         val physicalLenses = enumerateCameras(cameraXIds, facing)
         val result = physicalLenses.filter { !it.isLogicalAuto }.toMutableList()
 
-        // 2.0x virtual if no physical 2x exists (between 1.8x and 2.2f)
+        // 2.0x virtual if no physical 2x exists (between 1.8x and 2.2x)
         val hasPhysical2x = physicalLenses.any { it.multiplier in 1.8f..2.2f }
         if (!hasPhysical2x) {
             val mainWide = result.find { it.multiplier in 0.95f..1.05f }
@@ -151,7 +153,7 @@ class CameraRepository(private val context: Context) {
             if (largestTele != null) {
                 val virtualMultiplier = largestTele.multiplier * 2.0f
                 result.add(largestTele.copy(
-                    sensorId = "${largestTele.sensorId}-virtual-tele-2x",
+                    sensorId = "${largestTele.sensorId}${VIRTUAL_TELE_2X_SUFFIX}",
                     name = String.format("%.1fx", virtualMultiplier),
                     multiplier = virtualMultiplier,
                     isZoomPreset = true,
@@ -161,6 +163,25 @@ class CameraRepository(private val context: Context) {
         }
 
         return result.sortedBy { it.multiplier }
+    }
+
+    /**
+     * Returns presets for a telephoto lens (Native and 2.0x virtual).
+     */
+    fun getTelePresets(teleLens: LensInfo): List<LensInfo> {
+        val result = mutableListOf<LensInfo>()
+        // Native
+        result.add(teleLens)
+        // 2.0x Virtual Crop
+        val virtualMultiplier = teleLens.multiplier * 2.0f
+        result.add(teleLens.copy(
+            sensorId = "${teleLens.sensorId}${VIRTUAL_TELE_2X_SUFFIX}",
+            name = String.format("%.1fx", virtualMultiplier),
+            multiplier = virtualMultiplier,
+            isZoomPreset = true,
+            targetZoomRatio = 2.0f
+        ))
+        return result
     }
 
     /**
