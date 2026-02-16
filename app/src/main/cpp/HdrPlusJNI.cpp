@@ -3,6 +3,8 @@
 #include <vector>
 #include <string>
 #include <memory>
+#include <algorithm>
+#include <exception>
 #include <cstring>
 #include <chrono> // For timing
 #include <thread>
@@ -59,7 +61,12 @@ HalideStageStats parseHalideReport(const std::string& report) {
         if (std::regex_search(line, match, re)) {
             std::string name = match[1].str();
             float val = 0.0f;
-            try { val = std::stof(match[2].str()); } catch (...) { continue; }
+            try {
+                val = std::stof(match[2].str());
+            } catch (const std::exception& e) {
+                LOGE("Failed to parse value in halide report: %s, error: %s", match[2].str().c_str(), e.what());
+                continue;
+            }
             std::string unit = match[3].str();
             long ms = (unit == "s") ? (long)(val * 1000) : (long)val;
 
@@ -216,6 +223,16 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     }
 
     const size_t frameSizeBytes = static_cast<size_t>(width) * static_cast<size_t>(height) * sizeof(uint16_t);
+    for (int i = 0; i < numFrames; i++) {
+        jobject bufObj = env->GetObjectArrayElement(dngBuffers, i);
+        jlong capacity = env->GetDirectBufferCapacity(bufObj);
+        env->DeleteLocalRef(bufObj);
+        if (capacity < (jlong)frameSizeBytes) {
+            LOGE("Direct buffer %d capacity %lld is smaller than expected %zu", i, (long long)capacity, frameSizeBytes);
+            return -1;
+        }
+    }
+
     auto copyStart = std::chrono::high_resolution_clock::now();
     #pragma omp parallel for
     for (int i = 0; i < numFrames; i++) { std::memcpy(rawDataPtr + (static_cast<size_t>(i) * width * height), framePtrs[i], frameSizeBytes); }
@@ -303,6 +320,11 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
              uint16_t r = raw_ptr[x*stride_x + y*stride_y + 0*stride_c];
              uint16_t g = raw_ptr[x*stride_x + y*stride_y + 1*stride_c];
              uint16_t b = raw_ptr[x*stride_x + y*stride_y + 2*stride_c];
+
+             // Clip to 14-bit range (16383) to prevent pink highlights
+             r = std::min(r, (uint16_t)16383);
+             g = std::min(g, (uint16_t)16383);
+             b = std::min(b, (uint16_t)16383);
 
              float lscR = 1.0f, lscG = 1.0f, lscB = 1.0f;
              if (hasLsc) {

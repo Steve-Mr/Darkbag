@@ -1491,18 +1491,20 @@ class CameraFragment : Fragment() {
                     }
 
                     // 5. Shared Save Logic
+                    // Note: rotationDegrees is passed as 0 and mirror as false because the JNI layer (process_and_save_image)
+                    // has already performed pixel-level rotation and mirroring on the output files.
                     val finalJpgUri = ImageSaver.saveProcessedImage(
                         context = context,
                         inputBitmap = null,
                         bmpPath = bmpPath,
-                        rotationDegrees = image.combinedOrientation,
-                        zoomFactor = zoomFactor,
+                        rotationDegrees = 0,
+                        zoomFactor = 1.0f, // Zoom already handled by JNI
                         baseName = dngName,
                         linearDngPath = null,
                         tiffPath = tiffPath,
                         saveJpg = saveJpg,
                         saveTiff = saveTiff,
-                        mirror = mirror
+                        mirror = false
                     ) { bitmap ->
                         try {
                             // Generate Thumbnail for DNG

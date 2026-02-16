@@ -48,14 +48,14 @@
 #define TIFFTAG_OPCODELIST3 51022
 
 static const TIFFFieldInfo dng_field_info[] = {
-    { TIFFTAG_DNGVERSION, 4, 4, TIFF_BYTE, FIELD_CUSTOM, 1, 0, (char*)"DNGVersion" },
-    { TIFFTAG_DNGBACKWARDVERSION, 4, 4, TIFF_BYTE, FIELD_CUSTOM, 1, 0, (char*)"DNGBackwardVersion" },
-    { TIFFTAG_UNIQUECAMERAMODEL, -1, -1, TIFF_ASCII, FIELD_CUSTOM, 1, 0, (char*)"UniqueCameraModel" },
-    { TIFFTAG_BLACKLEVEL, -1, -1, TIFF_LONG, FIELD_CUSTOM, 1, 1, (char*)"BlackLevel" },
-    { TIFFTAG_WHITELEVEL, -1, -1, TIFF_LONG, FIELD_CUSTOM, 1, 1, (char*)"WhiteLevel" },
-    { TIFFTAG_COLORMATRIX1, -1, -1, TIFF_RATIONAL, FIELD_CUSTOM, 1, 1, (char*)"ColorMatrix1" },
-    { TIFFTAG_ASSHOTNEUTRAL, -1, -1, TIFF_RATIONAL, FIELD_CUSTOM, 1, 1, (char*)"AsShotNeutral" },
-    { TIFFTAG_CALIBRATIONILLUMINANT1, 1, 1, TIFF_SHORT, FIELD_CUSTOM, 1, 0, (char*)"CalibrationIlluminant1" }
+    { TIFFTAG_DNGVERSION, 4, 4, TIFF_BYTE, FIELD_CUSTOM, 1, 0, const_cast<char*>("DNGVersion") },
+    { TIFFTAG_DNGBACKWARDVERSION, 4, 4, TIFF_BYTE, FIELD_CUSTOM, 1, 0, const_cast<char*>("DNGBackwardVersion") },
+    { TIFFTAG_UNIQUECAMERAMODEL, -1, -1, TIFF_ASCII, FIELD_CUSTOM, 1, 0, const_cast<char*>("UniqueCameraModel") },
+    { TIFFTAG_BLACKLEVEL, -1, -1, TIFF_LONG, FIELD_CUSTOM, 1, 1, const_cast<char*>("BlackLevel") },
+    { TIFFTAG_WHITELEVEL, -1, -1, TIFF_LONG, FIELD_CUSTOM, 1, 1, const_cast<char*>("WhiteLevel") },
+    { TIFFTAG_COLORMATRIX1, -1, -1, TIFF_RATIONAL, FIELD_CUSTOM, 1, 1, const_cast<char*>("ColorMatrix1") },
+    { TIFFTAG_ASSHOTNEUTRAL, -1, -1, TIFF_RATIONAL, FIELD_CUSTOM, 1, 1, const_cast<char*>("AsShotNeutral") },
+    { TIFFTAG_CALIBRATIONILLUMINANT1, 1, 1, TIFF_SHORT, FIELD_CUSTOM, 1, 0, const_cast<char*>("CalibrationIlluminant1") }
 };
 
 static void DNGTagExtender(TIFF *tif) {
@@ -203,16 +203,27 @@ LUT3D load_lut(const char* path) {
     std::ifstream file(path);
     if (!file.is_open()) return lut;
     std::string line;
-    while (std::getline(file, line)) {
+    int lineCount = 0;
+    const int maxLines = 1000000;
+    while (std::getline(file, line) && ++lineCount < maxLines) {
         if (line.empty() || line[0] == '#') continue;
         if (line.find("LUT_3D_SIZE") != std::string::npos) {
             std::stringstream ss(line); std::string temp; ss >> temp >> lut.size;
-            if (lut.size > 0 && lut.size <= 64) lut.data.reserve(lut.size * lut.size * lut.size);
-            else { lut.size = 0; return lut; }
+            if (lut.size > 0 && lut.size <= 64) {
+                lut.data.reserve(lut.size * lut.size * lut.size);
+            } else {
+                lut.size = 0;
+                return lut;
+            }
             continue;
         }
         std::stringstream ss(line); float r, g, b;
         if (ss >> r >> g >> b) lut.data.push_back({r, g, b});
+    }
+    if (lut.size > 0 && lut.data.size() != (size_t)(lut.size * lut.size * lut.size)) {
+        LOGE("LUT size mismatch: expected %d^3=%zu, got %zu", lut.size, (size_t)(lut.size * lut.size * lut.size), lut.data.size());
+        lut.size = 0;
+        lut.data.clear();
     }
     return lut;
 }
@@ -608,17 +619,31 @@ bool write_jpeg(const char* filename, int width, int height, const std::vector<u
 }
 
 bool write_tiff(const char* filename, int width, int height, const std::vector<unsigned short>& data, int orientation, bool mirror) {
-    std::ofstream file(filename, std::ios::binary); if (!file.is_open()) return false;
-    char header[8] = {'I', 'I', 42, 0, 8, 0, 0, 0}; file.write(header, 8);
-    short num_entries = 11; file.write((char*)&num_entries, 2);
+    std::ofstream file(filename, std::ios::binary);
+    if (!file.is_open()) return false;
+
+    char header[8] = {'I', 'I', 42, 0, 8, 0, 0, 0};
+    file.write(header, 8);
+
+    short num_entries = 11;
+    file.write((char*)&num_entries, 2);
+
     auto write_entry = [&](short tag, short type, int count, uint32_t value_or_offset) {
-        file.write((char*)&tag, 2); file.write((char*)&type, 2); file.write((char*)&count, 4); file.write((char*)&value_or_offset, 4);
+        file.write((char*)&tag, 2);
+        file.write((char*)&type, 2);
+        file.write((char*)&count, 4);
+        file.write((char*)&value_or_offset, 4);
     };
+
     int data_offset = 8 + 2 + num_entries * 12 + 4;
-    write_entry(256, 3, 1, width); write_entry(257, 3, 1, height);
+    write_entry(256, 3, 1, width);
+    write_entry(257, 3, 1, height);
+
     size_t bps_offset = static_cast<size_t>(data_offset) + static_cast<size_t>(width) * height * 6;
     write_entry(258, 3, 3, static_cast<uint32_t>(bps_offset));
-    write_entry(259, 3, 1, 1); write_entry(262, 3, 1, 2);
+    write_entry(259, 3, 1, 1);
+    write_entry(262, 3, 1, 2);
+
     short tiffOrientation = 1;
     switch (orientation) {
         case 90: tiffOrientation = mirror ? 5 : 6; break;
@@ -626,16 +651,35 @@ bool write_tiff(const char* filename, int width, int height, const std::vector<u
         case 270: tiffOrientation = mirror ? 7 : 8; break;
         default: tiffOrientation = mirror ? 2 : 1; break;
     }
-    write_entry(274, 3, 1, tiffOrientation); write_entry(273, 4, 1, data_offset); write_entry(277, 3, 1, 3); write_entry(278, 3, 1, height);
+    write_entry(274, 3, 1, tiffOrientation);
+    write_entry(273, 4, 1, data_offset);
+    write_entry(277, 3, 1, 3);
+    write_entry(278, 3, 1, height);
     write_entry(279, 4, 1, static_cast<uint32_t>(static_cast<size_t>(width) * height * 6));
-    write_entry(284, 3, 1, 1); int next_ifd = 0; file.write((char*)&next_ifd, 4);
-    file.write((char*)data.data(), data.size() * 2); short bps[3] = {16, 16, 16}; file.write((char*)bps, 6);
-    bool result = file.good(); file.close(); return result;
+    write_entry(284, 3, 1, 1);
+
+    int next_ifd = 0;
+    file.write((char*)&next_ifd, 4);
+    file.write((char*)data.data(), data.size() * 2);
+
+    short bps[3] = {16, 16, 16};
+    file.write((char*)bps, 6);
+
+    bool result = file.good();
+    file.close();
+    return result;
 }
 
 bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, int iso, long exposureTime, float fNumber, float focalLength, long captureTimeMillis, const std::vector<float>& ccm, int orientation, bool mirror) {
-    TIFFSetTagExtender(DNGTagExtender); TIFF* tif = TIFFOpen(filename, "w"); if (!tif) return false;
-    TIFFSetField(tif, TIFFTAG_IMAGEWIDTH, width); TIFFSetField(tif, TIFFTAG_IMAGELENGTH, height); TIFFSetField(tif, TIFFTAG_BITSPERSAMPLE, 16); TIFFSetField(tif, TIFFTAG_COMPRESSION, COMPRESSION_NONE);
+    TIFFSetTagExtender(DNGTagExtender);
+    TIFF* tif = TIFFOpen(filename, "w");
+    if (!tif) return false;
+
+    TIFFSetField(tif, TIFFTAG_IMAGEWIDTH, width);
+    TIFFSetField(tif, TIFFTAG_IMAGELENGTH, height);
+    TIFFSetField(tif, TIFFTAG_BITSPERSAMPLE, 16);
+    TIFFSetField(tif, TIFFTAG_COMPRESSION, COMPRESSION_NONE);
+
     uint16_t tiffOrientation = 1;
     switch (orientation) {
         case 90: tiffOrientation = mirror ? 5 : 6; break;
@@ -643,29 +687,97 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
         case 270: tiffOrientation = mirror ? 7 : 8; break;
         default: tiffOrientation = mirror ? 2 : 1; break;
     }
-    TIFFSetField(tif, TIFFTAG_ORIENTATION, tiffOrientation); TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_LINEAR_RAW);
-    TIFFSetField(tif, TIFFTAG_SAMPLESPERPIXEL, 3); TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG); TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, height); TIFFSetField(tif, TIFFTAG_SUBFILETYPE, 0);
-    static const char* make = "Google"; TIFFSetField(tif, TIFFTAG_MAKE, make); static const char* model = "HDR+ Device"; TIFFSetField(tif, TIFFTAG_MODEL, model); static const char* software = "CameraXBasic HDR+"; TIFFSetField(tif, TIFFTAG_SOFTWARE, software);
-    time_t raw_time = (time_t)(captureTimeMillis / 1000); struct tm * timeinfo = localtime(&raw_time); char buffer[20]; strftime(buffer, 20, "%Y:%m:%d %H:%M:%S", timeinfo); TIFFSetField(tif, TIFFTAG_DATETIME, buffer);
-    static const uint8_t dng_version[] = {1, 4, 0, 0}; TIFFSetField(tif, TIFFTAG_DNGVERSION, dng_version); static const uint8_t dng_backward_version[] = {1, 1, 0, 0}; TIFFSetField(tif, TIFFTAG_DNGBACKWARDVERSION, dng_backward_version); TIFFSetField(tif, TIFFTAG_UNIQUECAMERAMODEL, model);
-    uint32_t white_level_val = (uint32_t)whiteLevel; if (white_level_val == 0) white_level_val = 65535; TIFFSetField(tif, TIFFTAG_WHITELEVEL, 1, &white_level_val); uint32_t black_level_val = 0; TIFFSetField(tif, TIFFTAG_BLACKLEVEL, 1, &black_level_val);
-    Matrix3x3 ccmMat; std::copy(ccm.data(), ccm.data() + 9, ccmMat.m); Matrix3x3 invCcm = invert(ccmMat); Matrix3x3 colorMatrix1 = multiply(invCcm, M_XYZ_to_sRGB_D65);
-    TIFFSetField(tif, TIFFTAG_COLORMATRIX1, 9, colorMatrix1.m); static const float as_shot_neutral[] = {1.0f, 1.0f, 1.0f}; TIFFSetField(tif, TIFFTAG_ASSHOTNEUTRAL, 3, as_shot_neutral);
-    TIFFSetField(tif, TIFFTAG_CALIBRATIONILLUMINANT1, 21); float exposureTimeSec = (float)exposureTime / 1000000000.0f; TIFFSetField(tif, TIFFTAG_EXPOSURETIME, exposureTimeSec); TIFFSetField(tif, TIFFTAG_FNUMBER, fNumber); TIFFSetField(tif, TIFFTAG_FOCALLENGTH, focalLength); unsigned short iso_short = (unsigned short)iso; TIFFSetField(tif, TIFFTAG_ISOSPEEDRATINGS, 1, &iso_short);
-    if (TIFFWriteEncodedStrip(tif, 0, (void*)data.data(), static_cast<size_t>(width) * height * 3 * sizeof(unsigned short)) < 0) { TIFFClose(tif); return false; }
-    TIFFClose(tif); return true;
+    TIFFSetField(tif, TIFFTAG_ORIENTATION, tiffOrientation);
+    TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_LINEAR_RAW);
+    TIFFSetField(tif, TIFFTAG_SAMPLESPERPIXEL, 3);
+    TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG);
+    TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, height);
+    TIFFSetField(tif, TIFFTAG_SUBFILETYPE, 0);
+
+    static const char* make = "Google";
+    TIFFSetField(tif, TIFFTAG_MAKE, make);
+    static const char* model = "HDR+ Device";
+    TIFFSetField(tif, TIFFTAG_MODEL, model);
+    static const char* software = "CameraXBasic HDR+";
+    TIFFSetField(tif, TIFFTAG_SOFTWARE, software);
+
+    time_t raw_time = (time_t)(captureTimeMillis / 1000);
+    struct tm * timeinfo = localtime(&raw_time);
+    char buffer[20];
+    strftime(buffer, 20, "%Y:%m:%d %H:%M:%S", timeinfo);
+    TIFFSetField(tif, TIFFTAG_DATETIME, buffer);
+
+    static const uint8_t dng_version[] = {1, 4, 0, 0};
+    TIFFSetField(tif, TIFFTAG_DNGVERSION, dng_version);
+    static const uint8_t dng_backward_version[] = {1, 1, 0, 0};
+    TIFFSetField(tif, TIFFTAG_DNGBACKWARDVERSION, dng_backward_version);
+    TIFFSetField(tif, TIFFTAG_UNIQUECAMERAMODEL, model);
+
+    uint32_t white_level_val = (uint32_t)whiteLevel;
+    if (white_level_val == 0) white_level_val = 65535;
+    TIFFSetField(tif, TIFFTAG_WHITELEVEL, 1, &white_level_val);
+    uint32_t black_level_val = 0;
+    TIFFSetField(tif, TIFFTAG_BLACKLEVEL, 1, &black_level_val);
+
+    Matrix3x3 ccmMat;
+    std::copy(ccm.data(), ccm.data() + 9, ccmMat.m);
+    Matrix3x3 invCcm = invert(ccmMat);
+    Matrix3x3 colorMatrix1 = multiply(invCcm, M_XYZ_to_sRGB_D65);
+    TIFFSetField(tif, TIFFTAG_COLORMATRIX1, 9, colorMatrix1.m);
+
+    static const float as_shot_neutral[] = {1.0f, 1.0f, 1.0f};
+    TIFFSetField(tif, TIFFTAG_ASSHOTNEUTRAL, 3, as_shot_neutral);
+
+    TIFFSetField(tif, TIFFTAG_CALIBRATIONILLUMINANT1, 21);
+    float exposureTimeSec = (float)exposureTime / 1000000000.0f;
+    TIFFSetField(tif, TIFFTAG_EXPOSURETIME, exposureTimeSec);
+    TIFFSetField(tif, TIFFTAG_FNUMBER, fNumber);
+    TIFFSetField(tif, TIFFTAG_FOCALLENGTH, focalLength);
+
+    unsigned short iso_short = (unsigned short)iso;
+    TIFFSetField(tif, TIFFTAG_ISOSPEEDRATINGS, 1, &iso_short);
+
+    if (TIFFWriteEncodedStrip(tif, 0, (void*)data.data(), static_cast<size_t>(width) * height * 3 * sizeof(unsigned short)) < 0) {
+        TIFFClose(tif);
+        return false;
+    }
+
+    TIFFClose(tif);
+    return true;
 }
 
 bool write_bmp(const char* filename, int width, int height, const std::vector<unsigned short>& data) {
-    std::ofstream file(filename, std::ios::binary); if (!file.is_open()) return false;
-    size_t padded_width = (static_cast<size_t>(width) * 3 + 3) & (~3); size_t size = 54 + padded_width * height;
-    unsigned char header[54] = {0}; header[0] = 'B'; header[1] = 'M'; *(int*)&header[2] = static_cast<int>(size); *(int*)&header[10] = 54; *(int*)&header[14] = 40; *(int*)&header[18] = width; *(int*)&header[22] = height; *(short*)&header[26] = 1; *(short*)&header[28] = 24;
-    file.write((char*)header, 54); std::vector<unsigned char> line(padded_width, 0);
+    std::ofstream file(filename, std::ios::binary);
+    if (!file.is_open()) return false;
+
+    size_t padded_width = (static_cast<size_t>(width) * 3 + 3) & (~3);
+    size_t size = 54 + padded_width * height;
+
+    unsigned char header[54] = {0};
+    header[0] = 'B';
+    header[1] = 'M';
+    *(int*)&header[2] = static_cast<int>(size);
+    *(int*)&header[10] = 54;
+    *(int*)&header[14] = 40;
+    *(int*)&header[18] = width;
+    *(int*)&header[22] = height;
+    *(short*)&header[26] = 1;
+    *(short*)&header[28] = 24;
+
+    file.write((char*)header, 54);
+
+    std::vector<unsigned char> line(padded_width, 0);
     for (int y = height - 1; y >= 0; y--) {
         for (int x = 0; x < width; x++) {
-            size_t idx = (static_cast<size_t>(y) * width + x) * 3; line[static_cast<size_t>(x)*3+0] = (unsigned char)(data[idx+2] >> 8); line[static_cast<size_t>(x)*3+1] = (unsigned char)(data[idx+1] >> 8); line[static_cast<size_t>(x)*3+2] = (unsigned char)(data[idx+0] >> 8);
+            size_t idx = (static_cast<size_t>(y) * width + x) * 3;
+            line[static_cast<size_t>(x) * 3 + 0] = (unsigned char)(data[idx + 2] >> 8);
+            line[static_cast<size_t>(x) * 3 + 1] = (unsigned char)(data[idx + 1] >> 8);
+            line[static_cast<size_t>(x) * 3 + 2] = (unsigned char)(data[idx + 0] >> 8);
         }
         file.write((char*)line.data(), padded_width);
     }
-    bool result = file.good(); file.close(); return result;
+
+    bool result = file.good();
+    file.close();
+    return result;
 }
