@@ -211,7 +211,8 @@ class SettingsFragment : Fragment() {
         binding.switchHdrPlusOis.isChecked = prefs.getBoolean(KEY_HDR_PLUS_OIS, true)
         binding.switchHdrPlusOis.setOnCheckedChangeListener { _, isChecked ->
             prefs.edit().putBoolean(KEY_HDR_PLUS_OIS, isChecked).apply()
-            
+        }
+
         binding.switchForce60fps.isChecked = prefs.getBoolean(KEY_FORCE_60FPS, true)
         binding.switchForce60fps.setOnCheckedChangeListener { _, isChecked ->
             prefs.edit().putBoolean(KEY_FORCE_60FPS, isChecked).apply()

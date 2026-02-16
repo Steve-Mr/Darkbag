@@ -23,6 +23,11 @@ object ImageSaver {
     /**
      * Shared helper to handle Bitmap post-processing (Rotate, Crop, Compress) and Saving (JPG, TIFF, LinearDNG).
      * Deletes input temp files after saving.
+     *
+     * @param rotationDegrees The degrees of rotation to apply to the [inputBitmap] or the bitmap at [bmpPath].
+     *                        If the source at [bmpPath] was already rotated (e.g., by the JNI layer),
+     *                        this should be 0 to avoid double-rotation and incorrect EXIF orientation.
+     * @param mirror Whether to mirror the image horizontally. Should be false if already mirrored by JNI.
      */
     suspend fun saveProcessedImage(
         context: Context,
