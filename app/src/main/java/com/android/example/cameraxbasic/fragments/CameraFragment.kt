@@ -43,7 +43,11 @@ import android.media.ImageReader
 import android.os.Handler
 import android.os.HandlerThread
 import android.hardware.camera2.CameraCharacteristics
+import android.graphics.Matrix
+import android.graphics.Rect
+import android.graphics.RectF
 import android.hardware.camera2.CaptureResult
+import android.hardware.camera2.params.MeteringRectangle
 import android.hardware.camera2.params.RggbChannelVector
 import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CaptureRequest
@@ -173,6 +177,8 @@ class CameraFragment : Fragment() {
     private var isManualFocus = false
     private var isManualExposure = false
     private var activeManualTab: String? = null
+    private var focusMeteringRegion: MeteringRectangle? = null
+    private var exposureMeteringRegion: MeteringRectangle? = null
 
     // Flash State
     private var isFlashEnabled = false
@@ -710,6 +716,10 @@ class CameraFragment : Fragment() {
 
     @OptIn(ExperimentalCamera2Interop::class)
     private suspend fun bindCameraUseCasesInternal() {
+        // Reset Tap-to-Focus regions on lens switch
+        focusMeteringRegion = null
+        exposureMeteringRegion = null
+
         // Fetch Characteristics for Manual Control
         val targetId = currentLens?.id ?: if (lensFacing == CameraSelector.LENS_FACING_BACK) "0" else "1"
 
@@ -1582,11 +1592,43 @@ class CameraFragment : Fragment() {
         fragmentCameraBinding.viewFinder.setOnTouchListener { view, event ->
             if (event.action == android.view.MotionEvent.ACTION_UP) {
                 if (currentLens?.useCamera2 == true) {
-                     isManualFocus = false
-                     applyCameraControls()
+                     triggerTapToFocusCamera2(event.x, event.y)
                 } else {
                     val point = factory.createPoint(event.x, event.y)
-                    val action = FocusMeteringAction.Builder(point).build()
+
+                    val actionBuilder = if (isManualExposure) {
+                        FocusMeteringAction.Builder(point, FocusMeteringAction.FLAG_AF)
+                    } else {
+                        FocusMeteringAction.Builder(point, FocusMeteringAction.FLAG_AF or FocusMeteringAction.FLAG_AE)
+                    }
+
+                    actionBuilder.disableAutoCancel()
+                    val action = actionBuilder.build()
+
+                    // If manual focus is ON, we temporarily switch to Auto to sync the slider
+                    val wasManualFocus = isManualFocus
+                    if (wasManualFocus) {
+                        lifecycleScope.launch(Dispatchers.Default) {
+                            withTimeoutOrNull(3000) {
+                                captureResultFlow.first { res ->
+                                    val afState = res.get(CaptureResult.CONTROL_AF_STATE)
+                                    afState == CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED ||
+                                            afState == CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED
+                                }
+                            }?.let { res ->
+                                val dist = res.get(CaptureResult.LENS_FOCUS_DISTANCE)
+                                if (dist != null) {
+                                    currentFocusDistance = dist
+                                    withContext(Dispatchers.Main) {
+                                        isManualFocus = true
+                                        applyCameraControls()
+                                        updateManualPanel()
+                                        updateTabColors()
+                                    }
+                                }
+                            }
+                        }
+                    }
 
                     isManualFocus = false
                     applyCameraControls() // Apply change
@@ -1606,6 +1648,111 @@ class CameraFragment : Fragment() {
                 view.performClick()
             }
             true
+        }
+    }
+
+    private fun triggerTapToFocusCamera2(x: Float, y: Float) {
+        val device = camera2Device ?: return
+        val session = camera2Session ?: return
+        val surface = camera2PreviewSurface ?: return
+        val handler = camera2Handler ?: return
+
+        lifecycleScope.launch(Dispatchers.Default) {
+            try {
+                val characteristics = camera2Manager.getCameraCharacteristics(device.id)
+                val sensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
+                val activeArray = characteristics.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE) ?: return@launch
+
+                val lastResult = captureResultFlow.replayCache.lastOrNull()
+                val cropRegion = lastResult?.get(CaptureResult.SCALER_CROP_REGION) ?: activeArray
+
+                val region = getMeteringRectangle(
+                    x, y,
+                    fragmentCameraBinding.viewFinder.width,
+                    fragmentCameraBinding.viewFinder.height,
+                    sensorOrientation,
+                    lensFacing,
+                    cropRegion
+                )
+
+                focusMeteringRegion = region
+                if (!isManualExposure) {
+                    exposureMeteringRegion = region
+                }
+
+                // 1. Cancel ongoing
+                val cancelRequest = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_PREVIEW)
+                cancelRequest.addTarget(surface)
+                applyManualSettingsToRequest(cancelRequest)
+                cancelRequest.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_CANCEL)
+                cancelRequest.set(CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER, CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER_CANCEL)
+                session.capture(cancelRequest.build(), null, handler)
+
+                // 2. Trigger AF/AE
+                val triggerRequest = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_PREVIEW)
+                triggerRequest.addTarget(surface)
+                applyManualSettingsToRequest(triggerRequest)
+
+                triggerRequest.set(CaptureRequest.CONTROL_AF_REGIONS, arrayOf(region))
+                if (!isManualExposure) {
+                    triggerRequest.set(CaptureRequest.CONTROL_AE_REGIONS, arrayOf(region))
+                }
+
+                // If in manual focus, we need to temporarily switch to AUTO to perform the tap-to-focus
+                if (isManualFocus) {
+                    triggerRequest.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_AUTO)
+                }
+
+                triggerRequest.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_START)
+                if (!isManualExposure) {
+                    triggerRequest.set(CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER, CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER_START)
+                }
+
+                session.capture(triggerRequest.build(), object : CameraCaptureSession.CaptureCallback() {
+                    override fun onCaptureCompleted(session: CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {
+                        super.onCaptureCompleted(session, request, result)
+
+                        if (isManualFocus) {
+                             // Wait for AF convergence then sync slider
+                             lifecycleScope.launch(Dispatchers.Default) {
+                                 withTimeoutOrNull(3000) {
+                                     captureResultFlow.first { res ->
+                                         val afState = res.get(CaptureResult.CONTROL_AF_STATE)
+                                         afState == CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED ||
+                                                 afState == CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED
+                                     }
+                                 }?.let { res ->
+                                     val dist = res.get(CaptureResult.LENS_FOCUS_DISTANCE)
+                                     if (dist != null) {
+                                         currentFocusDistance = dist
+                                         withContext(Dispatchers.Main) {
+                                             updateManualPanel()
+                                             updateTabColors()
+                                         }
+                                     }
+                                 }
+                                 // After syncing, we stay in AF_MODE_OFF (isManualFocus=true)
+                                 // But we need to update the repeating request to reflect new distance
+                                 withContext(Dispatchers.Main) {
+                                     applyCameraControls()
+                                 }
+                             }
+                        }
+                    }
+                }, handler)
+
+                // 3. Resume repeating
+                withContext(Dispatchers.Main) {
+                    // If we were in manual focus, we don't want to switch to AUTO permanently.
+                    // But if we were in continuous AF, we switch to AUTO to keep it locked.
+                    if (!isManualFocus) {
+                        // focusMeteringRegion is already set, applyCameraControls will use AF_MODE_AUTO
+                        applyCameraControls()
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Camera2 tap to focus trigger failed", e)
+            }
         }
     }
 
@@ -1749,15 +1896,18 @@ class CameraFragment : Fragment() {
         when (activeManualTab) {
             "Focus" -> {
                 isManualFocus = false
+                focusMeteringRegion = null
                 camera?.cameraControl?.cancelFocusAndMetering()
             }
 
             "ISO", "Shutter" -> {
                 isManualExposure = false
+                exposureMeteringRegion = null
             }
 
             "EV" -> {
                 currentEvIndex = 0
+                exposureMeteringRegion = null
             }
         }
         applyCameraControls()
@@ -3462,6 +3612,17 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         if (isManualFocus) {
             request.set(android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE, android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE_OFF)
             request.set(android.hardware.camera2.CaptureRequest.LENS_FOCUS_DISTANCE, currentFocusDistance)
+        } else {
+            if (focusMeteringRegion != null) {
+                request.set(android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE, android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE_AUTO)
+                request.set(android.hardware.camera2.CaptureRequest.CONTROL_AF_REGIONS, arrayOf(focusMeteringRegion))
+            } else {
+                request.set(android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE, android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
+            }
+        }
+
+        if (!isManualExposure && exposureMeteringRegion != null) {
+            request.set(android.hardware.camera2.CaptureRequest.CONTROL_AE_REGIONS, arrayOf(exposureMeteringRegion))
         }
 
         if (currentLens?.useCamera2 == true) {
@@ -3529,5 +3690,53 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = false
             cameraUiContainerBinding?.cameraCaptureButton?.alpha = 0.5f
         }
+    }
+
+    private fun getMeteringRectangle(
+        x: Float, y: Float,
+        viewWidth: Int, viewHeight: Int,
+        sensorOrientation: Int,
+        lensFacing: Int,
+        cropRegion: android.graphics.Rect
+    ): MeteringRectangle {
+        val normalizedX = x / viewWidth
+        val normalizedY = y / viewHeight
+
+        val displayRotation = when (displayManager.getDisplay(displayId)?.rotation) {
+            Surface.ROTATION_90 -> 90
+            Surface.ROTATION_180 -> 180
+            Surface.ROTATION_270 -> 270
+            else -> 0
+        }
+
+        val sensorToDisplay = if (lensFacing == CameraSelector.LENS_FACING_FRONT) {
+            (sensorOrientation + displayRotation) % 360
+        } else {
+            (sensorOrientation - displayRotation + 360) % 360
+        }
+
+        val matrix = Matrix()
+        matrix.postRotate(-sensorToDisplay.toFloat(), 0.5f, 0.5f)
+        if (lensFacing == CameraSelector.LENS_FACING_FRONT) {
+            matrix.postScale(-1f, 1f, 0.5f, 0.5f)
+        }
+
+        val pts = floatArrayOf(normalizedX, normalizedY)
+        matrix.mapPoints(pts)
+
+        val sx = pts[0].coerceIn(0f, 1f)
+        val sy = pts[1].coerceIn(0f, 1f)
+
+        val centerX = cropRegion.left + (sx * cropRegion.width()).toInt()
+        val centerY = cropRegion.top + (sy * cropRegion.height()).toInt()
+
+        val size = (cropRegion.width() * 0.1f).toInt()
+        val rect = android.graphics.Rect(
+            (centerX - size / 2).coerceIn(cropRegion.left, cropRegion.right),
+            (centerY - size / 2).coerceIn(cropRegion.top, cropRegion.bottom),
+            (centerX + size / 2).coerceIn(cropRegion.left, cropRegion.right),
+            (centerY + size / 2).coerceIn(cropRegion.top, cropRegion.bottom)
+        )
+        return MeteringRectangle(rect, 1000)
     }
 }
