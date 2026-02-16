@@ -403,7 +403,7 @@ bool process_and_save_image(
     // A: linear RGB input after adaptive edge compensation
     // B: after color-space matrix transform (before log/LUT)
     // C: after log curve (before LUT)
-    const bool enableStageDebug = !isPreview && (jpgPath || tiffPath);
+    const bool enableStageDebug = false;
     std::string debugBasePath = jpgPath ? std::string(jpgPath) : (tiffPath ? std::string(tiffPath) : std::string());
     std::string debugPathA = enableStageDebug ? build_debug_stage_path(debugBasePath.c_str(), "_debug_A_linear") : std::string();
     std::string debugPathB = enableStageDebug ? build_debug_stage_path(debugBasePath.c_str(), "_debug_B_matrix") : std::string();

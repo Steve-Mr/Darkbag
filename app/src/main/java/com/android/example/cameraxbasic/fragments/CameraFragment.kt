@@ -2713,7 +2713,7 @@ class CameraFragment : Fragment() {
                 var lensShadingMapData: FloatArray? = null
                 var lensShadingRows = 0
                 var lensShadingCols = 0
-                val useSensorColorMatrix = true
+                val useSensorColorMatrix = false
 
                 if (chars != null) {
                     whiteLevel = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_WHITE_LEVEL) ?: 1023
@@ -2785,7 +2785,7 @@ class CameraFragment : Fragment() {
                 
                 val ccm = if (useSensorColorMatrix) ccmSensor else ccmCapture
                 val ccmAlt = if (useSensorColorMatrix) ccmCapture else ccmSensor
-                val exportMatrixAB = true
+                val exportMatrixAB = false
 Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB=${wb.joinToString()}, CFA=$cfa, LSC=${lensShadingRows}x${lensShadingCols}, useSensorCCM=$useSensorColorMatrix")
 
                 val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)

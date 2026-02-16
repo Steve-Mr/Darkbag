@@ -43,7 +43,6 @@ object ImageSaver {
         var finalJpgUri: Uri? = null
 
         // 1. Process Input Bitmap or JPEG File from JNI -> Final MediaStore JPG
-        val debugSourcePath = bmpPath
         if (inputBitmap != null || bmpPath != null) {
             val isNativeJpeg = bmpPath != null && (bmpPath.endsWith(".jpg") || bmpPath.endsWith(".jpeg"))
             val needsBitmapProcessing = rotationDegrees != 0 || zoomFactor > 1.05f || inputBitmap != null || mirror
@@ -146,9 +145,10 @@ object ImageSaver {
             }
         }
 
-        if (debugSourcePath != null) {
-            saveDebugStageImagesToMediaStore(context, baseName, debugSourcePath)
-        }
+        // Debug sidecar export disabled for performance.
+        // if (debugSourcePath != null) {
+        //     saveDebugStageImagesToMediaStore(context, baseName, debugSourcePath)
+        // }
 
         // 2. Save TIFF
         if (saveTiff && tiffPath != null) {
