@@ -172,7 +172,7 @@ class CameraFragment : Fragment() {
     // Manual Control State
     private var isManualFocus = false
     private var isManualExposure = false
-    private var lastClippingRatio: Double = 0.0
+    @Volatile private var lastClippingRatio: Double = 0.0
     private var activeManualTab: String? = null
 
     // Flash State
@@ -2387,6 +2387,8 @@ class CameraFragment : Fragment() {
         private const val FOCUS_RING_DISPLAY_TIME_MS = 500L
         private const val FOCUS_RING_FADE_OUT_DURATION_MS = 300L
         private const val AE_SETTLE_DELAY_MS = 50L
+        private const val ANALYSIS_HIGHLIGHT_THRESHOLD = 240
+        private const val ANALYSIS_SAMPLING_STEP = 4
 
         const val KEY_SELECTED_LENS_ID = "selected_lens_sensor_id"
         const val KEY_LENS_FACING = "lens_facing"
@@ -3157,16 +3159,14 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 val pixelStride = plane.pixelStride
 
                 var highlightCount = 0
-                val highlightThreshold = 240
 
-                // Sample every 4th pixel to save CPU while still getting a good estimate
-                val step = 4
+                // Sample pixels to save CPU while still getting a good estimate
                 var totalSampled = 0
-                for (y in 0 until height step step) {
+                for (y in 0 until height step ANALYSIS_SAMPLING_STEP) {
                     val rowStart = y * rowStride
-                    for (x in 0 until width step step) {
+                    for (x in 0 until width step ANALYSIS_SAMPLING_STEP) {
                         val value = buffer.get(rowStart + x * pixelStride).toInt() and 0xFF
-                        if (value > highlightThreshold) {
+                        if (value > ANALYSIS_HIGHLIGHT_THRESHOLD) {
                             highlightCount++
                         }
                         totalSampled++

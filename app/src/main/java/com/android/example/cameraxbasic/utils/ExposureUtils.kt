@@ -18,6 +18,10 @@ object ExposureUtils {
     private const val FACTOR_BRIGHT = 0.125f       // -3 EV
     private const val FACTOR_DARK = 1.0f           // 0 EV
 
+    private const val CLIPPING_RATIO_THRESHOLD = 0.01
+    private const val CLIPPING_TO_EV_FACTOR = 20.0
+    private const val MAX_ADDITIONAL_UNDEREXPOSURE_STOPS = 2.0
+
     data class ExposureConfig(
         val iso: Int,
         val exposureTime: Long, // nanoseconds
@@ -82,10 +86,10 @@ object ExposureUtils {
         }
 
         // Apply additional underexposure if highlights are clipping (Pixel-based refinement)
-        if (underexposureMode == "Dynamic (Experimental)" && clippingRatio > 0.01) {
+        if (underexposureMode == "Dynamic (Experimental)" && clippingRatio > CLIPPING_RATIO_THRESHOLD) {
              // If more than 1% of pixels are clipping, push underexposure further
              // Every 5% of clipping adds ~1 stop of underexposure, up to -2 stops additional
-             val additionalUnderexposure = (clippingRatio * 20.0).coerceAtMost(2.0)
+             val additionalUnderexposure = (clippingRatio * CLIPPING_TO_EV_FACTOR).coerceAtMost(MAX_ADDITIONAL_UNDEREXPOSURE_STOPS)
              underexposeFactor *= (0.5).pow(additionalUnderexposure).toFloat()
         }
 
