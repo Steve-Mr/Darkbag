@@ -1605,28 +1605,8 @@ class CameraFragment : Fragment() {
                     val action = actionBuilder.build()
 
                     // If manual focus is ON, we temporarily switch to Auto to sync the slider
-                    val wasManualFocus = isManualFocus
-                    if (wasManualFocus) {
-                        lifecycleScope.launch(Dispatchers.Default) {
-                            withTimeoutOrNull(3000) {
-                                captureResultFlow.first { res ->
-                                    val afState = res.get(CaptureResult.CONTROL_AF_STATE)
-                                    afState == CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED ||
-                                            afState == CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED
-                                }
-                            }?.let { res ->
-                                val dist = res.get(CaptureResult.LENS_FOCUS_DISTANCE)
-                                if (dist != null) {
-                                    currentFocusDistance = dist
-                                    withContext(Dispatchers.Main) {
-                                        isManualFocus = true
-                                        applyCameraControls()
-                                        updateManualPanel()
-                                        updateTabColors()
-                                    }
-                                }
-                            }
-                        }
+                    if (isManualFocus) {
+                        syncManualFocusAfterTap()
                     }
 
                     isManualFocus = false
@@ -1710,32 +1690,8 @@ class CameraFragment : Fragment() {
                 session.capture(triggerRequest.build(), object : CameraCaptureSession.CaptureCallback() {
                     override fun onCaptureCompleted(session: CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {
                         super.onCaptureCompleted(session, request, result)
-
                         if (isManualFocus) {
-                             // Wait for AF convergence then sync slider
-                             lifecycleScope.launch(Dispatchers.Default) {
-                                 withTimeoutOrNull(3000) {
-                                     captureResultFlow.first { res ->
-                                         val afState = res.get(CaptureResult.CONTROL_AF_STATE)
-                                         afState == CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED ||
-                                                 afState == CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED
-                                     }
-                                 }?.let { res ->
-                                     val dist = res.get(CaptureResult.LENS_FOCUS_DISTANCE)
-                                     if (dist != null) {
-                                         currentFocusDistance = dist
-                                         withContext(Dispatchers.Main) {
-                                             updateManualPanel()
-                                             updateTabColors()
-                                         }
-                                     }
-                                 }
-                                 // After syncing, we stay in AF_MODE_OFF (isManualFocus=true)
-                                 // But we need to update the repeating request to reflect new distance
-                                 withContext(Dispatchers.Main) {
-                                     applyCameraControls()
-                                 }
-                             }
+                             syncManualFocusAfterTap()
                         }
                     }
                 }, handler)
@@ -3676,6 +3632,29 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         camera2Thread?.quitSafely()
         camera2Thread = null
         camera2Handler = null
+    }
+
+    private fun syncManualFocusAfterTap() {
+        lifecycleScope.launch(Dispatchers.Default) {
+            withTimeoutOrNull(3000) {
+                captureResultFlow.first { res ->
+                    val afState = res.get(CaptureResult.CONTROL_AF_STATE)
+                    afState == CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED ||
+                            afState == CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED
+                }
+            }?.let { res ->
+                val dist = res.get(CaptureResult.LENS_FOCUS_DISTANCE)
+                if (dist != null) {
+                    currentFocusDistance = dist
+                    withContext(Dispatchers.Main) {
+                        isManualFocus = true
+                        applyCameraControls()
+                        updateManualPanel()
+                        updateTabColors()
+                    }
+                }
+            }
+        }
     }
 
     private fun resetBurstUi() {
