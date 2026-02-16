@@ -61,10 +61,12 @@ bool process_and_save_image(
 // --- File Writers ---
 bool write_tiff(const char* filename, int width, int height, const std::vector<unsigned short>& data, int orientation = 0, bool mirror = false);
 
-bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, int iso, long exposureTime, float fNumber, float focalLength, long captureTimeMillis, const std::vector<float>& ccm, int orientation, bool mirror = false, const int* blackLevel = nullptr, const float* whiteBalance = nullptr);
+bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, int iso, long exposureTime, float fNumber, float focalLength, long captureTimeMillis, const std::vector<float>& ccm, int orientation, bool mirror = false);
 
 bool write_bmp(const char* filename, int width, int height, const std::vector<unsigned short>& data);
 
 bool write_jpeg(const char* filename, int width, int height, const std::vector<unsigned short>& data, int quality);
+
+void setup_dng_tags();
 
 #endif // COLOR_PIPE_H

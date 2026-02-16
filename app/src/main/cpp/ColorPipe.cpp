@@ -14,6 +14,7 @@
 #include <future>
 #include <array>
 #include <cstdio>
+#include <cstdint>
 
 // Define missing tags if needed (Standard EXIF tags)
 #ifndef TIFFTAG_EXPOSURETIME
@@ -202,7 +203,7 @@ LUT3D load_lut(const char* path) {
     lut.size = 0;
     std::ifstream file(path);
     if (!file.is_open()) return lut;
-    char lineBuf[2048];
+    char lineBuf[8192];
     int lineCount = 0;
     const int maxLines = 1000000;
     while (file.getline(lineBuf, sizeof(lineBuf)) && ++lineCount < maxLines) {
@@ -603,6 +604,10 @@ bool process_and_save_image(
 
 bool write_jpeg(const char* filename, int width, int height, const std::vector<unsigned short>& data, int quality) {
     LOGD("write_jpeg: %s, %dx%d", filename, width, height);
+    if (width <= 0 || height <= 0 || (size_t)width > SIZE_MAX / (size_t)height / 3) {
+        LOGE("write_jpeg: Invalid dimensions or overflow: %dx%d", width, height);
+        return false;
+    }
     size_t total_pixels = static_cast<size_t>(width) * height;
     std::vector<unsigned char> rgb8;
     try {
@@ -626,6 +631,10 @@ bool write_jpeg(const char* filename, int width, int height, const std::vector<u
 }
 
 bool write_tiff(const char* filename, int width, int height, const std::vector<unsigned short>& data, int orientation, bool mirror) {
+    if (width <= 0 || height <= 0 || (size_t)width > SIZE_MAX / (size_t)height / 6) {
+        LOGE("write_tiff: Invalid dimensions or overflow: %dx%d", width, height);
+        return false;
+    }
     TIFF* tif = TIFFOpen(filename, "w");
     if (!tif) return false;
 
@@ -656,8 +665,7 @@ bool write_tiff(const char* filename, int width, int height, const std::vector<u
     return true;
 }
 
-bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, int iso, long exposureTime, float fNumber, float focalLength, long captureTimeMillis, const std::vector<float>& ccm, int orientation, bool mirror, const int* blackLevel, const float* whiteBalance) {
-    TIFFSetTagExtender(DNGTagExtender);
+bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, int iso, long exposureTime, float fNumber, float focalLength, long captureTimeMillis, const std::vector<float>& ccm, int orientation, bool mirror) {
     TIFF* tif = TIFFOpen(filename, "w");
     if (!tif) return false;
 
@@ -702,14 +710,8 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
     uint32_t white_level_val = (uint32_t)whiteLevel;
     if (white_level_val == 0) white_level_val = 65535;
     TIFFSetField(tif, TIFFTAG_WHITELEVEL, 1, &white_level_val);
-
-    if (blackLevel) {
-        uint32_t bl[4] = {(uint32_t)blackLevel[0], (uint32_t)blackLevel[1], (uint32_t)blackLevel[2], (uint32_t)blackLevel[3]};
-        TIFFSetField(tif, TIFFTAG_BLACKLEVEL, 4, bl);
-    } else {
-        uint32_t black_level_val = 0;
-        TIFFSetField(tif, TIFFTAG_BLACKLEVEL, 1, &black_level_val);
-    }
+    uint32_t black_level_val = 0;
+    TIFFSetField(tif, TIFFTAG_BLACKLEVEL, 1, &black_level_val);
 
     Matrix3x3 ccmMat;
     std::copy(ccm.data(), ccm.data() + 9, ccmMat.m);
@@ -717,18 +719,8 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
     Matrix3x3 colorMatrix1 = multiply(invCcm, M_XYZ_to_sRGB_D65);
     TIFFSetField(tif, TIFFTAG_COLORMATRIX1, 9, colorMatrix1.m);
 
-    if (whiteBalance) {
-        float avgG = (whiteBalance[1] + whiteBalance[2]) * 0.5f;
-        float as_shot_neutral[3] = {
-            1.0f / (whiteBalance[0] > 0 ? whiteBalance[0] : 1.0f),
-            1.0f / (avgG > 0 ? avgG : 1.0f),
-            1.0f / (whiteBalance[3] > 0 ? whiteBalance[3] : 1.0f)
-        };
-        TIFFSetField(tif, TIFFTAG_ASSHOTNEUTRAL, 3, as_shot_neutral);
-    } else {
-        static const float as_shot_neutral[] = {1.0f, 1.0f, 1.0f};
-        TIFFSetField(tif, TIFFTAG_ASSHOTNEUTRAL, 3, as_shot_neutral);
-    }
+    static const float as_shot_neutral[] = {1.0f, 1.0f, 1.0f};
+    TIFFSetField(tif, TIFFTAG_ASSHOTNEUTRAL, 3, as_shot_neutral);
 
     TIFFSetField(tif, TIFFTAG_CALIBRATIONILLUMINANT1, 21);
     float exposureTimeSec = (float)exposureTime / 1000000000.0f;
@@ -748,11 +740,23 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
     return true;
 }
 
+void setup_dng_tags() {
+    TIFFSetTagExtender(DNGTagExtender);
+}
+
 bool write_bmp(const char* filename, int width, int height, const std::vector<unsigned short>& data) {
+    if (width <= 0 || height <= 0 || (size_t)width > (SIZE_MAX - 3) / 3) {
+        LOGE("write_bmp: Invalid width or overflow: %d", width);
+        return false;
+    }
+    size_t padded_width = (static_cast<size_t>(width) * 3 + 3) & (~3);
+    if ((size_t)height > (SIZE_MAX - 54) / padded_width) {
+        LOGE("write_bmp: Invalid height or overflow: %d", height);
+        return false;
+    }
     std::ofstream file(filename, std::ios::binary);
     if (!file.is_open()) return false;
 
-    size_t padded_width = (static_cast<size_t>(width) * 3 + 3) & (~3);
     size_t size = 54 + padded_width * height;
 
     unsigned char header[54] = {0};
