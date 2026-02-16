@@ -103,6 +103,19 @@ Matrix3x3 invert(const Matrix3x3& src) {
     return res;
 }
 
+Matrix3x3 normalize_rows(const Matrix3x3& src) {
+    Matrix3x3 out = src;
+    for (int r = 0; r < 3; ++r) {
+        float sum = out.m[r * 3 + 0] + out.m[r * 3 + 1] + out.m[r * 3 + 2];
+        if (std::abs(sum) > 1e-6f) {
+            out.m[r * 3 + 0] /= sum;
+            out.m[r * 3 + 1] /= sum;
+            out.m[r * 3 + 2] /= sum;
+        }
+    }
+    return out;
+}
+
 // --- Color Matrices ---
 const Matrix3x3 M_sRGB_D65_to_XYZ = {
     0.41239080f, 0.35758434f, 0.18048079f,
@@ -396,7 +409,11 @@ bool process_and_save_image(
     int outW = width / downsampleFactor, outH = height / downsampleFactor;
     bool swapDims = (orientation == 90 || orientation == 270);
     int finalW = swapDims ? outH : outW, finalH = swapDims ? outW : outH;
-    Matrix3x3 effective_CCM = {0}; if (sourceColorSpace == 1 && ccm) std::copy(ccm, ccm + 9, effective_CCM.m);
+    Matrix3x3 effective_CCM = {0};
+    if (sourceColorSpace == 1 && ccm) {
+        std::copy(ccm, ccm + 9, effective_CCM.m);
+        effective_CCM = normalize_rows(effective_CCM);
+    }
     std::vector<unsigned short> processedImage; std::vector<unsigned char> previewRgb8;
 
     AdaptiveEdgeComp edgeComp = calculate_adaptive_edge_comp(inputImage, width, height);
@@ -446,7 +463,17 @@ bool process_and_save_image(
         if (stageA) *stageA = colorA;
 
         Vec3 color = colorA;
-        if (sourceColorSpace == 1) { if (ccm) color = multiply(effective_CCM, color); color = multiply(M_sRGB_D65_to_XYZ, color); }
+        if (sourceColorSpace == 1) {
+            // Android COLOR_CORRECTION_TRANSFORM is already a sensor-domain correction matrix.
+            // Treat it as sensor->XYZ(D50)-like matrix then adapt to D65.
+            if (ccm) {
+                color = multiply(effective_CCM, color);
+                color = multiply(M_Bradford_D50_to_D65, color);
+            } else {
+                // Fallback path when matrix metadata is unavailable.
+                color = multiply(M_sRGB_D65_to_XYZ, color);
+            }
+        }
         else if (sourceColorSpace == 0) { color = multiply(M_ProPhoto_D50_to_XYZ, color); color = multiply(M_Bradford_D50_to_D65, color); }
 
         if (edgeComp.enabled) {
