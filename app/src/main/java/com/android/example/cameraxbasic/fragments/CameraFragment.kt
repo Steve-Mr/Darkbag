@@ -1578,22 +1578,21 @@ class CameraFragment : Fragment() {
         }
 
     private fun setupTapToFocus() {
-        val width = fragmentCameraBinding.viewFinder.width.toFloat()
-        val height = fragmentCameraBinding.viewFinder.height.toFloat()
-        val cameraInfo = camera?.cameraInfo ?: return
-
-        val factory = DisplayOrientedMeteringPointFactory(
-            fragmentCameraBinding.viewFinder.display,
-            cameraInfo,
-            width,
-            height
-        )
-
         fragmentCameraBinding.viewFinder.setOnTouchListener { view, event ->
             if (event.action == android.view.MotionEvent.ACTION_UP) {
                 if (currentLens?.useCamera2 == true) {
                      triggerTapToFocusCamera2(event.x, event.y)
                 } else {
+                    val cameraInfo = camera?.cameraInfo ?: return@setOnTouchListener true
+                    val width = fragmentCameraBinding.viewFinder.width.toFloat()
+                    val height = fragmentCameraBinding.viewFinder.height.toFloat()
+
+                    val factory = DisplayOrientedMeteringPointFactory(
+                        fragmentCameraBinding.viewFinder.display,
+                        cameraInfo,
+                        width,
+                        height
+                    )
                     val point = factory.createPoint(event.x, event.y)
 
                     val actionBuilder = if (isManualExposure) {
