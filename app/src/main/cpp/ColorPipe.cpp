@@ -13,6 +13,7 @@
 #include <ctime>
 #include <future>
 #include <array>
+#include <cstdio>
 
 // Define missing tags if needed (Standard EXIF tags)
 #ifndef TIFFTAG_EXPOSURETIME
@@ -280,6 +281,23 @@ constexpr float kBlendEndRadius = 1.0f;
 inline float safe_div(float a, float b) {
     return (b > 1e-6f) ? (a / b) : 1.0f;
 }
+inline float clamp01(float v) {
+    if (!(v > 0.0f)) return 0.0f;
+    if (v > 1.0f) return 1.0f;
+    return v;
+}
+
+std::string build_debug_stage_path(const char* basePath, const char* stageSuffix) {
+    if (!basePath || !stageSuffix) return {};
+    std::string p(basePath);
+    size_t slash = p.find_last_of("/");
+    size_t dot = p.find_last_of('.');
+    if (dot == std::string::npos || (slash != std::string::npos && dot < slash)) {
+        dot = p.size();
+    }
+    return p.substr(0, dot) + stageSuffix + ".jpg";
+}
+
 
 AdaptiveEdgeComp calculate_adaptive_edge_comp(const std::vector<unsigned short>& inputImage, int width, int height) {
     AdaptiveEdgeComp edgeComp;
@@ -336,12 +354,9 @@ AdaptiveEdgeComp calculate_adaptive_edge_comp(const std::vector<unsigned short>&
     float centerGvsRB = safe_div(centerMean[1], 0.5f * (centerMean[0] + centerMean[2]));
     float edgeGvsRB = safe_div(edgeMean[1], 0.5f * (edgeMean[0] + edgeMean[2]));
 
+    // Conditionally enable compensation when edge luma drop and green shift are detected.
+    // Gains are derived from center/edge statistics and clamped to safe bounds.
     bool needsComp = (edgeLuma < centerLuma * kLumaDropThreshold) && (edgeGvsRB > centerGvsRB * kGreenShiftThreshold);
-    if (!needsComp) {
-        return edgeComp;
-    }
-
-    edgeComp.enabled = true;
     edgeComp.lumaEdgeGain = std::clamp(1.0f + (safe_div(centerLuma, edgeLuma) - 1.0f) * kCompStrength, kMinLumaEdgeGain, kMaxLumaEdgeGain);
 
     for (int ch = 0; ch < 3; ch++) {
@@ -350,9 +365,17 @@ AdaptiveEdgeComp calculate_adaptive_edge_comp(const std::vector<unsigned short>&
         edgeComp.chromaEdgeGain[ch] = std::clamp(mixed, kMinChromaGain, kMaxChromaGain);
     }
 
-    LOGD("Adaptive edge compensation enabled. LumaEdgeGain=%.3f, ChromaEdgeGain=[%.3f, %.3f, %.3f]",
+    edgeComp.enabled = needsComp;
+    if (!edgeComp.enabled) {
+        edgeComp.lumaEdgeGain = 1.0f;
+        edgeComp.chromaEdgeGain = {1.0f, 1.0f, 1.0f};
+    }
+
+    LOGD("Adaptive edge compensation active=%d. LumaEdgeGain=%.3f, ChromaEdgeGain=[%.3f, %.3f, %.3f], centerLuma=%.1f, edgeLuma=%.1f, centerGvsRB=%.4f, edgeGvsRB=%.4f",
+         (int)edgeComp.enabled,
          edgeComp.lumaEdgeGain,
-         edgeComp.chromaEdgeGain[0], edgeComp.chromaEdgeGain[1], edgeComp.chromaEdgeGain[2]);
+         edgeComp.chromaEdgeGain[0], edgeComp.chromaEdgeGain[1], edgeComp.chromaEdgeGain[2],
+         centerLuma, edgeLuma, centerGvsRB, edgeGvsRB);
 
     return edgeComp;
 }
@@ -376,7 +399,21 @@ bool process_and_save_image(
 
     AdaptiveEdgeComp edgeComp = calculate_adaptive_edge_comp(inputImage, width, height);
 
-    auto process_pixel = [&](int x, int y) -> Vec3 {
+    // Debug stage split output (A/B/C):
+    // A: linear RGB input after adaptive edge compensation
+    // B: after color-space matrix transform (before log/LUT)
+    // C: after log curve (before LUT)
+    const bool enableStageDebug = false;
+    std::string debugBasePath = jpgPath ? std::string(jpgPath) : (tiffPath ? std::string(tiffPath) : std::string());
+    std::string debugPathA = enableStageDebug ? build_debug_stage_path(debugBasePath.c_str(), "_debug_A_linear") : std::string();
+    std::string debugPathB = enableStageDebug ? build_debug_stage_path(debugBasePath.c_str(), "_debug_B_matrix") : std::string();
+    std::string debugPathC = enableStageDebug ? build_debug_stage_path(debugBasePath.c_str(), "_debug_C_log") : std::string();
+
+    std::vector<unsigned char> debugA8;
+    std::vector<unsigned char> debugB8;
+    std::vector<unsigned char> debugC8;
+
+    auto process_pixel = [&](int x, int y, Vec3* stageA, Vec3* stageB, Vec3* stageC) -> Vec3 {
         x = std::max(0, std::min(x, width - 1));
         y = std::max(0, std::min(y, height - 1));
         size_t idx = (static_cast<size_t>(y) * width + x) * 3;
@@ -403,9 +440,13 @@ bool process_and_save_image(
             norm_b *= bGain;
         }
 
-        Vec3 color = {norm_r, norm_g, norm_b};
+        Vec3 colorA = {norm_r, norm_g, norm_b};
+        if (stageA) *stageA = colorA;
+
+        Vec3 color = colorA;
         if (sourceColorSpace == 1) { if (ccm) color = multiply(effective_CCM, color); color = multiply(M_sRGB_D65_to_XYZ, color); }
         else if (sourceColorSpace == 0) { color = multiply(M_ProPhoto_D50_to_XYZ, color); color = multiply(M_Bradford_D50_to_D65, color); }
+
         switch (targetLog) {
             case 1: color = multiply(M_XYZ_to_AlexaWideGamut_D65, color); break;
             case 2:
@@ -415,7 +456,11 @@ bool process_and_save_image(
             case 7: color = multiply(M_XYZ_to_VGamut_D65, color); break;
             default: color = multiply(M_XYZ_to_Rec709_D65, color); break;
         }
+        if (stageB) *stageB = color;
+
         color.r = apply_log(color.r, targetLog); color.g = apply_log(color.g, targetLog); color.b = apply_log(color.b, targetLog);
+        if (stageC) *stageC = color;
+
         if (lut.size > 0) color = apply_lut(lut, color);
         return color;
     };
@@ -426,6 +471,13 @@ bool process_and_save_image(
 
     int finalW_zoomed = swapDims ? (cropH / downsampleFactor) : (cropW / downsampleFactor);
     int finalH_zoomed = swapDims ? (cropW / downsampleFactor) : (cropH / downsampleFactor);
+
+    if (enableStageDebug) {
+        size_t n = static_cast<size_t>(finalW_zoomed) * finalH_zoomed * 3;
+        debugA8.resize(n);
+        debugB8.resize(n);
+        debugC8.resize(n);
+    }
 
     if (isPreview) {
         previewRgb8.resize(static_cast<size_t>(finalW_zoomed) * finalH_zoomed * 3);
@@ -439,7 +491,7 @@ bool process_and_save_image(
                 else if (orientation == 270) { sx = (finalH_zoomed - 1) - py; sy = opx; }
                 else { sx = opx; sy = py; }
 
-                Vec3 color = process_pixel(cropX + sx * downsampleFactor, cropY + sy * downsampleFactor);
+                Vec3 color = process_pixel(cropX + sx * downsampleFactor, cropY + sy * downsampleFactor, nullptr, nullptr, nullptr);
                 size_t outIdx = (static_cast<size_t>(py) * finalW_zoomed + px) * 3;
                 previewRgb8[outIdx + 0] = (unsigned char)std::max(0.0f, std::min(255.0f, color.r * 255.0f));
                 previewRgb8[outIdx + 1] = (unsigned char)std::max(0.0f, std::min(255.0f, color.g * 255.0f));
@@ -458,11 +510,29 @@ bool process_and_save_image(
                 else if (orientation == 270) { sx = (finalH_zoomed - 1) - py; sy = opx; }
                 else { sx = opx; sy = py; }
 
-                Vec3 color = process_pixel(cropX + sx, cropY + sy);
+                Vec3 stageA{}, stageB{}, stageC{};
+                Vec3 color = process_pixel(cropX + sx, cropY + sy,
+                                           enableStageDebug ? &stageA : nullptr,
+                                           enableStageDebug ? &stageB : nullptr,
+                                           enableStageDebug ? &stageC : nullptr);
                 size_t outIdx = (static_cast<size_t>(py) * finalW_zoomed + px) * 3;
                 processedImage[outIdx + 0] = (unsigned short)std::max(0.0f, std::min(65535.0f, color.r * 65535.0f));
                 processedImage[outIdx + 1] = (unsigned short)std::max(0.0f, std::min(65535.0f, color.g * 65535.0f));
                 processedImage[outIdx + 2] = (unsigned short)std::max(0.0f, std::min(65535.0f, color.b * 65535.0f));
+
+                if (enableStageDebug) {
+                    debugA8[outIdx + 0] = (unsigned char)(clamp01(stageA.r) * 255.0f);
+                    debugA8[outIdx + 1] = (unsigned char)(clamp01(stageA.g) * 255.0f);
+                    debugA8[outIdx + 2] = (unsigned char)(clamp01(stageA.b) * 255.0f);
+
+                    debugB8[outIdx + 0] = (unsigned char)(clamp01(stageB.r) * 255.0f);
+                    debugB8[outIdx + 1] = (unsigned char)(clamp01(stageB.g) * 255.0f);
+                    debugB8[outIdx + 2] = (unsigned char)(clamp01(stageB.b) * 255.0f);
+
+                    debugC8[outIdx + 0] = (unsigned char)(clamp01(stageC.r) * 255.0f);
+                    debugC8[outIdx + 1] = (unsigned char)(clamp01(stageC.g) * 255.0f);
+                    debugC8[outIdx + 2] = (unsigned char)(clamp01(stageC.b) * 255.0f);
+                }
 
                 // Note: out_rgb_buffer is usually for preview only, but we keep it here if needed.
                 // It expects original dimensions though. This part might need adjustment if used for rotated large images.
@@ -500,6 +570,16 @@ bool process_and_save_image(
             }
         }
     }
+    if (enableStageDebug && !debugA8.empty()) {
+        bool aOk = stbi_write_jpg(debugPathA.c_str(), finalW_zoomed, finalH_zoomed, 3, debugA8.data(), 95) != 0;
+        bool bOk = stbi_write_jpg(debugPathB.c_str(), finalW_zoomed, finalH_zoomed, 3, debugB8.data(), 95) != 0;
+        bool cOk = stbi_write_jpg(debugPathC.c_str(), finalW_zoomed, finalH_zoomed, 3, debugC8.data(), 95) != 0;
+        LOGD("Stage debug outputs: A=%s (%d), B=%s (%d), C=%s (%d)",
+             debugPathA.c_str(), (int)aOk,
+             debugPathB.c_str(), (int)bOk,
+             debugPathC.c_str(), (int)cOk);
+    }
+
     return tiffOk && jpgOk;
 }
 

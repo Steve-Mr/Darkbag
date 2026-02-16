@@ -43,7 +43,11 @@ import android.media.ImageReader
 import android.os.Handler
 import android.os.HandlerThread
 import android.hardware.camera2.CameraCharacteristics
+import android.graphics.Matrix
+import android.graphics.Rect
+import android.graphics.RectF
 import android.hardware.camera2.CaptureResult
+import android.hardware.camera2.params.MeteringRectangle
 import android.hardware.camera2.params.RggbChannelVector
 import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CaptureRequest
@@ -172,7 +176,10 @@ class CameraFragment : Fragment() {
     // Manual Control State
     private var isManualFocus = false
     private var isManualExposure = false
+    @Volatile private var lastClippingRatio: Double = 0.0
     private var activeManualTab: String? = null
+    private var focusMeteringRegion: MeteringRectangle? = null
+    private var exposureMeteringRegion: MeteringRectangle? = null
 
     // Flash State
     private var isFlashEnabled = false
@@ -713,6 +720,10 @@ class CameraFragment : Fragment() {
 
     @OptIn(ExperimentalCamera2Interop::class)
     private suspend fun bindCameraUseCasesInternal() {
+        // Reset Tap-to-Focus regions on lens switch
+        focusMeteringRegion = null
+        exposureMeteringRegion = null
+
         // Fetch Characteristics for Manual Control
         val targetId = currentLens?.id ?: if (lensFacing == CameraSelector.LENS_FACING_BACK) "0" else "1"
 
@@ -915,7 +926,7 @@ class CameraFragment : Fragment() {
                             val underexposureMode = prefs.getString(SettingsFragment.KEY_HDR_UNDEREXPOSURE_MODE, "Dynamic (Experimental)") ?: "Dynamic (Experimental)"
 
                             lastHdrPlusConfig = ExposureUtils.calculateHdrPlusExposure(
-                                iso, time, validIsoRange, validTimeRange, underexposureMode
+                                iso, time, validIsoRange, validTimeRange, underexposureMode, lastClippingRatio
                             )
                         }
                     }
@@ -1579,25 +1590,36 @@ class CameraFragment : Fragment() {
         }
 
     private fun setupTapToFocus() {
-        val width = fragmentCameraBinding.viewFinder.width.toFloat()
-        val height = fragmentCameraBinding.viewFinder.height.toFloat()
-        val cameraInfo = camera?.cameraInfo ?: return
-
-        val factory = DisplayOrientedMeteringPointFactory(
-            fragmentCameraBinding.viewFinder.display,
-            cameraInfo,
-            width,
-            height
-        )
-
         fragmentCameraBinding.viewFinder.setOnTouchListener { view, event ->
             if (event.action == android.view.MotionEvent.ACTION_UP) {
                 if (currentLens?.useCamera2 == true) {
-                     isManualFocus = false
-                     applyCameraControls()
+                     triggerTapToFocusCamera2(event.x, event.y)
                 } else {
+                    val cameraInfo = camera?.cameraInfo ?: return@setOnTouchListener true
+                    val width = fragmentCameraBinding.viewFinder.width.toFloat()
+                    val height = fragmentCameraBinding.viewFinder.height.toFloat()
+
+                    val factory = DisplayOrientedMeteringPointFactory(
+                        fragmentCameraBinding.viewFinder.display,
+                        cameraInfo,
+                        width,
+                        height
+                    )
                     val point = factory.createPoint(event.x, event.y)
-                    val action = FocusMeteringAction.Builder(point).build()
+
+                    val actionBuilder = if (isManualExposure) {
+                        FocusMeteringAction.Builder(point, FocusMeteringAction.FLAG_AF)
+                    } else {
+                        FocusMeteringAction.Builder(point, FocusMeteringAction.FLAG_AF or FocusMeteringAction.FLAG_AE)
+                    }
+
+                    actionBuilder.disableAutoCancel()
+                    val action = actionBuilder.build()
+
+                    // If manual focus is ON, we temporarily switch to Auto to sync the slider
+                    if (isManualFocus) {
+                        syncManualFocusAfterTap()
+                    }
 
                     isManualFocus = false
                     applyCameraControls() // Apply change
@@ -1617,6 +1639,87 @@ class CameraFragment : Fragment() {
                 view.performClick()
             }
             true
+        }
+    }
+
+    private fun triggerTapToFocusCamera2(x: Float, y: Float) {
+        val device = camera2Device ?: return
+        val session = camera2Session ?: return
+        val surface = camera2PreviewSurface ?: return
+        val handler = camera2Handler ?: return
+
+        lifecycleScope.launch(Dispatchers.Default) {
+            try {
+                val characteristics = camera2Manager.getCameraCharacteristics(device.id)
+                val sensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
+                val activeArray = characteristics.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE) ?: return@launch
+
+                val lastResult = captureResultFlow.replayCache.lastOrNull()
+                val cropRegion = lastResult?.get(CaptureResult.SCALER_CROP_REGION) ?: activeArray
+
+                val region = getMeteringRectangle(
+                    x, y,
+                    fragmentCameraBinding.viewFinder.width,
+                    fragmentCameraBinding.viewFinder.height,
+                    sensorOrientation,
+                    lensFacing,
+                    cropRegion
+                )
+
+                focusMeteringRegion = region
+                if (!isManualExposure) {
+                    exposureMeteringRegion = region
+                }
+
+                // 1. Cancel ongoing
+                val cancelRequest = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_PREVIEW)
+                cancelRequest.addTarget(surface)
+                applyManualSettingsToRequest(cancelRequest)
+                cancelRequest.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_CANCEL)
+                cancelRequest.set(CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER, CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER_CANCEL)
+                session.capture(cancelRequest.build(), null, handler)
+
+                // 2. Trigger AF/AE
+                val triggerRequest = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_PREVIEW)
+                triggerRequest.addTarget(surface)
+                applyManualSettingsToRequest(triggerRequest)
+
+                triggerRequest.set(CaptureRequest.CONTROL_AF_REGIONS, arrayOf(region))
+                if (!isManualExposure) {
+                    triggerRequest.set(CaptureRequest.CONTROL_AE_REGIONS, arrayOf(region))
+                }
+
+                // If in manual focus, we need to temporarily switch to AUTO to perform the tap-to-focus
+                if (isManualFocus) {
+                    triggerRequest.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_AUTO)
+                }
+
+                triggerRequest.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_START)
+                if (!isManualExposure) {
+                    triggerRequest.set(CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER, CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER_START)
+                }
+
+                session.capture(triggerRequest.build(), object : CameraCaptureSession.CaptureCallback() {
+                    override fun onCaptureCompleted(session: CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {
+                        super.onCaptureCompleted(session, request, result)
+                        if (isManualFocus) {
+                             syncManualFocusAfterTap()
+                        }
+                    }
+                }, handler)
+
+                // 3. Resume repeating
+                withContext(Dispatchers.Main) {
+                    // If we were in manual focus, we don't want to switch to AUTO permanently.
+                    // But if we were in continuous AF, we switch to AUTO to keep it locked.
+                    if (!isManualFocus) {
+                        // focusMeteringRegion is already set, applyCameraControls will use AF_MODE_AUTO
+                        applyCameraControls()
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Camera2 tap to focus trigger failed", e)
+            }
         }
     }
 
@@ -1760,15 +1863,18 @@ class CameraFragment : Fragment() {
         when (activeManualTab) {
             "Focus" -> {
                 isManualFocus = false
+                focusMeteringRegion = null
                 camera?.cameraControl?.cancelFocusAndMetering()
             }
 
             "ISO", "Shutter" -> {
                 isManualExposure = false
+                exposureMeteringRegion = null
             }
 
             "EV" -> {
                 currentEvIndex = 0
+                exposureMeteringRegion = null
             }
         }
         applyCameraControls()
@@ -2400,6 +2506,8 @@ class CameraFragment : Fragment() {
         private const val FOCUS_RING_DISPLAY_TIME_MS = 500L
         private const val FOCUS_RING_FADE_OUT_DURATION_MS = 300L
         private const val AE_SETTLE_DELAY_MS = 50L
+        private const val ANALYSIS_HIGHLIGHT_THRESHOLD = 240
+        private const val ANALYSIS_SAMPLING_STEP = 4
 
         const val KEY_SELECTED_LENS_ID = "selected_lens_sensor_id"
         const val KEY_LENS_FACING = "lens_facing"
@@ -2563,7 +2671,8 @@ class CameraFragment : Fragment() {
                         currentTime,
                         validIsoRange,
                         validTimeRange,
-                        underexposureMode
+                        underexposureMode,
+                        lastClippingRatio
                     )
                 }
 
@@ -2749,19 +2858,32 @@ class CameraFragment : Fragment() {
                 chars = cameraManager.getCameraCharacteristics(targetCharId)
 
                 var whiteLevel = 1023
-                var blackLevel = 64
+                var blackLevelPattern = intArrayOf(64, 64, 64, 64)
                 var wb = floatArrayOf(2.0f, 1.0f, 1.0f, 1.5f)
-                var ccm = floatArrayOf(
+                var ccmMain = floatArrayOf(
                     2.0f, -1.0f, 0.0f,
                     -0.5f, 2.0f, -0.5f,
                     0.0f, -1.0f, 2.0f
                 )
                 var cfa = 0
+                var ccmSensor = ccmMain.copyOf()
+                var ccmCapture = ccmMain.copyOf()
+                var lensShadingMapData: FloatArray? = null
+                var lensShadingRows = 0
+                var lensShadingCols = 0
+                val useSensorColorMatrix = false
 
                 if (chars != null) {
                     whiteLevel = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_WHITE_LEVEL) ?: 1023
                     val bl = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_BLACK_LEVEL_PATTERN)
-                    if (bl != null) blackLevel = bl.getOffsetForIndex(0, 0)
+                    if (bl != null) {
+                        blackLevelPattern = intArrayOf(
+                            bl.getOffsetForIndex(0, 0),
+                            bl.getOffsetForIndex(1, 0),
+                            bl.getOffsetForIndex(0, 1),
+                            bl.getOffsetForIndex(1, 1)
+                        )
+                    }
 
                     val cfaEnum = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_COLOR_FILTER_ARRANGEMENT)
                     if (cfaEnum != null) cfa = cfaEnum
@@ -2782,13 +2904,47 @@ class CameraFragment : Fragment() {
                         for(row in 0 until 3) {
                             for(col in 0 until 3) {
                                 val rat = ccmMat.getElement(col, row)
-                                ccm[idx++] = rat.toFloat()
+                                ccmCapture[idx++] = rat.toFloat()
                             }
                         }
                     }
+
+                    if (useSensorColorMatrix && chars != null) {
+                        val sensorMat = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_COLOR_TRANSFORM1)
+                        if (sensorMat != null) {
+                            var idx = 0
+                            for (row in 0 until 3) {
+                                for (col in 0 until 3) {
+                                    val rat = sensorMat.getElement(col, row)
+                                    ccmSensor[idx++] = rat.toFloat()
+                                }
+                            }
+                        }
+                    }
+
+                    val lsc = r.get(android.hardware.camera2.CaptureResult.STATISTICS_LENS_SHADING_CORRECTION_MAP)
+                    if (lsc != null) {
+                        lensShadingRows = lsc.rowCount
+                        lensShadingCols = lsc.columnCount
+                        val out = FloatArray(4 * lensShadingRows * lensShadingCols)
+                        fun idx(ch: Int, row: Int, col: Int): Int = ch * lensShadingRows * lensShadingCols + row * lensShadingCols + col
+                        for (row in 0 until lensShadingRows) {
+                            for (col in 0 until lensShadingCols) {
+                                out[idx(0, row, col)] = lsc.getGainFactor(0, col, row)
+                                out[idx(1, row, col)] = lsc.getGainFactor(1, col, row)
+                                out[idx(2, row, col)] = lsc.getGainFactor(2, col, row)
+                                out[idx(3, row, col)] = lsc.getGainFactor(3, col, row)
+                            }
+                        }
+                        lensShadingMapData = out
+                    }
                 }
 
-                Log.d(TAG, "Metadata: WL=$whiteLevel, BL=$blackLevel, WB=${wb.joinToString()}, CFA=$cfa")
+                
+                val ccm = if (useSensorColorMatrix) ccmSensor else ccmCapture
+                val ccmAlt = if (useSensorColorMatrix) ccmCapture else ccmSensor
+                val exportMatrixAB = false
+Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB=${wb.joinToString()}, CFA=$cfa, LSC=${lensShadingRows}x${lensShadingCols}, useSensorCCM=$useSensorColorMatrix")
 
                 val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
                 val targetLogName = prefs.getString(SettingsFragment.KEY_TARGET_LOG, "None")
@@ -2837,8 +2993,9 @@ class CameraFragment : Fragment() {
                     buffers,
                     width, height,
                     combinedOrientation,
-                    whiteLevel, blackLevel,
-                    wb, ccm, cfa,
+                    whiteLevel, blackLevelPattern,
+                    lensShadingMapData, lensShadingRows, lensShadingCols, useSensorColorMatrix,
+                    wb, ccm, ccmAlt, exportMatrixAB, cfa,
                     iso, exposureTime, fNumber, focalLength, captureTime,
                     targetLogIndex,
                     nativeLutPath,
@@ -3114,7 +3271,34 @@ class CameraFragment : Fragment() {
 
         analysisImageReader?.setOnImageAvailableListener({ reader ->
             val image = reader.acquireLatestImage() ?: return@setOnImageAvailableListener
-            image.close()
+            try {
+                val plane = image.planes[0]
+                val buffer = plane.buffer
+                val width = image.width
+                val height = image.height
+                val rowStride = plane.rowStride
+                val pixelStride = plane.pixelStride
+
+                var highlightCount = 0
+
+                // Sample pixels to save CPU while still getting a good estimate
+                var totalSampled = 0
+                for (y in 0 until height step ANALYSIS_SAMPLING_STEP) {
+                    val rowStart = y * rowStride
+                    for (x in 0 until width step ANALYSIS_SAMPLING_STEP) {
+                        val value = buffer.get(rowStart + x * pixelStride).toInt() and 0xFF
+                        if (value > ANALYSIS_HIGHLIGHT_THRESHOLD) {
+                            highlightCount++
+                        }
+                        totalSampled++
+                    }
+                }
+                lastClippingRatio = if (totalSampled > 0) highlightCount.toDouble() / totalSampled else 0.0
+            } catch (e: Exception) {
+                Log.e(TAG, "Error analyzing image", e)
+            } finally {
+                image.close()
+            }
         }, handler)
 
         val previewSize = map?.getOutputSizes(android.graphics.SurfaceTexture::class.java)
@@ -3147,6 +3331,17 @@ class CameraFragment : Fragment() {
                             analysisImageReader?.surface?.let { request.addTarget(it) }
 
                             applyManualSettingsToRequest(request)
+
+                            val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                            val force60fps = prefs.getBoolean(SettingsFragment.KEY_FORCE_60FPS, true)
+                            if (force60fps) {
+                                val fpsRanges = chars.get(android.hardware.camera2.CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
+                                val targetRange = fpsRanges?.find { it.upper == 60 }
+                                if (targetRange != null) {
+                                    Log.d(TAG, "Setting target FPS range to: $targetRange")
+                                    request.set(android.hardware.camera2.CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, targetRange)
+                                }
+                            }
 
                             if (!isManualFocus) {
                                 request.set(android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE, android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
@@ -3267,7 +3462,7 @@ class CameraFragment : Fragment() {
             val underexposureMode = prefs.getString(SettingsFragment.KEY_HDR_UNDEREXPOSURE_MODE, "Dynamic (Experimental)") ?: "Dynamic (Experimental)"
 
             val config = ExposureUtils.calculateHdrPlusExposure(
-                curIso, curTime, validIsoRange, validTimeRange, underexposureMode
+                curIso, curTime, validIsoRange, validTimeRange, underexposureMode, lastClippingRatio
             )
 
             val burstSize = (prefs.getString(SettingsFragment.KEY_HDR_BURST_COUNT, "3") ?: "3").toIntOrNull() ?: 3
@@ -3473,6 +3668,17 @@ class CameraFragment : Fragment() {
         if (isManualFocus) {
             request.set(android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE, android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE_OFF)
             request.set(android.hardware.camera2.CaptureRequest.LENS_FOCUS_DISTANCE, currentFocusDistance)
+        } else {
+            if (focusMeteringRegion != null) {
+                request.set(android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE, android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE_AUTO)
+                request.set(android.hardware.camera2.CaptureRequest.CONTROL_AF_REGIONS, arrayOf(focusMeteringRegion))
+            } else {
+                request.set(android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE, android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
+            }
+        }
+
+        if (!isManualExposure && exposureMeteringRegion != null) {
+            request.set(android.hardware.camera2.CaptureRequest.CONTROL_AE_REGIONS, arrayOf(exposureMeteringRegion))
         }
 
         if (currentLens?.useCamera2 == true) {
@@ -3529,6 +3735,29 @@ class CameraFragment : Fragment() {
         camera2Handler = null
     }
 
+    private fun syncManualFocusAfterTap() {
+        lifecycleScope.launch(Dispatchers.Default) {
+            withTimeoutOrNull(3000) {
+                captureResultFlow.first { res ->
+                    val afState = res.get(CaptureResult.CONTROL_AF_STATE)
+                    afState == CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED ||
+                            afState == CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED
+                }
+            }?.let { res ->
+                val dist = res.get(CaptureResult.LENS_FOCUS_DISTANCE)
+                if (dist != null) {
+                    currentFocusDistance = dist
+                    withContext(Dispatchers.Main) {
+                        isManualFocus = true
+                        applyCameraControls()
+                        updateManualPanel()
+                        updateTabColors()
+                    }
+                }
+            }
+        }
+    }
+
     private fun resetBurstUi() {
         cameraUiContainerBinding?.captureProgress?.visibility = View.GONE
         isBurstActive = false
@@ -3540,5 +3769,53 @@ class CameraFragment : Fragment() {
             cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = false
             cameraUiContainerBinding?.cameraCaptureButton?.alpha = 0.5f
         }
+    }
+
+    private fun getMeteringRectangle(
+        x: Float, y: Float,
+        viewWidth: Int, viewHeight: Int,
+        sensorOrientation: Int,
+        lensFacing: Int,
+        cropRegion: android.graphics.Rect
+    ): MeteringRectangle {
+        val normalizedX = x / viewWidth
+        val normalizedY = y / viewHeight
+
+        val displayRotation = when (displayManager.getDisplay(displayId)?.rotation) {
+            Surface.ROTATION_90 -> 90
+            Surface.ROTATION_180 -> 180
+            Surface.ROTATION_270 -> 270
+            else -> 0
+        }
+
+        val sensorToDisplay = if (lensFacing == CameraSelector.LENS_FACING_FRONT) {
+            (sensorOrientation + displayRotation) % 360
+        } else {
+            (sensorOrientation - displayRotation + 360) % 360
+        }
+
+        val matrix = Matrix()
+        matrix.postRotate(-sensorToDisplay.toFloat(), 0.5f, 0.5f)
+        if (lensFacing == CameraSelector.LENS_FACING_FRONT) {
+            matrix.postScale(-1f, 1f, 0.5f, 0.5f)
+        }
+
+        val pts = floatArrayOf(normalizedX, normalizedY)
+        matrix.mapPoints(pts)
+
+        val sx = pts[0].coerceIn(0f, 1f)
+        val sy = pts[1].coerceIn(0f, 1f)
+
+        val centerX = cropRegion.left + (sx * cropRegion.width()).toInt()
+        val centerY = cropRegion.top + (sy * cropRegion.height()).toInt()
+
+        val size = (cropRegion.width() * 0.1f).toInt()
+        val rect = android.graphics.Rect(
+            (centerX - size / 2).coerceIn(cropRegion.left, cropRegion.right),
+            (centerY - size / 2).coerceIn(cropRegion.top, cropRegion.bottom),
+            (centerX + size / 2).coerceIn(cropRegion.left, cropRegion.right),
+            (centerY + size / 2).coerceIn(cropRegion.top, cropRegion.bottom)
+        )
+        return MeteringRectangle(rect, 1000)
     }
 }
