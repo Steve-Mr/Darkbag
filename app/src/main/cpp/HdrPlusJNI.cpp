@@ -32,6 +32,8 @@
 using namespace Halide::Runtime;
 
 namespace {
+constexpr uint16_t kMax14BitValue = 16383; // 2^14 - 1
+constexpr uint16_t kMax16BitValue = 65535; // 2^16 - 1
 JavaVM* g_jvm = nullptr;
 jclass g_colorProcessorClass = nullptr;
 thread_local std::string halide_report_buffer;
@@ -174,7 +176,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_exportHdrPlus(
 
     if (dng_path_cstr) {
         LOGD("Exporting DNG to %s", dng_path_cstr);
-        write_dng(dng_path_cstr, width, height, finalImage, 65535, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation, (bool)mirror);
+        write_dng(dng_path_cstr, width, height, finalImage, kMax16BitValue, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation, (bool)mirror);
     }
 
     bool saveOk = true;
@@ -214,17 +216,20 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
 
     g_hdrPlusBuffers.ensureCapacity(width, height, numFrames);
     uint16_t* rawDataPtr = g_hdrPlusBuffers.inputPool.data();
+    const size_t frameSizeBytes = static_cast<size_t>(width) * static_cast<size_t>(height) * sizeof(uint16_t);
     std::vector<uint16_t*> framePtrs(numFrames, nullptr);
     for (int i = 0; i < numFrames; i++) {
         jobject bufObj = env->GetObjectArrayElement(dngBuffers, i);
+        if (!bufObj) {
+            LOGE("Direct buffer at index %d is null", i);
+            return -1;
+        }
         framePtrs[i] = (uint16_t*)env->GetDirectBufferAddress(bufObj);
-        env->DeleteLocalRef(bufObj);
-        if (!framePtrs[i]) { LOGE("Failed to get direct buffer address for frame %d", i); return -1; }
-    }
-
-    const size_t frameSizeBytes = static_cast<size_t>(width) * static_cast<size_t>(height) * sizeof(uint16_t);
-    for (int i = 0; i < numFrames; i++) {
-        jobject bufObj = env->GetObjectArrayElement(dngBuffers, i);
+        if (!framePtrs[i]) {
+            LOGE("Failed to get direct buffer address for frame %d", i);
+            env->DeleteLocalRef(bufObj);
+            return -1;
+        }
         jlong capacity = env->GetDirectBufferCapacity(bufObj);
         env->DeleteLocalRef(bufObj);
         if (capacity < (jlong)frameSizeBytes) {
@@ -321,10 +326,10 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
              uint16_t g = raw_ptr[x*stride_x + y*stride_y + 1*stride_c];
              uint16_t b = raw_ptr[x*stride_x + y*stride_y + 2*stride_c];
 
-             // Clip to 14-bit range (16383) to prevent pink highlights
-             r = std::min(r, (uint16_t)16383);
-             g = std::min(g, (uint16_t)16383);
-             b = std::min(b, (uint16_t)16383);
+             // Clip to 14-bit range to prevent pink highlights
+             r = std::min(r, kMax14BitValue);
+             g = std::min(g, kMax14BitValue);
+             b = std::min(b, kMax14BitValue);
 
              float lscR = 1.0f, lscG = 1.0f, lscB = 1.0f;
              if (hasLsc) {
@@ -353,9 +358,9 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
              int idx = (y * width + x) * 3;
              // Halide output is scaled by 0.25 (14-bit range).
              // We shift left by 2 to restore full 16-bit range for final saving.
-             finalImage[idx+0] = (uint16_t)std::min((int)((float)r * lscR) << 2, 65535);
-             finalImage[idx+1] = (uint16_t)std::min((int)((float)g * lscG) << 2, 65535);
-             finalImage[idx+2] = (uint16_t)std::min((int)((float)b * lscB) << 2, 65535);
+             finalImage[idx+0] = (uint16_t)std::min((int)((float)r * lscR) << 2, (int)kMax16BitValue);
+             finalImage[idx+1] = (uint16_t)std::min((int)((float)g * lscG) << 2, (int)kMax16BitValue);
+             finalImage[idx+2] = (uint16_t)std::min((int)((float)b * lscB) << 2, (int)kMax16BitValue);
         }
     }
     auto postDurationMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - postStart).count();
@@ -385,7 +390,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
         auto saveFunc = [fImg = (bool)isAsync ? finalImage : std::vector<uint16_t>(), isAsync, &finalImage, width, height, digitalGain, targetLog, lut, tiffPathStr, jpgPathStr, dngPathStr, baseName, ccmVec, ccmAltVec, exportMatrixAB, useSensorColorMatrix, wbVec, orientation, iso, exposureTime, fNumber, focalLength, captureTimeMillis, zoomFactor, mirror]() mutable {
             const std::vector<uint16_t>& img = isAsync ? fImg : finalImage;
             bool dngOk = true;
-            if (!dngPathStr.empty()) dngOk = write_dng(dngPathStr.c_str(), width, height, img, 65535, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation, (bool)mirror);
+            if (!dngPathStr.empty()) dngOk = write_dng(dngPathStr.c_str(), width, height, img, kMax16BitValue, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation, (bool)mirror);
 
             bool otherOk = true;
             if (!tiffPathStr.empty() || !jpgPathStr.empty()) {
