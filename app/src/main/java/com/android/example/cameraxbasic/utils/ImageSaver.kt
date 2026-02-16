@@ -43,6 +43,7 @@ object ImageSaver {
         var finalJpgUri: Uri? = null
 
         // 1. Process Input Bitmap or JPEG File from JNI -> Final MediaStore JPG
+        val debugSourcePath = bmpPath
         if (inputBitmap != null || bmpPath != null) {
             val isNativeJpeg = bmpPath != null && (bmpPath.endsWith(".jpg") || bmpPath.endsWith(".jpeg"))
             val needsBitmapProcessing = rotationDegrees != 0 || zoomFactor > 1.05f || inputBitmap != null || mirror
@@ -145,6 +146,10 @@ object ImageSaver {
             }
         }
 
+        if (debugSourcePath != null) {
+            saveDebugStageImagesToMediaStore(context, baseName, debugSourcePath)
+        }
+
         // 2. Save TIFF
         if (saveTiff && tiffPath != null) {
             val tiffFile = File(tiffPath)
@@ -220,6 +225,33 @@ object ImageSaver {
         }
 
         return finalJpgUri
+    }
+
+    private fun saveDebugStageImagesToMediaStore(context: Context, baseName: String, sourcePath: String) {
+        val source = File(sourcePath)
+        val parent = source.parentFile ?: return
+        val stem = source.nameWithoutExtension
+
+        val debugSuffixes = listOf(
+            "_debug_A_linear" to "${baseName}_debug_A_linear.jpg",
+            "_debug_B_matrix" to "${baseName}_debug_B_matrix.jpg",
+            "_debug_C_log" to "${baseName}_debug_C_log.jpg"
+        )
+
+        for ((suffix, displayName) in debugSuffixes) {
+            val debugFile = File(parent, "$stem${suffix}.jpg")
+            if (!debugFile.exists() || debugFile.length() <= 0L) continue
+
+            try {
+                saveJpegToMediaStore(context, displayName, null) { out ->
+                    FileInputStream(debugFile).use { it.copyTo(out) }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to export debug stage image: ${debugFile.absolutePath}", e)
+            } finally {
+                debugFile.delete()
+            }
+        }
     }
 
     fun getExifOrientation(rotationDegrees: Int, mirror: Boolean): Int {
