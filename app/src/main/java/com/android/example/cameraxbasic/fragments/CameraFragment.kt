@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+@file:SuppressLint("RestrictedApi")
 package com.android.example.cameraxbasic.fragments
 
 import android.annotation.SuppressLint
@@ -38,8 +39,19 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
 import android.graphics.BitmapFactory
+import android.media.ImageReader
+import android.os.Handler
+import android.os.HandlerThread
 import android.hardware.camera2.CameraCharacteristics
+import android.graphics.Matrix
+import android.graphics.Rect
+import android.graphics.RectF
 import android.hardware.camera2.CaptureResult
+import android.hardware.camera2.params.MeteringRectangle
+import android.hardware.camera2.params.RggbChannelVector
+import android.hardware.camera2.CameraCaptureSession
+import android.hardware.camera2.CaptureRequest
+import android.hardware.camera2.TotalCaptureResult
 import com.google.android.material.slider.Slider
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.button.MaterialButtonToggleGroup
@@ -55,11 +67,6 @@ import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.camera2.interop.Camera2CameraInfo
 import androidx.camera.camera2.interop.Camera2Interop
 import androidx.camera.lifecycle.ProcessCameraProvider
-import androidx.camera.core.UseCaseGroup
-import android.hardware.camera2.params.RggbChannelVector
-import android.hardware.camera2.CameraCaptureSession
-import android.hardware.camera2.CaptureRequest
-import android.hardware.camera2.TotalCaptureResult
 import androidx.concurrent.futures.await
 import com.android.example.cameraxbasic.MainApplication
 import com.android.example.cameraxbasic.processor.ColorProcessor
@@ -99,6 +106,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.sync.withLock
 import java.nio.ByteBuffer
 import java.text.SimpleDateFormat
 import java.util.*
@@ -138,8 +146,26 @@ class CameraFragment : Fragment() {
     private var cameraProvider: ProcessCameraProvider? = null
     private lateinit var windowMetricsCalculator: WindowMetricsCalculator
 
+    // Camera2 State
+    private var camera2Device: android.hardware.camera2.CameraDevice? = null
+    @Volatile private var camera2Session: android.hardware.camera2.CameraCaptureSession? = null
+    private var camera2PreviewSurface: android.view.Surface? = null
+    private var rawImageReader: android.media.ImageReader? = null
+    private var analysisImageReader: android.media.ImageReader? = null
+    private val camera2Manager by lazy {
+        requireContext().getSystemService(Context.CAMERA_SERVICE) as android.hardware.camera2.CameraManager
+    }
+
+    private var camera2Thread: HandlerThread? = null
+    private var camera2Handler: Handler? = null
+    private val camera2Lock = kotlinx.coroutines.sync.Mutex()
+
     private var lutProcessor: LutSurfaceProcessor? = null
     private lateinit var lutManager: LutManager
+    private lateinit var cameraRepository: com.android.example.cameraxbasic.utils.CameraRepository
+    private var availableLenses: List<com.android.example.cameraxbasic.utils.LensInfo> = emptyList()
+    private var currentLens: com.android.example.cameraxbasic.utils.LensInfo? = null
+
     private var activeLutJob: kotlinx.coroutines.Job? = null
     private var lutAdapter: LutPreviewAdapter? = null
 
@@ -150,13 +176,22 @@ class CameraFragment : Fragment() {
     // Manual Control State
     private var isManualFocus = false
     private var isManualExposure = false
+    @Volatile private var lastClippingRatio: Double = 0.0
     private var activeManualTab: String? = null
+    private var focusMeteringRegion: MeteringRectangle? = null
+    private var exposureMeteringRegion: MeteringRectangle? = null
 
     // Flash State
     private var isFlashEnabled = false
 
     // HDR+ State
     private var isHdrPlusEnabled = false
+
+    private val shouldMirror: Boolean
+        get() = lensFacing == CameraSelector.LENS_FACING_FRONT &&
+                requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                    .getBoolean(SettingsFragment.KEY_MIRROR_FRONT_CAMERA, true)
+
     @Volatile private var isBurstActive = false
     private var hdrPlusBurstHelper: HdrPlusBurst? = null
     private var lastHdrPlusConfig: ExposureUtils.ExposureConfig? = null // Cache for instant trigger
@@ -166,17 +201,41 @@ class CameraFragment : Fragment() {
     private var isoRange: android.util.Range<Int>? = null
     private var exposureTimeRange: android.util.Range<Long>? = null
     private var evRange: android.util.Range<Int>? = null
+    private var isRawSupported = false
 
     private var currentFocusDistance = 0.0f
     private var currentIso = 100
     private var currentExposureTime = 10_000_000L // 10ms
     private var currentEvIndex = 0
 
+    private var processingCount = 0
+
+    private var isOisSupported = false
+    private var isHdrOisEnabledPref = true
+
+    private fun showProcessingAnimation() {
+        lifecycleScope.launch(Dispatchers.Main) {
+            processingCount++
+            cameraUiContainerBinding?.processingProgress?.visibility = View.VISIBLE
+            Log.d(TAG, "showProcessingAnimation: count=$processingCount")
+        }
+    }
+
+    private fun hideProcessingAnimation() {
+        lifecycleScope.launch(Dispatchers.Main) {
+            processingCount = (processingCount - 1).coerceAtLeast(0)
+            if (processingCount == 0) {
+                cameraUiContainerBinding?.processingProgress?.visibility = View.GONE
+            }
+            Log.d(TAG, "hideProcessingAnimation: count=$processingCount")
+        }
+    }
+
     // Zoom State
-    private var defaultFocalLength = 24
-    private var currentFocalLength = -1
-    private var is2xMode = false
     private var zoomJob: kotlinx.coroutines.Job? = null
+    private var transientLensLabel: String? = null
+
+    private var deviceOrientationDegrees = 0
 
     /** Orientation listener to track device rotation independently of UI rotation */
     private val orientationEventListener by lazy {
@@ -185,6 +244,16 @@ class CameraFragment : Fragment() {
                 if (orientation == OrientationEventListener.ORIENTATION_UNKNOWN) {
                     return
                 }
+
+                // Map Orientation to degrees (0, 90, 180, 270 counter-clockwise)
+                deviceOrientationDegrees = when (orientation) {
+                    in 45 until 135 -> 90 // Landscape Left (90 CCW)
+                    in 135 until 225 -> 180 // Upside Down
+                    in 225 until 315 -> 270 // Landscape Right (270 CCW)
+                    else -> 0 // Portrait
+                }
+
+                Log.d(TAG, "Device orientation: $orientation, mapped to CCW: $deviceOrientationDegrees")
 
                 val rotation = when (orientation) {
                     in 45 until 135 -> android.view.Surface.ROTATION_270
@@ -219,6 +288,8 @@ class CameraFragment : Fragment() {
 
     // Rate limiting semaphore to prevent OOM
     private val processingSemaphore = kotlinx.coroutines.sync.Semaphore(2)
+
+    private var camera2RetryCount = 0
     private val processingChannel = kotlinx.coroutines.channels.Channel<RawImageHolder>(2)
 
     data class RawImageHolder(
@@ -226,8 +297,10 @@ class CameraFragment : Fragment() {
         val width: Int,
         val height: Int,
         val timestamp: Long,
-        val rotationDegrees: Int,
-        val zoomRatio: Float
+        val rotationDegrees: Int, // Sensor Orientation
+        val combinedOrientation: Int, // Combined with Display
+        val zoomRatio: Float,
+        val physicalId: String? = null
     ) {
         override fun equals(other: Any?): Boolean {
             if (this === other) return true
@@ -241,6 +314,7 @@ class CameraFragment : Fragment() {
             if (timestamp != other.timestamp) return false
             if (rotationDegrees != other.rotationDegrees) return false
             if (zoomRatio != other.zoomRatio) return false
+            if (physicalId != other.physicalId) return false
 
             return true
         }
@@ -252,6 +326,7 @@ class CameraFragment : Fragment() {
             result = 31 * result + timestamp.hashCode()
             result = 31 * result + rotationDegrees
             result = 31 * result + zoomRatio.hashCode()
+            result = 31 * result + (physicalId?.hashCode() ?: 0)
             return result
         }
     }
@@ -292,6 +367,10 @@ class CameraFragment : Fragment() {
     override fun onStop() {
         super.onStop()
         orientationEventListener.disable()
+        // Ensure Camera2 is closed when stopping to release hardware resources
+        lifecycleScope.launch {
+            releaseCamera2Resources()
+        }
     }
 
     override fun onResume() {
@@ -302,12 +381,28 @@ class CameraFragment : Fragment() {
             Navigation.findNavController(requireActivity(), R.id.fragment_container).navigate(
                 CameraFragmentDirections.actionCameraToPermissions()
             )
+            return
+        }
+
+        // Re-initialize camera engine if needed.
+        // For Camera2 engine, we need to re-bind use cases (which triggers openCamera2).
+        // For CameraX, they are bound to lifecycle but we ensure consistency.
+        if (cameraProvider != null || currentLens?.useCamera2 == true) {
+            bindCameraUseCases()
         }
     }
 
     override fun onDestroyView() {
         _fragmentCameraBinding = null
         super.onDestroyView()
+
+        // Important: Unbind CameraX before releasing executors/processors
+        // to prevent RejectedExecutionException during cleanup.
+        try {
+            cameraProvider?.unbindAll()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error unbinding CameraX in onDestroyView", e)
+        }
 
         // Shut down our background executor
         cameraExecutor.shutdown()
@@ -368,22 +463,20 @@ class CameraFragment : Fragment() {
         mediaStoreUtils = MediaStoreUtils(requireContext())
 
         lutManager = LutManager(requireContext())
+        cameraRepository = com.android.example.cameraxbasic.utils.CameraRepository(requireContext())
 
-        // Initialize Zoom Default
+        // Initialize Preferences
         val prefs =
             requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        val defaultStr = prefs.getString(SettingsFragment.KEY_DEFAULT_FOCAL_LENGTH, "24") ?: "24"
-        defaultFocalLength = defaultStr.toIntOrNull() ?: 24
-        if (currentFocalLength == -1) {
-            currentFocalLength = defaultFocalLength
-        }
 
         // Initialize Flash State
         isFlashEnabled = prefs.getBoolean(SettingsFragment.KEY_FLASH_MODE, false)
 
+        // Initialize HDR+ State
+        isHdrPlusEnabled = prefs.getBoolean(KEY_HDR_PLUS_ENABLED, true)
+        updateHdrPlusUi()
+
         // Initialize HDR+ Burst Helper
-        // Burst count is now dynamic, but we initialize with default.
-        // It will be updated/reset in triggerHdrPlusBurst
         hdrPlusBurstHelper = HdrPlusBurst(
             frameCount = 3,
             onBurstComplete = { frames ->
@@ -392,57 +485,47 @@ class CameraFragment : Fragment() {
         )
 
         // Listen for background save completions from JNI or WorkManager
-        // This collector now primarily handles UI updates (thumbnails)
-        // because WorkManager-based export handles its own MediaStore saving.
         viewLifecycleOwner.lifecycleScope.launch {
             ColorProcessor.backgroundSaveFlow.collect { event ->
                 Log.d(TAG, "Received background save complete event: ${event.baseName}")
 
-                // If it's a legacy JNI async task, we still need to save it to MediaStore here.
-                // If it's from WorkManager, the saving is already done, but we don't know for sure.
-                // However, saveProcessedImage is idempotent-ish (it will update or insert).
-                // To be safe and robust, we run it in applicationScope.
-
                 (requireContext().applicationContext as MainApplication).applicationScope.launch(Dispatchers.IO) {
                     try {
-                        val finalUri = ImageSaver.saveProcessedImage(
-                            requireContext().applicationContext,
-                            null,
-                            event.jpgPath,
-                            event.orientation,
-                            event.zoomFactor,
-                            event.baseName,
-                            event.dngPath,
-                            event.tiffPath,
-                            event.saveJpg,
-                            event.saveTiff,
-                            event.targetUri?.let { Uri.parse(it) }
-                        )
-                        if (finalUri != null) {
+                        // For HDR+, work is already finalized by HdrPlusExportWorker.
+                        // We only need to update the thumbnail using the provided targetUri.
+                        if (event.targetUri != null) {
+                            Log.d(TAG, "Update thumbnail for ${event.baseName}: ${event.targetUri}")
                             withContext(Dispatchers.Main) {
-                                setGalleryThumbnail(finalUri.toString())
+                                setGalleryThumbnail(event.targetUri)
                             }
+                        } else {
+                             Log.w(TAG, "Received save event for ${event.baseName} without targetUri.")
                         }
-                        Log.i(TAG, "Background MediaStore export finished for ${event.baseName}")
                     } catch (e: Exception) {
-                        Log.e(TAG, "Background MediaStore export failed for ${event.baseName}", e)
+                        Log.e(TAG, "Background UI update failed for ${event.baseName}", e)
                     }
                 }
             }
         }
 
-        // Start processing consumer using applicationScope to ensure it finishes if fragment is closed
-        (requireContext().applicationContext as MainApplication).applicationScope.launch(Dispatchers.IO) {
+        // Start processing consumer
+        // Use viewLifecycleOwner.lifecycleScope for the listener loop to avoid leaking fragment.
+        viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
             for (holder in processingChannel) {
-                try {
-                    processImageAsync(requireContext().applicationContext, holder)
-                } catch (e: Exception) {
-                    Log.e(TAG, "Error processing image from channel", e)
-                } finally {
-                    processingSemaphore.release()
-                    withContext(Dispatchers.Main) {
-                        cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
-                        cameraUiContainerBinding?.cameraCaptureButton?.alpha = 1.0f
+                val appContext = requireContext().applicationContext
+                // Launch each task in applicationScope so it continues even if fragment is destroyed
+                (appContext as MainApplication).applicationScope.launch(Dispatchers.IO) {
+                    try {
+                        processImageAsync(appContext, holder)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error processing image from channel", e)
+                    } finally {
+                        processingSemaphore.release()
+                        withContext(Dispatchers.Main) {
+                            cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
+                            cameraUiContainerBinding?.cameraCaptureButton?.alpha = 1.0f
+                            hideProcessingAnimation()
+                        }
                     }
                 }
             }
@@ -456,6 +539,14 @@ class CameraFragment : Fragment() {
 
             // Build UI controls
             updateCameraUi()
+
+            // Initialize LUT Processor early to be ready for any engine
+            if (lutProcessor == null) {
+                lutProcessor = LutSurfaceProcessor()
+            }
+
+            // Setup ViewFinder early
+            setupViewFinderBinding()
 
             // Setup Tap to Focus
             setupTapToFocus()
@@ -471,9 +562,6 @@ class CameraFragment : Fragment() {
      * Inflate camera controls and update the UI manually upon config changes to avoid removing
      * and re-adding the view finder from the view hierarchy; this provides a seamless rotation
      * transition on devices that support it.
-     *
-     * NOTE: The flag is supported starting in Android 8 but there still is a small flash on the
-     * screen for devices that run Android 9 or below.
      */
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
@@ -485,15 +573,92 @@ class CameraFragment : Fragment() {
         updateCameraSwitchButton()
     }
 
-    /** Initialize CameraX, and prepare to bind the camera use cases  */
+    private fun refreshLenses(force: Boolean = false) {
+        val cameraXIds = mutableSetOf<String>()
+        cameraProvider?.availableCameraInfos?.forEach { info ->
+            val id = Camera2CameraInfo.from(info).cameraId
+            cameraXIds.add(id)
+        }
+
+        val repoFacing = if (lensFacing == CameraSelector.LENS_FACING_BACK)
+            android.hardware.camera2.CameraCharacteristics.LENS_FACING_BACK
+        else
+            android.hardware.camera2.CameraCharacteristics.LENS_FACING_FRONT
+
+        // Use unified focal length presets (includes digital ones like 28mm, 35mm, 2.0x)
+        val newLenses = cameraRepository.getFocalLengthPresets(cameraXIds, repoFacing)
+
+        if (!force && newLenses.size == availableLenses.size && newLenses.zip(availableLenses).all { it.first.sensorId == it.second.sensorId }) {
+            return // No change
+        }
+
+        Log.d(TAG, "Available Lenses/Presets identified: ${newLenses.size} for facing $repoFacing")
+
+        // Update currentLens reference if it exists
+        currentLens?.let { old ->
+             var found = newLenses.find { it.sensorId == old.sensorId }
+             if (found == null) {
+                 val base1x = newLenses.find { it.multiplier in 0.95f..1.05f && !it.isZoomPreset }
+                 if (base1x != null) {
+                     found = cameraRepository.get1xPresets(base1x).find { it.sensorId == old.sensorId }
+                 }
+             }
+             currentLens = found
+        }
+
+        availableLenses = newLenses
+
+        if (currentLens == null) {
+            val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+            val savedLensId = prefs.getString(KEY_SELECTED_LENS_ID, null)
+            val defaultLensId = prefs.getString(SettingsFragment.KEY_DEFAULT_LENS_ID, null)
+            val default1xFocal = prefs.getString(SettingsFragment.KEY_DEFAULT_FOCAL_1X, "24mm")
+
+            if (savedLensId != null) {
+                var found = availableLenses.find { it.sensorId == savedLensId }
+                if (found == null) {
+                    val base1x = availableLenses.find { it.multiplier in 0.95f..1.05f && !it.isZoomPreset }
+                    if (base1x != null) {
+                        found = cameraRepository.get1xPresets(base1x).find { it.sensorId == savedLensId }
+                    }
+                }
+                currentLens = found
+            }
+
+            if (currentLens == null) {
+                val targetId = defaultLensId
+                var found = availableLenses.find { it.sensorId == targetId }
+                if (found == null) {
+                    found = availableLenses.find { it.multiplier in 0.95f..1.05f && !it.isZoomPreset }
+                        ?: availableLenses.firstOrNull()
+                }
+
+                if (found != null && found.multiplier in 0.95f..1.05f && !found.isZoomPreset) {
+                    val presets1x = cameraRepository.get1xPresets(found)
+                    currentLens = presets1x.find { it.name == default1xFocal } ?: found
+                } else {
+                    currentLens = found
+                }
+            }
+        }
+    }
+
+    /** Initialize Camera Engine, and prepare to bind the camera use cases  */
     private suspend fun setUpCamera() {
-        cameraProvider = ProcessCameraProvider.getInstance(requireContext()).await()
+        // Initially don't initialize cameraProvider unless needed.
+        // But we need to know lensFacing.
+        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        lensFacing = prefs.getInt(KEY_LENS_FACING, CameraSelector.LENS_FACING_BACK)
+
+        // Initialize Lenses
+        withContext(Dispatchers.Default) {
+            refreshLenses()
+        }
 
         // Select lensFacing depending on the available cameras
-        lensFacing = when {
-            hasBackCamera() -> CameraSelector.LENS_FACING_BACK
-            hasFrontCamera() -> CameraSelector.LENS_FACING_FRONT
-            else -> throw IllegalStateException("Back and front camera are unavailable")
+        if (availableLenses.isEmpty()) {
+             // Fallback to front if no back lenses found or just use default check
+             lensFacing = CameraSelector.LENS_FACING_FRONT
         }
 
         // Enable or disable switching between cameras
@@ -504,54 +669,202 @@ class CameraFragment : Fragment() {
     }
 
     /** Declare and bind preview, capture and analysis use cases */
+    private fun setupViewFinderBinding() {
+        val proc = lutProcessor ?: return
+        // Connect ViewFinder TextureView to LutProcessor
+        fragmentCameraBinding.viewFinder.surfaceTextureListener =
+            object : TextureView.SurfaceTextureListener {
+                override fun onSurfaceTextureAvailable(st: SurfaceTexture, w: Int, h: Int) {
+                    proc.setOutputSurface(Surface(st), w, h)
+                }
+                override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, w: Int, h: Int) {
+                    proc.setOutputSurface(Surface(st), w, h)
+                }
+                override fun onSurfaceTextureDestroyed(st: SurfaceTexture): Boolean {
+                    proc.setOutputSurface(null, 0, 0)
+                    return true
+                }
+                override fun onSurfaceTextureUpdated(st: SurfaceTexture) {}
+            }
+
+        // If surface is already available, bind it immediately
+        if (fragmentCameraBinding.viewFinder.isAvailable) {
+            fragmentCameraBinding.viewFinder.surfaceTexture?.let { st ->
+                proc.setOutputSurface(
+                    Surface(st),
+                    fragmentCameraBinding.viewFinder.width,
+                    fragmentCameraBinding.viewFinder.height
+                )
+            }
+        }
+        updateLiveLut() // Ensure LUT is loaded
+    }
+
+    private var bindJob: kotlinx.coroutines.Job? = null
+
     @OptIn(ExperimentalCamera2Interop::class)
     private fun bindCameraUseCases() {
+        bindJob?.cancel()
+        bindJob = lifecycleScope.launch {
+            // Move heavy lens refresh to background
+            withContext(Dispatchers.Default) {
+                refreshLenses()
+            }
 
-        // Get screen metrics used to setup camera for full screen resolution
+            // Ensure Camera2 is closed if we are switching engines or lenses
+            closeCamera2()
+
+            bindCameraUseCasesInternal()
+        }
+    }
+
+    @OptIn(ExperimentalCamera2Interop::class)
+    private suspend fun bindCameraUseCasesInternal() {
+        // Reset Tap-to-Focus regions on lens switch
+        focusMeteringRegion = null
+        exposureMeteringRegion = null
+
+        // Fetch Characteristics for Manual Control
+        val targetId = currentLens?.id ?: if (lensFacing == CameraSelector.LENS_FACING_BACK) "0" else "1"
+
+        try {
+            val chars = camera2Manager.getCameraCharacteristics(targetId)
+
+            isoRange = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
+            exposureTimeRange = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
+            minFocusDistance = chars.get(android.hardware.camera2.CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE) ?: 0.0f
+            evRange = chars.get(android.hardware.camera2.CameraCharacteristics.CONTROL_AE_COMPENSATION_RANGE)
+
+            // Clamp current values to new ranges
+            isoRange?.let { currentIso = currentIso.coerceIn(it.lower, it.upper) }
+            exposureTimeRange?.let { currentExposureTime = currentExposureTime.coerceIn(it.lower, it.upper) }
+
+            // Check for RAW support early to enable HDR+ UI
+            val map = chars.get(android.hardware.camera2.CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+            isRawSupported = map?.getOutputFormats()?.contains(android.graphics.ImageFormat.RAW_SENSOR) == true
+
+            // Check OIS support
+            val availableOis = chars.get(android.hardware.camera2.CameraCharacteristics.LENS_INFO_AVAILABLE_OPTICAL_STABILIZATION)
+            isOisSupported = availableOis != null && availableOis.contains(android.hardware.camera2.CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON)
+
+            // Cache HDR+ OIS preference
+            isHdrOisEnabledPref = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(SettingsFragment.KEY_HDR_PLUS_OIS, true)
+
+            // Update UI if manual panel is visible
+            lifecycleScope.launch(Dispatchers.Main) {
+                updateManualPanel()
+                updateTabColors()
+
+                if (isRawSupported) {
+                    cameraUiContainerBinding?.hdrPlusToggle?.visibility = View.VISIBLE
+                    updateHdrPlusUi()
+                } else {
+                    cameraUiContainerBinding?.hdrPlusToggle?.visibility = View.GONE
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to fetch camera characteristics", e)
+        }
+
+        // Force 4:3 Aspect Ratio for all engines
         val metrics = windowMetricsCalculator.computeCurrentWindowMetrics(requireActivity()).bounds
+        if (metrics.width() < metrics.height()) {
+            fragmentCameraBinding.viewFinder.setAspectRatio(3, 4)
+        } else {
+            fragmentCameraBinding.viewFinder.setAspectRatio(4, 3)
+        }
+
+        // Decide Engine: Camera2 (Hard Switch) or CameraX
+        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val useCameraxFallback = prefs.getBoolean(SettingsFragment.KEY_USE_CAMERAX, false)
+
+        if (currentLens?.useCamera2 == true && !useCameraxFallback) {
+            Log.d(TAG, "Switching to Camera2 Engine for lens: ${currentLens?.name}")
+
+            // Clean up CameraX if it was active
+            cameraProvider?.unbindAll()
+            camera = null
+
+            // Ensure UI is updated before opening Camera2
+            initLensControls()
+
+            // Check Flash for Camera2
+            try {
+                val c2Chars = camera2Manager.getCameraCharacteristics(currentLens!!.id)
+                val hasFlash = c2Chars.get(android.hardware.camera2.CameraCharacteristics.FLASH_INFO_AVAILABLE) ?: false
+                cameraUiContainerBinding?.flashButton?.visibility = if (hasFlash) View.VISIBLE else View.GONE
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to check flash for Camera2", e)
+            }
+
+            // Give system a moment to release hardware
+            delay(300)
+            openCamera2(currentLens!!.id)
+            return
+        }
+
+        // Else, ensure Camera2 is closed and use CameraX
+        closeCamera2()
+
+        // Initialize CameraX provider lazily if needed
+        if (cameraProvider == null) {
+            lifecycleScope.launch {
+                cameraProvider = ProcessCameraProvider.getInstance(requireContext()).await()
+                refreshLenses() // Update lenses with CameraX direct info if available
+                bindCameraUseCases() // Re-enter to bind
+            }
+            return
+        }
+
+        val cameraProvider = cameraProvider!!
+
+        // Use previously computed screen metrics
         Log.d(TAG, "Screen metrics: ${metrics.width()} x ${metrics.height()}")
 
         val rotation = fragmentCameraBinding.viewFinder.display.rotation
 
-        // CameraProvider
-        val cameraProvider = cameraProvider
-            ?: throw IllegalStateException("Camera initialization failed.")
-
         // CameraSelector
-        val cameraSelector = CameraSelector.Builder().requireLensFacing(lensFacing).build()
+        var cameraSelector = if (currentLens != null) {
+            CameraSelector.Builder()
+                .addCameraFilter { cameraInfos ->
+                    cameraInfos.filter {
+                        val id = Camera2CameraInfo.from(it).cameraId
+                        id == currentLens?.id
+                    }
+                }
+                .build()
+        } else {
+            CameraSelector.Builder().requireLensFacing(lensFacing).build()
+        }
 
-        val cameraInfo = cameraProvider.getCameraInfo(cameraSelector)
-
-        // Fetch Characteristics for Manual Control
-        try {
-            val camera2Info = Camera2CameraInfo.from(cameraInfo)
-            isoRange =
-                camera2Info.getCameraCharacteristic(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
-            exposureTimeRange =
-                camera2Info.getCameraCharacteristic(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
-            minFocusDistance =
-                camera2Info.getCameraCharacteristic(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE)
-                    ?: 0.0f
-            evRange = cameraInfo.exposureState.exposureCompensationRange
-
-            // Initialize defaults if ranges are valid
-            isoRange?.let { currentIso = it.lower }
-            exposureTimeRange?.let { currentExposureTime = it.lower }
+        val cameraInfo = try {
+            cameraProvider.getCameraInfo(cameraSelector)
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to fetch camera characteristics", e)
-        }
-        val capabilities = ImageCapture.getImageCaptureCapabilities(cameraInfo)
-        val isRawSupported =
-            capabilities.supportedOutputFormats.contains(ImageCapture.OUTPUT_FORMAT_RAW)
+            Log.e(TAG, "Failed to get camera info for ${currentLens?.id}", e)
+            if (useCameraxFallback) {
+                Log.w(TAG, "Fallback to generic lens facing as requested by setting")
+                cameraSelector = CameraSelector.Builder().requireLensFacing(lensFacing).build()
+                val info = cameraProvider.getCameraInfo(cameraSelector)
 
-        // Enable HDR+ UI if RAW is supported
-        if (isRawSupported) {
-            cameraUiContainerBinding?.hdrPlusToggle?.visibility = View.VISIBLE
-            isHdrPlusEnabled = true
-            updateHdrPlusUi()
+                // Sync currentLens with actual bound camera
+                val actualId = Camera2CameraInfo.from(info).cameraId
+                val fallbackLens = availableLenses.find { it.id == actualId && it.physicalId == null }
+                if (fallbackLens != null && fallbackLens.sensorId != currentLens?.sensorId) {
+                    Log.d(TAG, "Updating currentLens to fallback: ${fallbackLens.name}")
+                    currentLens = fallbackLens
+                    updateLensUI()
+                }
+                info
+            } else {
+                Log.e(TAG, "CameraX bind failed and fallback is disabled.")
+                Toast.makeText(context, "Failed to bind to selected lens", Toast.LENGTH_SHORT).show()
+                return
+            }
         }
 
-        // Force 4:3 aspect ratio to match typical sensor output and avoid cropping in preview
+
+        // Force 4:3 aspect ratio
         val resolutionSelector = ResolutionSelector.Builder()
             .setAspectRatioStrategy(
                 AspectRatioStrategy(
@@ -561,20 +874,15 @@ class CameraFragment : Fragment() {
             )
             .build()
 
-        // Configure AutoFitTextureView
-        if (metrics.width() < metrics.height()) {
-            fragmentCameraBinding.viewFinder.setAspectRatio(3, 4)
-        } else {
-            fragmentCameraBinding.viewFinder.setAspectRatio(4, 3)
-        }
-
         // Preview
-        preview = Preview.Builder()
-            // We request aspect ratio but no resolution
+        val previewBuilder = Preview.Builder()
             .setResolutionSelector(resolutionSelector)
-            // Set initial target rotation
             .setTargetRotation(rotation)
-            .build()
+
+        currentLens?.physicalId?.let { pId ->
+            Camera2Interop.Extender(previewBuilder).setPhysicalCameraId(pId)
+        }
+        preview = previewBuilder.build()
 
         // ImageCapture
         val imageCaptureBuilder = ImageCapture.Builder()
@@ -582,19 +890,22 @@ class CameraFragment : Fragment() {
             .setResolutionSelector(resolutionSelector)
             .setTargetRotation(rotation)
             .setFlashMode(if (isFlashEnabled) ImageCapture.FLASH_MODE_ON else ImageCapture.FLASH_MODE_OFF)
-            .apply {
-                if (isRawSupported) {
-                    setOutputFormat(ImageCapture.OUTPUT_FORMAT_RAW)
-                }
-            }
+
+        currentLens?.physicalId?.let { pId ->
+            Camera2Interop.Extender(imageCaptureBuilder).setPhysicalCameraId(pId)
+        }
+
+        if (isRawSupported) {
+            imageCaptureBuilder.setOutputFormat(ImageCapture.OUTPUT_FORMAT_RAW)
+        }
 
         // Add Camera2 Interop Callback to capture metadata
         androidx.camera.camera2.interop.Camera2Interop.Extender(imageCaptureBuilder)
-            .setSessionCaptureCallback(object : CameraCaptureSession.CaptureCallback() {
+            .setSessionCaptureCallback(object : android.hardware.camera2.CameraCaptureSession.CaptureCallback() {
                 override fun onCaptureCompleted(
-                    session: CameraCaptureSession,
-                    request: CaptureRequest,
-                    result: TotalCaptureResult
+                    session: android.hardware.camera2.CameraCaptureSession,
+                    request: android.hardware.camera2.CaptureRequest,
+                    result: android.hardware.camera2.TotalCaptureResult
                 ) {
                     val timestamp =
                         result.get(android.hardware.camera2.CaptureResult.SENSOR_TIMESTAMP)
@@ -604,19 +915,18 @@ class CameraFragment : Fragment() {
                     captureResultFlow.tryEmit(result)
 
                     // Background Calculation for HDR+ Latency Optimization
-                    if (isHdrPlusEnabled && !isBurstActive && !isManualExposure) {
+                    if (isHdrPlusEnabled && !isBurstActive && !isManualExposure && isAdded) {
                         lifecycleScope.launch(Dispatchers.Default) {
-                            val iso = result.get(CaptureResult.SENSOR_SENSITIVITY) ?: 100
-                            val time = result.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: 10_000_000L
+                            val iso = result.get(android.hardware.camera2.CaptureResult.SENSOR_SENSITIVITY) ?: 100
+                            val time = result.get(android.hardware.camera2.CaptureResult.SENSOR_EXPOSURE_TIME) ?: 10_000_000L
 
-                            // Safe check for ranges, default if null
                             val validIsoRange = isoRange ?: android.util.Range(100, 3200)
                             val validTimeRange = exposureTimeRange ?: android.util.Range(1000L, 1_000_000_000L)
                             val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
                             val underexposureMode = prefs.getString(SettingsFragment.KEY_HDR_UNDEREXPOSURE_MODE, "Dynamic (Experimental)") ?: "Dynamic (Experimental)"
 
                             lastHdrPlusConfig = ExposureUtils.calculateHdrPlusExposure(
-                                iso, time, validIsoRange, validTimeRange, underexposureMode
+                                iso, time, validIsoRange, validTimeRange, underexposureMode, lastClippingRatio
                             )
                         }
                     }
@@ -626,22 +936,16 @@ class CameraFragment : Fragment() {
         imageCapture = imageCaptureBuilder.build()
 
         // ImageAnalysis
-        imageAnalyzer = ImageAnalysis.Builder()
-            // We request aspect ratio but no resolution
+        val imageAnalyzerBuilder = ImageAnalysis.Builder()
             .setResolutionSelector(resolutionSelector)
-            // Set initial target rotation, we will have to call this again if rotation changes
-            // during the lifecycle of this use case
             .setTargetRotation(rotation)
-            .build()
-            // The analyzer can then be assigned to the instance
+
+        currentLens?.physicalId?.let { pId ->
+            Camera2Interop.Extender(imageAnalyzerBuilder).setPhysicalCameraId(pId)
+        }
+        imageAnalyzer = imageAnalyzerBuilder.build()
             .also {
                 it.setAnalyzer(cameraExecutor, LuminosityAnalyzer { luma ->
-                    // Values returned from our analyzer are passed to the attached listener
-                    // We log image analysis results here - you should do something useful
-                    // instead!
-                    // Values returned from our analyzer are passed to the attached listener
-                    // We log image analysis results here - you should do something useful
-                    // instead!
                 })
             }
 
@@ -649,63 +953,18 @@ class CameraFragment : Fragment() {
         cameraProvider.unbindAll()
 
         if (camera != null) {
-            // Must remove observers from the previous camera instance
             removeCameraStateObservers(camera!!.cameraInfo)
-        }
-
-        // Manual pipeline for preview
-        if (lutProcessor == null) {
-            lutProcessor = LutSurfaceProcessor()
         }
 
         val lutBinder = object : Preview.SurfaceProvider {
             override fun onSurfaceRequested(request: SurfaceRequest) {
-                // Connect Camera to LutProcessor
                 lutProcessor?.onInputSurface(request)
             }
         }
 
-        // Connect View to LutProcessor
-        fragmentCameraBinding.viewFinder.surfaceTextureListener =
-            object : TextureView.SurfaceTextureListener {
-                override fun onSurfaceTextureAvailable(
-                    surface: SurfaceTexture,
-                    width: Int,
-                    height: Int
-                ) {
-                    lutProcessor?.setOutputSurface(Surface(surface), width, height)
-                }
-
-                override fun onSurfaceTextureSizeChanged(
-                    surface: SurfaceTexture,
-                    width: Int,
-                    height: Int
-                ) {
-                    lutProcessor?.setOutputSurface(Surface(surface), width, height)
-                }
-
-                override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
-                    lutProcessor?.setOutputSurface(null, 0, 0)
-                    return true
-                }
-
-                override fun onSurfaceTextureUpdated(surface: SurfaceTexture) {}
-            }
-
-        // Check if surface is already available
-        if (fragmentCameraBinding.viewFinder.isAvailable) {
-            val st = fragmentCameraBinding.viewFinder.surfaceTexture
-            if (st != null) {
-                lutProcessor?.setOutputSurface(
-                    Surface(st),
-                    fragmentCameraBinding.viewFinder.width,
-                    fragmentCameraBinding.viewFinder.height
-                )
-            }
-        }
-
-        preview?.setSurfaceProvider(cameraExecutor, lutBinder)
-        updateLiveLut() // Ensure LUT is loaded
+        // Use main executor for the surface provider to avoid unbinding callbacks
+        // hitting a shut down cameraExecutor during lifecycle transitions.
+        preview?.setSurfaceProvider(androidx.core.content.ContextCompat.getMainExecutor(requireContext()), lutBinder)
 
         val useCaseGroup = UseCaseGroup.Builder()
             .addUseCase(preview!!)
@@ -714,27 +973,32 @@ class CameraFragment : Fragment() {
             .build()
 
         try {
-            // A variable number of use-cases can be passed here -
-            // camera provides access to CameraControl & CameraInfo
+            // Refresh Physical Lens Controls UI for the active facing before binding
+            initLensControls()
+
             camera = cameraProvider.bindToLifecycle(
                 this, cameraSelector, useCaseGroup
             )
 
-            // Check Flash Availability
-            if (camera?.cameraInfo?.hasFlashUnit() == true) {
-                cameraUiContainerBinding?.flashButton?.visibility = View.VISIBLE
-            } else {
-                cameraUiContainerBinding?.flashButton?.visibility = View.GONE
+            camera?.let { cam ->
+                // Check Flash Availability
+                if (cam.cameraInfo.hasFlashUnit()) {
+                    cameraUiContainerBinding?.flashButton?.visibility = View.VISIBLE
+                } else {
+                    cameraUiContainerBinding?.flashButton?.visibility = View.GONE
+                }
+
+                observeCameraState(cam.cameraInfo)
             }
 
-            observeCameraState(camera?.cameraInfo!!)
-
             // Pre-initialize JNI memory pool with current resolution and burst size
-            val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+            // Move to background thread to avoid blocking main thread
             val burstSizeStr = prefs.getString(SettingsFragment.KEY_HDR_BURST_COUNT, "8") ?: "8"
             val burstSize = burstSizeStr.toIntOrNull() ?: 8
             imageCapture?.resolutionInfo?.resolution?.let { res ->
-                ColorProcessor.initMemoryPool(res.width, res.height, burstSize)
+                lifecycleScope.launch(Dispatchers.Default) {
+                    ColorProcessor.initMemoryPool(res.width, res.height, burstSize)
+                }
             }
 
             // Restore Zoom
@@ -744,7 +1008,14 @@ class CameraFragment : Fragment() {
             applyCameraControls()
 
         } catch (exc: Exception) {
-            Log.e(TAG, "Use case binding failed", exc)
+            Log.e(TAG, "Use case binding failed, attempting fallback", exc)
+            if (currentLens?.isLogicalAuto == false) {
+                currentLens = availableLenses.find { it.isLogicalAuto }
+                lifecycleScope.launch(Dispatchers.Main) {
+                    updateLensUI()
+                    bindCameraUseCases()
+                }
+            }
         }
     }
 
@@ -754,9 +1025,16 @@ class CameraFragment : Fragment() {
 
     private fun observeCameraState(cameraInfo: CameraInfo) {
         cameraInfo.cameraState.observe(viewLifecycleOwner) { cameraState ->
-            // Camera state toasts removed as per requirement
             cameraState.error?.let { error ->
                 Log.e(TAG, "Camera State Error: ${error.code}")
+                if ((error.code == CameraState.ERROR_CAMERA_DISABLED || error.code == CameraState.ERROR_CAMERA_FATAL_ERROR)
+                    && currentLens?.isLogicalAuto == false) {
+
+                    Log.w(TAG, "Camera error detected on non-auto lens, falling back")
+                    currentLens = availableLenses.find { it.isLogicalAuto }
+                    updateLensUI()
+                    bindCameraUseCases()
+                }
             }
         }
     }
@@ -806,10 +1084,6 @@ class CameraFragment : Fragment() {
                 it.visibility = View.GONE
             }
 
-            // Close Manual Controls if open (and reset tab selection if desired, or just hide panel)
-            // Ideally we just hide the panel and uncheck tabs if that's the desired UX.
-            // Or just hide the panel and keep state?
-            // "Clicking on tab again collapses" was requested. "Clicking outside closes" also.
             if (cameraUiContainerBinding?.manualPanel?.visibility == View.VISIBLE) {
                  cameraUiContainerBinding?.manualPanel?.visibility = View.GONE
                  cameraUiContainerBinding?.manualTabs?.clearChecked()
@@ -829,17 +1103,17 @@ class CameraFragment : Fragment() {
             updateFlashIcon(btn)
             btn.setOnClickListener {
                 isFlashEnabled = !isFlashEnabled
-                // Save pref
                 requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
                     .edit().putBoolean(SettingsFragment.KEY_FLASH_MODE, isFlashEnabled).apply()
                 updateFlashIcon(btn)
-                // Update UseCase dynamically
                 imageCapture?.flashMode = if (isFlashEnabled) ImageCapture.FLASH_MODE_ON else ImageCapture.FLASH_MODE_OFF
             }
         }
 
         // Listener for button used to capture photo
         cameraUiContainerBinding?.cameraCaptureButton?.setOnClickListener {
+            if (isBurstActive) return@setOnClickListener
+
             // Check concurrency limit
             if (!processingSemaphore.tryAcquire()) {
                 Toast.makeText(
@@ -850,20 +1124,26 @@ class CameraFragment : Fragment() {
                 return@setOnClickListener
             }
 
-            // Get a stable reference of the modifiable image capture use case
-            imageCapture?.let { imageCapture ->
-
-                if (imageCapture.outputFormat == ImageCapture.OUTPUT_FORMAT_RAW) {
-                    if (isHdrPlusEnabled) {
-                        // Trigger Burst
-                        triggerHdrPlusBurst(imageCapture)
+            if (currentLens?.useCamera2 == true) {
+                if (isHdrPlusEnabled && isRawSupported) {
+                    triggerHdrPlusBurstCamera2()
+                } else {
+                    takeSinglePictureCamera2()
+                }
+            } else {
+                // Get a stable reference of the modifiable image capture use case
+                imageCapture?.let { imageCapture ->
+                    if (isRawSupported) {
+                        if (isHdrPlusEnabled) {
+                            triggerHdrPlusBurst(imageCapture)
+                        } else {
+                            takeSinglePicture(imageCapture)
+                        }
                     } else {
-                        // Standard Single RAW Capture with Processing
                         takeSinglePicture(imageCapture)
                     }
-                } else {
-                    // JPEG Capture
-                    takeSinglePicture(imageCapture)
+                } ?: run {
+                     processingSemaphore.release()
                 }
             }
         }
@@ -879,6 +1159,11 @@ class CameraFragment : Fragment() {
                 } else {
                     CameraSelector.LENS_FACING_FRONT
                 }
+
+                // Persist choice for session
+                val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                prefs.edit().putInt(KEY_LENS_FACING, lensFacing).apply()
+
                 // Re-bind use cases to update selected camera
                 bindCameraUseCases()
             }
@@ -891,6 +1176,8 @@ class CameraFragment : Fragment() {
         cameraUiContainerBinding?.hdrPlusToggle?.let { toggle ->
             toggle.setOnClickListener {
                 isHdrPlusEnabled = !isHdrPlusEnabled
+                requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                    .edit().putBoolean(KEY_HDR_PLUS_ENABLED, isHdrPlusEnabled).apply()
                 updateHdrPlusUi()
             }
         }
@@ -948,19 +1235,36 @@ class CameraFragment : Fragment() {
 
     /** Returns true if the device has an available back camera. False otherwise */
     private fun hasBackCamera(): Boolean {
-        return cameraProvider?.hasCamera(CameraSelector.DEFAULT_BACK_CAMERA) ?: false
+        val provider = cameraProvider
+        if (provider != null) {
+            return provider.hasCamera(CameraSelector.DEFAULT_BACK_CAMERA)
+        }
+        // Fallback to CameraManager if CameraX is not initialized
+        return try {
+            camera2Manager.cameraIdList.any { id ->
+                val chars = camera2Manager.getCameraCharacteristics(id)
+                chars.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK
+            }
+        } catch (e: Exception) { false }
     }
 
     /** Returns true if the device has an available front camera. False otherwise */
     private fun hasFrontCamera(): Boolean {
-        return cameraProvider?.hasCamera(CameraSelector.DEFAULT_FRONT_CAMERA) ?: false
+        val provider = cameraProvider
+        if (provider != null) {
+            return provider.hasCamera(CameraSelector.DEFAULT_FRONT_CAMERA)
+        }
+        // Fallback to CameraManager if CameraX is not initialized
+        return try {
+            camera2Manager.cameraIdList.any { id ->
+                val chars = camera2Manager.getCameraCharacteristics(id)
+                chars.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_FRONT
+            }
+        } catch (e: Exception) { false }
     }
 
     /**
      * Our custom image analysis class.
-     *
-     * <p>All we need to do is override the function `analyze` with our desired operations. Here,
-     * we compute the average luminosity of the image by looking at the Y plane of the YUV frame.
      */
     private class LuminosityAnalyzer(listener: LumaListener? = null) : ImageAnalysis.Analyzer {
         private val frameRateWindow = 8
@@ -970,75 +1274,47 @@ class CameraFragment : Fragment() {
         var framesPerSecond: Double = -1.0
             private set
 
-        /**
-         * Helper extension function used to extract a byte array from an image plane buffer
-         */
-        private fun ByteBuffer.toByteArray(): ByteArray {
-            rewind()    // Rewind the buffer to zero
-            val data = ByteArray(remaining())
-            get(data)   // Copy the buffer into a byte array
-            return data // Return the byte array
-        }
-
-        /**
-         * Analyzes an image to produce a result.
-         *
-         * <p>The caller is responsible for ensuring this analysis method can be executed quickly
-         * enough to prevent stalls in the image acquisition pipeline. Otherwise, newly available
-         * images will not be acquired and analyzed.
-         *
-         * <p>The image passed to this method becomes invalid after this method returns. The caller
-         * should not store external references to this image, as these references will become
-         * invalid.
-         *
-         * @param image image being analyzed VERY IMPORTANT: Analyzer method implementation must
-         * call image.close() on received images when finished using them. Otherwise, new images
-         * may not be received or the camera may stall, depending on back pressure setting.
-         *
-         */
         override fun analyze(image: ImageProxy) {
-            // If there are no listeners attached, we don't need to perform analysis
             if (listeners.isEmpty()) {
                 image.close()
                 return
             }
 
-            // Keep track of frames analyzed
             val currentTime = System.currentTimeMillis()
             frameTimestamps.push(currentTime)
 
-            // Compute the FPS using a moving average
             while (frameTimestamps.size >= frameRateWindow) frameTimestamps.removeLast()
             val timestampFirst = frameTimestamps.peekFirst() ?: currentTime
             val timestampLast = frameTimestamps.peekLast() ?: currentTime
             framesPerSecond = 1.0 / ((timestampFirst - timestampLast) /
                     frameTimestamps.size.coerceAtLeast(1).toDouble()) * 1000.0
 
-            // Analysis could take an arbitrarily long amount of time
-            // Since we are running in a different thread, it won't stall other use cases
-
             lastAnalyzedTimestamp = frameTimestamps.first
 
-            // Since format in ImageAnalysis is YUV, image.planes[0] contains the luminance plane
-            val buffer = image.planes[0].buffer
+            val plane = image.planes[0]
+            val buffer = plane.buffer
+            val width = image.width
+            val height = image.height
+            val rowStride = plane.rowStride
+            val pixelStride = plane.pixelStride
 
-            // Extract image data from callback object
-            val data = buffer.toByteArray()
+            var sum = 0L
+            // Direct ByteBuffer iteration to avoid massive allocations (toByteArray + map + average)
+            // This reduces garbage collection pressure significantly during preview.
+            for (y in 0 until height) {
+                val rowStart = y * rowStride
+                for (x in 0 until width) {
+                    sum += buffer.get(rowStart + x * pixelStride).toLong() and 0xFF
+                }
+            }
+            val luma = sum.toDouble() / (width * height)
 
-            // Convert the data into an array of pixel values ranging 0-255
-            val pixels = data.map { it.toInt() and 0xFF }
-
-            // Compute average luminance for the image
-            val luma = pixels.average()
-
-            // Call all listeners with new value
             listeners.forEach { it(luma) }
-
             image.close()
         }
     }
 
-    private fun copyImageToHolder(image: ImageProxy, zoomRatio: Float): RawImageHolder {
+    private fun copyImageToHolder(image: ImageProxy, zoomRatio: Float, combinedOrientation: Int, physicalId: String? = null): RawImageHolder {
         val plane = image.planes[0]
         val buffer = plane.buffer
         val width = image.width
@@ -1046,32 +1322,25 @@ class CameraFragment : Fragment() {
         val rowStride = plane.rowStride
         val pixelStride = 2 // 16-bit raw
 
-        // Strictly, we want tight packing for DngCreator input stream
-        // width * pixelStride is the tight packing size for a row
         val rowLength = width * pixelStride
         val dataLength = rowLength * height
         val cleanData = ByteArray(dataLength)
 
         if (rowStride == rowLength) {
-            // Fast path: Data is already tightly packed
             if (buffer.remaining() == dataLength) {
                 buffer.get(cleanData)
             } else {
-                // Buffer might be larger (e.g. alignment), only get what we need
                 buffer.get(cleanData, 0, dataLength)
             }
         } else {
-            // Slow path: Remove padding bytes from each row
-            val rowData = ByteArray(rowLength)
-            // Save original position
             buffer.rewind()
             for (y in 0 until height) {
-                // Calculate position of the row start
                 val rowStart = y * rowStride
-                if (rowStart + rowLength > buffer.capacity()) break // Safety
+                if (rowStart + rowLength > buffer.capacity()) break
                 buffer.position(rowStart)
-                buffer.get(rowData)
-                System.arraycopy(rowData, 0, cleanData, y * rowLength, rowLength)
+                // Use the more efficient bulk get(ByteArray, offset, length)
+                // to avoid allocating a temporary rowData array and extra System.arraycopy.
+                buffer.get(cleanData, y * rowLength, rowLength)
             }
         }
 
@@ -1081,7 +1350,9 @@ class CameraFragment : Fragment() {
             height = height,
             timestamp = image.imageInfo.timestamp,
             rotationDegrees = image.imageInfo.rotationDegrees,
-            zoomRatio = zoomRatio
+            combinedOrientation = combinedOrientation,
+            zoomRatio = zoomRatio,
+            physicalId = physicalId
         )
     }
 
@@ -1098,22 +1369,30 @@ class CameraFragment : Fragment() {
                     "Processing Image: Timestamp=${image.timestamp}, ZoomRatio=${image.zoomRatio}, Rotation=${image.rotationDegrees}"
                 )
 
-                val cam = camera ?: return@withContext
-                val camera2Info = Camera2CameraInfo.from(cam.cameraInfo)
-                val cameraManager =
-                    context.getSystemService(Context.CAMERA_SERVICE) as android.hardware.camera2.CameraManager
-                val chars = cameraManager.getCameraCharacteristics(camera2Info.cameraId)
-
                 // 1. Wait for Metadata
                 val captureResult = findCaptureResult(image.timestamp)
 
                 if (captureResult == null) {
                     Log.e(
                         TAG,
-                        "Timed out waiting for CaptureResult for timestamp ${image.timestamp}"
+                        "Timed out waiting for android.hardware.camera2.CaptureResult for timestamp ${image.timestamp}"
                     )
                     return@withContext
                 }
+
+                val cameraManager =
+                    context.getSystemService(Context.CAMERA_SERVICE) as android.hardware.camera2.CameraManager
+
+                val activePhysicalId = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    captureResult.get(android.hardware.camera2.CaptureResult.LOGICAL_MULTI_CAMERA_ACTIVE_PHYSICAL_ID)
+                } else null
+
+                val cam = camera
+                val camera2InfoId = if (cam != null) Camera2CameraInfo.from(cam.cameraInfo).cameraId else "0"
+
+                val targetCharId = activePhysicalId ?: image.physicalId ?: currentLens?.id ?: camera2InfoId
+                Log.d(TAG, "Fetching characteristics for processing using ID: $targetCharId")
+                val chars = cameraManager.getCameraCharacteristics(targetCharId)
 
                 // 2. Prepare Settings
                 val prefs =
@@ -1121,7 +1400,6 @@ class CameraFragment : Fragment() {
                 val targetLogName = prefs.getString(SettingsFragment.KEY_TARGET_LOG, "None")
                 val targetLogIndex = SettingsFragment.LOG_CURVES.indexOf(targetLogName)
 
-                // Use Active LUT filename if present, else fallback to legacy
                 val activeLutName = prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, null)
                 var nativeLutPath: String? = null
 
@@ -1162,19 +1440,14 @@ class CameraFragment : Fragment() {
                 // 3. Generate DNG in Memory (for LibRaw and Saving)
                 android.hardware.camera2.DngCreator(chars, captureResult).use { dngCreatorReal ->
 
-                    // Store DNG bytes in memory
                     val dngOutputStream = java.io.ByteArrayOutputStream()
                     var dngBytes: ByteArray? = null
 
-                    val orientation = when (image.rotationDegrees) {
-                        90 -> ExifInterface.ORIENTATION_ROTATE_90
-                        180 -> ExifInterface.ORIENTATION_ROTATE_180
-                        270 -> ExifInterface.ORIENTATION_ROTATE_270
-                        else -> ExifInterface.ORIENTATION_NORMAL
-                    }
-                    dngCreatorReal.setOrientation(orientation)
+                    val mirror = shouldMirror
 
-                    // Write DNG to memory (no thumbnail yet)
+                    val exifOrientation = ImageSaver.getExifOrientation(image.combinedOrientation, mirror)
+                    dngCreatorReal.setOrientation(exifOrientation)
+
                     val inputStream = java.io.ByteArrayInputStream(image.data)
                     dngCreatorReal.writeInputStream(
                         dngOutputStream,
@@ -1184,9 +1457,9 @@ class CameraFragment : Fragment() {
                     )
                     dngBytes = dngOutputStream.toByteArray()
 
-                    // 4. Process with LibRaw
+                    // 4. Process with LibRaw (JNI does NOT rotate/mirror/zoom for Standard RAW to keep thumbnail correct)
                     val result = ColorProcessor.processRaw(
-                        dngBytes, targetLogIndex, nativeLutPath, tiffPath, bmpPath, useGpu
+                        dngBytes, targetLogIndex, nativeLutPath, tiffPath, bmpPath, useGpu, 0, false
                     )
 
                     if (result == 1) {
@@ -1201,18 +1474,10 @@ class CameraFragment : Fragment() {
                         throw RuntimeException("ColorProcessor returned error code $result")
                     }
 
-                    // Determine Digital Zoom for Standard Pipeline
-                    // LibRaw saves the FULL image, so we might need to crop the Bitmap post-processing
-                    // if the user had zoomed in (using Crop Region).
-                    // Or if zoomRatio > 1.0 (Digital Zoom).
-
-                    // Wait, `processRaw` processes the WHOLE DNG.
-                    // The Bitmap output is full resolution (possibly subsampled by LibRaw if half_size used, but here full).
-                    // We need to apply the crop.
                     val cropRegion =
                         captureResult.get(android.hardware.camera2.CaptureResult.SCALER_CROP_REGION)
                     val activeArray =
-                        chars.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
+                        chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
 
                     var zoomFactor = 1.0f
                     if (image.zoomRatio > 1.05f) {
@@ -1226,23 +1491,20 @@ class CameraFragment : Fragment() {
                     }
 
                     // 5. Shared Save Logic
-                    // For standard pipeline, the image should be saved as-is (unrotated pixels) because
-                    // JPEG EXIF orientation handles the display, or LibRaw output is already oriented.
-                    // Passing rotationDegrees caused double rotation or unwanted rotation.
-                    // We pass 0 for rotation here to match original behavior.
-
-                    // Note: `ImageSaver.saveProcessedImage` is suspending.
+                    // Note: rotationDegrees is passed as 0 and mirror as false because the JNI layer (process_and_save_image)
+                    // has already performed pixel-level rotation and mirroring on the output files.
                     val finalJpgUri = ImageSaver.saveProcessedImage(
-                        context,
-                        null,
-                        bmpPath,
-                        0, // Rotation disabled for standard pipeline
-                        zoomFactor,
-                        dngName,
-                        null, // No Linear DNG here
-                        tiffPath,
-                        saveJpg,
-                        saveTiff
+                        context = context,
+                        inputBitmap = null,
+                        bmpPath = bmpPath,
+                        rotationDegrees = 0,
+                        zoomFactor = 1.0f, // Zoom already handled by JNI
+                        baseName = dngName,
+                        linearDngPath = null,
+                        tiffPath = tiffPath,
+                        saveJpg = saveJpg,
+                        saveTiff = saveTiff,
+                        mirror = false
                     ) { bitmap ->
                         try {
                             // Generate Thumbnail for DNG
@@ -1271,8 +1533,7 @@ class CameraFragment : Fragment() {
                         }
                     }
 
-                    // 6. Save Standard RAW DNG (specific to this pipeline)
-                    // Insert DNG into MediaStore
+                    // 6. Save Standard RAW DNG
                     val dngValues = ContentValues().apply {
                         put(MediaStore.MediaColumns.DISPLAY_NAME, "$dngName.dng")
                         put(MediaStore.MediaColumns.MIME_TYPE, "image/x-adobe-dng")
@@ -1296,29 +1557,11 @@ class CameraFragment : Fragment() {
                                     0
                                 )
                             }
-                            // Inject crop metadata if zoomed
+                            // NOTE:
+                            // ExifInterface.saveAttributes() does not support DNG and throws by design.
+                            // DNG crop metadata injection should be done via native DNG tag writing path.
                             if (zoomFactor > 1.05f) {
-                                try {
-                                    contentResolver.openFileDescriptor(dngUri, "rw")?.use { pfd ->
-                                        val exif =
-                                            androidx.exifinterface.media.ExifInterface(pfd.fileDescriptor)
-                                        val fullWidth = image.width
-                                        val fullHeight = image.height
-                                        val cropWidth = (fullWidth / zoomFactor).toInt()
-                                        val cropHeight = (fullHeight / zoomFactor).toInt()
-                                        val x = ((fullWidth - cropWidth) / 2) / 2 * 2
-                                        val y = ((fullHeight - cropHeight) / 2) / 2 * 2
-
-                                        exif.setAttribute(
-                                            "DefaultCropSize",
-                                            "$cropWidth $cropHeight"
-                                        )
-                                        exif.setAttribute("DefaultCropOrigin", "$x $y")
-                                        exif.saveAttributes()
-                                    }
-                                } catch (e: Exception) {
-                                    Log.e(TAG, "Failed to inject DNG crop metadata", e)
-                                }
+                                Log.d(TAG, "Skip DNG crop metadata injection: ExifInterface cannot save DNG attributes")
                             }
 
                             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -1341,49 +1584,57 @@ class CameraFragment : Fragment() {
                                 ?.let { setGalleryThumbnail(it) }
                         }
                     }
-                } // End of dngCreatorReal.use
+                }
 
             } catch (e: Exception) {
                 Log.e(TAG, "Error in background processing", e)
             }
         }
 
-
-
     private fun setupTapToFocus() {
-        // Use DisplayOrientedMeteringPointFactory with explicit inputs since we removed PreviewView
-        val width = fragmentCameraBinding.viewFinder.width.toFloat()
-        val height = fragmentCameraBinding.viewFinder.height.toFloat()
-        val cameraInfo = camera?.cameraInfo ?: return
-
-        val factory = DisplayOrientedMeteringPointFactory(
-            fragmentCameraBinding.viewFinder.display,
-            cameraInfo,
-            width,
-            height
-        )
-
         fragmentCameraBinding.viewFinder.setOnTouchListener { view, event ->
             if (event.action == android.view.MotionEvent.ACTION_UP) {
-                val point = factory.createPoint(event.x, event.y)
-                val action = FocusMeteringAction.Builder(point).build()
+                if (currentLens?.useCamera2 == true) {
+                     triggerTapToFocusCamera2(event.x, event.y)
+                } else {
+                    val cameraInfo = camera?.cameraInfo ?: return@setOnTouchListener true
+                    val width = fragmentCameraBinding.viewFinder.width.toFloat()
+                    val height = fragmentCameraBinding.viewFinder.height.toFloat()
 
-                // If in manual focus mode, tapping switch to AF
-                isManualFocus = false
-                applyCameraControls() // Apply change (clear manual focus override)
+                    val factory = DisplayOrientedMeteringPointFactory(
+                        fragmentCameraBinding.viewFinder.display,
+                        cameraInfo,
+                        width,
+                        height
+                    )
+                    val point = factory.createPoint(event.x, event.y)
 
-                // Also reset Focus UI if active
-                if (activeManualTab == "Focus") {
-                    updateManualPanel()
+                    val actionBuilder = if (isManualExposure) {
+                        FocusMeteringAction.Builder(point, FocusMeteringAction.FLAG_AF)
+                    } else {
+                        FocusMeteringAction.Builder(point, FocusMeteringAction.FLAG_AF or FocusMeteringAction.FLAG_AE)
+                    }
+
+                    actionBuilder.disableAutoCancel()
+                    val action = actionBuilder.build()
+
+                    // If manual focus is ON, we temporarily switch to Auto to sync the slider
+                    if (isManualFocus) {
+                        syncManualFocusAfterTap()
+                    }
+
+                    isManualFocus = false
+                    applyCameraControls() // Apply change
+
+                    if (activeManualTab == "Focus") {
+                        updateManualPanel()
+                    }
+
+                    updateTabColors()
+
+                    camera?.cameraControl?.startFocusAndMetering(action)
                 }
 
-                // Update text color for Focus Tab (Reset to auto color)
-                updateTabColors()
-
-                camera?.cameraControl?.startFocusAndMetering(action)
-
-                // Calculate screen coordinates for Focus Ring (which is in root layout)
-                // view.x/y is relative to root. event.x/y is relative to view.
                 val screenX = view.x + event.x
                 val screenY = view.y + event.y
                 showFocusRing(screenX, screenY)
@@ -1393,12 +1644,92 @@ class CameraFragment : Fragment() {
         }
     }
 
+    private fun triggerTapToFocusCamera2(x: Float, y: Float) {
+        val device = camera2Device ?: return
+        val session = camera2Session ?: return
+        val surface = camera2PreviewSurface ?: return
+        val handler = camera2Handler ?: return
+
+        lifecycleScope.launch(Dispatchers.Default) {
+            try {
+                val characteristics = camera2Manager.getCameraCharacteristics(device.id)
+                val sensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
+                val activeArray = characteristics.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE) ?: return@launch
+
+                val lastResult = captureResultFlow.replayCache.lastOrNull()
+                val cropRegion = lastResult?.get(CaptureResult.SCALER_CROP_REGION) ?: activeArray
+
+                val region = getMeteringRectangle(
+                    x, y,
+                    fragmentCameraBinding.viewFinder.width,
+                    fragmentCameraBinding.viewFinder.height,
+                    sensorOrientation,
+                    lensFacing,
+                    cropRegion
+                )
+
+                focusMeteringRegion = region
+                if (!isManualExposure) {
+                    exposureMeteringRegion = region
+                }
+
+                // 1. Cancel ongoing
+                val cancelRequest = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_PREVIEW)
+                cancelRequest.addTarget(surface)
+                applyManualSettingsToRequest(cancelRequest)
+                cancelRequest.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_CANCEL)
+                cancelRequest.set(CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER, CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER_CANCEL)
+                session.capture(cancelRequest.build(), null, handler)
+
+                // 2. Trigger AF/AE
+                val triggerRequest = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_PREVIEW)
+                triggerRequest.addTarget(surface)
+                applyManualSettingsToRequest(triggerRequest)
+
+                triggerRequest.set(CaptureRequest.CONTROL_AF_REGIONS, arrayOf(region))
+                if (!isManualExposure) {
+                    triggerRequest.set(CaptureRequest.CONTROL_AE_REGIONS, arrayOf(region))
+                }
+
+                // If in manual focus, we need to temporarily switch to AUTO to perform the tap-to-focus
+                if (isManualFocus) {
+                    triggerRequest.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_AUTO)
+                }
+
+                triggerRequest.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_START)
+                if (!isManualExposure) {
+                    triggerRequest.set(CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER, CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER_START)
+                }
+
+                session.capture(triggerRequest.build(), object : CameraCaptureSession.CaptureCallback() {
+                    override fun onCaptureCompleted(session: CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {
+                        super.onCaptureCompleted(session, request, result)
+                        if (isManualFocus) {
+                             syncManualFocusAfterTap()
+                        }
+                    }
+                }, handler)
+
+                // 3. Resume repeating
+                withContext(Dispatchers.Main) {
+                    // If we were in manual focus, we don't want to switch to AUTO permanently.
+                    // But if we were in continuous AF, we switch to AUTO to keep it locked.
+                    if (!isManualFocus) {
+                        // focusMeteringRegion is already set, applyCameraControls will use AF_MODE_AUTO
+                        applyCameraControls()
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Camera2 tap to focus trigger failed", e)
+            }
+        }
+    }
+
     private fun showFocusRing(x: Float, y: Float) {
         val focusRing = fragmentCameraBinding.focusRing
         val width = focusRing.width.toFloat()
         val height = focusRing.height.toFloat()
 
-        // Cancel any ongoing animation to prevent conflicts from rapid taps
         focusRing.animate().cancel()
 
         focusRing.translationX = x - width / 2
@@ -1426,14 +1757,6 @@ class CameraFragment : Fragment() {
         // Tab Listeners
         binding.manualTabs?.addOnButtonCheckedListener { group, checkedId, isChecked ->
             if (isChecked) {
-                // If checking the same tab as active, we might want to toggle off?
-                // MaterialButtonToggleGroup single selection mode makes it hard to deselect by clicking same item
-                // unless selectionRequired=false. We set selectionRequired=false in XML.
-
-                // However, the listener fires when checked state changes.
-                // If I click "Focus" while it's checked, it might uncheck it.
-                // Let's rely on isChecked.
-
                 when (checkedId) {
                     R.id.btn_tab_focus -> activeManualTab = "Focus"
                     R.id.btn_tab_iso -> activeManualTab = "ISO"
@@ -1444,7 +1767,6 @@ class CameraFragment : Fragment() {
                 binding.touchOverlay?.visibility = View.VISIBLE
                 updateManualPanel()
             } else {
-                // If unchecking, and no other button is checked
                 if (group.checkedButtonId == View.NO_ID) {
                     activeManualTab = null
                     binding.manualPanel?.visibility = View.GONE
@@ -1469,7 +1791,7 @@ class CameraFragment : Fragment() {
             currentFocusDistance = minFocusDistance
             isManualFocus = true
             applyCameraControls()
-            updateManualPanel() // Update slider position
+            updateManualPanel()
             updateTabColors()
         }
 
@@ -1490,7 +1812,6 @@ class CameraFragment : Fragment() {
 
         when (activeManualTab) {
             "Focus" -> {
-                // 0 is Far (0.0), Max is Near (minFocusDistance)
                 currentFocusDistance = ratio * minFocusDistance
                 isManualFocus = true
                 binding.tvManualValue?.text = String.format("%.2f", currentFocusDistance)
@@ -1506,15 +1827,12 @@ class CameraFragment : Fragment() {
 
             "Shutter" -> {
                 exposureTimeRange?.let { range ->
-                    // Logarithmic scale
-                    // v = min * (max/min)^ratio
                     val minVal = range.lower.toDouble()
                     val maxVal = range.upper.toDouble()
                     val res = minVal * Math.pow(maxVal / minVal, ratio.toDouble())
                     currentExposureTime = res.toLong()
                     isManualExposure = true
 
-                    // Format text
                     val ms = currentExposureTime / 1_000_000.0
                     if (ms < 1000) {
                         binding.tvManualValue?.text = String.format("1/%.0fs", 1000.0 / ms)
@@ -1527,8 +1845,6 @@ class CameraFragment : Fragment() {
             "EV" -> {
                 evRange?.let { range ->
                     currentEvIndex = (range.lower + (range.upper - range.lower) * ratio).toInt()
-                    // EV doesn't set isManualExposure flag as it works in Auto.
-                    // But if isManualExposure is TRUE, EV does nothing.
                     if (isManualExposure) {
                         Toast.makeText(
                             requireContext(),
@@ -1549,15 +1865,18 @@ class CameraFragment : Fragment() {
         when (activeManualTab) {
             "Focus" -> {
                 isManualFocus = false
+                focusMeteringRegion = null
                 camera?.cameraControl?.cancelFocusAndMetering()
             }
 
             "ISO", "Shutter" -> {
                 isManualExposure = false
+                exposureMeteringRegion = null
             }
 
             "EV" -> {
                 currentEvIndex = 0
+                exposureMeteringRegion = null
             }
         }
         applyCameraControls()
@@ -1642,63 +1961,332 @@ class CameraFragment : Fragment() {
         }
     }
 
+    private fun initLensControls() {
+        val binding = cameraUiContainerBinding ?: return
+        val container = binding.lensControlsContainer ?: return
+        val scroll = binding.controlsHubScroll ?: return
+
+        if (availableLenses.isEmpty()) {
+            refreshLenses()
+        }
+
+        if (availableLenses.isNotEmpty()) {
+            scroll.visibility = View.VISIBLE
+            container.removeAllViews()
+
+            // Filter out all presets (1x sub-presets, virtual tele 2x) from the main list.
+            // We want physical lenses and the virtual 2.0x wide only.
+            val filteredLenses = availableLenses.filter {
+                !it.isZoomPreset || it.sensorId.contains("virtual-2x")
+            }.filter {
+                !it.sensorId.contains(com.android.example.cameraxbasic.utils.CameraRepository.VIRTUAL_TELE_2X_SUFFIX)
+            }
+
+            val isBackCamera = lensFacing == CameraSelector.LENS_FACING_BACK
+            val largestTele = if (isBackCamera) {
+                filteredLenses.filter { it.multiplier > 1.05f && !it.isZoomPreset }.maxByOrNull { it.multiplier }
+            } else null
+
+            for (lens in filteredLenses) {
+                val btn = com.google.android.material.button.MaterialButton(
+                    requireContext()
+                ).apply {
+                    layoutParams = android.widget.LinearLayout.LayoutParams(
+                        resources.getDimensionPixelSize(R.dimen.lens_button_size),
+                        resources.getDimensionPixelSize(R.dimen.lens_button_size)
+                    ).apply {
+                        marginEnd = resources.getDimensionPixelSize(R.dimen.spacing_small)
+                    }
+                    text = lens.name
+                    tag = lens
+                    textSize = 10f
+                    setPadding(0, 0, 0, 0)
+                    insetTop = 0
+                    insetBottom = 0
+                    cornerRadius = resources.getDimensionPixelSize(R.dimen.radius_full)
+
+                    setOnClickListener {
+                        val oldLens = currentLens
+                        val is1x = lens.multiplier in 0.95f..1.05f && !lens.isZoomPreset
+                        // Only cycle if we are already in the 1x family (24/28/35mm)
+                        val isAlreadyIn1xPresets = oldLens != null && oldLens.id == lens.id &&
+                                (oldLens.name == "24mm" || oldLens.name == "28mm" || oldLens.name == "35mm")
+
+                        // Largest Tele Cycling
+                        val isLargestTele = largestTele != null && lens.sensorId == largestTele.sensorId
+                        val isAlreadyInTelePresets = oldLens != null && (oldLens.sensorId == lens.sensorId || oldLens.sensorId == "${lens.sensorId}${com.android.example.cameraxbasic.utils.CameraRepository.VIRTUAL_TELE_2X_SUFFIX}")
+
+                        if (is1x && isAlreadyIn1xPresets) {
+                            // Cycle through 1x presets: 24mm -> 28mm -> 35mm
+                            val presets1x = cameraRepository.get1xPresets(lens)
+                            val currentName = oldLens?.name ?: "24mm"
+                            val nextIndex = when (currentName) {
+                                "24mm" -> presets1x.indexOfFirst { it.name == "28mm" }.takeIf { it != -1 } ?: 0
+                                "28mm" -> presets1x.indexOfFirst { it.name == "35mm" }.takeIf { it != -1 } ?: 0
+                                "35mm" -> 0
+                                else -> 0
+                            }
+                            currentLens = presets1x[nextIndex]
+
+                            // Visual feedback: Focal Length -> Multiplier
+                            transientLensLabel = currentLens!!.name
+                            lifecycleScope.launch(Dispatchers.Main) {
+                                delay(800)
+                                if (transientLensLabel == presets1x[nextIndex].name) {
+                                    transientLensLabel = null
+                                    updateLensUI()
+                                }
+                            }
+                        } else if (isLargestTele && isAlreadyInTelePresets) {
+                             // Cycle Largest Tele: Native -> 2x Crop
+                             val telePresets = cameraRepository.getTelePresets(lens)
+                             val isCurrentlyNative = oldLens?.sensorId == lens.sensorId
+                             currentLens = if (isCurrentlyNative) telePresets[1] else telePresets[0]
+                        } else if (is1x) {
+                            // Switching TO 1x from another lens: Use the 1x default focal length setting
+                            val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                            val default1xFocal = prefs.getString(SettingsFragment.KEY_DEFAULT_FOCAL_1X, "24mm")
+                            val presets1x = cameraRepository.get1xPresets(lens)
+                            currentLens = presets1x.find { it.name == default1xFocal } ?: lens
+                        } else {
+                            currentLens = lens
+                        }
+
+                        updateLensUI()
+
+                        if (oldLens?.id != currentLens?.id || oldLens?.physicalId != currentLens?.physicalId || oldLens?.useCamera2 != currentLens?.useCamera2) {
+                            animateSwitch {
+                                bindCameraUseCases()
+                            }
+                        } else {
+                            updateZoom(true)
+                        }
+                    }
+                }
+                container.addView(btn)
+            }
+            updateLensUI()
+        } else {
+            scroll.visibility = View.GONE
+        }
+    }
+
+    private fun updateLensUI() {
+        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        currentLens?.let {
+            prefs.edit().putString(KEY_SELECTED_LENS_ID, it.sensorId).apply()
+        }
+
+        val binding = cameraUiContainerBinding ?: return
+        val container = binding.lensControlsContainer ?: return
+
+        val colorPrimary = MaterialColors.getColor(container, com.google.android.material.R.attr.colorPrimary)
+        val colorOnSurface = MaterialColors.getColor(container, com.google.android.material.R.attr.colorOnSurface)
+
+        // Identify the largest physical tele lens (Back camera only) to handle its label correctly
+        val isBackCamera = lensFacing == CameraSelector.LENS_FACING_BACK
+        val largestTele = if (isBackCamera) {
+            availableLenses.filter { it.multiplier > 1.05f && !it.isZoomPreset }.maxByOrNull { it.multiplier }
+        } else null
+
+        for (i in 0 until container.childCount) {
+            val btn = container.getChildAt(i) as? com.google.android.material.button.MaterialButton
+            val lens = btn?.tag as? com.android.example.cameraxbasic.utils.LensInfo
+            if (btn != null && lens != null) {
+                // For the 1.0x button, it stays active if any of its sub-presets (24, 28, 35) are active
+                // For the largest tele button, it stays active if its 2x virtual preset is active
+                val isActive = lens.sensorId == currentLens?.sensorId ||
+                              (lens.multiplier in 0.95f..1.05f && currentLens?.id == lens.id && !currentLens!!.sensorId.contains("virtual")) ||
+                              (largestTele != null && lens.sensorId == largestTele.sensorId && currentLens?.sensorId == "${largestTele.sensorId}${com.android.example.cameraxbasic.utils.CameraRepository.VIRTUAL_TELE_2X_SUFFIX}")
+
+                if (isActive) {
+                    // Update text for 1.0x button or Largest Tele button
+                    if (lens.multiplier in 0.95f..1.05f && !lens.isZoomPreset) {
+                        btn.text = transientLensLabel ?: String.format("%.1fx", currentLens?.multiplier ?: 1.0f)
+                    } else if (largestTele != null && lens.sensorId == largestTele.sensorId) {
+                        btn.text = String.format("%.1fx", currentLens?.multiplier ?: lens.multiplier)
+                    }
+
+                    btn.setTextColor(colorPrimary)
+                    btn.strokeWidth = resources.getDimensionPixelSize(R.dimen.stroke_small)
+                    btn.strokeColor = android.content.res.ColorStateList.valueOf(colorPrimary)
+                    btn.setBackgroundColor(MaterialColors.layer(
+                        MaterialColors.getColor(btn, com.google.android.material.R.attr.colorSurface),
+                        colorPrimary,
+                        0.1f
+                    ))
+                } else {
+                    btn.setTextColor(colorOnSurface)
+                    btn.strokeWidth = 0
+
+                    if (lens.multiplier in 0.95f..1.05f && !lens.isZoomPreset) {
+                        val default1xFocal = prefs.getString(SettingsFragment.KEY_DEFAULT_FOCAL_1X, "24mm")
+                        val presets1x = cameraRepository.get1xPresets(lens)
+                        val defaultPreset = presets1x.find { it.name == default1xFocal } ?: lens
+                        btn.text = String.format("%.1fx", defaultPreset.multiplier)
+                    } else {
+                        btn.text = lens.name
+                    }
+
+                    btn.setBackgroundColor(MaterialColors.layer(
+                        MaterialColors.getColor(btn, com.google.android.material.R.attr.colorSurface),
+                        colorOnSurface,
+                        0.15f
+                    ))
+                }
+            }
+        }
+    }
+
     private fun initZoomControls() {
         val binding = cameraUiContainerBinding ?: return
 
         binding.btnZoomToggle?.setOnClickListener {
-            if (is2xMode) {
-                is2xMode = false
-                currentFocalLength = defaultFocalLength
+            val nextFocal = when {
+                currentLens?.sensorId?.endsWith("-28mm") == true -> 35
+                currentLens?.sensorId?.endsWith("-35mm") == true -> 24
+                else -> 28
+            }
+
+            val targetId = if (nextFocal == 24) {
+                 availableLenses.find { it.multiplier in 0.95f..1.05f && !it.isZoomPreset }?.sensorId
             } else {
-                currentFocalLength = when (currentFocalLength) {
-                    24 -> 28
-                    28 -> 35
-                    35 -> 24
-                    else -> 24
+                 availableLenses.find { it.sensorId.endsWith("-$nextFocal" + "mm") }?.sensorId
+            }
+
+            targetId?.let { id ->
+                availableLenses.find { it.sensorId == id }?.let {
+                    currentLens = it
+                    updateZoom(true)
                 }
             }
-            updateZoom(true)
         }
 
         binding.btnZoom2x?.setOnClickListener {
-            if (!is2xMode) {
-                is2xMode = true
+            availableLenses.find { it.multiplier in 1.9f..2.1f || it.sensorId.contains("2.0x") || it.sensorId.contains("virtual-2x") }?.let {
+                currentLens = it
                 updateZoom(true)
             }
         }
 
-        // Set initial UI state
         updateZoomUI(false)
     }
 
     private fun updateZoom(animate: Boolean) {
-        val targetRatio = if (is2xMode) {
-            2.0f
-        } else {
-            currentFocalLength / 24.0f
+        if (camera2Device != null) {
+            updateZoomCamera2()
+            updateZoomUI(animate)
+            return
         }
 
-        val maxZoom = camera?.cameraInfo?.zoomState?.value?.maxZoomRatio
-            ?: 8.0f // Default high enough if null
+        val targetRatio = if (currentLens?.isZoomPreset == true && currentLens?.targetZoomRatio != null) {
+            currentLens!!.targetZoomRatio!!
+        } else {
+            1.0f
+        }
+
+        val maxZoom = camera?.cameraInfo?.zoomState?.value?.maxZoomRatio ?: 8.0f
         val ratio = targetRatio.coerceAtMost(maxZoom)
 
         camera?.cameraControl?.setZoomRatio(ratio)
         updateZoomUI(animate)
     }
 
+    private fun updateZoomCamera2() {
+        val session = camera2Session ?: return
+        val device = camera2Device ?: return
+        val chars = camera2Manager.getCameraCharacteristics(device.id)
+        val activeArray = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE) ?: return
+
+        val targetRatio = if (currentLens?.isZoomPreset == true && currentLens?.targetZoomRatio != null) {
+            currentLens!!.targetZoomRatio!!
+        } else {
+            1.0f
+        }
+
+        val cropW = (activeArray.width() / targetRatio).toInt()
+        val cropH = (activeArray.height() / targetRatio).toInt()
+        val centerX = activeArray.centerX()
+        val centerY = activeArray.centerY()
+
+        val cropRegion = android.graphics.Rect(
+            centerX - cropW / 2,
+            centerY - cropH / 2,
+            centerX + cropW / 2,
+            centerY + cropH / 2
+        )
+
+        try {
+            val request = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_PREVIEW)
+            request.addTarget(camera2PreviewSurface!!)
+            applyManualSettingsToRequest(request)
+            request.set(android.hardware.camera2.CaptureRequest.SCALER_CROP_REGION, cropRegion)
+
+            session.setRepeatingRequest(request.build(), object : android.hardware.camera2.CameraCaptureSession.CaptureCallback() {
+                override fun onCaptureCompleted(session: android.hardware.camera2.CameraCaptureSession, request: android.hardware.camera2.CaptureRequest, result: android.hardware.camera2.TotalCaptureResult) {
+                    val timestamp = result.get(android.hardware.camera2.CaptureResult.SENSOR_TIMESTAMP)
+                    if (timestamp != null) {
+                        captureResults[timestamp] = result
+                    }
+                    captureResultFlow.tryEmit(result)
+                }
+            }, camera2Handler)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to update Camera2 zoom", e)
+        }
+    }
+
+    private fun animateSwitch(onMidPoint: () -> Unit) {
+        val switchDuration = 200L
+        fragmentCameraBinding.viewFinder.animate()
+            .alpha(0f)
+            .setDuration(switchDuration)
+            .withEndAction {
+                lifecycleScope.launch(Dispatchers.Main) {
+                    onMidPoint()
+                    delay(100)
+                    fragmentCameraBinding.viewFinder.animate()
+                        .alpha(1f)
+                        .setDuration(switchDuration)
+                        .start()
+                }
+            }
+            .start()
+    }
+
+    private fun getCombinedOrientation(): Int {
+        val sensorOrientation = try {
+            val lens = currentLens
+            val targetId = lens?.id ?: if (lensFacing == CameraSelector.LENS_FACING_BACK) "0" else "1"
+
+            camera2Manager.getCameraCharacteristics(targetId)
+                .get(android.hardware.camera2.CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
+        } catch (e: Exception) { 0 }
+
+        val combined = if (lensFacing == CameraSelector.LENS_FACING_FRONT) {
+            (sensorOrientation - deviceOrientationDegrees + 360) % 360
+        } else {
+            (sensorOrientation + deviceOrientationDegrees) % 360
+        }
+        Log.d(TAG, "getCombinedOrientation: sensor=$sensorOrientation, device=$deviceOrientationDegrees, facing=$lensFacing -> combined=$combined")
+        return combined
+    }
+
     private fun updateZoomUI(animate: Boolean) {
         val binding = cameraUiContainerBinding ?: return
+
+        updateLensUI()
+
         val activeColor = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorPrimary)
         val inactiveColor = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnSurface)
 
-        if (is2xMode) {
+        val is2xActive = (currentLens?.multiplier ?: 1.0f) in 1.9f..2.1f
+        val focalEq = currentLens?.equivalentFocalLength ?: 24f
+
+        if (is2xActive) {
             binding.btnZoom2x?.setTextColor(activeColor)
             binding.btnZoomToggle?.setTextColor(inactiveColor)
 
-            // If we just switched to 2x, we might want to ensure 1x label is generic or last state?
-            // Requirement: "user at 2x clicks 1x returns to default".
-            // Label can just remain "1x" or whatever it was?
-            // Let's reset it to "1x" for clarity as "Standard".
             binding.btnZoomToggle?.text = "1x"
             zoomJob?.cancel()
         } else {
@@ -1706,16 +2294,11 @@ class CameraFragment : Fragment() {
             binding.btnZoomToggle?.setTextColor(activeColor)
 
             zoomJob?.cancel()
-            val labelX = when (currentFocalLength) {
-                24 -> "1x"
-                28 -> "1.2x"
-                35 -> "1.5x"
-                else -> "1x"
-            }
+            val labelX = String.format("%.1fx", currentLens?.multiplier ?: 1.0f)
 
-            if (animate) {
+            if (animate && currentLens?.isZoomPreset == true) {
                 zoomJob = lifecycleScope.launch(Dispatchers.Main) {
-                    val labelMm = "${currentFocalLength}mm"
+                    val labelMm = "${focalEq.toInt()}mm"
 
                     binding.btnZoomToggle?.text = labelMm
                     delay(500)
@@ -1728,52 +2311,81 @@ class CameraFragment : Fragment() {
     }
 
     @OptIn(ExperimentalCamera2Interop::class)
-    private fun applyCameraControls() {
+    private fun applyCameraControls(isHdrBurst: Boolean = false) {
+        if (camera2Device != null) {
+            updateCamera2RepeatingRequest(isHdrBurst)
+            return
+        }
+
         val cameraControl = camera?.cameraControl ?: return
         val camera2Control = Camera2CameraControl.from(cameraControl)
         val builder = CaptureRequestOptions.Builder()
 
-        // Global Settings: Anti-Banding
         val prefs =
             requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
         val antiBandingMode = when (prefs.getString(SettingsFragment.KEY_ANTIBANDING, "Auto")) {
-            "50Hz" -> CaptureRequest.CONTROL_AE_ANTIBANDING_MODE_50HZ
-            "60Hz" -> CaptureRequest.CONTROL_AE_ANTIBANDING_MODE_60HZ
-            "Off" -> CaptureRequest.CONTROL_AE_ANTIBANDING_MODE_OFF
-            else -> CaptureRequest.CONTROL_AE_ANTIBANDING_MODE_AUTO
+            "50Hz" -> android.hardware.camera2.CaptureRequest.CONTROL_AE_ANTIBANDING_MODE_50HZ
+            "60Hz" -> android.hardware.camera2.CaptureRequest.CONTROL_AE_ANTIBANDING_MODE_60HZ
+            "Off" -> android.hardware.camera2.CaptureRequest.CONTROL_AE_ANTIBANDING_MODE_OFF
+            else -> android.hardware.camera2.CaptureRequest.CONTROL_AE_ANTIBANDING_MODE_AUTO
         }
-        builder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_ANTIBANDING_MODE, antiBandingMode)
+        builder.setCaptureRequestOption(android.hardware.camera2.CaptureRequest.CONTROL_AE_ANTIBANDING_MODE, antiBandingMode)
 
-        // Focus
         if (isManualFocus) {
             builder.setCaptureRequestOption(
-                CaptureRequest.CONTROL_AF_MODE,
-                CaptureRequest.CONTROL_AF_MODE_OFF
+                android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE,
+                android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE_OFF
             )
             builder.setCaptureRequestOption(
-                CaptureRequest.LENS_FOCUS_DISTANCE,
+                android.hardware.camera2.CaptureRequest.LENS_FOCUS_DISTANCE,
                 currentFocusDistance
             )
         }
 
-        // Exposure
         if (isManualExposure) {
             builder.setCaptureRequestOption(
-                CaptureRequest.CONTROL_AE_MODE,
-                CaptureRequest.CONTROL_AE_MODE_OFF
+                android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE,
+                android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE_OFF
             )
-            builder.setCaptureRequestOption(CaptureRequest.SENSOR_SENSITIVITY, currentIso)
+            builder.setCaptureRequestOption(android.hardware.camera2.CaptureRequest.SENSOR_SENSITIVITY, currentIso)
             builder.setCaptureRequestOption(
-                CaptureRequest.SENSOR_EXPOSURE_TIME,
+                android.hardware.camera2.CaptureRequest.SENSOR_EXPOSURE_TIME,
                 currentExposureTime
             )
         }
 
+        // Apply Stabilization
+        applyStabilizationOptions(builder, isHdrBurst)
+
         camera2Control.setCaptureRequestOptions(builder.build())
 
-        // EV
         if (!isManualExposure) {
             cameraControl.setExposureCompensationIndex(currentEvIndex)
+        }
+    }
+
+    private fun updateCamera2RepeatingRequest(isHdrBurst: Boolean = false) {
+        val session = camera2Session ?: return
+        val device = camera2Device ?: return
+        val surface = camera2PreviewSurface ?: return
+        val handler = camera2Handler ?: return
+
+        try {
+            val request = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_PREVIEW)
+            request.addTarget(surface)
+            applyManualSettingsToRequest(request, isHdrBurst)
+
+            session.setRepeatingRequest(request.build(), object : android.hardware.camera2.CameraCaptureSession.CaptureCallback() {
+                override fun onCaptureCompleted(session: android.hardware.camera2.CameraCaptureSession, request: android.hardware.camera2.CaptureRequest, result: android.hardware.camera2.TotalCaptureResult) {
+                    val timestamp = result.get(android.hardware.camera2.CaptureResult.SENSOR_TIMESTAMP)
+                    if (timestamp != null) {
+                        captureResults[timestamp] = result
+                    }
+                    captureResultFlow.tryEmit(result)
+                }
+            }, handler)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to update Camera2 repeating request", e)
         }
     }
 
@@ -1781,7 +2393,6 @@ class CameraFragment : Fragment() {
         val binding = cameraUiContainerBinding ?: return
         val rv = binding.lutList ?: return
 
-        // Ensure LayoutManager
         if (rv.layoutManager == null) {
             rv.layoutManager = androidx.recyclerview.widget.LinearLayoutManager(requireContext())
         }
@@ -1824,11 +2435,9 @@ class CameraFragment : Fragment() {
                 holder.text.text = "None"
                 if (currentName == null) holder.text.setTextColor(colorPrimary)
                 holder.itemView.setOnClickListener {
-                    // Update Prefs
                     prefs.edit().remove(SettingsFragment.KEY_ACTIVE_LUT).apply()
                     updateLiveLut()
 
-                    // Optimized Notify
                     val oldPosition = if (currentName != null) luts.indexOfFirst { it.name == currentName } + 1 else 0
                     notifyItemChanged(oldPosition)
                     notifyItemChanged(0)
@@ -1841,11 +2450,9 @@ class CameraFragment : Fragment() {
                 holder.text.text = file.nameWithoutExtension
                 if (currentName == file.name) holder.text.setTextColor(colorPrimary)
                 holder.itemView.setOnClickListener {
-                    // Update Prefs
                     prefs.edit().putString(SettingsFragment.KEY_ACTIVE_LUT, file.name).apply()
                     updateLiveLut()
 
-                    // Optimized Notify
                     val oldPosition = if (currentName != null) luts.indexOfFirst { it.name == currentName } + 1 else 0
                     notifyItemChanged(oldPosition)
                     notifyItemChanged(position)
@@ -1881,7 +2488,6 @@ class CameraFragment : Fragment() {
                 if (file.exists()) {
                     lutData = ColorProcessor.loadLutData(file.absolutePath)
                     if (lutData != null) {
-                        // size = cuberoot(len/3)
                         size =
                             Math.round(Math.pow((lutData.size / 3).toDouble(), 1.0 / 3.0)).toInt()
                     }
@@ -1902,23 +2508,70 @@ class CameraFragment : Fragment() {
         private const val FOCUS_RING_DISPLAY_TIME_MS = 500L
         private const val FOCUS_RING_FADE_OUT_DURATION_MS = 300L
         private const val AE_SETTLE_DELAY_MS = 50L
+        private const val ANALYSIS_HIGHLIGHT_THRESHOLD = 240
+        private const val ANALYSIS_SAMPLING_STEP = 4
+
+        const val KEY_SELECTED_LENS_ID = "selected_lens_sensor_id"
+        const val KEY_LENS_FACING = "lens_facing"
+        const val KEY_HDR_PLUS_ENABLED = "hdr_plus_enabled"
     }
+
+    private fun saveJpegFallback(data: ByteArray, rotationDegrees: Int, zoomFactor: Float) {
+        val appContext = requireContext().applicationContext
+        val mirror = shouldMirror
+
+        (appContext as MainApplication).applicationScope.launch(Dispatchers.IO) {
+            try {
+                val name = SimpleDateFormat(FILENAME, Locale.US).format(System.currentTimeMillis())
+                val bmpFile = File(appContext.cacheDir, "temp_$name.jpg")
+                FileOutputStream(bmpFile).use { it.write(data) }
+
+                val uri = ImageSaver.saveProcessedImage(
+                    context = appContext,
+                    inputBitmap = null,
+                    bmpPath = bmpFile.absolutePath,
+                    rotationDegrees = rotationDegrees,
+                    zoomFactor = zoomFactor,
+                    baseName = name,
+                    linearDngPath = null,
+                    tiffPath = null,
+                    saveJpg = true,
+                    saveTiff = false,
+                    mirror = mirror
+                )
+                withContext(Dispatchers.Main) {
+                    uri?.let { setGalleryThumbnail(it.toString()) }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to save JPEG fallback", e)
+            } finally {
+                processingSemaphore.release()
+                withContext(Dispatchers.Main) {
+                    cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
+                    cameraUiContainerBinding?.cameraCaptureButton?.alpha = 1.0f
+                    hideProcessingAnimation()
+                }
+            }
+        }
+    }
+
     private fun takeSinglePicture(imageCapture: ImageCapture) {
-        if (imageCapture.outputFormat == ImageCapture.OUTPUT_FORMAT_RAW) {
-            // RAW Capture with Processing
-            imageCapture.takePicture(
-                cameraExecutor,
-                object : ImageCapture.OnImageCapturedCallback() {
-                    override fun onCaptureSuccess(image: ImageProxy) {
+        imageCapture.takePicture(
+            cameraExecutor,
+            object : ImageCapture.OnImageCapturedCallback() {
+                override fun onCaptureSuccess(image: ImageProxy) {
+                    if (image.format == android.graphics.ImageFormat.RAW_SENSOR) {
                         try {
-                            // 1. Immediate Copy (Free the pipeline)
-                            val currentZoom =
-                                if (is2xMode) 2.0f else (currentFocalLength / 24.0f)
+                            val currentZoom = if (currentLens?.isZoomPreset == true && currentLens?.targetZoomRatio != null) {
+                                currentLens!!.targetZoomRatio!!
+                            } else {
+                                1.0f
+                            }
 
-                            val holder = copyImageToHolder(image, currentZoom)
-                            image.close() // Close ASAP
+                            val holder = copyImageToHolder(image, currentZoom, getCombinedOrientation(), currentLens?.physicalId)
+                            image.close()
 
-                            // 2. Queue for Processing
+                            showProcessingAnimation()
                             lifecycleScope.launch {
                                 processingChannel.send(holder)
                             }
@@ -1932,9 +2585,9 @@ class CameraFragment : Fragment() {
                                     "Memory full, photo not saved",
                                     Toast.LENGTH_SHORT
                                 ).show()
-                                cameraUiContainerBinding?.cameraCaptureButton?.isEnabled =
-                                    true
+                                cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
                                 cameraUiContainerBinding?.cameraCaptureButton?.alpha = 1.0f
+                                hideProcessingAnimation()
                             }
                         } catch (e: Exception) {
                             Log.e(TAG, "Error during capture copy", e)
@@ -1944,50 +2597,54 @@ class CameraFragment : Fragment() {
                                 cameraUiContainerBinding?.cameraCaptureButton?.isEnabled =
                                     true
                                 cameraUiContainerBinding?.cameraCaptureButton?.alpha = 1.0f
+                                hideProcessingAnimation()
                             }
                         }
-                    }
+                    } else {
+                        // JPEG/YUV fallback path
+                        val buffer = image.planes[0].buffer
+                        val data = ByteArray(buffer.remaining())
+                        buffer.get(data)
+                        val rotation = image.imageInfo.rotationDegrees
+                        image.close()
 
-                    override fun onError(exception: ImageCaptureException) {
-                        Log.e(TAG, "Photo capture failed: ${exception.message}", exception)
-                        processingSemaphore.release()
-                        lifecycleScope.launch(Dispatchers.Main) {
-                            cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
-                            cameraUiContainerBinding?.cameraCaptureButton?.alpha = 1.0f
+                        val currentZoom = if (currentLens?.isZoomPreset == true && currentLens?.targetZoomRatio != null) {
+                                currentLens!!.targetZoomRatio!!
+                            } else {
+                                1.0f
                         }
+                        showProcessingAnimation()
+                        saveJpegFallback(data, rotation, currentZoom)
                     }
-                })
+                }
 
-            // Optimistic UI update
-            if (processingSemaphore.availablePermits == 0) {
-                cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = false
-                cameraUiContainerBinding?.cameraCaptureButton?.alpha = 0.5f
-            }
+                override fun onError(exception: ImageCaptureException) {
+                    Log.e(TAG, "Photo capture failed: ${exception.message}", exception)
+                    processingSemaphore.release()
+                    lifecycleScope.launch(Dispatchers.Main) {
+                        cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
+                        cameraUiContainerBinding?.cameraCaptureButton?.alpha = 1.0f
+                    }
+                }
+            })
 
-        } else {
-            processingSemaphore.release() // Not raw, release immediately (logic for JPG path)
-            Toast.makeText(
-                requireContext(),
-                "RAW capture is not supported on this device.",
-                Toast.LENGTH_SHORT
-            ).show()
+        if (processingSemaphore.availablePermits == 0) {
+            cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = false
+            cameraUiContainerBinding?.cameraCaptureButton?.alpha = 0.5f
         }
 
-        // We can only change the foreground Drawable using API level 23+ API
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            // Display flash animation to indicate that photo was captured
+            fragmentCameraBinding.root.foreground = ColorDrawable(Color.WHITE)
             fragmentCameraBinding.root.postDelayed({
-                fragmentCameraBinding.root.foreground = ColorDrawable(Color.WHITE)
-                fragmentCameraBinding.root.postDelayed(
-                    { fragmentCameraBinding.root.foreground = null }, ANIMATION_FAST_MILLIS
-                )
-            }, ANIMATION_SLOW_MILLIS)
+                fragmentCameraBinding.root.foreground = null
+            }, ANIMATION_FAST_MILLIS)
         }
     }
 
     private fun triggerHdrPlusBurst(imageCapture: ImageCapture) {
         if (isBurstActive) {
             Log.d(TAG, "Burst already active, ignoring trigger")
+            processingSemaphore.release()
             return
         }
         isBurstActive = true
@@ -1995,13 +2652,18 @@ class CameraFragment : Fragment() {
 
         lifecycleScope.launch(Dispatchers.Main) {
             try {
-                // 1. Get Calculated Exposure (Instant)
-                // Use cached config if available to skip calculation delay
                 val config = lastHdrPlusConfig ?: run {
-                    // Fallback if cache empty
-                    val result = captureResultFlow.replayCache.lastOrNull() ?: captureResultFlow.first()
-                    val currentIso = result.get(CaptureResult.SENSOR_SENSITIVITY) ?: 100
-                    val currentTime = result.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: 10_000_000L
+                    val result = captureResultFlow.replayCache.lastOrNull() ?: withTimeoutOrNull(2000) {
+                        captureResultFlow.first()
+                    }
+
+                    if (result == null) {
+                        Log.e(TAG, "Timed out waiting for capture result for HDR+ config")
+                        throw RuntimeException("Camera metadata timeout")
+                    }
+
+                    val currentIso = result.get(android.hardware.camera2.CaptureResult.SENSOR_SENSITIVITY) ?: 100
+                    val currentTime = result.get(android.hardware.camera2.CaptureResult.SENSOR_EXPOSURE_TIME) ?: 10_000_000L
                     val validIsoRange = isoRange ?: android.util.Range(100, 3200)
                     val validTimeRange = exposureTimeRange ?: android.util.Range(1000L, 1_000_000_000L)
                     val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
@@ -2011,7 +2673,8 @@ class CameraFragment : Fragment() {
                         currentTime,
                         validIsoRange,
                         validTimeRange,
-                        underexposureMode
+                        underexposureMode,
+                        lastClippingRatio
                     )
                 }
 
@@ -2020,27 +2683,26 @@ class CameraFragment : Fragment() {
                     "HDR+ Exposure: TargetISO=${config.iso}, TargetTime=${config.exposureTime}, DigitalGain=${config.digitalGain}"
                 )
 
-                // 2. Apply Manual Exposure for Burst
                 val cameraControl = camera?.cameraControl
                 if (cameraControl != null) {
                     val camera2Control = Camera2CameraControl.from(cameraControl)
                     val builder = CaptureRequestOptions.Builder()
                     builder.setCaptureRequestOption(
-                        CaptureRequest.CONTROL_AE_MODE,
-                        CaptureRequest.CONTROL_AE_MODE_OFF
+                        android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE,
+                        android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE_OFF
                     )
-                    builder.setCaptureRequestOption(CaptureRequest.SENSOR_SENSITIVITY, config.iso)
+                    builder.setCaptureRequestOption(android.hardware.camera2.CaptureRequest.SENSOR_SENSITIVITY, config.iso)
                     builder.setCaptureRequestOption(
-                        CaptureRequest.SENSOR_EXPOSURE_TIME,
+                        android.hardware.camera2.CaptureRequest.SENSOR_EXPOSURE_TIME,
                         config.exposureTime
                     )
+                    // Apply OIS for HDR+ Burst
+                    applyStabilizationOptions(builder, true)
                     camera2Control.setCaptureRequestOptions(builder.build()).await()
                 }
 
-                // Slight delay to ensure AE settles
                 delay(AE_SETTLE_DELAY_MS)
 
-                // 3. Get Burst Size Preference
                 val prefs = requireContext().getSharedPreferences(
                     SettingsFragment.PREFS_NAME,
                     Context.MODE_PRIVATE
@@ -2048,8 +2710,6 @@ class CameraFragment : Fragment() {
                 val burstSizeStr = prefs.getString(SettingsFragment.KEY_HDR_BURST_COUNT, "3") ?: "3"
                 val burstSize = burstSizeStr.toIntOrNull() ?: 3
 
-
-                // 4. Re-initialize helper with correct count & gain
                 hdrPlusBurstHelper = HdrPlusBurst(
                     frameCount = burstSize,
                     onBurstComplete = { frames ->
@@ -2057,7 +2717,6 @@ class CameraFragment : Fragment() {
                     }
                 )
 
-                // Initialize UI for Burst
                 cameraUiContainerBinding?.captureProgress?.max = burstSize
                 cameraUiContainerBinding?.captureProgress?.progress = 0
                 cameraUiContainerBinding?.captureProgress?.visibility = View.VISIBLE
@@ -2072,7 +2731,6 @@ class CameraFragment : Fragment() {
 
                 Log.d(TAG, "Starting HDR+ Burst (Pipelined, $burstSize frames)")
 
-                // Pipelined burst: Trigger all captures at once to fill the camera pipeline
                 for (i in 0 until burstSize) {
                     captureBurstFrame(imageCapture, burstSize, i)
                 }
@@ -2083,10 +2741,8 @@ class CameraFragment : Fragment() {
                     "HDR+ setup failed: ${e.message}",
                     Toast.LENGTH_LONG
                 ).show()
-                // Ensure state is cleaned up on failure
                 resetBurstUi()
                 processingSemaphore.release()
-                // Attempt to restore camera controls
                 applyCameraControls()
             }
         }
@@ -2108,13 +2764,14 @@ class CameraFragment : Fragment() {
                             Log.d(TAG, "HDR+ Burst Capture sequence complete.")
                             applyCameraControls()
                             resetBurstUi()
+                            showProcessingAnimation()
                         }
                     }
 
                     val helper = hdrPlusBurstHelper
                     if (helper != null) {
                         try {
-                            helper.addFrame(image)
+                            helper.addFrame(image, currentLens?.physicalId)
                         } catch (e: Throwable) {
                             Log.e(TAG, "Failed to add frame to burst", e)
                             lifecycleScope.launch(Dispatchers.Main) {
@@ -2148,10 +2805,10 @@ class CameraFragment : Fragment() {
     }
 
     private suspend fun findCaptureResult(timestamp: Long, tolerance: Long = 5_000_000L): TotalCaptureResult? {
-        // 1. Check cache first for an immediate match.
-        captureResults.entries.find { abs(it.key - timestamp) < tolerance }?.value?.let { return it }
+        synchronized(captureResults) {
+            captureResults.entries.firstOrNull { abs(it.key - timestamp) < tolerance }?.value?.let { return it }
+        }
 
-        // 2. If not in cache, wait on the flow with a timeout.
         return withTimeoutOrNull(3000) {
             captureResultFlow.first { res ->
                 val ts = res.get(android.hardware.camera2.CaptureResult.SENSOR_TIMESTAMP)
@@ -2161,55 +2818,77 @@ class CameraFragment : Fragment() {
     }
 
     private fun processHdrPlusBurst(frames: List<HdrFrame>, digitalGain: Float) {
-        val currentZoom = if (is2xMode) 2.0f else (currentFocalLength / 24.0f)
+        val currentZoom = if (currentLens?.isZoomPreset == true && currentLens?.targetZoomRatio != null) {
+            currentLens!!.targetZoomRatio!!
+        } else {
+            1.0f
+        }
+        val combinedOrientation = getCombinedOrientation()
         val startTime = burstStartTime
         val captureEndTime = System.currentTimeMillis()
         val appContext = context?.applicationContext ?: return
 
         (appContext as MainApplication).applicationScope.launch(Dispatchers.IO) {
             var fallbackSent = false
+            var isHdrPlusSuccess = false
             try {
                 val context = appContext
-
                 Log.d(TAG, "processHdrPlusBurst started with ${frames.size} frames. DigitalGain=$digitalGain")
 
-                // 1. Prepare buffers
                 val width = frames[0].width
                 val height = frames[0].height
                 val rotationDegrees = frames[0].rotationDegrees
 
                 val buffers = frames.map { it.buffer!! }.toTypedArray()
 
-                // Need characteristics for static info
-                var chars: CameraCharacteristics? = null
-                val cam = camera
-                val camInfo = cam?.cameraInfo
-                if (camInfo is Camera2CameraInfo) {
-                    chars = Camera2CameraInfo.extractCameraCharacteristics(camInfo)
-                }
-
-                // 2. Metadata (WB, CCM, BlackLevel)
                 val timestamp = frames[0].timestamp
                 val result = findCaptureResult(timestamp)
 
-                // Default values
+                var chars: android.hardware.camera2.CameraCharacteristics? = null
+                val cam = camera
+                val camInfo = cam?.cameraInfo
+
+                val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as android.hardware.camera2.CameraManager
+                val camera2InfoId = if (camInfo != null) Camera2CameraInfo.from(camInfo).cameraId else "0"
+
+                val activePhysicalId = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && result != null) {
+                    result.get(android.hardware.camera2.CaptureResult.LOGICAL_MULTI_CAMERA_ACTIVE_PHYSICAL_ID)
+                } else null
+
+                val targetCharId = activePhysicalId ?: frames[0].physicalId ?: currentLens?.id ?: camera2InfoId
+                Log.d(TAG, "Fetching HDR+ characteristics for processing using ID: $targetCharId")
+                chars = cameraManager.getCameraCharacteristics(targetCharId)
+
                 var whiteLevel = 1023
-                var blackLevel = 64
+                var blackLevelPattern = intArrayOf(64, 64, 64, 64)
                 var wb = floatArrayOf(2.0f, 1.0f, 1.0f, 1.5f)
-                var ccm = floatArrayOf(
+                var ccmMain = floatArrayOf(
                     2.0f, -1.0f, 0.0f,
                     -0.5f, 2.0f, -0.5f,
                     0.0f, -1.0f, 2.0f
                 )
-                var cfa = 0 // Default RGGB
+                var cfa = 0
+                var ccmSensor = ccmMain.copyOf()
+                var ccmCapture = ccmMain.copyOf()
+                var lensShadingMapData: FloatArray? = null
+                var lensShadingRows = 0
+                var lensShadingCols = 0
+                val useSensorColorMatrix = false
 
                 if (chars != null) {
                     whiteLevel = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_WHITE_LEVEL) ?: 1023
                     val bl = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_BLACK_LEVEL_PATTERN)
-                    if (bl != null) blackLevel = bl.getOffsetForIndex(0, 0)
+                    if (bl != null) {
+                        blackLevelPattern = intArrayOf(
+                            bl.getOffsetForIndex(0, 0),
+                            bl.getOffsetForIndex(1, 0),
+                            bl.getOffsetForIndex(0, 1),
+                            bl.getOffsetForIndex(1, 1)
+                        )
+                    }
 
                     val cfaEnum = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_COLOR_FILTER_ARRANGEMENT)
-                    if (cfaEnum != null) cfa = cfaEnum // Pass Raw Enum (0..3)
+                    if (cfaEnum != null) cfa = cfaEnum
                 }
 
                 result?.let { r ->
@@ -2227,15 +2906,48 @@ class CameraFragment : Fragment() {
                         for(row in 0 until 3) {
                             for(col in 0 until 3) {
                                 val rat = ccmMat.getElement(col, row)
-                                ccm[idx++] = rat.toFloat()
+                                ccmCapture[idx++] = rat.toFloat()
                             }
                         }
                     }
+
+                    if (useSensorColorMatrix && chars != null) {
+                        val sensorMat = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_COLOR_TRANSFORM1)
+                        if (sensorMat != null) {
+                            var idx = 0
+                            for (row in 0 until 3) {
+                                for (col in 0 until 3) {
+                                    val rat = sensorMat.getElement(col, row)
+                                    ccmSensor[idx++] = rat.toFloat()
+                                }
+                            }
+                        }
+                    }
+
+                    val lsc = r.get(android.hardware.camera2.CaptureResult.STATISTICS_LENS_SHADING_CORRECTION_MAP)
+                    if (lsc != null) {
+                        lensShadingRows = lsc.rowCount
+                        lensShadingCols = lsc.columnCount
+                        val out = FloatArray(4 * lensShadingRows * lensShadingCols)
+                        fun idx(ch: Int, row: Int, col: Int): Int = ch * lensShadingRows * lensShadingCols + row * lensShadingCols + col
+                        for (row in 0 until lensShadingRows) {
+                            for (col in 0 until lensShadingCols) {
+                                out[idx(0, row, col)] = lsc.getGainFactor(0, col, row)
+                                out[idx(1, row, col)] = lsc.getGainFactor(1, col, row)
+                                out[idx(2, row, col)] = lsc.getGainFactor(2, col, row)
+                                out[idx(3, row, col)] = lsc.getGainFactor(3, col, row)
+                            }
+                        }
+                        lensShadingMapData = out
+                    }
                 }
 
-                Log.d(TAG, "Metadata: WL=$whiteLevel, BL=$blackLevel, WB=${wb.joinToString()}, CFA=$cfa")
+                
+                val ccm = if (useSensorColorMatrix) ccmSensor else ccmCapture
+                val ccmAlt = if (useSensorColorMatrix) ccmCapture else ccmSensor
+                val exportMatrixAB = false
+Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB=${wb.joinToString()}, CFA=$cfa, LSC=${lensShadingRows}x${lensShadingCols}, useSensorCCM=$useSensorColorMatrix")
 
-                // 4. Settings (Log/LUT)
                 val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
                 val targetLogName = prefs.getString(SettingsFragment.KEY_TARGET_LOG, "None")
                 val targetLogIndex = SettingsFragment.LOG_CURVES.indexOf(targetLogName)
@@ -2247,16 +2959,12 @@ class CameraFragment : Fragment() {
                     if (lutFile.exists()) nativeLutPath = lutFile.absolutePath
                 }
 
-                Log.d(TAG, "Settings: Log=$targetLogName ($targetLogIndex), LUT=$nativeLutPath")
-
-                // Extract Real Metadata
                 val iso = result?.get(android.hardware.camera2.CaptureResult.SENSOR_SENSITIVITY) ?: 100
                 val exposureTime = result?.get(android.hardware.camera2.CaptureResult.SENSOR_EXPOSURE_TIME) ?: 10_000_000L
                 val fNumber = result?.get(android.hardware.camera2.CaptureResult.LENS_APERTURE) ?: 1.8f
                 val focalLength = result?.get(android.hardware.camera2.CaptureResult.LENS_FOCAL_LENGTH) ?: 0.0f
                 val captureTime = System.currentTimeMillis()
 
-                // 5. Output Path
                 val dngName = SimpleDateFormat(FILENAME, Locale.US).format(System.currentTimeMillis()) + "_HDRPLUS"
                 val saveTiff = prefs.getBoolean(SettingsFragment.KEY_SAVE_TIFF, true)
                 val saveJpg = prefs.getBoolean(SettingsFragment.KEY_SAVE_JPG, true)
@@ -2268,80 +2976,93 @@ class CameraFragment : Fragment() {
                 val tempJpgFile = File(context.cacheDir, "$dngName.tmp.jpg")
                 val fullResJpgFile = File(context.cacheDir, "${dngName}_full.jpg")
 
-                // We now use Native JPEG compression (libjpeg-turbo) instead of allocating a large Bitmap in Java
-                val outputBitmap: android.graphics.Bitmap? = null
-
-                // Save Linear DNG (as requested)
                 val linearDngFile = File(context.cacheDir, "${dngName}_linear.dng")
                 val linearDngPath = linearDngFile.absolutePath
 
                 Log.d(TAG, "Output Paths: TIFF=$tiffPath, DNG=$linearDngPath")
 
-                // 6. JNI Call
                 val jniStartTime = System.currentTimeMillis()
-                // Ensure buffers are rewound just in case
                 buffers.forEach { it.rewind() }
 
-                val debugStats = LongArray(15) // Expanded for stage profiling
+                val debugStats = LongArray(15)
 
-                // We always call JNI to produce a FAST JPEG first, and save a temp raw file.
-                // The heavy processing (TIFF, DNG, Full-res JPEG) is delegated to WorkManager.
+                // Initial JNI call produces:
+                // 1) intermediate linear RAW buffer (tempRawPath) for the ExportWorker,
+                // 2) optional fast downsampled JPEG (tempJpgPath) for immediate gallery update.
+                val mirror = shouldMirror
+
                 val ret = ColorProcessor.processHdrPlus(
                     buffers,
                     width, height,
-                    rotationDegrees, // JNI will use this to rotate the preview JPEG
-                    whiteLevel, blackLevel,
-                    wb, ccm, cfa,
+                    combinedOrientation,
+                    whiteLevel, blackLevelPattern,
+                    lensShadingMapData, lensShadingRows, lensShadingCols, useSensorColorMatrix,
+                    wb, ccm, ccmAlt, exportMatrixAB, cfa,
                     iso, exposureTime, fNumber, focalLength, captureTime,
                     targetLogIndex,
                     nativeLutPath,
-                    null, // Don't save TIFF in first pass
-                    tempJpgFile.absolutePath, // Fast (downsampled) JPEG
-                    null, // Don't save Linear DNG in first pass
+                    null, // outputTiffPath
+                    if (saveJpg) tempJpgFile.absolutePath else null, // outputJpgPath (fast preview)
+                    null, // outputDngPath
                     digitalGain,
                     debugStats,
-                    outputBitmap,
-                    false, // Force sync JNI call for the fast JPEG
-                    tempRawFile.absolutePath // Always save raw for second pass
+                    null, // outputBitmap
+                    false, // isAsync (deprecated in favor of WorkManager)
+                    tempRawFile.absolutePath,
+                    currentZoom,
+                    mirror
                 )
 
                 val jniEndTime = System.currentTimeMillis()
                 Log.d(TAG, "JNI processHdrPlus returned $ret in ${jniEndTime - jniStartTime}ms")
 
                 if (ret == 0) {
+                    isHdrPlusSuccess = true
+
                     val saveStartTime = System.currentTimeMillis()
 
-                    // Save the FAST (downsampled) JPEG immediately to UI and MediaStore
-                    val finalJpgUri = ImageSaver.saveProcessedImage(
-                        context,
-                        null,
-                        tempJpgFile.absolutePath,
-                        0, // Rotation ALREADY DONE in JNI
-                        currentZoom,
-                        dngName,
-                        null,
-                        null,
-                        saveJpg,
-                        false
-                    )
+                    val mirror = shouldMirror
 
-                    // Always use WorkManager for the heavy pass (Full-res JPEG, TIFF, DNG)
-                    // This honors the "fast jpeg" requirement by showing the downsampled one first
-                    // and then silently replacing it with the full-res version.
+                    val fastJpegUri = if (saveJpg) {
+                        ImageSaver.saveProcessedImage(
+                            context = context,
+                            inputBitmap = null,
+                            bmpPath = tempJpgFile.absolutePath,
+                            rotationDegrees = 0, // Rotation already handled in JNI
+                            zoomFactor = 1.0f, // Zoom already handled in JNI
+                            baseName = dngName,
+                            linearDngPath = null,
+                            tiffPath = null,
+                            saveJpg = true,
+                            saveTiff = false,
+                            mirror = false // Mirroring already handled in JNI
+                        )
+                    } else {
+                        null
+                    }
+
+                    withContext(Dispatchers.Main) {
+                        if (fastJpegUri != null) {
+                            setGalleryThumbnail(fastJpegUri.toString())
+                        }
+                        Toast.makeText(context, "HDR+ Saved!", Toast.LENGTH_SHORT).show()
+                        hideProcessingAnimation()
+                    }
+
                     val workData = androidx.work.Data.Builder()
                         .putString("tempRawPath", tempRawFile.absolutePath)
                         .putInt("width", width)
                         .putInt("height", height)
-                        .putInt("orientation", rotationDegrees)
+                        .putInt("orientation", combinedOrientation)
                         .putFloat("digitalGain", digitalGain)
                         .putInt("targetLog", targetLogIndex)
                         .putString("lutPath", nativeLutPath)
                         .putString("tiffPath", tiffPath)
                         .putString("jpgPath", if (saveJpg) fullResJpgFile.absolutePath else null)
-                        .putString("targetUri", finalJpgUri?.toString())
+                        .putString("targetUri", fastJpegUri?.toString()) // Replace fast JPEG in place
                         .putFloat("zoomFactor", currentZoom)
                         .putString("dngPath", linearDngPath)
-                        .putInt("iso", iso)
+                        .putInt("iso", (iso).toInt())
                         .putLong("exposureTime", exposureTime)
                         .putFloat("fNumber", fNumber)
                         .putFloat("focalLength", focalLength)
@@ -2351,6 +3072,7 @@ class CameraFragment : Fragment() {
                         .putString("baseName", dngName)
                         .putBoolean("saveTiff", saveTiff)
                         .putBoolean("saveJpg", saveJpg)
+                        .putBoolean("mirror", mirror)
                         .build()
 
                     val workRequest = androidx.work.OneTimeWorkRequestBuilder<HdrPlusExportWorker>()
@@ -2400,22 +3122,6 @@ class CameraFragment : Fragment() {
                     Log.i(TAG, logMsg)
                     com.android.example.cameraxbasic.utils.DebugLogManager.addLog(logMsg)
 
-                    // Update UI
-                    withContext(Dispatchers.Main) {
-                        if (finalJpgUri != null) {
-                            Toast.makeText(context, "HDR+ Saved!", Toast.LENGTH_SHORT).show()
-                            setGalleryThumbnail(finalJpgUri.toString())
-                        } else {
-                            // If user didn't request JPG, we might still have succeeded with others.
-                            // But usually JPG is default.
-                            if (saveJpg) {
-                                Toast.makeText(context, "HDR+ Save Failed", Toast.LENGTH_SHORT).show()
-                            } else {
-                                Toast.makeText(context, "HDR+ Saved!", Toast.LENGTH_SHORT).show()
-                            }
-                        }
-                    }
-
                 } else {
                     throw RuntimeException("JNI processing returned error code: $ret")
                 }
@@ -2423,10 +3129,9 @@ class CameraFragment : Fragment() {
             } catch (e: Exception) {
                 Log.e(TAG, "HDR+ processing failed, falling back to single shot", e)
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(context, "HDR+ failed, saving single frame...", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(appContext, "HDR+ failed, saving single frame...", Toast.LENGTH_SHORT).show()
                 }
 
-                // Fallback: Use the first frame as a single shot
                 if (frames.isNotEmpty()) {
                     try {
                         val firstFrame = frames[0]
@@ -2440,7 +3145,9 @@ class CameraFragment : Fragment() {
                             height = firstFrame.height,
                             timestamp = firstFrame.timestamp,
                             rotationDegrees = firstFrame.rotationDegrees,
-                            zoomRatio = currentZoom
+                            combinedOrientation = combinedOrientation,
+                            zoomRatio = currentZoom,
+                            physicalId = firstFrame.physicalId
                         )
                         processingChannel.send(holder)
                         fallbackSent = true
@@ -2453,17 +3160,19 @@ class CameraFragment : Fragment() {
                     HdrPlusBurst.releaseBuffer(it.buffer)
                     it.close()
                 }
-                // Release semaphore ONLY if we didn't hand off the work to the channel
                 if (!fallbackSent) {
                     processingSemaphore.release()
-                    // Refresh UI state (button availability) on Main thread after releasing slot
                     lifecycleScope.launch(Dispatchers.Main) {
                         resetBurstUi()
+                        if (!isHdrPlusSuccess) {
+                            hideProcessingAnimation()
+                        }
                     }
                 }
             }
         }
     }
+
     private fun updateHdrPlusUi() {
         cameraUiContainerBinding?.hdrPlusToggle?.let { toggle ->
             val color = if (isHdrPlusEnabled)
@@ -2476,21 +3185,639 @@ class CameraFragment : Fragment() {
         }
     }
 
+    @SuppressLint("MissingPermission")
+    private suspend fun openCamera2(cameraId: String) {
+        // Ensure previous device and session are closed
+        closeCamera2()
+
+        Log.d(TAG, "Opening Camera2: $cameraId (retryCount: $camera2RetryCount)")
+
+        if (camera2Thread == null) {
+            camera2Thread = HandlerThread("Camera2Thread").apply { start() }
+            camera2Handler = Handler(camera2Thread!!.looper)
+        }
+
+        try {
+            camera2Manager.openCamera(cameraId, object : android.hardware.camera2.CameraDevice.StateCallback() {
+                override fun onOpened(device: android.hardware.camera2.CameraDevice) {
+                    lifecycleScope.launch(Dispatchers.Main) {
+                        camera2Lock.withLock {
+                            camera2RetryCount = 0 // Reset on success
+                            camera2Device = device
+                            createCamera2CaptureSession()
+                        }
+                    }
+                }
+
+                override fun onDisconnected(device: android.hardware.camera2.CameraDevice) {
+                    lifecycleScope.launch { closeCamera2() }
+                }
+
+                override fun onError(device: android.hardware.camera2.CameraDevice, error: Int) {
+                    Log.e(TAG, "Camera2 open error: $error for camera $cameraId")
+                    lifecycleScope.launch { closeCamera2() }
+
+                    if (error == 2 && camera2RetryCount < 1) {
+                         camera2RetryCount++
+                         Log.i(TAG, "Retrying camera open after hardware error (attempt $camera2RetryCount)...")
+                         camera2Handler?.postDelayed({
+                             lifecycleScope.launch { openCamera2(cameraId) }
+                         }, 500)
+                         return
+                    }
+
+                    lifecycleScope.launch(Dispatchers.Main) {
+                        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                        val useCameraxFallback = prefs.getBoolean(SettingsFragment.KEY_USE_CAMERAX, false)
+
+                        if (useCameraxFallback) {
+                            Log.w(TAG, "Camera2 failed after retries, falling back to CameraX Auto")
+                            currentLens = availableLenses.find { it.isLogicalAuto }
+                            updateLensUI()
+                            bindCameraUseCases()
+                        } else {
+                            Toast.makeText(context, "Camera hardware error: $error. Please restart the app.", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                }
+            }, camera2Handler)
+        } catch (e: android.hardware.camera2.CameraAccessException) {
+            Log.e(TAG, "Failed to open Camera2", e)
+        }
+    }
+
+    private fun createCamera2CaptureSession() {
+        val device = camera2Device ?: return
+        val handler = camera2Handler ?: return
+
+        Log.d(TAG, "Creating Camera2 Capture Session for device: ${device.id}")
+
+        val chars = camera2Manager.getCameraCharacteristics(device.id)
+        val map = chars.get(android.hardware.camera2.CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+
+        val isRawSupportedLocally = map?.getOutputFormats()?.contains(android.graphics.ImageFormat.RAW_SENSOR) == true
+        if (isRawSupportedLocally) {
+            val rawSizes = map?.getOutputSizes(android.graphics.ImageFormat.RAW_SENSOR)
+            val size = rawSizes?.maxByOrNull { it.width * it.height } ?: android.util.Size(4000, 3000)
+            rawImageReader = ImageReader.newInstance(size.width, size.height, android.graphics.ImageFormat.RAW_SENSOR, 8)
+        } else {
+            val jpegSizes = map?.getOutputSizes(android.graphics.ImageFormat.JPEG)
+            val size = jpegSizes?.maxByOrNull { it.width * it.height } ?: android.util.Size(4000, 3000)
+            rawImageReader = ImageReader.newInstance(size.width, size.height, android.graphics.ImageFormat.JPEG, 8)
+        }
+
+        val yuvSizes = map?.getOutputSizes(android.graphics.ImageFormat.YUV_420_888)
+        val analysisSize = yuvSizes?.filter { it.width.toFloat()/it.height.toFloat() in 1.3f..1.4f }
+            ?.minByOrNull { it.width * it.height } ?: android.util.Size(640, 480)
+        analysisImageReader = ImageReader.newInstance(analysisSize.width, analysisSize.height, android.graphics.ImageFormat.YUV_420_888, 2)
+
+        analysisImageReader?.setOnImageAvailableListener({ reader ->
+            val image = reader.acquireLatestImage() ?: return@setOnImageAvailableListener
+            try {
+                val plane = image.planes[0]
+                val buffer = plane.buffer
+                val width = image.width
+                val height = image.height
+                val rowStride = plane.rowStride
+                val pixelStride = plane.pixelStride
+
+                var highlightCount = 0
+
+                // Sample pixels to save CPU while still getting a good estimate
+                var totalSampled = 0
+                for (y in 0 until height step ANALYSIS_SAMPLING_STEP) {
+                    val rowStart = y * rowStride
+                    for (x in 0 until width step ANALYSIS_SAMPLING_STEP) {
+                        val value = buffer.get(rowStart + x * pixelStride).toInt() and 0xFF
+                        if (value > ANALYSIS_HIGHLIGHT_THRESHOLD) {
+                            highlightCount++
+                        }
+                        totalSampled++
+                    }
+                }
+                lastClippingRatio = if (totalSampled > 0) highlightCount.toDouble() / totalSampled else 0.0
+            } catch (e: Exception) {
+                Log.e(TAG, "Error analyzing image", e)
+            } finally {
+                image.close()
+            }
+        }, handler)
+
+        val previewSize = map?.getOutputSizes(android.graphics.SurfaceTexture::class.java)
+            ?.filter { it.width.toFloat()/it.height.toFloat() in 1.3f..1.4f }
+            ?.maxByOrNull { it.width * it.height } ?: android.util.Size(1440, 1080)
+
+        Log.d(TAG, "Requesting preview surface from LutProcessor: ${previewSize.width}x${previewSize.height}")
+        lutProcessor?.getInputSurface(previewSize.width, previewSize.height) { surface ->
+            lifecycleScope.launch(Dispatchers.Main) {
+                camera2Lock.withLock {
+                    if (!isAdded || camera2Device !== device) {
+                        Log.w(TAG, "Preview surface ready but fragment detached or device changed/closed. Ignoring.")
+                        return@withLock
+                    }
+
+                    camera2PreviewSurface = surface
+                    val surfaces = listOf(surface, rawImageReader!!.surface, analysisImageReader!!.surface)
+
+                    try {
+                        device.createCaptureSession(surfaces, object : android.hardware.camera2.CameraCaptureSession.StateCallback() {
+                    override fun onConfigured(session: android.hardware.camera2.CameraCaptureSession) {
+                        lifecycleScope.launch(Dispatchers.Main) {
+                            camera2Lock.withLock {
+                                camera2Session = session
+                            }
+                        }
+                        try {
+                            val request = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_PREVIEW)
+                            request.addTarget(surface)
+                            analysisImageReader?.surface?.let { request.addTarget(it) }
+
+                            applyManualSettingsToRequest(request)
+
+                            val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                            val force60fps = prefs.getBoolean(SettingsFragment.KEY_FORCE_60FPS, true)
+                            if (force60fps) {
+                                val fpsRanges = chars.get(android.hardware.camera2.CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
+                                val targetRange = fpsRanges?.find { it.upper == 60 }
+                                if (targetRange != null) {
+                                    Log.d(TAG, "Setting target FPS range to: $targetRange")
+                                    request.set(android.hardware.camera2.CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, targetRange)
+                                }
+                            }
+
+                            if (!isManualFocus) {
+                                request.set(android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE, android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
+                            }
+
+                            session.setRepeatingRequest(request.build(), object : android.hardware.camera2.CameraCaptureSession.CaptureCallback() {
+                                override fun onCaptureCompleted(session: android.hardware.camera2.CameraCaptureSession, request: android.hardware.camera2.CaptureRequest, result: android.hardware.camera2.TotalCaptureResult) {
+                                    val timestamp = result.get(android.hardware.camera2.CaptureResult.SENSOR_TIMESTAMP)
+                                    if (timestamp != null) {
+                                        captureResults[timestamp] = result
+                                    }
+                                    captureResultFlow.tryEmit(result)
+                                }
+                            }, handler)
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Failed to start repeating request", e)
+                        }
+                    }
+
+                    override fun onConfigureFailed(session: android.hardware.camera2.CameraCaptureSession) {
+                        Log.e(TAG, "Camera2 session config failed")
+                    }
+                }, handler)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to create capture session", e)
+            }
+                }
+            }
+        }
+    }
+
+    private fun takeSinglePictureCamera2() {
+        val device = camera2Device ?: run { processingSemaphore.release(); return }
+        val session = camera2Session ?: run { processingSemaphore.release(); return }
+        val reader = rawImageReader ?: run { processingSemaphore.release(); return }
+        val handler = camera2Handler ?: run { processingSemaphore.release(); return }
+
+        try {
+            val request = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_STILL_CAPTURE)
+            request.addTarget(reader.surface)
+            request.set(android.hardware.camera2.CaptureRequest.JPEG_ORIENTATION, getCombinedOrientation())
+
+            applyManualSettingsToRequest(request)
+
+            reader.setOnImageAvailableListener({ r ->
+                val image = r.acquireLatestImage() ?: return@setOnImageAvailableListener
+                try {
+                    val currentZoom = if (currentLens?.isZoomPreset == true && currentLens?.targetZoomRatio != null) {
+                        currentLens!!.targetZoomRatio!!
+                    } else {
+                        1.0f
+                    }
+                    if (image.format == android.graphics.ImageFormat.RAW_SENSOR) {
+                        val holder = copyAndroidImageToHolder(image, currentZoom, getCombinedOrientation(), currentLens?.id)
+                        image.close()
+                        showProcessingAnimation()
+                        lifecycleScope.launch {
+                            processingChannel.send(holder)
+                        }
+                    } else {
+                        // JPEG path
+                        val buffer = image.planes[0].buffer
+                        val data = ByteArray(buffer.remaining())
+                        buffer.get(data)
+                        image.close()
+                       
+                        showProcessingAnimation()
+                        saveJpegFallback(data, 0, currentZoom) // Rotation handled by C2 JPEG_ORIENTATION
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to process Camera2 image", e)
+                    image.close()
+                    processingSemaphore.release()
+                }
+            }, handler)
+
+            session.capture(request.build(), object : android.hardware.camera2.CameraCaptureSession.CaptureCallback() {
+                override fun onCaptureStarted(session: android.hardware.camera2.CameraCaptureSession, request: android.hardware.camera2.CaptureRequest, timestamp: Long, frameNumber: Long) {
+                    lifecycleScope.launch(Dispatchers.Main) {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                             fragmentCameraBinding.root.foreground = ColorDrawable(Color.WHITE)
+                             fragmentCameraBinding.root.postDelayed({ fragmentCameraBinding.root.foreground = null }, 50)
+                        }
+                    }
+                }
+
+                override fun onCaptureCompleted(session: android.hardware.camera2.CameraCaptureSession, request: android.hardware.camera2.CaptureRequest, result: android.hardware.camera2.TotalCaptureResult) {
+                    val timestamp = result.get(android.hardware.camera2.CaptureResult.SENSOR_TIMESTAMP)
+                    if (timestamp != null) {
+                        captureResults[timestamp] = result
+                    }
+                    captureResultFlow.tryEmit(result)
+                }
+            }, handler)
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Camera2 capture failed", e)
+            processingSemaphore.release()
+        }
+    }
+
+    private fun triggerHdrPlusBurstCamera2() {
+        val device = camera2Device ?: run { processingSemaphore.release(); return }
+        val session = camera2Session ?: run { processingSemaphore.release(); return }
+        val reader = rawImageReader ?: run { processingSemaphore.release(); return }
+        val handler = camera2Handler ?: run { processingSemaphore.release(); return }
+
+        isBurstActive = true
+        burstStartTime = System.currentTimeMillis()
+
+        try {
+            val result = captureResultFlow.replayCache.lastOrNull()
+            val curIso = result?.get(android.hardware.camera2.CaptureResult.SENSOR_SENSITIVITY) ?: 100
+            val curTime = result?.get(android.hardware.camera2.CaptureResult.SENSOR_EXPOSURE_TIME) ?: 10_000_000L
+            val validIsoRange = isoRange ?: android.util.Range(100, 3200)
+            val validTimeRange = exposureTimeRange ?: android.util.Range(1000L, 1_000_000_000L)
+            val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+            val underexposureMode = prefs.getString(SettingsFragment.KEY_HDR_UNDEREXPOSURE_MODE, "Dynamic (Experimental)") ?: "Dynamic (Experimental)"
+
+            val config = ExposureUtils.calculateHdrPlusExposure(
+                curIso, curTime, validIsoRange, validTimeRange, underexposureMode, lastClippingRatio
+            )
+
+            val burstSize = (prefs.getString(SettingsFragment.KEY_HDR_BURST_COUNT, "3") ?: "3").toIntOrNull() ?: 3
+
+            hdrPlusBurstHelper = HdrPlusBurst(frameCount = burstSize, onBurstComplete = { frames ->
+                processHdrPlusBurst(frames, config.digitalGain)
+            })
+
+            lifecycleScope.launch(Dispatchers.Main) {
+                cameraUiContainerBinding?.captureProgress?.max = burstSize
+                cameraUiContainerBinding?.captureProgress?.progress = 0
+                cameraUiContainerBinding?.captureProgress?.visibility = View.VISIBLE
+                cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = false
+                cameraUiContainerBinding?.cameraCaptureButton?.alpha = 0.5f
+            }
+
+            val burstRequests = mutableListOf<android.hardware.camera2.CaptureRequest>()
+            val combinedOrientation = getCombinedOrientation()
+            for (i in 0 until burstSize) {
+                val request = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_STILL_CAPTURE)
+                request.addTarget(reader.surface)
+                request.set(android.hardware.camera2.CaptureRequest.JPEG_ORIENTATION, combinedOrientation)
+
+                applyManualSettingsToRequest(request, true)
+
+                request.set(android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE, android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE_OFF)
+                request.set(android.hardware.camera2.CaptureRequest.SENSOR_SENSITIVITY, config.iso)
+                request.set(android.hardware.camera2.CaptureRequest.SENSOR_EXPOSURE_TIME, config.exposureTime)
+
+                burstRequests.add(request.build())
+            }
+
+            var framesCaptured = 0
+
+            val watchdog = lifecycleScope.launch(Dispatchers.Main) {
+                delay(8000)
+                if (isBurstActive && framesCaptured < burstSize) {
+                    Log.e(TAG, "Burst capture timed out! Resetting UI.")
+                    Toast.makeText(requireContext(), "Burst capture timed out", Toast.LENGTH_SHORT).show()
+                    isBurstActive = false
+                    processingSemaphore.release()
+                    resetBurstUi()
+                }
+            }
+
+            reader.setOnImageAvailableListener({ r ->
+                val image = r.acquireNextImage() ?: return@setOnImageAvailableListener
+                try {
+                    val plane = image.planes[0]
+                    val chars = camera2Manager.getCameraCharacteristics(currentLens?.id ?: "0")
+                    val sensorOrientation = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
+
+                    hdrPlusBurstHelper?.addManualFrame(
+                        plane.buffer,
+                        image.width,
+                        image.height,
+                        plane.rowStride,
+                        plane.pixelStride,
+                        image.timestamp,
+                        sensorOrientation,
+                        currentLens?.id
+                    )
+                    image.close()
+                    framesCaptured++
+                    lifecycleScope.launch(Dispatchers.Main) {
+                        cameraUiContainerBinding?.captureProgress?.progress = framesCaptured
+                    }
+                    if (framesCaptured >= burstSize) {
+                        watchdog.cancel()
+                        lifecycleScope.launch(Dispatchers.Main) {
+                            resetBurstUi()
+                            showProcessingAnimation()
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to add C2 frame", e)
+                    image.close()
+                }
+            }, handler)
+
+            // Sequential capture instead of captureBurst to comply with requirements
+            for (request in burstRequests) {
+                session.capture(request, object : android.hardware.camera2.CameraCaptureSession.CaptureCallback() {
+                    override fun onCaptureCompleted(session: android.hardware.camera2.CameraCaptureSession, request: android.hardware.camera2.CaptureRequest, result: android.hardware.camera2.TotalCaptureResult) {
+                        val timestamp = result.get(android.hardware.camera2.CaptureResult.SENSOR_TIMESTAMP)
+                        if (timestamp != null) {
+                            captureResults[timestamp] = result
+                        }
+                        captureResultFlow.tryEmit(result)
+                    }
+                }, handler)
+            }
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Camera2 burst failed", e)
+            isBurstActive = false
+            processingSemaphore.release()
+            lifecycleScope.launch(Dispatchers.Main) {
+                resetBurstUi()
+            }
+        }
+    }
+
+    private fun copyAndroidImageToHolder(image: android.media.Image, zoomRatio: Float, combinedOrientation: Int, physicalId: String?): RawImageHolder {
+        val plane = image.planes[0]
+        val buffer = plane.buffer
+        val rowStride = plane.rowStride
+        val pixelStride = 2 // RAW16
+        val width = image.width
+        val height = image.height
+
+        val rowLength = width * pixelStride
+        val data = ByteArray(rowLength * height)
+
+        buffer.rewind()
+        if (rowStride == rowLength) {
+            buffer.get(data)
+        } else {
+            for (y in 0 until height) {
+                buffer.position(y * rowStride)
+                buffer.get(data, y * rowLength, rowLength)
+            }
+        }
+
+        val chars = camera2Manager.getCameraCharacteristics(physicalId ?: "0")
+        val sensorOrientation = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
+
+        return RawImageHolder(
+            data = data,
+            width = width,
+            height = height,
+            timestamp = image.timestamp,
+            rotationDegrees = sensorOrientation,
+            combinedOrientation = combinedOrientation,
+            zoomRatio = zoomRatio,
+            physicalId = physicalId
+        )
+    }
+
+
+    private fun getTargetOisMode(isHdrBurst: Boolean): Int {
+        return if (isHdrBurst && !isHdrOisEnabledPref) {
+            android.hardware.camera2.CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_OFF
+        } else {
+            android.hardware.camera2.CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON
+        }
+    }
+
+    private fun <B> applyStabilizationLogic(
+        builder: B,
+        isHdrBurst: Boolean,
+        setOption: (B, android.hardware.camera2.CaptureRequest.Key<Int>, Int) -> Unit
+    ) {
+        if (isOisSupported) {
+            val mode = getTargetOisMode(isHdrBurst)
+            setOption(builder, android.hardware.camera2.CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE, mode)
+            // Explicitly disable EIS when OIS is in use to avoid conflicts
+            setOption(builder, android.hardware.camera2.CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, android.hardware.camera2.CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF)
+        } else {
+            setOption(builder, android.hardware.camera2.CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE, android.hardware.camera2.CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_OFF)
+        }
+    }
+
+    private fun applyStabilizationOptions(builder: CaptureRequestOptions.Builder, isHdrBurst: Boolean) {
+        applyStabilizationLogic(builder, isHdrBurst) { b, key, value ->
+            b.setCaptureRequestOption(key, value)
+        }
+    }
+
+    private fun applyStabilizationToRequest(request: android.hardware.camera2.CaptureRequest.Builder, isHdrBurst: Boolean) {
+        applyStabilizationLogic(request, isHdrBurst) { r, key, value ->
+            r.set(key, value)
+        }
+
+        if (isOisSupported) {
+            val mode = getTargetOisMode(isHdrBurst)
+            Log.d(TAG, "OIS ${if(mode == android.hardware.camera2.CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON) "enabled" else "disabled"} for ${if(isHdrBurst) "HDR+ Burst" else "Standard/Preview"}")
+        }
+    }
+
+    private fun applyManualSettingsToRequest(request: android.hardware.camera2.CaptureRequest.Builder, isHdrBurst: Boolean = false) {
+        // Apply Stabilization
+        applyStabilizationToRequest(request, isHdrBurst)
+
+        if (isManualExposure) {
+            request.set(android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE, android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE_OFF)
+            request.set(android.hardware.camera2.CaptureRequest.SENSOR_SENSITIVITY, currentIso)
+            request.set(android.hardware.camera2.CaptureRequest.SENSOR_EXPOSURE_TIME, currentExposureTime)
+
+            if (isFlashEnabled) {
+                request.set(android.hardware.camera2.CaptureRequest.FLASH_MODE, android.hardware.camera2.CaptureRequest.FLASH_MODE_TORCH)
+            } else {
+                request.set(android.hardware.camera2.CaptureRequest.FLASH_MODE, android.hardware.camera2.CaptureRequest.FLASH_MODE_OFF)
+            }
+        } else {
+            if (isFlashEnabled) {
+                request.set(android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE, android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE_ON_ALWAYS_FLASH)
+            } else {
+                request.set(android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE, android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE_ON)
+            }
+        }
+
+        if (isManualFocus) {
+            request.set(android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE, android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE_OFF)
+            request.set(android.hardware.camera2.CaptureRequest.LENS_FOCUS_DISTANCE, currentFocusDistance)
+        } else {
+            if (focusMeteringRegion != null) {
+                request.set(android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE, android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE_AUTO)
+                request.set(android.hardware.camera2.CaptureRequest.CONTROL_AF_REGIONS, arrayOf(focusMeteringRegion))
+            } else {
+                request.set(android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE, android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
+            }
+        }
+
+        if (!isManualExposure && exposureMeteringRegion != null) {
+            request.set(android.hardware.camera2.CaptureRequest.CONTROL_AE_REGIONS, arrayOf(exposureMeteringRegion))
+        }
+
+        if (currentLens?.useCamera2 == true) {
+            val deviceId = camera2Device?.id ?: currentLens?.id
+            if (deviceId != null) {
+                val chars = camera2Manager.getCameraCharacteristics(deviceId)
+                val activeArray = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
+                if (activeArray != null) {
+                    val targetRatio = if (currentLens?.isZoomPreset == true && currentLens?.targetZoomRatio != null) {
+                        currentLens!!.targetZoomRatio!!
+                    } else {
+                        1.0f
+                    }
+                    if (targetRatio > 1.01f) {
+                        val cropW = (activeArray.width() / targetRatio).toInt()
+                        val cropH = (activeArray.height() / targetRatio).toInt()
+                        val centerX = activeArray.centerX()
+                        val centerY = activeArray.centerY()
+                        val cropRegion = android.graphics.Rect(
+                            centerX - cropW / 2,
+                            centerY - cropH / 2,
+                            centerX + cropW / 2,
+                            centerY + cropH / 2
+                        )
+                        request.set(android.hardware.camera2.CaptureRequest.SCALER_CROP_REGION, cropRegion)
+                    } else {
+                        request.set(android.hardware.camera2.CaptureRequest.SCALER_CROP_REGION, activeArray)
+                    }
+                }
+            }
+        }
+    }
+
+    private suspend fun closeCamera2() {
+        camera2Lock.withLock {
+            camera2Session?.close()
+            camera2Session = null
+            camera2Device?.close()
+            camera2Device = null
+            rawImageReader?.close()
+            rawImageReader = null
+            analysisImageReader?.close()
+            analysisImageReader = null
+            camera2PreviewSurface = null
+            lutProcessor?.releaseInputSurface()
+            // Do NOT quit the thread here to avoid "dead thread" crash during callbacks
+        }
+    }
+
+    private suspend fun releaseCamera2Resources() {
+        closeCamera2()
+        camera2Thread?.quitSafely()
+        camera2Thread = null
+        camera2Handler = null
+    }
+
+    private fun syncManualFocusAfterTap() {
+        lifecycleScope.launch(Dispatchers.Default) {
+            withTimeoutOrNull(3000) {
+                captureResultFlow.first { res ->
+                    val afState = res.get(CaptureResult.CONTROL_AF_STATE)
+                    afState == CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED ||
+                            afState == CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED
+                }
+            }?.let { res ->
+                val dist = res.get(CaptureResult.LENS_FOCUS_DISTANCE)
+                if (dist != null) {
+                    currentFocusDistance = dist
+                    withContext(Dispatchers.Main) {
+                        isManualFocus = true
+                        applyCameraControls()
+                        updateManualPanel()
+                        updateTabColors()
+                    }
+                }
+            }
+        }
+    }
+
     private fun resetBurstUi() {
-        // Run on Main Thread
         cameraUiContainerBinding?.captureProgress?.visibility = View.GONE
         isBurstActive = false
 
-        // Check if we can enable the button (processing limit)
         if (processingSemaphore.availablePermits > 0) {
             cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
             cameraUiContainerBinding?.cameraCaptureButton?.alpha = 1.0f
         } else {
-            // Keep disabled or show busy state if needed, but standard logic
-            // only disables if 0 permits. Here we just re-enable if possible.
-            // If full, it remains disabled (or we should explicitly disable to be safe).
             cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = false
             cameraUiContainerBinding?.cameraCaptureButton?.alpha = 0.5f
         }
+    }
+
+    private fun getMeteringRectangle(
+        x: Float, y: Float,
+        viewWidth: Int, viewHeight: Int,
+        sensorOrientation: Int,
+        lensFacing: Int,
+        cropRegion: android.graphics.Rect
+    ): MeteringRectangle {
+        val normalizedX = x / viewWidth
+        val normalizedY = y / viewHeight
+
+        val displayRotation = when (displayManager.getDisplay(displayId)?.rotation) {
+            Surface.ROTATION_90 -> 90
+            Surface.ROTATION_180 -> 180
+            Surface.ROTATION_270 -> 270
+            else -> 0
+        }
+
+        val sensorToDisplay = if (lensFacing == CameraSelector.LENS_FACING_FRONT) {
+            (sensorOrientation + displayRotation) % 360
+        } else {
+            (sensorOrientation - displayRotation + 360) % 360
+        }
+
+        val matrix = Matrix()
+        matrix.postRotate(-sensorToDisplay.toFloat(), 0.5f, 0.5f)
+        if (lensFacing == CameraSelector.LENS_FACING_FRONT) {
+            matrix.postScale(-1f, 1f, 0.5f, 0.5f)
+        }
+
+        val pts = floatArrayOf(normalizedX, normalizedY)
+        matrix.mapPoints(pts)
+
+        val sx = pts[0].coerceIn(0f, 1f)
+        val sy = pts[1].coerceIn(0f, 1f)
+
+        val centerX = cropRegion.left + (sx * cropRegion.width()).toInt()
+        val centerY = cropRegion.top + (sy * cropRegion.height()).toInt()
+
+        val size = (cropRegion.width() * 0.1f).toInt()
+        val rect = android.graphics.Rect(
+            (centerX - size / 2).coerceIn(cropRegion.left, cropRegion.right),
+            (centerY - size / 2).coerceIn(cropRegion.top, cropRegion.bottom),
+            (centerX + size / 2).coerceIn(cropRegion.left, cropRegion.right),
+            (centerY + size / 2).coerceIn(cropRegion.top, cropRegion.bottom)
+        )
+        return MeteringRectangle(rect, 1000)
     }
 }

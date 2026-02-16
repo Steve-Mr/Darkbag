@@ -24,7 +24,9 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processRaw(
         jstring lutPath,
         jstring outputTiffPath,
         jstring outputJpgPath,
-        jboolean useGpu // Ignored in new pipeline
+        jboolean useGpu, // Ignored in new pipeline
+        jint orientation,
+        jboolean mirror
 ) {
     LOGD("Native processRaw started using LibRaw.");
 
@@ -60,6 +62,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processRaw(
     RawProcessor.imgdata.params.no_auto_bright = 1;
     RawProcessor.imgdata.params.use_camera_wb = 1;
     RawProcessor.imgdata.params.output_color = 4; // ProPhotoRGB
+    RawProcessor.imgdata.params.user_flip = 0;    // Disable internal rotation to avoid double-rotation with Kotlin
 
     // Process
     if (RawProcessor.dcraw_process() != LIBRAW_SUCCESS) {
@@ -106,7 +109,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processRaw(
     const char* jpg_path_cstr = (outputJpgPath) ? env->GetStringUTFChars(outputJpgPath, 0) : nullptr;
 
     // Use Shared Pipeline (Gain = 1.0 for standard LibRaw output)
-    process_and_save_image(
+    bool saveOk = process_and_save_image(
         rawImage,
         image->width,
         image->height,
@@ -118,7 +121,12 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processRaw(
         0, // sourceColorSpace = ProPhoto (LibRaw output_color=4)
         nullptr, // ccm is not used for ProPhoto path
         nullptr, // wb is not used for ProPhoto path (LibRaw handles it)
-        0 // orientation = 0 (Assuming LibRaw handles rotation or it is already correct)
+        (int)orientation,
+        nullptr, // out_rgb_buffer
+        false, // isPreview
+        1, // downsampleFactor
+        1.0f, // zoomFactor
+        (bool)mirror
     );
 
     // Release Strings
@@ -130,7 +138,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processRaw(
     RawProcessor.recycle();
     delete[] buf;
 
-    return 0;
+    return saveOk ? 0 : -1;
 }
 
 extern "C" JNIEXPORT jfloatArray JNICALL

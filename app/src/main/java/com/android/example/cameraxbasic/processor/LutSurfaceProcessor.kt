@@ -18,7 +18,9 @@ class LutSurfaceProcessor : SurfaceProcessor {
 
     private val thread = HandlerThread("GLThread")
     private val handler: Handler
-    private val executor = Executors.newSingleThreadExecutor()
+    // Executor that runs tasks on the GL thread via the handler.
+    // This is safer as it won't throw RejectedExecutionException if shut down.
+    private val handlerExecutor = java.util.concurrent.Executor { runnable -> handler.post(runnable) }
 
     private var eglDisplay = EGL14.EGL_NO_DISPLAY
     private var eglContext = EGL14.EGL_NO_CONTEXT
@@ -29,6 +31,7 @@ class LutSurfaceProcessor : SurfaceProcessor {
     private var inputTextureId = 0
     private var lutTextureId = 0
     private var dummyLutTextureId = 0
+    private var logLutTextureId = 0
     private var program = 0
     private var outputSurface: Surface? = null
     private var width = 0
@@ -89,7 +92,7 @@ class LutSurfaceProcessor : SurfaceProcessor {
             this.inputTextureId = textureId
             this.inputSurfaceTexture = surfaceTexture
 
-            request.provideSurface(surface, executor) { result ->
+            request.provideSurface(surface, handlerExecutor) { result ->
                 // Clean up ONLY the resources created for THIS request
                 surface.release()
 
@@ -111,7 +114,7 @@ class LutSurfaceProcessor : SurfaceProcessor {
 
     override fun onOutputSurface(output: SurfaceOutput) {
         handler.post {
-            val s = output.getSurface(executor) {
+            val s = output.getSurface(handlerExecutor) {
                 // Handle close request if needed, though we manage EGL surface based on outputSurface var
                 if (outputSurface != null) {
                     outputSurface = null
@@ -119,6 +122,48 @@ class LutSurfaceProcessor : SurfaceProcessor {
                 }
             }
             setOutputSurfaceInternal(s, output.size.width, output.size.height)
+        }
+    }
+
+    // Direct Surface binding (TextureView)
+    fun getInputSurface(w: Int, h: Int, onSurfaceReady: (Surface) -> Unit) {
+        handler.post {
+            inputWidth = w
+            inputHeight = h
+
+            val textures = IntArray(1)
+            GLES30.glGenTextures(1, textures, 0)
+            val textureId = textures[0]
+
+            GLES30.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, textureId)
+            GLES30.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_NEAREST)
+            GLES30.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_NEAREST)
+            GLES30.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE)
+            GLES30.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE)
+
+            val surfaceTexture = SurfaceTexture(textureId)
+            surfaceTexture.setDefaultBufferSize(w, h)
+            surfaceTexture.setOnFrameAvailableListener({
+                handler.post { drawFrame() }
+            }, handler)
+
+            val surface = Surface(surfaceTexture)
+
+            this.inputTextureId = textureId
+            this.inputSurfaceTexture = surfaceTexture
+
+            onSurfaceReady(surface)
+        }
+    }
+
+    fun releaseInputSurface() {
+        handler.post {
+            inputSurfaceTexture?.release()
+            inputSurfaceTexture = null
+            if (inputTextureId != 0) {
+                GLES30.glDeleteTextures(1, intArrayOf(inputTextureId), 0)
+                inputTextureId = 0
+            }
         }
     }
 
@@ -143,7 +188,10 @@ class LutSurfaceProcessor : SurfaceProcessor {
 
     fun updateLut(lutData: FloatArray?, size: Int, logType: Int) {
         handler.post {
-            currentLogType = logType
+            if (currentLogType != logType) {
+                currentLogType = logType
+                updateLogLut(logType)
+            }
             currentLutSize = size
 
             if (lutData != null && size > 0) {
@@ -177,7 +225,54 @@ class LutSurfaceProcessor : SurfaceProcessor {
              releaseGl()
              thread.quitSafely()
         }
-        executor.shutdown()
+        // No need to shutdown handlerExecutor as it's just a wrapper
+    }
+
+    private fun updateLogLut(type: Int) {
+        if (logLutTextureId == 0) {
+            val texs = IntArray(1)
+            GLES30.glGenTextures(1, texs, 0)
+            logLutTextureId = texs[0]
+        }
+
+        val lutSize = 1024
+        val buffer = ByteBuffer.allocateDirect(lutSize * 4).order(ByteOrder.nativeOrder()).asFloatBuffer()
+
+        for (i in 0 until lutSize) {
+            val x_gamma = i.toFloat() / (lutSize - 1)
+            val x_linear = Math.pow(x_gamma.toDouble(), 2.2).toFloat()
+
+            val y_log = when (type) {
+                1 -> { // Arri LogC3
+                    if (x_linear > 0.010591f) 0.247190f * (Math.log10(5.555556 * x_linear + 0.052272).toFloat()) + 0.385537f
+                    else 5.367655f * x_linear + 0.092809f
+                }
+                2, 3 -> { // F-Log
+                    if (x_linear >= 0.00089f) 0.344676f * (Math.log10(0.555556 * x_linear + 0.009468).toFloat()) + 0.790453f
+                    else 8.52f * x_linear + 0.0929f
+                }
+                5, 6 -> { // S-Log3
+                    if (x_linear >= 0.01125f) (420.0f + Math.log10((x_linear + 0.01) / 0.19).toFloat() * 261.5f) / 1023.0f
+                    else (x_linear * 171.21029f + 95.0f) / 1023.0f
+                }
+                7 -> { // V-Log
+                    if (x_linear >= 0.01f) 0.241514f * (Math.log10(x_linear + 0.008730).toFloat()) + 0.598206f
+                    else 5.6f * x_linear + 0.125f
+                }
+                else -> x_gamma // Default to pass-through (assuming input is already gamma-encoded)
+            }
+            buffer.put(y_log)
+        }
+        buffer.position(0)
+
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, logLutTextureId)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE)
+
+        GLES30.glTexImage2D(GLES30.GL_TEXTURE_2D, 0, GLES30.GL_R16F, lutSize, 1, 0, GLES30.GL_RED, GLES30.GL_FLOAT, buffer)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
     }
 
     private fun initGl() {
@@ -302,8 +397,14 @@ class LutSurfaceProcessor : SurfaceProcessor {
              GLES30.glBindTexture(GLES30.GL_TEXTURE_3D, dummyLutTextureId)
              GLES30.glUniform1i(GLES30.glGetUniformLocation(program, "uLut"), 1)
         }
+
+        if (logLutTextureId != 0) {
+            GLES30.glActiveTexture(GLES30.GL_TEXTURE2)
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, logLutTextureId)
+            GLES30.glUniform1i(GLES30.glGetUniformLocation(program, "uLogLut"), 2)
+        }
+
         GLES30.glUniform1i(GLES30.glGetUniformLocation(program, "uLutSize"), currentLutSize)
-        GLES30.glUniform1i(GLES30.glGetUniformLocation(program, "uLogType"), currentLogType)
 
         val posHandle = GLES30.glGetAttribLocation(program, "aPosition")
         val texHandle = GLES30.glGetAttribLocation(program, "aTexCoord")
@@ -347,42 +448,19 @@ class LutSurfaceProcessor : SurfaceProcessor {
 
             uniform samplerExternalOES uTexture;
             uniform sampler3D uLut;
+            uniform sampler2D uLogLut;
             uniform int uLutSize;
-            uniform int uLogType;
 
             in vec2 vTexCoord;
             out vec4 outColor;
 
-            float apply_log(float x, int type) {
-                if (x < 0.0) x = 0.0;
-                if (type == 1) { // Arri LogC3
-                     if (x > 0.010591) return 0.247190 * (log(5.555556 * x + 0.052272) / log(10.0)) + 0.385537;
-                     return 5.367655 * x + 0.092809;
-                }
-                if (type == 2 || type == 3) { // F-Log
-                     if (x >= 0.00089) return 0.344676 * (log(0.555556 * x + 0.009468) / log(10.0)) + 0.790453;
-                     return 8.52 * x + 0.0929;
-                }
-                if (type == 5 || type == 6) { // S-Log3
-                     if (x >= 0.01125) return (420.0 + log((x + 0.01) / 0.19) / log(10.0) * 261.5) / 1023.0;
-                     return (x * 171.21029 + 95.0) / 1023.0;
-                }
-                if (type == 7) { // V-Log
-                     if (x >= 0.01) return 0.241514 * (log(x + 0.008730) / log(10.0)) + 0.598206;
-                     return 5.6 * x + 0.125;
-                }
-                return pow(x, 1.0/2.2);
-            }
-
             void main() {
                 vec4 color = texture(uTexture, vTexCoord);
 
-                vec3 linear = pow(color.rgb, vec3(2.2));
-
                 vec3 logColor;
-                logColor.r = apply_log(linear.r, uLogType);
-                logColor.g = apply_log(linear.g, uLogType);
-                logColor.b = apply_log(linear.b, uLogType);
+                logColor.r = texture(uLogLut, vec2(color.r, 0.5)).r;
+                logColor.g = texture(uLogLut, vec2(color.g, 0.5)).r;
+                logColor.b = texture(uLogLut, vec2(color.b, 0.5)).r;
 
                 if (uLutSize > 0) {
                      outColor = vec4(texture(uLut, logColor).rgb, 1.0);
@@ -419,11 +497,12 @@ class LutSurfaceProcessor : SurfaceProcessor {
             GLES30.glDeleteProgram(program)
             program = 0
         }
-        val textures = IntArray(3)
+        val textures = IntArray(4)
         var count = 0
         if (inputTextureId != 0) textures[count++] = inputTextureId
         if (lutTextureId != 0) textures[count++] = lutTextureId
         if (dummyLutTextureId != 0) textures[count++] = dummyLutTextureId
+        if (logLutTextureId != 0) textures[count++] = logLutTextureId
 
         if (count > 0) {
             GLES30.glDeleteTextures(count, textures, 0)

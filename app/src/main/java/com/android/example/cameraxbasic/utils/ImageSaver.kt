@@ -23,6 +23,11 @@ object ImageSaver {
     /**
      * Shared helper to handle Bitmap post-processing (Rotate, Crop, Compress) and Saving (JPG, TIFF, LinearDNG).
      * Deletes input temp files after saving.
+     *
+     * @param rotationDegrees The degrees of rotation to apply to the [inputBitmap] or the bitmap at [bmpPath].
+     *                        If the source at [bmpPath] was already rotated (e.g., by the JNI layer),
+     *                        this should be 0 to avoid double-rotation and incorrect EXIF orientation.
+     * @param mirror Whether to mirror the image horizontally. Should be false if already mirrored by JNI.
      */
     suspend fun saveProcessedImage(
         context: Context,
@@ -36,6 +41,7 @@ object ImageSaver {
         saveJpg: Boolean,
         saveTiff: Boolean,
         targetUri: Uri? = null,
+        mirror: Boolean = false,
         onBitmapReady: ((Bitmap) -> Unit)? = null
     ): Uri? {
         val contentResolver = context.contentResolver
@@ -44,12 +50,17 @@ object ImageSaver {
         // 1. Process Input Bitmap or JPEG File from JNI -> Final MediaStore JPG
         if (inputBitmap != null || bmpPath != null) {
             val isNativeJpeg = bmpPath != null && (bmpPath.endsWith(".jpg") || bmpPath.endsWith(".jpeg"))
-            val needsBitmapProcessing = rotationDegrees != 0 || zoomFactor > 1.05f || inputBitmap != null
+            val needsBitmapProcessing = rotationDegrees != 0 || zoomFactor > 1.05f || inputBitmap != null || mirror
 
             if (isNativeJpeg && !needsBitmapProcessing && saveJpg) {
                 // FAST PATH: Directly use JNI-generated JPEG
-                finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri) { out ->
-                    File(bmpPath!!).inputStream().use { it.copyTo(out) }
+                val f = File(bmpPath!!)
+                if (f.exists() && f.length() > 0) {
+                    finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri) { out ->
+                        f.inputStream().use { it.copyTo(out) }
+                    }
+                } else {
+                    Log.e(TAG, "Fast path source file missing or empty: ${f.absolutePath}, size: ${if(f.exists()) f.length() else -1}")
                 }
                 File(bmpPath!!).delete()
             } else {
@@ -59,13 +70,23 @@ object ImageSaver {
                     processedBitmap = inputBitmap
                 } else if (bmpPath != null) {
                     processedBitmap = BitmapFactory.decodeFile(bmpPath)
+                    if (processedBitmap == null) {
+                        Log.e(TAG, "BitmapFactory.decodeFile returned null for $bmpPath")
+                    }
                 }
 
                 try {
-                    // Rotate if needed
-                    if (processedBitmap != null && rotationDegrees != 0) {
+                    // Rotate and Mirror if needed
+                    if (processedBitmap != null && (rotationDegrees != 0 || mirror)) {
                         val matrix = Matrix()
-                        matrix.postRotate(rotationDegrees.toFloat())
+                        if (rotationDegrees != 0) {
+                            matrix.postRotate(rotationDegrees.toFloat())
+                        }
+                        if (mirror) {
+                            // Mirror horizontally after rotation
+                            matrix.postScale(-1f, 1f)
+                        }
+
                         val rotated = Bitmap.createBitmap(
                             processedBitmap, 0, 0, processedBitmap.width, processedBitmap.height, matrix, true
                         )
@@ -102,14 +123,18 @@ object ImageSaver {
 
                     // Save JPG
                     if (saveJpg) {
-                        finalJpgUri = saveJpegToMediaStore(
-                            context,
-                            "$baseName.jpg",
-                            targetUri,
-                            processedBitmap?.width,
-                            processedBitmap?.height
-                        ) { out ->
-                            processedBitmap?.compress(Bitmap.CompressFormat.JPEG, 95, out)
+                        if (processedBitmap != null) {
+                            finalJpgUri = saveJpegToMediaStore(
+                                context,
+                                "$baseName.jpg",
+                                targetUri,
+                                processedBitmap.width,
+                                processedBitmap.height
+                            ) { out ->
+                                processedBitmap.compress(Bitmap.CompressFormat.JPEG, 95, out)
+                            }
+                        } else {
+                            Log.e(TAG, "Cannot save JPEG: processedBitmap is null (Slow Path)")
                         }
                     }
                 } catch (t: Throwable) {
@@ -124,6 +149,11 @@ object ImageSaver {
                 }
             }
         }
+
+        // Debug sidecar export disabled for performance.
+        // if (debugSourcePath != null) {
+        //     saveDebugStageImagesToMediaStore(context, baseName, debugSourcePath)
+        // }
 
         // 2. Save TIFF
         if (saveTiff && tiffPath != null) {
@@ -146,6 +176,9 @@ object ImageSaver {
                         contentResolver.openOutputStream(tiffUri)?.use { out ->
                             FileInputStream(tiffFile).copyTo(out)
                         }
+
+                        updateExifOrientation(context, tiffUri, getExifOrientation(rotationDegrees, mirror))
+
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                             tiffValues.clear()
                             tiffValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
@@ -181,6 +214,7 @@ object ImageSaver {
                         contentResolver.openOutputStream(dngUri)?.use { out ->
                             FileInputStream(dngFile).copyTo(out)
                         }
+
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                             dngValues.clear()
                             dngValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
@@ -196,6 +230,56 @@ object ImageSaver {
         }
 
         return finalJpgUri
+    }
+
+    private fun saveDebugStageImagesToMediaStore(context: Context, baseName: String, sourcePath: String) {
+        val source = File(sourcePath)
+        val parent = source.parentFile ?: return
+        val stem = source.nameWithoutExtension
+
+        val debugSuffixes = listOf(
+            "_debug_A_linear" to "${baseName}_debug_A_linear.jpg",
+            "_debug_B_matrix" to "${baseName}_debug_B_matrix.jpg",
+            "_debug_C_log" to "${baseName}_debug_C_log.jpg",
+            "_AB_SENSOR_CCM" to "${baseName}_AB_SENSOR_CCM.jpg",
+            "_AB_CAPTURE_CCM" to "${baseName}_AB_CAPTURE_CCM.jpg"
+        )
+
+        for ((suffix, displayName) in debugSuffixes) {
+            val debugFile = File(parent, "$stem${suffix}.jpg")
+            if (!debugFile.exists() || debugFile.length() <= 0L) continue
+
+            try {
+                saveJpegToMediaStore(context, displayName, null) { out ->
+                    FileInputStream(debugFile).use { it.copyTo(out) }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to export debug stage image: ${debugFile.absolutePath}", e)
+            } finally {
+                debugFile.delete()
+            }
+        }
+    }
+
+    fun getExifOrientation(rotationDegrees: Int, mirror: Boolean): Int {
+        return when (rotationDegrees) {
+            90 -> if (mirror) ExifInterface.ORIENTATION_TRANSPOSE else ExifInterface.ORIENTATION_ROTATE_90
+            180 -> if (mirror) ExifInterface.ORIENTATION_FLIP_VERTICAL else ExifInterface.ORIENTATION_ROTATE_180
+            270 -> if (mirror) ExifInterface.ORIENTATION_TRANSVERSE else ExifInterface.ORIENTATION_ROTATE_270
+            else -> if (mirror) ExifInterface.ORIENTATION_FLIP_HORIZONTAL else ExifInterface.ORIENTATION_NORMAL
+        }
+    }
+
+    private fun updateExifOrientation(context: Context, uri: Uri, orientation: Int) {
+        try {
+            context.contentResolver.openFileDescriptor(uri, "rw")?.use { pfd ->
+                val exif = ExifInterface(pfd.fileDescriptor)
+                exif.setAttribute(ExifInterface.TAG_ORIENTATION, orientation.toString())
+                exif.saveAttributes()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to update EXIF orientation for $uri", e)
+        }
     }
 
     /**
@@ -234,6 +318,7 @@ object ImageSaver {
             try {
                 contentResolver.openOutputStream(uri, "wt")?.use { out ->
                     writeData(out)
+                    out.flush()
                 }
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     jpgValues.clear()

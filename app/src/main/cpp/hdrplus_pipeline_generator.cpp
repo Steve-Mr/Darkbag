@@ -20,7 +20,10 @@ public:
   GeneratorParam<bool> use_gpu{"use_gpu", false};
 
   Input<Buffer<uint16_t>> inputs{"inputs", 3};
-  Input<uint16_t> black_point{"black_point"};
+  Input<uint16_t> black_point_r{"black_point_r"};
+  Input<uint16_t> black_point_g0{"black_point_g0"};
+  Input<uint16_t> black_point_g1{"black_point_g1"};
+  Input<uint16_t> black_point_b{"black_point_b"};
   Input<uint16_t> white_point{"white_point"};
   Input<float> white_balance_r{"white_balance_r"};
   Input<float> white_balance_g0{"white_balance_g0"};
@@ -43,7 +46,7 @@ public:
                                white_balance_g1, white_balance_b};
 
     Func bayer_shifted = shift_bayer_to_rggb(merged, cfa_pattern);
-    Func black_white_level_output = black_white_level(bayer_shifted, black_point, white_point);
+    Func black_white_level_output = black_white_level(bayer_shifted, black_point_r, black_point_g0, black_point_g1, black_point_b, white_point);
     Func white_balance_output = white_balance(black_white_level_output, wb);
 
     // Demosaic
@@ -123,8 +126,11 @@ public:
 private:
   Var x{"x"}, y{"y"}, c{"c"}, xo{"xo"}, yo{"yo"}, xi{"xi"}, yi{"yi"};
 
-  Func black_white_level(Func input, const Expr bp, const Expr wp) {
+  Func black_white_level(Func input, const Expr bp_r, const Expr bp_g0, const Expr bp_g1, const Expr bp_b, const Expr wp) {
     Func output("black_white_level_output");
+    Expr bp = select(y % 2 == 0,
+                     select(x % 2 == 0, bp_r, bp_g0),
+                     select(x % 2 == 0, bp_g1, bp_b));
     // Reserve headroom (0.25x) for White Balance to prevent clipping
     Expr white_factor = (65535.f / max(1.f, f32(wp) - f32(bp))) * 0.25f;
     output(x, y) = u16_sat((i32(input(x, y)) - bp) * white_factor);

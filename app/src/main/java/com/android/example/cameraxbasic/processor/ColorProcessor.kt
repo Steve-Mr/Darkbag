@@ -1,7 +1,6 @@
 package com.android.example.cameraxbasic.processor
 
 import java.nio.ByteBuffer
-
 import kotlinx.coroutines.flow.MutableSharedFlow
 
 object ColorProcessor {
@@ -32,6 +31,8 @@ object ColorProcessor {
      * @param outputTiffPath Output path for TIFF.
      * @param outputJpgPath Output path for JPEG.
      * @param useGpu Whether to use GPU acceleration.
+     * @param orientation Orientation in degrees.
+     * @param mirror Whether to mirror horizontally.
      * @return 0 for GPU Success, 1 for CPU Success (Fallback or requested), -1 for Failure.
      */
     external fun processRaw(
@@ -40,7 +41,9 @@ object ColorProcessor {
         lutPath: String?,
         outputTiffPath: String?,
         outputJpgPath: String?,
-        useGpu: Boolean
+        useGpu: Boolean,
+        orientation: Int,
+        mirror: Boolean
     ): Int
 
     /**
@@ -50,10 +53,6 @@ object ColorProcessor {
      */
     external fun loadLutData(lutPath: String): FloatArray?
 
-    /**
-     * Processes a burst of RAW frames using the HDR+ pipeline.
-     * @param outputBitmap Optional Bitmap to receive the processed preview (faster than BMP file).
-     */
     /**
      * Callback for background export completion. Called from JNI thread.
      */
@@ -89,7 +88,9 @@ object ColorProcessor {
         focalLength: Float,
         captureTimeMillis: Long,
         ccm: FloatArray,
-        whiteBalance: FloatArray
+        whiteBalance: FloatArray,
+        zoomFactor: Float,
+        mirror: Boolean
     ): Int
 
     external fun processHdrPlus(
@@ -98,9 +99,15 @@ object ColorProcessor {
         height: Int,
         orientation: Int,
         whiteLevel: Int,
-        blackLevel: Int,
+        blackLevelPattern: IntArray, // [r, g0, g1, b]
+        lensShadingMap: FloatArray?, // [4 * rows * cols], channel-major R,GE,GO,B
+        lensShadingRows: Int,
+        lensShadingCols: Int,
+        useSensorColorMatrix: Boolean,
         whiteBalance: FloatArray, // [r, g0, g1, b]
-        ccm: FloatArray,          // [3x3]
+        ccm: FloatArray,          // selected [3x3]
+        ccmAlt: FloatArray?,      // alternate [3x3] for AB compare
+        exportMatrixAB: Boolean,
         cfaPattern: Int,
         iso: Int,
         exposureTime: Long,
@@ -116,6 +123,8 @@ object ColorProcessor {
         debugStats: LongArray?, // [0] Halide, [1] Copy, [2] Post, [3] DNG Encode, [4] Save, [5] DNG Wait, [6] Total, [7] Align, [8] Merge, [9] Demosaic, [10] Denoise, [11] sRGB, [12] JNI Prep, [13] BlackWhite, [14] WB
         outputBitmap: android.graphics.Bitmap? = null,
         isAsync: Boolean = false,
-        tempRawPath: String? = null
+        tempRawPath: String? = null,
+        zoomFactor: Float,
+        mirror: Boolean
     ): Int
 }
