@@ -33,6 +33,7 @@ object ExposureUtils {
      * @param isoRange Supported ISO range of the camera.
      * @param timeRange Supported Exposure Time range of the camera.
      * @param underexposureMode Mode for underexposure: "0 EV", "-1 EV", "-2 EV", or "Dynamic (Experimental)".
+     * @param clippingRatio Ratio of pixels that are near saturation (0.0 to 1.0).
      * @return ExposureConfig with target ISO, Time, and required Digital Gain.
      */
     fun calculateHdrPlusExposure(
@@ -40,7 +41,8 @@ object ExposureUtils {
         currentTime: Long,
         isoRange: Range<Int>,
         timeRange: Range<Long>,
-        underexposureMode: String = "Dynamic (Experimental)"
+        underexposureMode: String = "Dynamic (Experimental)",
+        clippingRatio: Double = 0.0
     ): ExposureConfig {
         val minIso = isoRange.lower
         val maxIso = isoRange.upper
@@ -53,7 +55,7 @@ object ExposureUtils {
         val baselineTotalExposure = currentIso.toDouble() * currentTime.toDouble()
 
         // 2. Determine Underexposure Factor
-        val underexposeFactor = when (underexposureMode) {
+        var underexposeFactor = when (underexposureMode) {
             "0 EV" -> 1.0f
             "-1 EV" -> 0.5f
             "-2 EV" -> 0.25f
@@ -77,6 +79,14 @@ object ExposureUtils {
                     }
                 }
             }
+        }
+
+        // Apply additional underexposure if highlights are clipping (Pixel-based refinement)
+        if (underexposureMode == "Dynamic (Experimental)" && clippingRatio > 0.01) {
+             // If more than 1% of pixels are clipping, push underexposure further
+             // Every 5% of clipping adds ~1 stop of underexposure, up to -2 stops additional
+             val additionalUnderexposure = (clippingRatio * 20.0).coerceAtMost(2.0)
+             underexposeFactor *= (0.5).pow(additionalUnderexposure).toFloat()
         }
 
         val targetTotalExposure = baselineTotalExposure * underexposeFactor
