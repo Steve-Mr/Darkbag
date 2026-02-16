@@ -105,7 +105,9 @@ object ColorProcessor {
         lensShadingCols: Int,
         useSensorColorMatrix: Boolean,
         whiteBalance: FloatArray, // [r, g0, g1, b]
-        ccm: FloatArray,          // [3x3]
+        ccm: FloatArray,          // selected [3x3]
+        ccmAlt: FloatArray?,      // alternate [3x3] for AB compare
+        exportMatrixAB: Boolean,
         cfaPattern: Int,
         iso: Int,
         exposureTime: Long,

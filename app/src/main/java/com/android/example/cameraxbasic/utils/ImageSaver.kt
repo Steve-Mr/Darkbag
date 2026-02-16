@@ -235,7 +235,9 @@ object ImageSaver {
         val debugSuffixes = listOf(
             "_debug_A_linear" to "${baseName}_debug_A_linear.jpg",
             "_debug_B_matrix" to "${baseName}_debug_B_matrix.jpg",
-            "_debug_C_log" to "${baseName}_debug_C_log.jpg"
+            "_debug_C_log" to "${baseName}_debug_C_log.jpg",
+            "_AB_SENSOR_CCM" to "${baseName}_AB_SENSOR_CCM.jpg",
+            "_AB_CAPTURE_CCM" to "${baseName}_AB_CAPTURE_CCM.jpg"
         )
 
         for ((suffix, displayName) in debugSuffixes) {

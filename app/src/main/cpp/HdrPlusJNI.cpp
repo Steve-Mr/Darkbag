@@ -157,6 +157,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_exportHdrPlus(
     std::vector<float> ccmVec(9); for(int i=0; i<9; ++i) ccmVec[i] = ccmData[i];
     env->ReleaseFloatArrayElements(ccm, ccmData, JNI_ABORT);
 
+
     const char* lut_path_cstr = (lutPath) ? env->GetStringUTFChars(lutPath, 0) : nullptr;
     LUT3D lut; if (lut_path_cstr) { lut = load_lut(lut_path_cstr); env->ReleaseStringUTFChars(lutPath, lut_path_cstr); }
 
@@ -191,7 +192,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_exportHdrPlus(
 
 extern "C" JNIEXPORT jint JNICALL
 Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
-    JNIEnv* env, jobject /* this */, jobjectArray dngBuffers, jint width, jint height, jint orientation, jint whiteLevel, jintArray blackLevelPattern, jfloatArray lensShadingMap, jint lensShadingRows, jint lensShadingCols, jboolean useSensorColorMatrix, jfloatArray whiteBalance, jfloatArray ccm, jint cfaPattern,
+    JNIEnv* env, jobject /* this */, jobjectArray dngBuffers, jint width, jint height, jint orientation, jint whiteLevel, jintArray blackLevelPattern, jfloatArray lensShadingMap, jint lensShadingRows, jint lensShadingCols, jboolean useSensorColorMatrix, jfloatArray whiteBalance, jfloatArray ccm, jfloatArray ccmAlt, jboolean exportMatrixAB, jint cfaPattern,
     jint iso, jlong exposureTime, jfloat fNumber, jfloat focalLength, jlong captureTimeMillis, jint targetLog, jstring lutPath, jstring outputTiffPath, jstring outputJpgPath, jstring outputDngPath,
     jfloat digitalGain, jlongArray debugStats, jobject outputBitmap, jboolean isAsync, jstring tempRawPath, jfloat zoomFactor, jboolean mirror
 ) {
@@ -251,6 +252,13 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     jfloat* ccmData = env->GetFloatArrayElements(ccm, nullptr);
     std::vector<float> ccmVec(9); for(int i=0; i<9; ++i) ccmVec[i] = ccmData[i];
     env->ReleaseFloatArrayElements(ccm, ccmData, JNI_ABORT);
+
+    std::vector<float> ccmAltVec;
+    if (ccmAlt && env->GetArrayLength(ccmAlt) >= 9) {
+        jfloat* ccmAltData = env->GetFloatArrayElements(ccmAlt, nullptr);
+        ccmAltVec.assign(ccmAltData, ccmAltData + 9);
+        env->ReleaseFloatArrayElements(ccmAlt, ccmAltData, JNI_ABORT);
+    }
 
     std::vector<float> identityCCM = { 1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f };
     Buffer<float> ccmHalideBuf(identityCCM.data(), 3, 3);
@@ -352,7 +360,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     }
 
     if (!tiffPathStr.empty() || !jpgPathStr.empty() || !dngPathStr.empty()) {
-        auto saveFunc = [fImg = (bool)isAsync ? finalImage : std::vector<uint16_t>(), isAsync, &finalImage, width, height, digitalGain, targetLog, lut, tiffPathStr, jpgPathStr, dngPathStr, baseName, ccmVec, wbVec, orientation, iso, exposureTime, fNumber, focalLength, captureTimeMillis, zoomFactor, mirror]() mutable {
+        auto saveFunc = [fImg = (bool)isAsync ? finalImage : std::vector<uint16_t>(), isAsync, &finalImage, width, height, digitalGain, targetLog, lut, tiffPathStr, jpgPathStr, dngPathStr, baseName, ccmVec, ccmAltVec, exportMatrixAB, useSensorColorMatrix, wbVec, orientation, iso, exposureTime, fNumber, focalLength, captureTimeMillis, zoomFactor, mirror]() mutable {
             const std::vector<uint16_t>& img = isAsync ? fImg : finalImage;
             bool dngOk = true;
             if (!dngPathStr.empty()) dngOk = write_dng(dngPathStr.c_str(), width, height, img, 65535, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation, (bool)mirror);
@@ -360,6 +368,15 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
             bool otherOk = true;
             if (!tiffPathStr.empty() || !jpgPathStr.empty()) {
                 otherOk = process_and_save_image(img, width, height, digitalGain, targetLog, lut, tiffPathStr.empty()?nullptr:tiffPathStr.c_str(), jpgPathStr.empty()?nullptr:jpgPathStr.c_str(), 1, ccmVec.data(), wbVec.data(), orientation, nullptr, !isAsync, isAsync?1:4, zoomFactor, (bool)mirror);
+
+                if (exportMatrixAB && !jpgPathStr.empty() && ccmAltVec.size() == 9) {
+                    std::string suffix = useSensorColorMatrix ? "_AB_CAPTURE_CCM.jpg" : "_AB_SENSOR_CCM.jpg";
+                    std::string altJpgPath = jpgPathStr;
+                    size_t dot = altJpgPath.find_last_of('.');
+                    if (dot == std::string::npos) dot = altJpgPath.size();
+                    altJpgPath = altJpgPath.substr(0, dot) + suffix;
+                    process_and_save_image(img, width, height, digitalGain, targetLog, lut, nullptr, altJpgPath.c_str(), 1, ccmAltVec.data(), wbVec.data(), orientation, nullptr, false, 1, zoomFactor, (bool)mirror);
+                }
             }
 
             if (isAsync && g_jvm && g_colorProcessorClass) {

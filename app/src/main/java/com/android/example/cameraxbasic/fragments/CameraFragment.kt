@@ -2702,12 +2702,14 @@ class CameraFragment : Fragment() {
                 var whiteLevel = 1023
                 var blackLevelPattern = intArrayOf(64, 64, 64, 64)
                 var wb = floatArrayOf(2.0f, 1.0f, 1.0f, 1.5f)
-                var ccm = floatArrayOf(
+                var ccmMain = floatArrayOf(
                     2.0f, -1.0f, 0.0f,
                     -0.5f, 2.0f, -0.5f,
                     0.0f, -1.0f, 2.0f
                 )
                 var cfa = 0
+                var ccmSensor = ccmMain.copyOf()
+                var ccmCapture = ccmMain.copyOf()
                 var lensShadingMapData: FloatArray? = null
                 var lensShadingRows = 0
                 var lensShadingCols = 0
@@ -2739,12 +2741,12 @@ class CameraFragment : Fragment() {
                     }
 
                     val ccmMat = r.get(android.hardware.camera2.CaptureResult.COLOR_CORRECTION_TRANSFORM)
-                    if (!useSensorColorMatrix && ccmMat != null) {
+                    if (ccmMat != null) {
                         var idx = 0
                         for(row in 0 until 3) {
                             for(col in 0 until 3) {
                                 val rat = ccmMat.getElement(col, row)
-                                ccm[idx++] = rat.toFloat()
+                                ccmCapture[idx++] = rat.toFloat()
                             }
                         }
                     }
@@ -2756,7 +2758,7 @@ class CameraFragment : Fragment() {
                             for (row in 0 until 3) {
                                 for (col in 0 until 3) {
                                     val rat = sensorMat.getElement(col, row)
-                                    ccm[idx++] = rat.toFloat()
+                                    ccmSensor[idx++] = rat.toFloat()
                                 }
                             }
                         }
@@ -2770,17 +2772,21 @@ class CameraFragment : Fragment() {
                         fun idx(ch: Int, row: Int, col: Int): Int = ch * lensShadingRows * lensShadingCols + row * lensShadingCols + col
                         for (row in 0 until lensShadingRows) {
                             for (col in 0 until lensShadingCols) {
-                                out[idx(0, row, col)] = lsc.getGainFactor(android.hardware.camera2.params.LensShadingMap.CHANNEL_R, col, row)
-                                out[idx(1, row, col)] = lsc.getGainFactor(android.hardware.camera2.params.LensShadingMap.CHANNEL_G_EVEN, col, row)
-                                out[idx(2, row, col)] = lsc.getGainFactor(android.hardware.camera2.params.LensShadingMap.CHANNEL_G_ODD, col, row)
-                                out[idx(3, row, col)] = lsc.getGainFactor(android.hardware.camera2.params.LensShadingMap.CHANNEL_B, col, row)
+                                out[idx(0, row, col)] = lsc.getGainFactor(0, col, row)
+                                out[idx(1, row, col)] = lsc.getGainFactor(1, col, row)
+                                out[idx(2, row, col)] = lsc.getGainFactor(2, col, row)
+                                out[idx(3, row, col)] = lsc.getGainFactor(3, col, row)
                             }
                         }
                         lensShadingMapData = out
                     }
                 }
 
-                Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB=${wb.joinToString()}, CFA=$cfa, LSC=${lensShadingRows}x${lensShadingCols}, useSensorCCM=$useSensorColorMatrix")
+                
+                val ccm = if (useSensorColorMatrix) ccmSensor else ccmCapture
+                val ccmAlt = if (useSensorColorMatrix) ccmCapture else ccmSensor
+                val exportMatrixAB = true
+Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB=${wb.joinToString()}, CFA=$cfa, LSC=${lensShadingRows}x${lensShadingCols}, useSensorCCM=$useSensorColorMatrix")
 
                 val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
                 val targetLogName = prefs.getString(SettingsFragment.KEY_TARGET_LOG, "None")
@@ -2831,7 +2837,7 @@ class CameraFragment : Fragment() {
                     combinedOrientation,
                     whiteLevel, blackLevelPattern,
                     lensShadingMapData, lensShadingRows, lensShadingCols, useSensorColorMatrix,
-                    wb, ccm, cfa,
+                    wb, ccm, ccmAlt, exportMatrixAB, cfa,
                     iso, exposureTime, fNumber, focalLength, captureTime,
                     targetLogIndex,
                     nativeLutPath,
