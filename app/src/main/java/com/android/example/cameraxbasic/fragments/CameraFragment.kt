@@ -176,6 +176,7 @@ class CameraFragment : Fragment() {
     // Manual Control State
     private var isManualFocus = false
     private var isManualExposure = false
+    @Volatile private var lastClippingRatio: Double = 0.0
     private var activeManualTab: String? = null
     private var focusMeteringRegion: MeteringRectangle? = null
     private var exposureMeteringRegion: MeteringRectangle? = null
@@ -914,7 +915,7 @@ class CameraFragment : Fragment() {
                             val underexposureMode = prefs.getString(SettingsFragment.KEY_HDR_UNDEREXPOSURE_MODE, "Dynamic (Experimental)") ?: "Dynamic (Experimental)"
 
                             lastHdrPlusConfig = ExposureUtils.calculateHdrPlusExposure(
-                                iso, time, validIsoRange, validTimeRange, underexposureMode
+                                iso, time, validIsoRange, validTimeRange, underexposureMode, lastClippingRatio
                             )
                         }
                     }
@@ -2491,6 +2492,8 @@ class CameraFragment : Fragment() {
         private const val FOCUS_RING_DISPLAY_TIME_MS = 500L
         private const val FOCUS_RING_FADE_OUT_DURATION_MS = 300L
         private const val AE_SETTLE_DELAY_MS = 50L
+        private const val ANALYSIS_HIGHLIGHT_THRESHOLD = 240
+        private const val ANALYSIS_SAMPLING_STEP = 4
 
         const val KEY_SELECTED_LENS_ID = "selected_lens_sensor_id"
         const val KEY_LENS_FACING = "lens_facing"
@@ -2654,7 +2657,8 @@ class CameraFragment : Fragment() {
                         currentTime,
                         validIsoRange,
                         validTimeRange,
-                        underexposureMode
+                        underexposureMode,
+                        lastClippingRatio
                     )
                 }
 
@@ -3251,7 +3255,34 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
         analysisImageReader?.setOnImageAvailableListener({ reader ->
             val image = reader.acquireLatestImage() ?: return@setOnImageAvailableListener
-            image.close()
+            try {
+                val plane = image.planes[0]
+                val buffer = plane.buffer
+                val width = image.width
+                val height = image.height
+                val rowStride = plane.rowStride
+                val pixelStride = plane.pixelStride
+
+                var highlightCount = 0
+
+                // Sample pixels to save CPU while still getting a good estimate
+                var totalSampled = 0
+                for (y in 0 until height step ANALYSIS_SAMPLING_STEP) {
+                    val rowStart = y * rowStride
+                    for (x in 0 until width step ANALYSIS_SAMPLING_STEP) {
+                        val value = buffer.get(rowStart + x * pixelStride).toInt() and 0xFF
+                        if (value > ANALYSIS_HIGHLIGHT_THRESHOLD) {
+                            highlightCount++
+                        }
+                        totalSampled++
+                    }
+                }
+                lastClippingRatio = if (totalSampled > 0) highlightCount.toDouble() / totalSampled else 0.0
+            } catch (e: Exception) {
+                Log.e(TAG, "Error analyzing image", e)
+            } finally {
+                image.close()
+            }
         }, handler)
 
         val previewSize = map?.getOutputSizes(android.graphics.SurfaceTexture::class.java)
@@ -3284,6 +3315,17 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                             analysisImageReader?.surface?.let { request.addTarget(it) }
 
                             applyManualSettingsToRequest(request)
+
+                            val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                            val force60fps = prefs.getBoolean(SettingsFragment.KEY_FORCE_60FPS, true)
+                            if (force60fps) {
+                                val fpsRanges = chars.get(android.hardware.camera2.CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
+                                val targetRange = fpsRanges?.find { it.upper == 60 }
+                                if (targetRange != null) {
+                                    Log.d(TAG, "Setting target FPS range to: $targetRange")
+                                    request.set(android.hardware.camera2.CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, targetRange)
+                                }
+                            }
 
                             if (!isManualFocus) {
                                 request.set(android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE, android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
@@ -3404,7 +3446,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             val underexposureMode = prefs.getString(SettingsFragment.KEY_HDR_UNDEREXPOSURE_MODE, "Dynamic (Experimental)") ?: "Dynamic (Experimental)"
 
             val config = ExposureUtils.calculateHdrPlusExposure(
-                curIso, curTime, validIsoRange, validTimeRange, underexposureMode
+                curIso, curTime, validIsoRange, validTimeRange, underexposureMode, lastClippingRatio
             )
 
             val burstSize = (prefs.getString(SettingsFragment.KEY_HDR_BURST_COUNT, "3") ?: "3").toIntOrNull() ?: 3

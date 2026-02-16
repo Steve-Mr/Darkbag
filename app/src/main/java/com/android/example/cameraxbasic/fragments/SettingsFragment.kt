@@ -207,6 +207,11 @@ class SettingsFragment : Fragment() {
         binding.switchUseCamerax.setOnCheckedChangeListener { _, isChecked ->
             prefs.edit().putBoolean(KEY_USE_CAMERAX, isChecked).apply()
         }
+
+        binding.switchForce60fps.isChecked = prefs.getBoolean(KEY_FORCE_60FPS, true)
+        binding.switchForce60fps.setOnCheckedChangeListener { _, isChecked ->
+            prefs.edit().putBoolean(KEY_FORCE_60FPS, isChecked).apply()
+        }
     }
 
     override fun onDestroyView() {
@@ -233,6 +238,7 @@ class SettingsFragment : Fragment() {
         const val KEY_HDR_UNDEREXPOSURE_MODE = "hdr_underexposure_mode"
         const val KEY_USE_CAMERAX = "use_camerax_engine"
         const val KEY_MIRROR_FRONT_CAMERA = "mirror_front_camera"
+        const val KEY_FORCE_60FPS = "force_60fps"
 
         val FOCAL_LENGTHS = listOf("24", "28", "35")
         val ANTIBANDING_MODES = listOf("Auto", "50Hz", "60Hz", "Off")
