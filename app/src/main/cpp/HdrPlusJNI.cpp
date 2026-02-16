@@ -14,6 +14,7 @@
 #include <sstream>
 #include <iostream>
 #include <cstdio>
+#include <cmath>
 #include <android/bitmap.h>
 #include <libraw/libraw.h>
 #include <HalideBuffer.h>
@@ -190,11 +191,12 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_exportHdrPlus(
 
 extern "C" JNIEXPORT jint JNICALL
 Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
-    JNIEnv* env, jobject /* this */, jobjectArray dngBuffers, jint width, jint height, jint orientation, jint whiteLevel, jint blackLevel, jfloatArray whiteBalance, jfloatArray ccm, jint cfaPattern,
+    JNIEnv* env, jobject /* this */, jobjectArray dngBuffers, jint width, jint height, jint orientation, jint whiteLevel, jintArray blackLevelPattern, jfloatArray lensShadingMap, jint lensShadingRows, jint lensShadingCols, jboolean useSensorColorMatrix, jfloatArray whiteBalance, jfloatArray ccm, jint cfaPattern,
     jint iso, jlong exposureTime, jfloat fNumber, jfloat focalLength, jlong captureTimeMillis, jint targetLog, jstring lutPath, jstring outputTiffPath, jstring outputJpgPath, jstring outputDngPath,
     jfloat digitalGain, jlongArray debugStats, jobject outputBitmap, jboolean isAsync, jstring tempRawPath, jfloat zoomFactor, jboolean mirror
 ) {
     LOGD("Native processHdrPlus started.");
+    (void)useSensorColorMatrix;
     std::lock_guard<std::mutex> lock(g_hdrPlusMutex);
     auto nativeStart = std::chrono::high_resolution_clock::now();
     auto jniPrepStart = std::chrono::high_resolution_clock::now();
@@ -226,6 +228,25 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     float wb_r = wbData[0], wb_g0 = wbData[1], wb_g1 = wbData[2], wb_b = wbData[3];
     std::vector<float> wbVec = {wb_r, wb_g0, wb_g1, wb_b};
     env->ReleaseFloatArrayElements(whiteBalance, wbData, JNI_ABORT);
+    uint16_t bl_r = 64, bl_g0 = 64, bl_g1 = 64, bl_b = 64;
+    if (blackLevelPattern && env->GetArrayLength(blackLevelPattern) >= 4) {
+        jint tmp[4] = {64, 64, 64, 64};
+        env->GetIntArrayRegion(blackLevelPattern, 0, 4, tmp);
+        bl_r = (uint16_t)std::max(0, tmp[0]);
+        bl_g0 = (uint16_t)std::max(0, tmp[1]);
+        bl_g1 = (uint16_t)std::max(0, tmp[2]);
+        bl_b = (uint16_t)std::max(0, tmp[3]);
+    }
+
+    std::vector<float> lensShadingVec;
+    if (lensShadingMap && lensShadingRows > 0 && lensShadingCols > 0) {
+        const jsize l = env->GetArrayLength(lensShadingMap);
+        const int expected = 4 * lensShadingRows * lensShadingCols;
+        if (l >= expected) {
+            lensShadingVec.resize(expected);
+            env->GetFloatArrayRegion(lensShadingMap, 0, expected, lensShadingVec.data());
+        }
+    }
 
     jfloat* ccmData = env->GetFloatArrayElements(ccm, nullptr);
     std::vector<float> ccmVec(9); for(int i=0; i<9; ++i) ccmVec[i] = ccmData[i];
@@ -245,7 +266,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     }
 
     auto halideStart = std::chrono::high_resolution_clock::now();
-    int halide_res = hdrplus_raw_pipeline(inputBuf, (uint16_t)blackLevel, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, ccmHalideBuf, 1.0f, 1.0f, outputBuf);
+    int halide_res = hdrplus_raw_pipeline(inputBuf, bl_r, bl_g0, bl_g1, bl_b, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, ccmHalideBuf, 1.0f, 1.0f, outputBuf);
     auto halideDurationMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - halideStart).count();
 
     halide_report_buffer.clear(); halide_profiler_report(nullptr);
@@ -263,18 +284,48 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     int stride_x = outputBuf.dim(0).stride(), stride_y = outputBuf.dim(1).stride(), stride_c = outputBuf.dim(2).stride();
     const uint16_t* raw_ptr = outputBuf.data();
     auto postStart = std::chrono::high_resolution_clock::now();
+    const bool hasLsc = !lensShadingVec.empty() && lensShadingRows > 0 && lensShadingCols > 0;
+    auto lsc_idx = [&](int ch, int row, int col) -> int {
+        return ch * lensShadingRows * lensShadingCols + row * lensShadingCols + col;
+    };
+
     #pragma omp parallel for
     for (int y = 0; y < height; y++) {
         for (int x = 0; x < width; x++) {
              uint16_t r = raw_ptr[x*stride_x + y*stride_y + 0*stride_c];
              uint16_t g = raw_ptr[x*stride_x + y*stride_y + 1*stride_c];
              uint16_t b = raw_ptr[x*stride_x + y*stride_y + 2*stride_c];
+
+             float lscR = 1.0f, lscG = 1.0f, lscB = 1.0f;
+             if (hasLsc) {
+                 float fx = (width > 1) ? (float)x * (lensShadingCols - 1) / (float)(width - 1) : 0.0f;
+                 float fy = (height > 1) ? (float)y * (lensShadingRows - 1) / (float)(height - 1) : 0.0f;
+                 int x0 = std::max(0, std::min((int)std::floor(fx), lensShadingCols - 1));
+                 int y0 = std::max(0, std::min((int)std::floor(fy), lensShadingRows - 1));
+                 int x1 = std::max(0, std::min(x0 + 1, lensShadingCols - 1));
+                 int y1 = std::max(0, std::min(y0 + 1, lensShadingRows - 1));
+                 float tx = fx - x0;
+                 float ty = fy - y0;
+                 auto bilerp = [&](int ch) {
+                     float v00 = lensShadingVec[lsc_idx(ch, y0, x0)];
+                     float v10 = lensShadingVec[lsc_idx(ch, y0, x1)];
+                     float v01 = lensShadingVec[lsc_idx(ch, y1, x0)];
+                     float v11 = lensShadingVec[lsc_idx(ch, y1, x1)];
+                     float v0 = v00 * (1.0f - tx) + v10 * tx;
+                     float v1 = v01 * (1.0f - tx) + v11 * tx;
+                     return v0 * (1.0f - ty) + v1 * ty;
+                 };
+                 lscR = bilerp(0);
+                 lscG = 0.5f * (bilerp(1) + bilerp(2));
+                 lscB = bilerp(3);
+             }
+
              int idx = (y * width + x) * 3;
              // Halide output is scaled by 0.25 (14-bit range).
              // We shift left by 2 to restore full 16-bit range for final saving.
-             finalImage[idx+0] = (uint16_t)std::min((int)r << 2, 65535);
-             finalImage[idx+1] = (uint16_t)std::min((int)g << 2, 65535);
-             finalImage[idx+2] = (uint16_t)std::min((int)b << 2, 65535);
+             finalImage[idx+0] = (uint16_t)std::min((int)((float)r * lscR) << 2, 65535);
+             finalImage[idx+1] = (uint16_t)std::min((int)((float)g * lscG) << 2, 65535);
+             finalImage[idx+2] = (uint16_t)std::min((int)((float)b * lscB) << 2, 65535);
         }
     }
     auto postDurationMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - postStart).count();

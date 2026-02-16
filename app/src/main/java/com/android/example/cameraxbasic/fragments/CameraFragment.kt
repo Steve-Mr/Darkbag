@@ -2700,7 +2700,7 @@ class CameraFragment : Fragment() {
                 chars = cameraManager.getCameraCharacteristics(targetCharId)
 
                 var whiteLevel = 1023
-                var blackLevel = 64
+                var blackLevelPattern = intArrayOf(64, 64, 64, 64)
                 var wb = floatArrayOf(2.0f, 1.0f, 1.0f, 1.5f)
                 var ccm = floatArrayOf(
                     2.0f, -1.0f, 0.0f,
@@ -2708,11 +2708,22 @@ class CameraFragment : Fragment() {
                     0.0f, -1.0f, 2.0f
                 )
                 var cfa = 0
+                var lensShadingMapData: FloatArray? = null
+                var lensShadingRows = 0
+                var lensShadingCols = 0
+                val useSensorColorMatrix = true
 
                 if (chars != null) {
                     whiteLevel = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_WHITE_LEVEL) ?: 1023
                     val bl = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_BLACK_LEVEL_PATTERN)
-                    if (bl != null) blackLevel = bl.getOffsetForIndex(0, 0)
+                    if (bl != null) {
+                        blackLevelPattern = intArrayOf(
+                            bl.getOffsetForIndex(0, 0),
+                            bl.getOffsetForIndex(1, 0),
+                            bl.getOffsetForIndex(0, 1),
+                            bl.getOffsetForIndex(1, 1)
+                        )
+                    }
 
                     val cfaEnum = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_COLOR_FILTER_ARRANGEMENT)
                     if (cfaEnum != null) cfa = cfaEnum
@@ -2728,7 +2739,7 @@ class CameraFragment : Fragment() {
                     }
 
                     val ccmMat = r.get(android.hardware.camera2.CaptureResult.COLOR_CORRECTION_TRANSFORM)
-                    if (ccmMat != null) {
+                    if (!useSensorColorMatrix && ccmMat != null) {
                         var idx = 0
                         for(row in 0 until 3) {
                             for(col in 0 until 3) {
@@ -2737,9 +2748,39 @@ class CameraFragment : Fragment() {
                             }
                         }
                     }
+
+                    if (useSensorColorMatrix && chars != null) {
+                        val sensorMat = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_COLOR_TRANSFORM1)
+                        if (sensorMat != null) {
+                            var idx = 0
+                            for (row in 0 until 3) {
+                                for (col in 0 until 3) {
+                                    val rat = sensorMat.getElement(col, row)
+                                    ccm[idx++] = rat.toFloat()
+                                }
+                            }
+                        }
+                    }
+
+                    val lsc = r.get(android.hardware.camera2.CaptureResult.STATISTICS_LENS_SHADING_CORRECTION_MAP)
+                    if (lsc != null) {
+                        lensShadingRows = lsc.rowCount
+                        lensShadingCols = lsc.columnCount
+                        val out = FloatArray(4 * lensShadingRows * lensShadingCols)
+                        fun idx(ch: Int, row: Int, col: Int): Int = ch * lensShadingRows * lensShadingCols + row * lensShadingCols + col
+                        for (row in 0 until lensShadingRows) {
+                            for (col in 0 until lensShadingCols) {
+                                out[idx(0, row, col)] = lsc.getGainFactor(android.hardware.camera2.params.LensShadingMap.CHANNEL_R, col, row)
+                                out[idx(1, row, col)] = lsc.getGainFactor(android.hardware.camera2.params.LensShadingMap.CHANNEL_G_EVEN, col, row)
+                                out[idx(2, row, col)] = lsc.getGainFactor(android.hardware.camera2.params.LensShadingMap.CHANNEL_G_ODD, col, row)
+                                out[idx(3, row, col)] = lsc.getGainFactor(android.hardware.camera2.params.LensShadingMap.CHANNEL_B, col, row)
+                            }
+                        }
+                        lensShadingMapData = out
+                    }
                 }
 
-                Log.d(TAG, "Metadata: WL=$whiteLevel, BL=$blackLevel, WB=${wb.joinToString()}, CFA=$cfa")
+                Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB=${wb.joinToString()}, CFA=$cfa, LSC=${lensShadingRows}x${lensShadingCols}, useSensorCCM=$useSensorColorMatrix")
 
                 val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
                 val targetLogName = prefs.getString(SettingsFragment.KEY_TARGET_LOG, "None")
@@ -2788,7 +2829,8 @@ class CameraFragment : Fragment() {
                     buffers,
                     width, height,
                     combinedOrientation,
-                    whiteLevel, blackLevel,
+                    whiteLevel, blackLevelPattern,
+                    lensShadingMapData, lensShadingRows, lensShadingCols, useSensorColorMatrix,
                     wb, ccm, cfa,
                     iso, exposureTime, fNumber, focalLength, captureTime,
                     targetLogIndex,

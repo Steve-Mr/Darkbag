@@ -99,7 +99,11 @@ object ColorProcessor {
         height: Int,
         orientation: Int,
         whiteLevel: Int,
-        blackLevel: Int,
+        blackLevelPattern: IntArray, // [r, g0, g1, b]
+        lensShadingMap: FloatArray?, // [4 * rows * cols], channel-major R,GE,GO,B
+        lensShadingRows: Int,
+        lensShadingCols: Int,
+        useSensorColorMatrix: Boolean,
         whiteBalance: FloatArray, // [r, g0, g1, b]
         ccm: FloatArray,          // [3x3]
         cfaPattern: Int,
