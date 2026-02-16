@@ -202,10 +202,11 @@ LUT3D load_lut(const char* path) {
     lut.size = 0;
     std::ifstream file(path);
     if (!file.is_open()) return lut;
-    std::string line;
+    char lineBuf[2048];
     int lineCount = 0;
     const int maxLines = 1000000;
-    while (std::getline(file, line) && ++lineCount < maxLines) {
+    while (file.getline(lineBuf, sizeof(lineBuf)) && ++lineCount < maxLines) {
+        std::string line(lineBuf);
         if (line.empty() || line[0] == '#') continue;
         if (line.find("LUT_3D_SIZE") != std::string::npos) {
             std::stringstream ss(line); std::string temp; ss >> temp >> lut.size;
@@ -219,6 +220,12 @@ LUT3D load_lut(const char* path) {
         }
         std::stringstream ss(line); float r, g, b;
         if (ss >> r >> g >> b) lut.data.push_back({r, g, b});
+    }
+    if (file.fail() && !file.eof()) {
+        LOGE("LUT loading failed or line too long at line %d", lineCount);
+        lut.size = 0;
+        lut.data.clear();
+        return lut;
     }
     if (lut.size > 0 && lut.data.size() != (size_t)(lut.size * lut.size * lut.size)) {
         LOGE("LUT size mismatch: expected %d^3=%zu, got %zu", lut.size, (size_t)(lut.size * lut.size * lut.size), lut.data.size());
@@ -504,9 +511,9 @@ bool process_and_save_image(
 
                 Vec3 color = process_pixel(cropX + sx * downsampleFactor, cropY + sy * downsampleFactor, nullptr, nullptr, nullptr);
                 size_t outIdx = (static_cast<size_t>(py) * finalW_zoomed + px) * 3;
-                previewRgb8[outIdx + 0] = (unsigned char)std::max(0.0f, std::min(255.0f, color.r * 255.0f));
-                previewRgb8[outIdx + 1] = (unsigned char)std::max(0.0f, std::min(255.0f, color.g * 255.0f));
-                previewRgb8[outIdx + 2] = (unsigned char)std::max(0.0f, std::min(255.0f, color.b * 255.0f));
+                previewRgb8[outIdx + 0] = (unsigned char)std::max(0.0f, std::min(255.0f, color.r * 255.0f + 0.5f));
+                previewRgb8[outIdx + 1] = (unsigned char)std::max(0.0f, std::min(255.0f, color.g * 255.0f + 0.5f));
+                previewRgb8[outIdx + 2] = (unsigned char)std::max(0.0f, std::min(255.0f, color.b * 255.0f + 0.5f));
             }
         }
     } else {
@@ -549,9 +556,9 @@ bool process_and_save_image(
                 // It expects original dimensions though. This part might need adjustment if used for rotated large images.
                 if (out_rgb_buffer && !swapDims) {
                     size_t bIdx = (static_cast<size_t>(py) * finalW + px) * 4;
-                    out_rgb_buffer[bIdx+0] = (unsigned char)(processedImage[outIdx+0]>>8);
-                    out_rgb_buffer[bIdx+1] = (unsigned char)(processedImage[outIdx+1]>>8);
-                    out_rgb_buffer[bIdx+2] = (unsigned char)(processedImage[outIdx+2]>>8);
+                    out_rgb_buffer[bIdx+0] = (unsigned char)std::min(255, (processedImage[outIdx+0] + 128) >> 8);
+                    out_rgb_buffer[bIdx+1] = (unsigned char)std::min(255, (processedImage[outIdx+1] + 128) >> 8);
+                    out_rgb_buffer[bIdx+2] = (unsigned char)std::min(255, (processedImage[outIdx+2] + 128) >> 8);
                     out_rgb_buffer[bIdx+3] = 255;
                 }
             }
@@ -607,9 +614,9 @@ bool write_jpeg(const char* filename, int width, int height, const std::vector<u
 
     #pragma omp parallel for
     for (size_t i = 0; i < total_pixels; i++) {
-        rgb8[i * 3 + 0] = (unsigned char)(data[i * 3 + 0] >> 8);
-        rgb8[i * 3 + 1] = (unsigned char)(data[i * 3 + 1] >> 8);
-        rgb8[i * 3 + 2] = (unsigned char)(data[i * 3 + 2] >> 8);
+        rgb8[i * 3 + 0] = (unsigned char)std::min(255, (data[i * 3 + 0] + 128) >> 8);
+        rgb8[i * 3 + 1] = (unsigned char)std::min(255, (data[i * 3 + 1] + 128) >> 8);
+        rgb8[i * 3 + 2] = (unsigned char)std::min(255, (data[i * 3 + 2] + 128) >> 8);
     }
     int res = stbi_write_jpg(filename, width, height, 3, rgb8.data(), quality);
     if (res == 0) {
@@ -619,58 +626,37 @@ bool write_jpeg(const char* filename, int width, int height, const std::vector<u
 }
 
 bool write_tiff(const char* filename, int width, int height, const std::vector<unsigned short>& data, int orientation, bool mirror) {
-    std::ofstream file(filename, std::ios::binary);
-    if (!file.is_open()) return false;
+    TIFF* tif = TIFFOpen(filename, "w");
+    if (!tif) return false;
 
-    char header[8] = {'I', 'I', 42, 0, 8, 0, 0, 0};
-    file.write(header, 8);
+    TIFFSetField(tif, TIFFTAG_IMAGEWIDTH, width);
+    TIFFSetField(tif, TIFFTAG_IMAGELENGTH, height);
+    TIFFSetField(tif, TIFFTAG_BITSPERSAMPLE, 16);
+    TIFFSetField(tif, TIFFTAG_SAMPLESPERPIXEL, 3);
+    TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, height);
+    TIFFSetField(tif, TIFFTAG_COMPRESSION, COMPRESSION_NONE);
+    TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_RGB);
+    TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG);
 
-    short num_entries = 11;
-    file.write((char*)&num_entries, 2);
-
-    auto write_entry = [&](short tag, short type, int count, uint32_t value_or_offset) {
-        file.write((char*)&tag, 2);
-        file.write((char*)&type, 2);
-        file.write((char*)&count, 4);
-        file.write((char*)&value_or_offset, 4);
-    };
-
-    int data_offset = 8 + 2 + num_entries * 12 + 4;
-    write_entry(256, 3, 1, width);
-    write_entry(257, 3, 1, height);
-
-    size_t bps_offset = static_cast<size_t>(data_offset) + static_cast<size_t>(width) * height * 6;
-    write_entry(258, 3, 3, static_cast<uint32_t>(bps_offset));
-    write_entry(259, 3, 1, 1);
-    write_entry(262, 3, 1, 2);
-
-    short tiffOrientation = 1;
+    uint16_t tiffOrientation = 1;
     switch (orientation) {
         case 90: tiffOrientation = mirror ? 5 : 6; break;
         case 180: tiffOrientation = mirror ? 4 : 3; break;
         case 270: tiffOrientation = mirror ? 7 : 8; break;
         default: tiffOrientation = mirror ? 2 : 1; break;
     }
-    write_entry(274, 3, 1, tiffOrientation);
-    write_entry(273, 4, 1, data_offset);
-    write_entry(277, 3, 1, 3);
-    write_entry(278, 3, 1, height);
-    write_entry(279, 4, 1, static_cast<uint32_t>(static_cast<size_t>(width) * height * 6));
-    write_entry(284, 3, 1, 1);
+    TIFFSetField(tif, TIFFTAG_ORIENTATION, tiffOrientation);
 
-    int next_ifd = 0;
-    file.write((char*)&next_ifd, 4);
-    file.write((char*)data.data(), data.size() * 2);
+    if (TIFFWriteEncodedStrip(tif, 0, (void*)data.data(), static_cast<size_t>(width) * height * 3 * sizeof(unsigned short)) < 0) {
+        TIFFClose(tif);
+        return false;
+    }
 
-    short bps[3] = {16, 16, 16};
-    file.write((char*)bps, 6);
-
-    bool result = file.good();
-    file.close();
-    return result;
+    TIFFClose(tif);
+    return true;
 }
 
-bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, int iso, long exposureTime, float fNumber, float focalLength, long captureTimeMillis, const std::vector<float>& ccm, int orientation, bool mirror) {
+bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, int iso, long exposureTime, float fNumber, float focalLength, long captureTimeMillis, const std::vector<float>& ccm, int orientation, bool mirror, const int* blackLevel, const float* whiteBalance) {
     TIFFSetTagExtender(DNGTagExtender);
     TIFF* tif = TIFFOpen(filename, "w");
     if (!tif) return false;
@@ -716,8 +702,14 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
     uint32_t white_level_val = (uint32_t)whiteLevel;
     if (white_level_val == 0) white_level_val = 65535;
     TIFFSetField(tif, TIFFTAG_WHITELEVEL, 1, &white_level_val);
-    uint32_t black_level_val = 0;
-    TIFFSetField(tif, TIFFTAG_BLACKLEVEL, 1, &black_level_val);
+
+    if (blackLevel) {
+        uint32_t bl[4] = {(uint32_t)blackLevel[0], (uint32_t)blackLevel[1], (uint32_t)blackLevel[2], (uint32_t)blackLevel[3]};
+        TIFFSetField(tif, TIFFTAG_BLACKLEVEL, 4, bl);
+    } else {
+        uint32_t black_level_val = 0;
+        TIFFSetField(tif, TIFFTAG_BLACKLEVEL, 1, &black_level_val);
+    }
 
     Matrix3x3 ccmMat;
     std::copy(ccm.data(), ccm.data() + 9, ccmMat.m);
@@ -725,8 +717,18 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
     Matrix3x3 colorMatrix1 = multiply(invCcm, M_XYZ_to_sRGB_D65);
     TIFFSetField(tif, TIFFTAG_COLORMATRIX1, 9, colorMatrix1.m);
 
-    static const float as_shot_neutral[] = {1.0f, 1.0f, 1.0f};
-    TIFFSetField(tif, TIFFTAG_ASSHOTNEUTRAL, 3, as_shot_neutral);
+    if (whiteBalance) {
+        float avgG = (whiteBalance[1] + whiteBalance[2]) * 0.5f;
+        float as_shot_neutral[3] = {
+            1.0f / (whiteBalance[0] > 0 ? whiteBalance[0] : 1.0f),
+            1.0f / (avgG > 0 ? avgG : 1.0f),
+            1.0f / (whiteBalance[3] > 0 ? whiteBalance[3] : 1.0f)
+        };
+        TIFFSetField(tif, TIFFTAG_ASSHOTNEUTRAL, 3, as_shot_neutral);
+    } else {
+        static const float as_shot_neutral[] = {1.0f, 1.0f, 1.0f};
+        TIFFSetField(tif, TIFFTAG_ASSHOTNEUTRAL, 3, as_shot_neutral);
+    }
 
     TIFFSetField(tif, TIFFTAG_CALIBRATIONILLUMINANT1, 21);
     float exposureTimeSec = (float)exposureTime / 1000000000.0f;
@@ -770,9 +772,9 @@ bool write_bmp(const char* filename, int width, int height, const std::vector<un
     for (int y = height - 1; y >= 0; y--) {
         for (int x = 0; x < width; x++) {
             size_t idx = (static_cast<size_t>(y) * width + x) * 3;
-            line[static_cast<size_t>(x) * 3 + 0] = (unsigned char)(data[idx + 2] >> 8);
-            line[static_cast<size_t>(x) * 3 + 1] = (unsigned char)(data[idx + 1] >> 8);
-            line[static_cast<size_t>(x) * 3 + 2] = (unsigned char)(data[idx + 0] >> 8);
+            line[static_cast<size_t>(x) * 3 + 0] = (unsigned char)std::min(255, (data[idx + 2] + 128) >> 8);
+            line[static_cast<size_t>(x) * 3 + 1] = (unsigned char)std::min(255, (data[idx + 1] + 128) >> 8);
+            line[static_cast<size_t>(x) * 3 + 2] = (unsigned char)std::min(255, (data[idx + 0] + 128) >> 8);
         }
         file.write((char*)line.data(), padded_width);
     }

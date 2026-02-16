@@ -176,7 +176,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_exportHdrPlus(
 
     if (dng_path_cstr) {
         LOGD("Exporting DNG to %s", dng_path_cstr);
-        write_dng(dng_path_cstr, width, height, finalImage, kMax16BitValue, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation, (bool)mirror);
+        write_dng(dng_path_cstr, width, height, finalImage, kMax16BitValue, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation, (bool)mirror, nullptr, wbVec.data());
     }
 
     bool saveOk = true;
@@ -386,11 +386,12 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
         env->ReleaseStringUTFChars(tempRawPath, tr_p_cstr);
     }
 
+    std::vector<int> blVec = { (int)bl_r, (int)bl_g0, (int)bl_g1, (int)bl_b };
     if (!tiffPathStr.empty() || !jpgPathStr.empty() || !dngPathStr.empty()) {
-        auto saveFunc = [fImg = (bool)isAsync ? finalImage : std::vector<uint16_t>(), isAsync, &finalImage, width, height, digitalGain, targetLog, lut, tiffPathStr, jpgPathStr, dngPathStr, baseName, ccmVec, ccmAltVec, exportMatrixAB, useSensorColorMatrix, wbVec, orientation, iso, exposureTime, fNumber, focalLength, captureTimeMillis, zoomFactor, mirror]() mutable {
+        auto saveFunc = [fImg = (bool)isAsync ? finalImage : std::vector<uint16_t>(), isAsync, &finalImage, width, height, digitalGain, targetLog, lut, tiffPathStr, jpgPathStr, dngPathStr, baseName, ccmVec, ccmAltVec, exportMatrixAB, useSensorColorMatrix, wbVec, orientation, iso, exposureTime, fNumber, focalLength, captureTimeMillis, zoomFactor, mirror, blVec]() mutable {
             const std::vector<uint16_t>& img = isAsync ? fImg : finalImage;
             bool dngOk = true;
-            if (!dngPathStr.empty()) dngOk = write_dng(dngPathStr.c_str(), width, height, img, kMax16BitValue, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation, (bool)mirror);
+            if (!dngPathStr.empty()) dngOk = write_dng(dngPathStr.c_str(), width, height, img, kMax16BitValue, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation, (bool)mirror, blVec.data(), wbVec.data());
 
             bool otherOk = true;
             if (!tiffPathStr.empty() || !jpgPathStr.empty()) {
