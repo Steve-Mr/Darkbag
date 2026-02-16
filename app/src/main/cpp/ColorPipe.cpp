@@ -103,19 +103,6 @@ Matrix3x3 invert(const Matrix3x3& src) {
     return res;
 }
 
-Matrix3x3 normalize_rows(const Matrix3x3& src) {
-    Matrix3x3 out = src;
-    for (int r = 0; r < 3; ++r) {
-        float sum = out.m[r * 3 + 0] + out.m[r * 3 + 1] + out.m[r * 3 + 2];
-        if (std::abs(sum) > 1e-6f) {
-            out.m[r * 3 + 0] /= sum;
-            out.m[r * 3 + 1] /= sum;
-            out.m[r * 3 + 2] /= sum;
-        }
-    }
-    return out;
-}
-
 // --- Color Matrices ---
 const Matrix3x3 M_sRGB_D65_to_XYZ = {
     0.41239080f, 0.35758434f, 0.18048079f,
@@ -268,7 +255,6 @@ struct AdaptiveEdgeComp {
     bool enabled = false;
     float lumaEdgeGain = 1.0f;
     std::array<float, 3> chromaEdgeGain{1.0f, 1.0f, 1.0f};
-    float postMatrixGreenEdgeGain = 1.0f;
     float centerX = 0.0f;
     float centerY = 0.0f;
     float invMaxRadius = 1.0f;
@@ -281,8 +267,8 @@ constexpr float kGreenShiftThreshold = 1.03f;
 constexpr float kCompStrength = 0.75f;
 constexpr float kMinLumaEdgeGain = 1.0f;
 constexpr float kMaxLumaEdgeGain = 1.35f;
-constexpr float kMinChromaGain = 0.65f;
-constexpr float kMaxChromaGain = 1.40f;
+constexpr float kMinChromaGain = 0.85f;
+constexpr float kMaxChromaGain = 1.25f;
 constexpr int kAnalysisStep = 8;
 
 constexpr float kRec709LinearLumaR = 0.2126f;
@@ -290,7 +276,6 @@ constexpr float kRec709LinearLumaG = 0.7152f;
 constexpr float kRec709LinearLumaB = 0.0722f;
 
 constexpr float kBlendStartRadius = 0.55f;
-constexpr float kMinPostMatrixGreenGain = 0.78f;
 constexpr float kBlendEndRadius = 1.0f;
 
 inline float safe_div(float a, float b) {
@@ -372,7 +357,6 @@ AdaptiveEdgeComp calculate_adaptive_edge_comp(const std::vector<unsigned short>&
     // Always enable compensation by default (as requested), but gains remain clamped
     // and are driven by center/edge statistics.
     bool needsComp = (edgeLuma < centerLuma * kLumaDropThreshold) && (edgeGvsRB > centerGvsRB * kGreenShiftThreshold);
-    edgeComp.enabled = true;
     edgeComp.lumaEdgeGain = std::clamp(1.0f + (safe_div(centerLuma, edgeLuma) - 1.0f) * kCompStrength, kMinLumaEdgeGain, kMaxLumaEdgeGain);
 
     for (int ch = 0; ch < 3; ch++) {
@@ -381,15 +365,16 @@ AdaptiveEdgeComp calculate_adaptive_edge_comp(const std::vector<unsigned short>&
         edgeComp.chromaEdgeGain[ch] = std::clamp(mixed, kMinChromaGain, kMaxChromaGain);
     }
 
-    // Additional B-stage safeguard:
-    // if edge green ratio is higher than center, suppress green mildly after matrix conversion.
-    edgeComp.postMatrixGreenEdgeGain = std::clamp(safe_div(centerGvsRB, edgeGvsRB), kMinPostMatrixGreenGain, 1.0f);
+    edgeComp.enabled = needsComp;
+    if (!edgeComp.enabled) {
+        edgeComp.lumaEdgeGain = 1.0f;
+        edgeComp.chromaEdgeGain = {1.0f, 1.0f, 1.0f};
+    }
 
-    LOGD("Adaptive edge compensation active. needsComp=%d, LumaEdgeGain=%.3f, ChromaEdgeGain=[%.3f, %.3f, %.3f], postMatrixGreenEdgeGain=%.3f, centerLuma=%.1f, edgeLuma=%.1f, centerGvsRB=%.4f, edgeGvsRB=%.4f",
-         (int)needsComp,
+    LOGD("Adaptive edge compensation active=%d. LumaEdgeGain=%.3f, ChromaEdgeGain=[%.3f, %.3f, %.3f], centerLuma=%.1f, edgeLuma=%.1f, centerGvsRB=%.4f, edgeGvsRB=%.4f",
+         (int)edgeComp.enabled,
          edgeComp.lumaEdgeGain,
          edgeComp.chromaEdgeGain[0], edgeComp.chromaEdgeGain[1], edgeComp.chromaEdgeGain[2],
-         edgeComp.postMatrixGreenEdgeGain,
          centerLuma, edgeLuma, centerGvsRB, edgeGvsRB);
 
     return edgeComp;
@@ -409,11 +394,7 @@ bool process_and_save_image(
     int outW = width / downsampleFactor, outH = height / downsampleFactor;
     bool swapDims = (orientation == 90 || orientation == 270);
     int finalW = swapDims ? outH : outW, finalH = swapDims ? outW : outH;
-    Matrix3x3 effective_CCM = {0};
-    if (sourceColorSpace == 1 && ccm) {
-        std::copy(ccm, ccm + 9, effective_CCM.m);
-        effective_CCM = normalize_rows(effective_CCM);
-    }
+    Matrix3x3 effective_CCM = {0}; if (sourceColorSpace == 1 && ccm) std::copy(ccm, ccm + 9, effective_CCM.m);
     std::vector<unsigned short> processedImage; std::vector<unsigned char> previewRgb8;
 
     AdaptiveEdgeComp edgeComp = calculate_adaptive_edge_comp(inputImage, width, height);
@@ -463,28 +444,8 @@ bool process_and_save_image(
         if (stageA) *stageA = colorA;
 
         Vec3 color = colorA;
-        if (sourceColorSpace == 1) {
-            // Android COLOR_CORRECTION_TRANSFORM is already a sensor-domain correction matrix.
-            // Treat it as sensor->XYZ(D50)-like matrix then adapt to D65.
-            if (ccm) {
-                color = multiply(effective_CCM, color);
-                color = multiply(M_Bradford_D50_to_D65, color);
-            } else {
-                // Fallback path when matrix metadata is unavailable.
-                color = multiply(M_sRGB_D65_to_XYZ, color);
-            }
-        }
+        if (sourceColorSpace == 1) { if (ccm) color = multiply(effective_CCM, color); color = multiply(M_sRGB_D65_to_XYZ, color); }
         else if (sourceColorSpace == 0) { color = multiply(M_ProPhoto_D50_to_XYZ, color); color = multiply(M_Bradford_D50_to_D65, color); }
-
-        if (edgeComp.enabled) {
-            const float nx = (x - edgeComp.centerX) * edgeComp.invMaxRadius;
-            const float ny = (y - edgeComp.centerY) * edgeComp.invMaxRadius;
-            float r = std::sqrt(nx * nx + ny * ny);
-            float t = std::clamp((r - kBlendStartRadius) / (kBlendEndRadius - kBlendStartRadius), 0.0f, 1.0f);
-            t = t * t * (3.0f - 2.0f * t);
-            float postG = 1.0f + (edgeComp.postMatrixGreenEdgeGain - 1.0f) * t;
-            color.g *= postG;
-        }
 
         switch (targetLog) {
             case 1: color = multiply(M_XYZ_to_AlexaWideGamut_D65, color); break;
