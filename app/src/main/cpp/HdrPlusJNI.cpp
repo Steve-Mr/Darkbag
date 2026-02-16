@@ -308,10 +308,10 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
              if (hasLsc) {
                  float fx = (width > 1) ? (float)x * (lensShadingCols - 1) / (float)(width - 1) : 0.0f;
                  float fy = (height > 1) ? (float)y * (lensShadingRows - 1) / (float)(height - 1) : 0.0f;
-                 int x0 = std::max(0, std::min((int)std::floor(fx), lensShadingCols - 1));
-                 int y0 = std::max(0, std::min((int)std::floor(fy), lensShadingRows - 1));
-                 int x1 = std::max(0, std::min(x0 + 1, lensShadingCols - 1));
-                 int y1 = std::max(0, std::min(y0 + 1, lensShadingRows - 1));
+                 int x0 = std::clamp((int)std::floor(fx), 0, lensShadingCols - 1);
+                 int y0 = std::clamp((int)std::floor(fy), 0, lensShadingRows - 1);
+                 int x1 = std::min(x0 + 1, lensShadingCols - 1);
+                 int y1 = std::min(y0 + 1, lensShadingRows - 1);
                  float tx = fx - x0;
                  float ty = fy - y0;
                  auto bilerp = [&](int ch) {

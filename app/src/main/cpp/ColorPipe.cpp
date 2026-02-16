@@ -354,8 +354,8 @@ AdaptiveEdgeComp calculate_adaptive_edge_comp(const std::vector<unsigned short>&
     float centerGvsRB = safe_div(centerMean[1], 0.5f * (centerMean[0] + centerMean[2]));
     float edgeGvsRB = safe_div(edgeMean[1], 0.5f * (edgeMean[0] + edgeMean[2]));
 
-    // Always enable compensation by default (as requested), but gains remain clamped
-    // and are driven by center/edge statistics.
+    // Conditionally enable compensation when edge luma drop and green shift are detected.
+    // Gains are derived from center/edge statistics and clamped to safe bounds.
     bool needsComp = (edgeLuma < centerLuma * kLumaDropThreshold) && (edgeGvsRB > centerGvsRB * kGreenShiftThreshold);
     edgeComp.lumaEdgeGain = std::clamp(1.0f + (safe_div(centerLuma, edgeLuma) - 1.0f) * kCompStrength, kMinLumaEdgeGain, kMaxLumaEdgeGain);
 
