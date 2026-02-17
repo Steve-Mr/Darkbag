@@ -1065,7 +1065,11 @@ class CameraFragment : Fragment() {
         // Apply WindowInsets to UI Container to avoid system bar overlap
         cameraUiContainerBinding?.root?.let { rootView ->
             ViewCompat.setOnApplyWindowInsetsListener(rootView) { view, windowInsets ->
-                val insets = windowInsets.getInsets(WindowInsetsCompat.Type.systemBars())
+                val insets = windowInsets.getInsets(
+                    WindowInsetsCompat.Type.systemBars() or
+                    WindowInsetsCompat.Type.displayCutout() or
+                    WindowInsetsCompat.Type.mandatorySystemGestures()
+                )
                 view.updatePadding(
                     left = insets.left,
                     top = insets.top,
@@ -1074,6 +1078,8 @@ class CameraFragment : Fragment() {
                 )
                 WindowInsetsCompat.CONSUMED
             }
+            // Request insets dispatch to handle race conditions during view creation
+            rootView.requestApplyInsets()
         }
 
         // Touch overlay to dismiss menus
