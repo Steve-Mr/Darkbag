@@ -3007,7 +3007,6 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     digitalGain,
                     debugStats,
                     null, // outputBitmap
-                    false, // isAsync (deprecated in favor of WorkManager)
                     tempRawFile.absolutePath,
                     currentZoom,
                     mirror
