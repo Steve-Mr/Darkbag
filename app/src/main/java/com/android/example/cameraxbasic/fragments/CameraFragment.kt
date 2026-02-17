@@ -1552,13 +1552,7 @@ class CameraFragment : Fragment() {
                                 val newFile = parentFolder?.createFile("image/x-adobe-dng", "$dngName.dng")
                                 if (newFile != null) {
                                     context.contentResolver.openOutputStream(newFile.uri)?.use { out ->
-                                        val inputStream2 = java.io.ByteArrayInputStream(image.data)
-                                        dngCreatorReal.writeInputStream(
-                                            out,
-                                            android.util.Size(image.width, image.height),
-                                            inputStream2,
-                                            0
-                                        )
+                                        writeDngToStream(dngCreatorReal, image, out)
                                     }
                                     Log.i(TAG, "Saved Standard RAW to custom folder: ${newFile.uri}")
                                 }
@@ -1581,13 +1575,7 @@ class CameraFragment : Fragment() {
                             if (dngUri != null) {
                                 try {
                                     contentResolver.openOutputStream(dngUri)?.use { out ->
-                                        val inputStream2 = java.io.ByteArrayInputStream(image.data)
-                                        dngCreatorReal.writeInputStream(
-                                            out,
-                                            android.util.Size(image.width, image.height),
-                                            inputStream2,
-                                            0
-                                        )
+                                        writeDngToStream(dngCreatorReal, image, out)
                                     }
                                     // NOTE:
                                     // ExifInterface.saveAttributes() does not support DNG and throws by design.
@@ -3855,6 +3843,20 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = false
             cameraUiContainerBinding?.cameraCaptureButton?.alpha = 0.5f
         }
+    }
+
+    private fun writeDngToStream(
+        dngCreator: android.hardware.camera2.DngCreator,
+        image: RawImageHolder,
+        outputStream: java.io.OutputStream
+    ) {
+        val inputStream = java.io.ByteArrayInputStream(image.data)
+        dngCreator.writeInputStream(
+            outputStream,
+            android.util.Size(image.width, image.height),
+            inputStream,
+            0
+        )
     }
 
     private fun getMeteringRectangle(
