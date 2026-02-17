@@ -57,16 +57,106 @@ class MediaStoreUtils(private val context: Context) {
         return cursor
     }
 
-    suspend fun getLatestImageFilename(): String? {
-        var filename: String?
-        if (mediaStoreCollection == null) return null
+    suspend fun getLatestAppImage(context: Context): Uri? {
+        val prefs = context.getSharedPreferences(com.android.example.cameraxbasic.fragments.SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
 
-        getMediaStoreImageCursor(mediaStoreCollection).use { cursor ->
-            if (cursor?.moveToFirst() != true) return null
-            filename = cursor.getString(cursor.getColumnIndexOrThrow(imageDataColumnIndex))
+        // 1. Check persisted last captured URI (most accurate and fast)
+        val lastUriStr = prefs.getString(com.android.example.cameraxbasic.fragments.SettingsFragment.KEY_LAST_CAPTURE_URI, null)
+        if (lastUriStr != null) {
+            val lastUri = Uri.parse(lastUriStr)
+            if (verifyUriExists(context, lastUri)) {
+                return lastUri
+            }
         }
 
-        return filename
+        // 2. Search prioritized folders
+        val priorityList = listOf(
+            prefs.getString(com.android.example.cameraxbasic.fragments.SettingsFragment.KEY_JPG_STORAGE_URI, null) to "image/jpeg",
+            prefs.getString(com.android.example.cameraxbasic.fragments.SettingsFragment.KEY_RAW_STORAGE_URI, null) to "image/x-adobe-dng",
+            prefs.getString(com.android.example.cameraxbasic.fragments.SettingsFragment.KEY_TIFF_STORAGE_URI, null) to "image/tiff"
+        )
+
+        for ((folderUri, mimeType) in priorityList) {
+            if (folderUri != null) {
+                val latest = getLatestFileInSAF(context, folderUri, mimeType)
+                if (latest != null) {
+                    prefs.edit().putString(com.android.example.cameraxbasic.fragments.SettingsFragment.KEY_LAST_CAPTURE_URI, latest.toString()).apply()
+                    return latest
+                }
+            }
+        }
+
+        // 3. Fallback to MediaStore filtered by Pictures/Darkbag
+        val latestMediaStore = getLatestMediaStoreImageFiltered(context)
+        if (latestMediaStore != null) {
+            prefs.edit().putString(com.android.example.cameraxbasic.fragments.SettingsFragment.KEY_LAST_CAPTURE_URI, latestMediaStore.toString()).apply()
+        }
+        return latestMediaStore
+    }
+
+    private fun verifyUriExists(context: Context, uri: Uri): Boolean {
+        return try {
+            if (uri.scheme == "content") {
+                val doc = androidx.documentfile.provider.DocumentFile.fromSingleUri(context, uri)
+                doc?.exists() == true
+            } else {
+                File(uri.path ?: return false).exists()
+            }
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    private fun getLatestFileInSAF(context: Context, folderUri: String, mimeType: String): Uri? {
+        return try {
+            val treeUri = Uri.parse(folderUri)
+            val root = androidx.documentfile.provider.DocumentFile.fromTreeUri(context, treeUri)
+            root?.listFiles()
+                ?.filter { it.type == mimeType || (mimeType == "image/x-adobe-dng" && it.name?.endsWith(".dng", ignoreCase = true) == true) }
+                ?.maxByOrNull { it.lastModified() }
+                ?.uri
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun getLatestMediaStoreImageFiltered(context: Context): Uri? {
+        val priorityMimes = listOf("image/jpeg", "image/x-adobe-dng", "image/tiff")
+        for (mime in priorityMimes) {
+            val uri = queryLatestInMediaStore(context, mime)
+            if (uri != null) return uri
+        }
+        return null
+    }
+
+    private fun queryLatestInMediaStore(context: Context, mimeType: String): Uri? {
+        val collection = MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+        val projection = arrayOf(MediaStore.MediaColumns._ID)
+        val selection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ? AND ${MediaStore.MediaColumns.MIME_TYPE} = ?"
+        } else {
+            "${MediaStore.MediaColumns.DATA} LIKE ? AND ${MediaStore.MediaColumns.MIME_TYPE} = ?"
+        }
+        val pathFilter = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) "Pictures/Darkbag%" else "%Pictures/Darkbag%"
+        val selectionArgs = arrayOf(pathFilter, mimeType)
+        val sortOrder = "${MediaStore.MediaColumns.DATE_ADDED} DESC"
+
+        try {
+            context.contentResolver.query(collection, projection, selection, selectionArgs, sortOrder)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val id = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID))
+                    return ContentUris.withAppendedId(collection, id)
+                }
+            }
+        } catch (e: Exception) {
+            // Log error or ignore
+        }
+        return null
+    }
+
+    suspend fun getLatestImageFilename(): String? {
+        // Deprecated in favor of getLatestAppImage
+        return null
     }
 
     suspend fun getImages(): MutableList<MediaStoreFile> {
@@ -98,6 +188,18 @@ class MediaStoreUtils(private val context: Context) {
         @Suppress("DEPRECATION")
         private const val imageDataColumnIndex = MediaStore.Images.Media.DATA
         private const val imageIdColumnIndex = MediaStore.Images.Media._ID
+
+        fun getFolderNameFromUri(context: Context, uri: Uri): String {
+            if (uri.scheme == "content") {
+                return try {
+                    val docUri = androidx.documentfile.provider.DocumentFile.fromTreeUri(context, uri)
+                    docUri?.name ?: uri.path ?: "Unknown"
+                } catch (e: Exception) {
+                    uri.path ?: "Unknown"
+                }
+            }
+            return uri.path ?: "Unknown"
+        }
     }
 }
 

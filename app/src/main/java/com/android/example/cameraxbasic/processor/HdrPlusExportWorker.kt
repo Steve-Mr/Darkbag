@@ -42,6 +42,10 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
         val baseName = data.getString("baseName") ?: "HDRPLUS"
         val saveTiff = data.getBoolean("saveTiff", true)
         val saveJpg = data.getBoolean("saveJpg", true)
+        val saveRaw = data.getBoolean("saveRaw", true)
+        val jpgFolderUri = data.getString("jpgFolderUri")
+        val tiffFolderUri = data.getString("tiffFolderUri")
+        val rawFolderUri = data.getString("rawFolderUri")
         val mirror = data.getBoolean("mirror", false)
 
         Log.d(TAG, "Background Export Worker started for $baseName")
@@ -69,11 +73,23 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
                 tiffPath = tiffPath,
                 saveJpg = saveJpg,
                 saveTiff = saveTiff,
+                saveRaw = saveRaw,
+                jpgFolderUri = jpgFolderUri,
+                tiffFolderUri = tiffFolderUri,
+                rawFolderUri = rawFolderUri,
                 targetUri = targetUri?.let { Uri.parse(it) },
                 mirror = false // already handled by JNI
             )
 
             Log.d(TAG, "Background Export Worker finished successfully for $baseName. finalUri=$finalUri")
+
+            if (finalUri != null) {
+                val prefs = applicationContext.getSharedPreferences(
+                    com.android.example.cameraxbasic.fragments.SettingsFragment.PREFS_NAME,
+                    Context.MODE_PRIVATE
+                )
+                prefs.edit().putString(com.android.example.cameraxbasic.fragments.SettingsFragment.KEY_LAST_CAPTURE_URI, finalUri.toString()).apply()
+            }
 
             // Still notify UI for thumbnail update if possible
             // We pass null for paths to signal that saving is already done
