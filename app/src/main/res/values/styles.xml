@@ -49,4 +49,18 @@
         <item name="strokeWidth">0dp</item>
     </style>
 
+    <!-- Connected Button Group Style -->
+    <style name="Widget.App.MaterialButtonGroup.Connected" parent="Widget.Material3.MaterialButtonGroup.Connected">
+        <!-- Any custom overrides if needed -->
+    </style>
+
+    <style name="Widget.App.Button.OutlinedButton.Connected" parent="Widget.Material3.Button.OutlinedButton">
+        <item name="cornerRadius">0dp</item>
+    </style>
+
+    <!-- 7-sided Cookie Shape -->
+    <style name="ShapeAppearance.App.Cookie7" parent="ShapeAppearance.Material3.MediumComponent">
+        <!-- We will handle the complex 7-sided path in code or via a custom drawable as ShapeAppearance primarily supports 4 corners -->
+    </style>
+
 </resources>

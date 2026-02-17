@@ -38,6 +38,7 @@ import android.view.TextureView
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
+import android.widget.ArrayAdapter
 import android.graphics.BitmapFactory
 import android.media.ImageReader
 import android.os.Handler
@@ -475,6 +476,7 @@ class CameraFragment : Fragment() {
         // Initialize HDR+ State
         isHdrPlusEnabled = prefs.getBoolean(KEY_HDR_PLUS_ENABLED, true)
         updateHdrPlusUi()
+        updateHdrPlusConstraints()
 
         // Initialize HDR+ Burst Helper
         hdrPlusBurstHelper = HdrPlusBurst(
@@ -757,10 +759,10 @@ class CameraFragment : Fragment() {
                 updateTabColors()
 
                 if (isRawSupported) {
-                    cameraUiContainerBinding?.hdrPlusToggle?.visibility = View.VISIBLE
+                    cameraUiContainerBinding?.hdrPlusSwitch?.visibility = View.VISIBLE
                     updateHdrPlusUi()
                 } else {
-                    cameraUiContainerBinding?.hdrPlusToggle?.visibility = View.GONE
+                    cameraUiContainerBinding?.hdrPlusSwitch?.visibility = View.GONE
                 }
             }
         } catch (e: Exception) {
@@ -1153,7 +1155,7 @@ class CameraFragment : Fragment() {
                 }
             }
         }
-        cameraUiContainerBinding?.cameraSwitchButton?.let {
+        cameraUiContainerBinding?.cameraSwitchButtonAlt?.let {
 
             // Disable the button until the camera is set up
             it.isEnabled = false
@@ -1180,10 +1182,10 @@ class CameraFragment : Fragment() {
 
         updateHdrPlusConstraints()
 
-        // HDR+ Toggle
-        cameraUiContainerBinding?.hdrPlusToggle?.let { toggle ->
-            toggle.setOnClickListener {
-                isHdrPlusEnabled = !isHdrPlusEnabled
+        // HDR+ Switch
+        cameraUiContainerBinding?.hdrPlusSwitch?.let { toggle ->
+            toggle.setOnCheckedChangeListener { _, isChecked ->
+                isHdrPlusEnabled = isChecked
                 requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
                     .edit().putBoolean(KEY_HDR_PLUS_ENABLED, isHdrPlusEnabled).apply()
                 updateHdrPlusUi()
@@ -1191,19 +1193,9 @@ class CameraFragment : Fragment() {
             }
         }
 
-        // LUT Selector (Always visible now)
-        cameraUiContainerBinding?.lutButton?.visibility = View.VISIBLE
-        cameraUiContainerBinding?.lutButton?.setOnClickListener {
-             // Toggle LUT List Visibility
-             val lutListContainer = cameraUiContainerBinding?.lutListContainer
-             if (lutListContainer?.visibility == View.VISIBLE) {
-                 lutListContainer.visibility = View.GONE
-                 cameraUiContainerBinding?.touchOverlay?.visibility = View.GONE
-             } else {
-                 lutListContainer?.visibility = View.VISIBLE
-                 cameraUiContainerBinding?.touchOverlay?.visibility = View.VISIBLE
-                 refreshLutList()
-             }
+        // LUT Switcher (Strip)
+        cameraUiContainerBinding?.lutSwitcherButton?.setOnClickListener {
+             showLutMenu()
         }
 
         // Initialize Zoom Controls
@@ -1235,10 +1227,10 @@ class CameraFragment : Fragment() {
     /** Enabled or disabled a button to switch cameras depending on the available cameras */
     private fun updateCameraSwitchButton() {
         try {
-            cameraUiContainerBinding?.cameraSwitchButton?.isEnabled =
+            cameraUiContainerBinding?.cameraSwitchButtonAlt?.isEnabled =
                 hasBackCamera() && hasFrontCamera()
         } catch (exception: CameraInfoUnavailableException) {
-            cameraUiContainerBinding?.cameraSwitchButton?.isEnabled = false
+            cameraUiContainerBinding?.cameraSwitchButtonAlt?.isEnabled = false
         }
     }
 
@@ -1996,19 +1988,17 @@ class CameraFragment : Fragment() {
 
     private fun initLensControls() {
         val binding = cameraUiContainerBinding ?: return
-        val container = binding.lensControlsContainer ?: return
-        val scroll = binding.controlsHubScroll ?: return
+        val group = binding.lensButtonGroup ?: return
+        val row = binding.lensControlRow ?: return
 
         if (availableLenses.isEmpty()) {
             refreshLenses()
         }
 
         if (availableLenses.isNotEmpty()) {
-            scroll.visibility = View.VISIBLE
-            container.removeAllViews()
+            row.visibility = View.VISIBLE
+            group.removeAllViews()
 
-            // Filter out all presets (1x sub-presets, virtual tele 2x) from the main list.
-            // We want physical lenses and the virtual 2.0x wide only.
             val filteredLenses = availableLenses.filter {
                 !it.isZoomPreset || it.sensorId.contains("virtual-2x")
             }.filter {
@@ -2022,35 +2012,30 @@ class CameraFragment : Fragment() {
 
             for (lens in filteredLenses) {
                 val btn = com.google.android.material.button.MaterialButton(
-                    requireContext()
+                    requireContext(), null, com.google.android.material.R.attr.materialButtonOutlinedStyle
                 ).apply {
                     layoutParams = android.widget.LinearLayout.LayoutParams(
-                        resources.getDimensionPixelSize(R.dimen.lens_button_size),
+                        android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
                         resources.getDimensionPixelSize(R.dimen.lens_button_size)
-                    ).apply {
-                        marginEnd = resources.getDimensionPixelSize(R.dimen.spacing_small)
-                    }
+                    )
                     text = lens.name
                     tag = lens
-                    textSize = 10f
-                    setPadding(0, 0, 0, 0)
+                    textSize = 12f
+                    isCheckable = true
+                    setPadding(resources.getDimensionPixelSize(R.dimen.spacing_medium), 0, resources.getDimensionPixelSize(R.dimen.spacing_medium), 0)
                     insetTop = 0
                     insetBottom = 0
-                    cornerRadius = resources.getDimensionPixelSize(R.dimen.radius_full)
 
                     setOnClickListener {
                         val oldLens = currentLens
                         val is1x = lens.multiplier in 0.95f..1.05f && !lens.isZoomPreset
-                        // Only cycle if we are already in the 1x family (24/28/35mm)
                         val isAlreadyIn1xPresets = oldLens != null && oldLens.id == lens.id &&
                                 (oldLens.name == "24mm" || oldLens.name == "28mm" || oldLens.name == "35mm")
 
-                        // Largest Tele Cycling
                         val isLargestTele = largestTele != null && lens.sensorId == largestTele.sensorId
                         val isAlreadyInTelePresets = oldLens != null && (oldLens.sensorId == lens.sensorId || oldLens.sensorId == "${lens.sensorId}${com.android.example.cameraxbasic.utils.CameraRepository.VIRTUAL_TELE_2X_SUFFIX}")
 
                         if (is1x && isAlreadyIn1xPresets) {
-                            // Cycle through 1x presets: 24mm -> 28mm -> 35mm
                             val presets1x = cameraRepository.get1xPresets(lens)
                             val currentName = oldLens?.name ?: "24mm"
                             val nextIndex = when (currentName) {
@@ -2061,7 +2046,6 @@ class CameraFragment : Fragment() {
                             }
                             currentLens = presets1x[nextIndex]
 
-                            // Visual feedback: Focal Length -> Multiplier
                             transientLensLabel = currentLens!!.name
                             lifecycleScope.launch(Dispatchers.Main) {
                                 delay(800)
@@ -2071,12 +2055,10 @@ class CameraFragment : Fragment() {
                                 }
                             }
                         } else if (isLargestTele && isAlreadyInTelePresets) {
-                             // Cycle Largest Tele: Native -> 2x Crop
                              val telePresets = cameraRepository.getTelePresets(lens)
                              val isCurrentlyNative = oldLens?.sensorId == lens.sensorId
                              currentLens = if (isCurrentlyNative) telePresets[1] else telePresets[0]
                         } else if (is1x) {
-                            // Switching TO 1x from another lens: Use the 1x default focal length setting
                             val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
                             val default1xFocal = prefs.getString(SettingsFragment.KEY_DEFAULT_FOCAL_1X, "24mm")
                             val presets1x = cameraRepository.get1xPresets(lens)
@@ -2096,11 +2078,11 @@ class CameraFragment : Fragment() {
                         }
                     }
                 }
-                container.addView(btn)
+                group.addView(btn)
             }
             updateLensUI()
         } else {
-            scroll.visibility = View.GONE
+            row.visibility = View.GONE
         }
     }
 
@@ -2111,47 +2093,34 @@ class CameraFragment : Fragment() {
         }
 
         val binding = cameraUiContainerBinding ?: return
-        val container = binding.lensControlsContainer ?: return
+        val group = binding.lensButtonGroup ?: return
 
-        val colorPrimary = MaterialColors.getColor(container, com.google.android.material.R.attr.colorPrimary)
-        val colorOnSurface = MaterialColors.getColor(container, com.google.android.material.R.attr.colorOnSurface)
+        val colorPrimary = MaterialColors.getColor(group, com.google.android.material.R.attr.colorPrimary)
+        val colorOnSurface = MaterialColors.getColor(group, com.google.android.material.R.attr.colorOnSurface)
 
-        // Identify the largest physical tele lens (Back camera only) to handle its label correctly
         val isBackCamera = lensFacing == CameraSelector.LENS_FACING_BACK
         val largestTele = if (isBackCamera) {
             availableLenses.filter { it.multiplier > 1.05f && !it.isZoomPreset }.maxByOrNull { it.multiplier }
         } else null
 
-        for (i in 0 until container.childCount) {
-            val btn = container.getChildAt(i) as? com.google.android.material.button.MaterialButton
+        for (i in 0 until group.childCount) {
+            val btn = group.getChildAt(i) as? com.google.android.material.button.MaterialButton
             val lens = btn?.tag as? com.android.example.cameraxbasic.utils.LensInfo
             if (btn != null && lens != null) {
-                // For the 1.0x button, it stays active if any of its sub-presets (24, 28, 35) are active
-                // For the largest tele button, it stays active if its 2x virtual preset is active
                 val isActive = lens.sensorId == currentLens?.sensorId ||
                               (lens.multiplier in 0.95f..1.05f && currentLens?.id == lens.id && !currentLens!!.sensorId.contains("virtual")) ||
                               (largestTele != null && lens.sensorId == largestTele.sensorId && currentLens?.sensorId == "${largestTele.sensorId}${com.android.example.cameraxbasic.utils.CameraRepository.VIRTUAL_TELE_2X_SUFFIX}")
 
+                btn.isChecked = isActive
                 if (isActive) {
-                    // Update text for 1.0x button or Largest Tele button
                     if (lens.multiplier in 0.95f..1.05f && !lens.isZoomPreset) {
                         btn.text = transientLensLabel ?: String.format("%.1fx", currentLens?.multiplier ?: 1.0f)
                     } else if (largestTele != null && lens.sensorId == largestTele.sensorId) {
                         btn.text = String.format("%.1fx", currentLens?.multiplier ?: lens.multiplier)
                     }
-
                     btn.setTextColor(colorPrimary)
-                    btn.strokeWidth = resources.getDimensionPixelSize(R.dimen.stroke_small)
-                    btn.strokeColor = android.content.res.ColorStateList.valueOf(colorPrimary)
-                    btn.setBackgroundColor(MaterialColors.layer(
-                        MaterialColors.getColor(btn, com.google.android.material.R.attr.colorSurface),
-                        colorPrimary,
-                        0.1f
-                    ))
                 } else {
                     btn.setTextColor(colorOnSurface)
-                    btn.strokeWidth = 0
-
                     if (lens.multiplier in 0.95f..1.05f && !lens.isZoomPreset) {
                         val default1xFocal = prefs.getString(SettingsFragment.KEY_DEFAULT_FOCAL_1X, "24mm")
                         val presets1x = cameraRepository.get1xPresets(lens)
@@ -2160,13 +2129,24 @@ class CameraFragment : Fragment() {
                     } else {
                         btn.text = lens.name
                     }
-
-                    btn.setBackgroundColor(MaterialColors.layer(
-                        MaterialColors.getColor(btn, com.google.android.material.R.attr.colorSurface),
-                        colorOnSurface,
-                        0.15f
-                    ))
                 }
+            }
+        }
+
+        // Adjust position of lens row to be above viewfinder bottom
+        lifecycleScope.launch(Dispatchers.Main) {
+            val vfBottom = fragmentCameraBinding.viewFinder.bottom
+            val row = binding.lensControlRow ?: return@launch
+            val containerHeight = binding.cameraUiContainer.height
+
+            // If viewfinder is smaller than screen, align row to its bottom
+            if (vfBottom < containerHeight && vfBottom > 0) {
+                 val params = row.layoutParams as androidx.constraintlayout.widget.ConstraintLayout.LayoutParams
+                 params.bottomToTop = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.UNSET
+                 params.bottomToBottom = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.UNSET
+                 row.translationY = (vfBottom - containerHeight).toFloat() - resources.getDimension(R.dimen.margin_medium)
+            } else {
+                 row.translationY = 0f
             }
         }
     }
@@ -2513,6 +2493,9 @@ class CameraFragment : Fragment() {
         val targetLogIndex = SettingsFragment.LOG_CURVES.indexOf(targetLogName)
         val isPreviewEnabled = prefs.getBoolean(SettingsFragment.KEY_ENABLE_LUT_PREVIEW, true)
 
+        val displayLut = activeLutName?.substringBeforeLast(".") ?: getString(R.string.lut_none)
+        cameraUiContainerBinding?.lutSwitcherButton?.text = if (targetLogName == getString(R.string.lut_none)) getString(R.string.lut_none) else "$targetLogName + $displayLut"
+
         activeLutJob?.cancel()
         activeLutJob = lifecycleScope.launch(Dispatchers.IO) {
             var lutData: FloatArray? = null
@@ -2531,6 +2514,77 @@ class CameraFragment : Fragment() {
                 proc.updateLut(lutData, size, targetLogIndex)
             }
         }
+    }
+
+    private fun showLutMenu() {
+        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val currentLog = prefs.getString(SettingsFragment.KEY_TARGET_LOG, "None") ?: "None"
+        val currentLut = prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, "None")?.substringBeforeLast(".") ?: "None"
+
+        val popup = android.widget.PopupMenu(requireContext(), cameraUiContainerBinding?.lutSwitcherButton)
+        popup.menu.add("${getString(R.string.lut_menu_log)}: $currentLog")
+        val lutItem = popup.menu.add("${getString(R.string.lut_menu_lut)}: $currentLut")
+
+        if (currentLog == "None") {
+            lutItem.isEnabled = false
+            lutItem.title = getString(R.string.lut_menu_select_log_first)
+        }
+
+        popup.setOnMenuItemClickListener { item ->
+            val title = item.title.toString()
+            if (title.startsWith(getString(R.string.lut_menu_log))) {
+                showLogSelectionMenu()
+            } else if (title.startsWith(getString(R.string.lut_menu_lut))) {
+                showLutSelectionMenu()
+            }
+            true
+        }
+        popup.show()
+    }
+
+    private fun showLogSelectionMenu() {
+        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val popup = android.widget.PopupMenu(requireContext(), cameraUiContainerBinding?.lutSwitcherButton)
+
+        SettingsFragment.LOG_CURVES.forEach { log ->
+            popup.menu.add(log)
+        }
+
+        popup.setOnMenuItemClickListener { item ->
+            val selectedLog = item.title.toString()
+            prefs.edit().putString(SettingsFragment.KEY_TARGET_LOG, selectedLog).apply()
+            if (selectedLog == getString(R.string.lut_none)) {
+                prefs.edit().remove(SettingsFragment.KEY_ACTIVE_LUT).apply()
+            }
+            updateLiveLut()
+            true
+        }
+        popup.show()
+    }
+
+    private fun showLutSelectionMenu() {
+        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val popup = android.widget.PopupMenu(requireContext(), cameraUiContainerBinding?.lutSwitcherButton)
+        val luts = lutManager.getLuts()
+
+        popup.menu.add(getString(R.string.lut_none))
+        luts.forEach { file ->
+            popup.menu.add(file.nameWithoutExtension).apply {
+                intent = Intent().apply { putExtra("filename", file.name) }
+            }
+        }
+
+        popup.setOnMenuItemClickListener { item ->
+            if (item.title == getString(R.string.lut_none)) {
+                prefs.edit().remove(SettingsFragment.KEY_ACTIVE_LUT).apply()
+            } else {
+                val filename = item.intent?.getStringExtra("filename")
+                prefs.edit().putString(SettingsFragment.KEY_ACTIVE_LUT, filename).apply()
+            }
+            updateLiveLut()
+            true
+        }
+        popup.show()
     }
 
     companion object {
@@ -3224,13 +3278,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
     }
 
     private fun updateHdrPlusUi() {
-        cameraUiContainerBinding?.hdrPlusToggle?.let { toggle ->
-            val color = if (isHdrPlusEnabled)
-                MaterialColors.getColor(toggle, com.google.android.material.R.attr.colorPrimary)
-            else
-                MaterialColors.getColor(toggle, com.google.android.material.R.attr.colorOnSurface)
-
-            toggle.setTextColor(color)
+        cameraUiContainerBinding?.hdrPlusSwitch?.let { toggle ->
             toggle.isChecked = isHdrPlusEnabled
         }
     }
@@ -3256,6 +3304,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 binding.manualTabs?.clearChecked()
                 activeManualTab = null
             }
+            // Hide lens row if needed? No, user didn't say to hide it.
         } else {
             // Restore flash visibility if supported
             val hasFlash = try {
