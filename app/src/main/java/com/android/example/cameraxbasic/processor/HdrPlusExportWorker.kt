@@ -43,6 +43,7 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
         val saveTiff = data.getBoolean("saveTiff", true)
         val saveJpg = data.getBoolean("saveJpg", true)
         val saveRaw = data.getBoolean("saveRaw", true)
+        val jpgFolderUri = data.getString("jpgFolderUri")
         val tiffFolderUri = data.getString("tiffFolderUri")
         val rawFolderUri = data.getString("rawFolderUri")
         val mirror = data.getBoolean("mirror", false)
@@ -73,6 +74,7 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
                 saveJpg = saveJpg,
                 saveTiff = saveTiff,
                 saveRaw = saveRaw,
+                jpgFolderUri = jpgFolderUri,
                 tiffFolderUri = tiffFolderUri,
                 rawFolderUri = rawFolderUri,
                 targetUri = targetUri?.let { Uri.parse(it) },

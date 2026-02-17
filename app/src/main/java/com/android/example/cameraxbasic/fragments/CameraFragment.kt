@@ -1434,6 +1434,7 @@ class CameraFragment : Fragment() {
 
                 val saveTiff = prefs.getBoolean(SettingsFragment.KEY_SAVE_TIFF, true)
                 val saveJpg = prefs.getBoolean(SettingsFragment.KEY_SAVE_JPG, true)
+                val jpgFolderUri = prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
                 val tiffFolderUri = prefs.getString(SettingsFragment.KEY_TIFF_STORAGE_URI, null)
                 val rawFolderUri = prefs.getString(SettingsFragment.KEY_RAW_STORAGE_URI, null)
                 val useGpu = prefs.getBoolean(SettingsFragment.KEY_USE_GPU, false)
@@ -1509,6 +1510,7 @@ class CameraFragment : Fragment() {
                         tiffPath = tiffPath,
                         saveJpg = saveJpg,
                         saveTiff = saveTiff,
+                        jpgFolderUri = jpgFolderUri,
                         tiffFolderUri = tiffFolderUri,
                         rawFolderUri = rawFolderUri,
                         mirror = false
@@ -3002,6 +3004,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 val saveTiff = prefs.getBoolean(SettingsFragment.KEY_SAVE_TIFF, true)
                 val saveJpg = prefs.getBoolean(SettingsFragment.KEY_SAVE_JPG, true)
                 val saveRaw = prefs.getBoolean(SettingsFragment.KEY_SAVE_RAW, true)
+                val jpgFolderUri = prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
                 val tiffFolderUri = prefs.getString(SettingsFragment.KEY_TIFF_STORAGE_URI, null)
                 val rawFolderUri = prefs.getString(SettingsFragment.KEY_RAW_STORAGE_URI, null)
                 val hqBackgroundExport = prefs.getBoolean(SettingsFragment.KEY_HQ_BACKGROUND_EXPORT, false)
@@ -3070,6 +3073,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                             tiffPath = null,
                             saveJpg = true,
                             saveTiff = false,
+                            jpgFolderUri = jpgFolderUri,
                             mirror = false // Mirroring already handled in JNI
                         )
                     } else {
@@ -3108,6 +3112,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         .putBoolean("saveTiff", saveTiff)
                         .putBoolean("saveJpg", saveJpg)
                         .putBoolean("saveRaw", saveRaw)
+                        .putString("jpgFolderUri", jpgFolderUri)
                         .putString("tiffFolderUri", tiffFolderUri)
                         .putString("rawFolderUri", rawFolderUri)
                         .putBoolean("mirror", mirror)

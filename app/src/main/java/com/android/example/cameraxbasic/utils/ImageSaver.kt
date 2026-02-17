@@ -41,6 +41,7 @@ object ImageSaver {
         saveJpg: Boolean,
         saveTiff: Boolean,
         saveRaw: Boolean = true,
+        jpgFolderUri: String? = null,
         tiffFolderUri: String? = null,
         rawFolderUri: String? = null,
         targetUri: Uri? = null,
@@ -59,8 +60,12 @@ object ImageSaver {
                 // FAST PATH: Directly use JNI-generated JPEG
                 val f = File(bmpPath!!)
                 if (f.exists() && f.length() > 0) {
-                    finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri) { out ->
-                        f.inputStream().use { it.copyTo(out) }
+                    if (jpgFolderUri != null) {
+                        saveFileToFolder(context, f, "$baseName.jpg", "image/jpeg", jpgFolderUri)
+                    } else {
+                        finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri) { out ->
+                            f.inputStream().use { it.copyTo(out) }
+                        }
                     }
                 } else {
                     Log.e(TAG, "Fast path source file missing or empty: ${f.absolutePath}, size: ${if(f.exists()) f.length() else -1}")
@@ -127,14 +132,23 @@ object ImageSaver {
                     // Save JPG
                     if (saveJpg) {
                         if (processedBitmap != null) {
-                            finalJpgUri = saveJpegToMediaStore(
-                                context,
-                                "$baseName.jpg",
-                                targetUri,
-                                processedBitmap.width,
-                                processedBitmap.height
-                            ) { out ->
-                                processedBitmap.compress(Bitmap.CompressFormat.JPEG, 95, out)
+                            if (jpgFolderUri != null) {
+                                val tempJpg = File(context.cacheDir, "temp_final_$baseName.jpg")
+                                FileOutputStream(tempJpg).use { out ->
+                                    processedBitmap.compress(Bitmap.CompressFormat.JPEG, 95, out)
+                                }
+                                saveFileToFolder(context, tempJpg, "$baseName.jpg", "image/jpeg", jpgFolderUri)
+                                tempJpg.delete()
+                            } else {
+                                finalJpgUri = saveJpegToMediaStore(
+                                    context,
+                                    "$baseName.jpg",
+                                    targetUri,
+                                    processedBitmap.width,
+                                    processedBitmap.height
+                                ) { out ->
+                                    processedBitmap.compress(Bitmap.CompressFormat.JPEG, 95, out)
+                                }
                             }
                         } else {
                             Log.e(TAG, "Cannot save JPEG: processedBitmap is null (Slow Path)")

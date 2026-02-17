@@ -272,8 +272,23 @@ class SettingsFragment : Fragment() {
         binding.layoutTiffStorage.visibility = if (binding.cbSaveTiff.isChecked) View.VISIBLE else View.GONE
         binding.layoutRawStorage.visibility = if (binding.cbSaveRaw.isChecked) View.VISIBLE else View.GONE
 
-        binding.tvTiffPath.text = prefs.getString(KEY_TIFF_STORAGE_URI_NAME, "Default")
-        binding.tvRawPath.text = prefs.getString(KEY_RAW_STORAGE_URI_NAME, "Default")
+        binding.tvJpgPath.text = prefs.getString(KEY_JPG_STORAGE_URI_NAME, "Default (Pictures/Darkbag)")
+        binding.tvTiffPath.text = prefs.getString(KEY_TIFF_STORAGE_URI_NAME, "Default (Pictures/Darkbag)")
+        binding.tvRawPath.text = prefs.getString(KEY_RAW_STORAGE_URI_NAME, "Default (Pictures/Darkbag)")
+    }
+
+    private val jpgPicker = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        uri?.let {
+            val takeFlags: Int = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            requireContext().contentResolver.takePersistableUriPermission(it, takeFlags)
+
+            val folderName = com.android.example.cameraxbasic.utils.MediaStoreUtils.getFolderNameFromUri(requireContext(), it)
+            prefs.edit()
+                .putString(KEY_JPG_STORAGE_URI, it.toString())
+                .putString(KEY_JPG_STORAGE_URI_NAME, folderName)
+                .apply()
+            updateStorageVisibility()
+        }
     }
 
     private val tiffPicker = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
@@ -305,10 +320,13 @@ class SettingsFragment : Fragment() {
     }
 
     private fun setupStoragePickers() {
-        binding.tvTiffPath.setOnClickListener {
+        binding.layoutJpgStorage.setOnClickListener {
+            jpgPicker.launch(null)
+        }
+        binding.layoutTiffStorage.setOnClickListener {
             tiffPicker.launch(null)
         }
-        binding.tvRawPath.setOnClickListener {
+        binding.layoutRawStorage.setOnClickListener {
             rawPicker.launch(null)
         }
     }
@@ -341,6 +359,8 @@ class SettingsFragment : Fragment() {
         const val KEY_FORCE_60FPS = "force_60fps"
         const val KEY_DEBUG_ENABLED = "debug_enabled"
         const val KEY_SAVE_RAW = "save_raw"
+        const val KEY_JPG_STORAGE_URI = "jpg_storage_uri"
+        const val KEY_JPG_STORAGE_URI_NAME = "jpg_storage_uri_name"
         const val KEY_TIFF_STORAGE_URI = "tiff_storage_uri"
         const val KEY_TIFF_STORAGE_URI_NAME = "tiff_storage_uri_name"
         const val KEY_RAW_STORAGE_URI = "raw_storage_uri"

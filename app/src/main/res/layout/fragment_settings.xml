@@ -303,7 +303,10 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:orientation="vertical"
-                        android:paddingStart="@dimen/margin_medium"
+                        android:paddingStart="40dp"
+                        android:clickable="true"
+                        android:focusable="true"
+                        android:background="?attr/selectableItemBackground"
                         android:visibility="gone">
                         <TextView
                             android:layout_width="match_parent"
@@ -315,7 +318,7 @@
                             android:id="@+id/tv_jpg_path"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:text="Pictures/Darkbag (Default)"
+                            android:text="Default"
                             android:textSize="14sp" />
                         <Space android:layout_width="match_parent" android:layout_height="@dimen/spacing_small" />
                     </LinearLayout>
@@ -331,7 +334,10 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:orientation="vertical"
-                        android:paddingStart="@dimen/margin_medium"
+                        android:paddingStart="40dp"
+                        android:clickable="true"
+                        android:focusable="true"
+                        android:background="?attr/selectableItemBackground"
                         android:visibility="gone">
                         <TextView
                             android:layout_width="match_parent"
@@ -344,10 +350,7 @@
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:text="Default"
-                            android:textSize="14sp"
-                            android:clickable="true"
-                            android:focusable="true"
-                            android:background="?attr/selectableItemBackground"/>
+                            android:textSize="14sp" />
                         <Space android:layout_width="match_parent" android:layout_height="@dimen/spacing_small" />
                     </LinearLayout>
 
@@ -362,7 +365,10 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:orientation="vertical"
-                        android:paddingStart="@dimen/margin_medium"
+                        android:paddingStart="40dp"
+                        android:clickable="true"
+                        android:focusable="true"
+                        android:background="?attr/selectableItemBackground"
                         android:visibility="gone">
                         <TextView
                             android:layout_width="match_parent"
@@ -375,10 +381,7 @@
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:text="Default"
-                            android:textSize="14sp"
-                            android:clickable="true"
-                            android:focusable="true"
-                            android:background="?attr/selectableItemBackground"/>
+                            android:textSize="14sp" />
                         <Space android:layout_width="match_parent" android:layout_height="@dimen/spacing_small" />
                     </LinearLayout>
 
