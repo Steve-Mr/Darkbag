@@ -2,6 +2,7 @@ package com.android.example.cameraxbasic.fragments
 
 import androidx.appcompat.app.AlertDialog
 import android.content.Context
+import android.content.Intent
 import android.content.SharedPreferences
 import android.net.Uri
 import android.os.Bundle

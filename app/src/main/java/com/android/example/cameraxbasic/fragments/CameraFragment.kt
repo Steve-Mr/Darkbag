@@ -3227,10 +3227,10 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         val binding = cameraUiContainerBinding ?: return
         if (isHdrPlusEnabled) {
             // Hide and disable flash
-            binding.flashButton.visibility = View.GONE
+            binding.flashButton?.visibility = View.GONE
             if (isFlashEnabled) {
                 isFlashEnabled = false
-                updateFlashIcon(binding.flashButton)
+                binding.flashButton?.let { updateFlashIcon(it) }
                 imageCapture?.flashMode = ImageCapture.FLASH_MODE_OFF
                 // If using Camera2, the repeating request will be updated via applyCameraControls or similar
                 applyCameraControls()
@@ -3255,7 +3255,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 }
             } catch (e: Exception) { false }
 
-            binding.flashButton.visibility = if (hasFlash) View.VISIBLE else View.GONE
+            binding.flashButton?.visibility = if (hasFlash) View.VISIBLE else View.GONE
 
             // Restore manual controls if enabled in settings
             val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
