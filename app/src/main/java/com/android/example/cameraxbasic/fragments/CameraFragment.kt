@@ -1066,7 +1066,9 @@ class CameraFragment : Fragment() {
         cameraUiContainerBinding?.root?.let { rootView ->
             ViewCompat.setOnApplyWindowInsetsListener(rootView) { view, windowInsets ->
                 val insets = windowInsets.getInsets(
-                    WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
+                    WindowInsetsCompat.Type.systemBars() or
+                    WindowInsetsCompat.Type.displayCutout() or
+                    WindowInsetsCompat.Type.mandatorySystemGestures()
                 )
                 view.updatePadding(
                     left = insets.left,
