@@ -1056,9 +1056,9 @@ class CameraFragment : Fragment() {
 
         // In the background, load latest photo taken (if any) for gallery thumbnail
         lifecycleScope.launch {
-            val thumbnailUri = mediaStoreUtils.getLatestImageFilename()
+            val thumbnailUri = mediaStoreUtils.getLatestAppImage(requireContext())
             thumbnailUri?.let {
-                setGalleryThumbnail(it)
+                setGalleryThumbnail(it.toString())
             }
         }
 
@@ -1432,7 +1432,7 @@ class CameraFragment : Fragment() {
                     }
                 }
 
-                val saveTiff = prefs.getBoolean(SettingsFragment.KEY_SAVE_TIFF, true)
+                val saveTiff = prefs.getBoolean(SettingsFragment.KEY_SAVE_TIFF, false)
                 val saveJpg = prefs.getBoolean(SettingsFragment.KEY_SAVE_JPG, true)
                 val jpgFolderUri = prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
                 val tiffFolderUri = prefs.getString(SettingsFragment.KEY_TIFF_STORAGE_URI, null)
@@ -1499,7 +1499,7 @@ class CameraFragment : Fragment() {
                     // 5. Shared Save Logic
                     // Note: rotationDegrees is passed as 0 and mirror as false because the JNI layer (process_and_save_image)
                     // has already performed pixel-level rotation and mirroring on the output files.
-                    val finalJpgUri = ImageSaver.saveProcessedImage(
+                    val resultUri = ImageSaver.saveProcessedImage(
                         context = context,
                         inputBitmap = null,
                         bmpPath = bmpPath,
@@ -1543,6 +1543,7 @@ class CameraFragment : Fragment() {
                     }
 
                     // 6. Save Standard RAW DNG
+                    var dngResultUri: Uri? = null
                     val saveRaw = prefs.getBoolean(SettingsFragment.KEY_SAVE_RAW, true)
                     if (saveRaw && isRawSupported) {
                         if (rawFolderUri != null) {
@@ -1555,6 +1556,7 @@ class CameraFragment : Fragment() {
                                         writeDngToStream(dngCreatorReal, image, out)
                                     }
                                     Log.i(TAG, "Saved Standard RAW to custom folder: ${newFile.uri}")
+                                    dngResultUri = newFile.uri
                                 }
                             } catch (e: Exception) {
                                 Log.e(TAG, "Error saving Standard RAW to custom folder", e)
@@ -1589,6 +1591,7 @@ class CameraFragment : Fragment() {
                                         dngValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
                                         contentResolver.update(dngUri, dngValues, null, null)
                                     }
+                                    dngResultUri = dngUri
                                 } catch (e: Exception) {
                                     Log.e(TAG, "Error writing DNG to MediaStore", e)
                                     contentResolver.delete(dngUri, null, null)
@@ -1599,11 +1602,13 @@ class CameraFragment : Fragment() {
 
                     // 7. Update UI
                     withContext(Dispatchers.Main) {
-                        if (finalJpgUri != null) {
-                            setGalleryThumbnail(finalJpgUri.toString())
+                        val finalThumbnailUri = resultUri ?: dngResultUri
+                        if (finalThumbnailUri != null) {
+                            prefs.edit().putString(SettingsFragment.KEY_LAST_CAPTURE_URI, finalThumbnailUri.toString()).apply()
+                            setGalleryThumbnail(finalThumbnailUri.toString())
                         } else {
-                            mediaStoreUtils.getLatestImageFilename()
-                                ?.let { setGalleryThumbnail(it) }
+                            mediaStoreUtils.getLatestAppImage(requireContext())
+                                ?.let { setGalleryThumbnail(it.toString()) }
                         }
                     }
                 }
@@ -2549,6 +2554,9 @@ class CameraFragment : Fragment() {
                 val bmpFile = File(appContext.cacheDir, "temp_$name.jpg")
                 FileOutputStream(bmpFile).use { it.write(data) }
 
+                val jpgFolderUri = appContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                    .getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
+
                 val uri = ImageSaver.saveProcessedImage(
                     context = appContext,
                     inputBitmap = null,
@@ -2560,10 +2568,15 @@ class CameraFragment : Fragment() {
                     tiffPath = null,
                     saveJpg = true,
                     saveTiff = false,
+                    jpgFolderUri = jpgFolderUri,
                     mirror = mirror
                 )
                 withContext(Dispatchers.Main) {
-                    uri?.let { setGalleryThumbnail(it.toString()) }
+                    uri?.let {
+                        appContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                            .edit().putString(SettingsFragment.KEY_LAST_CAPTURE_URI, it.toString()).apply()
+                        setGalleryThumbnail(it.toString())
+                    }
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to save JPEG fallback", e)
@@ -2989,7 +3002,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 val captureTime = System.currentTimeMillis()
 
                 val dngName = SimpleDateFormat(FILENAME, Locale.US).format(System.currentTimeMillis()) + "_HDRPLUS"
-                val saveTiff = prefs.getBoolean(SettingsFragment.KEY_SAVE_TIFF, true)
+                val saveTiff = prefs.getBoolean(SettingsFragment.KEY_SAVE_TIFF, false)
                 val saveJpg = prefs.getBoolean(SettingsFragment.KEY_SAVE_JPG, true)
                 val saveRaw = prefs.getBoolean(SettingsFragment.KEY_SAVE_RAW, true)
                 val jpgFolderUri = prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)

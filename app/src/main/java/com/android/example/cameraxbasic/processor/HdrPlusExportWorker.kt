@@ -83,6 +83,14 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
 
             Log.d(TAG, "Background Export Worker finished successfully for $baseName. finalUri=$finalUri")
 
+            if (finalUri != null) {
+                val prefs = applicationContext.getSharedPreferences(
+                    com.android.example.cameraxbasic.fragments.SettingsFragment.PREFS_NAME,
+                    Context.MODE_PRIVATE
+                )
+                prefs.edit().putString(com.android.example.cameraxbasic.fragments.SettingsFragment.KEY_LAST_CAPTURE_URI, finalUri.toString()).apply()
+            }
+
             // Still notify UI for thumbnail update if possible
             // We pass null for paths to signal that saving is already done
             ColorProcessor.onBackgroundSaveComplete(

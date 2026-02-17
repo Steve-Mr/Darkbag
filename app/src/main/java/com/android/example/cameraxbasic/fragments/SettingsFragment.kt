@@ -207,23 +207,38 @@ class SettingsFragment : Fragment() {
              prefs.edit().putBoolean(KEY_ENABLE_LUT_PREVIEW, isChecked).apply()
         }
 
-        binding.cbSaveTiff.isChecked = prefs.getBoolean(KEY_SAVE_TIFF, true)
+        binding.cbSaveTiff.isChecked = prefs.getBoolean(KEY_SAVE_TIFF, false)
         binding.cbSaveJpg.isChecked = prefs.getBoolean(KEY_SAVE_JPG, true)
         binding.cbSaveRaw.isChecked = prefs.getBoolean(KEY_SAVE_RAW, true)
 
         binding.cbSaveTiff.setOnCheckedChangeListener { _, isChecked ->
-            prefs.edit().putBoolean(KEY_SAVE_TIFF, isChecked).apply()
-            updateStorageVisibility()
+            if (!isChecked && !binding.cbSaveJpg.isChecked && !binding.cbSaveRaw.isChecked) {
+                binding.cbSaveTiff.isChecked = true
+                Toast.makeText(requireContext(), "At least one output format must be selected", Toast.LENGTH_SHORT).show()
+            } else {
+                prefs.edit().putBoolean(KEY_SAVE_TIFF, isChecked).apply()
+                updateStorageVisibility()
+            }
         }
 
         binding.cbSaveJpg.setOnCheckedChangeListener { _, isChecked ->
-            prefs.edit().putBoolean(KEY_SAVE_JPG, isChecked).apply()
-            updateStorageVisibility()
+            if (!isChecked && !binding.cbSaveTiff.isChecked && !binding.cbSaveRaw.isChecked) {
+                binding.cbSaveJpg.isChecked = true
+                Toast.makeText(requireContext(), "At least one output format must be selected", Toast.LENGTH_SHORT).show()
+            } else {
+                prefs.edit().putBoolean(KEY_SAVE_JPG, isChecked).apply()
+                updateStorageVisibility()
+            }
         }
 
         binding.cbSaveRaw.setOnCheckedChangeListener { _, isChecked ->
-            prefs.edit().putBoolean(KEY_SAVE_RAW, isChecked).apply()
-            updateStorageVisibility()
+            if (!isChecked && !binding.cbSaveJpg.isChecked && !binding.cbSaveTiff.isChecked) {
+                binding.cbSaveRaw.isChecked = true
+                Toast.makeText(requireContext(), "At least one output format must be selected", Toast.LENGTH_SHORT).show()
+            } else {
+                prefs.edit().putBoolean(KEY_SAVE_RAW, isChecked).apply()
+                updateStorageVisibility()
+            }
         }
 
         updateStorageVisibility()
@@ -365,6 +380,7 @@ class SettingsFragment : Fragment() {
         const val KEY_TIFF_STORAGE_URI_NAME = "tiff_storage_uri_name"
         const val KEY_RAW_STORAGE_URI = "raw_storage_uri"
         const val KEY_RAW_STORAGE_URI_NAME = "raw_storage_uri_name"
+        const val KEY_LAST_CAPTURE_URI = "last_capture_uri"
 
         val FOCAL_LENGTHS = listOf("24", "28", "35")
         val ANTIBANDING_MODES = listOf("Auto", "50Hz", "60Hz", "Off")

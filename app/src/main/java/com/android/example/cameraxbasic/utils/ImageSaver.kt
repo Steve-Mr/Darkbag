@@ -50,6 +50,8 @@ object ImageSaver {
     ): Uri? {
         val contentResolver = context.contentResolver
         var finalJpgUri: Uri? = null
+        var finalTiffUri: Uri? = null
+        var finalRawUri: Uri? = null
 
         // 1. Process Input Bitmap or JPEG File from JNI -> Final MediaStore JPG
         if (inputBitmap != null || bmpPath != null) {
@@ -61,7 +63,7 @@ object ImageSaver {
                 val f = File(bmpPath!!)
                 if (f.exists() && f.length() > 0) {
                     if (jpgFolderUri != null) {
-                        saveFileToFolder(context, f, "$baseName.jpg", "image/jpeg", jpgFolderUri)
+                        finalJpgUri = saveFileToFolder(context, f, "$baseName.jpg", "image/jpeg", jpgFolderUri)
                     } else {
                         finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri) { out ->
                             f.inputStream().use { it.copyTo(out) }
@@ -137,7 +139,7 @@ object ImageSaver {
                                 FileOutputStream(tempJpg).use { out ->
                                     processedBitmap.compress(Bitmap.CompressFormat.JPEG, 95, out)
                                 }
-                                saveFileToFolder(context, tempJpg, "$baseName.jpg", "image/jpeg", jpgFolderUri)
+                                finalJpgUri = saveFileToFolder(context, tempJpg, "$baseName.jpg", "image/jpeg", jpgFolderUri)
                                 tempJpg.delete()
                             } else {
                                 finalJpgUri = saveJpegToMediaStore(
@@ -167,17 +169,12 @@ object ImageSaver {
             }
         }
 
-        // Debug sidecar export disabled for performance.
-        // if (debugSourcePath != null) {
-        //     saveDebugStageImagesToMediaStore(context, baseName, debugSourcePath)
-        // }
-
         // 2. Save TIFF
         if (saveTiff && tiffPath != null) {
             val tiffFile = File(tiffPath)
             if (tiffFile.exists()) {
                 if (tiffFolderUri != null) {
-                    saveFileToFolder(context, tiffFile, "$baseName.tiff", "image/tiff", tiffFolderUri)
+                    finalTiffUri = saveFileToFolder(context, tiffFile, "$baseName.tiff", "image/tiff", tiffFolderUri)
                 } else {
                     val tiffValues = ContentValues().apply {
                         put(MediaStore.MediaColumns.DISPLAY_NAME, "$baseName.tiff")
@@ -204,6 +201,7 @@ object ImageSaver {
                                 tiffValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
                                 contentResolver.update(tiffUri, tiffValues, null, null)
                             }
+                            finalTiffUri = tiffUri
                         } catch (e: Exception) {
                             Log.e(TAG, "Failed to save TIFF", e)
                             contentResolver.delete(tiffUri, null, null)
@@ -219,7 +217,7 @@ object ImageSaver {
             val dngFile = File(linearDngPath)
             if (dngFile.exists()) {
                 if (rawFolderUri != null) {
-                    saveFileToFolder(context, dngFile, "${baseName}_linear.dng", "image/x-adobe-dng", rawFolderUri)
+                    finalRawUri = saveFileToFolder(context, dngFile, "${baseName}_linear.dng", "image/x-adobe-dng", rawFolderUri)
                 } else {
                     val dngValues = ContentValues().apply {
                         put(MediaStore.MediaColumns.DISPLAY_NAME, "${baseName}_linear.dng")
@@ -244,6 +242,7 @@ object ImageSaver {
                                 dngValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
                                 contentResolver.update(dngUri, dngValues, null, null)
                             }
+                            finalRawUri = dngUri
                         } catch (e: Exception) {
                             Log.e(TAG, "Failed to save Linear DNG", e)
                             contentResolver.delete(dngUri, null, null)
@@ -254,7 +253,8 @@ object ImageSaver {
             }
         }
 
-        return finalJpgUri
+        // Priority for thumbnail: JPEG > DNG > TIFF
+        return finalJpgUri ?: finalRawUri ?: finalTiffUri
     }
 
     private fun saveDebugStageImagesToMediaStore(context: Context, baseName: String, sourcePath: String) {
@@ -307,7 +307,7 @@ object ImageSaver {
         }
     }
 
-    private fun saveFileToFolder(context: Context, sourceFile: File, displayName: String, mimeType: String, folderUri: String) {
+    private fun saveFileToFolder(context: Context, sourceFile: File, displayName: String, mimeType: String, folderUri: String): Uri? {
         try {
             val treeUri = Uri.parse(folderUri)
             val parentFolder = androidx.documentfile.provider.DocumentFile.fromTreeUri(context, treeUri)
@@ -317,12 +317,14 @@ object ImageSaver {
                     FileInputStream(sourceFile).copyTo(out)
                 }
                 Log.i(TAG, "Saved $displayName to custom folder: ${newFile.uri}")
+                return newFile.uri
             } else {
                 Log.e(TAG, "Failed to create file $displayName in custom folder")
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error saving $displayName to custom folder", e)
         }
+        return null
     }
 
     /**
