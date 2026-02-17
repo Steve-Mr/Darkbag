@@ -59,18 +59,52 @@ class SettingsFragment : Fragment() {
         }
 
         setupToolbar()
+        setupAboutSection()
         setupMenus()
         setupCheckboxes()
+        setupStoragePickers()
         setupNavigation()
         updateDebugStats()
+        updateDebugVisibility()
     }
 
 
     override fun onResume() {
         super.onResume()
         updateDebugStats()
+        // Re-apply adapters to fix dropdown disappearance bug
+        setupMenus()
     }
 
+    private var aboutClickCount = 0
+    private fun setupAboutSection() {
+        try {
+            val packageInfo = requireContext().packageManager.getPackageInfo(requireContext().packageName, 0)
+            binding.tvAppName.text = getString(R.string.app_name)
+            binding.tvAppVersion.text = "Version ${packageInfo.versionName} (${packageInfo.versionCode})"
+        } catch (e: Exception) {
+            binding.tvAppName.text = "Camera"
+            binding.tvAppVersion.text = "Version 1.0.0"
+        }
+
+        binding.cardAbout.setOnClickListener {
+            aboutClickCount++
+            if (aboutClickCount >= 5) {
+                if (!prefs.getBoolean(KEY_DEBUG_ENABLED, false)) {
+                    prefs.edit().putBoolean(KEY_DEBUG_ENABLED, true).apply()
+                    updateDebugVisibility()
+                    Toast.makeText(requireContext(), "Debug Mode Enabled", Toast.LENGTH_SHORT).show()
+                }
+                aboutClickCount = 0
+            }
+        }
+    }
+
+    private fun updateDebugVisibility() {
+        val isDebug = prefs.getBoolean(KEY_DEBUG_ENABLED, false)
+        binding.sectionDebug.visibility = if (isDebug) View.VISIBLE else View.GONE
+        binding.switchCloseDebug.isChecked = false
+    }
 
     private fun updateDebugStats() {
         val logs = com.android.example.cameraxbasic.utils.DebugLogManager.getLogs()
@@ -105,7 +139,7 @@ class SettingsFragment : Fragment() {
         // HDR+ Burst Frames
         val burstAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, BURST_SIZES)
         binding.menuHdrBurst.setAdapter(burstAdapter)
-        val savedBurst = prefs.getString(KEY_HDR_BURST_COUNT, "8")
+        val savedBurst = prefs.getString(KEY_HDR_BURST_COUNT, "5")
         binding.menuHdrBurst.setText(savedBurst, false)
         binding.menuHdrBurst.setOnItemClickListener { _, _, position, _ ->
             prefs.edit().putString(KEY_HDR_BURST_COUNT, BURST_SIZES[position]).apply()
@@ -167,11 +201,6 @@ class SettingsFragment : Fragment() {
     }
 
     private fun setupCheckboxes() {
-        binding.switchUseGpu.isChecked = prefs.getBoolean(KEY_USE_GPU, false)
-        binding.switchUseGpu.setOnCheckedChangeListener { _, isChecked ->
-            prefs.edit().putBoolean(KEY_USE_GPU, isChecked).apply()
-        }
-
         binding.switchLivePreview.isChecked = prefs.getBoolean(KEY_ENABLE_LUT_PREVIEW, true)
         binding.switchLivePreview.setOnCheckedChangeListener { _, isChecked ->
              prefs.edit().putBoolean(KEY_ENABLE_LUT_PREVIEW, isChecked).apply()
@@ -179,14 +208,24 @@ class SettingsFragment : Fragment() {
 
         binding.cbSaveTiff.isChecked = prefs.getBoolean(KEY_SAVE_TIFF, true)
         binding.cbSaveJpg.isChecked = prefs.getBoolean(KEY_SAVE_JPG, true)
+        binding.cbSaveRaw.isChecked = prefs.getBoolean(KEY_SAVE_RAW, true)
 
         binding.cbSaveTiff.setOnCheckedChangeListener { _, isChecked ->
             prefs.edit().putBoolean(KEY_SAVE_TIFF, isChecked).apply()
+            updateStorageVisibility()
         }
 
         binding.cbSaveJpg.setOnCheckedChangeListener { _, isChecked ->
             prefs.edit().putBoolean(KEY_SAVE_JPG, isChecked).apply()
+            updateStorageVisibility()
         }
+
+        binding.cbSaveRaw.setOnCheckedChangeListener { _, isChecked ->
+            prefs.edit().putBoolean(KEY_SAVE_RAW, isChecked).apply()
+            updateStorageVisibility()
+        }
+
+        updateStorageVisibility()
 
         binding.switchHqBackgroundExport.isChecked = prefs.getBoolean(KEY_HQ_BACKGROUND_EXPORT, false)
         binding.switchHqBackgroundExport.setOnCheckedChangeListener { _, isChecked ->
@@ -213,9 +252,63 @@ class SettingsFragment : Fragment() {
             prefs.edit().putBoolean(KEY_HDR_PLUS_OIS, isChecked).apply()
         }
 
-        binding.switchForce60fps.isChecked = prefs.getBoolean(KEY_FORCE_60FPS, true)
+        binding.switchForce60fps.isChecked = prefs.getBoolean(KEY_FORCE_60FPS, false)
         binding.switchForce60fps.setOnCheckedChangeListener { _, isChecked ->
             prefs.edit().putBoolean(KEY_FORCE_60FPS, isChecked).apply()
+        }
+
+        binding.switchCloseDebug.setOnCheckedChangeListener { _, isChecked ->
+            if (isChecked) {
+                prefs.edit().putBoolean(KEY_DEBUG_ENABLED, false).apply()
+                updateDebugVisibility()
+                aboutClickCount = 0
+            }
+        }
+    }
+
+    private fun updateStorageVisibility() {
+        binding.layoutJpgStorage.visibility = if (binding.cbSaveJpg.isChecked) View.VISIBLE else View.GONE
+        binding.layoutTiffStorage.visibility = if (binding.cbSaveTiff.isChecked) View.VISIBLE else View.GONE
+        binding.layoutRawStorage.visibility = if (binding.cbSaveRaw.isChecked) View.VISIBLE else View.GONE
+
+        binding.tvTiffPath.text = prefs.getString(KEY_TIFF_STORAGE_URI_NAME, "Default")
+        binding.tvRawPath.text = prefs.getString(KEY_RAW_STORAGE_URI_NAME, "Default")
+    }
+
+    private val tiffPicker = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        uri?.let {
+            val takeFlags: Int = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            requireContext().contentResolver.takePersistableUriPermission(it, takeFlags)
+
+            val folderName = com.android.example.cameraxbasic.utils.MediaStoreUtils.getFolderNameFromUri(requireContext(), it)
+            prefs.edit()
+                .putString(KEY_TIFF_STORAGE_URI, it.toString())
+                .putString(KEY_TIFF_STORAGE_URI_NAME, folderName)
+                .apply()
+            updateStorageVisibility()
+        }
+    }
+
+    private val rawPicker = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        uri?.let {
+            val takeFlags: Int = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            requireContext().contentResolver.takePersistableUriPermission(it, takeFlags)
+
+            val folderName = com.android.example.cameraxbasic.utils.MediaStoreUtils.getFolderNameFromUri(requireContext(), it)
+            prefs.edit()
+                .putString(KEY_RAW_STORAGE_URI, it.toString())
+                .putString(KEY_RAW_STORAGE_URI_NAME, folderName)
+                .apply()
+            updateStorageVisibility()
+        }
+    }
+
+    private fun setupStoragePickers() {
+        binding.tvTiffPath.setOnClickListener {
+            tiffPicker.launch(null)
+        }
+        binding.tvRawPath.setOnClickListener {
+            rawPicker.launch(null)
         }
     }
 
@@ -245,6 +338,12 @@ class SettingsFragment : Fragment() {
         const val KEY_MIRROR_FRONT_CAMERA = "mirror_front_camera"
         const val KEY_HDR_PLUS_OIS = "hdr_plus_ois_enabled"
         const val KEY_FORCE_60FPS = "force_60fps"
+        const val KEY_DEBUG_ENABLED = "debug_enabled"
+        const val KEY_SAVE_RAW = "save_raw"
+        const val KEY_TIFF_STORAGE_URI = "tiff_storage_uri"
+        const val KEY_TIFF_STORAGE_URI_NAME = "tiff_storage_uri_name"
+        const val KEY_RAW_STORAGE_URI = "raw_storage_uri"
+        const val KEY_RAW_STORAGE_URI_NAME = "raw_storage_uri_name"
 
         val FOCAL_LENGTHS = listOf("24", "28", "35")
         val ANTIBANDING_MODES = listOf("Auto", "50Hz", "60Hz", "Off")

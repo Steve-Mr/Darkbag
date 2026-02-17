@@ -40,6 +40,9 @@ object ImageSaver {
         tiffPath: String?,
         saveJpg: Boolean,
         saveTiff: Boolean,
+        saveRaw: Boolean = true,
+        tiffFolderUri: String? = null,
+        rawFolderUri: String? = null,
         targetUri: Uri? = null,
         mirror: Boolean = false,
         onBitmapReady: ((Bitmap) -> Unit)? = null
@@ -159,34 +162,38 @@ object ImageSaver {
         if (saveTiff && tiffPath != null) {
             val tiffFile = File(tiffPath)
             if (tiffFile.exists()) {
-                val tiffValues = ContentValues().apply {
-                    put(MediaStore.MediaColumns.DISPLAY_NAME, "$baseName.tiff")
-                    put(MediaStore.MediaColumns.MIME_TYPE, "image/tiff")
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                        put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/Darkbag")
-                        put(MediaStore.MediaColumns.IS_PENDING, 1)
-                    }
-                }
-                val tiffUri = contentResolver.insert(
-                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                    tiffValues
-                )
-                if (tiffUri != null) {
-                    try {
-                        contentResolver.openOutputStream(tiffUri)?.use { out ->
-                            FileInputStream(tiffFile).copyTo(out)
-                        }
-
-                        updateExifOrientation(context, tiffUri, getExifOrientation(rotationDegrees, mirror))
-
+                if (tiffFolderUri != null) {
+                    saveFileToFolder(context, tiffFile, "$baseName.tiff", "image/tiff", tiffFolderUri)
+                } else {
+                    val tiffValues = ContentValues().apply {
+                        put(MediaStore.MediaColumns.DISPLAY_NAME, "$baseName.tiff")
+                        put(MediaStore.MediaColumns.MIME_TYPE, "image/tiff")
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                            tiffValues.clear()
-                            tiffValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
-                            contentResolver.update(tiffUri, tiffValues, null, null)
+                            put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/Darkbag")
+                            put(MediaStore.MediaColumns.IS_PENDING, 1)
                         }
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Failed to save TIFF", e)
-                        contentResolver.delete(tiffUri, null, null)
+                    }
+                    val tiffUri = contentResolver.insert(
+                        MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                        tiffValues
+                    )
+                    if (tiffUri != null) {
+                        try {
+                            contentResolver.openOutputStream(tiffUri)?.use { out ->
+                                FileInputStream(tiffFile).copyTo(out)
+                            }
+
+                            updateExifOrientation(context, tiffUri, getExifOrientation(rotationDegrees, mirror))
+
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                tiffValues.clear()
+                                tiffValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                                contentResolver.update(tiffUri, tiffValues, null, null)
+                            }
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Failed to save TIFF", e)
+                            contentResolver.delete(tiffUri, null, null)
+                        }
                     }
                 }
                 tiffFile.delete()
@@ -194,35 +201,39 @@ object ImageSaver {
         }
 
         // 3. Save Linear DNG (HDR+ only usually)
-        if (linearDngPath != null) {
+        if (saveRaw && linearDngPath != null) {
             val dngFile = File(linearDngPath)
             if (dngFile.exists()) {
-                val dngValues = ContentValues().apply {
-                    put(MediaStore.MediaColumns.DISPLAY_NAME, "${baseName}_linear.dng")
-                    put(MediaStore.MediaColumns.MIME_TYPE, "image/x-adobe-dng")
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                        put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/Darkbag")
-                        put(MediaStore.MediaColumns.IS_PENDING, 1)
-                    }
-                }
-                val dngUri = contentResolver.insert(
-                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                    dngValues
-                )
-                if (dngUri != null) {
-                    try {
-                        contentResolver.openOutputStream(dngUri)?.use { out ->
-                            FileInputStream(dngFile).copyTo(out)
-                        }
-
+                if (rawFolderUri != null) {
+                    saveFileToFolder(context, dngFile, "${baseName}_linear.dng", "image/x-adobe-dng", rawFolderUri)
+                } else {
+                    val dngValues = ContentValues().apply {
+                        put(MediaStore.MediaColumns.DISPLAY_NAME, "${baseName}_linear.dng")
+                        put(MediaStore.MediaColumns.MIME_TYPE, "image/x-adobe-dng")
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                            dngValues.clear()
-                            dngValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
-                            contentResolver.update(dngUri, dngValues, null, null)
+                            put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/Darkbag")
+                            put(MediaStore.MediaColumns.IS_PENDING, 1)
                         }
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Failed to save Linear DNG", e)
-                        contentResolver.delete(dngUri, null, null)
+                    }
+                    val dngUri = contentResolver.insert(
+                        MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                        dngValues
+                    )
+                    if (dngUri != null) {
+                        try {
+                            contentResolver.openOutputStream(dngUri)?.use { out ->
+                                FileInputStream(dngFile).copyTo(out)
+                            }
+
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                dngValues.clear()
+                                dngValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                                contentResolver.update(dngUri, dngValues, null, null)
+                            }
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Failed to save Linear DNG", e)
+                            contentResolver.delete(dngUri, null, null)
+                        }
                     }
                 }
                 dngFile.delete()
@@ -279,6 +290,24 @@ object ImageSaver {
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to update EXIF orientation for $uri", e)
+        }
+    }
+
+    private fun saveFileToFolder(context: Context, sourceFile: File, displayName: String, mimeType: String, folderUri: String) {
+        try {
+            val treeUri = Uri.parse(folderUri)
+            val parentFolder = androidx.documentfile.provider.DocumentFile.fromTreeUri(context, treeUri)
+            val newFile = parentFolder?.createFile(mimeType, displayName)
+            if (newFile != null) {
+                context.contentResolver.openOutputStream(newFile.uri)?.use { out ->
+                    FileInputStream(sourceFile).copyTo(out)
+                }
+                Log.i(TAG, "Saved $displayName to custom folder: ${newFile.uri}")
+            } else {
+                Log.e(TAG, "Failed to create file $displayName in custom folder")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error saving $displayName to custom folder", e)
         }
     }
 

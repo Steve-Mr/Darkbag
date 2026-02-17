@@ -993,8 +993,8 @@ class CameraFragment : Fragment() {
 
             // Pre-initialize JNI memory pool with current resolution and burst size
             // Move to background thread to avoid blocking main thread
-            val burstSizeStr = prefs.getString(SettingsFragment.KEY_HDR_BURST_COUNT, "8") ?: "8"
-            val burstSize = burstSizeStr.toIntOrNull() ?: 8
+            val burstSizeStr = prefs.getString(SettingsFragment.KEY_HDR_BURST_COUNT, "5") ?: "5"
+            val burstSize = burstSizeStr.toIntOrNull() ?: 5
             imageCapture?.resolutionInfo?.resolution?.let { res ->
                 lifecycleScope.launch(Dispatchers.Default) {
                     ColorProcessor.initMemoryPool(res.width, res.height, burstSize)
@@ -1172,6 +1172,8 @@ class CameraFragment : Fragment() {
         // Initialize Manual Controls
         initManualControls()
 
+        updateHdrPlusConstraints()
+
         // HDR+ Toggle
         cameraUiContainerBinding?.hdrPlusToggle?.let { toggle ->
             toggle.setOnClickListener {
@@ -1179,6 +1181,7 @@ class CameraFragment : Fragment() {
                 requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
                     .edit().putBoolean(KEY_HDR_PLUS_ENABLED, isHdrPlusEnabled).apply()
                 updateHdrPlusUi()
+                updateHdrPlusConstraints()
             }
         }
 
@@ -1431,6 +1434,8 @@ class CameraFragment : Fragment() {
 
                 val saveTiff = prefs.getBoolean(SettingsFragment.KEY_SAVE_TIFF, true)
                 val saveJpg = prefs.getBoolean(SettingsFragment.KEY_SAVE_JPG, true)
+                val tiffFolderUri = prefs.getString(SettingsFragment.KEY_TIFF_STORAGE_URI, null)
+                val rawFolderUri = prefs.getString(SettingsFragment.KEY_RAW_STORAGE_URI, null)
                 val useGpu = prefs.getBoolean(SettingsFragment.KEY_USE_GPU, false)
 
                 val tiffFile = if (saveTiff) File(context.cacheDir, "$dngName.tiff") else null
@@ -1504,6 +1509,8 @@ class CameraFragment : Fragment() {
                         tiffPath = tiffPath,
                         saveJpg = saveJpg,
                         saveTiff = saveTiff,
+                        tiffFolderUri = tiffFolderUri,
+                        rawFolderUri = rawFolderUri,
                         mirror = false
                     ) { bitmap ->
                         try {
@@ -1534,44 +1541,69 @@ class CameraFragment : Fragment() {
                     }
 
                     // 6. Save Standard RAW DNG
-                    val dngValues = ContentValues().apply {
-                        put(MediaStore.MediaColumns.DISPLAY_NAME, "$dngName.dng")
-                        put(MediaStore.MediaColumns.MIME_TYPE, "image/x-adobe-dng")
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                            put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/Darkbag")
-                            put(MediaStore.MediaColumns.IS_PENDING, 1)
-                        }
-                    }
-                    val dngUri = contentResolver.insert(
-                        MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                        dngValues
-                    )
-                    if (dngUri != null) {
-                        try {
-                            contentResolver.openOutputStream(dngUri)?.use { out ->
-                                val inputStream2 = java.io.ByteArrayInputStream(image.data)
-                                dngCreatorReal.writeInputStream(
-                                    out,
-                                    android.util.Size(image.width, image.height),
-                                    inputStream2,
-                                    0
-                                )
+                    val saveRaw = prefs.getBoolean(SettingsFragment.KEY_SAVE_RAW, true)
+                    if (saveRaw && isRawSupported) {
+                        if (rawFolderUri != null) {
+                            try {
+                                val treeUri = Uri.parse(rawFolderUri)
+                                val parentFolder = androidx.documentfile.provider.DocumentFile.fromTreeUri(context, treeUri)
+                                val newFile = parentFolder?.createFile("image/x-adobe-dng", "$dngName.dng")
+                                if (newFile != null) {
+                                    context.contentResolver.openOutputStream(newFile.uri)?.use { out ->
+                                        val inputStream2 = java.io.ByteArrayInputStream(image.data)
+                                        dngCreatorReal.writeInputStream(
+                                            out,
+                                            android.util.Size(image.width, image.height),
+                                            inputStream2,
+                                            0
+                                        )
+                                    }
+                                    Log.i(TAG, "Saved Standard RAW to custom folder: ${newFile.uri}")
+                                }
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Error saving Standard RAW to custom folder", e)
                             }
-                            // NOTE:
-                            // ExifInterface.saveAttributes() does not support DNG and throws by design.
-                            // DNG crop metadata injection should be done via native DNG tag writing path.
-                            if (zoomFactor > 1.05f) {
-                                Log.d(TAG, "Skip DNG crop metadata injection: ExifInterface cannot save DNG attributes")
+                        } else {
+                            val dngValues = ContentValues().apply {
+                                put(MediaStore.MediaColumns.DISPLAY_NAME, "$dngName.dng")
+                                put(MediaStore.MediaColumns.MIME_TYPE, "image/x-adobe-dng")
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                    put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/Darkbag")
+                                    put(MediaStore.MediaColumns.IS_PENDING, 1)
+                                }
                             }
+                            val dngUri = contentResolver.insert(
+                                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                                dngValues
+                            )
+                            if (dngUri != null) {
+                                try {
+                                    contentResolver.openOutputStream(dngUri)?.use { out ->
+                                        val inputStream2 = java.io.ByteArrayInputStream(image.data)
+                                        dngCreatorReal.writeInputStream(
+                                            out,
+                                            android.util.Size(image.width, image.height),
+                                            inputStream2,
+                                            0
+                                        )
+                                    }
+                                    // NOTE:
+                                    // ExifInterface.saveAttributes() does not support DNG and throws by design.
+                                    // DNG crop metadata injection should be done via native DNG tag writing path.
+                                    if (zoomFactor > 1.05f) {
+                                        Log.d(TAG, "Skip DNG crop metadata injection: ExifInterface cannot save DNG attributes")
+                                    }
 
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                                dngValues.clear()
-                                dngValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
-                                contentResolver.update(dngUri, dngValues, null, null)
+                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                        dngValues.clear()
+                                        dngValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                                        contentResolver.update(dngUri, dngValues, null, null)
+                                    }
+                                } catch (e: Exception) {
+                                    Log.e(TAG, "Error writing DNG to MediaStore", e)
+                                    contentResolver.delete(dngUri, null, null)
+                                }
                             }
-                        } catch (e: Exception) {
-                            Log.e(TAG, "Error writing DNG to MediaStore", e)
-                            contentResolver.delete(dngUri, null, null)
                         }
                     }
 
@@ -2708,8 +2740,8 @@ class CameraFragment : Fragment() {
                     SettingsFragment.PREFS_NAME,
                     Context.MODE_PRIVATE
                 )
-                val burstSizeStr = prefs.getString(SettingsFragment.KEY_HDR_BURST_COUNT, "3") ?: "3"
-                val burstSize = burstSizeStr.toIntOrNull() ?: 3
+                val burstSizeStr = prefs.getString(SettingsFragment.KEY_HDR_BURST_COUNT, "5") ?: "5"
+                val burstSize = burstSizeStr.toIntOrNull() ?: 5
 
                 hdrPlusBurstHelper = HdrPlusBurst(
                     frameCount = burstSize,
@@ -2969,6 +3001,9 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 val dngName = SimpleDateFormat(FILENAME, Locale.US).format(System.currentTimeMillis()) + "_HDRPLUS"
                 val saveTiff = prefs.getBoolean(SettingsFragment.KEY_SAVE_TIFF, true)
                 val saveJpg = prefs.getBoolean(SettingsFragment.KEY_SAVE_JPG, true)
+                val saveRaw = prefs.getBoolean(SettingsFragment.KEY_SAVE_RAW, true)
+                val tiffFolderUri = prefs.getString(SettingsFragment.KEY_TIFF_STORAGE_URI, null)
+                val rawFolderUri = prefs.getString(SettingsFragment.KEY_RAW_STORAGE_URI, null)
                 val hqBackgroundExport = prefs.getBoolean(SettingsFragment.KEY_HQ_BACKGROUND_EXPORT, false)
 
                 val tiffFile = File(context.cacheDir, "$dngName.tiff")
@@ -3072,6 +3107,9 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         .putString("baseName", dngName)
                         .putBoolean("saveTiff", saveTiff)
                         .putBoolean("saveJpg", saveJpg)
+                        .putBoolean("saveRaw", saveRaw)
+                        .putString("tiffFolderUri", tiffFolderUri)
+                        .putString("rawFolderUri", rawFolderUri)
                         .putBoolean("mirror", mirror)
                         .build()
 
@@ -3182,6 +3220,47 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
             toggle.setTextColor(color)
             toggle.isChecked = isHdrPlusEnabled
+        }
+    }
+
+    private fun updateHdrPlusConstraints() {
+        val binding = cameraUiContainerBinding ?: return
+        if (isHdrPlusEnabled) {
+            // Hide and disable flash
+            binding.flashButton.visibility = View.GONE
+            if (isFlashEnabled) {
+                isFlashEnabled = false
+                updateFlashIcon(binding.flashButton)
+                imageCapture?.flashMode = ImageCapture.FLASH_MODE_OFF
+                // If using Camera2, the repeating request will be updated via applyCameraControls or similar
+                applyCameraControls()
+            }
+            // Hide manual controls
+            binding.manualControlsRoot?.visibility = View.GONE
+            // Close manual panel if open
+            if (binding.manualPanel?.visibility == View.VISIBLE) {
+                binding.manualPanel?.visibility = View.GONE
+                binding.touchOverlay?.visibility = View.GONE
+                binding.manualTabs?.clearChecked()
+                activeManualTab = null
+            }
+        } else {
+            // Restore flash visibility if supported
+            val hasFlash = try {
+                if (currentLens?.useCamera2 == true) {
+                    val c2Chars = camera2Manager.getCameraCharacteristics(currentLens!!.id)
+                    c2Chars.get(android.hardware.camera2.CameraCharacteristics.FLASH_INFO_AVAILABLE) ?: false
+                } else {
+                    camera?.cameraInfo?.hasFlashUnit() ?: false
+                }
+            } catch (e: Exception) { false }
+
+            binding.flashButton.visibility = if (hasFlash) View.VISIBLE else View.GONE
+
+            // Restore manual controls if enabled in settings
+            val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+            val manualEnabled = prefs.getBoolean(SettingsFragment.KEY_MANUAL_CONTROLS, false)
+            binding.manualControlsRoot?.visibility = if (manualEnabled) View.VISIBLE else View.GONE
         }
     }
 
@@ -3335,7 +3414,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                             applyManualSettingsToRequest(request)
 
                             val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-                            val force60fps = prefs.getBoolean(SettingsFragment.KEY_FORCE_60FPS, true)
+                            val force60fps = prefs.getBoolean(SettingsFragment.KEY_FORCE_60FPS, false)
                             if (force60fps) {
                                 val fpsRanges = chars.get(android.hardware.camera2.CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
                                 val targetRange = fpsRanges?.find { it.upper == 60 }
@@ -3467,7 +3546,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 curIso, curTime, validIsoRange, validTimeRange, underexposureMode, lastClippingRatio
             )
 
-            val burstSize = (prefs.getString(SettingsFragment.KEY_HDR_BURST_COUNT, "3") ?: "3").toIntOrNull() ?: 3
+            val burstSize = (prefs.getString(SettingsFragment.KEY_HDR_BURST_COUNT, "5") ?: "5").toIntOrNull() ?: 5
 
             hdrPlusBurstHelper = HdrPlusBurst(frameCount = burstSize, onBurstComplete = { frames ->
                 processHdrPlusBurst(frames, config.digitalGain)

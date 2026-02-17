@@ -98,6 +98,14 @@ class MediaStoreUtils(private val context: Context) {
         @Suppress("DEPRECATION")
         private const val imageDataColumnIndex = MediaStore.Images.Media.DATA
         private const val imageIdColumnIndex = MediaStore.Images.Media._ID
+
+        fun getFolderNameFromUri(context: Context, uri: Uri): String {
+            if (uri.scheme == "content") {
+                val docUri = androidx.documentfile.provider.DocumentFile.fromTreeUri(context, uri)
+                return docUri?.name ?: uri.path ?: "Unknown"
+            }
+            return uri.path ?: "Unknown"
+        }
     }
 }
 
