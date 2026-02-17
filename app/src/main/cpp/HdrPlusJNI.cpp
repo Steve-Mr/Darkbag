@@ -203,7 +203,7 @@ extern "C" JNIEXPORT jint JNICALL
 Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     JNIEnv* env, jobject /* this */, jobjectArray dngBuffers, jint width, jint height, jint orientation, jint whiteLevel, jintArray blackLevelPattern, jfloatArray lensShadingMap, jint lensShadingRows, jint lensShadingCols, jboolean useSensorColorMatrix, jfloatArray whiteBalance, jfloatArray ccm, jfloatArray ccmAlt, jboolean exportMatrixAB, jint cfaPattern,
     jint iso, jlong exposureTime, jfloat fNumber, jfloat focalLength, jlong captureTimeMillis, jint targetLog, jstring lutPath, jstring outputTiffPath, jstring outputJpgPath, jstring outputDngPath,
-    jfloat digitalGain, jlongArray debugStats, jobject outputBitmap, jboolean isAsync, jstring tempRawPath, jfloat zoomFactor, jboolean mirror
+    jfloat digitalGain, jlongArray debugStats, jobject outputBitmap, jstring tempRawPath, jfloat zoomFactor, jboolean mirror
 ) {
     LOGD("Native processHdrPlus started.");
     (void)useSensorColorMatrix;
@@ -387,34 +387,22 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     }
 
     if (!tiffPathStr.empty() || !jpgPathStr.empty() || !dngPathStr.empty()) {
-        auto saveFunc = [fImg = (bool)isAsync ? finalImage : std::vector<uint16_t>(), isAsync, &finalImage, width, height, digitalGain, targetLog, lut, tiffPathStr, jpgPathStr, dngPathStr, baseName, ccmVec, ccmAltVec, exportMatrixAB, useSensorColorMatrix, wbVec, orientation, iso, exposureTime, fNumber, focalLength, captureTimeMillis, zoomFactor, mirror]() mutable {
-            const std::vector<uint16_t>& img = isAsync ? fImg : finalImage;
-            bool dngOk = true;
-            if (!dngPathStr.empty()) dngOk = write_dng(dngPathStr.c_str(), width, height, img, kMax16BitValue, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation, (bool)mirror);
+        if (!dngPathStr.empty()) {
+            write_dng(dngPathStr.c_str(), width, height, finalImage, kMax16BitValue, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation, (bool)mirror);
+        }
 
-            bool otherOk = true;
-            if (!tiffPathStr.empty() || !jpgPathStr.empty()) {
-                otherOk = process_and_save_image(img, width, height, digitalGain, targetLog, lut, tiffPathStr.empty()?nullptr:tiffPathStr.c_str(), jpgPathStr.empty()?nullptr:jpgPathStr.c_str(), 1, ccmVec.data(), wbVec.data(), orientation, nullptr, !isAsync, isAsync?1:4, zoomFactor, (bool)mirror);
+        if (!tiffPathStr.empty() || !jpgPathStr.empty()) {
+            process_and_save_image(finalImage, width, height, digitalGain, targetLog, lut, tiffPathStr.empty()?nullptr:tiffPathStr.c_str(), jpgPathStr.empty()?nullptr:jpgPathStr.c_str(), 1, ccmVec.data(), wbVec.data(), orientation, nullptr, true, 4, zoomFactor, (bool)mirror);
 
-                if (exportMatrixAB && !jpgPathStr.empty() && ccmAltVec.size() == 9) {
-                    std::string suffix = useSensorColorMatrix ? "_AB_CAPTURE_CCM.jpg" : "_AB_SENSOR_CCM.jpg";
-                    std::string altJpgPath = jpgPathStr;
-                    size_t dot = altJpgPath.find_last_of('.');
-                    if (dot == std::string::npos) dot = altJpgPath.size();
-                    altJpgPath = altJpgPath.substr(0, dot) + suffix;
-                    process_and_save_image(img, width, height, digitalGain, targetLog, lut, nullptr, altJpgPath.c_str(), 1, ccmAltVec.data(), wbVec.data(), orientation, nullptr, false, 1, zoomFactor, (bool)mirror);
-                }
+            if (exportMatrixAB && !jpgPathStr.empty() && ccmAltVec.size() == 9) {
+                std::string suffix = useSensorColorMatrix ? "_AB_CAPTURE_CCM.jpg" : "_AB_SENSOR_CCM.jpg";
+                std::string altJpgPath = jpgPathStr;
+                size_t dot = altJpgPath.find_last_of('.');
+                if (dot == std::string::npos) dot = altJpgPath.size();
+                altJpgPath = altJpgPath.substr(0, dot) + suffix;
+                process_and_save_image(finalImage, width, height, digitalGain, targetLog, lut, nullptr, altJpgPath.c_str(), 1, ccmAltVec.data(), wbVec.data(), orientation, nullptr, false, 1, zoomFactor, (bool)mirror);
             }
-
-            if (isAsync && g_jvm && g_colorProcessorClass) {
-                JNIEnv* env = nullptr; if (g_jvm->AttachCurrentThread(&env, nullptr) == JNI_OK && env) {
-                    jmethodID m = env->GetStaticMethodID(g_colorProcessorClass, "onBackgroundSaveComplete", "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;FIZZ)V");
-                    if (m) { jstring jB = env->NewStringUTF(baseName.c_str()), jT = tiffPathStr.empty()?nullptr:env->NewStringUTF(tiffPathStr.c_str()), jD = dngPathStr.empty()?nullptr:env->NewStringUTF(dngPathStr.c_str()), jJ = jpgPathStr.empty()?nullptr:env->NewStringUTF(jpgPathStr.c_str()); env->CallStaticVoidMethod(g_colorProcessorClass, m, jB, jT, jD, jJ, nullptr, 1.0f, orientation, !tiffPathStr.empty(), !jpgPathStr.empty()); if (jB) env->DeleteLocalRef(jB); if (jJ) env->DeleteLocalRef(jJ); if (jT) env->DeleteLocalRef(jT); if (jD) env->DeleteLocalRef(jD); }
-                    g_jvm->DetachCurrentThread();
-                }
-            }
-        };
-        if (isAsync) std::thread(std::move(saveFunc)).detach(); else saveFunc();
+        }
     }
     fillDebugStats(env, debugStats, copyDurationMs, halideDurationMs, postDurationMs, 0, std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now()-saveStart).count(), 0, std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now()-nativeStart).count(), jniPrepMs, stageStats);
     return 0;
