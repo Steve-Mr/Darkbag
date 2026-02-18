@@ -23,6 +23,7 @@
     <dimen name="margin_xlarge">48dp</dimen>
     <dimen name="margin_xxlarge">64dp</dimen>
 
+    <dimen name="spacing_xsmall">2dp</dimen>
     <dimen name="spacing_small">4dp</dimen>
     <dimen name="spacing_medium">8dp</dimen>
     <dimen name="spacing_large">16dp</dimen>
