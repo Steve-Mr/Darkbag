@@ -129,14 +129,15 @@
             android:layout_height="wrap_content"
             android:scrollbars="none">
 
-            <com.google.android.material.button.MaterialButtonGroup
+            <com.google.android.material.button.MaterialButtonToggleGroup
                 android:id="@+id/lens_button_group"
-                style="@style/Widget.Material3.MaterialButtonGroup.Connected"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
+                app:singleSelection="true"
+                app:selectionRequired="true"
                 android:paddingHorizontal="@dimen/spacing_small">
                 <!-- Buttons dynamically added in code -->
-            </com.google.android.material.button.MaterialButtonGroup>
+            </com.google.android.material.button.MaterialButtonToggleGroup>
         </HorizontalScrollView>
     </LinearLayout>
 

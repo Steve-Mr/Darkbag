@@ -2025,6 +2025,7 @@ class CameraFragment : Fragment() {
                 val btn = com.google.android.material.button.MaterialButton(
                     requireContext(), null, com.google.android.material.R.attr.materialButtonOutlinedStyle
                 ).apply {
+                    id = View.generateViewId()
                     layoutParams = android.widget.LinearLayout.LayoutParams(
                         android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
                         resources.getDimensionPixelSize(R.dimen.lens_button_size)
@@ -2146,9 +2147,11 @@ class CameraFragment : Fragment() {
 
         // Adjust position of lens row to be above viewfinder bottom
         fun adjustLensRow() {
-            val vfBottom = fragmentCameraBinding.viewFinder.bottom
-            val row = binding.lensControlRow ?: return
-            val containerHeight = binding.cameraUiContainer.height
+            val bindingInternal = _fragmentCameraBinding ?: return
+            val uiBinding = cameraUiContainerBinding ?: return
+            val vfBottom = bindingInternal.viewFinder.bottom
+            val row = uiBinding.lensControlRow ?: return
+            val containerHeight = uiBinding.cameraUiContainer.height
 
             if (vfBottom > 0 && vfBottom <= containerHeight) {
                  row.translationY = (vfBottom - containerHeight).toFloat() - resources.getDimension(R.dimen.margin_medium)
@@ -2158,7 +2161,7 @@ class CameraFragment : Fragment() {
             row.visibility = View.VISIBLE
         }
 
-        fragmentCameraBinding.viewFinder.post { adjustLensRow() }
+        _fragmentCameraBinding?.viewFinder?.post { adjustLensRow() }
     }
 
     private fun initZoomControls() {
