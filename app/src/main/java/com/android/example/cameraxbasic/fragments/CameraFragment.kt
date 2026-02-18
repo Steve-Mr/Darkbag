@@ -187,6 +187,7 @@ class CameraFragment : Fragment() {
 
     // HDR+ State
     private var isHdrPlusEnabled = false
+    private var septagonProgress: com.android.example.cameraxbasic.utils.SeptagonProgressDrawable? = null
 
     private val shouldMirror: Boolean
         get() = lensFacing == CameraSelector.LENS_FACING_FRONT &&
@@ -363,6 +364,7 @@ class CameraFragment : Fragment() {
     override fun onStart() {
         super.onStart()
         orientationEventListener.enable()
+        updateHdrPlusConstraints()
     }
 
     override fun onStop() {
@@ -384,6 +386,8 @@ class CameraFragment : Fragment() {
             )
             return
         }
+
+        updateHdrPlusConstraints()
 
         // Re-initialize camera engine if needed.
         // For Camera2 engine, we need to re-bind use cases (which triggers openCamera2).
@@ -556,6 +560,7 @@ class CameraFragment : Fragment() {
             // Set up the camera and its use cases
             lifecycleScope.launch {
                 setUpCamera()
+            updateHdrPlusConstraints()
             }
         }
     }
@@ -795,7 +800,7 @@ class CameraFragment : Fragment() {
             try {
                 val c2Chars = camera2Manager.getCameraCharacteristics(currentLens!!.id)
                 val hasFlash = c2Chars.get(android.hardware.camera2.CameraCharacteristics.FLASH_INFO_AVAILABLE) ?: false
-                cameraUiContainerBinding?.flashButton?.visibility = if (hasFlash) View.VISIBLE else View.GONE
+                cameraUiContainerBinding?.flashButton?.visibility = if (hasFlash && !isHdrPlusEnabled) View.VISIBLE else View.GONE
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to check flash for Camera2", e)
             }
@@ -984,7 +989,7 @@ class CameraFragment : Fragment() {
 
             camera?.let { cam ->
                 // Check Flash Availability
-                if (cam.cameraInfo.hasFlashUnit()) {
+                if (cam.cameraInfo.hasFlashUnit() && !isHdrPlusEnabled) {
                     cameraUiContainerBinding?.flashButton?.visibility = View.VISIBLE
                 } else {
                     cameraUiContainerBinding?.flashButton?.visibility = View.GONE
@@ -1055,6 +1060,12 @@ class CameraFragment : Fragment() {
             fragmentCameraBinding.root,
             true
         )
+
+        val colorPrimary = MaterialColors.getColor(requireContext(), com.google.android.material.R.attr.colorPrimary, Color.YELLOW)
+        septagonProgress = com.android.example.cameraxbasic.utils.SeptagonProgressDrawable().apply {
+            setColor(colorPrimary)
+        }
+        cameraUiContainerBinding?.captureProgress?.setImageDrawable(septagonProgress)
 
         // In the background, load latest photo taken (if any) for gallery thumbnail
         lifecycleScope.launch {
@@ -2134,21 +2145,20 @@ class CameraFragment : Fragment() {
         }
 
         // Adjust position of lens row to be above viewfinder bottom
-        lifecycleScope.launch(Dispatchers.Main) {
+        fun adjustLensRow() {
             val vfBottom = fragmentCameraBinding.viewFinder.bottom
-            val row = binding.lensControlRow ?: return@launch
+            val row = binding.lensControlRow ?: return
             val containerHeight = binding.cameraUiContainer.height
 
-            // If viewfinder is smaller than screen, align row to its bottom
-            if (vfBottom < containerHeight && vfBottom > 0) {
-                 val params = row.layoutParams as androidx.constraintlayout.widget.ConstraintLayout.LayoutParams
-                 params.bottomToTop = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.UNSET
-                 params.bottomToBottom = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.UNSET
+            if (vfBottom > 0 && vfBottom <= containerHeight) {
                  row.translationY = (vfBottom - containerHeight).toFloat() - resources.getDimension(R.dimen.margin_medium)
             } else {
                  row.translationY = 0f
             }
+            row.visibility = View.VISIBLE
         }
+
+        fragmentCameraBinding.viewFinder.post { adjustLensRow() }
     }
 
     private fun initZoomControls() {
@@ -2494,7 +2504,7 @@ class CameraFragment : Fragment() {
         val isPreviewEnabled = prefs.getBoolean(SettingsFragment.KEY_ENABLE_LUT_PREVIEW, true)
 
         val displayLut = activeLutName?.substringBeforeLast(".") ?: getString(R.string.lut_none)
-        cameraUiContainerBinding?.lutSwitcherButton?.text = if (targetLogName == getString(R.string.lut_none)) getString(R.string.lut_none) else "$targetLogName + $displayLut"
+        cameraUiContainerBinding?.lutSwitcherButton?.text = displayLut
 
         activeLutJob?.cancel()
         activeLutJob = lifecycleScope.launch(Dispatchers.IO) {
@@ -2813,8 +2823,7 @@ class CameraFragment : Fragment() {
                     }
                 )
 
-                cameraUiContainerBinding?.captureProgress?.max = burstSize
-                cameraUiContainerBinding?.captureProgress?.progress = 0
+                septagonProgress?.setProgress(0f)
                 cameraUiContainerBinding?.captureProgress?.visibility = View.VISIBLE
                 cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = false
                 cameraUiContainerBinding?.cameraCaptureButton?.alpha = 0.5f
@@ -2853,10 +2862,10 @@ class CameraFragment : Fragment() {
                     Log.d(TAG, "Burst frame ${currentFrame + 1} captured successfully.")
 
                     lifecycleScope.launch(Dispatchers.Main) {
-                        cameraUiContainerBinding?.captureProgress?.progress =
-                            (cameraUiContainerBinding?.captureProgress?.progress ?: 0) + 1
+                        val progress = (currentFrame + 1).toFloat() / totalFrames
+                        septagonProgress?.setProgress(progress)
 
-                        if ((cameraUiContainerBinding?.captureProgress?.progress ?: 0) >= totalFrames) {
+                        if (currentFrame + 1 >= totalFrames) {
                             Log.d(TAG, "HDR+ Burst Capture sequence complete.")
                             applyCameraControls()
                             resetBurstUi()
@@ -3614,8 +3623,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             })
 
             lifecycleScope.launch(Dispatchers.Main) {
-                cameraUiContainerBinding?.captureProgress?.max = burstSize
-                cameraUiContainerBinding?.captureProgress?.progress = 0
+                septagonProgress?.setProgress(0f)
                 cameraUiContainerBinding?.captureProgress?.visibility = View.VISIBLE
                 cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = false
                 cameraUiContainerBinding?.cameraCaptureButton?.alpha = 0.5f
@@ -3670,7 +3678,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     image.close()
                     framesCaptured++
                     lifecycleScope.launch(Dispatchers.Main) {
-                        cameraUiContainerBinding?.captureProgress?.progress = framesCaptured
+                        septagonProgress?.setProgress(framesCaptured.toFloat() / burstSize)
                     }
                     if (framesCaptured >= burstSize) {
                         watchdog.cancel()

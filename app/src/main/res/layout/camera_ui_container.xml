@@ -34,6 +34,7 @@
             android:id="@+id/hdr_plus_switch"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:minWidth="80dp"
             app:showText="true"
             android:textOn="HDR+"
             android:textOff="OFF"
@@ -319,15 +320,11 @@
                 app:layout_constraintStart_toStartOf="parent"
                 app:layout_constraintEnd_toEndOf="parent" />
 
-            <com.google.android.material.progressindicator.CircularProgressIndicator
+            <ImageView
                 android:id="@+id/capture_progress"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:indeterminate="false"
+                android:layout_width="@dimen/shutter_button_size"
+                android:layout_height="@dimen/shutter_button_size"
                 android:visibility="gone"
-                app:indicatorSize="@dimen/shutter_button_size"
-                app:trackThickness="4dp"
-                app:indicatorColor="?attr/colorPrimary"
                 app:layout_constraintTop_toTopOf="@id/camera_capture_button"
                 app:layout_constraintBottom_toBottomOf="@id/camera_capture_button"
                 app:layout_constraintStart_toStartOf="@id/camera_capture_button"
@@ -348,8 +345,8 @@
 
             <com.google.android.material.loadingindicator.LoadingIndicator
                 android:id="@+id/processing_progress"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
                 android:visibility="gone"
                 app:layout_constraintTop_toTopOf="@id/photo_view_button"
                 app:layout_constraintBottom_toBottomOf="@id/photo_view_button"
