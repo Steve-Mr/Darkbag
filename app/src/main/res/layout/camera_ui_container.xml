@@ -27,14 +27,15 @@
         android:layout_height="wrap_content"
         android:orientation="horizontal"
         android:layout_margin="@dimen/margin_medium"
+        android:gravity="center_vertical"
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintStart_toStartOf="parent">
 
         <com.google.android.material.materialswitch.MaterialSwitch
             android:id="@+id/hdr_plus_switch"
+            style="@style/Widget.App.MaterialSwitch.TopBar"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:minWidth="80dp"
             app:showText="true"
             android:textOn="HDR+"
             android:textOff="OFF"
@@ -129,15 +130,14 @@
             android:layout_height="wrap_content"
             android:scrollbars="none">
 
-            <com.google.android.material.button.MaterialButtonToggleGroup
+            <com.google.android.material.button.MaterialButtonGroup
                 android:id="@+id/lens_button_group"
+                style="@style/Widget.Material3.MaterialButtonGroup.Connected"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                app:singleSelection="true"
-                app:selectionRequired="true"
                 android:paddingHorizontal="@dimen/spacing_small">
                 <!-- Buttons dynamically added in code -->
-            </com.google.android.material.button.MaterialButtonToggleGroup>
+            </com.google.android.material.button.MaterialButtonGroup>
         </HorizontalScrollView>
     </LinearLayout>
 

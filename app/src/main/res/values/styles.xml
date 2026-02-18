@@ -63,4 +63,11 @@
         <!-- We will handle the complex 7-sided path in code or via a custom drawable as ShapeAppearance primarily supports 4 corners -->
     </style>
 
+    <style name="Widget.App.MaterialSwitch.TopBar" parent="Widget.Material3.CompoundButton.MaterialSwitch">
+        <item name="android:minWidth">100dp</item>
+        <item name="android:minHeight">@dimen/round_button_medium</item>
+        <item name="android:paddingHorizontal">8dp</item>
+        <item name="android:switchMinWidth">100dp</item>
+    </style>
+
 </resources>
