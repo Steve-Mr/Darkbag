@@ -4,7 +4,7 @@ import android.graphics.*
 import android.graphics.drawable.Drawable
 import androidx.core.graphics.PathParser
 
-class SeptagonProgressDrawable : Drawable() {
+class ArchProgressDrawable : Drawable() {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeWidth = 12f
@@ -22,8 +22,8 @@ class SeptagonProgressDrawable : Drawable() {
     private val measure = PathMeasure()
     private val segmentPath = Path()
 
-    // Same path as ic_shutter_cookie.xml but scaled to bounds
-    private val pathString = "M50,5 C60,5 80,15 85.2,21.9 C90,30 95,50 93.9,60.0 C93,75 75,85 69.5,90.5 C60,95 40,95 30.5,90.5 C25,85 7,75 6.1,60.0 C5,50 10,30 14.8,21.9 C20,15 40,5 50,5 Z"
+    // Rounded Arch path starting at 12 o'clock (50,5)
+    private val pathString = "M 50,5 A 45,45 0 0 1 95,50 L 95,80 Q 95,95 80,95 L 20,95 Q 5,95 5,80 L 5,50 A 45,45 0 0 1 50,5 Z"
 
     override fun onBoundsChange(bounds: Rect) {
         super.onBoundsChange(bounds)

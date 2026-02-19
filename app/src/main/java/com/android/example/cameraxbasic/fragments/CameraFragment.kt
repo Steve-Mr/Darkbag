@@ -186,7 +186,7 @@ class CameraFragment : Fragment() {
 
     // HDR+ State
     private var isHdrPlusEnabled = false
-    private var septagonProgress: com.android.example.cameraxbasic.utils.SeptagonProgressDrawable? = null
+    private var archProgress: com.android.example.cameraxbasic.utils.ArchProgressDrawable? = null
 
     private val shouldMirror: Boolean
         get() = lensFacing == CameraSelector.LENS_FACING_FRONT &&
@@ -247,11 +247,17 @@ class CameraFragment : Fragment() {
                 }
 
                 // Map Orientation to degrees (0, 90, 180, 270 counter-clockwise)
-                deviceOrientationDegrees = when (orientation) {
+                val newOrientationDegrees = when (orientation) {
                     in 45 until 135 -> 90 // Landscape Left (90 CCW)
                     in 135 until 225 -> 180 // Upside Down
                     in 225 until 315 -> 270 // Landscape Right (270 CCW)
                     else -> 0 // Portrait
+                }
+
+                if (newOrientationDegrees != deviceOrientationDegrees) {
+                    deviceOrientationDegrees = newOrientationDegrees
+                    // Smoothly rotate shutter button and progress indicator to point its Arch top towards the new "up"
+                    rotateShutter(-deviceOrientationDegrees.toFloat())
                 }
 
                 val rotation = when (orientation) {
@@ -1066,10 +1072,14 @@ class CameraFragment : Fragment() {
         )
 
         val colorPrimary = MaterialColors.getColor(requireContext(), com.google.android.material.R.attr.colorPrimary, Color.YELLOW)
-        septagonProgress = com.android.example.cameraxbasic.utils.SeptagonProgressDrawable().apply {
+        archProgress = com.android.example.cameraxbasic.utils.ArchProgressDrawable().apply {
             setColor(colorPrimary)
         }
-        cameraUiContainerBinding?.captureProgress?.setImageDrawable(septagonProgress)
+        cameraUiContainerBinding?.captureProgress?.setImageDrawable(archProgress)
+
+        // Reset rotation of shutter on UI update
+        cameraUiContainerBinding?.cameraCaptureButton?.rotation = -deviceOrientationDegrees.toFloat()
+        cameraUiContainerBinding?.captureProgress?.rotation = -deviceOrientationDegrees.toFloat()
 
         // In the background, load latest photo taken (if any) for gallery thumbnail
         lifecycleScope.launch {
@@ -2842,7 +2852,7 @@ class CameraFragment : Fragment() {
                     }
                 )
 
-                septagonProgress?.setProgress(0f)
+                archProgress?.setProgress(0f)
                 cameraUiContainerBinding?.captureProgress?.visibility = View.VISIBLE
                 cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = false
                 cameraUiContainerBinding?.cameraCaptureButton?.alpha = 0.5f
@@ -2882,7 +2892,7 @@ class CameraFragment : Fragment() {
 
                     lifecycleScope.launch(Dispatchers.Main) {
                         val progress = (currentFrame + 1).toFloat() / totalFrames
-                        septagonProgress?.setProgress(progress)
+                        archProgress?.setProgress(progress)
 
                         if (currentFrame + 1 >= totalFrames) {
                             Log.d(TAG, "HDR+ Burst Capture sequence complete.")
@@ -3642,7 +3652,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             })
 
             lifecycleScope.launch(Dispatchers.Main) {
-                septagonProgress?.setProgress(0f)
+                archProgress?.setProgress(0f)
                 cameraUiContainerBinding?.captureProgress?.visibility = View.VISIBLE
                 cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = false
                 cameraUiContainerBinding?.cameraCaptureButton?.alpha = 0.5f
@@ -3697,7 +3707,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     image.close()
                     framesCaptured++
                     lifecycleScope.launch(Dispatchers.Main) {
-                        septagonProgress?.setProgress(framesCaptured.toFloat() / burstSize)
+                        archProgress?.setProgress(framesCaptured.toFloat() / burstSize)
                     }
                     if (framesCaptured >= burstSize) {
                         watchdog.cancel()
@@ -3925,6 +3935,29 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 }
             }
         }
+    }
+
+    private fun rotateShutter(targetRotation: Float) {
+        val binding = cameraUiContainerBinding ?: return
+
+        fun animateRotation(view: android.view.View, target: Float) {
+            val current = view.rotation
+            val diff = (target - current) % 360
+            val shortestDiff = when {
+                diff > 180 -> diff - 360
+                diff < -180 -> diff + 360
+                else -> diff
+            }
+
+            view.animate()
+                .rotation(current + shortestDiff)
+                .setDuration(ANIMATION_SLOW_MILLIS)
+                .setInterpolator(android.view.animation.AccelerateDecelerateInterpolator())
+                .start()
+        }
+
+        animateRotation(binding.cameraCaptureButton, targetRotation)
+        animateRotation(binding.captureProgress, targetRotation)
     }
 
     private fun resetBurstUi() {
