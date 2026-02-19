@@ -70,4 +70,13 @@
         <item name="android:switchMinWidth">100dp</item>
     </style>
 
+    <!-- Asymmetric LUT Switcher Shape -->
+    <style name="ShapeAppearance.App.LutSwitcher" parent="ShapeAppearance.Material3.MediumComponent">
+        <item name="cornerFamily">rounded</item>
+        <item name="cornerSizeTopLeft">24dp</item>
+        <item name="cornerSizeBottomLeft">24dp</item>
+        <item name="cornerSizeTopRight">0dp</item>
+        <item name="cornerSizeBottomRight">0dp</item>
+    </style>
+
 </resources>

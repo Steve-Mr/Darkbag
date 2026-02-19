@@ -1049,16 +1049,21 @@ class CameraFragment : Fragment() {
 
     /** Method used to re-draw the camera UI controls, called every time configuration changes. */
     private fun updateCameraUi() {
+        val root = _fragmentCameraBinding?.root as? androidx.constraintlayout.widget.ConstraintLayout ?: return
 
-        // Remove previous UI if any
-        cameraUiContainerBinding?.root?.let {
-            fragmentCameraBinding.root.removeView(it)
+        // Remove all views except view_finder and focus_ring to avoid duplicates when re-inflating <merge>
+        val viewsToRemove = mutableListOf<View>()
+        for (i in 0 until root.childCount) {
+            val child = root.getChildAt(i)
+            if (child.id != R.id.view_finder && child.id != R.id.focus_ring) {
+                viewsToRemove.add(child)
+            }
         }
+        viewsToRemove.forEach { root.removeView(it) }
 
         cameraUiContainerBinding = CameraUiContainerBinding.inflate(
             LayoutInflater.from(requireContext()),
-            fragmentCameraBinding.root,
-            true
+            root
         )
 
         val colorPrimary = MaterialColors.getColor(requireContext(), com.google.android.material.R.attr.colorPrimary, Color.YELLOW)
@@ -1107,6 +1112,7 @@ class CameraFragment : Fragment() {
                     constraintSet.constrainHeight(vfId, androidx.constraintlayout.widget.ConstraintSet.MATCH_CONSTRAINT)
                     constraintSet.connect(vfId, androidx.constraintlayout.widget.ConstraintSet.TOP, topId, androidx.constraintlayout.widget.ConstraintSet.BOTTOM)
                     constraintSet.connect(vfId, androidx.constraintlayout.widget.ConstraintSet.BOTTOM, bottomId, androidx.constraintlayout.widget.ConstraintSet.TOP)
+                    constraintSet.setVerticalBias(vfId, 0.5f)
 
                     // Constrain Lens Group Row to the bottom of the Viewfinder (above its bottom edge)
                     val marginMedium = resources.getDimensionPixelSize(R.dimen.margin_medium)
@@ -1236,9 +1242,6 @@ class CameraFragment : Fragment() {
         cameraUiContainerBinding?.lutSwitcherButton?.setOnClickListener {
              showLutMenu()
         }
-
-        // Initialize Zoom Controls
-        initZoomControls()
 
         // Listener for button used to view the most recent photo
         cameraUiContainerBinding?.photoViewButton?.setOnClickListener {
@@ -2049,10 +2052,14 @@ class CameraFragment : Fragment() {
             } else null
 
             // Reuse buttons to avoid MaterialButtonGroup layout crash
+            // Account for dummy view at index 0 if it exists
+            val startIndex = if (group.childCount > 0 && group.getChildAt(0) !is com.google.android.material.button.MaterialButton) 1 else 0
+
             for (i in filteredLenses.indices) {
                 val lens = filteredLenses[i]
-                val btn = if (i < group.childCount) {
-                    group.getChildAt(i) as com.google.android.material.button.MaterialButton
+                val btnIndex = i + startIndex
+                val btn = if (btnIndex < group.childCount) {
+                    group.getChildAt(btnIndex) as com.google.android.material.button.MaterialButton
                 } else {
                     val newBtn = com.google.android.material.button.MaterialButton(
                         requireContext(), null, com.google.android.material.R.attr.materialButtonOutlinedStyle
@@ -2063,7 +2070,8 @@ class CameraFragment : Fragment() {
                         resources.getDimensionPixelSize(R.dimen.lens_button_size)
                     )
                     newBtn.textSize = 12f
-                    newBtn.setPadding(resources.getDimensionPixelSize(R.dimen.spacing_xsmall), 0, resources.getDimensionPixelSize(R.dimen.spacing_xsmall), 0)
+                    // Minimal padding for compactness
+                    newBtn.setPadding(0, 0, 0, 0)
                     newBtn.minWidth = 0
                     newBtn.minimumWidth = 0
                     newBtn.insetTop = 0
@@ -2128,7 +2136,7 @@ class CameraFragment : Fragment() {
             }
 
             // Remove extra buttons safely
-            while (group.childCount > filteredLenses.size) {
+            while (group.childCount > filteredLenses.size + startIndex) {
                 group.removeViewAt(group.childCount - 1)
             }
 
@@ -2156,8 +2164,11 @@ class CameraFragment : Fragment() {
         } else null
 
         for (i in 0 until group.childCount) {
-            val btn = group.getChildAt(i) as? com.google.android.material.button.MaterialButton
-            val lens = btn?.tag as? com.android.example.cameraxbasic.utils.LensInfo
+            val child = group.getChildAt(i)
+            if (child !is com.google.android.material.button.MaterialButton) continue
+
+            val btn = child
+            val lens = btn.tag as? com.android.example.cameraxbasic.utils.LensInfo
             if (btn != null && lens != null) {
                 val isActive = lens.sensorId == currentLens?.sensorId ||
                               (lens.multiplier in 0.95f..1.05f && currentLens?.id == lens.id && !currentLens!!.sensorId.contains("virtual")) ||
@@ -2188,44 +2199,10 @@ class CameraFragment : Fragment() {
         cameraUiContainerBinding?.lensControlRow?.visibility = View.VISIBLE
     }
 
-    private fun initZoomControls() {
-        val binding = cameraUiContainerBinding ?: return
-
-        binding.btnZoomToggle?.setOnClickListener {
-            val nextFocal = when {
-                currentLens?.sensorId?.endsWith("-28mm") == true -> 35
-                currentLens?.sensorId?.endsWith("-35mm") == true -> 24
-                else -> 28
-            }
-
-            val targetId = if (nextFocal == 24) {
-                 availableLenses.find { it.multiplier in 0.95f..1.05f && !it.isZoomPreset }?.sensorId
-            } else {
-                 availableLenses.find { it.sensorId.endsWith("-$nextFocal" + "mm") }?.sensorId
-            }
-
-            targetId?.let { id ->
-                availableLenses.find { it.sensorId == id }?.let {
-                    currentLens = it
-                    updateZoom(true)
-                }
-            }
-        }
-
-        binding.btnZoom2x?.setOnClickListener {
-            availableLenses.find { it.multiplier in 1.9f..2.1f || it.sensorId.contains("2.0x") || it.sensorId.contains("virtual-2x") }?.let {
-                currentLens = it
-                updateZoom(true)
-            }
-        }
-
-        updateZoomUI(false)
-    }
-
     private fun updateZoom(animate: Boolean) {
         if (camera2Device != null) {
             updateZoomCamera2()
-            updateZoomUI(animate)
+            updateLensUI()
             return
         }
 
@@ -2239,7 +2216,7 @@ class CameraFragment : Fragment() {
         val ratio = targetRatio.coerceAtMost(maxZoom)
 
         camera?.cameraControl?.setZoomRatio(ratio)
-        updateZoomUI(animate)
+        updateLensUI()
     }
 
     private fun updateZoomCamera2() {
@@ -2320,44 +2297,6 @@ class CameraFragment : Fragment() {
         }
         Log.d(TAG, "getCombinedOrientation: sensor=$sensorOrientation, device=$deviceOrientationDegrees, facing=$lensFacing -> combined=$combined")
         return combined
-    }
-
-    private fun updateZoomUI(animate: Boolean) {
-        val binding = cameraUiContainerBinding ?: return
-
-        updateLensUI()
-
-        val activeColor = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorPrimary)
-        val inactiveColor = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnSurface)
-
-        val is2xActive = (currentLens?.multiplier ?: 1.0f) in 1.9f..2.1f
-        val focalEq = currentLens?.equivalentFocalLength ?: 24f
-
-        if (is2xActive) {
-            binding.btnZoom2x?.setTextColor(activeColor)
-            binding.btnZoomToggle?.setTextColor(inactiveColor)
-
-            binding.btnZoomToggle?.text = "1x"
-            zoomJob?.cancel()
-        } else {
-            binding.btnZoom2x?.setTextColor(inactiveColor)
-            binding.btnZoomToggle?.setTextColor(activeColor)
-
-            zoomJob?.cancel()
-            val labelX = String.format("%.1fx", currentLens?.multiplier ?: 1.0f)
-
-            if (animate && currentLens?.isZoomPreset == true) {
-                zoomJob = lifecycleScope.launch(Dispatchers.Main) {
-                    val labelMm = "${focalEq.toInt()}mm"
-
-                    binding.btnZoomToggle?.text = labelMm
-                    delay(500)
-                    binding.btnZoomToggle?.text = labelX
-                }
-            } else {
-                binding.btnZoomToggle?.text = labelX
-            }
-        }
     }
 
     @OptIn(ExperimentalCamera2Interop::class)
@@ -2566,7 +2505,7 @@ class CameraFragment : Fragment() {
             items.add("${getString(R.string.lut_menu_lut)}: $currentLut")
         }
 
-        showPillPopup(items) { item, _ ->
+        showPillPopup(items, autoDismiss = false) { item, _ ->
             if (item.startsWith(getString(R.string.lut_menu_log))) {
                 showLogSelectionMenu()
             } else if (item.startsWith(getString(R.string.lut_menu_lut))) {
@@ -2576,42 +2515,57 @@ class CameraFragment : Fragment() {
     }
 
     private fun showLogSelectionMenu() {
-        showPillPopup(SettingsFragment.LOG_CURVES) { selectedLog, _ ->
-            val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-            prefs.edit().putString(SettingsFragment.KEY_TARGET_LOG, selectedLog).apply()
-            if (selectedLog == getString(R.string.lut_none)) {
-                prefs.edit().remove(SettingsFragment.KEY_ACTIVE_LUT).apply()
+        val items = mutableListOf("← Back")
+        items.addAll(SettingsFragment.LOG_CURVES)
+
+        showPillPopup(items, autoDismiss = false) { selectedLog, position ->
+            if (position == 0) {
+                showLutMenu()
+            } else {
+                val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                prefs.edit().putString(SettingsFragment.KEY_TARGET_LOG, selectedLog).apply()
+                if (selectedLog == getString(R.string.lut_none)) {
+                    prefs.edit().remove(SettingsFragment.KEY_ACTIVE_LUT).apply()
+                }
+                updateLiveLut()
+                showLutMenu()
             }
-            updateLiveLut()
         }
     }
 
     private fun showLutSelectionMenu() {
         val luts = lutManager.getLuts()
-        val items = mutableListOf(getString(R.string.lut_none))
+        val items = mutableListOf("← Back", getString(R.string.lut_none))
         items.addAll(luts.map { it.nameWithoutExtension })
 
-        showPillPopup(items) { selectedName, position ->
-            val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        showPillPopup(items, autoDismiss = false) { selectedName, position ->
             if (position == 0) {
-                prefs.edit().remove(SettingsFragment.KEY_ACTIVE_LUT).apply()
+                showLutMenu()
             } else {
-                val filename = luts[position - 1].name
-                prefs.edit().putString(SettingsFragment.KEY_ACTIVE_LUT, filename).apply()
+                val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                if (position == 1) {
+                    prefs.edit().remove(SettingsFragment.KEY_ACTIVE_LUT).apply()
+                } else {
+                    val filename = luts[position - 2].name
+                    prefs.edit().putString(SettingsFragment.KEY_ACTIVE_LUT, filename).apply()
+                }
+                updateLiveLut()
+                showLutMenu()
             }
-            updateLiveLut()
         }
     }
 
-    private fun showPillPopup(items: List<String>, onSelected: (String, Int) -> Unit) {
+    private fun showPillPopup(items: List<String>, autoDismiss: Boolean = true, onSelected: (String, Int) -> Unit) {
         val binding = cameraUiContainerBinding ?: return
         val container = binding.lutListContainer ?: return
         val rv = binding.lutList ?: return
 
+        container.bringToFront()
         container.setCardBackgroundColor(Color.TRANSPARENT)
         container.cardElevation = 0f
-        container.layoutParams.width = resources.getDimensionPixelSize(R.dimen.round_button_large) * 2
+        container.layoutParams.width = resources.getDimensionPixelSize(R.dimen.round_button_large) * 3
         container.visibility = View.VISIBLE
+        binding.touchOverlay?.bringToFront()
         binding.touchOverlay?.visibility = View.VISIBLE
 
         rv.layoutManager = androidx.recyclerview.widget.LinearLayoutManager(requireContext())
@@ -2629,8 +2583,10 @@ class CameraFragment : Fragment() {
                 pillHolder.btn.text = items[position]
                 pillHolder.btn.setOnClickListener {
                     onSelected(items[position], position)
-                    container.visibility = View.GONE
-                    binding.touchOverlay?.visibility = View.GONE
+                    if (autoDismiss) {
+                        container.visibility = View.GONE
+                        binding.touchOverlay?.visibility = View.GONE
+                    }
                 }
             }
 
@@ -3331,6 +3287,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         cameraUiContainerBinding?.hdrPlusSwitch?.let { toggle ->
             toggle.isChecked = isHdrPlusEnabled
         }
+        cameraUiContainerBinding?.tvHdrStatus?.text = if (isHdrPlusEnabled) "HDR+" else "OFF"
     }
 
     private fun updateHdrPlusConstraints() {
