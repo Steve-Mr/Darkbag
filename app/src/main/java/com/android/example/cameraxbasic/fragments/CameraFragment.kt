@@ -1120,19 +1120,19 @@ class CameraFragment : Fragment() {
 
                     if (topId != null && bottomId != null) {
                         // Center Viewfinder between top bar and manual controls (or bottom island if manual is GONE)
-                        // If manualId is null, use bottomId as the anchor.
-                        val bottomAnchorId = manualId ?: bottomId
+                        val bottomAnchorId = if (manualId != null) {
+                            // Ensure Manual Controls are constrained to the Bottom Island
+                            constraintSet.connect(manualId, androidx.constraintlayout.widget.ConstraintSet.BOTTOM, bottomId, androidx.constraintlayout.widget.ConstraintSet.TOP)
+                            manualId
+                        } else {
+                            bottomId
+                        }
 
                         constraintSet.constrainHeight(vfId, androidx.constraintlayout.widget.ConstraintSet.MATCH_CONSTRAINT)
                         constraintSet.constrainDefaultHeight(vfId, androidx.constraintlayout.widget.ConstraintSet.MATCH_CONSTRAINT_WRAP)
                         constraintSet.connect(vfId, androidx.constraintlayout.widget.ConstraintSet.TOP, topId, androidx.constraintlayout.widget.ConstraintSet.BOTTOM)
                         constraintSet.connect(vfId, androidx.constraintlayout.widget.ConstraintSet.BOTTOM, bottomAnchorId, androidx.constraintlayout.widget.ConstraintSet.TOP)
                         constraintSet.setVerticalBias(vfId, 0.5f)
-
-                        // Ensure Manual Controls are constrained to the Bottom Island
-                        if (manualId != null) {
-                            constraintSet.connect(manualId, androidx.constraintlayout.widget.ConstraintSet.BOTTOM, bottomId, androidx.constraintlayout.widget.ConstraintSet.TOP)
-                        }
 
                         // Constrain Lens Group Row to the bottom of the Viewfinder (above its bottom edge)
                         if (lensRowId != null) {
