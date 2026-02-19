@@ -1276,6 +1276,7 @@ class CameraFragment : Fragment() {
         try {
             cameraUiContainerBinding?.cameraSwitchButtonAlt?.isEnabled =
                 hasBackCamera() && hasFrontCamera()
+            cameraUiContainerBinding?.cameraSwitchButtonAlt?.visibility = View.VISIBLE
         } catch (exception: CameraInfoUnavailableException) {
             cameraUiContainerBinding?.cameraSwitchButtonAlt?.isEnabled = false
         }
@@ -2038,6 +2039,9 @@ class CameraFragment : Fragment() {
         val container = binding.lensControlsContainer ?: return
         val row = binding.lensControlRow ?: return
 
+        // Ensure the row containing the switch button is always visible
+        row.visibility = View.VISIBLE
+
         // Always clear container to avoid stale buttons from previous facings
         container.removeAllViews()
 
@@ -2056,8 +2060,8 @@ class CameraFragment : Fragment() {
             !it.sensorId.contains(com.android.example.cameraxbasic.utils.CameraRepository.VIRTUAL_TELE_2X_SUFFIX)
         }
 
-        // Show lens controls only if multiple lenses are available (typically for rear camera)
-        if (filteredLenses.size > 1) {
+        // Populate lens controls if any are available
+        if (filteredLenses.isNotEmpty()) {
             val isBackCamera = lensFacing == CameraSelector.LENS_FACING_BACK
             val largestTele = if (isBackCamera) {
                 filteredLenses.filter { it.multiplier > 1.05f && !it.isZoomPreset }.maxByOrNull { it.multiplier }
@@ -2146,6 +2150,10 @@ class CameraFragment : Fragment() {
         }
 
         val binding = cameraUiContainerBinding ?: return
+
+        // Ensure the row containing the switch button is always visible
+        binding.lensControlRow?.visibility = View.VISIBLE
+
         val container = binding.lensControlsContainer ?: return
 
         val colorPrimary = MaterialColors.getColor(container, com.google.android.material.R.attr.colorPrimary)
@@ -2201,8 +2209,7 @@ class CameraFragment : Fragment() {
             }
         }
 
-        cameraUiContainerBinding?.lensControlRow?.visibility = View.VISIBLE
-        cameraUiContainerBinding?.lensControlsCard?.visibility = if (container.childCount > 1) View.VISIBLE else View.GONE
+        binding.lensControlsCard?.visibility = if (container.childCount > 1) View.VISIBLE else View.GONE
     }
 
     private fun updateZoom(animate: Boolean) {
