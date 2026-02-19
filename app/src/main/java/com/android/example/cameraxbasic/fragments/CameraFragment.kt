@@ -1113,21 +1113,35 @@ class CameraFragment : Fragment() {
                     constraintSet.clone(root)
 
                     val vfId = vfBinding.viewFinder.id
-                    val topId = uiBinding.topRightControls?.id ?: return@setOnApplyWindowInsetsListener windowInsets
-                    val bottomId = uiBinding.bottomIslandCard?.id ?: return@setOnApplyWindowInsetsListener windowInsets
-                    val lensRowId = uiBinding.lensControlRow?.id ?: return@setOnApplyWindowInsetsListener windowInsets
+                    val topId = uiBinding.topRightControls?.id
+                    val bottomId = uiBinding.bottomIslandCard?.id
+                    val lensRowId = uiBinding.lensControlRow?.id
+                    val manualId = uiBinding.manualControlsRoot?.id
 
-                    // Center Viewfinder between top and bottom bars
-                    constraintSet.constrainHeight(vfId, androidx.constraintlayout.widget.ConstraintSet.MATCH_CONSTRAINT)
-                    constraintSet.connect(vfId, androidx.constraintlayout.widget.ConstraintSet.TOP, topId, androidx.constraintlayout.widget.ConstraintSet.BOTTOM)
-                    constraintSet.connect(vfId, androidx.constraintlayout.widget.ConstraintSet.BOTTOM, bottomId, androidx.constraintlayout.widget.ConstraintSet.TOP)
-                    constraintSet.setVerticalBias(vfId, 0.5f)
+                    if (topId != null && bottomId != null) {
+                        // Center Viewfinder between top bar and manual controls (or bottom island if manual is GONE)
+                        val bottomAnchorId = if (manualId != null) {
+                            // Ensure Manual Controls are constrained to the Bottom Island
+                            constraintSet.connect(manualId, androidx.constraintlayout.widget.ConstraintSet.BOTTOM, bottomId, androidx.constraintlayout.widget.ConstraintSet.TOP)
+                            manualId
+                        } else {
+                            bottomId
+                        }
 
-                    // Constrain Lens Group Row to the bottom of the Viewfinder (above its bottom edge)
-                    val marginMedium = resources.getDimensionPixelSize(R.dimen.margin_medium)
-                    constraintSet.connect(lensRowId, androidx.constraintlayout.widget.ConstraintSet.BOTTOM, vfId, androidx.constraintlayout.widget.ConstraintSet.BOTTOM, marginMedium)
-                    constraintSet.connect(lensRowId, androidx.constraintlayout.widget.ConstraintSet.START, androidx.constraintlayout.widget.ConstraintSet.PARENT_ID, androidx.constraintlayout.widget.ConstraintSet.START)
-                    constraintSet.connect(lensRowId, androidx.constraintlayout.widget.ConstraintSet.END, androidx.constraintlayout.widget.ConstraintSet.PARENT_ID, androidx.constraintlayout.widget.ConstraintSet.END)
+                        constraintSet.constrainHeight(vfId, androidx.constraintlayout.widget.ConstraintSet.MATCH_CONSTRAINT)
+                        constraintSet.constrainDefaultHeight(vfId, androidx.constraintlayout.widget.ConstraintSet.MATCH_CONSTRAINT_WRAP)
+                        constraintSet.connect(vfId, androidx.constraintlayout.widget.ConstraintSet.TOP, topId, androidx.constraintlayout.widget.ConstraintSet.BOTTOM)
+                        constraintSet.connect(vfId, androidx.constraintlayout.widget.ConstraintSet.BOTTOM, bottomAnchorId, androidx.constraintlayout.widget.ConstraintSet.TOP)
+                        constraintSet.setVerticalBias(vfId, 0.5f)
+
+                        // Constrain Lens Group Row to the bottom of the Viewfinder (above its bottom edge)
+                        if (lensRowId != null) {
+                            val marginXsmall = resources.getDimensionPixelSize(R.dimen.margin_xsmall)
+                            constraintSet.connect(lensRowId, androidx.constraintlayout.widget.ConstraintSet.BOTTOM, vfId, androidx.constraintlayout.widget.ConstraintSet.BOTTOM, marginXsmall)
+                            constraintSet.connect(lensRowId, androidx.constraintlayout.widget.ConstraintSet.START, androidx.constraintlayout.widget.ConstraintSet.PARENT_ID, androidx.constraintlayout.widget.ConstraintSet.START)
+                            constraintSet.connect(lensRowId, androidx.constraintlayout.widget.ConstraintSet.END, androidx.constraintlayout.widget.ConstraintSet.PARENT_ID, androidx.constraintlayout.widget.ConstraintSet.END)
+                        }
+                    }
 
                     constraintSet.applyTo(root)
                 }
