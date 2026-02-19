@@ -1609,9 +1609,11 @@ class CameraFragment : Fragment() {
                     // 7. Update UI
                     withContext(Dispatchers.Main) {
                         // Priority: JPG > RAW > TIFF
-                        val finalThumbnailUri = (if (saveJpg) resultUri else null)
-                            ?: dngResultUri
-                            ?: resultUri
+                        val finalThumbnailUri = if (saveJpg && resultUri != null) {
+                            resultUri
+                        } else {
+                            dngResultUri ?: resultUri
+                        }
 
                         if (finalThumbnailUri != null) {
                             prefs.edit().putString(SettingsFragment.KEY_LAST_CAPTURE_URI, finalThumbnailUri.toString()).apply()
