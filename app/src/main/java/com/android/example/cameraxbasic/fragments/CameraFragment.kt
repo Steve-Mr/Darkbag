@@ -496,6 +496,7 @@ class CameraFragment : Fragment() {
                         if (event.targetUri != null) {
                             Log.d(TAG, "Update thumbnail for ${event.baseName}: ${event.targetUri}")
                             withContext(Dispatchers.Main) {
+                                prefs.edit().putString(SettingsFragment.KEY_LAST_CAPTURE_URI, event.targetUri).apply()
                                 setGalleryThumbnail(event.targetUri)
                             }
                         } else {
@@ -1213,9 +1214,8 @@ class CameraFragment : Fragment() {
         cameraUiContainerBinding?.photoViewButton?.setOnClickListener {
             // Only navigate when the gallery has photos
             lifecycleScope.launch {
-                val images = mediaStoreUtils.getImages()
-                if (images.isNotEmpty()) {
-                    val uri = images.first().uri
+                val uri = mediaStoreUtils.getLatestAppImage(requireContext())
+                if (uri != null) {
                     val intent = Intent(Intent.ACTION_VIEW, uri)
                     intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                     try {
@@ -1608,7 +1608,13 @@ class CameraFragment : Fragment() {
 
                     // 7. Update UI
                     withContext(Dispatchers.Main) {
-                        val finalThumbnailUri = resultUri ?: dngResultUri
+                        // Priority: JPG > RAW > TIFF
+                        val finalThumbnailUri = if (saveJpg && resultUri != null) {
+                            resultUri
+                        } else {
+                            dngResultUri ?: resultUri
+                        }
+
                         if (finalThumbnailUri != null) {
                             prefs.edit().putString(SettingsFragment.KEY_LAST_CAPTURE_URI, finalThumbnailUri.toString()).apply()
                             setGalleryThumbnail(finalThumbnailUri.toString())
@@ -3089,6 +3095,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
                     withContext(Dispatchers.Main) {
                         if (fastJpegUri != null) {
+                            prefs.edit().putString(SettingsFragment.KEY_LAST_CAPTURE_URI, fastJpegUri.toString()).apply()
                             setGalleryThumbnail(fastJpegUri.toString())
                         }
                         Toast.makeText(context, "HDR+ Saved!", Toast.LENGTH_SHORT).show()
