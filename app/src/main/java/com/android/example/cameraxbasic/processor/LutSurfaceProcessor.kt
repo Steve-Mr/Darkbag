@@ -38,7 +38,7 @@ class LutSurfaceProcessor : SurfaceProcessor {
     private var height = 0
 
     private var currentLutSize = 0
-    private var currentLogType = 0
+    private var currentLogType = -1
 
     private var inputWidth = 0
     private var inputHeight = 0
@@ -302,6 +302,7 @@ class LutSurfaceProcessor : SurfaceProcessor {
 
         createProgram()
         createDummyLut()
+        updateLogLut(0)
     }
 
     private fun createDummyLut() {
@@ -398,11 +399,9 @@ class LutSurfaceProcessor : SurfaceProcessor {
              GLES30.glUniform1i(GLES30.glGetUniformLocation(program, "uLut"), 1)
         }
 
-        if (logLutTextureId != 0) {
-            GLES30.glActiveTexture(GLES30.GL_TEXTURE2)
-            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, logLutTextureId)
-            GLES30.glUniform1i(GLES30.glGetUniformLocation(program, "uLogLut"), 2)
-        }
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE2)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, if (logLutTextureId != 0) logLutTextureId else 0)
+        GLES30.glUniform1i(GLES30.glGetUniformLocation(program, "uLogLut"), 2)
 
         GLES30.glUniform1i(GLES30.glGetUniformLocation(program, "uLutSize"), currentLutSize)
 
@@ -457,12 +456,11 @@ class LutSurfaceProcessor : SurfaceProcessor {
             void main() {
                 vec4 color = texture(uTexture, vTexCoord);
 
-                vec3 logColor;
-                logColor.r = texture(uLogLut, vec2(color.r, 0.5)).r;
-                logColor.g = texture(uLogLut, vec2(color.g, 0.5)).r;
-                logColor.b = texture(uLogLut, vec2(color.b, 0.5)).r;
-
                 if (uLutSize > 0) {
+                     vec3 logColor;
+                     logColor.r = texture(uLogLut, vec2(color.r, 0.5)).r;
+                     logColor.g = texture(uLogLut, vec2(color.g, 0.5)).r;
+                     logColor.b = texture(uLogLut, vec2(color.b, 0.5)).r;
                      outColor = vec4(texture(uLut, logColor).rgb, 1.0);
                 } else {
                      outColor = color;
