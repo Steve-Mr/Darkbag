@@ -10,17 +10,20 @@ import kotlin.math.pow
 
 object ExposureUtils {
 
-    private const val ISO_THRESHOLD_VERY_BRIGHT = 50
-    private const val ISO_THRESHOLD_BRIGHT = 100
-    private const val ISO_THRESHOLD_DARK = 800
+    private const val ISO_THRESHOLD_VERY_LOW = 40
+    private const val ISO_THRESHOLD_LOW = 100
+    private const val ISO_THRESHOLD_MID = 400
+    private const val ISO_THRESHOLD_HIGH = 800
 
-    private const val FACTOR_VERY_BRIGHT = 0.0625f // -4 EV
-    private const val FACTOR_BRIGHT = 0.125f       // -3 EV
-    private const val FACTOR_DARK = 1.0f           // 0 EV
+    private const val FACTOR_EV_MINUS_4 = 0.0625f   // -4 EV
+    private const val FACTOR_EV_MINUS_3 = 0.125f    // -3 EV
+    private const val FACTOR_EV_MINUS_1_5 = 0.3535f // -1.5 EV
+    private const val FACTOR_EV_0 = 1.0f            // 0 EV
 
-    private const val CLIPPING_RATIO_THRESHOLD = 0.01
-    private const val CLIPPING_TO_EV_FACTOR = 20.0
+    private const val CLIPPING_RATIO_THRESHOLD = 0.03
+    private const val CLIPPING_TO_EV_FACTOR = 15.0
     private const val MAX_ADDITIONAL_UNDEREXPOSURE_STOPS = 2.0
+    private const val GAIN_DAMPENING_FACTOR = 0.2
 
     data class ExposureConfig(
         val iso: Int,
@@ -59,27 +62,28 @@ object ExposureUtils {
         val baselineTotalExposure = currentIso.toDouble() * currentTime.toDouble()
 
         // 2. Determine Underexposure Factor
+        var additionalUnderexposure = 0.0
         var underexposeFactor = when (underexposureMode) {
             "0 EV" -> 1.0f
             "-1 EV" -> 0.5f
             "-2 EV" -> 0.25f
             else -> {
-                // Dynamic Logic:
-                // - Very Bright Scene (ISO <= 50): Underexpose extremely (up to -4 EV)
-                // - Bright Scene (ISO <= 100): Underexpose significantly (-2 to -3 EV).
-                // - Dark Scene (ISO >= 800): Underexpose less or not at all (0 EV) to avoid noise.
+                // Dynamic Logic Refined:
+                // - ISO 40 or less: -4 EV (rare)
+                // - ISO 100: -3 EV
+                // - ISO 400: -1.5 EV
+                // - ISO 800 or more: 0 EV
                 when {
-                    currentIso <= ISO_THRESHOLD_VERY_BRIGHT -> FACTOR_VERY_BRIGHT // -4 EV
-                    currentIso <= ISO_THRESHOLD_BRIGHT -> {
-                        // Interpolate -4 EV to -3 EV
-                        val ratio = (currentIso - ISO_THRESHOLD_VERY_BRIGHT) / (ISO_THRESHOLD_BRIGHT.toFloat() - ISO_THRESHOLD_VERY_BRIGHT.toFloat())
-                        FACTOR_VERY_BRIGHT + (ratio * (FACTOR_BRIGHT - FACTOR_VERY_BRIGHT))
+                    currentIso <= ISO_THRESHOLD_VERY_LOW -> FACTOR_EV_MINUS_4
+                    currentIso <= ISO_THRESHOLD_LOW -> {
+                        interpolate(currentIso, ISO_THRESHOLD_VERY_LOW, ISO_THRESHOLD_LOW, FACTOR_EV_MINUS_4, FACTOR_EV_MINUS_3)
                     }
-                    currentIso >= ISO_THRESHOLD_DARK -> FACTOR_DARK  // 0 EV
+                    currentIso <= ISO_THRESHOLD_MID -> {
+                        interpolate(currentIso, ISO_THRESHOLD_LOW, ISO_THRESHOLD_MID, FACTOR_EV_MINUS_3, FACTOR_EV_MINUS_1_5)
+                    }
+                    currentIso >= ISO_THRESHOLD_HIGH -> FACTOR_EV_0
                     else -> {
-                        // Interpolate -3 EV to 0 EV
-                        val ratio = (currentIso - ISO_THRESHOLD_BRIGHT) / (ISO_THRESHOLD_DARK.toFloat() - ISO_THRESHOLD_BRIGHT.toFloat())
-                        FACTOR_BRIGHT + (ratio * (FACTOR_DARK - FACTOR_BRIGHT))
+                        interpolate(currentIso, ISO_THRESHOLD_MID, ISO_THRESHOLD_HIGH, FACTOR_EV_MINUS_1_5, FACTOR_EV_0)
                     }
                 }
             }
@@ -87,14 +91,14 @@ object ExposureUtils {
 
         // Apply additional underexposure if highlights are clipping (Pixel-based refinement)
         if (underexposureMode == "Dynamic (Experimental)" && clippingRatio > CLIPPING_RATIO_THRESHOLD) {
-             // If more than 1% of pixels are clipping, push underexposure further
-             // Every 5% of clipping adds ~1 stop of underexposure, up to -2 stops additional
-             val additionalUnderexposure = (clippingRatio * CLIPPING_TO_EV_FACTOR).coerceAtMost(MAX_ADDITIONAL_UNDEREXPOSURE_STOPS)
+             // Smooth ramp: If more than threshold (e.g. 3%) pixels are clipping, push underexposure further.
+             // Subtraction of threshold ensures a smooth transition from 0 EV additional underexposure.
+             val excessClipping = clippingRatio - CLIPPING_RATIO_THRESHOLD
+             additionalUnderexposure = (excessClipping * CLIPPING_TO_EV_FACTOR).coerceAtMost(MAX_ADDITIONAL_UNDEREXPOSURE_STOPS)
              underexposeFactor *= (0.5).pow(additionalUnderexposure).toFloat()
         }
 
         val targetTotalExposure = baselineTotalExposure * underexposeFactor
-        val digitalGain = 1.0f / underexposeFactor
 
         // 3. Exposure Factorization (The "Payload" Strategy)
         // Goal: Achieve targetTotalExposure using specific constraints.
@@ -146,10 +150,33 @@ object ExposureUtils {
             }
         }
 
+        // 4. Final Gain Calculation
+        // Calculate gain based on ACTUALLY achieved exposure to avoid overexposure boost when hardware hits its floor.
+        val actualTotalExposure = targetIso.toDouble() * targetTime.toDouble()
+        var digitalGain = (baselineTotalExposure / actualTotalExposure).toFloat()
+
+        // Apply "Gain Dampening" for highlight preservation.
+        // If we underexposed specifically due to clipping, we avoid boosting midtones back to full brightness.
+        if (additionalUnderexposure > 0) {
+            val dampening = (1.0 - GAIN_DAMPENING_FACTOR * (additionalUnderexposure / MAX_ADDITIONAL_UNDEREXPOSURE_STOPS)).toFloat()
+            digitalGain *= dampening
+        }
+
         return ExposureConfig(
             iso = targetIso,
             exposureTime = targetTime,
             digitalGain = digitalGain
         )
+    }
+
+    /**
+     * Linear interpolation helper.
+     */
+    private fun interpolate(value: Int, fromX: Int, toX: Int, fromY: Float, toY: Float): Float {
+        if (toX == fromX) {
+            return fromY
+        }
+        val ratio = (value - fromX).toFloat() / (toX - fromX)
+        return fromY + (ratio * (toY - fromY))
     }
 }
