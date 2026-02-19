@@ -12,5 +12,5 @@
     android:textColor="?attr/colorOnSurface"
     android:gravity="center"
     app:cornerRadius="1000dp"
-    app:backgroundTint="?attr/colorSurfaceContainerHigh"
+    app:backgroundTint="?attr/colorSurfaceContainerHighest"
     app:rippleColor="?attr/colorPrimary" />

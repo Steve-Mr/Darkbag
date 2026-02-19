@@ -58,6 +58,16 @@
         <item name="cornerRadius">0dp</item>
     </style>
 
+    <style name="Widget.App.Button.Lens" parent="Widget.Material3.Button.TonalButton">
+        <item name="android:insetTop">0dp</item>
+        <item name="android:insetBottom">0dp</item>
+        <item name="android:minWidth">56dp</item>
+        <item name="android:minHeight">56dp</item>
+        <item name="android:paddingHorizontal">0dp</item>
+        <item name="android:paddingVertical">0dp</item>
+        <item name="cornerRadius">16dp</item>
+    </style>
+
     <!-- 7-sided Cookie Shape -->
     <style name="ShapeAppearance.App.Cookie7" parent="ShapeAppearance.Material3.MediumComponent">
         <!-- We will handle the complex 7-sided path in code or via a custom drawable as ShapeAppearance primarily supports 4 corners -->

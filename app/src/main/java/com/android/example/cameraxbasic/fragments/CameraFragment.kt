@@ -2038,7 +2038,12 @@ class CameraFragment : Fragment() {
         if (availableLenses.isNotEmpty()) {
             row.visibility = View.VISIBLE
 
-            val filteredLenses = availableLenses.filter {
+            val repoFacing = if (lensFacing == CameraSelector.LENS_FACING_BACK)
+                android.hardware.camera2.CameraCharacteristics.LENS_FACING_BACK
+            else
+                android.hardware.camera2.CameraCharacteristics.LENS_FACING_FRONT
+
+            val filteredLenses = availableLenses.filter { it.facing == repoFacing }.filter {
                 !it.isZoomPreset || it.sensorId.contains("virtual-2x")
             }.filter {
                 !it.sensorId.contains(com.android.example.cameraxbasic.utils.CameraRepository.VIRTUAL_TELE_2X_SUFFIX)
@@ -2060,7 +2065,9 @@ class CameraFragment : Fragment() {
                     group.getChildAt(btnIndex) as com.google.android.material.button.MaterialButton
                 } else {
                     val newBtn = com.google.android.material.button.MaterialButton(
-                        requireContext(), null, com.google.android.material.R.attr.materialButtonOutlinedStyle
+                        android.view.ContextThemeWrapper(requireContext(), R.style.Widget_App_Button_Lens),
+                        null,
+                        com.google.android.material.R.attr.materialButtonStyle
                     )
                     newBtn.id = View.generateViewId()
                     newBtn.layoutParams = android.view.ViewGroup.LayoutParams(
@@ -2068,16 +2075,9 @@ class CameraFragment : Fragment() {
                         resources.getDimensionPixelSize(R.dimen.lens_button_size)
                     )
                     newBtn.textSize = 12f
-                    // Minimal padding for compactness
-                    newBtn.setPadding(0, 0, 0, 0)
-                    newBtn.insetTop = 0
-                    newBtn.insetBottom = 0
                     group.addView(newBtn)
                     newBtn
                 }
-
-                btn.minWidth = resources.getDimensionPixelSize(R.dimen.lens_button_size)
-                btn.minimumWidth = resources.getDimensionPixelSize(R.dimen.lens_button_size)
 
                 btn.text = lens.name
                 btn.tag = lens
@@ -2562,8 +2562,10 @@ class CameraFragment : Fragment() {
         binding.touchOverlay?.bringToFront()
         binding.touchOverlay?.visibility = View.VISIBLE
         container.bringToFront()
-        container.setCardBackgroundColor(Color.TRANSPARENT)
-        container.cardElevation = 0f
+
+        val colorSurface = MaterialColors.getColor(container, com.google.android.material.R.attr.colorSurfaceContainerHigh)
+        container.setCardBackgroundColor(colorSurface)
+        container.cardElevation = 8f
         container.layoutParams.width = resources.getDimensionPixelSize(R.dimen.round_button_large) * 3
         container.visibility = View.VISIBLE
 

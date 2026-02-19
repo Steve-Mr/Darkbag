@@ -20,7 +20,7 @@
     <!-- Top Left Controls (HDR+ Pill) -->
     <com.google.android.material.card.MaterialCardView
         android:id="@+id/hdr_plus_pill"
-        android:layout_width="wrap_content"
+        android:layout_width="120dp"
         android:layout_height="48dp"
         android:layout_marginStart="@dimen/margin_medium"
         app:cardCornerRadius="24dp"
@@ -31,16 +31,17 @@
         app:layout_constraintStart_toStartOf="parent">
 
         <LinearLayout
-            android:layout_width="wrap_content"
+            android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:orientation="horizontal"
-            android:gravity="center_vertical"
-            android:paddingHorizontal="16dp">
+            android:gravity="center"
+            android:paddingHorizontal="8dp">
 
             <TextView
                 android:id="@+id/tv_hdr_status"
-                android:layout_width="wrap_content"
+                android:layout_width="48dp"
                 android:layout_height="wrap_content"
+                android:gravity="center"
                 android:text="OFF"
                 android:textAppearance="@style/TextAppearance.Material3.LabelLarge"
                 android:layout_marginEnd="8dp" />
@@ -111,31 +112,23 @@
             android:backgroundTint="?attr/colorSurfaceContainerHighest"
             android:contentDescription="@string/switch_camera_button_alt" />
 
-        <com.google.android.material.card.MaterialCardView
+        <HorizontalScrollView
+            android:id="@+id/controls_hub_scroll"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            app:cardCornerRadius="28dp"
-            app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
-            app:strokeWidth="0dp">
+            android:scrollbars="none">
 
-            <HorizontalScrollView
-                android:id="@+id/controls_hub_scroll"
+            <com.google.android.material.button.MaterialButtonGroup
+                android:id="@+id/lens_button_group"
+                style="@style/Widget.Material3.MaterialButtonGroup.Connected"
                 android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:scrollbars="none">
-
-                <com.google.android.material.button.MaterialButtonGroup
-                    android:id="@+id/lens_button_group"
-                    style="@style/Widget.Material3.MaterialButtonGroup.Connected"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content">
-                    <View
-                        android:layout_width="0dp"
-                        android:layout_height="0dp"
-                        android:visibility="gone" />
-                </com.google.android.material.button.MaterialButtonGroup>
-            </HorizontalScrollView>
-        </com.google.android.material.card.MaterialCardView>
+                android:layout_height="wrap_content">
+                <View
+                    android:layout_width="0dp"
+                    android:layout_height="0dp"
+                    android:visibility="gone" />
+            </com.google.android.material.button.MaterialButtonGroup>
+        </HorizontalScrollView>
     </LinearLayout>
 
     <!-- Manual Controls Panel -->

@@ -17,6 +17,7 @@ data class LensInfo(
     val equivalentFocalLength: Float,
     val multiplier: Float,
     val type: LensType,
+    val facing: Int,         // LENS_FACING_BACK or LENS_FACING_FRONT
     val isLogicalAuto: Boolean = false,
     val zoomRange: Range<Float>? = null,
     val isZoomPreset: Boolean = false,
@@ -104,6 +105,7 @@ class CameraRepository(private val context: Context) {
                 physicalId = null,
                 chars = chars,
                 mainFocal35mm = mainWideEqFocal,
+                facing = facing,
                 isAuto = isAnchor,
                 zoomRange = if (isAnchor) zoomRange else null,
                 useCamera2 = true // Prefer Camera2 for everyone by default
@@ -117,7 +119,7 @@ class CameraRepository(private val context: Context) {
 
         // B. Ensure we have at least the anchor camera
         if (availableLenses.none { it.id == anchorId && it.physicalId == null }) {
-            availableLenses.add(createLensInfo(anchorId, null, anchorChars, mainWideEqFocal, isAuto = true, zoomRange = zoomRange, useCamera2 = true))
+            availableLenses.add(createLensInfo(anchorId, null, anchorChars, mainWideEqFocal, facing, isAuto = true, zoomRange = zoomRange, useCamera2 = true))
         }
 
         // Sort by focal length multiplier
@@ -243,6 +245,7 @@ class CameraRepository(private val context: Context) {
         physicalId: String?,
         chars: CameraCharacteristics,
         mainFocal35mm: Float,
+        facing: Int,
         isAuto: Boolean = false,
         name: String? = null,
         isPreset: Boolean = false,
@@ -266,7 +269,7 @@ class CameraRepository(private val context: Context) {
         }
         val sensorId = if (useCamera2) "c2-$id" else (physicalId ?: "$id-${targetZoom ?: 0f}")
 
-        return LensInfo(id, physicalId, sensorId, finalName, f, eqFocal, multiplier, type, isAuto, zoomRange, isPreset, targetZoom, useCamera2)
+        return LensInfo(id, physicalId, sensorId, finalName, f, eqFocal, multiplier, type, facing, isAuto, zoomRange, isPreset, targetZoom, useCamera2)
     }
 
     private fun calculateEquivalentFocalLength(chars: CameraCharacteristics): Float {
