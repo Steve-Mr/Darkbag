@@ -2033,7 +2033,7 @@ class CameraFragment : Fragment() {
 
     private fun initLensControls() {
         val binding = cameraUiContainerBinding ?: return
-        val group = binding.lensButtonGroup ?: return
+        val container = binding.lensControlsContainer ?: return
         val row = binding.lensControlRow ?: return
 
         if (availableLenses.isEmpty()) {
@@ -2042,6 +2042,7 @@ class CameraFragment : Fragment() {
 
         if (availableLenses.isNotEmpty()) {
             row.visibility = View.VISIBLE
+            container.removeAllViews()
 
             val repoFacing = if (lensFacing == CameraSelector.LENS_FACING_BACK)
                 android.hardware.camera2.CameraCharacteristics.LENS_FACING_BACK
@@ -2059,91 +2060,78 @@ class CameraFragment : Fragment() {
                 filteredLenses.filter { it.multiplier > 1.05f && !it.isZoomPreset }.maxByOrNull { it.multiplier }
             } else null
 
-            // Reuse buttons to avoid MaterialButtonGroup layout crash
-            // Account for dummy view at index 0 if it exists
-            val startIndex = if (group.childCount > 0 && group.getChildAt(0) !is com.google.android.material.button.MaterialButton) 1 else 0
-
-            for (i in filteredLenses.indices) {
-                val lens = filteredLenses[i]
-                val btnIndex = i + startIndex
-                val btn = if (btnIndex < group.childCount) {
-                    group.getChildAt(btnIndex) as com.google.android.material.button.MaterialButton
-                } else {
-                    val newBtn = com.google.android.material.button.MaterialButton(
-                        android.view.ContextThemeWrapper(requireContext(), R.style.Widget_App_Button_Lens),
-                        null,
-                        com.google.android.material.R.attr.materialButtonStyle
-                    )
-                    newBtn.id = View.generateViewId()
-                    newBtn.layoutParams = android.view.ViewGroup.LayoutParams(
-                        android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+            for (lens in filteredLenses) {
+                val btn = com.google.android.material.button.MaterialButton(
+                    requireContext()
+                ).apply {
+                    layoutParams = android.widget.LinearLayout.LayoutParams(
+                        resources.getDimensionPixelSize(R.dimen.lens_button_size),
                         resources.getDimensionPixelSize(R.dimen.lens_button_size)
-                    )
-                    newBtn.textSize = 12f
-                    group.addView(newBtn)
-                    newBtn
-                }
+                    ).apply {
+                        marginEnd = resources.getDimensionPixelSize(R.dimen.spacing_small)
+                    }
+                    text = lens.name
+                    tag = lens
+                    textSize = 10f
+                    setPadding(0, 0, 0, 0)
+                    insetTop = 0
+                    insetBottom = 0
+                    cornerRadius = resources.getDimensionPixelSize(R.dimen.radius_full)
 
-                btn.text = lens.name
-                btn.tag = lens
-                btn.setOnClickListener {
-                    val oldLens = currentLens
-                    val is1x = lens.multiplier in 0.95f..1.05f && !lens.isZoomPreset
-                    val isAlreadyIn1xPresets = oldLens != null && oldLens.id == lens.id &&
-                            (oldLens.name == "24mm" || oldLens.name == "28mm" || oldLens.name == "35mm")
+                    setOnClickListener {
+                        val oldLens = currentLens
+                        val is1x = lens.multiplier in 0.95f..1.05f && !lens.isZoomPreset
+                        val isAlreadyIn1xPresets = oldLens != null && oldLens.id == lens.id &&
+                                (oldLens.name == "24mm" || oldLens.name == "28mm" || oldLens.name == "35mm")
 
-                    val isLargestTele = largestTele != null && lens.sensorId == largestTele.sensorId
-                    val isAlreadyInTelePresets = oldLens != null && (oldLens.sensorId == lens.sensorId || oldLens.sensorId == "${lens.sensorId}${com.android.example.cameraxbasic.utils.CameraRepository.VIRTUAL_TELE_2X_SUFFIX}")
+                        val isLargestTele = largestTele != null && lens.sensorId == largestTele.sensorId
+                        val isAlreadyInTelePresets = oldLens != null && (oldLens.sensorId == lens.sensorId || oldLens.sensorId == "${lens.sensorId}${com.android.example.cameraxbasic.utils.CameraRepository.VIRTUAL_TELE_2X_SUFFIX}")
 
-                    if (is1x && isAlreadyIn1xPresets) {
-                        val presets1x = cameraRepository.get1xPresets(lens)
-                        val currentName = oldLens?.name ?: "24mm"
-                        val nextIndex = when (currentName) {
-                            "24mm" -> presets1x.indexOfFirst { it.name == "28mm" }.takeIf { it != -1 } ?: 0
-                            "28mm" -> presets1x.indexOfFirst { it.name == "35mm" }.takeIf { it != -1 } ?: 0
-                            "35mm" -> 0
-                            else -> 0
-                        }
-                        currentLens = presets1x[nextIndex]
-
-                        transientLensLabel = currentLens!!.name
-                        lifecycleScope.launch(Dispatchers.Main) {
-                            delay(800)
-                            if (transientLensLabel == presets1x[nextIndex].name) {
-                                transientLensLabel = null
-                                updateLensUI()
+                        if (is1x && isAlreadyIn1xPresets) {
+                            val presets1x = cameraRepository.get1xPresets(lens)
+                            val currentName = oldLens?.name ?: "24mm"
+                            val nextIndex = when (currentName) {
+                                "24mm" -> presets1x.indexOfFirst { it.name == "28mm" }.takeIf { it != -1 } ?: 0
+                                "28mm" -> presets1x.indexOfFirst { it.name == "35mm" }.takeIf { it != -1 } ?: 0
+                                "35mm" -> 0
+                                else -> 0
                             }
-                        }
-                    } else if (isLargestTele && isAlreadyInTelePresets) {
-                         val telePresets = cameraRepository.getTelePresets(lens)
-                         val isCurrentlyNative = oldLens?.sensorId == lens.sensorId
-                         currentLens = if (isCurrentlyNative) telePresets[1] else telePresets[0]
-                    } else if (is1x) {
-                        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-                        val default1xFocal = prefs.getString(SettingsFragment.KEY_DEFAULT_FOCAL_1X, "24mm")
-                        val presets1x = cameraRepository.get1xPresets(lens)
-                        currentLens = presets1x.find { it.name == default1xFocal } ?: lens
-                    } else {
-                        currentLens = lens
-                    }
+                            currentLens = presets1x[nextIndex]
 
-                    updateLensUI()
-
-                    if (oldLens?.id != currentLens?.id || oldLens?.physicalId != currentLens?.physicalId || oldLens?.useCamera2 != currentLens?.useCamera2) {
-                        animateSwitch {
-                            bindCameraUseCases()
+                            transientLensLabel = currentLens!!.name
+                            lifecycleScope.launch(Dispatchers.Main) {
+                                delay(800)
+                                if (transientLensLabel == presets1x[nextIndex].name) {
+                                    transientLensLabel = null
+                                    updateLensUI()
+                                }
+                            }
+                        } else if (isLargestTele && isAlreadyInTelePresets) {
+                             val telePresets = cameraRepository.getTelePresets(lens)
+                             val isCurrentlyNative = oldLens?.sensorId == lens.sensorId
+                             currentLens = if (isCurrentlyNative) telePresets[1] else telePresets[0]
+                        } else if (is1x) {
+                            val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                            val default1xFocal = prefs.getString(SettingsFragment.KEY_DEFAULT_FOCAL_1X, "24mm")
+                            val presets1x = cameraRepository.get1xPresets(lens)
+                            currentLens = presets1x.find { it.name == default1xFocal } ?: lens
+                        } else {
+                            currentLens = lens
                         }
-                    } else {
-                        updateZoom(true)
+
+                        updateLensUI()
+
+                        if (oldLens?.id != currentLens?.id || oldLens?.physicalId != currentLens?.physicalId || oldLens?.useCamera2 != currentLens?.useCamera2) {
+                            animateSwitch {
+                                bindCameraUseCases()
+                            }
+                        } else {
+                            updateZoom(true)
+                        }
                     }
                 }
+                container.addView(btn)
             }
-
-            // Remove extra buttons safely
-            while (group.childCount > filteredLenses.size + startIndex) {
-                group.removeViewAt(group.childCount - 1)
-            }
-
             updateLensUI()
         } else {
             row.visibility = View.GONE
@@ -2157,37 +2145,43 @@ class CameraFragment : Fragment() {
         }
 
         val binding = cameraUiContainerBinding ?: return
-        val group = binding.lensButtonGroup ?: return
+        val container = binding.lensControlsContainer ?: return
 
-        val colorOnSecondary = MaterialColors.getColor(group, com.google.android.material.R.attr.colorOnSecondaryContainer)
-        val colorOnSurfaceVariant = MaterialColors.getColor(group, com.google.android.material.R.attr.colorOnSurfaceVariant)
+        val colorPrimary = MaterialColors.getColor(container, com.google.android.material.R.attr.colorPrimary)
+        val colorOnSurface = MaterialColors.getColor(container, com.google.android.material.R.attr.colorOnSurface)
 
         val isBackCamera = lensFacing == CameraSelector.LENS_FACING_BACK
         val largestTele = if (isBackCamera) {
             availableLenses.filter { it.multiplier > 1.05f && !it.isZoomPreset }.maxByOrNull { it.multiplier }
         } else null
 
-        for (i in 0 until group.childCount) {
-            val child = group.getChildAt(i)
-            if (child !is com.google.android.material.button.MaterialButton) continue
-
-            val btn = child
-            val lens = btn.tag as? com.android.example.cameraxbasic.utils.LensInfo
+        for (i in 0 until container.childCount) {
+            val btn = container.getChildAt(i) as? com.google.android.material.button.MaterialButton
+            val lens = btn?.tag as? com.android.example.cameraxbasic.utils.LensInfo
             if (btn != null && lens != null) {
                 val isActive = lens.sensorId == currentLens?.sensorId ||
                               (lens.multiplier in 0.95f..1.05f && currentLens?.id == lens.id && !currentLens!!.sensorId.contains("virtual")) ||
                               (largestTele != null && lens.sensorId == largestTele.sensorId && currentLens?.sensorId == "${largestTele.sensorId}${com.android.example.cameraxbasic.utils.CameraRepository.VIRTUAL_TELE_2X_SUFFIX}")
 
-                btn.isChecked = isActive
                 if (isActive) {
                     if (lens.multiplier in 0.95f..1.05f && !lens.isZoomPreset) {
                         btn.text = transientLensLabel ?: String.format("%.1fx", currentLens?.multiplier ?: 1.0f)
                     } else if (largestTele != null && lens.sensorId == largestTele.sensorId) {
                         btn.text = String.format("%.1fx", currentLens?.multiplier ?: lens.multiplier)
                     }
-                    btn.setTextColor(colorOnSecondary)
+
+                    btn.setTextColor(colorPrimary)
+                    btn.strokeWidth = resources.getDimensionPixelSize(R.dimen.stroke_small)
+                    btn.strokeColor = android.content.res.ColorStateList.valueOf(colorPrimary)
+                    btn.setBackgroundColor(MaterialColors.layer(
+                        MaterialColors.getColor(btn, com.google.android.material.R.attr.colorSurface),
+                        colorPrimary,
+                        0.1f
+                    ))
                 } else {
-                    btn.setTextColor(colorOnSurfaceVariant)
+                    btn.setTextColor(colorOnSurface)
+                    btn.strokeWidth = 0
+
                     if (lens.multiplier in 0.95f..1.05f && !lens.isZoomPreset) {
                         val default1xFocal = prefs.getString(SettingsFragment.KEY_DEFAULT_FOCAL_1X, "24mm")
                         val presets1x = cameraRepository.get1xPresets(lens)
@@ -2196,6 +2190,12 @@ class CameraFragment : Fragment() {
                     } else {
                         btn.text = lens.name
                     }
+
+                    btn.setBackgroundColor(MaterialColors.layer(
+                        MaterialColors.getColor(btn, com.google.android.material.R.attr.colorSurface),
+                        colorOnSurface,
+                        0.15f
+                    ))
                 }
             }
         }
@@ -2512,7 +2512,8 @@ class CameraFragment : Fragment() {
         showPillPopup(items, autoDismiss = false) { item, _ ->
             if (item.startsWith(getString(R.string.lut_menu_log))) {
                 showLogSelectionMenu()
-            } else if (item.startsWith(getString(R.string.lut_menu_lut))) {
+            } else if (item.startsWith(getString(R.string.lut_menu_lut)) &&
+                     !item.contains(getString(R.string.lut_menu_select_log_first))) {
                 showLutSelectionMenu()
             }
         }

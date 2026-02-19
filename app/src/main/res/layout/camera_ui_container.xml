@@ -118,16 +118,12 @@
             android:layout_height="wrap_content"
             android:scrollbars="none">
 
-            <com.google.android.material.button.MaterialButtonGroup
-                android:id="@+id/lens_button_group"
-                style="@style/Widget.Material3.MaterialButtonGroup.Connected"
+            <LinearLayout
+                android:id="@+id/lens_controls_container"
                 android:layout_width="wrap_content"
-                android:layout_height="wrap_content">
-                <View
-                    android:layout_width="0dp"
-                    android:layout_height="0dp"
-                    android:visibility="gone" />
-            </com.google.android.material.button.MaterialButtonGroup>
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical" />
         </HorizontalScrollView>
     </LinearLayout>
 
