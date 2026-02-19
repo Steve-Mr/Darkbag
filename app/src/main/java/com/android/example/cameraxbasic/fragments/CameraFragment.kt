@@ -255,8 +255,6 @@ class CameraFragment : Fragment() {
                     else -> 0 // Portrait
                 }
 
-                Log.d(TAG, "Device orientation: $orientation, mapped to CCW: $deviceOrientationDegrees")
-
                 val rotation = when (orientation) {
                     in 45 until 135 -> android.view.Surface.ROTATION_270
                     in 135 until 225 -> android.view.Surface.ROTATION_180
@@ -2072,13 +2070,14 @@ class CameraFragment : Fragment() {
                     newBtn.textSize = 12f
                     // Minimal padding for compactness
                     newBtn.setPadding(0, 0, 0, 0)
-                    newBtn.minWidth = 0
-                    newBtn.minimumWidth = 0
                     newBtn.insetTop = 0
                     newBtn.insetBottom = 0
                     group.addView(newBtn)
                     newBtn
                 }
+
+                btn.minWidth = resources.getDimensionPixelSize(R.dimen.lens_button_size)
+                btn.minimumWidth = resources.getDimensionPixelSize(R.dimen.lens_button_size)
 
                 btn.text = lens.name
                 btn.tag = lens
@@ -2560,13 +2559,13 @@ class CameraFragment : Fragment() {
         val container = binding.lutListContainer ?: return
         val rv = binding.lutList ?: return
 
+        binding.touchOverlay?.bringToFront()
+        binding.touchOverlay?.visibility = View.VISIBLE
         container.bringToFront()
         container.setCardBackgroundColor(Color.TRANSPARENT)
         container.cardElevation = 0f
         container.layoutParams.width = resources.getDimensionPixelSize(R.dimen.round_button_large) * 3
         container.visibility = View.VISIBLE
-        binding.touchOverlay?.bringToFront()
-        binding.touchOverlay?.visibility = View.VISIBLE
 
         rv.layoutManager = androidx.recyclerview.widget.LinearLayoutManager(requireContext())
         rv.adapter = object : androidx.recyclerview.widget.RecyclerView.Adapter<androidx.recyclerview.widget.RecyclerView.ViewHolder>() {

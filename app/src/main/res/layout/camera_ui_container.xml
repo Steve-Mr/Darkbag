@@ -21,13 +21,13 @@
     <com.google.android.material.card.MaterialCardView
         android:id="@+id/hdr_plus_pill"
         android:layout_width="wrap_content"
-        android:layout_height="64dp"
-        android:layout_marginTop="@dimen/margin_medium"
+        android:layout_height="48dp"
         android:layout_marginStart="@dimen/margin_medium"
-        app:cardCornerRadius="32dp"
+        app:cardCornerRadius="24dp"
         app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
         app:strokeWidth="0dp"
-        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintTop_toTopOf="@id/top_right_controls"
+        app:layout_constraintBottom_toBottomOf="@id/top_right_controls"
         app:layout_constraintStart_toStartOf="parent">
 
         <LinearLayout
@@ -111,24 +111,31 @@
             android:backgroundTint="?attr/colorSurfaceContainerHighest"
             android:contentDescription="@string/switch_camera_button_alt" />
 
-        <HorizontalScrollView
-            android:id="@+id/controls_hub_scroll"
+        <com.google.android.material.card.MaterialCardView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:scrollbars="none">
+            app:cardCornerRadius="28dp"
+            app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+            app:strokeWidth="0dp">
 
-            <com.google.android.material.button.MaterialButtonGroup
-                android:id="@+id/lens_button_group"
-                style="@style/Widget.Material3.MaterialButtonGroup.Connected"
+            <HorizontalScrollView
+                android:id="@+id/controls_hub_scroll"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:paddingHorizontal="@dimen/spacing_small">
-                <View
-                    android:layout_width="0dp"
-                    android:layout_height="0dp"
-                    android:visibility="gone" />
-            </com.google.android.material.button.MaterialButtonGroup>
-        </HorizontalScrollView>
+                android:scrollbars="none">
+
+                <com.google.android.material.button.MaterialButtonGroup
+                    android:id="@+id/lens_button_group"
+                    style="@style/Widget.Material3.MaterialButtonGroup.Connected"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content">
+                    <View
+                        android:layout_width="0dp"
+                        android:layout_height="0dp"
+                        android:visibility="gone" />
+                </com.google.android.material.button.MaterialButtonGroup>
+            </HorizontalScrollView>
+        </com.google.android.material.card.MaterialCardView>
     </LinearLayout>
 
     <!-- Manual Controls Panel -->
@@ -353,16 +360,14 @@
         android:id="@+id/lut_list_container"
         style="@style/Widget.Material3.CardView.Filled"
         android:layout_width="200dp"
-        android:layout_height="0dp"
+        android:layout_height="wrap_content"
         android:layout_marginStart="@dimen/margin_medium"
-        android:layout_marginTop="@dimen/spacing_medium"
+        android:layout_marginBottom="@dimen/spacing_medium"
         android:visibility="gone"
         app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
         app:cardCornerRadius="@dimen/radius_medium"
-        app:layout_constraintTop_toBottomOf="@id/top_right_controls"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintBottom_toTopOf="@id/manual_controls_root"
-        app:layout_constraintVertical_bias="0.0"
+        app:layout_constraintBottom_toTopOf="@id/bottom_island_card"
         app:layout_constrainedHeight="true"
         app:layout_constraintHeight_max="400dp">
 
