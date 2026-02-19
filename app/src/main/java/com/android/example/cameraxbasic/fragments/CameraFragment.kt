@@ -1221,6 +1221,7 @@ class CameraFragment : Fragment() {
                     withContext(Dispatchers.Default) {
                         refreshLenses(force = true)
                     }
+                    initLensControls()
                     bindCameraUseCases()
                 }
             }
@@ -1275,6 +1276,7 @@ class CameraFragment : Fragment() {
         try {
             cameraUiContainerBinding?.cameraSwitchButtonAlt?.isEnabled =
                 hasBackCamera() && hasFrontCamera()
+            cameraUiContainerBinding?.cameraSwitchButtonAlt?.visibility = View.VISIBLE
         } catch (exception: CameraInfoUnavailableException) {
             cameraUiContainerBinding?.cameraSwitchButtonAlt?.isEnabled = false
         }
@@ -2037,25 +2039,29 @@ class CameraFragment : Fragment() {
         val container = binding.lensControlsContainer ?: return
         val row = binding.lensControlRow ?: return
 
+        // Ensure the row containing the switch button is always visible
+        row.visibility = View.VISIBLE
+
+        // Always clear container to avoid stale buttons from previous facings
+        container.removeAllViews()
+
         if (availableLenses.isEmpty()) {
             refreshLenses()
         }
 
-        if (availableLenses.isNotEmpty()) {
-            row.visibility = View.VISIBLE
-            container.removeAllViews()
+        val repoFacing = if (lensFacing == CameraSelector.LENS_FACING_BACK)
+            android.hardware.camera2.CameraCharacteristics.LENS_FACING_BACK
+        else
+            android.hardware.camera2.CameraCharacteristics.LENS_FACING_FRONT
 
-            val repoFacing = if (lensFacing == CameraSelector.LENS_FACING_BACK)
-                android.hardware.camera2.CameraCharacteristics.LENS_FACING_BACK
-            else
-                android.hardware.camera2.CameraCharacteristics.LENS_FACING_FRONT
+        val filteredLenses = availableLenses.filter { it.facing == repoFacing }.filter {
+            !it.isZoomPreset || it.sensorId.contains("virtual-2x")
+        }.filter {
+            !it.sensorId.contains(com.android.example.cameraxbasic.utils.CameraRepository.VIRTUAL_TELE_2X_SUFFIX)
+        }
 
-            val filteredLenses = availableLenses.filter { it.facing == repoFacing }.filter {
-                !it.isZoomPreset || it.sensorId.contains("virtual-2x")
-            }.filter {
-                !it.sensorId.contains(com.android.example.cameraxbasic.utils.CameraRepository.VIRTUAL_TELE_2X_SUFFIX)
-            }
-
+        // Populate lens controls if any are available
+        if (filteredLenses.isNotEmpty()) {
             val isBackCamera = lensFacing == CameraSelector.LENS_FACING_BACK
             val largestTele = if (isBackCamera) {
                 filteredLenses.filter { it.multiplier > 1.05f && !it.isZoomPreset }.maxByOrNull { it.multiplier }
@@ -2133,10 +2139,8 @@ class CameraFragment : Fragment() {
                 }
                 container.addView(btn)
             }
-            updateLensUI()
-        } else {
-            row.visibility = View.GONE
         }
+        updateLensUI()
     }
 
     private fun updateLensUI() {
@@ -2146,6 +2150,10 @@ class CameraFragment : Fragment() {
         }
 
         val binding = cameraUiContainerBinding ?: return
+
+        // Ensure the row containing the switch button is always visible
+        binding.lensControlRow?.visibility = View.VISIBLE
+
         val container = binding.lensControlsContainer ?: return
 
         val colorPrimary = MaterialColors.getColor(container, com.google.android.material.R.attr.colorPrimary)
@@ -2201,7 +2209,7 @@ class CameraFragment : Fragment() {
             }
         }
 
-        cameraUiContainerBinding?.lensControlRow?.visibility = View.VISIBLE
+        binding.lensControlsCard?.visibility = if (container.childCount > 1) View.VISIBLE else View.GONE
     }
 
     private fun updateZoom(animate: Boolean) {

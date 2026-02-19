@@ -96,7 +96,7 @@
         android:orientation="horizontal"
         android:gravity="center_vertical"
         android:layout_marginBottom="@dimen/margin_medium"
-        android:visibility="gone"
+        android:visibility="visible"
         app:layout_constraintBottom_toTopOf="@id/manual_controls_root"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent">
@@ -113,11 +113,13 @@
             android:contentDescription="@string/switch_camera_button_alt" />
 
         <com.google.android.material.card.MaterialCardView
+            android:id="@+id/lens_controls_card"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             app:cardCornerRadius="26dp"
             app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
-            app:strokeWidth="0dp">
+            app:strokeWidth="0dp"
+            android:visibility="gone">
 
             <HorizontalScrollView
                 android:id="@+id/controls_hub_scroll"

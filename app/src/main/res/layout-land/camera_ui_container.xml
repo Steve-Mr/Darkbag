@@ -39,16 +39,18 @@
         android:id="@+id/lens_control_row"
         android:layout_width="0dp"
         android:layout_height="0dp"
-        android:visibility="gone"
+        android:visibility="visible"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent">
         <com.google.android.material.button.MaterialButton android:id="@+id/camera_switch_button_alt" android:layout_width="wrap_content" android:layout_height="wrap_content" />
         <com.google.android.material.card.MaterialCardView
+            android:id="@+id/lens_controls_card"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             app:cardCornerRadius="26dp"
             app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
-            app:strokeWidth="0dp">
+            app:strokeWidth="0dp"
+            android:visibility="gone">
             <HorizontalScrollView android:id="@+id/controls_hub_scroll" android:layout_width="wrap_content" android:layout_height="wrap_content" android:paddingHorizontal="4dp" android:clipToPadding="false">
                 <LinearLayout android:id="@+id/lens_controls_container" android:layout_width="wrap_content" android:layout_height="wrap_content" android:paddingVertical="4dp" android:orientation="horizontal" />
             </HorizontalScrollView>
