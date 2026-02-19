@@ -112,19 +112,30 @@
             android:backgroundTint="?attr/colorSurfaceContainerHighest"
             android:contentDescription="@string/switch_camera_button_alt" />
 
-        <HorizontalScrollView
-            android:id="@+id/controls_hub_scroll"
+        <com.google.android.material.card.MaterialCardView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:scrollbars="none">
+            app:cardCornerRadius="26dp"
+            app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+            app:strokeWidth="0dp">
 
-            <LinearLayout
-                android:id="@+id/lens_controls_container"
+            <HorizontalScrollView
+                android:id="@+id/controls_hub_scroll"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical" />
-        </HorizontalScrollView>
+                android:paddingHorizontal="4dp"
+                android:clipToPadding="false"
+                android:scrollbars="none">
+
+                <LinearLayout
+                    android:id="@+id/lens_controls_container"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:paddingVertical="4dp"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical" />
+            </HorizontalScrollView>
+        </com.google.android.material.card.MaterialCardView>
     </LinearLayout>
 
     <!-- Manual Controls Panel -->
