@@ -1136,8 +1136,8 @@ class CameraFragment : Fragment() {
 
                         // Constrain Lens Group Row to the bottom of the Viewfinder (above its bottom edge)
                         if (lensRowId != null) {
-                            val marginMedium = resources.getDimensionPixelSize(R.dimen.margin_medium)
-                            constraintSet.connect(lensRowId, androidx.constraintlayout.widget.ConstraintSet.BOTTOM, vfId, androidx.constraintlayout.widget.ConstraintSet.BOTTOM, marginMedium)
+                            val marginXsmall = resources.getDimensionPixelSize(R.dimen.margin_xsmall)
+                            constraintSet.connect(lensRowId, androidx.constraintlayout.widget.ConstraintSet.BOTTOM, vfId, androidx.constraintlayout.widget.ConstraintSet.BOTTOM, marginXsmall)
                             constraintSet.connect(lensRowId, androidx.constraintlayout.widget.ConstraintSet.START, androidx.constraintlayout.widget.ConstraintSet.PARENT_ID, androidx.constraintlayout.widget.ConstraintSet.START)
                             constraintSet.connect(lensRowId, androidx.constraintlayout.widget.ConstraintSet.END, androidx.constraintlayout.widget.ConstraintSet.PARENT_ID, androidx.constraintlayout.widget.ConstraintSet.END)
                         }
