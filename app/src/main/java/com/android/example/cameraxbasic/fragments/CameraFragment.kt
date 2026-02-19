@@ -593,7 +593,7 @@ class CameraFragment : Fragment() {
         // Use unified focal length presets (includes digital ones like 28mm, 35mm, 2.0x)
         val newLenses = cameraRepository.getFocalLengthPresets(cameraXIds, repoFacing)
 
-        if (!force && newLenses.size == availableLenses.size && newLenses.zip(availableLenses).all { it.first.sensorId == it.second.sensorId }) {
+        if (!force && newLenses.size == availableLenses.size && newLenses.zip(availableLenses).all { it.first.sensorId == it.second.sensorId && it.first.facing == it.second.facing }) {
             return // No change
         }
 
@@ -1216,7 +1216,12 @@ class CameraFragment : Fragment() {
                 prefs.edit().putInt(KEY_LENS_FACING, lensFacing).apply()
 
                 // Re-bind use cases to update selected camera
-                bindCameraUseCases()
+                lifecycleScope.launch {
+                    withContext(Dispatchers.Default) {
+                        refreshLenses(force = true)
+                    }
+                    bindCameraUseCases()
+                }
             }
         }
 
@@ -2154,8 +2159,8 @@ class CameraFragment : Fragment() {
         val binding = cameraUiContainerBinding ?: return
         val group = binding.lensButtonGroup ?: return
 
-        val colorPrimary = MaterialColors.getColor(group, com.google.android.material.R.attr.colorPrimary)
-        val colorOnSurface = MaterialColors.getColor(group, com.google.android.material.R.attr.colorOnSurface)
+        val colorOnSecondary = MaterialColors.getColor(group, com.google.android.material.R.attr.colorOnSecondaryContainer)
+        val colorOnSurfaceVariant = MaterialColors.getColor(group, com.google.android.material.R.attr.colorOnSurfaceVariant)
 
         val isBackCamera = lensFacing == CameraSelector.LENS_FACING_BACK
         val largestTele = if (isBackCamera) {
@@ -2180,9 +2185,9 @@ class CameraFragment : Fragment() {
                     } else if (largestTele != null && lens.sensorId == largestTele.sensorId) {
                         btn.text = String.format("%.1fx", currentLens?.multiplier ?: lens.multiplier)
                     }
-                    btn.setTextColor(colorPrimary)
+                    btn.setTextColor(colorOnSecondary)
                 } else {
-                    btn.setTextColor(colorOnSurface)
+                    btn.setTextColor(colorOnSurfaceVariant)
                     if (lens.multiplier in 0.95f..1.05f && !lens.isZoomPreset) {
                         val default1xFocal = prefs.getString(SettingsFragment.KEY_DEFAULT_FOCAL_1X, "24mm")
                         val presets1x = cameraRepository.get1xPresets(lens)
