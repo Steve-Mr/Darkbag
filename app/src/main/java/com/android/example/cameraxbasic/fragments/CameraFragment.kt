@@ -2201,7 +2201,8 @@ class CameraFragment : Fragment() {
             }
         }
 
-        cameraUiContainerBinding?.lensControlRow?.visibility = if (container.childCount > 1) View.VISIBLE else View.GONE
+        cameraUiContainerBinding?.lensControlRow?.visibility = View.VISIBLE
+        cameraUiContainerBinding?.lensControlsCard?.visibility = if (container.childCount > 1) View.VISIBLE else View.GONE
     }
 
     private fun updateZoom(animate: Boolean) {

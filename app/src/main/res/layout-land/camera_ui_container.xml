@@ -44,6 +44,7 @@
         app:layout_constraintTop_toTopOf="parent">
         <com.google.android.material.button.MaterialButton android:id="@+id/camera_switch_button_alt" android:layout_width="wrap_content" android:layout_height="wrap_content" />
         <com.google.android.material.card.MaterialCardView
+            android:id="@+id/lens_controls_card"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             app:cardCornerRadius="26dp"

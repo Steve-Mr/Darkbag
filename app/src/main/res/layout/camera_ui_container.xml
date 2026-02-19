@@ -113,6 +113,7 @@
             android:contentDescription="@string/switch_camera_button_alt" />
 
         <com.google.android.material.card.MaterialCardView
+            android:id="@+id/lens_controls_card"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             app:cardCornerRadius="26dp"
