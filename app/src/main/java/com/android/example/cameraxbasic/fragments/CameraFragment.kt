@@ -3927,13 +3927,16 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
     }
 
     private fun rotateShutter(targetRotation: Float) {
-        val shutter = cameraUiContainerBinding?.cameraCaptureButton ?: return
-        val progress = cameraUiContainerBinding?.captureProgress ?: return
+        val binding = cameraUiContainerBinding ?: return
 
         fun animateRotation(view: android.view.View, target: Float) {
             val current = view.rotation
             val diff = (target - current) % 360
-            val shortestDiff = if (diff > 180) diff - 360 else if (diff < -180) diff + 360 else diff
+            val shortestDiff = when {
+                diff > 180 -> diff - 360
+                diff < -180 -> diff + 360
+                else -> diff
+            }
 
             view.animate()
                 .rotation(current + shortestDiff)
@@ -3942,8 +3945,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 .start()
         }
 
-        animateRotation(shutter, targetRotation)
-        animateRotation(progress, targetRotation)
+        animateRotation(binding.cameraCaptureButton, targetRotation)
+        animateRotation(binding.captureProgress, targetRotation)
     }
 
     private fun resetBurstUi() {
