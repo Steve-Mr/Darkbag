@@ -2063,11 +2063,11 @@ class CameraFragment : Fragment() {
 
             for (lens in filteredLenses) {
                 val btn = com.google.android.material.button.MaterialButton(
-                    requireContext()
+                    android.view.ContextThemeWrapper(requireContext(), R.style.Widget_App_Button_Lens)
                 ).apply {
                     layoutParams = android.widget.LinearLayout.LayoutParams(
-                        resources.getDimensionPixelSize(R.dimen.lens_button_size),
-                        resources.getDimensionPixelSize(R.dimen.lens_button_size)
+                        resources.getDimensionPixelSize(R.dimen.lens_button_width),
+                        resources.getDimensionPixelSize(R.dimen.lens_button_height)
                     ).apply {
                         marginEnd = resources.getDimensionPixelSize(R.dimen.spacing_small)
                     }
@@ -2075,9 +2075,6 @@ class CameraFragment : Fragment() {
                     tag = lens
                     textSize = 10f
                     setPadding(0, 0, 0, 0)
-                    insetTop = 0
-                    insetBottom = 0
-                    cornerRadius = resources.getDimensionPixelSize(R.dimen.radius_full)
 
                     setOnClickListener {
                         val oldLens = currentLens
