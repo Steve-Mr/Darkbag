@@ -30,7 +30,7 @@ import androidx.core.view.WindowInsetsControllerCompat
 
 /** Milliseconds used for UI animations */
 const val ANIMATION_FAST_MILLIS = 50L
-const val ANIMATION_SLOW_MILLIS = 100L
+const val ANIMATION_SLOW_MILLIS = 250L
 
 /**
  * Simulate a button click, including a small delay while it is being pressed to trigger the
