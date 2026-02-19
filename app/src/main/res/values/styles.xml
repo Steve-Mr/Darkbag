@@ -49,4 +49,39 @@
         <item name="strokeWidth">0dp</item>
     </style>
 
+    <!-- Connected Button Group Style -->
+    <style name="Widget.App.MaterialButtonGroup.Connected" parent="Widget.Material3.MaterialButtonGroup.Connected">
+        <!-- Any custom overrides if needed -->
+    </style>
+
+    <style name="Widget.App.Button.OutlinedButton.Connected" parent="Widget.Material3.Button.OutlinedButton">
+        <item name="cornerRadius">0dp</item>
+    </style>
+
+    <style name="Widget.App.Button.Lens" parent="Widget.Material3.Button.TonalButton">
+        <item name="android:insetTop">0dp</item>
+        <item name="android:insetBottom">0dp</item>
+        <item name="android:paddingHorizontal">0dp</item>
+        <item name="android:paddingVertical">0dp</item>
+        <item name="cornerRadius">@dimen/radius_medium</item>
+    </style>
+
+    <!-- 7-sided Cookie Shape -->
+    <style name="ShapeAppearance.App.Cookie7" parent="ShapeAppearance.Material3.MediumComponent">
+        <!-- We will handle the complex 7-sided path in code or via a custom drawable as ShapeAppearance primarily supports 4 corners -->
+    </style>
+
+    <style name="Widget.App.MaterialSwitch.TopBar" parent="Widget.Material3.CompoundButton.MaterialSwitch">
+        <item name="android:minWidth">100dp</item>
+        <item name="android:minHeight">@dimen/round_button_medium</item>
+        <item name="android:paddingHorizontal">8dp</item>
+        <item name="android:switchMinWidth">100dp</item>
+    </style>
+
+    <!-- Pill shaped LUT Switcher -->
+    <style name="ShapeAppearance.App.LutSwitcher" parent="ShapeAppearance.Material3.MediumComponent">
+        <item name="cornerFamily">rounded</item>
+        <item name="cornerSize">24dp</item>
+    </style>
+
 </resources>

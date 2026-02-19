@@ -1,181 +1,115 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!--
-  ~ Copyright 2020 The Android Open Source Project
-  ~
-  ~ Licensed under the Apache License, Version 2.0 (the "License");
-  ~ you may not use this file except in compliance with the License.
-  ~ You may obtain a copy of the License at
-  ~
-  ~     https://www.apache.org/licenses/LICENSE-2.0
-  ~
-  ~ Unless required by applicable law or agreed to in writing, software
-  ~ distributed under the License is distributed on an "AS IS" BASIS,
-  ~ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-  ~ See the License for the specific language governing permissions and
-  ~ limitations under the License.
-  -->
-<androidx.constraintlayout.widget.ConstraintLayout
-    xmlns:android="http://schemas.android.com/apk/res/android"
+<merge xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
-    android:id="@+id/camera_ui_container"
-    android:layoutDirection="ltr"
-    android:layout_width="match_parent"
-    android:layout_height="match_parent">
+    xmlns:tools="http://schemas.android.com/tools"
+    tools:parentTag="androidx.constraintlayout.widget.ConstraintLayout">
 
-    <!-- Note: LUT and Manual Controls are omitted in landscape for this basic port,
-         but we must ensure ID types match the portrait layout to avoid ClassCastExceptions.
-         We define them as GONE or use consistent types for shared IDs.
-    -->
-
-    <!-- Invisible/Gone counterparts for consistent ViewBinding types -->
-    <com.google.android.material.button.MaterialButton
-        android:id="@+id/lut_button"
-        style="@style/Widget.Material3.Button.IconButton"
+    <!-- Invisible counterparts for consistent ViewBinding types in Landscape -->
+    <View
+        android:id="@+id/touch_overlay"
         android:layout_width="0dp"
         android:layout_height="0dp"
         android:visibility="gone"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent" />
 
-    <com.google.android.material.button.MaterialButton
-        android:id="@+id/settings_button"
-        style="@style/Widget.Material3.Button.IconButton"
+    <com.google.android.material.card.MaterialCardView
+        android:id="@+id/hdr_plus_pill"
         android:layout_width="0dp"
         android:layout_height="0dp"
-        android:visibility="gone"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent" />
-
-    <androidx.recyclerview.widget.RecyclerView
-        android:id="@+id/lut_list"
-        android:layout_width="0dp"
-        android:layout_height="0dp"
-        android:visibility="gone"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent" />
-
-    <LinearLayout
-        android:id="@+id/zoom_controls_container"
-        android:layout_width="0dp"
-        android:layout_height="0dp"
-        android:orientation="horizontal"
         android:visibility="gone"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent">
-         <com.google.android.material.button.MaterialButton
-            android:id="@+id/btn_zoom_toggle"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"/>
-         <com.google.android.material.button.MaterialButton
-            android:id="@+id/btn_zoom_2x"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"/>
+        <TextView android:id="@+id/tv_hdr_status" android:layout_width="wrap_content" android:layout_height="wrap_content" />
+        <com.google.android.material.materialswitch.MaterialSwitch android:id="@+id/hdr_plus_switch" android:layout_width="wrap_content" android:layout_height="wrap_content" />
+    </com.google.android.material.card.MaterialCardView>
+
+    <LinearLayout
+        android:id="@+id/top_right_controls"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:visibility="gone"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent">
+        <com.google.android.material.button.MaterialButton android:id="@+id/flash_button" android:layout_width="wrap_content" android:layout_height="wrap_content" />
+        <com.google.android.material.button.MaterialButton android:id="@+id/settings_button" android:layout_width="wrap_content" android:layout_height="wrap_content" />
     </LinearLayout>
 
-    <androidx.constraintlayout.widget.ConstraintLayout
+    <LinearLayout
+        android:id="@+id/lens_control_row"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:visibility="visible"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent">
+        <com.google.android.material.button.MaterialButton android:id="@+id/camera_switch_button_alt" android:layout_width="wrap_content" android:layout_height="wrap_content" />
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/lens_controls_card"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            app:cardCornerRadius="26dp"
+            app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+            app:strokeWidth="0dp"
+            android:visibility="gone">
+            <HorizontalScrollView android:id="@+id/controls_hub_scroll" android:layout_width="wrap_content" android:layout_height="wrap_content" android:paddingHorizontal="4dp" android:clipToPadding="false">
+                <LinearLayout android:id="@+id/lens_controls_container" android:layout_width="wrap_content" android:layout_height="wrap_content" android:paddingVertical="4dp" android:orientation="horizontal" />
+            </HorizontalScrollView>
+        </com.google.android.material.card.MaterialCardView>
+    </LinearLayout>
+
+    <com.google.android.material.card.MaterialCardView
         android:id="@+id/manual_controls_root"
         android:layout_width="0dp"
         android:layout_height="0dp"
         android:visibility="gone"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent">
-
-        <com.google.android.material.button.MaterialButtonToggleGroup
-            android:id="@+id/manual_tabs"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content">
-             <com.google.android.material.button.MaterialButton
-                android:id="@+id/btn_tab_focus"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"/>
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btn_tab_iso"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"/>
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btn_tab_shutter"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"/>
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btn_tab_ev"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"/>
+        <com.google.android.material.button.MaterialButtonToggleGroup android:id="@+id/manual_tabs" android:layout_width="wrap_content" android:layout_height="wrap_content">
+             <com.google.android.material.button.MaterialButton android:id="@+id/btn_tab_focus" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+             <com.google.android.material.button.MaterialButton android:id="@+id/btn_tab_iso" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+             <com.google.android.material.button.MaterialButton android:id="@+id/btn_tab_shutter" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+             <com.google.android.material.button.MaterialButton android:id="@+id/btn_tab_ev" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
         </com.google.android.material.button.MaterialButtonToggleGroup>
-
-        <LinearLayout
-             android:id="@+id/manual_panel"
-             android:layout_width="wrap_content"
-             android:layout_height="wrap_content">
-             <TextView android:id="@+id/tv_manual_value"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"/>
-             <com.google.android.material.slider.Slider
-                android:id="@+id/seekbar_manual"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"/>
-             <com.google.android.material.button.MaterialButton
-                android:id="@+id/btn_manual_auto"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"/>
-             <LinearLayout android:id="@+id/focus_extras"
-                 android:layout_width="wrap_content"
-                 android:layout_height="wrap_content">
-                 <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btn_focus_near"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"/>
-                 <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btn_focus_far"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"/>
-             </LinearLayout>
+        <LinearLayout android:id="@+id/manual_panel" android:layout_width="wrap_content" android:layout_height="wrap_content">
+            <TextView android:id="@+id/tv_manual_value" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+            <com.google.android.material.slider.Slider android:id="@+id/seekbar_manual" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+            <com.google.android.material.button.MaterialButton android:id="@+id/btn_manual_auto" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+            <LinearLayout android:id="@+id/focus_extras" android:layout_width="wrap_content" android:layout_height="wrap_content">
+                <com.google.android.material.button.MaterialButton android:id="@+id/btn_focus_near" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+                <com.google.android.material.button.MaterialButton android:id="@+id/btn_focus_far" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+            </LinearLayout>
         </LinearLayout>
-    </androidx.constraintlayout.widget.ConstraintLayout>
+    </com.google.android.material.card.MaterialCardView>
 
-
-    <!-- Actual Controls -->
-
-    <com.google.android.material.button.MaterialButton
-        android:id="@+id/camera_switch_button"
-        style="@style/Widget.Material3.Button.IconButton.Filled.Tonal"
-        android:layout_width="@dimen/round_button_medium"
-        android:layout_height="@dimen/round_button_medium"
-        android:layout_marginEnd="@dimen/margin_xlarge"
-        android:layout_marginBottom="@dimen/margin_small"
-        android:padding="@dimen/spacing_small"
-        android:insetLeft="0dp"
-        android:insetTop="0dp"
-        android:insetRight="0dp"
-        android:insetBottom="0dp"
-        app:icon="@drawable/ic_switch"
-        app:layout_constraintRight_toRightOf="parent"
-        app:layout_constraintBottom_toBottomOf="parent"
-        android:contentDescription="@string/gallery_button_alt" />
-
-    <ImageButton
-        android:id="@+id/camera_capture_button"
-        android:layout_width="@dimen/round_button_large"
-        android:layout_height="@dimen/round_button_large"
-        android:layout_marginEnd="@dimen/shutter_button_margin"
-        android:background="@drawable/ic_shutter"
-        android:contentDescription="@string/capture_button_alt"
-        android:scaleType="fitXY"
-        app:layout_constraintBottom_toBottomOf="parent"
+    <com.google.android.material.card.MaterialCardView
+        android:id="@+id/bottom_island_card"
+        android:layout_width="wrap_content"
+        android:layout_height="match_parent"
         app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintTop_toTopOf="parent" />
-
-    <ImageButton
-        android:id="@+id/photo_view_button"
-        android:layout_width="@dimen/round_button_medium"
-        android:layout_height="@dimen/round_button_medium"
-        android:layout_marginEnd="@dimen/margin_xlarge"
-        android:layout_marginTop="@dimen/margin_small"
-        android:padding="@dimen/spacing_large"
-        android:scaleType="fitCenter"
-        android:background="@drawable/ic_outer_circle"
-        app:srcCompat="@drawable/ic_photo"
-        app:layout_constraintRight_toRightOf="parent"
         app:layout_constraintTop_toTopOf="parent"
-        android:contentDescription="@string/switch_camera_button_alt" />
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:cardBackgroundColor="@android:color/transparent"
+        app:strokeWidth="0dp">
+        <androidx.constraintlayout.widget.ConstraintLayout
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent">
+            <com.google.android.material.button.MaterialButton android:id="@+id/lut_switcher_button" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
+            <ImageButton android:id="@+id/camera_capture_button" android:layout_width="@dimen/round_button_large" android:layout_height="@dimen/round_button_large" app:layout_constraintTop_toTopOf="parent" app:layout_constraintBottom_toBottomOf="parent" app:layout_constraintEnd_toEndOf="parent" android:layout_marginEnd="@dimen/margin_medium" android:background="@drawable/ic_shutter_cookie" />
+            <ImageView android:id="@+id/capture_progress" android:layout_width="@dimen/round_button_large" android:layout_height="@dimen/round_button_large" app:layout_constraintTop_toTopOf="@id/camera_capture_button" app:layout_constraintBottom_toBottomOf="@id/camera_capture_button" app:layout_constraintStart_toStartOf="@id/camera_capture_button" app:layout_constraintEnd_toEndOf="@id/camera_capture_button" android:visibility="gone" />
+            <ImageButton android:id="@+id/photo_view_button" android:layout_width="@dimen/round_button_medium" android:layout_height="@dimen/round_button_medium" app:layout_constraintBottom_toTopOf="@id/camera_capture_button" app:layout_constraintEnd_toEndOf="parent" android:layout_marginEnd="@dimen/margin_medium" android:layout_marginBottom="@dimen/margin_medium" android:background="@drawable/ic_outer_circle" app:srcCompat="@drawable/ic_photo" />
+            <com.google.android.material.loadingindicator.LoadingIndicator android:id="@+id/processing_progress" android:layout_width="48dp" android:layout_height="48dp" android:visibility="gone" app:layout_constraintTop_toTopOf="@id/photo_view_button" app:layout_constraintBottom_toBottomOf="@id/photo_view_button" app:layout_constraintStart_toStartOf="@id/photo_view_button" app:layout_constraintEnd_toEndOf="@id/photo_view_button" />
+            <com.google.android.material.button.MaterialButton android:id="@+id/camera_switch_button" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
+        </androidx.constraintlayout.widget.ConstraintLayout>
+    </com.google.android.material.card.MaterialCardView>
 
-</androidx.constraintlayout.widget.ConstraintLayout>
+    <com.google.android.material.card.MaterialCardView
+        android:id="@+id/lut_list_container"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:visibility="gone"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent">
+        <androidx.recyclerview.widget.RecyclerView android:id="@+id/lut_list" android:layout_width="match_parent" android:layout_height="match_parent" />
+    </com.google.android.material.card.MaterialCardView>
+
+</merge>
