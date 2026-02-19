@@ -203,7 +203,7 @@ extern "C" JNIEXPORT jint JNICALL
 Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     JNIEnv* env, jobject /* this */, jobjectArray dngBuffers, jint width, jint height, jint orientation, jint whiteLevel, jintArray blackLevelPattern, jfloatArray lensShadingMap, jint lensShadingRows, jint lensShadingCols, jboolean useSensorColorMatrix, jfloatArray whiteBalance, jfloatArray ccm, jfloatArray ccmAlt, jboolean exportMatrixAB, jint cfaPattern,
     jint iso, jlong exposureTime, jfloat fNumber, jfloat focalLength, jlong captureTimeMillis, jint targetLog, jstring lutPath, jstring outputTiffPath, jstring outputJpgPath, jstring outputDngPath,
-    jfloat digitalGain, jlongArray debugStats, jobject outputBitmap, jstring tempRawPath, jfloat zoomFactor, jboolean mirror
+    jfloat digitalGain, jlongArray debugStats, jobject outputBitmap, jstring tempRawPath, jfloat zoomFactor, jboolean mirror, jstring outputBayerDngPath = nullptr
 ) {
     LOGD("Native processHdrPlus started.");
     (void)useSensorColorMatrix;
@@ -212,7 +212,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     auto jniPrepStart = std::chrono::high_resolution_clock::now();
 
     int numFrames = env->GetArrayLength(dngBuffers);
-    if (numFrames < 2) { LOGE("HDR+ requires at least 2 frames."); return -1; }
+    if (numFrames < 1) { LOGE("Processing requires at least 1 frame."); return -1; }
 
     g_hdrPlusBuffers.ensureCapacity(width, height, numFrames);
     uint16_t* rawDataPtr = g_hdrPlusBuffers.inputPool.data();
@@ -368,11 +368,13 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     const char* tiff_p_cstr = (outputTiffPath) ? env->GetStringUTFChars(outputTiffPath, 0) : nullptr;
     const char* jpg_p_cstr = (outputJpgPath) ? env->GetStringUTFChars(outputJpgPath, 0) : nullptr;
     const char* dng_p_cstr = (outputDngPath) ? env->GetStringUTFChars(outputDngPath, 0) : nullptr;
-    std::string tiffPathStr = tiff_p_cstr ? tiff_p_cstr : "", jpgPathStr = jpg_p_cstr ? jpg_p_cstr : "", dngPathStr = dng_p_cstr ? dng_p_cstr : "";
+    const char* bayer_dng_p_cstr = (outputBayerDngPath) ? env->GetStringUTFChars(outputBayerDngPath, 0) : nullptr;
+    std::string tiffPathStr = tiff_p_cstr ? tiff_p_cstr : "", jpgPathStr = jpg_p_cstr ? jpg_p_cstr : "", dngPathStr = dng_p_cstr ? dng_p_cstr : "", bayerDngPathStr = bayer_dng_p_cstr ? bayer_dng_p_cstr : "";
     std::string baseName = dngPathStr.empty() ? "HDRPLUS" : dngPathStr.substr(dngPathStr.find_last_of('/')+1);
     if (outputTiffPath && tiff_p_cstr) env->ReleaseStringUTFChars(outputTiffPath, tiff_p_cstr);
     if (outputJpgPath && jpg_p_cstr) env->ReleaseStringUTFChars(outputJpgPath, jpg_p_cstr);
     if (outputDngPath && dng_p_cstr) env->ReleaseStringUTFChars(outputDngPath, dng_p_cstr);
+    if (outputBayerDngPath && bayer_dng_p_cstr) env->ReleaseStringUTFChars(outputBayerDngPath, bayer_dng_p_cstr);
 
     auto saveStart = std::chrono::high_resolution_clock::now();
     if (bitmapPixels) {
@@ -386,7 +388,10 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
         env->ReleaseStringUTFChars(tempRawPath, tr_p_cstr);
     }
 
-    if (!tiffPathStr.empty() || !jpgPathStr.empty() || !dngPathStr.empty()) {
+    if (!tiffPathStr.empty() || !jpgPathStr.empty() || !dngPathStr.empty() || !bayerDngPathStr.empty()) {
+        if (!bayerDngPathStr.empty()) {
+            write_bayer_dng(bayerDngPathStr.c_str(), width, height, rawDataPtr, whiteLevel, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation, (bool)mirror, blackLevelPattern, wbVec.data(), cfaPattern);
+        }
         if (!dngPathStr.empty()) {
             write_dng(dngPathStr.c_str(), width, height, finalImage, kMax16BitValue, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation, (bool)mirror);
         }
@@ -406,4 +411,28 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     }
     fillDebugStats(env, debugStats, copyDurationMs, halideDurationMs, postDurationMs, 0, std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now()-saveStart).count(), 0, std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now()-nativeStart).count(), jniPrepMs, stageStats);
     return 0;
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_android_example_cameraxbasic_processor_ColorProcessor_processSingleFrameRaw(
+    JNIEnv* env, jobject /* this */, jobject bayerBuffer, jint width, jint height, jint orientation, jint whiteLevel, jintArray blackLevelPattern, jfloatArray lensShadingMap, jint lensShadingRows, jint lensShadingCols, jfloatArray whiteBalance, jfloatArray ccm, jint cfaPattern,
+    jint iso, jlong exposureTime, jfloat fNumber, jfloat focalLength, jlong captureTimeMillis, jint targetLog, jstring lutPath, jstring outputTiffPath, jstring outputJpgPath, jstring outputDngPath, jstring outputBayerDngPath,
+    jfloat digitalGain, jlongArray debugStats, jobject outputBitmap, jstring tempRawPath, jfloat zoomFactor, jboolean mirror
+) {
+    LOGD("Native processSingleFrameRaw started.");
+
+    // Repurpose processHdrPlus logic by wrapping the single buffer in an array
+    jclass objClass = env->FindClass("java/nio/ByteBuffer");
+    jobjectArray dngBuffers = env->NewObjectArray(1, objClass, nullptr);
+    env->SetObjectArrayElement(dngBuffers, 0, bayerBuffer);
+
+    // Call the existing processHdrPlus logic.
+    return Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
+        env, nullptr, dngBuffers, width, height, orientation, whiteLevel, blackLevelPattern, lensShadingMap, lensShadingRows, lensShadingCols,
+        false, // useSensorColorMatrix
+        whiteBalance, ccm, nullptr, // ccmAlt
+        false, // exportMatrixAB
+        cfaPattern, iso, exposureTime, fNumber, focalLength, captureTimeMillis, targetLog, lutPath,
+        outputTiffPath, outputJpgPath, outputDngPath, digitalGain, debugStats, outputBitmap, tempRawPath, zoomFactor, mirror, outputBayerDngPath
+    );
 }

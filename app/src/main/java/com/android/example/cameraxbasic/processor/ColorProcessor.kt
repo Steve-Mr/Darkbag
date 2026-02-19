@@ -47,6 +47,41 @@ object ColorProcessor {
     ): Int
 
     /**
+     * Optimized single frame processing using the Halide pipeline.
+     */
+    external fun processSingleFrameRaw(
+        bayerBuffer: ByteBuffer,
+        width: Int,
+        height: Int,
+        orientation: Int,
+        whiteLevel: Int,
+        blackLevelPattern: IntArray,
+        lensShadingMap: FloatArray?,
+        lensShadingRows: Int,
+        lensShadingCols: Int,
+        whiteBalance: FloatArray,
+        ccm: FloatArray,
+        cfaPattern: Int,
+        iso: Int,
+        exposureTime: Long,
+        fNumber: Float,
+        focalLength: Float,
+        captureTimeMillis: Long,
+        targetLog: Int,
+        lutPath: String?,
+        outputTiffPath: String?,
+        outputJpgPath: String?,
+        outputDngPath: String?,
+        outputBayerDngPath: String?,
+        digitalGain: Float,
+        debugStats: LongArray?,
+        outputBitmap: android.graphics.Bitmap? = null,
+        tempRawPath: String? = null,
+        zoomFactor: Float,
+        mirror: Boolean
+    ): Int
+
+    /**
      * Loads a .cube LUT file into a flat float array (RGB interleaved).
      * @param lutPath Path to .cube file.
      * @return Float array of size N^3 * 3, or null if loading failed.
@@ -124,6 +159,7 @@ object ColorProcessor {
         outputBitmap: android.graphics.Bitmap? = null,
         tempRawPath: String? = null,
         zoomFactor: Float,
-        mirror: Boolean
+        mirror: Boolean,
+        outputBayerDngPath: String?
     ): Int
 }

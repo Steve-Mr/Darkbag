@@ -650,7 +650,7 @@ bool write_tiff(const char* filename, int width, int height, const std::vector<u
     return true;
 }
 
-bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, int iso, long exposureTime, float fNumber, float focalLength, long captureTimeMillis, const std::vector<float>& ccm, int orientation, bool mirror) {
+bool write_dng_internal(const char* filename, int width, int height, const unsigned short* data, int samplesPerPixel, int whiteLevel, int iso, long exposureTime, float fNumber, float focalLength, long captureTimeMillis, const std::vector<float>& ccm, int orientation, bool mirror, bool isBayer, const int* blackLevelPattern, const float* wb, int cfaPattern) {
     TIFFSetTagExtender(DNGTagExtender);
     TIFF* tif = TIFFOpen(filename, "w");
     if (!tif) return false;
@@ -668,24 +668,40 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
         default: tiffOrientation = mirror ? 2 : 1; break;
     }
     TIFFSetField(tif, TIFFTAG_ORIENTATION, tiffOrientation);
-    TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_LINEAR_RAW);
-    TIFFSetField(tif, TIFFTAG_SAMPLESPERPIXEL, 3);
+    TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, isBayer ? PHOTOMETRIC_CFA : PHOTOMETRIC_LINEAR_RAW);
+    TIFFSetField(tif, TIFFTAG_SAMPLESPERPIXEL, samplesPerPixel);
     TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG);
     TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, height);
     TIFFSetField(tif, TIFFTAG_SUBFILETYPE, 0);
 
+    if (isBayer) {
+        uint16_t cfaRepeatDim[2] = {2, 2};
+        TIFFSetField(tif, TIFFTAG_CFAREPEATPATTERNDIM, cfaRepeatDim);
+
+        // 0:RGGB, 1:GRBG, 2:GBRG, 3:BGGR (Android)
+        // DNG: 0=R, 1=G, 2=B
+        uint8_t patterns[4][4] = {
+            {0, 1, 1, 2}, // RGGB
+            {1, 0, 2, 1}, // GRBG
+            {1, 2, 0, 1}, // GBRG
+            {2, 1, 1, 0}  // BGGR
+        };
+        int pIdx = std::clamp(cfaPattern, 0, 3);
+        TIFFSetField(tif, TIFFTAG_CFAPATTERN, patterns[pIdx]);
+    }
+
     static const char* make = "Google";
     TIFFSetField(tif, TIFFTAG_MAKE, make);
-    static const char* model = "HDR+ Device";
+    static const char* model = "Darkbag Device";
     TIFFSetField(tif, TIFFTAG_MODEL, model);
-    static const char* software = "CameraXBasic HDR+";
+    static const char* software = "Darkbag Camera";
     TIFFSetField(tif, TIFFTAG_SOFTWARE, software);
 
     time_t raw_time = (time_t)(captureTimeMillis / 1000);
     struct tm * timeinfo = localtime(&raw_time);
-    char buffer[20];
-    strftime(buffer, 20, "%Y:%m:%d %H:%M:%S", timeinfo);
-    TIFFSetField(tif, TIFFTAG_DATETIME, buffer);
+    char time_buffer[20];
+    strftime(time_buffer, 20, "%Y:%m:%d %H:%M:%S", timeinfo);
+    TIFFSetField(tif, TIFFTAG_DATETIME, time_buffer);
 
     static const uint8_t dng_version[] = {1, 4, 0, 0};
     TIFFSetField(tif, TIFFTAG_DNGVERSION, dng_version);
@@ -696,17 +712,31 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
     uint32_t white_level_val = (uint32_t)whiteLevel;
     if (white_level_val == 0) white_level_val = 65535;
     TIFFSetField(tif, TIFFTAG_WHITELEVEL, 1, &white_level_val);
-    uint32_t black_level_val = 0;
-    TIFFSetField(tif, TIFFTAG_BLACKLEVEL, 1, &black_level_val);
 
-    Matrix3x3 ccmMat;
-    std::copy(ccm.data(), ccm.data() + 9, ccmMat.m);
-    Matrix3x3 invCcm = invert(ccmMat);
-    Matrix3x3 colorMatrix1 = multiply(invCcm, M_XYZ_to_sRGB_D65);
-    TIFFSetField(tif, TIFFTAG_COLORMATRIX1, 9, colorMatrix1.m);
+    if (isBayer && blackLevelPattern) {
+        uint32_t bl[4] = {(uint32_t)blackLevelPattern[0], (uint32_t)blackLevelPattern[1], (uint32_t)blackLevelPattern[2], (uint32_t)blackLevelPattern[3]};
+        TIFFSetField(tif, TIFFTAG_BLACKLEVEL, 4, bl);
+    } else {
+        uint32_t black_level_val = 0;
+        TIFFSetField(tif, TIFFTAG_BLACKLEVEL, 1, &black_level_val);
+    }
 
-    static const float as_shot_neutral[] = {1.0f, 1.0f, 1.0f};
-    TIFFSetField(tif, TIFFTAG_ASSHOTNEUTRAL, 3, as_shot_neutral);
+    if (!ccm.empty()) {
+        Matrix3x3 ccmMat;
+        std::copy(ccm.data(), ccm.data() + 9, ccmMat.m);
+        Matrix3x3 invCcm = invert(ccmMat);
+        Matrix3x3 colorMatrix1 = multiply(invCcm, M_XYZ_to_sRGB_D65);
+        TIFFSetField(tif, TIFFTAG_COLORMATRIX1, 9, colorMatrix1.m);
+    }
+
+    if (isBayer && wb) {
+        // AsShotNeutral is [1/R, 1/G, 1/B]
+        float as_shot_neutral[3] = {1.0f / wb[0], 1.0f / wb[1], 1.0f / wb[3]};
+        TIFFSetField(tif, TIFFTAG_ASSHOTNEUTRAL, 3, as_shot_neutral);
+    } else {
+        static const float as_shot_neutral[] = {1.0f, 1.0f, 1.0f};
+        TIFFSetField(tif, TIFFTAG_ASSHOTNEUTRAL, 3, as_shot_neutral);
+    }
 
     TIFFSetField(tif, TIFFTAG_CALIBRATIONILLUMINANT1, 21);
     float exposureTimeSec = (float)exposureTime / 1000000000.0f;
@@ -717,13 +747,21 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
     unsigned short iso_short = (unsigned short)iso;
     TIFFSetField(tif, TIFFTAG_ISOSPEEDRATINGS, 1, &iso_short);
 
-    if (TIFFWriteEncodedStrip(tif, 0, (void*)data.data(), static_cast<size_t>(width) * height * 3 * sizeof(unsigned short)) < 0) {
+    if (TIFFWriteEncodedStrip(tif, 0, (void*)data, static_cast<size_t>(width) * height * samplesPerPixel * sizeof(unsigned short)) < 0) {
         TIFFClose(tif);
         return false;
     }
 
     TIFFClose(tif);
     return true;
+}
+
+bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, int iso, long exposureTime, float fNumber, float focalLength, long captureTimeMillis, const std::vector<float>& ccm, int orientation, bool mirror) {
+    return write_dng_internal(filename, width, height, data.data(), 3, whiteLevel, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccm, orientation, mirror, false, nullptr, nullptr, 0);
+}
+
+bool write_bayer_dng(const char* filename, int width, int height, const unsigned short* data, int whiteLevel, int iso, long exposureTime, float fNumber, float focalLength, long captureTimeMillis, const std::vector<float>& ccm, int orientation, bool mirror, const int* blackLevelPattern, const float* wb, int cfaPattern) {
+    return write_dng_internal(filename, width, height, data, 1, whiteLevel, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccm, orientation, mirror, true, blackLevelPattern, wb, cfaPattern);
 }
 
 bool write_bmp(const char* filename, int width, int height, const std::vector<unsigned short>& data) {
