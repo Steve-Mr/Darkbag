@@ -61,11 +61,11 @@
     <style name="Widget.App.Button.Lens" parent="Widget.Material3.Button.TonalButton">
         <item name="android:insetTop">0dp</item>
         <item name="android:insetBottom">0dp</item>
-        <item name="android:minWidth">@dimen/lens_button_width</item>
-        <item name="android:minHeight">@dimen/lens_button_height</item>
+        <item name="android:minWidth">84dp</item>
+        <item name="android:minHeight">56dp</item>
         <item name="android:paddingHorizontal">0dp</item>
         <item name="android:paddingVertical">0dp</item>
-        <item name="cornerRadius">@dimen/radius_medium</item>
+        <item name="cornerRadius">16dp</item>
     </style>
 
     <!-- 7-sided Cookie Shape -->
@@ -80,10 +80,13 @@
         <item name="android:switchMinWidth">100dp</item>
     </style>
 
-    <!-- Pill shaped LUT Switcher -->
+    <!-- Asymmetric LUT Switcher Shape -->
     <style name="ShapeAppearance.App.LutSwitcher" parent="ShapeAppearance.Material3.MediumComponent">
         <item name="cornerFamily">rounded</item>
-        <item name="cornerSize">24dp</item>
+        <item name="cornerSizeTopLeft">24dp</item>
+        <item name="cornerSizeBottomLeft">24dp</item>
+        <item name="cornerSizeTopRight">0dp</item>
+        <item name="cornerSizeBottomRight">0dp</item>
     </style>
 
 </resources>
