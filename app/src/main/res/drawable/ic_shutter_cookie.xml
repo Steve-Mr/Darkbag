@@ -5,7 +5,7 @@
     android:viewportHeight="100">
     <!-- Rounded Septagon (7-sided cookie) with cubic curves for smoothness -->
     <path
-        android:fillColor="#FFFFFF"
+        android:fillColor="?attr/colorOnPrimaryContainer"
         android:pathData="M50,5
         C60,5 80,15 85.2,21.9
         C90,30 95,50 93.9,60.0

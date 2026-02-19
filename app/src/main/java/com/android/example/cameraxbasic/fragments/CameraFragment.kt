@@ -38,7 +38,6 @@ import android.view.TextureView
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
-import android.widget.ArrayAdapter
 import android.graphics.BitmapFactory
 import android.media.ImageReader
 import android.os.Handler
@@ -558,7 +557,7 @@ class CameraFragment : Fragment() {
             // Set up the camera and its use cases
             lifecycleScope.launch {
                 setUpCamera()
-            updateHdrPlusConstraints()
+                updateHdrPlusConstraints()
             }
         }
     }
@@ -2503,27 +2502,28 @@ class CameraFragment : Fragment() {
         val currentLog = prefs.getString(SettingsFragment.KEY_TARGET_LOG, "None") ?: "None"
         val currentLut = prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, "None")?.substringBeforeLast(".") ?: "None"
 
-        val items = mutableListOf<String>()
-        items.add("${getString(R.string.lut_menu_log)}: $currentLog")
+        val items = mutableListOf<Pair<String, Boolean>>()
+        items.add("${getString(R.string.lut_menu_log)}: $currentLog" to true)
         if (currentLog == "None") {
-            items.add(getString(R.string.lut_menu_select_log_first))
+            items.add(getString(R.string.lut_menu_select_log_first) to false)
         } else {
-            items.add("${getString(R.string.lut_menu_lut)}: $currentLut")
+            items.add("${getString(R.string.lut_menu_lut)}: $currentLut" to true)
         }
 
         showPillPopup(items, autoDismiss = false) { item, _ ->
             if (item.startsWith(getString(R.string.lut_menu_log))) {
                 showLogSelectionMenu()
-            } else if (item.startsWith(getString(R.string.lut_menu_lut)) &&
-                     !item.contains(getString(R.string.lut_menu_select_log_first))) {
+            } else {
                 showLutSelectionMenu()
             }
         }
     }
 
     private fun showLogSelectionMenu() {
-        val items = mutableListOf("← Back")
-        items.addAll(SettingsFragment.LOG_CURVES)
+        val items = mutableListOf("← Back" to true)
+        SettingsFragment.LOG_CURVES.forEach { log ->
+            items.add(log to true)
+        }
 
         showPillPopup(items, autoDismiss = false) { selectedLog, position ->
             if (position == 0) {
@@ -2542,8 +2542,10 @@ class CameraFragment : Fragment() {
 
     private fun showLutSelectionMenu() {
         val luts = lutManager.getLuts()
-        val items = mutableListOf("← Back", getString(R.string.lut_none))
-        items.addAll(luts.map { it.nameWithoutExtension })
+        val items = mutableListOf("← Back" to true, getString(R.string.lut_none) to true)
+        luts.forEach { file ->
+            items.add(file.nameWithoutExtension to true)
+        }
 
         showPillPopup(items, autoDismiss = false) { selectedName, position ->
             if (position == 0) {
@@ -2562,7 +2564,7 @@ class CameraFragment : Fragment() {
         }
     }
 
-    private fun showPillPopup(items: List<String>, autoDismiss: Boolean = true, onSelected: (String, Int) -> Unit) {
+    private fun showPillPopup(items: List<Pair<String, Boolean>>, autoDismiss: Boolean = true, onSelected: (String, Int) -> Unit) {
         val binding = cameraUiContainerBinding ?: return
         val container = binding.lutListContainer ?: return
         val rv = binding.lutList ?: return
@@ -2589,9 +2591,12 @@ class CameraFragment : Fragment() {
 
             override fun onBindViewHolder(holder: androidx.recyclerview.widget.RecyclerView.ViewHolder, position: Int) {
                 val pillHolder = holder as PillViewHolder
-                pillHolder.btn.text = items[position]
+                val (title, isEnabled) = items[position]
+                pillHolder.btn.text = title
+                pillHolder.btn.isEnabled = isEnabled
+                pillHolder.btn.alpha = if (isEnabled) 1.0f else 0.5f
                 pillHolder.btn.setOnClickListener {
-                    onSelected(items[position], position)
+                    onSelected(title, position)
                     if (autoDismiss) {
                         container.visibility = View.GONE
                         binding.touchOverlay?.visibility = View.GONE
@@ -3320,7 +3325,6 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 binding.manualTabs?.clearChecked()
                 activeManualTab = null
             }
-            // Hide lens row if needed? No, user didn't say to hide it.
         } else {
             // Restore flash visibility if supported
             val hasFlash = try {

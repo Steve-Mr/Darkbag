@@ -287,6 +287,13 @@
             android:paddingVertical="@dimen/padding_small"
             android:paddingHorizontal="@dimen/padding_large">
 
+            <androidx.constraintlayout.widget.Guideline
+                android:id="@+id/shutter_center"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                app:layout_constraintGuide_percent="0.5" />
+
             <!-- LUT Switcher Strip -->
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/lut_switcher_button"
@@ -300,11 +307,11 @@
                 android:textSize="12sp"
                 android:gravity="start|center_vertical"
                 android:paddingStart="32dp"
-                app:layout_constraintEnd_toStartOf="@id/camera_capture_button"
+                app:layout_constraintEnd_toEndOf="@id/shutter_center"
                 app:layout_constraintStart_toStartOf="parent"
                 app:layout_constraintTop_toTopOf="@id/camera_capture_button"
                 app:layout_constraintBottom_toBottomOf="@id/camera_capture_button"
-                android:layout_marginEnd="-24dp" />
+                android:layout_marginEnd="32dp" />
 
             <ImageButton
                 android:id="@+id/camera_capture_button"
