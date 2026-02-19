@@ -23,6 +23,7 @@ object ExposureUtils {
     private const val CLIPPING_RATIO_THRESHOLD = 0.03
     private const val CLIPPING_TO_EV_FACTOR = 15.0
     private const val MAX_ADDITIONAL_UNDEREXPOSURE_STOPS = 2.0
+    private const val GAIN_DAMPENING_FACTOR = 0.2
 
     data class ExposureConfig(
         val iso: Int,
@@ -75,17 +76,14 @@ object ExposureUtils {
                 when {
                     currentIso <= ISO_THRESHOLD_VERY_LOW -> FACTOR_EV_MINUS_4
                     currentIso <= ISO_THRESHOLD_LOW -> {
-                        val ratio = (currentIso - ISO_THRESHOLD_VERY_LOW) / (ISO_THRESHOLD_LOW.toFloat() - ISO_THRESHOLD_VERY_LOW.toFloat())
-                        FACTOR_EV_MINUS_4 + (ratio * (FACTOR_EV_MINUS_3 - FACTOR_EV_MINUS_4))
+                        interpolate(currentIso, ISO_THRESHOLD_VERY_LOW, ISO_THRESHOLD_LOW, FACTOR_EV_MINUS_4, FACTOR_EV_MINUS_3)
                     }
                     currentIso <= ISO_THRESHOLD_MID -> {
-                        val ratio = (currentIso - ISO_THRESHOLD_LOW) / (ISO_THRESHOLD_MID.toFloat() - ISO_THRESHOLD_LOW.toFloat())
-                        FACTOR_EV_MINUS_3 + (ratio * (FACTOR_EV_MINUS_1_5 - FACTOR_EV_MINUS_3))
+                        interpolate(currentIso, ISO_THRESHOLD_LOW, ISO_THRESHOLD_MID, FACTOR_EV_MINUS_3, FACTOR_EV_MINUS_1_5)
                     }
                     currentIso >= ISO_THRESHOLD_HIGH -> FACTOR_EV_0
                     else -> {
-                        val ratio = (currentIso - ISO_THRESHOLD_MID) / (ISO_THRESHOLD_HIGH.toFloat() - ISO_THRESHOLD_MID.toFloat())
-                        FACTOR_EV_MINUS_1_5 + (ratio * (FACTOR_EV_0 - FACTOR_EV_MINUS_1_5))
+                        interpolate(currentIso, ISO_THRESHOLD_MID, ISO_THRESHOLD_HIGH, FACTOR_EV_MINUS_1_5, FACTOR_EV_0)
                     }
                 }
             }
@@ -160,7 +158,7 @@ object ExposureUtils {
         // Apply "Gain Dampening" for highlight preservation.
         // If we underexposed specifically due to clipping, we avoid boosting midtones back to full brightness.
         if (additionalUnderexposure > 0) {
-            val dampening = (1.0 - 0.2 * (additionalUnderexposure / MAX_ADDITIONAL_UNDEREXPOSURE_STOPS)).toFloat()
+            val dampening = (1.0 - GAIN_DAMPENING_FACTOR * (additionalUnderexposure / MAX_ADDITIONAL_UNDEREXPOSURE_STOPS)).toFloat()
             digitalGain *= dampening
         }
 
@@ -169,5 +167,13 @@ object ExposureUtils {
             exposureTime = targetTime,
             digitalGain = digitalGain
         )
+    }
+
+    /**
+     * Linear interpolation helper.
+     */
+    private fun interpolate(value: Int, fromX: Int, toX: Int, fromY: Float, toY: Float): Float {
+        val ratio = (value - fromX) / (toX.toFloat() - fromX.toFloat())
+        return fromY + (ratio * (toY - fromY))
     }
 }
