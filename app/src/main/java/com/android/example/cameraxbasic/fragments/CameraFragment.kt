@@ -600,6 +600,7 @@ class CameraFragment : Fragment() {
         Log.d(TAG, "Available Lenses/Presets identified: ${newLenses.size} for facing $repoFacing")
 
         // Update currentLens reference if it exists
+        var updatedLens: com.android.example.cameraxbasic.utils.LensInfo? = null
         currentLens?.let { old ->
              var found = newLenses.find { it.sensorId == old.sensorId }
              if (found == null) {
@@ -608,44 +609,45 @@ class CameraFragment : Fragment() {
                      found = cameraRepository.get1xPresets(base1x).find { it.sensorId == old.sensorId }
                  }
              }
-             currentLens = found
+             updatedLens = found
         }
 
-        availableLenses = newLenses
-
-        if (currentLens == null) {
+        if (updatedLens == null) {
             val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
             val savedLensId = prefs.getString(KEY_SELECTED_LENS_ID, null)
             val defaultLensId = prefs.getString(SettingsFragment.KEY_DEFAULT_LENS_ID, null)
             val default1xFocal = prefs.getString(SettingsFragment.KEY_DEFAULT_FOCAL_1X, "24mm")
 
             if (savedLensId != null) {
-                var found = availableLenses.find { it.sensorId == savedLensId }
+                var found = newLenses.find { it.sensorId == savedLensId }
                 if (found == null) {
-                    val base1x = availableLenses.find { it.multiplier in 0.95f..1.05f && !it.isZoomPreset }
+                    val base1x = newLenses.find { it.multiplier in 0.95f..1.05f && !it.isZoomPreset }
                     if (base1x != null) {
                         found = cameraRepository.get1xPresets(base1x).find { it.sensorId == savedLensId }
                     }
                 }
-                currentLens = found
+                updatedLens = found
             }
 
-            if (currentLens == null) {
+            if (updatedLens == null) {
                 val targetId = defaultLensId
-                var found = availableLenses.find { it.sensorId == targetId }
+                var found = newLenses.find { it.sensorId == targetId }
                 if (found == null) {
-                    found = availableLenses.find { it.multiplier in 0.95f..1.05f && !it.isZoomPreset }
-                        ?: availableLenses.firstOrNull()
+                    found = newLenses.find { it.multiplier in 0.95f..1.05f && !it.isZoomPreset }
+                        ?: newLenses.firstOrNull()
                 }
 
                 if (found != null && found.multiplier in 0.95f..1.05f && !found.isZoomPreset) {
                     val presets1x = cameraRepository.get1xPresets(found)
-                    currentLens = presets1x.find { it.name == default1xFocal } ?: found
+                    updatedLens = presets1x.find { it.name == default1xFocal } ?: found
                 } else {
-                    currentLens = found
+                    updatedLens = found
                 }
             }
         }
+
+        currentLens = updatedLens
+        availableLenses = newLenses
     }
 
     /** Initialize Camera Engine, and prepare to bind the camera use cases  */
