@@ -173,7 +173,10 @@ object ExposureUtils {
      * Linear interpolation helper.
      */
     private fun interpolate(value: Int, fromX: Int, toX: Int, fromY: Float, toY: Float): Float {
-        val ratio = (value - fromX) / (toX.toFloat() - fromX.toFloat())
+        if (toX == fromX) {
+            return fromY
+        }
+        val ratio = (value - fromX).toFloat() / (toX - fromX)
         return fromY + (ratio * (toY - fromY))
     }
 }
