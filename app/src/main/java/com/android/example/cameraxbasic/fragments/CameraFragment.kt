@@ -42,6 +42,7 @@ import android.graphics.BitmapFactory
 import android.media.ImageReader
 import android.os.Handler
 import android.os.HandlerThread
+import android.util.Size
 import android.hardware.camera2.CameraCharacteristics
 import android.graphics.Matrix
 import android.graphics.Rect
@@ -1520,6 +1521,29 @@ class CameraFragment : Fragment() {
                 val tiffFile = File(context.cacheDir, "$dngName.tiff")
                 val linearDngFile = File(context.cacheDir, "${dngName}_linear.dng")
                 val bayerDngFile = File(context.cacheDir, "${dngName}_bayer.dng")
+                var dngWritten = false
+                if (saveRaw) {
+                    try {
+                        val dngCreator = android.hardware.camera2.DngCreator(chars, captureResult)
+
+                        // Map rotation to DngCreator orientation
+                        val dngOrientation = when (image.combinedOrientation) {
+                            90 -> ExifInterface.ORIENTATION_ROTATE_90
+                            180 -> ExifInterface.ORIENTATION_ROTATE_180
+                            270 -> ExifInterface.ORIENTATION_ROTATE_270
+                            else -> ExifInterface.ORIENTATION_NORMAL
+                        }
+                        dngCreator.setOrientation(dngOrientation)
+
+                        FileOutputStream(bayerDngFile).use { out ->
+                            dngCreator.writeByteBuffer(out, Size(image.width, image.height), image.data, 0)
+                        }
+                        dngWritten = true
+                        Log.d(TAG, "DNG saved using DngCreator: ${bayerDngFile.absolutePath}")
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to save DNG using DngCreator", e)
+                    }
+                }
 
                 val iso = captureResult.get(android.hardware.camera2.CaptureResult.SENSOR_SENSITIVITY) ?: 100
                 val exposureTime = captureResult.get(android.hardware.camera2.CaptureResult.SENSOR_EXPOSURE_TIME) ?: 10_000_000L
@@ -1553,8 +1577,6 @@ class CameraFragment : Fragment() {
                     lutPath = nativeLutPath,
                     outputTiffPath = null,
                     outputJpgPath = if (saveJpg) tempJpgFile.absolutePath else null, // Fast JPG
-                    outputDngPath = null,
-                    outputBayerDngPath = if (saveRaw) bayerDngFile.absolutePath else null,
                     digitalGain = 1.0f,
                     debugStats = debugStats,
                     outputBitmap = null,
@@ -1576,7 +1598,7 @@ class CameraFragment : Fragment() {
                     rotationDegrees = 0,
                     zoomFactor = 1.0f,
                     baseName = dngName,
-                    linearDngPath = if (saveRaw) bayerDngFile.absolutePath else null, // Faster RAW path
+                    linearDngPath = if (dngWritten) bayerDngFile.absolutePath else null,
                     tiffPath = null,
                     saveJpg = saveJpg,
                     saveTiff = false,
@@ -1609,7 +1631,6 @@ class CameraFragment : Fragment() {
                     .putString("jpgPath", if (saveJpg) fullResJpgFile.absolutePath else null)
                     .putString("targetUri", fastOutputUri?.toString())
                     .putFloat("zoomFactor", image.zoomRatio)
-                    .putString("dngPath", null) // DNG already handled in fast path for Standard
                     .putInt("iso", iso)
                     .putLong("exposureTime", exposureTime)
                     .putFloat("fNumber", fNumber)
@@ -1640,7 +1661,7 @@ class CameraFragment : Fragment() {
                         Callback to Enqueued: ${t.enqueued - t.captureCallback}ms
                         Wait in Queue: ${t.processingStart - t.enqueued}ms
                         JNI (Halide + FastJPG): ${t.jniDone - t.processingStart}ms
-                        Fast JPG Write: ${t.firstOutputWritten - t.jniDone}ms
+                        DNG Write (DngCreator): ${t.firstOutputWritten - t.jniDone}ms
                         Native Halide Detail: ${debugStats[0]}ms
                     """.trimIndent()
                     Log.i(TAG, report)
@@ -3125,14 +3146,12 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     nativeLutPath,
                     null, // outputTiffPath
                     if (saveJpg) tempJpgFile.absolutePath else null, // outputJpgPath (fast preview)
-                    null, // outputDngPath
                     digitalGain,
                     debugStats,
                     null, // outputBitmap
                     tempRawFile.absolutePath,
                     currentZoom,
                     mirror,
-                    null, // outputBayerDngPath
                     activeArray
                 )
 
@@ -3187,7 +3206,6 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         .putString("jpgPath", if (saveJpg) fullResJpgFile.absolutePath else null)
                         .putString("targetUri", fastJpegUri?.toString()) // Replace fast JPEG in place
                         .putFloat("zoomFactor", currentZoom)
-                        .putString("dngPath", linearDngPath)
                         .putInt("iso", (iso).toInt())
                         .putLong("exposureTime", exposureTime)
                         .putFloat("fNumber", fNumber)

@@ -71,8 +71,6 @@ object ColorProcessor {
         lutPath: String?,
         outputTiffPath: String?,
         outputJpgPath: String?,
-        outputDngPath: String?,
-        outputBayerDngPath: String?,
         digitalGain: Float,
         debugStats: LongArray?,
         outputBitmap: android.graphics.Bitmap? = null,
@@ -117,7 +115,6 @@ object ColorProcessor {
         lutPath: String?,
         tiffPath: String?,
         jpgPath: String?,
-        dngPath: String?,
         iso: Int,
         exposureTime: Long,
         fNumber: Float,
@@ -155,14 +152,12 @@ object ColorProcessor {
         lutPath: String?,
         outputTiffPath: String?,
         outputJpgPath: String?,
-        outputDngPath: String?,
         digitalGain: Float,
         debugStats: LongArray?, // [0] Halide, [1] Copy, [2] Post, [3] DNG Encode, [4] Save, [5] DNG Wait, [6] Total, [7] Align, [8] Merge, [9] Demosaic, [10] Denoise, [11] sRGB, [12] JNI Prep, [13] BlackWhite, [14] WB
         outputBitmap: android.graphics.Bitmap? = null,
         tempRawPath: String? = null,
         zoomFactor: Float,
         mirror: Boolean,
-        outputBayerDngPath: String?,
         activeArray: IntArray? = null
     ): Int
 }
