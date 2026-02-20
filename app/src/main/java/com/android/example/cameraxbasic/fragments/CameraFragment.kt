@@ -3934,12 +3934,15 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
     }
 
     private fun showShutterBlackout() {
-        val binding = fragmentCameraBinding ?: return
-        lifecycleScope.launch(Dispatchers.Main) {
-            binding.viewFinderBlackout.visibility = View.VISIBLE
-            binding.viewFinderBlackout.postDelayed({
-                binding.viewFinderBlackout.visibility = View.GONE
-            }, ANIMATION_FAST_MILLIS)
+        _fragmentCameraBinding?.let { binding ->
+            val blackout = binding.viewFinderBlackout
+            blackout.post {
+                blackout.visibility = View.VISIBLE
+                blackout.bringToFront()
+                blackout.postDelayed({
+                    _fragmentCameraBinding?.viewFinderBlackout?.visibility = View.INVISIBLE
+                }, 100L) // Use 100ms to ensure visibility during processing
+            }
         }
     }
 
