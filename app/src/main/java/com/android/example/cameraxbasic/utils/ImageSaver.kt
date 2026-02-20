@@ -51,6 +51,9 @@ object ImageSaver {
         onBitmapReady: ((Bitmap) -> Unit)? = null
     ): Uri? {
         val halfFrameManager = HalfFrameManager(context)
+
+        val actualSaveJpg = if (halfFrameManager.isEnabled) halfFrameManager.saveJpg else saveJpg
+        val actualSaveRaw = if (halfFrameManager.isEnabled) halfFrameManager.saveRaw else saveRaw
         val actualSaveTiff = if (halfFrameManager.isEnabled) false else saveTiff
 
         val contentResolver = context.contentResolver
@@ -63,36 +66,41 @@ object ImageSaver {
             val isNativeJpeg = bmpPath != null && (bmpPath.endsWith(".jpg") || bmpPath.endsWith(".jpeg"))
             val needsBitmapProcessing = rotationDegrees != 0 || zoomFactor > 1.05f || inputBitmap != null || mirror
 
-            if (isNativeJpeg && !needsBitmapProcessing && saveJpg) {
+            if (isNativeJpeg && !needsBitmapProcessing && actualSaveJpg) {
                 // FAST PATH: Directly use JNI-generated JPEG
                 val f = File(bmpPath!!)
                 if (f.exists() && f.length() > 0) {
-                    if (halfFrameManager.isEnabled && isFastPath) {
-                        if (halfFrameManager.step == 0) {
-                            ColorProcessor.halfFrameFlow.tryEmit(1)
-                        }
-                        // Don't return! Let RAW saving continue below.
-                    } else {
-                        val finalPath = if (halfFrameManager.isEnabled) {
-                             halfFrameManager.handleCapture(f.absolutePath)
-                        } else {
-                             f.absolutePath
-                        }
+                    if (halfFrameManager.isEnabled) {
+                        val finalPath = halfFrameManager.handleCapture(f.absolutePath, baseName, isFastPath)
 
-                        if (finalPath != null) {
-                            val finalFile = File(finalPath)
-                            if (jpgFolderUri != null) {
-                                finalJpgUri = saveFileToFolder(context, finalFile, "$baseName.jpg", "image/jpeg", jpgFolderUri)
+                        if (isFastPath) {
+                            if (halfFrameManager.frame1BaseName == baseName) {
+                                ColorProcessor.halfFrameFlow.tryEmit(1)
                             } else {
-                                finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri) { out ->
-                                    finalFile.inputStream().use { it.copyTo(out) }
+                                ColorProcessor.halfFrameFlow.tryEmit(2)
+                            }
+                        } else {
+                            if (finalPath != null) {
+                                val finalFile = File(finalPath)
+                                if (jpgFolderUri != null) {
+                                    finalJpgUri = saveFileToFolder(context, finalFile, "$baseName.jpg", "image/jpeg", jpgFolderUri)
+                                } else {
+                                    finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri) { out ->
+                                        finalFile.inputStream().use { it.copyTo(out) }
+                                    }
+                                }
+                                if (finalPath != f.absolutePath) {
+                                    finalFile.delete()
                                 }
                             }
-                            if (finalPath != f.absolutePath) {
-                                finalFile.delete() // Cleanup stitched file
-                            }
-                            if (halfFrameManager.isEnabled) {
-                                ColorProcessor.halfFrameFlow.tryEmit(2)
+                        }
+                    } else {
+                        val finalFile = f
+                        if (jpgFolderUri != null) {
+                            finalJpgUri = saveFileToFolder(context, finalFile, "$baseName.jpg", "image/jpeg", jpgFolderUri)
+                        } else {
+                            finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri) { out ->
+                                finalFile.inputStream().use { it.copyTo(out) }
                             }
                         }
                     }
@@ -159,49 +167,63 @@ object ImageSaver {
                     }
 
                     // Save JPG
-                    if (saveJpg) {
+                    if (actualSaveJpg) {
                         if (processedBitmap != null) {
-                            if (halfFrameManager.isEnabled && isFastPath) {
-                                if (halfFrameManager.step == 0) {
-                                    ColorProcessor.halfFrameFlow.tryEmit(1)
-                                }
-                                // Don't return!
-                            } else {
-                                // First, get a local JPG file
-                            val tempJpg = File(context.cacheDir, "temp_proc_$baseName.jpg")
-                            FileOutputStream(tempJpg).use { out ->
-                                processedBitmap.compress(Bitmap.CompressFormat.JPEG, 95, out)
-                            }
-
-                                val finalPath = if (halfFrameManager.isEnabled) {
-                                    halfFrameManager.handleCapture(tempJpg.absolutePath)
-                                } else {
-                                    tempJpg.absolutePath
+                            if (halfFrameManager.isEnabled) {
+                                // First, get a local JPG file for internal processing/stitching
+                                val tempJpg = File(context.cacheDir, "temp_proc_$baseName.jpg")
+                                FileOutputStream(tempJpg).use { out ->
+                                    processedBitmap.compress(Bitmap.CompressFormat.JPEG, 95, out)
                                 }
 
-                                if (finalPath != null) {
-                                    val finalFile = File(finalPath)
-                                    if (jpgFolderUri != null) {
-                                        finalJpgUri = saveFileToFolder(context, finalFile, "$baseName.jpg", "image/jpeg", jpgFolderUri)
+                                val finalPath = halfFrameManager.handleCapture(tempJpg.absolutePath, baseName, isFastPath)
+
+                                if (isFastPath) {
+                                    if (halfFrameManager.frame1BaseName == baseName) {
+                                        ColorProcessor.halfFrameFlow.tryEmit(1)
                                     } else {
-                                        finalJpgUri = saveJpegToMediaStore(
-                                            context,
-                                            "$baseName.jpg",
-                                            targetUri,
-                                            processedBitmap.width,
-                                            processedBitmap.height
-                                        ) { out ->
-                                            finalFile.inputStream().use { it.copyTo(out) }
+                                        ColorProcessor.halfFrameFlow.tryEmit(2)
+                                    }
+                                } else {
+                                    if (finalPath != null) {
+                                        val finalFile = File(finalPath)
+                                        if (jpgFolderUri != null) {
+                                            finalJpgUri = saveFileToFolder(context, finalFile, "$baseName.jpg", "image/jpeg", jpgFolderUri)
+                                        } else {
+                                            finalJpgUri = saveJpegToMediaStore(
+                                                context,
+                                                "$baseName.jpg",
+                                                targetUri,
+                                                processedBitmap.width,
+                                                processedBitmap.height
+                                            ) { out ->
+                                                finalFile.inputStream().use { it.copyTo(out) }
+                                            }
+                                        }
+                                        if (finalPath != tempJpg.absolutePath) {
+                                             finalFile.delete()
                                         }
                                     }
-                                    if (finalPath != tempJpg.absolutePath) {
-                                         finalFile.delete() // Cleanup stitched file
-                                    }
-                                    if (halfFrameManager.isEnabled) {
-                                        ColorProcessor.halfFrameFlow.tryEmit(2) // Signal completion
-                                    }
+                                }
+                                tempJpg.delete()
+                            } else {
+                                // Normal Mode
+                                val tempJpg = File(context.cacheDir, "temp_proc_$baseName.jpg")
+                                FileOutputStream(tempJpg).use { out ->
+                                    processedBitmap.compress(Bitmap.CompressFormat.JPEG, 95, out)
+                                }
+                                if (jpgFolderUri != null) {
+                                    finalJpgUri = saveFileToFolder(context, tempJpg, "$baseName.jpg", "image/jpeg", jpgFolderUri)
                                 } else {
-                                    // Intermediate capture
+                                    finalJpgUri = saveJpegToMediaStore(
+                                        context,
+                                        "$baseName.jpg",
+                                        targetUri,
+                                        processedBitmap.width,
+                                        processedBitmap.height
+                                    ) { out ->
+                                        tempJpg.inputStream().use { it.copyTo(out) }
+                                    }
                                 }
                                 tempJpg.delete()
                             }
@@ -266,7 +288,7 @@ object ImageSaver {
         }
 
         // 3. Save DNG (Bayer or Linear)
-        if (saveRaw && linearDngPath != null) {
+        if (actualSaveRaw && linearDngPath != null) {
             val dngFile = File(linearDngPath)
             if (dngFile.exists()) {
                 val dngDisplayName = if (linearDngPath.contains("_linear")) "${baseName}_linear.dng" else "$baseName.dng"

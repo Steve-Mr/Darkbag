@@ -287,6 +287,16 @@ class SettingsFragment : Fragment() {
             prefs.edit().putBoolean(KEY_HALF_FRAME_AUTO_BURST, isChecked).apply()
         }
 
+        binding.cbHfSaveJpg.isChecked = prefs.getBoolean(KEY_HALF_FRAME_SAVE_JPG, true)
+        binding.cbHfSaveJpg.setOnCheckedChangeListener { _, isChecked ->
+            prefs.edit().putBoolean(KEY_HALF_FRAME_SAVE_JPG, isChecked).apply()
+        }
+
+        binding.cbHfSaveRaw.isChecked = prefs.getBoolean(KEY_HALF_FRAME_SAVE_RAW, false)
+        binding.cbHfSaveRaw.setOnCheckedChangeListener { _, isChecked ->
+            prefs.edit().putBoolean(KEY_HALF_FRAME_SAVE_RAW, isChecked).apply()
+        }
+
         binding.switchMirrorFront.isChecked = prefs.getBoolean(KEY_MIRROR_FRONT_CAMERA, true)
         binding.switchMirrorFront.setOnCheckedChangeListener { _, isChecked ->
             prefs.edit().putBoolean(KEY_MIRROR_FRONT_CAMERA, isChecked).apply()
@@ -423,6 +433,9 @@ class SettingsFragment : Fragment() {
         const val KEY_HALF_FRAME_DATE_STAMP = "half_frame_date_stamp"
         const val KEY_HALF_FRAME_LIGHT_LEAK = "half_frame_light_leak"
         const val KEY_HALF_FRAME_AUTO_BURST = "half_frame_auto_burst"
+        const val KEY_HALF_FRAME_SAVE_JPG = "half_frame_save_jpg"
+        const val KEY_HALF_FRAME_SAVE_RAW = "half_frame_save_raw"
+        const val KEY_HALF_FRAME_BASE_NAME = "half_frame_base_name"
 
         val FOCAL_LENGTHS = listOf("24", "28", "35")
         val ANTIBANDING_MODES = listOf("Auto", "50Hz", "60Hz", "Off")

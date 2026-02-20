@@ -1221,7 +1221,8 @@ class CameraFragment : Fragment() {
                 // Cancel/Reset half-frame
                 halfFrameStep = 0
                 val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-                prefs.edit().putInt(SettingsFragment.KEY_HALF_FRAME_STEP, 0).apply()
+                prefs.edit().putInt(SettingsFragment.KEY_HALF_FRAME_STEP, 0)
+                    .remove(SettingsFragment.KEY_HALF_FRAME_BASE_NAME).apply()
                 // Cleanup temp file
                 val tempPath = prefs.getString(SettingsFragment.KEY_HALF_FRAME_TEMP_PATH, null)
                 if (tempPath != null) {
@@ -4019,12 +4020,10 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
         if (!isHalfFrameModeEnabled) {
             uiBinding.tvHalfFrameStep?.visibility = View.GONE
-            vfBinding.viewFinder.scaleX = 1f
-            vfBinding.viewFinder.scaleY = 1f
+            vfBinding.halfFrameGapIndicator.visibility = View.GONE
             vfBinding.viewFinder.translationX = 0f
             vfBinding.viewFinder.translationY = 0f
 
-            // Hide thumbnail only if we are in the middle of a half-frame capture
             if (halfFrameStep == 0) {
                  uiBinding.photoViewButton?.visibility = View.VISIBLE
             }
@@ -4033,26 +4032,59 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
         uiBinding.tvHalfFrameStep?.visibility = View.VISIBLE
         uiBinding.tvHalfFrameStep?.text = if (halfFrameStep == 0) "1/2" else "2/2"
-
-        // Hide thumbnail if we captured the first frame
         uiBinding.photoViewButton?.visibility = if (halfFrameStep == 0) View.VISIBLE else View.GONE
 
         val layout = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUTS[0])
 
-        // Viewfinder size is updated after layout
         vfBinding.viewFinder.post {
+            val gapWidth = (maxOf(vfBinding.viewFinder.width, vfBinding.viewFinder.height) * 0.03f).toInt().coerceAtLeast(16)
+
+            vfBinding.halfFrameGapIndicator.visibility = View.VISIBLE
+            val params = vfBinding.halfFrameGapIndicator.layoutParams
+
             if (layout == SettingsFragment.HALF_FRAME_LAYOUTS[0]) { // Side-by-side
-                vfBinding.viewFinder.scaleX = 0.5f
-                vfBinding.viewFinder.scaleY = 1.0f
-                val offset = vfBinding.viewFinder.width / 4f
-                vfBinding.viewFinder.translationX = if (halfFrameStep == 0) -offset else offset
+                // Scale down slightly to fit VF + GAP in original VF width
+                val scale = vfBinding.viewFinder.width.toFloat() / (vfBinding.viewFinder.width + gapWidth)
+                vfBinding.viewFinder.scaleX = scale
+                vfBinding.viewFinder.scaleY = scale
+                vfBinding.halfFrameGapIndicator.scaleX = scale
+                vfBinding.halfFrameGapIndicator.scaleY = scale
+
+                params.width = gapWidth
+                params.height = vfBinding.viewFinder.height
+                vfBinding.halfFrameGapIndicator.layoutParams = params
+
+                val shift = gapWidth / 2f
+                if (halfFrameStep == 0) {
+                    vfBinding.viewFinder.translationX = -shift * scale
+                    vfBinding.halfFrameGapIndicator.translationX = vfBinding.viewFinder.width.toFloat()
+                } else {
+                    vfBinding.viewFinder.translationX = shift * scale
+                    vfBinding.halfFrameGapIndicator.translationX = -gapWidth.toFloat()
+                }
                 vfBinding.viewFinder.translationY = 0f
+                vfBinding.halfFrameGapIndicator.translationY = 0f
             } else { // Top-bottom
-                vfBinding.viewFinder.scaleX = 1.0f
-                vfBinding.viewFinder.scaleY = 0.5f
-                val offset = vfBinding.viewFinder.height / 4f
+                val scale = vfBinding.viewFinder.height.toFloat() / (vfBinding.viewFinder.height + gapWidth)
+                vfBinding.viewFinder.scaleX = scale
+                vfBinding.viewFinder.scaleY = scale
+                vfBinding.halfFrameGapIndicator.scaleX = scale
+                vfBinding.halfFrameGapIndicator.scaleY = scale
+
+                params.width = vfBinding.viewFinder.width
+                params.height = gapWidth
+                vfBinding.halfFrameGapIndicator.layoutParams = params
+
+                val shift = gapWidth / 2f
+                if (halfFrameStep == 0) {
+                    vfBinding.viewFinder.translationY = -shift * scale
+                    vfBinding.halfFrameGapIndicator.translationY = vfBinding.viewFinder.height.toFloat()
+                } else {
+                    vfBinding.viewFinder.translationY = shift * scale
+                    vfBinding.halfFrameGapIndicator.translationY = -gapWidth.toFloat()
+                }
                 vfBinding.viewFinder.translationX = 0f
-                vfBinding.viewFinder.translationY = if (halfFrameStep == 0) -offset else offset
+                vfBinding.halfFrameGapIndicator.translationX = 0f
             }
         }
     }

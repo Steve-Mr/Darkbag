@@ -12,8 +12,8 @@ object HalfFrameUtils {
     private const val TAG = "HalfFrameUtils"
 
     /**
-     * Stitches two images according to the layout.
-     * Assumes images are already correctly oriented.
+     * Stitches two images according to the layout without stretching.
+     * If the result is landscape, it rotates it to portrait.
      */
     fun stitchImages(
         firstPath: String,
@@ -30,69 +30,70 @@ object HalfFrameUtils {
             val w2 = secondBitmap.width
             val h2 = secondBitmap.height
 
-            // We use the first image as the reference size
+            // Target size for each slot (use first frame as reference)
             val targetW = w1
             val targetH = h1
 
-            // Squeezing logic to maintain the final image size similar to a single frame
-            // and ensure the final image is always vertical (Portrait).
-            // For Half-frame, we squeeze each frame to 50% of the canvas.
+            // Divider width: 3% of the larger dimension to be more prominent
+            val divider = (maxOf(targetW, targetH) * 0.03f).toInt().coerceAtLeast(16)
 
-            // Canvas size will be targetW x targetH (Portrait)
-            val canvasW = if (targetW > targetH) targetH else targetW
-            val canvasH = if (targetW > targetH) targetW else targetH
+            var resultBitmap = if (layout == "Side-by-side" || layout == "左右排列" || layout.contains("side", ignoreCase = true)) {
+                val combinedW = targetW + divider + targetW
+                val combinedH = targetH
 
-            val divider = (maxOf(canvasW, canvasH) * 0.01f).toInt().coerceAtLeast(4)
+                val result = Bitmap.createBitmap(combinedW, combinedH, Bitmap.Config.ARGB_8888)
+                val canvas = Canvas(result)
+                canvas.drawColor(Color.BLACK)
 
-            val finalBitmap = Bitmap.createBitmap(canvasW, canvasH, Bitmap.Config.ARGB_8888)
-            val canvas = Canvas(finalBitmap)
-            canvas.drawColor(Color.BLACK)
-
-            val paint = Paint(Paint.FILTER_BITMAP_FLAG)
-
-            if (layout == "Side-by-side" || layout == "左右排列") {
-                // Each frame squeezed to (canvasW - divider)/2 width, canvasH height
-                val frameW = (canvasW - divider) / 2
-                val frameH = canvasH
-
-                // Draw first frame (Left)
-                val src1 = Rect(0, 0, w1, h1)
-                val dst1 = Rect(0, 0, frameW, frameH)
-                canvas.drawBitmap(firstBitmap, src1, dst1, paint)
-
-                // Draw second frame (Right)
-                val src2 = Rect(0, 0, w2, h2)
-                val dst2 = Rect(frameW + divider, 0, canvasW, frameH)
-                canvas.drawBitmap(secondBitmap, src2, dst2, paint)
+                // Draw first (Left)
+                canvas.drawBitmap(firstBitmap, 0f, 0f, null)
+                // Draw second (Right) - scaled to fit if necessary, but keep aspect ratio
+                val rect2 = getFitRect(w2, h2, targetW, targetH)
+                val dest2 = Rect(targetW + divider + rect2.left, rect2.top, targetW + divider + rect2.right, rect2.bottom)
+                canvas.drawBitmap(secondBitmap, Rect(0, 0, w2, h2), dest2, Paint(Paint.FILTER_BITMAP_FLAG))
+                result
             } else {
-                // Each frame squeezed to canvasW width, (canvasH - divider)/2 height
-                val frameW = canvasW
-                val frameH = (canvasH - divider) / 2
+                // Top-bottom: [Img1 / Divider / Img2]
+                val combinedW = targetW
+                val combinedH = targetH + divider + targetH
 
-                // Draw first frame (Top)
-                val src1 = Rect(0, 0, w1, h1)
-                val dst1 = Rect(0, 0, frameW, frameH)
-                canvas.drawBitmap(firstBitmap, src1, dst1, paint)
+                val result = Bitmap.createBitmap(combinedW, combinedH, Bitmap.Config.ARGB_8888)
+                val canvas = Canvas(result)
+                canvas.drawColor(Color.BLACK)
 
-                // Draw second frame (Bottom)
-                val src2 = Rect(0, 0, w2, h2)
-                val dst2 = Rect(0, frameH + divider, frameW, canvasH)
-                canvas.drawBitmap(secondBitmap, src2, dst2, paint)
+                // Draw first (Top)
+                canvas.drawBitmap(firstBitmap, 0f, 0f, null)
+                // Draw second (Bottom)
+                val rect2 = getFitRect(w2, h2, targetW, targetH)
+                val dest2 = Rect(rect2.left, targetH + divider + rect2.top, rect2.right, targetH + divider + rect2.bottom)
+                canvas.drawBitmap(secondBitmap, Rect(0, 0, w2, h2), dest2, Paint(Paint.FILTER_BITMAP_FLAG))
+                result
+            }
+
+            // Ensure "stored vertical"
+            if (resultBitmap.width > resultBitmap.height) {
+                val matrix = Matrix().apply { postRotate(90f) }
+                val rotated = Bitmap.createBitmap(resultBitmap, 0, 0, resultBitmap.width, resultBitmap.height, matrix, true)
+                if (rotated != resultBitmap) {
+                    resultBitmap.recycle()
+                    resultBitmap = rotated
+                }
             }
 
             if (downsample) {
-                // Economical mode: further downsample the already squeezed image
+                // Digital "film saving": Downsample so the final area is approx equal to a single frame.
+                // Combined area is ~2x. Scale factor = sqrt(0.5) ~ 0.707
                 val scale = 0.707f
-                val scaledW = (finalBitmap.width * scale).toInt()
-                val scaledH = (finalBitmap.height * scale).toInt()
-                val scaled = Bitmap.createScaledBitmap(finalBitmap, scaledW, scaledH, true)
-                if (scaled != finalBitmap) {
-                    finalBitmap.recycle()
+                val scaledW = (resultBitmap.width * scale).toInt()
+                val scaledH = (resultBitmap.height * scale).toInt()
+                val scaled = Bitmap.createScaledBitmap(resultBitmap, scaledW, scaledH, true)
+                if (scaled != resultBitmap) {
+                    resultBitmap.recycle()
                 }
                 return scaled
             }
 
-            return finalBitmap
+            return resultBitmap
         } catch (e: OutOfMemoryError) {
             Log.e(TAG, "OOM during stitching", e)
             return null
@@ -105,11 +106,28 @@ object HalfFrameUtils {
         }
     }
 
-    fun addEffects(bitmap: Bitmap, dateStamp: Boolean, lightLeak: Boolean): Bitmap {
+    private fun getFitRect(srcW: Int, srcH: Int, dstW: Int, dstH: Int): Rect {
+        val srcAspect = srcW.toFloat() / srcH
+        val dstAspect = dstW.toFloat() / dstH
+
+        return if (srcAspect > dstAspect) {
+            // Src is wider than Dst
+            val h = (dstW / srcAspect).toInt()
+            val top = (dstH - h) / 2
+            Rect(0, top, dstW, top + h)
+        } else {
+            // Src is taller than Dst
+            val w = (dstH * srcAspect).toInt()
+            val left = (dstW - w) / 2
+            Rect(left, 0, left + w, dstH)
+        }
+    }
+
+    fun addEffects(bitmap: Bitmap, dateStamp: Boolean, lightLeak: Boolean, layout: String): Bitmap {
         var result = bitmap
 
         if (dateStamp) {
-            result = addDateStamp(result)
+            result = addDateStampToBoth(result, layout)
         }
 
         if (lightLeak) {
@@ -119,7 +137,7 @@ object HalfFrameUtils {
         return result
     }
 
-    private fun addDateStamp(bitmap: Bitmap): Bitmap {
+    private fun addDateStampToBoth(bitmap: Bitmap, layout: String): Bitmap {
         val workingBitmap = if (bitmap.isMutable) bitmap else bitmap.copy(Bitmap.Config.ARGB_8888, true)
         val canvas = Canvas(workingBitmap)
 
@@ -128,16 +146,31 @@ object HalfFrameUtils {
 
         val paint = Paint().apply {
             color = Color.parseColor("#FF8C00") // Classic orange
-            alpha = 200
-            textSize = bitmap.height * 0.03f
+            alpha = 220
+            textSize = minOf(bitmap.width, bitmap.height) * 0.04f
             typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
             setShadowLayer(5f, 0f, 0f, Color.RED)
+            textAlign = Paint.Align.RIGHT
         }
 
-        val x = workingBitmap.width * 0.85f
-        val y = workingBitmap.height * 0.95f
+        val textWidth = paint.measureText(dateText)
+        val margin = textWidth * 0.2f
 
-        canvas.drawText(dateText, x, y, paint)
+        // Since we might have rotated the bitmap to Portrait,
+        // we need to figure out where the "bottom right" of each frame is.
+        // Side-by-side rotated: Top half is Frame 1, Bottom half is Frame 2.
+        // Top-bottom (already Portrait): Top half is Frame 1, Bottom half is Frame 2.
+
+        val frame1BottomY = workingBitmap.height / 2f
+        val frame2BottomY = workingBitmap.height.toFloat()
+
+        val x = workingBitmap.width - margin
+
+        // Frame 1 date
+        canvas.drawText(dateText, x, frame1BottomY - margin, paint)
+        // Frame 2 date
+        canvas.drawText(dateText, x, frame2BottomY - margin, paint)
+
         return workingBitmap
     }
 
@@ -146,26 +179,25 @@ object HalfFrameUtils {
         val canvas = Canvas(workingBitmap)
 
         val random = Random()
-        val leakType = random.nextInt(3)
+        val leakType = random.nextInt(2)
 
         val paint = Paint().apply {
             style = Paint.Style.FILL
         }
 
         when (leakType) {
-            0 -> { // Side leak
-                val colors = intArrayOf(Color.TRANSPARENT, Color.argb(100, 255, 50, 0), Color.argb(150, 255, 100, 0))
-                val positions = floatArrayOf(0f, 0.8f, 1f)
-                val gradient = LinearGradient(0f, 0f, workingBitmap.width * 0.3f, 0f, colors, positions, Shader.TileMode.CLAMP)
+            0 -> { // Vertical side leak
+                val colors = intArrayOf(Color.argb(150, 255, 100, 0), Color.argb(100, 255, 50, 0), Color.TRANSPARENT)
+                val gradient = LinearGradient(0f, 0f, workingBitmap.width * 0.2f, 0f, colors, null, Shader.TileMode.CLAMP)
                 paint.shader = gradient
-                canvas.drawRect(0f, 0f, workingBitmap.width * 0.3f, workingBitmap.height.toFloat(), paint)
+                canvas.drawRect(0f, 0f, workingBitmap.width * 0.2f, workingBitmap.height.toFloat(), paint)
             }
-            1 -> { // Corner leak
+            1 -> { // Bottom corner glow
                 val colors = intArrayOf(Color.argb(180, 255, 150, 0), Color.TRANSPARENT)
                 val gradient = RadialGradient(workingBitmap.width.toFloat(), workingBitmap.height.toFloat(),
-                    workingBitmap.width * 0.5f, colors, null, Shader.TileMode.CLAMP)
+                    workingBitmap.width * 0.6f, colors, null, Shader.TileMode.CLAMP)
                 paint.shader = gradient
-                canvas.drawCircle(workingBitmap.width.toFloat(), workingBitmap.height.toFloat(), workingBitmap.width * 0.5f, paint)
+                canvas.drawCircle(workingBitmap.width.toFloat(), workingBitmap.height.toFloat(), workingBitmap.width * 0.6f, paint)
             }
         }
 

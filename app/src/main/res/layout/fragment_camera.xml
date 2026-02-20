@@ -41,6 +41,15 @@
         app:layout_constraintStart_toStartOf="@id/view_finder" />
 
     <View
+        android:id="@+id/half_frame_gap_indicator"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:background="@android:color/black"
+        android:visibility="gone"
+        app:layout_constraintTop_toTopOf="@id/view_finder"
+        app:layout_constraintStart_toStartOf="@id/view_finder" />
+
+    <View
         android:id="@+id/half_frame_film_roll"
         android:layout_width="0dp"
         android:layout_height="0dp"

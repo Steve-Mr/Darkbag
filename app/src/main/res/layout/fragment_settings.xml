@@ -272,6 +272,20 @@
                         android:text="@string/half_frame_auto_burst"
                         android:textSize="16sp" />
 
+                    <Space android:layout_width="match_parent" android:layout_height="@dimen/spacing_medium" />
+
+                    <com.google.android.material.checkbox.MaterialCheckBox
+                        android:id="@+id/cb_hf_save_jpg"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Save Half-frame JPEG" />
+
+                    <com.google.android.material.checkbox.MaterialCheckBox
+                        android:id="@+id/cb_hf_save_raw"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Save Individual RAWs (DNG)" />
+
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 

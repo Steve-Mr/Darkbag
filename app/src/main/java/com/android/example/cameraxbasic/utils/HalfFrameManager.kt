@@ -22,6 +22,10 @@ class HalfFrameManager(private val context: Context) {
         get() = prefs.getString(SettingsFragment.KEY_HALF_FRAME_TEMP_PATH, null)
         set(value) = prefs.edit().putString(SettingsFragment.KEY_HALF_FRAME_TEMP_PATH, value).apply()
 
+    var frame1BaseName: String?
+        get() = prefs.getString(SettingsFragment.KEY_HALF_FRAME_BASE_NAME, null)
+        set(value) = prefs.edit().putString(SettingsFragment.KEY_HALF_FRAME_BASE_NAME, value).apply()
+
     val isEnabled: Boolean
         get() = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_MODE, false)
 
@@ -37,66 +41,85 @@ class HalfFrameManager(private val context: Context) {
     val lightLeak: Boolean
         get() = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_LIGHT_LEAK, false)
 
+    val saveJpg: Boolean
+        get() = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_SAVE_JPG, true)
+
+    val saveRaw: Boolean
+        get() = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_SAVE_RAW, false)
+
     /**
      * Handles the captured JPG.
      * @param currentJpgPath Path to the just-captured JPG.
-     * @return Path to the final stitched image if step 2 is complete, null otherwise.
+     * @param baseName Unique ID for this capture.
+     * @param isFastPath Whether this is a fast preview.
+     * @return Path to the final stitched image if complete, null otherwise.
      */
-    fun handleCapture(currentJpgPath: String): String? {
+    fun handleCapture(currentJpgPath: String, baseName: String, isFastPath: Boolean): String? {
         if (!isEnabled) return currentJpgPath
 
-        if (step == 0) {
-            // First frame: Save to internal temp
+        val f1Base = frame1BaseName
+
+        if (f1Base == null || baseName == f1Base) {
+            // This is Frame 1 (either Fast Path or HQ update)
+            if (f1Base == null) {
+                frame1BaseName = baseName
+                step = 1
+                Log.d(TAG, "Frame 1 Start: $baseName")
+            } else {
+                Log.d(TAG, "Frame 1 Update (HQ): $baseName")
+            }
+
+            // Save to internal temp
             val tempFile = File(context.filesDir, "half_frame_frame1.jpg")
             File(currentJpgPath).copyTo(tempFile, overwrite = true)
             tempPath = tempFile.absolutePath
-            step = 1
-            Log.d(TAG, "Half-frame Step 1 complete. Saved to $tempPath")
-            return null // Signal that it's not finished
+            return null
         } else {
-            // Second frame: Stitch
-            val firstPath = tempPath
-            if (firstPath == null || !File(firstPath).exists()) {
-                Log.e(TAG, "First frame missing, resetting to step 1")
-                val tempFile = File(context.filesDir, "half_frame_frame1.jpg")
-                File(currentJpgPath).copyTo(tempFile, overwrite = true)
-                tempPath = tempFile.absolutePath
-                step = 1
+            // This is Frame 2
+            if (isFastPath) {
+                // Signal completion but don't stitch yet
+                Log.d(TAG, "Frame 2 Start (Fast): $baseName")
                 return null
+            } else {
+                // HQ Path: Stitch!
+                val firstPath = tempPath
+                if (firstPath == null || !File(firstPath).exists()) {
+                    Log.e(TAG, "First frame missing, resetting to step 1")
+                    frame1BaseName = baseName
+                    step = 1
+                    val tempFile = File(context.filesDir, "half_frame_frame1.jpg")
+                    File(currentJpgPath).copyTo(tempFile, overwrite = true)
+                    tempPath = tempFile.absolutePath
+                    return null
+                }
+
+                Log.d(TAG, "Frame 2 HQ: Stitching $f1Base and $baseName")
+                val stitchedBitmap = HalfFrameUtils.stitchImages(firstPath, currentJpgPath, layout, downsample)
+                if (stitchedBitmap == null) {
+                    Log.e(TAG, "Stitching failed")
+                    return null
+                }
+
+                val finalBitmap = HalfFrameUtils.addEffects(stitchedBitmap, dateStamp, lightLeak, layout)
+                val stitchedFile = File(context.cacheDir, "stitched_hf_${System.currentTimeMillis()}.jpg")
+                FileOutputStream(stitchedFile).use { out ->
+                    finalBitmap.compress(Bitmap.CompressFormat.JPEG, 95, out)
+                }
+                if (finalBitmap != stitchedBitmap) stitchedBitmap.recycle()
+                finalBitmap.recycle()
+
+                // Cleanup
+                File(firstPath).delete()
+                tempPath = null
+                frame1BaseName = null
+                step = 0
+                return stitchedFile.absolutePath
             }
-
-            Log.d(TAG, "Half-frame Step 2: Stitching $firstPath and $currentJpgPath")
-            val stitchedBitmap = HalfFrameUtils.stitchImages(firstPath, currentJpgPath, layout, downsample)
-            if (stitchedBitmap == null) {
-                Log.e(TAG, "Stitching failed")
-                return currentJpgPath // Fallback to just current
-            }
-
-            // Add effects
-            val finalBitmap = HalfFrameUtils.addEffects(stitchedBitmap, dateStamp, lightLeak)
-
-            // Save stitched result to a temp file that will be processed by ImageSaver
-            val stitchedFile = File(context.cacheDir, "stitched_halfframe_${System.currentTimeMillis()}.jpg")
-            FileOutputStream(stitchedFile).use { out ->
-                finalBitmap.compress(Bitmap.CompressFormat.JPEG, 95, out)
-            }
-            if (finalBitmap != stitchedBitmap) {
-                stitchedBitmap.recycle()
-            }
-            finalBitmap.recycle()
-
-            // Cleanup
-            File(firstPath).delete()
-            tempPath = null
-            step = 0
-
-            Log.d(TAG, "Half-frame complete. Stitched file: ${stitchedFile.absolutePath}")
-            return stitchedFile.absolutePath
         }
     }
 
     /**
-     * Gets a FileProvider URI for the intermediate frame, for external access or debugging.
+     * Gets a FileProvider URI for the intermediate frame.
      */
     fun getIntermediateUri(): Uri? {
         val path = tempPath ?: return null
