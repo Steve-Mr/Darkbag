@@ -516,7 +516,6 @@ class CameraFragment : Fragment() {
                         processingSemaphore.release()
                         withContext(Dispatchers.Main) {
                             cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
-                            cameraUiContainerBinding?.cameraCaptureButton?.alpha = 1.0f
                             hideProcessingAnimation()
                         }
                     }
@@ -2682,7 +2681,6 @@ class CameraFragment : Fragment() {
                 processingSemaphore.release()
                 withContext(Dispatchers.Main) {
                     cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
-                    cameraUiContainerBinding?.cameraCaptureButton?.alpha = 1.0f
                     hideProcessingAnimation()
                 }
             }
@@ -2722,7 +2720,6 @@ class CameraFragment : Fragment() {
                                     Toast.LENGTH_SHORT
                                 ).show()
                                 cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
-                                cameraUiContainerBinding?.cameraCaptureButton?.alpha = 1.0f
                                 hideProcessingAnimation()
                             }
                         } catch (e: Exception) {
@@ -2732,7 +2729,6 @@ class CameraFragment : Fragment() {
                             lifecycleScope.launch(Dispatchers.Main) {
                                 cameraUiContainerBinding?.cameraCaptureButton?.isEnabled =
                                     true
-                                cameraUiContainerBinding?.cameraCaptureButton?.alpha = 1.0f
                                 hideProcessingAnimation()
                             }
                         }
@@ -2759,22 +2755,15 @@ class CameraFragment : Fragment() {
                     processingSemaphore.release()
                     lifecycleScope.launch(Dispatchers.Main) {
                         cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
-                        cameraUiContainerBinding?.cameraCaptureButton?.alpha = 1.0f
                     }
                 }
             })
 
         if (processingSemaphore.availablePermits == 0) {
             cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = false
-            cameraUiContainerBinding?.cameraCaptureButton?.alpha = 0.5f
         }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            fragmentCameraBinding.root.foreground = ColorDrawable(Color.WHITE)
-            fragmentCameraBinding.root.postDelayed({
-                fragmentCameraBinding.root.foreground = null
-            }, ANIMATION_FAST_MILLIS)
-        }
+        showShutterBlackout()
     }
 
     private fun triggerHdrPlusBurst(imageCapture: ImageCapture) {
@@ -2856,7 +2845,8 @@ class CameraFragment : Fragment() {
                 archProgress?.setProgress(0f)
                 cameraUiContainerBinding?.captureProgress?.visibility = View.VISIBLE
                 cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = false
-                cameraUiContainerBinding?.cameraCaptureButton?.alpha = 0.5f
+
+                showShutterBlackout()
 
                 Toast.makeText(
                     requireContext(),
@@ -3608,12 +3598,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
             session.capture(request.build(), object : android.hardware.camera2.CameraCaptureSession.CaptureCallback() {
                 override fun onCaptureStarted(session: android.hardware.camera2.CameraCaptureSession, request: android.hardware.camera2.CaptureRequest, timestamp: Long, frameNumber: Long) {
-                    lifecycleScope.launch(Dispatchers.Main) {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                             fragmentCameraBinding.root.foreground = ColorDrawable(Color.WHITE)
-                             fragmentCameraBinding.root.postDelayed({ fragmentCameraBinding.root.foreground = null }, 50)
-                        }
-                    }
+                    showShutterBlackout()
                 }
 
                 override fun onCaptureCompleted(session: android.hardware.camera2.CameraCaptureSession, request: android.hardware.camera2.CaptureRequest, result: android.hardware.camera2.TotalCaptureResult) {
@@ -3663,7 +3648,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 archProgress?.setProgress(0f)
                 cameraUiContainerBinding?.captureProgress?.visibility = View.VISIBLE
                 cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = false
-                cameraUiContainerBinding?.cameraCaptureButton?.alpha = 0.5f
+                showShutterBlackout()
             }
 
             val burstRequests = mutableListOf<android.hardware.camera2.CaptureRequest>()
@@ -3948,6 +3933,16 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         }
     }
 
+    private fun showShutterBlackout() {
+        val binding = fragmentCameraBinding ?: return
+        lifecycleScope.launch(Dispatchers.Main) {
+            binding.viewFinderBlackout.visibility = View.VISIBLE
+            binding.viewFinderBlackout.postDelayed({
+                binding.viewFinderBlackout.visibility = View.GONE
+            }, ANIMATION_FAST_MILLIS)
+        }
+    }
+
     private fun rotateShutter(targetRotation: Float) {
         val binding = cameraUiContainerBinding ?: return
 
@@ -3977,10 +3972,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
         if (processingSemaphore.availablePermits > 0) {
             cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
-            cameraUiContainerBinding?.cameraCaptureButton?.alpha = 1.0f
         } else {
             cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = false
-            cameraUiContainerBinding?.cameraCaptureButton?.alpha = 0.5f
         }
     }
 
