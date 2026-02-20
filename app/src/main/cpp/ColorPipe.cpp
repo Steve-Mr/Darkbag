@@ -96,8 +96,8 @@ static const TIFFFieldInfo dng_field_info[] = {
     { TIFFTAG_BLACKLEVEL, -1, -1, TIFF_LONG, FIELD_CUSTOM, 1, 1, const_cast<char*>("BlackLevel") },
     { TIFFTAG_BLACKLEVELREPEATDIM, 2, 2, TIFF_SHORT, FIELD_CUSTOM, 1, 0, const_cast<char*>("BlackLevelRepeatDim") },
     { TIFFTAG_WHITELEVEL, -1, -1, TIFF_LONG, FIELD_CUSTOM, 1, 1, const_cast<char*>("WhiteLevel") },
-    { TIFFTAG_DEFAULTCROPORIGIN, 2, 2, TIFF_SHORT, FIELD_CUSTOM, 1, 0, const_cast<char*>("DefaultCropOrigin") },
-    { TIFFTAG_DEFAULTCROPSIZE, 2, 2, TIFF_SHORT, FIELD_CUSTOM, 1, 0, const_cast<char*>("DefaultCropSize") },
+    { TIFFTAG_DEFAULTCROPORIGIN, 2, 2, TIFF_LONG, FIELD_CUSTOM, 1, 0, const_cast<char*>("DefaultCropOrigin") },
+    { TIFFTAG_DEFAULTCROPSIZE, 2, 2, TIFF_LONG, FIELD_CUSTOM, 1, 0, const_cast<char*>("DefaultCropSize") },
     { TIFFTAG_COLORMATRIX1, -1, -1, TIFF_SRATIONAL, FIELD_CUSTOM, 1, 1, const_cast<char*>("ColorMatrix1") },
     { TIFFTAG_ASSHOTNEUTRAL, -1, -1, TIFF_RATIONAL, FIELD_CUSTOM, 1, 1, const_cast<char*>("AsShotNeutral") },
     { TIFFTAG_CALIBRATIONILLUMINANT1, 1, 1, TIFF_SHORT, FIELD_CUSTOM, 1, 0, const_cast<char*>("CalibrationIlluminant1") },
@@ -727,21 +727,26 @@ bool write_dng_internal(const char* filename, int width, int height, const unsig
         TIFFSetField(tif, TIFFTAG_BLACKLEVELREPEATDIM, repeatDim);
 
         uint32_t active_area[4];
+        uint32_t activeW, activeH;
         if (activeArea) {
             active_area[0] = (uint32_t)activeArea[0]; // top
             active_area[1] = (uint32_t)activeArea[1]; // left
             active_area[2] = (uint32_t)activeArea[2]; // bottom
             active_area[3] = (uint32_t)activeArea[3]; // right
+            activeW = active_area[3] - active_area[1];
+            activeH = active_area[2] - active_area[0];
         } else {
             active_area[0] = 0;
             active_area[1] = 0;
             active_area[2] = (uint32_t)height;
             active_area[3] = (uint32_t)width;
+            activeW = (uint32_t)width;
+            activeH = (uint32_t)height;
         }
         TIFFSetField(tif, TIFFTAG_ACTIVEAREA, active_area);
 
-        uint16_t crop_origin[2] = {0, 0};
-        uint16_t crop_size[2] = {(uint16_t)width, (uint16_t)height};
+        uint32_t crop_origin[2] = {0, 0};
+        uint32_t crop_size[2] = {activeW, activeH};
         TIFFSetField(tif, TIFFTAG_DEFAULTCROPORIGIN, crop_origin);
         TIFFSetField(tif, TIFFTAG_DEFAULTCROPSIZE, crop_size);
 
