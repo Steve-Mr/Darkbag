@@ -36,6 +36,7 @@ constexpr uint16_t kMax14BitValue = 16383; // 2^14 - 1
 constexpr uint16_t kMax16BitValue = 65535; // 2^16 - 1
 JavaVM* g_jvm = nullptr;
 jclass g_colorProcessorClass = nullptr;
+jclass g_byteBufferClass = nullptr;
 thread_local std::string halide_report_buffer;
 
 extern "C" void halide_print(void* user_context, const char* str) {
@@ -118,8 +119,13 @@ extern "C" jint JNI_OnLoad(JavaVM* vm, void* reserved) {
     g_jvm = vm;
     JNIEnv* env;
     if (vm->GetEnv((void**)&env, JNI_VERSION_1_6) != JNI_OK) return JNI_ERR;
-    jclass clazz = env->FindClass("com/android/example/cameraxbasic/processor/ColorProcessor");
-    if (clazz) g_colorProcessorClass = (jclass)env->NewGlobalRef(clazz);
+
+    jclass colorProcClazz = env->FindClass("com/android/example/cameraxbasic/processor/ColorProcessor");
+    if (colorProcClazz) g_colorProcessorClass = (jclass)env->NewGlobalRef(colorProcClazz);
+
+    jclass byteBufClazz = env->FindClass("java/nio/ByteBuffer");
+    if (byteBufClazz) g_byteBufferClass = (jclass)env->NewGlobalRef(byteBufClazz);
+
     return JNI_VERSION_1_6;
 }
 
@@ -414,8 +420,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processSingleFram
     LOGD("Native processSingleFrameRaw started.");
 
     // Repurpose processHdrPlus logic by wrapping the single buffer in an array
-    jclass objClass = env->FindClass("java/nio/ByteBuffer");
-    jobjectArray dngBuffers = env->NewObjectArray(1, objClass, nullptr);
+    jobjectArray dngBuffers = env->NewObjectArray(1, g_byteBufferClass, nullptr);
     env->SetObjectArrayElement(dngBuffers, 0, bayerBuffer);
 
     // Call the existing processHdrPlus logic.
