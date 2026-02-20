@@ -40,7 +40,7 @@
 #define TIFFTAG_UNIQUECAMERAMODEL 50708
 #define TIFFTAG_BLACKLEVEL 50714
 #ifndef TIFFTAG_BLACKLEVELREPEATDIM
-#define TIFFTAG_BLACKLEVELREPEATDIM 50715
+#define TIFFTAG_BLACKLEVELREPEATDIM 50713
 #endif
 #define TIFFTAG_WHITELEVEL 50717
 #define TIFFTAG_COLORMATRIX1 50721
@@ -62,12 +62,12 @@ static const TIFFFieldInfo dng_field_info[] = {
     { TIFFTAG_DNGBACKWARDVERSION, 4, 4, TIFF_BYTE, FIELD_CUSTOM, 1, 0, const_cast<char*>("DNGBackwardVersion") },
     { TIFFTAG_UNIQUECAMERAMODEL, -1, -1, TIFF_ASCII, FIELD_CUSTOM, 1, 0, const_cast<char*>("UniqueCameraModel") },
     { TIFFTAG_BLACKLEVEL, -1, -1, TIFF_LONG, FIELD_CUSTOM, 1, 1, const_cast<char*>("BlackLevel") },
-    { TIFFTAG_BLACKLEVELREPEATDIM, 2, 2, TIFF_SHORT, FIELD_CUSTOM, 1, 0, const_cast<char*>("BlackLevelRepeatDim") },
+    { TIFFTAG_BLACKLEVELREPEATDIM, 2, 2, TIFF_SHORT, FIELD_CUSTOM, 1, 1, const_cast<char*>("BlackLevelRepeatDim") },
     { TIFFTAG_WHITELEVEL, -1, -1, TIFF_LONG, FIELD_CUSTOM, 1, 1, const_cast<char*>("WhiteLevel") },
-    { TIFFTAG_COLORMATRIX1, -1, -1, TIFF_RATIONAL, FIELD_CUSTOM, 1, 1, const_cast<char*>("ColorMatrix1") },
+    { TIFFTAG_COLORMATRIX1, -1, -1, TIFF_SRATIONAL, FIELD_CUSTOM, 1, 1, const_cast<char*>("ColorMatrix1") },
     { TIFFTAG_ASSHOTNEUTRAL, -1, -1, TIFF_RATIONAL, FIELD_CUSTOM, 1, 1, const_cast<char*>("AsShotNeutral") },
     { TIFFTAG_CALIBRATIONILLUMINANT1, 1, 1, TIFF_SHORT, FIELD_CUSTOM, 1, 0, const_cast<char*>("CalibrationIlluminant1") },
-    { TIFFTAG_CFAREPEATPATTERNDIM, 2, 2, TIFF_SHORT, FIELD_CUSTOM, 1, 0, const_cast<char*>("CFARepeatPatternDim") },
+    { TIFFTAG_CFAREPEATPATTERNDIM, 2, 2, TIFF_SHORT, FIELD_CUSTOM, 1, 1, const_cast<char*>("CFARepeatPatternDim") },
     { TIFFTAG_CFAPATTERN, -1, -1, TIFF_BYTE, FIELD_CUSTOM, 1, 1, const_cast<char*>("CFAPattern") }
 };
 
@@ -688,8 +688,9 @@ bool write_dng_internal(const char* filename, int width, int height, const unsig
     TIFFSetField(tif, TIFFTAG_SUBFILETYPE, 0);
 
     if (isBayer) {
-        TIFFSetField(tif, TIFFTAG_CFAREPEATPATTERNDIM, (uint16_t)2, (uint16_t)2);
-        TIFFSetField(tif, TIFFTAG_BLACKLEVELREPEATDIM, (uint16_t)2, (uint16_t)2);
+        uint16_t repeatDim[2] = {2, 2};
+        TIFFSetField(tif, TIFFTAG_CFAREPEATPATTERNDIM, (uint16_t)2, repeatDim);
+        TIFFSetField(tif, TIFFTAG_BLACKLEVELREPEATDIM, (uint16_t)2, repeatDim);
 
         // 0:RGGB, 1:GRBG, 2:GBRG, 3:BGGR (Android)
         // DNG: 0=R, 1=G, 2=B
@@ -739,16 +740,25 @@ bool write_dng_internal(const char* filename, int width, int height, const unsig
         std::copy(ccm.data(), ccm.data() + 9, ccmMat.m);
         Matrix3x3 invCcm = invert(ccmMat);
         Matrix3x3 colorMatrix1 = multiply(invCcm, M_XYZ_to_sRGB_D65);
-        TIFFSetField(tif, TIFFTAG_COLORMATRIX1, 9, colorMatrix1.m);
+
+        int32_t cm_rational[18];
+        for (int i = 0; i < 9; i++) {
+            cm_rational[i*2] = (int32_t)(colorMatrix1.m[i] * 10000.0f);
+            cm_rational[i*2+1] = 10000;
+        }
+        TIFFSetField(tif, TIFFTAG_COLORMATRIX1, 9, cm_rational);
     }
 
     if (isBayer && wb) {
         // AsShotNeutral is [1/R, 1/G, 1/B]
-        float as_shot_neutral[3] = {1.0f / wb[0], 1.0f / wb[1], 1.0f / wb[3]};
-        TIFFSetField(tif, TIFFTAG_ASSHOTNEUTRAL, 3, as_shot_neutral);
+        uint32_t asn_rational[6];
+        asn_rational[0] = (uint32_t)(10000.0f / wb[0]); asn_rational[1] = 10000;
+        asn_rational[2] = (uint32_t)(10000.0f / wb[1]); asn_rational[3] = 10000;
+        asn_rational[4] = (uint32_t)(10000.0f / wb[3]); asn_rational[5] = 10000;
+        TIFFSetField(tif, TIFFTAG_ASSHOTNEUTRAL, 3, asn_rational);
     } else {
-        static const float as_shot_neutral[] = {1.0f, 1.0f, 1.0f};
-        TIFFSetField(tif, TIFFTAG_ASSHOTNEUTRAL, 3, as_shot_neutral);
+        uint32_t asn_rational[6] = {1, 1, 1, 1, 1, 1};
+        TIFFSetField(tif, TIFFTAG_ASSHOTNEUTRAL, 3, asn_rational);
     }
 
     TIFFSetField(tif, TIFFTAG_CALIBRATIONILLUMINANT1, 21);
