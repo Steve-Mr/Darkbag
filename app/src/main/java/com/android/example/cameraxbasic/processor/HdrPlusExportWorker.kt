@@ -28,6 +28,7 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
         val fNumber = data.getFloat("fNumber", 1.8f)
         val focalLength = data.getFloat("focalLength", 0.0f)
         val captureTimeMillis = data.getLong("captureTimeMillis", 0L)
+        val activeArray = data.getIntArray("activeArray")
 
         val ccm = data.getFloatArray("ccm")
         if (ccm == null || ccm.size != 9) {
@@ -54,7 +55,7 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
             tempRawPath, width, height, orientation, digitalGain, targetLog,
             lutPath, tiffPath, jpgPath, dngPath,
             iso, exposureTime, fNumber, focalLength, captureTimeMillis,
-            ccm, whiteBalance, zoomFactor, mirror
+            ccm, whiteBalance, zoomFactor, mirror, activeArray
         )
 
         if (ret == 0) {

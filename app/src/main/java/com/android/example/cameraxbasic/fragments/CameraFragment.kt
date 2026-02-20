@@ -1462,6 +1462,10 @@ class CameraFragment : Fragment() {
                     blackLevelPattern = intArrayOf(bl.getOffsetForIndex(0, 0), bl.getOffsetForIndex(1, 0), bl.getOffsetForIndex(0, 1), bl.getOffsetForIndex(1, 1))
                 }
                 chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_COLOR_FILTER_ARRANGEMENT)?.let { cfa = it }
+                val activeArrayRect = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
+                val activeArray = if (activeArrayRect != null) {
+                    intArrayOf(activeArrayRect.top, activeArrayRect.left, activeArrayRect.bottom, activeArrayRect.right)
+                } else null
 
                 captureResult.get(android.hardware.camera2.CaptureResult.COLOR_CORRECTION_GAINS)?.let { wbVec ->
                     wb = floatArrayOf(wbVec.red, wbVec.greenEven, wbVec.greenOdd, wbVec.blue)
@@ -1556,7 +1560,8 @@ class CameraFragment : Fragment() {
                     outputBitmap = null,
                     tempRawPath = tempRawFile.absolutePath,
                     zoomFactor = image.zoomRatio,
-                    mirror = mirror
+                    mirror = mirror,
+                    activeArray = activeArray
                 )
 
                 timing?.jniDone = System.currentTimeMillis()
@@ -1593,7 +1598,8 @@ class CameraFragment : Fragment() {
                 // 5. Enqueue HQ Processing
                 val workData = androidx.work.Data.Builder()
                     .putString("tempRawPath", tempRawFile.absolutePath)
-                    .putInt("width", image.width)
+                if (activeArray != null) workData.putIntArray("activeArray", activeArray)
+                workData.putInt("width", image.width)
                     .putInt("height", image.height)
                     .putInt("orientation", image.combinedOrientation)
                     .putFloat("digitalGain", 1.0f)
@@ -1619,10 +1625,9 @@ class CameraFragment : Fragment() {
                     .putString("tiffFolderUri", tiffFolderUri)
                     .putString("rawFolderUri", rawFolderUri)
                     .putBoolean("mirror", mirror)
-                    .build()
 
                 val workRequest = androidx.work.OneTimeWorkRequestBuilder<HdrPlusExportWorker>()
-                    .setInputData(workData)
+                    .setInputData(workData.build())
                     .build()
                 androidx.work.WorkManager.getInstance(context).enqueue(workRequest)
 
@@ -3055,6 +3060,10 @@ class CameraFragment : Fragment() {
                 val ccm = if (useSensorColorMatrix) ccmSensor else ccmCapture
                 val ccmAlt = if (useSensorColorMatrix) ccmCapture else ccmSensor
                 val exportMatrixAB = false
+                val activeArrayRect = chars?.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
+                val activeArray = if (activeArrayRect != null) {
+                    intArrayOf(activeArrayRect.top, activeArrayRect.left, activeArrayRect.bottom, activeArrayRect.right)
+                } else null
 Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB=${wb.joinToString()}, CFA=$cfa, LSC=${lensShadingRows}x${lensShadingCols}, useSensorCCM=$useSensorColorMatrix")
 
                 val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
@@ -3123,7 +3132,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     tempRawFile.absolutePath,
                     currentZoom,
                     mirror,
-                    null // outputBayerDngPath
+                    null, // outputBayerDngPath
+                    activeArray
                 )
 
                 val jniEndTime = System.currentTimeMillis()
@@ -3166,7 +3176,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
                     val workData = androidx.work.Data.Builder()
                         .putString("tempRawPath", tempRawFile.absolutePath)
-                        .putInt("width", width)
+                    if (activeArray != null) workData.putIntArray("activeArray", activeArray)
+                    workData.putInt("width", width)
                         .putInt("height", height)
                         .putInt("orientation", combinedOrientation)
                         .putFloat("digitalGain", digitalGain)
@@ -3192,10 +3203,9 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         .putString("tiffFolderUri", tiffFolderUri)
                         .putString("rawFolderUri", rawFolderUri)
                         .putBoolean("mirror", mirror)
-                        .build()
 
                     val workRequest = androidx.work.OneTimeWorkRequestBuilder<HdrPlusExportWorker>()
-                        .setInputData(workData)
+                        .setInputData(workData.build())
                         .build()
                     androidx.work.WorkManager.getInstance(context).enqueue(workRequest)
                     val saveEndTime = System.currentTimeMillis()

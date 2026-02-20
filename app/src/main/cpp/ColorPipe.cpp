@@ -47,11 +47,20 @@
 #ifndef TIFFTAG_BLACKLEVEL
 #define TIFFTAG_BLACKLEVEL 50714
 #endif
+#ifndef TIFFTAG_ACTIVEAREA
+#define TIFFTAG_ACTIVEAREA 50710
+#endif
 #ifndef TIFFTAG_BLACKLEVELREPEATDIM
 #define TIFFTAG_BLACKLEVELREPEATDIM 50713
 #endif
 #ifndef TIFFTAG_WHITELEVEL
 #define TIFFTAG_WHITELEVEL 50717
+#endif
+#ifndef TIFFTAG_DEFAULTCROPORIGIN
+#define TIFFTAG_DEFAULTCROPORIGIN 50719
+#endif
+#ifndef TIFFTAG_DEFAULTCROPSIZE
+#define TIFFTAG_DEFAULTCROPSIZE 50720
 #endif
 #ifndef TIFFTAG_COLORMATRIX1
 #define TIFFTAG_COLORMATRIX1 50721
@@ -83,9 +92,12 @@ static const TIFFFieldInfo dng_field_info[] = {
     { TIFFTAG_DNGVERSION, 4, 4, TIFF_BYTE, FIELD_CUSTOM, 1, 0, const_cast<char*>("DNGVersion") },
     { TIFFTAG_DNGBACKWARDVERSION, 4, 4, TIFF_BYTE, FIELD_CUSTOM, 1, 0, const_cast<char*>("DNGBackwardVersion") },
     { TIFFTAG_UNIQUECAMERAMODEL, -1, -1, TIFF_ASCII, FIELD_CUSTOM, 1, 0, const_cast<char*>("UniqueCameraModel") },
+    { TIFFTAG_ACTIVEAREA, 4, 4, TIFF_LONG, FIELD_CUSTOM, 1, 0, const_cast<char*>("ActiveArea") },
     { TIFFTAG_BLACKLEVEL, -1, -1, TIFF_LONG, FIELD_CUSTOM, 1, 1, const_cast<char*>("BlackLevel") },
     { TIFFTAG_BLACKLEVELREPEATDIM, 2, 2, TIFF_SHORT, FIELD_CUSTOM, 1, 0, const_cast<char*>("BlackLevelRepeatDim") },
     { TIFFTAG_WHITELEVEL, -1, -1, TIFF_LONG, FIELD_CUSTOM, 1, 1, const_cast<char*>("WhiteLevel") },
+    { TIFFTAG_DEFAULTCROPORIGIN, 2, 2, TIFF_SHORT, FIELD_CUSTOM, 1, 0, const_cast<char*>("DefaultCropOrigin") },
+    { TIFFTAG_DEFAULTCROPSIZE, 2, 2, TIFF_SHORT, FIELD_CUSTOM, 1, 0, const_cast<char*>("DefaultCropSize") },
     { TIFFTAG_COLORMATRIX1, -1, -1, TIFF_SRATIONAL, FIELD_CUSTOM, 1, 1, const_cast<char*>("ColorMatrix1") },
     { TIFFTAG_ASSHOTNEUTRAL, -1, -1, TIFF_RATIONAL, FIELD_CUSTOM, 1, 1, const_cast<char*>("AsShotNeutral") },
     { TIFFTAG_CALIBRATIONILLUMINANT1, 1, 1, TIFF_SHORT, FIELD_CUSTOM, 1, 0, const_cast<char*>("CalibrationIlluminant1") },
@@ -685,7 +697,7 @@ bool write_tiff(const char* filename, int width, int height, const std::vector<u
     return true;
 }
 
-bool write_dng_internal(const char* filename, int width, int height, const unsigned short* data, int samplesPerPixel, int whiteLevel, int iso, long exposureTime, float fNumber, float focalLength, long captureTimeMillis, const std::vector<float>& ccm, int orientation, bool mirror, bool isBayer, const int* blackLevelPattern, const float* wb, int cfaPattern) {
+bool write_dng_internal(const char* filename, int width, int height, const unsigned short* data, int samplesPerPixel, int whiteLevel, int iso, long exposureTime, float fNumber, float focalLength, long captureTimeMillis, const std::vector<float>& ccm, int orientation, bool mirror, bool isBayer, const int* blackLevelPattern, const float* wb, int cfaPattern, const int* activeArea) {
     TIFFSetTagExtender(DNGTagExtender);
     TIFF* tif = TIFFOpen(filename, "w");
     if (!tif) return false;
@@ -713,6 +725,25 @@ bool write_dng_internal(const char* filename, int width, int height, const unsig
         uint16_t repeatDim[2] = {2, 2};
         TIFFSetField(tif, TIFFTAG_CFAREPEATPATTERNDIM, repeatDim);
         TIFFSetField(tif, TIFFTAG_BLACKLEVELREPEATDIM, repeatDim);
+
+        uint32_t active_area[4];
+        if (activeArea) {
+            active_area[0] = (uint32_t)activeArea[0]; // top
+            active_area[1] = (uint32_t)activeArea[1]; // left
+            active_area[2] = (uint32_t)activeArea[2]; // bottom
+            active_area[3] = (uint32_t)activeArea[3]; // right
+        } else {
+            active_area[0] = 0;
+            active_area[1] = 0;
+            active_area[2] = (uint32_t)height;
+            active_area[3] = (uint32_t)width;
+        }
+        TIFFSetField(tif, TIFFTAG_ACTIVEAREA, active_area);
+
+        uint16_t crop_origin[2] = {0, 0};
+        uint16_t crop_size[2] = {(uint16_t)width, (uint16_t)height};
+        TIFFSetField(tif, TIFFTAG_DEFAULTCROPORIGIN, crop_origin);
+        TIFFSetField(tif, TIFFTAG_DEFAULTCROPSIZE, crop_size);
 
         // 0:RGGB, 1:GRBG, 2:GBRG, 3:BGGR (Android)
         // DNG: 0=R, 1=G, 2=B
@@ -758,15 +789,14 @@ bool write_dng_internal(const char* filename, int width, int height, const unsig
     }
 
     if (!ccm.empty()) {
-        Matrix3x3 ccmMat;
-        std::copy(ccm.data(), ccm.data() + 9, ccmMat.m);
-        Matrix3x3 invCcm = invert(ccmMat);
-        Matrix3x3 colorMatrix1 = multiply(invCcm, M_XYZ_to_sRGB_D65);
-
+        // Android COLOR_CORRECTION_TRANSFORM is XYZ -> Sensor.
+        // DNG ColorMatrix1 is XYZ -> Sensor.
+        // Matrix elements are row-major in both.
         int32_t cm_rational[18];
+        const int32_t scale = 1000000;
         for (int i = 0; i < 9; i++) {
-            cm_rational[i*2] = (int32_t)(colorMatrix1.m[i] * 10000.0f);
-            cm_rational[i*2+1] = 10000;
+            cm_rational[i * 2] = (int32_t)(ccm[i] * (float)scale);
+            cm_rational[i * 2 + 1] = scale;
         }
         TIFFSetField(tif, TIFFTAG_COLORMATRIX1, (uint16_t)9, cm_rational);
     }
@@ -783,7 +813,8 @@ bool write_dng_internal(const char* filename, int width, int height, const unsig
         TIFFSetField(tif, TIFFTAG_ASSHOTNEUTRAL, (uint16_t)3, asn_rational);
     }
 
-    TIFFSetField(tif, TIFFTAG_CALIBRATIONILLUMINANT1, 21);
+    // Set to D50 (17) as it's the standard for Android color transforms
+    TIFFSetField(tif, TIFFTAG_CALIBRATIONILLUMINANT1, (uint16_t)17);
     float exposureTimeSec = (float)exposureTime / 1000000000.0f;
     TIFFSetField(tif, TIFFTAG_EXPOSURETIME, exposureTimeSec);
     TIFFSetField(tif, TIFFTAG_FNUMBER, fNumber);
@@ -801,12 +832,12 @@ bool write_dng_internal(const char* filename, int width, int height, const unsig
     return true;
 }
 
-bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, int iso, long exposureTime, float fNumber, float focalLength, long captureTimeMillis, const std::vector<float>& ccm, int orientation, bool mirror) {
-    return write_dng_internal(filename, width, height, data.data(), 3, whiteLevel, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccm, orientation, mirror, false, nullptr, nullptr, 0);
+bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, int iso, long exposureTime, float fNumber, float focalLength, long captureTimeMillis, const std::vector<float>& ccm, int orientation, bool mirror, const int* activeArea) {
+    return write_dng_internal(filename, width, height, data.data(), 3, whiteLevel, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccm, orientation, mirror, false, nullptr, nullptr, 0, activeArea);
 }
 
-bool write_bayer_dng(const char* filename, int width, int height, const unsigned short* data, int whiteLevel, int iso, long exposureTime, float fNumber, float focalLength, long captureTimeMillis, const std::vector<float>& ccm, int orientation, bool mirror, const int* blackLevelPattern, const float* wb, int cfaPattern) {
-    return write_dng_internal(filename, width, height, data, 1, whiteLevel, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccm, orientation, mirror, true, blackLevelPattern, wb, cfaPattern);
+bool write_bayer_dng(const char* filename, int width, int height, const unsigned short* data, int whiteLevel, int iso, long exposureTime, float fNumber, float focalLength, long captureTimeMillis, const std::vector<float>& ccm, int orientation, bool mirror, const int* blackLevelPattern, const float* wb, int cfaPattern, const int* activeArea) {
+    return write_dng_internal(filename, width, height, data, 1, whiteLevel, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccm, orientation, mirror, true, blackLevelPattern, wb, cfaPattern, activeArea);
 }
 
 bool write_bmp(const char* filename, int width, int height, const std::vector<unsigned short>& data) {

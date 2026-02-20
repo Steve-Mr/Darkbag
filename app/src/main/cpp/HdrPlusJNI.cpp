@@ -132,7 +132,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_initMemoryPool(JN
 extern "C" JNIEXPORT jint JNICALL
 Java_com_android_example_cameraxbasic_processor_ColorProcessor_exportHdrPlus(
     JNIEnv* env, jobject /* this */, jstring tempRawPath, jint width, jint height, jint orientation, jfloat digitalGain, jint targetLog, jstring lutPath, jstring tiffPath, jstring jpgPath, jstring dngPath,
-    jint iso, jlong exposureTime, jfloat fNumber, jfloat focalLength, jlong captureTimeMillis, jfloatArray ccm, jfloatArray whiteBalance, jfloat zoomFactor, jboolean mirror
+    jint iso, jlong exposureTime, jfloat fNumber, jfloat focalLength, jlong captureTimeMillis, jfloatArray ccm, jfloatArray whiteBalance, jfloat zoomFactor, jboolean mirror, jintArray activeArray
 ) {
     LOGD("Native exportHdrPlus started.");
     std::lock_guard<std::mutex> lock(g_hdrPlusMutex);
@@ -174,9 +174,16 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_exportHdrPlus(
     const char* jpg_path_cstr = (jpgPath) ? env->GetStringUTFChars(jpgPath, 0) : nullptr;
     const char* dng_path_cstr = (dngPath) ? env->GetStringUTFChars(dngPath, 0) : nullptr;
 
+    int active_arr[4];
+    int* active_arr_ptr = nullptr;
+    if (activeArray && env->GetArrayLength(activeArray) >= 4) {
+        env->GetIntArrayRegion(activeArray, 0, 4, active_arr);
+        active_arr_ptr = active_arr;
+    }
+
     if (dng_path_cstr) {
         LOGD("Exporting DNG to %s", dng_path_cstr);
-        write_dng(dng_path_cstr, width, height, finalImage, kMax16BitValue, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation, (bool)mirror);
+        write_dng(dng_path_cstr, width, height, finalImage, kMax16BitValue, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation, (bool)mirror, active_arr_ptr);
     }
 
     bool saveOk = true;
@@ -203,7 +210,7 @@ extern "C" JNIEXPORT jint JNICALL
 Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     JNIEnv* env, jobject /* this */, jobjectArray dngBuffers, jint width, jint height, jint orientation, jint whiteLevel, jintArray blackLevelPattern, jfloatArray lensShadingMap, jint lensShadingRows, jint lensShadingCols, jboolean useSensorColorMatrix, jfloatArray whiteBalance, jfloatArray ccm, jfloatArray ccmAlt, jboolean exportMatrixAB, jint cfaPattern,
     jint iso, jlong exposureTime, jfloat fNumber, jfloat focalLength, jlong captureTimeMillis, jint targetLog, jstring lutPath, jstring outputTiffPath, jstring outputJpgPath, jstring outputDngPath,
-    jfloat digitalGain, jlongArray debugStats, jobject outputBitmap, jstring tempRawPath, jfloat zoomFactor, jboolean mirror, jstring outputBayerDngPath = nullptr
+    jfloat digitalGain, jlongArray debugStats, jobject outputBitmap, jstring tempRawPath, jfloat zoomFactor, jboolean mirror, jstring outputBayerDngPath, jintArray activeArray
 ) {
     LOGD("Native processHdrPlus started.");
     (void)useSensorColorMatrix;
@@ -387,12 +394,19 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
         env->ReleaseStringUTFChars(tempRawPath, tr_p_cstr);
     }
 
+    int active_arr[4];
+    int* active_arr_ptr = nullptr;
+    if (activeArray && env->GetArrayLength(activeArray) >= 4) {
+        env->GetIntArrayRegion(activeArray, 0, 4, active_arr);
+        active_arr_ptr = active_arr;
+    }
+
     if (!tiffPathStr.empty() || !jpgPathStr.empty() || !dngPathStr.empty() || !bayerDngPathStr.empty()) {
         if (!bayerDngPathStr.empty()) {
-            write_bayer_dng(bayerDngPathStr.c_str(), width, height, (unsigned short*)rawDataPtr, whiteLevel, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation, (bool)mirror, bl_pattern, wbVec.data(), cfaPattern);
+            write_bayer_dng(bayerDngPathStr.c_str(), width, height, (unsigned short*)rawDataPtr, whiteLevel, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation, (bool)mirror, bl_pattern, wbVec.data(), cfaPattern, active_arr_ptr);
         }
         if (!dngPathStr.empty()) {
-            write_dng(dngPathStr.c_str(), width, height, finalImage, kMax16BitValue, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation, (bool)mirror);
+            write_dng(dngPathStr.c_str(), width, height, finalImage, kMax16BitValue, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation, (bool)mirror, active_arr_ptr);
         }
 
         if (!tiffPathStr.empty() || !jpgPathStr.empty()) {
@@ -416,7 +430,7 @@ extern "C" JNIEXPORT jint JNICALL
 Java_com_android_example_cameraxbasic_processor_ColorProcessor_processSingleFrameRaw(
     JNIEnv* env, jobject /* this */, jobject bayerBuffer, jint width, jint height, jint orientation, jint whiteLevel, jintArray blackLevelPattern, jfloatArray lensShadingMap, jint lensShadingRows, jint lensShadingCols, jfloatArray whiteBalance, jfloatArray ccm, jint cfaPattern,
     jint iso, jlong exposureTime, jfloat fNumber, jfloat focalLength, jlong captureTimeMillis, jint targetLog, jstring lutPath, jstring outputTiffPath, jstring outputJpgPath, jstring outputDngPath, jstring outputBayerDngPath,
-    jfloat digitalGain, jlongArray debugStats, jobject outputBitmap, jstring tempRawPath, jfloat zoomFactor, jboolean mirror
+    jfloat digitalGain, jlongArray debugStats, jobject outputBitmap, jstring tempRawPath, jfloat zoomFactor, jboolean mirror, jintArray activeArray
 ) {
     LOGD("Native processSingleFrameRaw started.");
 
@@ -432,6 +446,6 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processSingleFram
         whiteBalance, ccm, nullptr, // ccmAlt
         false, // exportMatrixAB
         cfaPattern, iso, exposureTime, fNumber, focalLength, captureTimeMillis, targetLog, lutPath,
-        outputTiffPath, outputJpgPath, outputDngPath, digitalGain, debugStats, outputBitmap, tempRawPath, zoomFactor, mirror, outputBayerDngPath
+        outputTiffPath, outputJpgPath, outputDngPath, digitalGain, debugStats, outputBitmap, tempRawPath, zoomFactor, mirror, outputBayerDngPath, activeArray
     );
 }
