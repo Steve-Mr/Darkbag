@@ -251,15 +251,14 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     float wb_r = wbData[0], wb_g0 = wbData[1], wb_g1 = wbData[2], wb_b = wbData[3];
     std::vector<float> wbVec = {wb_r, wb_g0, wb_g1, wb_b};
     env->ReleaseFloatArrayElements(whiteBalance, wbData, JNI_ABORT);
-    uint16_t bl_r = 64, bl_g0 = 64, bl_g1 = 64, bl_b = 64;
+    int bl_pattern[4] = {64, 64, 64, 64};
     if (blackLevelPattern && env->GetArrayLength(blackLevelPattern) >= 4) {
-        jint tmp[4] = {64, 64, 64, 64};
-        env->GetIntArrayRegion(blackLevelPattern, 0, 4, tmp);
-        bl_r = (uint16_t)std::max(0, tmp[0]);
-        bl_g0 = (uint16_t)std::max(0, tmp[1]);
-        bl_g1 = (uint16_t)std::max(0, tmp[2]);
-        bl_b = (uint16_t)std::max(0, tmp[3]);
+        env->GetIntArrayRegion(blackLevelPattern, 0, 4, bl_pattern);
     }
+    uint16_t bl_r = (uint16_t)std::max(0, bl_pattern[0]);
+    uint16_t bl_g0 = (uint16_t)std::max(0, bl_pattern[1]);
+    uint16_t bl_g1 = (uint16_t)std::max(0, bl_pattern[2]);
+    uint16_t bl_b = (uint16_t)std::max(0, bl_pattern[3]);
 
     std::vector<float> lensShadingVec;
     if (lensShadingMap && lensShadingRows > 0 && lensShadingCols > 0) {
@@ -390,7 +389,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
 
     if (!tiffPathStr.empty() || !jpgPathStr.empty() || !dngPathStr.empty() || !bayerDngPathStr.empty()) {
         if (!bayerDngPathStr.empty()) {
-            write_bayer_dng(bayerDngPathStr.c_str(), width, height, rawDataPtr, whiteLevel, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation, (bool)mirror, blackLevelPattern, wbVec.data(), cfaPattern);
+            write_bayer_dng(bayerDngPathStr.c_str(), width, height, rawDataPtr, whiteLevel, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation, (bool)mirror, bl_pattern, wbVec.data(), cfaPattern);
         }
         if (!dngPathStr.empty()) {
             write_dng(dngPathStr.c_str(), width, height, finalImage, kMax16BitValue, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation, (bool)mirror);
