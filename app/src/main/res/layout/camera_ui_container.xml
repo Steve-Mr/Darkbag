@@ -319,6 +319,8 @@
                 android:layout_width="@dimen/shutter_button_size"
                 android:layout_height="@dimen/shutter_button_size"
                 android:background="@drawable/ic_shutter_cookie"
+                android:backgroundTint="@color/shutter_button_tint"
+                android:foreground="?attr/selectableItemBackgroundBorderless"
                 android:scaleType="fitCenter"
                 android:contentDescription="@string/capture_button_alt"
                 app:layout_constraintTop_toTopOf="parent"
