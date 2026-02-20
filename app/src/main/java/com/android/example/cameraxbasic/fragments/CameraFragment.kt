@@ -212,6 +212,11 @@ class CameraFragment : Fragment() {
 
     private var processingCount = 0
 
+    // Half-frame State
+    private var isHalfFrameModeEnabled = false
+    private var halfFrameStep = 0
+    private var halfFrameTempPath: String? = null
+
     private var isOisSupported = false
     private var isHdrOisEnabledPref = true
 
@@ -381,6 +386,8 @@ class CameraFragment : Fragment() {
         if (cameraProvider != null || currentLens?.useCamera2 == true) {
             bindCameraUseCases()
         }
+
+        updateHalfFrameUI()
     }
 
     override fun onDestroyView() {
@@ -468,6 +475,19 @@ class CameraFragment : Fragment() {
         updateHdrPlusUi()
         updateHdrPlusConstraints()
 
+        // Initialize Half-frame State
+        isHalfFrameModeEnabled = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_MODE, false)
+        halfFrameStep = prefs.getInt(SettingsFragment.KEY_HALF_FRAME_STEP, 0)
+        halfFrameTempPath = prefs.getString(SettingsFragment.KEY_HALF_FRAME_TEMP_PATH, null)
+
+        // Validate Half-frame state
+        if (halfFrameStep == 1 && (halfFrameTempPath == null || !File(halfFrameTempPath!!).exists())) {
+            halfFrameStep = 0
+            prefs.edit().putInt(SettingsFragment.KEY_HALF_FRAME_STEP, 0).apply()
+        }
+
+        updateHalfFrameUI()
+
         // Initialize HDR+ Burst Helper
         hdrPlusBurstHelper = HdrPlusBurst(
             frameCount = 3,
@@ -475,6 +495,32 @@ class CameraFragment : Fragment() {
                 processHdrPlusBurst(frames, 1.0f)
             }
         )
+
+        // Listen for Half-frame events
+        viewLifecycleOwner.lifecycleScope.launch {
+            ColorProcessor.halfFrameFlow.collect { step ->
+                withContext(Dispatchers.Main) {
+                    if (step == 1) {
+                        // Intermediate capture complete
+                        halfFrameStep = 1
+                        // Persistent state is already updated by HalfFrameManager, but we should sync here if needed.
+                        // Actually HalfFrameManager handles SharedPreferences.
+                        animateHalfFrameAdvance()
+
+                        // Handle auto burst if enabled
+                        val autoBurst = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_AUTO_BURST, false)
+                        if (autoBurst) {
+                            delay(800)
+                            cameraUiContainerBinding?.cameraCaptureButton?.simulateClick()
+                        }
+                    } else {
+                        // Full capture complete
+                        halfFrameStep = 0
+                        updateHalfFrameUI()
+                    }
+                }
+            }
+        }
 
         // Listen for background save completions from JNI or WorkManager
         viewLifecycleOwner.lifecycleScope.launch {
@@ -1170,6 +1216,25 @@ class CameraFragment : Fragment() {
         }
 
         // Listener for button used to capture photo
+        cameraUiContainerBinding?.cameraCaptureButton?.setOnLongClickListener {
+            if (isHalfFrameModeEnabled && halfFrameStep == 1) {
+                // Cancel/Reset half-frame
+                halfFrameStep = 0
+                val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                prefs.edit().putInt(SettingsFragment.KEY_HALF_FRAME_STEP, 0).apply()
+                // Cleanup temp file
+                val tempPath = prefs.getString(SettingsFragment.KEY_HALF_FRAME_TEMP_PATH, null)
+                if (tempPath != null) {
+                    File(tempPath).delete()
+                }
+                updateHalfFrameUI()
+                Toast.makeText(requireContext(), "Half-frame Reset", Toast.LENGTH_SHORT).show()
+                true
+            } else {
+                false
+            }
+        }
+
         cameraUiContainerBinding?.cameraCaptureButton?.setOnClickListener {
             if (isBurstActive) return@setOnClickListener
 
@@ -1604,7 +1669,8 @@ class CameraFragment : Fragment() {
                     saveRaw = saveRaw,
                     jpgFolderUri = jpgFolderUri,
                     rawFolderUri = rawFolderUri,
-                    mirror = false
+                    mirror = false,
+                    isFastPath = true
                 )
 
                 timing?.firstOutputWritten = System.currentTimeMillis()
@@ -3165,7 +3231,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                             saveJpg = true,
                             saveTiff = false,
                             jpgFolderUri = jpgFolderUri,
-                            mirror = false // Mirroring already handled in JNI
+                            mirror = false, // Mirroring already handled in JNI
+                            isFastPath = true
                         )
                     } else {
                         null
@@ -3941,6 +4008,88 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     _fragmentCameraBinding?.viewFinderBlackout?.visibility = View.INVISIBLE
                 }, 100L) // Use 100ms to ensure visibility during processing
             }
+        }
+    }
+
+    private fun updateHalfFrameUI() {
+        val uiBinding = cameraUiContainerBinding ?: return
+        val vfBinding = _fragmentCameraBinding ?: return
+        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        isHalfFrameModeEnabled = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_MODE, false)
+
+        if (!isHalfFrameModeEnabled) {
+            uiBinding.tvHalfFrameStep?.visibility = View.GONE
+            vfBinding.viewFinder.scaleX = 1f
+            vfBinding.viewFinder.scaleY = 1f
+            vfBinding.viewFinder.translationX = 0f
+            vfBinding.viewFinder.translationY = 0f
+
+            // Hide thumbnail only if we are in the middle of a half-frame capture
+            if (halfFrameStep == 0) {
+                 uiBinding.photoViewButton?.visibility = View.VISIBLE
+            }
+            return
+        }
+
+        uiBinding.tvHalfFrameStep?.visibility = View.VISIBLE
+        uiBinding.tvHalfFrameStep?.text = if (halfFrameStep == 0) "1/2" else "2/2"
+
+        // Hide thumbnail if we captured the first frame
+        uiBinding.photoViewButton?.visibility = if (halfFrameStep == 0) View.VISIBLE else View.GONE
+
+        val layout = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUTS[0])
+
+        // Viewfinder size is updated after layout
+        vfBinding.viewFinder.post {
+            if (layout == SettingsFragment.HALF_FRAME_LAYOUTS[0]) { // Side-by-side
+                vfBinding.viewFinder.scaleX = 0.5f
+                vfBinding.viewFinder.scaleY = 1.0f
+                val offset = vfBinding.viewFinder.width / 4f
+                vfBinding.viewFinder.translationX = if (halfFrameStep == 0) -offset else offset
+                vfBinding.viewFinder.translationY = 0f
+            } else { // Top-bottom
+                vfBinding.viewFinder.scaleX = 1.0f
+                vfBinding.viewFinder.scaleY = 0.5f
+                val offset = vfBinding.viewFinder.height / 4f
+                vfBinding.viewFinder.translationX = 0f
+                vfBinding.viewFinder.translationY = if (halfFrameStep == 0) -offset else offset
+            }
+        }
+    }
+
+    private fun animateHalfFrameAdvance() {
+        val vfBinding = _fragmentCameraBinding ?: return
+        val roll = vfBinding.halfFrameFilmRoll
+        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val layout = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUTS[0])
+
+        roll.visibility = View.VISIBLE
+        roll.alpha = 1f
+        roll.translationX = 0f
+        roll.translationY = 0f
+        roll.bringToFront()
+
+        val duration = 500L
+        if (layout == SettingsFragment.HALF_FRAME_LAYOUTS[0]) {
+            roll.translationX = vfBinding.viewFinder.width.toFloat()
+            roll.animate()
+                .translationX(-vfBinding.viewFinder.width.toFloat())
+                .setDuration(duration)
+                .withEndAction {
+                    roll.visibility = View.GONE
+                    updateHalfFrameUI()
+                }
+                .start()
+        } else {
+            roll.translationY = vfBinding.viewFinder.height.toFloat()
+            roll.animate()
+                .translationY(-vfBinding.viewFinder.height.toFloat())
+                .setDuration(duration)
+                .withEndAction {
+                    roll.visibility = View.GONE
+                    updateHalfFrameUI()
+                }
+                .start()
         }
     }
 

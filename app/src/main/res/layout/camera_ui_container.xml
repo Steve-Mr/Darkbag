@@ -338,6 +338,22 @@
                 app:layout_constraintStart_toStartOf="@id/camera_capture_button"
                 app:layout_constraintEnd_toEndOf="@id/camera_capture_button" />
 
+            <!-- Half-frame Progress Indicator -->
+            <TextView
+                android:id="@+id/tv_half_frame_step"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:elevation="4dp"
+                android:textColor="@android:color/white"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:text="1/2"
+                android:visibility="gone"
+                app:layout_constraintTop_toTopOf="@id/camera_capture_button"
+                app:layout_constraintBottom_toBottomOf="@id/camera_capture_button"
+                app:layout_constraintStart_toStartOf="@id/camera_capture_button"
+                app:layout_constraintEnd_toEndOf="@id/camera_capture_button" />
+
             <ImageButton
                 android:id="@+id/photo_view_button"
                 android:layout_width="@dimen/round_button_medium"

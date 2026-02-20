@@ -9,6 +9,7 @@ object ColorProcessor {
     }
 
     val backgroundSaveFlow = MutableSharedFlow<BackgroundSaveEvent>(extraBufferCapacity = 10)
+    val halfFrameFlow = MutableSharedFlow<Int>(extraBufferCapacity = 5)
 
     external fun initMemoryPool(width: Int, height: Int, frames: Int)
 

@@ -199,6 +199,15 @@ class SettingsFragment : Fragment() {
         binding.menuAntibanding.setOnItemClickListener { _, _, position, _ ->
             prefs.edit().putString(KEY_ANTIBANDING, ANTIBANDING_MODES[position]).apply()
         }
+
+        // Half-frame Layout
+        val halfFrameLayoutAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, HALF_FRAME_LAYOUTS)
+        binding.menuHalfFrameLayout.setAdapter(halfFrameLayoutAdapter)
+        val savedHalfFrameLayout = prefs.getString(KEY_HALF_FRAME_LAYOUT, HALF_FRAME_LAYOUTS[0])
+        binding.menuHalfFrameLayout.setText(savedHalfFrameLayout, false)
+        binding.menuHalfFrameLayout.setOnItemClickListener { _, _, position, _ ->
+            prefs.edit().putString(KEY_HALF_FRAME_LAYOUT, HALF_FRAME_LAYOUTS[position]).apply()
+        }
     }
 
     private fun setupCheckboxes() {
@@ -251,6 +260,31 @@ class SettingsFragment : Fragment() {
         binding.switchManualControls.isChecked = prefs.getBoolean(KEY_MANUAL_CONTROLS, false)
         binding.switchManualControls.setOnCheckedChangeListener { _, isChecked ->
             prefs.edit().putBoolean(KEY_MANUAL_CONTROLS, isChecked).apply()
+        }
+
+        binding.switchHalfFrameMode.isChecked = prefs.getBoolean(KEY_HALF_FRAME_MODE, false)
+        binding.switchHalfFrameMode.setOnCheckedChangeListener { _, isChecked ->
+            prefs.edit().putBoolean(KEY_HALF_FRAME_MODE, isChecked).apply()
+        }
+
+        binding.switchHalfFrameDownsample.isChecked = prefs.getBoolean(KEY_HALF_FRAME_DOWNSAMPLE, true)
+        binding.switchHalfFrameDownsample.setOnCheckedChangeListener { _, isChecked ->
+            prefs.edit().putBoolean(KEY_HALF_FRAME_DOWNSAMPLE, isChecked).apply()
+        }
+
+        binding.switchHalfFrameDateStamp.isChecked = prefs.getBoolean(KEY_HALF_FRAME_DATE_STAMP, false)
+        binding.switchHalfFrameDateStamp.setOnCheckedChangeListener { _, isChecked ->
+            prefs.edit().putBoolean(KEY_HALF_FRAME_DATE_STAMP, isChecked).apply()
+        }
+
+        binding.switchHalfFrameLightLeak.isChecked = prefs.getBoolean(KEY_HALF_FRAME_LIGHT_LEAK, false)
+        binding.switchHalfFrameLightLeak.setOnCheckedChangeListener { _, isChecked ->
+            prefs.edit().putBoolean(KEY_HALF_FRAME_LIGHT_LEAK, isChecked).apply()
+        }
+
+        binding.switchHalfFrameAutoBurst.isChecked = prefs.getBoolean(KEY_HALF_FRAME_AUTO_BURST, false)
+        binding.switchHalfFrameAutoBurst.setOnCheckedChangeListener { _, isChecked ->
+            prefs.edit().putBoolean(KEY_HALF_FRAME_AUTO_BURST, isChecked).apply()
         }
 
         binding.switchMirrorFront.isChecked = prefs.getBoolean(KEY_MIRROR_FRONT_CAMERA, true)
@@ -381,11 +415,20 @@ class SettingsFragment : Fragment() {
         const val KEY_RAW_STORAGE_URI = "raw_storage_uri"
         const val KEY_RAW_STORAGE_URI_NAME = "raw_storage_uri_name"
         const val KEY_LAST_CAPTURE_URI = "last_capture_uri"
+        const val KEY_HALF_FRAME_MODE = "half_frame_mode"
+        const val KEY_HALF_FRAME_LAYOUT = "half_frame_layout"
+        const val KEY_HALF_FRAME_DOWNSAMPLE = "half_frame_downsample"
+        const val KEY_HALF_FRAME_STEP = "half_frame_step"
+        const val KEY_HALF_FRAME_TEMP_PATH = "half_frame_temp_path"
+        const val KEY_HALF_FRAME_DATE_STAMP = "half_frame_date_stamp"
+        const val KEY_HALF_FRAME_LIGHT_LEAK = "half_frame_light_leak"
+        const val KEY_HALF_FRAME_AUTO_BURST = "half_frame_auto_burst"
 
         val FOCAL_LENGTHS = listOf("24", "28", "35")
         val ANTIBANDING_MODES = listOf("Auto", "50Hz", "60Hz", "Off")
         val BURST_SIZES = listOf("3", "4", "5", "6", "7", "8")
         val HDR_UNDEREXPOSURE_MODES = listOf("0 EV", "-1 EV", "-2 EV", "Dynamic (Experimental)")
+        val HALF_FRAME_LAYOUTS = listOf("Side-by-side", "Top-bottom")
 
         val LOG_CURVES = listOf(
             "None",
