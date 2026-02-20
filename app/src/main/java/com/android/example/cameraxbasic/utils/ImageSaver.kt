@@ -212,15 +212,16 @@ object ImageSaver {
             }
         }
 
-        // 3. Save Linear DNG (HDR+ only usually)
+        // 3. Save DNG (Bayer or Linear)
         if (saveRaw && linearDngPath != null) {
             val dngFile = File(linearDngPath)
             if (dngFile.exists()) {
+                val dngDisplayName = if (linearDngPath.contains("_linear")) "${baseName}_linear.dng" else "$baseName.dng"
                 if (rawFolderUri != null) {
-                    finalRawUri = saveFileToFolder(context, dngFile, "${baseName}_linear.dng", "image/x-adobe-dng", rawFolderUri)
+                    finalRawUri = saveFileToFolder(context, dngFile, dngDisplayName, "image/x-adobe-dng", rawFolderUri)
                 } else {
                     val dngValues = ContentValues().apply {
-                        put(MediaStore.MediaColumns.DISPLAY_NAME, "${baseName}_linear.dng")
+                        put(MediaStore.MediaColumns.DISPLAY_NAME, dngDisplayName)
                         put(MediaStore.MediaColumns.MIME_TYPE, "image/x-adobe-dng")
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                             put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/Darkbag")

@@ -22,12 +22,12 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
         val jpgPath = data.getString("jpgPath")
         val targetUri = data.getString("targetUri")
         val zoomFactor = data.getFloat("zoomFactor", 1.0f)
-        val dngPath = data.getString("dngPath")
         val iso = data.getInt("iso", 100)
         val exposureTime = data.getLong("exposureTime", 10_000_000L)
         val fNumber = data.getFloat("fNumber", 1.8f)
         val focalLength = data.getFloat("focalLength", 0.0f)
         val captureTimeMillis = data.getLong("captureTimeMillis", 0L)
+        val activeArray = data.getIntArray("activeArray")
 
         val ccm = data.getFloatArray("ccm")
         if (ccm == null || ccm.size != 9) {
@@ -52,9 +52,9 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
 
         val ret = ColorProcessor.exportHdrPlus(
             tempRawPath, width, height, orientation, digitalGain, targetLog,
-            lutPath, tiffPath, jpgPath, dngPath,
+            lutPath, tiffPath, jpgPath,
             iso, exposureTime, fNumber, focalLength, captureTimeMillis,
-            ccm, whiteBalance, zoomFactor, mirror
+            ccm, whiteBalance, zoomFactor, mirror, activeArray
         )
 
         if (ret == 0) {
@@ -69,7 +69,7 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
                 rotationDegrees = 0, // orientation 0 (already handled by JNI)
                 zoomFactor = 1.0f, // zoom 1.0 (already handled by JNI)
                 baseName = baseName,
-                linearDngPath = dngPath,
+                linearDngPath = null, // DNG removed for HDR+ for now
                 tiffPath = tiffPath,
                 saveJpg = saveJpg,
                 saveTiff = saveTiff,

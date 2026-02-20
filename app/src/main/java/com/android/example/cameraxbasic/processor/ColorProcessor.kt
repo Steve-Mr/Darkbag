@@ -47,6 +47,40 @@ object ColorProcessor {
     ): Int
 
     /**
+     * Optimized single frame processing using the Halide pipeline.
+     */
+    external fun processSingleFrameRaw(
+        bayerBuffer: ByteBuffer,
+        width: Int,
+        height: Int,
+        orientation: Int,
+        whiteLevel: Int,
+        blackLevelPattern: IntArray,
+        lensShadingMap: FloatArray?,
+        lensShadingRows: Int,
+        lensShadingCols: Int,
+        whiteBalance: FloatArray,
+        ccm: FloatArray,
+        cfaPattern: Int,
+        iso: Int,
+        exposureTime: Long,
+        fNumber: Float,
+        focalLength: Float,
+        captureTimeMillis: Long,
+        targetLog: Int,
+        lutPath: String?,
+        outputTiffPath: String?,
+        outputJpgPath: String?,
+        digitalGain: Float,
+        debugStats: LongArray?,
+        outputBitmap: android.graphics.Bitmap? = null,
+        tempRawPath: String? = null,
+        zoomFactor: Float,
+        mirror: Boolean,
+        activeArray: IntArray? = null
+    ): Int
+
+    /**
      * Loads a .cube LUT file into a flat float array (RGB interleaved).
      * @param lutPath Path to .cube file.
      * @return Float array of size N^3 * 3, or null if loading failed.
@@ -81,7 +115,6 @@ object ColorProcessor {
         lutPath: String?,
         tiffPath: String?,
         jpgPath: String?,
-        dngPath: String?,
         iso: Int,
         exposureTime: Long,
         fNumber: Float,
@@ -90,7 +123,8 @@ object ColorProcessor {
         ccm: FloatArray,
         whiteBalance: FloatArray,
         zoomFactor: Float,
-        mirror: Boolean
+        mirror: Boolean,
+        activeArray: IntArray? = null
     ): Int
 
     external fun processHdrPlus(
@@ -118,12 +152,12 @@ object ColorProcessor {
         lutPath: String?,
         outputTiffPath: String?,
         outputJpgPath: String?,
-        outputDngPath: String?,
         digitalGain: Float,
         debugStats: LongArray?, // [0] Halide, [1] Copy, [2] Post, [3] DNG Encode, [4] Save, [5] DNG Wait, [6] Total, [7] Align, [8] Merge, [9] Demosaic, [10] Denoise, [11] sRGB, [12] JNI Prep, [13] BlackWhite, [14] WB
         outputBitmap: android.graphics.Bitmap? = null,
         tempRawPath: String? = null,
         zoomFactor: Float,
-        mirror: Boolean
+        mirror: Boolean,
+        activeArray: IntArray? = null
     ): Int
 }

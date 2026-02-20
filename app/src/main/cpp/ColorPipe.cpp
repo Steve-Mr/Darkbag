@@ -35,27 +35,74 @@
 #endif
 
 // Define DNG Tags (Custom Tags 507xx)
+#ifndef TIFFTAG_DNGVERSION
 #define TIFFTAG_DNGVERSION 50706
+#endif
+#ifndef TIFFTAG_DNGBACKWARDVERSION
 #define TIFFTAG_DNGBACKWARDVERSION 50707
+#endif
+#ifndef TIFFTAG_UNIQUECAMERAMODEL
 #define TIFFTAG_UNIQUECAMERAMODEL 50708
+#endif
+#ifndef TIFFTAG_BLACKLEVEL
 #define TIFFTAG_BLACKLEVEL 50714
+#endif
+#ifndef TIFFTAG_ACTIVEAREA
+#define TIFFTAG_ACTIVEAREA 50710
+#endif
+#ifndef TIFFTAG_BLACKLEVELREPEATDIM
+#define TIFFTAG_BLACKLEVELREPEATDIM 50713
+#endif
+#ifndef TIFFTAG_WHITELEVEL
 #define TIFFTAG_WHITELEVEL 50717
+#endif
+#ifndef TIFFTAG_DEFAULTCROPORIGIN
+#define TIFFTAG_DEFAULTCROPORIGIN 50719
+#endif
+#ifndef TIFFTAG_DEFAULTCROPSIZE
+#define TIFFTAG_DEFAULTCROPSIZE 50720
+#endif
+#ifndef TIFFTAG_COLORMATRIX1
 #define TIFFTAG_COLORMATRIX1 50721
+#endif
+#ifndef TIFFTAG_ASSHOTNEUTRAL
 #define TIFFTAG_ASSHOTNEUTRAL 50728
+#endif
+#ifndef TIFFTAG_CALIBRATIONILLUMINANT1
 #define TIFFTAG_CALIBRATIONILLUMINANT1 50778
+#endif
+#ifndef TIFFTAG_OPCODELIST1
 #define TIFFTAG_OPCODELIST1 51008
+#endif
+#ifndef TIFFTAG_OPCODELIST2
 #define TIFFTAG_OPCODELIST2 51009
+#endif
+#ifndef TIFFTAG_OPCODELIST3
 #define TIFFTAG_OPCODELIST3 51022
+#endif
+
+#ifndef TIFFTAG_CFAREPEATPATTERNDIM
+#define TIFFTAG_CFAREPEATPATTERNDIM 33421
+#endif
+#ifndef TIFFTAG_CFAPATTERN
+#define TIFFTAG_CFAPATTERN 33422
+#endif
 
 static const TIFFFieldInfo dng_field_info[] = {
     { TIFFTAG_DNGVERSION, 4, 4, TIFF_BYTE, FIELD_CUSTOM, 1, 0, const_cast<char*>("DNGVersion") },
     { TIFFTAG_DNGBACKWARDVERSION, 4, 4, TIFF_BYTE, FIELD_CUSTOM, 1, 0, const_cast<char*>("DNGBackwardVersion") },
     { TIFFTAG_UNIQUECAMERAMODEL, -1, -1, TIFF_ASCII, FIELD_CUSTOM, 1, 0, const_cast<char*>("UniqueCameraModel") },
+    { TIFFTAG_ACTIVEAREA, 4, 4, TIFF_LONG, FIELD_CUSTOM, 1, 0, const_cast<char*>("ActiveArea") },
     { TIFFTAG_BLACKLEVEL, -1, -1, TIFF_LONG, FIELD_CUSTOM, 1, 1, const_cast<char*>("BlackLevel") },
+    { TIFFTAG_BLACKLEVELREPEATDIM, 2, 2, TIFF_SHORT, FIELD_CUSTOM, 1, 0, const_cast<char*>("BlackLevelRepeatDim") },
     { TIFFTAG_WHITELEVEL, -1, -1, TIFF_LONG, FIELD_CUSTOM, 1, 1, const_cast<char*>("WhiteLevel") },
-    { TIFFTAG_COLORMATRIX1, -1, -1, TIFF_RATIONAL, FIELD_CUSTOM, 1, 1, const_cast<char*>("ColorMatrix1") },
+    { TIFFTAG_DEFAULTCROPORIGIN, 2, 2, TIFF_LONG, FIELD_CUSTOM, 1, 0, const_cast<char*>("DefaultCropOrigin") },
+    { TIFFTAG_DEFAULTCROPSIZE, 2, 2, TIFF_LONG, FIELD_CUSTOM, 1, 0, const_cast<char*>("DefaultCropSize") },
+    { TIFFTAG_COLORMATRIX1, -1, -1, TIFF_SRATIONAL, FIELD_CUSTOM, 1, 1, const_cast<char*>("ColorMatrix1") },
     { TIFFTAG_ASSHOTNEUTRAL, -1, -1, TIFF_RATIONAL, FIELD_CUSTOM, 1, 1, const_cast<char*>("AsShotNeutral") },
-    { TIFFTAG_CALIBRATIONILLUMINANT1, 1, 1, TIFF_SHORT, FIELD_CUSTOM, 1, 0, const_cast<char*>("CalibrationIlluminant1") }
+    { TIFFTAG_CALIBRATIONILLUMINANT1, 1, 1, TIFF_SHORT, FIELD_CUSTOM, 1, 0, const_cast<char*>("CalibrationIlluminant1") },
+    { TIFFTAG_CFAREPEATPATTERNDIM, 2, 2, TIFF_SHORT, FIELD_CUSTOM, 1, 0, const_cast<char*>("CFARepeatPatternDim") },
+    { TIFFTAG_CFAPATTERN, -1, -1, TIFF_BYTE, FIELD_CUSTOM, 1, 1, const_cast<char*>("CFAPattern") }
 };
 
 static void DNGTagExtender(TIFF *tif) {
@@ -650,81 +697,6 @@ bool write_tiff(const char* filename, int width, int height, const std::vector<u
     return true;
 }
 
-bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, int iso, long exposureTime, float fNumber, float focalLength, long captureTimeMillis, const std::vector<float>& ccm, int orientation, bool mirror) {
-    TIFFSetTagExtender(DNGTagExtender);
-    TIFF* tif = TIFFOpen(filename, "w");
-    if (!tif) return false;
-
-    TIFFSetField(tif, TIFFTAG_IMAGEWIDTH, width);
-    TIFFSetField(tif, TIFFTAG_IMAGELENGTH, height);
-    TIFFSetField(tif, TIFFTAG_BITSPERSAMPLE, 16);
-    TIFFSetField(tif, TIFFTAG_COMPRESSION, COMPRESSION_NONE);
-
-    uint16_t tiffOrientation = 1;
-    switch (orientation) {
-        case 90: tiffOrientation = mirror ? 5 : 6; break;
-        case 180: tiffOrientation = mirror ? 4 : 3; break;
-        case 270: tiffOrientation = mirror ? 7 : 8; break;
-        default: tiffOrientation = mirror ? 2 : 1; break;
-    }
-    TIFFSetField(tif, TIFFTAG_ORIENTATION, tiffOrientation);
-    TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_LINEAR_RAW);
-    TIFFSetField(tif, TIFFTAG_SAMPLESPERPIXEL, 3);
-    TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG);
-    TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, height);
-    TIFFSetField(tif, TIFFTAG_SUBFILETYPE, 0);
-
-    static const char* make = "Google";
-    TIFFSetField(tif, TIFFTAG_MAKE, make);
-    static const char* model = "HDR+ Device";
-    TIFFSetField(tif, TIFFTAG_MODEL, model);
-    static const char* software = "CameraXBasic HDR+";
-    TIFFSetField(tif, TIFFTAG_SOFTWARE, software);
-
-    time_t raw_time = (time_t)(captureTimeMillis / 1000);
-    struct tm * timeinfo = localtime(&raw_time);
-    char buffer[20];
-    strftime(buffer, 20, "%Y:%m:%d %H:%M:%S", timeinfo);
-    TIFFSetField(tif, TIFFTAG_DATETIME, buffer);
-
-    static const uint8_t dng_version[] = {1, 4, 0, 0};
-    TIFFSetField(tif, TIFFTAG_DNGVERSION, dng_version);
-    static const uint8_t dng_backward_version[] = {1, 1, 0, 0};
-    TIFFSetField(tif, TIFFTAG_DNGBACKWARDVERSION, dng_backward_version);
-    TIFFSetField(tif, TIFFTAG_UNIQUECAMERAMODEL, model);
-
-    uint32_t white_level_val = (uint32_t)whiteLevel;
-    if (white_level_val == 0) white_level_val = 65535;
-    TIFFSetField(tif, TIFFTAG_WHITELEVEL, 1, &white_level_val);
-    uint32_t black_level_val = 0;
-    TIFFSetField(tif, TIFFTAG_BLACKLEVEL, 1, &black_level_val);
-
-    Matrix3x3 ccmMat;
-    std::copy(ccm.data(), ccm.data() + 9, ccmMat.m);
-    Matrix3x3 invCcm = invert(ccmMat);
-    Matrix3x3 colorMatrix1 = multiply(invCcm, M_XYZ_to_sRGB_D65);
-    TIFFSetField(tif, TIFFTAG_COLORMATRIX1, 9, colorMatrix1.m);
-
-    static const float as_shot_neutral[] = {1.0f, 1.0f, 1.0f};
-    TIFFSetField(tif, TIFFTAG_ASSHOTNEUTRAL, 3, as_shot_neutral);
-
-    TIFFSetField(tif, TIFFTAG_CALIBRATIONILLUMINANT1, 21);
-    float exposureTimeSec = (float)exposureTime / 1000000000.0f;
-    TIFFSetField(tif, TIFFTAG_EXPOSURETIME, exposureTimeSec);
-    TIFFSetField(tif, TIFFTAG_FNUMBER, fNumber);
-    TIFFSetField(tif, TIFFTAG_FOCALLENGTH, focalLength);
-
-    unsigned short iso_short = (unsigned short)iso;
-    TIFFSetField(tif, TIFFTAG_ISOSPEEDRATINGS, 1, &iso_short);
-
-    if (TIFFWriteEncodedStrip(tif, 0, (void*)data.data(), static_cast<size_t>(width) * height * 3 * sizeof(unsigned short)) < 0) {
-        TIFFClose(tif);
-        return false;
-    }
-
-    TIFFClose(tif);
-    return true;
-}
 
 bool write_bmp(const char* filename, int width, int height, const std::vector<unsigned short>& data) {
     std::ofstream file(filename, std::ios::binary);
