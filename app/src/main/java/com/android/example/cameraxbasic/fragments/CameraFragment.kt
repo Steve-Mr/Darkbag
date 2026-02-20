@@ -307,7 +307,7 @@ class CameraFragment : Fragment() {
     )
 
     data class RawImageHolder(
-        val data: ByteArray,
+        val data: ByteBuffer,
         val width: Int,
         val height: Int,
         val timestamp: Long,
@@ -316,35 +316,7 @@ class CameraFragment : Fragment() {
         val zoomRatio: Float,
         val physicalId: String? = null,
         val timing: StandardTimingTracker? = null
-    ) {
-        override fun equals(other: Any?): Boolean {
-            if (this === other) return true
-            if (javaClass != other?.javaClass) return false
-
-            other as RawImageHolder
-
-            if (!data.contentEquals(other.data)) return false
-            if (width != other.width) return false
-            if (height != other.height) return false
-            if (timestamp != other.timestamp) return false
-            if (rotationDegrees != other.rotationDegrees) return false
-            if (zoomRatio != other.zoomRatio) return false
-            if (physicalId != other.physicalId) return false
-
-            return true
-        }
-
-        override fun hashCode(): Int {
-            var result = data.contentHashCode()
-            result = 31 * result + width
-            result = 31 * result + height
-            result = 31 * result + timestamp.hashCode()
-            result = 31 * result + rotationDegrees
-            result = 31 * result + zoomRatio.hashCode()
-            result = 31 * result + (physicalId?.hashCode() ?: 0)
-            return result
-        }
-    }
+    )
 
     /** Volume down button receiver used to trigger shutter */
     private val volumeDownReceiver = object : BroadcastReceiver() {
@@ -1409,25 +1381,22 @@ class CameraFragment : Fragment() {
 
         val rowLength = width * pixelStride
         val dataLength = rowLength * height
-        val cleanData = ByteArray(dataLength)
+        val cleanData = ByteBuffer.allocateDirect(dataLength)
 
         if (rowStride == rowLength) {
-            if (buffer.remaining() == dataLength) {
-                buffer.get(cleanData)
-            } else {
-                buffer.get(cleanData, 0, dataLength)
-            }
+            cleanData.put(buffer)
         } else {
             buffer.rewind()
             for (y in 0 until height) {
                 val rowStart = y * rowStride
                 if (rowStart + rowLength > buffer.capacity()) break
                 buffer.position(rowStart)
-                // Use the more efficient bulk get(ByteArray, offset, length)
-                // to avoid allocating a temporary rowData array and extra System.arraycopy.
-                buffer.get(cleanData, y * rowLength, rowLength)
+                buffer.limit(rowStart + rowLength)
+                cleanData.put(buffer)
             }
+            buffer.limit(buffer.capacity())
         }
+        cleanData.rewind()
 
         return RawImageHolder(
             data = cleanData,
@@ -1554,15 +1523,12 @@ class CameraFragment : Fragment() {
                 val focalLength = captureResult.get(android.hardware.camera2.CaptureResult.LENS_FOCAL_LENGTH) ?: 0.0f
                 val captureTime = System.currentTimeMillis()
 
-                val bayerBuffer = ByteBuffer.allocateDirect(image.data.size).put(image.data)
-                bayerBuffer.rewind()
-
                 val debugStats = LongArray(15)
                 val mirror = shouldMirror
 
                 // 3. JNI Halide Processing
                 val result = ColorProcessor.processSingleFrameRaw(
-                    bayerBuffer = bayerBuffer,
+                    bayerBuffer = image.data,
                     width = image.width,
                     height = image.height,
                     orientation = image.combinedOrientation,
@@ -3288,9 +3254,10 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 if (frames.isNotEmpty()) {
                     try {
                         val firstFrame = frames[0]
-                        val data = ByteArray(firstFrame.buffer!!.remaining())
+                        val data = ByteBuffer.allocateDirect(firstFrame.buffer!!.remaining())
                         firstFrame.buffer!!.rewind()
-                        firstFrame.buffer!!.get(data)
+                        data.put(firstFrame.buffer!!)
+                        data.rewind()
 
                         val holder = RawImageHolder(
                             data = data,
@@ -3767,17 +3734,20 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         val height = image.height
 
         val rowLength = width * pixelStride
-        val data = ByteArray(rowLength * height)
+        val data = ByteBuffer.allocateDirect(rowLength * height)
 
         buffer.rewind()
         if (rowStride == rowLength) {
-            buffer.get(data)
+            data.put(buffer)
         } else {
             for (y in 0 until height) {
                 buffer.position(y * rowStride)
-                buffer.get(data, y * rowLength, rowLength)
+                buffer.limit(y * rowStride + rowLength)
+                data.put(buffer)
             }
+            buffer.limit(buffer.capacity())
         }
+        data.rewind()
 
         val chars = camera2Manager.getCameraCharacteristics(physicalId ?: "0")
         val sensorOrientation = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
@@ -3991,7 +3961,12 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         image: RawImageHolder,
         outputStream: java.io.OutputStream
     ) {
-        val inputStream = java.io.ByteArrayInputStream(image.data)
+        val bytes = ByteArray(image.data.remaining())
+        val originalPos = image.data.position()
+        image.data.get(bytes)
+        image.data.position(originalPos)
+
+        val inputStream = java.io.ByteArrayInputStream(bytes)
         dngCreator.writeInputStream(
             outputStream,
             android.util.Size(image.width, image.height),

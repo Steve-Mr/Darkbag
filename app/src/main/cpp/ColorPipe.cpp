@@ -39,6 +39,9 @@
 #define TIFFTAG_DNGBACKWARDVERSION 50707
 #define TIFFTAG_UNIQUECAMERAMODEL 50708
 #define TIFFTAG_BLACKLEVEL 50714
+#ifndef TIFFTAG_BLACKLEVELREPEATDIM
+#define TIFFTAG_BLACKLEVELREPEATDIM 50715
+#endif
 #define TIFFTAG_WHITELEVEL 50717
 #define TIFFTAG_COLORMATRIX1 50721
 #define TIFFTAG_ASSHOTNEUTRAL 50728
@@ -47,15 +50,25 @@
 #define TIFFTAG_OPCODELIST2 51009
 #define TIFFTAG_OPCODELIST3 51022
 
+#ifndef TIFFTAG_CFAREPEATPATTERNDIM
+#define TIFFTAG_CFAREPEATPATTERNDIM 33421
+#endif
+#ifndef TIFFTAG_CFAPATTERN
+#define TIFFTAG_CFAPATTERN 33422
+#endif
+
 static const TIFFFieldInfo dng_field_info[] = {
     { TIFFTAG_DNGVERSION, 4, 4, TIFF_BYTE, FIELD_CUSTOM, 1, 0, const_cast<char*>("DNGVersion") },
     { TIFFTAG_DNGBACKWARDVERSION, 4, 4, TIFF_BYTE, FIELD_CUSTOM, 1, 0, const_cast<char*>("DNGBackwardVersion") },
     { TIFFTAG_UNIQUECAMERAMODEL, -1, -1, TIFF_ASCII, FIELD_CUSTOM, 1, 0, const_cast<char*>("UniqueCameraModel") },
     { TIFFTAG_BLACKLEVEL, -1, -1, TIFF_LONG, FIELD_CUSTOM, 1, 1, const_cast<char*>("BlackLevel") },
+    { TIFFTAG_BLACKLEVELREPEATDIM, 2, 2, TIFF_SHORT, FIELD_CUSTOM, 1, 0, const_cast<char*>("BlackLevelRepeatDim") },
     { TIFFTAG_WHITELEVEL, -1, -1, TIFF_LONG, FIELD_CUSTOM, 1, 1, const_cast<char*>("WhiteLevel") },
     { TIFFTAG_COLORMATRIX1, -1, -1, TIFF_RATIONAL, FIELD_CUSTOM, 1, 1, const_cast<char*>("ColorMatrix1") },
     { TIFFTAG_ASSHOTNEUTRAL, -1, -1, TIFF_RATIONAL, FIELD_CUSTOM, 1, 1, const_cast<char*>("AsShotNeutral") },
-    { TIFFTAG_CALIBRATIONILLUMINANT1, 1, 1, TIFF_SHORT, FIELD_CUSTOM, 1, 0, const_cast<char*>("CalibrationIlluminant1") }
+    { TIFFTAG_CALIBRATIONILLUMINANT1, 1, 1, TIFF_SHORT, FIELD_CUSTOM, 1, 0, const_cast<char*>("CalibrationIlluminant1") },
+    { TIFFTAG_CFAREPEATPATTERNDIM, 2, 2, TIFF_SHORT, FIELD_CUSTOM, 1, 0, const_cast<char*>("CFARepeatPatternDim") },
+    { TIFFTAG_CFAPATTERN, -1, -1, TIFF_BYTE, FIELD_CUSTOM, 1, 1, const_cast<char*>("CFAPattern") }
 };
 
 static void DNGTagExtender(TIFF *tif) {
@@ -675,8 +688,8 @@ bool write_dng_internal(const char* filename, int width, int height, const unsig
     TIFFSetField(tif, TIFFTAG_SUBFILETYPE, 0);
 
     if (isBayer) {
-        uint16_t cfaRepeatDim[2] = {2, 2};
-        TIFFSetField(tif, TIFFTAG_CFAREPEATPATTERNDIM, cfaRepeatDim);
+        TIFFSetField(tif, TIFFTAG_CFAREPEATPATTERNDIM, (uint16_t)2, (uint16_t)2);
+        TIFFSetField(tif, TIFFTAG_BLACKLEVELREPEATDIM, (uint16_t)2, (uint16_t)2);
 
         // 0:RGGB, 1:GRBG, 2:GBRG, 3:BGGR (Android)
         // DNG: 0=R, 1=G, 2=B
@@ -687,7 +700,7 @@ bool write_dng_internal(const char* filename, int width, int height, const unsig
             {2, 1, 1, 0}  // BGGR
         };
         int pIdx = std::clamp(cfaPattern, 0, 3);
-        TIFFSetField(tif, TIFFTAG_CFAPATTERN, patterns[pIdx]);
+        TIFFSetField(tif, TIFFTAG_CFAPATTERN, (uint32_t)4, patterns[pIdx]);
     }
 
     static const char* make = "Google";

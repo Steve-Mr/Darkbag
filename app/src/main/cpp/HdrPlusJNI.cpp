@@ -389,7 +389,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
 
     if (!tiffPathStr.empty() || !jpgPathStr.empty() || !dngPathStr.empty() || !bayerDngPathStr.empty()) {
         if (!bayerDngPathStr.empty()) {
-            write_bayer_dng(bayerDngPathStr.c_str(), width, height, rawDataPtr, whiteLevel, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation, (bool)mirror, bl_pattern, wbVec.data(), cfaPattern);
+            write_bayer_dng(bayerDngPathStr.c_str(), width, height, (unsigned short*)rawDataPtr, whiteLevel, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation, (bool)mirror, bl_pattern, wbVec.data(), cfaPattern);
         }
         if (!dngPathStr.empty()) {
             write_dng(dngPathStr.c_str(), width, height, finalImage, kMax16BitValue, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation, (bool)mirror);
