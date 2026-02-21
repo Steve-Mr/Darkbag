@@ -425,6 +425,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
                 altJpgPath = altJpgPath.substr(0, dot) + suffix;
                 process_and_save_image(finalImage, width, height, digitalGain, targetLog, lut, nullptr, altJpgPath.c_str(), 1, ccmAltVec.data(), wbVec.data(), orientation, nullptr, false, 1, zoomFactor, (bool)mirror);
             }
+        }
     }
     fillDebugStats(env, debugStats, (jlong)copyDurationMs, (jlong)halideDurationMs, (jlong)postDurationMs, 0, (jlong)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now()-saveStart).count(), 0, (jlong)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now()-nativeStart).count(), (jlong)jniPrepMs, stageStats);
     return 0;
