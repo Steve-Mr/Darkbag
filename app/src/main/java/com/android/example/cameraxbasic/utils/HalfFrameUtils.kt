@@ -11,9 +11,16 @@ import java.util.*
 object HalfFrameUtils {
     private const val TAG = "HalfFrameUtils"
 
+    private fun ensureOrientation(bitmap: Bitmap, wantPortrait: Boolean): Bitmap {
+        val isPortrait = bitmap.height >= bitmap.width
+        if (isPortrait == wantPortrait) return bitmap
+
+        val matrix = Matrix().apply { postRotate(90f) }
+        return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+    }
+
     /**
      * Stitches two images according to the layout without stretching.
-     * If the result is landscape, it rotates it to portrait.
      */
     fun stitchImages(
         firstPath: String,
@@ -21,8 +28,14 @@ object HalfFrameUtils {
         layout: String,
         downsample: Boolean
     ): Bitmap? {
-        val firstBitmap = BitmapFactory.decodeFile(firstPath) ?: return null
-        val secondBitmap = BitmapFactory.decodeFile(secondPath) ?: return null
+        val firstRaw = BitmapFactory.decodeFile(firstPath) ?: return null
+        val secondRaw = BitmapFactory.decodeFile(secondPath) ?: return null
+
+        val isSideBySide = layout == "Side-by-side" || layout == "左右排列" || layout.contains("side", ignoreCase = true)
+
+        // Side-by-side wants Portrait inputs; Top-bottom wants Landscape inputs
+        val firstBitmap = ensureOrientation(firstRaw, isSideBySide)
+        val secondBitmap = ensureOrientation(secondRaw, isSideBySide)
 
         try {
             val w1 = firstBitmap.width
@@ -37,7 +50,7 @@ object HalfFrameUtils {
             // Divider width: 3% of the larger dimension to be more prominent
             val divider = (maxOf(targetW, targetH) * 0.03f).toInt().coerceAtLeast(16)
 
-            var resultBitmap = if (layout == "Side-by-side" || layout == "左右排列" || layout.contains("side", ignoreCase = true)) {
+            var resultBitmap = if (isSideBySide) {
                 val combinedW = targetW + divider + targetW
                 val combinedH = targetH
 
@@ -70,16 +83,6 @@ object HalfFrameUtils {
                 result
             }
 
-            // Ensure "stored vertical"
-            if (resultBitmap.width > resultBitmap.height) {
-                val matrix = Matrix().apply { postRotate(90f) }
-                val rotated = Bitmap.createBitmap(resultBitmap, 0, 0, resultBitmap.width, resultBitmap.height, matrix, true)
-                if (rotated != resultBitmap) {
-                    resultBitmap.recycle()
-                    resultBitmap = rotated
-                }
-            }
-
             if (downsample) {
                 // Digital "film saving": Downsample so the final area is approx equal to a single frame.
                 // Combined area is ~2x. Scale factor = sqrt(0.5) ~ 0.707
@@ -101,8 +104,10 @@ object HalfFrameUtils {
             Log.e(TAG, "Error stitching images", e)
             return null
         } finally {
-            firstBitmap.recycle()
-            secondBitmap.recycle()
+            firstRaw.recycle()
+            secondRaw.recycle()
+            if (firstBitmap != firstRaw) firstBitmap.recycle()
+            if (secondBitmap != secondRaw) secondBitmap.recycle()
         }
     }
 

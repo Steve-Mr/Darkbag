@@ -506,13 +506,6 @@ class CameraFragment : Fragment() {
                         // Persistent state is already updated by HalfFrameManager, but we should sync here if needed.
                         // Actually HalfFrameManager handles SharedPreferences.
                         animateHalfFrameAdvance()
-
-                        // Handle auto burst if enabled
-                        val autoBurst = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_AUTO_BURST, false)
-                        if (autoBurst) {
-                            delay(800)
-                            cameraUiContainerBinding?.cameraCaptureButton?.simulateClick()
-                        }
                     } else {
                         // Full capture complete
                         halfFrameStep = 0
@@ -1251,23 +1244,32 @@ class CameraFragment : Fragment() {
 
             val timing = StandardTimingTracker(shutterClick = System.currentTimeMillis())
 
+            // Early Step Update for Half-frame to allow rapid follow-up
+            val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+            val isFrame1Trigger = isHalfFrameModeEnabled && halfFrameStep == 0
+            if (isFrame1Trigger) {
+                halfFrameStep = 1
+                prefs.edit().putInt(SettingsFragment.KEY_HALF_FRAME_STEP, 1).apply()
+                updateHalfFrameUI()
+            }
+
             if (currentLens?.useCamera2 == true) {
                 if (isHdrPlusEnabled && isRawSupported) {
-                    triggerHdrPlusBurstCamera2()
+                    triggerHdrPlusBurstCamera2(isFrame1Trigger)
                 } else {
-                    takeSinglePictureCamera2(timing)
+                    takeSinglePictureCamera2(timing, isFrame1Trigger)
                 }
             } else {
                 // Get a stable reference of the modifiable image capture use case
                 imageCapture?.let { imageCapture ->
                     if (isRawSupported) {
                         if (isHdrPlusEnabled) {
-                            triggerHdrPlusBurst(imageCapture)
+                            triggerHdrPlusBurst(imageCapture, isFrame1Trigger)
                         } else {
-                            takeSinglePicture(imageCapture, timing)
+                            takeSinglePicture(imageCapture, timing, isFrame1Trigger)
                         }
                     } else {
-                        takeSinglePicture(imageCapture, timing)
+                        takeSinglePicture(imageCapture, timing, isFrame1Trigger)
                     }
                 } ?: run {
                      processingSemaphore.release()
@@ -2751,12 +2753,28 @@ class CameraFragment : Fragment() {
         }
     }
 
-    private fun takeSinglePicture(imageCapture: ImageCapture, timing: StandardTimingTracker? = null) {
+    private fun triggerAutoBurst(prefs: SharedPreferences) {
+        val autoBurst = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_AUTO_BURST, false)
+        if (autoBurst) {
+            lifecycleScope.launch(Dispatchers.Main) {
+                delay(800) // Keep standard interval
+                cameraUiContainerBinding?.cameraCaptureButton?.simulateClick()
+            }
+        }
+    }
+
+    private fun takeSinglePicture(imageCapture: ImageCapture, timing: StandardTimingTracker? = null, isFrame1Trigger: Boolean = false) {
+        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
         imageCapture.takePicture(
             cameraExecutor,
             object : ImageCapture.OnImageCapturedCallback() {
                 override fun onCaptureSuccess(image: ImageProxy) {
                     timing?.captureCallback = System.currentTimeMillis()
+
+                    if (isFrame1Trigger) {
+                        triggerAutoBurst(prefs)
+                    }
+
                     if (image.format == android.graphics.ImageFormat.RAW_SENSOR) {
                         try {
                             val currentZoom = if (currentLens?.isZoomPreset == true && currentLens?.targetZoomRatio != null) {
@@ -2830,7 +2848,7 @@ class CameraFragment : Fragment() {
         showShutterBlackout()
     }
 
-    private fun triggerHdrPlusBurst(imageCapture: ImageCapture) {
+    private fun triggerHdrPlusBurst(imageCapture: ImageCapture, isFrame1Trigger: Boolean = false) {
         if (isBurstActive) {
             Log.d(TAG, "Burst already active, ignoring trigger")
             processingSemaphore.release()
@@ -2921,7 +2939,7 @@ class CameraFragment : Fragment() {
                 Log.d(TAG, "Starting HDR+ Burst (Pipelined, $burstSize frames)")
 
                 for (i in 0 until burstSize) {
-                    captureBurstFrame(imageCapture, burstSize, i)
+                    captureBurstFrame(imageCapture, burstSize, i, isFrame1Trigger)
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to start HDR+ burst", e)
@@ -2937,7 +2955,7 @@ class CameraFragment : Fragment() {
         }
     }
 
-    private fun captureBurstFrame(imageCapture: ImageCapture, totalFrames: Int, currentFrame: Int) {
+    private fun captureBurstFrame(imageCapture: ImageCapture, totalFrames: Int, currentFrame: Int, isFrame1Trigger: Boolean = false) {
         Log.d(TAG, "Triggering burst frame ${currentFrame + 1}/$totalFrames")
         imageCapture.takePicture(
             cameraExecutor,
@@ -2954,6 +2972,11 @@ class CameraFragment : Fragment() {
                             applyCameraControls()
                             resetBurstUi()
                             showProcessingAnimation()
+
+                            if (isFrame1Trigger) {
+                                val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                                triggerAutoBurst(prefs)
+                            }
                         }
                     }
 
@@ -3615,7 +3638,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         }
     }
 
-    private fun takeSinglePictureCamera2(timing: StandardTimingTracker? = null) {
+    private fun takeSinglePictureCamera2(timing: StandardTimingTracker? = null, isFrame1Trigger: Boolean = false) {
         val device = camera2Device ?: run { processingSemaphore.release(); return }
         val session = camera2Session ?: run { processingSemaphore.release(); return }
         val reader = rawImageReader ?: run { processingSemaphore.release(); return }
@@ -3665,6 +3688,10 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             session.capture(request.build(), object : android.hardware.camera2.CameraCaptureSession.CaptureCallback() {
                 override fun onCaptureStarted(session: android.hardware.camera2.CameraCaptureSession, request: android.hardware.camera2.CaptureRequest, timestamp: Long, frameNumber: Long) {
                     showShutterBlackout()
+                    if (isFrame1Trigger) {
+                        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                        triggerAutoBurst(prefs)
+                    }
                 }
 
                 override fun onCaptureCompleted(session: android.hardware.camera2.CameraCaptureSession, request: android.hardware.camera2.CaptureRequest, result: android.hardware.camera2.TotalCaptureResult) {
@@ -3682,7 +3709,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         }
     }
 
-    private fun triggerHdrPlusBurstCamera2() {
+    private fun triggerHdrPlusBurstCamera2(isFrame1Trigger: Boolean = false) {
         val device = camera2Device ?: run { processingSemaphore.release(); return }
         val session = camera2Session ?: run { processingSemaphore.release(); return }
         val reader = rawImageReader ?: run { processingSemaphore.release(); return }
@@ -3773,6 +3800,10 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         lifecycleScope.launch(Dispatchers.Main) {
                             resetBurstUi()
                             showProcessingAnimation()
+
+                            if (isFrame1Trigger) {
+                                triggerAutoBurst(prefs)
+                            }
                         }
                     }
                 } catch (e: Exception) {
