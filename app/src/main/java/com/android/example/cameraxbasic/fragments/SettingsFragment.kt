@@ -149,7 +149,7 @@ class SettingsFragment : Fragment() {
         // HDR+ Underexposure
         val underexposureAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, HDR_UNDEREXPOSURE_MODES)
         binding.menuHdrUnderexposure.setAdapter(underexposureAdapter)
-        val savedUnderexposure = prefs.getString(KEY_HDR_UNDEREXPOSURE_MODE, "Dynamic")
+        val savedUnderexposure = prefs.getString(KEY_HDR_UNDEREXPOSURE_MODE, HDR_UNDEREXPOSURE_MODE_DYNAMIC)
         binding.menuHdrUnderexposure.setText(savedUnderexposure, false)
         binding.menuHdrUnderexposure.setOnItemClickListener { _, _, position, _ ->
             prefs.edit().putString(KEY_HDR_UNDEREXPOSURE_MODE, HDR_UNDEREXPOSURE_MODES[position]).apply()
@@ -385,7 +385,17 @@ class SettingsFragment : Fragment() {
         val FOCAL_LENGTHS = listOf("24", "28", "35")
         val ANTIBANDING_MODES = listOf("Auto", "50Hz", "60Hz", "Off")
         val BURST_SIZES = listOf("3", "4", "5", "6", "7", "8")
-        val HDR_UNDEREXPOSURE_MODES = listOf("0 EV", "-1 EV", "-2 EV", "Dynamic (Experimental)")
+        const val HDR_UNDEREXPOSURE_MODE_0EV = "0 EV"
+        const val HDR_UNDEREXPOSURE_MODE_MINUS_1EV = "-1 EV"
+        const val HDR_UNDEREXPOSURE_MODE_MINUS_2EV = "-2 EV"
+        const val HDR_UNDEREXPOSURE_MODE_DYNAMIC = "Dynamic (Experimental)"
+
+        val HDR_UNDEREXPOSURE_MODES = listOf(
+            HDR_UNDEREXPOSURE_MODE_0EV,
+            HDR_UNDEREXPOSURE_MODE_MINUS_1EV,
+            HDR_UNDEREXPOSURE_MODE_MINUS_2EV,
+            HDR_UNDEREXPOSURE_MODE_DYNAMIC
+        )
 
         val LOG_CURVES = listOf(
             "None",

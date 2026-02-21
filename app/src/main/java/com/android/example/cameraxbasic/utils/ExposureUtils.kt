@@ -3,6 +3,7 @@ package com.android.example.cameraxbasic.utils
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CaptureResult
 import android.util.Range
+import com.android.example.cameraxbasic.fragments.SettingsFragment
 import kotlin.math.log2
 import kotlin.math.max
 import kotlin.math.min
@@ -40,7 +41,7 @@ object ExposureUtils {
      * @param currentTime Current Exposure Time (ns) from auto-exposure.
      * @param isoRange Supported ISO range of the camera.
      * @param timeRange Supported Exposure Time range of the camera.
-     * @param underexposureMode Mode for underexposure: "0 EV", "-1 EV", "-2 EV", or "Dynamic (Experimental)".
+     * @param underexposureMode Mode for underexposure. See [SettingsFragment] HDR_UNDEREXPOSURE_MODE_* constants.
      * @param clippingRatio Ratio of pixels that are near saturation (0.0 to 1.0).
      * @return ExposureConfig with target ISO, Time, and required Digital Gain.
      */
@@ -49,7 +50,7 @@ object ExposureUtils {
         currentTime: Long,
         isoRange: Range<Int>,
         timeRange: Range<Long>,
-        underexposureMode: String = "Dynamic (Experimental)",
+        underexposureMode: String = SettingsFragment.HDR_UNDEREXPOSURE_MODE_DYNAMIC,
         clippingRatio: Double = 0.0
     ): ExposureConfig {
         val minIso = isoRange.lower
@@ -65,9 +66,9 @@ object ExposureUtils {
         // 2. Determine Underexposure Factor
         var additionalUnderexposure = 0.0
         var underexposeFactor = when (underexposureMode) {
-            "0 EV" -> 1.0f
-            "-1 EV" -> 0.5f
-            "-2 EV" -> 0.25f
+            SettingsFragment.HDR_UNDEREXPOSURE_MODE_0EV -> 1.0f
+            SettingsFragment.HDR_UNDEREXPOSURE_MODE_MINUS_1EV -> 0.5f
+            SettingsFragment.HDR_UNDEREXPOSURE_MODE_MINUS_2EV -> 0.25f
             else -> {
                 // Dynamic Logic Refined:
                 // - ISO 40 or less: -4 EV (rare)
@@ -91,8 +92,8 @@ object ExposureUtils {
         }
 
         // Apply additional underexposure if highlights are clipping (Pixel-based refinement)
-        if (underexposureMode == "Dynamic (Experimental)" && clippingRatio > CLIPPING_RATIO_THRESHOLD) {
-             // Smooth ramp: If more than threshold (e.g. 3%) pixels are clipping, push underexposure further.
+        if (underexposureMode == SettingsFragment.HDR_UNDEREXPOSURE_MODE_DYNAMIC && clippingRatio > CLIPPING_RATIO_THRESHOLD) {
+             // Smooth ramp: If more than threshold (e.g. 0.5%) pixels are clipping, push underexposure further.
              // Subtraction of threshold ensures a smooth transition from 0 EV additional underexposure.
              val excessClipping = clippingRatio - CLIPPING_RATIO_THRESHOLD
              additionalUnderexposure = (excessClipping * CLIPPING_TO_EV_FACTOR).coerceAtMost(MAX_ADDITIONAL_UNDEREXPOSURE_STOPS)
@@ -160,7 +161,7 @@ object ExposureUtils {
         val actualTotalExposure = targetIso.toDouble() * targetTime.toDouble()
 
         // Use restricted recovery target to keep highlights safe.
-        val effectiveBaseline = if (underexposureMode == "Dynamic (Experimental)") {
+        val effectiveBaseline = if (underexposureMode == SettingsFragment.HDR_UNDEREXPOSURE_MODE_DYNAMIC) {
             baselineTotalExposure * RECOVERY_TARGET_RATIO
         } else {
             baselineTotalExposure

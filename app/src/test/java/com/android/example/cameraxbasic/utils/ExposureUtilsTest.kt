@@ -1,6 +1,7 @@
 package com.android.example.cameraxbasic.utils
 
 import android.util.Range
+import com.android.example.cameraxbasic.fragments.SettingsFragment
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -23,7 +24,7 @@ class ExposureUtilsTest {
             currentTime = 33_333_333L, // 1/30s
             isoRange = isoRange,
             timeRange = timeRange,
-            underexposureMode = "Dynamic (Experimental)",
+            underexposureMode = SettingsFragment.HDR_UNDEREXPOSURE_MODE_DYNAMIC,
             clippingRatio = 0.0
         )
 
@@ -51,7 +52,7 @@ class ExposureUtilsTest {
             currentTime = 100_000L, // Already at minTime
             isoRange = isoRange,
             timeRange = timeRange,
-            underexposureMode = "Dynamic (Experimental)",
+            underexposureMode = SettingsFragment.HDR_UNDEREXPOSURE_MODE_DYNAMIC,
             clippingRatio = 0.0
         )
 

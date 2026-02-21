@@ -918,7 +918,7 @@ class CameraFragment : Fragment() {
                             val validIsoRange = isoRange ?: android.util.Range(100, 3200)
                             val validTimeRange = exposureTimeRange ?: android.util.Range(1000L, 1_000_000_000L)
                             val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-                            val underexposureMode = prefs.getString(SettingsFragment.KEY_HDR_UNDEREXPOSURE_MODE, "Dynamic (Experimental)") ?: "Dynamic (Experimental)"
+                            val underexposureMode = prefs.getString(SettingsFragment.KEY_HDR_UNDEREXPOSURE_MODE, SettingsFragment.HDR_UNDEREXPOSURE_MODE_DYNAMIC) ?: SettingsFragment.HDR_UNDEREXPOSURE_MODE_DYNAMIC
 
                             lastHdrPlusConfig = ExposureUtils.calculateHdrPlusExposure(
                                 iso, time, validIsoRange, validTimeRange, underexposureMode, lastClippingRatio
@@ -1370,10 +1370,7 @@ class CameraFragment : Fragment() {
             if (totalSampled > 0) {
                 val luma = sum.toDouble() / totalSampled
                 val currentRatio = highlightCount.toDouble() / totalSampled
-                lastClippingRatio = (CLIPPING_EMA_ALPHA * currentRatio) + (1.0 - CLIPPING_EMA_ALPHA) * lastClippingRatio
-                if (currentRatio > 0.01) {
-                    Log.d(TAG, "LuminosityAnalyzer: clipping detected! current=$currentRatio, ema=$lastClippingRatio")
-                }
+                updateClippingRatio(currentRatio, "LuminosityAnalyzer")
 
                 listeners.forEach { it(luma) }
             }
@@ -2310,6 +2307,13 @@ class CameraFragment : Fragment() {
             .start()
     }
 
+    private fun updateClippingRatio(currentRatio: Double, source: String) {
+        lastClippingRatio = (CLIPPING_EMA_ALPHA * currentRatio) + (1.0 - CLIPPING_EMA_ALPHA) * lastClippingRatio
+        if (currentRatio > 0.01) {
+            Log.d(TAG, "$source: clipping detected! current=$currentRatio, ema=$lastClippingRatio")
+        }
+    }
+
     private fun getCombinedOrientation(): Int {
         val sensorOrientation = try {
             val lens = currentLens
@@ -2801,7 +2805,7 @@ class CameraFragment : Fragment() {
                     val validIsoRange = isoRange ?: android.util.Range(100, 3200)
                     val validTimeRange = exposureTimeRange ?: android.util.Range(1000L, 1_000_000_000L)
                     val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-                    val underexposureMode = prefs.getString(SettingsFragment.KEY_HDR_UNDEREXPOSURE_MODE, "Dynamic (Experimental)") ?: "Dynamic (Experimental)"
+                    val underexposureMode = prefs.getString(SettingsFragment.KEY_HDR_UNDEREXPOSURE_MODE, SettingsFragment.HDR_UNDEREXPOSURE_MODE_DYNAMIC) ?: SettingsFragment.HDR_UNDEREXPOSURE_MODE_DYNAMIC
                     ExposureUtils.calculateHdrPlusExposure(
                         currentIso,
                         currentTime,
@@ -3480,10 +3484,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     }
                 }
                 val currentRatio = if (totalSampled > 0) highlightCount.toDouble() / totalSampled else 0.0
-                lastClippingRatio = (CLIPPING_EMA_ALPHA * currentRatio) + (1.0 - CLIPPING_EMA_ALPHA) * lastClippingRatio
-                if (currentRatio > 0.01) {
-                    Log.d(TAG, "AnalysisImageReader: clipping detected! current=$currentRatio, ema=$lastClippingRatio")
-                }
+                updateClippingRatio(currentRatio, "AnalysisImageReader")
             } catch (e: Exception) {
                 Log.e(TAG, "Error analyzing image", e)
             } finally {
@@ -3646,7 +3647,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             val validIsoRange = isoRange ?: android.util.Range(100, 3200)
             val validTimeRange = exposureTimeRange ?: android.util.Range(1000L, 1_000_000_000L)
             val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-            val underexposureMode = prefs.getString(SettingsFragment.KEY_HDR_UNDEREXPOSURE_MODE, "Dynamic (Experimental)") ?: "Dynamic (Experimental)"
+            val underexposureMode = prefs.getString(SettingsFragment.KEY_HDR_UNDEREXPOSURE_MODE, SettingsFragment.HDR_UNDEREXPOSURE_MODE_DYNAMIC) ?: SettingsFragment.HDR_UNDEREXPOSURE_MODE_DYNAMIC
 
             val config = ExposureUtils.calculateHdrPlusExposure(
                 curIso, curTime, validIsoRange, validTimeRange, underexposureMode, lastClippingRatio
