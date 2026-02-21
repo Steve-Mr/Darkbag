@@ -21,15 +21,9 @@ import android.annotation.SuppressLint
 import android.content.*
 import android.content.ContentUris
 import android.content.res.Configuration
-import android.graphics.Bitmap
-import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.Paint
-import android.graphics.Shader
 import android.graphics.SurfaceTexture
-import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.ColorDrawable
-import android.graphics.drawable.LayerDrawable
 import android.hardware.display.DisplayManager
 import android.os.Build
 import android.os.Bundle
@@ -520,12 +514,8 @@ class CameraFragment : Fragment() {
         viewLifecycleOwner.lifecycleScope.launch {
             ColorProcessor.halfFrameFlow.collect { step ->
                 withContext(Dispatchers.Main) {
-                    if (step == 1) {
-                        // Frame 1 burst done: play transition from right -> left
-                        animateHalfFrameAdvance()
-                    } else {
-                        // Frame 2 burst done: play exit+re-enter transition, then settle to step 1 UI
-                        animateHalfFrameAdvance()
+                    if (step != 1) {
+                        // Full capture complete
                         halfFrameStep = 0
                         updateHalfFrameUI()
                         hideProcessingAnimation() // Final cleanup
@@ -2824,7 +2814,10 @@ class CameraFragment : Fragment() {
                     timing?.captureCallback = System.currentTimeMillis()
 
                     if (isFrame1Trigger) {
+                        lifecycleScope.launch(Dispatchers.Main) { animateFilmEdgeRoll() }
                         triggerAutoBurst(prefs)
+                    } else if (isHalfFrameModeEnabled) {
+                        lifecycleScope.launch(Dispatchers.Main) { animateFilmEdgeRoll() }
                     }
 
                     if (image.format == android.graphics.ImageFormat.RAW_SENSOR) {
@@ -3031,6 +3024,9 @@ class CameraFragment : Fragment() {
                                 showProcessingAnimation()
                             }
 
+                            if (isHalfFrameModeEnabled) {
+                                animateFilmEdgeRoll()
+                            }
                             if (isFrame1Trigger) {
                                 val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
                                 triggerAutoBurst(prefs)
@@ -3869,6 +3865,9 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                                 showProcessingAnimation()
                             }
 
+                            if (isHalfFrameModeEnabled) {
+                                animateFilmEdgeRoll()
+                            }
                             if (isFrame1Trigger) {
                                 triggerAutoBurst(prefs)
                             }
@@ -4151,10 +4150,10 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
             gapView.visibility = View.VISIBLE
             gapView.bringToFront()
-            gapView.background = buildHalfFrameGapBackground()
+            gapView.background = ColorDrawable(Color.parseColor("#FF7A7A7A"))
             val gapParams = gapView.layoutParams
             gapParams.width = gapWidthScaled.toInt()
-            gapParams.height = (totalH * scale).toInt()
+            gapParams.height = totalH.toInt()
             gapView.layoutParams = gapParams
 
             edgeTopView.visibility = View.VISIBLE
@@ -4163,7 +4162,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             edgeBottomView.bringToFront()
 
             vfBinding.viewFinder.scaleX = scale
-            vfBinding.viewFinder.scaleY = scale
+            vfBinding.viewFinder.scaleY = 1f
 
             if (halfFrameStep == 0) {
                 vfBinding.viewFinder.translationX = -shift
@@ -4177,83 +4176,44 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         }
     }
 
-    private fun animateHalfFrameAdvance() {
-        val vfBinding = fragmentCameraBinding
+    private fun animateFilmEdgeRoll() {
         val uiBinding = cameraUiContainerBinding ?: return
-        val gap = uiBinding.halfFrameGapIndicator ?: return
-        val finder = vfBinding.viewFinder
-        val totalW = finder.width.toFloat()
-        if (totalW <= 0f) return
+        val topEdge = uiBinding.halfFrameFilmEdgeTop ?: return
+        val bottomEdge = uiBinding.halfFrameFilmEdgeBottom ?: return
 
-        val gapWidthBase = (totalW * 0.12f).coerceAtLeast(60f)
-        val scale = totalW / (totalW + gapWidthBase)
-        val gapWidthScaled = gapWidthBase * scale
-        val shift = gapWidthScaled / 2f
+        topEdge.animate().cancel()
+        bottomEdge.animate().cancel()
 
-        val posRight = totalW * scale
-        val posLeft = 0f
+        val rollDistance = (resources.displayMetrics.density * 14f)
 
-        gap.animate().cancel()
-        finder.animate().cancel()
+        topEdge.translationY = 0f
+        bottomEdge.translationY = 0f
 
-        if (halfFrameStep == 1) {
-            gap.translationX = posRight
-            finder.translationX = -shift
+        topEdge.animate()
+            .translationY(-rollDistance)
+            .setDuration(180)
+            .setInterpolator(android.view.animation.AccelerateDecelerateInterpolator())
+            .withEndAction {
+                topEdge.animate()
+                    .translationY(0f)
+                    .setDuration(180)
+                    .setInterpolator(android.view.animation.AccelerateDecelerateInterpolator())
+                    .start()
+            }
+            .start()
 
-            gap.animate()
-                .translationX(-gapWidthScaled)
-                 .setDuration(1200)
-                .setInterpolator(android.view.animation.DecelerateInterpolator())
-                .start()
-            finder.animate()
-                .translationX(shift)
-                 .setDuration(1200)
-                .setInterpolator(android.view.animation.DecelerateInterpolator())
-                .start()
-        } else {
-            finder.translationX = shift
-            gap.translationX = posLeft
-
-            gap.animate()
-                 .translationX(-gapWidthScaled * 1.1f)
-                 .setDuration(700)
-                .setInterpolator(android.view.animation.AccelerateInterpolator())
-                .withEndAction {
-                    gap.translationX = totalW
-                    gap.animate()
-                        .translationX(posRight)
-                         .setDuration(700)
-                        .setInterpolator(android.view.animation.DecelerateInterpolator())
-                        .start()
-                }
-                .start()
-
-            finder.animate()
-                .translationX(-shift)
-                 .setDuration(1000)
-                .setInterpolator(android.view.animation.DecelerateInterpolator())
-                .start()
-        }
-    }
-
-    private fun buildHalfFrameGapBackground(): LayerDrawable {
-        val stripeSizePx = (resources.displayMetrics.density * 12f).toInt().coerceAtLeast(8)
-        val bitmap = Bitmap.createBitmap(stripeSizePx, stripeSizePx, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(bitmap)
-        canvas.drawColor(Color.parseColor("#FF1A1A1A"))
-
-        val stripePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#99FFFFFF")
-            strokeWidth = stripeSizePx / 3f
-        }
-        canvas.drawLine(-stripeSizePx.toFloat(), stripeSizePx.toFloat(), stripeSizePx.toFloat(), -stripeSizePx.toFloat(), stripePaint)
-        canvas.drawLine(0f, stripeSizePx.toFloat(), stripeSizePx.toFloat(), 0f, stripePaint)
-
-        val bitmapDrawable = BitmapDrawable(resources, bitmap).apply {
-            tileModeX = Shader.TileMode.REPEAT
-            tileModeY = Shader.TileMode.REPEAT
-        }
-        return LayerDrawable(arrayOf(ColorDrawable(Color.parseColor("#FF101010")), bitmapDrawable))
+        bottomEdge.animate()
+            .translationY(rollDistance)
+            .setDuration(180)
+            .setInterpolator(android.view.animation.AccelerateDecelerateInterpolator())
+            .withEndAction {
+                bottomEdge.animate()
+                    .translationY(0f)
+                    .setDuration(180)
+                    .setInterpolator(android.view.animation.AccelerateDecelerateInterpolator())
+                    .start()
+            }
+            .start()
     }
 
     private fun cycleCaptureMode() {
