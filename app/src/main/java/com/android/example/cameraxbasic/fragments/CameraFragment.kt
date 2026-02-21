@@ -2645,7 +2645,7 @@ class CameraFragment : Fragment() {
         private const val FOCUS_RING_DISPLAY_TIME_MS = 500L
         private const val FOCUS_RING_FADE_OUT_DURATION_MS = 300L
         private const val AE_SETTLE_DELAY_MS = 50L
-        private const val ANALYSIS_HIGHLIGHT_THRESHOLD = 225
+        private const val ANALYSIS_HIGHLIGHT_THRESHOLD = 200
         private const val ANALYSIS_SAMPLING_STEP = 4
         private const val CLIPPING_EMA_ALPHA = 0.3
 
