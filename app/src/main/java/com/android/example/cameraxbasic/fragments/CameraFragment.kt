@@ -422,10 +422,17 @@ class CameraFragment : Fragment() {
         return fragmentCameraBinding.root
     }
 
-    private fun setGalleryThumbnail(filename: String) {
+    private fun setGalleryThumbnail(filename: String?) {
         // Run the operations in the view's thread
         cameraUiContainerBinding?.photoViewButton?.let { photoViewButton ->
             photoViewButton.post {
+                if (filename == null) {
+                    photoViewButton.setImageDrawable(null)
+                    photoViewButton.visibility = View.GONE
+                    return@post
+                }
+
+                photoViewButton.visibility = View.VISIBLE
                 // Remove thumbnail padding
                 photoViewButton.setPadding(resources.getDimension(R.dimen.stroke_small).toInt())
 
@@ -1679,9 +1686,11 @@ class CameraFragment : Fragment() {
                 timing?.firstOutputWritten = System.currentTimeMillis()
 
                 withContext(Dispatchers.Main) {
-                    fastOutputUri?.let {
-                        prefs.edit().putString(SettingsFragment.KEY_LAST_CAPTURE_URI, it.toString()).apply()
-                        setGalleryThumbnail(it.toString())
+                    if (fastOutputUri != null) {
+                        prefs.edit().putString(SettingsFragment.KEY_LAST_CAPTURE_URI, fastOutputUri.toString()).apply()
+                        setGalleryThumbnail(fastOutputUri.toString())
+                    } else if (isHalfFrameModeEnabled && prefs.getInt(SettingsFragment.KEY_HALF_FRAME_STEP, 0) == 1) {
+                        setGalleryThumbnail(null)
                     }
                 }
 
@@ -2735,10 +2744,12 @@ class CameraFragment : Fragment() {
                     mirror = mirror
                 )
                 withContext(Dispatchers.Main) {
-                    uri?.let {
+                    if (uri != null) {
                         appContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-                            .edit().putString(SettingsFragment.KEY_LAST_CAPTURE_URI, it.toString()).apply()
-                        setGalleryThumbnail(it.toString())
+                            .edit().putString(SettingsFragment.KEY_LAST_CAPTURE_URI, uri.toString()).apply()
+                        setGalleryThumbnail(uri.toString())
+                    } else if (isHalfFrameModeEnabled && appContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE).getInt(SettingsFragment.KEY_HALF_FRAME_STEP, 0) == 1) {
+                        setGalleryThumbnail(null)
                     }
                 }
             } catch (e: Exception) {
@@ -3266,6 +3277,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         if (fastJpegUri != null) {
                             prefs.edit().putString(SettingsFragment.KEY_LAST_CAPTURE_URI, fastJpegUri.toString()).apply()
                             setGalleryThumbnail(fastJpegUri.toString())
+                        } else if (isHalfFrameModeEnabled && prefs.getInt(SettingsFragment.KEY_HALF_FRAME_STEP, 0) == 1) {
+                            setGalleryThumbnail(null)
                         }
                         Toast.makeText(context, "HDR+ Saved!", Toast.LENGTH_SHORT).show()
                         hideProcessingAnimation()

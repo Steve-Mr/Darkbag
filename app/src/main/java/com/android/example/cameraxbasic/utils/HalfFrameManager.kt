@@ -77,9 +77,25 @@ class HalfFrameManager(private val context: Context) {
         } else {
             // This is Frame 2
             if (isFastPath) {
-                // Signal completion but don't stitch yet
-                Log.d(TAG, "Frame 2 Start (Fast): $baseName")
-                return null
+                // Perform fast stitching for immediate thumbnail feedback
+                val firstPath = tempPath
+                if (firstPath == null || !File(firstPath).exists()) {
+                    Log.e(TAG, "First frame missing for fast stitch")
+                    return null
+                }
+
+                Log.d(TAG, "Frame 2 Fast: Stitching $f1Base and $baseName")
+                val stitchedBitmap = HalfFrameUtils.stitchImages(firstPath, currentJpgPath, layout, downsample)
+                if (stitchedBitmap == null) return null
+
+                val finalBitmap = HalfFrameUtils.addEffects(stitchedBitmap, dateStamp, lightLeak, layout)
+                val stitchedFile = File(context.cacheDir, "stitched_hf_fast.jpg")
+                FileOutputStream(stitchedFile).use { out ->
+                    finalBitmap.compress(Bitmap.CompressFormat.JPEG, 70, out)
+                }
+                if (finalBitmap != stitchedBitmap) stitchedBitmap.recycle()
+                finalBitmap.recycle()
+                return stitchedFile.absolutePath
             } else {
                 // HQ Path: Stitch!
                 val firstPath = tempPath

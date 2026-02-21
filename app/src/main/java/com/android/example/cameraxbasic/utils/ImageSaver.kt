@@ -78,6 +78,12 @@ object ImageSaver {
                                 ColorProcessor.halfFrameFlow.tryEmit(1)
                             } else {
                                 ColorProcessor.halfFrameFlow.tryEmit(2)
+                                if (finalPath != null) {
+                                    val finalFile = File(finalPath)
+                                    finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri) { out ->
+                                        finalFile.inputStream().use { it.copyTo(out) }
+                                    }
+                                }
                             }
                         } else {
                             if (finalPath != null) {
@@ -183,6 +189,18 @@ object ImageSaver {
                                         ColorProcessor.halfFrameFlow.tryEmit(1)
                                     } else {
                                         ColorProcessor.halfFrameFlow.tryEmit(2)
+                                        if (finalPath != null) {
+                                            val finalFile = File(finalPath)
+                                            finalJpgUri = saveJpegToMediaStore(
+                                                context,
+                                                "$baseName.jpg",
+                                                targetUri,
+                                                processedBitmap.width,
+                                                processedBitmap.height
+                                            ) { out ->
+                                                finalFile.inputStream().use { it.copyTo(out) }
+                                            }
+                                        }
                                     }
                                 } else {
                                     if (finalPath != null) {
@@ -425,30 +443,34 @@ object ImageSaver {
         var uri = targetUri
         val isReplacement = uri != null
 
-        if (uri == null) {
-            jpgValues.apply {
-                put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
-                put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+        try {
+            if (uri == null) {
+                jpgValues.apply {
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
+                    put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/Darkbag")
+                        put(MediaStore.MediaColumns.IS_PENDING, 1)
+                    }
+                    width?.let { put(MediaStore.MediaColumns.WIDTH, it) }
+                    height?.let { put(MediaStore.MediaColumns.HEIGHT, it) }
+                }
+                uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, jpgValues)
+            } else {
+                // Hardened replacement logic: avoid updating DISPLAY_NAME and RELATIVE_PATH
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/Darkbag")
-                    put(MediaStore.MediaColumns.IS_PENDING, 1)
+                    jpgValues.put(MediaStore.MediaColumns.IS_PENDING, 1)
                 }
-                width?.let { put(MediaStore.MediaColumns.WIDTH, it) }
-                height?.let { put(MediaStore.MediaColumns.HEIGHT, it) }
-            }
-            uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, jpgValues)
-        } else {
-            // Hardened replacement logic: only update mutable columns
-            width?.let { jpgValues.put(MediaStore.MediaColumns.WIDTH, it) }
-            height?.let { jpgValues.put(MediaStore.MediaColumns.HEIGHT, it) }
+                width?.let { jpgValues.put(MediaStore.MediaColumns.WIDTH, it) }
+                height?.let { jpgValues.put(MediaStore.MediaColumns.HEIGHT, it) }
 
-            if (jpgValues.size() > 0) {
-                try {
+                if (jpgValues.size() > 0) {
                     contentResolver.update(uri, jpgValues, null, null)
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to update MediaStore entry metadata during replacement", e)
                 }
             }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to insert/update MediaStore entry", e)
+            return null
         }
 
         if (uri != null) {
@@ -458,10 +480,11 @@ object ImageSaver {
                     out.flush()
                 }
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    jpgValues.clear()
-                    jpgValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                    val finalValues = ContentValues().apply {
+                        put(MediaStore.MediaColumns.IS_PENDING, 0)
+                    }
                     try {
-                        contentResolver.update(uri, jpgValues, null, null)
+                        contentResolver.update(uri, finalValues, null, null)
                     } catch (e: Exception) {
                         Log.e(TAG, "Failed to clear IS_PENDING for $uri", e)
                     }
