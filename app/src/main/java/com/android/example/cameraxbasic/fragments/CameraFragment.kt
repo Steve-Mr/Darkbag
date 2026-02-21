@@ -521,10 +521,11 @@ class CameraFragment : Fragment() {
             ColorProcessor.halfFrameFlow.collect { step ->
                 withContext(Dispatchers.Main) {
                     if (step == 1) {
-                        // Intermediate capture complete (HQ part)
-                        // We already updated UI on click
+                        // Frame 1 burst done: play transition from right -> left
+                        animateHalfFrameAdvance()
                     } else {
-                        // Full capture complete
+                        // Frame 2 burst done: play exit+re-enter transition, then settle to step 1 UI
+                        animateHalfFrameAdvance()
                         halfFrameStep = 0
                         updateHalfFrameUI()
                         hideProcessingAnimation() // Final cleanup
@@ -1277,14 +1278,12 @@ class CameraFragment : Fragment() {
                 halfFrameStep = 1
                 prefs.edit().putInt(SettingsFragment.KEY_HALF_FRAME_STEP, 1).apply()
                 updateHalfFrameUI()
-                animateHalfFrameAdvance() // Immediate animation on click
             }
 
             if (isFrame2Trigger) {
                 halfFrameStep = 0
                 prefs.edit().putInt(SettingsFragment.KEY_HALF_FRAME_STEP, 0).apply()
                 updateHalfFrameUI()
-                animateHalfFrameAdvance() // Immediate animation on click for second frame
 
                 showProcessingAnimation() // Immediate indicator on click for second frame
                 cameraUiContainerBinding?.photoViewButton?.visibility = View.VISIBLE // Show thumbnail container for progress indicator
@@ -4100,13 +4099,13 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
     }
 
     private fun showShutterBlackout() {
-        _fragmentCameraBinding?.let { binding ->
+        cameraUiContainerBinding?.let { binding ->
             val blackout = binding.viewFinderBlackout
             blackout.post {
                 blackout.visibility = View.VISIBLE
                 blackout.bringToFront()
                 blackout.postDelayed({
-                    _fragmentCameraBinding?.viewFinderBlackout?.visibility = View.INVISIBLE
+                    cameraUiContainerBinding?.viewFinderBlackout?.visibility = View.INVISIBLE
                 }, 100L) // Use 100ms to ensure visibility during processing
             }
         }
@@ -4114,15 +4113,16 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
     private fun updateHalfFrameUI() {
         val uiBinding = cameraUiContainerBinding ?: return
-        val vfBinding = _fragmentCameraBinding ?: return
+        val vfBinding = fragmentCameraBinding
+        val overlayBinding = cameraUiContainerBinding ?: return
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
         isHalfFrameModeEnabled = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_MODE, false)
 
         if (!isHalfFrameModeEnabled) {
             uiBinding.tvHalfFrameStep?.visibility = View.GONE
-            vfBinding.halfFrameGapIndicator.visibility = View.GONE
-            vfBinding.halfFrameFilmEdgeTop.visibility = View.GONE
-            vfBinding.halfFrameFilmEdgeBottom.visibility = View.GONE
+            overlayBinding.halfFrameGapIndicator.visibility = View.GONE
+            overlayBinding.halfFrameFilmEdgeTop.visibility = View.GONE
+            overlayBinding.halfFrameFilmEdgeBottom.visibility = View.GONE
             vfBinding.viewFinder.scaleX = 1f
             vfBinding.viewFinder.scaleY = 1f
             vfBinding.viewFinder.translationX = 0f
@@ -4148,37 +4148,38 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             val gapWidthScaled = gapWidthBase * scale
             val shift = gapWidthScaled / 2f
 
-            vfBinding.halfFrameGapIndicator.visibility = View.VISIBLE
-            vfBinding.halfFrameGapIndicator.bringToFront()
-            vfBinding.halfFrameGapIndicator.background = buildHalfFrameGapBackground()
-            val gapParams = vfBinding.halfFrameGapIndicator.layoutParams
+            overlayBinding.halfFrameGapIndicator.visibility = View.VISIBLE
+            overlayBinding.halfFrameGapIndicator.bringToFront()
+            overlayBinding.halfFrameGapIndicator.background = buildHalfFrameGapBackground()
+            val gapParams = overlayBinding.halfFrameGapIndicator.layoutParams
             gapParams.width = gapWidthScaled.toInt()
             gapParams.height = (totalH * scale).toInt()
-            vfBinding.halfFrameGapIndicator.layoutParams = gapParams
+            overlayBinding.halfFrameGapIndicator.layoutParams = gapParams
 
-            vfBinding.halfFrameFilmEdgeTop.visibility = View.VISIBLE
-            vfBinding.halfFrameFilmEdgeBottom.visibility = View.VISIBLE
-            vfBinding.halfFrameFilmEdgeTop.bringToFront()
-            vfBinding.halfFrameFilmEdgeBottom.bringToFront()
+            overlayBinding.halfFrameFilmEdgeTop.visibility = View.VISIBLE
+            overlayBinding.halfFrameFilmEdgeBottom.visibility = View.VISIBLE
+            overlayBinding.halfFrameFilmEdgeTop.bringToFront()
+            overlayBinding.halfFrameFilmEdgeBottom.bringToFront()
 
             vfBinding.viewFinder.scaleX = scale
             vfBinding.viewFinder.scaleY = scale
 
             if (halfFrameStep == 0) {
                 vfBinding.viewFinder.translationX = -shift
-                vfBinding.halfFrameGapIndicator.translationX = totalW * scale
+                overlayBinding.halfFrameGapIndicator.translationX = totalW * scale
             } else {
                 vfBinding.viewFinder.translationX = shift
-                vfBinding.halfFrameGapIndicator.translationX = 0f
+                overlayBinding.halfFrameGapIndicator.translationX = 0f
             }
             vfBinding.viewFinder.translationY = 0f
-            vfBinding.halfFrameGapIndicator.translationY = 0f
+            overlayBinding.halfFrameGapIndicator.translationY = 0f
         }
     }
 
     private fun animateHalfFrameAdvance() {
-        val vfBinding = _fragmentCameraBinding ?: return
-        val gap = vfBinding.halfFrameGapIndicator
+        val vfBinding = fragmentCameraBinding
+        val overlayBinding = cameraUiContainerBinding ?: return
+        val gap = overlayBinding.halfFrameGapIndicator
         val finder = vfBinding.viewFinder
         val totalW = finder.width.toFloat()
         if (totalW <= 0f) return
@@ -4199,13 +4200,13 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             finder.translationX = -shift
 
             gap.animate()
-                .translationX(posLeft)
-                .setDuration(500)
+                .translationX(-gapWidthScaled)
+                 .setDuration(1200)
                 .setInterpolator(android.view.animation.DecelerateInterpolator())
                 .start()
             finder.animate()
                 .translationX(shift)
-                .setDuration(500)
+                 .setDuration(1200)
                 .setInterpolator(android.view.animation.DecelerateInterpolator())
                 .start()
         } else {
@@ -4213,14 +4214,14 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             gap.translationX = posLeft
 
             gap.animate()
-                .translationX(-gapWidthScaled)
-                .setDuration(300)
+                 .translationX(-gapWidthScaled * 1.1f)
+                 .setDuration(700)
                 .setInterpolator(android.view.animation.AccelerateInterpolator())
                 .withEndAction {
                     gap.translationX = totalW
                     gap.animate()
                         .translationX(posRight)
-                        .setDuration(380)
+                         .setDuration(700)
                         .setInterpolator(android.view.animation.DecelerateInterpolator())
                         .start()
                 }
@@ -4228,7 +4229,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
             finder.animate()
                 .translationX(-shift)
-                .setDuration(420)
+                 .setDuration(1000)
                 .setInterpolator(android.view.animation.DecelerateInterpolator())
                 .start()
         }
