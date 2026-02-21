@@ -5,9 +5,10 @@ import android.content.SharedPreferences
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.provider.DocumentsContract
 import android.util.Log
-import androidx.core.content.FileProvider
 import com.android.example.cameraxbasic.fragments.SettingsFragment
+import com.android.example.cameraxbasic.provider.HalfFrameDocumentsProvider
 import java.io.File
 import java.io.FileOutputStream
 
@@ -139,16 +140,15 @@ class HalfFrameManager(private val context: Context) {
     }
 
     /**
-     * Gets a FileProvider URI for the intermediate frame.
+     * Gets a DocumentsProvider URI for the intermediate frame.
      */
     fun getIntermediateUri(): Uri? {
         val path = tempPath ?: return null
         val file = File(path)
         if (!file.exists()) return null
-        return FileProvider.getUriForFile(
-            context,
-            "com.android.example.cameraxbasic.fileprovider",
-            file
+        return DocumentsContract.buildDocumentUri(
+            HalfFrameDocumentsProvider.AUTHORITY,
+            "file:${file.name}"
         )
     }
 

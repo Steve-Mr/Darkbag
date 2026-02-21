@@ -547,14 +547,7 @@ class CameraFragment : Fragment() {
         viewLifecycleOwner.lifecycleScope.launch {
             ColorProcessor.halfFrameFlow.collect { step ->
                 withContext(Dispatchers.Main) {
-                    if (step == 1) {
-                        val uri = com.android.example.cameraxbasic.utils.HalfFrameManager(requireContext()).getIntermediateUri()
-                        if (uri != null) {
-                            val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-                            prefs.edit().putString(SettingsFragment.KEY_LAST_CAPTURE_URI, uri.toString()).apply()
-                            setGalleryThumbnail(uri.toString())
-                        }
-                    } else {
+                    if (step != 1) {
                         // Full capture complete
                         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
                         writeScopedHalfFrameStep(prefs, 0)
