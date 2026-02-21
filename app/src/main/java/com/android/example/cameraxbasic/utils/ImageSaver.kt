@@ -190,12 +190,17 @@ object ImageSaver {
                                         if (jpgFolderUri != null) {
                                             finalJpgUri = saveFileToFolder(context, finalFile, "$baseName.jpg", "image/jpeg", jpgFolderUri)
                                         } else {
+                                            val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                                            BitmapFactory.decodeFile(finalPath, options)
+                                            val finalW = if (options.outWidth > 0) options.outWidth else processedBitmap.width
+                                            val finalH = if (options.outHeight > 0) options.outHeight else processedBitmap.height
+
                                             finalJpgUri = saveJpegToMediaStore(
                                                 context,
                                                 "$baseName.jpg",
                                                 targetUri,
-                                                processedBitmap.width,
-                                                processedBitmap.height
+                                                finalW,
+                                                finalH
                                             ) { out ->
                                                 finalFile.inputStream().use { it.copyTo(out) }
                                             }
@@ -433,15 +438,16 @@ object ImageSaver {
             }
             uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, jpgValues)
         } else {
-            // Hardened replacement logic: only update mutable columns to avoid UnsupportedOperationException
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                jpgValues.put(MediaStore.MediaColumns.IS_PENDING, 1)
-            }
+            // Hardened replacement logic: only update mutable columns
             width?.let { jpgValues.put(MediaStore.MediaColumns.WIDTH, it) }
             height?.let { jpgValues.put(MediaStore.MediaColumns.HEIGHT, it) }
 
             if (jpgValues.size() > 0) {
-                contentResolver.update(uri, jpgValues, null, null)
+                try {
+                    contentResolver.update(uri, jpgValues, null, null)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to update MediaStore entry metadata during replacement", e)
+                }
             }
         }
 
@@ -454,7 +460,11 @@ object ImageSaver {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     jpgValues.clear()
                     jpgValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
-                    contentResolver.update(uri, jpgValues, null, null)
+                    try {
+                        contentResolver.update(uri, jpgValues, null, null)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to clear IS_PENDING for $uri", e)
+                    }
                 }
                 if (isReplacement) {
                     Log.i(TAG, "Replaced JPEG at $uri")

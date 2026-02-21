@@ -149,7 +149,11 @@ object HalfFrameUtils {
         val sdf = SimpleDateFormat(" ' 'yy  M  d", Locale.US)
         val dateText = sdf.format(Date())
 
-        val isSideBySide = layout == "Side-by-side" || layout == "左右排列" || layout.contains("side", ignoreCase = true)
+        // More robust detection: if string matches Side-by-side OR if it's a wide image that isn't square
+        val isSideBySide = layout == "Side-by-side" ||
+                          layout == "左右排列" ||
+                          layout.contains("side", ignoreCase = true) ||
+                          (layout.isEmpty() && bitmap.width > bitmap.height)
 
         val paint = Paint().apply {
             color = Color.parseColor("#FF8C00") // Classic orange
