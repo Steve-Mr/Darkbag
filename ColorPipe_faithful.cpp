@@ -34,63 +34,18 @@
 #define PHOTOMETRIC_LINEAR_RAW 34892
 #endif
 
-#ifndef PHOTOMETRIC_CFA
-#define PHOTOMETRIC_CFA 32803
-#endif
-
 // Define DNG Tags (Custom Tags 507xx)
-#ifndef TIFFTAG_DNGVERSION
 #define TIFFTAG_DNGVERSION 50706
-#endif
-#ifndef TIFFTAG_DNGBACKWARDVERSION
 #define TIFFTAG_DNGBACKWARDVERSION 50707
-#endif
-#ifndef TIFFTAG_UNIQUECAMERAMODEL
 #define TIFFTAG_UNIQUECAMERAMODEL 50708
-#endif
-#ifndef TIFFTAG_BLACKLEVEL
 #define TIFFTAG_BLACKLEVEL 50714
-#endif
-#ifndef TIFFTAG_ACTIVEAREA
-#define TIFFTAG_ACTIVEAREA 50710
-#endif
-#ifndef TIFFTAG_BLACKLEVELREPEATDIM
-#define TIFFTAG_BLACKLEVELREPEATDIM 50713
-#endif
-#ifndef TIFFTAG_WHITELEVEL
 #define TIFFTAG_WHITELEVEL 50717
-#endif
-#ifndef TIFFTAG_DEFAULTCROPORIGIN
-#define TIFFTAG_DEFAULTCROPORIGIN 50719
-#endif
-#ifndef TIFFTAG_DEFAULTCROPSIZE
-#define TIFFTAG_DEFAULTCROPSIZE 50720
-#endif
-#ifndef TIFFTAG_COLORMATRIX1
 #define TIFFTAG_COLORMATRIX1 50721
-#endif
-#ifndef TIFFTAG_ASSHOTNEUTRAL
 #define TIFFTAG_ASSHOTNEUTRAL 50728
-#endif
-#ifndef TIFFTAG_CALIBRATIONILLUMINANT1
 #define TIFFTAG_CALIBRATIONILLUMINANT1 50778
-#endif
-#ifndef TIFFTAG_OPCODELIST1
 #define TIFFTAG_OPCODELIST1 51008
-#endif
-#ifndef TIFFTAG_OPCODELIST2
 #define TIFFTAG_OPCODELIST2 51009
-#endif
-#ifndef TIFFTAG_OPCODELIST3
 #define TIFFTAG_OPCODELIST3 51022
-#endif
-
-#ifndef TIFFTAG_CFAREPEATPATTERNDIM
-#define TIFFTAG_CFAREPEATPATTERNDIM 33421
-#endif
-#ifndef TIFFTAG_CFAPATTERN
-#define TIFFTAG_CFAPATTERN 33422
-#endif
 
 static const TIFFFieldInfo dng_field_info[] = {
     { TIFFTAG_DNGVERSION, 4, 4, TIFF_BYTE, FIELD_CUSTOM, 1, 0, const_cast<char*>("DNGVersion") },
@@ -745,7 +700,7 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
     TIFFSetField(tif, TIFFTAG_BLACKLEVEL, 1, &black_level_val);
 
     Matrix3x3 ccmMat;
-    std::copy(ccm.begin(), ccm.begin() + 9, ccmMat.m);
+    std::copy(ccm.data(), ccm.data() + 9, ccmMat.m);
     Matrix3x3 invCcm = invert(ccmMat);
     Matrix3x3 colorMatrix1 = multiply(invCcm, M_XYZ_to_sRGB_D65);
     TIFFSetField(tif, TIFFTAG_COLORMATRIX1, 9, colorMatrix1.m);
@@ -760,7 +715,7 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
     TIFFSetField(tif, TIFFTAG_FOCALLENGTH, focalLength);
 
     unsigned short iso_short = (unsigned short)iso;
-    TIFFSetField(tif, TIFFTAG_ISOSPEEDRATINGS, (uint16_t)1, &iso_short);
+    TIFFSetField(tif, TIFFTAG_ISOSPEEDRATINGS, 1, &iso_short);
 
     if (TIFFWriteEncodedStrip(tif, 0, (void*)data.data(), static_cast<size_t>(width) * height * 3 * sizeof(unsigned short)) < 0) {
         TIFFClose(tif);
@@ -770,7 +725,6 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
     TIFFClose(tif);
     return true;
 }
-
 
 bool write_bmp(const char* filename, int width, int height, const std::vector<unsigned short>& data) {
     std::ofstream file(filename, std::ios::binary);

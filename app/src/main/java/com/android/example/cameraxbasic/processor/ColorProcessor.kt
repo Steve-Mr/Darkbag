@@ -72,14 +72,12 @@ object ColorProcessor {
         outputTiffPath: String?,
         outputJpgPath: String?,
         outputDngPath: String?,
-        outputBayerDngPath: String?,
         digitalGain: Float,
         debugStats: LongArray?,
         outputBitmap: android.graphics.Bitmap? = null,
         tempRawPath: String? = null,
         zoomFactor: Float,
-        mirror: Boolean,
-        activeArray: IntArray? = null
+        mirror: Boolean
     ): Int
 
     /**
@@ -126,8 +124,7 @@ object ColorProcessor {
         ccm: FloatArray,
         whiteBalance: FloatArray,
         zoomFactor: Float,
-        mirror: Boolean,
-        activeArray: IntArray? = null
+        mirror: Boolean
     ): Int
 
     external fun processHdrPlus(
@@ -161,8 +158,6 @@ object ColorProcessor {
         outputBitmap: android.graphics.Bitmap? = null,
         tempRawPath: String? = null,
         zoomFactor: Float,
-        mirror: Boolean,
-        outputBayerDngPath: String?,
-        activeArray: IntArray? = null
+        mirror: Boolean
     ): Int
 }

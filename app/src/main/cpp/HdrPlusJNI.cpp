@@ -138,7 +138,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_initMemoryPool(JN
 extern "C" JNIEXPORT jint JNICALL
 Java_com_android_example_cameraxbasic_processor_ColorProcessor_exportHdrPlus(
     JNIEnv* env, jobject /* this */, jstring tempRawPath, jint width, jint height, jint orientation, jfloat digitalGain, jint targetLog, jstring lutPath, jstring tiffPath, jstring jpgPath, jstring dngPath,
-    jint iso, jlong exposureTime, jfloat fNumber, jfloat focalLength, jlong captureTimeMillis, jfloatArray ccm, jfloatArray whiteBalance, jfloat zoomFactor, jboolean mirror, jintArray activeArray
+    jint iso, jlong exposureTime, jfloat fNumber, jfloat focalLength, jlong captureTimeMillis, jfloatArray ccm, jfloatArray whiteBalance, jfloat zoomFactor, jboolean mirror
 ) {
     LOGD("Native exportHdrPlus started.");
     std::lock_guard<std::mutex> lock(g_hdrPlusMutex);
@@ -180,16 +180,9 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_exportHdrPlus(
     const char* jpg_path_cstr = (jpgPath) ? env->GetStringUTFChars(jpgPath, 0) : nullptr;
     const char* dng_path_cstr = (dngPath) ? env->GetStringUTFChars(dngPath, 0) : nullptr;
 
-    int active_arr[4];
-    int* active_arr_ptr = nullptr;
-    if (activeArray && env->GetArrayLength(activeArray) >= 4) {
-        env->GetIntArrayRegion(activeArray, 0, 4, active_arr);
-        active_arr_ptr = active_arr;
-    }
-
     if (dng_path_cstr) {
         LOGD("Exporting DNG to %s", dng_path_cstr);
-        write_dng(dng_path_cstr, width, height, finalImage, kMax16BitValue, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation, (bool)mirror, active_arr_ptr);
+        write_dng(dng_path_cstr, width, height, finalImage, kMax16BitValue, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation, (bool)mirror);
     }
 
     bool saveOk = true;
@@ -216,7 +209,7 @@ extern "C" JNIEXPORT jint JNICALL
 Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     JNIEnv* env, jobject /* this */, jobjectArray dngBuffers, jint width, jint height, jint orientation, jint whiteLevel, jintArray blackLevelPattern, jfloatArray lensShadingMap, jint lensShadingRows, jint lensShadingCols, jboolean useSensorColorMatrix, jfloatArray whiteBalance, jfloatArray ccm, jfloatArray ccmAlt, jboolean exportMatrixAB, jint cfaPattern,
     jint iso, jlong exposureTime, jfloat fNumber, jfloat focalLength, jlong captureTimeMillis, jint targetLog, jstring lutPath, jstring outputTiffPath, jstring outputJpgPath, jstring outputDngPath,
-    jfloat digitalGain, jlongArray debugStats, jobject outputBitmap, jstring tempRawPath, jfloat zoomFactor, jboolean mirror, jstring outputBayerDngPath, jintArray activeArray
+    jfloat digitalGain, jlongArray debugStats, jobject outputBitmap, jstring tempRawPath, jfloat zoomFactor, jboolean mirror
 ) {
     LOGD("Native processHdrPlus started.");
     (void)useSensorColorMatrix;
@@ -380,12 +373,10 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     const char* tiff_p_cstr = (outputTiffPath) ? env->GetStringUTFChars(outputTiffPath, 0) : nullptr;
     const char* jpg_p_cstr = (outputJpgPath) ? env->GetStringUTFChars(outputJpgPath, 0) : nullptr;
     const char* dng_p_cstr = (outputDngPath) ? env->GetStringUTFChars(outputDngPath, 0) : nullptr;
-    const char* bayer_dng_p_cstr = (outputBayerDngPath) ? env->GetStringUTFChars(outputBayerDngPath, 0) : nullptr;
-    std::string tiffPathStr = tiff_p_cstr ? tiff_p_cstr : "", jpgPathStr = jpg_p_cstr ? jpg_p_cstr : "", dngPathStr = dng_p_cstr ? dng_p_cstr : "", bayerDngPathStr = bayer_dng_p_cstr ? bayer_dng_p_cstr : "";
+    std::string tiffPathStr = tiff_p_cstr ? tiff_p_cstr : "", jpgPathStr = jpg_p_cstr ? jpg_p_cstr : "", dngPathStr = dng_p_cstr ? dng_p_cstr : "";
     if (outputTiffPath && tiff_p_cstr) env->ReleaseStringUTFChars(outputTiffPath, tiff_p_cstr);
     if (outputJpgPath && jpg_p_cstr) env->ReleaseStringUTFChars(outputJpgPath, jpg_p_cstr);
     if (outputDngPath && dng_p_cstr) env->ReleaseStringUTFChars(outputDngPath, dng_p_cstr);
-    if (outputBayerDngPath && bayer_dng_p_cstr) env->ReleaseStringUTFChars(outputBayerDngPath, bayer_dng_p_cstr);
 
     auto saveStart = std::chrono::high_resolution_clock::now();
     if (bitmapPixels) {
@@ -399,19 +390,9 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
         env->ReleaseStringUTFChars(tempRawPath, tr_p_cstr);
     }
 
-    int active_arr[4];
-    int* active_arr_ptr = nullptr;
-    if (activeArray && env->GetArrayLength(activeArray) >= 4) {
-        env->GetIntArrayRegion(activeArray, 0, 4, active_arr);
-        active_arr_ptr = active_arr;
-    }
-
-    if (!tiffPathStr.empty() || !jpgPathStr.empty() || !dngPathStr.empty() || !bayerDngPathStr.empty()) {
-        if (!bayerDngPathStr.empty()) {
-            write_bayer_dng(bayerDngPathStr.c_str(), width, height, (unsigned short*)rawDataPtr, whiteLevel, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation, (bool)mirror, bl_pattern, wbVec.data(), cfaPattern, active_arr_ptr);
-        }
+    if (!tiffPathStr.empty() || !jpgPathStr.empty() || !dngPathStr.empty()) {
         if (!dngPathStr.empty()) {
-            write_dng(dngPathStr.c_str(), width, height, finalImage, kMax16BitValue, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation, (bool)mirror, active_arr_ptr);
+            write_dng(dngPathStr.c_str(), width, height, finalImage, kMax16BitValue, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation, (bool)mirror);
         }
 
         if (!tiffPathStr.empty() || !jpgPathStr.empty()) {
@@ -434,8 +415,8 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
 extern "C" JNIEXPORT jint JNICALL
 Java_com_android_example_cameraxbasic_processor_ColorProcessor_processSingleFrameRaw(
     JNIEnv* env, jobject /* this */, jobject bayerBuffer, jint width, jint height, jint orientation, jint whiteLevel, jintArray blackLevelPattern, jfloatArray lensShadingMap, jint lensShadingRows, jint lensShadingCols, jfloatArray whiteBalance, jfloatArray ccm, jint cfaPattern,
-    jint iso, jlong exposureTime, jfloat fNumber, jfloat focalLength, jlong captureTimeMillis, jint targetLog, jstring lutPath, jstring outputTiffPath, jstring outputJpgPath, jstring outputDngPath, jstring outputBayerDngPath,
-    jfloat digitalGain, jlongArray debugStats, jobject outputBitmap, jstring tempRawPath, jfloat zoomFactor, jboolean mirror, jintArray activeArray
+    jint iso, jlong exposureTime, jfloat fNumber, jfloat focalLength, jlong captureTimeMillis, jint targetLog, jstring lutPath, jstring outputTiffPath, jstring outputJpgPath, jstring outputDngPath,
+    jfloat digitalGain, jlongArray debugStats, jobject outputBitmap, jstring tempRawPath, jfloat zoomFactor, jboolean mirror
 ) {
     LOGD("Native processSingleFrameRaw started.");
 
@@ -450,6 +431,6 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processSingleFram
         whiteBalance, ccm, nullptr, // ccmAlt
         false, // exportMatrixAB
         cfaPattern, iso, exposureTime, fNumber, focalLength, captureTimeMillis, targetLog, lutPath,
-        outputTiffPath, outputJpgPath, outputDngPath, digitalGain, debugStats, outputBitmap, tempRawPath, zoomFactor, mirror, outputBayerDngPath, activeArray
+        outputTiffPath, outputJpgPath, outputDngPath, digitalGain, debugStats, outputBitmap, tempRawPath, zoomFactor, mirror
     );
 }
