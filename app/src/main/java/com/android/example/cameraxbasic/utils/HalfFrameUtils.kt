@@ -149,10 +149,14 @@ object HalfFrameUtils {
         val sdf = SimpleDateFormat(" ' 'yy  M  d", Locale.US)
         val dateText = sdf.format(Date())
 
+        val isSideBySide = layout == "Side-by-side" || layout == "左右排列" || layout.contains("side", ignoreCase = true)
+
         val paint = Paint().apply {
             color = Color.parseColor("#FF8C00") // Classic orange
             alpha = 220
-            textSize = minOf(bitmap.width, bitmap.height) * 0.04f
+            // For Side-by-side, we use height as reference; for Top-bottom, we use width.
+            // Basically use the "single frame" dimension.
+            textSize = (if (isSideBySide) bitmap.height else bitmap.width) * 0.04f
             typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
             setShadowLayer(5f, 0f, 0f, Color.RED)
             textAlign = Paint.Align.RIGHT
@@ -161,20 +165,42 @@ object HalfFrameUtils {
         val textWidth = paint.measureText(dateText)
         val margin = textWidth * 0.2f
 
-        // Since we might have rotated the bitmap to Portrait,
-        // we need to figure out where the "bottom right" of each frame is.
-        // Side-by-side rotated: Top half is Frame 1, Bottom half is Frame 2.
-        // Top-bottom (already Portrait): Top half is Frame 1, Bottom half is Frame 2.
+        if (isSideBySide) {
+            // Side-by-side (Wide): [ Frame 1 (Portrait) | Divider | Frame 2 (Portrait) ]
+            // Total height is the height of one frame.
+            val frame1RightX = (bitmap.width - 16) / 2f // Approximate divider as 16 if not known exactly,
+                                                        // but better use the actual center.
+            // Since we have: combinedW = targetW + divider + targetW
+            // targetW = (combinedW - divider) / 2
+            // We can estimate targetW if we don't pass it.
+            // In stitchImages, divider is (maxOf(targetW, targetH) * 0.03f).toInt().coerceAtLeast(16)
+            // For Side-by-side, targetH > targetW, so divider is approx targetH * 0.03.
 
-        val frame1BottomY = workingBitmap.height / 2f
-        val frame2BottomY = workingBitmap.height.toFloat()
+            // Let's use the actual proportions.
+            val targetW = (bitmap.width * 0.5f) - (bitmap.height * 0.015f) // rough estimate
 
-        val x = workingBitmap.width - margin
+            // Actually, we can just use the center gap.
+            val centerGapX = bitmap.width / 2f
+            val dividerHalf = (bitmap.height * 0.03f).coerceAtLeast(16f) / 2f
 
-        // Frame 1 date
-        canvas.drawText(dateText, x, frame1BottomY - margin, paint)
-        // Frame 2 date
-        canvas.drawText(dateText, x, frame2BottomY - margin, paint)
+            val x1 = centerGapX - dividerHalf - margin
+            val x2 = bitmap.width - margin
+            val y = bitmap.height - margin
+
+            canvas.drawText(dateText, x1, y, paint)
+            canvas.drawText(dateText, x2, y, paint)
+        } else {
+            // Top-bottom (Tall): [ Frame 1 (Landscape) / Divider / Frame 2 (Landscape) ]
+            val centerGapY = bitmap.height / 2f
+            val dividerHalf = (bitmap.width * 0.03f).coerceAtLeast(16f) / 2f
+
+            val x = bitmap.width - margin
+            val y1 = centerGapY - dividerHalf - margin
+            val y2 = bitmap.height - margin
+
+            canvas.drawText(dateText, x, y1, paint)
+            canvas.drawText(dateText, x, y2, paint)
+        }
 
         return workingBitmap
     }

@@ -415,24 +415,34 @@ object ImageSaver {
         writeData: (OutputStream) -> Unit
     ): Uri? {
         val contentResolver = context.contentResolver
-        val jpgValues = ContentValues().apply {
-            put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
-            put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/Darkbag")
-                put(MediaStore.MediaColumns.IS_PENDING, 1)
-            }
-            width?.let { put(MediaStore.MediaColumns.WIDTH, it) }
-            height?.let { put(MediaStore.MediaColumns.HEIGHT, it) }
-        }
+        val jpgValues = ContentValues()
 
         var uri = targetUri
         val isReplacement = uri != null
 
         if (uri == null) {
+            jpgValues.apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
+                put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/Darkbag")
+                    put(MediaStore.MediaColumns.IS_PENDING, 1)
+                }
+                width?.let { put(MediaStore.MediaColumns.WIDTH, it) }
+                height?.let { put(MediaStore.MediaColumns.HEIGHT, it) }
+            }
             uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, jpgValues)
         } else {
-            contentResolver.update(uri, jpgValues, null, null)
+            // Hardened replacement logic: only update mutable columns to avoid UnsupportedOperationException
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                jpgValues.put(MediaStore.MediaColumns.IS_PENDING, 1)
+            }
+            width?.let { jpgValues.put(MediaStore.MediaColumns.WIDTH, it) }
+            height?.let { jpgValues.put(MediaStore.MediaColumns.HEIGHT, it) }
+
+            if (jpgValues.size() > 0) {
+                contentResolver.update(uri, jpgValues, null, null)
+            }
         }
 
         if (uri != null) {
