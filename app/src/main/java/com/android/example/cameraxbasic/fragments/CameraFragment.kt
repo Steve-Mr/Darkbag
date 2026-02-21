@@ -472,6 +472,7 @@ class CameraFragment : Fragment() {
         hdrPlusBurstHelper = HdrPlusBurst(
             frameCount = 3,
             onBurstComplete = { frames ->
+                // In Auto Burst mode, we use default gain (4.0x) as a fallback
                 processHdrPlusBurst(frames, ExposureUtils.PIPELINE_GAIN_MULTIPLIER)
             }
         )
@@ -1585,7 +1586,7 @@ class CameraFragment : Fragment() {
                     outputTiffPath = null,
                     outputJpgPath = if (saveJpg) tempJpgFile.absolutePath else null, // Fast JPG
                     outputDngPath = null,
-                    digitalGain = ExposureUtils.PIPELINE_GAIN_MULTIPLIER,
+                    digitalGain = config.digitalGain,
                     debugStats = debugStats,
                     outputBitmap = null,
                     tempRawPath = tempRawFile.absolutePath,
@@ -1631,7 +1632,7 @@ class CameraFragment : Fragment() {
                 workData.putInt("width", image.width)
                     .putInt("height", image.height)
                     .putInt("orientation", image.combinedOrientation)
-                    .putFloat("digitalGain", ExposureUtils.PIPELINE_GAIN_MULTIPLIER)
+                    .putFloat("digitalGain", config.digitalGain)
                     .putInt("targetLog", targetLogIndex)
                     .putString("lutPath", nativeLutPath)
                     .putString("tiffPath", if (saveTiff) tiffFile.absolutePath else null)

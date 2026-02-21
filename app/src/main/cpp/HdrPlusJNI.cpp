@@ -331,16 +331,20 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
              uint16_t g = raw_ptr[x*stride_x + y*stride_y + 1*stride_c];
              uint16_t b = raw_ptr[x*stride_x + y*stride_y + 2*stride_c];
 
-             // Neutralize highlights for single frames (Standard mode).
-             // Halide output maps nominal white to kMax14BitValue (16383). For single frames, anything
-             // above this is likely non-neutral sensor saturation. We clip to 16383 to ensure white highlights.
-             // Note: This does NOT make the image dark because digitalGain (4.0x) is applied in ColorPipe,
-             // mapping 16383 back to 1.0 (full brightness).
-             // For HDR+ (numFrames > 1), we preserve the full 16-bit range to maintain HDR headroom.
-             if (numFrames == 1) {
-                 r = std::min(r, kMax14BitValue);
-                 g = std::min(g, kMax14BitValue);
-                 b = std::min(b, kMax14BitValue);
+             // Highlight Neutralization (to fix pink highlights).
+             // When pixels exceed the nominal white level (due to WB gains or HDR merge),
+             // we gradually desaturate them to avoid un-neutral color tints in blown areas.
+             // Note: Halide output maps nominal white to kMax14BitValue (16383).
+             float max_v = (float)std::max({r, g, b});
+             float threshold = (float)kMax14BitValue;
+             if (max_v > threshold) {
+                 // Start desaturating at nominal white, fully neutral by 2x nominal white (32766).
+                 // This preserves HDR headroom while ensuring highlights are neutral white/grey.
+                 float weight = std::min(1.0f, (max_v - threshold) / threshold);
+                 float luma = (r + g + b) / 3.0f;
+                 r = (uint16_t)(r * (1.0f - weight) + luma * weight);
+                 g = (uint16_t)(g * (1.0f - weight) + luma * weight);
+                 b = (uint16_t)(b * (1.0f - weight) + luma * weight);
              }
 
              float lscR = 1.0f, lscG = 1.0f, lscB = 1.0f;
