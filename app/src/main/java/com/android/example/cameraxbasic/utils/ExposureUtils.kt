@@ -24,12 +24,8 @@ object ExposureUtils {
     private const val CLIPPING_RATIO_THRESHOLD = 0.005 // 0.5%
     private const val CLIPPING_TO_EV_FACTOR = 20.0
     private const val MAX_ADDITIONAL_UNDEREXPOSURE_STOPS = 3.0
-    private const val GAIN_DAMPENING_FACTOR = 0.75
-
-    private const val RECOVERY_RATIO_MAX = 0.8f
-    private const val RECOVERY_RATIO_MIN = 0.25f // Approx -2 EV
-    private const val CLIPPING_FOR_RECOVERY_START = 0.002
-    private const val CLIPPING_FOR_RECOVERY_MAX = 0.02
+    private const val GAIN_DAMPENING_FACTOR = 0.4
+    private const val RECOVERY_TARGET_RATIO = 0.8f // Keep a fixed safe margin for highlights
 
     data class ExposureConfig(
         val iso: Int,
@@ -164,22 +160,14 @@ object ExposureUtils {
         // Calculate gain based on ACTUALLY achieved exposure to avoid overexposure boost when hardware hits its floor.
         val actualTotalExposure = targetIso.toDouble() * targetTime.toDouble()
 
-        // Dynamic brightness recovery target:
-        // In high highlight risk scenes, we lower the final brightness to preserve details.
-        val dynamicRecoveryRatio = if (underexposureMode == SettingsFragment.HDR_UNDEREXPOSURE_MODE_DYNAMIC) {
-            when {
-                clippingRatio <= CLIPPING_FOR_RECOVERY_START -> RECOVERY_RATIO_MAX
-                clippingRatio >= CLIPPING_FOR_RECOVERY_MAX -> RECOVERY_RATIO_MIN
-                else -> {
-                    val ratio = (clippingRatio - CLIPPING_FOR_RECOVERY_START) / (CLIPPING_FOR_RECOVERY_MAX - CLIPPING_FOR_RECOVERY_START)
-                    (RECOVERY_RATIO_MAX - ratio * (RECOVERY_RATIO_MAX - RECOVERY_RATIO_MIN)).toFloat()
-                }
-            }
+        // Use a fixed recovery target to avoid over-aggressive darkening while still keeping highlights safe.
+        val recoveryRatio = if (underexposureMode == SettingsFragment.HDR_UNDEREXPOSURE_MODE_DYNAMIC) {
+            RECOVERY_TARGET_RATIO
         } else {
             1.0f
         }
 
-        val effectiveBaseline = baselineTotalExposure * dynamicRecoveryRatio
+        val effectiveBaseline = baselineTotalExposure * recoveryRatio
         var digitalGain = (effectiveBaseline / actualTotalExposure).toFloat()
 
         // Apply "Gain Dampening" for highlight preservation.

@@ -106,13 +106,13 @@ class ExposureUtilsTest {
     }
 
     @Test
-    fun testHighClippingRecoveryRatio() {
-        // Clipping 5% (well above 2% max threshold)
+    fun testHighClippingRecoveryRatio_Fixed() {
+        // Clipping 5%
         val config = ExposureUtils.calculateHdrPlusExposure(
             800, 33_333_333L, isoRange, timeRange, clippingRatio = 0.05
         )
 
-        // Target brightness should be 0.25x (RECOVERY_RATIO_MIN)
+        // Target brightness should be fixed 0.8x (RECOVERY_TARGET_RATIO)
         // underexposeFactor for ISO 800 is -0.5 EV (0.7071)
         // Additional underexposure for 5% clipping:
         // excessClipping = 0.05 - 0.005 = 0.045
@@ -120,13 +120,13 @@ class ExposureUtilsTest {
         // final underexposeFactor = 0.7071 * 0.5^0.9 = 0.7071 * 0.5358 = 0.3788
 
         // digitalGain calculation:
-        // recoveryRatio = 0.25 (since 0.05 > 0.02)
-        // digitalGain = (baseline * 0.25) / (baseline * 0.3788) = 0.6599
-        // Then dampened by GAIN_DAMPENING_FACTOR (0.75):
-        // dampening = 1.0 - 0.75 * (0.9 / 3.0) = 1.0 - 0.225 = 0.775
-        // final gain = 0.6599 * 0.775 = 0.511
+        // recoveryRatio = 0.8
+        // digitalGain = (baseline * 0.8) / (baseline * 0.3788) = 2.112
+        // Then dampened by GAIN_DAMPENING_FACTOR (0.4):
+        // dampening = 1.0 - 0.4 * (0.9 / 3.0) = 1.0 - 0.12 = 0.88
+        // final gain = 2.112 * 0.88 = 1.858
 
-        assertEquals(0.511f, config.digitalGain, 0.05f)
+        assertEquals(1.858f, config.digitalGain, 0.05f)
     }
 
     @Test
