@@ -44,10 +44,31 @@
         android:id="@+id/half_frame_gap_indicator"
         android:layout_width="0dp"
         android:layout_height="0dp"
-        android:background="@android:color/black"
+        android:background="@drawable/bg_striped_gap"
         android:visibility="gone"
         app:layout_constraintTop_toTopOf="@id/view_finder"
         app:layout_constraintStart_toStartOf="@id/view_finder" />
+
+    <View
+        android:id="@+id/half_frame_film_edge_top"
+        android:layout_width="0dp"
+        android:layout_height="24dp"
+        android:background="@drawable/bg_film_edge"
+        android:visibility="gone"
+        app:layout_constraintTop_toTopOf="@id/view_finder"
+        app:layout_constraintStart_toStartOf="@id/view_finder"
+        app:layout_constraintEnd_toEndOf="@id/view_finder" />
+
+    <View
+        android:id="@+id/half_frame_film_edge_bottom"
+        android:layout_width="0dp"
+        android:layout_height="24dp"
+        android:background="@drawable/bg_film_edge"
+        android:visibility="gone"
+        android:rotation="180"
+        app:layout_constraintBottom_toBottomOf="@id/view_finder"
+        app:layout_constraintStart_toStartOf="@id/view_finder"
+        app:layout_constraintEnd_toEndOf="@id/view_finder" />
 
     <View
         android:id="@+id/half_frame_film_roll"

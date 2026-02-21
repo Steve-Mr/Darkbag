@@ -352,6 +352,23 @@ object ImageSaver {
             }
         }
 
+        // If this is not a fast path and we have a result, emit a save event for UI updates
+        if (!isFastPath && finalJpgUri != null) {
+            com.android.example.cameraxbasic.processor.ColorProcessor.backgroundSaveFlow.tryEmit(
+                com.android.example.cameraxbasic.processor.ColorProcessor.BackgroundSaveEvent(
+                    baseName = baseName,
+                    tiffPath = tiffPath,
+                    dngPath = linearDngPath,
+                    jpgPath = bmpPath,
+                    targetUri = finalJpgUri.toString(),
+                    zoomFactor = zoomFactor,
+                    orientation = rotationDegrees,
+                    saveTiff = saveTiff,
+                    saveJpg = saveJpg
+                )
+            )
+        }
+
         // Priority for thumbnail: JPEG > DNG > TIFF
         return finalJpgUri ?: finalRawUri ?: finalTiffUri
     }
@@ -494,6 +511,10 @@ object ImageSaver {
                 } else {
                     Log.i(TAG, "Saved JPEG to $uri")
                 }
+
+                // If this is a final HQ save, notify the UI to update thumbnails and hide progress
+                // Note: We don't emit for fast path here because saveProcessedImage handles it.
+
                 return uri
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to write JPEG to MediaStore", e)

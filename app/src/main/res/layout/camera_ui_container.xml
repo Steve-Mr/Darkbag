@@ -105,11 +105,22 @@
             style="@style/Widget.App.Button.IconButton.Large"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginEnd="@dimen/spacing_medium"
+            android:layout_marginEnd="@dimen/spacing_small"
             app:icon="@drawable/ic_switch"
             app:iconTint="?attr/colorOnSurface"
             android:backgroundTint="?attr/colorSurfaceContainerHighest"
             android:contentDescription="@string/switch_camera_button_alt" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/mode_switch_button"
+            style="@style/Widget.App.Button.IconButton.Large"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="@dimen/spacing_medium"
+            app:icon="@drawable/ic_mode_normal"
+            app:iconTint="?attr/colorOnSurface"
+            android:backgroundTint="?attr/colorSurfaceContainerHighest"
+            android:contentDescription="Switch Capture Mode" />
 
         <com.google.android.material.card.MaterialCardView
             android:id="@+id/lens_controls_card"
@@ -372,10 +383,11 @@
                 android:layout_width="48dp"
                 android:layout_height="48dp"
                 android:visibility="gone"
-                app:layout_constraintTop_toTopOf="@id/photo_view_button"
-                app:layout_constraintBottom_toBottomOf="@id/photo_view_button"
-                app:layout_constraintStart_toStartOf="@id/photo_view_button"
-                app:layout_constraintEnd_toEndOf="@id/photo_view_button" />
+                app:layout_constraintTop_toTopOf="@id/camera_capture_button"
+                app:layout_constraintBottom_toBottomOf="@id/camera_capture_button"
+                app:layout_constraintEnd_toEndOf="parent"
+                app:layout_constraintStart_toStartOf="@id/shutter_center"
+                app:layout_constraintHorizontal_bias="0.8" />
 
         </androidx.constraintlayout.widget.ConstraintLayout>
 

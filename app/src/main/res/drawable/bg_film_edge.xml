@@ -1,0 +1,13 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="400dp"
+    android:height="20dp"
+    android:viewportWidth="400"
+    android:viewportHeight="20">
+    <path
+        android:fillColor="#000000"
+        android:pathData="M0,0h400v20h-400z"/>
+    <!-- Hole pattern -->
+    <path
+        android:fillColor="#1A1A1A"
+        android:pathData="M10,5h12v10h-12z M40,5h12v10h-12z M70,5h12v10h-12z M100,5h12v10h-12z M130,5h12v10h-12z M160,5h12v10h-12z M190,5h12v10h-12z M220,5h12v10h-12z M250,5h12v10h-12z M280,5h12v10h-12z M310,5h12v10h-12z M340,5h12v10h-12z M370,5h12v10h-12z"/>
+</vector>
