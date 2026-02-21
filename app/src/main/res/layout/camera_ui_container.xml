@@ -122,6 +122,7 @@
             android:insetBottom="0dp"
             app:iconPadding="0dp"
             app:iconGravity="textStart"
+            app:cornerRadius="999dp"
             app:icon="@drawable/ic_mode_normal"
             app:iconTint="?attr/colorOnSurface"
             android:backgroundTint="?attr/colorSurfaceContainerHighest"

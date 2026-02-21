@@ -21,9 +21,15 @@ import android.annotation.SuppressLint
 import android.content.*
 import android.content.ContentUris
 import android.content.res.Configuration
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.Shader
 import android.graphics.SurfaceTexture
+import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.ColorDrawable
+import android.graphics.drawable.LayerDrawable
 import android.hardware.display.DisplayManager
 import android.os.Build
 import android.os.Bundle
@@ -388,6 +394,7 @@ class CameraFragment : Fragment() {
         }
 
         updateHalfFrameUI()
+        cameraUiContainerBinding?.modeSwitchButton?.let { updateModeSwitchIcon(it) }
     }
 
     override fun onDestroyView() {
@@ -4116,11 +4123,13 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             vfBinding.halfFrameGapIndicator.visibility = View.GONE
             vfBinding.halfFrameFilmEdgeTop.visibility = View.GONE
             vfBinding.halfFrameFilmEdgeBottom.visibility = View.GONE
+            vfBinding.viewFinder.scaleX = 1f
+            vfBinding.viewFinder.scaleY = 1f
             vfBinding.viewFinder.translationX = 0f
             vfBinding.viewFinder.translationY = 0f
 
             if (halfFrameStep == 0) {
-                 uiBinding.photoViewButton?.visibility = View.VISIBLE
+                uiBinding.photoViewButton?.visibility = View.VISIBLE
             }
             return
         }
@@ -4129,19 +4138,11 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         uiBinding.tvHalfFrameStep?.text = if (halfFrameStep == 0) "1/2" else "2/2"
         uiBinding.photoViewButton?.visibility = if (halfFrameStep == 0) View.VISIBLE else View.GONE
 
-        vfBinding.halfFrameFilmEdgeTop.visibility = View.VISIBLE
-        vfBinding.halfFrameFilmEdgeBottom.visibility = View.VISIBLE
-        vfBinding.halfFrameFilmEdgeTop.bringToFront()
-        vfBinding.halfFrameFilmEdgeBottom.bringToFront()
-
-        val layout = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUTS[0])
-
         vfBinding.viewFinder.post {
             val totalW = vfBinding.viewFinder.width.toFloat()
             val totalH = vfBinding.viewFinder.height.toFloat()
-            if (totalW <= 0) return@post
+            if (totalW <= 0f || totalH <= 0f) return@post
 
-            // Horizontal gap UI for BOTH modes as requested
             val gapWidthBase = (totalW * 0.12f).coerceAtLeast(60f)
             val scale = totalW / (totalW + gapWidthBase)
             val gapWidthScaled = gapWidthBase * scale
@@ -4149,20 +4150,24 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
             vfBinding.halfFrameGapIndicator.visibility = View.VISIBLE
             vfBinding.halfFrameGapIndicator.bringToFront()
-            val params = vfBinding.halfFrameGapIndicator.layoutParams
-            params.width = gapWidthScaled.toInt()
-            params.height = (totalH * scale).toInt()
-            vfBinding.halfFrameGapIndicator.layoutParams = params
+            vfBinding.halfFrameGapIndicator.background = buildHalfFrameGapBackground()
+            val gapParams = vfBinding.halfFrameGapIndicator.layoutParams
+            gapParams.width = gapWidthScaled.toInt()
+            gapParams.height = (totalH * scale).toInt()
+            vfBinding.halfFrameGapIndicator.layoutParams = gapParams
+
+            vfBinding.halfFrameFilmEdgeTop.visibility = View.VISIBLE
+            vfBinding.halfFrameFilmEdgeBottom.visibility = View.VISIBLE
+            vfBinding.halfFrameFilmEdgeTop.bringToFront()
+            vfBinding.halfFrameFilmEdgeBottom.bringToFront()
 
             vfBinding.viewFinder.scaleX = scale
             vfBinding.viewFinder.scaleY = scale
 
             if (halfFrameStep == 0) {
-                // First frame: Viewfinder on Left, Gap on Right
                 vfBinding.viewFinder.translationX = -shift
                 vfBinding.halfFrameGapIndicator.translationX = totalW * scale
             } else {
-                // Second frame: Viewfinder on Right, Gap on Left
                 vfBinding.viewFinder.translationX = shift
                 vfBinding.halfFrameGapIndicator.translationX = 0f
             }
@@ -4174,41 +4179,79 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
     private fun animateHalfFrameAdvance() {
         val vfBinding = _fragmentCameraBinding ?: return
         val gap = vfBinding.halfFrameGapIndicator
-        val totalW = vfBinding.viewFinder.width.toFloat()
-        if (totalW <= 0) return
+        val finder = vfBinding.viewFinder
+        val totalW = finder.width.toFloat()
+        if (totalW <= 0f) return
 
         val gapWidthBase = (totalW * 0.12f).coerceAtLeast(60f)
         val scale = totalW / (totalW + gapWidthBase)
         val gapWidthScaled = gapWidthBase * scale
+        val shift = gapWidthScaled / 2f
 
         val posRight = totalW * scale
         val posLeft = 0f
 
-        // Simplified animation as requested:
+        gap.animate().cancel()
+        finder.animate().cancel()
+
         if (halfFrameStep == 1) {
-            // After Frame 1: Gap slides from Right to Left
             gap.translationX = posRight
+            finder.translationX = -shift
+
             gap.animate()
                 .translationX(posLeft)
                 .setDuration(500)
                 .setInterpolator(android.view.animation.DecelerateInterpolator())
                 .start()
+            finder.animate()
+                .translationX(shift)
+                .setDuration(500)
+                .setInterpolator(android.view.animation.DecelerateInterpolator())
+                .start()
         } else {
-            // After Frame 2: Gap slides Left to Out-Left, then New Gap slides Right-In to Right
+            finder.translationX = shift
+            gap.translationX = posLeft
+
             gap.animate()
                 .translationX(-gapWidthScaled)
                 .setDuration(300)
                 .setInterpolator(android.view.animation.AccelerateInterpolator())
                 .withEndAction {
-                    gap.translationX = totalW // Reset to far right
+                    gap.translationX = totalW
                     gap.animate()
                         .translationX(posRight)
-                        .setDuration(400)
+                        .setDuration(380)
                         .setInterpolator(android.view.animation.DecelerateInterpolator())
                         .start()
                 }
                 .start()
+
+            finder.animate()
+                .translationX(-shift)
+                .setDuration(420)
+                .setInterpolator(android.view.animation.DecelerateInterpolator())
+                .start()
         }
+    }
+
+    private fun buildHalfFrameGapBackground(): LayerDrawable {
+        val stripeSizePx = (resources.displayMetrics.density * 12f).toInt().coerceAtLeast(8)
+        val bitmap = Bitmap.createBitmap(stripeSizePx, stripeSizePx, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        canvas.drawColor(Color.parseColor("#FF1A1A1A"))
+
+        val stripePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.parseColor("#99FFFFFF")
+            strokeWidth = stripeSizePx / 3f
+        }
+        canvas.drawLine(-stripeSizePx.toFloat(), stripeSizePx.toFloat(), stripeSizePx.toFloat(), -stripeSizePx.toFloat(), stripePaint)
+        canvas.drawLine(0f, stripeSizePx.toFloat(), stripeSizePx.toFloat(), 0f, stripePaint)
+
+        val bitmapDrawable = BitmapDrawable(resources, bitmap).apply {
+            tileModeX = Shader.TileMode.REPEAT
+            tileModeY = Shader.TileMode.REPEAT
+        }
+        return LayerDrawable(arrayOf(ColorDrawable(Color.parseColor("#FF101010")), bitmapDrawable))
     }
 
     private fun cycleCaptureMode() {
