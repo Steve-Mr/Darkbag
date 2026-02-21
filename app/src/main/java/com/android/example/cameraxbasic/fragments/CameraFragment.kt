@@ -215,6 +215,8 @@ class CameraFragment : Fragment() {
     private var isHalfFrameModeEnabled = false
     private var halfFrameStep = 0
     private var halfFrameTempPath: String? = null
+    private var halfFrameBaseFinderWidth = 0
+    private var halfFrameBaseFinderHeight = 0
 
     private var isOisSupported = false
     private var isHdrOisEnabledPref = true
@@ -1106,6 +1108,10 @@ class CameraFragment : Fragment() {
             LayoutInflater.from(requireContext()),
             root
         )
+
+        // Recompute half-frame base size after UI reinflation / configuration changes.
+        halfFrameBaseFinderWidth = 0
+        halfFrameBaseFinderHeight = 0
 
         val colorPrimary = MaterialColors.getColor(requireContext(), com.google.android.material.R.attr.colorPrimary, Color.YELLOW)
         archProgress = com.android.example.cameraxbasic.utils.ArchProgressDrawable().apply {
@@ -4122,6 +4128,13 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             gapView.visibility = View.GONE
             edgeTopView.visibility = View.GONE
             edgeBottomView.visibility = View.GONE
+
+            (vfBinding.viewFinder.layoutParams as? androidx.constraintlayout.widget.ConstraintLayout.LayoutParams)?.let { lp ->
+                lp.width = ViewGroup.LayoutParams.WRAP_CONTENT
+                lp.height = 0
+                vfBinding.viewFinder.layoutParams = lp
+            }
+
             vfBinding.viewFinder.scaleX = 1f
             vfBinding.viewFinder.scaleY = 1f
             vfBinding.viewFinder.translationX = 0f
@@ -4138,8 +4151,13 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         uiBinding.photoViewButton?.visibility = if (halfFrameStep == 0) View.VISIBLE else View.GONE
 
         vfBinding.viewFinder.post {
-            val totalW = vfBinding.viewFinder.width.toFloat()
-            val totalH = vfBinding.viewFinder.height.toFloat()
+            if (halfFrameBaseFinderWidth <= 0 || halfFrameBaseFinderHeight <= 0) {
+                halfFrameBaseFinderWidth = vfBinding.viewFinder.width
+                halfFrameBaseFinderHeight = vfBinding.viewFinder.height
+            }
+
+            val totalW = halfFrameBaseFinderWidth.toFloat()
+            val totalH = halfFrameBaseFinderHeight.toFloat()
             if (totalW <= 0f || totalH <= 0f) return@post
 
             val gapWidthBase = (totalW * 0.12f).coerceAtLeast(60f)
@@ -4155,8 +4173,14 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             edgeTopView.bringToFront()
             edgeBottomView.bringToFront()
 
-            vfBinding.viewFinder.scaleX = scale
-            vfBinding.viewFinder.scaleY = scale
+            (vfBinding.viewFinder.layoutParams as? androidx.constraintlayout.widget.ConstraintLayout.LayoutParams)?.let { lp ->
+                lp.width = (totalW * scale).toInt()
+                lp.height = (totalH * scale).toInt()
+                vfBinding.viewFinder.layoutParams = lp
+            }
+
+            vfBinding.viewFinder.scaleX = 1f
+            vfBinding.viewFinder.scaleY = 1f
 
             if (halfFrameStep == 0) {
                 vfBinding.viewFinder.translationX = -shift
