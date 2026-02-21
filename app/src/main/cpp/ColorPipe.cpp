@@ -34,6 +34,10 @@
 #define PHOTOMETRIC_LINEAR_RAW 34892
 #endif
 
+#ifndef PHOTOMETRIC_CFA
+#define PHOTOMETRIC_CFA 32803
+#endif
+
 // Define DNG Tags (Custom Tags 507xx)
 #ifndef TIFFTAG_DNGVERSION
 #define TIFFTAG_DNGVERSION 50706
@@ -695,6 +699,173 @@ bool write_tiff(const char* filename, int width, int height, const std::vector<u
 
     TIFFClose(tif);
     return true;
+}
+
+bool write_dng_internal(const char* filename, int width, int height, const unsigned short* data, int samplesPerPixel, int whiteLevel, int iso, long exposureTime, float fNumber, float focalLength, long captureTimeMillis, const std::vector<float>& ccm, int orientation, bool mirror, bool isBayer, const int* blackLevelPattern, const float* wb, int cfaPattern, const int* activeArea) {
+    TIFFSetTagExtender(DNGTagExtender);
+    TIFF* tif = TIFFOpen(filename, "w");
+    if (!tif) return false;
+
+    TIFFSetField(tif, TIFFTAG_IMAGEWIDTH, width);
+    TIFFSetField(tif, TIFFTAG_IMAGELENGTH, height);
+    TIFFSetField(tif, TIFFTAG_BITSPERSAMPLE, 16);
+    TIFFSetField(tif, TIFFTAG_COMPRESSION, COMPRESSION_NONE);
+
+    uint16_t tiffOrientation = 1;
+    switch (orientation) {
+        case 90: tiffOrientation = mirror ? 5 : 6; break;
+        case 180: tiffOrientation = mirror ? 4 : 3; break;
+        case 270: tiffOrientation = mirror ? 7 : 8; break;
+        default: tiffOrientation = mirror ? 2 : 1; break;
+    }
+    TIFFSetField(tif, TIFFTAG_ORIENTATION, tiffOrientation);
+    TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, isBayer ? PHOTOMETRIC_CFA : PHOTOMETRIC_LINEAR_RAW);
+    TIFFSetField(tif, TIFFTAG_SAMPLESPERPIXEL, samplesPerPixel);
+    TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG);
+    TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, height);
+    TIFFSetField(tif, TIFFTAG_SUBFILETYPE, 0);
+
+    if (isBayer) {
+        uint16_t repeatDim[2] = {2, 2};
+        TIFFSetField(tif, TIFFTAG_CFAREPEATPATTERNDIM, repeatDim);
+        TIFFSetField(tif, TIFFTAG_BLACKLEVELREPEATDIM, repeatDim);
+
+        uint32_t active_area[4];
+        uint32_t activeW, activeH;
+        if (activeArea) {
+            active_area[0] = (uint32_t)activeArea[0]; // top
+            active_area[1] = (uint32_t)activeArea[1]; // left
+            active_area[2] = (uint32_t)activeArea[2]; // bottom
+            active_area[3] = (uint32_t)activeArea[3]; // right
+            activeW = active_area[3] - active_area[1];
+            activeH = active_area[2] - active_area[0];
+        } else {
+            active_area[0] = 0;
+            active_area[1] = 0;
+            active_area[2] = (uint32_t)height;
+            active_area[3] = (uint32_t)width;
+            activeW = (uint32_t)width;
+            activeH = (uint32_t)height;
+        }
+        TIFFSetField(tif, TIFFTAG_ACTIVEAREA, active_area);
+
+        uint32_t crop_origin[2] = {0, 0};
+        uint32_t crop_size[2] = {activeW, activeH};
+        TIFFSetField(tif, TIFFTAG_DEFAULTCROPORIGIN, crop_origin);
+        TIFFSetField(tif, TIFFTAG_DEFAULTCROPSIZE, crop_size);
+
+        // 0:RGGB, 1:GRBG, 2:GBRG, 3:BGGR (Android)
+        // DNG: 0=R, 1=G, 2=B
+        uint8_t patterns[4][4] = {
+            {0, 1, 1, 2}, // RGGB
+            {1, 0, 2, 1}, // GRBG
+            {1, 2, 0, 1}, // GBRG
+            {2, 1, 1, 0}  // BGGR
+        };
+        int pIdx = std::clamp(cfaPattern, 0, 3);
+        TIFFSetField(tif, TIFFTAG_CFAPATTERN, (uint16_t)4, patterns[pIdx]);
+    } else {
+        uint32_t active_area[4];
+        uint32_t activeW, activeH;
+        if (activeArea) {
+            active_area[0] = (uint32_t)activeArea[0];
+            active_area[1] = (uint32_t)activeArea[1];
+            active_area[2] = (uint32_t)activeArea[2];
+            active_area[3] = (uint32_t)activeArea[3];
+            activeW = active_area[3] - active_area[1];
+            activeH = active_area[2] - active_area[0];
+        } else {
+            active_area[0] = 0;
+            active_area[1] = 0;
+            active_area[2] = (uint32_t)height;
+            active_area[3] = (uint32_t)width;
+            activeW = (uint32_t)width;
+            activeH = (uint32_t)height;
+        }
+        TIFFSetField(tif, TIFFTAG_ACTIVEAREA, active_area);
+
+        uint32_t crop_origin[2] = {0, 0};
+        uint32_t crop_size[2] = {activeW, activeH};
+        TIFFSetField(tif, TIFFTAG_DEFAULTCROPORIGIN, crop_origin);
+        TIFFSetField(tif, TIFFTAG_DEFAULTCROPSIZE, crop_size);
+    }
+
+    static const char* make = "Google";
+    TIFFSetField(tif, TIFFTAG_MAKE, make);
+    static const char* model = "Darkbag Device";
+    TIFFSetField(tif, TIFFTAG_MODEL, model);
+    static const char* software = "Darkbag Camera";
+    TIFFSetField(tif, TIFFTAG_SOFTWARE, software);
+
+    time_t raw_time = (time_t)(captureTimeMillis / 1000);
+    struct tm * timeinfo = localtime(&raw_time);
+    char time_buffer[20];
+    strftime(time_buffer, 20, "%Y:%m:%d %H:%M:%S", timeinfo);
+    TIFFSetField(tif, TIFFTAG_DATETIME, time_buffer);
+
+    static const uint8_t dng_version[] = {1, 4, 0, 0};
+    TIFFSetField(tif, TIFFTAG_DNGVERSION, dng_version);
+    static const uint8_t dng_backward_version[] = {1, 1, 0, 0};
+    TIFFSetField(tif, TIFFTAG_DNGBACKWARDVERSION, dng_backward_version);
+    TIFFSetField(tif, TIFFTAG_UNIQUECAMERAMODEL, model);
+
+    uint32_t white_level_val = (uint32_t)whiteLevel;
+    if (white_level_val == 0) white_level_val = 65535;
+    TIFFSetField(tif, TIFFTAG_WHITELEVEL, (uint16_t)1, &white_level_val);
+
+    if (isBayer && blackLevelPattern) {
+        uint32_t bl[4] = {(uint32_t)blackLevelPattern[0], (uint32_t)blackLevelPattern[1], (uint32_t)blackLevelPattern[2], (uint32_t)blackLevelPattern[3]};
+        TIFFSetField(tif, TIFFTAG_BLACKLEVEL, (uint16_t)4, bl);
+    } else {
+        uint32_t black_level_val = 0;
+        TIFFSetField(tif, TIFFTAG_BLACKLEVEL, (uint16_t)1, &black_level_val);
+    }
+
+    if (!ccm.empty()) {
+        int32_t cm_rational[18];
+        const int32_t scale = 1000000;
+        for (int i = 0; i < 9; i++) {
+            cm_rational[i * 2] = (int32_t)(ccm[i] * (float)scale);
+            cm_rational[i * 2 + 1] = scale;
+        }
+        TIFFSetField(tif, TIFFTAG_COLORMATRIX1, (uint16_t)9, cm_rational);
+    }
+
+    if (isBayer && wb) {
+        uint32_t asn_rational[6];
+        asn_rational[0] = (uint32_t)(10000.0f / wb[0]); asn_rational[1] = 10000;
+        asn_rational[2] = (uint32_t)(10000.0f / wb[1]); asn_rational[3] = 10000;
+        asn_rational[4] = (uint32_t)(10000.0f / wb[3]); asn_rational[5] = 10000;
+        TIFFSetField(tif, TIFFTAG_ASSHOTNEUTRAL, (uint16_t)3, asn_rational);
+    } else {
+        uint32_t asn_rational[6] = {1, 1, 1, 1, 1, 1};
+        TIFFSetField(tif, TIFFTAG_ASSHOTNEUTRAL, (uint16_t)3, asn_rational);
+    }
+
+    TIFFSetField(tif, TIFFTAG_CALIBRATIONILLUMINANT1, (uint16_t)17);
+    float exposureTimeSec = (float)exposureTime / 1000000000.0f;
+    TIFFSetField(tif, TIFFTAG_EXPOSURETIME, exposureTimeSec);
+    TIFFSetField(tif, TIFFTAG_FNUMBER, fNumber);
+    TIFFSetField(tif, TIFFTAG_FOCALLENGTH, focalLength);
+
+    unsigned short iso_short = (unsigned short)iso;
+    TIFFSetField(tif, TIFFTAG_ISOSPEEDRATINGS, (uint16_t)1, &iso_short);
+
+    if (TIFFWriteEncodedStrip(tif, 0, (void*)data, static_cast<size_t>(width) * height * samplesPerPixel * sizeof(unsigned short)) < 0) {
+        TIFFClose(tif);
+        return false;
+    }
+
+    TIFFClose(tif);
+    return true;
+}
+
+bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, int iso, long exposureTime, float fNumber, float focalLength, long captureTimeMillis, const std::vector<float>& ccm, int orientation, bool mirror, const int* activeArea) {
+    return write_dng_internal(filename, width, height, data.data(), 3, whiteLevel, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccm, orientation, mirror, false, nullptr, nullptr, 0, activeArea);
+}
+
+bool write_bayer_dng(const char* filename, int width, int height, const unsigned short* data, int whiteLevel, int iso, long exposureTime, float fNumber, float focalLength, long captureTimeMillis, const std::vector<float>& ccm, int orientation, bool mirror, const int* blackLevelPattern, const float* wb, int cfaPattern, const int* activeArea) {
+    return write_dng_internal(filename, width, height, data, 1, whiteLevel, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccm, orientation, mirror, true, blackLevelPattern, wb, cfaPattern, activeArea);
 }
 
 

@@ -1576,6 +1576,8 @@ class CameraFragment : Fragment() {
                     lutPath = nativeLutPath,
                     outputTiffPath = null,
                     outputJpgPath = if (saveJpg) tempJpgFile.absolutePath else null, // Fast JPG
+                    outputDngPath = null,
+                    outputBayerDngPath = null,
                     digitalGain = 1.0f,
                     debugStats = debugStats,
                     outputBitmap = null,
@@ -3136,12 +3138,14 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     nativeLutPath,
                     null, // outputTiffPath
                     if (saveJpg) tempJpgFile.absolutePath else null, // outputJpgPath (fast preview)
+                    null, // outputDngPath (finalize in background)
                     digitalGain,
                     debugStats,
                     null, // outputBitmap
                     tempRawFile.absolutePath,
                     currentZoom,
                     mirror,
+                    null, // outputBayerDngPath
                     activeArray
                 )
 
@@ -3196,6 +3200,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         .putString("jpgPath", if (saveJpg) fullResJpgFile.absolutePath else null)
                         .putString("targetUri", fastJpegUri?.toString()) // Replace fast JPEG in place
                         .putFloat("zoomFactor", currentZoom)
+                        .putString("dngPath", if (saveRaw) linearDngPath else null)
                         .putInt("iso", (iso).toInt())
                         .putLong("exposureTime", exposureTime)
                         .putFloat("fNumber", fNumber)
