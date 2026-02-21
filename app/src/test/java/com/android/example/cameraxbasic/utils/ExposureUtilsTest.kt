@@ -33,8 +33,9 @@ class ExposureUtilsTest {
         // targetTotalExposure = baseline * 0.7071
         // actualTotalExposure should match target (since we are not at floor)
         // digitalGain = (baseline * 0.8) / actual = (baseline * 0.8) / (baseline * 0.7071) = 0.8 / 0.7071 = 1.131
+        // Multiplied by 4x pipeline gain: 4.524
 
-        assertEquals(1.131f, config.digitalGain, 0.05f)
+        assertEquals(4.524f, config.digitalGain, 0.2f)
 
         val baseline = 800.0 * 33_333_333.0
         val actual = config.iso.toDouble() * config.exposureTime.toDouble()
@@ -62,8 +63,9 @@ class ExposureUtilsTest {
         // actual hardware floor = 100 * 100k = 10M (cannot go lower than minIso * minTime)
 
         // digitalGain = (baseline * 0.8) / actual = (10M * 0.8) / 10M = 0.8
+        // Multiplied by 4x pipeline gain: 3.2
 
-        assertEquals(0.8f, configFloor.digitalGain, 0.01f)
+        assertEquals(3.2f, configFloor.digitalGain, 0.05f)
         assertEquals(100, configFloor.iso)
         assertEquals(100_000L, configFloor.exposureTime)
     }
@@ -99,7 +101,8 @@ class ExposureUtilsTest {
 
         val baseline = 800.0 * 33_333_333.0
         val actualHigh = configHighClipping.iso.toDouble() * configHighClipping.exposureTime.toDouble()
-        val expectedGainWithoutDampening = (baseline / actualHigh).toFloat()
+        // recoveryRatio = 0.8, pipelineGain = 4.0 => total baseline multiplier 3.2
+        val expectedGainWithoutDampening = (baseline * 0.8 / actualHigh).toFloat() * 4.0f
 
         assertTrue("Gain should be dampened: ${configHighClipping.digitalGain} < $expectedGainWithoutDampening",
             configHighClipping.digitalGain < expectedGainWithoutDampening)
@@ -125,8 +128,9 @@ class ExposureUtilsTest {
         // Then dampened by GAIN_DAMPENING_FACTOR (0.4):
         // dampening = 1.0 - 0.4 * (0.9 / 3.0) = 1.0 - 0.12 = 0.88
         // final gain = 2.112 * 0.88 = 1.858
+        // Multiplied by 4x pipeline gain: 7.432
 
-        assertEquals(1.858f, config.digitalGain, 0.05f)
+        assertEquals(7.432f, config.digitalGain, 0.2f)
     }
 
     @Test

@@ -26,6 +26,7 @@ object ExposureUtils {
     private const val MAX_ADDITIONAL_UNDEREXPOSURE_STOPS = 3.0
     private const val GAIN_DAMPENING_FACTOR = 0.4
     private const val RECOVERY_TARGET_RATIO = 0.8f // Keep a fixed safe margin for highlights
+    const val PIPELINE_GAIN_MULTIPLIER = 4.0f // Compensate for Halide's 0.25 scaling
 
     data class ExposureConfig(
         val iso: Int,
@@ -168,7 +169,7 @@ object ExposureUtils {
         }
 
         val effectiveBaseline = baselineTotalExposure * recoveryRatio
-        var digitalGain = (effectiveBaseline / actualTotalExposure).toFloat()
+        var digitalGain = (effectiveBaseline / actualTotalExposure).toFloat() * PIPELINE_GAIN_MULTIPLIER
 
         // Apply "Gain Dampening" for highlight preservation.
         // If we underexposed specifically due to clipping, we avoid boosting midtones back to full brightness.

@@ -331,7 +331,17 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
              uint16_t g = raw_ptr[x*stride_x + y*stride_y + 1*stride_c];
              uint16_t b = raw_ptr[x*stride_x + y*stride_y + 2*stride_c];
 
-             // Removed manual 14-bit clipping to preserve HDR headroom from Halide merge.
+             // Neutralize highlights for single frames (Standard mode).
+             // Halide output maps nominal white to kMax14BitValue (16383). For single frames, anything
+             // above this is likely non-neutral sensor saturation. We clip to 16383 to ensure white highlights.
+             // Note: This does NOT make the image dark because digitalGain (4.0x) is applied in ColorPipe,
+             // mapping 16383 back to 1.0 (full brightness).
+             // For HDR+ (numFrames > 1), we preserve the full 16-bit range to maintain HDR headroom.
+             if (numFrames == 1) {
+                 r = std::min(r, kMax14BitValue);
+                 g = std::min(g, kMax14BitValue);
+                 b = std::min(b, kMax14BitValue);
+             }
 
              float lscR = 1.0f, lscG = 1.0f, lscB = 1.0f;
              if (hasLsc) {
