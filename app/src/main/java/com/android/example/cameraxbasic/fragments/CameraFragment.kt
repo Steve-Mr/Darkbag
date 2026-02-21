@@ -4099,30 +4099,31 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
     }
 
     private fun showShutterBlackout() {
-        cameraUiContainerBinding?.let { binding ->
-            val blackout = binding.viewFinderBlackout
-            blackout.post {
-                blackout.visibility = View.VISIBLE
-                blackout.bringToFront()
-                blackout.postDelayed({
-                    cameraUiContainerBinding?.viewFinderBlackout?.visibility = View.INVISIBLE
-                }, 100L) // Use 100ms to ensure visibility during processing
-            }
+        val binding = cameraUiContainerBinding ?: return
+        val blackout = binding.viewFinderBlackout ?: return
+        blackout.post {
+            blackout.visibility = View.VISIBLE
+            blackout.bringToFront()
+            blackout.postDelayed({
+                cameraUiContainerBinding?.viewFinderBlackout?.visibility = View.INVISIBLE
+            }, 100L) // Use 100ms to ensure visibility during processing
         }
     }
 
     private fun updateHalfFrameUI() {
         val uiBinding = cameraUiContainerBinding ?: return
         val vfBinding = fragmentCameraBinding
-        val overlayBinding = cameraUiContainerBinding ?: return
+        val gapView = uiBinding.halfFrameGapIndicator ?: return
+        val edgeTopView = uiBinding.halfFrameFilmEdgeTop ?: return
+        val edgeBottomView = uiBinding.halfFrameFilmEdgeBottom ?: return
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
         isHalfFrameModeEnabled = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_MODE, false)
 
         if (!isHalfFrameModeEnabled) {
             uiBinding.tvHalfFrameStep?.visibility = View.GONE
-            overlayBinding.halfFrameGapIndicator.visibility = View.GONE
-            overlayBinding.halfFrameFilmEdgeTop.visibility = View.GONE
-            overlayBinding.halfFrameFilmEdgeBottom.visibility = View.GONE
+            gapView.visibility = View.GONE
+            edgeTopView.visibility = View.GONE
+            edgeBottomView.visibility = View.GONE
             vfBinding.viewFinder.scaleX = 1f
             vfBinding.viewFinder.scaleY = 1f
             vfBinding.viewFinder.translationX = 0f
@@ -4148,38 +4149,38 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             val gapWidthScaled = gapWidthBase * scale
             val shift = gapWidthScaled / 2f
 
-            overlayBinding.halfFrameGapIndicator.visibility = View.VISIBLE
-            overlayBinding.halfFrameGapIndicator.bringToFront()
-            overlayBinding.halfFrameGapIndicator.background = buildHalfFrameGapBackground()
-            val gapParams = overlayBinding.halfFrameGapIndicator.layoutParams
+            gapView.visibility = View.VISIBLE
+            gapView.bringToFront()
+            gapView.background = buildHalfFrameGapBackground()
+            val gapParams = gapView.layoutParams
             gapParams.width = gapWidthScaled.toInt()
             gapParams.height = (totalH * scale).toInt()
-            overlayBinding.halfFrameGapIndicator.layoutParams = gapParams
+            gapView.layoutParams = gapParams
 
-            overlayBinding.halfFrameFilmEdgeTop.visibility = View.VISIBLE
-            overlayBinding.halfFrameFilmEdgeBottom.visibility = View.VISIBLE
-            overlayBinding.halfFrameFilmEdgeTop.bringToFront()
-            overlayBinding.halfFrameFilmEdgeBottom.bringToFront()
+            edgeTopView.visibility = View.VISIBLE
+            edgeBottomView.visibility = View.VISIBLE
+            edgeTopView.bringToFront()
+            edgeBottomView.bringToFront()
 
             vfBinding.viewFinder.scaleX = scale
             vfBinding.viewFinder.scaleY = scale
 
             if (halfFrameStep == 0) {
                 vfBinding.viewFinder.translationX = -shift
-                overlayBinding.halfFrameGapIndicator.translationX = totalW * scale
+                gapView.translationX = totalW * scale
             } else {
                 vfBinding.viewFinder.translationX = shift
-                overlayBinding.halfFrameGapIndicator.translationX = 0f
+                gapView.translationX = 0f
             }
             vfBinding.viewFinder.translationY = 0f
-            overlayBinding.halfFrameGapIndicator.translationY = 0f
+            gapView.translationY = 0f
         }
     }
 
     private fun animateHalfFrameAdvance() {
         val vfBinding = fragmentCameraBinding
-        val overlayBinding = cameraUiContainerBinding ?: return
-        val gap = overlayBinding.halfFrameGapIndicator
+        val uiBinding = cameraUiContainerBinding ?: return
+        val gap = uiBinding.halfFrameGapIndicator ?: return
         val finder = vfBinding.viewFinder
         val totalW = finder.width.toFloat()
         if (totalW <= 0f) return
