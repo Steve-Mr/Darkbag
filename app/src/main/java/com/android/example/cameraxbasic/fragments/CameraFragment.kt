@@ -1716,9 +1716,7 @@ class CameraFragment : Fragment() {
                     camera?.cameraControl?.startFocusAndMetering(action)
                 }
 
-                val screenX = view.x + event.x
-                val screenY = view.y + event.y
-                showFocusRing(screenX, screenY)
+                showFocusRing(event.x, event.y)
                 view.performClick()
             }
             true
@@ -1808,13 +1806,12 @@ class CameraFragment : Fragment() {
 
     private fun showFocusRing(x: Float, y: Float) {
         val focusRing = fragmentCameraBinding.focusRing
-        val width = focusRing.width.toFloat()
-        val height = focusRing.height.toFloat()
+        val size = resources.getDimension(R.dimen.focus_ring_size)
 
         focusRing.animate().cancel()
 
-        focusRing.translationX = x - width / 2
-        focusRing.translationY = y - height / 2
+        focusRing.translationX = x - size / 2
+        focusRing.translationY = y - size / 2
         focusRing.visibility = View.VISIBLE
         focusRing.alpha = 1.0f
 
