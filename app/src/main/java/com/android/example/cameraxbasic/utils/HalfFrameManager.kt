@@ -14,17 +14,24 @@ import java.io.FileOutputStream
 class HalfFrameManager(private val context: Context) {
     private val prefs: SharedPreferences = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
 
+    private fun profileKey(): String {
+        if (!isEnabled) return "normal"
+        return if (layout == SettingsFragment.HALF_FRAME_LAYOUTS[0]) "half_side" else "half_top"
+    }
+
+    private fun scopedKey(base: String): String = "${base}_${profileKey()}"
+
     var step: Int
-        get() = prefs.getInt(SettingsFragment.KEY_HALF_FRAME_STEP, 0)
-        set(value) = prefs.edit().putInt(SettingsFragment.KEY_HALF_FRAME_STEP, value).apply()
+        get() = prefs.getInt(scopedKey(SettingsFragment.KEY_HALF_FRAME_STEP), 0)
+        set(value) = prefs.edit().putInt(scopedKey(SettingsFragment.KEY_HALF_FRAME_STEP), value).apply()
 
     var tempPath: String?
-        get() = prefs.getString(SettingsFragment.KEY_HALF_FRAME_TEMP_PATH, null)
-        set(value) = prefs.edit().putString(SettingsFragment.KEY_HALF_FRAME_TEMP_PATH, value).apply()
+        get() = prefs.getString(scopedKey(SettingsFragment.KEY_HALF_FRAME_TEMP_PATH), null)
+        set(value) = prefs.edit().putString(scopedKey(SettingsFragment.KEY_HALF_FRAME_TEMP_PATH), value).apply()
 
     var frame1BaseName: String?
-        get() = prefs.getString(SettingsFragment.KEY_HALF_FRAME_BASE_NAME, null)
-        set(value) = prefs.edit().putString(SettingsFragment.KEY_HALF_FRAME_BASE_NAME, value).apply()
+        get() = prefs.getString(scopedKey(SettingsFragment.KEY_HALF_FRAME_BASE_NAME), null)
+        set(value) = prefs.edit().putString(scopedKey(SettingsFragment.KEY_HALF_FRAME_BASE_NAME), value).apply()
 
     val isEnabled: Boolean
         get() = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_MODE, false)
@@ -69,7 +76,7 @@ class HalfFrameManager(private val context: Context) {
             }
 
             // Save to internal temp
-            val tempFile = File(context.filesDir, "half_frame_frame1.jpg")
+            val tempFile = File(context.filesDir, "half_frame_frame1_${profileKey()}.jpg")
             File(currentJpgPath).copyTo(tempFile, overwrite = true)
             tempPath = tempFile.absolutePath
             return null
@@ -101,7 +108,7 @@ class HalfFrameManager(private val context: Context) {
                 if (firstPath == null || !File(firstPath).exists()) {
                     Log.e(TAG, "First frame missing, resetting to step 1")
                     frame1BaseName = baseName
-                    val tempFile = File(context.filesDir, "half_frame_frame1.jpg")
+                    val tempFile = File(context.filesDir, "half_frame_frame1_${profileKey()}.jpg")
                     File(currentJpgPath).copyTo(tempFile, overwrite = true)
                     tempPath = tempFile.absolutePath
                     return null

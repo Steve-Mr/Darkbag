@@ -221,6 +221,38 @@ class CameraFragment : Fragment() {
     private var isOisSupported = false
     private var isHdrOisEnabledPref = true
 
+    private fun currentHalfFrameProfile(prefs: SharedPreferences): String {
+        val mode = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_MODE, false)
+        if (!mode) return "normal"
+        val layout = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUTS[0])
+        return if (layout == SettingsFragment.HALF_FRAME_LAYOUTS[0]) "half_side" else "half_top"
+    }
+
+    private fun scopedHalfFrameStepKey(prefs: SharedPreferences): String =
+        "${SettingsFragment.KEY_HALF_FRAME_STEP}_${currentHalfFrameProfile(prefs)}"
+
+    private fun scopedHalfFrameTempPathKey(prefs: SharedPreferences): String =
+        "${SettingsFragment.KEY_HALF_FRAME_TEMP_PATH}_${currentHalfFrameProfile(prefs)}"
+
+    private fun scopedHalfFrameBaseNameKey(prefs: SharedPreferences): String =
+        "${SettingsFragment.KEY_HALF_FRAME_BASE_NAME}_${currentHalfFrameProfile(prefs)}"
+
+    private fun readScopedHalfFrameState(prefs: SharedPreferences) {
+        val stepKey = scopedHalfFrameStepKey(prefs)
+        val tempKey = scopedHalfFrameTempPathKey(prefs)
+        halfFrameStep = prefs.getInt(stepKey, 0)
+        halfFrameTempPath = prefs.getString(tempKey, null)
+        if (halfFrameStep == 1 && (halfFrameTempPath == null || !File(halfFrameTempPath!!).exists())) {
+            halfFrameStep = 0
+            prefs.edit().putInt(stepKey, 0).remove(tempKey).apply()
+        }
+    }
+
+    private fun writeScopedHalfFrameStep(prefs: SharedPreferences, step: Int) {
+        halfFrameStep = step
+        prefs.edit().putInt(scopedHalfFrameStepKey(prefs), step).apply()
+    }
+
     private fun showProcessingAnimation() {
         lifecycleScope.launch(Dispatchers.Main) {
             processingCount++
@@ -388,6 +420,8 @@ class CameraFragment : Fragment() {
             bindCameraUseCases()
         }
 
+        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        readScopedHalfFrameState(prefs)
         updateHalfFrameUI()
         cameraUiContainerBinding?.modeSwitchButton?.let { updateModeSwitchIcon(it) }
     }
@@ -490,18 +524,16 @@ class CameraFragment : Fragment() {
         updateHdrPlusUi()
         updateHdrPlusConstraints()
 
-        // Initialize Half-frame State
+        // Initialize Half-frame State (isolated by mode/layout profile)
         isHalfFrameModeEnabled = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_MODE, false)
-        halfFrameStep = prefs.getInt(SettingsFragment.KEY_HALF_FRAME_STEP, 0)
-        halfFrameTempPath = prefs.getString(SettingsFragment.KEY_HALF_FRAME_TEMP_PATH, null)
-
-        // Validate Half-frame state
-        if (halfFrameStep == 1 && (halfFrameTempPath == null || !File(halfFrameTempPath!!).exists())) {
-            halfFrameStep = 0
-            prefs.edit().putInt(SettingsFragment.KEY_HALF_FRAME_STEP, 0).apply()
-        }
+        readScopedHalfFrameState(prefs)
 
         updateHalfFrameUI()
+        fragmentCameraBinding.viewFinder.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            if (isHalfFrameModeEnabled) {
+                updateHalfFrameUI()
+            }
+        }
 
         // Initialize HDR+ Burst Helper
         hdrPlusBurstHelper = HdrPlusBurst(
@@ -515,9 +547,17 @@ class CameraFragment : Fragment() {
         viewLifecycleOwner.lifecycleScope.launch {
             ColorProcessor.halfFrameFlow.collect { step ->
                 withContext(Dispatchers.Main) {
-                    if (step != 1) {
+                    if (step == 1) {
+                        val uri = com.android.example.cameraxbasic.utils.HalfFrameManager(requireContext()).getIntermediateUri()
+                        if (uri != null) {
+                            val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                            prefs.edit().putString(SettingsFragment.KEY_LAST_CAPTURE_URI, uri.toString()).apply()
+                            setGalleryThumbnail(uri.toString())
+                        }
+                    } else {
                         // Full capture complete
-                        halfFrameStep = 0
+                        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                        writeScopedHalfFrameStep(prefs, 0)
                         updateHalfFrameUI()
                         hideProcessingAnimation() // Final cleanup
                     }
@@ -1232,15 +1272,16 @@ class CameraFragment : Fragment() {
         cameraUiContainerBinding?.cameraCaptureButton?.setOnLongClickListener {
             if (isHalfFrameModeEnabled && halfFrameStep == 1) {
                 // Cancel/Reset half-frame
-                halfFrameStep = 0
                 val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-                prefs.edit().putInt(SettingsFragment.KEY_HALF_FRAME_STEP, 0)
-                    .remove(SettingsFragment.KEY_HALF_FRAME_BASE_NAME).apply()
+                writeScopedHalfFrameStep(prefs, 0)
+                prefs.edit().remove(scopedHalfFrameBaseNameKey(prefs))
+                    .remove(scopedHalfFrameTempPathKey(prefs)).apply()
                 // Cleanup temp file
-                val tempPath = prefs.getString(SettingsFragment.KEY_HALF_FRAME_TEMP_PATH, null)
+                val tempPath = halfFrameTempPath
                 if (tempPath != null) {
                     File(tempPath).delete()
                 }
+                halfFrameTempPath = null
                 updateHalfFrameUI()
                 Toast.makeText(requireContext(), "Half-frame Reset", Toast.LENGTH_SHORT).show()
                 true
@@ -1270,14 +1311,12 @@ class CameraFragment : Fragment() {
             val isFrame2Trigger = isHalfFrameModeEnabled && halfFrameStep == 1
 
             if (isFrame1Trigger) {
-                halfFrameStep = 1
-                prefs.edit().putInt(SettingsFragment.KEY_HALF_FRAME_STEP, 1).apply()
+                writeScopedHalfFrameStep(prefs, 1)
                 updateHalfFrameUI()
             }
 
             if (isFrame2Trigger) {
-                halfFrameStep = 0
-                prefs.edit().putInt(SettingsFragment.KEY_HALF_FRAME_STEP, 0).apply()
+                writeScopedHalfFrameStep(prefs, 0)
                 updateHalfFrameUI()
 
                 showProcessingAnimation() // Immediate indicator on click for second frame
@@ -1723,7 +1762,7 @@ class CameraFragment : Fragment() {
                     if (fastOutputUri != null) {
                         prefs.edit().putString(SettingsFragment.KEY_LAST_CAPTURE_URI, fastOutputUri.toString()).apply()
                         setGalleryThumbnail(fastOutputUri.toString())
-                    } else if (isHalfFrameModeEnabled && prefs.getInt(SettingsFragment.KEY_HALF_FRAME_STEP, 0) == 1) {
+                    } else if (isHalfFrameModeEnabled && prefs.getInt(scopedHalfFrameStepKey(prefs), 0) == 1) {
                         setGalleryThumbnail(null)
                     }
                 }
@@ -2778,11 +2817,11 @@ class CameraFragment : Fragment() {
                     mirror = mirror
                 )
                 withContext(Dispatchers.Main) {
+                    val uiPrefs = appContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
                     if (uri != null) {
-                        appContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-                            .edit().putString(SettingsFragment.KEY_LAST_CAPTURE_URI, uri.toString()).apply()
+                        uiPrefs.edit().putString(SettingsFragment.KEY_LAST_CAPTURE_URI, uri.toString()).apply()
                         setGalleryThumbnail(uri.toString())
-                    } else if (isHalfFrameModeEnabled && appContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE).getInt(SettingsFragment.KEY_HALF_FRAME_STEP, 0) == 1) {
+                    } else if (isHalfFrameModeEnabled && uiPrefs.getInt(scopedHalfFrameStepKey(uiPrefs), 0) == 1) {
                         setGalleryThumbnail(null)
                     }
                 }
@@ -3325,7 +3364,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         if (fastJpegUri != null) {
                             prefs.edit().putString(SettingsFragment.KEY_LAST_CAPTURE_URI, fastJpegUri.toString()).apply()
                             setGalleryThumbnail(fastJpegUri.toString())
-                        } else if (isHalfFrameModeEnabled && prefs.getInt(SettingsFragment.KEY_HALF_FRAME_STEP, 0) == 1) {
+                        } else if (isHalfFrameModeEnabled && prefs.getInt(scopedHalfFrameStepKey(prefs), 0) == 1) {
                             setGalleryThumbnail(null)
                         }
                         Toast.makeText(context, "HDR+ Saved!", Toast.LENGTH_SHORT).show()
@@ -4122,6 +4161,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         val edgeBottomView = uiBinding.halfFrameFilmEdgeBottom ?: return
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
         isHalfFrameModeEnabled = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_MODE, false)
+        readScopedHalfFrameState(prefs)
 
         if (!isHalfFrameModeEnabled) {
             uiBinding.tvHalfFrameStep?.visibility = View.GONE
@@ -4245,11 +4285,10 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         prefs.edit()
             .putBoolean(SettingsFragment.KEY_HALF_FRAME_MODE, newMode)
             .putString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, newLayout)
-            .putInt(SettingsFragment.KEY_HALF_FRAME_STEP, 0)
             .apply()
 
         isHalfFrameModeEnabled = newMode
-        halfFrameStep = 0
+        readScopedHalfFrameState(prefs)
         updateHalfFrameUI()
 
         // Re-bind use cases if needed?
