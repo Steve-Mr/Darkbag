@@ -331,10 +331,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
              uint16_t g = raw_ptr[x*stride_x + y*stride_y + 1*stride_c];
              uint16_t b = raw_ptr[x*stride_x + y*stride_y + 2*stride_c];
 
-             // Clip to 14-bit range to prevent pink highlights
-             r = std::min(r, kMax14BitValue);
-             g = std::min(g, kMax14BitValue);
-             b = std::min(b, kMax14BitValue);
+             // Removed manual 14-bit clipping to preserve HDR headroom from Halide merge.
 
              float lscR = 1.0f, lscG = 1.0f, lscB = 1.0f;
              if (hasLsc) {
@@ -361,11 +358,12 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
              }
 
              int idx = (y * width + x) * 3;
-             // Halide output is scaled by 0.25 (14-bit range).
-             // We shift left by 2 to restore full 16-bit range for final saving.
-             finalImage[idx+0] = (uint16_t)std::min((int)((float)r * lscR) << 2, (int)kMax16BitValue);
-             finalImage[idx+1] = (uint16_t)std::min((int)((float)g * lscG) << 2, (int)kMax16BitValue);
-             finalImage[idx+2] = (uint16_t)std::min((int)((float)b * lscB) << 2, (int)kMax16BitValue);
+             // Halide output already has nominal white at 16383 (0.25 scaling) but preserves highlights up to 65535.
+             // We remove the 2-bit shift to prevent double-gaining and clipping highlights.
+             // Software lift is now correctly managed by digitalGain in ExposureUtils.
+             finalImage[idx+0] = (uint16_t)std::min((float)r * lscR, (float)kMax16BitValue);
+             finalImage[idx+1] = (uint16_t)std::min((float)g * lscG, (float)kMax16BitValue);
+             finalImage[idx+2] = (uint16_t)std::min((float)b * lscB, (float)kMax16BitValue);
         }
     }
     auto postDurationMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - postStart).count();
