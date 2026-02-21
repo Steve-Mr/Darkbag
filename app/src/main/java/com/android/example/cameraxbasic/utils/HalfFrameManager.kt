@@ -63,7 +63,6 @@ class HalfFrameManager(private val context: Context) {
             // This is Frame 1 (either Fast Path or HQ update)
             if (f1Base == null) {
                 frame1BaseName = baseName
-                step = 1
                 Log.d(TAG, "Frame 1 Start: $baseName")
             } else {
                 Log.d(TAG, "Frame 1 Update (HQ): $baseName")
@@ -102,7 +101,6 @@ class HalfFrameManager(private val context: Context) {
                 if (firstPath == null || !File(firstPath).exists()) {
                     Log.e(TAG, "First frame missing, resetting to step 1")
                     frame1BaseName = baseName
-                    step = 1
                     val tempFile = File(context.filesDir, "half_frame_frame1.jpg")
                     File(currentJpgPath).copyTo(tempFile, overwrite = true)
                     tempPath = tempFile.absolutePath
@@ -128,7 +126,6 @@ class HalfFrameManager(private val context: Context) {
                 File(firstPath).delete()
                 tempPath = null
                 frame1BaseName = null
-                step = 0
                 return stitchedFile.absolutePath
             }
         }

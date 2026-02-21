@@ -428,9 +428,13 @@ class CameraFragment : Fragment() {
             photoViewButton.post {
                 if (filename == null) {
                     photoViewButton.setImageDrawable(null)
-                    // Keep it GONE by default when null,
-                    // unless we manually show it for the loading state.
-                    photoViewButton.visibility = View.GONE
+                    // If Half-frame mode is in step 1 (just took frame 2), keep it VISIBLE
+                    // to show the background loading indicator
+                    if (isHalfFrameModeEnabled && halfFrameStep == 1) {
+                        photoViewButton.visibility = View.VISIBLE
+                    } else {
+                        photoViewButton.visibility = View.GONE
+                    }
                     return@post
                 }
 
@@ -1270,6 +1274,11 @@ class CameraFragment : Fragment() {
             }
 
             if (isFrame2Trigger) {
+                halfFrameStep = 0
+                prefs.edit().putInt(SettingsFragment.KEY_HALF_FRAME_STEP, 0).apply()
+                updateHalfFrameUI()
+                animateHalfFrameAdvance() // Immediate animation on click for second frame
+
                 showProcessingAnimation() // Immediate indicator on click for second frame
                 cameraUiContainerBinding?.photoViewButton?.visibility = View.VISIBLE // Show thumbnail container for progress indicator
                 setGalleryThumbnail(null) // Clear previous thumbnail and show placeholder/indicator
@@ -4119,116 +4128,84 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         uiBinding.tvHalfFrameStep?.visibility = View.VISIBLE
         uiBinding.tvHalfFrameStep?.text = if (halfFrameStep == 0) "1/2" else "2/2"
         uiBinding.photoViewButton?.visibility = if (halfFrameStep == 0) View.VISIBLE else View.GONE
+
         vfBinding.halfFrameFilmEdgeTop.visibility = View.VISIBLE
         vfBinding.halfFrameFilmEdgeBottom.visibility = View.VISIBLE
+        vfBinding.halfFrameFilmEdgeTop.bringToFront()
+        vfBinding.halfFrameFilmEdgeBottom.bringToFront()
 
         val layout = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUTS[0])
 
         vfBinding.viewFinder.post {
-            val gapWidth = (maxOf(vfBinding.viewFinder.width, vfBinding.viewFinder.height) * 0.03f).toInt().coerceAtLeast(16)
+            val totalW = vfBinding.viewFinder.width.toFloat()
+            val totalH = vfBinding.viewFinder.height.toFloat()
+            if (totalW <= 0) return@post
+
+            // Horizontal gap UI for BOTH modes as requested
+            val gapWidthBase = (totalW * 0.12f).coerceAtLeast(60f)
+            val scale = totalW / (totalW + gapWidthBase)
+            val gapWidthScaled = gapWidthBase * scale
+            val shift = gapWidthScaled / 2f
 
             vfBinding.halfFrameGapIndicator.visibility = View.VISIBLE
+            vfBinding.halfFrameGapIndicator.bringToFront()
             val params = vfBinding.halfFrameGapIndicator.layoutParams
+            params.width = gapWidthScaled.toInt()
+            params.height = (totalH * scale).toInt()
+            vfBinding.halfFrameGapIndicator.layoutParams = params
 
-            if (layout == SettingsFragment.HALF_FRAME_LAYOUTS[0]) { // Side-by-side
-                // Scale down slightly to fit VF + GAP in original VF width
-                val scale = vfBinding.viewFinder.width.toFloat() / (vfBinding.viewFinder.width + gapWidth)
-                vfBinding.viewFinder.scaleX = scale
-                vfBinding.viewFinder.scaleY = scale
-                vfBinding.halfFrameGapIndicator.scaleX = scale
-                vfBinding.halfFrameGapIndicator.scaleY = scale
+            vfBinding.viewFinder.scaleX = scale
+            vfBinding.viewFinder.scaleY = scale
 
-                params.width = gapWidth
-                params.height = vfBinding.viewFinder.height
-                vfBinding.halfFrameGapIndicator.layoutParams = params
-
-                val shift = gapWidth / 2f
-                if (halfFrameStep == 0) {
-                    vfBinding.viewFinder.translationX = -shift * scale
-                    vfBinding.halfFrameGapIndicator.translationX = vfBinding.viewFinder.width.toFloat()
-                } else {
-                    vfBinding.viewFinder.translationX = shift * scale
-                    vfBinding.halfFrameGapIndicator.translationX = -gapWidth.toFloat()
-                }
-                vfBinding.viewFinder.translationY = 0f
-                vfBinding.halfFrameGapIndicator.translationY = 0f
-            } else { // Top-bottom
-                val scale = vfBinding.viewFinder.height.toFloat() / (vfBinding.viewFinder.height + gapWidth)
-                vfBinding.viewFinder.scaleX = scale
-                vfBinding.viewFinder.scaleY = scale
-                vfBinding.halfFrameGapIndicator.scaleX = scale
-                vfBinding.halfFrameGapIndicator.scaleY = scale
-
-                params.width = vfBinding.viewFinder.width
-                params.height = gapWidth
-                vfBinding.halfFrameGapIndicator.layoutParams = params
-
-                val shift = gapWidth / 2f
-                if (halfFrameStep == 0) {
-                    vfBinding.viewFinder.translationY = -shift * scale
-                    vfBinding.halfFrameGapIndicator.translationY = vfBinding.viewFinder.height.toFloat()
-                } else {
-                    vfBinding.viewFinder.translationY = shift * scale
-                    vfBinding.halfFrameGapIndicator.translationY = -gapWidth.toFloat()
-                }
-                vfBinding.viewFinder.translationX = 0f
+            if (halfFrameStep == 0) {
+                // First frame: Viewfinder on Left, Gap on Right
+                vfBinding.viewFinder.translationX = -shift
+                vfBinding.halfFrameGapIndicator.translationX = totalW * scale
+            } else {
+                // Second frame: Viewfinder on Right, Gap on Left
+                vfBinding.viewFinder.translationX = shift
                 vfBinding.halfFrameGapIndicator.translationX = 0f
             }
+            vfBinding.viewFinder.translationY = 0f
+            vfBinding.halfFrameGapIndicator.translationY = 0f
         }
     }
 
     private fun animateHalfFrameAdvance() {
         val vfBinding = _fragmentCameraBinding ?: return
-        val roll = vfBinding.halfFrameFilmRoll
-        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        val layout = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUTS[0])
+        val gap = vfBinding.halfFrameGapIndicator
+        val totalW = vfBinding.viewFinder.width.toFloat()
+        if (totalW <= 0) return
 
-        val isSideBySide = layout == SettingsFragment.HALF_FRAME_LAYOUTS[0]
+        val gapWidthBase = (totalW * 0.12f).coerceAtLeast(60f)
+        val scale = totalW / (totalW + gapWidthBase)
+        val gapWidthScaled = gapWidthBase * scale
 
-        roll.visibility = View.VISIBLE
-        roll.alpha = 1f
-        roll.bringToFront()
+        val posRight = totalW * scale
+        val posLeft = 0f
 
-        val duration = 600L
-        if (isSideBySide) {
-            roll.setBackgroundResource(R.drawable.bg_film_roll_side)
-            val vfWidth = vfBinding.viewFinder.width.toFloat()
-            val gapWidth = (vfWidth * 0.1f).coerceAtLeast(40f)
-
-            // Adjust roll size to be 2 Viewfinders + 1 Gap
-            val rollParams = roll.layoutParams
-            rollParams.width = (vfWidth * 2 + gapWidth).toInt()
-            rollParams.height = vfBinding.viewFinder.height
-            roll.layoutParams = rollParams
-
-            roll.translationX = vfWidth
-            roll.animate()
-                .translationX(-(vfWidth + gapWidth))
-                .setDuration(duration)
-                .setInterpolator(android.view.animation.AccelerateDecelerateInterpolator())
-                .withEndAction {
-                    roll.visibility = View.GONE
-                    updateHalfFrameUI()
-                }
+        // Simplified animation as requested:
+        if (halfFrameStep == 1) {
+            // After Frame 1: Gap slides from Right to Left
+            gap.translationX = posRight
+            gap.animate()
+                .translationX(posLeft)
+                .setDuration(500)
+                .setInterpolator(android.view.animation.DecelerateInterpolator())
                 .start()
         } else {
-            roll.setBackgroundResource(R.drawable.bg_film_roll_top)
-            val vfHeight = vfBinding.viewFinder.height.toFloat()
-            val gapHeight = (vfHeight * 0.1f).coerceAtLeast(40f)
-
-            val rollParams = roll.layoutParams
-            rollParams.height = (vfHeight * 2 + gapHeight).toInt()
-            rollParams.width = vfBinding.viewFinder.width
-            roll.layoutParams = rollParams
-
-            roll.translationY = vfHeight
-            roll.animate()
-                .translationY(-(vfHeight + gapHeight))
-                .setDuration(duration)
-                .setInterpolator(android.view.animation.AccelerateDecelerateInterpolator())
+            // After Frame 2: Gap slides Left to Out-Left, then New Gap slides Right-In to Right
+            gap.animate()
+                .translationX(-gapWidthScaled)
+                .setDuration(300)
+                .setInterpolator(android.view.animation.AccelerateInterpolator())
                 .withEndAction {
-                    roll.visibility = View.GONE
-                    updateHalfFrameUI()
+                    gap.translationX = totalW // Reset to far right
+                    gap.animate()
+                        .translationX(posRight)
+                        .setDuration(400)
+                        .setInterpolator(android.view.animation.DecelerateInterpolator())
+                        .start()
                 }
                 .start()
         }

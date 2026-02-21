@@ -52,7 +52,7 @@
     <View
         android:id="@+id/half_frame_film_edge_top"
         android:layout_width="0dp"
-        android:layout_height="24dp"
+        android:layout_height="32dp"
         android:background="@drawable/bg_film_edge"
         android:visibility="gone"
         app:layout_constraintTop_toTopOf="@id/view_finder"
@@ -62,7 +62,7 @@
     <View
         android:id="@+id/half_frame_film_edge_bottom"
         android:layout_width="0dp"
-        android:layout_height="24dp"
+        android:layout_height="32dp"
         android:background="@drawable/bg_film_edge"
         android:visibility="gone"
         android:rotation="180"
@@ -70,16 +70,6 @@
         app:layout_constraintStart_toStartOf="@id/view_finder"
         app:layout_constraintEnd_toEndOf="@id/view_finder" />
 
-    <View
-        android:id="@+id/half_frame_film_roll"
-        android:layout_width="0dp"
-        android:layout_height="0dp"
-        android:background="@android:color/black"
-        android:visibility="gone"
-        app:layout_constraintTop_toTopOf="@id/view_finder"
-        app:layout_constraintBottom_toBottomOf="@id/view_finder"
-        app:layout_constraintStart_toStartOf="@id/view_finder"
-        app:layout_constraintEnd_toEndOf="@id/view_finder" />
 
     <View
         android:id="@+id/view_finder_blackout"
