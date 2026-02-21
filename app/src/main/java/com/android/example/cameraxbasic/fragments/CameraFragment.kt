@@ -4144,16 +4144,18 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             if (totalW <= 0f || totalH <= 0f) return@post
 
             val gapWidthBase = (totalW * 0.12f).coerceAtLeast(60f)
+            // Keep the viewfinder aspect ratio by applying a uniform scale on both axes.
             val scale = totalW / (totalW + gapWidthBase)
             val gapWidthScaled = gapWidthBase * scale
             val shift = gapWidthScaled / 2f
+            val verticalInset = (totalH - (totalH * scale)) / 2f
 
             gapView.visibility = View.VISIBLE
             gapView.bringToFront()
             gapView.background = ColorDrawable(Color.parseColor("#FF7A7A7A"))
             val gapParams = gapView.layoutParams
             gapParams.width = gapWidthScaled.toInt()
-            gapParams.height = totalH.toInt()
+            gapParams.height = (totalH * scale).toInt()
             gapView.layoutParams = gapParams
 
             edgeTopView.visibility = View.VISIBLE
@@ -4162,7 +4164,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             edgeBottomView.bringToFront()
 
             vfBinding.viewFinder.scaleX = scale
-            vfBinding.viewFinder.scaleY = 1f
+            vfBinding.viewFinder.scaleY = scale
 
             if (halfFrameStep == 0) {
                 vfBinding.viewFinder.translationX = -shift
@@ -4172,7 +4174,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 gapView.translationX = 0f
             }
             vfBinding.viewFinder.translationY = 0f
-            gapView.translationY = 0f
+            gapView.translationY = verticalInset
         }
     }
 
@@ -4184,32 +4186,34 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         topEdge.animate().cancel()
         bottomEdge.animate().cancel()
 
-        val rollDistance = (resources.displayMetrics.density * 14f)
+        val rollDistance = (resources.displayMetrics.density * 36f)
 
-        topEdge.translationY = 0f
-        bottomEdge.translationY = 0f
+        topEdge.translationX = 0f
+        bottomEdge.translationX = 0f
 
         topEdge.animate()
-            .translationY(-rollDistance)
-            .setDuration(180)
+            .translationX(-rollDistance)
+            .setDuration(220)
             .setInterpolator(android.view.animation.AccelerateDecelerateInterpolator())
             .withEndAction {
+                topEdge.translationX = rollDistance
                 topEdge.animate()
-                    .translationY(0f)
-                    .setDuration(180)
+                    .translationX(0f)
+                    .setDuration(220)
                     .setInterpolator(android.view.animation.AccelerateDecelerateInterpolator())
                     .start()
             }
             .start()
 
         bottomEdge.animate()
-            .translationY(rollDistance)
-            .setDuration(180)
+            .translationX(-rollDistance)
+            .setDuration(220)
             .setInterpolator(android.view.animation.AccelerateDecelerateInterpolator())
             .withEndAction {
+                bottomEdge.translationX = rollDistance
                 bottomEdge.animate()
-                    .translationY(0f)
-                    .setDuration(180)
+                    .translationX(0f)
+                    .setDuration(220)
                     .setInterpolator(android.view.animation.AccelerateDecelerateInterpolator())
                     .start()
             }
