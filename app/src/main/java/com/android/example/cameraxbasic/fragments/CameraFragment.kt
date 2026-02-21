@@ -23,7 +23,6 @@ import android.content.ContentUris
 import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.SurfaceTexture
-import android.graphics.drawable.ColorDrawable
 import android.hardware.display.DisplayManager
 import android.os.Build
 import android.os.Bundle
@@ -4148,15 +4147,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             val scale = totalW / (totalW + gapWidthBase)
             val gapWidthScaled = gapWidthBase * scale
             val shift = gapWidthScaled / 2f
-            val verticalInset = (totalH - (totalH * scale)) / 2f
-
-            gapView.visibility = View.VISIBLE
-            gapView.bringToFront()
-            gapView.background = ColorDrawable(Color.parseColor("#FF7A7A7A"))
-            val gapParams = gapView.layoutParams
-            gapParams.width = gapWidthScaled.toInt()
-            gapParams.height = (totalH * scale).toInt()
-            gapView.layoutParams = gapParams
+            // Gap decoration removed: the black bar is now the naturally exposed container area.
+            gapView.visibility = View.GONE
 
             edgeTopView.visibility = View.VISIBLE
             edgeBottomView.visibility = View.VISIBLE
@@ -4168,13 +4160,10 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
             if (halfFrameStep == 0) {
                 vfBinding.viewFinder.translationX = -shift
-                gapView.translationX = totalW * scale
             } else {
                 vfBinding.viewFinder.translationX = shift
-                gapView.translationX = 0f
             }
             vfBinding.viewFinder.translationY = 0f
-            gapView.translationY = verticalInset
         }
     }
 
@@ -4186,20 +4175,19 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         topEdge.animate().cancel()
         bottomEdge.animate().cancel()
 
-        val rollDistance = (resources.displayMetrics.density * 36f)
+        val rollDistance = (resources.displayMetrics.density * 28f)
 
         topEdge.translationX = 0f
         bottomEdge.translationX = 0f
 
         topEdge.animate()
             .translationX(-rollDistance)
-            .setDuration(220)
+            .setDuration(180)
             .setInterpolator(android.view.animation.AccelerateDecelerateInterpolator())
             .withEndAction {
-                topEdge.translationX = rollDistance
                 topEdge.animate()
                     .translationX(0f)
-                    .setDuration(220)
+                    .setDuration(180)
                     .setInterpolator(android.view.animation.AccelerateDecelerateInterpolator())
                     .start()
             }
@@ -4207,13 +4195,12 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
         bottomEdge.animate()
             .translationX(-rollDistance)
-            .setDuration(220)
+            .setDuration(180)
             .setInterpolator(android.view.animation.AccelerateDecelerateInterpolator())
             .withEndAction {
-                bottomEdge.translationX = rollDistance
                 bottomEdge.animate()
                     .translationX(0f)
-                    .setDuration(220)
+                    .setDuration(180)
                     .setInterpolator(android.view.animation.AccelerateDecelerateInterpolator())
                     .start()
             }
