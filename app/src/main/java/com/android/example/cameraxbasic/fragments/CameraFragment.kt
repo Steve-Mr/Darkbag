@@ -1323,7 +1323,7 @@ class CameraFragment : Fragment() {
     /**
      * Our custom image analysis class.
      */
-    private class LuminosityAnalyzer(listener: LumaListener? = null) : ImageAnalysis.Analyzer {
+    private inner class LuminosityAnalyzer(listener: LumaListener? = null) : ImageAnalysis.Analyzer {
         private val frameRateWindow = 8
         private val frameTimestamps = ArrayDeque<Long>(5)
         private val listeners = ArrayList<LumaListener>().apply { listener?.let { add(it) } }
@@ -1332,11 +1332,6 @@ class CameraFragment : Fragment() {
             private set
 
         override fun analyze(image: ImageProxy) {
-            if (listeners.isEmpty()) {
-                image.close()
-                return
-            }
-
             val currentTime = System.currentTimeMillis()
             frameTimestamps.push(currentTime)
 
@@ -1356,17 +1351,33 @@ class CameraFragment : Fragment() {
             val pixelStride = plane.pixelStride
 
             var sum = 0L
-            // Direct ByteBuffer iteration to avoid massive allocations (toByteArray + map + average)
-            // This reduces garbage collection pressure significantly during preview.
-            for (y in 0 until height) {
+            var highlightCount = 0
+            var totalSampled = 0
+
+            // Direct ByteBuffer iteration with sampling for efficiency
+            for (y in 0 until height step ANALYSIS_SAMPLING_STEP) {
                 val rowStart = y * rowStride
-                for (x in 0 until width) {
-                    sum += buffer.get(rowStart + x * pixelStride).toLong() and 0xFF
+                for (x in 0 until width step ANALYSIS_SAMPLING_STEP) {
+                    val value = buffer.get(rowStart + x * pixelStride).toInt() and 0xFF
+                    sum += value
+                    if (value > ANALYSIS_HIGHLIGHT_THRESHOLD) {
+                        highlightCount++
+                    }
+                    totalSampled++
                 }
             }
-            val luma = sum.toDouble() / (width * height)
 
-            listeners.forEach { it(luma) }
+            if (totalSampled > 0) {
+                val luma = sum.toDouble() / totalSampled
+                val currentRatio = highlightCount.toDouble() / totalSampled
+                lastClippingRatio = (CLIPPING_EMA_ALPHA * currentRatio) + (1.0 - CLIPPING_EMA_ALPHA) * lastClippingRatio
+                if (currentRatio > 0.01) {
+                    Log.d(TAG, "LuminosityAnalyzer: clipping detected! current=$currentRatio, ema=$lastClippingRatio")
+                }
+
+                listeners.forEach { it(luma) }
+            }
+
             image.close()
         }
     }
@@ -2630,8 +2641,9 @@ class CameraFragment : Fragment() {
         private const val FOCUS_RING_DISPLAY_TIME_MS = 500L
         private const val FOCUS_RING_FADE_OUT_DURATION_MS = 300L
         private const val AE_SETTLE_DELAY_MS = 50L
-        private const val ANALYSIS_HIGHLIGHT_THRESHOLD = 240
+        private const val ANALYSIS_HIGHLIGHT_THRESHOLD = 225
         private const val ANALYSIS_SAMPLING_STEP = 4
+        private const val CLIPPING_EMA_ALPHA = 0.3
 
         const val KEY_SELECTED_LENS_ID = "selected_lens_sensor_id"
         const val KEY_LENS_FACING = "lens_facing"
@@ -3467,7 +3479,11 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         totalSampled++
                     }
                 }
-                lastClippingRatio = if (totalSampled > 0) highlightCount.toDouble() / totalSampled else 0.0
+                val currentRatio = if (totalSampled > 0) highlightCount.toDouble() / totalSampled else 0.0
+                lastClippingRatio = (CLIPPING_EMA_ALPHA * currentRatio) + (1.0 - CLIPPING_EMA_ALPHA) * lastClippingRatio
+                if (currentRatio > 0.01) {
+                    Log.d(TAG, "AnalysisImageReader: clipping detected! current=$currentRatio, ema=$lastClippingRatio")
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "Error analyzing image", e)
             } finally {

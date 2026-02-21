@@ -18,12 +18,13 @@ object ExposureUtils {
     private const val FACTOR_EV_MINUS_4 = 0.0625f   // -4 EV
     private const val FACTOR_EV_MINUS_3 = 0.125f    // -3 EV
     private const val FACTOR_EV_MINUS_1_5 = 0.3535f // -1.5 EV
-    private const val FACTOR_EV_0 = 1.0f            // 0 EV
+    private const val FACTOR_EV_MINUS_0_5 = 0.7071f // -0.5 EV
 
-    private const val CLIPPING_RATIO_THRESHOLD = 0.03
+    private const val CLIPPING_RATIO_THRESHOLD = 0.005 // 0.5%
     private const val CLIPPING_TO_EV_FACTOR = 15.0
-    private const val MAX_ADDITIONAL_UNDEREXPOSURE_STOPS = 2.0
-    private const val GAIN_DAMPENING_FACTOR = 0.2
+    private const val MAX_ADDITIONAL_UNDEREXPOSURE_STOPS = 3.0
+    private const val GAIN_DAMPENING_FACTOR = 0.5
+    private const val RECOVERY_TARGET_RATIO = 0.8f // Don't pull back to full baseline
 
     data class ExposureConfig(
         val iso: Int,
@@ -81,9 +82,9 @@ object ExposureUtils {
                     currentIso <= ISO_THRESHOLD_MID -> {
                         interpolate(currentIso, ISO_THRESHOLD_LOW, ISO_THRESHOLD_MID, FACTOR_EV_MINUS_3, FACTOR_EV_MINUS_1_5)
                     }
-                    currentIso >= ISO_THRESHOLD_HIGH -> FACTOR_EV_0
+                    currentIso >= ISO_THRESHOLD_HIGH -> FACTOR_EV_MINUS_0_5
                     else -> {
-                        interpolate(currentIso, ISO_THRESHOLD_MID, ISO_THRESHOLD_HIGH, FACTOR_EV_MINUS_1_5, FACTOR_EV_0)
+                        interpolate(currentIso, ISO_THRESHOLD_MID, ISO_THRESHOLD_HIGH, FACTOR_EV_MINUS_1_5, FACTOR_EV_MINUS_0_5)
                     }
                 }
             }
@@ -99,6 +100,10 @@ object ExposureUtils {
         }
 
         val targetTotalExposure = baselineTotalExposure * underexposeFactor
+
+        android.util.Log.d("ExposureUtils", "HDR+ Exposure Calc: baseline=${baselineTotalExposure.toLong()}, " +
+                "mode=$underexposureMode, factor=$underexposeFactor, target=${targetTotalExposure.toLong()}, " +
+                "clipping=$clippingRatio, additionalUnder=$additionalUnderexposure")
 
         // 3. Exposure Factorization (The "Payload" Strategy)
         // Goal: Achieve targetTotalExposure using specific constraints.
@@ -153,7 +158,15 @@ object ExposureUtils {
         // 4. Final Gain Calculation
         // Calculate gain based on ACTUALLY achieved exposure to avoid overexposure boost when hardware hits its floor.
         val actualTotalExposure = targetIso.toDouble() * targetTime.toDouble()
-        var digitalGain = (baselineTotalExposure / actualTotalExposure).toFloat()
+
+        // Use restricted recovery target to keep highlights safe.
+        val effectiveBaseline = if (underexposureMode == "Dynamic (Experimental)") {
+            baselineTotalExposure * RECOVERY_TARGET_RATIO
+        } else {
+            baselineTotalExposure
+        }
+
+        var digitalGain = (effectiveBaseline / actualTotalExposure).toFloat()
 
         // Apply "Gain Dampening" for highlight preservation.
         // If we underexposed specifically due to clipping, we avoid boosting midtones back to full brightness.
@@ -161,6 +174,8 @@ object ExposureUtils {
             val dampening = (1.0 - GAIN_DAMPENING_FACTOR * (additionalUnderexposure / MAX_ADDITIONAL_UNDEREXPOSURE_STOPS)).toFloat()
             digitalGain *= dampening
         }
+
+        android.util.Log.d("ExposureUtils", "HDR+ Exposure Result: targetIso=$targetIso, targetTime=${targetTime/1_000_000.0}ms, digitalGain=$digitalGain")
 
         return ExposureConfig(
             iso = targetIso,

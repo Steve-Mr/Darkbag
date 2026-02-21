@@ -16,8 +16,8 @@ class ExposureUtilsTest {
     private val timeRange = Range(100_000L, 1_000_000_000L) // 0.1ms to 1s
 
     @Test
-    fun testNormalScene_NoUnderexposure() {
-        // ISO 800 should have 0 EV underexposure in Dynamic mode
+    fun testNormalScene_DynamicUnderexposure() {
+        // ISO 800 should have -0.5 EV underexposure in Dynamic mode (0.7071)
         val config = ExposureUtils.calculateHdrPlusExposure(
             currentIso = 800,
             currentTime = 33_333_333L, // 1/30s
@@ -27,14 +27,19 @@ class ExposureUtilsTest {
             clippingRatio = 0.0
         )
 
-        // At ISO 800, underexposeFactor should be 1.0
-        assertEquals(1.0f, config.digitalGain, 0.05f)
+        // underexposeFactor is 0.7071
+        // digitalGain should be influenced by RECOVERY_TARGET_RATIO (0.8)
+        // targetTotalExposure = baseline * 0.7071
+        // actualTotalExposure should match target (since we are not at floor)
+        // digitalGain = (baseline * 0.8) / actual = (baseline * 0.8) / (baseline * 0.7071) = 0.8 / 0.7071 = 1.131
+
+        assertEquals(1.131f, config.digitalGain, 0.05f)
 
         val baseline = 800.0 * 33_333_333.0
         val actual = config.iso.toDouble() * config.exposureTime.toDouble()
 
-        // Since we want 0 EV and we are far from floor, actual should match baseline
-        assertEquals(baseline, actual, baseline * 0.05)
+        // actual / baseline should be approx 0.7071
+        assertEquals(0.7071, actual / baseline, 0.05)
     }
 
     @Test
@@ -55,22 +60,21 @@ class ExposureUtilsTest {
         // targetTotalExposure = 10M * 0.125 = 1.25M
         // actual hardware floor = 100 * 100k = 10M (cannot go lower than minIso * minTime)
 
-        // Refactored logic: digitalGain = baseline / actual = 10M / 10M = 1.0
-        // Old logic would have given digitalGain = 1 / 0.125 = 8.0 (Overexposure!)
+        // digitalGain = (baseline * 0.8) / actual = (10M * 0.8) / 10M = 0.8
 
-        assertEquals(1.0f, configFloor.digitalGain, 0.01f)
+        assertEquals(0.8f, configFloor.digitalGain, 0.01f)
         assertEquals(100, configFloor.iso)
         assertEquals(100_000L, configFloor.exposureTime)
     }
 
     @Test
     fun testClippingSmoothness() {
-        // Threshold is 0.03
+        // Threshold is 0.005
         val configAtThreshold = ExposureUtils.calculateHdrPlusExposure(
-            800, 33_333_333L, isoRange, timeRange, clippingRatio = 0.03
+            800, 33_333_333L, isoRange, timeRange, clippingRatio = 0.005
         )
         val configJustAbove = ExposureUtils.calculateHdrPlusExposure(
-            800, 33_333_333L, isoRange, timeRange, clippingRatio = 0.031
+            800, 33_333_333L, isoRange, timeRange, clippingRatio = 0.006
         )
 
         // Difference should be small because of smooth ramp
@@ -103,10 +107,10 @@ class ExposureUtilsTest {
     @Test
     fun testDynamicCurve() {
         val tenMs = 10_000_000L
-        // ISO 800 -> 0 EV (1.0)
+        // ISO 800 -> -0.5 EV (0.7071)
         val config800 = ExposureUtils.calculateHdrPlusExposure(800, tenMs, isoRange, timeRange)
         val achievedFactor800 = (config800.iso.toDouble() * config800.exposureTime.toDouble()) / (800.0 * tenMs)
-        assertEquals(1.0, achievedFactor800, 0.1)
+        assertEquals(0.7071, achievedFactor800, 0.1)
 
         // ISO 100 -> -3 EV (0.125)
         val config100 = ExposureUtils.calculateHdrPlusExposure(100, tenMs, isoRange, timeRange)
