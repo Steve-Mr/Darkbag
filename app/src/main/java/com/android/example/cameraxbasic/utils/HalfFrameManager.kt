@@ -21,6 +21,7 @@ class HalfFrameManager(private val context: Context) {
     }
 
     private fun scopedKey(base: String): String = "${base}_${profileKey()}"
+    private fun scopedCaptureTimeKey(): String = "half_frame_capture_time_${profileKey()}"
 
     var step: Int
         get() = prefs.getInt(scopedKey(SettingsFragment.KEY_HALF_FRAME_STEP), 0)
@@ -80,6 +81,7 @@ class HalfFrameManager(private val context: Context) {
             val tempFile = File(context.filesDir, "half_frame_frame1_${profileKey()}.jpg")
             File(currentJpgPath).copyTo(tempFile, overwrite = true)
             tempPath = tempFile.absolutePath
+            prefs.edit().putLong(scopedCaptureTimeKey(), tempFile.lastModified()).apply()
             return null
         } else {
             // This is Frame 2
@@ -112,6 +114,7 @@ class HalfFrameManager(private val context: Context) {
                     val tempFile = File(context.filesDir, "half_frame_frame1_${profileKey()}.jpg")
                     File(currentJpgPath).copyTo(tempFile, overwrite = true)
                     tempPath = tempFile.absolutePath
+                    prefs.edit().putLong(scopedCaptureTimeKey(), tempFile.lastModified()).apply()
                     return null
                 }
 
@@ -134,6 +137,7 @@ class HalfFrameManager(private val context: Context) {
                 File(firstPath).delete()
                 tempPath = null
                 frame1BaseName = null
+                prefs.edit().remove(scopedCaptureTimeKey()).apply()
                 return stitchedFile.absolutePath
             }
         }
