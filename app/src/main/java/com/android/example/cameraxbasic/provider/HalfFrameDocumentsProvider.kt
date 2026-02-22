@@ -4,6 +4,7 @@ import android.content.res.AssetFileDescriptor
 import android.database.Cursor
 import android.database.MatrixCursor
 import android.graphics.Point
+import android.os.Bundle
 import android.os.CancellationSignal
 import android.os.ParcelFileDescriptor
 import android.provider.DocumentsContract
@@ -43,6 +44,10 @@ class HalfFrameDocumentsProvider : DocumentsProvider() {
         return result
     }
 
+    override fun queryChildDocuments(parentDocumentId: String, projection: Array<out String>?, queryArgs: Bundle?): Cursor {
+        return queryChildDocuments(parentDocumentId, projection, queryArgs?.getString(android.content.ContentResolver.QUERY_ARG_SQL_SORT_ORDER))
+    }
+
     override fun openDocument(documentId: String, mode: String, signal: CancellationSignal?): ParcelFileDescriptor {
         val file = fileFromDocumentId(documentId)
         return ParcelFileDescriptor.open(file, ParcelFileDescriptor.parseMode(mode))
@@ -55,7 +60,7 @@ class HalfFrameDocumentsProvider : DocumentsProvider() {
         parentDocumentId == ROOT_ID && documentId.startsWith("file:")
 
     override fun queryRecentDocuments(rootId: String, projection: Array<out String>?): Cursor =
-        queryChildDocuments(ROOT_ID, projection, null)
+        queryChildDocuments(ROOT_ID, projection, null as String?)
 
     override fun openDocumentThumbnail(documentId: String, sizeHint: Point, signal: CancellationSignal?): AssetFileDescriptor {
         val pfd = openDocument(documentId, "r", signal)
