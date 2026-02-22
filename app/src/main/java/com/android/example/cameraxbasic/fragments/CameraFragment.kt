@@ -92,6 +92,7 @@ import com.android.example.cameraxbasic.utils.ANIMATION_FAST_MILLIS
 import com.android.example.cameraxbasic.utils.ANIMATION_SLOW_MILLIS
 import com.android.example.cameraxbasic.utils.MediaStoreUtils
 import com.android.example.cameraxbasic.utils.LutManager
+import com.android.example.cameraxbasic.utils.HalfFrameSessionStore
 import com.android.example.cameraxbasic.processor.LutSurfaceProcessor
 import com.android.example.cameraxbasic.utils.ExposureUtils
 import com.android.example.cameraxbasic.utils.simulateClick
