@@ -24,6 +24,10 @@ object ExposureUtils {
     private const val CLIPPING_TO_EV_FACTOR = 15.0
     private const val MAX_ADDITIONAL_UNDEREXPOSURE_STOPS = 2.0
     private const val GAIN_DAMPENING_FACTOR = 0.2
+    private const val DYNAMIC_GAIN_CAP_LOW_CLIP = 1.10f
+    private const val DYNAMIC_GAIN_CAP_AT_THRESHOLD = 1.00f
+    private const val DYNAMIC_GAIN_CAP_HIGH_CLIP = 0.85f
+    private const val HIGH_CLIP_RATIO_REFERENCE = 0.20
 
     data class ExposureConfig(
         val iso: Int,
@@ -153,7 +157,25 @@ object ExposureUtils {
         // 4. Final Gain Calculation
         // Calculate gain based on ACTUALLY achieved exposure to avoid overexposure boost when hardware hits its floor.
         val actualTotalExposure = targetIso.toDouble() * targetTime.toDouble()
-        var digitalGain = (baselineTotalExposure / actualTotalExposure).toFloat()
+        val idealGain = (baselineTotalExposure / actualTotalExposure).toFloat()
+        var digitalGain = idealGain
+
+        // Dynamic mode: cap gain recovery to preserve highlight headroom.
+        // This keeps underexposure effective in JPEG output without touching color transforms.
+        if (underexposureMode == "Dynamic (Experimental)") {
+            val gainCap = when {
+                clippingRatio <= CLIPPING_RATIO_THRESHOLD -> {
+                    val t = (clippingRatio / CLIPPING_RATIO_THRESHOLD).toFloat().coerceIn(0.0f, 1.0f)
+                    lerp(DYNAMIC_GAIN_CAP_LOW_CLIP, DYNAMIC_GAIN_CAP_AT_THRESHOLD, t)
+                }
+                else -> {
+                    val highClipNorm = ((clippingRatio - CLIPPING_RATIO_THRESHOLD) /
+                        (HIGH_CLIP_RATIO_REFERENCE - CLIPPING_RATIO_THRESHOLD)).toFloat().coerceIn(0.0f, 1.0f)
+                    lerp(DYNAMIC_GAIN_CAP_AT_THRESHOLD, DYNAMIC_GAIN_CAP_HIGH_CLIP, highClipNorm)
+                }
+            }
+            digitalGain = min(idealGain, gainCap)
+        }
 
         // Apply "Gain Dampening" for highlight preservation.
         // If we underexposed specifically due to clipping, we avoid boosting midtones back to full brightness.
@@ -178,5 +200,9 @@ object ExposureUtils {
         }
         val ratio = (value - fromX).toFloat() / (toX - fromX)
         return fromY + (ratio * (toY - fromY))
+    }
+
+    private fun lerp(start: Float, end: Float, t: Float): Float {
+        return start + (end - start) * t.coerceIn(0.0f, 1.0f)
     }
 }

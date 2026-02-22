@@ -101,6 +101,36 @@ class ExposureUtilsTest {
     }
 
     @Test
+    fun testDynamicGainCappedWhenNoClipping() {
+        val config = ExposureUtils.calculateHdrPlusExposure(
+            currentIso = 100,
+            currentTime = 33_333_333L,
+            isoRange = isoRange,
+            timeRange = timeRange,
+            underexposureMode = "Dynamic (Experimental)",
+            clippingRatio = 0.0
+        )
+
+        // At ISO 100 dynamic underexposure is strong, but gain recovery is capped to protect highlights.
+        assertTrue("Expected gain cap <= 1.10, got ${config.digitalGain}", config.digitalGain <= 1.10f + 1e-3f)
+    }
+
+    @Test
+    fun testDynamicGainDropsBelowUnityWhenClippingHigh() {
+        val config = ExposureUtils.calculateHdrPlusExposure(
+            currentIso = 800,
+            currentTime = 33_333_333L,
+            isoRange = isoRange,
+            timeRange = timeRange,
+            underexposureMode = "Dynamic (Experimental)",
+            clippingRatio = 0.20
+        )
+
+        assertTrue("High clipping should suppress gain below 1.0, got ${config.digitalGain}", config.digitalGain < 1.0f)
+        assertTrue("High clipping cap should stay above severe darkening floor, got ${config.digitalGain}", config.digitalGain >= 0.80f)
+    }
+
+    @Test
     fun testDynamicCurve() {
         val tenMs = 10_000_000L
         // ISO 800 -> 0 EV (1.0)
