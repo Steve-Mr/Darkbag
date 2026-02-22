@@ -336,10 +336,13 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
              // When pixels exceed the nominal white level (due to WB gains or HDR merge),
              // we gradually desaturate them to avoid un-neutral color tints in blown areas.
              // Note: Halide output maps nominal white to whiteLevel / 4.
+             // We start desaturating at whiteLevel (4x nominal white) for HDR+ to allow 2 stops of color headroom.
+             // For Standard mode (numFrames == 1), we start at nominal white to fix pink highlights.
              float max_v = (float)std::max({r, g, b});
-             float threshold = (float)whiteLevel / 4.0f;
+             float threshold = (numFrames > 1) ? (float)whiteLevel : (float)whiteLevel / 4.0f;
              if (max_v > threshold) {
-                 // Start desaturating at nominal white, fully neutral by 2x nominal white.
+                 // For HDR+: Start at 4x nominal white, fully neutral by 8x.
+                 // For Standard: Start at nominal white, fully neutral by 2x.
                  // This preserves HDR headroom while ensuring highlights are neutral white/grey.
                  float weight = std::min(1.0f, (max_v - threshold) / threshold);
                  float luma = (r + g + b) / 3.0f;
