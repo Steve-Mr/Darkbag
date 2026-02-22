@@ -2814,7 +2814,7 @@ class CameraFragment : Fragment() {
                         validTimeRange,
                         underexposureMode,
                         lastClippingRatio
-                    )
+                    ).also { lastHdrPlusConfig = it }
                 }
 
                 Log.d(
@@ -3203,6 +3203,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     workData.putInt("width", width)
                         .putInt("height", height)
                         .putInt("orientation", combinedOrientation)
+                        .putInt("whiteLevel", whiteLevel)
                         .putFloat("digitalGain", digitalGain)
                         .putInt("targetLog", targetLogIndex)
                         .putString("lutPath", nativeLutPath)

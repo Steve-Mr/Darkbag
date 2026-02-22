@@ -15,6 +15,7 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
         val width = data.getInt("width", 0)
         val height = data.getInt("height", 0)
         val orientation = data.getInt("orientation", 0)
+        val whiteLevel = data.getInt("whiteLevel", 1023)
         val digitalGain = data.getFloat("digitalGain", 1.0f)
         val targetLog = data.getInt("targetLog", 0)
         val lutPath = data.getString("lutPath")
@@ -51,7 +52,7 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
         Log.d(TAG, "Background Export Worker started for $baseName")
 
         val ret = ColorProcessor.exportHdrPlus(
-            tempRawPath, width, height, orientation, digitalGain, targetLog,
+            tempRawPath, width, height, orientation, whiteLevel, digitalGain, targetLog,
             lutPath, tiffPath, jpgPath, dngPath,
             iso, exposureTime, fNumber, focalLength, captureTimeMillis,
             ccm, whiteBalance, zoomFactor, mirror

@@ -137,7 +137,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_initMemoryPool(JN
 
 extern "C" JNIEXPORT jint JNICALL
 Java_com_android_example_cameraxbasic_processor_ColorProcessor_exportHdrPlus(
-    JNIEnv* env, jobject /* this */, jstring tempRawPath, jint width, jint height, jint orientation, jfloat digitalGain, jint targetLog, jstring lutPath, jstring tiffPath, jstring jpgPath, jstring dngPath,
+    JNIEnv* env, jobject /* this */, jstring tempRawPath, jint width, jint height, jint orientation, jint whiteLevel, jfloat digitalGain, jint targetLog, jstring lutPath, jstring tiffPath, jstring jpgPath, jstring dngPath,
     jint iso, jlong exposureTime, jfloat fNumber, jfloat focalLength, jlong captureTimeMillis, jfloatArray ccm, jfloatArray whiteBalance, jfloat zoomFactor, jboolean mirror
 ) {
     LOGD("Native exportHdrPlus started.");
@@ -182,7 +182,8 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_exportHdrPlus(
 
     if (dng_path_cstr) {
         LOGD("Exporting DNG to %s", dng_path_cstr);
-        write_dng(dng_path_cstr, width, height, finalImage, kMax16BitValue, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation, (bool)mirror);
+        // Linear DNG nominal white is scaled to 1/4 of sensor white level by Halide.
+        write_dng(dng_path_cstr, width, height, finalImage, whiteLevel / 4, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation, (bool)mirror);
     }
 
     bool saveOk = true;
@@ -334,11 +335,11 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
              // Highlight Neutralization (to fix pink highlights).
              // When pixels exceed the nominal white level (due to WB gains or HDR merge),
              // we gradually desaturate them to avoid un-neutral color tints in blown areas.
-             // Note: Halide output maps nominal white to kMax14BitValue (16383).
+             // Note: Halide output maps nominal white to whiteLevel / 4.
              float max_v = (float)std::max({r, g, b});
-             float threshold = (float)kMax14BitValue;
+             float threshold = (float)whiteLevel / 4.0f;
              if (max_v > threshold) {
-                 // Start desaturating at nominal white, fully neutral by 2x nominal white (32766).
+                 // Start desaturating at nominal white, fully neutral by 2x nominal white.
                  // This preserves HDR headroom while ensuring highlights are neutral white/grey.
                  float weight = std::min(1.0f, (max_v - threshold) / threshold);
                  float luma = (r + g + b) / 3.0f;
@@ -404,7 +405,8 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
 
     if (!tiffPathStr.empty() || !jpgPathStr.empty() || !dngPathStr.empty()) {
         if (!dngPathStr.empty()) {
-            write_dng(dngPathStr.c_str(), width, height, finalImage, kMax16BitValue, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation, (bool)mirror);
+            // Linear DNG nominal white is scaled to 1/4 of sensor white level by Halide.
+            write_dng(dngPathStr.c_str(), width, height, finalImage, whiteLevel / 4, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation, (bool)mirror);
         }
 
         if (!tiffPathStr.empty() || !jpgPathStr.empty()) {

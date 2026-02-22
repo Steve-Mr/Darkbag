@@ -110,6 +110,7 @@ object ColorProcessor {
         width: Int,
         height: Int,
         orientation: Int,
+        whiteLevel: Int,
         digitalGain: Float,
         targetLog: Int,
         lutPath: String?,
