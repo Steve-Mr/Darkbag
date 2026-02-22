@@ -217,60 +217,26 @@ class CameraFragment : Fragment() {
     private var halfFrameTempPath: String? = null
     private var halfFrameBaseFinderWidth = 0
     private var halfFrameBaseFinderHeight = 0
+    private lateinit var halfFrameSessionStore: HalfFrameSessionStore
 
     private var isOisSupported = false
     private var isHdrOisEnabledPref = true
 
-    private fun currentHalfFrameProfile(prefs: SharedPreferences): String {
-        val mode = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_MODE, false)
-        if (!mode) return "normal"
-        val layout = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUTS[0])
-        return if (layout == SettingsFragment.HALF_FRAME_LAYOUTS[0]) "half_side" else "half_top"
-    }
-
     private fun scopedHalfFrameStepKey(prefs: SharedPreferences): String =
-        "${SettingsFragment.KEY_HALF_FRAME_STEP}_${currentHalfFrameProfile(prefs)}"
-
-    private fun scopedHalfFrameTempPathKey(prefs: SharedPreferences): String =
-        "${SettingsFragment.KEY_HALF_FRAME_TEMP_PATH}_${currentHalfFrameProfile(prefs)}"
-
-    private fun scopedHalfFrameBaseNameKey(prefs: SharedPreferences): String =
-        "${SettingsFragment.KEY_HALF_FRAME_BASE_NAME}_${currentHalfFrameProfile(prefs)}"
-
-    private fun scopedHalfFrameCaptureTimeKey(prefs: SharedPreferences): String =
-        "half_frame_capture_time_${currentHalfFrameProfile(prefs)}"
+        halfFrameSessionStore.scopedStepKeyForCurrentProfile()
 
     private fun readScopedHalfFrameState(prefs: SharedPreferences, requireFileForStep1: Boolean = false) {
-        val stepKey = scopedHalfFrameStepKey(prefs)
-        val tempKey = scopedHalfFrameTempPathKey(prefs)
-        val timeKey = scopedHalfFrameCaptureTimeKey(prefs)
-        halfFrameStep = prefs.getInt(stepKey, 0)
-        halfFrameTempPath = prefs.getString(tempKey, null)
-        val captureTime = prefs.getLong(timeKey, 0L)
-        val hasFile = halfFrameTempPath != null && File(halfFrameTempPath!!).exists()
-        if (halfFrameStep == 1) {
-            val shouldReset = if (requireFileForStep1) {
-                !hasFile
-            } else {
-                !hasFile && (captureTime <= 0L || (System.currentTimeMillis() - captureTime) > 120_000L)
-            }
-            if (shouldReset) {
-                halfFrameStep = 0
-                prefs.edit().putInt(stepKey, 0).remove(tempKey).remove(timeKey).apply()
-            }
-        }
+        val session = halfFrameSessionStore.readSession(strict = requireFileForStep1)
+        halfFrameStep = session.step
+        halfFrameTempPath = session.tempPath
     }
 
     private fun writeScopedHalfFrameStep(prefs: SharedPreferences, step: Int, captureTimeMillis: Long? = null) {
+        halfFrameSessionStore.markStep(step, captureTimeMillis)
         halfFrameStep = step
-        val editor = prefs.edit().putInt(scopedHalfFrameStepKey(prefs), step)
-        val timeKey = scopedHalfFrameCaptureTimeKey(prefs)
-        if (step == 1) {
-            editor.putLong(timeKey, captureTimeMillis ?: System.currentTimeMillis())
-        } else {
-            editor.remove(timeKey)
+        if (step == 0) {
+            halfFrameTempPath = null
         }
-        editor.apply()
     }
 
     private fun showProcessingAnimation() {
@@ -535,6 +501,7 @@ class CameraFragment : Fragment() {
         // Initialize Preferences
         val prefs =
             requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        halfFrameSessionStore = HalfFrameSessionStore(requireContext())
 
         // Initialize Flash State
         isFlashEnabled = prefs.getBoolean(SettingsFragment.KEY_FLASH_MODE, false)
@@ -1288,15 +1255,8 @@ class CameraFragment : Fragment() {
             if (isHalfFrameModeEnabled && halfFrameStep == 1) {
                 // Cancel/Reset half-frame
                 val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                halfFrameSessionStore.clearCurrentSession(deleteTempFile = true)
                 writeScopedHalfFrameStep(prefs, 0)
-                prefs.edit().remove(scopedHalfFrameBaseNameKey(prefs))
-                    .remove(scopedHalfFrameTempPathKey(prefs)).remove(scopedHalfFrameCaptureTimeKey(prefs)).apply()
-                // Cleanup temp file
-                val tempPath = halfFrameTempPath
-                if (tempPath != null) {
-                    File(tempPath).delete()
-                }
-                halfFrameTempPath = null
                 updateHalfFrameUI()
                 Toast.makeText(requireContext(), "Half-frame Reset", Toast.LENGTH_SHORT).show()
                 true

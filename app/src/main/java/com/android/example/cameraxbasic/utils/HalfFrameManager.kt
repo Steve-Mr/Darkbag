@@ -14,26 +14,19 @@ import java.io.FileOutputStream
 
 class HalfFrameManager(private val context: Context) {
     private val prefs: SharedPreferences = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-
-    private fun profileKey(): String {
-        if (!isEnabled) return "normal"
-        return if (layout == SettingsFragment.HALF_FRAME_LAYOUTS[0]) "half_side" else "half_top"
-    }
-
-    private fun scopedKey(base: String): String = "${base}_${profileKey()}"
-    private fun scopedCaptureTimeKey(): String = "half_frame_capture_time_${profileKey()}"
+    private val sessionStore = HalfFrameSessionStore(context)
 
     var step: Int
-        get() = prefs.getInt(scopedKey(SettingsFragment.KEY_HALF_FRAME_STEP), 0)
-        set(value) = prefs.edit().putInt(scopedKey(SettingsFragment.KEY_HALF_FRAME_STEP), value).apply()
+        get() = sessionStore.readSession().step
+        set(value) = sessionStore.markStep(value)
 
     var tempPath: String?
-        get() = prefs.getString(scopedKey(SettingsFragment.KEY_HALF_FRAME_TEMP_PATH), null)
-        set(value) = prefs.edit().putString(scopedKey(SettingsFragment.KEY_HALF_FRAME_TEMP_PATH), value).apply()
+        get() = sessionStore.readSession().tempPath
+        set(value) = sessionStore.setTempPath(value)
 
     var frame1BaseName: String?
-        get() = prefs.getString(scopedKey(SettingsFragment.KEY_HALF_FRAME_BASE_NAME), null)
-        set(value) = prefs.edit().putString(scopedKey(SettingsFragment.KEY_HALF_FRAME_BASE_NAME), value).apply()
+        get() = sessionStore.readSession().baseName
+        set(value) = sessionStore.setBaseName(value)
 
     val isEnabled: Boolean
         get() = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_MODE, false)
@@ -78,10 +71,10 @@ class HalfFrameManager(private val context: Context) {
             }
 
             // Save to internal temp
-            val tempFile = File(context.filesDir, "half_frame_frame1_${profileKey()}.jpg")
+            val tempFile = sessionStore.tempFileForCurrentProfile()
             File(currentJpgPath).copyTo(tempFile, overwrite = true)
             tempPath = tempFile.absolutePath
-            prefs.edit().putLong(scopedCaptureTimeKey(), tempFile.lastModified()).apply()
+            sessionStore.markStep(1, tempFile.lastModified())
             return null
         } else {
             // This is Frame 2
@@ -111,10 +104,10 @@ class HalfFrameManager(private val context: Context) {
                 if (firstPath == null || !File(firstPath).exists()) {
                     Log.e(TAG, "First frame missing, resetting to step 1")
                     frame1BaseName = baseName
-                    val tempFile = File(context.filesDir, "half_frame_frame1_${profileKey()}.jpg")
+                    val tempFile = sessionStore.tempFileForCurrentProfile()
                     File(currentJpgPath).copyTo(tempFile, overwrite = true)
                     tempPath = tempFile.absolutePath
-                    prefs.edit().putLong(scopedCaptureTimeKey(), tempFile.lastModified()).apply()
+                    sessionStore.markStep(1, tempFile.lastModified())
                     return null
                 }
 
@@ -137,7 +130,7 @@ class HalfFrameManager(private val context: Context) {
                 File(firstPath).delete()
                 tempPath = null
                 frame1BaseName = null
-                prefs.edit().remove(scopedCaptureTimeKey()).apply()
+                sessionStore.markStep(0)
                 return stitchedFile.absolutePath
             }
         }
