@@ -1133,8 +1133,17 @@ class CameraFragment : Fragment() {
         )
 
         // Recompute half-frame base size after UI reinflation / configuration changes.
+        // We reset the viewfinder to its default constraints to ensure the next layout pass
+        // allows updateHalfFrameUI to capture the correct full dimensions.
         halfFrameBaseFinderWidth = 0
         halfFrameBaseFinderHeight = 0
+        (fragmentCameraBinding.viewFinder.layoutParams as? androidx.constraintlayout.widget.ConstraintLayout.LayoutParams)?.let { lp ->
+            if (lp.width != ViewGroup.LayoutParams.WRAP_CONTENT || lp.height != 0) {
+                lp.width = ViewGroup.LayoutParams.WRAP_CONTENT
+                lp.height = 0
+                fragmentCameraBinding.viewFinder.layoutParams = lp
+            }
+        }
 
         val colorPrimary = MaterialColors.getColor(requireContext(), com.google.android.material.R.attr.colorPrimary, Color.YELLOW)
         archProgress = com.android.example.cameraxbasic.utils.ArchProgressDrawable().apply {
@@ -4133,41 +4142,61 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
     private fun updateHalfFrameUI() {
         val uiBinding = cameraUiContainerBinding ?: return
         val vfBinding = fragmentCameraBinding
-        val gapView = uiBinding.halfFrameGapIndicator ?: return
-        val edgeTopView = uiBinding.halfFrameFilmEdgeTop ?: return
-        val edgeBottomView = uiBinding.halfFrameFilmEdgeBottom ?: return
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        isHalfFrameModeEnabled = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_MODE, false)
-        readScopedHalfFrameState(prefs)
 
-        if (!isHalfFrameModeEnabled) {
-            uiBinding.tvHalfFrameStep?.visibility = View.GONE
-            gapView.visibility = View.GONE
-            edgeTopView.visibility = View.GONE
-            edgeBottomView.visibility = View.GONE
-
-            (vfBinding.viewFinder.layoutParams as? androidx.constraintlayout.widget.ConstraintLayout.LayoutParams)?.let { lp ->
-                lp.width = ViewGroup.LayoutParams.WRAP_CONTENT
-                lp.height = 0
-                vfBinding.viewFinder.layoutParams = lp
-            }
-
-            vfBinding.viewFinder.scaleX = 1f
-            vfBinding.viewFinder.scaleY = 1f
-            vfBinding.viewFinder.translationX = 0f
-            vfBinding.viewFinder.translationY = 0f
-
-            if (halfFrameStep == 0) {
-                uiBinding.photoViewButton?.visibility = View.VISIBLE
-            }
-            return
-        }
-
-        uiBinding.tvHalfFrameStep?.visibility = View.VISIBLE
-        uiBinding.tvHalfFrameStep?.text = if (halfFrameStep == 0) "1/2" else "2/2"
-        uiBinding.photoViewButton?.visibility = if (halfFrameStep == 0) View.VISIBLE else View.GONE
-
+        // Post all updates to the viewfinder to avoid requestLayout() during layout pass
+        // and ensure consistent ordering of state changes.
         vfBinding.viewFinder.post {
+            // Re-read enabled state inside the post to ensure we use the latest value
+            val isEnabled = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_MODE, false)
+            isHalfFrameModeEnabled = isEnabled
+            readScopedHalfFrameState(prefs)
+
+            val gapView = uiBinding.halfFrameGapIndicator ?: return@post
+            val edgeTopView = uiBinding.halfFrameFilmEdgeTop ?: return@post
+            val edgeBottomView = uiBinding.halfFrameFilmEdgeBottom ?: return@post
+
+            if (!isEnabled) {
+                if (uiBinding.tvHalfFrameStep?.visibility != View.GONE) {
+                    uiBinding.tvHalfFrameStep?.visibility = View.GONE
+                }
+                if (gapView.visibility != View.GONE) gapView.visibility = View.GONE
+                if (edgeTopView.visibility != View.GONE) edgeTopView.visibility = View.GONE
+                if (edgeBottomView.visibility != View.GONE) edgeBottomView.visibility = View.GONE
+
+                (vfBinding.viewFinder.layoutParams as? androidx.constraintlayout.widget.ConstraintLayout.LayoutParams)?.let { lp ->
+                    if (lp.width != ViewGroup.LayoutParams.WRAP_CONTENT || lp.height != 0) {
+                        lp.width = ViewGroup.LayoutParams.WRAP_CONTENT
+                        lp.height = 0
+                        vfBinding.viewFinder.layoutParams = lp
+                    }
+                }
+
+                vfBinding.viewFinder.scaleX = 1f
+                vfBinding.viewFinder.scaleY = 1f
+                vfBinding.viewFinder.translationX = 0f
+                vfBinding.viewFinder.translationY = 0f
+
+                if (halfFrameStep == 0 && uiBinding.photoViewButton?.visibility != View.VISIBLE) {
+                    uiBinding.photoViewButton?.visibility = View.VISIBLE
+                }
+                return@post
+            }
+
+            // Enabled path
+            if (uiBinding.tvHalfFrameStep?.visibility != View.VISIBLE) {
+                uiBinding.tvHalfFrameStep?.visibility = View.VISIBLE
+            }
+            val stepText = if (halfFrameStep == 0) "1/2" else "2/2"
+            if (uiBinding.tvHalfFrameStep?.text != stepText) {
+                uiBinding.tvHalfFrameStep?.text = stepText
+            }
+
+            val photoButtonVisibility = if (halfFrameStep == 0) View.VISIBLE else View.GONE
+            if (uiBinding.photoViewButton?.visibility != photoButtonVisibility) {
+                uiBinding.photoViewButton?.visibility = photoButtonVisibility
+            }
+
             if (halfFrameBaseFinderWidth <= 0 || halfFrameBaseFinderHeight <= 0) {
                 halfFrameBaseFinderWidth = vfBinding.viewFinder.width
                 halfFrameBaseFinderHeight = vfBinding.viewFinder.height
@@ -4183,28 +4212,33 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             val gapWidthScaled = gapWidthBase * scale
             val shift = gapWidthScaled / 2f
             // Gap decoration removed: the black bar is now the naturally exposed container area.
-            gapView.visibility = View.GONE
+            if (gapView.visibility != View.GONE) gapView.visibility = View.GONE
 
-            edgeTopView.visibility = View.VISIBLE
-            edgeBottomView.visibility = View.VISIBLE
+            if (edgeTopView.visibility != View.VISIBLE) edgeTopView.visibility = View.VISIBLE
+            if (edgeBottomView.visibility != View.VISIBLE) edgeBottomView.visibility = View.VISIBLE
             edgeTopView.bringToFront()
             edgeBottomView.bringToFront()
 
+            val targetW = (totalW * scale).toInt()
+            val targetH = (totalH * scale).toInt()
             (vfBinding.viewFinder.layoutParams as? androidx.constraintlayout.widget.ConstraintLayout.LayoutParams)?.let { lp ->
-                lp.width = (totalW * scale).toInt()
-                lp.height = (totalH * scale).toInt()
-                vfBinding.viewFinder.layoutParams = lp
+                if (lp.width != targetW || lp.height != targetH) {
+                    lp.width = targetW
+                    lp.height = targetH
+                    vfBinding.viewFinder.layoutParams = lp
+                }
             }
 
             vfBinding.viewFinder.scaleX = 1f
             vfBinding.viewFinder.scaleY = 1f
 
-            if (halfFrameStep == 0) {
-                vfBinding.viewFinder.translationX = -shift
-            } else {
-                vfBinding.viewFinder.translationX = shift
+            val targetShift = if (halfFrameStep == 0) -shift else shift
+            if (vfBinding.viewFinder.translationX != targetShift) {
+                vfBinding.viewFinder.translationX = targetShift
             }
-            vfBinding.viewFinder.translationY = 0f
+            if (vfBinding.viewFinder.translationY != 0f) {
+                vfBinding.viewFinder.translationY = 0f
+            }
         }
     }
 
