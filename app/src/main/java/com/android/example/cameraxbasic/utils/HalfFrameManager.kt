@@ -16,6 +16,15 @@ class HalfFrameManager(private val context: Context) {
     private val prefs: SharedPreferences = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
     private val sessionStore = HalfFrameSessionStore(context)
 
+    data class Metadata(
+        val profile: String,
+        val dateStamp: Boolean,
+        val captureTimeMillis: Long = System.currentTimeMillis(),
+        val frame1BaseName: String? = null,
+        val frame1TempPath: String? = null,
+        val frame1CaptureTime: Long = 0L
+    )
+
     var step: Int
         get() = sessionStore.readSession().step
         set(value) = sessionStore.markStep(value)
@@ -54,43 +63,76 @@ class HalfFrameManager(private val context: Context) {
      * @param currentJpgPath Path to the just-captured JPG.
      * @param baseName Unique ID for this capture.
      * @param isFastPath Whether this is a fast preview.
+     * @param metadata Capture-time metadata (profile, dateStamp).
      * @return Path to the final stitched image if complete, null otherwise.
      */
-    fun handleCapture(currentJpgPath: String, baseName: String, isFastPath: Boolean): String? {
-        if (!isEnabled) return currentJpgPath
+    fun handleCapture(
+        currentJpgPath: String,
+        baseName: String,
+        isFastPath: Boolean,
+        metadata: Metadata? = null
+    ): String? {
+        val activeProfile = metadata?.profile ?: sessionStore.currentProfile()
+        val isManualMode = metadata != null
 
-        val f1Base = frame1BaseName
+        // If no metadata and not enabled globally, it's a normal capture
+        if (!isManualMode && !isEnabled) return currentJpgPath
+        // If metadata profile is "normal", it's a normal capture even if HF is enabled globally
+        if (activeProfile == HalfFrameSessionStore.PROFILE_NORMAL) return currentJpgPath
+
+        val f1Base = sessionStore.readSession(profile = activeProfile).baseName
 
         if (f1Base == null || baseName == f1Base) {
             // This is Frame 1 (either Fast Path or HQ update)
             if (f1Base == null) {
-                frame1BaseName = baseName
-                Log.d(TAG, "Frame 1 Start: $baseName")
+                sessionStore.setBaseName(baseName, activeProfile)
+                Log.d(TAG, "Frame 1 Start: $baseName in $activeProfile")
             } else {
-                Log.d(TAG, "Frame 1 Update (HQ): $baseName")
+                Log.d(TAG, "Frame 1 Update (HQ): $baseName in $activeProfile")
             }
 
             // Save to internal temp
-            val tempFile = sessionStore.tempFileForCurrentProfile()
+            val tempFile = sessionStore.tempFileForProfile(activeProfile)
             File(currentJpgPath).copyTo(tempFile, overwrite = true)
-            tempPath = tempFile.absolutePath
-            sessionStore.markStep(1, tempFile.lastModified())
+            sessionStore.setTempPath(tempFile.absolutePath, activeProfile)
+
+            // Store capture time for date stamp
+            if (metadata != null) {
+                sessionStore.markStep(1, metadata.captureTimeMillis, activeProfile)
+            } else {
+                sessionStore.markStep(1, tempFile.lastModified(), activeProfile)
+            }
+
             return null
         } else {
             // This is Frame 2
+            val session = sessionStore.readSession(profile = activeProfile)
+
+            // Prioritize metadata-provided partner info to avoid race with UI thread clearing prefs
+            val firstPath = metadata?.frame1TempPath ?: session.tempPath
+            val time1 = if (metadata?.frame1CaptureTime != null && metadata.frame1CaptureTime > 0)
+                metadata.frame1CaptureTime else session.captureTimeMillis
+            val time2 = metadata?.captureTimeMillis ?: System.currentTimeMillis()
+
+            val partnerBaseName = metadata?.frame1BaseName ?: session.baseName
+            val dateStampEnabled = metadata?.dateStamp ?: dateStamp
+            val activeLayout = if (activeProfile == HalfFrameSessionStore.PROFILE_HALF_TOP)
+                SettingsFragment.HALF_FRAME_LAYOUTS[1] else SettingsFragment.HALF_FRAME_LAYOUTS[0]
+
             if (isFastPath) {
                 // Perform fast stitching for immediate thumbnail feedback
-                val firstPath = tempPath
                 if (firstPath == null || !File(firstPath).exists()) {
-                    Log.e(TAG, "First frame missing for fast stitch")
+                    Log.e(TAG, "First frame missing for fast stitch in $activeProfile (baseName: $baseName, partner: $partnerBaseName)")
                     return null
                 }
 
-                Log.d(TAG, "Frame 2 Fast: Stitching $f1Base and $baseName")
-                val stitchedBitmap = HalfFrameUtils.stitchImages(firstPath, currentJpgPath, layout, downsample)
+                Log.d(TAG, "Frame 2 Fast: Stitching $partnerBaseName and $baseName in $activeProfile")
+                val stitchedBitmap = HalfFrameUtils.stitchImages(firstPath, currentJpgPath, activeLayout, downsample)
                 if (stitchedBitmap == null) return null
 
-                val finalBitmap = HalfFrameUtils.addEffects(stitchedBitmap, dateStamp, lightLeak, layout)
+                val finalBitmap = HalfFrameUtils.addEffects(
+                    stitchedBitmap, dateStampEnabled, lightLeak, activeLayout, time1, time2
+                )
                 val stitchedFile = File(context.cacheDir, "stitched_hf_fast.jpg")
                 FileOutputStream(stitchedFile).use { out ->
                     finalBitmap.compress(Bitmap.CompressFormat.JPEG, 70, out)
@@ -100,25 +142,26 @@ class HalfFrameManager(private val context: Context) {
                 return stitchedFile.absolutePath
             } else {
                 // HQ Path: Stitch!
-                val firstPath = tempPath
                 if (firstPath == null || !File(firstPath).exists()) {
-                    Log.e(TAG, "First frame missing, resetting to step 1")
-                    frame1BaseName = baseName
-                    val tempFile = sessionStore.tempFileForCurrentProfile()
+                    Log.e(TAG, "First frame missing in $activeProfile for HQ (baseName: $baseName, partner: $partnerBaseName), resetting to step 1")
+                    sessionStore.setBaseName(baseName, activeProfile)
+                    val tempFile = sessionStore.tempFileForProfile(activeProfile)
                     File(currentJpgPath).copyTo(tempFile, overwrite = true)
-                    tempPath = tempFile.absolutePath
-                    sessionStore.markStep(1, tempFile.lastModified())
+                    sessionStore.setTempPath(tempFile.absolutePath, activeProfile)
+                    sessionStore.markStep(1, time2, activeProfile)
                     return null
                 }
 
-                Log.d(TAG, "Frame 2 HQ: Stitching $f1Base and $baseName")
-                val stitchedBitmap = HalfFrameUtils.stitchImages(firstPath, currentJpgPath, layout, downsample)
+                Log.d(TAG, "Frame 2 HQ: Stitching $partnerBaseName and $baseName in $activeProfile")
+                val stitchedBitmap = HalfFrameUtils.stitchImages(firstPath, currentJpgPath, activeLayout, downsample)
                 if (stitchedBitmap == null) {
-                    Log.e(TAG, "Stitching failed")
+                    Log.e(TAG, "Stitching failed in $activeProfile")
                     return null
                 }
 
-                val finalBitmap = HalfFrameUtils.addEffects(stitchedBitmap, dateStamp, lightLeak, layout)
+                val finalBitmap = HalfFrameUtils.addEffects(
+                    stitchedBitmap, dateStampEnabled, lightLeak, activeLayout, time1, time2
+                )
                 val stitchedFile = File(context.cacheDir, "stitched_hf_${System.currentTimeMillis()}.jpg")
                 FileOutputStream(stitchedFile).use { out ->
                     finalBitmap.compress(Bitmap.CompressFormat.JPEG, 95, out)
@@ -128,9 +171,7 @@ class HalfFrameManager(private val context: Context) {
 
                 // Cleanup
                 File(firstPath).delete()
-                tempPath = null
-                frame1BaseName = null
-                sessionStore.markStep(0)
+                sessionStore.clearProfile(activeProfile)
                 return stitchedFile.absolutePath
             }
         }
