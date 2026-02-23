@@ -19,7 +19,10 @@ class HalfFrameManager(private val context: Context) {
     data class Metadata(
         val profile: String,
         val dateStamp: Boolean,
-        val captureTimeMillis: Long = System.currentTimeMillis()
+        val captureTimeMillis: Long = System.currentTimeMillis(),
+        val frame1BaseName: String? = null,
+        val frame1TempPath: String? = null,
+        val frame1CaptureTime: Long = 0L
     )
 
     var step: Int
@@ -104,9 +107,14 @@ class HalfFrameManager(private val context: Context) {
         } else {
             // This is Frame 2
             val session = sessionStore.readSession(profile = activeProfile)
-            val firstPath = session.tempPath
-            val time1 = session.captureTimeMillis
+
+            // Prioritize metadata-provided partner info to avoid race with UI thread clearing prefs
+            val firstPath = metadata?.frame1TempPath ?: session.tempPath
+            val time1 = if (metadata?.frame1CaptureTime != null && metadata.frame1CaptureTime > 0)
+                metadata.frame1CaptureTime else session.captureTimeMillis
             val time2 = metadata?.captureTimeMillis ?: System.currentTimeMillis()
+
+            val partnerBaseName = metadata?.frame1BaseName ?: session.baseName
             val dateStampEnabled = metadata?.dateStamp ?: dateStamp
             val activeLayout = if (activeProfile == HalfFrameSessionStore.PROFILE_HALF_TOP)
                 SettingsFragment.HALF_FRAME_LAYOUTS[1] else SettingsFragment.HALF_FRAME_LAYOUTS[0]
@@ -114,11 +122,11 @@ class HalfFrameManager(private val context: Context) {
             if (isFastPath) {
                 // Perform fast stitching for immediate thumbnail feedback
                 if (firstPath == null || !File(firstPath).exists()) {
-                    Log.e(TAG, "First frame missing for fast stitch in $activeProfile")
+                    Log.e(TAG, "First frame missing for fast stitch in $activeProfile (baseName: $baseName, partner: $partnerBaseName)")
                     return null
                 }
 
-                Log.d(TAG, "Frame 2 Fast: Stitching $f1Base and $baseName in $activeProfile")
+                Log.d(TAG, "Frame 2 Fast: Stitching $partnerBaseName and $baseName in $activeProfile")
                 val stitchedBitmap = HalfFrameUtils.stitchImages(firstPath, currentJpgPath, activeLayout, downsample)
                 if (stitchedBitmap == null) return null
 
@@ -135,7 +143,7 @@ class HalfFrameManager(private val context: Context) {
             } else {
                 // HQ Path: Stitch!
                 if (firstPath == null || !File(firstPath).exists()) {
-                    Log.e(TAG, "First frame missing in $activeProfile, resetting to step 1")
+                    Log.e(TAG, "First frame missing in $activeProfile for HQ (baseName: $baseName, partner: $partnerBaseName), resetting to step 1")
                     sessionStore.setBaseName(baseName, activeProfile)
                     val tempFile = sessionStore.tempFileForProfile(activeProfile)
                     File(currentJpgPath).copyTo(tempFile, overwrite = true)
@@ -144,7 +152,7 @@ class HalfFrameManager(private val context: Context) {
                     return null
                 }
 
-                Log.d(TAG, "Frame 2 HQ: Stitching $f1Base and $baseName in $activeProfile")
+                Log.d(TAG, "Frame 2 HQ: Stitching $partnerBaseName and $baseName in $activeProfile")
                 val stitchedBitmap = HalfFrameUtils.stitchImages(firstPath, currentJpgPath, activeLayout, downsample)
                 if (stitchedBitmap == null) {
                     Log.e(TAG, "Stitching failed in $activeProfile")

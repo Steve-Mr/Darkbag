@@ -1303,6 +1303,19 @@ class CameraFragment : Fragment() {
                 showProcessingAnimation()
             }
 
+            var hfMetadataForTrigger: HalfFrameManager.Metadata? = null
+            if (isHalfFrameModeEnabled) {
+                val session = halfFrameSessionStore.readSession()
+                hfMetadataForTrigger = HalfFrameManager.Metadata(
+                    profile = session.profile,
+                    dateStamp = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_DATE_STAMP, false),
+                    captureTimeMillis = timing.shutterClick,
+                    frame1BaseName = if (isFrame2Trigger) session.baseName else null,
+                    frame1TempPath = if (isFrame2Trigger) session.tempPath else null,
+                    frame1CaptureTime = if (isFrame2Trigger) session.captureTimeMillis else 0L
+                )
+            }
+
             if (isFrame2Trigger) {
                 writeScopedHalfFrameStep(prefs, 0)
                 updateHalfFrameUI()
@@ -1314,21 +1327,21 @@ class CameraFragment : Fragment() {
 
             if (currentLens?.useCamera2 == true) {
                 if (isHdrPlusEnabled && isRawSupported) {
-                    triggerHdrPlusBurstCamera2(isFrame1Trigger)
+                    triggerHdrPlusBurstCamera2(isFrame1Trigger, hfMetadataForTrigger)
                 } else {
-                    takeSinglePictureCamera2(timing, isFrame1Trigger)
+                    takeSinglePictureCamera2(timing, isFrame1Trigger, hfMetadataForTrigger)
                 }
             } else {
                 // Get a stable reference of the modifiable image capture use case
                 imageCapture?.let { imageCapture ->
                     if (isRawSupported) {
                         if (isHdrPlusEnabled) {
-                            triggerHdrPlusBurst(imageCapture, isFrame1Trigger)
+                            triggerHdrPlusBurst(imageCapture, isFrame1Trigger, hfMetadataForTrigger)
                         } else {
-                            takeSinglePicture(imageCapture, timing, isFrame1Trigger)
+                            takeSinglePicture(imageCapture, timing, isFrame1Trigger, hfMetadataForTrigger)
                         }
                     } else {
-                        takeSinglePicture(imageCapture, timing, isFrame1Trigger)
+                        takeSinglePicture(imageCapture, timing, isFrame1Trigger, hfMetadataForTrigger)
                     }
                 } ?: run {
                      processingSemaphore.release()
@@ -1797,6 +1810,9 @@ class CameraFragment : Fragment() {
                     workData.putString("hfProfile", hf.profile)
                     workData.putBoolean("hfDateStamp", hf.dateStamp)
                     workData.putLong("hfCaptureTime", hf.captureTimeMillis)
+                    hf.frame1BaseName?.let { workData.putString("hfF1Base", it) }
+                    hf.frame1TempPath?.let { workData.putString("hfF1Path", it) }
+                    workData.putLong("hfF1Time", hf.frame1CaptureTime)
                 }
 
                 val workRequest = androidx.work.OneTimeWorkRequestBuilder<HdrPlusExportWorker>()
@@ -2857,14 +2873,13 @@ class CameraFragment : Fragment() {
         }
     }
 
-    private fun takeSinglePicture(imageCapture: ImageCapture, timing: StandardTimingTracker? = null, isFrame1Trigger: Boolean = false) {
+    private fun takeSinglePicture(
+        imageCapture: ImageCapture,
+        timing: StandardTimingTracker? = null,
+        isFrame1Trigger: Boolean = false,
+        hfMetadata: HalfFrameManager.Metadata? = null
+    ) {
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        val hfMetadata = if (isHalfFrameModeEnabled) {
-            HalfFrameManager.Metadata(
-                profile = halfFrameSessionStore.currentProfile(),
-                dateStamp = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_DATE_STAMP, false)
-            )
-        } else null
 
         imageCapture.takePicture(
             cameraExecutor,
@@ -2958,26 +2973,23 @@ class CameraFragment : Fragment() {
         showShutterBlackout()
     }
 
-    private fun triggerHdrPlusBurst(imageCapture: ImageCapture, isFrame1Trigger: Boolean = false) {
+    private fun triggerHdrPlusBurst(
+        imageCapture: ImageCapture,
+        isFrame1Trigger: Boolean = false,
+        hfMetadata: HalfFrameManager.Metadata? = null
+    ) {
         if (isBurstActive) {
             Log.d(TAG, "Burst already active, ignoring trigger")
             processingSemaphore.release()
             return
         }
         isBurstActive = true
-        val captureStartTime = System.currentTimeMillis()
+        val captureStartTime = hfMetadata?.captureTimeMillis ?: System.currentTimeMillis()
         burstStartTime = captureStartTime
 
         lifecycleScope.launch(Dispatchers.Main) {
             try {
                 val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-                val hfMetadata = if (isHalfFrameModeEnabled) {
-                    HalfFrameManager.Metadata(
-                        profile = halfFrameSessionStore.currentProfile(),
-                        dateStamp = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_DATE_STAMP, false),
-                        captureTimeMillis = captureStartTime
-                    )
-                } else null
 
                 val config = lastHdrPlusConfig ?: run {
                     val result = captureResultFlow.replayCache.lastOrNull() ?: withTimeoutOrNull(2000) {
@@ -3434,6 +3446,9 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         workData.putString("hfProfile", hf.profile)
                         workData.putBoolean("hfDateStamp", hf.dateStamp)
                         workData.putLong("hfCaptureTime", hf.captureTimeMillis)
+                        hf.frame1BaseName?.let { workData.putString("hfF1Base", it) }
+                        hf.frame1TempPath?.let { workData.putString("hfF1Path", it) }
+                        workData.putLong("hfF1Time", hf.frame1CaptureTime)
                     }
 
                     val workRequest = androidx.work.OneTimeWorkRequestBuilder<HdrPlusExportWorker>()
@@ -3774,19 +3789,15 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         }
     }
 
-    private fun takeSinglePictureCamera2(timing: StandardTimingTracker? = null, isFrame1Trigger: Boolean = false) {
+    private fun takeSinglePictureCamera2(
+        timing: StandardTimingTracker? = null,
+        isFrame1Trigger: Boolean = false,
+        hfMetadata: HalfFrameManager.Metadata? = null
+    ) {
         val device = camera2Device ?: run { processingSemaphore.release(); return }
         val session = camera2Session ?: run { processingSemaphore.release(); return }
         val reader = rawImageReader ?: run { processingSemaphore.release(); return }
         val handler = camera2Handler ?: run { processingSemaphore.release(); return }
-
-        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        val hfMetadata = if (isHalfFrameModeEnabled) {
-            HalfFrameManager.Metadata(
-                profile = halfFrameSessionStore.currentProfile(),
-                dateStamp = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_DATE_STAMP, false)
-            )
-        } else null
 
         try {
             val request = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_STILL_CAPTURE)
@@ -3857,14 +3868,17 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         }
     }
 
-    private fun triggerHdrPlusBurstCamera2(isFrame1Trigger: Boolean = false) {
+    private fun triggerHdrPlusBurstCamera2(
+        isFrame1Trigger: Boolean = false,
+        hfMetadata: HalfFrameManager.Metadata? = null
+    ) {
         val device = camera2Device ?: run { processingSemaphore.release(); return }
         val session = camera2Session ?: run { processingSemaphore.release(); return }
         val reader = rawImageReader ?: run { processingSemaphore.release(); return }
         val handler = camera2Handler ?: run { processingSemaphore.release(); return }
 
         isBurstActive = true
-        val captureStartTime = System.currentTimeMillis()
+        val captureStartTime = hfMetadata?.captureTimeMillis ?: System.currentTimeMillis()
         burstStartTime = captureStartTime
 
         try {
@@ -3881,14 +3895,6 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             )
 
             val burstSize = (prefs.getString(SettingsFragment.KEY_HDR_BURST_COUNT, "5") ?: "5").toIntOrNull() ?: 5
-
-            val hfMetadata = if (isHalfFrameModeEnabled) {
-                HalfFrameManager.Metadata(
-                    profile = halfFrameSessionStore.currentProfile(),
-                    dateStamp = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_DATE_STAMP, false),
-                    captureTimeMillis = captureStartTime
-                )
-            } else null
 
             hdrPlusBurstHelper = HdrPlusBurst(frameCount = burstSize, onBurstComplete = { frames ->
                 processHdrPlusBurst(frames, config.digitalGain, hfMetadata)

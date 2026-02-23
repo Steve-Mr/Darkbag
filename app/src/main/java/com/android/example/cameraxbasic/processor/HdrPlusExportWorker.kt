@@ -51,12 +51,18 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
         val hfProfile = data.getString("hfProfile")
         val hfDateStamp = data.getBoolean("hfDateStamp", false)
         val hfCaptureTime = data.getLong("hfCaptureTime", captureTimeMillis)
+        val hfF1Base = data.getString("hfF1Base")
+        val hfF1Path = data.getString("hfF1Path")
+        val hfF1Time = data.getLong("hfF1Time", 0L)
 
         val hfMetadata = hfProfile?.let {
             com.android.example.cameraxbasic.utils.HalfFrameManager.Metadata(
                 profile = it,
                 dateStamp = hfDateStamp,
-                captureTimeMillis = hfCaptureTime
+                captureTimeMillis = hfCaptureTime,
+                frame1BaseName = hfF1Base,
+                frame1TempPath = hfF1Path,
+                frame1CaptureTime = hfF1Time
             )
         }
 
