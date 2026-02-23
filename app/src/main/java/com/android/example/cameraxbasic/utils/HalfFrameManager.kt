@@ -53,7 +53,7 @@ class HalfFrameManager(private val context: Context) {
         get() = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_LIGHT_LEAK, false)
 
     val saveJpg: Boolean
-        get() = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_SAVE_JPG, true)
+        get() = true // Mandatory for half-frame mode
 
     val saveRaw: Boolean
         get() = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_SAVE_RAW, false)

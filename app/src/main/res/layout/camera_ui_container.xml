@@ -42,9 +42,21 @@
         android:id="@+id/half_frame_gap_indicator"
         android:layout_width="0dp"
         android:layout_height="0dp"
+        android:background="@android:color/black"
         android:visibility="gone"
         app:layout_constraintTop_toTopOf="@id/view_finder"
-        app:layout_constraintStart_toStartOf="@id/view_finder" />
+        app:layout_constraintBottom_toBottomOf="@id/view_finder"
+        app:layout_constraintStart_toStartOf="parent" />
+
+    <ImageView
+        android:id="@+id/half_frame_snapshot"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:scaleType="centerCrop"
+        android:visibility="gone"
+        app:layout_constraintTop_toTopOf="@id/view_finder"
+        app:layout_constraintBottom_toBottomOf="@id/view_finder"
+        app:layout_constraintStart_toStartOf="parent" />
 
     <View
         android:id="@+id/view_finder_blackout"
@@ -406,28 +418,31 @@
                 app:layout_constraintStart_toStartOf="@id/camera_capture_button"
                 app:layout_constraintEnd_toEndOf="@id/camera_capture_button" />
 
-            <ImageButton
-                android:id="@+id/photo_view_button"
-                android:layout_width="@dimen/round_button_medium"
-                android:layout_height="@dimen/round_button_medium"
-                android:padding="@dimen/spacing_medium"
-                android:scaleType="fitCenter"
-                android:background="@drawable/ic_outer_circle"
-                android:src="@drawable/ic_photo"
-                android:contentDescription="@string/gallery_button_alt"
+            <FrameLayout
+                android:id="@+id/photo_view_container"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
                 app:layout_constraintEnd_toEndOf="parent"
                 app:layout_constraintTop_toTopOf="@id/camera_capture_button"
-                app:layout_constraintBottom_toBottomOf="@id/camera_capture_button" />
+                app:layout_constraintBottom_toBottomOf="@id/camera_capture_button">
 
-            <com.google.android.material.loadingindicator.LoadingIndicator
-                android:id="@+id/processing_progress"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:visibility="gone"
-                app:layout_constraintTop_toTopOf="@id/photo_view_button"
-                app:layout_constraintBottom_toBottomOf="@id/photo_view_button"
-                app:layout_constraintEnd_toEndOf="@id/photo_view_button"
-                app:layout_constraintStart_toStartOf="@id/photo_view_button" />
+                <ImageButton
+                    android:id="@+id/photo_view_button"
+                    android:layout_width="@dimen/round_button_medium"
+                    android:layout_height="@dimen/round_button_medium"
+                    android:padding="@dimen/spacing_medium"
+                    android:scaleType="fitCenter"
+                    android:background="@drawable/ic_outer_circle"
+                    android:src="@drawable/ic_photo"
+                    android:contentDescription="@string/gallery_button_alt" />
+
+                <com.google.android.material.loadingindicator.LoadingIndicator
+                    android:id="@+id/processing_progress"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:layout_gravity="center"
+                    android:visibility="gone" />
+            </FrameLayout>
 
         </androidx.constraintlayout.widget.ConstraintLayout>
 

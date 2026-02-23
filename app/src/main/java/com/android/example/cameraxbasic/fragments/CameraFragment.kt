@@ -245,6 +245,11 @@ class CameraFragment : Fragment() {
         lifecycleScope.launch(Dispatchers.Main) {
             processingCount++
             cameraUiContainerBinding?.processingProgress?.visibility = View.VISIBLE
+            cameraUiContainerBinding?.photoViewContainer?.visibility = View.VISIBLE
+            // Hide thumbnail image while processing if in half-frame mode
+            if (isHalfFrameModeEnabled) {
+                cameraUiContainerBinding?.photoViewButton?.visibility = View.INVISIBLE
+            }
             Log.d(TAG, "showProcessingAnimation: count=$processingCount")
         }
     }
@@ -254,6 +259,11 @@ class CameraFragment : Fragment() {
             processingCount = (processingCount - 1).coerceAtLeast(0)
             if (processingCount == 0) {
                 cameraUiContainerBinding?.processingProgress?.visibility = View.GONE
+                // Restore thumbnail visibility if not in the middle of a half-frame pair
+                if (!isHalfFrameModeEnabled || halfFrameStep == 0) {
+                    cameraUiContainerBinding?.photoViewButton?.visibility = View.VISIBLE
+                    cameraUiContainerBinding?.photoViewButton?.alpha = 1f
+                }
             }
             Log.d(TAG, "hideProcessingAnimation: count=$processingCount")
         }
@@ -448,31 +458,37 @@ class CameraFragment : Fragment() {
     }
 
     private fun setGalleryThumbnail(filename: String?) {
-        // Run the operations in the view's thread
-        cameraUiContainerBinding?.photoViewButton?.let { photoViewButton ->
-            photoViewButton.post {
-                if (filename == null) {
-                    photoViewButton.setImageDrawable(null)
-                    // If Half-frame mode is in step 1 (just took frame 2), keep it VISIBLE
-                    // to show the background loading indicator
-                    if (isHalfFrameModeEnabled && halfFrameStep == 1) {
-                        photoViewButton.visibility = View.VISIBLE
-                    } else {
-                        photoViewButton.visibility = View.GONE
-                    }
-                    return@post
+        val binding = cameraUiContainerBinding ?: return
+        val photoViewButton = binding.photoViewButton ?: return
+
+        photoViewButton.post {
+            if (filename == null) {
+                photoViewButton.setImageDrawable(null)
+                // In half-frame mode or during processing, we keep the container visible but hide the button
+                if (isHalfFrameModeEnabled || processingCount > 0) {
+                    photoViewButton.visibility = View.INVISIBLE
+                } else {
+                    photoViewButton.visibility = View.GONE
                 }
-
-                photoViewButton.visibility = View.VISIBLE
-                // Remove thumbnail padding
-                photoViewButton.setPadding(resources.getDimension(R.dimen.stroke_small).toInt())
-
-                // Load thumbnail into circular button using Glide
-                Glide.with(photoViewButton)
-                    .load(filename)
-                    .apply(RequestOptions.circleCropTransform())
-                    .into(photoViewButton)
+                return@post
             }
+
+            // In half-frame mode, only show the thumbnail if we are at step 0 (idle) and not processing
+            if (isHalfFrameModeEnabled && (halfFrameStep != 0 || processingCount > 0)) {
+                photoViewButton.visibility = View.INVISIBLE
+                return@post
+            }
+
+            photoViewButton.visibility = View.VISIBLE
+            photoViewButton.alpha = 1f
+            // Remove thumbnail padding
+            photoViewButton.setPadding(resources.getDimension(R.dimen.stroke_small).toInt())
+
+            // Load thumbnail into circular button using Glide
+            Glide.with(photoViewButton)
+                .load(filename)
+                .apply(RequestOptions.circleCropTransform())
+                .into(photoViewButton)
         }
     }
 
@@ -539,11 +555,12 @@ class CameraFragment : Fragment() {
                 withContext(Dispatchers.Main) {
                     if (step == 1) {
                         hideProcessingAnimation()
+                        updateHalfFrameUI(animate = true)
                     } else {
                         // Full capture complete
                         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
                         writeScopedHalfFrameStep(prefs, 0)
-                        updateHalfFrameUI()
+                        updateHalfFrameUI(animate = true)
                         hideProcessingAnimation() // Final cleanup
                     }
                 }
@@ -1299,7 +1316,7 @@ class CameraFragment : Fragment() {
 
             if (isFrame1Trigger) {
                 writeScopedHalfFrameStep(prefs, 1, System.currentTimeMillis())
-                updateHalfFrameUI()
+                updateHalfFrameUI(animate = true)
                 showProcessingAnimation()
             }
 
@@ -2888,10 +2905,7 @@ class CameraFragment : Fragment() {
                     timing?.captureCallback = System.currentTimeMillis()
 
                     if (isFrame1Trigger) {
-                        lifecycleScope.launch(Dispatchers.Main) { animateFilmEdgeRoll() }
                         triggerAutoBurst(prefs)
-                    } else if (isHalfFrameModeEnabled) {
-                        lifecycleScope.launch(Dispatchers.Main) { animateFilmEdgeRoll() }
                     }
 
                     if (image.format == android.graphics.ImageFormat.RAW_SENSOR) {
@@ -3102,9 +3116,6 @@ class CameraFragment : Fragment() {
                                 showProcessingAnimation()
                             }
 
-                            if (isHalfFrameModeEnabled) {
-                                animateFilmEdgeRoll()
-                            }
                             if (isFrame1Trigger) {
                                 val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
                                 triggerAutoBurst(prefs)
@@ -3966,9 +3977,6 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                                 showProcessingAnimation()
                             }
 
-                            if (isHalfFrameModeEnabled) {
-                                animateFilmEdgeRoll()
-                            }
                             if (isFrame1Trigger) {
                                 triggerAutoBurst(prefs)
                             }
@@ -4217,7 +4225,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         }
     }
 
-    private fun updateHalfFrameUI() {
+    private fun updateHalfFrameUI(animate: Boolean = false) {
         val uiBinding = cameraUiContainerBinding ?: return
         val vfBinding = fragmentCameraBinding
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
@@ -4231,6 +4239,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             readScopedHalfFrameState(prefs)
 
             val gapView = uiBinding.halfFrameGapIndicator ?: return@post
+            val snapshotView = uiBinding.halfFrameSnapshot ?: return@post
             val edgeTopView = uiBinding.halfFrameFilmEdgeTop ?: return@post
             val edgeBottomView = uiBinding.halfFrameFilmEdgeBottom ?: return@post
 
@@ -4239,6 +4248,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     uiBinding.tvHalfFrameStep?.visibility = View.GONE
                 }
                 if (gapView.visibility != View.GONE) gapView.visibility = View.GONE
+                if (snapshotView.visibility != View.GONE) snapshotView.visibility = View.GONE
                 if (edgeTopView.visibility != View.GONE) edgeTopView.visibility = View.GONE
                 if (edgeBottomView.visibility != View.GONE) edgeBottomView.visibility = View.GONE
 
@@ -4255,8 +4265,9 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 vfBinding.viewFinder.translationX = 0f
                 vfBinding.viewFinder.translationY = 0f
 
-                if (halfFrameStep == 0 && uiBinding.photoViewButton?.visibility != View.VISIBLE) {
+                if (uiBinding.photoViewButton?.visibility != View.VISIBLE) {
                     uiBinding.photoViewButton?.visibility = View.VISIBLE
+                    uiBinding.photoViewButton?.alpha = 1f
                 }
                 return@post
             }
@@ -4270,9 +4281,12 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 uiBinding.tvHalfFrameStep?.text = stepText
             }
 
-            val photoButtonVisibility = if (halfFrameStep == 0) View.VISIBLE else View.GONE
-            if (uiBinding.photoViewButton?.visibility != photoButtonVisibility) {
-                uiBinding.photoViewButton?.visibility = photoButtonVisibility
+            // Hide thumbnail button during processing of Shot 1 and throughout Shot 2
+            if (halfFrameStep == 1) {
+                uiBinding.photoViewButton?.visibility = View.INVISIBLE
+            } else if (processingCount == 0) {
+                uiBinding.photoViewButton?.visibility = View.VISIBLE
+                uiBinding.photoViewButton?.alpha = 1f
             }
 
             if (halfFrameBaseFinderWidth <= 0 || halfFrameBaseFinderHeight <= 0) {
@@ -4289,8 +4303,6 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             val scale = totalW / (totalW + gapWidthBase)
             val gapWidthScaled = gapWidthBase * scale
             val shift = gapWidthScaled / 2f
-            // Gap decoration removed: the black bar is now the naturally exposed container area.
-            if (gapView.visibility != View.GONE) gapView.visibility = View.GONE
 
             if (edgeTopView.visibility != View.VISIBLE) edgeTopView.visibility = View.VISIBLE
             if (edgeBottomView.visibility != View.VISIBLE) edgeBottomView.visibility = View.VISIBLE
@@ -4304,6 +4316,13 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     lp.width = targetW
                     lp.height = targetH
                     vfBinding.viewFinder.layoutParams = lp
+
+                    snapshotView.layoutParams.width = targetW
+                    snapshotView.layoutParams.height = targetH
+                    snapshotView.requestLayout()
+
+                    gapView.layoutParams.width = gapWidthScaled.toInt()
+                    gapView.requestLayout()
                 }
             }
 
@@ -4311,16 +4330,84 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             vfBinding.viewFinder.scaleY = 1f
 
             val targetShift = if (halfFrameStep == 0) -shift else shift
-            if (vfBinding.viewFinder.translationX != targetShift) {
+
+            if (animate) {
+                performHalfFrameAdvanceAnimation(targetShift, totalW, gapWidthScaled)
+            } else {
+                vfBinding.viewFinder.animate().cancel()
                 vfBinding.viewFinder.translationX = targetShift
+                gapView.visibility = View.GONE
+                snapshotView.visibility = View.GONE
             }
+
             if (vfBinding.viewFinder.translationY != 0f) {
                 vfBinding.viewFinder.translationY = 0f
             }
         }
     }
 
-    private fun animateFilmEdgeRoll() {
+    private fun performHalfFrameAdvanceAnimation(targetShift: Float, totalW: Float, gapWidth: Float) {
+        val uiBinding = cameraUiContainerBinding ?: return
+        val vf = fragmentCameraBinding.viewFinder
+        val snapshot = uiBinding.halfFrameSnapshot ?: return
+        val gap = uiBinding.halfFrameGapIndicator ?: return
+
+        // VF base position (centered) is (totalW - vf.width) / 2
+        val vfBaseX = (totalW - vf.width) / 2f
+        val startShift = vf.translationX
+        val currentVfLeft = vfBaseX + startShift
+
+        // 1. Take Snapshot of current viewfinder
+        val bitmap = vf.bitmap
+        if (bitmap != null) {
+            snapshot.setImageBitmap(bitmap)
+            snapshot.visibility = View.VISIBLE
+            // Snapshot's layout is parent.start, so its translationX is its screen position
+            snapshot.translationX = currentVfLeft
+        }
+
+        // 2. Prepare Gap (also parent.start layout)
+        gap.visibility = View.VISIBLE
+        // If halfFrameStep is now 1 (took shot 1), gap is to the right of shot 1: currentVfLeft + vf.width
+        // If halfFrameStep is now 0 (took shot 2), gap is to the left of shot 2: currentVfLeft - gapWidth
+        gap.translationX = if (halfFrameStep == 1) currentVfLeft + vf.width else currentVfLeft - gapWidth
+
+        // 3. Prepare ViewFinder for "coming in" from right
+        // We want it to end at targetShift. Since everything moves by -totalW, it must start at targetShift + totalW
+        vf.animate().cancel()
+        vf.translationX = targetShift + totalW
+
+        // 4. Animate everything to the left by exactly totalW (full screen width)
+        val duration = 450L
+        val interpolator = android.view.animation.AccelerateDecelerateInterpolator()
+
+        snapshot.animate()
+            .translationX(currentVfLeft - totalW)
+            .setDuration(duration)
+            .setInterpolator(interpolator)
+            .withEndAction {
+                snapshot.visibility = View.GONE
+                snapshot.setImageBitmap(null)
+            }
+            .start()
+
+        gap.animate()
+            .translationX(gap.translationX - totalW)
+            .setDuration(duration)
+            .setInterpolator(interpolator)
+            .withEndAction { gap.visibility = View.GONE }
+            .start()
+
+        vf.animate()
+            .translationX(targetShift)
+            .setDuration(duration)
+            .setInterpolator(interpolator)
+            .start()
+
+        animateFilmEdgeRoll(duration)
+    }
+
+    private fun animateFilmEdgeRoll(duration: Long = 360L) {
         val uiBinding = cameraUiContainerBinding ?: return
         val topEdge = uiBinding.halfFrameFilmEdgeTop ?: return
         val bottomEdge = uiBinding.halfFrameFilmEdgeBottom ?: return
@@ -4328,35 +4415,25 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         topEdge.animate().cancel()
         bottomEdge.animate().cancel()
 
-        val rollDistance = (resources.displayMetrics.density * 28f)
+        // Sprocket hole period is 30/400 of the view width
+        val periodPx = (30f / 400f) * topEdge.width
+        // Move by multiple periods to cover about half the screen width for a "roll" feel
+        val rollDistance = periodPx * ( (topEdge.width / 2) / periodPx ).toInt()
 
-        topEdge.translationX = 0f
-        bottomEdge.translationX = 0f
+        val interpolator = android.view.animation.AccelerateDecelerateInterpolator()
 
         topEdge.animate()
             .translationX(-rollDistance)
-            .setDuration(180)
-            .setInterpolator(android.view.animation.AccelerateDecelerateInterpolator())
-            .withEndAction {
-                topEdge.animate()
-                    .translationX(0f)
-                    .setDuration(180)
-                    .setInterpolator(android.view.animation.AccelerateDecelerateInterpolator())
-                    .start()
-            }
+            .setDuration(duration)
+            .setInterpolator(interpolator)
+            .withEndAction { topEdge.translationX = 0f }
             .start()
 
         bottomEdge.animate()
             .translationX(-rollDistance)
-            .setDuration(180)
-            .setInterpolator(android.view.animation.AccelerateDecelerateInterpolator())
-            .withEndAction {
-                bottomEdge.animate()
-                    .translationX(0f)
-                    .setDuration(180)
-                    .setInterpolator(android.view.animation.AccelerateDecelerateInterpolator())
-                    .start()
-            }
+            .setDuration(duration)
+            .setInterpolator(interpolator)
+            .withEndAction { bottomEdge.translationX = 0f }
             .start()
     }
 
