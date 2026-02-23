@@ -23,12 +23,12 @@ class HalfFrameSessionStore(private val context: Context) {
         return if (layout == SettingsFragment.HALF_FRAME_LAYOUTS[0]) PROFILE_HALF_SIDE else PROFILE_HALF_TOP
     }
 
-    fun readSession(strict: Boolean = false): Session {
-        val profile = currentProfile()
-        val step = prefs.getInt(key(SettingsFragment.KEY_HALF_FRAME_STEP, profile), 0)
-        val tempPath = prefs.getString(key(SettingsFragment.KEY_HALF_FRAME_TEMP_PATH, profile), null)
-        val baseName = prefs.getString(key(SettingsFragment.KEY_HALF_FRAME_BASE_NAME, profile), null)
-        val captureTime = prefs.getLong(key(KEY_CAPTURE_TIME, profile), 0L)
+    fun readSession(strict: Boolean = false, profile: String? = null): Session {
+        val activeProfile = profile ?: currentProfile()
+        val step = prefs.getInt(key(SettingsFragment.KEY_HALF_FRAME_STEP, activeProfile), 0)
+        val tempPath = prefs.getString(key(SettingsFragment.KEY_HALF_FRAME_TEMP_PATH, activeProfile), null)
+        val baseName = prefs.getString(key(SettingsFragment.KEY_HALF_FRAME_BASE_NAME, activeProfile), null)
+        val captureTime = prefs.getLong(key(KEY_CAPTURE_TIME, activeProfile), 0L)
 
         var resolvedStep = step
         var resolvedTemp = tempPath
@@ -43,44 +43,39 @@ class HalfFrameSessionStore(private val context: Context) {
                 resolvedTemp = null
                 resolvedBase = null
                 prefs.edit()
-                    .putInt(key(SettingsFragment.KEY_HALF_FRAME_STEP, profile), 0)
-                    .remove(key(SettingsFragment.KEY_HALF_FRAME_TEMP_PATH, profile))
-                    .remove(key(SettingsFragment.KEY_HALF_FRAME_BASE_NAME, profile))
-                    .remove(key(KEY_CAPTURE_TIME, profile))
+                    .putInt(key(SettingsFragment.KEY_HALF_FRAME_STEP, activeProfile), 0)
+                    .remove(key(SettingsFragment.KEY_HALF_FRAME_TEMP_PATH, activeProfile))
+                    .remove(key(SettingsFragment.KEY_HALF_FRAME_BASE_NAME, activeProfile))
+                    .remove(key(KEY_CAPTURE_TIME, activeProfile))
                     .apply()
             }
         }
 
-        return Session(profile, resolvedStep, resolvedTemp, resolvedBase, captureTime)
+        return Session(activeProfile, resolvedStep, resolvedTemp, resolvedBase, captureTime)
     }
 
-    fun markStep(step: Int, captureTimeMillis: Long? = null) {
-        val profile = currentProfile()
-        val editor = prefs.edit().putInt(key(SettingsFragment.KEY_HALF_FRAME_STEP, profile), step)
+    fun markStep(step: Int, captureTimeMillis: Long? = null, profile: String? = null) {
+        val activeProfile = profile ?: currentProfile()
+        val editor = prefs.edit().putInt(key(SettingsFragment.KEY_HALF_FRAME_STEP, activeProfile), step)
         if (step == 1) {
-            editor.putLong(key(KEY_CAPTURE_TIME, profile), captureTimeMillis ?: System.currentTimeMillis())
+            editor.putLong(key(KEY_CAPTURE_TIME, activeProfile), captureTimeMillis ?: System.currentTimeMillis())
         } else {
-            editor.remove(key(KEY_CAPTURE_TIME, profile))
+            editor.remove(key(KEY_CAPTURE_TIME, activeProfile))
         }
         editor.apply()
     }
 
-    fun setTempPath(path: String?) {
-        val profile = currentProfile()
-        prefs.edit().putString(key(SettingsFragment.KEY_HALF_FRAME_TEMP_PATH, profile), path).apply()
+    fun setTempPath(path: String?, profile: String? = null) {
+        val activeProfile = profile ?: currentProfile()
+        prefs.edit().putString(key(SettingsFragment.KEY_HALF_FRAME_TEMP_PATH, activeProfile), path).apply()
     }
 
-    fun setBaseName(baseName: String?) {
-        val profile = currentProfile()
-        prefs.edit().putString(key(SettingsFragment.KEY_HALF_FRAME_BASE_NAME, profile), baseName).apply()
+    fun setBaseName(baseName: String?, profile: String? = null) {
+        val activeProfile = profile ?: currentProfile()
+        prefs.edit().putString(key(SettingsFragment.KEY_HALF_FRAME_BASE_NAME, activeProfile), baseName).apply()
     }
 
-    fun clearCurrentSession(deleteTempFile: Boolean = false) {
-        val profile = currentProfile()
-        val tempPath = prefs.getString(key(SettingsFragment.KEY_HALF_FRAME_TEMP_PATH, profile), null)
-        if (deleteTempFile && !tempPath.isNullOrBlank()) {
-            runCatching { File(tempPath).delete() }
-        }
+    fun clearProfile(profile: String) {
         prefs.edit()
             .putInt(key(SettingsFragment.KEY_HALF_FRAME_STEP, profile), 0)
             .remove(key(SettingsFragment.KEY_HALF_FRAME_TEMP_PATH, profile))
@@ -89,7 +84,18 @@ class HalfFrameSessionStore(private val context: Context) {
             .apply()
     }
 
-    fun tempFileForCurrentProfile(): File = File(context.filesDir, "half_frame_frame1_${currentProfile()}.jpg")
+    fun clearCurrentSession(deleteTempFile: Boolean = false) {
+        val profile = currentProfile()
+        val tempPath = prefs.getString(key(SettingsFragment.KEY_HALF_FRAME_TEMP_PATH, profile), null)
+        if (deleteTempFile && !tempPath.isNullOrBlank()) {
+            runCatching { File(tempPath).delete() }
+        }
+        clearProfile(profile)
+    }
+
+    fun tempFileForProfile(profile: String): File = File(context.filesDir, "half_frame_frame1_$profile.jpg")
+
+    fun tempFileForCurrentProfile(): File = tempFileForProfile(currentProfile())
 
     fun scopedStepKeyForCurrentProfile(): String = key(SettingsFragment.KEY_HALF_FRAME_STEP, currentProfile())
 

@@ -48,6 +48,18 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
         val rawFolderUri = data.getString("rawFolderUri")
         val mirror = data.getBoolean("mirror", false)
 
+        val hfProfile = data.getString("hfProfile")
+        val hfDateStamp = data.getBoolean("hfDateStamp", false)
+        val hfCaptureTime = data.getLong("hfCaptureTime", captureTimeMillis)
+
+        val hfMetadata = hfProfile?.let {
+            com.android.example.cameraxbasic.utils.HalfFrameManager.Metadata(
+                profile = it,
+                dateStamp = hfDateStamp,
+                captureTimeMillis = hfCaptureTime
+            )
+        }
+
         Log.d(TAG, "Background Export Worker started for $baseName")
 
         val ret = ColorProcessor.exportHdrPlus(
@@ -78,7 +90,8 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
                 tiffFolderUri = tiffFolderUri,
                 rawFolderUri = rawFolderUri,
                 targetUri = targetUri?.let { Uri.parse(it) },
-                mirror = false // already handled by JNI
+                mirror = false, // already handled by JNI
+                halfFrameMetadata = hfMetadata
             )
 
             Log.d(TAG, "Background Export Worker finished successfully for $baseName. finalUri=$finalUri")

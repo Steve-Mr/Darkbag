@@ -93,6 +93,7 @@ import com.android.example.cameraxbasic.utils.ANIMATION_SLOW_MILLIS
 import com.android.example.cameraxbasic.utils.MediaStoreUtils
 import com.android.example.cameraxbasic.utils.LutManager
 import com.android.example.cameraxbasic.utils.HalfFrameSessionStore
+import com.android.example.cameraxbasic.utils.HalfFrameManager
 import com.android.example.cameraxbasic.processor.LutSurfaceProcessor
 import com.android.example.cameraxbasic.utils.ExposureUtils
 import com.android.example.cameraxbasic.utils.simulateClick
@@ -341,7 +342,8 @@ class CameraFragment : Fragment() {
         val combinedOrientation: Int, // Combined with Display
         val zoomRatio: Float,
         val physicalId: String? = null,
-        val timing: StandardTimingTracker? = null
+        val timing: StandardTimingTracker? = null,
+        val halfFrameMetadata: HalfFrameManager.Metadata? = null
     )
 
     /** Volume down button receiver used to trigger shutter */
@@ -1505,7 +1507,13 @@ class CameraFragment : Fragment() {
         }
     }
 
-    private fun copyImageToHolder(image: ImageProxy, zoomRatio: Float, combinedOrientation: Int, physicalId: String? = null): RawImageHolder {
+    private fun copyImageToHolder(
+        image: ImageProxy,
+        zoomRatio: Float,
+        combinedOrientation: Int,
+        physicalId: String? = null,
+        halfFrameMetadata: HalfFrameManager.Metadata? = null
+    ): RawImageHolder {
         val plane = image.planes[0]
         val buffer = plane.buffer
         val width = image.width
@@ -1540,7 +1548,8 @@ class CameraFragment : Fragment() {
             rotationDegrees = image.imageInfo.rotationDegrees,
             combinedOrientation = combinedOrientation,
             zoomRatio = zoomRatio,
-            physicalId = physicalId
+            physicalId = physicalId,
+            halfFrameMetadata = halfFrameMetadata
         )
     }
 
@@ -1739,7 +1748,8 @@ class CameraFragment : Fragment() {
                     jpgFolderUri = jpgFolderUri,
                     rawFolderUri = rawFolderUri,
                     mirror = false,
-                    isFastPath = true
+                    isFastPath = true,
+                    halfFrameMetadata = image.halfFrameMetadata
                 )
 
                 timing?.firstOutputWritten = System.currentTimeMillis()
@@ -1782,6 +1792,12 @@ class CameraFragment : Fragment() {
                     .putString("tiffFolderUri", tiffFolderUri)
                     .putString("rawFolderUri", rawFolderUri)
                     .putBoolean("mirror", mirror)
+
+                image.halfFrameMetadata?.let { hf ->
+                    workData.putString("hfProfile", hf.profile)
+                    workData.putBoolean("hfDateStamp", hf.dateStamp)
+                    workData.putLong("hfCaptureTime", hf.captureTimeMillis)
+                }
 
                 val workRequest = androidx.work.OneTimeWorkRequestBuilder<HdrPlusExportWorker>()
                     .setInputData(workData.build())
@@ -2775,7 +2791,12 @@ class CameraFragment : Fragment() {
         const val KEY_HDR_PLUS_ENABLED = "hdr_plus_enabled"
     }
 
-    private fun saveJpegFallback(data: ByteArray, rotationDegrees: Int, zoomFactor: Float) {
+    private fun saveJpegFallback(
+        data: ByteArray,
+        rotationDegrees: Int,
+        zoomFactor: Float,
+        halfFrameMetadata: HalfFrameManager.Metadata? = null
+    ) {
         val appContext = requireContext().applicationContext
         val mirror = shouldMirror
 
@@ -2800,7 +2821,8 @@ class CameraFragment : Fragment() {
                     saveJpg = true,
                     saveTiff = false,
                     jpgFolderUri = jpgFolderUri,
-                    mirror = mirror
+                    mirror = mirror,
+                    halfFrameMetadata = halfFrameMetadata
                 )
                 withContext(Dispatchers.Main) {
                     val uiPrefs = appContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
@@ -2837,6 +2859,13 @@ class CameraFragment : Fragment() {
 
     private fun takeSinglePicture(imageCapture: ImageCapture, timing: StandardTimingTracker? = null, isFrame1Trigger: Boolean = false) {
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val hfMetadata = if (isHalfFrameModeEnabled) {
+            HalfFrameManager.Metadata(
+                profile = halfFrameSessionStore.currentProfile(),
+                dateStamp = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_DATE_STAMP, false)
+            )
+        } else null
+
         imageCapture.takePicture(
             cameraExecutor,
             object : ImageCapture.OnImageCapturedCallback() {
@@ -2858,7 +2887,9 @@ class CameraFragment : Fragment() {
                                 1.0f
                             }
 
-                            val holder = copyImageToHolder(image, currentZoom, getCombinedOrientation(), currentLens?.physicalId).copy(timing = timing)
+                            val holder = copyImageToHolder(
+                                image, currentZoom, getCombinedOrientation(), currentLens?.physicalId, hfMetadata
+                            ).copy(timing = timing)
                             image.close()
 
                             if (!isFrame1Trigger) {
@@ -2907,7 +2938,7 @@ class CameraFragment : Fragment() {
                         if (!isFrame1Trigger) {
                             showProcessingAnimation()
                         }
-                        saveJpegFallback(data, rotation, currentZoom)
+                        saveJpegFallback(data, rotation, currentZoom, hfMetadata)
                     }
                 }
 
@@ -2934,10 +2965,20 @@ class CameraFragment : Fragment() {
             return
         }
         isBurstActive = true
-        burstStartTime = System.currentTimeMillis()
+        val captureStartTime = System.currentTimeMillis()
+        burstStartTime = captureStartTime
 
         lifecycleScope.launch(Dispatchers.Main) {
             try {
+                val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                val hfMetadata = if (isHalfFrameModeEnabled) {
+                    HalfFrameManager.Metadata(
+                        profile = halfFrameSessionStore.currentProfile(),
+                        dateStamp = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_DATE_STAMP, false),
+                        captureTimeMillis = captureStartTime
+                    )
+                } else null
+
                 val config = lastHdrPlusConfig ?: run {
                     val result = captureResultFlow.replayCache.lastOrNull() ?: withTimeoutOrNull(2000) {
                         captureResultFlow.first()
@@ -2952,7 +2993,6 @@ class CameraFragment : Fragment() {
                     val currentTime = result.get(android.hardware.camera2.CaptureResult.SENSOR_EXPOSURE_TIME) ?: 10_000_000L
                     val validIsoRange = isoRange ?: android.util.Range(100, 3200)
                     val validTimeRange = exposureTimeRange ?: android.util.Range(1000L, 1_000_000_000L)
-                    val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
                     val underexposureMode = prefs.getString(SettingsFragment.KEY_HDR_UNDEREXPOSURE_MODE, "Dynamic (Experimental)") ?: "Dynamic (Experimental)"
                     ExposureUtils.calculateHdrPlusExposure(
                         currentIso,
@@ -2989,17 +3029,13 @@ class CameraFragment : Fragment() {
 
                 delay(AE_SETTLE_DELAY_MS)
 
-                val prefs = requireContext().getSharedPreferences(
-                    SettingsFragment.PREFS_NAME,
-                    Context.MODE_PRIVATE
-                )
                 val burstSizeStr = prefs.getString(SettingsFragment.KEY_HDR_BURST_COUNT, "5") ?: "5"
                 val burstSize = burstSizeStr.toIntOrNull() ?: 5
 
                 hdrPlusBurstHelper = HdrPlusBurst(
                     frameCount = burstSize,
                     onBurstComplete = { frames ->
-                        processHdrPlusBurst(frames, config.digitalGain)
+                        processHdrPlusBurst(frames, config.digitalGain, hfMetadata)
                     }
                 )
 
@@ -3113,7 +3149,11 @@ class CameraFragment : Fragment() {
         }
     }
 
-    private fun processHdrPlusBurst(frames: List<HdrFrame>, digitalGain: Float) {
+    private fun processHdrPlusBurst(
+        frames: List<HdrFrame>,
+        digitalGain: Float,
+        hfMetadata: HalfFrameManager.Metadata? = null
+    ) {
         val currentZoom = if (currentLens?.isZoomPreset == true && currentLens?.targetZoomRatio != null) {
             currentLens!!.targetZoomRatio!!
         } else {
@@ -3340,7 +3380,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                             saveTiff = false,
                             jpgFolderUri = jpgFolderUri,
                             mirror = false, // Mirroring already handled in JNI
-                            isFastPath = true
+                            isFastPath = true,
+                            halfFrameMetadata = hfMetadata
                         )
                     } else {
                         null
@@ -3388,6 +3429,12 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         .putString("tiffFolderUri", tiffFolderUri)
                         .putString("rawFolderUri", rawFolderUri)
                         .putBoolean("mirror", mirror)
+
+                    hfMetadata?.let { hf ->
+                        workData.putString("hfProfile", hf.profile)
+                        workData.putBoolean("hfDateStamp", hf.dateStamp)
+                        workData.putLong("hfCaptureTime", hf.captureTimeMillis)
+                    }
 
                     val workRequest = androidx.work.OneTimeWorkRequestBuilder<HdrPlusExportWorker>()
                         .setInputData(workData.build())
@@ -3462,7 +3509,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                             rotationDegrees = firstFrame.rotationDegrees,
                             combinedOrientation = combinedOrientation,
                             zoomRatio = currentZoom,
-                            physicalId = firstFrame.physicalId
+                            physicalId = firstFrame.physicalId,
+                            halfFrameMetadata = hfMetadata
                         )
                         processingChannel.send(holder)
                         fallbackSent = true
@@ -3732,6 +3780,14 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         val reader = rawImageReader ?: run { processingSemaphore.release(); return }
         val handler = camera2Handler ?: run { processingSemaphore.release(); return }
 
+        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val hfMetadata = if (isHalfFrameModeEnabled) {
+            HalfFrameManager.Metadata(
+                profile = halfFrameSessionStore.currentProfile(),
+                dateStamp = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_DATE_STAMP, false)
+            )
+        } else null
+
         try {
             val request = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_STILL_CAPTURE)
             request.addTarget(reader.surface)
@@ -3749,7 +3805,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         1.0f
                     }
                     if (image.format == android.graphics.ImageFormat.RAW_SENSOR) {
-                        val holder = copyAndroidImageToHolder(image, currentZoom, getCombinedOrientation(), currentLens?.id).copy(timing = timing)
+                        val holder = copyAndroidImageToHolder(image, currentZoom, getCombinedOrientation(), currentLens?.id, hfMetadata).copy(timing = timing)
                         image.close()
                         if (!isFrame1Trigger) {
                             showProcessingAnimation()
@@ -3768,7 +3824,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         if (!isFrame1Trigger) {
                             showProcessingAnimation()
                         }
-                        saveJpegFallback(data, 0, currentZoom) // Rotation handled by C2 JPEG_ORIENTATION
+                        saveJpegFallback(data, 0, currentZoom, hfMetadata) // Rotation handled by C2 JPEG_ORIENTATION
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to process Camera2 image", e)
@@ -3808,7 +3864,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         val handler = camera2Handler ?: run { processingSemaphore.release(); return }
 
         isBurstActive = true
-        burstStartTime = System.currentTimeMillis()
+        val captureStartTime = System.currentTimeMillis()
+        burstStartTime = captureStartTime
 
         try {
             val result = captureResultFlow.replayCache.lastOrNull()
@@ -3825,8 +3882,16 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
             val burstSize = (prefs.getString(SettingsFragment.KEY_HDR_BURST_COUNT, "5") ?: "5").toIntOrNull() ?: 5
 
+            val hfMetadata = if (isHalfFrameModeEnabled) {
+                HalfFrameManager.Metadata(
+                    profile = halfFrameSessionStore.currentProfile(),
+                    dateStamp = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_DATE_STAMP, false),
+                    captureTimeMillis = captureStartTime
+                )
+            } else null
+
             hdrPlusBurstHelper = HdrPlusBurst(frameCount = burstSize, onBurstComplete = { frames ->
-                processHdrPlusBurst(frames, config.digitalGain)
+                processHdrPlusBurst(frames, config.digitalGain, hfMetadata)
             })
 
             lifecycleScope.launch(Dispatchers.Main) {
@@ -3932,7 +3997,13 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         }
     }
 
-    private fun copyAndroidImageToHolder(image: android.media.Image, zoomRatio: Float, combinedOrientation: Int, physicalId: String?): RawImageHolder {
+    private fun copyAndroidImageToHolder(
+        image: android.media.Image,
+        zoomRatio: Float,
+        combinedOrientation: Int,
+        physicalId: String?,
+        halfFrameMetadata: HalfFrameManager.Metadata? = null
+    ): RawImageHolder {
         val plane = image.planes[0]
         val buffer = plane.buffer
         val rowStride = plane.rowStride
@@ -3967,7 +4038,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             rotationDegrees = sensorOrientation,
             combinedOrientation = combinedOrientation,
             zoomRatio = zoomRatio,
-            physicalId = physicalId
+            physicalId = physicalId,
+            halfFrameMetadata = halfFrameMetadata
         )
     }
 

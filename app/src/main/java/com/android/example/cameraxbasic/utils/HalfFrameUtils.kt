@@ -128,11 +128,18 @@ object HalfFrameUtils {
         }
     }
 
-    fun addEffects(bitmap: Bitmap, dateStamp: Boolean, lightLeak: Boolean, layout: String): Bitmap {
+    fun addEffects(
+        bitmap: Bitmap,
+        dateStamp: Boolean,
+        lightLeak: Boolean,
+        layout: String,
+        time1: Long = System.currentTimeMillis(),
+        time2: Long = System.currentTimeMillis()
+    ): Bitmap {
         var result = bitmap
 
         if (dateStamp) {
-            result = addDateStampToBoth(result, layout)
+            result = addDateStampToBoth(result, layout, time1, time2)
         }
 
         if (lightLeak) {
@@ -142,12 +149,13 @@ object HalfFrameUtils {
         return result
     }
 
-    private fun addDateStampToBoth(bitmap: Bitmap, layout: String): Bitmap {
+    private fun addDateStampToBoth(bitmap: Bitmap, layout: String, time1: Long, time2: Long): Bitmap {
         val workingBitmap = if (bitmap.isMutable) bitmap else bitmap.copy(Bitmap.Config.ARGB_8888, true)
         val canvas = Canvas(workingBitmap)
 
         val sdf = SimpleDateFormat(" ' 'yy  M  d", Locale.US)
-        val dateText = sdf.format(Date())
+        val dateText1 = sdf.format(Date(time1))
+        val dateText2 = sdf.format(Date(time2))
 
         // More robust detection: if string matches Side-by-side OR if it's a wide image that isn't square
         val isSideBySide = layout == "Side-by-side" ||
@@ -166,23 +174,11 @@ object HalfFrameUtils {
             textAlign = Paint.Align.RIGHT
         }
 
-        val textWidth = paint.measureText(dateText)
+        val textWidth = paint.measureText(dateText2)
         val margin = textWidth * 0.2f
 
         if (isSideBySide) {
             // Side-by-side (Wide): [ Frame 1 (Portrait) | Divider | Frame 2 (Portrait) ]
-            // Total height is the height of one frame.
-            val frame1RightX = (bitmap.width - 16) / 2f // Approximate divider as 16 if not known exactly,
-                                                        // but better use the actual center.
-            // Since we have: combinedW = targetW + divider + targetW
-            // targetW = (combinedW - divider) / 2
-            // We can estimate targetW if we don't pass it.
-            // In stitchImages, divider is (maxOf(targetW, targetH) * 0.03f).toInt().coerceAtLeast(16)
-            // For Side-by-side, targetH > targetW, so divider is approx targetH * 0.03.
-
-            // Let's use the actual proportions.
-            val targetW = (bitmap.width * 0.5f) - (bitmap.height * 0.015f) // rough estimate
-
             // Actually, we can just use the center gap.
             val centerGapX = bitmap.width / 2f
             val dividerHalf = (bitmap.height * 0.03f).coerceAtLeast(16f) / 2f
@@ -191,8 +187,8 @@ object HalfFrameUtils {
             val x2 = bitmap.width - margin
             val y = bitmap.height - margin
 
-            canvas.drawText(dateText, x1, y, paint)
-            canvas.drawText(dateText, x2, y, paint)
+            canvas.drawText(dateText1, x1, y, paint)
+            canvas.drawText(dateText2, x2, y, paint)
         } else {
             // Top-bottom (Tall): [ Frame 1 (Landscape) / Divider / Frame 2 (Landscape) ]
             val centerGapY = bitmap.height / 2f
@@ -202,8 +198,8 @@ object HalfFrameUtils {
             val y1 = centerGapY - dividerHalf - margin
             val y2 = bitmap.height - margin
 
-            canvas.drawText(dateText, x, y1, paint)
-            canvas.drawText(dateText, x, y2, paint)
+            canvas.drawText(dateText1, x, y1, paint)
+            canvas.drawText(dateText2, x, y2, paint)
         }
 
         return workingBitmap
