@@ -1,12 +1,13 @@
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="400dp"
+    android:width="1200dp"
     android:height="20dp"
-    android:viewportWidth="400"
+    android:viewportWidth="1200"
     android:viewportHeight="20">
     <path
         android:fillColor="#FF2B2218"
-        android:pathData="M0,0h400v20h-400z"/>
+        android:pathData="M0,0h1200v20h-1200z"/>
+    <!-- Sprocket holes every 30 units, starting at 10. (10, 40, 70, ..., 1180) -->
     <path
         android:fillColor="#FF7A6547"
-        android:pathData="M10,5h12v10h-12z M40,5h12v10h-12z M70,5h12v10h-12z M100,5h12v10h-12z M130,5h12v10h-12z M160,5h12v10h-12z M190,5h12v10h-12z M220,5h12v10h-12z M250,5h12v10h-12z M280,5h12v10h-12z M310,5h12v10h-12z M340,5h12v10h-12z M370,5h12v10h-12z"/>
+        android:pathData="M10,5h12v10h-12z M40,5h12v10h-12z M70,5h12v10h-12z M100,5h12v10h-12z M130,5h12v10h-12z M160,5h12v10h-12z M190,5h12v10h-12z M220,5h12v10h-12z M250,5h12v10h-12z M280,5h12v10h-12z M310,5h12v10h-12z M340,5h12v10h-12z M370,5h12v10h-12z M400,5h12v10h-12z M430,5h12v10h-12z M460,5h12v10h-12z M490,5h12v10h-12z M520,5h12v10h-12z M550,5h12v10h-12z M580,5h12v10h-12z M610,5h12v10h-12z M640,5h12v10h-12z M670,5h12v10h-12z M700,5h12v10h-12z M730,5h12v10h-12z M760,5h12v10h-12z M790,5h12v10h-12z M820,5h12v10h-12z M850,5h12v10h-12z M880,5h12v10h-12z M910,5h12v10h-12z M940,5h12v10h-12z M970,5h12v10h-12z M1000,5h12v10h-12z M1030,5h12v10h-12z M1060,5h12v10h-12z M1090,5h12v10h-12z M1120,5h12v10h-12z M1150,5h12v10h-12z M1180,5h12v10h-12z"/>
 </vector>

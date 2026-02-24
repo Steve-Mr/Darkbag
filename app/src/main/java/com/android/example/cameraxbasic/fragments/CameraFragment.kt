@@ -555,12 +555,8 @@ class CameraFragment : Fragment() {
                 withContext(Dispatchers.Main) {
                     if (step == 1) {
                         hideProcessingAnimation()
-                        updateHalfFrameUI(animate = true)
                     } else {
-                        // Full capture complete
-                        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-                        writeScopedHalfFrameStep(prefs, 0)
-                        updateHalfFrameUI(animate = true)
+                        // Full capture complete (Frame 2 background stitching done)
                         hideProcessingAnimation() // Final cleanup
                     }
                 }
@@ -1316,7 +1312,10 @@ class CameraFragment : Fragment() {
 
             if (isFrame1Trigger) {
                 writeScopedHalfFrameStep(prefs, 1, System.currentTimeMillis())
-                updateHalfFrameUI(animate = true)
+                // Animate after shutter blackout
+                fragmentCameraBinding.viewFinder.postDelayed({
+                    updateHalfFrameUI(animate = true)
+                }, 100)
                 showProcessingAnimation()
             }
 
@@ -1335,7 +1334,10 @@ class CameraFragment : Fragment() {
 
             if (isFrame2Trigger) {
                 writeScopedHalfFrameStep(prefs, 0)
-                updateHalfFrameUI()
+                // Animate after shutter blackout
+                fragmentCameraBinding.viewFinder.postDelayed({
+                    updateHalfFrameUI(animate = true)
+                }, 100)
 
                 showProcessingAnimation() // Immediate indicator on click for second frame
                 cameraUiContainerBinding?.photoViewButton?.visibility = View.VISIBLE // Show thumbnail container for progress indicator
@@ -4415,10 +4417,10 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         topEdge.animate().cancel()
         bottomEdge.animate().cancel()
 
-        // Sprocket hole period is 30/400 of the view width
-        val periodPx = (30f / 400f) * topEdge.width
-        // Move by multiple periods to cover about half the screen width for a "roll" feel
-        val rollDistance = periodPx * ( (topEdge.width / 2) / periodPx ).toInt()
+        // Sprocket hole period is 30/1200 of the view width (based on 1200dp vector with 30dp spacing)
+        val periodPx = (30f / 1200f) * topEdge.width
+        // Move by multiple periods to cover about 40% of the screen width for a "roll" feel
+        val rollDistance = periodPx * ( (resources.displayMetrics.widthPixels * 0.4f) / periodPx ).toInt()
 
         val interpolator = android.view.animation.AccelerateDecelerateInterpolator()
 
