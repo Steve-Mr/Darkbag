@@ -46,6 +46,7 @@ class ExpressiveShutterButton @JvmOverloads constructor(
     private var dotRotation = 0f
     private var isRotating = false
     private var continuousRotation = 0f
+    private var clickRotation = 0f
 
     private var colorPrimary: Int = 0
     private var colorOnPrimary: Int = 0
@@ -59,6 +60,15 @@ class ExpressiveShutterButton @JvmOverloads constructor(
         interpolator = LinearInterpolator()
         addUpdateListener {
             continuousRotation = it.animatedValue as Float
+            invalidate()
+        }
+    }
+
+    private val clickSpinAnimator = ValueAnimator.ofFloat(0f, 45f).apply {
+        duration = 250L
+        interpolator = android.view.animation.DecelerateInterpolator()
+        addUpdateListener {
+            clickRotation = it.animatedValue as Float
             invalidate()
         }
     }
@@ -159,9 +169,23 @@ class ExpressiveShutterButton @JvmOverloads constructor(
     override fun onTouchEvent(event: android.view.MotionEvent): Boolean {
         if (!isEnabled) return super.onTouchEvent(event)
 
-        if (event.action == android.view.MotionEvent.ACTION_DOWN) {
-            if (!isPointInsidePath(event.x, event.y)) {
-                return false
+        when (event.action) {
+            android.view.MotionEvent.ACTION_DOWN -> {
+                if (!isPointInsidePath(event.x, event.y)) {
+                    return false
+                }
+                animate().scaleX(0.95f).scaleY(0.95f).setDuration(100).start()
+            }
+            android.view.MotionEvent.ACTION_UP -> {
+                animate().scaleX(1.0f).scaleY(1.0f).setDuration(150).withEndAction {
+                    if (!isRotating) {
+                        clickSpinAnimator.cancel()
+                        clickSpinAnimator.start()
+                    }
+                }.start()
+            }
+            android.view.MotionEvent.ACTION_CANCEL -> {
+                animate().scaleX(1.0f).scaleY(1.0f).setDuration(150).start()
             }
         }
         return super.onTouchEvent(event)
@@ -200,6 +224,7 @@ class ExpressiveShutterButton @JvmOverloads constructor(
             isRotating = false
             rotationAnimator.cancel()
             continuousRotation = 0f
+            clickRotation = 0f
             invalidate()
         }
     }
@@ -227,8 +252,9 @@ class ExpressiveShutterButton @JvmOverloads constructor(
 
         // 2. Draw the star shape
         canvas.save()
-        if (isRotating) {
-            canvas.rotate(continuousRotation, cx, cy)
+        val totalRotation = if (isRotating) continuousRotation else clickRotation
+        if (totalRotation != 0f) {
+            canvas.rotate(totalRotation, cx, cy)
         }
         canvas.drawPath(shapePath, shapePaint)
         canvas.restore()
