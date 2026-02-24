@@ -11,6 +11,7 @@ import android.view.animation.LinearInterpolator
 import androidx.appcompat.widget.AppCompatImageButton
 import androidx.graphics.shapes.CornerRounding
 import androidx.graphics.shapes.RoundedPolygon
+import androidx.graphics.shapes.star
 import androidx.graphics.shapes.toPath
 import com.google.android.material.color.MaterialColors
 import kotlin.math.cos
@@ -46,7 +47,7 @@ class ExpressiveShutterButton @JvmOverloads constructor(
     private var colorOnPrimary: Int = 0
     private var colorPrimaryContainer: Int = 0
     private var colorOnPrimaryContainer: Int = 0
-    private var colorDisabled: Int = 0
+    private var colorSecondaryContainer: Int = 0
 
     private val rotationAnimator = ValueAnimator.ofFloat(0f, 360f).apply {
         duration = 3000L
@@ -72,22 +73,23 @@ class ExpressiveShutterButton @JvmOverloads constructor(
         colorOnPrimary = MaterialColors.getColor(this, com.google.android.material.R.attr.colorOnPrimary)
         colorPrimaryContainer = MaterialColors.getColor(this, com.google.android.material.R.attr.colorPrimaryContainer)
         colorOnPrimaryContainer = MaterialColors.getColor(this, com.google.android.material.R.attr.colorOnPrimaryContainer)
-        colorDisabled = MaterialColors.getColor(this, com.google.android.material.R.attr.colorSurfaceContainerHighest)
+        colorSecondaryContainer = MaterialColors.getColor(this, com.google.android.material.R.attr.colorSecondaryContainer)
 
         updatePaintColors()
     }
 
     private fun updatePaintColors() {
-        val baseColor = if (!isEnabled) colorDisabled else colorPrimary
+        // Use container variant when disabled/processing for better visual continuity
+        val baseColor = if (!isEnabled) colorPrimaryContainer else colorPrimary
         shapePaint.color = baseColor
 
         // Dot should be visible against the shape
         dotPaint.color = if (!isEnabled) colorOnPrimaryContainer else colorOnPrimary
-        dotPaint.alpha = if (!isEnabled) 100 else 255
+        dotPaint.alpha = if (!isEnabled) 160 else 255
 
         progressPaint.color = colorPrimary
         progressTrackPaint.color = colorPrimary
-        progressTrackPaint.alpha = 50
+        progressTrackPaint.alpha = 40
     }
 
     override fun setEnabled(enabled: Boolean) {
@@ -105,17 +107,19 @@ class ExpressiveShutterButton @JvmOverloads constructor(
         if (width <= 0 || height <= 0) return
 
         val size = minOf(width, height).toFloat()
-        // Shutter button slightly smaller for the outer progress ring
-        val ringWidth = size * 0.08f
-        val padding = ringWidth + (size * 0.04f)
+        // Reduced padding slightly as progress ring is thinner now
+        val ringWidth = size * 0.04f
+        val padding = ringWidth + (size * 0.06f)
         val radius = (size / 2f) - padding
 
-        val polygon = RoundedPolygon(
-            numVertices = 9,
+        val polygon = RoundedPolygon.star(
+            numVerticesPerRadius = 8,
+            innerRadius = 0.8f * radius,
+            rounding = CornerRounding(radius = radius * 0.15f, smoothing = 0.9f),
             radius = radius,
             centerX = width / 2f,
             centerY = height / 2f,
-            rounding = CornerRounding(radius * 0.4f)
+            innerRounding = CornerRounding(radius = radius * 0.15f, smoothing = 0.9f)
         )
 
         shapePath = polygon.toPath()
@@ -139,9 +143,18 @@ class ExpressiveShutterButton @JvmOverloads constructor(
     }
 
     override fun onTouchEvent(event: android.view.MotionEvent): Boolean {
-        if (event.action == android.view.MotionEvent.ACTION_DOWN) {
-            if (!isPointInsidePath(event.x, event.y)) {
-                return false
+        if (!isEnabled) return super.onTouchEvent(event)
+
+        when (event.action) {
+            android.view.MotionEvent.ACTION_DOWN -> {
+                if (!isPointInsidePath(event.x, event.y)) {
+                    return false
+                }
+                // Visual feedback for click
+                animate().scaleX(0.92f).scaleY(0.92f).setDuration(80).start()
+            }
+            android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
+                animate().scaleX(1.0f).scaleY(1.0f).setDuration(150).start()
             }
         }
         return super.onTouchEvent(event)
@@ -191,8 +204,9 @@ class ExpressiveShutterButton @JvmOverloads constructor(
 
         if (size <= 0) return
 
-        val ringWidth = size * 0.06f
-        val progressRadius = (size / 2f) - (ringWidth / 2f)
+        // Progress ring thinner and radius smaller as requested
+        val ringWidth = size * 0.04f
+        val progressRadius = (size / 2f) - (ringWidth * 1.5f)
 
         // 1. Draw Progress Ring
         progressPaint.strokeWidth = ringWidth
@@ -204,7 +218,7 @@ class ExpressiveShutterButton @JvmOverloads constructor(
              canvas.drawArc(rectF, -90f, progress * 360f, false, progressPaint)
         }
 
-        // 2. Draw the 9-sided shape
+        // 2. Draw the star shape
         canvas.save()
         if (isRotating) {
             canvas.rotate(continuousRotation, cx, cy)
@@ -213,11 +227,12 @@ class ExpressiveShutterButton @JvmOverloads constructor(
         canvas.restore()
 
         // 3. Draw Orientation Dot
-        val ringWidthTotal = size * 0.08f
-        val padding = ringWidthTotal + (size * 0.04f)
-        val shapeRadius = (size / 2f) - padding
-        val dotDistance = shapeRadius * 0.7f
-        val dotRadius = shapeRadius * 0.12f
+        val ringWidthTotal = size * 0.04f
+        val padding = ringWidthTotal + (size * 0.06f)
+        val radius = (size / 2f) - padding
+        // Dot distance synced with innerRadius (0.8f * radius)
+        val dotDistance = (0.8f * radius) * 0.75f
+        val dotRadius = radius * 0.1f
 
         val angleRad = Math.toRadians((dotRotation - 90).toDouble())
         val dx = cx + (dotDistance * cos(angleRad)).toFloat()

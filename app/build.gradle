@@ -94,7 +94,7 @@ dependencies {
     // App compat and UI things
     implementation 'androidx.activity:activity-ktx:1.9.3'
     implementation 'androidx.appcompat:appcompat:1.7.0'
-    implementation 'androidx.graphics:graphics-shapes:1.0.1'
+    implementation 'androidx.graphics:graphics-shapes:1.0.0'
     implementation 'androidx.documentfile:documentfile:1.0.1'
     implementation 'com.google.android.material:material:1.13.0-alpha06'
     implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.8.6'
