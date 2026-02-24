@@ -4219,7 +4219,14 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
     private fun showShutterBlackout() {
         val binding = cameraUiContainerBinding ?: return
         val blackout = binding.viewFinderBlackout ?: return
+        val vf = fragmentCameraBinding.viewFinder
         blackout.post {
+            // Sync translation and scaling with the ViewFinder to ensure full coverage in Half-frame mode
+            blackout.translationX = vf.translationX
+            blackout.translationY = vf.translationY
+            blackout.scaleX = vf.scaleX
+            blackout.scaleY = vf.scaleY
+
             blackout.visibility = View.VISIBLE
             blackout.bringToFront()
             blackout.postDelayed({
