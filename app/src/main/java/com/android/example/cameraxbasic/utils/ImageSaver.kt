@@ -384,6 +384,9 @@ object ImageSaver {
         }
 
         // Priority for thumbnail: JPEG > DNG > TIFF
+        // For half-frame mode, we strictly avoid DNG thumbnails to prevent showing single frames
+        if (isHalfFrameActive && finalJpgUri == null) return null
+
         return finalJpgUri ?: finalRawUri ?: finalTiffUri
     }
 

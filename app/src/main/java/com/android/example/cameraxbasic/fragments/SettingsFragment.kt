@@ -287,11 +287,6 @@ class SettingsFragment : Fragment() {
             prefs.edit().putBoolean(KEY_HALF_FRAME_AUTO_BURST, isChecked).apply()
         }
 
-        binding.cbHfSaveJpg.isChecked = prefs.getBoolean(KEY_HALF_FRAME_SAVE_JPG, true)
-        binding.cbHfSaveJpg.setOnCheckedChangeListener { _, isChecked ->
-            prefs.edit().putBoolean(KEY_HALF_FRAME_SAVE_JPG, isChecked).apply()
-        }
-
         binding.cbHfSaveRaw.isChecked = prefs.getBoolean(KEY_HALF_FRAME_SAVE_RAW, false)
         binding.cbHfSaveRaw.setOnCheckedChangeListener { _, isChecked ->
             prefs.edit().putBoolean(KEY_HALF_FRAME_SAVE_RAW, isChecked).apply()
