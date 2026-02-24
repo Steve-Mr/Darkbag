@@ -55,7 +55,7 @@ class ExpressiveShutterButton @JvmOverloads constructor(
     private var colorSecondaryContainer: Int = 0
 
     private val rotationAnimator = ValueAnimator.ofFloat(0f, 360f).apply {
-        duration = 3000L
+        duration = 1500L
         repeatCount = ValueAnimator.INFINITE
         interpolator = LinearInterpolator()
         addUpdateListener {
