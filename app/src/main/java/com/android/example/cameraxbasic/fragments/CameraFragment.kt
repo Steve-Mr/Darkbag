@@ -17,6 +17,7 @@
 @file:SuppressLint("RestrictedApi")
 package com.android.example.cameraxbasic.fragments
 
+import android.animation.ValueAnimator
 import android.annotation.SuppressLint
 import android.content.*
 import android.content.ContentUris
@@ -188,7 +189,6 @@ class CameraFragment : Fragment() {
 
     // HDR+ State
     private var isHdrPlusEnabled = false
-    private var archProgress: com.android.example.cameraxbasic.utils.ArchProgressDrawable? = null
 
     private val shouldMirror: Boolean
         get() = lensFacing == CameraSelector.LENS_FACING_FRONT &&
@@ -293,8 +293,7 @@ class CameraFragment : Fragment() {
 
                 if (newOrientationDegrees != deviceOrientationDegrees) {
                     deviceOrientationDegrees = newOrientationDegrees
-                    // Smoothly rotate shutter button and progress indicator to point its Arch top towards the new "up"
-                    rotateShutter(-deviceOrientationDegrees.toFloat())
+                    updateShutterOrientation()
                 }
 
                 val rotation = when (orientation) {
@@ -535,6 +534,7 @@ class CameraFragment : Fragment() {
         readScopedHalfFrameState(prefs, requireFileForStep1 = true)
 
         updateHalfFrameUI()
+        updateShutterOrientation()
         fragmentCameraBinding.viewFinder.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
             if (isHalfFrameModeEnabled) {
                 updateHalfFrameUI()
@@ -1146,15 +1146,8 @@ class CameraFragment : Fragment() {
             }
         }
 
-        val colorPrimary = MaterialColors.getColor(requireContext(), com.google.android.material.R.attr.colorPrimary, Color.YELLOW)
-        archProgress = com.android.example.cameraxbasic.utils.ArchProgressDrawable().apply {
-            setColor(colorPrimary)
-        }
-        cameraUiContainerBinding?.captureProgress?.setImageDrawable(archProgress)
-
-        // Reset rotation of shutter on UI update
-        cameraUiContainerBinding?.cameraCaptureButton?.rotation = -deviceOrientationDegrees.toFloat()
-        cameraUiContainerBinding?.captureProgress?.rotation = -deviceOrientationDegrees.toFloat()
+        // Update shutter dot on UI update
+        updateShutterOrientation()
 
         // In the background, load latest photo taken (if any) for gallery thumbnail
         lifecycleScope.launch {
@@ -3096,8 +3089,8 @@ class CameraFragment : Fragment() {
                     }
                 )
 
-                archProgress?.setProgress(0f)
-                cameraUiContainerBinding?.captureProgress?.visibility = View.VISIBLE
+                cameraUiContainerBinding?.cameraCaptureButton?.setProgress(0f)
+                cameraUiContainerBinding?.cameraCaptureButton?.startRotation()
                 cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = false
 
                 showShutterBlackout()
@@ -3137,7 +3130,7 @@ class CameraFragment : Fragment() {
 
                     lifecycleScope.launch(Dispatchers.Main) {
                         val progress = (currentFrame + 1).toFloat() / totalFrames
-                        archProgress?.setProgress(progress)
+                        cameraUiContainerBinding?.cameraCaptureButton?.setProgress(progress)
 
                         if (currentFrame + 1 >= totalFrames) {
                             Log.d(TAG, "HDR+ Burst Capture sequence complete.")
@@ -3953,8 +3946,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             })
 
             lifecycleScope.launch(Dispatchers.Main) {
-                archProgress?.setProgress(0f)
-                cameraUiContainerBinding?.captureProgress?.visibility = View.VISIBLE
+                cameraUiContainerBinding?.cameraCaptureButton?.setProgress(0f)
+                cameraUiContainerBinding?.cameraCaptureButton?.startRotation()
                 cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = false
                 showShutterBlackout()
             }
@@ -4008,7 +4001,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     image.close()
                     framesCaptured++
                     lifecycleScope.launch(Dispatchers.Main) {
-                        archProgress?.setProgress(framesCaptured.toFloat() / burstSize)
+                        cameraUiContainerBinding?.cameraCaptureButton?.setProgress(framesCaptured.toFloat() / burstSize)
                     }
                     if (framesCaptured >= burstSize) {
                         watchdog.cancel()
@@ -4506,6 +4499,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         isHalfFrameModeEnabled = newMode
         readScopedHalfFrameState(prefs, requireFileForStep1 = true)
         updateHalfFrameUI()
+        updateShutterOrientation()
 
         // Re-bind use cases if needed?
         // Actually Half-frame doesn't change use cases, just UI and post-processing.
@@ -4526,29 +4520,53 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
     private fun rotateShutter(targetRotation: Float) {
         val binding = cameraUiContainerBinding ?: return
+        val shutter = binding.cameraCaptureButton as? com.android.example.cameraxbasic.ui.ExpressiveShutterButton ?: return
 
-        fun animateRotation(view: android.view.View, target: Float) {
-            val current = view.rotation
-            val diff = (target - current) % 360
-            val shortestDiff = when {
-                diff > 180 -> diff - 360
-                diff < -180 -> diff + 360
-                else -> diff
-            }
-
-            view.animate()
-                .rotation(current + shortestDiff)
-                .setDuration(ANIMATION_SLOW_MILLIS)
-                .setInterpolator(android.view.animation.AccelerateDecelerateInterpolator())
-                .start()
+        val current = shutter.getDotRotation()
+        val diff = (targetRotation - current) % 360
+        val shortestDiff = when {
+            diff > 180 -> diff - 360
+            diff < -180 -> diff + 360
+            else -> diff
         }
 
-        animateRotation(binding.cameraCaptureButton, targetRotation)
-        animateRotation(binding.captureProgress, targetRotation)
+        ValueAnimator.ofFloat(current, current + shortestDiff).apply {
+            duration = ANIMATION_SLOW_MILLIS.toLong()
+            interpolator = android.view.animation.AccelerateDecelerateInterpolator()
+            addUpdateListener { animator ->
+                shutter.setDotRotation(animator.animatedValue as Float)
+            }
+            start()
+        }
+    }
+
+    private fun updateShutterOrientation() {
+        rotateShutter(getDotTargetRotation())
+    }
+
+    private fun getDotTargetRotation(): Float {
+        if (!isHalfFrameModeEnabled) {
+            return -deviceOrientationDegrees.toFloat()
+        }
+
+        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val layout = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUTS[0])
+
+        // Half-frame forces output orientation. Dot points to the fixed "Up" of the output frame.
+        return if (layout == SettingsFragment.HALF_FRAME_LAYOUTS[1]) {
+            // Top-bottom forces Landscape.
+            // Most devices have sensor orientation 90.
+            // So if phone is portrait, Landscape-Up is phone-left (-90).
+            -90f
+        } else {
+            // Side-by-side forces Portrait. Up is phone-top (0).
+            0f
+        }
     }
 
     private fun resetBurstUi() {
-        cameraUiContainerBinding?.captureProgress?.visibility = View.GONE
+        cameraUiContainerBinding?.cameraCaptureButton?.setProgress(0f)
+        cameraUiContainerBinding?.cameraCaptureButton?.stopRotation()
         isBurstActive = false
 
         if (processingSemaphore.availablePermits > 0) {
