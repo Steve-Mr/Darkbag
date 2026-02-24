@@ -4320,10 +4320,6 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     lp.height = targetH
                     vfBinding.viewFinder.layoutParams = lp
 
-                    snapshotView.layoutParams.width = targetW
-                    snapshotView.layoutParams.height = targetH
-                    snapshotView.requestLayout()
-
                     gapView.layoutParams.width = gapWidthScaled.toInt()
                     gapView.requestLayout()
                 }
@@ -4367,6 +4363,10 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             snapshot.visibility = View.VISIBLE
             // Snapshot's layout is parent.start, so its translationX is its screen position
             snapshot.translationX = currentVfLeft
+            // Ensure snapshot matches VF visible area perfectly
+            snapshot.layoutParams.width = vf.width
+            snapshot.layoutParams.height = vf.height
+            snapshot.requestLayout()
         }
 
         // 2. Prepare Gap (also parent.start layout)
@@ -4374,6 +4374,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         // If halfFrameStep is now 1 (took shot 1), gap is to the right of shot 1: currentVfLeft + vf.width
         // If halfFrameStep is now 0 (took shot 2), gap is to the left of shot 2: currentVfLeft - gapWidth
         gap.translationX = if (halfFrameStep == 1) currentVfLeft + vf.width else currentVfLeft - gapWidth
+        gap.layoutParams.height = vf.height
+        gap.requestLayout()
 
         // 3. Prepare ViewFinder for "coming in" from right
         // We want it to end at targetShift. Since everything moves by -totalW, it must start at targetShift + totalW
