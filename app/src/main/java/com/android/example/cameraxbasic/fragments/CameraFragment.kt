@@ -2666,13 +2666,15 @@ class CameraFragment : Fragment() {
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
         val mode = prefs.getString(SettingsFragment.KEY_HDR_UNDEREXPOSURE_MODE, "Dynamic (Experimental)") ?: "Dynamic (Experimental)"
 
-        if (mode.contains("Dynamic")) {
-            btn.text = null
-            btn.setIconResource(R.drawable.ic_hdr_dynamic)
-        } else {
-            btn.icon = null
-            btn.text = mode.lowercase().replace(" ", "")
+        btn.text = null
+        val iconRes = when {
+            mode.contains("Dynamic") -> R.drawable.ic_hdr_dynamic
+            mode == "Off" -> R.drawable.ic_exposure_off
+            mode == "-1 EV" -> R.drawable.ic_exposure_neg_1
+            mode == "-2 EV" -> R.drawable.ic_exposure_neg_2
+            else -> R.drawable.ic_hdr_dynamic
         }
+        btn.setIconResource(iconRes)
     }
 
     private fun cycleUnderexposureMode() {
