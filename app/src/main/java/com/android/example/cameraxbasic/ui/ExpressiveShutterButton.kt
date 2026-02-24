@@ -22,6 +22,13 @@ class ExpressiveShutterButton @JvmOverloads constructor(
     defStyleAttr: Int = 0
 ) : AppCompatImageButton(context, attrs, defStyleAttr) {
 
+    companion object {
+        private const val COOKIE_SIDES = 9
+        // Tuned to match Material 3 Expressive "9-sided cookie" contour.
+        private const val COOKIE_CORNER_ROUNDING = 0.22f
+        private const val COOKIE_CORNER_SMOOTHING = 0.74f
+    }
+
     private val shapePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
     }
@@ -107,18 +114,29 @@ class ExpressiveShutterButton @JvmOverloads constructor(
         val size = minOf(width, height).toFloat()
         // Shutter button slightly smaller for the outer progress ring
         val ringWidth = size * 0.08f
-        val padding = ringWidth + (size * 0.04f)
+        val padding = ringWidth + (size * 0.06f)
         val radius = (size / 2f) - padding
 
         val polygon = RoundedPolygon(
-            numVertices = 9,
-            radius = radius,
-            centerX = width / 2f,
-            centerY = height / 2f,
-            rounding = CornerRounding(radius * 0.4f)
+            numVertices = COOKIE_SIDES,
+            radius = 1f,
+            centerX = 0f,
+            centerY = 0f,
+            rounding = CornerRounding(
+                radius = COOKIE_CORNER_ROUNDING,
+                smoothing = COOKIE_CORNER_SMOOTHING
+            )
         )
 
-        shapePath = polygon.toPath()
+        shapePath = polygon.toPath().apply {
+            transform(
+                Matrix().apply {
+                    setScale(radius, radius)
+                    postRotate(-90f)
+                    postTranslate(width / 2f, height / 2f)
+                }
+            )
+        }
 
         outlineProvider = object : ViewOutlineProvider() {
             override fun getOutline(view: View, outline: Outline) {
