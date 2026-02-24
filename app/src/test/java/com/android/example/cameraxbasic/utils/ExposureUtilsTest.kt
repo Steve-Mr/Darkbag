@@ -114,4 +114,13 @@ class ExposureUtilsTest {
         val achievedFactor100 = (config100.iso.toDouble() * config100.exposureTime.toDouble()) / (100.0 * tenMs)
         assertEquals(0.125, achievedFactor100, 0.05)
     }
+
+    @Test
+    fun testOffMode() {
+        val tenMs = 10_000_000L
+        val config = ExposureUtils.calculateHdrPlusExposure(800, tenMs, isoRange, timeRange, underexposureMode = "Off")
+        val achievedFactor = (config.iso.toDouble() * config.exposureTime.toDouble()) / (800.0 * tenMs)
+        assertEquals(1.0, achievedFactor, 0.05)
+        assertEquals(1.0f, config.digitalGain, 0.05f)
+    }
 }
