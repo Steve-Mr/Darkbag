@@ -374,7 +374,7 @@
                 app:layout_constraintStart_toStartOf="parent"
                 app:layout_constraintTop_toTopOf="@id/camera_capture_button"
                 app:layout_constraintBottom_toBottomOf="@id/camera_capture_button"
-                android:layout_marginEnd="32dp" />
+                android:layout_marginEnd="20dp" />
 
             <com.android.example.cameraxbasic.ui.ExpressiveShutterButton
                 android:id="@+id/camera_capture_button"

@@ -2,7 +2,11 @@ package com.android.example.cameraxbasic.ui
 
 import android.animation.ValueAnimator
 import android.content.Context
+import android.content.res.ColorStateList
 import android.graphics.*
+import android.graphics.drawable.RippleDrawable
+import android.graphics.drawable.ShapeDrawable
+import android.graphics.drawable.shapes.PathShape
 import android.os.Build
 import android.util.AttributeSet
 import android.view.View
@@ -60,10 +64,8 @@ class ExpressiveShutterButton @JvmOverloads constructor(
     }
 
     init {
-        // Remove default background to avoid square corners and default effects
         background = null
         setupColors()
-
         // Default elevation for depth
         elevation = 4f * resources.displayMetrics.density
     }
@@ -124,6 +126,18 @@ class ExpressiveShutterButton @JvmOverloads constructor(
 
         shapePath = polygon.toPath()
 
+        // Create Ripple with Star Mask
+        val rippleColor = MaterialColors.getColor(this, com.google.android.material.R.attr.colorControlHighlight)
+        val maskPath = Path(shapePath)
+        val maskDrawable = ShapeDrawable(PathShape(maskPath, width.toFloat(), height.toFloat()))
+
+        // Use foreground for ripple to be on top of the custom drawn star
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            foreground = RippleDrawable(ColorStateList.valueOf(rippleColor), null, maskDrawable)
+        } else {
+            background = RippleDrawable(ColorStateList.valueOf(rippleColor), null, maskDrawable)
+        }
+
         outlineProvider = object : ViewOutlineProvider() {
             override fun getOutline(view: View, outline: Outline) {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -145,16 +159,9 @@ class ExpressiveShutterButton @JvmOverloads constructor(
     override fun onTouchEvent(event: android.view.MotionEvent): Boolean {
         if (!isEnabled) return super.onTouchEvent(event)
 
-        when (event.action) {
-            android.view.MotionEvent.ACTION_DOWN -> {
-                if (!isPointInsidePath(event.x, event.y)) {
-                    return false
-                }
-                // Visual feedback for click
-                animate().scaleX(0.92f).scaleY(0.92f).setDuration(80).start()
-            }
-            android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
-                animate().scaleX(1.0f).scaleY(1.0f).setDuration(150).start()
+        if (event.action == android.view.MotionEvent.ACTION_DOWN) {
+            if (!isPointInsidePath(event.x, event.y)) {
+                return false
             }
         }
         return super.onTouchEvent(event)
