@@ -873,14 +873,8 @@ class CameraFragment : Fragment() {
             // Ensure UI is updated before opening Camera2
             initLensControls()
 
-            // Check Flash for Camera2
-            try {
-                val c2Chars = camera2Manager.getCameraCharacteristics(currentLens!!.id)
-                val hasFlash = c2Chars.get(android.hardware.camera2.CameraCharacteristics.FLASH_INFO_AVAILABLE) ?: false
-                cameraUiContainerBinding?.flashButton?.visibility = if (hasFlash && !isHdrPlusEnabled) View.VISIBLE else View.GONE
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to check flash for Camera2", e)
-            }
+            // Update constraints to set flash/underexposure button visibility correctly
+            updateHdrPlusConstraints()
 
             // Give system a moment to release hardware
             delay(300)
@@ -1065,13 +1059,6 @@ class CameraFragment : Fragment() {
             )
 
             camera?.let { cam ->
-                // Check Flash Availability
-                if (cam.cameraInfo.hasFlashUnit() && !isHdrPlusEnabled) {
-                    cameraUiContainerBinding?.flashButton?.visibility = View.VISIBLE
-                } else {
-                    cameraUiContainerBinding?.flashButton?.visibility = View.GONE
-                }
-
                 observeCameraState(cam.cameraInfo)
             }
 
@@ -1090,6 +1077,9 @@ class CameraFragment : Fragment() {
 
             // Apply Settings
             applyCameraControls()
+
+            // Finally, update constraints to set flash/underexposure button visibility correctly
+            updateHdrPlusConstraints()
 
         } catch (exc: Exception) {
             Log.e(TAG, "Use case binding failed, attempting fallback", exc)
