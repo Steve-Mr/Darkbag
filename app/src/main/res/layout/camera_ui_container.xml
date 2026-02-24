@@ -376,29 +376,15 @@
                 app:layout_constraintBottom_toBottomOf="@id/camera_capture_button"
                 android:layout_marginEnd="32dp" />
 
-            <ImageButton
+            <com.android.example.cameraxbasic.ui.ExpressiveShutterButton
                 android:id="@+id/camera_capture_button"
                 android:layout_width="@dimen/shutter_button_size"
                 android:layout_height="@dimen/shutter_button_size"
-                android:background="@drawable/ic_shutter_cookie"
-                android:backgroundTint="@color/shutter_button_tint"
-                android:foreground="?attr/selectableItemBackgroundBorderless"
-                android:scaleType="fitCenter"
                 android:contentDescription="@string/capture_button_alt"
                 app:layout_constraintTop_toTopOf="parent"
                 app:layout_constraintBottom_toBottomOf="parent"
                 app:layout_constraintStart_toStartOf="parent"
                 app:layout_constraintEnd_toEndOf="parent" />
-
-            <ImageView
-                android:id="@+id/capture_progress"
-                android:layout_width="@dimen/shutter_button_size"
-                android:layout_height="@dimen/shutter_button_size"
-                android:visibility="gone"
-                app:layout_constraintTop_toTopOf="@id/camera_capture_button"
-                app:layout_constraintBottom_toBottomOf="@id/camera_capture_button"
-                app:layout_constraintStart_toStartOf="@id/camera_capture_button"
-                app:layout_constraintEnd_toEndOf="@id/camera_capture_button" />
 
             <!-- Half-frame Progress Indicator -->
             <TextView
