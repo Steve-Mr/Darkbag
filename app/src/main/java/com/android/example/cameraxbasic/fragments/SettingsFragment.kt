@@ -75,6 +75,8 @@ class SettingsFragment : Fragment() {
         updateDebugStats()
         // Re-apply adapters to fix dropdown disappearance bug
         setupMenus()
+        updateCheckboxStates()
+        updateStorageVisibility()
     }
 
     private var aboutClickCount = 0
@@ -127,6 +129,12 @@ class SettingsFragment : Fragment() {
         }
     }
 
+    private fun isLutActive(): Boolean {
+        val log = prefs.getString(KEY_TARGET_LOG, "None")
+        val lut = prefs.getString(KEY_ACTIVE_LUT, null)
+        return (log != null && log != "None") || lut != null
+    }
+
     private fun setupMenus() {
         // Target Log Curve
         val logAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, LOG_CURVES)
@@ -135,6 +143,8 @@ class SettingsFragment : Fragment() {
         binding.menuTargetLog.setText(savedLog, false)
         binding.menuTargetLog.setOnItemClickListener { _, _, position, _ ->
             prefs.edit().putString(KEY_TARGET_LOG, LOG_CURVES[position]).apply()
+            updateCheckboxStates()
+            updateStorageVisibility()
         }
 
         // HDR+ Burst Frames
@@ -210,6 +220,32 @@ class SettingsFragment : Fragment() {
         }
     }
 
+    private fun updateCheckboxStates() {
+        val isLut = isLutActive()
+        var isJpg = binding.cbSaveJpg.isChecked
+        var isTiff = binding.cbSaveTiff.isChecked
+        var isRaw = binding.cbSaveRaw.isChecked
+
+        if (isLut) {
+            // Requirement: jpg/tiff at least one selected.
+            if (!isJpg && !isTiff) {
+                isJpg = true
+                binding.cbSaveJpg.isChecked = true
+                prefs.edit().putBoolean(KEY_SAVE_JPG, true).apply()
+            }
+            // If only one of (jpg, tiff) is selected, it becomes disabled.
+            binding.cbSaveJpg.isEnabled = !(isJpg && !isTiff)
+            binding.cbSaveTiff.isEnabled = !(isTiff && !isJpg)
+            binding.cbSaveRaw.isEnabled = true
+        } else {
+            // Requirement: at least one of (jpg, tiff, raw) selected.
+            val count = (if (isJpg) 1 else 0) + (if (isTiff) 1 else 0) + (if (isRaw) 1 else 0)
+            binding.cbSaveJpg.isEnabled = !(isJpg && count == 1)
+            binding.cbSaveTiff.isEnabled = !(isTiff && count == 1)
+            binding.cbSaveRaw.isEnabled = !(isRaw && count == 1)
+        }
+    }
+
     private fun setupCheckboxes() {
         binding.switchLivePreview.isChecked = prefs.getBoolean(KEY_ENABLE_LUT_PREVIEW, true)
         binding.switchLivePreview.setOnCheckedChangeListener { _, isChecked ->
@@ -221,35 +257,24 @@ class SettingsFragment : Fragment() {
         binding.cbSaveRaw.isChecked = prefs.getBoolean(KEY_SAVE_RAW, true)
 
         binding.cbSaveTiff.setOnCheckedChangeListener { _, isChecked ->
-            if (!isChecked && !binding.cbSaveJpg.isChecked && !binding.cbSaveRaw.isChecked) {
-                binding.cbSaveTiff.isChecked = true
-                Toast.makeText(requireContext(), "At least one output format must be selected", Toast.LENGTH_SHORT).show()
-            } else {
-                prefs.edit().putBoolean(KEY_SAVE_TIFF, isChecked).apply()
-                updateStorageVisibility()
-            }
+            prefs.edit().putBoolean(KEY_SAVE_TIFF, isChecked).apply()
+            updateCheckboxStates()
+            updateStorageVisibility()
         }
 
         binding.cbSaveJpg.setOnCheckedChangeListener { _, isChecked ->
-            if (!isChecked && !binding.cbSaveTiff.isChecked && !binding.cbSaveRaw.isChecked) {
-                binding.cbSaveJpg.isChecked = true
-                Toast.makeText(requireContext(), "At least one output format must be selected", Toast.LENGTH_SHORT).show()
-            } else {
-                prefs.edit().putBoolean(KEY_SAVE_JPG, isChecked).apply()
-                updateStorageVisibility()
-            }
+            prefs.edit().putBoolean(KEY_SAVE_JPG, isChecked).apply()
+            updateCheckboxStates()
+            updateStorageVisibility()
         }
 
         binding.cbSaveRaw.setOnCheckedChangeListener { _, isChecked ->
-            if (!isChecked && !binding.cbSaveJpg.isChecked && !binding.cbSaveTiff.isChecked) {
-                binding.cbSaveRaw.isChecked = true
-                Toast.makeText(requireContext(), "At least one output format must be selected", Toast.LENGTH_SHORT).show()
-            } else {
-                prefs.edit().putBoolean(KEY_SAVE_RAW, isChecked).apply()
-                updateStorageVisibility()
-            }
+            prefs.edit().putBoolean(KEY_SAVE_RAW, isChecked).apply()
+            updateCheckboxStates()
+            updateStorageVisibility()
         }
 
+        updateCheckboxStates()
         updateStorageVisibility()
 
         binding.switchHqBackgroundExport.isChecked = prefs.getBoolean(KEY_HQ_BACKGROUND_EXPORT, false)
@@ -305,6 +330,11 @@ class SettingsFragment : Fragment() {
         binding.switchHdrPlusOis.isChecked = prefs.getBoolean(KEY_HDR_PLUS_OIS, true)
         binding.switchHdrPlusOis.setOnCheckedChangeListener { _, isChecked ->
             prefs.edit().putBoolean(KEY_HDR_PLUS_OIS, isChecked).apply()
+        }
+
+        binding.switchShowUnderexposureButton.isChecked = prefs.getBoolean(KEY_SHOW_HDR_UNDEREXPOSURE_BUTTON, true)
+        binding.switchShowUnderexposureButton.setOnCheckedChangeListener { _, isChecked ->
+            prefs.edit().putBoolean(KEY_SHOW_HDR_UNDEREXPOSURE_BUTTON, isChecked).apply()
         }
 
         binding.switchForce60fps.isChecked = prefs.getBoolean(KEY_FORCE_60FPS, false)
@@ -407,6 +437,7 @@ class SettingsFragment : Fragment() {
         const val KEY_FLASH_MODE = "flash_mode"
         const val KEY_HDR_BURST_COUNT = "hdr_burst_count"
         const val KEY_HDR_UNDEREXPOSURE_MODE = "hdr_underexposure_mode"
+        const val KEY_SHOW_HDR_UNDEREXPOSURE_BUTTON = "show_hdr_underexposure_button"
         const val KEY_USE_CAMERAX = "use_camerax_engine"
         const val KEY_MIRROR_FRONT_CAMERA = "mirror_front_camera"
         const val KEY_HDR_PLUS_OIS = "hdr_plus_ois_enabled"
@@ -435,7 +466,7 @@ class SettingsFragment : Fragment() {
         val FOCAL_LENGTHS = listOf("24", "28", "35")
         val ANTIBANDING_MODES = listOf("Auto", "50Hz", "60Hz", "Off")
         val BURST_SIZES = listOf("3", "4", "5", "6", "7", "8")
-        val HDR_UNDEREXPOSURE_MODES = listOf("0 EV", "-1 EV", "-2 EV", "Dynamic (Experimental)")
+        val HDR_UNDEREXPOSURE_MODES = listOf("Off", "-1 EV", "-2 EV", "Dynamic (Experimental)")
         val HALF_FRAME_LAYOUTS = listOf("Side-by-side", "Top-bottom")
 
         val LOG_CURVES = listOf(

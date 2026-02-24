@@ -158,6 +158,15 @@
                         android:text="Enable OIS in HDR+ Burst"
                         android:textSize="16sp" />
 
+                    <Space android:layout_width="match_parent" android:layout_height="@dimen/spacing_medium" />
+
+                    <com.google.android.material.materialswitch.MaterialSwitch
+                        android:id="@+id/switch_show_underexposure_button"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Show Underexposure Toggle in Viewfinder"
+                        android:textSize="16sp" />
+
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 

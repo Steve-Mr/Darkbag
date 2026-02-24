@@ -1259,15 +1259,23 @@ class CameraFragment : Fragment() {
                 .navigate(CameraFragmentDirections.actionCameraToSettings())
         }
 
-        // Flash Button
+        // Flash / Underexposure Toggle Button
         cameraUiContainerBinding?.flashButton?.let { btn ->
-            updateFlashIcon(btn)
-            btn.setOnClickListener {
-                isFlashEnabled = !isFlashEnabled
-                requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-                    .edit().putBoolean(SettingsFragment.KEY_FLASH_MODE, isFlashEnabled).apply()
+            if (isHdrPlusEnabled) {
+                updateUnderexposureButton()
+            } else {
                 updateFlashIcon(btn)
-                imageCapture?.flashMode = if (isFlashEnabled) ImageCapture.FLASH_MODE_ON else ImageCapture.FLASH_MODE_OFF
+            }
+            btn.setOnClickListener {
+                if (isHdrPlusEnabled) {
+                    cycleUnderexposureMode()
+                } else {
+                    isFlashEnabled = !isFlashEnabled
+                    requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                        .edit().putBoolean(SettingsFragment.KEY_FLASH_MODE, isFlashEnabled).apply()
+                    updateFlashIcon(btn)
+                    imageCapture?.flashMode = if (isFlashEnabled) ImageCapture.FLASH_MODE_ON else ImageCapture.FLASH_MODE_OFF
+                }
             }
         }
 
@@ -2659,7 +2667,39 @@ class CameraFragment : Fragment() {
     }
 
     private fun updateFlashIcon(btn: MaterialButton) {
+        btn.text = null
         btn.setIconResource(if (isFlashEnabled) R.drawable.ic_flash_on else R.drawable.ic_flash_off)
+    }
+
+    private fun updateUnderexposureButton() {
+        val btn = cameraUiContainerBinding?.flashButton ?: return
+        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val mode = prefs.getString(SettingsFragment.KEY_HDR_UNDEREXPOSURE_MODE, "Dynamic (Experimental)") ?: "Dynamic (Experimental)"
+
+        if (mode.contains("Dynamic")) {
+            btn.text = null
+            btn.setIconResource(R.drawable.ic_hdr_dynamic)
+        } else {
+            btn.icon = null
+            btn.text = mode.lowercase().replace(" ", "")
+        }
+    }
+
+    private fun cycleUnderexposureMode() {
+        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val currentMode = prefs.getString(SettingsFragment.KEY_HDR_UNDEREXPOSURE_MODE, "Dynamic (Experimental)") ?: "Dynamic (Experimental)"
+        val modes = SettingsFragment.HDR_UNDEREXPOSURE_MODES
+        val currentIndex = modes.indexOf(currentMode)
+        val nextIndex = (currentIndex + 1) % modes.size
+        val nextMode = modes[nextIndex]
+
+        prefs.edit().putString(SettingsFragment.KEY_HDR_UNDEREXPOSURE_MODE, nextMode).apply()
+        updateUnderexposureButton()
+
+        // Update lastHdrPlusConfig to reflect new mode immediately for the next shot
+        lastHdrPlusConfig = null
+
+        Toast.makeText(requireContext(), "HDR+ Mode: $nextMode", Toast.LENGTH_SHORT).show()
     }
 
     private fun updateLiveLut() {
@@ -3570,9 +3610,16 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
     private fun updateHdrPlusConstraints() {
         val binding = cameraUiContainerBinding ?: return
+        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
         if (isHdrPlusEnabled) {
             // Hide and disable flash
-            binding.flashButton?.visibility = View.GONE
+            if (prefs.getBoolean(SettingsFragment.KEY_SHOW_HDR_UNDEREXPOSURE_BUTTON, true)) {
+                binding.flashButton?.visibility = View.VISIBLE
+                updateUnderexposureButton()
+            } else {
+                binding.flashButton?.visibility = View.GONE
+            }
+
             if (isFlashEnabled) {
                 isFlashEnabled = false
                 binding.flashButton?.let { updateFlashIcon(it) }
@@ -3601,6 +3648,9 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             } catch (e: Exception) { false }
 
             binding.flashButton?.visibility = if (hasFlash) View.VISIBLE else View.GONE
+            if (hasFlash && binding.flashButton != null) {
+                updateFlashIcon(binding.flashButton!!)
+            }
 
             // Restore manual controls if enabled in settings
             val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)

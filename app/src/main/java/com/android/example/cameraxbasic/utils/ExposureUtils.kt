@@ -39,7 +39,7 @@ object ExposureUtils {
      * @param currentTime Current Exposure Time (ns) from auto-exposure.
      * @param isoRange Supported ISO range of the camera.
      * @param timeRange Supported Exposure Time range of the camera.
-     * @param underexposureMode Mode for underexposure: "0 EV", "-1 EV", "-2 EV", or "Dynamic (Experimental)".
+     * @param underexposureMode Mode for underexposure: "Off", "-1 EV", "-2 EV", or "Dynamic (Experimental)".
      * @param clippingRatio Ratio of pixels that are near saturation (0.0 to 1.0).
      * @return ExposureConfig with target ISO, Time, and required Digital Gain.
      */
@@ -64,7 +64,7 @@ object ExposureUtils {
         // 2. Determine Underexposure Factor
         var additionalUnderexposure = 0.0
         var underexposeFactor = when (underexposureMode) {
-            "0 EV" -> 1.0f
+            "Off" -> 1.0f
             "-1 EV" -> 0.5f
             "-2 EV" -> 0.25f
             else -> {
