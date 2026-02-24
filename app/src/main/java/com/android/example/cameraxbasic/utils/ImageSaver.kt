@@ -48,13 +48,15 @@ object ImageSaver {
         targetUri: Uri? = null,
         mirror: Boolean = false,
         isFastPath: Boolean = false,
+        halfFrameMetadata: HalfFrameManager.Metadata? = null,
         onBitmapReady: ((Bitmap) -> Unit)? = null
     ): Uri? {
         val halfFrameManager = HalfFrameManager(context)
+        val isHalfFrameActive = halfFrameMetadata != null || halfFrameManager.isEnabled
 
-        val actualSaveJpg = if (halfFrameManager.isEnabled) halfFrameManager.saveJpg else saveJpg
-        val actualSaveRaw = if (halfFrameManager.isEnabled) halfFrameManager.saveRaw else saveRaw
-        val actualSaveTiff = if (halfFrameManager.isEnabled) false else saveTiff
+        val actualSaveJpg = if (isHalfFrameActive) halfFrameManager.saveJpg else saveJpg
+        val actualSaveRaw = if (isHalfFrameActive) halfFrameManager.saveRaw else saveRaw
+        val actualSaveTiff = if (isHalfFrameActive) false else saveTiff
 
         val contentResolver = context.contentResolver
         var finalJpgUri: Uri? = null
@@ -70,11 +72,17 @@ object ImageSaver {
                 // FAST PATH: Directly use JNI-generated JPEG
                 val f = File(bmpPath!!)
                 if (f.exists() && f.length() > 0) {
-                    if (halfFrameManager.isEnabled) {
-                        val finalPath = halfFrameManager.handleCapture(f.absolutePath, baseName, isFastPath)
+                    if (isHalfFrameActive) {
+                        val finalPath = halfFrameManager.handleCapture(f.absolutePath, baseName, isFastPath, halfFrameMetadata)
 
                         if (isFastPath) {
-                            if (halfFrameManager.frame1BaseName == baseName) {
+                            val session = if (halfFrameMetadata != null) {
+                                HalfFrameSessionStore(context).readSession(profile = halfFrameMetadata.profile)
+                            } else {
+                                HalfFrameSessionStore(context).readSession()
+                            }
+
+                            if (session.baseName == baseName) {
                                 ColorProcessor.halfFrameFlow.tryEmit(1)
                             } else {
                                 ColorProcessor.halfFrameFlow.tryEmit(2)
@@ -175,17 +183,23 @@ object ImageSaver {
                     // Save JPG
                     if (actualSaveJpg) {
                         if (processedBitmap != null) {
-                            if (halfFrameManager.isEnabled) {
+                            if (isHalfFrameActive) {
                                 // First, get a local JPG file for internal processing/stitching
                                 val tempJpg = File(context.cacheDir, "temp_proc_$baseName.jpg")
                                 FileOutputStream(tempJpg).use { out ->
                                     processedBitmap.compress(Bitmap.CompressFormat.JPEG, 95, out)
                                 }
 
-                                val finalPath = halfFrameManager.handleCapture(tempJpg.absolutePath, baseName, isFastPath)
+                                val finalPath = halfFrameManager.handleCapture(tempJpg.absolutePath, baseName, isFastPath, halfFrameMetadata)
 
                                 if (isFastPath) {
-                                    if (halfFrameManager.frame1BaseName == baseName) {
+                                    val session = if (halfFrameMetadata != null) {
+                                        HalfFrameSessionStore(context).readSession(profile = halfFrameMetadata.profile)
+                                    } else {
+                                        HalfFrameSessionStore(context).readSession()
+                                    }
+
+                                    if (session.baseName == baseName) {
                                         ColorProcessor.halfFrameFlow.tryEmit(1)
                                     } else {
                                         ColorProcessor.halfFrameFlow.tryEmit(2)
@@ -370,6 +384,9 @@ object ImageSaver {
         }
 
         // Priority for thumbnail: JPEG > DNG > TIFF
+        // For half-frame mode, we strictly avoid DNG thumbnails to prevent showing single frames
+        if (isHalfFrameActive && finalJpgUri == null) return null
+
         return finalJpgUri ?: finalRawUri ?: finalTiffUri
     }
 
