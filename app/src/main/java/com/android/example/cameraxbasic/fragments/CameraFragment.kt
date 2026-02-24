@@ -1311,6 +1311,7 @@ class CameraFragment : Fragment() {
             val isFrame2Trigger = isHalfFrameModeEnabled && halfFrameStep == 1
 
             if (isFrame1Trigger) {
+                halfFrameSessionStore.clearCurrentSession(deleteTempFile = false)
                 writeScopedHalfFrameStep(prefs, 1, System.currentTimeMillis())
                 // Animate after shutter blackout
                 fragmentCameraBinding.viewFinder.postDelayed({
