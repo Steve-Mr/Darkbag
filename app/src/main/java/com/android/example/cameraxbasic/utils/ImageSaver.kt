@@ -48,13 +48,15 @@ object ImageSaver {
         targetUri: Uri? = null,
         mirror: Boolean = false,
         isFastPath: Boolean = false,
+        halfFrameMetadata: HalfFrameManager.Metadata? = null,
         onBitmapReady: ((Bitmap) -> Unit)? = null
     ): Uri? {
         val halfFrameManager = HalfFrameManager(context)
+        val isHalfFrameActive = halfFrameMetadata != null || halfFrameManager.isEnabled
 
-        val actualSaveJpg = if (halfFrameManager.isEnabled) halfFrameManager.saveJpg else saveJpg
-        val actualSaveRaw = if (halfFrameManager.isEnabled) halfFrameManager.saveRaw else saveRaw
-        val actualSaveTiff = if (halfFrameManager.isEnabled) false else saveTiff
+        val actualSaveJpg = if (isHalfFrameActive) halfFrameManager.saveJpg else saveJpg
+        val actualSaveRaw = if (isHalfFrameActive) halfFrameManager.saveRaw else saveRaw
+        val actualSaveTiff = if (isHalfFrameActive) false else saveTiff
 
         val contentResolver = context.contentResolver
         var finalJpgUri: Uri? = null
@@ -70,14 +72,26 @@ object ImageSaver {
                 // FAST PATH: Directly use JNI-generated JPEG
                 val f = File(bmpPath!!)
                 if (f.exists() && f.length() > 0) {
-                    if (halfFrameManager.isEnabled) {
-                        val finalPath = halfFrameManager.handleCapture(f.absolutePath, baseName, isFastPath)
+                    if (isHalfFrameActive) {
+                        val finalPath = halfFrameManager.handleCapture(f.absolutePath, baseName, isFastPath, halfFrameMetadata)
 
                         if (isFastPath) {
-                            if (halfFrameManager.frame1BaseName == baseName) {
+                            val session = if (halfFrameMetadata != null) {
+                                HalfFrameSessionStore(context).readSession(profile = halfFrameMetadata.profile)
+                            } else {
+                                HalfFrameSessionStore(context).readSession()
+                            }
+
+                            if (session.baseName == baseName) {
                                 ColorProcessor.halfFrameFlow.tryEmit(1)
                             } else {
                                 ColorProcessor.halfFrameFlow.tryEmit(2)
+                                if (finalPath != null) {
+                                    val finalFile = File(finalPath)
+                                    finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri) { out ->
+                                        finalFile.inputStream().use { it.copyTo(out) }
+                                    }
+                                }
                             }
                         } else {
                             if (finalPath != null) {
@@ -169,20 +183,38 @@ object ImageSaver {
                     // Save JPG
                     if (actualSaveJpg) {
                         if (processedBitmap != null) {
-                            if (halfFrameManager.isEnabled) {
+                            if (isHalfFrameActive) {
                                 // First, get a local JPG file for internal processing/stitching
                                 val tempJpg = File(context.cacheDir, "temp_proc_$baseName.jpg")
                                 FileOutputStream(tempJpg).use { out ->
                                     processedBitmap.compress(Bitmap.CompressFormat.JPEG, 95, out)
                                 }
 
-                                val finalPath = halfFrameManager.handleCapture(tempJpg.absolutePath, baseName, isFastPath)
+                                val finalPath = halfFrameManager.handleCapture(tempJpg.absolutePath, baseName, isFastPath, halfFrameMetadata)
 
                                 if (isFastPath) {
-                                    if (halfFrameManager.frame1BaseName == baseName) {
+                                    val session = if (halfFrameMetadata != null) {
+                                        HalfFrameSessionStore(context).readSession(profile = halfFrameMetadata.profile)
+                                    } else {
+                                        HalfFrameSessionStore(context).readSession()
+                                    }
+
+                                    if (session.baseName == baseName) {
                                         ColorProcessor.halfFrameFlow.tryEmit(1)
                                     } else {
                                         ColorProcessor.halfFrameFlow.tryEmit(2)
+                                        if (finalPath != null) {
+                                            val finalFile = File(finalPath)
+                                            finalJpgUri = saveJpegToMediaStore(
+                                                context,
+                                                "$baseName.jpg",
+                                                targetUri,
+                                                processedBitmap.width,
+                                                processedBitmap.height
+                                            ) { out ->
+                                                finalFile.inputStream().use { it.copyTo(out) }
+                                            }
+                                        }
                                     }
                                 } else {
                                     if (finalPath != null) {
@@ -190,12 +222,17 @@ object ImageSaver {
                                         if (jpgFolderUri != null) {
                                             finalJpgUri = saveFileToFolder(context, finalFile, "$baseName.jpg", "image/jpeg", jpgFolderUri)
                                         } else {
+                                            val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                                            BitmapFactory.decodeFile(finalPath, options)
+                                            val finalW = if (options.outWidth > 0) options.outWidth else processedBitmap.width
+                                            val finalH = if (options.outHeight > 0) options.outHeight else processedBitmap.height
+
                                             finalJpgUri = saveJpegToMediaStore(
                                                 context,
                                                 "$baseName.jpg",
                                                 targetUri,
-                                                processedBitmap.width,
-                                                processedBitmap.height
+                                                finalW,
+                                                finalH
                                             ) { out ->
                                                 finalFile.inputStream().use { it.copyTo(out) }
                                             }
@@ -329,7 +366,27 @@ object ImageSaver {
             }
         }
 
+        // If this is not a fast path and we have a result, emit a save event for UI updates
+        if (!isFastPath && finalJpgUri != null) {
+            com.android.example.cameraxbasic.processor.ColorProcessor.backgroundSaveFlow.tryEmit(
+                com.android.example.cameraxbasic.processor.ColorProcessor.BackgroundSaveEvent(
+                    baseName = baseName,
+                    tiffPath = tiffPath,
+                    dngPath = linearDngPath,
+                    jpgPath = bmpPath,
+                    targetUri = finalJpgUri.toString(),
+                    zoomFactor = zoomFactor,
+                    orientation = rotationDegrees,
+                    saveTiff = saveTiff,
+                    saveJpg = saveJpg
+                )
+            )
+        }
+
         // Priority for thumbnail: JPEG > DNG > TIFF
+        // For half-frame mode, we strictly avoid DNG thumbnails to prevent showing single frames
+        if (isHalfFrameActive && finalJpgUri == null) return null
+
         return finalJpgUri ?: finalRawUri ?: finalTiffUri
     }
 
@@ -415,24 +472,39 @@ object ImageSaver {
         writeData: (OutputStream) -> Unit
     ): Uri? {
         val contentResolver = context.contentResolver
-        val jpgValues = ContentValues().apply {
-            put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
-            put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/Darkbag")
-                put(MediaStore.MediaColumns.IS_PENDING, 1)
-            }
-            width?.let { put(MediaStore.MediaColumns.WIDTH, it) }
-            height?.let { put(MediaStore.MediaColumns.HEIGHT, it) }
-        }
+        val jpgValues = ContentValues()
 
         var uri = targetUri
         val isReplacement = uri != null
 
-        if (uri == null) {
-            uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, jpgValues)
-        } else {
-            contentResolver.update(uri, jpgValues, null, null)
+        try {
+            if (uri == null) {
+                jpgValues.apply {
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
+                    put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/Darkbag")
+                        put(MediaStore.MediaColumns.IS_PENDING, 1)
+                    }
+                    width?.let { put(MediaStore.MediaColumns.WIDTH, it) }
+                    height?.let { put(MediaStore.MediaColumns.HEIGHT, it) }
+                }
+                uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, jpgValues)
+            } else {
+                // Hardened replacement logic: avoid updating DISPLAY_NAME and RELATIVE_PATH
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    jpgValues.put(MediaStore.MediaColumns.IS_PENDING, 1)
+                }
+                width?.let { jpgValues.put(MediaStore.MediaColumns.WIDTH, it) }
+                height?.let { jpgValues.put(MediaStore.MediaColumns.HEIGHT, it) }
+
+                if (jpgValues.size() > 0) {
+                    contentResolver.update(uri, jpgValues, null, null)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to insert/update MediaStore entry", e)
+            return null
         }
 
         if (uri != null) {
@@ -442,15 +514,24 @@ object ImageSaver {
                     out.flush()
                 }
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    jpgValues.clear()
-                    jpgValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
-                    contentResolver.update(uri, jpgValues, null, null)
+                    val finalValues = ContentValues().apply {
+                        put(MediaStore.MediaColumns.IS_PENDING, 0)
+                    }
+                    try {
+                        contentResolver.update(uri, finalValues, null, null)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to clear IS_PENDING for $uri", e)
+                    }
                 }
                 if (isReplacement) {
                     Log.i(TAG, "Replaced JPEG at $uri")
                 } else {
                     Log.i(TAG, "Saved JPEG to $uri")
                 }
+
+                // If this is a final HQ save, notify the UI to update thumbnails and hide progress
+                // Note: We don't emit for fast path here because saveProcessedImage handles it.
+
                 return uri
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to write JPEG to MediaStore", e)

@@ -11,9 +11,16 @@ import java.util.*
 object HalfFrameUtils {
     private const val TAG = "HalfFrameUtils"
 
+    private fun ensureOrientation(bitmap: Bitmap, wantPortrait: Boolean): Bitmap {
+        val isPortrait = bitmap.height >= bitmap.width
+        if (isPortrait == wantPortrait) return bitmap
+
+        val matrix = Matrix().apply { postRotate(90f) }
+        return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+    }
+
     /**
      * Stitches two images according to the layout without stretching.
-     * If the result is landscape, it rotates it to portrait.
      */
     fun stitchImages(
         firstPath: String,
@@ -21,8 +28,14 @@ object HalfFrameUtils {
         layout: String,
         downsample: Boolean
     ): Bitmap? {
-        val firstBitmap = BitmapFactory.decodeFile(firstPath) ?: return null
-        val secondBitmap = BitmapFactory.decodeFile(secondPath) ?: return null
+        val firstRaw = BitmapFactory.decodeFile(firstPath) ?: return null
+        val secondRaw = BitmapFactory.decodeFile(secondPath) ?: return null
+
+        val isSideBySide = layout == "Side-by-side" || layout == "左右排列" || layout.contains("side", ignoreCase = true)
+
+        // Side-by-side wants Portrait inputs; Top-bottom wants Landscape inputs
+        val firstBitmap = ensureOrientation(firstRaw, isSideBySide)
+        val secondBitmap = ensureOrientation(secondRaw, isSideBySide)
 
         try {
             val w1 = firstBitmap.width
@@ -37,7 +50,7 @@ object HalfFrameUtils {
             // Divider width: 3% of the larger dimension to be more prominent
             val divider = (maxOf(targetW, targetH) * 0.03f).toInt().coerceAtLeast(16)
 
-            var resultBitmap = if (layout == "Side-by-side" || layout == "左右排列" || layout.contains("side", ignoreCase = true)) {
+            var resultBitmap = if (isSideBySide) {
                 val combinedW = targetW + divider + targetW
                 val combinedH = targetH
 
@@ -70,16 +83,6 @@ object HalfFrameUtils {
                 result
             }
 
-            // Ensure "stored vertical"
-            if (resultBitmap.width > resultBitmap.height) {
-                val matrix = Matrix().apply { postRotate(90f) }
-                val rotated = Bitmap.createBitmap(resultBitmap, 0, 0, resultBitmap.width, resultBitmap.height, matrix, true)
-                if (rotated != resultBitmap) {
-                    resultBitmap.recycle()
-                    resultBitmap = rotated
-                }
-            }
-
             if (downsample) {
                 // Digital "film saving": Downsample so the final area is approx equal to a single frame.
                 // Combined area is ~2x. Scale factor = sqrt(0.5) ~ 0.707
@@ -101,8 +104,10 @@ object HalfFrameUtils {
             Log.e(TAG, "Error stitching images", e)
             return null
         } finally {
-            firstBitmap.recycle()
-            secondBitmap.recycle()
+            firstRaw.recycle()
+            secondRaw.recycle()
+            if (firstBitmap != firstRaw) firstBitmap.recycle()
+            if (secondBitmap != secondRaw) secondBitmap.recycle()
         }
     }
 
@@ -123,11 +128,18 @@ object HalfFrameUtils {
         }
     }
 
-    fun addEffects(bitmap: Bitmap, dateStamp: Boolean, lightLeak: Boolean, layout: String): Bitmap {
+    fun addEffects(
+        bitmap: Bitmap,
+        dateStamp: Boolean,
+        lightLeak: Boolean,
+        layout: String,
+        time1: Long = System.currentTimeMillis(),
+        time2: Long = System.currentTimeMillis()
+    ): Bitmap {
         var result = bitmap
 
         if (dateStamp) {
-            result = addDateStampToBoth(result, layout)
+            result = addDateStampToBoth(result, layout, time1, time2)
         }
 
         if (lightLeak) {
@@ -137,39 +149,58 @@ object HalfFrameUtils {
         return result
     }
 
-    private fun addDateStampToBoth(bitmap: Bitmap, layout: String): Bitmap {
+    private fun addDateStampToBoth(bitmap: Bitmap, layout: String, time1: Long, time2: Long): Bitmap {
         val workingBitmap = if (bitmap.isMutable) bitmap else bitmap.copy(Bitmap.Config.ARGB_8888, true)
         val canvas = Canvas(workingBitmap)
 
         val sdf = SimpleDateFormat(" ' 'yy  M  d", Locale.US)
-        val dateText = sdf.format(Date())
+        val dateText1 = sdf.format(Date(time1))
+        val dateText2 = sdf.format(Date(time2))
+
+        // More robust detection: if string matches Side-by-side OR if it's a wide image that isn't square
+        val isSideBySide = layout == "Side-by-side" ||
+                          layout == "左右排列" ||
+                          layout.contains("side", ignoreCase = true) ||
+                          (layout.isEmpty() && bitmap.width > bitmap.height)
 
         val paint = Paint().apply {
             color = Color.parseColor("#FF8C00") // Classic orange
             alpha = 220
-            textSize = minOf(bitmap.width, bitmap.height) * 0.04f
+            // For Side-by-side, we use height as reference; for Top-bottom, we use width.
+            // Basically use the "single frame" dimension.
+            textSize = (if (isSideBySide) bitmap.height else bitmap.width) * 0.04f
             typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
             setShadowLayer(5f, 0f, 0f, Color.RED)
             textAlign = Paint.Align.RIGHT
         }
 
-        val textWidth = paint.measureText(dateText)
+        val textWidth = paint.measureText(dateText2)
         val margin = textWidth * 0.2f
 
-        // Since we might have rotated the bitmap to Portrait,
-        // we need to figure out where the "bottom right" of each frame is.
-        // Side-by-side rotated: Top half is Frame 1, Bottom half is Frame 2.
-        // Top-bottom (already Portrait): Top half is Frame 1, Bottom half is Frame 2.
+        if (isSideBySide) {
+            // Side-by-side (Wide): [ Frame 1 (Portrait) | Divider | Frame 2 (Portrait) ]
+            // Actually, we can just use the center gap.
+            val centerGapX = bitmap.width / 2f
+            val dividerHalf = (bitmap.height * 0.03f).coerceAtLeast(16f) / 2f
 
-        val frame1BottomY = workingBitmap.height / 2f
-        val frame2BottomY = workingBitmap.height.toFloat()
+            val x1 = centerGapX - dividerHalf - margin
+            val x2 = bitmap.width - margin
+            val y = bitmap.height - margin
 
-        val x = workingBitmap.width - margin
+            canvas.drawText(dateText1, x1, y, paint)
+            canvas.drawText(dateText2, x2, y, paint)
+        } else {
+            // Top-bottom (Tall): [ Frame 1 (Landscape) / Divider / Frame 2 (Landscape) ]
+            val centerGapY = bitmap.height / 2f
+            val dividerHalf = (bitmap.width * 0.03f).coerceAtLeast(16f) / 2f
 
-        // Frame 1 date
-        canvas.drawText(dateText, x, frame1BottomY - margin, paint)
-        // Frame 2 date
-        canvas.drawText(dateText, x, frame2BottomY - margin, paint)
+            val x = bitmap.width - margin
+            val y1 = centerGapY - dividerHalf - margin
+            val y2 = bitmap.height - margin
+
+            canvas.drawText(dateText1, x, y1, paint)
+            canvas.drawText(dateText2, x, y2, paint)
+        }
 
         return workingBitmap
     }
