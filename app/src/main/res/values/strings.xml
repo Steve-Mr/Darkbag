@@ -44,4 +44,12 @@
     <string name="lut_menu_lut">LUT</string>
     <string name="lut_menu_select_log_first">LUT: (Select Log First)</string>
     <string name="lut_none">None</string>
+
+    <string name="half_frame_mode_title">Half-frame Mode</string>
+    <string name="enable_half_frame_mode">Enable Half-frame Mode</string>
+    <string name="half_frame_layout_hint">Half-frame Layout</string>
+    <string name="half_frame_downsample_title">Economical Mode (Downsample)</string>
+    <string name="half_frame_date_stamp">Date Stamp</string>
+    <string name="half_frame_light_leak">Random Light Leak</string>
+    <string name="half_frame_auto_burst">Auto Burst (Double Shot)</string>
 </resources>
