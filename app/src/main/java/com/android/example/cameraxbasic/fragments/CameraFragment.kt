@@ -17,6 +17,7 @@
 @file:SuppressLint("RestrictedApi")
 package com.android.example.cameraxbasic.fragments
 
+import android.animation.ValueAnimator
 import android.annotation.SuppressLint
 import android.content.*
 import android.content.ContentUris
@@ -4530,10 +4531,10 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         }
 
         ValueAnimator.ofFloat(current, current + shortestDiff).apply {
-            duration = ANIMATION_SLOW_MILLIS
+            duration = ANIMATION_SLOW_MILLIS.toLong()
             interpolator = android.view.animation.AccelerateDecelerateInterpolator()
-            addUpdateListener {
-                shutter.setDotRotation(it.animatedValue as Float)
+            addUpdateListener { animator ->
+                shutter.setDotRotation(animator.animatedValue as Float)
             }
             start()
         }
