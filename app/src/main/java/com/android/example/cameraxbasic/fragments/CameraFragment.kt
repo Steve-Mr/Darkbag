@@ -551,14 +551,9 @@ class CameraFragment : Fragment() {
 
         // Listen for Half-frame events
         viewLifecycleOwner.lifecycleScope.launch {
-            ColorProcessor.halfFrameFlow.collect { step ->
+            ColorProcessor.halfFrameFlow.collect {
                 withContext(Dispatchers.Main) {
-                    if (step == 1) {
-                        hideProcessingAnimation()
-                    } else {
-                        // Full capture complete (Frame 2 background stitching done)
-                        hideProcessingAnimation() // Final cleanup
-                    }
+                    hideProcessingAnimation()
                 }
             }
         }
@@ -577,15 +572,16 @@ class CameraFragment : Fragment() {
                             withContext(Dispatchers.Main) {
                                 prefs.edit().putString(SettingsFragment.KEY_LAST_CAPTURE_URI, event.targetUri).apply()
                                 setGalleryThumbnail(event.targetUri)
-                                hideProcessingAnimation() // Hide when final stitched result is ready
                             }
                         } else {
                              Log.w(TAG, "Received save event for ${event.baseName} without targetUri.")
-                             withContext(Dispatchers.Main) { hideProcessingAnimation() }
                         }
                     } catch (e: Exception) {
                         Log.e(TAG, "Background UI update failed for ${event.baseName}", e)
-                        withContext(Dispatchers.Main) { hideProcessingAnimation() }
+                    } finally {
+                        withContext(Dispatchers.Main) {
+                            hideProcessingAnimation()
+                        }
                     }
                 }
             }

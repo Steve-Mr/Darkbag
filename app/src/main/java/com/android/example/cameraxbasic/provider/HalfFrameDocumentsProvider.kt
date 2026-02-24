@@ -94,10 +94,16 @@ class HalfFrameDocumentsProvider : DocumentsProvider() {
 
     private fun fileFromDocumentId(documentId: String): File {
         require(documentId.startsWith("file:")) { "Unsupported documentId: $documentId" }
-        return File(rootDir(), documentId.removePrefix("file:"))
+        val fileName = documentId.removePrefix("file:")
+        val root = rootDir().canonicalFile
+        val file = File(root, fileName).canonicalFile
+        // Verify that the resolved file's canonical path starts with the canonical path of the root directory
+        // to prevent path traversal attacks. We use a trailing separator to avoid sibling directory traversal.
+        require(file.path.startsWith(root.path + File.separator)) { "Invalid documentId: $documentId" }
+        return file
     }
 
-    private fun rootDir(): File = context!!.filesDir
+    private fun rootDir(): File = checkNotNull(context) { "Context not available" }.filesDir
 
     companion object {
         const val AUTHORITY = "com.android.example.cameraxbasic.halfframe.documents"
