@@ -44,8 +44,31 @@ object ColorProcessor {
         outputJpgPath: String?,
         useGpu: Boolean,
         orientation: Int,
-        mirror: Boolean
+        mirror: Boolean,
+        exposure: Float = 0.0f,
+        contrast: Float = 0.0f,
+        highlights: Float = 0.0f,
+        shadows: Float = 0.0f,
+        whites: Float = 0.0f,
+        blacks: Float = 0.0f,
+        saturation: Float = 0.0f
     ): Int
+
+    external fun processRawToBitmap(
+        dngData: ByteArray,
+        targetLog: Int,
+        lutPath: String?,
+        orientation: Int,
+        mirror: Boolean,
+        exposure: Float,
+        contrast: Float,
+        highlights: Float,
+        shadows: Float,
+        whites: Float,
+        blacks: Float,
+        saturation: Float,
+        downsampleFactor: Int
+    ): android.graphics.Bitmap?
 
     /**
      * Optimized single frame processing using the Halide pipeline.
@@ -78,7 +101,14 @@ object ColorProcessor {
         outputBitmap: android.graphics.Bitmap? = null,
         tempRawPath: String? = null,
         zoomFactor: Float,
-        mirror: Boolean
+        mirror: Boolean,
+        exposure: Float = 0.0f,
+        contrast: Float = 0.0f,
+        highlights: Float = 0.0f,
+        shadows: Float = 0.0f,
+        whites: Float = 0.0f,
+        blacks: Float = 0.0f,
+        saturation: Float = 0.0f
     ): Int
 
     /**
@@ -125,7 +155,14 @@ object ColorProcessor {
         ccm: FloatArray,
         whiteBalance: FloatArray,
         zoomFactor: Float,
-        mirror: Boolean
+        mirror: Boolean,
+        exposure: Float = 0.0f,
+        contrast: Float = 0.0f,
+        highlights: Float = 0.0f,
+        shadows: Float = 0.0f,
+        whites: Float = 0.0f,
+        blacks: Float = 0.0f,
+        saturation: Float = 0.0f
     ): Int
 
     external fun processHdrPlus(
@@ -159,6 +196,13 @@ object ColorProcessor {
         outputBitmap: android.graphics.Bitmap? = null,
         tempRawPath: String? = null,
         zoomFactor: Float,
-        mirror: Boolean
+        mirror: Boolean,
+        exposure: Float = 0.0f,
+        contrast: Float = 0.0f,
+        highlights: Float = 0.0f,
+        shadows: Float = 0.0f,
+        whites: Float = 0.0f,
+        blacks: Float = 0.0f,
+        saturation: Float = 0.0f
     ): Int
 }

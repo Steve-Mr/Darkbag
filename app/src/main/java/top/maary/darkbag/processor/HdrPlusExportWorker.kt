@@ -74,7 +74,8 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
             tempRawPath, width, height, orientation, digitalGain, targetLog,
             lutPath, tiffPath, jpgPath, dngPath,
             iso, exposureTime, fNumber, focalLength, captureTimeMillis,
-            ccm, whiteBalance, zoomFactor, mirror
+            ccm, whiteBalance, zoomFactor, mirror,
+            0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f
         )
 
         if (ret == 0) {

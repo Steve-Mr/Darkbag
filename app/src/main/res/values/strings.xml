@@ -54,4 +54,6 @@
     <string name="half_frame_auto_burst">Auto Burst (Double Shot)</string>
 
     <string name="settings_shortcut_label">Settings</string>
+    <string name="camera_shortcut_label">Camera</string>
+    <string name="gallery_shortcut_label">Gallery</string>
 </resources>

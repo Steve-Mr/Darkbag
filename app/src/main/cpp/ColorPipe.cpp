@@ -241,6 +241,33 @@ float apply_log(float x, int type) {
     }
 }
 
+inline float apply_contrast(float val, float contrast) {
+    if (contrast == 0.0f) return val;
+    float factor = (contrast + 1.0f);
+    return std::clamp((val - 0.5f) * factor + 0.5f, 0.0f, 1.0f);
+}
+
+inline float apply_highlights_shadows(float val, float highlights, float shadows) {
+    if (shadows != 0.0f) {
+        val = std::pow(val, 1.0f / (1.0f + shadows * 0.5f));
+    }
+    if (highlights != 0.0f) {
+        val = 1.0f - std::pow(1.0f - val, 1.0f / (1.0f - highlights * 0.5f));
+    }
+    return val;
+}
+
+inline Vec3 apply_saturation(Vec3 c, float saturation) {
+    if (saturation == 0.0f) return c;
+    float luma = 0.2126f * c.r + 0.7152f * c.g + 0.0722f * c.b;
+    float factor = saturation + 1.0f;
+    return {
+        luma + (c.r - luma) * factor,
+        luma + (c.g - luma) * factor,
+        luma + (c.b - luma) * factor
+    };
+}
+
 // --- LUT (CPU) ---
 LUT3D load_lut(const char* path) {
     LUT3D lut;
@@ -444,10 +471,11 @@ bool process_and_save_image(
     int width, int height, float gain, int targetLog, const LUT3D& lut,
     const char* tiffPath, const char* jpgPath, int sourceColorSpace,
     const float* ccm, const float* wb, int orientation, unsigned char* out_rgb_buffer,
-    bool isPreview, int downsampleFactor, float zoomFactor, bool mirror
+    bool isPreview, int downsampleFactor, float zoomFactor, bool mirror,
+    BasicAdjustments adjustments
 ) {
-    LOGD("process_and_save_image: %dx%d, gain=%.2f, log=%d, lut=%d, tiff=%s, jpg=%s, preview=%d, ds=%d, zoom=%.2f, mirror=%d",
-         width, height, gain, targetLog, lut.size, tiffPath ? tiffPath : "null", jpgPath ? jpgPath : "null", isPreview, downsampleFactor, zoomFactor, mirror);
+    LOGD("process_and_save_image: %dx%d, gain=%.2f, log=%d, lut=%d, tiff=%s, jpg=%s, preview=%d, ds=%d, zoom=%.2f, mirror=%d, exp=%.2f",
+         width, height, gain, targetLog, lut.size, tiffPath ? tiffPath : "null", jpgPath ? jpgPath : "null", isPreview, downsampleFactor, zoomFactor, mirror, adjustments.exposure);
     int outW = width / downsampleFactor, outH = height / downsampleFactor;
     bool swapDims = (orientation == 90 || orientation == 270);
     int finalW = swapDims ? outH : outW, finalH = swapDims ? outW : outH;
@@ -474,9 +502,19 @@ bool process_and_save_image(
         x = std::max(0, std::min(x, width - 1));
         y = std::max(0, std::min(y, height - 1));
         size_t idx = (static_cast<size_t>(y) * width + x) * 3;
-        float norm_r = (float)inputImage[idx + 0] / 65535.0f * gain;
-        float norm_g = (float)inputImage[idx + 1] / 65535.0f * gain;
-        float norm_b = (float)inputImage[idx + 2] / 65535.0f * gain;
+
+        float exposureGain = std::pow(2.0f, adjustments.exposure);
+        float norm_r = (float)inputImage[idx + 0] / 65535.0f * gain * exposureGain;
+        float norm_g = (float)inputImage[idx + 1] / 65535.0f * gain * exposureGain;
+        float norm_b = (float)inputImage[idx + 2] / 65535.0f * gain * exposureGain;
+
+        // Apply Whites/Blacks (Linear)
+        auto apply_wb = [&](float v) {
+            return std::max(0.0f, v * (1.0f + adjustments.whites * 0.5f) + adjustments.blacks * 0.1f);
+        };
+        norm_r = apply_wb(norm_r);
+        norm_g = apply_wb(norm_g);
+        norm_b = apply_wb(norm_b);
 
         if (edgeComp.enabled) {
             const float nx = (x - edgeComp.centerX) * edgeComp.invMaxRadius;
@@ -516,9 +554,19 @@ bool process_and_save_image(
         if (stageB) *stageB = color;
 
         color.r = apply_log(color.r, targetLog); color.g = apply_log(color.g, targetLog); color.b = apply_log(color.b, targetLog);
+
+        // Apply Contrast, Highlights, Shadows in Log space
+        color.r = apply_contrast(apply_highlights_shadows(color.r, adjustments.highlights, adjustments.shadows), adjustments.contrast);
+        color.g = apply_contrast(apply_highlights_shadows(color.g, adjustments.highlights, adjustments.shadows), adjustments.contrast);
+        color.b = apply_contrast(apply_highlights_shadows(color.b, adjustments.highlights, adjustments.shadows), adjustments.contrast);
+
         if (stageC) *stageC = color;
 
         if (lut.size > 0) color = apply_lut(lut, color);
+
+        // Apply Saturation (Final)
+        color = apply_saturation(color, adjustments.saturation);
+
         return color;
     };
     int cropW = (int)(width / zoomFactor);

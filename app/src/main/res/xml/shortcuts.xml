@@ -1,6 +1,30 @@
 <?xml version="1.0" encoding="utf-8"?>
 <shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
     <shortcut
+        android:shortcutId="camera"
+        android:enabled="true"
+        android:icon="@drawable/ic_camera"
+        android:shortcutShortLabel="@string/camera_shortcut_label">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="top.maary.darkbag"
+            android:targetClass="top.maary.darkbag.MainActivity">
+            <extra android:name="shortcut" android:value="camera" />
+        </intent>
+    </shortcut>
+    <shortcut
+        android:shortcutId="gallery"
+        android:enabled="true"
+        android:icon="@drawable/ic_add"
+        android:shortcutShortLabel="@string/gallery_shortcut_label">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="top.maary.darkbag"
+            android:targetClass="top.maary.darkbag.MainActivity">
+            <extra android:name="shortcut" android:value="gallery" />
+        </intent>
+    </shortcut>
+    <shortcut
         android:shortcutId="settings"
         android:enabled="true"
         android:icon="@drawable/ic_shortcut_settings"

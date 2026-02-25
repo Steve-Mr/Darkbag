@@ -30,6 +30,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.navigation.Navigation
 import top.maary.darkbag.R
+import top.maary.darkbag.MainActivity
 import kotlinx.coroutines.launch
 
 private var PERMISSIONS_REQUIRED = arrayOf(Manifest.permission.CAMERA)
@@ -54,16 +55,39 @@ class PermissionsFragment : Fragment() {
             // Request camera-related permissions
             activityResultLauncher.launch(PERMISSIONS_REQUIRED)
         } else {
-            navigateToCamera()
+            navigateToNext()
         }
     }
 
-    private fun navigateToCamera() {
+    private fun navigateToNext() {
+        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val startGallery = prefs.getBoolean(SettingsFragment.KEY_START_GALLERY, false)
+
+        val shortcut = requireActivity().intent.getStringExtra(MainActivity.SHORTCUT_EXTRA_KEY)
+
         lifecycleScope.launch {
             lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-                Navigation.findNavController(requireActivity(), R.id.fragment_container).navigate(
-                    PermissionsFragmentDirections.actionPermissionsToCamera()
-                )
+                val navController = Navigation.findNavController(requireActivity(), R.id.fragment_container)
+
+                when (shortcut) {
+                    MainActivity.SHORTCUT_VALUE_GALLERY -> {
+                        navController.navigate(PermissionsFragmentDirections.actionPermissionsToGallery())
+                    }
+                    MainActivity.SHORTCUT_VALUE_CAMERA -> {
+                        navController.navigate(PermissionsFragmentDirections.actionPermissionsToCamera())
+                    }
+                    MainActivity.SHORTCUT_VALUE_SETTINGS -> {
+                        navController.navigate(PermissionsFragmentDirections.actionPermissionsToGallery())
+                        navController.navigate(R.id.settings_fragment)
+                    }
+                    else -> {
+                        if (startGallery) {
+                            navController.navigate(PermissionsFragmentDirections.actionPermissionsToGallery())
+                        } else {
+                            navController.navigate(PermissionsFragmentDirections.actionPermissionsToCamera())
+                        }
+                    }
+                }
             }
         }
     }
@@ -80,7 +104,7 @@ class PermissionsFragment : Fragment() {
             if (!permissionGranted) {
                 Toast.makeText(context, "Permission request denied", Toast.LENGTH_LONG).show()
             } else {
-                navigateToCamera()
+                navigateToNext()
             }
         }
 

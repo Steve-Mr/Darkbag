@@ -17,6 +17,16 @@ struct Matrix3x3 {
     float m[9]; // Row-major: m[0]*x + m[1]*y + m[2]*z
 };
 
+struct BasicAdjustments {
+    float exposure = 0.0f;    // EV
+    float contrast = 0.0f;    // -1.0 to 1.0
+    float highlights = 0.0f;  // -1.0 to 1.0
+    float shadows = 0.0f;     // -1.0 to 1.0
+    float whites = 0.0f;      // -1.0 to 1.0
+    float blacks = 0.0f;      // -1.0 to 1.0
+    float saturation = 0.0f;  // -1.0 to 1.0
+};
+
 Vec3 multiply(const Matrix3x3& mat, const Vec3& v);
 Matrix3x3 multiply(const Matrix3x3& a, const Matrix3x3& b);
 Matrix3x3 invert(const Matrix3x3& src);
@@ -55,7 +65,8 @@ bool process_and_save_image(
     bool isPreview = false,
     int downsampleFactor = 1,
     float zoomFactor = 1.0f,
-    bool mirror = false
+    bool mirror = false,
+    BasicAdjustments adjustments = {}
 );
 
 // --- File Writers ---

@@ -277,6 +277,8 @@ class SettingsFragment : Fragment() {
         updateCheckboxStates()
         updateStorageVisibility()
 
+        setupSwitch(binding.switchStartGallery, KEY_START_GALLERY, false)
+        setupSwitch(binding.switchLowResPreview, KEY_LOW_RES_PREVIEW, false)
         setupSwitch(binding.switchHqBackgroundExport, KEY_HQ_BACKGROUND_EXPORT, false)
         setupSwitch(binding.switchManualControls, KEY_MANUAL_CONTROLS, false)
         setupSwitch(binding.switchHalfFrameMode, KEY_HALF_FRAME_MODE, false)
@@ -436,6 +438,8 @@ class SettingsFragment : Fragment() {
         const val KEY_HALF_FRAME_SAVE_JPG = "half_frame_save_jpg"
         const val KEY_HALF_FRAME_SAVE_RAW = "half_frame_save_raw"
         const val KEY_HALF_FRAME_BASE_NAME = "half_frame_base_name"
+        const val KEY_START_GALLERY = "start_gallery"
+        const val KEY_LOW_RES_PREVIEW = "low_res_preview"
 
         val FOCAL_LENGTHS = listOf("24", "28", "35")
         val ANTIBANDING_MODES = listOf("Auto", "50Hz", "60Hz", "Off")

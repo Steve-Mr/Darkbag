@@ -1767,7 +1767,8 @@ class CameraFragment : Fragment() {
                     outputBitmap = null,
                     tempRawPath = tempRawFile.absolutePath,
                     zoomFactor = image.zoomRatio,
-                    mirror = mirror
+                    mirror = mirror,
+                    exposure = 0.0f, contrast = 0.0f, highlights = 0.0f, shadows = 0.0f, whites = 0.0f, blacks = 0.0f, saturation = 0.0f
                 )
 
                 timing?.jniDone = System.currentTimeMillis()
@@ -3431,7 +3432,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     null, // outputBitmap
                     tempRawFile.absolutePath,
                     currentZoom,
-                    mirror
+                    mirror,
+                    exposure = 0.0f, contrast = 0.0f, highlights = 0.0f, shadows = 0.0f, whites = 0.0f, blacks = 0.0f, saturation = 0.0f
                 )
 
                 val jniEndTime = System.currentTimeMillis()

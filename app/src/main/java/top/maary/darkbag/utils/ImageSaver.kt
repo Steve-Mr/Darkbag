@@ -1,5 +1,8 @@
 package top.maary.darkbag.utils
 import top.maary.darkbag.processor.ColorProcessor
+import top.maary.darkbag.MainApplication
+import top.maary.darkbag.persistence.ImageEntity
+import kotlinx.coroutines.launch
 
 import android.content.ContentValues
 import android.content.Context
@@ -387,7 +390,24 @@ object ImageSaver {
         // For half-frame mode, we strictly avoid DNG thumbnails to prevent showing single frames
         if (isHalfFrameActive && finalJpgUri == null) return null
 
-        return finalJpgUri ?: finalRawUri ?: finalTiffUri
+        val resultUri = finalJpgUri ?: finalRawUri ?: finalTiffUri
+
+        // Record in our internal database if not a fast path and we have a result
+        if (!isFastPath && resultUri != null) {
+            val mainApplication = context.applicationContext as? MainApplication
+            mainApplication?.applicationScope?.launch {
+                val imageEntity = ImageEntity(
+                    id = baseName,
+                    path = resultUri.toString(),
+                    isImported = false,
+                    dateAdded = System.currentTimeMillis(),
+                    isRaw = linearDngPath != null || actualSaveRaw
+                )
+                mainApplication.imageRepository.insert(imageEntity)
+            }
+        }
+
+        return resultUri
     }
 
     private fun saveDebugStageImagesToMediaStore(context: Context, baseName: String, sourcePath: String) {
