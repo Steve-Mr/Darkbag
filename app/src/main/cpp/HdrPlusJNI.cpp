@@ -120,7 +120,7 @@ extern "C" jint JNI_OnLoad(JavaVM* vm, void* reserved) {
     JNIEnv* env;
     if (vm->GetEnv((void**)&env, JNI_VERSION_1_6) != JNI_OK) return JNI_ERR;
 
-    jclass colorProcClazz = env->FindClass("com/android/example/cameraxbasic/processor/ColorProcessor");
+    jclass colorProcClazz = env->FindClass("top/maary/darkbag/processor/ColorProcessor");
     if (colorProcClazz) g_colorProcessorClass = (jclass)env->NewGlobalRef(colorProcClazz);
 
     jclass byteBufClazz = env->FindClass("java/nio/ByteBuffer");
@@ -130,13 +130,13 @@ extern "C" jint JNI_OnLoad(JavaVM* vm, void* reserved) {
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_android_example_cameraxbasic_processor_ColorProcessor_initMemoryPool(JNIEnv* env, jobject /* this */, jint width, jint height, jint frames) {
+Java_top_maary_darkbag_processor_ColorProcessor_initMemoryPool(JNIEnv* env, jobject /* this */, jint width, jint height, jint frames) {
     std::lock_guard<std::mutex> lock(g_hdrPlusMutex);
     g_hdrPlusBuffers.ensureCapacity(width, height, frames);
 }
 
 extern "C" JNIEXPORT jint JNICALL
-Java_com_android_example_cameraxbasic_processor_ColorProcessor_exportHdrPlus(
+Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
     JNIEnv* env, jobject /* this */, jstring tempRawPath, jint width, jint height, jint orientation, jfloat digitalGain, jint targetLog, jstring lutPath, jstring tiffPath, jstring jpgPath, jstring dngPath,
     jint iso, jlong exposureTime, jfloat fNumber, jfloat focalLength, jlong captureTimeMillis, jfloatArray ccm, jfloatArray whiteBalance, jfloat zoomFactor, jboolean mirror
 ) {
@@ -206,7 +206,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_exportHdrPlus(
 }
 
 extern "C" JNIEXPORT jint JNICALL
-Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
+Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
     JNIEnv* env, jobject /* this */, jobjectArray dngBuffers, jint width, jint height, jint orientation, jint whiteLevel, jintArray blackLevelPattern, jfloatArray lensShadingMap, jint lensShadingRows, jint lensShadingCols, jboolean useSensorColorMatrix, jfloatArray whiteBalance, jfloatArray ccm, jfloatArray ccmAlt, jboolean exportMatrixAB, jint cfaPattern,
     jint iso, jlong exposureTime, jfloat fNumber, jfloat focalLength, jlong captureTimeMillis, jint targetLog, jstring lutPath, jstring outputTiffPath, jstring outputJpgPath, jstring outputDngPath,
     jfloat digitalGain, jlongArray debugStats, jobject outputBitmap, jstring tempRawPath, jfloat zoomFactor, jboolean mirror
@@ -413,7 +413,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
 }
 
 extern "C" JNIEXPORT jint JNICALL
-Java_com_android_example_cameraxbasic_processor_ColorProcessor_processSingleFrameRaw(
+Java_top_maary_darkbag_processor_ColorProcessor_processSingleFrameRaw(
     JNIEnv* env, jobject /* this */, jobject bayerBuffer, jint width, jint height, jint orientation, jint whiteLevel, jintArray blackLevelPattern, jfloatArray lensShadingMap, jint lensShadingRows, jint lensShadingCols, jfloatArray whiteBalance, jfloatArray ccm, jint cfaPattern,
     jint iso, jlong exposureTime, jfloat fNumber, jfloat focalLength, jlong captureTimeMillis, jint targetLog, jstring lutPath, jstring outputTiffPath, jstring outputJpgPath, jstring outputDngPath,
     jfloat digitalGain, jlongArray debugStats, jobject outputBitmap, jstring tempRawPath, jfloat zoomFactor, jboolean mirror
@@ -425,7 +425,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processSingleFram
     env->SetObjectArrayElement(dngBuffers, 0, bayerBuffer);
 
     // Call the existing processHdrPlus logic.
-    return Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
+    return Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
         env, nullptr, dngBuffers, width, height, orientation, whiteLevel, blackLevelPattern, lensShadingMap, lensShadingRows, lensShadingCols,
         false, // useSensorColorMatrix
         whiteBalance, ccm, nullptr, // ccmAlt

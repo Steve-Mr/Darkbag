@@ -7,8 +7,8 @@
         android:shortcutShortLabel="@string/settings_shortcut_label">
         <intent
             android:action="android.intent.action.VIEW"
-            android:targetPackage="com.android.example.cameraxbasic"
-            android:targetClass="com.android.example.cameraxbasic.MainActivity">
+            android:targetPackage="top.maary.darkbag"
+            android:targetClass="top.maary.darkbag.MainActivity">
             <extra android:name="shortcut" android:value="settings" />
         </intent>
     </shortcut>
