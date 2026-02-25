@@ -4366,7 +4366,14 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             vfBinding.viewFinder.scaleX = 1f
             vfBinding.viewFinder.scaleY = 1f
 
-            val targetShift = if (halfFrameStep == 0) -shift else shift
+            val layout = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUTS[0])
+            val isTopBottom = layout == SettingsFragment.HALF_FRAME_LAYOUTS[1]
+
+            val targetShift = if (isTopBottom) {
+                if (halfFrameStep == 0) shift else -shift
+            } else {
+                if (halfFrameStep == 0) -shift else shift
+            }
 
             if (animate) {
                 performHalfFrameAdvanceAnimation(targetShift, totalW, gapWidthScaled)
@@ -4388,6 +4395,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         val vf = fragmentCameraBinding.viewFinder
         val snapshot = uiBinding.halfFrameSnapshot ?: return
         val gap = uiBinding.halfFrameGapIndicator ?: return
+        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val isTopBottom = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUTS[0]) == SettingsFragment.HALF_FRAME_LAYOUTS[1]
 
         // VF base position (centered) is (totalW - vf.width) / 2
         val vfBaseX = (totalW - vf.width) / 2f
@@ -4409,23 +4418,30 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
         // 2. Prepare Gap (also parent.start layout)
         gap.visibility = View.VISIBLE
-        // If halfFrameStep is now 1 (took shot 1), gap is to the right of shot 1: currentVfLeft + vf.width
-        // If halfFrameStep is now 0 (took shot 2), gap is to the left of shot 2: currentVfLeft - gapWidth
-        gap.translationX = if (halfFrameStep == 1) currentVfLeft + vf.width else currentVfLeft - gapWidth
+        // If Side-by-side: Shot 1 is left, Gap is to its right.
+        // If Top-bottom: Shot 1 is right, Gap is to its left.
+        gap.translationX = if (isTopBottom) {
+            if (halfFrameStep == 1) currentVfLeft - gapWidth else currentVfLeft + vf.width
+        } else {
+            if (halfFrameStep == 1) currentVfLeft + vf.width else currentVfLeft - gapWidth
+        }
         gap.layoutParams.height = vf.height
         gap.requestLayout()
 
-        // 3. Prepare ViewFinder for "coming in" from right
-        // We want it to end at targetShift. Since everything moves by -totalW, it must start at targetShift + totalW
+        // 3. Prepare ViewFinder for "coming in"
+        // Side-by-side: moves left (-totalW), starts at targetShift + totalW
+        // Top-bottom: moves right (+totalW), starts at targetShift - totalW
         vf.animate().cancel()
-        vf.translationX = targetShift + totalW
+        val moveDirectionFactor = if (isTopBottom) 1f else -1f
+        vf.translationX = targetShift - (moveDirectionFactor * totalW)
 
-        // 4. Animate everything to the left by exactly totalW (full screen width)
+        // 4. Animate everything by exactly totalW
         val duration = 450L
         val interpolator = android.view.animation.AccelerateDecelerateInterpolator()
+        val moveDist = moveDirectionFactor * totalW
 
         snapshot.animate()
-            .translationX(currentVfLeft - totalW)
+            .translationX(currentVfLeft + moveDist)
             .setDuration(duration)
             .setInterpolator(interpolator)
             .withEndAction {
@@ -4435,7 +4451,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             .start()
 
         gap.animate()
-            .translationX(gap.translationX - totalW)
+            .translationX(gap.translationX + moveDist)
             .setDuration(duration)
             .setInterpolator(interpolator)
             .withEndAction { gap.visibility = View.GONE }
@@ -4454,6 +4470,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         val uiBinding = cameraUiContainerBinding ?: return
         val topEdge = uiBinding.halfFrameFilmEdgeTop ?: return
         val bottomEdge = uiBinding.halfFrameFilmEdgeBottom ?: return
+        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val isTopBottom = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUTS[0]) == SettingsFragment.HALF_FRAME_LAYOUTS[1]
 
         topEdge.animate().cancel()
         bottomEdge.animate().cancel()
@@ -4462,18 +4480,19 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         val periodPx = (30f / 1200f) * topEdge.width
         // Move by multiple periods to cover about 40% of the screen width for a "roll" feel
         val rollDistance = periodPx * ( (resources.displayMetrics.widthPixels * 0.4f) / periodPx ).toInt()
+        val dist = if (isTopBottom) rollDistance else -rollDistance
 
         val interpolator = android.view.animation.AccelerateDecelerateInterpolator()
 
         topEdge.animate()
-            .translationX(-rollDistance)
+            .translationX(dist)
             .setDuration(duration)
             .setInterpolator(interpolator)
             .withEndAction { topEdge.translationX = 0f }
             .start()
 
         bottomEdge.animate()
-            .translationX(-rollDistance)
+            .translationX(dist)
             .setDuration(duration)
             .setInterpolator(interpolator)
             .withEndAction { bottomEdge.translationX = 0f }
@@ -4554,10 +4573,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
         // Half-frame forces output orientation. Dot points to the fixed "Up" of the output frame.
         return if (layout == SettingsFragment.HALF_FRAME_LAYOUTS[1]) {
-            // Top-bottom forces Landscape.
-            // Most devices have sensor orientation 90.
-            // So if phone is portrait, Landscape-Up is phone-left (-90).
-            -90f
+            // Top-bottom forces Landscape. Right side is Up.
+            90f
         } else {
             // Side-by-side forces Portrait. Up is phone-top (0).
             0f
