@@ -13,7 +13,8 @@ class HalfFrameSessionStore(private val context: Context) {
         val step: Int,
         val tempPath: String?,
         val baseName: String?,
-        val captureTimeMillis: Long
+        val captureTimeMillis: Long,
+        val lockedRotation: Int = 0
     )
 
     fun currentProfile(): String {
@@ -29,10 +30,12 @@ class HalfFrameSessionStore(private val context: Context) {
         val tempPath = prefs.getString(key(SettingsFragment.KEY_HALF_FRAME_TEMP_PATH, activeProfile), null)
         val baseName = prefs.getString(key(SettingsFragment.KEY_HALF_FRAME_BASE_NAME, activeProfile), null)
         val captureTime = prefs.getLong(key(KEY_CAPTURE_TIME, activeProfile), 0L)
+        val lockedRotation = prefs.getInt(key(KEY_LOCKED_ROTATION, activeProfile), 0)
 
         var resolvedStep = step
         var resolvedTemp = tempPath
         var resolvedBase = baseName
+        var resolvedRotation = lockedRotation
 
         if (resolvedStep == 1) {
             val exists = !resolvedTemp.isNullOrBlank() && File(resolvedTemp).exists()
@@ -42,25 +45,31 @@ class HalfFrameSessionStore(private val context: Context) {
                 resolvedStep = 0
                 resolvedTemp = null
                 resolvedBase = null
+                resolvedRotation = 0
                 prefs.edit()
                     .putInt(key(SettingsFragment.KEY_HALF_FRAME_STEP, activeProfile), 0)
                     .remove(key(SettingsFragment.KEY_HALF_FRAME_TEMP_PATH, activeProfile))
                     .remove(key(SettingsFragment.KEY_HALF_FRAME_BASE_NAME, activeProfile))
                     .remove(key(KEY_CAPTURE_TIME, activeProfile))
+                    .remove(key(KEY_LOCKED_ROTATION, activeProfile))
                     .apply()
             }
         }
 
-        return Session(activeProfile, resolvedStep, resolvedTemp, resolvedBase, captureTime)
+        return Session(activeProfile, resolvedStep, resolvedTemp, resolvedBase, captureTime, resolvedRotation)
     }
 
-    fun markStep(step: Int, captureTimeMillis: Long? = null, profile: String? = null) {
+    fun markStep(step: Int, captureTimeMillis: Long? = null, lockedRotation: Int? = null, profile: String? = null) {
         val activeProfile = profile ?: currentProfile()
         val editor = prefs.edit().putInt(key(SettingsFragment.KEY_HALF_FRAME_STEP, activeProfile), step)
         if (step == 1) {
             editor.putLong(key(KEY_CAPTURE_TIME, activeProfile), captureTimeMillis ?: System.currentTimeMillis())
+            if (lockedRotation != null) {
+                editor.putInt(key(KEY_LOCKED_ROTATION, activeProfile), lockedRotation)
+            }
         } else {
             editor.remove(key(KEY_CAPTURE_TIME, activeProfile))
+            editor.remove(key(KEY_LOCKED_ROTATION, activeProfile))
         }
         editor.apply()
     }
@@ -81,6 +90,7 @@ class HalfFrameSessionStore(private val context: Context) {
             .remove(key(SettingsFragment.KEY_HALF_FRAME_TEMP_PATH, profile))
             .remove(key(SettingsFragment.KEY_HALF_FRAME_BASE_NAME, profile))
             .remove(key(KEY_CAPTURE_TIME, profile))
+            .remove(key(KEY_LOCKED_ROTATION, profile))
             .apply()
     }
 
@@ -103,6 +113,7 @@ class HalfFrameSessionStore(private val context: Context) {
 
     companion object {
         private const val KEY_CAPTURE_TIME = "half_frame_capture_time"
+        private const val KEY_LOCKED_ROTATION = "half_frame_locked_rotation"
         private const val MAX_RECOVER_WINDOW_MS = 120_000L
         const val PROFILE_NORMAL = "normal"
         const val PROFILE_HALF_SIDE = "half_side"

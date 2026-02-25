@@ -99,9 +99,9 @@ class HalfFrameManager(private val context: Context) {
             // Store capture time for date stamp. Only update step on fast path to avoid race with frame 2
             if (isFastPath) {
                 if (metadata != null) {
-                    sessionStore.markStep(1, metadata.captureTimeMillis, activeProfile)
+                    sessionStore.markStep(1, metadata.captureTimeMillis, profile = activeProfile)
                 } else {
-                    sessionStore.markStep(1, tempFile.lastModified(), activeProfile)
+                    sessionStore.markStep(1, tempFile.lastModified(), profile = activeProfile)
                 }
             }
 
@@ -150,7 +150,7 @@ class HalfFrameManager(private val context: Context) {
                     val tempFile = sessionStore.tempFileForProfile(activeProfile)
                     File(currentJpgPath).copyTo(tempFile, overwrite = true)
                     sessionStore.setTempPath(tempFile.absolutePath, activeProfile)
-                    sessionStore.markStep(1, time2, activeProfile)
+                    sessionStore.markStep(1, time2, profile = activeProfile)
                     return null
                 }
 

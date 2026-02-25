@@ -217,6 +217,7 @@ class CameraFragment : Fragment() {
     private var isHalfFrameModeEnabled = false
     private var halfFrameStep = 0
     private var halfFrameTempPath: String? = null
+    private var halfFrameLockedRotation = 0
     private var halfFrameBaseFinderWidth = 0
     private var halfFrameBaseFinderHeight = 0
     private lateinit var halfFrameSessionStore: HalfFrameSessionStore
@@ -231,11 +232,13 @@ class CameraFragment : Fragment() {
         val session = halfFrameSessionStore.readSession(strict = requireFileForStep1)
         halfFrameStep = session.step
         halfFrameTempPath = session.tempPath
+        halfFrameLockedRotation = session.lockedRotation
     }
 
-    private fun writeScopedHalfFrameStep(prefs: SharedPreferences, step: Int, captureTimeMillis: Long? = null) {
-        halfFrameSessionStore.markStep(step, captureTimeMillis)
+    private fun writeScopedHalfFrameStep(prefs: SharedPreferences, step: Int, captureTimeMillis: Long? = null, lockedRotation: Int = 0) {
+        halfFrameSessionStore.markStep(step, captureTimeMillis, lockedRotation)
         halfFrameStep = step
+        halfFrameLockedRotation = if (step == 0) 0 else lockedRotation
         if (step == 0) {
             halfFrameTempPath = null
         }
@@ -294,6 +297,9 @@ class CameraFragment : Fragment() {
                 if (newOrientationDegrees != deviceOrientationDegrees) {
                     deviceOrientationDegrees = newOrientationDegrees
                     updateShutterOrientation()
+                    if (isHalfFrameModeEnabled) {
+                        updateHalfFrameUI()
+                    }
                 }
 
                 val rotation = when (orientation) {
@@ -1299,7 +1305,17 @@ class CameraFragment : Fragment() {
 
             if (isFrame1Trigger) {
                 halfFrameSessionStore.clearCurrentSession(deleteTempFile = false)
-                writeScopedHalfFrameStep(prefs, 1, System.currentTimeMillis())
+
+                val layout = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUTS[0])
+                val lockedRot = if (layout == SettingsFragment.HALF_FRAME_LAYOUTS[1]) {
+                    // Top-bottom: Landscape Left (90) -> 0, Landscape Right (270) -> 180
+                    if (deviceOrientationDegrees == 270) 180 else 0
+                } else {
+                    // Side-by-side: Portrait (0) -> 0, Upside Down (180) -> 180
+                    if (deviceOrientationDegrees == 180) 180 else 0
+                }
+
+                writeScopedHalfFrameStep(prefs, 1, System.currentTimeMillis(), lockedRot)
                 // Animate after shutter blackout
                 fragmentCameraBinding.viewFinder.postDelayed({
                     updateHalfFrameUI(animate = true)
@@ -2484,12 +2500,25 @@ class CameraFragment : Fragment() {
                 .get(android.hardware.camera2.CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
         } catch (e: Exception) { 0 }
 
-        val combined = if (lensFacing == CameraSelector.LENS_FACING_FRONT) {
-            (sensorOrientation - deviceOrientationDegrees + 360) % 360
+        val effectiveDeviceRotation = if (isHalfFrameModeEnabled && halfFrameStep != 0) {
+            // Use locked orientation for Shot 2 to ensure consistency with Shot 1
+            val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+            val layout = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUTS[0])
+            if (layout == SettingsFragment.HALF_FRAME_LAYOUTS[1]) {
+                if (halfFrameLockedRotation == 180) 270 else 90
+            } else {
+                if (halfFrameLockedRotation == 180) 180 else 0
+            }
         } else {
-            (sensorOrientation + deviceOrientationDegrees) % 360
+            deviceOrientationDegrees
         }
-        Log.d(TAG, "getCombinedOrientation: sensor=$sensorOrientation, device=$deviceOrientationDegrees, facing=$lensFacing -> combined=$combined")
+
+        val combined = if (lensFacing == CameraSelector.LENS_FACING_FRONT) {
+            (sensorOrientation - effectiveDeviceRotation + 360) % 360
+        } else {
+            (sensorOrientation + effectiveDeviceRotation) % 360
+        }
+        Log.d(TAG, "getCombinedOrientation: sensor=$sensorOrientation, device=$effectiveDeviceRotation (live=$deviceOrientationDegrees), facing=$lensFacing -> combined=$combined")
         return combined
     }
 
@@ -4305,6 +4334,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 vfBinding.viewFinder.scaleY = 1f
                 vfBinding.viewFinder.translationX = 0f
                 vfBinding.viewFinder.translationY = 0f
+                vfBinding.viewFinder.rotation = 0f
 
                 if (uiBinding.photoViewButton?.visibility != View.VISIBLE) {
                     uiBinding.photoViewButton?.visibility = View.VISIBLE
@@ -4366,10 +4396,32 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             vfBinding.viewFinder.scaleX = 1f
             vfBinding.viewFinder.scaleY = 1f
 
+            val layout = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUTS[0])
+            val targetUiRotation = if (halfFrameStep != 0) {
+                halfFrameLockedRotation.toFloat()
+            } else {
+                if (layout == SettingsFragment.HALF_FRAME_LAYOUTS[1]) {
+                    // Top-bottom: Landscape Left (90) -> 0, Landscape Right (270) -> 180
+                    if (deviceOrientationDegrees == 270) 180f else 0f
+                } else {
+                    if (deviceOrientationDegrees == 180) 180f else 0f
+                }
+            }
+
+            // Animate UI rotation if it changed
+            val currentRot = vfBinding.viewFinder.rotation
+            if (abs(currentRot - targetUiRotation) > 0.1f) {
+                vfBinding.viewFinder.animate().rotation(targetUiRotation).setDuration(ANIMATION_SLOW_MILLIS.toLong()).start()
+                gapView.animate().rotation(targetUiRotation).setDuration(ANIMATION_SLOW_MILLIS.toLong()).start()
+                snapshotView.animate().rotation(targetUiRotation).setDuration(ANIMATION_SLOW_MILLIS.toLong()).start()
+                edgeTopView.animate().rotation(targetUiRotation).setDuration(ANIMATION_SLOW_MILLIS.toLong()).start()
+                edgeBottomView.animate().rotation(targetUiRotation + 180f).setDuration(ANIMATION_SLOW_MILLIS.toLong()).start()
+            }
+
             val targetShift = if (halfFrameStep == 0) -shift else shift
 
             if (animate) {
-                performHalfFrameAdvanceAnimation(targetShift, totalW, gapWidthScaled)
+                performHalfFrameAdvanceAnimation(targetShift, totalW, gapWidthScaled, targetUiRotation)
             } else {
                 vfBinding.viewFinder.animate().cancel()
                 vfBinding.viewFinder.translationX = targetShift
@@ -4383,11 +4435,24 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         }
     }
 
-    private fun performHalfFrameAdvanceAnimation(targetShift: Float, totalW: Float, gapWidth: Float) {
+    private fun performHalfFrameAdvanceAnimation(targetShift: Float, totalW: Float, gapWidth: Float, uiRotation: Float) {
         val uiBinding = cameraUiContainerBinding ?: return
         val vf = fragmentCameraBinding.viewFinder
         val snapshot = uiBinding.halfFrameSnapshot ?: return
         val gap = uiBinding.halfFrameGapIndicator ?: return
+
+        val isFlipped = abs(uiRotation - 180f) < 0.1f
+        // If flipped 180, on-screen Left/Right are reversed relative to code.
+        // We want the visual slide to always be "towards the take-up spool" which is "Left" in standard UI.
+        // When rotated 180, code translation +X moves visually LEFT on screen.
+        // So slideDirection on screen should be consistent.
+        // Actually, if we rotate the views 180, translationX = +100 moves visually RIGHT on screen?
+        // Let's check: View rotated 180 around center. Positive X translation in its local space is Negative X in parent space.
+        // So if rotated 180, translationX(100) moves visually LEFT.
+
+        // Standard (0 deg): Move -totalW (visually Left)
+        // Flipped (180 deg): Move +totalW (visually Left in screen space? No, if we move +totalW in rotated space, it's -totalW in parent space).
+        val slideOffset = if (isFlipped) totalW else -totalW
 
         // VF base position (centered) is (totalW - vf.width) / 2
         val vfBaseX = (totalW - vf.width) / 2f
@@ -4399,9 +4464,9 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         if (bitmap != null) {
             snapshot.setImageBitmap(bitmap)
             snapshot.visibility = View.VISIBLE
+            snapshot.rotation = uiRotation
             // Snapshot's layout is parent.start, so its translationX is its screen position
             snapshot.translationX = currentVfLeft
-            // Ensure snapshot matches VF visible area perfectly
             snapshot.layoutParams.width = vf.width
             snapshot.layoutParams.height = vf.height
             snapshot.requestLayout()
@@ -4409,6 +4474,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
         // 2. Prepare Gap (also parent.start layout)
         gap.visibility = View.VISIBLE
+        gap.rotation = uiRotation
         // If halfFrameStep is now 1 (took shot 1), gap is to the right of shot 1: currentVfLeft + vf.width
         // If halfFrameStep is now 0 (took shot 2), gap is to the left of shot 2: currentVfLeft - gapWidth
         gap.translationX = if (halfFrameStep == 1) currentVfLeft + vf.width else currentVfLeft - gapWidth
@@ -4416,16 +4482,16 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         gap.requestLayout()
 
         // 3. Prepare ViewFinder for "coming in" from right
-        // We want it to end at targetShift. Since everything moves by -totalW, it must start at targetShift + totalW
+        // We want it to end at targetShift. Since everything moves by slideOffset, it must start at targetShift - slideOffset
         vf.animate().cancel()
-        vf.translationX = targetShift + totalW
+        vf.translationX = targetShift - slideOffset
 
-        // 4. Animate everything to the left by exactly totalW (full screen width)
+        // 4. Animate everything by slideOffset
         val duration = 450L
         val interpolator = android.view.animation.AccelerateDecelerateInterpolator()
 
         snapshot.animate()
-            .translationX(currentVfLeft - totalW)
+            .translationX(currentVfLeft + slideOffset)
             .setDuration(duration)
             .setInterpolator(interpolator)
             .withEndAction {
@@ -4435,7 +4501,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             .start()
 
         gap.animate()
-            .translationX(gap.translationX - totalW)
+            .translationX(gap.translationX + slideOffset)
             .setDuration(duration)
             .setInterpolator(interpolator)
             .withEndAction { gap.visibility = View.GONE }
@@ -4447,10 +4513,10 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             .setInterpolator(interpolator)
             .start()
 
-        animateFilmEdgeRoll(duration)
+        animateFilmEdgeRoll(duration, isFlipped)
     }
 
-    private fun animateFilmEdgeRoll(duration: Long = 360L) {
+    private fun animateFilmEdgeRoll(duration: Long = 360L, isFlipped: Boolean = false) {
         val uiBinding = cameraUiContainerBinding ?: return
         val topEdge = uiBinding.halfFrameFilmEdgeTop ?: return
         val bottomEdge = uiBinding.halfFrameFilmEdgeBottom ?: return
@@ -4463,17 +4529,20 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         // Move by multiple periods to cover about 40% of the screen width for a "roll" feel
         val rollDistance = periodPx * ( (resources.displayMetrics.widthPixels * 0.4f) / periodPx ).toInt()
 
+        // If flipped, the visual "Left" (take-up) is reversed in local space
+        val slideDir = if (isFlipped) 1f else -1f
+
         val interpolator = android.view.animation.AccelerateDecelerateInterpolator()
 
         topEdge.animate()
-            .translationX(-rollDistance)
+            .translationX(slideDir * rollDistance)
             .setDuration(duration)
             .setInterpolator(interpolator)
             .withEndAction { topEdge.translationX = 0f }
             .start()
 
         bottomEdge.animate()
-            .translationX(-rollDistance)
+            .translationX(slideDir * rollDistance)
             .setDuration(duration)
             .setInterpolator(interpolator)
             .withEndAction { bottomEdge.translationX = 0f }
@@ -4553,14 +4622,25 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         val layout = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUTS[0])
 
         // Half-frame forces output orientation. Dot points to the fixed "Up" of the output frame.
-        return if (layout == SettingsFragment.HALF_FRAME_LAYOUTS[1]) {
+        if (layout == SettingsFragment.HALF_FRAME_LAYOUTS[1]) {
             // Top-bottom forces Landscape.
-            // Most devices have sensor orientation 90.
-            // So if phone is portrait, Landscape-Up is phone-left (-90).
-            -90f
+            val uiRotation = if (halfFrameStep != 0) {
+                halfFrameLockedRotation.toFloat()
+            } else {
+                if (deviceOrientationDegrees == 270) 180f else 0f
+            }
+            // Standard (uiRotation 0): Right side up -> Dot points Right (90)
+            // Flipped (uiRotation 180): Left side up -> Dot points Left (-90)
+            return if (uiRotation == 180f) -90f else 90f
         } else {
-            // Side-by-side forces Portrait. Up is phone-top (0).
-            0f
+            // Side-by-side forces Portrait.
+            // Standard (Top side up): 0. Flipped (Bottom side up): 180.
+            val uiRotation = if (halfFrameStep != 0) {
+                halfFrameLockedRotation.toFloat()
+            } else {
+                if (deviceOrientationDegrees == 180) 180f else 0f
+            }
+            return uiRotation
         }
     }
 
