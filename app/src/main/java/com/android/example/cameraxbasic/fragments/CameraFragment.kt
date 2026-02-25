@@ -296,15 +296,18 @@ class CameraFragment : Fragment() {
                     updateShutterOrientation()
                 }
 
-                val rotation = when (orientation) {
-                    in 45 until 135 -> android.view.Surface.ROTATION_270
-                    in 135 until 225 -> android.view.Surface.ROTATION_180
-                    in 225 until 315 -> android.view.Surface.ROTATION_90
-                    else -> android.view.Surface.ROTATION_0
-                }
+                if (!isHalfFrameModeEnabled) {
+                    val rotation = when (orientation) {
+                        in 45 until 135 -> android.view.Surface.ROTATION_270
+                        in 135 until 225 -> android.view.Surface.ROTATION_180
+                        in 225 until 315 -> android.view.Surface.ROTATION_90
+                        else -> android.view.Surface.ROTATION_0
+                    }
 
-                imageCapture?.targetRotation = rotation
-                imageAnalyzer?.targetRotation = rotation
+                    imageCapture?.targetRotation = rotation
+                    imageAnalyzer?.targetRotation = rotation
+                    preview?.targetRotation = rotation
+                }
             }
         }
     }
@@ -378,7 +381,9 @@ class CameraFragment : Fragment() {
         override fun onDisplayChanged(displayId: Int) = view?.let { view ->
             if (displayId == this@CameraFragment.displayId) {
                 Log.d(TAG, "Rotation changed: ${view.display.rotation}")
-                preview?.targetRotation = view.display.rotation
+                if (!isHalfFrameModeEnabled) {
+                    preview?.targetRotation = view.display.rotation
+                }
             }
         } ?: Unit
     }
@@ -2484,12 +2489,20 @@ class CameraFragment : Fragment() {
                 .get(android.hardware.camera2.CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
         } catch (e: Exception) { 0 }
 
-        val combined = if (lensFacing == CameraSelector.LENS_FACING_FRONT) {
-            (sensorOrientation - deviceOrientationDegrees + 360) % 360
+        val effectiveDegrees = if (isHalfFrameModeEnabled) {
+            val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+            val layout = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUTS[0])
+            if (layout == SettingsFragment.HALF_FRAME_LAYOUTS[1]) 270 else 0
         } else {
-            (sensorOrientation + deviceOrientationDegrees) % 360
+            deviceOrientationDegrees
         }
-        Log.d(TAG, "getCombinedOrientation: sensor=$sensorOrientation, device=$deviceOrientationDegrees, facing=$lensFacing -> combined=$combined")
+
+        val combined = if (lensFacing == CameraSelector.LENS_FACING_FRONT) {
+            (sensorOrientation - effectiveDegrees + 360) % 360
+        } else {
+            (sensorOrientation + effectiveDegrees) % 360
+        }
+        Log.d(TAG, "getCombinedOrientation: sensor=$sensorOrientation, effective=$effectiveDegrees, facing=$lensFacing -> combined=$combined")
         return combined
     }
 
@@ -4310,6 +4323,18 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     uiBinding.photoViewButton?.visibility = View.VISIBLE
                     uiBinding.photoViewButton?.alpha = 1f
                 }
+
+                // Restore dynamic rotation for use cases
+                val rotation = when (deviceOrientationDegrees) {
+                    90 -> android.view.Surface.ROTATION_270
+                    180 -> android.view.Surface.ROTATION_180
+                    270 -> android.view.Surface.ROTATION_90
+                    else -> android.view.Surface.ROTATION_0
+                }
+                preview?.targetRotation = rotation
+                imageCapture?.targetRotation = rotation
+                imageAnalyzer?.targetRotation = rotation
+
                 return@post
             }
 
@@ -4366,10 +4391,14 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             vfBinding.viewFinder.scaleX = 1f
             vfBinding.viewFinder.scaleY = 1f
 
-            val targetShift = if (halfFrameStep == 0) -shift else shift
+            val layout = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUTS[0])
+            val isTopBottom = layout == SettingsFragment.HALF_FRAME_LAYOUTS[1]
+
+            val baseShift = if (halfFrameStep == 0) -shift else shift
+            val targetShift = if (isTopBottom) -baseShift else baseShift
 
             if (animate) {
-                performHalfFrameAdvanceAnimation(targetShift, totalW, gapWidthScaled)
+                performHalfFrameAdvanceAnimation(targetShift, totalW, gapWidthScaled, isTopBottom)
             } else {
                 vfBinding.viewFinder.animate().cancel()
                 vfBinding.viewFinder.translationX = targetShift
@@ -4380,10 +4409,20 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             if (vfBinding.viewFinder.translationY != 0f) {
                 vfBinding.viewFinder.translationY = 0f
             }
+
+            // Force fixed rotation for half-frame mode
+            val rotation = if (isTopBottom) {
+                android.view.Surface.ROTATION_90 // Corresponds to 270 orientation (Right is Up)
+            } else {
+                android.view.Surface.ROTATION_0 // Corresponds to 0 orientation (Top is Up)
+            }
+            preview?.targetRotation = rotation
+            imageCapture?.targetRotation = rotation
+            imageAnalyzer?.targetRotation = rotation
         }
     }
 
-    private fun performHalfFrameAdvanceAnimation(targetShift: Float, totalW: Float, gapWidth: Float) {
+    private fun performHalfFrameAdvanceAnimation(targetShift: Float, totalW: Float, gapWidth: Float, isTopBottom: Boolean) {
         val uiBinding = cameraUiContainerBinding ?: return
         val vf = fragmentCameraBinding.viewFinder
         val snapshot = uiBinding.halfFrameSnapshot ?: return
@@ -4409,23 +4448,30 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
         // 2. Prepare Gap (also parent.start layout)
         gap.visibility = View.VISIBLE
-        // If halfFrameStep is now 1 (took shot 1), gap is to the right of shot 1: currentVfLeft + vf.width
-        // If halfFrameStep is now 0 (took shot 2), gap is to the left of shot 2: currentVfLeft - gapWidth
-        gap.translationX = if (halfFrameStep == 1) currentVfLeft + vf.width else currentVfLeft - gapWidth
+        // If Side-by-side: Shot 1 is left, Gap is to its right.
+        // If Top-bottom: Shot 1 is right, Gap is to its left.
+        gap.translationX = if (isTopBottom) {
+            if (halfFrameStep == 1) currentVfLeft - gapWidth else currentVfLeft + vf.width
+        } else {
+            if (halfFrameStep == 1) currentVfLeft + vf.width else currentVfLeft - gapWidth
+        }
         gap.layoutParams.height = vf.height
         gap.requestLayout()
 
-        // 3. Prepare ViewFinder for "coming in" from right
-        // We want it to end at targetShift. Since everything moves by -totalW, it must start at targetShift + totalW
+        // 3. Prepare ViewFinder for "coming in"
+        // Side-by-side: moves left (-totalW), starts at targetShift + totalW
+        // Top-bottom: moves right (+totalW), starts at targetShift - totalW
         vf.animate().cancel()
-        vf.translationX = targetShift + totalW
+        val moveDirectionFactor = if (isTopBottom) 1f else -1f
+        vf.translationX = targetShift - (moveDirectionFactor * totalW)
 
-        // 4. Animate everything to the left by exactly totalW (full screen width)
+        // 4. Animate everything by exactly totalW
         val duration = 450L
         val interpolator = android.view.animation.AccelerateDecelerateInterpolator()
+        val moveDist = moveDirectionFactor * totalW
 
         snapshot.animate()
-            .translationX(currentVfLeft - totalW)
+            .translationX(currentVfLeft + moveDist)
             .setDuration(duration)
             .setInterpolator(interpolator)
             .withEndAction {
@@ -4435,7 +4481,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             .start()
 
         gap.animate()
-            .translationX(gap.translationX - totalW)
+            .translationX(gap.translationX + moveDist)
             .setDuration(duration)
             .setInterpolator(interpolator)
             .withEndAction { gap.visibility = View.GONE }
@@ -4447,10 +4493,10 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             .setInterpolator(interpolator)
             .start()
 
-        animateFilmEdgeRoll(duration)
+        animateFilmEdgeRoll(isTopBottom, duration)
     }
 
-    private fun animateFilmEdgeRoll(duration: Long = 360L) {
+    private fun animateFilmEdgeRoll(isTopBottom: Boolean, duration: Long = 360L) {
         val uiBinding = cameraUiContainerBinding ?: return
         val topEdge = uiBinding.halfFrameFilmEdgeTop ?: return
         val bottomEdge = uiBinding.halfFrameFilmEdgeBottom ?: return
@@ -4462,18 +4508,19 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         val periodPx = (30f / 1200f) * topEdge.width
         // Move by multiple periods to cover about 40% of the screen width for a "roll" feel
         val rollDistance = periodPx * ( (resources.displayMetrics.widthPixels * 0.4f) / periodPx ).toInt()
+        val dist = if (isTopBottom) rollDistance else -rollDistance
 
         val interpolator = android.view.animation.AccelerateDecelerateInterpolator()
 
         topEdge.animate()
-            .translationX(-rollDistance)
+            .translationX(dist)
             .setDuration(duration)
             .setInterpolator(interpolator)
             .withEndAction { topEdge.translationX = 0f }
             .start()
 
         bottomEdge.animate()
-            .translationX(-rollDistance)
+            .translationX(dist)
             .setDuration(duration)
             .setInterpolator(interpolator)
             .withEndAction { bottomEdge.translationX = 0f }
@@ -4554,10 +4601,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
         // Half-frame forces output orientation. Dot points to the fixed "Up" of the output frame.
         return if (layout == SettingsFragment.HALF_FRAME_LAYOUTS[1]) {
-            // Top-bottom forces Landscape.
-            // Most devices have sensor orientation 90.
-            // So if phone is portrait, Landscape-Up is phone-left (-90).
-            -90f
+            // Top-bottom forces Landscape. Right side is Up.
+            90f
         } else {
             // Side-by-side forces Portrait. Up is phone-top (0).
             0f
