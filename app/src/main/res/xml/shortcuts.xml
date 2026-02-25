@@ -3,7 +3,7 @@
     <shortcut
         android:shortcutId="settings"
         android:enabled="true"
-        android:icon="@drawable/ic_settings"
+        android:icon="@drawable/ic_shortcut_settings"
         android:shortcutShortLabel="@string/settings_shortcut_label">
         <intent
             android:action="android.intent.action.VIEW"

@@ -1453,10 +1453,12 @@ class CameraFragment : Fragment() {
 
     /** Enabled or disabled a button to switch cameras depending on the available cameras */
     private fun updateCameraSwitchButton() {
+        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val showSwitch = prefs.getBoolean(SettingsFragment.KEY_SHOW_CAMERA_SWITCH_BUTTON, true)
         try {
             cameraUiContainerBinding?.cameraSwitchButtonAlt?.isEnabled =
                 hasBackCamera() && hasFrontCamera()
-            cameraUiContainerBinding?.cameraSwitchButtonAlt?.visibility = View.VISIBLE
+            cameraUiContainerBinding?.cameraSwitchButtonAlt?.visibility = if (showSwitch) View.VISIBLE else View.GONE
         } catch (exception: CameraInfoUnavailableException) {
             cameraUiContainerBinding?.cameraSwitchButtonAlt?.isEnabled = false
         }
@@ -2236,8 +2238,8 @@ class CameraFragment : Fragment() {
         val container = binding.lensControlsContainer ?: return
         val row = binding.lensControlRow ?: return
 
-        // Ensure the row containing the switch button is always visible
-        row.visibility = View.VISIBLE
+        // Row visibility is managed by applyUIVisibility()
+        applyUIVisibility()
 
         // Always clear container to avoid stale buttons from previous facings
         container.removeAllViews()
@@ -2342,6 +2344,7 @@ class CameraFragment : Fragment() {
 
     private fun updateLensUI() {
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val showLensControls = prefs.getBoolean(SettingsFragment.KEY_SHOW_LENS_CONTROLS, true)
         currentLens?.let {
             prefs.edit().putString(KEY_SELECTED_LENS_ID, it.sensorId).apply()
         }
@@ -2406,7 +2409,7 @@ class CameraFragment : Fragment() {
             }
         }
 
-        binding.lensControlsCard?.visibility = if (container.childCount > 1) View.VISIBLE else View.GONE
+        binding.lensControlsCard?.visibility = if (container.childCount > 1 && showLensControls) View.VISIBLE else View.GONE
     }
 
     private fun updateZoom(animate: Boolean) {
@@ -4608,14 +4611,25 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         val binding = cameraUiContainerBinding ?: return
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
 
-        binding.hdrPlusPill?.visibility = if (prefs.getBoolean(SettingsFragment.KEY_SHOW_HDR_PLUS_SWITCH, true)) View.VISIBLE else View.GONE
-        binding.settingsButton?.visibility = if (prefs.getBoolean(SettingsFragment.KEY_SHOW_SETTINGS_BUTTON, true)) View.VISIBLE else View.GONE
-        binding.cameraSwitchButtonAlt?.visibility = if (prefs.getBoolean(SettingsFragment.KEY_SHOW_CAMERA_SWITCH_BUTTON, true)) View.VISIBLE else View.GONE
-        binding.modeSwitchButton?.visibility = if (prefs.getBoolean(SettingsFragment.KEY_SHOW_MODE_SWITCH_BUTTON, true)) View.VISIBLE else View.GONE
-        binding.lensControlsCard?.visibility = if (prefs.getBoolean(SettingsFragment.KEY_SHOW_LENS_CONTROLS, true)) {
-            if (binding.lensControlsContainer?.childCount ?: 0 > 1) View.VISIBLE else View.GONE
-        } else View.GONE
-        binding.lutSwitcherButton?.visibility = if (prefs.getBoolean(SettingsFragment.KEY_SHOW_LUT_SWITCHER, true)) View.VISIBLE else View.GONE
+        val showHdrPill = prefs.getBoolean(SettingsFragment.KEY_SHOW_HDR_PLUS_SWITCH, true)
+        val showSettings = prefs.getBoolean(SettingsFragment.KEY_SHOW_SETTINGS_BUTTON, true)
+        val showSwitch = prefs.getBoolean(SettingsFragment.KEY_SHOW_CAMERA_SWITCH_BUTTON, true)
+        val showModeSwitch = prefs.getBoolean(SettingsFragment.KEY_SHOW_MODE_SWITCH_BUTTON, true)
+        val showLensControls = prefs.getBoolean(SettingsFragment.KEY_SHOW_LENS_CONTROLS, true)
+        val showLutSwitcher = prefs.getBoolean(SettingsFragment.KEY_SHOW_LUT_SWITCHER, true)
+
+        binding.hdrPlusPill?.visibility = if (showHdrPill) View.VISIBLE else View.GONE
+        binding.settingsButton?.visibility = if (showSettings) View.VISIBLE else View.GONE
+        binding.cameraSwitchButtonAlt?.visibility = if (showSwitch) View.VISIBLE else View.GONE
+        binding.modeSwitchButton?.visibility = if (showModeSwitch) View.VISIBLE else View.GONE
+
+        val hasMultipleLenses = binding.lensControlsContainer?.childCount ?: 0 > 1
+        binding.lensControlsCard?.visibility = if (showLensControls && hasMultipleLenses) View.VISIBLE else View.GONE
+
+        // Hide the whole row if all its components are hidden
+        binding.lensControlRow?.visibility = if (showSwitch || showModeSwitch || (showLensControls && hasMultipleLenses)) View.VISIBLE else View.GONE
+
+        binding.lutSwitcherButton?.visibility = if (showLutSwitcher) View.VISIBLE else View.GONE
 
         // Update Flash/Underexposure button as well
         updateHdrPlusConstraints()
