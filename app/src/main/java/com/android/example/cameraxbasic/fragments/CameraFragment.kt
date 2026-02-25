@@ -4394,14 +4394,11 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             val layout = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUTS[0])
             val isTopBottom = layout == SettingsFragment.HALF_FRAME_LAYOUTS[1]
 
-            val targetShift = if (isTopBottom) {
-                if (halfFrameStep == 0) shift else -shift
-            } else {
-                if (halfFrameStep == 0) -shift else shift
-            }
+            val baseShift = if (halfFrameStep == 0) -shift else shift
+            val targetShift = if (isTopBottom) -baseShift else baseShift
 
             if (animate) {
-                performHalfFrameAdvanceAnimation(targetShift, totalW, gapWidthScaled)
+                performHalfFrameAdvanceAnimation(targetShift, totalW, gapWidthScaled, isTopBottom)
             } else {
                 vfBinding.viewFinder.animate().cancel()
                 vfBinding.viewFinder.translationX = targetShift
@@ -4425,13 +4422,11 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         }
     }
 
-    private fun performHalfFrameAdvanceAnimation(targetShift: Float, totalW: Float, gapWidth: Float) {
+    private fun performHalfFrameAdvanceAnimation(targetShift: Float, totalW: Float, gapWidth: Float, isTopBottom: Boolean) {
         val uiBinding = cameraUiContainerBinding ?: return
         val vf = fragmentCameraBinding.viewFinder
         val snapshot = uiBinding.halfFrameSnapshot ?: return
         val gap = uiBinding.halfFrameGapIndicator ?: return
-        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        val isTopBottom = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUTS[0]) == SettingsFragment.HALF_FRAME_LAYOUTS[1]
 
         // VF base position (centered) is (totalW - vf.width) / 2
         val vfBaseX = (totalW - vf.width) / 2f
@@ -4498,15 +4493,13 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             .setInterpolator(interpolator)
             .start()
 
-        animateFilmEdgeRoll(duration)
+        animateFilmEdgeRoll(isTopBottom, duration)
     }
 
-    private fun animateFilmEdgeRoll(duration: Long = 360L) {
+    private fun animateFilmEdgeRoll(isTopBottom: Boolean, duration: Long = 360L) {
         val uiBinding = cameraUiContainerBinding ?: return
         val topEdge = uiBinding.halfFrameFilmEdgeTop ?: return
         val bottomEdge = uiBinding.halfFrameFilmEdgeBottom ?: return
-        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        val isTopBottom = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUTS[0]) == SettingsFragment.HALF_FRAME_LAYOUTS[1]
 
         topEdge.animate().cancel()
         bottomEdge.animate().cancel()
