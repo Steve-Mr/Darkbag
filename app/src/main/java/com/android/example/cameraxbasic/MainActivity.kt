@@ -54,7 +54,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun handleIntent(intent: Intent) {
-        if (intent.getStringExtra("shortcut") == "settings") {
+        if (intent.getStringExtra(SHORTCUT_EXTRA_KEY) == SHORTCUT_VALUE_SETTINGS) {
             val navHostFragment = supportFragmentManager.findFragmentById(R.id.fragment_container) as? NavHostFragment
             navHostFragment?.navController?.let { navController ->
                 // Ensure we are not already on settings
@@ -89,6 +89,11 @@ class MainActivity : AppCompatActivity() {
         } else {
             super.onBackPressed()
         }
+    }
+
+    companion object {
+        const val SHORTCUT_EXTRA_KEY = "shortcut"
+        const val SHORTCUT_VALUE_SETTINGS = "settings"
     }
 
 }
