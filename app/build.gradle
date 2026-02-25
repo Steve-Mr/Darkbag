@@ -20,11 +20,11 @@ apply plugin: 'kotlin-kapt'
 apply plugin: "androidx.navigation.safeargs.kotlin"
 
 android {
-    namespace 'com.android.example.cameraxbasic'
+    namespace 'top.maary.darkbag'
     compileSdkVersion 35
     defaultConfig {
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
-        applicationId "com.android.example.cameraxbasic"
+        applicationId "top.maary.darkbag"
         minSdkVersion 24
         targetSdkVersion 35
         versionCode 1

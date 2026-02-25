@@ -22,7 +22,7 @@
 
     <fragment
         android:id="@+id/permissions_fragment"
-        android:name="com.android.example.cameraxbasic.fragments.PermissionsFragment"
+        android:name="top.maary.darkbag.fragments.PermissionsFragment"
         android:label="PermissionsFragment" >
 
         <action
@@ -35,7 +35,7 @@
 
     <fragment
         android:id="@+id/camera_fragment"
-        android:name="com.android.example.cameraxbasic.fragments.CameraFragment"
+        android:name="top.maary.darkbag.fragments.CameraFragment"
         android:label="CameraFragment" >
 
         <action
@@ -52,7 +52,7 @@
 
     <fragment
         android:id="@+id/settings_fragment"
-        android:name="com.android.example.cameraxbasic.fragments.SettingsFragment"
+        android:name="top.maary.darkbag.fragments.SettingsFragment"
         android:label="SettingsFragment">
 
         <action
@@ -62,7 +62,7 @@
 
     <fragment
         android:id="@+id/lut_management_fragment"
-        android:name="com.android.example.cameraxbasic.fragments.LutManagementFragment"
+        android:name="top.maary.darkbag.fragments.LutManagementFragment"
         android:label="Manage LUTs" />
 
 </navigation>

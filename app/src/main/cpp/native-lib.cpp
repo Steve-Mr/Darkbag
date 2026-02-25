@@ -16,7 +16,7 @@
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 
 extern "C" JNIEXPORT jint JNICALL
-Java_com_android_example_cameraxbasic_processor_ColorProcessor_processRaw(
+Java_top_maary_darkbag_processor_ColorProcessor_processRaw(
         JNIEnv* env,
         jobject /* this */,
         jbyteArray dngData,
@@ -142,7 +142,7 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processRaw(
 }
 
 extern "C" JNIEXPORT jfloatArray JNICALL
-Java_com_android_example_cameraxbasic_processor_ColorProcessor_loadLutData(
+Java_top_maary_darkbag_processor_ColorProcessor_loadLutData(
         JNIEnv* env,
         jobject /* this */,
         jstring lutPath) {

@@ -376,7 +376,7 @@
                 app:layout_constraintBottom_toBottomOf="@id/camera_capture_button"
                 android:layout_marginEnd="20dp" />
 
-            <com.android.example.cameraxbasic.ui.ExpressiveShutterButton
+            <top.maary.darkbag.ui.ExpressiveShutterButton
                 android:id="@+id/camera_capture_button"
                 android:layout_width="@dimen/shutter_button_size"
                 android:layout_height="@dimen/shutter_button_size"

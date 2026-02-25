@@ -678,7 +678,7 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
     TIFFSetField(tif, TIFFTAG_MAKE, make);
     static const char* model = "HDR+ Device";
     TIFFSetField(tif, TIFFTAG_MODEL, model);
-    static const char* software = "CameraXBasic HDR+";
+    static const char* software = "Darkbag HDR+";
     TIFFSetField(tif, TIFFTAG_SOFTWARE, software);
 
     time_t raw_time = (time_t)(captureTimeMillis / 1000);
