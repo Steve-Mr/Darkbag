@@ -23,6 +23,7 @@ import android.view.KeyEvent
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
+import androidx.navigation.fragment.NavHostFragment
 import com.android.example.cameraxbasic.databinding.ActivityMainBinding
 import com.google.android.material.color.DynamicColors
 
@@ -43,6 +44,25 @@ class MainActivity : AppCompatActivity() {
         DynamicColors.applyToActivityIfAvailable(this)
         activityMainBinding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(activityMainBinding.root)
+
+        handleIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleIntent(intent)
+    }
+
+    private fun handleIntent(intent: Intent) {
+        if (intent.getStringExtra("shortcut") == "settings") {
+            val navHostFragment = supportFragmentManager.findFragmentById(R.id.fragment_container) as? NavHostFragment
+            navHostFragment?.navController?.let { navController ->
+                // Ensure we are not already on settings
+                if (navController.currentDestination?.id != R.id.settings_fragment) {
+                    navController.navigate(R.id.settings_fragment)
+                }
+            }
+        }
     }
 
     override fun onResume() {

@@ -427,6 +427,7 @@ class CameraFragment : Fragment() {
         readScopedHalfFrameState(prefs, requireFileForStep1 = true)
         updateHalfFrameUI()
         cameraUiContainerBinding?.modeSwitchButton?.let { updateModeSwitchIcon(it) }
+        applyUIVisibility()
     }
 
     override fun onDestroyView() {
@@ -626,6 +627,8 @@ class CameraFragment : Fragment() {
             // Build UI controls
             updateCameraUi()
 
+            applyUIVisibility()
+
             // Initialize LUT Processor early to be ready for any engine
             if (lutProcessor == null) {
                 lutProcessor = LutSurfaceProcessor()
@@ -737,7 +740,15 @@ class CameraFragment : Fragment() {
         // Initially don't initialize cameraProvider unless needed.
         // But we need to know lensFacing.
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        lensFacing = prefs.getInt(KEY_LENS_FACING, CameraSelector.LENS_FACING_BACK)
+
+        val defaultLensId = prefs.getString(SettingsFragment.KEY_DEFAULT_LENS_ID, null)
+        if (defaultLensId != null) {
+            val facing = cameraRepository.getFacingOfSensorId(defaultLensId)
+            lensFacing = if (facing == android.hardware.camera2.CameraCharacteristics.LENS_FACING_FRONT)
+                CameraSelector.LENS_FACING_FRONT else CameraSelector.LENS_FACING_BACK
+        } else {
+            lensFacing = prefs.getInt(KEY_LENS_FACING, CameraSelector.LENS_FACING_BACK)
+        }
 
         // Initialize Lenses
         withContext(Dispatchers.Default) {
@@ -3609,9 +3620,11 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
     private fun updateHdrPlusConstraints() {
         val binding = cameraUiContainerBinding ?: return
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val showFlashButton = prefs.getBoolean(SettingsFragment.KEY_SHOW_HDR_UNDEREXPOSURE_BUTTON, true)
+
         if (isHdrPlusEnabled) {
             // Hide and disable flash
-            if (prefs.getBoolean(SettingsFragment.KEY_SHOW_HDR_UNDEREXPOSURE_BUTTON, true)) {
+            if (showFlashButton) {
                 binding.flashButton?.visibility = View.VISIBLE
                 updateUnderexposureButton()
             } else {
@@ -3645,7 +3658,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 }
             } catch (e: Exception) { false }
 
-            binding.flashButton?.visibility = if (hasFlash) View.VISIBLE else View.GONE
+            binding.flashButton?.visibility = if (hasFlash && showFlashButton) View.VISIBLE else View.GONE
             if (hasFlash && binding.flashButton != null) {
                 updateFlashIcon(binding.flashButton!!)
             }
@@ -4589,6 +4602,23 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
     private fun updateShutterOrientation() {
         rotateShutter(getDotTargetRotation())
+    }
+
+    private fun applyUIVisibility() {
+        val binding = cameraUiContainerBinding ?: return
+        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+
+        binding.hdrPlusPill?.visibility = if (prefs.getBoolean(SettingsFragment.KEY_SHOW_HDR_PLUS_SWITCH, true)) View.VISIBLE else View.GONE
+        binding.settingsButton?.visibility = if (prefs.getBoolean(SettingsFragment.KEY_SHOW_SETTINGS_BUTTON, true)) View.VISIBLE else View.GONE
+        binding.cameraSwitchButtonAlt?.visibility = if (prefs.getBoolean(SettingsFragment.KEY_SHOW_CAMERA_SWITCH_BUTTON, true)) View.VISIBLE else View.GONE
+        binding.modeSwitchButton?.visibility = if (prefs.getBoolean(SettingsFragment.KEY_SHOW_MODE_SWITCH_BUTTON, true)) View.VISIBLE else View.GONE
+        binding.lensControlsCard?.visibility = if (prefs.getBoolean(SettingsFragment.KEY_SHOW_LENS_CONTROLS, true)) {
+            if (binding.lensControlsContainer?.childCount ?: 0 > 1) View.VISIBLE else View.GONE
+        } else View.GONE
+        binding.lutSwitcherButton?.visibility = if (prefs.getBoolean(SettingsFragment.KEY_SHOW_LUT_SWITCHER, true)) View.VISIBLE else View.GONE
+
+        // Update Flash/Underexposure button as well
+        updateHdrPlusConstraints()
     }
 
     private fun getDotTargetRotation(): Float {

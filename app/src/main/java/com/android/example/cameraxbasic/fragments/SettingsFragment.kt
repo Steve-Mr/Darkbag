@@ -166,7 +166,7 @@ class SettingsFragment : Fragment() {
         }
 
         // Default Lens (Startup)
-        val lenses = cameraRepository.getFocalLengthPresets(emptySet())
+        val lenses = cameraRepository.getAllFocalLengthPresets(emptySet())
         val lensDisplayNames = lenses.map { it.name }
         val lensAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, lensDisplayNames)
         binding.menuDefaultLens.setAdapter(lensAdapter)
@@ -332,9 +332,39 @@ class SettingsFragment : Fragment() {
             prefs.edit().putBoolean(KEY_HDR_PLUS_OIS, isChecked).apply()
         }
 
+        binding.switchShowHdrPlusSwitch.isChecked = prefs.getBoolean(KEY_SHOW_HDR_PLUS_SWITCH, true)
+        binding.switchShowHdrPlusSwitch.setOnCheckedChangeListener { _, isChecked ->
+            prefs.edit().putBoolean(KEY_SHOW_HDR_PLUS_SWITCH, isChecked).apply()
+        }
+
         binding.switchShowUnderexposureButton.isChecked = prefs.getBoolean(KEY_SHOW_HDR_UNDEREXPOSURE_BUTTON, true)
         binding.switchShowUnderexposureButton.setOnCheckedChangeListener { _, isChecked ->
             prefs.edit().putBoolean(KEY_SHOW_HDR_UNDEREXPOSURE_BUTTON, isChecked).apply()
+        }
+
+        binding.switchShowSettingsButton.isChecked = prefs.getBoolean(KEY_SHOW_SETTINGS_BUTTON, true)
+        binding.switchShowSettingsButton.setOnCheckedChangeListener { _, isChecked ->
+            prefs.edit().putBoolean(KEY_SHOW_SETTINGS_BUTTON, isChecked).apply()
+        }
+
+        binding.switchShowCameraSwitchButton.isChecked = prefs.getBoolean(KEY_SHOW_CAMERA_SWITCH_BUTTON, true)
+        binding.switchShowCameraSwitchButton.setOnCheckedChangeListener { _, isChecked ->
+            prefs.edit().putBoolean(KEY_SHOW_CAMERA_SWITCH_BUTTON, isChecked).apply()
+        }
+
+        binding.switchShowModeSwitchButton.isChecked = prefs.getBoolean(KEY_SHOW_MODE_SWITCH_BUTTON, true)
+        binding.switchShowModeSwitchButton.setOnCheckedChangeListener { _, isChecked ->
+            prefs.edit().putBoolean(KEY_SHOW_MODE_SWITCH_BUTTON, isChecked).apply()
+        }
+
+        binding.switchShowLensControls.isChecked = prefs.getBoolean(KEY_SHOW_LENS_CONTROLS, true)
+        binding.switchShowLensControls.setOnCheckedChangeListener { _, isChecked ->
+            prefs.edit().putBoolean(KEY_SHOW_LENS_CONTROLS, isChecked).apply()
+        }
+
+        binding.switchShowLutSwitcher.isChecked = prefs.getBoolean(KEY_SHOW_LUT_SWITCHER, true)
+        binding.switchShowLutSwitcher.setOnCheckedChangeListener { _, isChecked ->
+            prefs.edit().putBoolean(KEY_SHOW_LUT_SWITCHER, isChecked).apply()
         }
 
         binding.switchForce60fps.isChecked = prefs.getBoolean(KEY_FORCE_60FPS, false)
@@ -438,6 +468,12 @@ class SettingsFragment : Fragment() {
         const val KEY_HDR_BURST_COUNT = "hdr_burst_count"
         const val KEY_HDR_UNDEREXPOSURE_MODE = "hdr_underexposure_mode"
         const val KEY_SHOW_HDR_UNDEREXPOSURE_BUTTON = "show_hdr_underexposure_button"
+        const val KEY_SHOW_HDR_PLUS_SWITCH = "show_hdr_plus_switch"
+        const val KEY_SHOW_SETTINGS_BUTTON = "show_settings_button"
+        const val KEY_SHOW_CAMERA_SWITCH_BUTTON = "show_camera_switch_button"
+        const val KEY_SHOW_MODE_SWITCH_BUTTON = "show_mode_switch_button"
+        const val KEY_SHOW_LENS_CONTROLS = "show_lens_controls"
+        const val KEY_SHOW_LUT_SWITCHER = "show_lut_switcher"
         const val KEY_USE_CAMERAX = "use_camerax_engine"
         const val KEY_MIRROR_FRONT_CAMERA = "mirror_front_camera"
         const val KEY_HDR_PLUS_OIS = "hdr_plus_ois_enabled"
