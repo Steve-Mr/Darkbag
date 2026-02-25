@@ -1308,10 +1308,10 @@ class CameraFragment : Fragment() {
 
                 val layout = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUTS[0])
                 val lockedRot = if (layout == SettingsFragment.HALF_FRAME_LAYOUTS[1]) {
-                    // Top-bottom: Landscape Left (90) -> 0, Landscape Right (270) -> 180
-                    if (deviceOrientationDegrees == 270) 180 else 0
+                    // Top-bottom: Default is Right-side-up (270). Flipped if Left-side-up (90).
+                    if (deviceOrientationDegrees == 90) 180 else 0
                 } else {
-                    // Side-by-side: Portrait (0) -> 0, Upside Down (180) -> 180
+                    // Side-by-side: Default is Portrait (0). Flipped if Upside Down (180).
                     if (deviceOrientationDegrees == 180) 180 else 0
                 }
 
@@ -2500,14 +2500,26 @@ class CameraFragment : Fragment() {
                 .get(android.hardware.camera2.CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
         } catch (e: Exception) { 0 }
 
-        val effectiveDeviceRotation = if (isHalfFrameModeEnabled && halfFrameStep != 0) {
-            // Use locked orientation for Shot 2 to ensure consistency with Shot 1
+        val effectiveDeviceRotation = if (isHalfFrameModeEnabled) {
             val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
             val layout = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUTS[0])
-            if (layout == SettingsFragment.HALF_FRAME_LAYOUTS[1]) {
-                if (halfFrameLockedRotation == 180) 270 else 90
+
+            val lockedRot = if (halfFrameStep != 0) {
+                halfFrameLockedRotation
             } else {
-                if (halfFrameLockedRotation == 180) 180 else 0
+                if (layout == SettingsFragment.HALF_FRAME_LAYOUTS[1]) {
+                    if (deviceOrientationDegrees == 90) 180 else 0
+                } else {
+                    if (deviceOrientationDegrees == 180) 180 else 0
+                }
+            }
+
+            if (layout == SettingsFragment.HALF_FRAME_LAYOUTS[1]) {
+                // Top-bottom: Standard (0) -> Right side up (270). Flipped (180) -> Left side up (90).
+                if (lockedRot == 180) 90 else 270
+            } else {
+                // Side-by-side: Standard (0) -> Portrait (0). Flipped (180) -> Upside Down (180).
+                if (lockedRot == 180) 180 else 0
             }
         } else {
             deviceOrientationDegrees
@@ -4397,15 +4409,27 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             vfBinding.viewFinder.scaleY = 1f
 
             val layout = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUTS[0])
-            val targetUiRotation = if (halfFrameStep != 0) {
-                halfFrameLockedRotation.toFloat()
+            val isTopBottom = layout == SettingsFragment.HALF_FRAME_LAYOUTS[1]
+
+            // Apply Aspect Ratio immediately
+            if (isTopBottom) {
+                vfBinding.viewFinder.setAspectRatio(4, 3)
             } else {
-                if (layout == SettingsFragment.HALF_FRAME_LAYOUTS[1]) {
-                    // Top-bottom: Landscape Left (90) -> 0, Landscape Right (270) -> 180
-                    if (deviceOrientationDegrees == 270) 180f else 0f
+                vfBinding.viewFinder.setAspectRatio(3, 4)
+            }
+
+            val currentLockedRot = if (halfFrameStep != 0) halfFrameLockedRotation else {
+                if (isTopBottom) {
+                    if (deviceOrientationDegrees == 90) 180 else 0
                 } else {
-                    if (deviceOrientationDegrees == 180) 180f else 0f
+                    if (deviceOrientationDegrees == 180) 180 else 0
                 }
+            }
+
+            val targetUiRotation = if (isTopBottom) {
+                if (currentLockedRot == 180) 270f else 90f
+            } else {
+                currentLockedRot.toFloat()
             }
 
             // Animate UI rotation if it changed
@@ -4441,7 +4465,15 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         val snapshot = uiBinding.halfFrameSnapshot ?: return
         val gap = uiBinding.halfFrameGapIndicator ?: return
 
-        val isFlipped = abs(uiRotation - 180f) < 0.1f
+        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val layout = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUTS[0])
+        val isTopBottom = layout == SettingsFragment.HALF_FRAME_LAYOUTS[1]
+
+        val isFlipped = if (isTopBottom) {
+            abs(uiRotation - 270f) < 0.1f
+        } else {
+            abs(uiRotation - 180f) < 0.1f
+        }
         // If flipped 180, on-screen Left/Right are reversed relative to code.
         // We want the visual slide to always be "towards the take-up spool" which is "Left" in standard UI.
         // When rotated 180, code translation +X moves visually LEFT on screen.
@@ -4620,28 +4652,23 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
         val layout = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUTS[0])
+        val isTopBottom = layout == SettingsFragment.HALF_FRAME_LAYOUTS[1]
 
-        // Half-frame forces output orientation. Dot points to the fixed "Up" of the output frame.
-        if (layout == SettingsFragment.HALF_FRAME_LAYOUTS[1]) {
-            // Top-bottom forces Landscape.
-            val uiRotation = if (halfFrameStep != 0) {
-                halfFrameLockedRotation.toFloat()
+        val lockedRot = if (halfFrameStep != 0) halfFrameLockedRotation else {
+            if (isTopBottom) {
+                if (deviceOrientationDegrees == 90) 180 else 0
             } else {
-                if (deviceOrientationDegrees == 270) 180f else 0f
+                if (deviceOrientationDegrees == 180) 180 else 0
             }
-            // Standard (uiRotation 0): Right side up -> Dot points Right (90)
-            // Flipped (uiRotation 180): Left side up -> Dot points Left (-90)
-            return if (uiRotation == 180f) -90f else 90f
-        } else {
-            // Side-by-side forces Portrait.
-            // Standard (Top side up): 0. Flipped (Bottom side up): 180.
-            val uiRotation = if (halfFrameStep != 0) {
-                halfFrameLockedRotation.toFloat()
-            } else {
-                if (deviceOrientationDegrees == 180) 180f else 0f
-            }
-            return uiRotation
         }
+
+        val targetSide = if (isTopBottom) {
+            if (lockedRot == 180) 270 else 90 // 90 CW = Right side, 270 CW = Left side
+        } else {
+            if (lockedRot == 180) 180 else 0 // 0 = Top, 180 = Bottom
+        }
+
+        return (targetSide - deviceOrientationDegrees + 360) % 360f
     }
 
     private fun resetBurstUi() {
