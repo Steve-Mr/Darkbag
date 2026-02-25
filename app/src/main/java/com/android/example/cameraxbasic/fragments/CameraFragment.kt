@@ -296,15 +296,18 @@ class CameraFragment : Fragment() {
                     updateShutterOrientation()
                 }
 
-                val rotation = when (orientation) {
-                    in 45 until 135 -> android.view.Surface.ROTATION_270
-                    in 135 until 225 -> android.view.Surface.ROTATION_180
-                    in 225 until 315 -> android.view.Surface.ROTATION_90
-                    else -> android.view.Surface.ROTATION_0
-                }
+                if (!isHalfFrameModeEnabled) {
+                    val rotation = when (orientation) {
+                        in 45 until 135 -> android.view.Surface.ROTATION_270
+                        in 135 until 225 -> android.view.Surface.ROTATION_180
+                        in 225 until 315 -> android.view.Surface.ROTATION_90
+                        else -> android.view.Surface.ROTATION_0
+                    }
 
-                imageCapture?.targetRotation = rotation
-                imageAnalyzer?.targetRotation = rotation
+                    imageCapture?.targetRotation = rotation
+                    imageAnalyzer?.targetRotation = rotation
+                    preview?.targetRotation = rotation
+                }
             }
         }
     }
@@ -378,7 +381,9 @@ class CameraFragment : Fragment() {
         override fun onDisplayChanged(displayId: Int) = view?.let { view ->
             if (displayId == this@CameraFragment.displayId) {
                 Log.d(TAG, "Rotation changed: ${view.display.rotation}")
-                preview?.targetRotation = view.display.rotation
+                if (!isHalfFrameModeEnabled) {
+                    preview?.targetRotation = view.display.rotation
+                }
             }
         } ?: Unit
     }
@@ -2484,12 +2489,20 @@ class CameraFragment : Fragment() {
                 .get(android.hardware.camera2.CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
         } catch (e: Exception) { 0 }
 
-        val combined = if (lensFacing == CameraSelector.LENS_FACING_FRONT) {
-            (sensorOrientation - deviceOrientationDegrees + 360) % 360
+        val effectiveDegrees = if (isHalfFrameModeEnabled) {
+            val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+            val layout = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUTS[0])
+            if (layout == SettingsFragment.HALF_FRAME_LAYOUTS[1]) 270 else 0
         } else {
-            (sensorOrientation + deviceOrientationDegrees) % 360
+            deviceOrientationDegrees
         }
-        Log.d(TAG, "getCombinedOrientation: sensor=$sensorOrientation, device=$deviceOrientationDegrees, facing=$lensFacing -> combined=$combined")
+
+        val combined = if (lensFacing == CameraSelector.LENS_FACING_FRONT) {
+            (sensorOrientation - effectiveDegrees + 360) % 360
+        } else {
+            (sensorOrientation + effectiveDegrees) % 360
+        }
+        Log.d(TAG, "getCombinedOrientation: sensor=$sensorOrientation, effective=$effectiveDegrees, facing=$lensFacing -> combined=$combined")
         return combined
     }
 
@@ -4310,6 +4323,18 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     uiBinding.photoViewButton?.visibility = View.VISIBLE
                     uiBinding.photoViewButton?.alpha = 1f
                 }
+
+                // Restore dynamic rotation for use cases
+                val rotation = when (deviceOrientationDegrees) {
+                    90 -> android.view.Surface.ROTATION_270
+                    180 -> android.view.Surface.ROTATION_180
+                    270 -> android.view.Surface.ROTATION_90
+                    else -> android.view.Surface.ROTATION_0
+                }
+                preview?.targetRotation = rotation
+                imageCapture?.targetRotation = rotation
+                imageAnalyzer?.targetRotation = rotation
+
                 return@post
             }
 
@@ -4387,6 +4412,16 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             if (vfBinding.viewFinder.translationY != 0f) {
                 vfBinding.viewFinder.translationY = 0f
             }
+
+            // Force fixed rotation for half-frame mode
+            val rotation = if (isTopBottom) {
+                android.view.Surface.ROTATION_90 // Corresponds to 270 orientation (Right is Up)
+            } else {
+                android.view.Surface.ROTATION_0 // Corresponds to 0 orientation (Top is Up)
+            }
+            preview?.targetRotation = rotation
+            imageCapture?.targetRotation = rotation
+            imageAnalyzer?.targetRotation = rotation
         }
     }
 
