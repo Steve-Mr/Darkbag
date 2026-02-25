@@ -4,7 +4,7 @@
     xmlns:tools="http://schemas.android.com/tools"
     tools:parentTag="androidx.constraintlayout.widget.ConstraintLayout">
 
-    <!-- Transparent Touch Overlay for dismissing menus -->
+    <!-- Transparent Touch Overlay -->
     <View
         android:id="@+id/touch_overlay"
         android:layout_width="0dp"
@@ -13,278 +13,159 @@
         android:focusable="true"
         android:visibility="gone"
         app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintBottom_toTopOf="@id/manual_controls_root"
+        app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
 
-    <ImageView
-        android:id="@+id/half_frame_snapshot"
-        android:layout_width="0dp"
-        android:layout_height="0dp"
-        android:scaleType="centerCrop"
-        android:visibility="gone"
-        app:layout_constraintTop_toTopOf="@id/view_finder"
-        app:layout_constraintBottom_toBottomOf="@id/view_finder"
-        app:layout_constraintStart_toStartOf="parent" />
-
-    <View
-        android:id="@+id/half_frame_gap_indicator"
-        android:layout_width="0dp"
-        android:layout_height="0dp"
-        android:background="@android:color/black"
-        android:visibility="gone"
-        app:layout_constraintTop_toTopOf="@id/view_finder"
-        app:layout_constraintBottom_toBottomOf="@id/view_finder"
-        app:layout_constraintStart_toStartOf="parent" />
-
-    <View
-        android:id="@+id/half_frame_film_edge_top"
-        android:layout_width="1200dp"
-        android:layout_height="32dp"
-        android:background="@drawable/bg_film_edge"
-        android:visibility="gone"
-        app:layout_constraintBottom_toTopOf="@id/view_finder"
-        app:layout_constraintStart_toStartOf="parent" />
-
-    <View
-        android:id="@+id/half_frame_film_edge_bottom"
-        android:layout_width="1200dp"
-        android:layout_height="32dp"
-        android:background="@drawable/bg_film_edge"
-        android:rotation="180"
-        android:visibility="gone"
-        app:layout_constraintTop_toBottomOf="@id/view_finder"
-        app:layout_constraintStart_toStartOf="parent" />
-
-    <View
-        android:id="@+id/view_finder_blackout"
-        android:layout_width="0dp"
-        android:layout_height="0dp"
-        android:background="@android:color/black"
-        android:visibility="invisible"
-        app:layout_constraintTop_toTopOf="@id/view_finder"
-        app:layout_constraintBottom_toBottomOf="@id/view_finder"
-        app:layout_constraintStart_toStartOf="@id/view_finder"
-        app:layout_constraintEnd_toEndOf="@id/view_finder" />
-
-
-    <!-- Top Left Controls (HDR+ Pill) -->
-    <com.google.android.material.card.MaterialCardView
-        android:id="@+id/hdr_plus_pill"
-        android:layout_width="140dp"
-        android:layout_height="48dp"
-        android:layout_marginStart="@dimen/margin_medium"
-        app:cardCornerRadius="24dp"
-        app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
-        app:strokeWidth="0dp"
-        app:layout_constraintTop_toTopOf="@id/top_right_controls"
-        app:layout_constraintBottom_toBottomOf="@id/top_right_controls"
-        app:layout_constraintStart_toStartOf="parent">
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:orientation="horizontal"
-            android:gravity="center"
-            android:paddingHorizontal="8dp">
-
-            <TextView
-                android:id="@+id/tv_hdr_status"
-                android:layout_width="56dp"
-                android:layout_height="wrap_content"
-                android:gravity="center"
-                android:text="OFF"
-                android:textAppearance="@style/TextAppearance.Material3.LabelLarge"
-                android:layout_marginEnd="4dp" />
-
-            <com.google.android.material.materialswitch.MaterialSwitch
-                android:id="@+id/hdr_plus_switch"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:visibility="visible" />
-        </LinearLayout>
-    </com.google.android.material.card.MaterialCardView>
-
+    <!-- Top Bar Controls -->
     <LinearLayout
-        android:id="@+id/top_right_controls"
-        android:layout_width="wrap_content"
+        android:id="@+id/top_bar"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
-        android:layout_marginEnd="@dimen/margin_medium"
         android:gravity="center_vertical"
-        app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintEnd_toEndOf="parent">
+        android:padding="@dimen/margin_small"
+        app:layout_constraintTop_toTopOf="parent">
+
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/hdr_plus_pill"
+            android:layout_width="wrap_content"
+            android:layout_height="48dp"
+            app:cardCornerRadius="24dp"
+            app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+            app:strokeWidth="0dp">
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
+                android:orientation="horizontal"
+                android:gravity="center"
+                android:paddingHorizontal="16dp">
+
+                <TextView
+                    android:id="@+id/tv_hdr_status"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="OFF"
+                    android:textAppearance="@style/TextAppearance.Material3.LabelLarge"
+                    android:layout_marginEnd="8dp" />
+
+                <com.google.android.material.materialswitch.MaterialSwitch
+                    android:id="@+id/hdr_plus_switch"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <View
+            android:layout_width="0dp"
+            android:layout_height="1dp"
+            android:layout_weight="1" />
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/flash_button"
             style="@style/Widget.App.Button.IconButton.Large"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
             android:layout_marginEnd="@dimen/spacing_medium"
             app:icon="@drawable/ic_flash_off"
             app:iconTint="?attr/colorOnSurface"
             android:backgroundTint="?attr/colorSurfaceContainerHigh"
-            android:contentDescription="@string/toggle_flash"
             android:visibility="gone" />
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/settings_button"
             style="@style/Widget.App.Button.IconButton.Large"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
             app:icon="@drawable/ic_settings"
             app:iconTint="?attr/colorOnSurface"
-            android:backgroundTint="?attr/colorSurfaceContainerHigh"
-            android:contentDescription="@string/settings_button_alt" />
+            android:backgroundTint="?attr/colorSurfaceContainerHigh" />
+
     </LinearLayout>
 
-    <!-- Unified Controls Hub (Zoom & Physical Lenses) -->
-    <LinearLayout
-        android:id="@+id/lens_control_row"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:gravity="center_vertical"
-        android:layout_marginBottom="@dimen/margin_xsmall"
-        android:visibility="visible"
-        app:layout_constraintBottom_toTopOf="@id/manual_controls_root"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent">
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/camera_switch_button_alt"
-            style="@style/Widget.App.Button.IconButton.Large"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginEnd="@dimen/spacing_small"
-            app:icon="@drawable/ic_switch"
-            app:iconTint="?attr/colorOnSurface"
-            android:backgroundTint="?attr/colorSurfaceContainerHighest"
-            android:contentDescription="@string/switch_camera_button_alt" />
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/mode_switch_button"
-            style="@style/Widget.App.Button.IconButton.Large"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginEnd="@dimen/spacing_small"
-            app:icon="@drawable/ic_mode_normal"
-            app:iconTint="?attr/colorOnSurface"
-            android:backgroundTint="?attr/colorSurfaceContainerHighest"
-            android:contentDescription="Switch Capture Mode" />
-
-        <com.google.android.material.card.MaterialCardView
-            android:id="@+id/lens_controls_card"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            app:cardCornerRadius="26dp"
-            app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
-            app:strokeWidth="0dp"
-            android:visibility="gone">
-
-            <HorizontalScrollView
-                android:id="@+id/controls_hub_scroll"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:paddingHorizontal="4dp"
-                android:clipToPadding="false"
-                android:scrollbars="none">
-
-                <LinearLayout
-                    android:id="@+id/lens_controls_container"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:paddingVertical="4dp"
-                    android:orientation="horizontal"
-                    android:gravity="center_vertical" />
-            </HorizontalScrollView>
-        </com.google.android.material.card.MaterialCardView>
-    </LinearLayout>
-
-    <!-- Manual Controls Panel -->
+    <!-- Unified Control Island (Bottom) -->
     <com.google.android.material.card.MaterialCardView
-        android:id="@+id/manual_controls_root"
+        android:id="@+id/bottom_island_card"
+        android:theme="@style/ThemeOverlay.App.VibrantIsland"
         style="@style/Widget.App.Card.ControlPanel"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginHorizontal="@dimen/margin_medium"
-        android:layout_marginBottom="@dimen/spacing_medium"
-        android:visibility="gone"
-        app:layout_constraintBottom_toTopOf="@id/bottom_island_card"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent">
+        android:layout_margin="@dimen/margin_small"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:cardBackgroundColor="?attr/colorSurfaceContainer">
 
-        <LinearLayout
+        <androidx.constraintlayout.widget.ConstraintLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:padding="@dimen/padding_medium">
+            android:paddingBottom="@dimen/padding_small">
 
-            <!-- Tabs -->
-            <com.google.android.material.button.MaterialButtonToggleGroup
-                android:id="@+id/manual_tabs"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:gravity="center"
-                app:selectionRequired="false"
-                app:singleSelection="true">
-
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btn_tab_focus"
-                    style="@style/Widget.Material3.Button.OutlinedButton"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="Focus" />
-
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btn_tab_iso"
-                    style="@style/Widget.Material3.Button.OutlinedButton"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="ISO" />
-
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btn_tab_shutter"
-                    style="@style/Widget.Material3.Button.OutlinedButton"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="Sec" />
-
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btn_tab_ev"
-                    style="@style/Widget.Material3.Button.OutlinedButton"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="EV" />
-            </com.google.android.material.button.MaterialButtonToggleGroup>
-
-            <!-- Control Panel -->
+            <!-- Manual Controls Hub -->
             <LinearLayout
-                android:id="@+id/manual_panel"
+                android:id="@+id/manual_controls_root"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
-                android:visibility="gone"
+                app:layout_constraintTop_toTopOf="parent"
                 android:paddingTop="@dimen/spacing_medium">
 
+                <com.google.android.material.button.MaterialButtonToggleGroup
+                    android:id="@+id/manual_tabs"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center_horizontal"
+                    app:singleSelection="true"
+                    app:selectionRequired="false">
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btn_tab_focus"
+                        style="@style/Widget.Material3.Button.OutlinedButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="40dp"
+                        android:text="Focus" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btn_tab_iso"
+                        style="@style/Widget.Material3.Button.OutlinedButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="40dp"
+                        android:text="ISO" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btn_tab_shutter"
+                        style="@style/Widget.Material3.Button.OutlinedButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="40dp"
+                        android:text="Sec" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btn_tab_ev"
+                        style="@style/Widget.Material3.Button.OutlinedButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="40dp"
+                        android:text="EV" />
+                </com.google.android.material.button.MaterialButtonToggleGroup>
+
+                <!-- Value and Slider Row -->
                 <LinearLayout
+                    android:id="@+id/manual_panel"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="horizontal"
-                    android:gravity="center_vertical">
+                    android:gravity="center_vertical"
+                    android:visibility="gone"
+                    android:paddingHorizontal="@dimen/padding_medium"
+                    android:paddingTop="@dimen/spacing_medium">
 
                     <TextView
                         android:id="@+id/tv_manual_value"
-                        android:layout_width="64dp"
+                        android:layout_width="80dp"
                         android:layout_height="wrap_content"
-                        android:textColor="?attr/colorOnSurface"
-                        android:text="Auto"
-                        android:textAppearance="@style/TextAppearance.Material3.LabelLarge"
-                        android:gravity="center" />
+                        android:textAppearance="@style/TextAppearance.App.ExpressiveValue"
+                        android:textColor="?attr/colorPrimary"
+                        android:textStyle="bold"
+                        android:gravity="center"
+                        android:text="Auto" />
 
                     <com.google.android.material.slider.Slider
                         android:id="@+id/seekbar_manual"
@@ -303,15 +184,14 @@
                         android:text="Auto" />
                 </LinearLayout>
 
-                <!-- Focus Specific Shortcuts -->
                 <LinearLayout
                     android:id="@+id/focus_extras"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="horizontal"
                     android:gravity="center"
-                    android:visibility="gone">
-
+                    android:visibility="gone"
+                    android:paddingTop="@dimen/spacing_small">
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btn_focus_near"
                         style="@style/Widget.Material3.Button.TonalButton"
@@ -319,7 +199,6 @@
                         android:layout_height="wrap_content"
                         android:layout_marginEnd="@dimen/spacing_medium"
                         android:text="Macro" />
-
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btn_focus_far"
                         style="@style/Widget.Material3.Button.TonalButton"
@@ -327,133 +206,217 @@
                         android:layout_height="wrap_content"
                         android:text="Infinity" />
                 </LinearLayout>
-
             </LinearLayout>
-        </LinearLayout>
-    </com.google.android.material.card.MaterialCardView>
 
-    <!-- Bottom Control Island -->
-    <com.google.android.material.card.MaterialCardView
-        android:id="@+id/bottom_island_card"
-        style="@style/Widget.App.Card.ControlPanel"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_margin="@dimen/margin_medium"
-        android:alpha="0.9"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent">
-
-        <androidx.constraintlayout.widget.ConstraintLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:paddingVertical="@dimen/padding_small"
-            android:paddingHorizontal="@dimen/padding_large">
-
-            <androidx.constraintlayout.widget.Guideline
-                android:id="@+id/shutter_center"
+            <!-- Lens and Mode Row -->
+            <LinearLayout
+                android:id="@+id/lens_control_row"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:orientation="vertical"
-                app:layout_constraintGuide_percent="0.5" />
-
-            <!-- LUT Switcher Strip -->
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/lut_switcher_button"
-                android:layout_width="0dp"
-                android:layout_height="48dp"
-                app:shapeAppearanceOverlay="@style/ShapeAppearance.App.LutSwitcher"
-                app:backgroundTint="?attr/colorSurfaceContainerHighest"
-                android:text="None"
-                android:textAllCaps="false"
-                android:textColor="?attr/colorOnSurface"
-                android:textSize="12sp"
-                android:gravity="start|center_vertical"
-                android:paddingStart="32dp"
-                app:layout_constraintEnd_toEndOf="@id/shutter_center"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                app:layout_constraintTop_toBottomOf="@id/manual_controls_root"
                 app:layout_constraintStart_toStartOf="parent"
-                app:layout_constraintTop_toTopOf="@id/camera_capture_button"
-                app:layout_constraintBottom_toBottomOf="@id/camera_capture_button"
-                android:layout_marginEnd="20dp" />
-
-            <com.android.example.cameraxbasic.ui.ExpressiveShutterButton
-                android:id="@+id/camera_capture_button"
-                android:layout_width="@dimen/shutter_button_size"
-                android:layout_height="@dimen/shutter_button_size"
-                android:contentDescription="@string/capture_button_alt"
-                app:layout_constraintTop_toTopOf="parent"
-                app:layout_constraintBottom_toBottomOf="parent"
-                app:layout_constraintStart_toStartOf="parent"
-                app:layout_constraintEnd_toEndOf="parent" />
-
-            <!-- Half-frame Progress Indicator -->
-            <TextView
-                android:id="@+id/tv_half_frame_step"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:elevation="4dp"
-                android:textColor="@android:color/white"
-                android:textSize="14sp"
-                android:textStyle="bold"
-                android:text="1/2"
-                android:visibility="gone"
-                app:layout_constraintTop_toTopOf="@id/camera_capture_button"
-                app:layout_constraintBottom_toBottomOf="@id/camera_capture_button"
-                app:layout_constraintStart_toStartOf="@id/camera_capture_button"
-                app:layout_constraintEnd_toEndOf="@id/camera_capture_button" />
-
-            <FrameLayout
-                android:id="@+id/photo_view_container"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
                 app:layout_constraintEnd_toEndOf="parent"
-                app:layout_constraintTop_toTopOf="@id/camera_capture_button"
-                app:layout_constraintBottom_toBottomOf="@id/camera_capture_button">
+                android:layout_marginTop="@dimen/spacing_large"
+                android:layout_marginBottom="@dimen/spacing_large">
 
-                <ImageButton
-                    android:id="@+id/photo_view_button"
-                    android:layout_width="@dimen/round_button_medium"
-                    android:layout_height="@dimen/round_button_medium"
-                    android:padding="@dimen/spacing_medium"
-                    android:scaleType="fitCenter"
-                    android:background="@drawable/ic_outer_circle"
-                    android:src="@drawable/ic_photo"
-                    android:contentDescription="@string/gallery_button_alt" />
-
-                <com.google.android.material.loadingindicator.LoadingIndicator
-                    android:id="@+id/processing_progress"
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/camera_switch_button_alt"
+                    style="@style/Widget.App.Button.IconButton.Large"
                     android:layout_width="48dp"
                     android:layout_height="48dp"
-                    android:layout_gravity="center"
-                    android:visibility="gone" />
-            </FrameLayout>
+                    app:icon="@drawable/ic_switch"
+                    android:backgroundTint="?attr/colorSurfaceContainerHighest" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/mode_switch_button"
+                    style="@style/Widget.App.Button.IconButton.Large"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:layout_marginHorizontal="@dimen/spacing_small"
+                    app:icon="@drawable/ic_mode_normal"
+                    android:backgroundTint="?attr/colorSurfaceContainerHighest" />
+
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/lens_controls_card"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    app:cardCornerRadius="24dp"
+                    app:cardBackgroundColor="?attr/colorSurfaceContainerHighest"
+                    app:strokeWidth="0dp">
+                    <HorizontalScrollView
+                        android:id="@+id/controls_hub_scroll"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:scrollbars="none">
+                        <LinearLayout
+                            android:id="@+id/lens_controls_container"
+                            android:layout_width="wrap_content"
+                            android:layout_height="48dp"
+                            android:orientation="horizontal"
+                            android:gravity="center_vertical"
+                            android:paddingHorizontal="4dp" />
+                    </HorizontalScrollView>
+                </com.google.android.material.card.MaterialCardView>
+            </LinearLayout>
+
+            <!-- Main Capture Row -->
+            <androidx.constraintlayout.widget.ConstraintLayout
+                android:id="@+id/capture_row"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                app:layout_constraintTop_toBottomOf="@id/lens_control_row"
+                app:layout_constraintBottom_toBottomOf="parent"
+                android:layout_marginTop="@dimen/spacing_medium">
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/lut_switcher_button"
+                    android:layout_width="0dp"
+                    android:layout_height="56dp"
+                    android:layout_marginStart="@dimen/margin_small"
+                    android:layout_marginEnd="24dp"
+                    app:shapeAppearanceOverlay="@style/ShapeAppearance.App.LutSwitcher"
+                    app:backgroundTint="?attr/colorSurfaceContainerHighest"
+                    android:text="None"
+                    android:textAllCaps="false"
+                    android:gravity="start|center_vertical"
+                    android:paddingStart="32dp"
+                    app:layout_constraintStart_toStartOf="parent"
+                    app:layout_constraintEnd_toStartOf="@id/camera_capture_button"
+                    app:layout_constraintTop_toTopOf="@id/camera_capture_button"
+                    app:layout_constraintBottom_toBottomOf="@id/camera_capture_button" />
+
+                <com.android.example.cameraxbasic.ui.ExpressiveShutterButton
+                    android:id="@+id/camera_capture_button"
+                    android:layout_width="112dp"
+                    android:layout_height="112dp"
+                    app:layout_constraintStart_toStartOf="parent"
+                    app:layout_constraintEnd_toEndOf="parent"
+                    app:layout_constraintTop_toTopOf="parent"
+                    app:layout_constraintBottom_toBottomOf="parent" />
+
+                <TextView
+                    android:id="@+id/tv_half_frame_step"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:elevation="8dp"
+                    android:textColor="@android:color/white"
+                    android:textStyle="bold"
+                    android:text="1/2"
+                    android:visibility="gone"
+                    app:layout_constraintTop_toTopOf="@id/camera_capture_button"
+                    app:layout_constraintBottom_toBottomOf="@id/camera_capture_button"
+                    app:layout_constraintStart_toStartOf="@id/camera_capture_button"
+                    app:layout_constraintEnd_toEndOf="@id/camera_capture_button" />
+
+                <FrameLayout
+                    android:id="@+id/photo_view_container"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="@dimen/margin_small"
+                    app:layout_constraintEnd_toEndOf="parent"
+                    app:layout_constraintTop_toTopOf="@id/camera_capture_button"
+                    app:layout_constraintBottom_toBottomOf="@id/camera_capture_button">
+
+                    <ImageButton
+                        android:id="@+id/photo_view_button"
+                        android:layout_width="64dp"
+                        android:layout_height="64dp"
+                        android:padding="2dp"
+                        android:scaleType="centerCrop"
+                        android:background="@drawable/ic_outer_circle"
+                        android:src="@drawable/ic_photo" />
+
+                    <com.google.android.material.progressindicator.CircularProgressIndicator
+                        android:id="@+id/processing_progress"
+                        app:indicatorSize="40dp"
+                        app:trackThickness="4dp"
+                        android:indeterminate="true"
+                        app:indicatorColor="?attr/colorTertiary"
+                        android:layout_width="48dp"
+                        android:layout_height="48dp"
+                        android:layout_gravity="center"
+                        android:visibility="gone" />
+                </FrameLayout>
+            </androidx.constraintlayout.widget.ConstraintLayout>
 
         </androidx.constraintlayout.widget.ConstraintLayout>
-
     </com.google.android.material.card.MaterialCardView>
 
-    <!-- LUT List Container -->
+    <!-- LUT List (Floating above island) -->
     <com.google.android.material.card.MaterialCardView
         android:id="@+id/lut_list_container"
         style="@style/Widget.Material3.CardView.Filled"
-        android:layout_width="200dp"
+        android:layout_width="220dp"
         android:layout_height="wrap_content"
-        android:layout_marginStart="@dimen/margin_medium"
-        android:layout_marginBottom="@dimen/spacing_medium"
         android:visibility="gone"
         app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
-        app:cardCornerRadius="@dimen/radius_medium"
+        app:cardCornerRadius="@dimen/radius_large"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintBottom_toTopOf="@id/bottom_island_card"
-        app:layout_constrainedHeight="true"
-        app:layout_constraintHeight_max="400dp">
-
+        android:layout_marginStart="@dimen/margin_medium"
+        android:layout_marginBottom="@dimen/spacing_medium">
         <androidx.recyclerview.widget.RecyclerView
             android:id="@+id/lut_list"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:padding="4dp"
-            android:clipToPadding="false" />
+            android:padding="8dp"
+            app:layout_constrainedHeight="true"
+            app:layout_constraintHeight_max="300dp" />
     </com.google.android.material.card.MaterialCardView>
+
+    <!-- Functional Overlays (behind island if needed, but usually on top of viewfinder) -->
+    <View
+        android:id="@+id/view_finder_blackout"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:background="@android:color/black"
+        android:visibility="invisible"
+        app:layout_constraintTop_toTopOf="@id/view_finder_container"
+        app:layout_constraintBottom_toBottomOf="@id/view_finder_container"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="@id/view_finder_container" />
+
+    <ImageView
+        android:id="@+id/half_frame_snapshot"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:scaleType="centerCrop"
+        android:visibility="gone"
+        app:layout_constraintTop_toTopOf="@id/view_finder_container"
+        app:layout_constraintBottom_toBottomOf="@id/view_finder_container"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="@id/view_finder_container" />
+
+    <View
+        android:id="@+id/half_frame_gap_indicator"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:background="@android:color/black"
+        android:visibility="gone"
+        app:layout_constraintTop_toTopOf="@id/view_finder_container"
+        app:layout_constraintBottom_toBottomOf="@id/view_finder_container"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="@id/view_finder_container" />
+
+    <View
+        android:id="@+id/half_frame_film_edge_top"
+        android:layout_width="1200dp"
+        android:layout_height="40dp"
+        android:background="@drawable/bg_film_edge"
+        android:visibility="gone"
+        app:layout_constraintBottom_toTopOf="@id/view_finder_container"
+        app:layout_constraintStart_toStartOf="parent" />
+
+    <View
+        android:id="@+id/half_frame_film_edge_bottom"
+        android:layout_width="1200dp"
+        android:layout_height="40dp"
+        android:background="@drawable/bg_film_edge"
+        android:rotation="180"
+        android:visibility="gone"
+        app:layout_constraintTop_toBottomOf="@id/view_finder_container"
+        app:layout_constraintStart_toStartOf="parent" />
 
 </merge>

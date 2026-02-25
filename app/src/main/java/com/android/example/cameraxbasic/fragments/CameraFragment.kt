@@ -1143,11 +1143,11 @@ class CameraFragment : Fragment() {
         // allows updateHalfFrameUI to capture the correct full dimensions.
         halfFrameBaseFinderWidth = 0
         halfFrameBaseFinderHeight = 0
-        (fragmentCameraBinding.viewFinder.layoutParams as? androidx.constraintlayout.widget.ConstraintLayout.LayoutParams)?.let { lp ->
+        (fragmentCameraBinding.viewFinderContainer.layoutParams as? androidx.constraintlayout.widget.ConstraintLayout.LayoutParams)?.let { lp ->
             if (lp.width != ViewGroup.LayoutParams.WRAP_CONTENT || lp.height != 0) {
                 lp.width = ViewGroup.LayoutParams.WRAP_CONTENT
                 lp.height = 0
-                fragmentCameraBinding.viewFinder.layoutParams = lp
+                fragmentCameraBinding.viewFinderContainer.layoutParams = lp
             }
         }
 
@@ -4264,12 +4264,13 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         val binding = cameraUiContainerBinding ?: return
         val blackout = binding.viewFinderBlackout ?: return
         val vf = fragmentCameraBinding.viewFinder
+        val vfc = fragmentCameraBinding.viewFinderContainer
         blackout.post {
             // Sync translation and scaling with the ViewFinder to ensure full coverage in Half-frame mode
-            blackout.translationX = vf.translationX
-            blackout.translationY = vf.translationY
-            blackout.scaleX = vf.scaleX
-            blackout.scaleY = vf.scaleY
+            blackout.translationX = fragmentCameraBinding.viewFinderContainer.translationX
+            blackout.translationY = fragmentCameraBinding.viewFinderContainer.translationY
+            blackout.scaleX = fragmentCameraBinding.viewFinderContainer.scaleX
+            blackout.scaleY = fragmentCameraBinding.viewFinderContainer.scaleY
 
             blackout.visibility = View.VISIBLE
             blackout.bringToFront()
@@ -4306,18 +4307,18 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 if (edgeTopView.visibility != View.GONE) edgeTopView.visibility = View.GONE
                 if (edgeBottomView.visibility != View.GONE) edgeBottomView.visibility = View.GONE
 
-                (vfBinding.viewFinder.layoutParams as? androidx.constraintlayout.widget.ConstraintLayout.LayoutParams)?.let { lp ->
+                (vfBinding.viewFinderContainer.layoutParams as? androidx.constraintlayout.widget.ConstraintLayout.LayoutParams)?.let { lp ->
                     if (lp.width != ViewGroup.LayoutParams.WRAP_CONTENT || lp.height != 0) {
                         lp.width = ViewGroup.LayoutParams.WRAP_CONTENT
                         lp.height = 0
-                        vfBinding.viewFinder.layoutParams = lp
+                        vfBinding.viewFinderContainer.layoutParams = lp
                     }
                 }
 
-                vfBinding.viewFinder.scaleX = 1f
-                vfBinding.viewFinder.scaleY = 1f
-                vfBinding.viewFinder.translationX = 0f
-                vfBinding.viewFinder.translationY = 0f
+                vfBinding.viewFinderContainer.scaleX = 1f
+                vfBinding.viewFinderContainer.scaleY = 1f
+                vfBinding.viewFinderContainer.translationX = 0f
+                vfBinding.viewFinderContainer.translationY = 0f
 
                 if (uiBinding.photoViewButton?.visibility != View.VISIBLE) {
                     uiBinding.photoViewButton?.visibility = View.VISIBLE
@@ -4377,19 +4378,19 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
             val targetW = (totalW * scale).toInt()
             val targetH = (totalH * scale).toInt()
-            (vfBinding.viewFinder.layoutParams as? androidx.constraintlayout.widget.ConstraintLayout.LayoutParams)?.let { lp ->
+            (vfBinding.viewFinderContainer.layoutParams as? androidx.constraintlayout.widget.ConstraintLayout.LayoutParams)?.let { lp ->
                 if (lp.width != targetW || lp.height != targetH) {
                     lp.width = targetW
                     lp.height = targetH
-                    vfBinding.viewFinder.layoutParams = lp
+                    vfBinding.viewFinderContainer.layoutParams = lp
 
                     gapView.layoutParams.width = gapWidthScaled.toInt()
                     gapView.requestLayout()
                 }
             }
 
-            vfBinding.viewFinder.scaleX = 1f
-            vfBinding.viewFinder.scaleY = 1f
+            vfBinding.viewFinderContainer.scaleX = 1f
+            vfBinding.viewFinderContainer.scaleY = 1f
 
             val layout = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUTS[0])
             val isTopBottom = layout == SettingsFragment.HALF_FRAME_LAYOUTS[1]
@@ -4400,14 +4401,14 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             if (animate) {
                 performHalfFrameAdvanceAnimation(targetShift, totalW, gapWidthScaled, isTopBottom)
             } else {
-                vfBinding.viewFinder.animate().cancel()
-                vfBinding.viewFinder.translationX = targetShift
+                vfBinding.viewFinderContainer.animate().cancel()
+                vfBinding.viewFinderContainer.translationX = targetShift
                 gapView.visibility = View.GONE
                 snapshotView.visibility = View.GONE
             }
 
-            if (vfBinding.viewFinder.translationY != 0f) {
-                vfBinding.viewFinder.translationY = 0f
+            if (vfBinding.viewFinderContainer.translationY != 0f) {
+                vfBinding.viewFinderContainer.translationY = 0f
             }
 
             // Force fixed rotation for half-frame mode
@@ -4425,12 +4426,13 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
     private fun performHalfFrameAdvanceAnimation(targetShift: Float, totalW: Float, gapWidth: Float, isTopBottom: Boolean) {
         val uiBinding = cameraUiContainerBinding ?: return
         val vf = fragmentCameraBinding.viewFinder
+        val vfc = fragmentCameraBinding.viewFinderContainer
         val snapshot = uiBinding.halfFrameSnapshot ?: return
         val gap = uiBinding.halfFrameGapIndicator ?: return
 
         // VF base position (centered) is (totalW - vf.width) / 2
         val vfBaseX = (totalW - vf.width) / 2f
-        val startShift = vf.translationX
+        val startShift = vfc.translationX
         val currentVfLeft = vfBaseX + startShift
 
         // 1. Take Snapshot of current viewfinder
@@ -4461,9 +4463,9 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         // 3. Prepare ViewFinder for "coming in"
         // Side-by-side: moves left (-totalW), starts at targetShift + totalW
         // Top-bottom: moves right (+totalW), starts at targetShift - totalW
-        vf.animate().cancel()
+        vfc.animate().cancel()
         val moveDirectionFactor = if (isTopBottom) 1f else -1f
-        vf.translationX = targetShift - (moveDirectionFactor * totalW)
+        vfc.translationX = targetShift - (moveDirectionFactor * totalW)
 
         // 4. Animate everything by exactly totalW
         val duration = 450L
@@ -4487,7 +4489,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             .withEndAction { gap.visibility = View.GONE }
             .start()
 
-        vf.animate()
+        vfc.animate()
             .translationX(targetShift)
             .setDuration(duration)
             .setInterpolator(interpolator)
