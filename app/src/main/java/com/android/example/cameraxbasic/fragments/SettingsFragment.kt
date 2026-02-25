@@ -166,7 +166,7 @@ class SettingsFragment : Fragment() {
         }
 
         // Default Lens (Startup)
-        val lenses = cameraRepository.getFocalLengthPresets(emptySet())
+        val lenses = cameraRepository.getAllFocalLengthPresets(emptySet())
         val lensDisplayNames = lenses.map { it.name }
         val lensAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, lensDisplayNames)
         binding.menuDefaultLens.setAdapter(lensAdapter)
@@ -247,10 +247,7 @@ class SettingsFragment : Fragment() {
     }
 
     private fun setupCheckboxes() {
-        binding.switchLivePreview.isChecked = prefs.getBoolean(KEY_ENABLE_LUT_PREVIEW, true)
-        binding.switchLivePreview.setOnCheckedChangeListener { _, isChecked ->
-             prefs.edit().putBoolean(KEY_ENABLE_LUT_PREVIEW, isChecked).apply()
-        }
+        setupSwitch(binding.switchLivePreview, KEY_ENABLE_LUT_PREVIEW)
 
         binding.cbSaveTiff.isChecked = prefs.getBoolean(KEY_SAVE_TIFF, false)
         binding.cbSaveJpg.isChecked = prefs.getBoolean(KEY_SAVE_JPG, true)
@@ -277,70 +274,31 @@ class SettingsFragment : Fragment() {
         updateCheckboxStates()
         updateStorageVisibility()
 
-        binding.switchHqBackgroundExport.isChecked = prefs.getBoolean(KEY_HQ_BACKGROUND_EXPORT, false)
-        binding.switchHqBackgroundExport.setOnCheckedChangeListener { _, isChecked ->
-            prefs.edit().putBoolean(KEY_HQ_BACKGROUND_EXPORT, isChecked).apply()
-        }
-
-        binding.switchManualControls.isChecked = prefs.getBoolean(KEY_MANUAL_CONTROLS, false)
-        binding.switchManualControls.setOnCheckedChangeListener { _, isChecked ->
-            prefs.edit().putBoolean(KEY_MANUAL_CONTROLS, isChecked).apply()
-        }
-
-        binding.switchHalfFrameMode.isChecked = prefs.getBoolean(KEY_HALF_FRAME_MODE, false)
-        binding.switchHalfFrameMode.setOnCheckedChangeListener { _, isChecked ->
-            prefs.edit().putBoolean(KEY_HALF_FRAME_MODE, isChecked).apply()
-        }
-
-        binding.switchHalfFrameDownsample.isChecked = prefs.getBoolean(KEY_HALF_FRAME_DOWNSAMPLE, true)
-        binding.switchHalfFrameDownsample.setOnCheckedChangeListener { _, isChecked ->
-            prefs.edit().putBoolean(KEY_HALF_FRAME_DOWNSAMPLE, isChecked).apply()
-        }
-
-        binding.switchHalfFrameDateStamp.isChecked = prefs.getBoolean(KEY_HALF_FRAME_DATE_STAMP, false)
-        binding.switchHalfFrameDateStamp.setOnCheckedChangeListener { _, isChecked ->
-            prefs.edit().putBoolean(KEY_HALF_FRAME_DATE_STAMP, isChecked).apply()
-        }
-
-        binding.switchHalfFrameLightLeak.isChecked = prefs.getBoolean(KEY_HALF_FRAME_LIGHT_LEAK, false)
-        binding.switchHalfFrameLightLeak.setOnCheckedChangeListener { _, isChecked ->
-            prefs.edit().putBoolean(KEY_HALF_FRAME_LIGHT_LEAK, isChecked).apply()
-        }
-
-        binding.switchHalfFrameAutoBurst.isChecked = prefs.getBoolean(KEY_HALF_FRAME_AUTO_BURST, false)
-        binding.switchHalfFrameAutoBurst.setOnCheckedChangeListener { _, isChecked ->
-            prefs.edit().putBoolean(KEY_HALF_FRAME_AUTO_BURST, isChecked).apply()
-        }
+        setupSwitch(binding.switchHqBackgroundExport, KEY_HQ_BACKGROUND_EXPORT, false)
+        setupSwitch(binding.switchManualControls, KEY_MANUAL_CONTROLS, false)
+        setupSwitch(binding.switchHalfFrameMode, KEY_HALF_FRAME_MODE, false)
+        setupSwitch(binding.switchHalfFrameDownsample, KEY_HALF_FRAME_DOWNSAMPLE)
+        setupSwitch(binding.switchHalfFrameDateStamp, KEY_HALF_FRAME_DATE_STAMP, false)
+        setupSwitch(binding.switchHalfFrameLightLeak, KEY_HALF_FRAME_LIGHT_LEAK, false)
+        setupSwitch(binding.switchHalfFrameAutoBurst, KEY_HALF_FRAME_AUTO_BURST, false)
 
         binding.cbHfSaveRaw.isChecked = prefs.getBoolean(KEY_HALF_FRAME_SAVE_RAW, false)
         binding.cbHfSaveRaw.setOnCheckedChangeListener { _, isChecked ->
             prefs.edit().putBoolean(KEY_HALF_FRAME_SAVE_RAW, isChecked).apply()
         }
 
-        binding.switchMirrorFront.isChecked = prefs.getBoolean(KEY_MIRROR_FRONT_CAMERA, true)
-        binding.switchMirrorFront.setOnCheckedChangeListener { _, isChecked ->
-            prefs.edit().putBoolean(KEY_MIRROR_FRONT_CAMERA, isChecked).apply()
-        }
+        setupSwitch(binding.switchMirrorFront, KEY_MIRROR_FRONT_CAMERA)
+        setupSwitch(binding.switchUseCamerax, KEY_USE_CAMERAX, false)
+        setupSwitch(binding.switchHdrPlusOis, KEY_HDR_PLUS_OIS)
+        setupSwitch(binding.switchShowHdrPlusSwitch, KEY_SHOW_HDR_PLUS_SWITCH)
+        setupSwitch(binding.switchShowUnderexposureButton, KEY_SHOW_HDR_UNDEREXPOSURE_BUTTON)
+        setupSwitch(binding.switchShowSettingsButton, KEY_SHOW_SETTINGS_BUTTON)
+        setupSwitch(binding.switchShowCameraSwitchButton, KEY_SHOW_CAMERA_SWITCH_BUTTON)
+        setupSwitch(binding.switchShowModeSwitchButton, KEY_SHOW_MODE_SWITCH_BUTTON)
+        setupSwitch(binding.switchShowLensControls, KEY_SHOW_LENS_CONTROLS)
+        setupSwitch(binding.switchShowLutSwitcher, KEY_SHOW_LUT_SWITCHER)
 
-        binding.switchUseCamerax.isChecked = prefs.getBoolean(KEY_USE_CAMERAX, false)
-        binding.switchUseCamerax.setOnCheckedChangeListener { _, isChecked ->
-            prefs.edit().putBoolean(KEY_USE_CAMERAX, isChecked).apply()
-        }
-
-        binding.switchHdrPlusOis.isChecked = prefs.getBoolean(KEY_HDR_PLUS_OIS, true)
-        binding.switchHdrPlusOis.setOnCheckedChangeListener { _, isChecked ->
-            prefs.edit().putBoolean(KEY_HDR_PLUS_OIS, isChecked).apply()
-        }
-
-        binding.switchShowUnderexposureButton.isChecked = prefs.getBoolean(KEY_SHOW_HDR_UNDEREXPOSURE_BUTTON, true)
-        binding.switchShowUnderexposureButton.setOnCheckedChangeListener { _, isChecked ->
-            prefs.edit().putBoolean(KEY_SHOW_HDR_UNDEREXPOSURE_BUTTON, isChecked).apply()
-        }
-
-        binding.switchForce60fps.isChecked = prefs.getBoolean(KEY_FORCE_60FPS, false)
-        binding.switchForce60fps.setOnCheckedChangeListener { _, isChecked ->
-            prefs.edit().putBoolean(KEY_FORCE_60FPS, isChecked).apply()
-        }
+        setupSwitch(binding.switchForce60fps, KEY_FORCE_60FPS, false)
 
         binding.switchCloseDebug.setOnCheckedChangeListener { _, isChecked ->
             if (isChecked) {
@@ -403,6 +361,13 @@ class SettingsFragment : Fragment() {
         }
     }
 
+    private fun setupSwitch(switch: com.google.android.material.materialswitch.MaterialSwitch, key: String, defaultValue: Boolean = true) {
+        switch.isChecked = prefs.getBoolean(key, defaultValue)
+        switch.setOnCheckedChangeListener { _, isChecked ->
+            prefs.edit().putBoolean(key, isChecked).apply()
+        }
+    }
+
     private fun setupStoragePickers() {
         binding.layoutJpgStorage.setOnClickListener {
             jpgPicker.launch(null)
@@ -438,6 +403,12 @@ class SettingsFragment : Fragment() {
         const val KEY_HDR_BURST_COUNT = "hdr_burst_count"
         const val KEY_HDR_UNDEREXPOSURE_MODE = "hdr_underexposure_mode"
         const val KEY_SHOW_HDR_UNDEREXPOSURE_BUTTON = "show_hdr_underexposure_button"
+        const val KEY_SHOW_HDR_PLUS_SWITCH = "show_hdr_plus_switch"
+        const val KEY_SHOW_SETTINGS_BUTTON = "show_settings_button"
+        const val KEY_SHOW_CAMERA_SWITCH_BUTTON = "show_camera_switch_button"
+        const val KEY_SHOW_MODE_SWITCH_BUTTON = "show_mode_switch_button"
+        const val KEY_SHOW_LENS_CONTROLS = "show_lens_controls"
+        const val KEY_SHOW_LUT_SWITCHER = "show_lut_switcher"
         const val KEY_USE_CAMERAX = "use_camerax_engine"
         const val KEY_MIRROR_FRONT_CAMERA = "mirror_front_camera"
         const val KEY_HDR_PLUS_OIS = "hdr_plus_ois_enabled"

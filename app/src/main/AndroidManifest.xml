@@ -78,6 +78,9 @@
             <!-- Declare notch support -->
             <meta-data android:name="android.notch_support" android:value="true"/>
 
+            <meta-data android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
+
         </activity>
 
         <provider

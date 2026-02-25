@@ -197,6 +197,24 @@ class CameraRepository(private val context: Context) {
     }
 
     /**
+     * Returns a unified list of both back and front cameras for settings.
+     */
+    fun getAllFocalLengthPresets(cameraXIds: Set<String>): List<LensInfo> {
+        return getFocalLengthPresets(cameraXIds, CameraCharacteristics.LENS_FACING_BACK) +
+                getFocalLengthPresets(cameraXIds, CameraCharacteristics.LENS_FACING_FRONT)
+    }
+
+    fun getFacingOfSensorId(sensorId: String): Int {
+        probeAllCameras()
+        val rawId = if (sensorId.startsWith("c2-")) {
+            sensorId.substring(3).split("-")[0]
+        } else {
+            sensorId.split("-")[0]
+        }
+        return idToCharsCache[rawId]?.get(CameraCharacteristics.LENS_FACING) ?: CameraCharacteristics.LENS_FACING_BACK
+    }
+
+    /**
      * Returns sub-presets for the 1.0x lens (24mm, 28mm, 35mm).
      */
     fun get1xPresets(mainWide: LensInfo): List<LensInfo> {
@@ -263,9 +281,12 @@ class CameraRepository(private val context: Context) {
             else -> LensType.TELE
         }
 
-        val finalName = name ?: when {
+        var finalName = name ?: when {
             isAuto -> "Auto"
             else -> String.format("%.1fx", multiplier)
+        }
+        if (facing == CameraCharacteristics.LENS_FACING_FRONT) {
+            finalName = "$finalName - Front"
         }
         val sensorId = if (useCamera2) "c2-$id" else (physicalId ?: "$id-${targetZoom ?: 0f}")
 

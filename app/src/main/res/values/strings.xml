@@ -52,4 +52,6 @@
     <string name="half_frame_date_stamp">Date Stamp</string>
     <string name="half_frame_light_leak">Random Light Leak</string>
     <string name="half_frame_auto_burst">Auto Burst (Double Shot)</string>
+
+    <string name="settings_shortcut_label">Settings</string>
 </resources>
