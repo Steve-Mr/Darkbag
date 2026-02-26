@@ -119,18 +119,7 @@ class ImageViewerFragment : Fragment() {
     private fun setupObservers() {
         viewModel.previewBitmap.observe(viewLifecycleOwner) { bitmap ->
             val currentPos = binding.imagePager.currentItem
-            val rv = binding.imagePager.getChildAt(0) as? androidx.recyclerview.widget.RecyclerView
-            val holder = rv?.findViewHolderForAdapterPosition(currentPos) as? ImagePagerAdapter.ViewHolder
-
-            if (bitmap != null) {
-                holder?.binding?.ivDisplay?.setImageBitmap(bitmap)
-            } else {
-                adapter.getImage(currentPos)?.let {
-                    holder?.binding?.ivDisplay?.let { iv ->
-                        com.bumptech.glide.Glide.with(this).load(it.primaryUri).into(iv)
-                    }
-                }
-            }
+            adapter.setPreviewBitmap(currentPos, bitmap)
         }
 
         viewModel.isModified.observe(viewLifecycleOwner) { modified ->

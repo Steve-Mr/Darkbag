@@ -87,12 +87,16 @@ class ImageRepository(private val context: Context) {
                 val date = cursor.getLong(dateColumn)
                 val uri = android.content.ContentUris.withAppendedId(collection, id)
 
-                val baseName = name.substringBeforeLast(".")
+                var baseName = name.substringBeforeLast(".")
                 val type = when {
                     mime.contains("jpeg") || name.endsWith(".jpg", true) -> "JPG"
                     mime.contains("tiff") || name.endsWith(".tiff", true) -> "TIFF"
                     mime.contains("dng") || name.endsWith(".dng", true) -> "DNG"
                     else -> null
+                }
+
+                if (type == "DNG") {
+                    baseName = baseName.removeSuffix("_linear")
                 }
 
                 if (type != null) {
@@ -111,12 +115,16 @@ class ImageRepository(private val context: Context) {
             val root = DocumentFile.fromTreeUri(context, treeUri)
             root?.listFiles()?.forEach { file ->
                 val name = file.name ?: return@forEach
-                val baseName = name.substringBeforeLast(".")
+                var baseName = name.substringBeforeLast(".")
                 val fileType = when {
                     name.endsWith(".jpg", true) || name.endsWith(".jpeg", true) -> "JPG"
                     name.endsWith(".tiff", true) -> "TIFF"
                     name.endsWith(".dng", true) -> "DNG"
                     else -> null
+                }
+
+                if (fileType == "DNG") {
+                    baseName = baseName.removeSuffix("_linear")
                 }
 
                 if (fileType == type) {
