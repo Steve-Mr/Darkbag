@@ -49,7 +49,8 @@ object ImageSaver {
         mirror: Boolean = false,
         isFastPath: Boolean = false,
         halfFrameMetadata: HalfFrameManager.Metadata? = null,
-        onBitmapReady: ((Bitmap) -> Unit)? = null
+        onBitmapReady: ((Bitmap) -> Unit)? = null,
+        metadata: String? = null
     ): Uri? {
         val halfFrameManager = HalfFrameManager(context)
         val isHalfFrameActive = halfFrameMetadata != null || halfFrameManager.isEnabled
@@ -88,7 +89,7 @@ object ImageSaver {
                                 ColorProcessor.halfFrameFlow.tryEmit(2)
                                 if (finalPath != null) {
                                     val finalFile = File(finalPath)
-                                    finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri) { out ->
+                                    finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri, metadata = metadata) { out ->
                                         finalFile.inputStream().use { it.copyTo(out) }
                                     }
                                 }
@@ -98,8 +99,9 @@ object ImageSaver {
                                 val finalFile = File(finalPath)
                                 if (jpgFolderUri != null) {
                                     finalJpgUri = saveFileToFolder(context, finalFile, "$baseName.jpg", "image/jpeg", jpgFolderUri)
+                                    finalJpgUri?.let { updateExif(context, it, null, metadata) }
                                 } else {
-                                    finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri) { out ->
+                                    finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri, metadata = metadata) { out ->
                                         finalFile.inputStream().use { it.copyTo(out) }
                                     }
                                 }
@@ -112,8 +114,9 @@ object ImageSaver {
                         val finalFile = f
                         if (jpgFolderUri != null) {
                             finalJpgUri = saveFileToFolder(context, finalFile, "$baseName.jpg", "image/jpeg", jpgFolderUri)
+                            finalJpgUri?.let { updateExif(context, it, null, metadata) }
                         } else {
-                            finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri) { out ->
+                            finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri, metadata = metadata) { out ->
                                 finalFile.inputStream().use { it.copyTo(out) }
                             }
                         }
@@ -210,7 +213,8 @@ object ImageSaver {
                                                 "$baseName.jpg",
                                                 targetUri,
                                                 processedBitmap.width,
-                                                processedBitmap.height
+                                                processedBitmap.height,
+                                                metadata = metadata
                                             ) { out ->
                                                 finalFile.inputStream().use { it.copyTo(out) }
                                             }
@@ -221,6 +225,7 @@ object ImageSaver {
                                         val finalFile = File(finalPath)
                                         if (jpgFolderUri != null) {
                                             finalJpgUri = saveFileToFolder(context, finalFile, "$baseName.jpg", "image/jpeg", jpgFolderUri)
+                                            finalJpgUri?.let { updateExif(context, it, null, metadata) }
                                         } else {
                                             val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                                             BitmapFactory.decodeFile(finalPath, options)
@@ -232,7 +237,8 @@ object ImageSaver {
                                                 "$baseName.jpg",
                                                 targetUri,
                                                 finalW,
-                                                finalH
+                                                finalH,
+                                                metadata = metadata
                                             ) { out ->
                                                 finalFile.inputStream().use { it.copyTo(out) }
                                             }
@@ -251,13 +257,15 @@ object ImageSaver {
                                 }
                                 if (jpgFolderUri != null) {
                                     finalJpgUri = saveFileToFolder(context, tempJpg, "$baseName.jpg", "image/jpeg", jpgFolderUri)
+                                    finalJpgUri?.let { updateExif(context, it, null, metadata) }
                                 } else {
                                     finalJpgUri = saveJpegToMediaStore(
                                         context,
                                         "$baseName.jpg",
                                         targetUri,
                                         processedBitmap.width,
-                                        processedBitmap.height
+                                        processedBitmap.height,
+                                        metadata = metadata
                                     ) { out ->
                                         tempJpg.inputStream().use { it.copyTo(out) }
                                     }
@@ -306,7 +314,7 @@ object ImageSaver {
                                 FileInputStream(tiffFile).copyTo(out)
                             }
 
-                            updateExifOrientation(context, tiffUri, getExifOrientation(rotationDegrees, mirror))
+                            updateExif(context, tiffUri, getExifOrientation(rotationDegrees, mirror), metadata)
 
                             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                                 tiffValues.clear()
@@ -428,15 +436,16 @@ object ImageSaver {
         }
     }
 
-    private fun updateExifOrientation(context: Context, uri: Uri, orientation: Int) {
+    private fun updateExif(context: Context, uri: Uri, orientation: Int?, metadata: String?) {
         try {
             context.contentResolver.openFileDescriptor(uri, "rw")?.use { pfd ->
                 val exif = ExifInterface(pfd.fileDescriptor)
-                exif.setAttribute(ExifInterface.TAG_ORIENTATION, orientation.toString())
+                orientation?.let { exif.setAttribute(ExifInterface.TAG_ORIENTATION, it.toString()) }
+                metadata?.let { exif.setAttribute(ExifInterface.TAG_USER_COMMENT, it) }
                 exif.saveAttributes()
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to update EXIF orientation for $uri", e)
+            Log.e(TAG, "Failed to update EXIF for $uri", e)
         }
     }
 
@@ -469,6 +478,7 @@ object ImageSaver {
         targetUri: Uri?,
         width: Int? = null,
         height: Int? = null,
+        metadata: String? = null,
         writeData: (OutputStream) -> Unit
     ): Uri? {
         val contentResolver = context.contentResolver
@@ -528,6 +538,8 @@ object ImageSaver {
                 } else {
                     Log.i(TAG, "Saved JPEG to $uri")
                 }
+
+                updateExif(context, uri, null, metadata)
 
                 // If this is a final HQ save, notify the UI to update thumbnails and hide progress
                 // Note: We don't emit for fast path here because saveProcessedImage handles it.

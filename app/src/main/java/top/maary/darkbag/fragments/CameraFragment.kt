@@ -20,6 +20,7 @@ import top.maary.darkbag.ui.ExpressiveShutterButton
 import top.maary.darkbag.utils.DebugLogManager
 import top.maary.darkbag.utils.LensInfo
 import top.maary.darkbag.utils.CameraRepository
+import top.maary.darkbag.utils.DarkbagMetadata
 
 import android.animation.ValueAnimator
 import android.annotation.SuppressLint
@@ -87,6 +88,7 @@ import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import androidx.navigation.Navigation
+import androidx.navigation.fragment.findNavController
 import androidx.window.layout.WindowMetricsCalculator
 import top.maary.darkbag.KEY_EVENT_ACTION
 import top.maary.darkbag.KEY_EVENT_EXTRA
@@ -1435,22 +1437,10 @@ class CameraFragment : Fragment() {
 
         // Listener for button used to view the most recent photo
         cameraUiContainerBinding?.photoViewButton?.setOnClickListener {
-            // Only navigate when the gallery has photos
-            lifecycleScope.launch {
-                val uri = mediaStoreUtils.getLatestAppImage(requireContext())
-                if (uri != null) {
-                    val intent = Intent(Intent.ACTION_VIEW, uri)
-                    intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                    try {
-                        startActivity(intent)
-                    } catch (e: ActivityNotFoundException) {
-                        Toast.makeText(
-                            requireContext(),
-                            "No gallery app installed",
-                            Toast.LENGTH_SHORT
-                        ).show()
-                    }
-                }
+            try {
+                findNavController().navigate(CameraFragmentDirections.actionCameraToViewer())
+            } catch (e: Exception) {
+                Log.e(TAG, "Navigation failed", e)
             }
         }
     }
@@ -1774,6 +1764,11 @@ class CameraFragment : Fragment() {
 
                 if (result < 0) throw RuntimeException("processSingleFrameRaw failed: $result")
 
+                val metadata = DarkbagMetadata(
+                    logIndex = targetLogIndex,
+                    lutName = activeLutName
+                ).toJson()
+
                 // 4. Fast Output Feedback (Thumbnail)
                 val fastOutputUri = ImageSaver.saveProcessedImage(
                     context = context,
@@ -1791,7 +1786,8 @@ class CameraFragment : Fragment() {
                     rawFolderUri = rawFolderUri,
                     mirror = false,
                     isFastPath = true,
-                    halfFrameMetadata = image.halfFrameMetadata
+                    halfFrameMetadata = image.halfFrameMetadata,
+                    metadata = metadata
                 )
 
                 timing?.firstOutputWritten = System.currentTimeMillis()
@@ -2910,7 +2906,8 @@ class CameraFragment : Fragment() {
                     saveTiff = false,
                     jpgFolderUri = jpgFolderUri,
                     mirror = mirror,
-                    halfFrameMetadata = halfFrameMetadata
+                    halfFrameMetadata = halfFrameMetadata,
+                    metadata = DarkbagMetadata().toJson()
                 )
                 withContext(Dispatchers.Main) {
                     val uiPrefs = appContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
@@ -3444,6 +3441,11 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
                     val mirror = shouldMirror
 
+                    val metadata = DarkbagMetadata(
+                        logIndex = targetLogIndex,
+                        lutName = activeLutName
+                    ).toJson()
+
                     val fastJpegUri = if (saveJpg) {
                         ImageSaver.saveProcessedImage(
                             context = context,
@@ -3459,7 +3461,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                             jpgFolderUri = jpgFolderUri,
                             mirror = false, // Mirroring already handled in JNI
                             isFastPath = true,
-                            halfFrameMetadata = hfMetadata
+                            halfFrameMetadata = hfMetadata,
+                            metadata = metadata
                         )
                     } else {
                         null

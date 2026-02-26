@@ -37,6 +37,16 @@ struct LUT3D {
 LUT3D load_lut(const char* path);
 Vec3 apply_lut(const LUT3D& lut, Vec3 color);
 
+struct Adjustments {
+    float exposure = 0.0f;    // EV adjustment
+    float contrast = 1.0f;    // 1.0 = normal
+    float saturation = 1.0f;  // 1.0 = normal
+    float highlights = 0.0f;  // [-1, 1]
+    float shadows = 0.0f;     // [-1, 1]
+    float whites = 0.0f;      // [-1, 1]
+    float blacks = 0.0f;      // [-1, 1]
+};
+
 // --- Shared Pipeline ---
 bool process_and_save_image(
     const std::vector<unsigned short>& inputImage,
@@ -55,7 +65,8 @@ bool process_and_save_image(
     bool isPreview = false,
     int downsampleFactor = 1,
     float zoomFactor = 1.0f,
-    bool mirror = false
+    bool mirror = false,
+    const Adjustments& adj = Adjustments()
 );
 
 // --- File Writers ---

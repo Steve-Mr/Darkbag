@@ -82,4 +82,10 @@
         <item name="cornerSize">24dp</item>
     </style>
 
+    <style name="BottomSheetDialogTheme_NoDim" parent="Theme.Material3.DayNight.BottomSheetDialog">
+        <item name="android:backgroundDimEnabled">false</item>
+        <item name="android:windowIsFloating">false</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+
 </resources>

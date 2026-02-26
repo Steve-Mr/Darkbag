@@ -444,10 +444,11 @@ bool process_and_save_image(
     int width, int height, float gain, int targetLog, const LUT3D& lut,
     const char* tiffPath, const char* jpgPath, int sourceColorSpace,
     const float* ccm, const float* wb, int orientation, unsigned char* out_rgb_buffer,
-    bool isPreview, int downsampleFactor, float zoomFactor, bool mirror
+    bool isPreview, int downsampleFactor, float zoomFactor, bool mirror,
+    const Adjustments& adj
 ) {
-    LOGD("process_and_save_image: %dx%d, gain=%.2f, log=%d, lut=%d, tiff=%s, jpg=%s, preview=%d, ds=%d, zoom=%.2f, mirror=%d",
-         width, height, gain, targetLog, lut.size, tiffPath ? tiffPath : "null", jpgPath ? jpgPath : "null", isPreview, downsampleFactor, zoomFactor, mirror);
+    LOGD("process_and_save_image: %dx%d, gain=%.2f, log=%d, lut=%d, preview=%d, zoom=%.2f, exp=%.2f, ct=%.2f, sa=%.2f",
+         width, height, gain, targetLog, lut.size, isPreview, zoomFactor, adj.exposure, adj.contrast, adj.saturation);
     int outW = width / downsampleFactor, outH = height / downsampleFactor;
     bool swapDims = (orientation == 90 || orientation == 270);
     int finalW = swapDims ? outH : outW, finalH = swapDims ? outW : outH;
@@ -474,9 +475,45 @@ bool process_and_save_image(
         x = std::max(0, std::min(x, width - 1));
         y = std::max(0, std::min(y, height - 1));
         size_t idx = (static_cast<size_t>(y) * width + x) * 3;
-        float norm_r = (float)inputImage[idx + 0] / 65535.0f * gain;
-        float norm_g = (float)inputImage[idx + 1] / 65535.0f * gain;
-        float norm_b = (float)inputImage[idx + 2] / 65535.0f * gain;
+
+        float exposure_gain = gain * powf(2.0f, adj.exposure);
+        float norm_r = (float)inputImage[idx + 0] / 65535.0f * exposure_gain;
+        float norm_g = (float)inputImage[idx + 1] / 65535.0f * exposure_gain;
+        float norm_b = (float)inputImage[idx + 2] / 65535.0f * exposure_gain;
+
+        // --- Linear Adjustments (Highlights, Shadows, Whites, Blacks) ---
+        auto apply_light_adj = [&](float v) {
+            if (v < 0.0f) v = 0.0f;
+            // Blacks
+            if (adj.blacks != 0) {
+                float b = adj.blacks * 0.05f; // Max 5% shift
+                float weight = clamp01(1.0f - v * 20.0f); // Only deep blacks
+                v += b * weight;
+            }
+            // Shadows
+            if (adj.shadows != 0) {
+                float s = adj.shadows * 0.2f;
+                float weight = clamp01(1.0f - v * 2.0f); // Lower 50%
+                v += v * s * weight;
+            }
+            // Highlights
+            if (adj.highlights != 0) {
+                float h = adj.highlights * 0.2f;
+                float weight = clamp01((v - 0.4f) * 2.0f); // Upper 60%
+                v += (1.0f - v) * h * weight;
+            }
+            // Whites
+            if (adj.whites != 0) {
+                float w = adj.whites * 0.1f;
+                float weight = clamp01((v - 0.8f) * 5.0f); // Top 20%
+                v += w * weight;
+            }
+            return v;
+        };
+
+        norm_r = apply_light_adj(norm_r);
+        norm_g = apply_light_adj(norm_g);
+        norm_b = apply_light_adj(norm_b);
 
         if (edgeComp.enabled) {
             const float nx = (x - edgeComp.centerX) * edgeComp.invMaxRadius;
@@ -516,6 +553,21 @@ bool process_and_save_image(
         if (stageB) *stageB = color;
 
         color.r = apply_log(color.r, targetLog); color.g = apply_log(color.g, targetLog); color.b = apply_log(color.b, targetLog);
+
+        // --- Post-Log Adjustments (Contrast, Saturation) ---
+        if (adj.contrast != 1.0f) {
+            color.r = (color.r - 0.5f) * adj.contrast + 0.5f;
+            color.g = (color.g - 0.5f) * adj.contrast + 0.5f;
+            color.b = (color.b - 0.5f) * adj.contrast + 0.5f;
+        }
+
+        if (adj.saturation != 1.0f) {
+            float luma = kRec709LinearLumaR * color.r + kRec709LinearLumaG * color.g + kRec709LinearLumaB * color.b;
+            color.r = luma + (color.r - luma) * adj.saturation;
+            color.g = luma + (color.g - luma) * adj.saturation;
+            color.b = luma + (color.b - luma) * adj.saturation;
+        }
+
         if (stageC) *stageC = color;
 
         if (lut.size > 0) color = apply_lut(lut, color);

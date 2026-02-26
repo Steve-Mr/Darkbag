@@ -48,7 +48,16 @@
             android:id="@+id/action_camera_to_settings"
             app:destination="@id/settings_fragment" />
 
+        <action
+            android:id="@+id/action_camera_to_viewer"
+            app:destination="@id/image_viewer_fragment" />
+
     </fragment>
+
+    <fragment
+        android:id="@+id/image_viewer_fragment"
+        android:name="top.maary.darkbag.fragments.ImageViewerFragment"
+        android:label="Image Viewer" />
 
     <fragment
         android:id="@+id/settings_fragment"

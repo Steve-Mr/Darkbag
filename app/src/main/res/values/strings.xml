@@ -54,4 +54,18 @@
     <string name="half_frame_auto_burst">Auto Burst (Double Shot)</string>
 
     <string name="settings_shortcut_label">Settings</string>
+    <string name="viewer_title">Image Viewer</string>
+    <string name="viewer_adjust">Adjust</string>
+    <string name="viewer_save">Save</string>
+    <string name="viewer_save_copy">Save as copy</string>
+    <string name="viewer_reset">Reset All</string>
+    <string name="viewer_light">Light</string>
+    <string name="viewer_color">Color</string>
+    <string name="viewer_exposure">Exposure</string>
+    <string name="viewer_highlights">Highlights</string>
+    <string name="viewer_shadows">Shadows</string>
+    <string name="viewer_whites">Whites</string>
+    <string name="viewer_blacks">Blacks</string>
+    <string name="viewer_contrast">Contrast</string>
+    <string name="viewer_saturation">Saturation</string>
 </resources>

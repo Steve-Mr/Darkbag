@@ -77,6 +77,11 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
             ccm, whiteBalance, zoomFactor, mirror
         )
 
+        val metadata = top.maary.darkbag.utils.DarkbagMetadata(
+            logIndex = targetLog,
+            lutName = lutPath?.let { java.io.File(it).name }
+        ).toJson()
+
         if (ret == 0) {
             Log.d(TAG, "Background Export Worker finished JNI processing for $baseName")
 
@@ -99,7 +104,8 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
                 rawFolderUri = rawFolderUri,
                 targetUri = targetUri?.let { Uri.parse(it) },
                 mirror = false, // already handled by JNI
-                halfFrameMetadata = hfMetadata
+                halfFrameMetadata = hfMetadata,
+                metadata = metadata
             )
 
             Log.d(TAG, "Background Export Worker finished successfully for $baseName. finalUri=$finalUri")

@@ -44,7 +44,30 @@ object ColorProcessor {
         outputJpgPath: String?,
         useGpu: Boolean,
         orientation: Int,
-        mirror: Boolean
+        mirror: Boolean,
+        exposure: Float = 0f,
+        highlights: Float = 0f,
+        shadows: Float = 0f,
+        whites: Float = 0f,
+        blacks: Float = 0f,
+        contrast: Float = 1f,
+        saturation: Float = 1f
+    ): Int
+
+    external fun processRawToBitmap(
+        dngData: ByteArray,
+        targetLog: Int,
+        lutPath: String?,
+        outputBitmap: android.graphics.Bitmap,
+        orientation: Int,
+        mirror: Boolean,
+        exposure: Float = 0f,
+        highlights: Float = 0f,
+        shadows: Float = 0f,
+        whites: Float = 0f,
+        blacks: Float = 0f,
+        contrast: Float = 1f,
+        saturation: Float = 1f
     ): Int
 
     /**
