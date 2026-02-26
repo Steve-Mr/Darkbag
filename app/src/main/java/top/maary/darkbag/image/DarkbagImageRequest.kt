@@ -7,5 +7,6 @@ data class DarkbagImageRequest(
     val uri: Uri,
     val dngUri: Uri?,
     val metadata: DarkbagMetadata,
-    val isRawMode: Boolean = false
+    val isRawMode: Boolean = false,
+    val quality: Int = 0
 )

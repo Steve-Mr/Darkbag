@@ -3,30 +3,43 @@ package top.maary.darkbag.image
 import android.content.Context
 import android.graphics.Bitmap
 import android.net.Uri
+import android.util.Log
 import androidx.exifinterface.media.ExifInterface
 import coil3.asImage
 import coil3.intercept.Interceptor
 import coil3.request.ImageResult
 import coil3.request.SuccessResult
 import coil3.decode.DataSource
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.withContext
 import top.maary.darkbag.processor.ColorProcessor
 import top.maary.darkbag.utils.DarkbagMetadata
 import java.io.File
 
 class DarkbagRawInterceptor(private val context: Context) : Interceptor {
+    private val semaphore = Semaphore(1)
+
     override suspend fun intercept(chain: Interceptor.Chain): ImageResult {
         val request = chain.request
         val data = request.data
 
         if (data is DarkbagImageRequest) {
+            val startTime = System.currentTimeMillis()
             val dngUri = data.dngUri
             // If we have a DNG and either we are in RAW mode (neutral display)
             // OR we are in JPG mode but have non-default metadata (adjustments).
             val shouldProcessRaw = dngUri != null && (data.isRawMode || data.metadata != DarkbagMetadata())
 
             if (shouldProcessRaw) {
-                val bitmap = processRaw(context, dngUri!!, data.metadata, data.isRawMode)
+                val bitmap = semaphore.withPermit {
+                    withContext(Dispatchers.Default) {
+                        processRaw(context, dngUri!!, data.metadata, data.isRawMode, data.quality)
+                    }
+                }
                 if (bitmap != null) {
+                    Log.d("DarkbagRawInterceptor", "Processed RAW in ${System.currentTimeMillis() - startTime}ms. mode=${if(data.isRawMode) "RAW" else "JPG"}")
                     return SuccessResult(
                         image = bitmap.asImage(),
                         request = request,
@@ -45,15 +58,17 @@ class DarkbagRawInterceptor(private val context: Context) : Interceptor {
         return chain.proceed()
     }
 
-    private fun processRaw(context: Context, dngUri: Uri, metadata: DarkbagMetadata, isRawMode: Boolean): Bitmap? {
+    private fun processRaw(context: Context, dngUri: Uri, metadata: DarkbagMetadata, isRawMode: Boolean, quality: Int): Bitmap? {
         return try {
             val bytes = context.contentResolver.openInputStream(dngUri)?.use { it.readBytes() } ?: return null
 
             var width = 0
             var height = 0
             var orientation = 0
-            context.contentResolver.openInputStream(dngUri)?.use { inputStream ->
-                val exif = ExifInterface(inputStream)
+
+            // Use a ByteArrayInputStream for ExifInterface to avoid re-opening/re-reading from disk
+            java.io.ByteArrayInputStream(bytes).use { bis ->
+                val exif = ExifInterface(bis)
                 width = exif.getAttributeInt(ExifInterface.TAG_IMAGE_WIDTH, 0)
                 height = exif.getAttributeInt(ExifInterface.TAG_IMAGE_LENGTH, 0)
                 orientation = exif.rotationDegrees
@@ -62,8 +77,17 @@ class DarkbagRawInterceptor(private val context: Context) : Interceptor {
             if (width <= 0 || height <= 0) return null
 
             val isSwapped = orientation == 90 || orientation == 270
-            val bmpWidth = if (isSwapped) height else width
-            val bmpHeight = if (isSwapped) width else height
+
+            // Limit viewer bitmap size to prevent OOM and keep performance reasonable
+            // while still maintaining high fidelity.
+            val maxDimension = 2560f
+            val scale = if (maxOf(width, height) > maxDimension) maxDimension / maxOf(width, height) else 1.0f
+
+            val targetW = (width * scale).toInt()
+            val targetH = (height * scale).toInt()
+
+            val bmpWidth = if (isSwapped) targetH else targetW
+            val bmpHeight = if (isSwapped) targetW else targetH
 
             val bitmap = Bitmap.createBitmap(bmpWidth, bmpHeight, Bitmap.Config.ARGB_8888)
 
@@ -88,7 +112,8 @@ class DarkbagRawInterceptor(private val context: Context) : Interceptor {
                 whites = targetMetadata.whites,
                 blacks = targetMetadata.blacks,
                 contrast = targetMetadata.contrast,
-                saturation = targetMetadata.saturation
+                saturation = targetMetadata.saturation,
+                quality = quality
             )
 
             if (res == 0) bitmap else null

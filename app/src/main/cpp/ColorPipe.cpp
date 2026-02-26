@@ -502,12 +502,13 @@ bool process_and_save_image(
         return v;
     };
 
+    const float exposure_gain = gain * powf(2.0f, adj.exposure);
+
     auto process_pixel = [&](int x, int y, Vec3* stageA, Vec3* stageB, Vec3* stageC) -> Vec3 {
         x = std::max(0, std::min(x, width - 1));
         y = std::max(0, std::min(y, height - 1));
         size_t idx = (static_cast<size_t>(y) * width + x) * 3;
 
-        float exposure_gain = gain * powf(2.0f, adj.exposure);
         float norm_r = (float)inputImage[idx + 0] / 65535.0f * exposure_gain;
         float norm_g = (float)inputImage[idx + 1] / 65535.0f * exposure_gain;
         float norm_b = (float)inputImage[idx + 2] / 65535.0f * exposure_gain;

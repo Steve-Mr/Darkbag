@@ -51,7 +51,8 @@ object ColorProcessor {
         whites: Float = 0f,
         blacks: Float = 0f,
         contrast: Float = 1f,
-        saturation: Float = 1f
+        saturation: Float = 1f,
+        quality: Int = 0
     ): Int
 
     external fun processRawToBitmap(
@@ -67,7 +68,8 @@ object ColorProcessor {
         whites: Float = 0f,
         blacks: Float = 0f,
         contrast: Float = 1f,
-        saturation: Float = 1f
+        saturation: Float = 1f,
+        quality: Int = 0
     ): Int
 
     /**

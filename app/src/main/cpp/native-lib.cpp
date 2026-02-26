@@ -75,7 +75,8 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRaw(
         jfloat whites,
         jfloat blacks,
         jfloat contrast,
-        jfloat saturation
+        jfloat saturation,
+        jint quality
 ) {
     LOGD("Native processRaw started using LibRaw.");
 
@@ -108,7 +109,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRaw(
         lut = load_lut(lut_path_cstr);
     }
 
-    image = decode_dng_to_raw(buf, len, RawProcessor, 3); // High quality
+    image = decode_dng_to_raw(buf, len, RawProcessor, (int)quality);
     if (!image) goto cleanup;
 
     {
@@ -179,7 +180,8 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRawToBitmap(
         jfloat whites,
         jfloat blacks,
         jfloat contrast,
-        jfloat saturation
+        jfloat saturation,
+        jint quality
 ) {
     unsigned char* buf = nullptr;
     libraw_processed_image_t* image = nullptr;
@@ -208,7 +210,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRawToBitmap(
         lut = load_lut(lut_path_cstr);
     }
 
-    image = decode_dng_to_raw(buf, len, RawProcessor, 3); // High quality for viewer
+    image = decode_dng_to_raw(buf, len, RawProcessor, (int)quality);
     if (!image) goto cleanup;
 
     {

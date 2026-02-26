@@ -132,13 +132,13 @@ class ImageViewerFragment : Fragment() {
     private fun setupObservers() {
         viewModel.currentMetadata.observe(viewLifecycleOwner) { meta ->
             binding.viewerLutSwitcher.text = meta.lutName?.substringBeforeLast(".") ?: "None"
-            adapter.updateParams(meta, viewModel.selectedFormat.value ?: "JPG")
+            adapter.updateParams(meta, viewModel.selectedFormat.value ?: "JPG", binding.imagePager.currentItem)
         }
 
         viewModel.selectedFormat.observe(viewLifecycleOwner) { format ->
             val image = viewModel.currentImage.value ?: return@observe
             updateUIForImage(image)
-            adapter.updateParams(viewModel.currentMetadata.value ?: DarkbagMetadata(), format)
+            adapter.updateParams(viewModel.currentMetadata.value ?: DarkbagMetadata(), format, binding.imagePager.currentItem)
 
             val buttonId = when(format) {
                 "JPG" -> R.id.btn_format_jpg
