@@ -42,6 +42,7 @@ class ImageViewerFragment : Fragment() {
     private lateinit var adapter: ImagePagerAdapter
     private lateinit var repository: ImageRepository
     private lateinit var lutManager: LutManager
+    private var isUpdatingFormatFromModel = false
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
         _binding = FragmentImageViewerBinding.inflate(inflater, container, false)
@@ -89,6 +90,18 @@ class ImageViewerFragment : Fragment() {
             findNavController().navigateUp()
         }
 
+        binding.formatToggleGroup.addOnButtonCheckedListener { _, checkedId, isChecked ->
+            if (isChecked && !isUpdatingFormatFromModel) {
+                val format = when(checkedId) {
+                    R.id.btn_format_jpg -> "JPG"
+                    R.id.btn_format_tiff -> "TIFF"
+                    R.id.btn_format_dng -> "DNG"
+                    else -> null
+                }
+                format?.let { viewModel.setFormat(it) }
+            }
+        }
+
         binding.btnSave.setOnClickListener {
             save(overwrite = true)
         }
@@ -117,9 +130,25 @@ class ImageViewerFragment : Fragment() {
     }
 
     private fun setupObservers() {
-        viewModel.previewBitmap.observe(viewLifecycleOwner) { bitmap ->
-            val currentPos = binding.imagePager.currentItem
-            adapter.setPreviewBitmap(currentPos, bitmap)
+        viewModel.previewState.observe(viewLifecycleOwner) { state ->
+            adapter.setPreviewBitmap(state.baseName, state.bitmap)
+        }
+
+        viewModel.selectedFormat.observe(viewLifecycleOwner) { format ->
+            val image = viewModel.currentImage.value ?: return@observe
+            adapter.setFormat(image.baseName, format)
+
+            val buttonId = when(format) {
+                "JPG" -> R.id.btn_format_jpg
+                "TIFF" -> R.id.btn_format_tiff
+                "DNG" -> R.id.btn_format_dng
+                else -> View.NO_ID
+            }
+            if (buttonId != View.NO_ID) {
+                isUpdatingFormatFromModel = true
+                binding.formatToggleGroup.check(buttonId)
+                isUpdatingFormatFromModel = false
+            }
         }
 
         viewModel.isModified.observe(viewLifecycleOwner) { modified ->
@@ -237,6 +266,10 @@ class ImageViewerFragment : Fragment() {
         val hasDng = image.allUris.containsKey("DNG")
         binding.fabAdjust.visibility = if (hasDng) View.VISIBLE else View.GONE
         binding.viewerLutSwitcher.visibility = if (hasDng) View.VISIBLE else View.GONE
+
+        binding.btnFormatJpg.visibility = if (image.allUris.containsKey("JPG")) View.VISIBLE else View.GONE
+        binding.btnFormatTiff.visibility = if (image.allUris.containsKey("TIFF")) View.VISIBLE else View.GONE
+        binding.btnFormatDng.visibility = if (image.allUris.containsKey("DNG")) View.VISIBLE else View.GONE
     }
 
     override fun onDestroyView() {

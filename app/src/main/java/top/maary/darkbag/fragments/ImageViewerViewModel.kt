@@ -19,9 +19,15 @@ import java.io.File
 
 class ImageViewerViewModel(application: Application) : AndroidViewModel(application) {
 
+    data class PreviewState(
+        val baseName: String,
+        val bitmap: Bitmap?
+    )
+
     val currentImage = MutableLiveData<DarkbagImage?>()
     val currentMetadata = MutableLiveData<DarkbagMetadata>()
-    val previewBitmap = MutableLiveData<Bitmap?>()
+    val selectedFormat = MutableLiveData<String>()
+    val previewState = MutableLiveData<PreviewState>()
     val isModified = MutableLiveData<Boolean>(false)
 
     private var originalMetadata: DarkbagMetadata? = null
@@ -29,14 +35,15 @@ class ImageViewerViewModel(application: Application) : AndroidViewModel(applicat
     private var previewJob: Job? = null
 
     fun setImage(image: DarkbagImage) {
-        if (currentImage.value?.primaryUri == image.primaryUri) return
+        if (currentImage.value?.baseName == image.baseName) return
 
         currentImage.value = image
+        selectedFormat.value = image.type
         val meta = image.metadata ?: DarkbagMetadata()
         currentMetadata.value = meta
         originalMetadata = meta
         isModified.value = false
-        previewBitmap.value = null
+        previewState.value = PreviewState(image.baseName, null)
 
         // Load DNG data if available
         image.allUris["DNG"]?.let { dngUri ->
@@ -119,9 +126,13 @@ class ImageViewerViewModel(application: Application) : AndroidViewModel(applicat
                 saturation = meta.saturation
             )
             if (res == 0) {
-                previewBitmap.postValue(preview)
+                previewState.postValue(PreviewState(image.baseName, preview))
             }
         }
+    }
+
+    fun setFormat(format: String) {
+        selectedFormat.value = format
     }
 
     fun resetMetadata() {

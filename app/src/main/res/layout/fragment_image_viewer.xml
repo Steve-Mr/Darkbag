@@ -17,6 +17,38 @@
         android:layout_height="wrap_content"
         android:padding="16dp">
 
+        <com.google.android.material.button.MaterialButtonToggleGroup
+            android:id="@+id/format_toggle_group"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            app:singleSelection="true"
+            app:selectionRequired="true"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintTop_toTopOf="parent">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_format_jpg"
+                style="@style/Widget.Material3.Button.OutlinedButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="JPG" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_format_tiff"
+                style="@style/Widget.Material3.Button.OutlinedButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="TIFF" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_format_dng"
+                style="@style/Widget.Material3.Button.OutlinedButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="RAW" />
+        </com.google.android.material.button.MaterialButtonToggleGroup>
+
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btn_back"
             style="@style/Widget.App.Button.IconButton.Large"
