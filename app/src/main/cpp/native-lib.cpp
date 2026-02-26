@@ -16,6 +16,47 @@
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 
+// Shared helper to decode DNG using LibRaw
+static libraw_processed_image_t* decode_dng_to_raw(const unsigned char* buf, jsize len, LibRaw& RawProcessor, int quality = 3) {
+    if (RawProcessor.open_buffer(buf, len) != LIBRAW_SUCCESS) {
+        LOGE("LibRaw open_buffer failed");
+        return nullptr;
+    }
+    if (RawProcessor.unpack() != LIBRAW_SUCCESS) {
+        LOGE("LibRaw unpack failed");
+        return nullptr;
+    }
+
+    RawProcessor.imgdata.params.output_bps = 16;
+    RawProcessor.imgdata.params.gamm[0] = 1.0;
+    RawProcessor.imgdata.params.gamm[1] = 1.0;
+    RawProcessor.imgdata.params.no_auto_bright = 1;
+    RawProcessor.imgdata.params.use_camera_wb = 1;
+    RawProcessor.imgdata.params.output_color = 4; // ProPhotoRGB
+    RawProcessor.imgdata.params.user_flip = 0;
+    RawProcessor.imgdata.params.user_qual = quality;
+
+    if (RawProcessor.dcraw_process() != LIBRAW_SUCCESS) {
+        LOGE("LibRaw dcraw_process failed");
+        return nullptr;
+    }
+
+    int ret = 0;
+    libraw_processed_image_t* image = RawProcessor.dcraw_make_mem_image(&ret);
+    if (!image) {
+        LOGE("LibRaw make_mem_image failed: %d", ret);
+        return nullptr;
+    }
+
+    if (image->type != LIBRAW_IMAGE_BITMAP || image->colors != 3 || image->bits != 16) {
+        LOGE("LibRaw output format mismatch");
+        LibRaw::dcraw_clear_mem(image);
+        return nullptr;
+    }
+
+    return image;
+}
+
 extern "C" JNIEXPORT jint JNICALL
 Java_top_maary_darkbag_processor_ColorProcessor_processRaw(
         JNIEnv* env,
@@ -38,6 +79,14 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRaw(
 ) {
     LOGD("Native processRaw started using LibRaw.");
 
+    unsigned char* buf = nullptr;
+    libraw_processed_image_t* image = nullptr;
+    const char* lut_path_cstr = nullptr;
+    const char* tiff_path_cstr = nullptr;
+    const char* jpg_path_cstr = nullptr;
+    LibRaw RawProcessor;
+    jint result = -1;
+
     Adjustments adj;
     adj.exposure = exposure;
     adj.highlights = highlights;
@@ -47,116 +96,46 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRaw(
     adj.contrast = contrast;
     adj.saturation = saturation;
 
-    // Get DNG Bytes
     jsize len = env->GetArrayLength(dngData);
     if (len <= 0) return -1;
 
-    unsigned char* buf = new unsigned char[len];
+    buf = new unsigned char[len];
     env->GetByteArrayRegion(dngData, 0, len, (jbyte*)buf);
 
-    // LibRaw Processing
-    LibRaw RawProcessor;
-
-    // Open buffer
-    if (RawProcessor.open_buffer(buf, len) != LIBRAW_SUCCESS) {
-        LOGE("LibRaw open_buffer failed");
-        delete[] buf;
-        return -1;
-    }
-
-    // Unpack
-    if (RawProcessor.unpack() != LIBRAW_SUCCESS) {
-        LOGE("LibRaw unpack failed");
-        RawProcessor.recycle();
-        delete[] buf;
-        return -1;
-    }
-
-    // Configure params
-    RawProcessor.imgdata.params.output_bps = 16;
-    RawProcessor.imgdata.params.gamm[0] = 1.0;
-    RawProcessor.imgdata.params.gamm[1] = 1.0;
-    RawProcessor.imgdata.params.no_auto_bright = 1;
-    RawProcessor.imgdata.params.use_camera_wb = 1;
-    RawProcessor.imgdata.params.output_color = 4; // ProPhotoRGB
-    RawProcessor.imgdata.params.user_flip = 0;    // Disable internal rotation to avoid double-rotation with Kotlin
-
-    // Process
-    if (RawProcessor.dcraw_process() != LIBRAW_SUCCESS) {
-        LOGE("LibRaw dcraw_process failed");
-        RawProcessor.recycle();
-        delete[] buf;
-        return -1;
-    }
-
-    // Get Mem Image
-    int ret = 0;
-    libraw_processed_image_t* image = RawProcessor.dcraw_make_mem_image(&ret);
-    if (!image) {
-        LOGE("LibRaw make_mem_image failed: %d", ret);
-        RawProcessor.recycle();
-        delete[] buf;
-        return -1;
-    }
-
-    // Check Format
-    if (image->type != LIBRAW_IMAGE_BITMAP || image->colors != 3 || image->bits != 16) {
-        LOGE("LibRaw output format mismatch: Type=%d, Colors=%d, Bits=%d", image->type, image->colors, image->bits);
-        LibRaw::dcraw_clear_mem(image);
-        RawProcessor.recycle();
-        delete[] buf;
-        return -1;
-    }
-
-    // Load LUT
-    const char* lut_path_cstr = (lutPath) ? env->GetStringUTFChars(lutPath, 0) : nullptr;
+    lut_path_cstr = (lutPath) ? env->GetStringUTFChars(lutPath, 0) : nullptr;
     LUT3D lut;
     if (lut_path_cstr) {
         lut = load_lut(lut_path_cstr);
-        env->ReleaseStringUTFChars(lutPath, lut_path_cstr);
     }
 
-    // Copy LibRaw data to std::vector for shared processing
-    std::vector<unsigned short> rawImage(image->width * image->height * 3);
-    unsigned short* src = (unsigned short*)image->data;
-    std::copy(src, src + (image->width * image->height * 3), rawImage.begin());
+    image = decode_dng_to_raw(buf, len, RawProcessor, 3); // High quality
+    if (!image) goto cleanup;
 
-    // Paths
-    const char* tiff_path_cstr = (outputTiffPath) ? env->GetStringUTFChars(outputTiffPath, 0) : nullptr;
-    const char* jpg_path_cstr = (outputJpgPath) ? env->GetStringUTFChars(outputJpgPath, 0) : nullptr;
+    {
+        std::vector<unsigned short> rawImage(image->width * image->height * 3);
+        unsigned short* src = (unsigned short*)image->data;
+        std::copy(src, src + (image->width * image->height * 3), rawImage.begin());
 
-    // Use Shared Pipeline (Gain = 1.0 for standard LibRaw output)
-    bool saveOk = process_and_save_image(
-        rawImage,
-        image->width,
-        image->height,
-        1.0f,
-        targetLog,
-        lut,
-        tiff_path_cstr,
-        jpg_path_cstr,
-        0, // sourceColorSpace = ProPhoto (LibRaw output_color=4)
-        nullptr, // ccm is not used for ProPhoto path
-        nullptr, // wb is not used for ProPhoto path (LibRaw handles it)
-        (int)orientation,
-        nullptr, // out_rgb_buffer
-        false, // isPreview
-        1, // downsampleFactor
-        1.0f, // zoomFactor
-        (bool)mirror,
-        adj
-    );
+        tiff_path_cstr = (outputTiffPath) ? env->GetStringUTFChars(outputTiffPath, 0) : nullptr;
+        jpg_path_cstr = (outputJpgPath) ? env->GetStringUTFChars(outputJpgPath, 0) : nullptr;
 
-    // Release Strings
-    if (outputTiffPath) env->ReleaseStringUTFChars(outputTiffPath, tiff_path_cstr);
-    if (outputJpgPath) env->ReleaseStringUTFChars(outputJpgPath, jpg_path_cstr);
+        bool saveOk = process_and_save_image(
+            rawImage, image->width, image->height, 1.0f, targetLog, lut,
+            tiff_path_cstr, jpg_path_cstr, 0, nullptr, nullptr, (int)orientation,
+            nullptr, false, 1, 1.0f, (bool)mirror, adj
+        );
+        result = saveOk ? 0 : -1;
+    }
 
-    // Cleanup
-    LibRaw::dcraw_clear_mem(image);
+cleanup:
+    if (lut_path_cstr) env->ReleaseStringUTFChars(lutPath, lut_path_cstr);
+    if (tiff_path_cstr) env->ReleaseStringUTFChars(outputTiffPath, tiff_path_cstr);
+    if (jpg_path_cstr) env->ReleaseStringUTFChars(outputJpgPath, jpg_path_cstr);
+    if (image) LibRaw::dcraw_clear_mem(image);
     RawProcessor.recycle();
     delete[] buf;
 
-    return saveOk ? 0 : -1;
+    return result;
 }
 
 extern "C" JNIEXPORT jfloatArray JNICALL
@@ -202,6 +181,13 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRawToBitmap(
         jfloat contrast,
         jfloat saturation
 ) {
+    unsigned char* buf = nullptr;
+    libraw_processed_image_t* image = nullptr;
+    const char* lut_path_cstr = nullptr;
+    LibRaw RawProcessor;
+    jint result = -1;
+    bool locked = false;
+
     Adjustments adj;
     adj.exposure = exposure;
     adj.highlights = highlights;
@@ -211,64 +197,49 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRawToBitmap(
     adj.contrast = contrast;
     adj.saturation = saturation;
 
-    // Get DNG Bytes
     jsize len = env->GetArrayLength(dngData);
     if (len <= 0) return -1;
-    unsigned char* buf = new unsigned char[len];
+    buf = new unsigned char[len];
     env->GetByteArrayRegion(dngData, 0, len, (jbyte*)buf);
 
-    LibRaw RawProcessor;
-    if (RawProcessor.open_buffer(buf, len) != LIBRAW_SUCCESS) { delete[] buf; return -1; }
-    if (RawProcessor.unpack() != LIBRAW_SUCCESS) { RawProcessor.recycle(); delete[] buf; return -1; }
-
-    RawProcessor.imgdata.params.output_bps = 16;
-    RawProcessor.imgdata.params.gamm[0] = 1.0;
-    RawProcessor.imgdata.params.gamm[1] = 1.0;
-    RawProcessor.imgdata.params.no_auto_bright = 1;
-    RawProcessor.imgdata.params.use_camera_wb = 1;
-    RawProcessor.imgdata.params.output_color = 4; // ProPhotoRGB
-    RawProcessor.imgdata.params.user_flip = 0;
-    // For preview, we use bilinear demosaicing (fastest)
-    RawProcessor.imgdata.params.user_qual = 0;
-
-    if (RawProcessor.dcraw_process() != LIBRAW_SUCCESS) { RawProcessor.recycle(); delete[] buf; return -1; }
-
-    int ret = 0;
-    libraw_processed_image_t* image = RawProcessor.dcraw_make_mem_image(&ret);
-    if (!image) { RawProcessor.recycle(); delete[] buf; return -1; }
-
-    // Load LUT
-    const char* lut_path_cstr = (lutPath) ? env->GetStringUTFChars(lutPath, 0) : nullptr;
+    lut_path_cstr = (lutPath) ? env->GetStringUTFChars(lutPath, 0) : nullptr;
     LUT3D lut;
     if (lut_path_cstr) {
         lut = load_lut(lut_path_cstr);
-        env->ReleaseStringUTFChars(lutPath, lut_path_cstr);
     }
 
-    std::vector<unsigned short> rawImage(image->width * image->height * 3);
-    unsigned short* src = (unsigned short*)image->data;
-    std::copy(src, src + (image->width * image->height * 3), rawImage.begin());
+    image = decode_dng_to_raw(buf, len, RawProcessor, 0); // Fast quality for preview
+    if (!image) goto cleanup;
 
-    AndroidBitmapInfo info;
-    void* pixels;
-    if (AndroidBitmap_getInfo(env, bitmap, &info) < 0) return -1;
-    if (AndroidBitmap_lockPixels(env, bitmap, &pixels) < 0) return -1;
+    {
+        std::vector<unsigned short> rawImage(image->width * image->height * 3);
+        unsigned short* src = (unsigned short*)image->data;
+        std::copy(src, src + (image->width * image->height * 3), rawImage.begin());
 
-    // We use downsampleFactor if bitmap is smaller than image
-    int downsample = 1;
-    bool swap = (orientation == 90 || orientation == 270);
-    int targetW = swap ? info.height : info.width;
-    if (image->width > targetW) downsample = image->width / targetW;
+        AndroidBitmapInfo info;
+        void* pixels;
+        if (AndroidBitmap_getInfo(env, bitmap, &info) < 0) goto cleanup;
+        if (AndroidBitmap_lockPixels(env, bitmap, &pixels) < 0) goto cleanup;
+        locked = true;
 
-    bool ok = process_and_save_image(
-        rawImage, image->width, image->height, 1.0f, targetLog, lut,
-        nullptr, nullptr, 0, nullptr, nullptr, orientation,
-        (unsigned char*)pixels, true, downsample, 1.0f, mirror, adj
-    );
+        int downsample = 1;
+        bool swap = (orientation == 90 || orientation == 270);
+        int targetW = swap ? info.height : info.width;
+        if (image->width > targetW) downsample = image->width / targetW;
 
-    AndroidBitmap_unlockPixels(env, bitmap);
-    LibRaw::dcraw_clear_mem(image);
+        bool ok = process_and_save_image(
+            rawImage, image->width, image->height, 1.0f, targetLog, lut,
+            nullptr, nullptr, 0, nullptr, nullptr, orientation,
+            (unsigned char*)pixels, true, downsample, 1.0f, mirror, adj
+        );
+        result = ok ? 0 : -1;
+    }
+
+cleanup:
+    if (locked) AndroidBitmap_unlockPixels(env, bitmap);
+    if (lut_path_cstr) env->ReleaseStringUTFChars(lutPath, lut_path_cstr);
+    if (image) LibRaw::dcraw_clear_mem(image);
     RawProcessor.recycle();
     delete[] buf;
-    return ok ? 0 : -1;
+    return result;
 }

@@ -3,6 +3,7 @@ package top.maary.darkbag.fragments
 import android.app.Application
 import android.graphics.Bitmap
 import android.net.Uri
+import androidx.exifinterface.media.ExifInterface
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.viewModelScope
@@ -55,9 +56,13 @@ class ImageViewerViewModel(application: Application) : AndroidViewModel(applicat
         }
     }
 
-    fun updateMetadata(newMeta: DarkbagMetadata) {
-        currentMetadata.value = newMeta
-        isModified.value = newMeta != originalMetadata
+    fun updateMetadata(updater: (DarkbagMetadata) -> DarkbagMetadata) {
+        val current = currentMetadata.value ?: DarkbagMetadata()
+        val next = updater(current)
+        if (current == next) return
+
+        currentMetadata.value = next
+        isModified.value = next != originalMetadata
         generatePreview(debounce = true)
     }
 
@@ -70,20 +75,40 @@ class ImageViewerViewModel(application: Application) : AndroidViewModel(applicat
         previewJob = viewModelScope.launch(Dispatchers.Default) {
             if (debounce) delay(100)
 
-            // Create a bitmap for preview. We'll use a size that fits common screens.
-            // Orientation handling: we'll use 0 for preview if we just want to see adjustments
-            // but for correct aspect ratio in UI, we might need more.
-            val preview = Bitmap.createBitmap(1024, 1024, Bitmap.Config.ARGB_8888)
+            val dngUri = image.allUris["DNG"] ?: return@launch
+            var width = 1024
+            var height = 1024
+            var orientation = 0
+
+            try {
+                getApplication<Application>().contentResolver.openInputStream(dngUri)?.use { inputStream ->
+                    val exif = ExifInterface(inputStream)
+                    width = exif.getAttributeInt(ExifInterface.TAG_IMAGE_WIDTH, 1024)
+                    height = exif.getAttributeInt(ExifInterface.TAG_IMAGE_LENGTH, 1024)
+                    orientation = exif.rotationDegrees
+                }
+            } catch (e: Exception) { }
+
+            // Calculate aspect ratio correct bitmap
+            val maxSide = 1024f
+            val scale = if (width > height) maxSide / width else maxSide / height
+            val targetW = (width * scale).toInt()
+            val targetH = (height * scale).toInt()
+
+            val preview = Bitmap.createBitmap(targetW, targetH, Bitmap.Config.ARGB_8888)
 
             val lutDir = File(getApplication<Application>().filesDir, "luts")
-            val lutPath = meta.lutName?.let { File(lutDir, it).absolutePath }
+            val lutPath = meta.lutName?.let {
+                if (it.contains("..") || it.startsWith("/")) null
+                else File(lutDir, it).absolutePath
+            }
 
             val res = ColorProcessor.processRawToBitmap(
                 dngData = bytes,
                 targetLog = meta.logIndex,
                 lutPath = lutPath,
                 outputBitmap = preview,
-                orientation = 0,
+                orientation = orientation,
                 mirror = false,
                 exposure = meta.exposure,
                 highlights = meta.highlights,
@@ -100,7 +125,7 @@ class ImageViewerViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     fun resetMetadata() {
-        originalMetadata?.let { updateMetadata(it) } ?: updateMetadata(DarkbagMetadata())
+        originalMetadata?.let { meta -> updateMetadata { meta } } ?: updateMetadata { DarkbagMetadata() }
     }
 
     fun saveImage(overwrite: Boolean, onComplete: (Uri?) -> Unit) {
@@ -109,8 +134,20 @@ class ImageViewerViewModel(application: Application) : AndroidViewModel(applicat
         val image = currentImage.value ?: return
 
         viewModelScope.launch(Dispatchers.IO) {
+            val dngUri = image.allUris["DNG"]
+            val orientation = dngUri?.let { uri ->
+                try {
+                    getApplication<Application>().contentResolver.openInputStream(uri)?.use {
+                        ExifInterface(it).rotationDegrees
+                    }
+                } catch (e: Exception) { 0 }
+            } ?: 0
+
             val lutDir = File(getApplication<Application>().filesDir, "luts")
-            val lutPath = meta.lutName?.let { File(lutDir, it).absolutePath }
+            val lutPath = meta.lutName?.let {
+                if (it.contains("..") || it.startsWith("/")) null
+                else File(lutDir, it).absolutePath
+            }
 
             // Generate a temporary path for re-processing
             val tempJpg = File(getApplication<Application>().cacheDir, "reproc_${System.currentTimeMillis()}.jpg")
@@ -122,7 +159,7 @@ class ImageViewerViewModel(application: Application) : AndroidViewModel(applicat
                 outputTiffPath = null,
                 outputJpgPath = tempJpg.absolutePath,
                 useGpu = false,
-                orientation = 0,
+                orientation = orientation,
                 mirror = false,
                 exposure = meta.exposure,
                 highlights = meta.highlights,

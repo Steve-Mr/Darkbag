@@ -25,6 +25,14 @@ import top.maary.darkbag.utils.ImageRepository
 import top.maary.darkbag.utils.LutManager
 import java.io.File
 
+data class AdjustmentConfig(
+    val binding: (LayoutImageAdjustmentsBinding) -> ItemAdjustmentSliderBinding,
+    val label: String,
+    val range: ClosedFloatingPointRange<Float>,
+    val getter: (DarkbagMetadata) -> Float,
+    val updater: (DarkbagMetadata, Float) -> DarkbagMetadata
+)
+
 class ImageViewerFragment : Fragment() {
 
     private var _binding: FragmentImageViewerBinding? = null
@@ -138,8 +146,7 @@ class ImageViewerFragment : Fragment() {
         binding.viewerLutList.layoutManager = LinearLayoutManager(requireContext())
         val luts = lutManager.getLuts()
         val lutAdapter = LutAdapter(luts, viewModel.currentMetadata.value?.lutName) { name ->
-            val currentMeta = viewModel.currentMetadata.value ?: DarkbagMetadata()
-            viewModel.updateMetadata(currentMeta.copy(lutName = name))
+            viewModel.updateMetadata { it.copy(lutName = name) }
             binding.viewerLutListContainer.visibility = View.GONE
         }
         binding.viewerLutList.adapter = lutAdapter
@@ -153,6 +160,16 @@ class ImageViewerFragment : Fragment() {
         binding.viewerLutListContainer.visibility = if (binding.viewerLutListContainer.visibility == View.VISIBLE) View.GONE else View.VISIBLE
     }
 
+    private val adjustmentConfigs = listOf(
+        AdjustmentConfig({ it.adjExposure }, "Exposure", -4f..4f, { it.exposure }, { m, v -> m.copy(exposure = v) }),
+        AdjustmentConfig({ it.adjHighlights }, "Highlights", -1f..1f, { it.highlights }, { m, v -> m.copy(highlights = v) }),
+        AdjustmentConfig({ it.adjShadows }, "Shadows", -1f..1f, { it.shadows }, { m, v -> m.copy(shadows = v) }),
+        AdjustmentConfig({ it.adjWhites }, "Whites", -1f..1f, { it.whites }, { m, v -> m.copy(whites = v) }),
+        AdjustmentConfig({ it.adjBlacks }, "Blacks", -1f..1f, { it.blacks }, { m, v -> m.copy(blacks = v) }),
+        AdjustmentConfig({ it.adjContrast }, "Contrast", 0.5f..1.5f, { it.contrast }, { m, v -> m.copy(contrast = v) }),
+        AdjustmentConfig({ it.adjSaturation }, "Saturation", 0f..2f, { it.saturation }, { m, v -> m.copy(saturation = v) })
+    )
+
     private fun showAdjustmentsBottomSheet() {
         val dialog = BottomSheetDialog(requireContext(), R.style.BottomSheetDialogTheme_NoDim)
         val bsBinding = LayoutImageAdjustmentsBinding.inflate(layoutInflater)
@@ -161,26 +178,10 @@ class ImageViewerFragment : Fragment() {
 
         val meta = viewModel.currentMetadata.value ?: DarkbagMetadata()
 
-        setupSlider(bsBinding.adjExposure, "Exposure", -4f, 4f, meta.exposure) { v ->
-            viewModel.updateMetadata(viewModel.currentMetadata.value?.copy(exposure = v) ?: DarkbagMetadata(exposure = v))
-        }
-        setupSlider(bsBinding.adjHighlights, "Highlights", -1f, 1f, meta.highlights) { v ->
-            viewModel.updateMetadata(viewModel.currentMetadata.value?.copy(highlights = v) ?: DarkbagMetadata(highlights = v))
-        }
-        setupSlider(bsBinding.adjShadows, "Shadows", -1f, 1f, meta.shadows) { v ->
-            viewModel.updateMetadata(viewModel.currentMetadata.value?.copy(shadows = v) ?: DarkbagMetadata(shadows = v))
-        }
-        setupSlider(bsBinding.adjWhites, "Whites", -1f, 1f, meta.whites) { v ->
-            viewModel.updateMetadata(viewModel.currentMetadata.value?.copy(whites = v) ?: DarkbagMetadata(whites = v))
-        }
-        setupSlider(bsBinding.adjBlacks, "Blacks", -1f, 1f, meta.blacks) { v ->
-            viewModel.updateMetadata(viewModel.currentMetadata.value?.copy(blacks = v) ?: DarkbagMetadata(blacks = v))
-        }
-        setupSlider(bsBinding.adjContrast, "Contrast", 0.5f, 1.5f, meta.contrast) { v ->
-            viewModel.updateMetadata(viewModel.currentMetadata.value?.copy(contrast = v) ?: DarkbagMetadata(contrast = v))
-        }
-        setupSlider(bsBinding.adjSaturation, "Saturation", 0f, 2f, meta.saturation) { v ->
-            viewModel.updateMetadata(viewModel.currentMetadata.value?.copy(saturation = v) ?: DarkbagMetadata(saturation = v))
+        adjustmentConfigs.forEach { config ->
+            setupSlider(config.binding(bsBinding), config.label, config.range, config.getter(meta)) { v ->
+                viewModel.updateMetadata { config.updater(it, v) }
+            }
         }
 
         bsBinding.btnReset.setOnClickListener {
@@ -191,11 +192,11 @@ class ImageViewerFragment : Fragment() {
         dialog.show()
     }
 
-    private fun setupSlider(sliderBinding: ItemAdjustmentSliderBinding, label: String, from: Float, to: Float, initial: Float, onUpdate: (Float) -> Unit) {
+    private fun setupSlider(sliderBinding: ItemAdjustmentSliderBinding, label: String, range: ClosedFloatingPointRange<Float>, initial: Float, onUpdate: (Float) -> Unit) {
         sliderBinding.label.text = label
         sliderBinding.value.text = "%.2f".format(initial)
-        sliderBinding.slider.valueFrom = from
-        sliderBinding.slider.valueTo = to
+        sliderBinding.slider.valueFrom = range.start
+        sliderBinding.slider.valueTo = range.endInclusive
         sliderBinding.slider.value = initial
         sliderBinding.slider.addOnChangeListener { _, value, fromUser ->
             if (fromUser) {

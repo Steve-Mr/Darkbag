@@ -471,6 +471,36 @@ bool process_and_save_image(
     std::vector<unsigned char> debugB8;
     std::vector<unsigned char> debugC8;
 
+    // --- Linear Adjustments (Highlights, Shadows, Whites, Blacks) ---
+    auto apply_light_adj = [&](float v) {
+        if (v < 0.0f) v = 0.0f;
+        // Blacks
+        if (adj.blacks != 0) {
+            float b = adj.blacks * 0.05f; // Max 5% shift
+            float weight = clamp01(1.0f - v * 20.0f); // Only deep blacks
+            v += b * weight;
+        }
+        // Shadows
+        if (adj.shadows != 0) {
+            float s = adj.shadows * 0.2f;
+            float weight = clamp01(1.0f - v * 2.0f); // Lower 50%
+            v += v * s * weight;
+        }
+        // Highlights
+        if (adj.highlights != 0) {
+            float h = adj.highlights * 0.2f;
+            float weight = clamp01((v - 0.4f) * 2.0f); // Upper 60%
+            v += (1.0f - v) * h * weight;
+        }
+        // Whites
+        if (adj.whites != 0) {
+            float w = adj.whites * 0.1f;
+            float weight = clamp01((v - 0.8f) * 5.0f); // Top 20%
+            v += w * weight;
+        }
+        return v;
+    };
+
     auto process_pixel = [&](int x, int y, Vec3* stageA, Vec3* stageB, Vec3* stageC) -> Vec3 {
         x = std::max(0, std::min(x, width - 1));
         y = std::max(0, std::min(y, height - 1));
@@ -480,36 +510,6 @@ bool process_and_save_image(
         float norm_r = (float)inputImage[idx + 0] / 65535.0f * exposure_gain;
         float norm_g = (float)inputImage[idx + 1] / 65535.0f * exposure_gain;
         float norm_b = (float)inputImage[idx + 2] / 65535.0f * exposure_gain;
-
-        // --- Linear Adjustments (Highlights, Shadows, Whites, Blacks) ---
-        auto apply_light_adj = [&](float v) {
-            if (v < 0.0f) v = 0.0f;
-            // Blacks
-            if (adj.blacks != 0) {
-                float b = adj.blacks * 0.05f; // Max 5% shift
-                float weight = clamp01(1.0f - v * 20.0f); // Only deep blacks
-                v += b * weight;
-            }
-            // Shadows
-            if (adj.shadows != 0) {
-                float s = adj.shadows * 0.2f;
-                float weight = clamp01(1.0f - v * 2.0f); // Lower 50%
-                v += v * s * weight;
-            }
-            // Highlights
-            if (adj.highlights != 0) {
-                float h = adj.highlights * 0.2f;
-                float weight = clamp01((v - 0.4f) * 2.0f); // Upper 60%
-                v += (1.0f - v) * h * weight;
-            }
-            // Whites
-            if (adj.whites != 0) {
-                float w = adj.whites * 0.1f;
-                float weight = clamp01((v - 0.8f) * 5.0f); // Top 20%
-                v += w * weight;
-            }
-            return v;
-        };
 
         norm_r = apply_light_adj(norm_r);
         norm_g = apply_light_adj(norm_g);
@@ -562,7 +562,8 @@ bool process_and_save_image(
         }
 
         if (adj.saturation != 1.0f) {
-            float luma = kRec709LinearLumaR * color.r + kRec709LinearLumaG * color.g + kRec709LinearLumaB * color.b;
+            // Using green channel as a luma approximation in log space is common and avoids hue shifts.
+            float luma = color.g;
             color.r = luma + (color.r - luma) * adj.saturation;
             color.g = luma + (color.g - luma) * adj.saturation;
             color.b = luma + (color.b - luma) * adj.saturation;
