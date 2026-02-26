@@ -7,7 +7,7 @@ import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
 import com.bumptech.glide.Glide
-import top.maary.darkbag.databinding.ItemGalleryCarouselBinding
+import top.maary.darkbag.databinding.ItemGalleryStaggeredBinding
 import top.maary.darkbag.persistence.ImageEntity
 
 class StaggeredGalleryAdapter(
@@ -27,9 +27,7 @@ class StaggeredGalleryAdapter(
     fun getSelectedImages() = currentList.filter { it.id in selectedIds }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
-        val binding = ItemGalleryCarouselBinding.inflate(LayoutInflater.from(parent.context), parent, false)
-        // Adjust width for staggered grid (match parent width)
-        binding.root.layoutParams.width = ViewGroup.LayoutParams.MATCH_PARENT
+        val binding = ItemGalleryStaggeredBinding.inflate(LayoutInflater.from(parent.context), parent, false)
         return ViewHolder(binding)
     }
 
@@ -37,7 +35,7 @@ class StaggeredGalleryAdapter(
         holder.bind(getItem(position))
     }
 
-    inner class ViewHolder(private val binding: ItemGalleryCarouselBinding) : RecyclerView.ViewHolder(binding.root) {
+    inner class ViewHolder(private val binding: ItemGalleryStaggeredBinding) : RecyclerView.ViewHolder(binding.root) {
         fun bind(item: ImageEntity) {
             Glide.with(binding.imageView).load(item.path).into(binding.imageView)
 
