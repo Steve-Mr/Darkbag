@@ -21,7 +21,8 @@ class ImageViewerViewModel(application: Application) : AndroidViewModel(applicat
 
     data class PreviewState(
         val baseName: String,
-        val bitmap: Bitmap?
+        val processedBitmap: Bitmap? = null,
+        val rawBitmap: Bitmap? = null
     )
 
     val currentImage = MutableLiveData<DarkbagImage?>()
@@ -43,7 +44,7 @@ class ImageViewerViewModel(application: Application) : AndroidViewModel(applicat
         currentMetadata.value = meta
         originalMetadata = meta
         isModified.value = false
-        previewState.value = PreviewState(image.baseName, null)
+        previewState.value = PreviewState(image.baseName, null, null)
         dngData = null
 
         // Load DNG data if available
@@ -54,6 +55,7 @@ class ImageViewerViewModel(application: Application) : AndroidViewModel(applicat
                     dngData = bytes
                     if (bytes != null) {
                         generatePreview(debounce = false)
+                        generateRawPreview()
                     }
                 } catch (e: Exception) {
                     dngData = null
@@ -98,13 +100,7 @@ class ImageViewerViewModel(application: Application) : AndroidViewModel(applicat
                 }
             } catch (e: Exception) { }
 
-            // Calculate aspect ratio correct bitmap
-            val maxSide = 1024f
-            val scale = if (width > height) maxSide / width else maxSide / height
-            val targetW = (width * scale).toInt()
-            val targetH = (height * scale).toInt()
-
-            val preview = Bitmap.createBitmap(targetW, targetH, Bitmap.Config.ARGB_8888)
+            val preview = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
 
             val lutDir = File(getApplication<Application>().filesDir, "luts")
             val lutPath = meta.lutName?.let {
@@ -129,7 +125,55 @@ class ImageViewerViewModel(application: Application) : AndroidViewModel(applicat
             )
             if (res == 0) {
                 if (currentImage.value?.baseName == baseNameAtStart) {
-                    previewState.postValue(PreviewState(image.baseName, preview))
+                    val current = previewState.value ?: PreviewState(image.baseName)
+                    previewState.postValue(current.copy(processedBitmap = preview))
+                }
+            }
+        }
+    }
+
+    private fun generateRawPreview() {
+        val bytes = dngData ?: return
+        val image = currentImage.value ?: return
+        val baseNameAtStart = image.baseName
+
+        viewModelScope.launch(Dispatchers.Default) {
+            val dngUri = image.allUris["DNG"] ?: return@launch
+            var width = 1024
+            var height = 1024
+            var orientation = 0
+
+            try {
+                getApplication<Application>().contentResolver.openInputStream(dngUri)?.use { inputStream ->
+                    val exif = ExifInterface(inputStream)
+                    width = exif.getAttributeInt(ExifInterface.TAG_IMAGE_WIDTH, 1024)
+                    height = exif.getAttributeInt(ExifInterface.TAG_IMAGE_LENGTH, 1024)
+                    orientation = exif.rotationDegrees
+                }
+            } catch (e: Exception) { }
+
+            val preview = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+
+            // Neutral processing: logIndex=0, lutPath=null, default adjustments
+            val res = ColorProcessor.processRawToBitmap(
+                dngData = bytes,
+                targetLog = 0,
+                lutPath = null,
+                outputBitmap = preview,
+                orientation = orientation,
+                mirror = false,
+                exposure = 0f,
+                highlights = 0f,
+                shadows = 0f,
+                whites = 0f,
+                blacks = 0f,
+                contrast = 1f,
+                saturation = 1f
+            )
+            if (res == 0) {
+                if (currentImage.value?.baseName == baseNameAtStart) {
+                    val current = previewState.value ?: PreviewState(image.baseName)
+                    previewState.postValue(current.copy(rawBitmap = preview))
                 }
             }
         }

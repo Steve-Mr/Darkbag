@@ -208,7 +208,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRawToBitmap(
         lut = load_lut(lut_path_cstr);
     }
 
-    image = decode_dng_to_raw(buf, len, RawProcessor, 0); // Fast quality for preview
+    image = decode_dng_to_raw(buf, len, RawProcessor, 3); // High quality for viewer
     if (!image) goto cleanup;
 
     {
@@ -222,15 +222,10 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRawToBitmap(
         if (AndroidBitmap_lockPixels(env, bitmap, &pixels) < 0) goto cleanup;
         locked = true;
 
-        int downsample = 1;
-        bool swap = (orientation == 90 || orientation == 270);
-        int targetW = swap ? info.height : info.width;
-        if (image->width > targetW) downsample = image->width / targetW;
-
         bool ok = process_and_save_image(
             rawImage, image->width, image->height, 1.0f, targetLog, lut,
             nullptr, nullptr, 0, nullptr, nullptr, orientation,
-            (unsigned char*)pixels, true, downsample, 1.0f, mirror, adj,
+            (unsigned char*)pixels, true, 1, 1.0f, mirror, adj,
             info.width, info.height, info.stride
         );
         result = ok ? 0 : -1;

@@ -10,7 +10,8 @@ import top.maary.darkbag.utils.DarkbagImage
 
 class ImagePagerAdapter(private var images: List<DarkbagImage>) : RecyclerView.Adapter<ImagePagerAdapter.ViewHolder>() {
 
-    private val previewBitmaps = mutableMapOf<String, Bitmap>()
+    private val processedBitmaps = mutableMapOf<String, Bitmap>()
+    private val rawBitmaps = mutableMapOf<String, Bitmap>()
     private var activeFormats = mutableMapOf<String, String>()
 
     class ViewHolder(val binding: ItemImagePagerBinding) : RecyclerView.ViewHolder(binding.root)
@@ -23,17 +24,24 @@ class ImagePagerAdapter(private var images: List<DarkbagImage>) : RecyclerView.A
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
         val image = images[position]
         val format = activeFormats[image.baseName] ?: image.type
-        val preview = previewBitmaps[image.baseName]
+        val processed = processedBitmaps[image.baseName]
+        val raw = rawBitmaps[image.baseName]
 
-        if (format == "DNG" && preview != null) {
-            holder.binding.ivDisplay.setImageBitmap(preview)
-        } else {
-            val uri = image.allUris[format] ?: image.allUris["JPG"] ?: image.primaryUri
+        when {
+            format == "JPG" && processed != null -> {
+                holder.binding.ivDisplay.setImageBitmap(processed)
+            }
+            format == "DNG" && raw != null -> {
+                holder.binding.ivDisplay.setImageBitmap(raw)
+            }
+            else -> {
+                val uri = image.allUris[format] ?: image.allUris["JPG"] ?: image.primaryUri
 
-            Glide.with(holder.itemView)
-                .load(uri)
-                .placeholder(holder.binding.ivDisplay.drawable)
-                .into(holder.binding.ivDisplay)
+                Glide.with(holder.itemView)
+                    .load(uri)
+                    .placeholder(holder.binding.ivDisplay.drawable)
+                    .into(holder.binding.ivDisplay)
+            }
         }
     }
 
@@ -45,12 +53,9 @@ class ImagePagerAdapter(private var images: List<DarkbagImage>) : RecyclerView.A
         notifyDataSetChanged()
     }
 
-    fun setPreviewBitmap(baseName: String, bitmap: Bitmap?) {
-        if (bitmap == null) {
-            previewBitmaps.remove(baseName)
-        } else {
-            previewBitmaps[baseName] = bitmap
-        }
+    fun setPreviewBitmaps(baseName: String, processed: Bitmap?, raw: Bitmap?) {
+        if (processed == null) processedBitmaps.remove(baseName) else processedBitmaps[baseName] = processed
+        if (raw == null) rawBitmaps.remove(baseName) else rawBitmaps[baseName] = raw
 
         val index = images.indexOfFirst { it.baseName == baseName }
         if (index != -1) {

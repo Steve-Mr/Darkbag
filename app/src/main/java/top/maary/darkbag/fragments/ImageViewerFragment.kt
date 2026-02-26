@@ -131,12 +131,13 @@ class ImageViewerFragment : Fragment() {
 
     private fun setupObservers() {
         viewModel.previewState.observe(viewLifecycleOwner) { state ->
-            adapter.setPreviewBitmap(state.baseName, state.bitmap)
+            adapter.setPreviewBitmaps(state.baseName, state.processedBitmap, state.rawBitmap)
         }
 
         viewModel.selectedFormat.observe(viewLifecycleOwner) { format ->
             val image = viewModel.currentImage.value ?: return@observe
             adapter.setFormat(image.baseName, format)
+            updateUIForImage(image)
 
             val buttonId = when(format) {
                 "JPG" -> R.id.btn_format_jpg
@@ -264,8 +265,10 @@ class ImageViewerFragment : Fragment() {
 
     private fun updateUIForImage(image: DarkbagImage) {
         val hasDng = image.allUris.containsKey("DNG")
-        binding.fabAdjust.visibility = if (hasDng) View.VISIBLE else View.GONE
-        binding.viewerLutSwitcher.visibility = if (hasDng) View.VISIBLE else View.GONE
+        val isJpg = viewModel.selectedFormat.value == "JPG"
+
+        binding.fabAdjust.visibility = if (hasDng && isJpg) View.VISIBLE else View.GONE
+        binding.viewerLutSwitcher.visibility = if (hasDng && isJpg) View.VISIBLE else View.GONE
 
         binding.btnFormatJpg.visibility = if (image.allUris.containsKey("JPG")) View.VISIBLE else View.GONE
         binding.btnFormatTiff.visibility = if (image.allUris.containsKey("TIFF")) View.VISIBLE else View.GONE
