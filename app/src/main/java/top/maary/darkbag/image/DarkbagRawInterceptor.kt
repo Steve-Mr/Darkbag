@@ -39,10 +39,10 @@ class DarkbagRawInterceptor(private val context: Context) : Interceptor {
             val newRequest = request.newBuilder()
                 .data(if (data.isRawMode) data.dngUri else data.uri)
                 .build()
-            return chain.proceed(newRequest)
+            return chain.withRequest(newRequest).proceed()
         }
 
-        return chain.proceed(request)
+        return chain.proceed()
     }
 
     private fun processRaw(context: Context, dngUri: Uri, metadata: DarkbagMetadata, isRawMode: Boolean): Bitmap? {
