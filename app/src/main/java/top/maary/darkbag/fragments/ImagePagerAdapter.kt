@@ -1,18 +1,18 @@
 package top.maary.darkbag.fragments
 
-import android.graphics.Bitmap
 import android.view.LayoutInflater
 import android.view.ViewGroup
 import androidx.recyclerview.widget.RecyclerView
-import com.bumptech.glide.Glide
+import coil3.load
 import top.maary.darkbag.databinding.ItemImagePagerBinding
+import top.maary.darkbag.image.DarkbagImageRequest
 import top.maary.darkbag.utils.DarkbagImage
+import top.maary.darkbag.utils.DarkbagMetadata
 
 class ImagePagerAdapter(private var images: List<DarkbagImage>) : RecyclerView.Adapter<ImagePagerAdapter.ViewHolder>() {
 
-    private val processedBitmaps = mutableMapOf<String, Bitmap>()
-    private val rawBitmaps = mutableMapOf<String, Bitmap>()
-    private var activeFormats = mutableMapOf<String, String>()
+    private var currentMetadata: DarkbagMetadata = DarkbagMetadata()
+    private var currentFormat: String = "JPG"
 
     class ViewHolder(val binding: ItemImagePagerBinding) : RecyclerView.ViewHolder(binding.root)
 
@@ -23,63 +23,28 @@ class ImagePagerAdapter(private var images: List<DarkbagImage>) : RecyclerView.A
 
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
         val image = images[position]
-        val format = activeFormats[image.baseName] ?: image.type
-        val processed = processedBitmaps[image.baseName]
-        val raw = rawBitmaps[image.baseName]
 
-        when {
-            format == "JPG" && processed != null -> {
-                holder.binding.ivDisplay.setImageBitmap(processed)
-            }
-            format == "DNG" && raw != null -> {
-                holder.binding.ivDisplay.setImageBitmap(raw)
-            }
-            else -> {
-                val uri = image.allUris[format] ?: image.allUris["JPG"] ?: image.primaryUri
+        val request = DarkbagImageRequest(
+            uri = image.allUris[currentFormat] ?: image.allUris["JPG"] ?: image.primaryUri,
+            dngUri = image.allUris["DNG"],
+            metadata = currentMetadata,
+            isRawMode = currentFormat == "DNG"
+        )
 
-                Glide.with(holder.itemView)
-                    .load(uri)
-                    .placeholder(holder.binding.ivDisplay.drawable)
-                    .into(holder.binding.ivDisplay)
-            }
-        }
+        holder.binding.ivDisplay.load(request)
     }
 
     override fun getItemCount(): Int = images.size
 
     fun updateImages(newImages: List<DarkbagImage>) {
         images = newImages
-        // We don't clear previewBitmaps here to keep previews during list updates
         notifyDataSetChanged()
     }
 
-    fun setProcessedBitmap(baseName: String, bitmap: Bitmap?) {
-        if (bitmap == null) processedBitmaps.remove(baseName) else processedBitmaps[baseName] = bitmap
-        notifyItem(baseName)
-    }
-
-    fun setRawBitmap(baseName: String, bitmap: Bitmap?) {
-        if (bitmap == null) rawBitmaps.remove(baseName) else rawBitmaps[baseName] = bitmap
-        notifyItem(baseName)
-    }
-
-    private fun notifyItem(baseName: String) {
-        val index = images.indexOfFirst { it.baseName == baseName }
-        if (index != -1) {
-            android.os.Handler(android.os.Looper.getMainLooper()).post {
-                notifyItemChanged(index)
-            }
-        }
-    }
-
-    fun setFormat(baseName: String, format: String) {
-        activeFormats[baseName] = format
-        val index = images.indexOfFirst { it.baseName == baseName }
-        if (index != -1) {
-            android.os.Handler(android.os.Looper.getMainLooper()).post {
-                notifyItemChanged(index)
-            }
-        }
+    fun updateParams(metadata: DarkbagMetadata, format: String) {
+        this.currentMetadata = metadata
+        this.currentFormat = format
+        notifyDataSetChanged()
     }
 
     fun getImage(position: Int): DarkbagImage? {

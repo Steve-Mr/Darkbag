@@ -130,18 +130,15 @@ class ImageViewerFragment : Fragment() {
     }
 
     private fun setupObservers() {
-        viewModel.processedPreview.observe(viewLifecycleOwner) { state ->
-            adapter.setProcessedBitmap(state.baseName, state.bitmap)
-        }
-
-        viewModel.rawPreview.observe(viewLifecycleOwner) { state ->
-            adapter.setRawBitmap(state.baseName, state.bitmap)
+        viewModel.currentMetadata.observe(viewLifecycleOwner) { meta ->
+            binding.viewerLutSwitcher.text = meta.lutName?.substringBeforeLast(".") ?: "None"
+            adapter.updateParams(meta, viewModel.selectedFormat.value ?: "JPG")
         }
 
         viewModel.selectedFormat.observe(viewLifecycleOwner) { format ->
             val image = viewModel.currentImage.value ?: return@observe
-            adapter.setFormat(image.baseName, format)
             updateUIForImage(image)
+            adapter.updateParams(viewModel.currentMetadata.value ?: DarkbagMetadata(), format)
 
             val buttonId = when(format) {
                 "JPG" -> R.id.btn_format_jpg
