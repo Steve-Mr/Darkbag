@@ -445,10 +445,11 @@ bool process_and_save_image(
     const char* tiffPath, const char* jpgPath, int sourceColorSpace,
     const float* ccm, const float* wb, int orientation, unsigned char* out_rgb_buffer,
     bool isPreview, int downsampleFactor, float zoomFactor, bool mirror,
-    const Adjustments& adj
+    const Adjustments& adj,
+    int out_width, int out_height, int out_stride
 ) {
-    LOGD("process_and_save_image: %dx%d, gain=%.2f, log=%d, lut=%d, preview=%d, zoom=%.2f, exp=%.2f, ct=%.2f, sa=%.2f",
-         width, height, gain, targetLog, lut.size, isPreview, zoomFactor, adj.exposure, adj.contrast, adj.saturation);
+    LOGD("process_and_save_image: %dx%d, gain=%.2f, log=%d, lut=%d, preview=%d, zoom=%.2f, exp=%.2f, ct=%.2f, sa=%.2f, out=%dx%d",
+         width, height, gain, targetLog, lut.size, isPreview, zoomFactor, adj.exposure, adj.contrast, adj.saturation, out_width, out_height);
     int outW = width / downsampleFactor, outH = height / downsampleFactor;
     bool swapDims = (orientation == 90 || orientation == 270);
     int finalW = swapDims ? outH : outW, finalH = swapDims ? outW : outH;
@@ -579,8 +580,11 @@ bool process_and_save_image(
     int cropX = (width - cropW) / 2;
     int cropY = (height - cropH) / 2;
 
-    int finalW_zoomed = swapDims ? (cropH / downsampleFactor) : (cropW / downsampleFactor);
-    int finalH_zoomed = swapDims ? (cropW / downsampleFactor) : (cropH / downsampleFactor);
+    int finalW_zoomed = (out_width > 0) ? out_width : (swapDims ? (cropH / downsampleFactor) : (cropW / downsampleFactor));
+    int finalH_zoomed = (out_height > 0) ? out_height : (swapDims ? (cropW / downsampleFactor) : (cropH / downsampleFactor));
+
+    float stepX = (float)cropW / (swapDims ? finalH_zoomed : finalW_zoomed);
+    float stepY = (float)cropH / (swapDims ? finalW_zoomed : finalH_zoomed);
 
     if (enableStageDebug) {
         size_t n = static_cast<size_t>(finalW_zoomed) * finalH_zoomed * 3;
@@ -594,14 +598,14 @@ bool process_and_save_image(
         #pragma omp parallel for
         for (int py = 0; py < finalH_zoomed; py++) {
             for (int px = 0; px < finalW_zoomed; px++) {
-                int sx, sy;
+                int sx_out, sy_out;
                 int opx = mirror ? (finalW_zoomed - 1 - px) : px;
-                if (orientation == 90) { sx = py; sy = (finalW_zoomed - 1) - opx; }
-                else if (orientation == 180) { sx = (finalW_zoomed - 1) - opx; sy = (finalH_zoomed - 1) - py; }
-                else if (orientation == 270) { sx = (finalH_zoomed - 1) - py; sy = opx; }
-                else { sx = opx; sy = py; }
+                if (orientation == 90) { sx_out = py; sy_out = (finalW_zoomed - 1) - opx; }
+                else if (orientation == 180) { sx_out = (finalW_zoomed - 1) - opx; sy_out = (finalH_zoomed - 1) - py; }
+                else if (orientation == 270) { sx_out = (finalH_zoomed - 1) - py; sy_out = opx; }
+                else { sx_out = opx; sy_out = py; }
 
-                Vec3 color = process_pixel(cropX + sx * downsampleFactor, cropY + sy * downsampleFactor, nullptr, nullptr, nullptr);
+                Vec3 color = process_pixel(cropX + sx_out * stepX, cropY + sy_out * stepY, nullptr, nullptr, nullptr);
                 size_t outIdx = (static_cast<size_t>(py) * finalW_zoomed + px) * 3;
                 unsigned char r8 = (unsigned char)std::max(0.0f, std::min(255.0f, color.r * 255.0f + 0.5f));
                 unsigned char g8 = (unsigned char)std::max(0.0f, std::min(255.0f, color.g * 255.0f + 0.5f));
@@ -611,7 +615,7 @@ bool process_and_save_image(
                 previewRgb8[outIdx + 2] = b8;
 
                 if (out_rgb_buffer) {
-                    size_t bIdx = (static_cast<size_t>(py) * finalW_zoomed + px) * 4;
+                    size_t bIdx = (static_cast<size_t>(py) * (out_stride > 0 ? (out_stride / 4) : finalW_zoomed) + px) * 4;
                     out_rgb_buffer[bIdx + 0] = r8;
                     out_rgb_buffer[bIdx + 1] = g8;
                     out_rgb_buffer[bIdx + 2] = b8;
@@ -624,15 +628,15 @@ bool process_and_save_image(
         #pragma omp parallel for
         for (int py = 0; py < finalH_zoomed; py++) {
             for (int px = 0; px < finalW_zoomed; px++) {
-                int sx, sy;
+                int sx_out, sy_out;
                 int opx = mirror ? (finalW_zoomed - 1 - px) : px;
-                if (orientation == 90) { sx = py; sy = (finalW_zoomed - 1) - opx; }
-                else if (orientation == 180) { sx = (finalW_zoomed - 1) - opx; sy = (finalH_zoomed - 1) - py; }
-                else if (orientation == 270) { sx = (finalH_zoomed - 1) - py; sy = opx; }
-                else { sx = opx; sy = py; }
+                if (orientation == 90) { sx_out = py; sy_out = (finalW_zoomed - 1) - opx; }
+                else if (orientation == 180) { sx_out = (finalW_zoomed - 1) - opx; sy_out = (finalH_zoomed - 1) - py; }
+                else if (orientation == 270) { sx_out = (finalH_zoomed - 1) - py; sy_out = opx; }
+                else { sx_out = opx; sy_out = py; }
 
                 Vec3 stageA{}, stageB{}, stageC{};
-                Vec3 color = process_pixel(cropX + sx, cropY + sy,
+                Vec3 color = process_pixel(cropX + sx_out * stepX, cropY + sy_out * stepY,
                                            enableStageDebug ? &stageA : nullptr,
                                            enableStageDebug ? &stageB : nullptr,
                                            enableStageDebug ? &stageC : nullptr);
@@ -657,7 +661,7 @@ bool process_and_save_image(
 
                 // Note: out_rgb_buffer is for real-time preview (Bitmap).
                 if (out_rgb_buffer) {
-                    size_t bIdx = (static_cast<size_t>(py) * finalW_zoomed + px) * 4;
+                    size_t bIdx = (static_cast<size_t>(py) * (out_stride > 0 ? (out_stride / 4) : finalW_zoomed) + px) * 4;
                     out_rgb_buffer[bIdx+0] = (unsigned char)std::min(255, (processedImage[outIdx+0] + 128) >> 8);
                     out_rgb_buffer[bIdx+1] = (unsigned char)std::min(255, (processedImage[outIdx+1] + 128) >> 8);
                     out_rgb_buffer[bIdx+2] = (unsigned char)std::min(255, (processedImage[outIdx+2] + 128) >> 8);

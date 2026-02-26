@@ -310,7 +310,11 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
     if (halide_res != 0) { LOGE("Halide failed: %d", halide_res); return -1; }
 
     unsigned char* bitmapPixels = nullptr;
-    if (outputBitmap) AndroidBitmap_lockPixels(env, outputBitmap, (void**)&bitmapPixels);
+    AndroidBitmapInfo info;
+    if (outputBitmap) {
+        if (AndroidBitmap_getInfo(env, outputBitmap, &info) < 0) return -1;
+        AndroidBitmap_lockPixels(env, outputBitmap, (void**)&bitmapPixels);
+    }
 
     const char* lut_path_cstr = (lutPath) ? env->GetStringUTFChars(lutPath, 0) : nullptr;
     LUT3D lut; if (lut_path_cstr) { lut = load_lut(lut_path_cstr); env->ReleaseStringUTFChars(lutPath, lut_path_cstr); }
@@ -380,7 +384,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
 
     auto saveStart = std::chrono::high_resolution_clock::now();
     if (bitmapPixels) {
-        process_and_save_image(finalImage, width, height, digitalGain, targetLog, lut, nullptr, nullptr, 1, ccmVec.data(), wbVec.data(), orientation, bitmapPixels, true, 4, zoomFactor, (bool)mirror);
+        process_and_save_image(finalImage, width, height, digitalGain, targetLog, lut, nullptr, nullptr, 1, ccmVec.data(), wbVec.data(), orientation, bitmapPixels, true, 4, zoomFactor, (bool)mirror, Adjustments(), info.width, info.height, info.stride);
         AndroidBitmap_unlockPixels(env, outputBitmap);
     }
 

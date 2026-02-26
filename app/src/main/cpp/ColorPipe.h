@@ -66,7 +66,10 @@ bool process_and_save_image(
     int downsampleFactor = 1,
     float zoomFactor = 1.0f,
     bool mirror = false,
-    const Adjustments& adj = Adjustments()
+    const Adjustments& adj = Adjustments(),
+    int out_width = 0,
+    int out_height = 0,
+    int out_stride = 0
 );
 
 // --- File Writers ---

@@ -22,13 +22,13 @@ class ImagePagerAdapter(private var images: List<DarkbagImage>) : RecyclerView.A
 
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
         val image = images[position]
+        val format = activeFormats[image.baseName] ?: image.type
         val preview = previewBitmaps[image.baseName]
 
-        if (preview != null) {
+        if (format == "DNG" && preview != null) {
             holder.binding.ivDisplay.setImageBitmap(preview)
         } else {
-            val format = activeFormats[image.baseName] ?: image.type
-            val uri = image.allUris[format] ?: image.primaryUri
+            val uri = image.allUris[format] ?: image.allUris["JPG"] ?: image.primaryUri
 
             Glide.with(holder.itemView)
                 .load(uri)

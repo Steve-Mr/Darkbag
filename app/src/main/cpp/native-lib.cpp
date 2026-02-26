@@ -230,7 +230,8 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRawToBitmap(
         bool ok = process_and_save_image(
             rawImage, image->width, image->height, 1.0f, targetLog, lut,
             nullptr, nullptr, 0, nullptr, nullptr, orientation,
-            (unsigned char*)pixels, true, downsample, 1.0f, mirror, adj
+            (unsigned char*)pixels, true, downsample, 1.0f, mirror, adj,
+            info.width, info.height, info.stride
         );
         result = ok ? 0 : -1;
     }

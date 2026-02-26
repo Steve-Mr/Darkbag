@@ -44,6 +44,7 @@ class ImageViewerViewModel(application: Application) : AndroidViewModel(applicat
         originalMetadata = meta
         isModified.value = false
         previewState.value = PreviewState(image.baseName, null)
+        dngData = null
 
         // Load DNG data if available
         image.allUris["DNG"]?.let { dngUri ->
@@ -77,6 +78,7 @@ class ImageViewerViewModel(application: Application) : AndroidViewModel(applicat
         val bytes = dngData ?: return
         val meta = currentMetadata.value ?: return
         val image = currentImage.value ?: return
+        val baseNameAtStart = image.baseName
 
         previewJob?.cancel()
         previewJob = viewModelScope.launch(Dispatchers.Default) {
@@ -126,7 +128,9 @@ class ImageViewerViewModel(application: Application) : AndroidViewModel(applicat
                 saturation = meta.saturation
             )
             if (res == 0) {
-                previewState.postValue(PreviewState(image.baseName, preview))
+                if (currentImage.value?.baseName == baseNameAtStart) {
+                    previewState.postValue(PreviewState(image.baseName, preview))
+                }
             }
         }
     }
