@@ -30,7 +30,7 @@ class DarkbagRawInterceptor(private val context: Context) : Interceptor {
             val dngUri = data.dngUri
             // If we have a DNG and either we are in RAW mode (neutral display)
             // OR we are in JPG mode but have non-default metadata (adjustments).
-            val shouldProcessRaw = dngUri != null && (data.isRawMode || data.metadata != DarkbagMetadata())
+            val shouldProcessRaw = dngUri != null && (data.isRawMode || data.metadata != DarkbagMetadata() || data.forceRaw)
 
             if (shouldProcessRaw) {
                 val bitmap = semaphore.withPermit {
@@ -60,7 +60,11 @@ class DarkbagRawInterceptor(private val context: Context) : Interceptor {
 
     private fun processRaw(context: Context, dngUri: Uri, metadata: DarkbagMetadata, isRawMode: Boolean, quality: Int): Bitmap? {
         return try {
-            val bytes = context.contentResolver.openInputStream(dngUri)?.use { it.readBytes() } ?: return null
+            val pfd = context.contentResolver.openFileDescriptor(dngUri, "r") ?: return null
+            val bytes = pfd.use { fd ->
+                val stream = java.io.FileInputStream(fd.fileDescriptor)
+                stream.use { it.readBytes() }
+            }
 
             var width = 0
             var height = 0

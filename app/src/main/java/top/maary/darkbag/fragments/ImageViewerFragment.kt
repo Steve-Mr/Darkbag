@@ -39,7 +39,7 @@ class ImageViewerFragment : Fragment() {
     private val binding get() = _binding!!
 
     private val viewModel: ImageViewerViewModel by viewModels()
-    private lateinit var adapter: ImagePagerAdapter
+    private var adapter: ImagePagerAdapter? = null
     private lateinit var repository: ImageRepository
     private lateinit var lutManager: LutManager
     private var isUpdatingFormatFromModel = false
@@ -77,7 +77,7 @@ class ImageViewerFragment : Fragment() {
         binding.imagePager.adapter = adapter
         binding.imagePager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
             override fun onPageSelected(position: Int) {
-                adapter.getImage(position)?.let {
+                adapter?.getImage(position)?.let {
                     viewModel.setImage(it)
                     updateUIForImage(it)
                 }
@@ -132,13 +132,19 @@ class ImageViewerFragment : Fragment() {
     private fun setupObservers() {
         viewModel.currentMetadata.observe(viewLifecycleOwner) { meta ->
             binding.viewerLutSwitcher.text = meta.lutName?.substringBeforeLast(".") ?: "None"
-            adapter.updateParams(meta, viewModel.selectedFormat.value ?: "JPG", binding.imagePager.currentItem)
+            adapter?.updateParams(meta, viewModel.selectedFormat.value ?: "JPG", binding.imagePager.currentItem)
+
+            // Show processing indicator if it's a RAW-backed JPG adjustment
+            if (viewModel.selectedFormat.value == "JPG" && meta != DarkbagMetadata()) {
+                 // Coil already handles the indicator in the item view,
+                 // but we can add a top-level one for global feedback if needed.
+            }
         }
 
         viewModel.selectedFormat.observe(viewLifecycleOwner) { format ->
             val image = viewModel.currentImage.value ?: return@observe
             updateUIForImage(image)
-            adapter.updateParams(viewModel.currentMetadata.value ?: DarkbagMetadata(), format, binding.imagePager.currentItem)
+            adapter?.updateParams(viewModel.currentMetadata.value ?: DarkbagMetadata(), format, binding.imagePager.currentItem)
 
             val buttonId = when(format) {
                 "JPG" -> R.id.btn_format_jpg
@@ -227,7 +233,9 @@ class ImageViewerFragment : Fragment() {
     }
 
     private fun save(overwrite: Boolean) {
+        binding.processingIndicator.visibility = View.VISIBLE
         viewModel.saveImage(overwrite) { uri ->
+            binding.processingIndicator.visibility = View.GONE
             if (uri != null) {
                 Toast.makeText(requireContext(), if (overwrite) "Saved" else "Copy saved", Toast.LENGTH_SHORT).show()
                 if (!overwrite) {
@@ -256,7 +264,7 @@ class ImageViewerFragment : Fragment() {
     private fun loadImages() {
         lifecycleScope.launch {
             val images = repository.getImages()
-            adapter.updateImages(images)
+            adapter?.updateImages(images)
             if (images.isNotEmpty()) {
                 viewModel.setImage(images[0])
                 updateUIForImage(images[0])
@@ -278,6 +286,7 @@ class ImageViewerFragment : Fragment() {
 
     override fun onDestroyView() {
         super.onDestroyView()
+        adapter = null
         _binding = null
     }
 }

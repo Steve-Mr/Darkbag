@@ -3,8 +3,10 @@ package top.maary.darkbag.fragments
 import android.view.LayoutInflater
 import android.view.ViewGroup
 import androidx.recyclerview.widget.RecyclerView
+import android.view.View
 import coil3.asImage
 import coil3.load
+import coil3.request.ImageRequest
 import coil3.request.crossfade
 import top.maary.darkbag.databinding.ItemImagePagerBinding
 import top.maary.darkbag.image.DarkbagImageRequest
@@ -17,7 +19,9 @@ class ImagePagerAdapter(private var images: List<DarkbagImage>) : RecyclerView.A
     private var currentFormat: String = "JPG"
     private var currentActivePosition: Int = 0
 
-    class ViewHolder(val binding: ItemImagePagerBinding) : RecyclerView.ViewHolder(binding.root)
+    class ViewHolder(val binding: ItemImagePagerBinding) : RecyclerView.ViewHolder(binding.root) {
+        var currentBaseName: String? = null
+    }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
         val binding = ItemImagePagerBinding.inflate(LayoutInflater.from(parent.context), parent, false)
@@ -34,10 +38,28 @@ class ImagePagerAdapter(private var images: List<DarkbagImage>) : RecyclerView.A
             isRawMode = currentFormat == "DNG"
         )
 
+        val sameImage = holder.currentBaseName == image.baseName
+        holder.currentBaseName = image.baseName
+
         holder.binding.ivDisplay.load(request) {
-            // Use current image as placeholder to avoid flickering when switching formats/metadata
-            placeholder(holder.binding.ivDisplay.drawable?.asImage())
+            // Use current image as placeholder ONLY IF it's the same physical photo,
+            // to avoid flickering when switching formats/metadata.
+            if (sameImage) {
+                placeholder(holder.binding.ivDisplay.drawable?.asImage())
+            }
             crossfade(true)
+
+            listener(
+                onStart = {
+                    holder.binding.loadingIndicator.visibility = View.VISIBLE
+                },
+                onSuccess = { _, _ ->
+                    holder.binding.loadingIndicator.visibility = View.GONE
+                },
+                onError = { _, _ ->
+                    holder.binding.loadingIndicator.visibility = View.GONE
+                }
+            )
         }
     }
 
