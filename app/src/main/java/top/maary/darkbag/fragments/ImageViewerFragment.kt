@@ -130,8 +130,12 @@ class ImageViewerFragment : Fragment() {
     }
 
     private fun setupObservers() {
-        viewModel.previewState.observe(viewLifecycleOwner) { state ->
-            adapter.setPreviewBitmaps(state.baseName, state.processedBitmap, state.rawBitmap)
+        viewModel.processedPreview.observe(viewLifecycleOwner) { state ->
+            adapter.setProcessedBitmap(state.baseName, state.bitmap)
+        }
+
+        viewModel.rawPreview.observe(viewLifecycleOwner) { state ->
+            adapter.setRawBitmap(state.baseName, state.bitmap)
         }
 
         viewModel.selectedFormat.observe(viewLifecycleOwner) { format ->

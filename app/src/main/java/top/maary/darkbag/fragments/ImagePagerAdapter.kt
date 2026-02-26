@@ -53,13 +53,19 @@ class ImagePagerAdapter(private var images: List<DarkbagImage>) : RecyclerView.A
         notifyDataSetChanged()
     }
 
-    fun setPreviewBitmaps(baseName: String, processed: Bitmap?, raw: Bitmap?) {
-        if (processed == null) processedBitmaps.remove(baseName) else processedBitmaps[baseName] = processed
-        if (raw == null) rawBitmaps.remove(baseName) else rawBitmaps[baseName] = raw
+    fun setProcessedBitmap(baseName: String, bitmap: Bitmap?) {
+        if (bitmap == null) processedBitmaps.remove(baseName) else processedBitmaps[baseName] = bitmap
+        notifyItem(baseName)
+    }
 
+    fun setRawBitmap(baseName: String, bitmap: Bitmap?) {
+        if (bitmap == null) rawBitmaps.remove(baseName) else rawBitmaps[baseName] = bitmap
+        notifyItem(baseName)
+    }
+
+    private fun notifyItem(baseName: String) {
         val index = images.indexOfFirst { it.baseName == baseName }
         if (index != -1) {
-            // Post to avoid "Cannot call this method in a scroll callback"
             android.os.Handler(android.os.Looper.getMainLooper()).post {
                 notifyItemChanged(index)
             }

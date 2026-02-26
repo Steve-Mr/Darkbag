@@ -19,16 +19,16 @@ import java.io.File
 
 class ImageViewerViewModel(application: Application) : AndroidViewModel(application) {
 
-    data class PreviewState(
+    data class PreviewBitmap(
         val baseName: String,
-        val processedBitmap: Bitmap? = null,
-        val rawBitmap: Bitmap? = null
+        val bitmap: Bitmap?
     )
 
     val currentImage = MutableLiveData<DarkbagImage?>()
     val currentMetadata = MutableLiveData<DarkbagMetadata>()
     val selectedFormat = MutableLiveData<String>()
-    val previewState = MutableLiveData<PreviewState>()
+    val processedPreview = MutableLiveData<PreviewBitmap>()
+    val rawPreview = MutableLiveData<PreviewBitmap>()
     val isModified = MutableLiveData<Boolean>(false)
 
     private var originalMetadata: DarkbagMetadata? = null
@@ -44,7 +44,8 @@ class ImageViewerViewModel(application: Application) : AndroidViewModel(applicat
         currentMetadata.value = meta
         originalMetadata = meta
         isModified.value = false
-        previewState.value = PreviewState(image.baseName, null, null)
+        processedPreview.value = PreviewBitmap(image.baseName, null)
+        rawPreview.value = PreviewBitmap(image.baseName, null)
         dngData = null
 
         // Load DNG data if available
@@ -87,20 +88,26 @@ class ImageViewerViewModel(application: Application) : AndroidViewModel(applicat
             if (debounce) delay(100)
 
             val dngUri = image.allUris["DNG"] ?: return@launch
-            var width = 1024
-            var height = 1024
+            var width = 0
+            var height = 0
             var orientation = 0
 
             try {
                 getApplication<Application>().contentResolver.openInputStream(dngUri)?.use { inputStream ->
                     val exif = ExifInterface(inputStream)
-                    width = exif.getAttributeInt(ExifInterface.TAG_IMAGE_WIDTH, 1024)
-                    height = exif.getAttributeInt(ExifInterface.TAG_IMAGE_LENGTH, 1024)
+                    width = exif.getAttributeInt(ExifInterface.TAG_IMAGE_WIDTH, 0)
+                    height = exif.getAttributeInt(ExifInterface.TAG_IMAGE_LENGTH, 0)
                     orientation = exif.rotationDegrees
                 }
             } catch (e: Exception) { }
 
-            val preview = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+            if (width <= 0 || height <= 0) return@launch
+
+            val isSwapped = orientation == 90 || orientation == 270
+            val bmpWidth = if (isSwapped) height else width
+            val bmpHeight = if (isSwapped) width else height
+
+            val preview = Bitmap.createBitmap(bmpWidth, bmpHeight, Bitmap.Config.ARGB_8888)
 
             val lutDir = File(getApplication<Application>().filesDir, "luts")
             val lutPath = meta.lutName?.let {
@@ -125,8 +132,7 @@ class ImageViewerViewModel(application: Application) : AndroidViewModel(applicat
             )
             if (res == 0) {
                 if (currentImage.value?.baseName == baseNameAtStart) {
-                    val current = previewState.value ?: PreviewState(image.baseName)
-                    previewState.postValue(current.copy(processedBitmap = preview))
+                    processedPreview.postValue(PreviewBitmap(image.baseName, preview))
                 }
             }
         }
@@ -139,20 +145,26 @@ class ImageViewerViewModel(application: Application) : AndroidViewModel(applicat
 
         viewModelScope.launch(Dispatchers.Default) {
             val dngUri = image.allUris["DNG"] ?: return@launch
-            var width = 1024
-            var height = 1024
+            var width = 0
+            var height = 0
             var orientation = 0
 
             try {
                 getApplication<Application>().contentResolver.openInputStream(dngUri)?.use { inputStream ->
                     val exif = ExifInterface(inputStream)
-                    width = exif.getAttributeInt(ExifInterface.TAG_IMAGE_WIDTH, 1024)
-                    height = exif.getAttributeInt(ExifInterface.TAG_IMAGE_LENGTH, 1024)
+                    width = exif.getAttributeInt(ExifInterface.TAG_IMAGE_WIDTH, 0)
+                    height = exif.getAttributeInt(ExifInterface.TAG_IMAGE_LENGTH, 0)
                     orientation = exif.rotationDegrees
                 }
             } catch (e: Exception) { }
 
-            val preview = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+            if (width <= 0 || height <= 0) return@launch
+
+            val isSwapped = orientation == 90 || orientation == 270
+            val bmpWidth = if (isSwapped) height else width
+            val bmpHeight = if (isSwapped) width else height
+
+            val preview = Bitmap.createBitmap(bmpWidth, bmpHeight, Bitmap.Config.ARGB_8888)
 
             // Neutral processing: logIndex=0, lutPath=null, default adjustments
             val res = ColorProcessor.processRawToBitmap(
@@ -172,8 +184,7 @@ class ImageViewerViewModel(application: Application) : AndroidViewModel(applicat
             )
             if (res == 0) {
                 if (currentImage.value?.baseName == baseNameAtStart) {
-                    val current = previewState.value ?: PreviewState(image.baseName)
-                    previewState.postValue(current.copy(rawBitmap = preview))
+                    rawPreview.postValue(PreviewBitmap(image.baseName, preview))
                 }
             }
         }
