@@ -57,7 +57,13 @@
     <fragment
         android:id="@+id/image_viewer_fragment"
         android:name="top.maary.darkbag.fragments.ImageViewerFragment"
-        android:label="Image Viewer" />
+        android:label="Image Viewer">
+        <argument
+            android:name="initial_uri"
+            app:argType="string"
+            app:nullable="true"
+            android:defaultValue="@null" />
+    </fragment>
 
     <fragment
         android:id="@+id/settings_fragment"

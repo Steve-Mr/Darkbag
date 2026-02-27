@@ -56,13 +56,25 @@ class ImagePagerAdapter(private var images: List<DarkbagImage>) : RecyclerView.A
 
             listener(
                 onStart = {
-                    holder.binding.loadingIndicator.visibility = View.VISIBLE
+                    // Only show loading if it's not a standard JPG (which should be instant from cache)
+                    // or delay it slightly to avoid a 1-frame flash.
+                    if (isModified || currentFormat == "DNG") {
+                        holder.binding.loadingIndicator.postDelayed({
+                            // Check if still loading
+                            if (holder.binding.loadingIndicator.tag == request.hashCode()) {
+                                holder.binding.loadingIndicator.visibility = View.VISIBLE
+                            }
+                        }, 100)
+                        holder.binding.loadingIndicator.tag = request.hashCode()
+                    }
                 },
                 onSuccess = { _, _ ->
                     holder.binding.loadingIndicator.visibility = View.GONE
+                    holder.binding.loadingIndicator.tag = null
                 },
                 onError = { _, _ ->
                     holder.binding.loadingIndicator.visibility = View.GONE
+                    holder.binding.loadingIndicator.tag = null
                 }
             )
         }

@@ -5,12 +5,14 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
+import android.net.Uri
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.viewModels
 import androidx.lifecycle.lifecycleScope
 import androidx.navigation.fragment.findNavController
+import androidx.navigation.fragment.navArgs
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.viewpager2.widget.ViewPager2
 import com.google.android.material.bottomsheet.BottomSheetDialog
@@ -39,6 +41,7 @@ class ImageViewerFragment : Fragment() {
     private val binding get() = _binding!!
 
     private val viewModel: ImageViewerViewModel by viewModels()
+    private val args: ImageViewerFragmentArgs by navArgs()
     private var adapter: ImagePagerAdapter? = null
     private lateinit var repository: ImageRepository
     private lateinit var lutManager: LutManager
@@ -264,11 +267,42 @@ class ImageViewerFragment : Fragment() {
 
     private fun loadImages() {
         lifecycleScope.launch {
+            // Priority 1: Show the initial URI passed from CameraFragment immediately
+            val initialUriStr = args.initialUri
+            if (initialUriStr != null) {
+                val uri = Uri.parse(initialUriStr)
+                // Minimal placeholder image object
+                val initialImage = DarkbagImage(
+                    baseName = "",
+                    primaryUri = uri,
+                    type = "JPG",
+                    allUris = mapOf("JPG" to uri),
+                    dateAdded = System.currentTimeMillis() / 1000
+                )
+                if (adapter?.itemCount == 0) {
+                    adapter?.updateImages(listOf(initialImage))
+                    viewModel.setImage(initialImage)
+                    updateUIForImage(initialImage)
+                }
+            }
+
+            // Priority 2: Full scan
             val images = repository.getImages()
-            adapter?.updateImages(images)
+
+            // Find the index of the initial image in the full list
+            val initialIndex = if (initialUriStr != null) {
+                images.indexOfFirst { it.primaryUri.toString() == initialUriStr || it.allUris.values.any { u -> u.toString() == initialUriStr } }
+            } else -1
+
+            val targetIndex = if (initialIndex >= 0) initialIndex else 0
+
+            // We update adapter with new data.
+            // We must call setCurrentItem BEFORE updateImages or manage the jump carefully to avoid flash.
             if (images.isNotEmpty()) {
-                viewModel.setImage(images[0])
-                updateUIForImage(images[0])
+                adapter?.updateImages(images)
+                binding.imagePager.setCurrentItem(targetIndex, false)
+                viewModel.setImage(images[targetIndex])
+                updateUIForImage(images[targetIndex])
             }
         }
     }

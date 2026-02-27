@@ -1448,7 +1448,9 @@ class CameraFragment : Fragment() {
         // Listener for button used to view the most recent photo
         cameraUiContainerBinding?.photoViewButton?.setOnClickListener {
             try {
-                findNavController().navigate(CameraFragmentDirections.actionCameraToViewer())
+                val lastUri = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                    .getString(SettingsFragment.KEY_LAST_CAPTURE_URI, null)
+                findNavController().navigate(CameraFragmentDirections.actionCameraToViewer(lastUri))
             } catch (e: Exception) {
                 Log.e(TAG, "Navigation failed", e)
             }
