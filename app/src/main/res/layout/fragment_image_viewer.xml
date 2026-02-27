@@ -38,7 +38,7 @@
         android:id="@+id/bottom_controls"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:background="#80000000"
+        android:background="@color/black_transparent_50"
         android:gravity="center"
         android:orientation="horizontal"
         android:padding="16dp"
@@ -52,9 +52,9 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="Share"
-            android:textColor="@android:color/white"
+            android:textColor="?attr/colorOnSurface"
             app:icon="@drawable/ic_share"
-            app:iconTint="@android:color/white" />
+            app:iconTint="?attr/colorOnSurface" />
 
         <Space
             android:layout_width="0dp"
@@ -67,9 +67,9 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="Delete"
-            android:textColor="@android:color/white"
+            android:textColor="?attr/colorOnSurface"
             app:icon="@drawable/ic_delete"
-            app:iconTint="@android:color/white" />
+            app:iconTint="?attr/colorOnSurface" />
 
     </LinearLayout>
 

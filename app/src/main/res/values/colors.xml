@@ -23,4 +23,5 @@
     <!-- Zoom button states (will be replaced by logic but kept for safety) -->
     <color name="zoom_button_active">#FFD600</color> <!-- Material Yellow -->
     <color name="zoom_button_inactive">#FFFFFF</color>
+    <color name="black_transparent_50">#80000000</color>
 </resources>

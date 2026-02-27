@@ -90,7 +90,11 @@ class ImageViewerFragment : Fragment() {
             putExtra(android.content.Intent.EXTRA_STREAM, uri)
             addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
-        startActivity(android.content.Intent.createChooser(intent, "Share Image"))
+        try {
+            startActivity(android.content.Intent.createChooser(intent, "Share Image"))
+        } catch (e: android.content.ActivityNotFoundException) {
+            android.widget.Toast.makeText(requireContext(), "No app found to share the image.", android.widget.Toast.LENGTH_SHORT).show()
+        }
     }
 
     private fun showDeleteDialog(group: ImageGroup) {
@@ -111,6 +115,7 @@ class ImageViewerFragment : Fragment() {
 
     private fun deleteImage(group: ImageGroup, deleteGroup: Boolean) {
         lifecycleScope.launch {
+            val context = this@ImageViewerFragment.context ?: return@launch
             var nextTargetUri: String? = null
             val currentIndex = binding.imagePager.currentItem
 

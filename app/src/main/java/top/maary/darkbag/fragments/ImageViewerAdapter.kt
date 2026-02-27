@@ -67,6 +67,18 @@ class ImageViewerAdapter(
 
         val isDng = uri.toString().endsWith(".dng", ignoreCase = true)
 
+        val glideListener = object : com.bumptech.glide.request.RequestListener<android.graphics.drawable.Drawable> {
+            override fun onLoadFailed(e: com.bumptech.glide.load.engine.GlideException?, model: Any?, target: com.bumptech.glide.request.target.Target<android.graphics.drawable.Drawable>?, isFirstResource: Boolean): Boolean {
+                holder.binding.loadingIndicator.visibility = View.GONE
+                return false
+            }
+
+            override fun onResourceReady(resource: android.graphics.drawable.Drawable?, model: Any?, target: com.bumptech.glide.request.target.Target<android.graphics.drawable.Drawable>?, dataSource: com.bumptech.glide.load.DataSource?, isFirstResource: Boolean): Boolean {
+                holder.binding.loadingIndicator.visibility = View.GONE
+                return false
+            }
+        }
+
         if (isDng) {
             holder.loadJob = scope.launch {
                 val bitmap = withContext(Dispatchers.IO) {
@@ -81,6 +93,7 @@ class ImageViewerAdapter(
                             }
                         }
                     } catch (e: Exception) {
+                        android.util.Log.e("ImageViewerAdapter", "Failed to decode DNG thumbnail: $uri", e)
                         null
                     }
                     null
@@ -93,8 +106,8 @@ class ImageViewerAdapter(
                     // Fallback to Glide (which might fail for some RAWs, but better than nothing)
                     Glide.with(holder.binding.imageView)
                         .load(uri)
+                        .listener(glideListener)
                         .into(holder.binding.imageView)
-                    holder.binding.loadingIndicator.visibility = View.GONE
                 }
             }
         } else {
@@ -102,8 +115,8 @@ class ImageViewerAdapter(
                 .load(uri)
                 .diskCacheStrategy(DiskCacheStrategy.NONE) // To handle fast path updates
                 .skipMemoryCache(true)
+                .listener(glideListener)
                 .into(holder.binding.imageView)
-            holder.binding.loadingIndicator.visibility = View.GONE
         }
     }
 

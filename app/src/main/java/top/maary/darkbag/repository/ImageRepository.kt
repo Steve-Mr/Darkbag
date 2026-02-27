@@ -25,9 +25,9 @@ class ImageRepository(private val context: Context) {
             prefs.getString(SettingsFragment.KEY_TIFF_STORAGE_URI, null) to "tiff"
         )
 
-        for ((folderUri, type) in safFolders) {
+        for ((folderUri, _) in safFolders) {
             if (folderUri != null) {
-                scanSafFolder(folderUri, type, groups)
+                scanSafFolder(folderUri, groups)
             }
         }
 
@@ -40,7 +40,7 @@ class ImageRepository(private val context: Context) {
             .sortedByDescending { it.captureTime }
     }
 
-    private fun scanSafFolder(folderUri: String, type: String, groups: MutableMap<String, ImageGroupBuilder>) {
+    private fun scanSafFolder(folderUri: String, groups: MutableMap<String, ImageGroupBuilder>) {
         try {
             val treeUri = Uri.parse(folderUri)
             val root = DocumentFile.fromTreeUri(context, treeUri)
@@ -65,7 +65,7 @@ class ImageRepository(private val context: Context) {
                 }
             }
         } catch (e: Exception) {
-            // Log error
+            android.util.Log.e("ImageRepository", "Failed to scan SAF folder: $folderUri", e)
         }
     }
 
