@@ -14,8 +14,10 @@ import top.maary.darkbag.R
 import top.maary.darkbag.databinding.ItemImageGroupBinding
 import top.maary.darkbag.models.ImageGroup
 
-class ImageViewerAdapter(private val groups: List<ImageGroup>) :
-    RecyclerView.Adapter<ImageViewerAdapter.ViewHolder>() {
+class ImageViewerAdapter(
+    private val groups: List<ImageGroup>,
+    private val scope: CoroutineScope
+) : RecyclerView.Adapter<ImageViewerAdapter.ViewHolder>() {
 
     class ViewHolder(val binding: ItemImageGroupBinding) : RecyclerView.ViewHolder(binding.root) {
         var loadJob: Job? = null
@@ -66,7 +68,6 @@ class ImageViewerAdapter(private val groups: List<ImageGroup>) :
         val isDng = uri.toString().endsWith(".dng", ignoreCase = true)
 
         if (isDng) {
-            val scope = androidx.lifecycle.findViewTreeLifecycleOwner(holder.itemView)?.lifecycleScope ?: CoroutineScope(Dispatchers.Main)
             holder.loadJob = scope.launch {
                 val bitmap = withContext(Dispatchers.IO) {
                     try {

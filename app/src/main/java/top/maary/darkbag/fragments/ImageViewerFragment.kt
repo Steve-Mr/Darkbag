@@ -52,7 +52,7 @@ class ImageViewerFragment : Fragment() {
                 findNavController().navigateUp()
                 return@launch
             }
-            adapter = ImageViewerAdapter(groups)
+            adapter = ImageViewerAdapter(groups, lifecycleScope)
             binding.imagePager.adapter = adapter
 
             val initialPos = groups.indexOfFirst {
