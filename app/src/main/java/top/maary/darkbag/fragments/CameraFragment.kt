@@ -1439,17 +1439,8 @@ class CameraFragment : Fragment() {
             lifecycleScope.launch {
                 val uri = mediaStoreUtils.getLatestAppImage(requireContext())
                 if (uri != null) {
-                    val intent = Intent(Intent.ACTION_VIEW, uri)
-                    intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                    try {
-                        startActivity(intent)
-                    } catch (e: ActivityNotFoundException) {
-                        Toast.makeText(
-                            requireContext(),
-                            "No gallery app installed",
-                            Toast.LENGTH_SHORT
-                        ).show()
-                    }
+                    Navigation.findNavController(requireActivity(), R.id.fragment_container)
+                        .navigate(CameraFragmentDirections.actionCameraToImageViewer(uri.toString()))
                 }
             }
         }
