@@ -67,29 +67,6 @@ class ImageViewerAdapter(
 
         val isDng = uri.toString().endsWith(".dng", ignoreCase = true)
 
-        val glideListener = object : com.bumptech.glide.request.RequestListener<android.graphics.drawable.Drawable> {
-            override fun onLoadFailed(
-                e: com.bumptech.glide.load.engine.GlideException?,
-                model: Any?,
-                target: com.bumptech.glide.request.target.Target<android.graphics.drawable.Drawable>?,
-                isFirstResource: Boolean
-            ): Boolean {
-                holder.binding.loadingIndicator.visibility = View.GONE
-                return false
-            }
-
-            override fun onResourceReady(
-                resource: android.graphics.drawable.Drawable,
-                model: Any?,
-                target: com.bumptech.glide.request.target.Target<android.graphics.drawable.Drawable>?,
-                dataSource: com.bumptech.glide.load.DataSource,
-                isFirstResource: Boolean
-            ): Boolean {
-                holder.binding.loadingIndicator.visibility = View.GONE
-                return false
-            }
-        }
-
         if (isDng) {
             holder.loadJob = scope.launch {
                 val bitmap = withContext(Dispatchers.IO) {
@@ -114,21 +91,38 @@ class ImageViewerAdapter(
                     holder.binding.imageView.setImageBitmap(bitmap)
                     holder.binding.loadingIndicator.visibility = View.GONE
                 } else {
-                    // Fallback to Glide (which might fail for some RAWs, but better than nothing)
-                    Glide.with(holder.binding.imageView)
-                        .load(uri)
-                        .listener(glideListener)
-                        .into(holder.binding.imageView)
+                    loadWithGlide(holder, uri)
                 }
             }
         } else {
-            Glide.with(holder.binding.imageView)
-                .load(uri)
-                .diskCacheStrategy(DiskCacheStrategy.NONE) // To handle fast path updates
-                .skipMemoryCache(true)
-                .listener(glideListener)
-                .into(holder.binding.imageView)
+            loadWithGlide(holder, uri, skipCache = true)
         }
+    }
+
+    private fun loadWithGlide(holder: ViewHolder, uri: Uri, skipCache: Boolean = false) {
+        Glide.with(holder.binding.imageView)
+            .asDrawable()
+            .load(uri)
+            .apply {
+                if (skipCache) {
+                    diskCacheStrategy(DiskCacheStrategy.NONE)
+                    skipMemoryCache(true)
+                }
+            }
+            .into(object : com.bumptech.glide.request.target.DrawableImageViewTarget(holder.binding.imageView) {
+                override fun onLoadFailed(errorDrawable: android.graphics.drawable.Drawable?) {
+                    super.onLoadFailed(errorDrawable)
+                    holder.binding.loadingIndicator.visibility = android.view.View.GONE
+                }
+
+                override fun onResourceReady(
+                    resource: android.graphics.drawable.Drawable,
+                    transition: com.bumptech.glide.request.transition.Transition<in android.graphics.drawable.Drawable>?
+                ) {
+                    super.onResourceReady(resource, transition)
+                    holder.binding.loadingIndicator.visibility = android.view.View.GONE
+                }
+            })
     }
 
     override fun getItemCount(): Int = groups.size
