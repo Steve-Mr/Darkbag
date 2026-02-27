@@ -66,22 +66,41 @@ class ImageViewerAdapter(
         holder.binding.loadingIndicator.visibility = View.VISIBLE
 
         val isDng = uri.toString().endsWith(".dng", ignoreCase = true)
+        val isTiff = uri.toString().endsWith(".tiff", ignoreCase = true) || uri.toString().endsWith(".tif", ignoreCase = true)
 
-        if (isDng) {
+        if (isDng || isTiff) {
             holder.loadJob = scope.launch {
                 val bitmap = withContext(Dispatchers.IO) {
                     try {
-                        holder.binding.root.context.contentResolver.openInputStream(uri)?.use { input ->
-                            val exif = ExifInterface(input)
-                            if (exif.hasThumbnail()) {
-                                val thumb = exif.thumbnailBytes
-                                if (thumb != null) {
-                                    return@withContext BitmapFactory.decodeByteArray(thumb, 0, thumb.size)
+                        val contentResolver = holder.binding.root.context.contentResolver
+
+                        // Try DNG thumbnail first if it's DNG
+                        if (isDng) {
+                            contentResolver.openInputStream(uri)?.use { input ->
+                                val exif = ExifInterface(input)
+                                if (exif.hasThumbnail()) {
+                                    val thumb = exif.thumbnailBytes
+                                    if (thumb != null) {
+                                        return@withContext BitmapFactory.decodeByteArray(thumb, 0, thumb.size)
+                                    }
                                 }
                             }
                         }
+
+                        // Fallback to BitmapFactory with sampling for TIFF or DNG without thumbnail
+                        contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                            val options = BitmapFactory.Options().apply {
+                                inJustDecodeBounds = true
+                            }
+                            BitmapFactory.decodeFileDescriptor(pfd.fileDescriptor, null, options)
+
+                            options.inSampleSize = calculateInSampleSize(options, 2048, 2048)
+                            options.inJustDecodeBounds = false
+
+                            return@withContext BitmapFactory.decodeFileDescriptor(pfd.fileDescriptor, null, options)
+                        }
                     } catch (e: Exception) {
-                        android.util.Log.e("ImageViewerAdapter", "Failed to decode DNG thumbnail: $uri", e)
+                        android.util.Log.e("ImageViewerAdapter", "Failed to decode preview: $uri", e)
                         null
                     }
                     null
@@ -97,6 +116,21 @@ class ImageViewerAdapter(
         } else {
             loadWithGlide(holder, uri, skipCache = true)
         }
+    }
+
+    private fun calculateInSampleSize(options: BitmapFactory.Options, reqWidth: Int, reqHeight: Int): Int {
+        val (height: Int, width: Int) = options.run { outHeight to outWidth }
+        var inSampleSize = 1
+
+        if (height > reqHeight || width > reqWidth) {
+            val halfHeight: Int = height / 2
+            val halfWidth: Int = width / 2
+
+            while (halfHeight / inSampleSize >= reqHeight && halfWidth / inSampleSize >= reqWidth) {
+                inSampleSize *= 2
+            }
+        }
+        return inSampleSize
     }
 
     private fun loadWithGlide(holder: ViewHolder, uri: Uri, skipCache: Boolean = false) {

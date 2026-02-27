@@ -73,8 +73,20 @@ class ImageViewerFragment : Fragment() {
 
     private fun setupActionButtons() {
         binding.btnShare.setOnClickListener {
-            val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
-            shareImage(currentGroup)
+            val currentIndex = binding.imagePager.currentItem
+            val currentGroup = adapter.getGroup(currentIndex)
+
+            val holder = (binding.imagePager.getChildAt(0) as? androidx.recyclerview.widget.RecyclerView)
+                ?.findViewHolderForAdapterPosition(currentIndex) as? ImageViewerAdapter.ViewHolder
+
+            val currentUri = when (holder?.binding?.formatToggleGroup?.checkedButtonId) {
+                R.id.btn_jpg -> currentGroup.jpgUri
+                R.id.btn_tiff -> currentGroup.tiffUri
+                R.id.btn_dng -> currentGroup.dngUri
+                else -> currentGroup.jpgUri ?: currentGroup.dngUri ?: currentGroup.tiffUri
+            }
+
+            currentUri?.let { shareImage(it) }
         }
 
         binding.btnDelete.setOnClickListener {
@@ -83,8 +95,7 @@ class ImageViewerFragment : Fragment() {
         }
     }
 
-    private fun shareImage(group: ImageGroup) {
-        val uri = group.jpgUri ?: group.dngUri ?: group.tiffUri ?: return
+    private fun shareImage(uri: android.net.Uri) {
         val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
             type = "image/*"
             putExtra(android.content.Intent.EXTRA_STREAM, uri)
