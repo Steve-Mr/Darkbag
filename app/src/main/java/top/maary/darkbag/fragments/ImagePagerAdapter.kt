@@ -45,6 +45,14 @@ class ImagePagerAdapter(private var images: List<DarkbagImage>) : RecyclerView.A
 
         val sameImage = holder.currentBaseName == image.baseName
         holder.currentBaseName = image.baseName
+        val loadToken = "${image.baseName}_${position}_${System.nanoTime()}"
+
+        // RecyclerView item may be reused from a previously loading RAW view.
+        // Always reset indicator state before starting a new request.
+        holder.binding.loadingIndicator.visibility = View.GONE
+        holder.binding.loadingIndicator.tag = null
+
+        val shouldShowLoading = position == currentActivePosition && (isModified || currentFormat == "DNG")
 
         holder.binding.ivDisplay.load(request) {
             // Use current image as placeholder ONLY IF it's the same physical photo,
@@ -56,16 +64,16 @@ class ImagePagerAdapter(private var images: List<DarkbagImage>) : RecyclerView.A
 
             listener(
                 onStart = {
-                    // Only show loading if it's not a standard JPG (which should be instant from cache)
-                    // or delay it slightly to avoid a 1-frame flash.
-                    if (isModified || currentFormat == "DNG") {
+                    // Only show loading for the current page and RAW-backed renders.
+                    // Delay avoids 1-frame flashes for fast completions.
+                    if (shouldShowLoading) {
+                        holder.binding.loadingIndicator.tag = loadToken
                         holder.binding.loadingIndicator.postDelayed({
-                            // Check if still loading
-                            if (holder.binding.loadingIndicator.tag == request.hashCode()) {
+                            // Keep indicator tied to the newest request bound to this ViewHolder.
+                            if (holder.binding.loadingIndicator.tag == loadToken) {
                                 holder.binding.loadingIndicator.visibility = View.VISIBLE
                             }
                         }, 100)
-                        holder.binding.loadingIndicator.tag = request.hashCode()
                     }
                 },
                 onSuccess = { _, _ ->

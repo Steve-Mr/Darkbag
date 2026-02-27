@@ -167,9 +167,6 @@ class ImageViewerFragment : Fragment() {
             binding.saveButtonContainer.visibility = if (modified) View.VISIBLE else View.GONE
         }
 
-        viewModel.currentMetadata.observe(viewLifecycleOwner) { meta ->
-            binding.viewerLutSwitcher.text = meta.lutName?.substringBeforeLast(".") ?: "None"
-        }
     }
 
     private fun setupLutList() {
