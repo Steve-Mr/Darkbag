@@ -68,12 +68,23 @@ class ImageViewerAdapter(
         val isDng = uri.toString().endsWith(".dng", ignoreCase = true)
 
         val glideListener = object : com.bumptech.glide.request.RequestListener<android.graphics.drawable.Drawable> {
-            override fun onLoadFailed(e: com.bumptech.glide.load.engine.GlideException?, model: Any?, target: com.bumptech.glide.request.target.Target<android.graphics.drawable.Drawable>?, isFirstResource: Boolean): Boolean {
+            override fun onLoadFailed(
+                e: com.bumptech.glide.load.engine.GlideException?,
+                model: Any?,
+                target: com.bumptech.glide.request.target.Target<android.graphics.drawable.Drawable>?,
+                isFirstResource: Boolean
+            ): Boolean {
                 holder.binding.loadingIndicator.visibility = View.GONE
                 return false
             }
 
-            override fun onResourceReady(resource: android.graphics.drawable.Drawable?, model: Any?, target: com.bumptech.glide.request.target.Target<android.graphics.drawable.Drawable>?, dataSource: com.bumptech.glide.load.DataSource?, isFirstResource: Boolean): Boolean {
+            override fun onResourceReady(
+                resource: android.graphics.drawable.Drawable,
+                model: Any?,
+                target: com.bumptech.glide.request.target.Target<android.graphics.drawable.Drawable>?,
+                dataSource: com.bumptech.glide.load.DataSource,
+                isFirstResource: Boolean
+            ): Boolean {
                 holder.binding.loadingIndicator.visibility = View.GONE
                 return false
             }
