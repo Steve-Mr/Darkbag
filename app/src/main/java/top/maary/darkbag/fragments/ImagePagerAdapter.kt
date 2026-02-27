@@ -31,11 +31,16 @@ class ImagePagerAdapter(private var images: List<DarkbagImage>) : RecyclerView.A
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
         val image = images[position]
 
+        val meta = if (position == currentActivePosition) currentMetadata else (image.metadata ?: DarkbagMetadata())
+        val isModified = !meta.isNeutral()
+
         val request = DarkbagImageRequest(
             uri = image.allUris[currentFormat] ?: image.allUris["JPG"] ?: image.primaryUri,
             dngUri = image.allUris["DNG"],
-            metadata = if (position == currentActivePosition) currentMetadata else (image.metadata ?: DarkbagMetadata()),
-            isRawMode = currentFormat == "DNG"
+            metadata = meta,
+            isRawMode = currentFormat == "DNG",
+            isModified = isModified,
+            isThumbnail = position != currentActivePosition // Only thumbnails for off-screen items
         )
 
         val sameImage = holder.currentBaseName == image.baseName

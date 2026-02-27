@@ -75,6 +75,7 @@ class ImageViewerFragment : Fragment() {
     private fun setupPager() {
         adapter = ImagePagerAdapter(emptyList())
         binding.imagePager.adapter = adapter
+        binding.imagePager.offscreenPageLimit = 1 // 3-item sliding window
         binding.imagePager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
             override fun onPageSelected(position: Int) {
                 adapter?.getImage(position)?.let {

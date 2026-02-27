@@ -13,6 +13,8 @@ data class DarkbagMetadata(
     val contrast: Float = 1f,
     val saturation: Float = 1f
 ) {
+    fun isNeutral(): Boolean = this == DEFAULT
+
     fun toJson(): String {
         val json = JSONObject()
         val meta = JSONObject()
@@ -30,6 +32,8 @@ data class DarkbagMetadata(
     }
 
     companion object {
+        val DEFAULT = DarkbagMetadata()
+
         fun fromJson(jsonStr: String?): DarkbagMetadata? {
             if (jsonStr == null) return null
             return try {

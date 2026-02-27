@@ -241,3 +241,65 @@ cleanup:
     delete[] buf;
     return result;
 }
+
+extern "C" JNIEXPORT jobject JNICALL
+Java_top_maary_darkbag_processor_ColorProcessor_extractDngThumbnail(
+        JNIEnv* env,
+        jobject /* this */,
+        jbyteArray dngData
+) {
+    jsize len = env->GetArrayLength(dngData);
+    if (len <= 0) return nullptr;
+
+    unsigned char* buf = new unsigned char[len];
+    env->GetByteArrayRegion(dngData, 0, len, (jbyte*)buf);
+
+    LibRaw RawProcessor;
+    jobject bitmap = nullptr;
+
+    if (RawProcessor.open_buffer(buf, len) == LIBRAW_SUCCESS) {
+        if (RawProcessor.unpack_thumb() == LIBRAW_SUCCESS) {
+            int ret = 0;
+            libraw_processed_image_t* thumb = RawProcessor.dcraw_make_mem_thumb(&ret);
+            if (thumb) {
+                if (thumb->type == LIBRAW_IMAGE_JPEG) {
+                    // It's a JPEG thumbnail, we need to decode it to a Bitmap.
+                    // Use Android's BitmapFactory.
+                    jclass factoryClass = env->FindClass("android/graphics/BitmapFactory");
+                    jmethodID decodeMethod = env->GetStaticMethodID(factoryClass, "decodeByteArray", "([BII)Landroid/graphics/Bitmap;");
+                    jbyteArray thumbArray = env->NewByteArray(thumb->data_size);
+                    env->SetByteArrayRegion(thumbArray, 0, thumb->data_size, (jbyte*)thumb->data);
+                    bitmap = env->CallStaticObjectMethod(factoryClass, decodeMethod, thumbArray, 0, thumb->data_size);
+                } else if (thumb->type == LIBRAW_IMAGE_BITMAP) {
+                    // It's a raw bitmap thumbnail.
+                    jclass bitmapClass = env->FindClass("android/graphics/Bitmap");
+                    jmethodID createMethod = env->GetStaticMethodID(bitmapClass, "createBitmap", "(IILandroid/graphics/Bitmap$Config;)Landroid/graphics/Bitmap;");
+                    jclass configClass = env->FindClass("android/graphics/Bitmap$Config");
+                    jfieldID configField = env->GetStaticFieldID(configClass, "ARGB_8888", "Landroid/graphics/Bitmap$Config;");
+                    jobject config = env->GetStaticObjectField(configClass, configField);
+
+                    bitmap = env->CallStaticObjectMethod(bitmapClass, createMethod, (jint)thumb->width, (jint)thumb->height, config);
+
+                    void* pixels;
+                    if (AndroidBitmap_lockPixels(env, bitmap, &pixels) == 0) {
+                        // Assuming thumb is 8-bit RGB or 16-bit RGB. LibRaw usually provides 8-bit for thumb.
+                        unsigned char* src = thumb->data;
+                        unsigned char* dst = (unsigned char*)pixels;
+                        for (int i = 0; i < thumb->width * thumb->height; ++i) {
+                            dst[i*4 + 0] = src[i*3 + 0]; // R
+                            dst[i*4 + 1] = src[i*3 + 1]; // G
+                            dst[i*4 + 2] = src[i*3 + 2]; // B
+                            dst[i*4 + 3] = 255;          // A
+                        }
+                        AndroidBitmap_unlockPixels(env, bitmap);
+                    }
+                }
+                LibRaw::dcraw_clear_mem(thumb);
+            }
+        }
+    }
+
+    RawProcessor.recycle();
+    delete[] buf;
+    return bitmap;
+}

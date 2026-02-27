@@ -113,6 +113,8 @@ object ColorProcessor {
      */
     external fun loadLutData(lutPath: String): FloatArray?
 
+    external fun extractDngThumbnail(dngData: ByteArray): android.graphics.Bitmap?
+
     /**
      * Callback for background export completion. Called from JNI thread.
      */

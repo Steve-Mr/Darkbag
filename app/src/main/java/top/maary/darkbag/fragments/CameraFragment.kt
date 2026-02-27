@@ -584,6 +584,16 @@ class CameraFragment : Fragment() {
                             withContext(Dispatchers.Main) {
                                 prefs.edit().putString(SettingsFragment.KEY_LAST_CAPTURE_URI, event.targetUri).apply()
                                 setGalleryThumbnail(event.targetUri)
+
+                                // Pre-fetch the JPG into Coil cache for instant viewer loading
+                                try {
+                                    val request = coil3.request.ImageRequest.Builder(requireContext())
+                                        .data(Uri.parse(event.targetUri))
+                                        .build()
+                                    coil3.SingletonImageLoader.get(requireContext()).enqueue(request)
+                                } catch (e: Exception) {
+                                    Log.e(TAG, "Failed to pre-fetch image: ${e.message}")
+                                }
                             }
                         } else {
                              Log.w(TAG, "Received save event for ${event.baseName} without targetUri.")

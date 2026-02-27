@@ -28,14 +28,30 @@ class DarkbagRawInterceptor(private val context: Context) : Interceptor {
         if (data is DarkbagImageRequest) {
             val startTime = System.currentTimeMillis()
             val dngUri = data.dngUri
-            // If we have a DNG and either we are in RAW mode (neutral display)
-            // OR we are in JPG mode but have non-default metadata (adjustments).
-            val shouldProcessRaw = dngUri != null && (data.isRawMode || data.metadata != DarkbagMetadata() || data.forceRaw)
+
+            // Optimization: If it's a JPG and NOT modified, load the JPG directly.
+            // Instant display for existing photos.
+            if (!data.isRawMode && !data.isModified && !data.forceRaw) {
+                val newRequest = request.newBuilder()
+                    .data(data.uri)
+                    .build()
+                return chain.withRequest(newRequest).proceed()
+            }
+
+            // We need RAW processing if:
+            // 1. It's RAW mode (neutral DNG view)
+            // 2. It's JPG mode but modified (needs re-render)
+            // 3. It's DNG-only (no JPG exists)
+            val shouldProcessRaw = dngUri != null && (data.isRawMode || data.isModified || data.forceRaw)
 
             if (shouldProcessRaw) {
                 val bitmap = semaphore.withPermit {
                     withContext(Dispatchers.Default) {
-                        processRaw(context, dngUri!!, data.metadata, data.isRawMode, data.quality)
+                        if (data.isThumbnail) {
+                            extractThumbnail(context, dngUri!!)
+                        } else {
+                            processRaw(context, dngUri!!, data.metadata, data.isRawMode, data.quality)
+                        }
                     }
                 }
                 if (bitmap != null) {
@@ -56,6 +72,19 @@ class DarkbagRawInterceptor(private val context: Context) : Interceptor {
         }
 
         return chain.proceed()
+    }
+
+    private fun extractThumbnail(context: Context, dngUri: Uri): Bitmap? {
+        return try {
+            val pfd = context.contentResolver.openFileDescriptor(dngUri, "r") ?: return null
+            val bytes = pfd.use { fd ->
+                val stream = java.io.FileInputStream(fd.fileDescriptor)
+                stream.use { it.readBytes() }
+            }
+            ColorProcessor.extractDngThumbnail(bytes)
+        } catch (e: Exception) {
+            null
+        }
     }
 
     private fun processRaw(context: Context, dngUri: Uri, metadata: DarkbagMetadata, isRawMode: Boolean, quality: Int): Bitmap? {

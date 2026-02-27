@@ -9,5 +9,7 @@ data class DarkbagImageRequest(
     val metadata: DarkbagMetadata,
     val isRawMode: Boolean = false,
     val quality: Int = 0,
-    val forceRaw: Boolean = false
+    val forceRaw: Boolean = false,
+    val isModified: Boolean = false,
+    val isThumbnail: Boolean = false
 )
