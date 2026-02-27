@@ -53,6 +53,24 @@ class ImageRepository(private val context: Context) {
                     name.endsWith(".jpg", ignoreCase = true) || name.endsWith(".jpeg", ignoreCase = true) -> {
                         builder.jpgUri = file.uri
                         builder.updateTime(file.lastModified())
+                        // Try reading EXIF for layout
+                        try {
+                            context.contentResolver.openFileDescriptor(file.uri, "r")?.use { pfd ->
+                                val exif = androidx.exifinterface.media.ExifInterface(pfd.fileDescriptor)
+                                val comment = exif.getAttribute(androidx.exifinterface.media.ExifInterface.TAG_USER_COMMENT)
+                                if (comment?.startsWith("HF_LAYOUT:") == true) {
+                                    builder.hfLayout = comment.substringAfter("HF_LAYOUT:")
+                                }
+                            }
+                        } catch (e: Exception) {}
+                    }
+                    name.contains("_HF1") && name.endsWith(".dng", ignoreCase = true) -> {
+                        builder.dngUri1 = file.uri
+                        builder.updateTime(file.lastModified())
+                    }
+                    name.contains("_HF2") && name.endsWith(".dng", ignoreCase = true) -> {
+                        builder.dngUri2 = file.uri
+                        builder.updateTime(file.lastModified())
                     }
                     name.endsWith(".dng", ignoreCase = true) -> {
                         builder.dngUri = file.uri
@@ -103,7 +121,24 @@ class ImageRepository(private val context: Context) {
                 val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
 
                 when {
-                    mime == "image/jpeg" -> builder.jpgUri = uri
+                    mime == "image/jpeg" -> {
+                        builder.jpgUri = uri
+                        try {
+                            context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                                val exif = androidx.exifinterface.media.ExifInterface(pfd.fileDescriptor)
+                                val comment = exif.getAttribute(androidx.exifinterface.media.ExifInterface.TAG_USER_COMMENT)
+                                if (comment?.startsWith("HF_LAYOUT:") == true) {
+                                    builder.hfLayout = comment.substringAfter("HF_LAYOUT:")
+                                }
+                            }
+                        } catch (e: Exception) {}
+                    }
+                    name.contains("_HF1") && (mime == "image/x-adobe-dng" || name.endsWith(".dng", ignoreCase = true)) -> {
+                        builder.dngUri1 = uri
+                    }
+                    name.contains("_HF2") && (mime == "image/x-adobe-dng" || name.endsWith(".dng", ignoreCase = true)) -> {
+                        builder.dngUri2 = uri
+                    }
                     mime == "image/x-adobe-dng" || name.endsWith(".dng", ignoreCase = true) -> builder.dngUri = uri
                     mime == "image/tiff" -> builder.tiffUri = uri
                 }
@@ -118,18 +153,24 @@ class ImageRepository(private val context: Context) {
             .replace("_bayer", "")
             .replace("_HDRPLUS", "")
             .replace("_full", "")
+            .replace("_HF1", "")
+            .replace("_HF2", "")
+            .replace("stitched_hf_", "")
     }
 
     private class ImageGroupBuilder(val baseName: String) {
         var jpgUri: Uri? = null
         var tiffUri: Uri? = null
         var dngUri: Uri? = null
+        var dngUri1: Uri? = null
+        var dngUri2: Uri? = null
+        var hfLayout: String? = null
         var captureTime: Long = 0L
 
         fun updateTime(time: Long) {
             if (time > captureTime) captureTime = time
         }
 
-        fun build() = ImageGroup(baseName, jpgUri, tiffUri, dngUri, captureTime)
+        fun build() = ImageGroup(baseName, jpgUri, tiffUri, dngUri, dngUri1, dngUri2, hfLayout, captureTime)
     }
 }

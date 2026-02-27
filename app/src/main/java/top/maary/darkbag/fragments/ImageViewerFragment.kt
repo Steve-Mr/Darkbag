@@ -82,8 +82,8 @@ class ImageViewerFragment : Fragment() {
             val currentUri = when (holder?.binding?.formatToggleGroup?.checkedButtonId) {
                 R.id.btn_jpg -> currentGroup.jpgUri
                 R.id.btn_tiff -> currentGroup.tiffUri
-                R.id.btn_dng -> currentGroup.dngUri
-                else -> currentGroup.jpgUri ?: currentGroup.dngUri ?: currentGroup.tiffUri
+                R.id.btn_dng -> currentGroup.dngUri ?: currentGroup.dngUri1 ?: currentGroup.dngUri2
+                else -> currentGroup.jpgUri ?: currentGroup.dngUri ?: currentGroup.dngUri1 ?: currentGroup.dngUri2 ?: currentGroup.tiffUri
             }
 
             currentUri?.let { shareImage(it) }
@@ -149,8 +149,8 @@ class ImageViewerFragment : Fragment() {
                 val currentUri = when (holder?.binding?.formatToggleGroup?.checkedButtonId) {
                     R.id.btn_jpg -> group.jpgUri
                     R.id.btn_tiff -> group.tiffUri
-                    R.id.btn_dng -> group.dngUri
-                    else -> group.jpgUri ?: group.dngUri ?: group.tiffUri
+                    R.id.btn_dng -> group.dngUri ?: group.dngUri1 ?: group.dngUri2
+                    else -> group.jpgUri ?: group.dngUri ?: group.dngUri1 ?: group.dngUri2 ?: group.tiffUri
                 }
                 currentUri?.let { context?.contentResolver?.delete(it, null, null) }
 

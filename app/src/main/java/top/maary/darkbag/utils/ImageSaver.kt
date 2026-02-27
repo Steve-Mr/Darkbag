@@ -328,7 +328,8 @@ object ImageSaver {
         if (actualSaveRaw && linearDngPath != null) {
             val dngFile = File(linearDngPath)
             if (dngFile.exists()) {
-                val dngDisplayName = if (linearDngPath.contains("_linear")) "${baseName}_linear.dng" else "$baseName.dng"
+                val baseSuffix = if (linearDngPath.contains("_linear")) "_linear" else ""
+                val dngDisplayName = "$baseName$baseSuffix.dng"
                 if (rawFolderUri != null) {
                     finalRawUri = saveFileToFolder(context, dngFile, dngDisplayName, "image/x-adobe-dng", rawFolderUri)
                 } else {
