@@ -53,13 +53,25 @@ class ImageRepository(private val context: Context) {
                     name.endsWith(".jpg", ignoreCase = true) || name.endsWith(".jpeg", ignoreCase = true) -> {
                         builder.jpgUri = file.uri
                         builder.updateTime(file.lastModified())
-                        // Try reading EXIF for layout
+                        // Try reading EXIF for layout and dimensions
                         try {
                             context.contentResolver.openFileDescriptor(file.uri, "r")?.use { pfd ->
                                 val exif = androidx.exifinterface.media.ExifInterface(pfd.fileDescriptor)
                                 val comment = exif.getAttribute(androidx.exifinterface.media.ExifInterface.TAG_USER_COMMENT)
                                 if (comment?.startsWith("HF_LAYOUT:") == true) {
                                     builder.hfLayout = comment.substringAfter("HF_LAYOUT:")
+                                }
+
+                                val orientation = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION, androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL)
+                                val w = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_IMAGE_WIDTH, 0)
+                                val h = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_IMAGE_LENGTH, 0)
+
+                                if (orientation == androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90 || orientation == androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270) {
+                                    builder.width = h
+                                    builder.height = w
+                                } else {
+                                    builder.width = w
+                                    builder.height = h
                                 }
                             }
                         } catch (e: Exception) {}
@@ -130,6 +142,18 @@ class ImageRepository(private val context: Context) {
                                 if (comment?.startsWith("HF_LAYOUT:") == true) {
                                     builder.hfLayout = comment.substringAfter("HF_LAYOUT:")
                                 }
+
+                                val orientation = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION, androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL)
+                                val w = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_IMAGE_WIDTH, 0)
+                                val h = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_IMAGE_LENGTH, 0)
+
+                                if (orientation == androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90 || orientation == androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270) {
+                                    builder.width = h
+                                    builder.height = w
+                                } else {
+                                    builder.width = w
+                                    builder.height = h
+                                }
                             }
                         } catch (e: Exception) {}
                     }
@@ -165,12 +189,14 @@ class ImageRepository(private val context: Context) {
         var dngUri1: Uri? = null
         var dngUri2: Uri? = null
         var hfLayout: String? = null
+        var width: Int = 0
+        var height: Int = 0
         var captureTime: Long = 0L
 
         fun updateTime(time: Long) {
             if (time > captureTime) captureTime = time
         }
 
-        fun build() = ImageGroup(baseName, jpgUri, tiffUri, dngUri, dngUri1, dngUri2, hfLayout, captureTime)
+        fun build() = ImageGroup(baseName, jpgUri, tiffUri, dngUri, dngUri1, dngUri2, hfLayout, width, height, captureTime)
     }
 }

@@ -13,6 +13,8 @@ data class ImageGroup(
     val dngUri1: Uri? = null, // Half-frame Frame 1
     val dngUri2: Uri? = null, // Half-frame Frame 2
     val hfLayout: String? = null, // "SBS" or "TB"
+    val width: Int = 0,
+    val height: Int = 0,
     val captureTime: Long = 0L
 ) : Parcelable {
     fun hasAny(): Boolean = jpgUri != null || tiffUri != null || dngUri != null || dngUri1 != null || dngUri2 != null

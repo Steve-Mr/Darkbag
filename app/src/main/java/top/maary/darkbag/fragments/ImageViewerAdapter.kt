@@ -78,6 +78,8 @@ class ImageViewerAdapter(
         holder.binding.imageViewHf2.visibility = View.GONE
         holder.binding.loadingIndicator.visibility = View.VISIBLE
 
+        applyContainerRatio(holder, group)
+
         val isDng = uri.toString().endsWith(".dng", ignoreCase = true)
         val isTiff = uri.toString().endsWith(".tiff", ignoreCase = true) || uri.toString().endsWith(".tif", ignoreCase = true)
 
@@ -156,6 +158,26 @@ class ImageViewerAdapter(
         return rotated
     }
 
+    private fun applyContainerRatio(holder: ViewHolder, group: ImageGroup) {
+        val root = holder.binding.root
+        val container = holder.binding.imageContainer
+
+        val ratio = when {
+            group.width > 0 && group.height > 0 -> {
+                // For HF JPG, this width/height already includes the 3% gap logic from stitching.
+                "${group.width}:${group.height}"
+            }
+            group.hfLayout == "TB" -> "4:6.18" // (4/3) : (1 + 0.03 + 1) -> 1.33 : 2.03 -> 1 : 1.53
+            group.hfLayout == "SBS" || group.isHalfFrame() -> "6.18:4" // (1 + 0.03 + 1) : (4/3) -> 2.03 : 1.33 -> 1.53 : 1
+            else -> "4:3" // Fallback
+        }
+
+        val constraintSet = androidx.constraintlayout.widget.ConstraintSet()
+        constraintSet.clone(root)
+        constraintSet.setDimensionRatio(R.id.image_container, ratio)
+        constraintSet.applyTo(root)
+    }
+
     private fun loadHalfFrameDngs(holder: ViewHolder, group: ImageGroup) {
         holder.loadJob?.cancel()
         holder.binding.imageView.visibility = View.GONE
@@ -163,19 +185,18 @@ class ImageViewerAdapter(
         holder.binding.imageViewHf2.visibility = View.VISIBLE
         holder.binding.loadingIndicator.visibility = View.VISIBLE
 
-        holder.binding.root.post {
-            val constraintSet = androidx.constraintlayout.widget.ConstraintSet()
-            constraintSet.clone(holder.binding.root)
+        applyContainerRatio(holder, group)
 
-            val rootWidth = holder.binding.root.width
-            val rootHeight = holder.binding.root.height
-            // Gap logic: matching HalfFrameUtils (3% of the single frame's long dimension)
-            // SBS: frame is Portrait (3:4), long dimension is height.
-            // TB: frame is Landscape (4:3), long dimension is width.
-            val gap = (if (group.hfLayout == "TB") rootWidth else rootHeight) * 0.03f
+        holder.binding.imageContainer.post {
+            val constraintSet = androidx.constraintlayout.widget.ConstraintSet()
+            constraintSet.clone(holder.binding.imageContainer)
+
+            val rootWidth = holder.binding.imageContainer.width
+            val rootHeight = holder.binding.imageContainer.height
 
             if (group.hfLayout == "TB") {
                 // Top-bottom
+                val gap = rootHeight * (0.03f / 2.03f)
                 constraintSet.connect(R.id.image_view_hf1, androidx.constraintlayout.widget.ConstraintSet.BOTTOM, R.id.image_view_hf2, androidx.constraintlayout.widget.ConstraintSet.TOP, (gap / 2).toInt())
                 constraintSet.connect(R.id.image_view_hf2, androidx.constraintlayout.widget.ConstraintSet.TOP, R.id.image_view_hf1, androidx.constraintlayout.widget.ConstraintSet.BOTTOM, (gap / 2).toInt())
 
@@ -193,10 +214,9 @@ class ImageViewerAdapter(
                 constraintSet.constrainWidth(R.id.image_view_hf2, androidx.constraintlayout.widget.ConstraintSet.MATCH_CONSTRAINT)
                 constraintSet.setVerticalWeight(R.id.image_view_hf1, 1f)
                 constraintSet.setVerticalWeight(R.id.image_view_hf2, 1f)
-                constraintSet.setDimensionRatio(R.id.image_view_hf1, "4:3")
-                constraintSet.setDimensionRatio(R.id.image_view_hf2, "4:3")
             } else {
                 // Side-by-side (default)
+                val gap = rootWidth * (0.03f / 2.03f)
                 constraintSet.connect(R.id.image_view_hf1, androidx.constraintlayout.widget.ConstraintSet.END, R.id.image_view_hf2, androidx.constraintlayout.widget.ConstraintSet.START, (gap / 2).toInt())
                 constraintSet.connect(R.id.image_view_hf2, androidx.constraintlayout.widget.ConstraintSet.START, R.id.image_view_hf1, androidx.constraintlayout.widget.ConstraintSet.END, (gap / 2).toInt())
 
@@ -214,10 +234,8 @@ class ImageViewerAdapter(
                 constraintSet.constrainHeight(R.id.image_view_hf2, androidx.constraintlayout.widget.ConstraintSet.MATCH_CONSTRAINT)
                 constraintSet.setHorizontalWeight(R.id.image_view_hf1, 1f)
                 constraintSet.setHorizontalWeight(R.id.image_view_hf2, 1f)
-                constraintSet.setDimensionRatio(R.id.image_view_hf1, "3:4")
-                constraintSet.setDimensionRatio(R.id.image_view_hf2, "3:4")
             }
-            constraintSet.applyTo(holder.binding.root)
+            constraintSet.applyTo(holder.binding.imageContainer)
 
             holder.loadJob = scope.launch {
                 val bit1 = group.dngUri1?.let { decodeDngThumbnail(holder.binding.root.context, it) }
@@ -295,22 +313,6 @@ class ImageViewerAdapter(
         return rotated
     }
 
-    private suspend fun decodeDngThumbnailOld(context: android.content.Context, uri: Uri): android.graphics.Bitmap? = withContext(Dispatchers.IO) {
-        try {
-            context.contentResolver.openInputStream(uri)?.use { input ->
-                val exif = androidx.exifinterface.media.ExifInterface(input)
-                if (exif.hasThumbnail()) {
-                    val thumb = exif.thumbnailBytes
-                    if (thumb != null) {
-                        return@withContext android.graphics.BitmapFactory.decodeByteArray(thumb, 0, thumb.size)
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            android.util.Log.e("ImageViewerAdapter", "Failed to decode DNG: $uri", e)
-        }
-        null
-    }
 
     private fun loadWithGlide(holder: ViewHolder, uri: Uri, skipCache: Boolean = false) {
         Glide.with(holder.binding.imageView)
