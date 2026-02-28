@@ -58,6 +58,8 @@ class ImageViewerFragment : Fragment() {
             val initialPos = groups.indexOfFirst {
                 it.jpgUri?.toString() == targetUri ||
                 it.dngUri?.toString() == targetUri ||
+                it.dngUri1?.toString() == targetUri ||
+                it.dngUri2?.toString() == targetUri ||
                 it.tiffUri?.toString() == targetUri
             }
             if (initialPos != -1) {
@@ -134,6 +136,8 @@ class ImageViewerFragment : Fragment() {
                 group.jpgUri?.let { context?.contentResolver?.delete(it, null, null) }
                 group.tiffUri?.let { context?.contentResolver?.delete(it, null, null) }
                 group.dngUri?.let { context?.contentResolver?.delete(it, null, null) }
+                group.dngUri1?.let { context.contentResolver.delete(it, null, null) }
+                group.dngUri2?.let { context.contentResolver.delete(it, null, null) }
 
                 // Determine next image to focus on
                 if (adapter.itemCount > 1) {
@@ -146,13 +150,18 @@ class ImageViewerFragment : Fragment() {
                 val holder = (binding.imagePager.getChildAt(0) as? androidx.recyclerview.widget.RecyclerView)
                     ?.findViewHolderForAdapterPosition(currentIndex) as? ImageViewerAdapter.ViewHolder
 
-                val currentUri = when (holder?.binding?.formatToggleGroup?.checkedButtonId) {
-                    R.id.btn_jpg -> group.jpgUri
-                    R.id.btn_tiff -> group.tiffUri
-                    R.id.btn_dng -> group.dngUri ?: group.dngUri1 ?: group.dngUri2
-                    else -> group.jpgUri ?: group.dngUri ?: group.dngUri1 ?: group.dngUri2 ?: group.tiffUri
+                if (holder?.binding?.formatToggleGroup?.checkedButtonId == R.id.btn_dng && group.isHalfFrame()) {
+                     group.dngUri1?.let { context.contentResolver.delete(it, null, null) }
+                     group.dngUri2?.let { context.contentResolver.delete(it, null, null) }
+                } else {
+                    val currentUri = when (holder?.binding?.formatToggleGroup?.checkedButtonId) {
+                        R.id.btn_jpg -> group.jpgUri
+                        R.id.btn_tiff -> group.tiffUri
+                        R.id.btn_dng -> group.dngUri
+                        else -> group.jpgUri ?: group.dngUri ?: group.dngUri1 ?: group.dngUri2 ?: group.tiffUri
+                    }
+                    currentUri?.let { context.contentResolver.delete(it, null, null) }
                 }
-                currentUri?.let { context?.contentResolver?.delete(it, null, null) }
 
                 // If we deleted the last format of this group, we need to find next group
                 val remainingGroup = repository.getGroupedImages().find { it.baseName == group.baseName }

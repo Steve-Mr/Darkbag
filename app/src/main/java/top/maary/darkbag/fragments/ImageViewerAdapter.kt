@@ -146,6 +146,16 @@ class ImageViewerAdapter(
         return inSampleSize
     }
 
+    private fun ensureOrientation(bitmap: android.graphics.Bitmap, wantPortrait: Boolean): android.graphics.Bitmap {
+        val isPortrait = bitmap.height >= bitmap.width
+        if (isPortrait == wantPortrait) return bitmap
+
+        val matrix = android.graphics.Matrix().apply { postRotate(90f) }
+        val rotated = android.graphics.Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+        if (rotated != bitmap) bitmap.recycle()
+        return rotated
+    }
+
     private fun loadHalfFrameDngs(holder: ViewHolder, group: ImageGroup) {
         holder.loadJob?.cancel()
         holder.binding.imageView.visibility = View.GONE
@@ -153,58 +163,139 @@ class ImageViewerAdapter(
         holder.binding.imageViewHf2.visibility = View.VISIBLE
         holder.binding.loadingIndicator.visibility = View.VISIBLE
 
-        val constraintSet = androidx.constraintlayout.widget.ConstraintSet()
-        constraintSet.clone(holder.binding.root)
+        holder.binding.root.post {
+            val constraintSet = androidx.constraintlayout.widget.ConstraintSet()
+            constraintSet.clone(holder.binding.root)
 
-        if (group.hfLayout == "TB") {
-            // Top-bottom
-            constraintSet.connect(R.id.image_view_hf1, androidx.constraintlayout.widget.ConstraintSet.BOTTOM, R.id.image_view_hf2, androidx.constraintlayout.widget.ConstraintSet.TOP)
-            constraintSet.connect(R.id.image_view_hf2, androidx.constraintlayout.widget.ConstraintSet.TOP, R.id.image_view_hf1, androidx.constraintlayout.widget.ConstraintSet.BOTTOM)
+            val rootWidth = holder.binding.root.width
+            val rootHeight = holder.binding.root.height
+            // Gap logic: matching HalfFrameUtils (3% of the single frame's long dimension)
+            // SBS: frame is Portrait (3:4), long dimension is height.
+            // TB: frame is Landscape (4:3), long dimension is width.
+            val gap = (if (group.hfLayout == "TB") rootWidth else rootHeight) * 0.03f
 
-            constraintSet.connect(R.id.image_view_hf1, androidx.constraintlayout.widget.ConstraintSet.START, androidx.constraintlayout.widget.ConstraintSet.PARENT_ID, androidx.constraintlayout.widget.ConstraintSet.START)
-            constraintSet.connect(R.id.image_view_hf1, androidx.constraintlayout.widget.ConstraintSet.END, androidx.constraintlayout.widget.ConstraintSet.PARENT_ID, androidx.constraintlayout.widget.ConstraintSet.END)
-            constraintSet.connect(R.id.image_view_hf1, androidx.constraintlayout.widget.ConstraintSet.TOP, androidx.constraintlayout.widget.ConstraintSet.PARENT_ID, androidx.constraintlayout.widget.ConstraintSet.TOP)
+            if (group.hfLayout == "TB") {
+                // Top-bottom
+                constraintSet.connect(R.id.image_view_hf1, androidx.constraintlayout.widget.ConstraintSet.BOTTOM, R.id.image_view_hf2, androidx.constraintlayout.widget.ConstraintSet.TOP, (gap / 2).toInt())
+                constraintSet.connect(R.id.image_view_hf2, androidx.constraintlayout.widget.ConstraintSet.TOP, R.id.image_view_hf1, androidx.constraintlayout.widget.ConstraintSet.BOTTOM, (gap / 2).toInt())
 
-            constraintSet.connect(R.id.image_view_hf2, androidx.constraintlayout.widget.ConstraintSet.START, androidx.constraintlayout.widget.ConstraintSet.PARENT_ID, androidx.constraintlayout.widget.ConstraintSet.START)
-            constraintSet.connect(R.id.image_view_hf2, androidx.constraintlayout.widget.ConstraintSet.END, androidx.constraintlayout.widget.ConstraintSet.PARENT_ID, androidx.constraintlayout.widget.ConstraintSet.END)
-            constraintSet.connect(R.id.image_view_hf2, androidx.constraintlayout.widget.ConstraintSet.BOTTOM, androidx.constraintlayout.widget.ConstraintSet.PARENT_ID, androidx.constraintlayout.widget.ConstraintSet.BOTTOM)
+                constraintSet.connect(R.id.image_view_hf1, androidx.constraintlayout.widget.ConstraintSet.START, androidx.constraintlayout.widget.ConstraintSet.PARENT_ID, androidx.constraintlayout.widget.ConstraintSet.START)
+                constraintSet.connect(R.id.image_view_hf1, androidx.constraintlayout.widget.ConstraintSet.END, androidx.constraintlayout.widget.ConstraintSet.PARENT_ID, androidx.constraintlayout.widget.ConstraintSet.END)
+                constraintSet.connect(R.id.image_view_hf1, androidx.constraintlayout.widget.ConstraintSet.TOP, androidx.constraintlayout.widget.ConstraintSet.PARENT_ID, androidx.constraintlayout.widget.ConstraintSet.TOP)
 
-            constraintSet.constrainHeight(R.id.image_view_hf1, 0)
-            constraintSet.constrainHeight(R.id.image_view_hf2, 0)
-            constraintSet.constrainWidth(R.id.image_view_hf1, androidx.constraintlayout.widget.ConstraintSet.MATCH_CONSTRAINT)
-            constraintSet.constrainWidth(R.id.image_view_hf2, androidx.constraintlayout.widget.ConstraintSet.MATCH_CONSTRAINT)
-        } else {
-            // Side-by-side (default)
-            constraintSet.connect(R.id.image_view_hf1, androidx.constraintlayout.widget.ConstraintSet.END, R.id.image_view_hf2, androidx.constraintlayout.widget.ConstraintSet.START)
-            constraintSet.connect(R.id.image_view_hf2, androidx.constraintlayout.widget.ConstraintSet.START, R.id.image_view_hf1, androidx.constraintlayout.widget.ConstraintSet.END)
+                constraintSet.connect(R.id.image_view_hf2, androidx.constraintlayout.widget.ConstraintSet.START, androidx.constraintlayout.widget.ConstraintSet.PARENT_ID, androidx.constraintlayout.widget.ConstraintSet.START)
+                constraintSet.connect(R.id.image_view_hf2, androidx.constraintlayout.widget.ConstraintSet.END, androidx.constraintlayout.widget.ConstraintSet.PARENT_ID, androidx.constraintlayout.widget.ConstraintSet.END)
+                constraintSet.connect(R.id.image_view_hf2, androidx.constraintlayout.widget.ConstraintSet.BOTTOM, androidx.constraintlayout.widget.ConstraintSet.PARENT_ID, androidx.constraintlayout.widget.ConstraintSet.BOTTOM)
 
-            constraintSet.connect(R.id.image_view_hf1, androidx.constraintlayout.widget.ConstraintSet.START, androidx.constraintlayout.widget.ConstraintSet.PARENT_ID, androidx.constraintlayout.widget.ConstraintSet.START)
-            constraintSet.connect(R.id.image_view_hf1, androidx.constraintlayout.widget.ConstraintSet.TOP, androidx.constraintlayout.widget.ConstraintSet.PARENT_ID, androidx.constraintlayout.widget.ConstraintSet.TOP)
-            constraintSet.connect(R.id.image_view_hf1, androidx.constraintlayout.widget.ConstraintSet.BOTTOM, androidx.constraintlayout.widget.ConstraintSet.PARENT_ID, androidx.constraintlayout.widget.ConstraintSet.BOTTOM)
+                constraintSet.constrainHeight(R.id.image_view_hf1, 0)
+                constraintSet.constrainHeight(R.id.image_view_hf2, 0)
+                constraintSet.constrainWidth(R.id.image_view_hf1, androidx.constraintlayout.widget.ConstraintSet.MATCH_CONSTRAINT)
+                constraintSet.constrainWidth(R.id.image_view_hf2, androidx.constraintlayout.widget.ConstraintSet.MATCH_CONSTRAINT)
+                constraintSet.setVerticalWeight(R.id.image_view_hf1, 1f)
+                constraintSet.setVerticalWeight(R.id.image_view_hf2, 1f)
+                constraintSet.setDimensionRatio(R.id.image_view_hf1, "4:3")
+                constraintSet.setDimensionRatio(R.id.image_view_hf2, "4:3")
+            } else {
+                // Side-by-side (default)
+                constraintSet.connect(R.id.image_view_hf1, androidx.constraintlayout.widget.ConstraintSet.END, R.id.image_view_hf2, androidx.constraintlayout.widget.ConstraintSet.START, (gap / 2).toInt())
+                constraintSet.connect(R.id.image_view_hf2, androidx.constraintlayout.widget.ConstraintSet.START, R.id.image_view_hf1, androidx.constraintlayout.widget.ConstraintSet.END, (gap / 2).toInt())
 
-            constraintSet.connect(R.id.image_view_hf2, androidx.constraintlayout.widget.ConstraintSet.END, androidx.constraintlayout.widget.ConstraintSet.PARENT_ID, androidx.constraintlayout.widget.ConstraintSet.END)
-            constraintSet.connect(R.id.image_view_hf2, androidx.constraintlayout.widget.ConstraintSet.TOP, androidx.constraintlayout.widget.ConstraintSet.PARENT_ID, androidx.constraintlayout.widget.ConstraintSet.TOP)
-            constraintSet.connect(R.id.image_view_hf2, androidx.constraintlayout.widget.ConstraintSet.BOTTOM, androidx.constraintlayout.widget.ConstraintSet.PARENT_ID, androidx.constraintlayout.widget.ConstraintSet.BOTTOM)
+                constraintSet.connect(R.id.image_view_hf1, androidx.constraintlayout.widget.ConstraintSet.START, androidx.constraintlayout.widget.ConstraintSet.PARENT_ID, androidx.constraintlayout.widget.ConstraintSet.START)
+                constraintSet.connect(R.id.image_view_hf1, androidx.constraintlayout.widget.ConstraintSet.TOP, androidx.constraintlayout.widget.ConstraintSet.PARENT_ID, androidx.constraintlayout.widget.ConstraintSet.TOP)
+                constraintSet.connect(R.id.image_view_hf1, androidx.constraintlayout.widget.ConstraintSet.BOTTOM, androidx.constraintlayout.widget.ConstraintSet.PARENT_ID, androidx.constraintlayout.widget.ConstraintSet.BOTTOM)
 
-            constraintSet.constrainWidth(R.id.image_view_hf1, 0)
-            constraintSet.constrainWidth(R.id.image_view_hf2, 0)
-            constraintSet.constrainHeight(R.id.image_view_hf1, androidx.constraintlayout.widget.ConstraintSet.MATCH_CONSTRAINT)
-            constraintSet.constrainHeight(R.id.image_view_hf2, androidx.constraintlayout.widget.ConstraintSet.MATCH_CONSTRAINT)
-        }
-        constraintSet.applyTo(holder.binding.root)
+                constraintSet.connect(R.id.image_view_hf2, androidx.constraintlayout.widget.ConstraintSet.END, androidx.constraintlayout.widget.ConstraintSet.PARENT_ID, androidx.constraintlayout.widget.ConstraintSet.END)
+                constraintSet.connect(R.id.image_view_hf2, androidx.constraintlayout.widget.ConstraintSet.TOP, androidx.constraintlayout.widget.ConstraintSet.PARENT_ID, androidx.constraintlayout.widget.ConstraintSet.TOP)
+                constraintSet.connect(R.id.image_view_hf2, androidx.constraintlayout.widget.ConstraintSet.BOTTOM, androidx.constraintlayout.widget.ConstraintSet.PARENT_ID, androidx.constraintlayout.widget.ConstraintSet.BOTTOM)
 
-        holder.loadJob = scope.launch {
-            val bit1 = group.dngUri1?.let { decodeDngThumbnail(holder.binding.root.context, it) }
-            val bit2 = group.dngUri2?.let { decodeDngThumbnail(holder.binding.root.context, it) }
+                constraintSet.constrainWidth(R.id.image_view_hf1, 0)
+                constraintSet.constrainWidth(R.id.image_view_hf2, 0)
+                constraintSet.constrainHeight(R.id.image_view_hf1, androidx.constraintlayout.widget.ConstraintSet.MATCH_CONSTRAINT)
+                constraintSet.constrainHeight(R.id.image_view_hf2, androidx.constraintlayout.widget.ConstraintSet.MATCH_CONSTRAINT)
+                constraintSet.setHorizontalWeight(R.id.image_view_hf1, 1f)
+                constraintSet.setHorizontalWeight(R.id.image_view_hf2, 1f)
+                constraintSet.setDimensionRatio(R.id.image_view_hf1, "3:4")
+                constraintSet.setDimensionRatio(R.id.image_view_hf2, "3:4")
+            }
+            constraintSet.applyTo(holder.binding.root)
 
-            if (bit1 != null) holder.binding.imageViewHf1.setImageBitmap(bit1) else holder.binding.imageViewHf1.setImageResource(android.R.drawable.ic_menu_gallery)
-            if (bit2 != null) holder.binding.imageViewHf2.setImageBitmap(bit2) else holder.binding.imageViewHf2.setImageResource(android.R.drawable.ic_menu_gallery)
+            holder.loadJob = scope.launch {
+                val bit1 = group.dngUri1?.let { decodeDngThumbnail(holder.binding.root.context, it) }
+                val bit2 = group.dngUri2?.let { decodeDngThumbnail(holder.binding.root.context, it) }
 
-            holder.binding.loadingIndicator.visibility = View.GONE
+                val wantPortrait = group.hfLayout != "TB"
+                val oriented1 = bit1?.let { ensureOrientation(it, wantPortrait) }
+                val oriented2 = bit2?.let { ensureOrientation(it, wantPortrait) }
+
+                if (oriented1 != null) {
+                    holder.binding.imageViewHf1.setImageBitmap(oriented1)
+                    holder.binding.imageViewHf1.scaleType = android.widget.ImageView.ScaleType.FIT_XY
+                } else {
+                    holder.binding.imageViewHf1.setImageResource(android.R.drawable.ic_menu_gallery)
+                }
+
+                if (oriented2 != null) {
+                    holder.binding.imageViewHf2.setImageBitmap(oriented2)
+                    holder.binding.imageViewHf2.scaleType = android.widget.ImageView.ScaleType.FIT_XY
+                } else {
+                    holder.binding.imageViewHf2.setImageResource(android.R.drawable.ic_menu_gallery)
+                }
+
+                holder.binding.loadingIndicator.visibility = View.GONE
+            }
         }
     }
 
     private suspend fun decodeDngThumbnail(context: android.content.Context, uri: Uri): android.graphics.Bitmap? = withContext(Dispatchers.IO) {
+        try {
+            var bitmap: android.graphics.Bitmap? = null
+            var orientation = androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL
+
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                val exif = androidx.exifinterface.media.ExifInterface(input)
+                orientation = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION, androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL)
+                if (exif.hasThumbnail()) {
+                    val thumb = exif.thumbnailBytes
+                    if (thumb != null) {
+                        bitmap = android.graphics.BitmapFactory.decodeByteArray(thumb, 0, thumb.size)
+                    }
+                }
+            }
+
+            if (bitmap == null) {
+                // Fallback for DNGs without thumbnails
+                context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                    val options = android.graphics.BitmapFactory.Options().apply {
+                        inJustDecodeBounds = true
+                    }
+                    android.graphics.BitmapFactory.decodeFileDescriptor(pfd.fileDescriptor, null, options)
+                    options.inSampleSize = calculateInSampleSize(options, 1024, 1024)
+                    options.inJustDecodeBounds = false
+                    bitmap = android.graphics.BitmapFactory.decodeFileDescriptor(pfd.fileDescriptor, null, options)
+                }
+            }
+
+            return@withContext bitmap?.let { rotateBitmap(it, orientation) }
+        } catch (e: Exception) {
+            android.util.Log.e("ImageViewerAdapter", "Failed to decode DNG: $uri", e)
+        }
+        null
+    }
+
+    private fun rotateBitmap(bitmap: android.graphics.Bitmap, orientation: Int): android.graphics.Bitmap {
+        val matrix = android.graphics.Matrix()
+        when (orientation) {
+            androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
+            androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
+            androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
+            else -> return bitmap
+        }
+        val rotated = android.graphics.Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+        if (rotated != bitmap) bitmap.recycle()
+        return rotated
+    }
+
+    private suspend fun decodeDngThumbnailOld(context: android.content.Context, uri: Uri): android.graphics.Bitmap? = withContext(Dispatchers.IO) {
         try {
             context.contentResolver.openInputStream(uri)?.use { input ->
                 val exif = androidx.exifinterface.media.ExifInterface(input)
@@ -214,16 +305,6 @@ class ImageViewerAdapter(
                         return@withContext android.graphics.BitmapFactory.decodeByteArray(thumb, 0, thumb.size)
                     }
                 }
-            }
-            // Fallback for DNGs without thumbnails
-            context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
-                val options = android.graphics.BitmapFactory.Options().apply {
-                    inJustDecodeBounds = true
-                }
-                android.graphics.BitmapFactory.decodeFileDescriptor(pfd.fileDescriptor, null, options)
-                options.inSampleSize = calculateInSampleSize(options, 1024, 1024)
-                options.inJustDecodeBounds = false
-                return@withContext android.graphics.BitmapFactory.decodeFileDescriptor(pfd.fileDescriptor, null, options)
             }
         } catch (e: Exception) {
             android.util.Log.e("ImageViewerAdapter", "Failed to decode DNG: $uri", e)
