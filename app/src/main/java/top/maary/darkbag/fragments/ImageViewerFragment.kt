@@ -81,14 +81,17 @@ class ImageViewerFragment : Fragment() {
             val holder = (binding.imagePager.getChildAt(0) as? androidx.recyclerview.widget.RecyclerView)
                 ?.findViewHolderForAdapterPosition(currentIndex) as? ImageViewerAdapter.ViewHolder
 
-            val currentUri = when (holder?.binding?.formatToggleGroup?.checkedButtonId) {
-                R.id.btn_jpg -> currentGroup.jpgUri
-                R.id.btn_tiff -> currentGroup.tiffUri
-                R.id.btn_dng -> currentGroup.dngUri ?: currentGroup.dngUri1 ?: currentGroup.dngUri2
-                else -> currentGroup.jpgUri ?: currentGroup.dngUri ?: currentGroup.dngUri1 ?: currentGroup.dngUri2 ?: currentGroup.tiffUri
+            if (holder?.binding?.formatToggleGroup?.checkedButtonId == R.id.btn_dng && currentGroup.isHalfFrame()) {
+                showHalfFrameShareSheet(currentGroup)
+            } else {
+                val currentUri = when (holder?.binding?.formatToggleGroup?.checkedButtonId) {
+                    R.id.btn_jpg -> currentGroup.jpgUri
+                    R.id.btn_tiff -> currentGroup.tiffUri
+                    R.id.btn_dng -> currentGroup.dngUri ?: currentGroup.dngUri1 ?: currentGroup.dngUri2
+                    else -> currentGroup.jpgUri ?: currentGroup.dngUri ?: currentGroup.dngUri1 ?: currentGroup.dngUri2 ?: currentGroup.tiffUri
+                }
+                currentUri?.let { shareImages(listOf(it)) }
             }
-
-            currentUri?.let { shareImage(it) }
         }
 
         binding.btnDelete.setOnClickListener {
@@ -97,17 +100,34 @@ class ImageViewerFragment : Fragment() {
         }
     }
 
-    private fun shareImage(uri: android.net.Uri) {
-        val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
-            type = "image/*"
-            putExtra(android.content.Intent.EXTRA_STREAM, uri)
-            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    private fun shareImages(uris: List<android.net.Uri>) {
+        if (uris.isEmpty()) return
+
+        val intent = if (uris.size == 1) {
+            android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                type = "image/*"
+                putExtra(android.content.Intent.EXTRA_STREAM, uris[0])
+            }
+        } else {
+            android.content.Intent(android.content.Intent.ACTION_SEND_MULTIPLE).apply {
+                type = "image/*"
+                putParcelableArrayListExtra(android.content.Intent.EXTRA_STREAM, ArrayList(uris))
+            }
         }
+
+        intent.addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+
         try {
             startActivity(android.content.Intent.createChooser(intent, "Share Image"))
         } catch (e: android.content.ActivityNotFoundException) {
             android.widget.Toast.makeText(requireContext(), "No app found to share the image.", android.widget.Toast.LENGTH_SHORT).show()
         }
+    }
+
+    private fun showHalfFrameShareSheet(group: ImageGroup) {
+        HalfFrameShareSheet(group.dngUri1, group.dngUri2) { uris ->
+            shareImages(uris)
+        }.show(childFragmentManager, HalfFrameShareSheet.TAG)
     }
 
     private fun showDeleteDialog(group: ImageGroup) {

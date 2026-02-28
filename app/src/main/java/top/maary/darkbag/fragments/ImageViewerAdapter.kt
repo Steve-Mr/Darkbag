@@ -5,7 +5,6 @@ import android.net.Uri
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import androidx.exifinterface.media.ExifInterface
 import androidx.recyclerview.widget.RecyclerView
 import com.bumptech.glide.Glide
 import com.bumptech.glide.load.engine.DiskCacheStrategy
@@ -13,6 +12,7 @@ import kotlinx.coroutines.*
 import top.maary.darkbag.R
 import top.maary.darkbag.databinding.ItemImageGroupBinding
 import top.maary.darkbag.models.ImageGroup
+import top.maary.darkbag.utils.ImageUtils
 
 class ImageViewerAdapter(
     private val groups: List<ImageGroup>,
@@ -91,15 +91,8 @@ class ImageViewerAdapter(
 
                         // Try DNG thumbnail first if it's DNG
                         if (isDng) {
-                            contentResolver.openInputStream(uri)?.use { input ->
-                                val exif = ExifInterface(input)
-                                if (exif.hasThumbnail()) {
-                                    val thumb = exif.thumbnailBytes
-                                    if (thumb != null) {
-                                        return@withContext BitmapFactory.decodeByteArray(thumb, 0, thumb.size)
-                                    }
-                                }
-                            }
+                            val thumb = ImageUtils.decodeDngThumbnail(holder.binding.root.context, uri)
+                            if (thumb != null) return@withContext thumb
                         }
 
                         // Fallback to BitmapFactory with sampling for TIFF or DNG without thumbnail
@@ -109,10 +102,19 @@ class ImageViewerAdapter(
                             }
                             BitmapFactory.decodeFileDescriptor(pfd.fileDescriptor, null, options)
 
-                            options.inSampleSize = calculateInSampleSize(options, 2048, 2048)
+                            options.inSampleSize = ImageUtils.calculateInSampleSize(options, 2048, 2048)
                             options.inJustDecodeBounds = false
 
-                            return@withContext BitmapFactory.decodeFileDescriptor(pfd.fileDescriptor, null, options)
+                            val bitmap = BitmapFactory.decodeFileDescriptor(pfd.fileDescriptor, null, options)
+
+                            // Handle EXIF orientation for TIFF fallback too
+                            val orientation = try {
+                                holder.binding.root.context.contentResolver.openInputStream(uri)?.use { input ->
+                                    androidx.exifinterface.media.ExifInterface(input).getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION, androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL)
+                                } ?: androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL
+                            } catch (e: Exception) { androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL }
+
+                            return@withContext bitmap?.let { ImageUtils.rotateBitmap(it, orientation) }
                         }
                     } catch (e: Exception) {
                         android.util.Log.e("ImageViewerAdapter", "Failed to decode preview: $uri", e)
@@ -131,21 +133,6 @@ class ImageViewerAdapter(
         } else {
             loadWithGlide(holder, uri, skipCache = true)
         }
-    }
-
-    private fun calculateInSampleSize(options: BitmapFactory.Options, reqWidth: Int, reqHeight: Int): Int {
-        val (height: Int, width: Int) = options.run { outHeight to outWidth }
-        var inSampleSize = 1
-
-        if (height > reqHeight || width > reqWidth) {
-            val halfHeight: Int = height / 2
-            val halfWidth: Int = width / 2
-
-            while (halfHeight / inSampleSize >= reqHeight && halfWidth / inSampleSize >= reqWidth) {
-                inSampleSize *= 2
-            }
-        }
-        return inSampleSize
     }
 
     private fun ensureOrientation(bitmap: android.graphics.Bitmap, wantPortrait: Boolean): android.graphics.Bitmap {
@@ -238,8 +225,8 @@ class ImageViewerAdapter(
             constraintSet.applyTo(holder.binding.imageContainer)
 
             holder.loadJob = scope.launch {
-                val bit1 = group.dngUri1?.let { decodeDngThumbnail(holder.binding.root.context, it) }
-                val bit2 = group.dngUri2?.let { decodeDngThumbnail(holder.binding.root.context, it) }
+                val bit1 = group.dngUri1?.let { ImageUtils.decodeDngThumbnail(holder.binding.root.context, it) }
+                val bit2 = group.dngUri2?.let { ImageUtils.decodeDngThumbnail(holder.binding.root.context, it) }
 
                 val wantPortrait = group.hfLayout != "TB"
                 val oriented1 = bit1?.let { ensureOrientation(it, wantPortrait) }
@@ -264,54 +251,6 @@ class ImageViewerAdapter(
         }
     }
 
-    private suspend fun decodeDngThumbnail(context: android.content.Context, uri: Uri): android.graphics.Bitmap? = withContext(Dispatchers.IO) {
-        try {
-            var bitmap: android.graphics.Bitmap? = null
-            var orientation = androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL
-
-            context.contentResolver.openInputStream(uri)?.use { input ->
-                val exif = androidx.exifinterface.media.ExifInterface(input)
-                orientation = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION, androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL)
-                if (exif.hasThumbnail()) {
-                    val thumb = exif.thumbnailBytes
-                    if (thumb != null) {
-                        bitmap = android.graphics.BitmapFactory.decodeByteArray(thumb, 0, thumb.size)
-                    }
-                }
-            }
-
-            if (bitmap == null) {
-                // Fallback for DNGs without thumbnails
-                context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
-                    val options = android.graphics.BitmapFactory.Options().apply {
-                        inJustDecodeBounds = true
-                    }
-                    android.graphics.BitmapFactory.decodeFileDescriptor(pfd.fileDescriptor, null, options)
-                    options.inSampleSize = calculateInSampleSize(options, 1024, 1024)
-                    options.inJustDecodeBounds = false
-                    bitmap = android.graphics.BitmapFactory.decodeFileDescriptor(pfd.fileDescriptor, null, options)
-                }
-            }
-
-            return@withContext bitmap?.let { rotateBitmap(it, orientation) }
-        } catch (e: Exception) {
-            android.util.Log.e("ImageViewerAdapter", "Failed to decode DNG: $uri", e)
-        }
-        null
-    }
-
-    private fun rotateBitmap(bitmap: android.graphics.Bitmap, orientation: Int): android.graphics.Bitmap {
-        val matrix = android.graphics.Matrix()
-        when (orientation) {
-            androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
-            androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
-            androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
-            else -> return bitmap
-        }
-        val rotated = android.graphics.Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
-        if (rotated != bitmap) bitmap.recycle()
-        return rotated
-    }
 
 
     private fun loadWithGlide(holder: ViewHolder, uri: Uri, skipCache: Boolean = false) {
