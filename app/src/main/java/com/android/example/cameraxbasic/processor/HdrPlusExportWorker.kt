@@ -28,6 +28,9 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
         val fNumber = data.getFloat("fNumber", 1.8f)
         val focalLength = data.getFloat("focalLength", 0.0f)
         val captureTimeMillis = data.getLong("captureTimeMillis", 0L)
+        val underexposureMode = data.getString("underexposureMode")
+        val dynamicUnderexposureEvRaw = data.getFloat("dynamicUnderexposureEv", Float.NaN)
+        val dynamicUnderexposureEv = if (dynamicUnderexposureEvRaw.isNaN()) null else dynamicUnderexposureEvRaw
 
         val ccm = data.getFloatArray("ccm")
         if (ccm == null || ccm.size != 9) {
@@ -78,7 +81,16 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
                 tiffFolderUri = tiffFolderUri,
                 rawFolderUri = rawFolderUri,
                 targetUri = targetUri?.let { Uri.parse(it) },
-                mirror = false // already handled by JNI
+                mirror = false, // already handled by JNI
+                exifMetadata = ImageSaver.ExifMetadata(
+                    iso = iso,
+                    exposureTimeNs = exposureTime,
+                    fNumber = fNumber,
+                    focalLengthMm = focalLength,
+                    digitalGain = digitalGain,
+                    hdrUnderexposureMode = underexposureMode,
+                    hdrDynamicUnderexposureEv = dynamicUnderexposureEv
+                )
             )
 
             Log.d(TAG, "Background Export Worker finished successfully for $baseName. finalUri=$finalUri")

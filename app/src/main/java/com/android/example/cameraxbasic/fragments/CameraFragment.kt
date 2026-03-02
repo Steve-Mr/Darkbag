@@ -116,6 +116,7 @@ import java.util.concurrent.Executors
 import kotlin.math.abs
 import kotlin.math.min
 import kotlin.math.max
+import kotlin.math.log2
 
 /** Helper type alias used for analysis use case callbacks */
 typealias LumaListener = (luma: Double) -> Unit
@@ -472,7 +473,7 @@ class CameraFragment : Fragment() {
         hdrPlusBurstHelper = HdrPlusBurst(
             frameCount = 3,
             onBurstComplete = { frames ->
-                processHdrPlusBurst(frames, 1.0f)
+                processHdrPlusBurst(frames, 1.0f, null, null)
             }
         )
 
@@ -1604,7 +1605,15 @@ class CameraFragment : Fragment() {
                     saveRaw = saveRaw,
                     jpgFolderUri = jpgFolderUri,
                     rawFolderUri = rawFolderUri,
-                    mirror = false
+                    mirror = false,
+                    exifMetadata = ImageSaver.ExifMetadata(
+                        iso = iso,
+                        exposureTimeNs = exposureTime,
+                        fNumber = fNumber,
+                        focalLengthMm = focalLength,
+                        digitalGain = 1.0f,
+                        hdrUnderexposureMode = "Off"
+                    )
                 )
 
                 timing?.firstOutputWritten = System.currentTimeMillis()
@@ -1635,6 +1644,8 @@ class CameraFragment : Fragment() {
                     .putFloat("fNumber", fNumber)
                     .putFloat("focalLength", focalLength)
                     .putLong("captureTimeMillis", captureTime)
+                    .putString("underexposureMode", "Off")
+                    .putFloat("dynamicUnderexposureEv", Float.NaN)
                     .putFloatArray("ccm", ccm)
                     .putFloatArray("whiteBalance", wb)
                     .putString("baseName", dngName)
@@ -2831,11 +2842,20 @@ class CameraFragment : Fragment() {
                 )
                 val burstSizeStr = prefs.getString(SettingsFragment.KEY_HDR_BURST_COUNT, "5") ?: "5"
                 val burstSize = burstSizeStr.toIntOrNull() ?: 5
+                val underexposureMode = prefs.getString(SettingsFragment.KEY_HDR_UNDEREXPOSURE_MODE, "Dynamic (Experimental)") ?: "Dynamic (Experimental)"
+                val baselineResult = captureResultFlow.replayCache.lastOrNull()
+                val baselineIso = baselineResult?.get(android.hardware.camera2.CaptureResult.SENSOR_SENSITIVITY) ?: config.iso
+                val baselineTime = baselineResult?.get(android.hardware.camera2.CaptureResult.SENSOR_EXPOSURE_TIME) ?: config.exposureTime
+                val dynamicUnderexposureEv = if (underexposureMode == "Dynamic (Experimental)") {
+                    computeUnderexposureEv(baselineIso, baselineTime, config.iso, config.exposureTime)
+                } else {
+                    null
+                }
 
                 hdrPlusBurstHelper = HdrPlusBurst(
                     frameCount = burstSize,
                     onBurstComplete = { frames ->
-                        processHdrPlusBurst(frames, config.digitalGain)
+                        processHdrPlusBurst(frames, config.digitalGain, underexposureMode, dynamicUnderexposureEv)
                     }
                 )
 
@@ -2939,7 +2959,14 @@ class CameraFragment : Fragment() {
         }
     }
 
-    private fun processHdrPlusBurst(frames: List<HdrFrame>, digitalGain: Float) {
+    private fun computeUnderexposureEv(currentIso: Int, currentTime: Long, targetIso: Int, targetTime: Long): Float {
+        val currentExposure = currentIso.toDouble() * currentTime.toDouble()
+        val targetExposure = targetIso.toDouble() * targetTime.toDouble()
+        if (currentExposure <= 0.0 || targetExposure <= 0.0) return 0.0f
+        return (-log2(targetExposure / currentExposure)).toFloat()
+    }
+
+    private fun processHdrPlusBurst(frames: List<HdrFrame>, digitalGain: Float, underexposureMode: String?, dynamicUnderexposureEv: Float?) {
         val currentZoom = if (currentLens?.isZoomPreset == true && currentLens?.targetZoomRatio != null) {
             currentLens!!.targetZoomRatio!!
         } else {
@@ -3165,7 +3192,16 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                             saveJpg = true,
                             saveTiff = false,
                             jpgFolderUri = jpgFolderUri,
-                            mirror = false // Mirroring already handled in JNI
+                            mirror = false, // Mirroring already handled in JNI
+                            exifMetadata = ImageSaver.ExifMetadata(
+                                iso = iso,
+                                exposureTimeNs = exposureTime,
+                                fNumber = fNumber,
+                                focalLengthMm = focalLength,
+                                digitalGain = digitalGain,
+                                hdrUnderexposureMode = underexposureMode,
+                                hdrDynamicUnderexposureEv = dynamicUnderexposureEv
+                            )
                         )
                     } else {
                         null
@@ -3199,6 +3235,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         .putFloat("fNumber", fNumber)
                         .putFloat("focalLength", focalLength)
                         .putLong("captureTimeMillis", captureTime)
+                        .putString("underexposureMode", underexposureMode)
+                        .putFloat("dynamicUnderexposureEv", dynamicUnderexposureEv ?: Float.NaN)
                         .putFloatArray("ccm", ccm)
                         .putFloatArray("whiteBalance", wb)
                         .putString("baseName", dngName)
@@ -3638,8 +3676,14 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
             val burstSize = (prefs.getString(SettingsFragment.KEY_HDR_BURST_COUNT, "5") ?: "5").toIntOrNull() ?: 5
 
+            val dynamicUnderexposureEv = if (underexposureMode == "Dynamic (Experimental)") {
+                computeUnderexposureEv(curIso, curTime, config.iso, config.exposureTime)
+            } else {
+                null
+            }
+
             hdrPlusBurstHelper = HdrPlusBurst(frameCount = burstSize, onBurstComplete = { frames ->
-                processHdrPlusBurst(frames, config.digitalGain)
+                processHdrPlusBurst(frames, config.digitalGain, underexposureMode, dynamicUnderexposureEv)
             })
 
             lifecycleScope.launch(Dispatchers.Main) {

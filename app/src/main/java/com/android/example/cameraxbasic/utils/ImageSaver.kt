@@ -14,11 +14,22 @@ import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.OutputStream
+import java.util.Locale
 import kotlin.math.max
 import kotlin.math.min
 
 object ImageSaver {
     private const val TAG = "ImageSaver"
+
+    data class ExifMetadata(
+        val iso: Int? = null,
+        val exposureTimeNs: Long? = null,
+        val fNumber: Float? = null,
+        val focalLengthMm: Float? = null,
+        val digitalGain: Float? = null,
+        val hdrUnderexposureMode: String? = null,
+        val hdrDynamicUnderexposureEv: Float? = null
+    )
 
     /**
      * Shared helper to handle Bitmap post-processing (Rotate, Crop, Compress) and Saving (JPG, TIFF, LinearDNG).
@@ -46,6 +57,7 @@ object ImageSaver {
         rawFolderUri: String? = null,
         targetUri: Uri? = null,
         mirror: Boolean = false,
+        exifMetadata: ExifMetadata? = null,
         onBitmapReady: ((Bitmap) -> Unit)? = null
     ): Uri? {
         val contentResolver = context.contentResolver
@@ -254,6 +266,10 @@ object ImageSaver {
             }
         }
 
+        if (finalJpgUri != null) {
+            applyExifMetadata(context, finalJpgUri, exifMetadata)
+        }
+
         // Priority for thumbnail: JPEG > DNG > TIFF
         return finalJpgUri ?: finalRawUri ?: finalTiffUri
     }
@@ -284,6 +300,45 @@ object ImageSaver {
             } finally {
                 debugFile.delete()
             }
+        }
+    }
+
+    private fun applyExifMetadata(context: Context, uri: Uri, metadata: ExifMetadata?) {
+        if (metadata == null) return
+        try {
+            context.contentResolver.openFileDescriptor(uri, "rw")?.use { pfd ->
+                val exif = ExifInterface(pfd.fileDescriptor)
+                metadata.iso?.let {
+                    exif.setAttribute(ExifInterface.TAG_PHOTOGRAPHIC_SENSITIVITY, it.toString())
+                }
+                metadata.exposureTimeNs?.let {
+                    if (it > 0L) {
+                        exif.setAttribute(ExifInterface.TAG_EXPOSURE_TIME, (it.toDouble() / 1_000_000_000.0).toString())
+                    }
+                }
+                metadata.fNumber?.let {
+                    if (it > 0f) {
+                        exif.setAttribute(ExifInterface.TAG_F_NUMBER, it.toString())
+                    }
+                }
+                metadata.focalLengthMm?.let {
+                    if (it > 0f) {
+                        exif.setAttribute(ExifInterface.TAG_FOCAL_LENGTH, it.toString())
+                    }
+                }
+
+                val hdrExtras = buildList {
+                    metadata.digitalGain?.let { add("HDRP_DigitalGain=${"%.4f".format(Locale.US, it)}") }
+                    metadata.hdrUnderexposureMode?.let { add("HDRP_UnderexposureMode=$it") }
+                    metadata.hdrDynamicUnderexposureEv?.let { add("HDRP_DynamicUnderexposureEV=${"%.3f".format(Locale.US, it)}") }
+                }
+                if (hdrExtras.isNotEmpty()) {
+                    exif.setAttribute(ExifInterface.TAG_USER_COMMENT, hdrExtras.joinToString("; "))
+                }
+                exif.saveAttributes()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to write EXIF metadata for $uri", e)
         }
     }
 
