@@ -19,6 +19,9 @@ class ImageViewerAdapter(
     private val scope: CoroutineScope
 ) : RecyclerView.Adapter<ImageViewerAdapter.ViewHolder>() {
 
+    var onImageTapped: (() -> Unit)? = null
+    var onZoomChanged: ((Boolean) -> Unit)? = null
+
     class ViewHolder(val binding: ItemImageGroupBinding) : RecyclerView.ViewHolder(binding.root) {
         var loadJob: Job? = null
     }
@@ -34,6 +37,8 @@ class ImageViewerAdapter(
         val group = groups[position]
         holder.loadJob?.cancel()
         holder.binding.imageView.resetZoom()
+        holder.binding.imageView.onTapped = { onImageTapped?.invoke() }
+        holder.binding.imageView.onZoomChanged = { isZoomed -> onZoomChanged?.invoke(isZoomed) }
 
         setupButtons(holder, group)
 
@@ -156,7 +161,7 @@ class ImageViewerAdapter(
             }
             group.hfLayout == "TB" -> "4:6.18" // (4/3) : (1 + 0.03 + 1) -> 1.33 : 2.03 -> 1 : 1.53
             group.hfLayout == "SBS" || group.isHalfFrame() -> "6.18:4" // (1 + 0.03 + 1) : (4/3) -> 2.03 : 1.33 -> 1.53 : 1
-            else -> "4:3" // Fallback
+            else -> null // Remove aspect ratio for single images
         }
 
         val constraintSet = androidx.constraintlayout.widget.ConstraintSet()

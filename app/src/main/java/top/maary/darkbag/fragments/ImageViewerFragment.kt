@@ -21,6 +21,7 @@ import top.maary.darkbag.repository.ImageRepository
 class ImageViewerFragment : Fragment() {
 
     private var _binding: FragmentImageViewerBinding? = null
+    private var isUiVisible = true
     private val binding get() = _binding!!
     private val args: ImageViewerFragmentArgs by navArgs()
     private lateinit var repository: ImageRepository
@@ -52,7 +53,10 @@ class ImageViewerFragment : Fragment() {
                 findNavController().navigateUp()
                 return@launch
             }
-            adapter = ImageViewerAdapter(groups, lifecycleScope)
+            adapter = ImageViewerAdapter(groups, lifecycleScope).apply {
+                onImageTapped = { toggleUi() }
+                onZoomChanged = { isZoomed -> if (isZoomed) hideUi() }
+            }
             binding.imagePager.adapter = adapter
 
             val initialPos = groups.indexOfFirst {
@@ -204,6 +208,24 @@ class ImageViewerFragment : Fragment() {
         binding.toolbar.setNavigationOnClickListener {
             findNavController().navigateUp()
         }
+    }
+
+    private fun toggleUi() {
+        if (isUiVisible) hideUi() else showUi()
+    }
+
+    private fun showUi() {
+        if (isUiVisible) return
+        isUiVisible = true
+        binding.appBar.animate().translationY(0f).setDuration(200).start()
+        binding.bottomControls.animate().translationY(0f).setDuration(200).start()
+    }
+
+    private fun hideUi() {
+        if (!isUiVisible) return
+        isUiVisible = false
+        binding.appBar.animate().translationY(-binding.appBar.height.toFloat()).setDuration(200).start()
+        binding.bottomControls.animate().translationY(binding.bottomControls.height.toFloat()).setDuration(200).start()
     }
 
     private fun setupEdgeToEdge() {

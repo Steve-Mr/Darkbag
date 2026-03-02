@@ -34,6 +34,9 @@ class ZoomableImageView @JvmOverloads constructor(
     private var mScaleDetector: ScaleGestureDetector
     private var mGestureDetector: GestureDetector
 
+    var onTapped: (() -> Unit)? = null
+    var onZoomChanged: ((Boolean) -> Unit)? = null
+
     companion object {
         private const val NONE = 0
         private const val DRAG = 1
@@ -61,6 +64,7 @@ class ZoomableImageView @JvmOverloads constructor(
                 last.set(curr)
                 start.set(last)
                 mode = DRAG
+                parent.requestDisallowInterceptTouchEvent(saveScale > 1f)
             }
             MotionEvent.ACTION_MOVE -> {
                 if (mode == DRAG) {
@@ -77,7 +81,10 @@ class ZoomableImageView @JvmOverloads constructor(
                 mode = NONE
                 val xDiff = abs(curr.x - start.x).toInt()
                 val yDiff = abs(curr.y - start.y).toInt()
-                if (xDiff < CLICK && yDiff < CLICK) performClick()
+                if (xDiff < CLICK && yDiff < CLICK) {
+                    performClick()
+                    onTapped?.invoke()
+                }
             }
             MotionEvent.ACTION_POINTER_UP -> {
                 mode = NONE
@@ -120,17 +127,24 @@ class ZoomableImageView @JvmOverloads constructor(
             }
 
             fixTrans()
+            onZoomChanged?.invoke(saveScale > 1f)
             return true
+            }
         }
-    }
 
     private inner class GestureListener : GestureDetector.SimpleOnGestureListener() {
+        override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
+            onTapped?.invoke()
+            return true
+        }
+
         override fun onDoubleTap(e: MotionEvent): Boolean {
             val targetScale = if (saveScale > 1f) 1f else 2f
             val mScaleFactor = targetScale / saveScale
             saveScale = targetScale
 
             if (targetScale == 1f) {
+                onZoomChanged?.invoke(false)
                 matrixValue.setScale(1f, 1f)
                 val drawable = drawable
                 if (drawable != null) {
@@ -147,6 +161,7 @@ class ZoomableImageView @JvmOverloads constructor(
                     origHeight = viewHeight - 2 * redundancyY
                 }
             } else {
+                onZoomChanged?.invoke(true)
                 matrixValue.postScale(mScaleFactor, mScaleFactor, e.x, e.y)
                 fixTrans()
             }
