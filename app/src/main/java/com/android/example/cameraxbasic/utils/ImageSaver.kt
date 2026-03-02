@@ -4,6 +4,10 @@ import android.content.ContentValues
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.Rect
 import android.graphics.Matrix
 import android.net.Uri
 import android.os.Build
@@ -58,6 +62,7 @@ object ImageSaver {
         targetUri: Uri? = null,
         mirror: Boolean = false,
         exifMetadata: ExifMetadata? = null,
+        debugOverlayText: String? = null,
         onBitmapReady: ((Bitmap) -> Unit)? = null
     ): Uri? {
         val contentResolver = context.contentResolver
@@ -68,7 +73,7 @@ object ImageSaver {
         // 1. Process Input Bitmap or JPEG File from JNI -> Final MediaStore JPG
         if (inputBitmap != null || bmpPath != null) {
             val isNativeJpeg = bmpPath != null && (bmpPath.endsWith(".jpg") || bmpPath.endsWith(".jpeg"))
-            val needsBitmapProcessing = rotationDegrees != 0 || zoomFactor > 1.05f || inputBitmap != null || mirror
+            val needsBitmapProcessing = rotationDegrees != 0 || zoomFactor > 1.05f || inputBitmap != null || mirror || !debugOverlayText.isNullOrBlank()
 
             if (isNativeJpeg && !needsBitmapProcessing && saveJpg) {
                 // FAST PATH: Directly use JNI-generated JPEG
@@ -136,6 +141,10 @@ object ImageSaver {
                             processedBitmap.recycle()
                             processedBitmap = croppedBitmap
                         }
+                    }
+
+                    if (processedBitmap != null && !debugOverlayText.isNullOrBlank()) {
+                        processedBitmap = drawDebugOverlay(processedBitmap, debugOverlayText)
                     }
 
                     // Invoke callback for thumbnail generation or other usage before compression/recycling
@@ -301,6 +310,41 @@ object ImageSaver {
                 debugFile.delete()
             }
         }
+    }
+
+    private fun drawDebugOverlay(source: Bitmap, text: String): Bitmap {
+        val mutable = if (source.isMutable) source else source.copy(Bitmap.Config.ARGB_8888, true)
+        val canvas = Canvas(mutable)
+
+        val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            textSize = (mutable.width.coerceAtLeast(mutable.height) * 0.028f).coerceIn(28f, 52f)
+            setShadowLayer(4f, 1f, 1f, Color.BLACK)
+        }
+        val bgPaint = Paint().apply { color = Color.argb(160, 0, 0, 0) }
+
+        val lines = text.split("\n").filter { it.isNotBlank() }
+        if (lines.isEmpty()) return mutable
+
+        val lineHeight = textPaint.fontSpacing * 1.05f
+        val margin = (textPaint.textSize * 0.6f)
+        val maxWidth = lines.maxOf { textPaint.measureText(it) }
+        val blockHeight = lineHeight * lines.size
+
+        val left = margin
+        val bottom = mutable.height - margin
+        val top = (bottom - blockHeight - margin * 0.7f).coerceAtLeast(0f)
+        val right = (left + maxWidth + margin * 1.4f).coerceAtMost(mutable.width.toFloat())
+
+        val rect = Rect(left.toInt(), top.toInt(), right.toInt(), bottom.toInt())
+        canvas.drawRect(rect, bgPaint)
+
+        var y = top + margin
+        for (line in lines) {
+            y += lineHeight
+            canvas.drawText(line, left + margin * 0.7f, y, textPaint)
+        }
+        return mutable
     }
 
     private fun applyExifMetadata(context: Context, uri: Uri, metadata: ExifMetadata?) {

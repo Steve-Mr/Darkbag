@@ -1613,7 +1613,10 @@ class CameraFragment : Fragment() {
                         focalLengthMm = focalLength,
                         digitalGain = 1.0f,
                         hdrUnderexposureMode = "Off"
-                    )
+                    ),
+                    debugOverlayText = if (prefs.getBoolean(SettingsFragment.KEY_DEBUG_ENABLED, false)) {
+                        buildCaptureDebugOverlayText(iso, exposureTime, fNumber, focalLength, 1.0f, "Off", null)
+                    } else null
                 )
 
                 timing?.firstOutputWritten = System.currentTimeMillis()
@@ -1646,6 +1649,9 @@ class CameraFragment : Fragment() {
                     .putLong("captureTimeMillis", captureTime)
                     .putString("underexposureMode", "Off")
                     .putFloat("dynamicUnderexposureEv", Float.NaN)
+                    .putString("debugOverlayText", if (prefs.getBoolean(SettingsFragment.KEY_DEBUG_ENABLED, false)) {
+                        buildCaptureDebugOverlayText(iso, exposureTime, fNumber, focalLength, 1.0f, "Off", null)
+                    } else null)
                     .putFloatArray("ccm", ccm)
                     .putFloatArray("whiteBalance", wb)
                     .putString("baseName", dngName)
@@ -2966,6 +2972,39 @@ class CameraFragment : Fragment() {
         return (-log2(targetExposure / currentExposure)).toFloat()
     }
 
+    private fun formatExposureTimeForOverlay(exposureTimeNs: Long): String {
+        if (exposureTimeNs <= 0L) return "0s"
+        val seconds = exposureTimeNs / 1_000_000_000.0
+        return if (seconds >= 1.0) {
+            String.format(Locale.US, "%.2fs", seconds)
+        } else {
+            val denom = kotlin.math.round(1.0 / seconds).toInt().coerceAtLeast(1)
+            "1/$denom"
+        }
+    }
+
+    private fun buildCaptureDebugOverlayText(
+        iso: Int,
+        exposureTimeNs: Long,
+        fNumber: Float,
+        focalLength: Float,
+        digitalGain: Float,
+        underexposureMode: String,
+        dynamicUnderexposureEv: Float?
+    ): String {
+        val underexposureLabel = if (underexposureMode == "Dynamic (Experimental)") {
+            val ev = dynamicUnderexposureEv ?: 0.0f
+            "Dynamic(${String.format(Locale.US, "%.2f", ev)}EV)"
+        } else {
+            underexposureMode
+        }
+        return buildString {
+            append("ISO $iso  T ${formatExposureTimeForOverlay(exposureTimeNs)}  f/${String.format(Locale.US, "%.1f", fNumber)}  ${String.format(Locale.US, "%.1f", focalLength)}mm")
+            append("\n")
+            append("UE: $underexposureLabel  DG: ${String.format(Locale.US, "%.3f", digitalGain)}")
+        }
+    }
+
     private fun processHdrPlusBurst(frames: List<HdrFrame>, digitalGain: Float, underexposureMode: String?, dynamicUnderexposureEv: Float?) {
         val currentZoom = if (currentLens?.isZoomPreset == true && currentLens?.targetZoomRatio != null) {
             currentLens!!.targetZoomRatio!!
@@ -3201,7 +3240,10 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                                 digitalGain = digitalGain,
                                 hdrUnderexposureMode = underexposureMode,
                                 hdrDynamicUnderexposureEv = dynamicUnderexposureEv
-                            )
+                            ),
+                            debugOverlayText = if (prefs.getBoolean(SettingsFragment.KEY_DEBUG_ENABLED, false)) {
+                                buildCaptureDebugOverlayText(iso, exposureTime, fNumber, focalLength, digitalGain, underexposureMode ?: "Unknown", dynamicUnderexposureEv)
+                            } else null
                         )
                     } else {
                         null
@@ -3237,6 +3279,9 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         .putLong("captureTimeMillis", captureTime)
                         .putString("underexposureMode", underexposureMode)
                         .putFloat("dynamicUnderexposureEv", dynamicUnderexposureEv ?: Float.NaN)
+                        .putString("debugOverlayText", if (prefs.getBoolean(SettingsFragment.KEY_DEBUG_ENABLED, false)) {
+                            buildCaptureDebugOverlayText(iso, exposureTime, fNumber, focalLength, digitalGain, underexposureMode ?: "Unknown", dynamicUnderexposureEv)
+                        } else null)
                         .putFloatArray("ccm", ccm)
                         .putFloatArray("whiteBalance", wb)
                         .putString("baseName", dngName)

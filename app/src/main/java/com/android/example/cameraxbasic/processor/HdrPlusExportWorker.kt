@@ -31,6 +31,7 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
         val underexposureMode = data.getString("underexposureMode")
         val dynamicUnderexposureEvRaw = data.getFloat("dynamicUnderexposureEv", Float.NaN)
         val dynamicUnderexposureEv = if (dynamicUnderexposureEvRaw.isNaN()) null else dynamicUnderexposureEvRaw
+        val debugOverlayText = data.getString("debugOverlayText")
 
         val ccm = data.getFloatArray("ccm")
         if (ccm == null || ccm.size != 9) {
@@ -90,7 +91,8 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
                     digitalGain = digitalGain,
                     hdrUnderexposureMode = underexposureMode,
                     hdrDynamicUnderexposureEv = dynamicUnderexposureEv
-                )
+                ),
+                debugOverlayText = debugOverlayText
             )
 
             Log.d(TAG, "Background Export Worker finished successfully for $baseName. finalUri=$finalUri")
