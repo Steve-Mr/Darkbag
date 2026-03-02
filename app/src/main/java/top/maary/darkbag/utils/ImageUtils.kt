@@ -63,7 +63,10 @@ object ImageUtils {
 
     private fun ensureOrientation(bitmap: Bitmap, wantPortrait: Boolean): Bitmap {
         val isPortrait = bitmap.height >= bitmap.width
-        if (isPortrait == wantPortrait) return bitmap.copy(bitmap.config, true)
+        if (isPortrait == wantPortrait) {
+            val config = bitmap.config ?: Bitmap.Config.ARGB_8888
+            return bitmap.copy(config, true)
+        }
 
         val matrix = Matrix().apply { postRotate(90f) }
         return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)

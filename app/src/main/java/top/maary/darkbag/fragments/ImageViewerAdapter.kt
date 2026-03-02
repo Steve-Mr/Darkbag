@@ -80,8 +80,6 @@ class ImageViewerAdapter(
     private fun loadImage(holder: ViewHolder, uri: Uri, group: ImageGroup) {
         holder.loadJob?.cancel()
         holder.binding.imageView.visibility = View.VISIBLE
-        holder.binding.imageViewHf1.visibility = View.GONE
-        holder.binding.imageViewHf2.visibility = View.GONE
         holder.binding.loadingIndicator.visibility = View.VISIBLE
 
         applyContainerRatio(holder, group)
