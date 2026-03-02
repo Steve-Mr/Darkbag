@@ -139,37 +139,35 @@ class ZoomableImageView @JvmOverloads constructor(
         }
 
         override fun onDoubleTap(e: MotionEvent): Boolean {
-            val targetScale = if (saveScale > 1f) 1f else 2f
-            val mScaleFactor = targetScale / saveScale
-            saveScale = targetScale
+            val targetScale = if (saveScale > 1f) 1f else 2.5f
+            val focusX = e.x
+            val focusY = e.y
 
-            if (targetScale == 1f) {
-                onZoomChanged?.invoke(false)
-                matrixValue.setScale(1f, 1f)
-                val drawable = drawable
-                if (drawable != null) {
-                    val bmWidth = drawable.intrinsicWidth
-                    val bmHeight = drawable.intrinsicHeight
-                    val scaleX = viewWidth.toFloat() / bmWidth
-                    val scaleY = viewHeight.toFloat() / bmHeight
-                    val scale = if (scaleX < scaleY) scaleX else scaleY
-                    matrixValue.setScale(scale, scale)
-                    val redundancyY = (viewHeight.toFloat() - scale * bmHeight) / 2
-                    val redundancyX = (viewWidth.toFloat() - scale * bmWidth) / 2
-                    matrixValue.postTranslate(redundancyX, redundancyY)
-                    origWidth = viewWidth - 2 * redundancyX
-                    origHeight = viewHeight - 2 * redundancyY
-                }
-            } else {
-                onZoomChanged?.invoke(true)
-                matrixValue.postScale(mScaleFactor, mScaleFactor, e.x, e.y)
-                fixTrans()
-            }
-
-            imageMatrix = matrixValue
-            invalidate()
+            animateZoom(targetScale, focusX, focusY)
             return true
         }
+    }
+
+    private fun animateZoom(targetScale: Float, focusX: Float, focusY: Float) {
+        val startScale = saveScale
+        val animator = android.animation.ValueAnimator.ofFloat(startScale, targetScale)
+        animator.duration = 300
+        animator.addUpdateListener { animation ->
+            val currentScale = animation.animatedValue as Float
+            val deltaScale = currentScale / saveScale
+            saveScale = currentScale
+
+            matrixValue.postScale(deltaScale, deltaScale, focusX, focusY)
+            fixTrans()
+            imageMatrix = matrixValue
+            invalidate()
+        }
+        animator.addListener(object : android.animation.AnimatorListenerAdapter() {
+            override fun onAnimationEnd(animation: android.animation.Animator) {
+                onZoomChanged?.invoke(saveScale > 1f)
+            }
+        })
+        animator.start()
     }
 
     private fun fixTrans() {
@@ -186,8 +184,8 @@ class ZoomableImageView @JvmOverloads constructor(
         val maxTrans: Float
 
         if (contentSize <= viewSize) {
-            minTrans = 0f
-            maxTrans = viewSize - contentSize
+            minTrans = (viewSize - contentSize) / 2
+            maxTrans = (viewSize - contentSize) / 2
         } else {
             minTrans = viewSize - contentSize
             maxTrans = 0f
