@@ -153,9 +153,9 @@ class ImageViewerFragment : Fragment() {
             val currentIndex = binding.imagePager.currentItem
 
             if (deleteGroup) {
-                group.jpgUri?.let { context?.contentResolver?.delete(it, null, null) }
-                group.tiffUri?.let { context?.contentResolver?.delete(it, null, null) }
-                group.dngUri?.let { context?.contentResolver?.delete(it, null, null) }
+                group.jpgUri?.let { context.contentResolver.delete(it, null, null) }
+                group.tiffUri?.let { context.contentResolver.delete(it, null, null) }
+                group.dngUri?.let { context.contentResolver.delete(it, null, null) }
                 group.dngUri1?.let { context.contentResolver.delete(it, null, null) }
                 group.dngUri2?.let { context.contentResolver.delete(it, null, null) }
 

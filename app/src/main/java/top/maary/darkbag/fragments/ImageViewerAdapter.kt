@@ -33,6 +33,7 @@ class ImageViewerAdapter(
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
         val group = groups[position]
         holder.loadJob?.cancel()
+        holder.binding.imageView.resetZoom()
 
         setupButtons(holder, group)
 
@@ -147,7 +148,6 @@ class ImageViewerAdapter(
 
     private fun applyContainerRatio(holder: ViewHolder, group: ImageGroup) {
         val root = holder.binding.root
-        val container = holder.binding.imageContainer
 
         val ratio = when {
             group.width > 0 && group.height > 0 -> {

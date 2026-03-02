@@ -14,13 +14,12 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent">
 
-        <ImageView
+        <top.maary.darkbag.ui.ZoomableImageView
             android:id="@+id/image_view"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:adjustViewBounds="true"
-            android:contentDescription="Full size image"
-            android:scaleType="fitXY" />
+            android:contentDescription="Full size image" />
 
         <ImageView
             android:id="@+id/image_view_hf1"
