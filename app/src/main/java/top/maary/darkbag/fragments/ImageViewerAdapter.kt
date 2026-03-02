@@ -141,16 +141,6 @@ class ImageViewerAdapter(
         }
     }
 
-    private fun ensureOrientation(bitmap: android.graphics.Bitmap, wantPortrait: Boolean): android.graphics.Bitmap {
-        val isPortrait = bitmap.height >= bitmap.width
-        if (isPortrait == wantPortrait) return bitmap
-
-        val matrix = android.graphics.Matrix().apply { postRotate(90f) }
-        val rotated = android.graphics.Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
-        if (rotated != bitmap) bitmap.recycle()
-        return rotated
-    }
-
     private fun applyContainerRatio(holder: ViewHolder, group: ImageGroup) {
         val root = holder.binding.root
 
@@ -172,87 +162,25 @@ class ImageViewerAdapter(
 
     private fun loadHalfFrameDngs(holder: ViewHolder, group: ImageGroup) {
         holder.loadJob?.cancel()
-        holder.binding.imageView.visibility = View.GONE
-        holder.binding.imageViewHf1.visibility = View.VISIBLE
-        holder.binding.imageViewHf2.visibility = View.VISIBLE
+        holder.binding.imageView.visibility = View.VISIBLE
         holder.binding.loadingIndicator.visibility = View.VISIBLE
 
         applyContainerRatio(holder, group)
 
-        holder.binding.imageContainer.post {
-            val constraintSet = androidx.constraintlayout.widget.ConstraintSet()
-            constraintSet.clone(holder.binding.imageContainer)
+        holder.loadJob = scope.launch {
+            val composite = ImageUtils.generateHalfFrameComposite(
+                holder.binding.root.context,
+                group.dngUri1,
+                group.dngUri2,
+                group.hfLayout
+            )
 
-            val rootWidth = holder.binding.imageContainer.width
-            val rootHeight = holder.binding.imageContainer.height
-
-            if (group.hfLayout == "TB") {
-                // Top-bottom
-                val gap = rootHeight * (0.03f / 2.03f)
-                constraintSet.connect(R.id.image_view_hf1, androidx.constraintlayout.widget.ConstraintSet.BOTTOM, R.id.image_view_hf2, androidx.constraintlayout.widget.ConstraintSet.TOP, (gap / 2).toInt())
-                constraintSet.connect(R.id.image_view_hf2, androidx.constraintlayout.widget.ConstraintSet.TOP, R.id.image_view_hf1, androidx.constraintlayout.widget.ConstraintSet.BOTTOM, (gap / 2).toInt())
-
-                constraintSet.connect(R.id.image_view_hf1, androidx.constraintlayout.widget.ConstraintSet.START, androidx.constraintlayout.widget.ConstraintSet.PARENT_ID, androidx.constraintlayout.widget.ConstraintSet.START)
-                constraintSet.connect(R.id.image_view_hf1, androidx.constraintlayout.widget.ConstraintSet.END, androidx.constraintlayout.widget.ConstraintSet.PARENT_ID, androidx.constraintlayout.widget.ConstraintSet.END)
-                constraintSet.connect(R.id.image_view_hf1, androidx.constraintlayout.widget.ConstraintSet.TOP, androidx.constraintlayout.widget.ConstraintSet.PARENT_ID, androidx.constraintlayout.widget.ConstraintSet.TOP)
-
-                constraintSet.connect(R.id.image_view_hf2, androidx.constraintlayout.widget.ConstraintSet.START, androidx.constraintlayout.widget.ConstraintSet.PARENT_ID, androidx.constraintlayout.widget.ConstraintSet.START)
-                constraintSet.connect(R.id.image_view_hf2, androidx.constraintlayout.widget.ConstraintSet.END, androidx.constraintlayout.widget.ConstraintSet.PARENT_ID, androidx.constraintlayout.widget.ConstraintSet.END)
-                constraintSet.connect(R.id.image_view_hf2, androidx.constraintlayout.widget.ConstraintSet.BOTTOM, androidx.constraintlayout.widget.ConstraintSet.PARENT_ID, androidx.constraintlayout.widget.ConstraintSet.BOTTOM)
-
-                constraintSet.constrainHeight(R.id.image_view_hf1, 0)
-                constraintSet.constrainHeight(R.id.image_view_hf2, 0)
-                constraintSet.constrainWidth(R.id.image_view_hf1, androidx.constraintlayout.widget.ConstraintSet.MATCH_CONSTRAINT)
-                constraintSet.constrainWidth(R.id.image_view_hf2, androidx.constraintlayout.widget.ConstraintSet.MATCH_CONSTRAINT)
-                constraintSet.setVerticalWeight(R.id.image_view_hf1, 1f)
-                constraintSet.setVerticalWeight(R.id.image_view_hf2, 1f)
+            if (composite != null) {
+                holder.binding.imageView.setImageBitmap(composite)
             } else {
-                // Side-by-side (default)
-                val gap = rootWidth * (0.03f / 2.03f)
-                constraintSet.connect(R.id.image_view_hf1, androidx.constraintlayout.widget.ConstraintSet.END, R.id.image_view_hf2, androidx.constraintlayout.widget.ConstraintSet.START, (gap / 2).toInt())
-                constraintSet.connect(R.id.image_view_hf2, androidx.constraintlayout.widget.ConstraintSet.START, R.id.image_view_hf1, androidx.constraintlayout.widget.ConstraintSet.END, (gap / 2).toInt())
-
-                constraintSet.connect(R.id.image_view_hf1, androidx.constraintlayout.widget.ConstraintSet.START, androidx.constraintlayout.widget.ConstraintSet.PARENT_ID, androidx.constraintlayout.widget.ConstraintSet.START)
-                constraintSet.connect(R.id.image_view_hf1, androidx.constraintlayout.widget.ConstraintSet.TOP, androidx.constraintlayout.widget.ConstraintSet.PARENT_ID, androidx.constraintlayout.widget.ConstraintSet.TOP)
-                constraintSet.connect(R.id.image_view_hf1, androidx.constraintlayout.widget.ConstraintSet.BOTTOM, androidx.constraintlayout.widget.ConstraintSet.PARENT_ID, androidx.constraintlayout.widget.ConstraintSet.BOTTOM)
-
-                constraintSet.connect(R.id.image_view_hf2, androidx.constraintlayout.widget.ConstraintSet.END, androidx.constraintlayout.widget.ConstraintSet.PARENT_ID, androidx.constraintlayout.widget.ConstraintSet.END)
-                constraintSet.connect(R.id.image_view_hf2, androidx.constraintlayout.widget.ConstraintSet.TOP, androidx.constraintlayout.widget.ConstraintSet.PARENT_ID, androidx.constraintlayout.widget.ConstraintSet.TOP)
-                constraintSet.connect(R.id.image_view_hf2, androidx.constraintlayout.widget.ConstraintSet.BOTTOM, androidx.constraintlayout.widget.ConstraintSet.PARENT_ID, androidx.constraintlayout.widget.ConstraintSet.BOTTOM)
-
-                constraintSet.constrainWidth(R.id.image_view_hf1, 0)
-                constraintSet.constrainWidth(R.id.image_view_hf2, 0)
-                constraintSet.constrainHeight(R.id.image_view_hf1, androidx.constraintlayout.widget.ConstraintSet.MATCH_CONSTRAINT)
-                constraintSet.constrainHeight(R.id.image_view_hf2, androidx.constraintlayout.widget.ConstraintSet.MATCH_CONSTRAINT)
-                constraintSet.setHorizontalWeight(R.id.image_view_hf1, 1f)
-                constraintSet.setHorizontalWeight(R.id.image_view_hf2, 1f)
+                holder.binding.imageView.setImageResource(android.R.drawable.ic_menu_gallery)
             }
-            constraintSet.applyTo(holder.binding.imageContainer)
-
-            holder.loadJob = scope.launch {
-                val bit1 = group.dngUri1?.let { ImageUtils.decodeDngThumbnail(holder.binding.root.context, it) }
-                val bit2 = group.dngUri2?.let { ImageUtils.decodeDngThumbnail(holder.binding.root.context, it) }
-
-                val wantPortrait = group.hfLayout != "TB"
-                val oriented1 = bit1?.let { ensureOrientation(it, wantPortrait) }
-                val oriented2 = bit2?.let { ensureOrientation(it, wantPortrait) }
-
-                if (oriented1 != null) {
-                    holder.binding.imageViewHf1.setImageBitmap(oriented1)
-                    holder.binding.imageViewHf1.scaleType = android.widget.ImageView.ScaleType.FIT_XY
-                } else {
-                    holder.binding.imageViewHf1.setImageResource(android.R.drawable.ic_menu_gallery)
-                }
-
-                if (oriented2 != null) {
-                    holder.binding.imageViewHf2.setImageBitmap(oriented2)
-                    holder.binding.imageViewHf2.scaleType = android.widget.ImageView.ScaleType.FIT_XY
-                } else {
-                    holder.binding.imageViewHf2.setImageResource(android.R.drawable.ic_menu_gallery)
-                }
-
-                holder.binding.loadingIndicator.visibility = View.GONE
-            }
+            holder.binding.loadingIndicator.visibility = View.GONE
         }
     }
 

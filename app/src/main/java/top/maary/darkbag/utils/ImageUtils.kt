@@ -1,15 +1,73 @@
 package top.maary.darkbag.utils
 
 import android.content.Context
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.graphics.Matrix
+import android.graphics.*
 import android.net.Uri
 import androidx.exifinterface.media.ExifInterface
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 object ImageUtils {
+
+    suspend fun generateHalfFrameComposite(
+        context: Context,
+        uri1: Uri?,
+        uri2: Uri?,
+        layout: String? // "SBS" or "TB"
+    ): Bitmap? = withContext(Dispatchers.IO) {
+        val bit1 = uri1?.let { decodeDngThumbnail(context, it) }
+        val bit2 = uri2?.let { decodeDngThumbnail(context, it) }
+
+        if (bit1 == null && bit2 == null) return@withContext null
+
+        val wantPortrait = layout != "TB"
+        val oriented1 = bit1?.let { ensureOrientation(it, wantPortrait) }
+        val oriented2 = bit2?.let { ensureOrientation(it, wantPortrait) }
+
+        try {
+            // Use first available frame as reference for dimensions
+            val ref = oriented1 ?: oriented2!!
+            val w = ref.width
+            val h = ref.height
+
+            val isSBS = layout != "TB"
+            val gap = (if (isSBS) h else w) * 0.03f
+
+            val resultW = if (isSBS) (w * 2 + gap).toInt() else w
+            val resultH = if (isSBS) h else (h * 2 + gap).toInt()
+
+            val composite = Bitmap.createBitmap(resultW, resultH, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(composite)
+            canvas.drawColor(Color.BLACK)
+
+            val paint = Paint(Paint.FILTER_BITMAP_FLAG)
+
+            if (isSBS) {
+                oriented1?.let { canvas.drawBitmap(it, 0f, 0f, paint) }
+                oriented2?.let { canvas.drawBitmap(it, w + gap, 0f, paint) }
+            } else {
+                oriented1?.let { canvas.drawBitmap(it, 0f, 0f, paint) }
+                oriented2?.let { canvas.drawBitmap(it, 0f, h + gap, paint) }
+            }
+
+            return@withContext composite
+        } catch (e: Exception) {
+            android.util.Log.e("ImageUtils", "Failed to generate composite", e)
+            null
+        } finally {
+            // Cleanup oriented bitmaps as they are intermediate
+            oriented1?.recycle()
+            oriented2?.recycle()
+        }
+    }
+
+    private fun ensureOrientation(bitmap: Bitmap, wantPortrait: Boolean): Bitmap {
+        val isPortrait = bitmap.height >= bitmap.width
+        if (isPortrait == wantPortrait) return bitmap.copy(bitmap.config, true)
+
+        val matrix = Matrix().apply { postRotate(90f) }
+        return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+    }
 
     suspend fun decodeDngThumbnail(context: Context, uri: Uri): Bitmap? = withContext(Dispatchers.IO) {
         try {
