@@ -8,7 +8,9 @@ import android.provider.MediaStore
 import androidx.documentfile.provider.DocumentFile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
 import top.maary.darkbag.fragments.SettingsFragment
+import top.maary.darkbag.models.EditConfig
 import top.maary.darkbag.models.ImageGroup
 import java.io.File
 
@@ -60,6 +62,8 @@ class ImageRepository(private val context: Context) {
                                 val comment = exif.getAttribute(androidx.exifinterface.media.ExifInterface.TAG_USER_COMMENT)
                                 if (comment?.startsWith("HF_LAYOUT:") == true) {
                                     builder.hfLayout = comment.substringAfter("HF_LAYOUT:")
+                                } else if (comment?.startsWith("{") == true) {
+                                    builder.editConfig = parseEditConfig(comment)
                                 }
 
                                 val orientation = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION, androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL)
@@ -143,6 +147,8 @@ class ImageRepository(private val context: Context) {
                                 val comment = exif.getAttribute(androidx.exifinterface.media.ExifInterface.TAG_USER_COMMENT)
                                 if (comment?.startsWith("HF_LAYOUT:") == true) {
                                     builder.hfLayout = comment.substringAfter("HF_LAYOUT:")
+                                } else if (comment?.startsWith("{") == true) {
+                                    builder.editConfig = parseEditConfig(comment)
                                 }
 
                                 val orientation = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION, androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL)
@@ -175,6 +181,25 @@ class ImageRepository(private val context: Context) {
         }
     }
 
+    private fun parseEditConfig(jsonStr: String): EditConfig? {
+        return try {
+            val json = JSONObject(jsonStr)
+            EditConfig(
+                log = json.optString("log", "None"),
+                lut = json.optString("lut", "None"),
+                exposure = json.optDouble("exposure", 0.0).toFloat(),
+                contrast = json.optDouble("contrast", 0.0).toFloat(),
+                saturation = json.optDouble("saturation", 0.0).toFloat(),
+                highlights = json.optDouble("highlights", 0.0).toFloat(),
+                shadows = json.optDouble("shadows", 0.0).toFloat(),
+                whites = json.optDouble("whites", 0.0).toFloat(),
+                blacks = json.optDouble("blacks", 0.0).toFloat()
+            )
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     private fun getBaseName(fileName: String): String {
         return fileName.substringBeforeLast(".")
             .replace("_linear", "")
@@ -196,11 +221,12 @@ class ImageRepository(private val context: Context) {
         var width: Int = 0
         var height: Int = 0
         var captureTime: Long = 0L
+        var editConfig: EditConfig? = null
 
         fun updateTime(time: Long) {
             if (time > captureTime) captureTime = time
         }
 
-        fun build() = ImageGroup(baseName, jpgUri, tiffUri, dngUri, dngUri1, dngUri2, hfLayout, width, height, captureTime)
+        fun build() = ImageGroup(baseName, jpgUri, tiffUri, dngUri, dngUri1, dngUri2, hfLayout, width, height, captureTime, editConfig)
     }
 }

@@ -68,13 +68,48 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
             )
         }
 
+        val prefs = applicationContext.getSharedPreferences(
+            SettingsFragment.PREFS_NAME,
+            Context.MODE_PRIVATE
+        )
+        val editConfig = if (hfMetadata == null) {
+            val activeLut = prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, "None")
+            val targetLog = prefs.getString(SettingsFragment.KEY_TARGET_LOG, "None")
+            top.maary.darkbag.models.EditConfig(
+                log = targetLog,
+                lut = activeLut
+            )
+        } else null
+
         Log.d(TAG, "Background Export Worker started for $baseName")
 
         val ret = ColorProcessor.exportHdrPlus(
-            tempRawPath, width, height, orientation, digitalGain, targetLog,
-            lutPath, tiffPath, jpgPath, dngPath,
-            iso, exposureTime, fNumber, focalLength, captureTimeMillis,
-            ccm, whiteBalance, zoomFactor, mirror
+            tempRawPath = tempRawPath,
+            width = width,
+            height = height,
+            orientation = orientation,
+            digitalGain = digitalGain,
+            targetLog = targetLog,
+            lutPath = lutPath,
+            exposure = editConfig?.exposure ?: 0f,
+            contrast = editConfig?.contrast ?: 0f,
+            saturation = editConfig?.saturation ?: 0f,
+            highlights = editConfig?.highlights ?: 0f,
+            shadows = editConfig?.shadows ?: 0f,
+            whites = editConfig?.whites ?: 0f,
+            blacks = editConfig?.blacks ?: 0f,
+            tiffPath = tiffPath,
+            jpgPath = jpgPath,
+            dngPath = dngPath,
+            iso = iso,
+            exposureTime = exposureTime,
+            fNumber = fNumber,
+            focalLength = focalLength,
+            captureTimeMillis = captureTimeMillis,
+            ccm = ccm,
+            whiteBalance = whiteBalance,
+            zoomFactor = zoomFactor,
+            mirror = mirror
         )
 
         if (ret == 0) {
@@ -99,7 +134,8 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
                 rawFolderUri = rawFolderUri,
                 targetUri = targetUri?.let { Uri.parse(it) },
                 mirror = false, // already handled by JNI
-                halfFrameMetadata = hfMetadata
+                halfFrameMetadata = hfMetadata,
+                editConfig = editConfig
             )
 
             Log.d(TAG, "Background Export Worker finished successfully for $baseName. finalUri=$finalUri")

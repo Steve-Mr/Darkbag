@@ -11,6 +11,8 @@ import android.os.Build
 import android.provider.MediaStore
 import android.util.Log
 import androidx.exifinterface.media.ExifInterface
+import org.json.JSONObject
+import top.maary.darkbag.models.EditConfig
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -49,6 +51,7 @@ object ImageSaver {
         mirror: Boolean = false,
         isFastPath: Boolean = false,
         halfFrameMetadata: HalfFrameManager.Metadata? = null,
+        editConfig: EditConfig? = null,
         onBitmapReady: ((Bitmap) -> Unit)? = null
     ): Uri? {
         val halfFrameManager = HalfFrameManager(context)
@@ -88,7 +91,7 @@ object ImageSaver {
                                 ColorProcessor.halfFrameFlow.tryEmit(2)
                                 if (finalPath != null) {
                                     val finalFile = File(finalPath)
-                                    finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri) { out ->
+                                    finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri, editConfig = editConfig) { out ->
                                         finalFile.inputStream().use { it.copyTo(out) }
                                     }
                                 }
@@ -111,9 +114,9 @@ object ImageSaver {
                     } else {
                         val finalFile = f
                         if (jpgFolderUri != null) {
-                            finalJpgUri = saveFileToFolder(context, finalFile, "$baseName.jpg", "image/jpeg", jpgFolderUri)
+                            finalJpgUri = saveFileToFolder(context, finalFile, "$baseName.jpg", "image/jpeg", jpgFolderUri, editConfig = editConfig)
                         } else {
-                            finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri) { out ->
+                            finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri, editConfig = editConfig) { out ->
                                 finalFile.inputStream().use { it.copyTo(out) }
                             }
                         }
@@ -210,7 +213,8 @@ object ImageSaver {
                                                 "$baseName.jpg",
                                                 targetUri,
                                                 processedBitmap.width,
-                                                processedBitmap.height
+                                                processedBitmap.height,
+                                                editConfig = editConfig
                                             ) { out ->
                                                 finalFile.inputStream().use { it.copyTo(out) }
                                             }
@@ -232,7 +236,8 @@ object ImageSaver {
                                                 "$baseName.jpg",
                                                 targetUri,
                                                 finalW,
-                                                finalH
+                                                finalH,
+                                                editConfig = editConfig
                                             ) { out ->
                                                 finalFile.inputStream().use { it.copyTo(out) }
                                             }
@@ -250,14 +255,15 @@ object ImageSaver {
                                     processedBitmap.compress(Bitmap.CompressFormat.JPEG, 95, out)
                                 }
                                 if (jpgFolderUri != null) {
-                                    finalJpgUri = saveFileToFolder(context, tempJpg, "$baseName.jpg", "image/jpeg", jpgFolderUri)
+                                    finalJpgUri = saveFileToFolder(context, tempJpg, "$baseName.jpg", "image/jpeg", jpgFolderUri, editConfig = editConfig)
                                 } else {
                                     finalJpgUri = saveJpegToMediaStore(
                                         context,
                                         "$baseName.jpg",
                                         targetUri,
                                         processedBitmap.width,
-                                        processedBitmap.height
+                                        processedBitmap.height,
+                                        editConfig = editConfig
                                     ) { out ->
                                         tempJpg.inputStream().use { it.copyTo(out) }
                                     }
@@ -391,6 +397,29 @@ object ImageSaver {
         return finalJpgUri ?: finalRawUri ?: finalTiffUri
     }
 
+    fun writeEditConfigToExif(context: Context, uri: Uri, editConfig: EditConfig) {
+        try {
+            val json = JSONObject().apply {
+                put("log", editConfig.log)
+                put("lut", editConfig.lut)
+                put("exposure", editConfig.exposure.toDouble())
+                put("contrast", editConfig.contrast.toDouble())
+                put("saturation", editConfig.saturation.toDouble())
+                put("highlights", editConfig.highlights.toDouble())
+                put("shadows", editConfig.shadows.toDouble())
+                put("whites", editConfig.whites.toDouble())
+                put("blacks", editConfig.blacks.toDouble())
+            }
+            context.contentResolver.openFileDescriptor(uri, "rw")?.use { pfd ->
+                val exif = ExifInterface(pfd.fileDescriptor)
+                exif.setAttribute(ExifInterface.TAG_USER_COMMENT, json.toString())
+                exif.saveAttributes()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to write EditConfig to EXIF for $uri", e)
+        }
+    }
+
     private fun saveDebugStageImagesToMediaStore(context: Context, baseName: String, sourcePath: String) {
         val source = File(sourcePath)
         val parent = source.parentFile ?: return
@@ -441,7 +470,7 @@ object ImageSaver {
         }
     }
 
-    private fun saveFileToFolder(context: Context, sourceFile: File, displayName: String, mimeType: String, folderUri: String): Uri? {
+    private fun saveFileToFolder(context: Context, sourceFile: File, displayName: String, mimeType: String, folderUri: String, editConfig: EditConfig? = null): Uri? {
         try {
             val treeUri = Uri.parse(folderUri)
             val parentFolder = androidx.documentfile.provider.DocumentFile.fromTreeUri(context, treeUri)
@@ -450,6 +479,11 @@ object ImageSaver {
                 context.contentResolver.openOutputStream(newFile.uri)?.use { out ->
                     FileInputStream(sourceFile).copyTo(out)
                 }
+
+                if (editConfig != null && mimeType == "image/jpeg") {
+                    writeEditConfigToExif(context, newFile.uri, editConfig)
+                }
+
                 Log.i(TAG, "Saved $displayName to custom folder: ${newFile.uri}")
                 return newFile.uri
             } else {
@@ -470,6 +504,7 @@ object ImageSaver {
         targetUri: Uri?,
         width: Int? = null,
         height: Int? = null,
+        editConfig: EditConfig? = null,
         writeData: (OutputStream) -> Unit
     ): Uri? {
         val contentResolver = context.contentResolver
@@ -524,6 +559,10 @@ object ImageSaver {
                         Log.e(TAG, "Failed to clear IS_PENDING for $uri", e)
                     }
                 }
+                if (editConfig != null) {
+                    writeEditConfigToExif(context, uri, editConfig)
+                }
+
                 if (isReplacement) {
                     Log.i(TAG, "Replaced JPEG at $uri")
                 } else {

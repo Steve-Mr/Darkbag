@@ -1783,6 +1783,13 @@ class CameraFragment : Fragment() {
 
                 if (result < 0) throw RuntimeException("processSingleFrameRaw failed: $result")
 
+                val editConfig = if (image.halfFrameMetadata == null) {
+                    top.maary.darkbag.models.EditConfig(
+                        log = targetLogName ?: "None",
+                        lut = activeLutName ?: "None"
+                    )
+                } else null
+
                 // 4. Fast Output Feedback (Thumbnail)
                 val fastOutputUri = ImageSaver.saveProcessedImage(
                     context = context,
@@ -1800,7 +1807,8 @@ class CameraFragment : Fragment() {
                     rawFolderUri = rawFolderUri,
                     mirror = false,
                     isFastPath = true,
-                    halfFrameMetadata = image.halfFrameMetadata
+                    halfFrameMetadata = image.halfFrameMetadata,
+                    editConfig = editConfig
                 )
 
                 timing?.firstOutputWritten = System.currentTimeMillis()
