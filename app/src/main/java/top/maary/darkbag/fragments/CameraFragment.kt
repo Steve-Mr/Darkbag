@@ -896,6 +896,9 @@ class CameraFragment : Fragment() {
             // Update constraints to set flash/underexposure button visibility correctly
             updateHdrPlusConstraints()
 
+            // Re-apply half-frame transformations and UI if enabled
+            updateHalfFrameUI()
+
             // Give system a moment to release hardware
             delay(300)
             openCamera2(currentLens!!.id)
@@ -1100,6 +1103,9 @@ class CameraFragment : Fragment() {
 
             // Finally, update constraints to set flash/underexposure button visibility correctly
             updateHdrPlusConstraints()
+
+            // Re-apply half-frame transformations and rotations if enabled
+            updateHalfFrameUI()
 
         } catch (exc: Exception) {
             Log.e(TAG, "Use case binding failed, attempting fallback", exc)
@@ -4378,6 +4384,16 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             if (halfFrameBaseFinderWidth <= 0 || halfFrameBaseFinderHeight <= 0) {
                 halfFrameBaseFinderWidth = vfBinding.viewFinder.width
                 halfFrameBaseFinderHeight = vfBinding.viewFinder.height
+
+                // Fallback to root container if view is not yet measured
+                if (halfFrameBaseFinderWidth <= 0 || halfFrameBaseFinderHeight <= 0) {
+                    vfBinding.root
+                        .takeIf { it.width > 0 && it.height > 0 }
+                        ?.let { root ->
+                            halfFrameBaseFinderWidth = root.width
+                            halfFrameBaseFinderHeight = root.height
+                        }
+                }
             }
 
             val totalW = halfFrameBaseFinderWidth.toFloat()
@@ -4422,6 +4438,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             } else {
                 vfBinding.viewFinder.animate().cancel()
                 vfBinding.viewFinder.translationX = targetShift
+                // Ensure viewfinder is visible after lens/engine switch
+                vfBinding.viewFinder.alpha = 1f
                 gapView.visibility = View.GONE
                 snapshotView.visibility = View.GONE
             }
