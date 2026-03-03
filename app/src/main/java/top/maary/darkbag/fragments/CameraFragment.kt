@@ -1101,6 +1101,9 @@ class CameraFragment : Fragment() {
             // Finally, update constraints to set flash/underexposure button visibility correctly
             updateHdrPlusConstraints()
 
+            // Re-apply half-frame transformations and rotations if enabled
+            updateHalfFrameUI()
+
         } catch (exc: Exception) {
             Log.e(TAG, "Use case binding failed, attempting fallback", exc)
             if (currentLens?.isLogicalAuto == false) {
