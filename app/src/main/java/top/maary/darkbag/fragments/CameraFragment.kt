@@ -896,6 +896,9 @@ class CameraFragment : Fragment() {
             // Update constraints to set flash/underexposure button visibility correctly
             updateHdrPlusConstraints()
 
+            // Re-apply half-frame transformations and UI if enabled
+            updateHalfFrameUI()
+
             // Give system a moment to release hardware
             delay(300)
             openCamera2(currentLens!!.id)
