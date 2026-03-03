@@ -4384,6 +4384,16 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             if (halfFrameBaseFinderWidth <= 0 || halfFrameBaseFinderHeight <= 0) {
                 halfFrameBaseFinderWidth = vfBinding.viewFinder.width
                 halfFrameBaseFinderHeight = vfBinding.viewFinder.height
+
+                // Fallback to root container if view is not yet measured
+                if (halfFrameBaseFinderWidth <= 0 || halfFrameBaseFinderHeight <= 0) {
+                    vfBinding.root.let { root ->
+                        if (root.width > 0 && root.height > 0) {
+                            halfFrameBaseFinderWidth = root.width
+                            halfFrameBaseFinderHeight = root.height
+                        }
+                    }
+                }
             }
 
             val totalW = halfFrameBaseFinderWidth.toFloat()
@@ -4428,6 +4438,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             } else {
                 vfBinding.viewFinder.animate().cancel()
                 vfBinding.viewFinder.translationX = targetShift
+                // Ensure viewfinder is visible after lens/engine switch
+                vfBinding.viewFinder.alpha = 1f
                 gapView.visibility = View.GONE
                 snapshotView.visibility = View.GONE
             }
