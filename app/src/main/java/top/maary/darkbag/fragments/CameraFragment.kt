@@ -1323,9 +1323,16 @@ class CameraFragment : Fragment() {
             val isFrame1Trigger = isHalfFrameModeEnabled && halfFrameStep == 0
             val isFrame2Trigger = isHalfFrameModeEnabled && halfFrameStep == 1
 
+            val hfGroupId = if (isFrame2Trigger) {
+                halfFrameSessionStore.readSession().baseName
+            } else {
+                SimpleDateFormat(FILENAME, Locale.US).format(timing.shutterClick)
+            }
+
             if (isFrame1Trigger) {
                 halfFrameSessionStore.clearCurrentSession(deleteTempFile = false)
-                writeScopedHalfFrameStep(prefs, 1, System.currentTimeMillis())
+                halfFrameSessionStore.setBaseName(hfGroupId)
+                writeScopedHalfFrameStep(prefs, 1, timing.shutterClick)
                 // Animate after shutter blackout
                 fragmentCameraBinding.viewFinder.postDelayed({
                     updateHalfFrameUI(animate = true)
@@ -1445,17 +1452,8 @@ class CameraFragment : Fragment() {
             lifecycleScope.launch {
                 val uri = mediaStoreUtils.getLatestAppImage(requireContext())
                 if (uri != null) {
-                    val intent = Intent(Intent.ACTION_VIEW, uri)
-                    intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                    try {
-                        startActivity(intent)
-                    } catch (e: ActivityNotFoundException) {
-                        Toast.makeText(
-                            requireContext(),
-                            "No gallery app installed",
-                            Toast.LENGTH_SHORT
-                        ).show()
-                    }
+                    Navigation.findNavController(requireActivity(), R.id.fragment_container)
+                        .navigate(CameraFragmentDirections.actionCameraToImageViewer(uri.toString()))
                 }
             }
         }
@@ -1608,8 +1606,13 @@ class CameraFragment : Fragment() {
             timing?.processingStart = System.currentTimeMillis()
             try {
                 val contentResolver = context.contentResolver
-                val dngName =
+                val dngName = if (image.halfFrameMetadata != null) {
+                    val suffix = if (image.halfFrameMetadata.frame1BaseName != null) "_HF2" else "_HF1"
+                    val group = image.halfFrameMetadata.frame1BaseName ?: SimpleDateFormat(FILENAME, Locale.US).format(image.halfFrameMetadata.captureTimeMillis)
+                    group + suffix
+                } else {
                     SimpleDateFormat(FILENAME, Locale.US).format(System.currentTimeMillis())
+                }
 
                 Log.d(
                     TAG,
@@ -3389,7 +3392,13 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 val focalLength = result?.get(android.hardware.camera2.CaptureResult.LENS_FOCAL_LENGTH) ?: 0.0f
                 val captureTime = System.currentTimeMillis()
 
-                val dngName = SimpleDateFormat(FILENAME, Locale.US).format(System.currentTimeMillis()) + "_HDRPLUS"
+                val dngName = if (hfMetadata != null) {
+                    val suffix = if (hfMetadata.frame1BaseName != null) "_HF2" else "_HF1"
+                    val group = hfMetadata.frame1BaseName ?: SimpleDateFormat(FILENAME, Locale.US).format(hfMetadata.captureTimeMillis)
+                    group + suffix + "_HDRPLUS"
+                } else {
+                    SimpleDateFormat(FILENAME, Locale.US).format(System.currentTimeMillis()) + "_HDRPLUS"
+                }
                 val saveTiff = prefs.getBoolean(SettingsFragment.KEY_SAVE_TIFF, false)
                 val saveJpg = prefs.getBoolean(SettingsFragment.KEY_SAVE_JPG, true)
                 val saveRaw = prefs.getBoolean(SettingsFragment.KEY_SAVE_RAW, true)

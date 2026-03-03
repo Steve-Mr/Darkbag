@@ -10,6 +10,12 @@ import java.util.*
 
 object HalfFrameUtils {
     private const val TAG = "HalfFrameUtils"
+    const val GAP_RATIO = 0.03f
+    const val MIN_GAP_PX = 16
+
+    fun calculateGap(refDimension: Int): Int {
+        return (refDimension * GAP_RATIO).toInt().coerceAtLeast(MIN_GAP_PX)
+    }
 
     private fun ensureOrientation(bitmap: Bitmap, wantPortrait: Boolean): Bitmap {
         val isPortrait = bitmap.height >= bitmap.width
@@ -47,8 +53,8 @@ object HalfFrameUtils {
             val targetW = w1
             val targetH = h1
 
-            // Divider width: 3% of the larger dimension to be more prominent
-            val divider = (maxOf(targetW, targetH) * 0.03f).toInt().coerceAtLeast(16)
+            // Divider width
+            val divider = calculateGap(maxOf(targetW, targetH))
 
             var resultBitmap = if (isSideBySide) {
                 val combinedW = targetW + divider + targetW
