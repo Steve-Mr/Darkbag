@@ -74,7 +74,9 @@ class ImageRepository(private val context: Context) {
                                     builder.height = h
                                 }
                             }
-                        } catch (e: Exception) {}
+                        } catch (e: Exception) {
+                            android.util.Log.w("ImageRepository", "Failed to read EXIF from ${file.uri}", e)
+                        }
                     }
                     name.contains("_HF1") && name.endsWith(".dng", ignoreCase = true) -> {
                         builder.dngUri1 = file.uri
@@ -155,7 +157,9 @@ class ImageRepository(private val context: Context) {
                                     builder.height = h
                                 }
                             }
-                        } catch (e: Exception) {}
+                        } catch (e: Exception) {
+                            android.util.Log.w("ImageRepository", "Failed to read EXIF from $uri", e)
+                        }
                     }
                     name.contains("_HF1") && (mime == "image/x-adobe-dng" || name.endsWith(".dng", ignoreCase = true)) -> {
                         builder.dngUri1 = uri

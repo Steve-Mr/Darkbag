@@ -44,10 +44,10 @@ class ImageViewerAdapter(
 
         // Default to JPG if available, else DNG, else TIFF
         when {
-            group.jpgUri != null -> loadImage(holder, group.jpgUri, group)
+            group.jpgUri != null -> loadImage(holder, group.jpgUri)
             group.isHalfFrame() -> loadHalfFrameDngs(holder, group)
-            group.dngUri != null -> loadImage(holder, group.dngUri, group)
-            group.tiffUri != null -> loadImage(holder, group.tiffUri, group)
+            group.dngUri != null -> loadImage(holder, group.dngUri)
+            group.tiffUri != null -> loadImage(holder, group.tiffUri)
         }
     }
 
@@ -57,13 +57,13 @@ class ImageViewerAdapter(
             btnTiff.visibility = if (group.tiffUri != null) View.VISIBLE else View.GONE
             btnDng.visibility = if (group.dngUri != null || group.dngUri1 != null || group.dngUri2 != null) View.VISIBLE else View.GONE
 
-            btnJpg.setOnClickListener { group.jpgUri?.let { loadImage(holder, it, group) } }
-            btnTiff.setOnClickListener { group.tiffUri?.let { loadImage(holder, it, group) } }
+            btnJpg.setOnClickListener { group.jpgUri?.let { loadImage(holder, it) } }
+            btnTiff.setOnClickListener { group.tiffUri?.let { loadImage(holder, it) } }
             btnDng.setOnClickListener {
                 if (group.isHalfFrame()) {
                     loadHalfFrameDngs(holder, group)
                 } else {
-                    group.dngUri?.let { loadImage(holder, it, group) }
+                    group.dngUri?.let { loadImage(holder, it) }
                 }
             }
 
@@ -77,7 +77,7 @@ class ImageViewerAdapter(
         }
     }
 
-    private fun loadImage(holder: ViewHolder, uri: Uri, group: ImageGroup) {
+    private fun loadImage(holder: ViewHolder, uri: Uri) {
         holder.loadJob?.cancel()
         holder.binding.imageView.visibility = View.VISIBLE
         holder.binding.loadingIndicator.visibility = View.VISIBLE

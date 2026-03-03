@@ -43,6 +43,13 @@ class ImageViewerFragment : Fragment() {
         setupEdgeToEdge()
         setupToolbar()
 
+        childFragmentManager.setFragmentResultListener(HalfFrameShareSheet.REQUEST_KEY, viewLifecycleOwner) { _, bundle ->
+            val uris = bundle.getParcelableArrayList<android.net.Uri>(HalfFrameShareSheet.BUNDLE_KEY_URIS)
+            if (uris != null) {
+                shareImages(uris)
+            }
+        }
+
         loadImages()
     }
 
@@ -129,9 +136,8 @@ class ImageViewerFragment : Fragment() {
     }
 
     private fun showHalfFrameShareSheet(group: ImageGroup) {
-        HalfFrameShareSheet(group.dngUri1, group.dngUri2) { uris ->
-            shareImages(uris)
-        }.show(childFragmentManager, HalfFrameShareSheet.TAG)
+        HalfFrameShareSheet.newInstance(group.dngUri1, group.dngUri2)
+            .show(childFragmentManager, HalfFrameShareSheet.TAG)
     }
 
     private fun showDeleteDialog(group: ImageGroup) {
