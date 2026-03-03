@@ -4387,12 +4387,12 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
                 // Fallback to root container if view is not yet measured
                 if (halfFrameBaseFinderWidth <= 0 || halfFrameBaseFinderHeight <= 0) {
-                    vfBinding.root.let { root ->
-                        if (root.width > 0 && root.height > 0) {
+                    vfBinding.root
+                        .takeIf { it.width > 0 && it.height > 0 }
+                        ?.let { root ->
                             halfFrameBaseFinderWidth = root.width
                             halfFrameBaseFinderHeight = root.height
                         }
-                    }
                 }
             }
 
