@@ -82,8 +82,6 @@ class ImageViewerAdapter(
         holder.binding.imageView.visibility = View.VISIBLE
         holder.binding.loadingIndicator.visibility = View.VISIBLE
 
-        applyContainerRatio(holder, group)
-
         val isDng = uri.toString().endsWith(".dng", ignoreCase = true)
         val isTiff = uri.toString().endsWith(".tiff", ignoreCase = true) || uri.toString().endsWith(".tif", ignoreCase = true)
 
@@ -139,31 +137,10 @@ class ImageViewerAdapter(
         }
     }
 
-    private fun applyContainerRatio(holder: ViewHolder, group: ImageGroup) {
-        val root = holder.binding.root
-
-        val ratio = when {
-            group.width > 0 && group.height > 0 -> {
-                // For HF JPG, this width/height already includes the 3% gap logic from stitching.
-                "${group.width}:${group.height}"
-            }
-            group.hfLayout == "TB" -> "4:6.18" // (4/3) : (1 + 0.03 + 1) -> 1.33 : 2.03 -> 1 : 1.53
-            group.hfLayout == "SBS" || group.isHalfFrame() -> "6.18:4" // (1 + 0.03 + 1) : (4/3) -> 2.03 : 1.33 -> 1.53 : 1
-            else -> null // Remove aspect ratio for single images
-        }
-
-        val constraintSet = androidx.constraintlayout.widget.ConstraintSet()
-        constraintSet.clone(root)
-        constraintSet.setDimensionRatio(R.id.image_container, ratio)
-        constraintSet.applyTo(root)
-    }
-
     private fun loadHalfFrameDngs(holder: ViewHolder, group: ImageGroup) {
         holder.loadJob?.cancel()
         holder.binding.imageView.visibility = View.VISIBLE
         holder.binding.loadingIndicator.visibility = View.VISIBLE
-
-        applyContainerRatio(holder, group)
 
         holder.loadJob = scope.launch {
             val composite = ImageUtils.generateHalfFrameComposite(

@@ -16,6 +16,16 @@ class ZoomableImageView @JvmOverloads constructor(
     defStyleAttr: Int = 0
 ) : AppCompatImageView(context, attrs, defStyleAttr) {
 
+    override fun setImageBitmap(bm: android.graphics.Bitmap?) {
+        super.setImageBitmap(bm)
+        resetZoom()
+    }
+
+    override fun setImageDrawable(drawable: android.graphics.drawable.Drawable?) {
+        super.setImageDrawable(drawable)
+        resetZoom()
+    }
+
     private var matrixValue = Matrix()
     private var mode = NONE
 
@@ -207,35 +217,42 @@ class ZoomableImageView @JvmOverloads constructor(
         origWidth = 0f
         origHeight = 0f
         matrixValue.reset()
-        imageMatrix = matrixValue
+        fitCenter()
         invalidate()
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         super.onMeasure(widthMeasureSpec, heightMeasureSpec)
-        viewWidth = MeasureSpec.getSize(widthMeasureSpec)
-        viewHeight = MeasureSpec.getSize(heightMeasureSpec)
+        val newWidth = MeasureSpec.getSize(widthMeasureSpec)
+        val newHeight = MeasureSpec.getSize(heightMeasureSpec)
 
-        // Rescale image on rotation or new image
-        if (origWidth == 0f || origHeight == 0f) {
-            val drawable = drawable
-            if (drawable == null || drawable.intrinsicWidth == 0 || drawable.intrinsicHeight == 0) return
-            val bmWidth = drawable.intrinsicWidth
-            val bmHeight = drawable.intrinsicHeight
-
-            val scaleX = viewWidth.toFloat() / bmWidth
-            val scaleY = viewHeight.toFloat() / bmHeight
-            val scale = if (scaleX < scaleY) scaleX else scaleY
-            matrixValue.setScale(scale, scale)
-
-            // Center the image
-            val redundancyY = (viewHeight.toFloat() - scale * bmHeight) / 2
-            val redundancyX = (viewWidth.toFloat() - scale * bmWidth) / 2
-            matrixValue.postTranslate(redundancyX, redundancyY)
-
-            origWidth = viewWidth - 2 * redundancyX
-            origHeight = viewHeight - 2 * redundancyY
-            imageMatrix = matrixValue
+        if (newWidth != viewWidth || newHeight != viewHeight) {
+            viewWidth = newWidth
+            viewHeight = newHeight
+            resetZoom()
         }
+    }
+
+    private fun fitCenter() {
+        val drawable = drawable
+        if (drawable == null || drawable.intrinsicWidth == 0 || drawable.intrinsicHeight == 0 || viewWidth == 0 || viewHeight == 0) return
+
+        val bmWidth = drawable.intrinsicWidth
+        val bmHeight = drawable.intrinsicHeight
+
+        val scaleX = viewWidth.toFloat() / bmWidth
+        val scaleY = viewHeight.toFloat() / bmHeight
+        val scale = if (scaleX < scaleY) scaleX else scaleY
+
+        matrixValue.setScale(scale, scale)
+
+        // Center the image
+        val redundancyY = (viewHeight.toFloat() - scale * bmHeight) / 2
+        val redundancyX = (viewWidth.toFloat() - scale * bmWidth) / 2
+        matrixValue.postTranslate(redundancyX, redundancyY)
+
+        origWidth = viewWidth - 2 * redundancyX
+        origHeight = viewHeight - 2 * redundancyY
+        imageMatrix = matrixValue
     }
 }

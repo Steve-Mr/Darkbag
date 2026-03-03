@@ -31,7 +31,8 @@ object ImageUtils {
             val h = ref.height
 
             val isSBS = layout != "TB"
-            val gap = (if (isSBS) h else w) * 0.03f
+            // Ensure gap calculation matches HalfFrameUtils (use long dimension of single frame)
+            val gap = HalfFrameUtils.calculateGap(maxOf(w, h)).toFloat()
 
             val resultW = if (isSBS) (w * 2 + gap).toInt() else w
             val resultH = if (isSBS) h else (h * 2 + gap).toInt()
