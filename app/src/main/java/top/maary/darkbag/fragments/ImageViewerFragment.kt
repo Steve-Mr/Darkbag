@@ -55,7 +55,7 @@ class ImageViewerFragment : Fragment() {
             }
             adapter = ImageViewerAdapter(groups, lifecycleScope).apply {
                 onImageTapped = { toggleUi() }
-                onZoomChanged = { isZoomed -> if (isZoomed) hideUi() }
+                onZoomChanged = { isZoomed -> if (isZoomed) hideUi() else showUi() }
             }
             binding.imagePager.adapter = adapter
 
@@ -217,15 +217,29 @@ class ImageViewerFragment : Fragment() {
     private fun showUi() {
         if (isUiVisible) return
         isUiVisible = true
-        binding.appBar.animate().translationY(0f).setDuration(200).start()
-        binding.bottomControls.animate().translationY(0f).setDuration(200).start()
+        binding.appBar.visibility = View.VISIBLE
+        binding.bottomControls.visibility = View.VISIBLE
+        binding.appBar.animate().translationY(0f).setDuration(200).setListener(null).start()
+        binding.bottomControls.animate().translationY(0f).setDuration(200).setListener(null).start()
     }
 
     private fun hideUi() {
         if (!isUiVisible) return
         isUiVisible = false
-        binding.appBar.animate().translationY(-binding.appBar.height.toFloat()).setDuration(200).start()
-        binding.bottomControls.animate().translationY(binding.bottomControls.height.toFloat()).setDuration(200).start()
+        binding.appBar.animate().translationY(-binding.appBar.height.toFloat())
+            .setDuration(200)
+            .setListener(object : android.animation.AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: android.animation.Animator) {
+                    if (!isUiVisible) binding.appBar.visibility = View.GONE
+                }
+            }).start()
+        binding.bottomControls.animate().translationY(binding.bottomControls.height.toFloat())
+            .setDuration(200)
+            .setListener(object : android.animation.AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: android.animation.Animator) {
+                    if (!isUiVisible) binding.bottomControls.visibility = View.GONE
+                }
+            }).start()
     }
 
     private fun setupEdgeToEdge() {

@@ -93,7 +93,6 @@ class ZoomableImageView @JvmOverloads constructor(
                 val yDiff = abs(curr.y - start.y).toInt()
                 if (xDiff < CLICK && yDiff < CLICK) {
                     performClick()
-                    onTapped?.invoke()
                 }
             }
             MotionEvent.ACTION_POINTER_UP -> {
