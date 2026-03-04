@@ -20,6 +20,11 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="Color" />
+        <com.google.android.material.tabs.TabItem
+            android:id="@+id/tab_effects"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Effects" />
     </com.google.android.material.tabs.TabLayout>
 
     <androidx.core.widget.NestedScrollView
@@ -110,6 +115,65 @@
                     android:valueFrom="-1.0"
                     android:valueTo="1.0"
                     android:value="0.0" />
+            </LinearLayout>
+
+            <!-- Effects Tab Content -->
+            <LinearLayout
+                android:id="@+id/layout_effects"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:visibility="gone">
+
+                <com.google.android.material.materialswitch.MaterialSwitch
+                    android:id="@+id/switch_timestamp"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Date Stamp" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    android:text="Light Leak / Flare" />
+
+                <com.google.android.material.button.MaterialButtonToggleGroup
+                    android:id="@+id/group_flare"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    app:singleSelection="true"
+                    app:selectionRequired="true">
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btn_flare_none"
+                        style="@style/Widget.Material3.Button.OutlinedButton"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="None" />
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btn_flare_random"
+                        style="@style/Widget.Material3.Button.OutlinedButton"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Rand" />
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btn_flare_v"
+                        style="@style/Widget.Material3.Button.OutlinedButton"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Side" />
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btn_flare_c"
+                        style="@style/Widget.Material3.Button.OutlinedButton"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Corner" />
+                </com.google.android.material.button.MaterialButtonToggleGroup>
+
             </LinearLayout>
 
         </LinearLayout>

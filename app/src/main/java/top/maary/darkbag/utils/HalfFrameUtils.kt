@@ -140,7 +140,8 @@ object HalfFrameUtils {
         lightLeak: Boolean,
         layout: String,
         time1: Long = System.currentTimeMillis(),
-        time2: Long = System.currentTimeMillis()
+        time2: Long = System.currentTimeMillis(),
+        flareType: Int = 0 // 0: random, 1: vertical, 2: corner, -1: none
     ): Bitmap {
         var result = bitmap
 
@@ -148,8 +149,8 @@ object HalfFrameUtils {
             result = addDateStampToBoth(result, layout, time1, time2)
         }
 
-        if (lightLeak) {
-            result = addLightLeak(result)
+        if (lightLeak || flareType >= 0) {
+            result = addLightLeak(result, flareType)
         }
 
         return result
@@ -211,12 +212,12 @@ object HalfFrameUtils {
         return workingBitmap
     }
 
-    private fun addLightLeak(bitmap: Bitmap): Bitmap {
+    private fun addLightLeak(bitmap: Bitmap, flareType: Int = 0): Bitmap {
+        if (flareType == -1) return bitmap
         val workingBitmap = if (bitmap.isMutable) bitmap else bitmap.copy(Bitmap.Config.ARGB_8888, true)
         val canvas = Canvas(workingBitmap)
 
-        val random = Random()
-        val leakType = random.nextInt(2)
+        val leakType = if (flareType == 0) Random().nextInt(2) else flareType - 1
 
         val paint = Paint().apply {
             style = Paint.Style.FILL

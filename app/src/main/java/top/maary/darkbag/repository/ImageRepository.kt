@@ -8,6 +8,7 @@ import android.provider.MediaStore
 import androidx.documentfile.provider.DocumentFile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
 import top.maary.darkbag.fragments.SettingsFragment
 import top.maary.darkbag.models.EditConfig
@@ -184,6 +185,22 @@ class ImageRepository(private val context: Context) {
     private fun parseEditConfig(jsonStr: String): EditConfig? {
         return try {
             val json = JSONObject(jsonStr)
+            val adjustmentsArray = json.optJSONArray("adjustments")
+            val adjustments = if (adjustmentsArray != null) {
+                List(adjustmentsArray.length()) { i ->
+                    val adjJson = adjustmentsArray.getJSONObject(i)
+                    top.maary.darkbag.models.BasicAdjustments(
+                        exposure = adjJson.optDouble("exposure", 0.0).toFloat(),
+                        contrast = adjJson.optDouble("contrast", 0.0).toFloat(),
+                        saturation = adjJson.optDouble("saturation", 0.0).toFloat(),
+                        highlights = adjJson.optDouble("highlights", 0.0).toFloat(),
+                        shadows = adjJson.optDouble("shadows", 0.0).toFloat(),
+                        whites = adjJson.optDouble("whites", 0.0).toFloat(),
+                        blacks = adjJson.optDouble("blacks", 0.0).toFloat()
+                    )
+                }
+            } else null
+
             EditConfig(
                 log = json.optString("log", "None"),
                 lut = json.optString("lut", "None"),
@@ -193,7 +210,10 @@ class ImageRepository(private val context: Context) {
                 highlights = json.optDouble("highlights", 0.0).toFloat(),
                 shadows = json.optDouble("shadows", 0.0).toFloat(),
                 whites = json.optDouble("whites", 0.0).toFloat(),
-                blacks = json.optDouble("blacks", 0.0).toFloat()
+                blacks = json.optDouble("blacks", 0.0).toFloat(),
+                adjustments = adjustments,
+                showTimestamp = json.optBoolean("show_timestamp", false),
+                flareType = json.optInt("flare_type", -1)
             )
         } catch (e: Exception) {
             null

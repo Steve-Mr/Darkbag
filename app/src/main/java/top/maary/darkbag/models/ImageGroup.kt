@@ -26,6 +26,22 @@ data class ImageGroup(
 data class EditConfig(
     val log: String? = "None",
     val lut: String? = "None",
+    // Standard or Global adjustments
+    val exposure: Float = 0f,
+    val contrast: Float = 0f,
+    val saturation: Float = 0f,
+    val highlights: Float = 0f,
+    val shadows: Float = 0f,
+    val whites: Float = 0f,
+    val blacks: Float = 0f,
+    // Half-frame specific
+    val adjustments: List<BasicAdjustments>? = null, // Index 0 for Frame 1, Index 1 for Frame 2
+    val showTimestamp: Boolean = false,
+    val flareType: Int = -1 // -1: None, 0: Random, 1: Vertical, 2: Corner
+) : Parcelable
+
+@Parcelize
+data class BasicAdjustments(
     val exposure: Float = 0f,
     val contrast: Float = 0f,
     val saturation: Float = 0f,

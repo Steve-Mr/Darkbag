@@ -409,6 +409,24 @@ object ImageSaver {
                 put("shadows", editConfig.shadows.toDouble())
                 put("whites", editConfig.whites.toDouble())
                 put("blacks", editConfig.blacks.toDouble())
+
+                editConfig.adjustments?.let { adjs ->
+                    val array = org.json.JSONArray()
+                    adjs.forEach { adj ->
+                        array.put(JSONObject().apply {
+                            put("exposure", adj.exposure.toDouble())
+                            put("contrast", adj.contrast.toDouble())
+                            put("saturation", adj.saturation.toDouble())
+                            put("highlights", adj.highlights.toDouble())
+                            put("shadows", adj.shadows.toDouble())
+                            put("whites", adj.whites.toDouble())
+                            put("blacks", adj.blacks.toDouble())
+                        })
+                    }
+                    put("adjustments", array)
+                }
+                put("show_timestamp", editConfig.showTimestamp)
+                put("flare_type", editConfig.flareType)
             }
             context.contentResolver.openFileDescriptor(uri, "rw")?.use { pfd ->
                 val exif = ExifInterface(pfd.fileDescriptor)
