@@ -597,9 +597,21 @@ bool process_and_save_image(
 
                 Vec3 color = process_pixel(cropX + sx * downsampleFactor, cropY + sy * downsampleFactor, nullptr, nullptr, nullptr);
                 size_t outIdx = (static_cast<size_t>(py) * finalW_zoomed + px) * 3;
-                previewRgb8[outIdx + 0] = (unsigned char)std::max(0.0f, std::min(255.0f, color.r * 255.0f + 0.5f));
-                previewRgb8[outIdx + 1] = (unsigned char)std::max(0.0f, std::min(255.0f, color.g * 255.0f + 0.5f));
-                previewRgb8[outIdx + 2] = (unsigned char)std::max(0.0f, std::min(255.0f, color.b * 255.0f + 0.5f));
+                unsigned char r8 = (unsigned char)std::max(0.0f, std::min(255.0f, color.r * 255.0f + 0.5f));
+                unsigned char g8 = (unsigned char)std::max(0.0f, std::min(255.0f, color.g * 255.0f + 0.5f));
+                unsigned char b8 = (unsigned char)std::max(0.0f, std::min(255.0f, color.b * 255.0f + 0.5f));
+
+                previewRgb8[outIdx + 0] = r8;
+                previewRgb8[outIdx + 1] = g8;
+                previewRgb8[outIdx + 2] = b8;
+
+                if (out_rgb_buffer) {
+                    size_t bIdx = (static_cast<size_t>(py) * finalW_zoomed + px) * 4;
+                    out_rgb_buffer[bIdx+0] = r8;
+                    out_rgb_buffer[bIdx+1] = g8;
+                    out_rgb_buffer[bIdx+2] = b8;
+                    out_rgb_buffer[bIdx+3] = 255;
+                }
             }
         }
     } else {
@@ -639,9 +651,8 @@ bool process_and_save_image(
                 }
 
                 // Note: out_rgb_buffer is usually for preview only, but we keep it here if needed.
-                // It expects original dimensions though. This part might need adjustment if used for rotated large images.
-                if (out_rgb_buffer && !swapDims) {
-                    size_t bIdx = (static_cast<size_t>(py) * finalW + px) * 4;
+                if (out_rgb_buffer) {
+                    size_t bIdx = (static_cast<size_t>(py) * finalW_zoomed + px) * 4;
                     out_rgb_buffer[bIdx+0] = (unsigned char)std::min(255, (processedImage[outIdx+0] + 128) >> 8);
                     out_rgb_buffer[bIdx+1] = (unsigned char)std::min(255, (processedImage[outIdx+1] + 128) >> 8);
                     out_rgb_buffer[bIdx+2] = (unsigned char)std::min(255, (processedImage[outIdx+2] + 128) >> 8);

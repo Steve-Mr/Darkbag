@@ -111,6 +111,12 @@ class ImageViewerFragment : Fragment() {
             enterEditMode()
         }
 
+        binding.editControlsRoot.setOnClickListener {
+            if (binding.editLutListContainer.visibility == View.VISIBLE) {
+                binding.editLutListContainer.visibility = View.GONE
+            }
+        }
+
         binding.btnEditSaveMain.setOnClickListener {
             saveEdit(isReplacement = true)
         }
@@ -191,6 +197,7 @@ class ImageViewerFragment : Fragment() {
     private fun exitEditMode() {
         isEditMode = false
         sourceDngBytes = null
+        previewJob?.cancel()
         binding.editControlsRoot.visibility = View.GONE
         binding.editLutListContainer.visibility = View.GONE
         binding.imagePager.isUserInputEnabled = true
