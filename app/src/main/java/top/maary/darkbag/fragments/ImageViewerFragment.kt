@@ -31,6 +31,7 @@ class ImageViewerFragment : Fragment() {
     private lateinit var adapter: ImageViewerAdapter
 
     private var isEditMode = false
+    private var isIndividualEditMode = false
     private var currentEditConfig: top.maary.darkbag.models.EditConfig? = null
     private var selectedDngIndex = 0 // 0 or 1 for half-frame
     private var sourceDngBytes: ByteArray? = null
@@ -193,6 +194,7 @@ class ImageViewerFragment : Fragment() {
         val dngUri2 = currentGroup.dngUri2
 
         isEditMode = true
+        isIndividualEditMode = false
         selectedDngIndex = 0
         hideUi()
         binding.editControlsRoot.visibility = View.VISIBLE
@@ -202,23 +204,11 @@ class ImageViewerFragment : Fragment() {
             adjustments = if (currentGroup.isHalfFrame()) listOf(top.maary.darkbag.models.BasicAdjustments(), top.maary.darkbag.models.BasicAdjustments()) else null
         )
 
-        if (currentGroup.isHalfFrame()) {
-            binding.hfSelection1.visibility = View.VISIBLE
-            binding.hfSelection2.visibility = View.VISIBLE
+        // Explicitly refresh Log/LUT labels
+        updateEditUi()
 
-            // Adjust guideline based on layout
-            val lp = binding.hfSelectionDivider.layoutParams as androidx.constraintlayout.widget.ConstraintLayout.LayoutParams
-            if (currentGroup.hfLayout == "TB") {
-                lp.orientation = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.HORIZONTAL
-            } else {
-                lp.orientation = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.VERTICAL
-            }
-            binding.hfSelectionDivider.layoutParams = lp
-            updateSelectionFeedback()
-        } else {
-            binding.hfSelection1.visibility = View.GONE
-            binding.hfSelection2.visibility = View.GONE
-        }
+        binding.hfSelection1.visibility = View.GONE
+        binding.hfSelection2.visibility = View.GONE
 
         updateEditUi()
 
@@ -241,6 +231,7 @@ class ImageViewerFragment : Fragment() {
 
     private fun exitEditMode() {
         isEditMode = false
+        isIndividualEditMode = false
         sourceDngBytes = null
         sourceDngBytes2 = null
         previewJob?.cancel()
@@ -258,7 +249,8 @@ class ImageViewerFragment : Fragment() {
 
     private fun updateEditUi() {
         currentEditConfig?.let { config ->
-            binding.btnEditLogLut.text = "Log: ${config.log} / LUT: ${config.lut?.substringBeforeLast(".")}"
+            val lutName = if (config.lut == "None" || config.lut == null) "None" else config.lut.substringBeforeLast(".")
+            binding.btnEditLogLut.text = "Log: ${config.log} / LUT: $lutName"
         }
     }
 
@@ -371,17 +363,33 @@ class ImageViewerFragment : Fragment() {
     }
 
     private fun showAdjustmentsBottomSheet() {
+        val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
+
+        if (currentGroup.isHalfFrame() && !isIndividualEditMode) {
+            isIndividualEditMode = true
+            binding.hfSelection1.visibility = View.VISIBLE
+            binding.hfSelection2.visibility = View.VISIBLE
+            val lp = binding.hfSelectionDivider.layoutParams as androidx.constraintlayout.widget.ConstraintLayout.LayoutParams
+            if (currentGroup.hfLayout == "TB") {
+                lp.orientation = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.HORIZONTAL
+            } else {
+                lp.orientation = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.VERTICAL
+            }
+            binding.hfSelectionDivider.layoutParams = lp
+            updateSelectionFeedback()
+        }
+
         val dialog = com.google.android.material.bottomsheet.BottomSheetDialog(requireContext())
         val sheetBinding = top.maary.darkbag.databinding.BottomSheetEditAdjustmentsBinding.inflate(layoutInflater)
         dialog.setContentView(sheetBinding.root)
 
         val config = currentEditConfig ?: return
-        val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
 
         // Effects tab visibility
         if (!currentGroup.isHalfFrame()) {
              sheetBinding.editTabs.getTabAt(2)?.view?.visibility = View.GONE
         } else {
+             sheetBinding.layoutEffects.visibility = View.VISIBLE // Ensure it can be seen
              sheetBinding.switchTimestamp.isChecked = config.showTimestamp
              val checkedFlareId = when(config.flareType) {
                  -1 -> R.id.btn_flare_none
@@ -559,7 +567,7 @@ class ImageViewerFragment : Fragment() {
                         )
 
                         // Apply selection feedback (gray out if not selected)
-                        if (currentGroup.isHalfFrame() && selectedDngIndex != index) {
+                        if (isIndividualEditMode && currentGroup.isHalfFrame() && selectedDngIndex != index) {
                              val canvas = android.graphics.Canvas(previewBitmap)
                              val paint = android.graphics.Paint()
                              val cm = android.graphics.ColorMatrix()
@@ -567,7 +575,7 @@ class ImageViewerFragment : Fragment() {
                              paint.colorFilter = android.graphics.ColorMatrixColorFilter(cm)
                              paint.alpha = 150
                              canvas.drawBitmap(previewBitmap, 0f, 0f, paint)
-                        } else if (currentGroup.isHalfFrame() && selectedDngIndex == index) {
+                        } else if (isIndividualEditMode && currentGroup.isHalfFrame() && selectedDngIndex == index) {
                              // Draw subtle border
                              val canvas = android.graphics.Canvas(previewBitmap)
                              val paint = android.graphics.Paint().apply {

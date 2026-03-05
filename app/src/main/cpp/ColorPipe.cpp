@@ -28,6 +28,9 @@
 #ifndef TIFFTAG_FOCALLENGTH
 #define TIFFTAG_FOCALLENGTH 37386
 #endif
+#ifndef TIFFTAG_DATETIMEORIGINAL
+#define TIFFTAG_DATETIMEORIGINAL 36867
+#endif
 
 // Define LinearRaw
 #ifndef PHOTOMETRIC_LINEAR_RAW
@@ -789,6 +792,7 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
     char buffer[20];
     strftime(buffer, 20, "%Y:%m:%d %H:%M:%S", timeinfo);
     TIFFSetField(tif, TIFFTAG_DATETIME, buffer);
+    TIFFSetField(tif, TIFFTAG_DATETIMEORIGINAL, buffer);
 
     static const uint8_t dng_version[] = {1, 4, 0, 0};
     TIFFSetField(tif, TIFFTAG_DNGVERSION, dng_version);
