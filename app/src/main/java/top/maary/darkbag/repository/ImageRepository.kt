@@ -213,7 +213,8 @@ class ImageRepository(private val context: Context) {
                 blacks = json.optDouble("blacks", 0.0).toFloat(),
                 adjustments = adjustments,
                 showTimestamp = json.optBoolean("show_timestamp", false),
-                flareType = json.optInt("flare_type", -1)
+                flareType = json.optInt("flare_type", -1),
+                hfLayout = json.optString("hf_layout", null)
             )
         } catch (e: Exception) {
             null

@@ -427,6 +427,7 @@ object ImageSaver {
                 }
                 put("show_timestamp", editConfig.showTimestamp)
                 put("flare_type", editConfig.flareType)
+                put("hf_layout", editConfig.hfLayout)
             }
             context.contentResolver.openFileDescriptor(uri, "rw")?.use { pfd ->
                 val exif = ExifInterface(pfd.fileDescriptor)

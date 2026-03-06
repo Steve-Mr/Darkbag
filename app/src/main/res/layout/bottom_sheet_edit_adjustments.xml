@@ -21,7 +21,6 @@
             android:layout_height="wrap_content"
             android:text="Color" />
         <com.google.android.material.tabs.TabItem
-            android:id="@+id/tab_effects"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="Effects" />

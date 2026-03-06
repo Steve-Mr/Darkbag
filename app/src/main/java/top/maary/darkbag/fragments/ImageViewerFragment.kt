@@ -255,10 +255,6 @@ class ImageViewerFragment : Fragment() {
     }
 
     private fun updateSelectionFeedback() {
-        // Find if BottomSheet is showing and update its sliders
-        // This is complex as sheetBinding is local to showAdjustmentsBottomSheet
-        // For now, selecting a part just triggers a preview refresh.
-        // If the user then opens the FAB, it will show correct values.
         applyEditPreview()
     }
 
@@ -387,9 +383,9 @@ class ImageViewerFragment : Fragment() {
 
         // Effects tab visibility
         if (!currentGroup.isHalfFrame()) {
-             sheetBinding.editTabs.getTabAt(2)?.view?.visibility = View.GONE
+             sheetBinding.editTabs.removeTabAt(2)
         } else {
-             sheetBinding.layoutEffects.visibility = View.VISIBLE // Ensure it can be seen
+             sheetBinding.layoutEffects.visibility = View.GONE // Start hidden, only show if tab selected
              sheetBinding.switchTimestamp.isChecked = config.showTimestamp
              val checkedFlareId = when(config.flareType) {
                  -1 -> R.id.btn_flare_none

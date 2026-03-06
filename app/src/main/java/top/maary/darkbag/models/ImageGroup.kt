@@ -37,7 +37,8 @@ data class EditConfig(
     // Half-frame specific
     val adjustments: List<BasicAdjustments>? = null, // Index 0 for Frame 1, Index 1 for Frame 2
     val showTimestamp: Boolean = false,
-    val flareType: Int = -1 // -1: None, 0: Random, 1: Vertical, 2: Corner
+    val flareType: Int = -1, // -1: None, 0: Random, 1: Vertical, 2: Corner
+    val hfLayout: String? = null // "SBS" or "TB"
 ) : Parcelable
 
 @Parcelize

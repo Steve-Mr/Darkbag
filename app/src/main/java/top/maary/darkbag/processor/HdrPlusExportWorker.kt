@@ -1,6 +1,7 @@
 package top.maary.darkbag.processor
 import top.maary.darkbag.fragments.SettingsFragment
 import top.maary.darkbag.utils.HalfFrameManager
+import top.maary.darkbag.utils.HalfFrameSessionStore
 
 import android.content.Context
 import android.net.Uri
@@ -18,7 +19,7 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
         val height = data.getInt("height", 0)
         val orientation = data.getInt("orientation", 0)
         val digitalGain = data.getFloat("digitalGain", 1.0f)
-        val targetLog = data.getInt("targetLog", 0)
+        val targetLogInt = data.getInt("targetLog", 0)
         val lutPath = data.getString("lutPath")
         val tiffPath = data.getString("tiffPath")
         val jpgPath = data.getString("jpgPath")
@@ -72,14 +73,17 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
             SettingsFragment.PREFS_NAME,
             Context.MODE_PRIVATE
         )
-        val editConfig = if (hfMetadata == null) {
-            val activeLut = prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, "None")
-            val targetLog = prefs.getString(SettingsFragment.KEY_TARGET_LOG, "None")
-            top.maary.darkbag.models.EditConfig(
-                log = targetLog,
-                lut = activeLut
-            )
-        } else null
+        val activeLut = prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, "None")
+        val targetLogStr = prefs.getString(SettingsFragment.KEY_TARGET_LOG, "None")
+        val layout = if (hfMetadata?.profile == HalfFrameSessionStore.PROFILE_HALF_TOP) "TB" else if (hfMetadata != null) "SBS" else null
+        val editConfig = top.maary.darkbag.models.EditConfig(
+            log = targetLogStr,
+            lut = activeLut,
+            adjustments = if (hfMetadata != null) listOf(top.maary.darkbag.models.BasicAdjustments(), top.maary.darkbag.models.BasicAdjustments()) else null,
+            hfLayout = layout,
+            showTimestamp = hfMetadata?.dateStamp ?: false,
+            flareType = if (prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_LIGHT_LEAK, false)) 0 else -1
+        )
 
         Log.d(TAG, "Background Export Worker started for $baseName")
 
@@ -89,7 +93,7 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
             height = height,
             orientation = orientation,
             digitalGain = digitalGain,
-            targetLog = targetLog,
+            targetLog = targetLogInt,
             lutPath = lutPath,
             exposure = editConfig?.exposure ?: 0f,
             contrast = editConfig?.contrast ?: 0f,

@@ -1783,12 +1783,15 @@ class CameraFragment : Fragment() {
 
                 if (result < 0) throw RuntimeException("processSingleFrameRaw failed: $result")
 
-                val editConfig = if (image.halfFrameMetadata == null) {
-                    top.maary.darkbag.models.EditConfig(
-                        log = targetLogName ?: "None",
-                        lut = activeLutName ?: "None"
-                    )
-                } else null
+                val layout = if (image.halfFrameMetadata?.profile == HalfFrameSessionStore.PROFILE_HALF_TOP) "TB" else if (image.halfFrameMetadata != null) "SBS" else null
+                val editConfig = top.maary.darkbag.models.EditConfig(
+                    log = targetLogName ?: "None",
+                    lut = activeLutName ?: "None",
+                    adjustments = if (image.halfFrameMetadata != null) listOf(top.maary.darkbag.models.BasicAdjustments(), top.maary.darkbag.models.BasicAdjustments()) else null,
+                    hfLayout = layout,
+                    showTimestamp = image.halfFrameMetadata?.dateStamp ?: false,
+                    flareType = if (prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_LIGHT_LEAK, false)) 0 else -1
+                )
 
                 // 4. Fast Output Feedback (Thumbnail)
                 val fastOutputUri = ImageSaver.saveProcessedImage(
