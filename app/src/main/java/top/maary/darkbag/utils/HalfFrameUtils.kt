@@ -171,6 +171,11 @@ object HalfFrameUtils {
                           layout == "SBS" ||
                           (layout.isEmpty() && bitmap.width > bitmap.height)
 
+        val isTopBottom = layout == "Top-bottom" ||
+                          layout == "上下排列" ||
+                          layout.contains("top", ignoreCase = true) ||
+                          layout == "TB"
+
         val paint = Paint().apply {
             color = Color.parseColor("#FF8C00") // Classic orange
             alpha = 220
@@ -185,7 +190,7 @@ object HalfFrameUtils {
         val textWidth = paint.measureText(dateText2)
         val margin = textWidth * 0.2f
 
-        if (isSideBySide) {
+        if (isSideBySide && !isTopBottom) {
             // Side-by-side (Wide): [ Frame 1 (Portrait) | Divider | Frame 2 (Portrait) ]
             // Actually, we can just use the center gap.
             val centerGapX = bitmap.width / 2f

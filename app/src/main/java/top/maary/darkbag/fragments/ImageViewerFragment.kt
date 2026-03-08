@@ -660,12 +660,12 @@ class ImageViewerFragment : Fragment() {
                         val forceUpdate1 = lastPreviewConfig == null ||
                                           lastPreviewConfig?.log != config.log ||
                                           lastPreviewConfig?.lut != config.lut ||
-                                          lastPreviewConfig?.adjustments?.get(0) != config.adjustments?.get(0)
+                                          lastPreviewConfig?.adjustments?.getOrNull(0) != config.adjustments?.getOrNull(0)
 
                         val forceUpdate2 = lastPreviewConfig == null ||
                                           lastPreviewConfig?.log != config.log ||
                                           lastPreviewConfig?.lut != config.lut ||
-                                          lastPreviewConfig?.adjustments?.get(1) != config.adjustments?.get(1)
+                                          lastPreviewConfig?.adjustments?.getOrNull(1) != config.adjustments?.getOrNull(1)
 
                         if (forceUpdate1 || cachedBitmap1 == null) {
                             cachedBitmap1?.recycle()

@@ -61,15 +61,7 @@ class ImageRepository(private val context: Context) {
                             context.contentResolver.openFileDescriptor(file.uri, "r")?.use { pfd ->
                                 val exif = androidx.exifinterface.media.ExifInterface(pfd.fileDescriptor)
                                 val comment = exif.getAttribute(androidx.exifinterface.media.ExifInterface.TAG_USER_COMMENT)
-                                if (comment?.startsWith("HF_LAYOUT:") == true) {
-                                    builder.hfLayout = comment.substringAfter("HF_LAYOUT:")
-                                } else if (comment?.startsWith("{") == true) {
-                                    val config = parseEditConfig(comment)
-                                    builder.editConfig = config
-                                    if (config?.hfLayout != null) {
-                                        builder.hfLayout = config.hfLayout
-                                    }
-                                }
+                                parseUserComment(comment, builder)
 
                                 val orientation = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION, androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL)
                                 val w = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_IMAGE_WIDTH, 0)
@@ -150,15 +142,7 @@ class ImageRepository(private val context: Context) {
                             context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
                                 val exif = androidx.exifinterface.media.ExifInterface(pfd.fileDescriptor)
                                 val comment = exif.getAttribute(androidx.exifinterface.media.ExifInterface.TAG_USER_COMMENT)
-                                if (comment?.startsWith("HF_LAYOUT:") == true) {
-                                    builder.hfLayout = comment.substringAfter("HF_LAYOUT:")
-                                } else if (comment?.startsWith("{") == true) {
-                                    val config = parseEditConfig(comment)
-                                    builder.editConfig = config
-                                    if (config?.hfLayout != null) {
-                                        builder.hfLayout = config.hfLayout
-                                    }
-                                }
+                                parseUserComment(comment, builder)
 
                                 val orientation = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION, androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL)
                                 val w = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_IMAGE_WIDTH, 0)
@@ -186,6 +170,18 @@ class ImageRepository(private val context: Context) {
                     mime == "image/tiff" -> builder.tiffUri = uri
                 }
                 builder.updateTime(date)
+            }
+        }
+    }
+
+    private fun parseUserComment(comment: String?, builder: ImageGroupBuilder) {
+        if (comment?.startsWith("HF_LAYOUT:") == true) {
+            builder.hfLayout = comment.substringAfter("HF_LAYOUT:")
+        } else if (comment?.startsWith("{") == true) {
+            val config = parseEditConfig(comment)
+            builder.editConfig = config
+            if (config?.hfLayout != null) {
+                builder.hfLayout = config.hfLayout
             }
         }
     }
