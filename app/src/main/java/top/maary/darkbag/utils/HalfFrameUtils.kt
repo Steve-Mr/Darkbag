@@ -37,7 +37,7 @@ object HalfFrameUtils {
         val firstRaw = BitmapFactory.decodeFile(firstPath) ?: return null
         val secondRaw = BitmapFactory.decodeFile(secondPath) ?: return null
 
-        val isSideBySide = layout == "Side-by-side" || layout == "左右排列" || layout.contains("side", ignoreCase = true)
+        val isSideBySide = layout == "Side-by-side" || layout == "左右排列" || layout.contains("side", ignoreCase = true) || layout == "SBS"
 
         // Side-by-side wants Portrait inputs; Top-bottom wants Landscape inputs
         val firstBitmap = ensureOrientation(firstRaw, isSideBySide)
@@ -168,6 +168,7 @@ object HalfFrameUtils {
         val isSideBySide = layout == "Side-by-side" ||
                           layout == "左右排列" ||
                           layout.contains("side", ignoreCase = true) ||
+                          layout == "SBS" ||
                           (layout.isEmpty() && bitmap.width > bitmap.height)
 
         val paint = Paint().apply {

@@ -220,6 +220,36 @@ class ImageViewerFragment : Fragment() {
         binding.hfSelection1.visibility = View.GONE
         binding.hfSelection2.visibility = View.GONE
 
+        if (currentGroup.isHalfFrame()) {
+            binding.btnEditTimestamp.visibility = View.VISIBLE
+            binding.btnEditFlare.visibility = View.VISIBLE
+            updateEffectsButtons()
+        } else {
+            binding.btnEditTimestamp.visibility = View.GONE
+            binding.btnEditFlare.visibility = View.GONE
+        }
+
+        binding.btnEditTimestamp.setOnClickListener {
+            val current = currentEditConfig ?: return@setOnClickListener
+            currentEditConfig = current.copy(showTimestamp = !current.showTimestamp)
+            updateEffectsButtons()
+            applyEditPreview()
+        }
+
+        binding.btnEditFlare.setOnClickListener {
+            val current = currentEditConfig ?: return@setOnClickListener
+            val nextFlare = when (current.flareType) {
+                -1 -> 0
+                0 -> 1
+                1 -> 2
+                2 -> -1
+                else -> -1
+            }
+            currentEditConfig = current.copy(flareType = nextFlare)
+            updateEffectsButtons()
+            applyEditPreview()
+        }
+
         updateEditUi()
 
         // Load DNG bytes
@@ -269,6 +299,24 @@ class ImageViewerFragment : Fragment() {
         }
     }
 
+    private fun updateEffectsButtons() {
+        val config = currentEditConfig ?: return
+
+        binding.btnEditTimestamp.setIconTintResource(if (config.showTimestamp) R.color.vibrant_orange else android.R.color.white)
+        binding.btnEditTimestamp.alpha = if (config.showTimestamp) 1.0f else 0.6f
+
+        val flareIcon = when (config.flareType) {
+            -1 -> R.drawable.ic_hdr_dynamic
+            0 -> R.drawable.ic_hdr_dynamic
+            1 -> R.drawable.ic_hdr_dynamic // Should ideally have distinct icons
+            2 -> R.drawable.ic_hdr_dynamic
+            else -> R.drawable.ic_hdr_dynamic
+        }
+        binding.btnEditFlare.setIconResource(flareIcon)
+        binding.btnEditFlare.setIconTintResource(if (config.flareType != -1) R.color.vibrant_pink else android.R.color.white)
+        binding.btnEditFlare.alpha = if (config.flareType != -1) 1.0f else 0.6f
+    }
+
     private fun updateSelectionFeedback() {
         val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
         val isTB = currentGroup.hfLayout == "TB"
@@ -276,8 +324,8 @@ class ImageViewerFragment : Fragment() {
         val dimColor = 0x66000000.toInt()
         val activeColor = 0x00000000.toInt()
 
-        binding.hfSelection1.setBackgroundColor(if (selectedDngIndex == 0) activeColor else dimColor)
-        binding.hfSelection2.setBackgroundColor(if (selectedDngIndex == 1) activeColor else dimColor)
+        binding.hfSelection1.setBackgroundColor(if (isIndividualEditMode && selectedDngIndex == 0) activeColor else if (isIndividualEditMode) dimColor else activeColor)
+        binding.hfSelection2.setBackgroundColor(if (isIndividualEditMode && selectedDngIndex == 1) activeColor else if (isIndividualEditMode) dimColor else activeColor)
 
         // Adjust constraints based on layout
         val lp1 = binding.hfSelection1.layoutParams as androidx.constraintlayout.widget.ConstraintLayout.LayoutParams
@@ -434,20 +482,16 @@ class ImageViewerFragment : Fragment() {
 
         val config = currentEditConfig ?: return
 
-        // Effects tab visibility
-        if (!currentGroup.isHalfFrame()) {
-             sheetBinding.editTabs.removeTabAt(2)
-        } else {
-             sheetBinding.layoutEffects.visibility = View.GONE // Start hidden, only show if tab selected
-             sheetBinding.switchTimestamp.isChecked = config.showTimestamp
-             val checkedFlareId = when(config.flareType) {
-                 -1 -> R.id.btn_flare_none
-                 0 -> R.id.btn_flare_random
-                 1 -> R.id.btn_flare_v
-                 2 -> R.id.btn_flare_c
-                 else -> R.id.btn_flare_none
-             }
-             sheetBinding.groupFlare.check(checkedFlareId)
+        if (currentGroup.isHalfFrame()) {
+            sheetBinding.groupFrameSelection.visibility = View.VISIBLE
+            sheetBinding.groupFrameSelection.check(if (selectedDngIndex == 0) R.id.btn_select_frame1 else R.id.btn_select_frame2)
+            sheetBinding.groupFrameSelection.addOnButtonCheckedListener { _, checkedId, isChecked ->
+                if (isChecked) {
+                    selectedDngIndex = if (checkedId == R.id.btn_select_frame1) 0 else 1
+                    updateSelectionFeedback()
+                    updateSlidersInSheet(sheetBinding)
+                }
+            }
         }
 
         updateSlidersInSheet(sheetBinding)
@@ -456,7 +500,6 @@ class ImageViewerFragment : Fragment() {
             override fun onTabSelected(tab: com.google.android.material.tabs.TabLayout.Tab?) {
                 sheetBinding.layoutLight.visibility = if (tab?.position == 0) View.VISIBLE else View.GONE
                 sheetBinding.layoutColor.visibility = if (tab?.position == 1) View.VISIBLE else View.GONE
-                sheetBinding.layoutEffects.visibility = if (tab?.position == 2) View.VISIBLE else View.GONE
             }
             override fun onTabUnselected(tab: com.google.android.material.tabs.TabLayout.Tab?) {}
             override fun onTabReselected(tab: com.google.android.material.tabs.TabLayout.Tab?) {}
@@ -503,30 +546,12 @@ class ImageViewerFragment : Fragment() {
         sheetBinding.sliderWhites.addOnChangeListener(changeListener)
         sheetBinding.sliderBlacks.addOnChangeListener(changeListener)
 
-        sheetBinding.switchTimestamp.setOnCheckedChangeListener { _, isChecked ->
-            currentEditConfig = currentEditConfig?.copy(showTimestamp = isChecked)
-            applyEditPreview()
-        }
-
-        sheetBinding.groupFlare.addOnButtonCheckedListener { _, checkedId, isChecked ->
-            if (isChecked) {
-                val type = when(checkedId) {
-                    R.id.btn_flare_none -> -1
-                    R.id.btn_flare_random -> 0
-                    R.id.btn_flare_v -> 1
-                    R.id.btn_flare_c -> 2
-                    else -> -1
-                }
-                currentEditConfig = currentEditConfig?.copy(flareType = type)
-                applyEditPreview()
-            }
-        }
-
         dialog.setOnDismissListener {
             isIndividualEditMode = false
             binding.hfSelection1.visibility = View.GONE
             binding.hfSelection2.visibility = View.GONE
             activeAdjustmentBinding = null
+            updateSelectionFeedback()
         }
 
         dialog.show()
@@ -658,7 +683,7 @@ class ImageViewerFragment : Fragment() {
                         if (b1 != null || b2 != null) {
                             // Manual Stitching for preview
                             val isSBS = currentGroup.hfLayout != "TB"
-                            val gap = top.maary.darkbag.utils.HalfFrameUtils.calculateGap(maxOf(b1?.width ?: 0, b1?.height ?: 0)).toFloat() / 4 // Scale gap for preview
+                            val gap = top.maary.darkbag.utils.HalfFrameUtils.calculateGap(maxOf(b1?.width ?: 0, b1?.height ?: 0)).toFloat()
 
                             val w1 = b1?.width ?: b2?.width ?: 0
                             val h1 = b1?.height ?: b2?.height ?: 0
@@ -684,6 +709,8 @@ class ImageViewerFragment : Fragment() {
                                 config.showTimestamp,
                                 config.flareType >= 0,
                                 currentGroup.hfLayout ?: "SBS",
+                                time1 = currentGroup.captureTime, // Should ideally store individual times
+                                time2 = currentGroup.captureTime,
                                 flareType = config.flareType
                             )
 
@@ -840,7 +867,8 @@ class ImageViewerFragment : Fragment() {
                             saveRaw = false,
                             targetUri = targetUri,
                             jpgFolderUri = if (isReplacement) null else jpgFolderUri,
-                            editConfig = config
+                                editConfig = config,
+                                isAlreadyStitched = currentGroup.isHalfFrame()
                         )
                     }
                 } catch (e: Exception) {

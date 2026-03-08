@@ -52,10 +52,11 @@ object ImageSaver {
         isFastPath: Boolean = false,
         halfFrameMetadata: HalfFrameManager.Metadata? = null,
         editConfig: EditConfig? = null,
+        isAlreadyStitched: Boolean = false,
         onBitmapReady: ((Bitmap) -> Unit)? = null
     ): Uri? {
         val halfFrameManager = HalfFrameManager(context)
-        val isHalfFrameActive = halfFrameMetadata != null || halfFrameManager.isEnabled
+        val isHalfFrameActive = !isAlreadyStitched && (halfFrameMetadata != null || halfFrameManager.isEnabled)
 
         val actualSaveJpg = if (isHalfFrameActive) halfFrameManager.saveJpg else saveJpg
         val actualSaveRaw = if (isHalfFrameActive) halfFrameManager.saveRaw else saveRaw

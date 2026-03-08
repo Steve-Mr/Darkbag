@@ -154,6 +154,30 @@
                     android:textAllCaps="false"
                     app:icon="@drawable/ic_lut" />
 
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_edit_timestamp"
+                    android:layout_width="48dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    style="@style/Widget.Material3.Button.TonalButton"
+                    android:padding="0dp"
+                    android:visibility="gone"
+                    app:icon="@drawable/ic_photo"
+                    app:iconGravity="textStart"
+                    app:iconPadding="0dp" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_edit_flare"
+                    android:layout_width="48dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    style="@style/Widget.Material3.Button.TonalButton"
+                    android:padding="0dp"
+                    android:visibility="gone"
+                    app:icon="@drawable/ic_hdr_dynamic"
+                    app:iconGravity="textStart"
+                    app:iconPadding="0dp" />
+
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
