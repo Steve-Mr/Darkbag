@@ -61,7 +61,8 @@ public:
     // For now, bilateral_filter inside chroma_denoise schedules itself.
 
     Func linear_rgb_output = srgb(chroma_denoised_output, ccm);
-    output(x, y, c) = linear_rgb_output(x, y, c);
+    Func compressed_output = highlight_compress(linear_rgb_output, compression);
+    output(x, y, c) = compressed_output(x, y, c);
 
     // --- Scheduling ---
     if (use_gpu) {
@@ -193,6 +194,20 @@ private:
                              at_B && R_row && B_col, d2(x, y), at_B && R_row && R_col, d3(x, y),
                              input(x, y));
     return {output_dm, d0, d1, d2, d3};
+  }
+
+  Func highlight_compress(Func input, Expr compression_strength) {
+    Func output_hc("highlight_compress_output");
+    Expr strength = clamp(compression_strength, 0.0f, 1.0f);
+    Expr v = f32(input(x, y, c)) / 65535.0f;
+
+    // Soft-knee highlight roll-off. strength=0 -> identity.
+    Expr knee = 0.88f - 0.28f * strength;
+    Expr t = clamp((v - knee) / max(1e-6f, 1.0f - knee), 0.0f, 1.0f);
+    Expr reduction = (0.38f * strength) * t * t * (1.0f - knee);
+    Expr out = clamp(v - reduction, 0.0f, 1.0f);
+    output_hc(x, y, c) = u16_sat(out * 65535.0f);
+    return output_hc;
   }
 
   Func bilateral_filter(Func input, Expr width, Expr height) {

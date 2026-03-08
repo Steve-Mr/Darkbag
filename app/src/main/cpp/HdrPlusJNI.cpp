@@ -301,7 +301,9 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
     }
 
     auto halideStart = std::chrono::high_resolution_clock::now();
-    int halide_res = hdrplus_raw_pipeline(inputBuf, bl_r, bl_g0, bl_g1, bl_b, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, ccmHalideBuf, 1.0f, 1.0f, outputBuf);
+    float highlightCompression = std::clamp((1.0f - digitalGain) * 1.2f, 0.0f, 1.0f);
+    int halide_res = hdrplus_raw_pipeline(inputBuf, bl_r, bl_g0, bl_g1, bl_b, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, ccmHalideBuf, highlightCompression, 1.0f, outputBuf);
+    LOGD("HDR+ Halide params: compression=%.3f digitalGain=%.3f", highlightCompression, digitalGain);
     auto halideDurationMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - halideStart).count();
 
     halide_report_buffer.clear(); halide_profiler_report(nullptr);
@@ -369,6 +371,16 @@ Java_com_android_example_cameraxbasic_processor_ColorProcessor_processHdrPlus(
         }
     }
     auto postDurationMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - postStart).count();
+
+    size_t clippedCount = 0;
+    const uint16_t clipThreshold = (uint16_t)(kMax16BitValue * 0.99f);
+    for (size_t i = 0; i < finalImage.size(); i += 3) {
+        if (finalImage[i] >= clipThreshold || finalImage[i + 1] >= clipThreshold || finalImage[i + 2] >= clipThreshold) {
+            clippedCount++;
+        }
+    }
+    double clippedRatio = finalImage.empty() ? 0.0 : (double)clippedCount / (double)(width * height);
+    LOGD("HDR+ final linear clip ratio=%.5f (threshold=%u)", clippedRatio, clipThreshold);
 
     const char* tiff_p_cstr = (outputTiffPath) ? env->GetStringUTFChars(outputTiffPath, 0) : nullptr;
     const char* jpg_p_cstr = (outputJpgPath) ? env->GetStringUTFChars(outputJpgPath, 0) : nullptr;

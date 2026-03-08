@@ -20,14 +20,14 @@ object ExposureUtils {
     private const val FACTOR_EV_MINUS_1_5 = 0.3535f // -1.5 EV
     private const val FACTOR_EV_0 = 1.0f            // 0 EV
 
-    private const val CLIPPING_RATIO_THRESHOLD = 0.03
-    private const val CLIPPING_TO_EV_FACTOR = 15.0
-    private const val MAX_ADDITIONAL_UNDEREXPOSURE_STOPS = 2.0
-    private const val GAIN_DAMPENING_FACTOR = 0.2
-    private const val DYNAMIC_GAIN_CAP_LOW_CLIP = 1.10f
-    private const val DYNAMIC_GAIN_CAP_AT_THRESHOLD = 1.00f
-    private const val DYNAMIC_GAIN_CAP_HIGH_CLIP = 0.85f
-    private const val HIGH_CLIP_RATIO_REFERENCE = 0.20
+    private const val CLIPPING_RATIO_THRESHOLD = 0.015
+    private const val CLIPPING_TO_EV_FACTOR = 24.0
+    private const val MAX_ADDITIONAL_UNDEREXPOSURE_STOPS = 3.0
+    private const val GAIN_DAMPENING_FACTOR = 0.35
+    private const val DYNAMIC_GAIN_CAP_LOW_CLIP = 1.00f
+    private const val DYNAMIC_GAIN_CAP_AT_THRESHOLD = 0.92f
+    private const val DYNAMIC_GAIN_CAP_HIGH_CLIP = 0.70f
+    private const val HIGH_CLIP_RATIO_REFERENCE = 0.12
 
     data class ExposureConfig(
         val iso: Int,

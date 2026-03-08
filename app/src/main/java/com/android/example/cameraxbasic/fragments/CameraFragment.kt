@@ -179,6 +179,7 @@ class CameraFragment : Fragment() {
     private var isManualFocus = false
     private var isManualExposure = false
     @Volatile private var lastClippingRatio: Double = 0.0
+    @Volatile private var lastRawHighlightRatio: Double = 0.0
     private var activeManualTab: String? = null
     private var focusMeteringRegion: MeteringRectangle? = null
     private var exposureMeteringRegion: MeteringRectangle? = null
@@ -922,7 +923,7 @@ class CameraFragment : Fragment() {
                             val underexposureMode = prefs.getString(SettingsFragment.KEY_HDR_UNDEREXPOSURE_MODE, "Dynamic (Experimental)") ?: "Dynamic (Experimental)"
 
                             lastHdrPlusConfig = ExposureUtils.calculateHdrPlusExposure(
-                                iso, time, validIsoRange, validTimeRange, underexposureMode, lastClippingRatio
+                                iso, time, validIsoRange, validTimeRange, underexposureMode, effectiveHdrClippingRatio()
                             )
                         }
                     }
@@ -2813,7 +2814,7 @@ class CameraFragment : Fragment() {
                         validIsoRange,
                         validTimeRange,
                         underexposureMode,
-                        lastClippingRatio
+                        effectiveHdrClippingRatio()
                     )
                 }
 
@@ -2970,6 +2971,35 @@ class CameraFragment : Fragment() {
         val targetExposure = targetIso.toDouble() * targetTime.toDouble()
         if (currentExposure <= 0.0 || targetExposure <= 0.0) return 0.0f
         return (-log2(targetExposure / currentExposure)).toFloat()
+    }
+
+    private fun effectiveHdrClippingRatio(): Double {
+        // Blend screen-space and RAW-space indicators; RAW ratio is sparse so scale it for control use.
+        val rawWeighted = (lastRawHighlightRatio * 6.0).coerceAtMost(0.35)
+        return max(lastClippingRatio, rawWeighted)
+    }
+
+    private fun estimateRawHighlightRatio(frame: HdrFrame, whiteLevel: Int): Double {
+        val buffer = frame.buffer ?: return 0.0
+        if (whiteLevel <= 0 || frame.pixelStride < 2 || frame.rowStride <= 0) return 0.0
+
+        val dup = buffer.duplicate().order(java.nio.ByteOrder.nativeOrder())
+        val threshold = (whiteLevel * 0.985).toInt().coerceAtLeast(1)
+        val step = 8
+        var highlights = 0
+        var sampled = 0
+
+        for (y in 0 until frame.height step step) {
+            val rowBase = y * frame.rowStride
+            for (x in 0 until frame.width step step) {
+                val idx = rowBase + x * frame.pixelStride
+                if (idx + 1 >= dup.limit()) continue
+                val value = dup.getShort(idx).toInt() and 0xFFFF
+                if (value >= threshold) highlights++
+                sampled++
+            }
+        }
+        return if (sampled > 0) highlights.toDouble() / sampled else 0.0
     }
 
     private fun formatExposureTimeForOverlay(exposureTimeNs: Long): String {
@@ -3181,6 +3211,9 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 buffers.forEach { it.rewind() }
 
                 val debugStats = LongArray(15)
+
+                lastRawHighlightRatio = estimateRawHighlightRatio(frames.first(), whiteLevel)
+                Log.d(TAG, "HDR+ RAW highlight ratio=${String.format(Locale.US, "%.4f", lastRawHighlightRatio)}, effectiveClip=${String.format(Locale.US, "%.4f", effectiveHdrClippingRatio())}")
 
                 // Initial JNI call produces:
                 // 1) intermediate linear RAW buffer (tempRawPath) for the ExportWorker,
@@ -3716,7 +3749,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             val underexposureMode = prefs.getString(SettingsFragment.KEY_HDR_UNDEREXPOSURE_MODE, "Dynamic (Experimental)") ?: "Dynamic (Experimental)"
 
             val config = ExposureUtils.calculateHdrPlusExposure(
-                curIso, curTime, validIsoRange, validTimeRange, underexposureMode, lastClippingRatio
+                curIso, curTime, validIsoRange, validTimeRange, underexposureMode, effectiveHdrClippingRatio()
             )
 
             val burstSize = (prefs.getString(SettingsFragment.KEY_HDR_BURST_COUNT, "5") ?: "5").toIntOrNull() ?: 5

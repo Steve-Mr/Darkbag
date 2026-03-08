@@ -112,7 +112,7 @@ class ExposureUtilsTest {
         )
 
         // At ISO 100 dynamic underexposure is strong, but gain recovery is capped to protect highlights.
-        assertTrue("Expected gain cap <= 1.10, got ${config.digitalGain}", config.digitalGain <= 1.10f + 1e-3f)
+        assertTrue("Expected gain cap <= 1.00, got ${config.digitalGain}", config.digitalGain <= 1.00f + 1e-3f)
     }
 
     @Test
@@ -127,7 +127,7 @@ class ExposureUtilsTest {
         )
 
         assertTrue("High clipping should suppress gain below 1.0, got ${config.digitalGain}", config.digitalGain < 1.0f)
-        assertTrue("High clipping cap should stay above severe darkening floor, got ${config.digitalGain}", config.digitalGain >= 0.80f)
+        assertTrue("High clipping cap should stay above severe darkening floor, got ${config.digitalGain}", config.digitalGain >= 0.65f)
     }
 
     @Test
