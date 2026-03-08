@@ -6,6 +6,7 @@ import android.util.Log
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.android.example.cameraxbasic.utils.ImageSaver
+import com.android.example.cameraxbasic.utils.DebugLogManager
 
 class HdrPlusExportWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
 
@@ -32,6 +33,7 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
         val dynamicUnderexposureEvRaw = data.getFloat("dynamicUnderexposureEv", Float.NaN)
         val dynamicUnderexposureEv = if (dynamicUnderexposureEvRaw.isNaN()) null else dynamicUnderexposureEvRaw
         val debugOverlayText = data.getString("debugOverlayText")
+        val captureId = data.getString("captureId")
 
         val ccm = data.getFloatArray("ccm")
         if (ccm == null || ccm.size != 9) {
@@ -52,7 +54,9 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
         val rawFolderUri = data.getString("rawFolderUri")
         val mirror = data.getBoolean("mirror", false)
 
+        DebugLogManager.initialize(applicationContext)
         Log.d(TAG, "Background Export Worker started for $baseName")
+        DebugLogManager.addLog("Worker start baseName=$baseName", captureId)
 
         val ret = ColorProcessor.exportHdrPlus(
             tempRawPath, width, height, orientation, digitalGain, targetLog,
@@ -90,12 +94,14 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
                     focalLengthMm = focalLength,
                     digitalGain = digitalGain,
                     hdrUnderexposureMode = underexposureMode,
-                    hdrDynamicUnderexposureEv = dynamicUnderexposureEv
+                    hdrDynamicUnderexposureEv = dynamicUnderexposureEv,
+                    captureId = captureId
                 ),
                 debugOverlayText = debugOverlayText
             )
 
             Log.d(TAG, "Background Export Worker finished successfully for $baseName. finalUri=$finalUri")
+            DebugLogManager.addLog("Worker success finalUri=$finalUri", captureId)
 
             if (finalUri != null) {
                 val prefs = applicationContext.getSharedPreferences(
@@ -113,6 +119,7 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
             return Result.success()
         } else {
             Log.e(TAG, "Background Export Worker failed with code $ret")
+            DebugLogManager.addLog("Worker failed code=$ret", captureId)
             // Notify UI to stop animation even on failure
             ColorProcessor.onBackgroundSaveComplete(
                 baseName, null, null, null, null, zoomFactor, orientation, saveTiff, saveJpg

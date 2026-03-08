@@ -25,6 +25,7 @@ import androidx.recyclerview.widget.RecyclerView
 import com.android.example.cameraxbasic.R
 import com.android.example.cameraxbasic.databinding.FragmentSettingsBinding
 import com.android.example.cameraxbasic.utils.LutManager
+import com.android.example.cameraxbasic.utils.DebugLogManager
 import com.google.android.material.color.MaterialColors
 import java.io.File
 
@@ -44,6 +45,7 @@ class SettingsFragment : Fragment() {
         super.onViewCreated(view, savedInstanceState)
         prefs = requireContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         cameraRepository = com.android.example.cameraxbasic.utils.CameraRepository(requireContext())
+        DebugLogManager.initialize(requireContext())
 
         // Apply Edge-to-Edge Insets
         ViewCompat.setOnApplyWindowInsetsListener(binding.appBar) { v, insets ->
@@ -108,10 +110,8 @@ class SettingsFragment : Fragment() {
     }
 
     private fun updateDebugStats() {
-        val logs = com.android.example.cameraxbasic.utils.DebugLogManager.getLogs()
-        if (logs.isNotEmpty()) {
-            binding.tvDebugStats.text = logs
-        }
+        val logs = DebugLogManager.getLogs()
+        binding.tvDebugStats.text = if (logs.isNotEmpty()) logs else "No debug logs"
     }
 
     private fun setupToolbar() {
@@ -276,6 +276,8 @@ class SettingsFragment : Fragment() {
         binding.switchCloseDebug.setOnCheckedChangeListener { _, isChecked ->
             if (isChecked) {
                 prefs.edit().putBoolean(KEY_DEBUG_ENABLED, false).apply()
+                DebugLogManager.clearLogs()
+                updateDebugStats()
                 updateDebugVisibility()
                 aboutClickCount = 0
             }

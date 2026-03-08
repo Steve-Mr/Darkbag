@@ -461,6 +461,7 @@ class CameraFragment : Fragment() {
         // Initialize Preferences
         val prefs =
             requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        com.android.example.cameraxbasic.utils.DebugLogManager.initialize(requireContext())
 
         // Initialize Flash State
         isFlashEnabled = prefs.getBoolean(SettingsFragment.KEY_FLASH_MODE, false)
@@ -1613,10 +1614,11 @@ class CameraFragment : Fragment() {
                         fNumber = fNumber,
                         focalLengthMm = focalLength,
                         digitalGain = 1.0f,
-                        hdrUnderexposureMode = "Off"
+                        hdrUnderexposureMode = "Off",
+                        captureId = captureId
                     ),
                     debugOverlayText = if (prefs.getBoolean(SettingsFragment.KEY_DEBUG_ENABLED, false)) {
-                        buildCaptureDebugOverlayText(iso, exposureTime, fNumber, focalLength, 1.0f, "Off", null)
+                        buildCaptureDebugOverlayText(captureId, iso, exposureTime, fNumber, focalLength, 1.0f, "Off", null)
                     } else null
                 )
 
@@ -1648,10 +1650,11 @@ class CameraFragment : Fragment() {
                     .putFloat("fNumber", fNumber)
                     .putFloat("focalLength", focalLength)
                     .putLong("captureTimeMillis", captureTime)
+                    .putString("captureId", captureId)
                     .putString("underexposureMode", "Off")
                     .putFloat("dynamicUnderexposureEv", Float.NaN)
                     .putString("debugOverlayText", if (prefs.getBoolean(SettingsFragment.KEY_DEBUG_ENABLED, false)) {
-                        buildCaptureDebugOverlayText(iso, exposureTime, fNumber, focalLength, 1.0f, "Off", null)
+                        buildCaptureDebugOverlayText(captureId, iso, exposureTime, fNumber, focalLength, 1.0f, "Off", null)
                     } else null)
                     .putFloatArray("ccm", ccm)
                     .putFloatArray("whiteBalance", wb)
@@ -1682,7 +1685,7 @@ class CameraFragment : Fragment() {
                         Native Halide Detail: ${debugStats[0]}ms
                     """.trimIndent()
                     Log.i(TAG, report)
-                    com.android.example.cameraxbasic.utils.DebugLogManager.addLog(report)
+                    com.android.example.cameraxbasic.utils.DebugLogManager.addLog(report, captureId)
                 }
 
             } catch (e: Exception) {
@@ -3014,6 +3017,7 @@ class CameraFragment : Fragment() {
     }
 
     private fun buildCaptureDebugOverlayText(
+        captureId: String,
         iso: Int,
         exposureTimeNs: Long,
         fNumber: Float,
@@ -3029,6 +3033,8 @@ class CameraFragment : Fragment() {
             underexposureMode
         }
         return buildString {
+            append("CID: $captureId")
+            append("\n")
             append("ISO $iso  T ${formatExposureTimeForOverlay(exposureTimeNs)}  f/${String.format(Locale.US, "%.1f", fNumber)}  ${String.format(Locale.US, "%.1f", focalLength)}mm")
             append("\n")
             append("UE: $underexposureLabel  DG: ${String.format(Locale.US, "%.3f", digitalGain)}")
@@ -3188,6 +3194,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 val captureTime = System.currentTimeMillis()
 
                 val dngName = SimpleDateFormat(FILENAME, Locale.US).format(System.currentTimeMillis()) + "_HDRPLUS"
+                val captureId = dngName
                 val saveTiff = prefs.getBoolean(SettingsFragment.KEY_SAVE_TIFF, false)
                 val saveJpg = prefs.getBoolean(SettingsFragment.KEY_SAVE_JPG, true)
                 val saveRaw = prefs.getBoolean(SettingsFragment.KEY_SAVE_RAW, true)
@@ -3213,7 +3220,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 val debugStats = LongArray(15)
 
                 lastRawHighlightRatio = estimateRawHighlightRatio(frames.first(), whiteLevel)
-                Log.d(TAG, "HDR+ RAW highlight ratio=${String.format(Locale.US, "%.4f", lastRawHighlightRatio)}, effectiveClip=${String.format(Locale.US, "%.4f", effectiveHdrClippingRatio())}")
+                Log.d(TAG, "[CID:$captureId] HDR+ RAW highlight ratio=${String.format(Locale.US, "%.4f", lastRawHighlightRatio)}, effectiveClip=${String.format(Locale.US, "%.4f", effectiveHdrClippingRatio())}")
 
                 // Initial JNI call produces:
                 // 1) intermediate linear RAW buffer (tempRawPath) for the ExportWorker,
@@ -3272,10 +3279,11 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                                 focalLengthMm = focalLength,
                                 digitalGain = digitalGain,
                                 hdrUnderexposureMode = underexposureMode,
-                                hdrDynamicUnderexposureEv = dynamicUnderexposureEv
+                                hdrDynamicUnderexposureEv = dynamicUnderexposureEv,
+                                captureId = captureId
                             ),
                             debugOverlayText = if (prefs.getBoolean(SettingsFragment.KEY_DEBUG_ENABLED, false)) {
-                                buildCaptureDebugOverlayText(iso, exposureTime, fNumber, focalLength, digitalGain, underexposureMode ?: "Unknown", dynamicUnderexposureEv)
+                                buildCaptureDebugOverlayText(captureId, iso, exposureTime, fNumber, focalLength, digitalGain, underexposureMode ?: "Unknown", dynamicUnderexposureEv)
                             } else null
                         )
                     } else {
@@ -3310,10 +3318,11 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         .putFloat("fNumber", fNumber)
                         .putFloat("focalLength", focalLength)
                         .putLong("captureTimeMillis", captureTime)
+                        .putString("captureId", captureId)
                         .putString("underexposureMode", underexposureMode)
                         .putFloat("dynamicUnderexposureEv", dynamicUnderexposureEv ?: Float.NaN)
                         .putString("debugOverlayText", if (prefs.getBoolean(SettingsFragment.KEY_DEBUG_ENABLED, false)) {
-                            buildCaptureDebugOverlayText(iso, exposureTime, fNumber, focalLength, digitalGain, underexposureMode ?: "Unknown", dynamicUnderexposureEv)
+                            buildCaptureDebugOverlayText(captureId, iso, exposureTime, fNumber, focalLength, digitalGain, underexposureMode ?: "Unknown", dynamicUnderexposureEv)
                         } else null)
                         .putFloatArray("ccm", ccm)
                         .putFloatArray("whiteBalance", wb)
@@ -3371,7 +3380,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     """.trimIndent()
 
                     Log.i(TAG, logMsg)
-                    com.android.example.cameraxbasic.utils.DebugLogManager.addLog(logMsg)
+                    com.android.example.cameraxbasic.utils.DebugLogManager.addLog(logMsg, captureId)
 
                 } else {
                     throw RuntimeException("JNI processing returned error code: $ret")

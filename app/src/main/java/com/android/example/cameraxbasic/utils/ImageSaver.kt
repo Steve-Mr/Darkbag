@@ -32,7 +32,8 @@ object ImageSaver {
         val focalLengthMm: Float? = null,
         val digitalGain: Float? = null,
         val hdrUnderexposureMode: String? = null,
-        val hdrDynamicUnderexposureEv: Float? = null
+        val hdrDynamicUnderexposureEv: Float? = null,
+        val captureId: String? = null
     )
 
     /**
@@ -375,6 +376,7 @@ object ImageSaver {
                     metadata.digitalGain?.let { add("HDRP_DigitalGain=${"%.4f".format(Locale.US, it)}") }
                     metadata.hdrUnderexposureMode?.let { add("HDRP_UnderexposureMode=$it") }
                     metadata.hdrDynamicUnderexposureEv?.let { add("HDRP_DynamicUnderexposureEV=${"%.3f".format(Locale.US, it)}") }
+                    metadata.captureId?.let { add("HDRP_CaptureId=$it") }
                 }
                 if (hdrExtras.isNotEmpty()) {
                     exif.setAttribute(ExifInterface.TAG_USER_COMMENT, hdrExtras.joinToString("; "))
