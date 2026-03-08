@@ -31,6 +31,7 @@ class ImageViewerFragment : Fragment() {
     private lateinit var adapter: ImageViewerAdapter
 
     private var isEditMode = false
+    private var isAdjusted = false
     private var isIndividualEditMode = false
     private var currentEditConfig: top.maary.darkbag.models.EditConfig? = null
     private var selectedDngIndex = 0 // 0 or 1 for half-frame
@@ -93,34 +94,42 @@ class ImageViewerFragment : Fragment() {
             }
             if (initialPos != -1) {
                 binding.imagePager.setCurrentItem(initialPos, false)
+                updateControlsForPosition(initialPos)
             } else if (targetUri != null) {
                 // If the target image was deleted, stay at current or nearest index
                 // ViewPager2 handles this somewhat, but let's be explicit if needed.
             }
 
             setupActionButtons()
-            updateEditButtonVisibility()
         }
 
         binding.imagePager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
             override fun onPageSelected(position: Int) {
-                updateEditButtonVisibility()
+                updateControlsForPosition(position)
             }
         })
     }
 
-    private fun updateEditButtonVisibility() {
+    private fun updateControlsForPosition(position: Int) {
         if (!::adapter.isInitialized || adapter.itemCount == 0) return
-        val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
-        binding.btnEdit.visibility = if (currentGroup.dngUri != null || currentGroup.dngUri1 != null) View.VISIBLE else View.GONE
+        val group = adapter.getGroup(position)
+
+        binding.btnJpg.visibility = if (group.jpgUri != null) View.VISIBLE else View.GONE
+        binding.btnTiff.visibility = if (group.tiffUri != null) View.VISIBLE else View.GONE
+        binding.btnDng.visibility = if (group.dngUri != null || group.dngUri1 != null) View.VISIBLE else View.GONE
+
+        val selectedFormatId = adapter.getSelectedFormat(position, group)
+        binding.formatToggleGroup.check(selectedFormatId)
+
+        if (selectedFormatId == R.id.btn_dng) {
+            if (!isEditMode) enterEditMode(false)
+        } else {
+            if (isEditMode) exitEditMode()
+        }
     }
 
     private fun setupActionButtons() {
-        binding.btnEdit.setOnClickListener {
-            enterEditMode()
-        }
-
-        binding.editControlsRoot.setOnClickListener {
+        binding.controlsContainer.setOnClickListener {
             if (binding.editLutListContainer.visibility == View.VISIBLE) {
                 binding.editLutListContainer.visibility = View.GONE
             }
@@ -140,17 +149,19 @@ class ImageViewerFragment : Fragment() {
             popup.show()
         }
 
+        binding.btnTopCancel.setOnClickListener {
+            exitEditMode()
+        }
+
         binding.btnShare.setOnClickListener {
             val currentIndex = binding.imagePager.currentItem
             val currentGroup = adapter.getGroup(currentIndex)
+            val selectedFormatId = adapter.getSelectedFormat(currentIndex, currentGroup)
 
-            val holder = (binding.imagePager.getChildAt(0) as? androidx.recyclerview.widget.RecyclerView)
-                ?.findViewHolderForAdapterPosition(currentIndex) as? ImageViewerAdapter.ViewHolder
-
-            if (holder?.binding?.formatToggleGroup?.checkedButtonId == R.id.btn_dng && currentGroup.isHalfFrame()) {
+            if (selectedFormatId == R.id.btn_dng && currentGroup.isHalfFrame()) {
                 showHalfFrameShareSheet(currentGroup)
             } else {
-                val currentUri = when (holder?.binding?.formatToggleGroup?.checkedButtonId) {
+                val currentUri = when (selectedFormatId) {
                     R.id.btn_jpg -> currentGroup.jpgUri
                     R.id.btn_tiff -> currentGroup.tiffUri
                     R.id.btn_dng -> currentGroup.dngUri ?: currentGroup.dngUri1 ?: currentGroup.dngUri2
@@ -163,11 +174,6 @@ class ImageViewerFragment : Fragment() {
         binding.btnDelete.setOnClickListener {
             val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
             showDeleteDialog(currentGroup)
-        }
-
-        // Edit Mode Buttons
-        binding.btnEditCancel.setOnClickListener {
-            exitEditMode()
         }
 
         binding.btnEditLogLut.setOnClickListener {
@@ -196,25 +202,33 @@ class ImageViewerFragment : Fragment() {
             }
             showAdjustmentsBottomSheet()
         }
+
+        binding.formatToggleGroup.addOnButtonCheckedListener { _, checkedId, isChecked ->
+            if (isChecked) {
+                val currentIndex = binding.imagePager.currentItem
+                adapter.setFormat(currentIndex, checkedId)
+                updateControlsForPosition(currentIndex)
+            }
+        }
     }
 
-    private fun enterEditMode() {
+    private fun enterEditMode(showAdjusted: Boolean = true) {
         val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
         val dngUri1 = currentGroup.dngUri ?: currentGroup.dngUri1 ?: return
         val dngUri2 = currentGroup.dngUri2
 
         isEditMode = true
+        isAdjusted = showAdjusted
         isIndividualEditMode = false
         selectedDngIndex = 0
-        hideUi()
-        binding.editControlsRoot.visibility = View.VISIBLE
+        binding.editorControlsLeft.visibility = View.VISIBLE
+        binding.fabAdjust.visibility = View.VISIBLE
         binding.imagePager.isUserInputEnabled = false
 
         currentEditConfig = currentGroup.editConfig?.copy() ?: top.maary.darkbag.models.EditConfig(
             adjustments = if (currentGroup.isHalfFrame()) listOf(top.maary.darkbag.models.BasicAdjustments(), top.maary.darkbag.models.BasicAdjustments()) else null
         )
 
-        // Explicitly refresh Log/LUT labels
         updateEditUi()
 
         binding.hfSelection1.visibility = View.GONE
@@ -232,8 +246,7 @@ class ImageViewerFragment : Fragment() {
         binding.btnEditTimestamp.setOnClickListener {
             val current = currentEditConfig ?: return@setOnClickListener
             currentEditConfig = current.copy(showTimestamp = !current.showTimestamp)
-            updateEffectsButtons()
-            applyEditPreview()
+            onConfigChanged()
         }
 
         binding.btnEditFlare.setOnClickListener {
@@ -246,11 +259,10 @@ class ImageViewerFragment : Fragment() {
                 else -> -1
             }
             currentEditConfig = current.copy(flareType = nextFlare)
-            updateEffectsButtons()
-            applyEditPreview()
+            onConfigChanged()
         }
 
-        updateEditUi()
+        updateAdjustedUiState()
 
         // Load DNG bytes
         lifecycleScope.launch(Dispatchers.IO) {
@@ -269,8 +281,35 @@ class ImageViewerFragment : Fragment() {
         }
     }
 
+    private fun onConfigChanged() {
+        isAdjusted = true
+        updateEffectsButtons()
+        updateEditUi()
+        updateAdjustedUiState()
+        applyEditPreview()
+    }
+
+    private fun updateAdjustedUiState() {
+        if (isAdjusted) {
+            binding.layoutShareDeleteSplit.visibility = View.GONE
+            binding.layoutSaveCancelSplit.visibility = View.VISIBLE
+            binding.btnTopCancel.visibility = View.VISIBLE
+            binding.toolbar.navigationIcon = null
+            binding.toolbar.setNavigationOnClickListener(null)
+        } else {
+            binding.layoutShareDeleteSplit.visibility = View.VISIBLE
+            binding.layoutSaveCancelSplit.visibility = View.GONE
+            binding.btnTopCancel.visibility = View.GONE
+            binding.toolbar.setNavigationIcon(R.drawable.ic_back)
+            binding.toolbar.setNavigationOnClickListener {
+                findNavController().navigateUp()
+            }
+        }
+    }
+
     private fun exitEditMode() {
         isEditMode = false
+        isAdjusted = false
         isIndividualEditMode = false
         sourceDngBytes = null
         sourceDngBytes2 = null
@@ -280,12 +319,13 @@ class ImageViewerFragment : Fragment() {
         cachedBitmap2 = null
         lastPreviewConfig = null
         previewJob?.cancel()
-        binding.editControlsRoot.visibility = View.GONE
+        binding.editorControlsLeft.visibility = View.GONE
+        binding.fabAdjust.visibility = View.GONE
         binding.hfSelection1.visibility = View.GONE
         binding.hfSelection2.visibility = View.GONE
         binding.editLutListContainer.visibility = View.GONE
         binding.imagePager.isUserInputEnabled = true
-        showUi()
+        updateAdjustedUiState()
 
         // Restore original image preview
         val currentIndex = binding.imagePager.currentItem
@@ -408,9 +448,8 @@ class ImageViewerFragment : Fragment() {
                 if (selectedLog == "None") {
                     currentEditConfig = currentEditConfig?.copy(lut = "None")
                 }
-                updateEditUi()
+                onConfigChanged()
                 showLutMenu()
-                applyEditPreview()
             }
         }
     }
@@ -432,9 +471,8 @@ class ImageViewerFragment : Fragment() {
                     val filename = luts[position - 2].name
                     currentEditConfig = currentEditConfig?.copy(lut = filename)
                 }
-                updateEditUi()
+                onConfigChanged()
                 showLutMenu()
-                applyEditPreview()
             }
         }
     }
@@ -544,7 +582,7 @@ class ImageViewerFragment : Fragment() {
                         else -> currentEditConfig
                     }
                 }
-                applyEditPreview()
+                onConfigChanged()
             }
         }
 
@@ -778,7 +816,8 @@ class ImageViewerFragment : Fragment() {
         val dngUri2 = currentGroup.dngUri2
 
         lifecycleScope.launch {
-            binding.editControlsRoot.visibility = View.GONE
+            binding.editorControlsLeft.visibility = View.GONE
+            binding.fabAdjust.visibility = View.GONE
             // Show some loading indicator if needed
 
             withContext(Dispatchers.IO) {
@@ -922,7 +961,7 @@ class ImageViewerFragment : Fragment() {
                 }
                 binding.imagePager.adapter = adapter
                 binding.imagePager.setCurrentItem(newPos, false)
-                updateEditButtonVisibility()
+                updateControlsForPosition(newPos)
             }
         }
     }
@@ -993,14 +1032,13 @@ class ImageViewerFragment : Fragment() {
                 }
             } else {
                 // Determine current format from ViewPager state
-                val holder = (binding.imagePager.getChildAt(0) as? androidx.recyclerview.widget.RecyclerView)
-                    ?.findViewHolderForAdapterPosition(currentIndex) as? ImageViewerAdapter.ViewHolder
+                val selectedFormatId = adapter.getSelectedFormat(currentIndex, group)
 
-                if (holder?.binding?.formatToggleGroup?.checkedButtonId == R.id.btn_dng && group.isHalfFrame()) {
+                if (selectedFormatId == R.id.btn_dng && group.isHalfFrame()) {
                      group.dngUri1?.let { context.contentResolver.delete(it, null, null) }
                      group.dngUri2?.let { context.contentResolver.delete(it, null, null) }
                 } else {
-                    val currentUri = when (holder?.binding?.formatToggleGroup?.checkedButtonId) {
+                    val currentUri = when (selectedFormatId) {
                         R.id.btn_jpg -> group.jpgUri
                         R.id.btn_tiff -> group.tiffUri
                         R.id.btn_dng -> group.dngUri
@@ -1027,9 +1065,7 @@ class ImageViewerFragment : Fragment() {
     }
 
     private fun setupToolbar() {
-        binding.toolbar.setNavigationOnClickListener {
-            findNavController().navigateUp()
-        }
+        updateAdjustedUiState()
     }
 
     private fun toggleUi() {
@@ -1040,9 +1076,9 @@ class ImageViewerFragment : Fragment() {
         if (isUiVisible) return
         isUiVisible = true
         binding.appBar.visibility = View.VISIBLE
-        binding.bottomControls.visibility = View.VISIBLE
         binding.appBar.animate().translationY(0f).setDuration(200).setListener(null).start()
-        binding.bottomControls.animate().translationY(0f).setDuration(200).setListener(null).start()
+        binding.controlsContainer.visibility = View.VISIBLE
+        binding.controlsContainer.animate().alpha(1f).setDuration(200).setListener(null).start()
     }
 
     private fun hideUi() {
@@ -1055,11 +1091,11 @@ class ImageViewerFragment : Fragment() {
                     if (!isUiVisible) binding.appBar.visibility = View.GONE
                 }
             }).start()
-        binding.bottomControls.animate().translationY(binding.bottomControls.height.toFloat())
+        binding.controlsContainer.animate().alpha(0f)
             .setDuration(200)
             .setListener(object : android.animation.AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: android.animation.Animator) {
-                    if (!isUiVisible) binding.bottomControls.visibility = View.GONE
+                    if (!isUiVisible) binding.controlsContainer.visibility = View.GONE
                 }
             }).start()
     }
@@ -1072,7 +1108,7 @@ class ImageViewerFragment : Fragment() {
                 left = systemBars.left,
                 right = systemBars.right
             )
-            binding.bottomControls.updatePadding(
+            binding.controlsContainer.updatePadding(
                 bottom = systemBars.bottom,
                 left = systemBars.left,
                 right = systemBars.right

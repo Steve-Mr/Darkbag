@@ -26,6 +26,22 @@ class ImageViewerAdapter(
         var loadJob: Job? = null
     }
 
+    private val selectedFormats = mutableMapOf<Int, Int>()
+
+    fun setFormat(position: Int, formatId: Int) {
+        selectedFormats[position] = formatId
+        notifyItemChanged(position)
+    }
+
+    fun getSelectedFormat(position: Int, group: ImageGroup): Int {
+        return selectedFormats[position] ?: when {
+            group.jpgUri != null -> R.id.btn_jpg
+            group.dngUri != null || group.dngUri1 != null -> R.id.btn_dng
+            group.tiffUri != null -> R.id.btn_tiff
+            else -> -1
+        }
+    }
+
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
         val binding = ItemImageGroupBinding.inflate(
             LayoutInflater.from(parent.context), parent, false
@@ -40,39 +56,20 @@ class ImageViewerAdapter(
         holder.binding.imageView.onTapped = { onImageTapped?.invoke() }
         holder.binding.imageView.onZoomChanged = { isZoomed -> onZoomChanged?.invoke(isZoomed) }
 
-        setupButtons(holder, group)
+        val selectedFormatId = getSelectedFormat(position, group)
 
-        // Default to JPG if available, else DNG, else TIFF
-        when {
-            group.jpgUri != null -> loadImage(holder, group.jpgUri)
-            group.isHalfFrame() -> loadHalfFrameDngs(holder, group)
-            group.dngUri != null -> loadImage(holder, group.dngUri)
-            group.tiffUri != null -> loadImage(holder, group.tiffUri)
-        }
-    }
-
-    private fun setupButtons(holder: ViewHolder, group: ImageGroup) {
-        with(holder.binding) {
-            btnJpg.visibility = if (group.jpgUri != null) View.VISIBLE else View.GONE
-            btnTiff.visibility = if (group.tiffUri != null) View.VISIBLE else View.GONE
-            btnDng.visibility = if (group.dngUri != null || group.dngUri1 != null || group.dngUri2 != null) View.VISIBLE else View.GONE
-
-            btnJpg.setOnClickListener { group.jpgUri?.let { loadImage(holder, it) } }
-            btnTiff.setOnClickListener { group.tiffUri?.let { loadImage(holder, it) } }
-            btnDng.setOnClickListener {
-                if (group.isHalfFrame()) {
-                    loadHalfFrameDngs(holder, group)
-                } else {
-                    group.dngUri?.let { loadImage(holder, it) }
+        when (selectedFormatId) {
+            R.id.btn_jpg -> group.jpgUri?.let { loadImage(holder, it) }
+            R.id.btn_dng -> if (group.isHalfFrame()) loadHalfFrameDngs(holder, group) else group.dngUri?.let { loadImage(holder, it) }
+            R.id.btn_tiff -> group.tiffUri?.let { loadImage(holder, it) }
+            else -> {
+                // Fallback
+                when {
+                    group.jpgUri != null -> loadImage(holder, group.jpgUri)
+                    group.isHalfFrame() -> loadHalfFrameDngs(holder, group)
+                    group.dngUri != null -> loadImage(holder, group.dngUri)
+                    group.tiffUri != null -> loadImage(holder, group.tiffUri)
                 }
-            }
-
-            // Set initial selected button
-            formatToggleGroup.clearChecked()
-            when {
-                group.jpgUri != null -> formatToggleGroup.check(R.id.btn_jpg)
-                group.dngUri != null || group.dngUri1 != null || group.dngUri2 != null -> formatToggleGroup.check(R.id.btn_dng)
-                group.tiffUri != null -> formatToggleGroup.check(R.id.btn_tiff)
             }
         }
     }

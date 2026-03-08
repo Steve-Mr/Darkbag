@@ -29,96 +29,118 @@
             android:layout_width="match_parent"
             android:layout_height="?attr/actionBarSize"
             app:navigationIcon="@drawable/ic_back"
-            app:navigationIconTint="@android:color/white"
-            app:titleTextColor="@android:color/white" />
+            app:navigationIconTint="@android:color/white">
+
+            <FrameLayout
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:layout_marginEnd="16dp">
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_top_cancel"
+                    style="@style/Widget.Material3.Button.TextButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="start|center_vertical"
+                    android:text="Cancel"
+                    android:textColor="@android:color/white"
+                    android:visibility="gone" />
+
+                <!-- Split Button for Share/Delete -->
+                <LinearLayout
+                    android:id="@+id/layout_share_delete_split"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="end|center_vertical"
+                    android:orientation="horizontal">
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btn_share"
+                        style="@style/Widget.Material3.Button.TonalButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Share"
+                        app:icon="@drawable/ic_share"
+                        app:shapeAppearanceOverlay="@style/ShapeAppearance.App.SplitButton.Main" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btn_delete"
+                        style="@style/Widget.Material3.Button.TonalButton"
+                        android:layout_width="48dp"
+                        android:layout_height="wrap_content"
+                        android:padding="0dp"
+                        app:icon="@drawable/ic_delete"
+                        app:iconGravity="textStart"
+                        app:iconPadding="0dp"
+                        app:shapeAppearanceOverlay="@style/ShapeAppearance.App.SplitButton.Alt" />
+
+                </LinearLayout>
+
+                <!-- Split Button for Save/Cancel -->
+                <LinearLayout
+                    android:id="@+id/layout_save_cancel_split"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="end|center_vertical"
+                    android:orientation="horizontal"
+                    android:visibility="gone">
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btn_edit_save_main"
+                        style="@style/Widget.Material3.Button"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Save"
+                        app:shapeAppearanceOverlay="@style/ShapeAppearance.App.SplitButton.Main" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btn_edit_save_alt"
+                        style="@style/Widget.Material3.Button"
+                        android:layout_width="48dp"
+                        android:layout_height="wrap_content"
+                        android:padding="0dp"
+                        app:icon="@drawable/ic_back"
+                        android:rotation="-90"
+                        app:shapeAppearanceOverlay="@style/ShapeAppearance.App.SplitButton.Alt" />
+
+                </LinearLayout>
+
+            </FrameLayout>
+
+        </com.google.android.material.appbar.MaterialToolbar>
 
     </com.google.android.material.appbar.AppBarLayout>
 
-    <LinearLayout
-        android:id="@+id/bottom_controls"
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:background="@color/black_transparent_50"
-        android:gravity="center"
-        android:orientation="horizontal"
-        android:padding="16dp"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent">
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btn_share"
-            style="@style/Widget.Material3.Button.TextButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Share"
-            android:textColor="?attr/colorOnSurface"
-            app:icon="@drawable/ic_share"
-            app:iconTint="?attr/colorOnSurface" />
-
-        <Space
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1" />
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btn_edit"
-            style="@style/Widget.Material3.Button.TextButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Edit"
-            android:textColor="?attr/colorOnSurface"
-            app:icon="@drawable/ic_edit"
-            app:iconTint="?attr/colorOnSurface" />
-
-        <Space
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1" />
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btn_delete"
-            style="@style/Widget.Material3.Button.TextButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Delete"
-            android:textColor="?attr/colorOnSurface"
-            app:icon="@drawable/ic_delete"
-            app:iconTint="?attr/colorOnSurface" />
-
-    </LinearLayout>
-
-    <!-- Edit Controls (Overlay) -->
+    <!-- Main Controls Container (Toggled by tap) -->
     <androidx.constraintlayout.widget.ConstraintLayout
-        android:id="@+id/edit_controls_root"
+        android:id="@+id/controls_container"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:visibility="gone"
-        android:clickable="true"
-        android:focusable="true">
+        android:clipChildren="false"
+        android:clipToPadding="false">
 
-        <!-- Selection Overlay for Half-frame -->
+        <!-- Half-frame Selection Overlay (Only in individual edit mode) -->
         <View
             android:id="@+id/hf_selection_1"
             android:layout_width="0dp"
             android:layout_height="0dp"
-            android:visibility="gone"
             android:background="#00000000"
-            app:layout_constraintTop_toTopOf="parent"
-            app:layout_constraintBottom_toBottomOf="@id/hf_selection_divider"
+            android:visibility="gone"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintEnd_toStartOf="@+id/hf_selection_divider"
             app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintEnd_toStartOf="@+id/hf_selection_divider" />
+            app:layout_constraintTop_toTopOf="parent" />
 
         <View
             android:id="@+id/hf_selection_2"
             android:layout_width="0dp"
             android:layout_height="0dp"
-            android:visibility="gone"
             android:background="#00000000"
-            app:layout_constraintTop_toTopOf="@id/hf_selection_divider"
+            android:visibility="gone"
             app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintStart_toEndOf="@+id/hf_selection_divider"
-            app:layout_constraintEnd_toEndOf="parent" />
+            app:layout_constraintTop_toTopOf="parent" />
 
         <androidx.constraintlayout.widget.Guideline
             android:id="@+id/hf_selection_divider"
@@ -127,130 +149,133 @@
             android:orientation="vertical"
             app:layout_constraintGuide_percent="0.5" />
 
-        <!-- Top Bar for Log/Lut -->
-        <com.google.android.material.card.MaterialCardView
-            android:id="@+id/edit_top_card"
-            android:layout_width="match_parent"
+        <!-- Bottom Left: Editor controls -->
+        <LinearLayout
+            android:id="@+id/editor_controls_left"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_margin="16dp"
-            app:cardCornerRadius="24dp"
-            app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
-            app:strokeWidth="0dp"
-            app:layout_constraintTop_toTopOf="parent">
+            android:layout_marginStart="16dp"
+            android:layout_marginBottom="16dp"
+            android:gravity="start"
+            android:orientation="vertical"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintStart_toStartOf="parent">
 
             <LinearLayout
-                android:layout_width="match_parent"
+                android:id="@+id/effect_buttons_container"
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:padding="8dp"
-                android:gravity="center">
-
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btn_edit_log_lut"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    style="@style/Widget.Material3.Button.TonalButton"
-                    android:text="Log: None / LUT: None"
-                    android:textAllCaps="false"
-                    android:ellipsize="end"
-                    android:maxLines="1"
-                    app:icon="@drawable/ic_lut" />
+                android:layout_marginBottom="8dp"
+                android:orientation="horizontal">
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btn_edit_timestamp"
-                    android:layout_width="48dp"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="8dp"
                     style="@style/Widget.Material3.Button.TonalButton"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:insetLeft="0dp"
+                    android:insetTop="0dp"
+                    android:insetRight="0dp"
+                    android:insetBottom="0dp"
                     android:padding="0dp"
                     android:visibility="gone"
                     app:icon="@drawable/ic_photo"
                     app:iconGravity="textStart"
-                    app:iconPadding="0dp" />
+                    app:iconPadding="0dp"
+                    app:shapeAppearanceOverlay="@style/ShapeAppearance.Material3.Corner.ExtraLarge" />
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btn_edit_flare"
-                    android:layout_width="48dp"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="8dp"
                     style="@style/Widget.Material3.Button.TonalButton"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:layout_marginStart="8dp"
+                    android:insetLeft="0dp"
+                    android:insetTop="0dp"
+                    android:insetRight="0dp"
+                    android:insetBottom="0dp"
                     android:padding="0dp"
                     android:visibility="gone"
                     app:icon="@drawable/ic_hdr_dynamic"
                     app:iconGravity="textStart"
-                    app:iconPadding="0dp" />
+                    app:iconPadding="0dp"
+                    app:shapeAppearanceOverlay="@style/ShapeAppearance.Material3.Corner.ExtraLarge" />
 
             </LinearLayout>
-        </com.google.android.material.card.MaterialCardView>
-
-        <!-- Basic Adjustments FAB -->
-        <com.google.android.material.floatingactionbutton.FloatingActionButton
-            android:id="@+id/fab_adjust"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_margin="16dp"
-            android:contentDescription="Adjust"
-            app:srcCompat="@drawable/ic_edit"
-            app:layout_constraintBottom_toTopOf="@id/edit_bottom_controls"
-            app:layout_constraintEnd_toEndOf="parent" />
-
-        <!-- Bottom Controls for Edit Mode -->
-        <LinearLayout
-            android:id="@+id/edit_bottom_controls"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:background="@color/black_transparent_50"
-            android:gravity="center"
-            android:orientation="horizontal"
-            android:padding="16dp"
-            app:layout_constraintBottom_toBottomOf="parent">
 
             <com.google.android.material.button.MaterialButton
-                android:id="@+id/btn_edit_cancel"
-                style="@style/Widget.Material3.Button.TextButton"
+                android:id="@+id/btn_edit_log_lut"
+                style="@style/Widget.Material3.Button.TonalButton"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Cancel"
-                android:textColor="@android:color/white" />
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:text="Log: None / LUT: None"
+                android:textAllCaps="false"
+                app:icon="@drawable/ic_lut"
+                app:shapeAppearanceOverlay="@style/ShapeAppearance.App.LutSwitcher" />
 
-            <Space
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1" />
+        </LinearLayout>
 
-            <!-- Split Button Emulation -->
-            <LinearLayout
-                android:id="@+id/layout_save_split"
+        <!-- Bottom Right: Viewer/Editor controls -->
+        <LinearLayout
+            android:id="@+id/viewer_controls_right"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="16dp"
+            android:layout_marginBottom="16dp"
+            android:gravity="end"
+            android:orientation="vertical"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintEnd_toEndOf="parent">
+
+            <com.google.android.material.floatingactionbutton.FloatingActionButton
+                android:id="@+id/fab_adjust"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:orientation="horizontal">
+                android:layout_marginBottom="8dp"
+                android:contentDescription="Adjust"
+                app:srcCompat="@drawable/ic_edit" />
+
+            <com.google.android.material.button.MaterialButtonToggleGroup
+                android:id="@+id/format_toggle_group"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                app:singleSelection="true">
 
                 <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btn_edit_save_main"
-                    style="@style/Widget.Material3.Button"
+                    android:id="@+id/btn_jpg"
+                    style="@style/Widget.Material3.Button.TonalButton"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Save"
+                    android:text="JPG"
+                    android:visibility="gone"
                     app:shapeAppearanceOverlay="@style/ShapeAppearance.App.SplitButton.Main" />
 
                 <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btn_edit_save_alt"
-                    style="@style/Widget.Material3.Button.Icon"
-                    android:layout_width="48dp"
+                    android:id="@+id/btn_tiff"
+                    style="@style/Widget.Material3.Button.TonalButton"
+                    android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:padding="0dp"
-                    app:icon="@drawable/ic_back"
-                    android:rotation="-90"
+                    android:text="TIFF"
+                    android:visibility="gone" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_dng"
+                    style="@style/Widget.Material3.Button.TonalButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="DNG"
+                    android:visibility="gone"
                     app:shapeAppearanceOverlay="@style/ShapeAppearance.App.SplitButton.Alt" />
 
-            </LinearLayout>
+            </com.google.android.material.button.MaterialButtonToggleGroup>
 
         </LinearLayout>
 
     </androidx.constraintlayout.widget.ConstraintLayout>
 
-    <!-- LUT Selection List Overlay (Same as Camera) -->
+    <!-- LUT Selection List Overlay -->
     <com.google.android.material.card.MaterialCardView
         android:id="@+id/edit_lut_list_container"
         style="@style/Widget.Material3.CardView.Filled"
@@ -259,18 +284,19 @@
         android:visibility="gone"
         app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
         app:cardCornerRadius="@dimen/radius_medium"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/edit_top_card"
         app:layout_constrainedHeight="true"
-        app:layout_constraintHeight_max="400dp">
+        app:layout_constraintBottom_toTopOf="@id/controls_container"
+        app:layout_constraintHeight_max="400dp"
+        app:layout_constraintStart_toStartOf="parent"
+        android:layout_marginStart="16dp"
+        android:layout_marginBottom="-16dp">
 
         <androidx.recyclerview.widget.RecyclerView
             android:id="@+id/edit_lut_list"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:padding="4dp"
-            android:clipToPadding="false" />
+            android:clipToPadding="false"
+            android:padding="4dp" />
     </com.google.android.material.card.MaterialCardView>
 
 </androidx.constraintlayout.widget.ConstraintLayout>
