@@ -64,7 +64,11 @@ class ImageRepository(private val context: Context) {
                                 if (comment?.startsWith("HF_LAYOUT:") == true) {
                                     builder.hfLayout = comment.substringAfter("HF_LAYOUT:")
                                 } else if (comment?.startsWith("{") == true) {
-                                    builder.editConfig = parseEditConfig(comment)
+                                    val config = parseEditConfig(comment)
+                                    builder.editConfig = config
+                                    if (config?.hfLayout != null) {
+                                        builder.hfLayout = config.hfLayout
+                                    }
                                 }
 
                                 val orientation = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION, androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL)
@@ -149,7 +153,11 @@ class ImageRepository(private val context: Context) {
                                 if (comment?.startsWith("HF_LAYOUT:") == true) {
                                     builder.hfLayout = comment.substringAfter("HF_LAYOUT:")
                                 } else if (comment?.startsWith("{") == true) {
-                                    builder.editConfig = parseEditConfig(comment)
+                                    val config = parseEditConfig(comment)
+                                    builder.editConfig = config
+                                    if (config?.hfLayout != null) {
+                                        builder.hfLayout = config.hfLayout
+                                    }
                                 }
 
                                 val orientation = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION, androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL)

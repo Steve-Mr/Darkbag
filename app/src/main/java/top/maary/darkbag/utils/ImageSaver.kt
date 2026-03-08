@@ -100,9 +100,9 @@ object ImageSaver {
                             if (finalPath != null) {
                                 val finalFile = File(finalPath)
                                 if (jpgFolderUri != null) {
-                                    finalJpgUri = saveFileToFolder(context, finalFile, "$baseName.jpg", "image/jpeg", jpgFolderUri)
+                                finalJpgUri = saveFileToFolder(context, finalFile, "$baseName.jpg", "image/jpeg", jpgFolderUri, editConfig = editConfig)
                                 } else {
-                                    finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri) { out ->
+                                finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri, editConfig = editConfig) { out ->
                                         finalFile.inputStream().use { it.copyTo(out) }
                                     }
                                 }
@@ -224,7 +224,7 @@ object ImageSaver {
                                     if (finalPath != null) {
                                         val finalFile = File(finalPath)
                                         if (jpgFolderUri != null) {
-                                            finalJpgUri = saveFileToFolder(context, finalFile, "$baseName.jpg", "image/jpeg", jpgFolderUri)
+                                        finalJpgUri = saveFileToFolder(context, finalFile, "$baseName.jpg", "image/jpeg", jpgFolderUri, editConfig = editConfig)
                                         } else {
                                             val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                                             BitmapFactory.decodeFile(finalPath, options)
