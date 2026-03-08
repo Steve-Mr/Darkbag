@@ -103,8 +103,9 @@
             android:layout_width="0dp"
             android:layout_height="0dp"
             android:visibility="gone"
+            android:background="#00000000"
             app:layout_constraintTop_toTopOf="parent"
-            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintBottom_toBottomOf="@id/hf_selection_divider"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintEnd_toStartOf="@+id/hf_selection_divider" />
 
@@ -113,7 +114,8 @@
             android:layout_width="0dp"
             android:layout_height="0dp"
             android:visibility="gone"
-            app:layout_constraintTop_toTopOf="parent"
+            android:background="#00000000"
+            app:layout_constraintTop_toTopOf="@id/hf_selection_divider"
             app:layout_constraintBottom_toBottomOf="parent"
             app:layout_constraintStart_toEndOf="@+id/hf_selection_divider"
             app:layout_constraintEnd_toEndOf="parent" />
@@ -145,12 +147,39 @@
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btn_edit_log_lut"
-                    android:layout_width="wrap_content"
+                    android:layout_width="0dp"
                     android:layout_height="wrap_content"
+                    android:layout_weight="1"
                     style="@style/Widget.Material3.Button.TonalButton"
                     android:text="Log: None / LUT: None"
                     android:textAllCaps="false"
+                    android:ellipsize="end"
+                    android:maxLines="1"
                     app:icon="@drawable/ic_lut" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_edit_timestamp"
+                    android:layout_width="48dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    style="@style/Widget.Material3.Button.TonalButton"
+                    android:padding="0dp"
+                    android:visibility="gone"
+                    app:icon="@drawable/ic_photo"
+                    app:iconGravity="textStart"
+                    app:iconPadding="0dp" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_edit_flare"
+                    android:layout_width="48dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    style="@style/Widget.Material3.Button.TonalButton"
+                    android:padding="0dp"
+                    android:visibility="gone"
+                    app:icon="@drawable/ic_hdr_dynamic"
+                    app:iconGravity="textStart"
+                    app:iconPadding="0dp" />
 
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>

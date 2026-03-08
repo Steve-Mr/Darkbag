@@ -36,6 +36,11 @@ class ImageViewerFragment : Fragment() {
     private var selectedDngIndex = 0 // 0 or 1 for half-frame
     private var sourceDngBytes: ByteArray? = null
     private var sourceDngBytes2: ByteArray? = null
+    private var cachedBitmap1: android.graphics.Bitmap? = null
+    private var cachedBitmap2: android.graphics.Bitmap? = null
+    private var lastPreviewConfig: top.maary.darkbag.models.EditConfig? = null
+    private var activeAdjustmentBinding: top.maary.darkbag.databinding.BottomSheetEditAdjustmentsBinding? = null
+
     private lateinit var lutManager: top.maary.darkbag.utils.LutManager
     private var previewJob: Job? = null
 
@@ -173,6 +178,7 @@ class ImageViewerFragment : Fragment() {
             if (selectedDngIndex != 0) {
                 selectedDngIndex = 0
                 updateSelectionFeedback()
+                activeAdjustmentBinding?.let { updateSlidersInSheet(it) }
             }
         }
 
@@ -180,10 +186,14 @@ class ImageViewerFragment : Fragment() {
             if (selectedDngIndex != 1) {
                 selectedDngIndex = 1
                 updateSelectionFeedback()
+                activeAdjustmentBinding?.let { updateSlidersInSheet(it) }
             }
         }
 
         binding.fabAdjust.setOnClickListener {
+            if (binding.editLutListContainer.visibility == View.VISIBLE) {
+                binding.editLutListContainer.visibility = View.GONE
+            }
             showAdjustmentsBottomSheet()
         }
     }
@@ -210,6 +220,36 @@ class ImageViewerFragment : Fragment() {
         binding.hfSelection1.visibility = View.GONE
         binding.hfSelection2.visibility = View.GONE
 
+        if (currentGroup.isHalfFrame()) {
+            binding.btnEditTimestamp.visibility = View.VISIBLE
+            binding.btnEditFlare.visibility = View.VISIBLE
+            updateEffectsButtons()
+        } else {
+            binding.btnEditTimestamp.visibility = View.GONE
+            binding.btnEditFlare.visibility = View.GONE
+        }
+
+        binding.btnEditTimestamp.setOnClickListener {
+            val current = currentEditConfig ?: return@setOnClickListener
+            currentEditConfig = current.copy(showTimestamp = !current.showTimestamp)
+            updateEffectsButtons()
+            applyEditPreview()
+        }
+
+        binding.btnEditFlare.setOnClickListener {
+            val current = currentEditConfig ?: return@setOnClickListener
+            val nextFlare = when (current.flareType) {
+                -1 -> 0
+                0 -> 1
+                1 -> 2
+                2 -> -1
+                else -> -1
+            }
+            currentEditConfig = current.copy(flareType = nextFlare)
+            updateEffectsButtons()
+            applyEditPreview()
+        }
+
         updateEditUi()
 
         // Load DNG bytes
@@ -234,6 +274,11 @@ class ImageViewerFragment : Fragment() {
         isIndividualEditMode = false
         sourceDngBytes = null
         sourceDngBytes2 = null
+        cachedBitmap1?.recycle()
+        cachedBitmap1 = null
+        cachedBitmap2?.recycle()
+        cachedBitmap2 = null
+        lastPreviewConfig = null
         previewJob?.cancel()
         binding.editControlsRoot.visibility = View.GONE
         binding.hfSelection1.visibility = View.GONE
@@ -254,11 +299,81 @@ class ImageViewerFragment : Fragment() {
         }
     }
 
+    private fun updateEffectsButtons() {
+        val config = currentEditConfig ?: return
+
+        binding.btnEditTimestamp.setIconTintResource(if (config.showTimestamp) R.color.vibrant_orange else android.R.color.white)
+        binding.btnEditTimestamp.alpha = if (config.showTimestamp) 1.0f else 0.6f
+
+        val flareIcon = when (config.flareType) {
+            -1 -> R.drawable.ic_hdr_dynamic
+            0 -> R.drawable.ic_hdr_dynamic
+            1 -> R.drawable.ic_hdr_dynamic // Should ideally have distinct icons
+            2 -> R.drawable.ic_hdr_dynamic
+            else -> R.drawable.ic_hdr_dynamic
+        }
+        binding.btnEditFlare.setIconResource(flareIcon)
+        binding.btnEditFlare.setIconTintResource(if (config.flareType != -1) R.color.vibrant_pink else android.R.color.white)
+        binding.btnEditFlare.alpha = if (config.flareType != -1) 1.0f else 0.6f
+    }
+
     private fun updateSelectionFeedback() {
-        applyEditPreview()
+        val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
+        val isTB = currentGroup.hfLayout == "TB"
+
+        val dimColor = 0x66000000.toInt()
+        val activeColor = 0x00000000.toInt()
+
+        if (isIndividualEditMode) {
+            binding.hfSelection1.visibility = View.VISIBLE
+            binding.hfSelection2.visibility = View.VISIBLE
+            val dividerLp = binding.hfSelectionDivider.layoutParams as androidx.constraintlayout.widget.ConstraintLayout.LayoutParams
+            if (isTB) {
+                dividerLp.orientation = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.HORIZONTAL
+            } else {
+                dividerLp.orientation = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.VERTICAL
+            }
+            binding.hfSelectionDivider.layoutParams = dividerLp
+        } else {
+            binding.hfSelection1.visibility = View.GONE
+            binding.hfSelection2.visibility = View.GONE
+        }
+
+        binding.hfSelection1.setBackgroundColor(if (isIndividualEditMode && selectedDngIndex == 0) activeColor else if (isIndividualEditMode) dimColor else activeColor)
+        binding.hfSelection2.setBackgroundColor(if (isIndividualEditMode && selectedDngIndex == 1) activeColor else if (isIndividualEditMode) dimColor else activeColor)
+
+        // Adjust constraints based on layout
+        val lp1 = binding.hfSelection1.layoutParams as androidx.constraintlayout.widget.ConstraintLayout.LayoutParams
+        val lp2 = binding.hfSelection2.layoutParams as androidx.constraintlayout.widget.ConstraintLayout.LayoutParams
+
+        if (isTB) {
+            lp1.bottomToBottom = -1
+            lp1.bottomToTop = R.id.hf_selection_divider
+            lp1.endToEnd = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.PARENT_ID
+            lp1.endToStart = -1
+
+            lp2.topToTop = -1
+            lp2.topToBottom = R.id.hf_selection_divider
+            lp2.startToStart = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.PARENT_ID
+            lp2.startToEnd = -1
+        } else {
+            lp1.bottomToBottom = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.PARENT_ID
+            lp1.bottomToTop = -1
+            lp1.endToEnd = -1
+            lp1.endToStart = R.id.hf_selection_divider
+
+            lp2.topToTop = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.PARENT_ID
+            lp2.topToBottom = -1
+            lp2.startToStart = -1
+            lp2.startToEnd = R.id.hf_selection_divider
+        }
+        binding.hfSelection1.layoutParams = lp1
+        binding.hfSelection2.layoutParams = lp2
     }
 
     private fun showLutMenu() {
+        if (activeAdjustmentBinding != null) return // Mutual exclusion
+
         val currentLog = currentEditConfig?.log ?: "None"
         val currentLut = currentEditConfig?.lut?.substringBeforeLast(".") ?: "None"
 
@@ -363,70 +478,38 @@ class ImageViewerFragment : Fragment() {
 
         if (currentGroup.isHalfFrame() && !isIndividualEditMode) {
             isIndividualEditMode = true
-            binding.hfSelection1.visibility = View.VISIBLE
-            binding.hfSelection2.visibility = View.VISIBLE
-            val lp = binding.hfSelectionDivider.layoutParams as androidx.constraintlayout.widget.ConstraintLayout.LayoutParams
-            if (currentGroup.hfLayout == "TB") {
-                lp.orientation = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.HORIZONTAL
-            } else {
-                lp.orientation = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.VERTICAL
-            }
-            binding.hfSelectionDivider.layoutParams = lp
             updateSelectionFeedback()
         }
 
         val dialog = com.google.android.material.bottomsheet.BottomSheetDialog(requireContext())
         val sheetBinding = top.maary.darkbag.databinding.BottomSheetEditAdjustmentsBinding.inflate(layoutInflater)
+        activeAdjustmentBinding = sheetBinding
         dialog.setContentView(sheetBinding.root)
 
         val config = currentEditConfig ?: return
 
-        // Effects tab visibility
-        if (!currentGroup.isHalfFrame()) {
-             sheetBinding.editTabs.removeTabAt(2)
-        } else {
-             sheetBinding.layoutEffects.visibility = View.GONE // Start hidden, only show if tab selected
-             sheetBinding.switchTimestamp.isChecked = config.showTimestamp
-             val checkedFlareId = when(config.flareType) {
-                 -1 -> R.id.btn_flare_none
-                 0 -> R.id.btn_flare_random
-                 1 -> R.id.btn_flare_v
-                 2 -> R.id.btn_flare_c
-                 else -> R.id.btn_flare_none
-             }
-             sheetBinding.groupFlare.check(checkedFlareId)
+        if (currentGroup.isHalfFrame()) {
+            sheetBinding.editPreviewCard.visibility = View.VISIBLE
+            sheetBinding.groupFrameSelection.visibility = View.VISIBLE
+            sheetBinding.groupFrameSelection.check(if (selectedDngIndex == 0) R.id.btn_select_frame1 else R.id.btn_select_frame2)
+
+            sheetBinding.groupFrameSelection.addOnButtonCheckedListener { _, checkedId, isChecked ->
+                if (isChecked) {
+                    selectedDngIndex = if (checkedId == R.id.btn_select_frame1) 0 else 1
+                    updateSelectionFeedback()
+                    updateSlidersInSheet(sheetBinding)
+                    applyEditPreview() // Update only the frame in BottomSheet
+                }
+            }
         }
 
-        // Initialize values based on current selection
-        fun updateSliders() {
-            val target = if (currentGroup.isHalfFrame()) {
-                config.adjustments?.getOrNull(selectedDngIndex) ?: top.maary.darkbag.models.BasicAdjustments()
-            } else {
-                top.maary.darkbag.models.BasicAdjustments(
-                    exposure = config.exposure,
-                    contrast = config.contrast,
-                    saturation = config.saturation,
-                    highlights = config.highlights,
-                    shadows = config.shadows,
-                    whites = config.whites,
-                    blacks = config.blacks
-                )
-            }
-            sheetBinding.sliderExposure.value = target.exposure
-            sheetBinding.sliderContrast.value = target.contrast
-            sheetBinding.sliderSaturation.value = target.saturation
-            sheetBinding.sliderHighlights.value = target.highlights
-            sheetBinding.sliderShadows.value = target.shadows
-            sheetBinding.sliderWhites.value = target.whites
-            sheetBinding.sliderBlacks.value = target.blacks
-        }
-        updateSliders()
+        updateSlidersInSheet(sheetBinding)
+        applyEditPreview()
 
         sheetBinding.editTabs.addOnTabSelectedListener(object : com.google.android.material.tabs.TabLayout.OnTabSelectedListener {
             override fun onTabSelected(tab: com.google.android.material.tabs.TabLayout.Tab?) {
                 sheetBinding.layoutLight.visibility = if (tab?.position == 0) View.VISIBLE else View.GONE
                 sheetBinding.layoutColor.visibility = if (tab?.position == 1) View.VISIBLE else View.GONE
-                sheetBinding.layoutEffects.visibility = if (tab?.position == 2) View.VISIBLE else View.GONE
             }
             override fun onTabUnselected(tab: com.google.android.material.tabs.TabLayout.Tab?) {}
             override fun onTabReselected(tab: com.google.android.material.tabs.TabLayout.Tab?) {}
@@ -473,26 +556,40 @@ class ImageViewerFragment : Fragment() {
         sheetBinding.sliderWhites.addOnChangeListener(changeListener)
         sheetBinding.sliderBlacks.addOnChangeListener(changeListener)
 
-        sheetBinding.switchTimestamp.setOnCheckedChangeListener { _, isChecked ->
-            currentEditConfig = currentEditConfig?.copy(showTimestamp = isChecked)
-            applyEditPreview()
-        }
-
-        sheetBinding.groupFlare.addOnButtonCheckedListener { _, checkedId, isChecked ->
-            if (isChecked) {
-                val type = when(checkedId) {
-                    R.id.btn_flare_none -> -1
-                    R.id.btn_flare_random -> 0
-                    R.id.btn_flare_v -> 1
-                    R.id.btn_flare_c -> 2
-                    else -> -1
-                }
-                currentEditConfig = currentEditConfig?.copy(flareType = type)
-                applyEditPreview()
-            }
+        dialog.setOnDismissListener {
+            isIndividualEditMode = false
+            activeAdjustmentBinding = null
+            updateSelectionFeedback()
+            applyEditPreview() // Final refresh for main viewer
         }
 
         dialog.show()
+    }
+
+    private fun updateSlidersInSheet(sheetBinding: top.maary.darkbag.databinding.BottomSheetEditAdjustmentsBinding) {
+        val config = currentEditConfig ?: return
+        val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
+
+        val target = if (currentGroup.isHalfFrame()) {
+            config.adjustments?.getOrNull(selectedDngIndex) ?: top.maary.darkbag.models.BasicAdjustments()
+        } else {
+            top.maary.darkbag.models.BasicAdjustments(
+                exposure = config.exposure,
+                contrast = config.contrast,
+                saturation = config.saturation,
+                highlights = config.highlights,
+                shadows = config.shadows,
+                whites = config.whites,
+                blacks = config.blacks
+            )
+        }
+        sheetBinding.sliderExposure.value = target.exposure
+        sheetBinding.sliderContrast.value = target.contrast
+        sheetBinding.sliderSaturation.value = target.saturation
+        sheetBinding.sliderHighlights.value = target.highlights
+        sheetBinding.sliderShadows.value = target.shadows
+        sheetBinding.sliderWhites.value = target.whites
+        sheetBinding.sliderBlacks.value = target.blacks
     }
 
     private fun applyEditPreview() {
@@ -504,6 +601,10 @@ class ImageViewerFragment : Fragment() {
         previewJob?.cancel()
         previewJob = lifecycleScope.launch {
             delay(150) // Debounce
+
+            // If in individual edit mode (BottomSheet open), only process the selected frame for BottomSheet
+            val processOnlySelected = isIndividualEditMode && currentGroup.isHalfFrame()
+
             val bitmap = withContext(Dispatchers.IO) {
                 try {
                     val context = requireContext()
@@ -562,40 +663,57 @@ class ImageViewerFragment : Fragment() {
                             downsampleFactor = ds
                         )
 
-                        // Apply selection feedback (gray out if not selected)
-                        if (isIndividualEditMode && currentGroup.isHalfFrame() && selectedDngIndex != index) {
-                             val canvas = android.graphics.Canvas(previewBitmap)
-                             val paint = android.graphics.Paint()
-                             val cm = android.graphics.ColorMatrix()
-                             cm.setSaturation(0f)
-                             paint.colorFilter = android.graphics.ColorMatrixColorFilter(cm)
-                             paint.alpha = 150
-                             canvas.drawBitmap(previewBitmap, 0f, 0f, paint)
-                        } else if (isIndividualEditMode && currentGroup.isHalfFrame() && selectedDngIndex == index) {
-                             // Draw subtle border
-                             val canvas = android.graphics.Canvas(previewBitmap)
-                             val paint = android.graphics.Paint().apply {
-                                 color = android.graphics.Color.WHITE
-                                 style = android.graphics.Paint.Style.STROKE
-                                 strokeWidth = 10f
-                                 alpha = 180
-                             }
-                             canvas.drawRect(0f, 0f, previewBitmap.width.toFloat(), previewBitmap.height.toFloat(), paint)
-                        }
-
                         return previewBitmap
                     }
 
                     if (!currentGroup.isHalfFrame()) {
                         processSingle(sourceDngBytes, dngUri1, 0)
+                    } else if (processOnlySelected) {
+                         // Process only the active frame for the BottomSheet card
+                         if (selectedDngIndex == 0) {
+                             if (lastPreviewConfig?.adjustments?.getOrNull(0) != config.adjustments?.getOrNull(0) ||
+                                 lastPreviewConfig?.log != config.log || lastPreviewConfig?.lut != config.lut || cachedBitmap1 == null) {
+                                 cachedBitmap1?.recycle()
+                                 cachedBitmap1 = processSingle(sourceDngBytes, dngUri1, 0)
+                             }
+                             cachedBitmap1
+                         } else {
+                             if (lastPreviewConfig?.adjustments?.getOrNull(1) != config.adjustments?.getOrNull(1) ||
+                                 lastPreviewConfig?.log != config.log || lastPreviewConfig?.lut != config.lut || cachedBitmap2 == null) {
+                                 cachedBitmap2?.recycle()
+                                 cachedBitmap2 = dngUri2?.let { processSingle(sourceDngBytes2, it, 1) }
+                             }
+                             cachedBitmap2
+                         }
                     } else {
-                        val b1 = processSingle(sourceDngBytes, dngUri1, 0)
-                        val b2 = dngUri2?.let { processSingle(sourceDngBytes2, it, 1) }
+                        // Check if we can reuse cached bitmaps
+                        val forceUpdate1 = lastPreviewConfig == null ||
+                                          lastPreviewConfig?.log != config.log ||
+                                          lastPreviewConfig?.lut != config.lut ||
+                                          lastPreviewConfig?.adjustments?.getOrNull(0) != config.adjustments?.getOrNull(0)
+
+                        val forceUpdate2 = lastPreviewConfig == null ||
+                                          lastPreviewConfig?.log != config.log ||
+                                          lastPreviewConfig?.lut != config.lut ||
+                                          lastPreviewConfig?.adjustments?.getOrNull(1) != config.adjustments?.getOrNull(1)
+
+                        if (forceUpdate1 || cachedBitmap1 == null) {
+                            cachedBitmap1?.recycle()
+                            cachedBitmap1 = processSingle(sourceDngBytes, dngUri1, 0)
+                        }
+
+                        if (forceUpdate2 || cachedBitmap2 == null) {
+                            cachedBitmap2?.recycle()
+                            cachedBitmap2 = dngUri2?.let { processSingle(sourceDngBytes2, it, 1) }
+                        }
+
+                        val b1 = cachedBitmap1
+                        val b2 = cachedBitmap2
 
                         if (b1 != null || b2 != null) {
                             // Manual Stitching for preview
                             val isSBS = currentGroup.hfLayout != "TB"
-                            val gap = top.maary.darkbag.utils.HalfFrameUtils.calculateGap(maxOf(b1?.width ?: 0, b1?.height ?: 0)).toFloat() / 4 // Scale gap for preview
+                            val gap = top.maary.darkbag.utils.HalfFrameUtils.calculateGap(maxOf(b1?.width ?: 0, b1?.height ?: 0)).toFloat()
 
                             val w1 = b1?.width ?: b2?.width ?: 0
                             val h1 = b1?.height ?: b2?.height ?: 0
@@ -621,11 +739,13 @@ class ImageViewerFragment : Fragment() {
                                 config.showTimestamp,
                                 config.flareType >= 0,
                                 currentGroup.hfLayout ?: "SBS",
+                                time1 = currentGroup.captureTime, // Should ideally store individual times
+                                time2 = currentGroup.captureTime,
                                 flareType = config.flareType
                             )
 
-                            b1?.recycle()
-                            b2?.recycle()
+                            // We don't recycle b1/b2 here because they are cached
+                            lastPreviewConfig = config.copy()
                             finalComposite
                         } else null
                     }
@@ -636,9 +756,12 @@ class ImageViewerFragment : Fragment() {
             }
 
             if (bitmap != null) {
-                val holder = (binding.imagePager.getChildAt(0) as? androidx.recyclerview.widget.RecyclerView)
-                    ?.findViewHolderForAdapterPosition(binding.imagePager.currentItem) as? ImageViewerAdapter.ViewHolder
-                holder?.binding?.imageView?.setImageBitmap(bitmap)
+                if (!processOnlySelected) {
+                    val holder = (binding.imagePager.getChildAt(0) as? androidx.recyclerview.widget.RecyclerView)
+                        ?.findViewHolderForAdapterPosition(binding.imagePager.currentItem) as? ImageViewerAdapter.ViewHolder
+                    holder?.binding?.imageView?.setImageBitmap(bitmap)
+                }
+                activeAdjustmentBinding?.editPreviewImage?.setImageBitmap(bitmap)
             }
         }
     }
@@ -777,7 +900,8 @@ class ImageViewerFragment : Fragment() {
                             saveRaw = false,
                             targetUri = targetUri,
                             jpgFolderUri = if (isReplacement) null else jpgFolderUri,
-                            editConfig = config
+                                editConfig = config,
+                                isAlreadyStitched = currentGroup.isHalfFrame()
                         )
                     }
                 } catch (e: Exception) {

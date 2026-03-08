@@ -169,15 +169,6 @@ class HalfFrameManager(private val context: Context) {
                     finalBitmap.compress(Bitmap.CompressFormat.JPEG, 95, out)
                 }
 
-                // Add layout metadata to EXIF
-                try {
-                    val exif = androidx.exifinterface.media.ExifInterface(stitchedFile.absolutePath)
-                    val layoutInfo = if (activeLayout == SettingsFragment.HALF_FRAME_LAYOUTS[1]) "TB" else "SBS"
-                    exif.setAttribute(androidx.exifinterface.media.ExifInterface.TAG_USER_COMMENT, "HF_LAYOUT:$layoutInfo")
-                    exif.saveAttributes()
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to write HF layout metadata", e)
-                }
                 if (finalBitmap != stitchedBitmap) stitchedBitmap.recycle()
                 finalBitmap.recycle()
 

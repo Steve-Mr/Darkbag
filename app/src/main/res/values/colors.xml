@@ -24,4 +24,7 @@
     <color name="zoom_button_active">#FFD600</color> <!-- Material Yellow -->
     <color name="zoom_button_inactive">#FFFFFF</color>
     <color name="black_transparent_50">#80000000</color>
+
+    <color name="vibrant_orange">#FFF57C00</color>
+    <color name="vibrant_pink">#FFE91E63</color>
 </resources>
