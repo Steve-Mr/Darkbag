@@ -490,37 +490,21 @@ class ImageViewerFragment : Fragment() {
 
         if (currentGroup.isHalfFrame()) {
             sheetBinding.editPreviewCard.visibility = View.VISIBLE
+            sheetBinding.groupFrameSelection.visibility = View.VISIBLE
             sheetBinding.groupFrameSelection.check(if (selectedDngIndex == 0) R.id.btn_select_frame1 else R.id.btn_select_frame2)
-
-            val dividerLp = sheetBinding.editPreviewDivider.layoutParams as androidx.constraintlayout.widget.ConstraintLayout.LayoutParams
-            if (currentGroup.hfLayout == "TB") {
-                dividerLp.orientation = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.HORIZONTAL
-            } else {
-                dividerLp.orientation = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.VERTICAL
-            }
-            sheetBinding.editPreviewDivider.layoutParams = dividerLp
-
-            fun updateInternalFeedback() {
-                val activeColor = 0x00000000.toInt()
-                val dimColor = 0x66000000.toInt()
-                sheetBinding.editPreviewDim1.visibility = View.VISIBLE
-                sheetBinding.editPreviewDim2.visibility = View.VISIBLE
-                sheetBinding.editPreviewDim1.setBackgroundColor(if (selectedDngIndex == 0) activeColor else dimColor)
-                sheetBinding.editPreviewDim2.setBackgroundColor(if (selectedDngIndex == 1) activeColor else dimColor)
-            }
-            updateInternalFeedback()
 
             sheetBinding.groupFrameSelection.addOnButtonCheckedListener { _, checkedId, isChecked ->
                 if (isChecked) {
                     selectedDngIndex = if (checkedId == R.id.btn_select_frame1) 0 else 1
-                    updateInternalFeedback()
                     updateSelectionFeedback()
                     updateSlidersInSheet(sheetBinding)
+                    applyEditPreview() // Update only the frame in BottomSheet
                 }
             }
         }
 
         updateSlidersInSheet(sheetBinding)
+        applyEditPreview()
 
         sheetBinding.editTabs.addOnTabSelectedListener(object : com.google.android.material.tabs.TabLayout.OnTabSelectedListener {
             override fun onTabSelected(tab: com.google.android.material.tabs.TabLayout.Tab?) {
@@ -576,6 +560,7 @@ class ImageViewerFragment : Fragment() {
             isIndividualEditMode = false
             activeAdjustmentBinding = null
             updateSelectionFeedback()
+            applyEditPreview() // Final refresh for main viewer
         }
 
         dialog.show()
@@ -616,6 +601,10 @@ class ImageViewerFragment : Fragment() {
         previewJob?.cancel()
         previewJob = lifecycleScope.launch {
             delay(150) // Debounce
+
+            // If in individual edit mode (BottomSheet open), only process the selected frame for BottomSheet
+            val processOnlySelected = isIndividualEditMode && currentGroup.isHalfFrame()
+
             val bitmap = withContext(Dispatchers.IO) {
                 try {
                     val context = requireContext()
@@ -679,6 +668,23 @@ class ImageViewerFragment : Fragment() {
 
                     if (!currentGroup.isHalfFrame()) {
                         processSingle(sourceDngBytes, dngUri1, 0)
+                    } else if (processOnlySelected) {
+                         // Process only the active frame for the BottomSheet card
+                         if (selectedDngIndex == 0) {
+                             if (lastPreviewConfig?.adjustments?.getOrNull(0) != config.adjustments?.getOrNull(0) ||
+                                 lastPreviewConfig?.log != config.log || lastPreviewConfig?.lut != config.lut || cachedBitmap1 == null) {
+                                 cachedBitmap1?.recycle()
+                                 cachedBitmap1 = processSingle(sourceDngBytes, dngUri1, 0)
+                             }
+                             cachedBitmap1
+                         } else {
+                             if (lastPreviewConfig?.adjustments?.getOrNull(1) != config.adjustments?.getOrNull(1) ||
+                                 lastPreviewConfig?.log != config.log || lastPreviewConfig?.lut != config.lut || cachedBitmap2 == null) {
+                                 cachedBitmap2?.recycle()
+                                 cachedBitmap2 = dngUri2?.let { processSingle(sourceDngBytes2, it, 1) }
+                             }
+                             cachedBitmap2
+                         }
                     } else {
                         // Check if we can reuse cached bitmaps
                         val forceUpdate1 = lastPreviewConfig == null ||
@@ -750,9 +756,11 @@ class ImageViewerFragment : Fragment() {
             }
 
             if (bitmap != null) {
-                val holder = (binding.imagePager.getChildAt(0) as? androidx.recyclerview.widget.RecyclerView)
-                    ?.findViewHolderForAdapterPosition(binding.imagePager.currentItem) as? ImageViewerAdapter.ViewHolder
-                holder?.binding?.imageView?.setImageBitmap(bitmap)
+                if (!processOnlySelected) {
+                    val holder = (binding.imagePager.getChildAt(0) as? androidx.recyclerview.widget.RecyclerView)
+                        ?.findViewHolderForAdapterPosition(binding.imagePager.currentItem) as? ImageViewerAdapter.ViewHolder
+                    holder?.binding?.imageView?.setImageBitmap(bitmap)
+                }
                 activeAdjustmentBinding?.editPreviewImage?.setImageBitmap(bitmap)
             }
         }
