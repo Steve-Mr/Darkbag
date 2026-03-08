@@ -324,6 +324,21 @@ class ImageViewerFragment : Fragment() {
         val dimColor = 0x66000000.toInt()
         val activeColor = 0x00000000.toInt()
 
+        if (isIndividualEditMode) {
+            binding.hfSelection1.visibility = View.VISIBLE
+            binding.hfSelection2.visibility = View.VISIBLE
+            val dividerLp = binding.hfSelectionDivider.layoutParams as androidx.constraintlayout.widget.ConstraintLayout.LayoutParams
+            if (isTB) {
+                dividerLp.orientation = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.HORIZONTAL
+            } else {
+                dividerLp.orientation = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.VERTICAL
+            }
+            binding.hfSelectionDivider.layoutParams = dividerLp
+        } else {
+            binding.hfSelection1.visibility = View.GONE
+            binding.hfSelection2.visibility = View.GONE
+        }
+
         binding.hfSelection1.setBackgroundColor(if (isIndividualEditMode && selectedDngIndex == 0) activeColor else if (isIndividualEditMode) dimColor else activeColor)
         binding.hfSelection2.setBackgroundColor(if (isIndividualEditMode && selectedDngIndex == 1) activeColor else if (isIndividualEditMode) dimColor else activeColor)
 
@@ -332,25 +347,25 @@ class ImageViewerFragment : Fragment() {
         val lp2 = binding.hfSelection2.layoutParams as androidx.constraintlayout.widget.ConstraintLayout.LayoutParams
 
         if (isTB) {
-            lp1.bottomToBottom = R.id.hf_selection_divider
+            lp1.bottomToBottom = -1
+            lp1.bottomToTop = R.id.hf_selection_divider
             lp1.endToEnd = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.PARENT_ID
-            lp1.bottomToTop = -1
             lp1.endToStart = -1
 
-            lp2.topToTop = R.id.hf_selection_divider
+            lp2.topToTop = -1
+            lp2.topToBottom = R.id.hf_selection_divider
             lp2.startToStart = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.PARENT_ID
-            lp2.topToBottom = -1
             lp2.startToEnd = -1
         } else {
             lp1.bottomToBottom = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.PARENT_ID
-            lp1.endToStart = R.id.hf_selection_divider
             lp1.bottomToTop = -1
             lp1.endToEnd = -1
+            lp1.endToStart = R.id.hf_selection_divider
 
             lp2.topToTop = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.PARENT_ID
-            lp2.startToEnd = R.id.hf_selection_divider
             lp2.topToBottom = -1
             lp2.startToStart = -1
+            lp2.startToEnd = R.id.hf_selection_divider
         }
         binding.hfSelection1.layoutParams = lp1
         binding.hfSelection2.layoutParams = lp2
@@ -463,15 +478,6 @@ class ImageViewerFragment : Fragment() {
 
         if (currentGroup.isHalfFrame() && !isIndividualEditMode) {
             isIndividualEditMode = true
-            binding.hfSelection1.visibility = View.VISIBLE
-            binding.hfSelection2.visibility = View.VISIBLE
-            val lp = binding.hfSelectionDivider.layoutParams as androidx.constraintlayout.widget.ConstraintLayout.LayoutParams
-            if (currentGroup.hfLayout == "TB") {
-                lp.orientation = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.HORIZONTAL
-            } else {
-                lp.orientation = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.VERTICAL
-            }
-            binding.hfSelectionDivider.layoutParams = lp
             updateSelectionFeedback()
         }
 
@@ -483,11 +489,31 @@ class ImageViewerFragment : Fragment() {
         val config = currentEditConfig ?: return
 
         if (currentGroup.isHalfFrame()) {
-            sheetBinding.groupFrameSelection.visibility = View.VISIBLE
+            sheetBinding.editPreviewCard.visibility = View.VISIBLE
             sheetBinding.groupFrameSelection.check(if (selectedDngIndex == 0) R.id.btn_select_frame1 else R.id.btn_select_frame2)
+
+            val dividerLp = sheetBinding.editPreviewDivider.layoutParams as androidx.constraintlayout.widget.ConstraintLayout.LayoutParams
+            if (currentGroup.hfLayout == "TB") {
+                dividerLp.orientation = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.HORIZONTAL
+            } else {
+                dividerLp.orientation = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.VERTICAL
+            }
+            sheetBinding.editPreviewDivider.layoutParams = dividerLp
+
+            fun updateInternalFeedback() {
+                val activeColor = 0x00000000.toInt()
+                val dimColor = 0x66000000.toInt()
+                sheetBinding.editPreviewDim1.visibility = View.VISIBLE
+                sheetBinding.editPreviewDim2.visibility = View.VISIBLE
+                sheetBinding.editPreviewDim1.setBackgroundColor(if (selectedDngIndex == 0) activeColor else dimColor)
+                sheetBinding.editPreviewDim2.setBackgroundColor(if (selectedDngIndex == 1) activeColor else dimColor)
+            }
+            updateInternalFeedback()
+
             sheetBinding.groupFrameSelection.addOnButtonCheckedListener { _, checkedId, isChecked ->
                 if (isChecked) {
                     selectedDngIndex = if (checkedId == R.id.btn_select_frame1) 0 else 1
+                    updateInternalFeedback()
                     updateSelectionFeedback()
                     updateSlidersInSheet(sheetBinding)
                 }
@@ -548,8 +574,6 @@ class ImageViewerFragment : Fragment() {
 
         dialog.setOnDismissListener {
             isIndividualEditMode = false
-            binding.hfSelection1.visibility = View.GONE
-            binding.hfSelection2.visibility = View.GONE
             activeAdjustmentBinding = null
             updateSelectionFeedback()
         }
@@ -729,6 +753,7 @@ class ImageViewerFragment : Fragment() {
                 val holder = (binding.imagePager.getChildAt(0) as? androidx.recyclerview.widget.RecyclerView)
                     ?.findViewHolderForAdapterPosition(binding.imagePager.currentItem) as? ImageViewerAdapter.ViewHolder
                 holder?.binding?.imageView?.setImageBitmap(bitmap)
+                activeAdjustmentBinding?.editPreviewImage?.setImageBitmap(bitmap)
             }
         }
     }
