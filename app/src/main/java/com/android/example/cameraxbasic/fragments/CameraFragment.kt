@@ -1422,6 +1422,7 @@ class CameraFragment : Fragment() {
                 val contentResolver = context.contentResolver
                 val dngName =
                     SimpleDateFormat(FILENAME, Locale.US).format(System.currentTimeMillis())
+                val captureId = dngName
 
                 Log.d(
                     TAG,
@@ -2984,7 +2985,7 @@ class CameraFragment : Fragment() {
 
     private fun estimateRawHighlightRatio(frame: HdrFrame, whiteLevel: Int): Double {
         val buffer = frame.buffer ?: return 0.0
-        if (whiteLevel <= 0 || frame.pixelStride < 2 || frame.rowStride <= 0) return 0.0
+        if (whiteLevel <= 0) return 0.0
 
         val dup = buffer.duplicate().order(java.nio.ByteOrder.nativeOrder())
         val threshold = (whiteLevel * 0.985).toInt().coerceAtLeast(1)
@@ -2992,10 +2993,13 @@ class CameraFragment : Fragment() {
         var highlights = 0
         var sampled = 0
 
+        val assumedPixelStrideBytes = 2
+        val rowStride = frame.width * assumedPixelStrideBytes
+
         for (y in 0 until frame.height step step) {
-            val rowBase = y * frame.rowStride
+            val rowBase = y * rowStride
             for (x in 0 until frame.width step step) {
-                val idx = rowBase + x * frame.pixelStride
+                val idx = rowBase + x * assumedPixelStrideBytes
                 if (idx + 1 >= dup.limit()) continue
                 val value = dup.getShort(idx).toInt() and 0xFFFF
                 if (value >= threshold) highlights++
