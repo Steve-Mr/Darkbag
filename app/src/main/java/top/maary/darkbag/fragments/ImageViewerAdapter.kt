@@ -52,7 +52,7 @@ class ImageViewerAdapter(
         holder.binding.imageView.onTapped = { onImageTapped?.invoke() }
         holder.binding.imageView.onZoomChanged = { isZoomed ->
             onZoomChanged?.invoke(isZoomed)
-            holder.binding.formatToggleGroup.visibility = if (isZoomed) View.GONE else View.VISIBLE
+            holder.binding.formatDock.visibility = if (isZoomed) View.GONE else View.VISIBLE
         }
 
         setupButtons(holder, group)
@@ -108,20 +108,21 @@ class ImageViewerAdapter(
 
     private fun selectButton(holder: ViewHolder, selectedId: Int) {
         val group = holder.binding.formatToggleGroup
+        val context = group.context
+        val colorPrimary = com.google.android.material.color.MaterialColors.getColor(group, android.R.attr.colorPrimary)
+        val colorOnSurface = com.google.android.material.color.MaterialColors.getColor(group, com.google.android.material.R.attr.colorOnSurface)
+
         for (i in 0 until group.childCount) {
             val child = group.getChildAt(i) as? com.google.android.material.button.MaterialButton
             if (child != null) {
                 val isSelected = child.id == selectedId
                 child.isSelected = isSelected
-                // For M3 Connected Button Group, we might need to manually handle the "checked" visual state
-                // if we are not using a ToggleGroup with singleSelection.
-                // But MaterialButtonGroup.Connected is just a container.
-                // Actually, the user might want a toggle behavior.
-                // If using MaterialButtonGroup, we use the standard button selection state or tonal style.
                 if (isSelected) {
-                    child.setAlpha(1.0f)
+                    child.setIconTint(android.content.res.ColorStateList.valueOf(colorPrimary))
+                    child.alpha = 1.0f
                 } else {
-                    child.setAlpha(0.6f)
+                    child.setIconTint(android.content.res.ColorStateList.valueOf(colorOnSurface))
+                    child.alpha = 0.6f
                 }
             }
         }
@@ -253,6 +254,6 @@ class ImageViewerAdapter(
 
     fun setUiVisibility(position: Int, isVisible: Boolean) {
         val holder = recyclerView?.findViewHolderForAdapterPosition(position) as? ViewHolder ?: return
-        holder.binding.formatToggleGroup.visibility = if (isVisible) View.VISIBLE else View.GONE
+        holder.binding.formatDock.visibility = if (isVisible) View.VISIBLE else View.GONE
     }
 }
