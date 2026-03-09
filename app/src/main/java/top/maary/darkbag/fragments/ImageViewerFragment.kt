@@ -1024,6 +1024,7 @@ class ImageViewerFragment : Fragment() {
     private fun showUi() {
         if (isUiVisible) return
         isUiVisible = true
+
         binding.toolbar.visibility = View.VISIBLE
         binding.splitShare.visibility = if (isAdjusted) View.GONE else View.VISIBLE
         binding.splitSave.visibility = if (isAdjusted) View.VISIBLE else View.GONE
@@ -1032,11 +1033,11 @@ class ImageViewerFragment : Fragment() {
 
         adapter.setUiVisibility(binding.imagePager.currentItem, true)
 
-        binding.toolbar.animate().translationY(0f).setDuration(200).setListener(null).start()
-        binding.splitShare.animate().translationY(0f).setDuration(200).setListener(null).start()
-        binding.splitSave.animate().translationY(0f).setDuration(200).setListener(null).start()
-        binding.bottomLeftControls.animate().translationY(0f).setDuration(200).setListener(null).start()
-        binding.bottomRightControls.animate().translationY(0f).setDuration(200).setListener(null).start()
+        binding.toolbar.animate().translationY(0f).alpha(1f).setDuration(200).setListener(null).start()
+        binding.splitShare.animate().translationY(0f).alpha(1f).setDuration(200).setListener(null).start()
+        binding.splitSave.animate().translationY(0f).alpha(1f).setDuration(200).setListener(null).start()
+        binding.bottomLeftControls.animate().translationY(0f).alpha(1f).setDuration(200).setListener(null).start()
+        binding.bottomRightControls.animate().translationY(0f).alpha(1f).setDuration(200).setListener(null).start()
     }
 
     private fun hideUi() {
@@ -1045,11 +1046,11 @@ class ImageViewerFragment : Fragment() {
 
         adapter.setUiVisibility(binding.imagePager.currentItem, false)
 
-        binding.toolbar.animate().translationY(-binding.toolbar.height.toFloat()).setDuration(200).start()
-        binding.splitShare.animate().translationY(-binding.toolbar.height.toFloat()).setDuration(200).start()
-        binding.splitSave.animate().translationY(-binding.toolbar.height.toFloat()).setDuration(200).start()
-        binding.bottomLeftControls.animate().translationY(binding.bottomLeftControls.height.toFloat() + 100).setDuration(200).start()
-        binding.bottomRightControls.animate().translationY(binding.bottomRightControls.height.toFloat() + 100).setDuration(200).start()
+        binding.toolbar.animate().translationY(-binding.toolbar.height.toFloat()).alpha(0f).setDuration(200).start()
+        binding.splitShare.animate().translationY(-binding.toolbar.height.toFloat()).alpha(0f).setDuration(200).start()
+        binding.splitSave.animate().translationY(-binding.toolbar.height.toFloat()).alpha(0f).setDuration(200).start()
+        binding.bottomLeftControls.animate().translationY(binding.bottomLeftControls.height.toFloat() + 100).alpha(0f).setDuration(200).start()
+        binding.bottomRightControls.animate().translationY(binding.bottomRightControls.height.toFloat() + 100).alpha(0f).setDuration(200).start()
     }
 
     private fun setupEdgeToEdge() {

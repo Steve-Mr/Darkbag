@@ -109,7 +109,7 @@ class ImageViewerAdapter(
     private fun selectButton(holder: ViewHolder, selectedId: Int) {
         val group = holder.binding.formatToggleGroup
         val colorPrimary = com.google.android.material.color.MaterialColors.getColor(group, android.R.attr.colorPrimary)
-        val colorOnSurfaceVariant = com.google.android.material.color.MaterialColors.getColor(group, com.google.android.material.R.attr.colorOnSurfaceVariant)
+        val colorWhite = android.graphics.Color.WHITE
 
         for (i in 0 until group.childCount) {
             val child = group.getChildAt(i) as? com.google.android.material.button.MaterialButton
@@ -118,10 +118,8 @@ class ImageViewerAdapter(
                 child.isEnabled = !isSelected
                 if (isSelected) {
                     child.setIconTint(android.content.res.ColorStateList.valueOf(colorPrimary))
-                    child.alpha = 1.0f
                 } else {
-                    child.setIconTint(android.content.res.ColorStateList.valueOf(colorOnSurfaceVariant))
-                    child.alpha = 0.8f
+                    child.setIconTint(android.content.res.ColorStateList.valueOf(colorWhite))
                 }
             }
         }
@@ -253,6 +251,13 @@ class ImageViewerAdapter(
 
     fun setUiVisibility(position: Int, isVisible: Boolean) {
         val holder = recyclerView?.findViewHolderForAdapterPosition(position) as? ViewHolder ?: return
-        holder.binding.formatToggleGroup.visibility = if (isVisible) View.VISIBLE else View.GONE
+        val targetAlpha = if (isVisible) 1.0f else 0.0f
+        holder.binding.formatToggleGroup.animate()
+            .alpha(targetAlpha)
+            .setDuration(200)
+            .withEndAction {
+                holder.binding.formatToggleGroup.visibility = if (isVisible) View.VISIBLE else View.GONE
+            }
+            .start()
     }
 }

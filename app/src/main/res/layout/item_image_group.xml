@@ -43,10 +43,11 @@
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnJpg"
-            style="@style/Widget.Material3.Button.TonalButton.Icon"
+            style="@style/Widget.Material3.Button.IconButton"
             android:layout_width="56dp"
             android:layout_height="56dp"
             android:padding="0dp"
+            android:backgroundTint="#4DFFFFFF"
             app:icon="@drawable/ic_photo"
             app:iconGravity="textStart"
             app:iconPadding="0dp"
@@ -54,10 +55,11 @@
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnTiff"
-            style="@style/Widget.Material3.Button.TonalButton.Icon"
+            style="@style/Widget.Material3.Button.IconButton"
             android:layout_width="56dp"
             android:layout_height="56dp"
             android:padding="0dp"
+            android:backgroundTint="#4DFFFFFF"
             app:icon="@drawable/ic_tiff"
             app:iconGravity="textStart"
             app:iconPadding="0dp"
@@ -65,10 +67,11 @@
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnDng"
-            style="@style/Widget.Material3.Button.TonalButton.Icon"
+            style="@style/Widget.Material3.Button.IconButton"
             android:layout_width="56dp"
             android:layout_height="56dp"
             android:padding="0dp"
+            android:backgroundTint="#4DFFFFFF"
             app:icon="@drawable/ic_raw"
             app:iconGravity="textStart"
             app:iconPadding="0dp"
