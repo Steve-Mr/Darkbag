@@ -24,6 +24,7 @@ object ExposureUtils {
     private const val CLIPPING_TO_EV_FACTOR = 15.0
     private const val MAX_ADDITIONAL_UNDEREXPOSURE_STOPS = 2.0
     private const val GAIN_DAMPENING_FACTOR = 0.2
+    private const val MIN_UNDEREXPOSURE_FACTOR = 0.001f
 
     data class ExposureConfig(
         val iso: Int,
@@ -99,7 +100,7 @@ object ExposureUtils {
         }
 
         // Final safety check: underexposeFactor must be between 0 and 1.
-        underexposeFactor = underexposeFactor.coerceIn(0.001f, 1.0f)
+        underexposeFactor = underexposeFactor.coerceIn(MIN_UNDEREXPOSURE_FACTOR, 1.0f)
 
         // CORRECT: Target exposure is REDUCED by multiplying baseline by underexposeFactor (e.g., * 0.125)
         val targetTotalExposure = baselineTotalExposure * underexposeFactor
