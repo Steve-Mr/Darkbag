@@ -22,7 +22,9 @@ class HalfFrameManager(private val context: Context) {
         val captureTimeMillis: Long = System.currentTimeMillis(),
         val frame1BaseName: String? = null,
         val frame1TempPath: String? = null,
-        val frame1CaptureTime: Long = 0L
+        val frame1CaptureTime: Long = 0L,
+        val digitalGain: Float = 1.0f,
+        val frame1DigitalGain: Float = 1.0f
     )
 
     var step: Int
@@ -70,7 +72,8 @@ class HalfFrameManager(private val context: Context) {
         currentJpgPath: String,
         baseName: String,
         isFastPath: Boolean,
-        metadata: Metadata? = null
+        metadata: Metadata? = null,
+        digitalGain: Float = 1.0f
     ): String? {
         val activeProfile = metadata?.profile ?: sessionStore.currentProfile()
         val isManualMode = metadata != null
@@ -96,12 +99,12 @@ class HalfFrameManager(private val context: Context) {
             File(currentJpgPath).copyTo(tempFile, overwrite = true)
             sessionStore.setTempPath(tempFile.absolutePath, activeProfile)
 
-            // Store capture time for date stamp. Only update step on fast path to avoid race with frame 2
+            // Store capture time and digital gain. Only update step on fast path to avoid race with frame 2
             if (isFastPath) {
                 if (metadata != null) {
-                    sessionStore.markStep(1, metadata.captureTimeMillis, activeProfile)
+                    sessionStore.markStep(1, metadata.captureTimeMillis, activeProfile, digitalGain = metadata.digitalGain)
                 } else {
-                    sessionStore.markStep(1, tempFile.lastModified(), activeProfile)
+                    sessionStore.markStep(1, tempFile.lastModified(), activeProfile, digitalGain = digitalGain)
                 }
             }
 

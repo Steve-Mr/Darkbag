@@ -79,7 +79,13 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
         val editConfig = top.maary.darkbag.models.EditConfig(
             log = targetLogStr,
             lut = activeLut,
-            adjustments = if (hfMetadata != null) listOf(top.maary.darkbag.models.BasicAdjustments(), top.maary.darkbag.models.BasicAdjustments()) else null,
+            digitalGain = digitalGain,
+            adjustments = if (hfMetadata != null) {
+                listOf(
+                    top.maary.darkbag.models.BasicAdjustments(digitalGain = hfMetadata.frame1DigitalGain),
+                    top.maary.darkbag.models.BasicAdjustments(digitalGain = hfMetadata.digitalGain)
+                )
+            } else null,
             hfLayout = layout,
             showTimestamp = hfMetadata?.dateStamp ?: false,
             flareType = if (prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_LIGHT_LEAK, false)) 0 else -1
@@ -139,7 +145,8 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
                 targetUri = targetUri?.let { Uri.parse(it) },
                 mirror = false, // already handled by JNI
                 halfFrameMetadata = hfMetadata,
-                editConfig = editConfig
+                editConfig = editConfig,
+                digitalGain = digitalGain
             )
 
             Log.d(TAG, "Background Export Worker finished successfully for $baseName. finalUri=$finalUri")

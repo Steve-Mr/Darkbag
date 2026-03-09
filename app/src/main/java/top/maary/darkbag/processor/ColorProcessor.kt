@@ -47,6 +47,7 @@ object ColorProcessor {
         shadows: Float = 0f,
         whites: Float = 0f,
         blacks: Float = 0f,
+        digitalGain: Float = 1.0f,
         outputTiffPath: String?,
         outputJpgPath: String?,
         useGpu: Boolean,

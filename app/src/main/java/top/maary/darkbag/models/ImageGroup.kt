@@ -34,6 +34,7 @@ data class EditConfig(
     val shadows: Float = 0f,
     val whites: Float = 0f,
     val blacks: Float = 0f,
+    val digitalGain: Float = 1.0f,
     // Half-frame specific
     val adjustments: List<BasicAdjustments>? = null, // Index 0 for Frame 1, Index 1 for Frame 2
     val showTimestamp: Boolean = false,
@@ -49,5 +50,6 @@ data class BasicAdjustments(
     val highlights: Float = 0f,
     val shadows: Float = 0f,
     val whites: Float = 0f,
-    val blacks: Float = 0f
+    val blacks: Float = 0f,
+    val digitalGain: Float = 1.0f
 ) : Parcelable

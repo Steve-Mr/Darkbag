@@ -52,6 +52,7 @@ object ImageSaver {
         isFastPath: Boolean = false,
         halfFrameMetadata: HalfFrameManager.Metadata? = null,
         editConfig: EditConfig? = null,
+        digitalGain: Float = 1.0f,
         isAlreadyStitched: Boolean = false,
         onBitmapReady: ((Bitmap) -> Unit)? = null
     ): Uri? {
@@ -77,7 +78,7 @@ object ImageSaver {
                 val f = File(bmpPath!!)
                 if (f.exists() && f.length() > 0) {
                     if (isHalfFrameActive) {
-                        val finalPath = halfFrameManager.handleCapture(f.absolutePath, baseName, isFastPath, halfFrameMetadata)
+                        val finalPath = halfFrameManager.handleCapture(f.absolutePath, baseName, isFastPath, halfFrameMetadata, digitalGain = digitalGain)
 
                         if (isFastPath) {
                             val session = if (halfFrameMetadata != null) {
@@ -194,7 +195,7 @@ object ImageSaver {
                                     processedBitmap.compress(Bitmap.CompressFormat.JPEG, 95, out)
                                 }
 
-                                val finalPath = halfFrameManager.handleCapture(tempJpg.absolutePath, baseName, isFastPath, halfFrameMetadata)
+                                val finalPath = halfFrameManager.handleCapture(tempJpg.absolutePath, baseName, isFastPath, halfFrameMetadata, digitalGain = digitalGain)
 
                                 if (isFastPath) {
                                     val session = if (halfFrameMetadata != null) {
@@ -410,6 +411,7 @@ object ImageSaver {
                 put("shadows", editConfig.shadows.toDouble())
                 put("whites", editConfig.whites.toDouble())
                 put("blacks", editConfig.blacks.toDouble())
+                put("digital_gain", editConfig.digitalGain.toDouble())
 
                 editConfig.adjustments?.let { adjs ->
                     val array = org.json.JSONArray()
@@ -422,6 +424,7 @@ object ImageSaver {
                             put("shadows", adj.shadows.toDouble())
                             put("whites", adj.whites.toDouble())
                             put("blacks", adj.blacks.toDouble())
+                            put("digital_gain", adj.digitalGain.toDouble())
                         })
                     }
                     put("adjustments", array)

@@ -234,8 +234,8 @@ class CameraFragment : Fragment() {
         halfFrameTempPath = session.tempPath
     }
 
-    private fun writeScopedHalfFrameStep(prefs: SharedPreferences, step: Int, captureTimeMillis: Long? = null) {
-        halfFrameSessionStore.markStep(step, captureTimeMillis)
+    private fun writeScopedHalfFrameStep(prefs: SharedPreferences, step: Int, captureTimeMillis: Long? = null, digitalGain: Float = 1.0f) {
+        halfFrameSessionStore.markStep(step, captureTimeMillis, digitalGain = digitalGain)
         halfFrameStep = step
         if (step == 0) {
             halfFrameTempPath = null
@@ -356,7 +356,8 @@ class CameraFragment : Fragment() {
         val zoomRatio: Float,
         val physicalId: String? = null,
         val timing: StandardTimingTracker? = null,
-        val halfFrameMetadata: HalfFrameManager.Metadata? = null
+        val halfFrameMetadata: HalfFrameManager.Metadata? = null,
+        val digitalGain: Float = 1.0f
     )
 
 
@@ -1320,6 +1321,9 @@ class CameraFragment : Fragment() {
             if (isFrame1Trigger) {
                 halfFrameSessionStore.clearCurrentSession(deleteTempFile = false)
                 halfFrameSessionStore.setBaseName(hfGroupId)
+
+                // For Frame 1 trigger, we might not have a config yet, but writeScopedHalfFrameStep
+                // will be updated after capture with the actual digitalGain in takeSinglePicture/triggerHdrPlusBurst
                 writeScopedHalfFrameStep(prefs, 1, timing.shutterClick)
                 // Animate after shutter blackout
                 fragmentCameraBinding.viewFinder.postDelayed({
@@ -1337,7 +1341,8 @@ class CameraFragment : Fragment() {
                     captureTimeMillis = timing.shutterClick,
                     frame1BaseName = if (isFrame2Trigger) session.baseName else null,
                     frame1TempPath = if (isFrame2Trigger) session.tempPath else null,
-                    frame1CaptureTime = if (isFrame2Trigger) session.captureTimeMillis else 0L
+                    frame1CaptureTime = if (isFrame2Trigger) session.captureTimeMillis else 0L,
+                    frame1DigitalGain = if (isFrame2Trigger) session.digitalGain else 1.0f
                 )
             }
 
@@ -1759,7 +1764,7 @@ class CameraFragment : Fragment() {
                     outputTiffPath = null,
                     outputJpgPath = if (saveJpg) tempJpgFile.absolutePath else null, // Fast JPG
                     outputDngPath = null,
-                    digitalGain = 1.0f,
+                    digitalGain = image.digitalGain,
                     debugStats = debugStats,
                     outputBitmap = null,
                     tempRawPath = tempRawFile.absolutePath,
@@ -1775,7 +1780,13 @@ class CameraFragment : Fragment() {
                 val editConfig = top.maary.darkbag.models.EditConfig(
                     log = targetLogName ?: "None",
                     lut = activeLutName ?: "None",
-                    adjustments = if (image.halfFrameMetadata != null) listOf(top.maary.darkbag.models.BasicAdjustments(), top.maary.darkbag.models.BasicAdjustments()) else null,
+                    digitalGain = image.digitalGain,
+                    adjustments = if (image.halfFrameMetadata != null) {
+                        listOf(
+                            top.maary.darkbag.models.BasicAdjustments(digitalGain = image.halfFrameMetadata.frame1DigitalGain),
+                            top.maary.darkbag.models.BasicAdjustments(digitalGain = image.digitalGain)
+                        )
+                    } else null,
                     hfLayout = layout,
                     showTimestamp = image.halfFrameMetadata?.dateStamp ?: false,
                     flareType = if (prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_LIGHT_LEAK, false)) 0 else -1
@@ -1799,7 +1810,8 @@ class CameraFragment : Fragment() {
                     mirror = false,
                     isFastPath = true,
                     halfFrameMetadata = image.halfFrameMetadata,
-                    editConfig = editConfig
+                    editConfig = editConfig,
+                    digitalGain = image.digitalGain
                 )
 
                 timing?.firstOutputWritten = System.currentTimeMillis()
@@ -1820,7 +1832,7 @@ class CameraFragment : Fragment() {
                 workData.putInt("width", image.width)
                     .putInt("height", image.height)
                     .putInt("orientation", image.combinedOrientation)
-                    .putFloat("digitalGain", 1.0f)
+                    .putFloat("digitalGain", image.digitalGain)
                     .putInt("targetLog", targetLogIndex)
                     .putString("lutPath", nativeLutPath)
                     .putString("tiffPath", if (saveTiff) tiffFile.absolutePath else null)
@@ -2979,9 +2991,23 @@ class CameraFragment : Fragment() {
                                 1.0f
                             }
 
+                            val result = captureResults[image.imageInfo.timestamp]
+                            val curIso = result?.get(CaptureResult.SENSOR_SENSITIVITY) ?: 100
+                            val curTime = result?.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: 10_000_000L
+                            val validIsoRange = isoRange ?: android.util.Range(100, 3200)
+                            val validTimeRange = exposureTimeRange ?: android.util.Range(1000L, 1_000_000_000L)
+                            val underexposureMode = prefs.getString(SettingsFragment.KEY_HDR_UNDEREXPOSURE_MODE, "Dynamic (Experimental)") ?: "Dynamic (Experimental)"
+                            val digitalGain = if (isHdrPlusEnabled) {
+                                ExposureUtils.calculateHdrPlusExposure(curIso, curTime, validIsoRange, validTimeRange, underexposureMode, lastClippingRatio).digitalGain
+                            } else 1.0f
+
+                            if (isFrame1Trigger) {
+                                writeScopedHalfFrameStep(prefs, 1, timing?.shutterClick, digitalGain = digitalGain)
+                            }
+
                             val holder = copyImageToHolder(
-                                image, currentZoom, getCombinedOrientation(), currentLens?.physicalId, hfMetadata
-                            ).copy(timing = timing)
+                                image, currentZoom, getCombinedOrientation(), currentLens?.physicalId, hfMetadata?.copy(digitalGain = digitalGain)
+                            ).copy(timing = timing, digitalGain = digitalGain)
                             image.close()
 
                             if (!isFrame1Trigger) {
@@ -3121,10 +3147,14 @@ class CameraFragment : Fragment() {
                 val burstSizeStr = prefs.getString(SettingsFragment.KEY_HDR_BURST_COUNT, "5") ?: "5"
                 val burstSize = burstSizeStr.toIntOrNull() ?: 5
 
+                if (isFrame1Trigger) {
+                    writeScopedHalfFrameStep(prefs, 1, captureStartTime, digitalGain = config.digitalGain)
+                }
+
                 hdrPlusBurstHelper = HdrPlusBurst(
                     frameCount = burstSize,
                     onBurstComplete = { frames ->
-                        processHdrPlusBurst(frames, config.digitalGain, hfMetadata)
+                        processHdrPlusBurst(frames, config.digitalGain, hfMetadata?.copy(digitalGain = config.digitalGain))
                     }
                 )
 
@@ -3473,7 +3503,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                             jpgFolderUri = jpgFolderUri,
                             mirror = false, // Mirroring already handled in JNI
                             isFastPath = true,
-                            halfFrameMetadata = hfMetadata
+                        halfFrameMetadata = hfMetadata?.copy(digitalGain = digitalGain),
+                        digitalGain = digitalGain
                         )
                     } else {
                         null
@@ -3908,7 +3939,21 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         1.0f
                     }
                     if (image.format == android.graphics.ImageFormat.RAW_SENSOR) {
-                        val holder = copyAndroidImageToHolder(image, currentZoom, getCombinedOrientation(), currentLens?.id, hfMetadata).copy(timing = timing)
+                        val result = captureResults[image.timestamp]
+                        val curIso = result?.get(CaptureResult.SENSOR_SENSITIVITY) ?: 100
+                        val curTime = result?.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: 10_000_000L
+                        val validIsoRange = isoRange ?: android.util.Range(100, 3200)
+                        val validTimeRange = exposureTimeRange ?: android.util.Range(1000L, 1_000_000_000L)
+                        val underexposureMode = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE).getString(SettingsFragment.KEY_HDR_UNDEREXPOSURE_MODE, "Dynamic (Experimental)") ?: "Dynamic (Experimental)"
+                        val digitalGain = if (isHdrPlusEnabled) {
+                            ExposureUtils.calculateHdrPlusExposure(curIso, curTime, validIsoRange, validTimeRange, underexposureMode, lastClippingRatio).digitalGain
+                        } else 1.0f
+
+                        if (isFrame1Trigger) {
+                            writeScopedHalfFrameStep(requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE), 1, timing?.shutterClick, digitalGain = digitalGain)
+                        }
+
+                        val holder = copyAndroidImageToHolder(image, currentZoom, getCombinedOrientation(), currentLens?.id, hfMetadata?.copy(digitalGain = digitalGain)).copy(timing = timing, digitalGain = digitalGain)
                         image.close()
                         if (!isFrame1Trigger) {
                             showProcessingAnimation()
@@ -3988,8 +4033,12 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
             val burstSize = (prefs.getString(SettingsFragment.KEY_HDR_BURST_COUNT, "5") ?: "5").toIntOrNull() ?: 5
 
+            if (isFrame1Trigger) {
+                writeScopedHalfFrameStep(requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE), 1, captureStartTime, digitalGain = config.digitalGain)
+            }
+
             hdrPlusBurstHelper = HdrPlusBurst(frameCount = burstSize, onBurstComplete = { frames ->
-                processHdrPlusBurst(frames, config.digitalGain, hfMetadata)
+                processHdrPlusBurst(frames, config.digitalGain, hfMetadata?.copy(digitalGain = config.digitalGain))
             })
 
             lifecycleScope.launch(Dispatchers.Main) {

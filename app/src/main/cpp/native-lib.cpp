@@ -30,6 +30,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRaw(
         jfloat shadows,
         jfloat whites,
         jfloat blacks,
+        jfloat digitalGain,
         jstring outputTiffPath,
         jstring outputJpgPath,
         jboolean useGpu, // Ignored in new pipeline
@@ -121,12 +122,12 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRaw(
     unsigned char* bitmapPixels = nullptr;
     if (outputBitmap) AndroidBitmap_lockPixels(env, outputBitmap, (void**)&bitmapPixels);
 
-    // Use Shared Pipeline (Gain = 1.0 for standard LibRaw output)
+    // Use Shared Pipeline
     bool saveOk = process_and_save_image(
         rawImage,
         image->width,
         image->height,
-        1.0f,
+        digitalGain,
         targetLog,
         lut,
         exposure, contrast, saturation, highlights, shadows, whites, blacks,

@@ -149,7 +149,20 @@ class ImageViewerFragment : Fragment() {
         selectedDngIndex = 0
         previewJob?.cancel()
 
-        currentEditConfig = group.editConfig?.copy() ?: top.maary.darkbag.models.EditConfig(
+        currentEditConfig = group.editConfig?.let {
+             if (it.exposure == 0f && it.adjustments == null) {
+                 val baseEv = if (it.digitalGain > 0f) kotlin.math.log2(it.digitalGain) else 0f
+                 it.copy(exposure = baseEv)
+             } else if (it.adjustments != null) {
+                 val newAdjs = it.adjustments.map { adj ->
+                     if (adj.exposure == 0f) {
+                         val baseEv = if (adj.digitalGain > 0f) kotlin.math.log2(adj.digitalGain) else 0f
+                         adj.copy(exposure = baseEv)
+                     } else adj
+                 }
+                 it.copy(adjustments = newAdjs)
+             } else it
+        }?.copy() ?: top.maary.darkbag.models.EditConfig(
             adjustments = if (group.isHalfFrame()) listOf(top.maary.darkbag.models.BasicAdjustments(), top.maary.darkbag.models.BasicAdjustments()) else null
         )
         updateEditUi()
@@ -580,6 +593,9 @@ class ImageViewerFragment : Fragment() {
         }
 
         sheetBinding.sliderExposure.addOnChangeListener(changeListener)
+        sheetBinding.sliderExposure.addOnChangeListener { _, value, _ ->
+            sheetBinding.tvExposureValue.text = String.format("%.2f EV", value)
+        }
         sheetBinding.sliderContrast.addOnChangeListener(changeListener)
         sheetBinding.sliderSaturation.addOnChangeListener(changeListener)
         sheetBinding.sliderHighlights.addOnChangeListener(changeListener)
@@ -614,6 +630,7 @@ class ImageViewerFragment : Fragment() {
             )
         }
         sheetBinding.sliderExposure.value = target.exposure
+        sheetBinding.tvExposureValue.text = String.format("%.2f EV", target.exposure)
         sheetBinding.sliderContrast.value = target.contrast
         sheetBinding.sliderSaturation.value = target.saturation
         sheetBinding.sliderHighlights.value = target.highlights
@@ -681,6 +698,7 @@ class ImageViewerFragment : Fragment() {
                             shadows = adj.shadows,
                             whites = adj.whites,
                             blacks = adj.blacks,
+                            digitalGain = 1.0f, // Gain is already in adj.exposure
                             outputTiffPath = null,
                             outputJpgPath = null,
                             useGpu = false,
@@ -839,6 +857,7 @@ class ImageViewerFragment : Fragment() {
                             shadows = adj.shadows,
                             whites = adj.whites,
                             blacks = adj.blacks,
+                            digitalGain = 1.0f, // Gain is already in adj.exposure
                             outputTiffPath = null,
                             outputJpgPath = null,
                             useGpu = false,
