@@ -21,9 +21,21 @@ class ImageViewerAdapter(
 
     var onImageTapped: (() -> Unit)? = null
     var onZoomChanged: ((Boolean) -> Unit)? = null
+    private var recyclerView: RecyclerView? = null
 
     class ViewHolder(val binding: ItemImageGroupBinding) : RecyclerView.ViewHolder(binding.root) {
         var loadJob: Job? = null
+        var currentFormat: String = "JPG"
+    }
+
+    override fun onAttachedToRecyclerView(recyclerView: RecyclerView) {
+        super.onAttachedToRecyclerView(recyclerView)
+        this.recyclerView = recyclerView
+    }
+
+    override fun onDetachedFromRecyclerView(recyclerView: RecyclerView) {
+        super.onDetachedFromRecyclerView(recyclerView)
+        this.recyclerView = null
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
@@ -40,39 +52,23 @@ class ImageViewerAdapter(
         holder.binding.imageView.onTapped = { onImageTapped?.invoke() }
         holder.binding.imageView.onZoomChanged = { isZoomed -> onZoomChanged?.invoke(isZoomed) }
 
-        setupButtons(holder, group)
-
         // Default to JPG if available, else DNG, else TIFF
         when {
-            group.jpgUri != null -> loadImage(holder, group.jpgUri)
-            group.isHalfFrame() -> loadHalfFrameDngs(holder, group)
-            group.dngUri != null -> loadImage(holder, group.dngUri)
-            group.tiffUri != null -> loadImage(holder, group.tiffUri)
-        }
-    }
-
-    private fun setupButtons(holder: ViewHolder, group: ImageGroup) {
-        with(holder.binding) {
-            btnJpg.visibility = if (group.jpgUri != null) View.VISIBLE else View.GONE
-            btnTiff.visibility = if (group.tiffUri != null) View.VISIBLE else View.GONE
-            btnDng.visibility = if (group.dngUri != null || group.dngUri1 != null || group.dngUri2 != null) View.VISIBLE else View.GONE
-
-            btnJpg.setOnClickListener { group.jpgUri?.let { loadImage(holder, it) } }
-            btnTiff.setOnClickListener { group.tiffUri?.let { loadImage(holder, it) } }
-            btnDng.setOnClickListener {
-                if (group.isHalfFrame()) {
-                    loadHalfFrameDngs(holder, group)
-                } else {
-                    group.dngUri?.let { loadImage(holder, it) }
-                }
+            group.jpgUri != null -> {
+                holder.currentFormat = "JPG"
+                loadImage(holder, group.jpgUri)
             }
-
-            // Set initial selected button
-            formatToggleGroup.clearChecked()
-            when {
-                group.jpgUri != null -> formatToggleGroup.check(R.id.btn_jpg)
-                group.dngUri != null || group.dngUri1 != null || group.dngUri2 != null -> formatToggleGroup.check(R.id.btn_dng)
-                group.tiffUri != null -> formatToggleGroup.check(R.id.btn_tiff)
+            group.isHalfFrame() -> {
+                holder.currentFormat = "DNG"
+                loadHalfFrameDngs(holder, group)
+            }
+            group.dngUri != null -> {
+                holder.currentFormat = "DNG"
+                loadImage(holder, group.dngUri)
+            }
+            group.tiffUri != null -> {
+                holder.currentFormat = "TIFF"
+                loadImage(holder, group.tiffUri)
             }
         }
     }
@@ -90,32 +86,22 @@ class ImageViewerAdapter(
                 val bitmap = withContext(Dispatchers.IO) {
                     try {
                         val contentResolver = holder.binding.root.context.contentResolver
-
-                        // Try DNG thumbnail first if it's DNG
                         if (isDng) {
                             val thumb = ImageUtils.decodeDngThumbnail(holder.binding.root.context, uri)
                             if (thumb != null) return@withContext thumb
                         }
 
-                        // Fallback to BitmapFactory with sampling for TIFF or DNG without thumbnail
                         contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
-                            val options = BitmapFactory.Options().apply {
-                                inJustDecodeBounds = true
-                            }
+                            val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                             BitmapFactory.decodeFileDescriptor(pfd.fileDescriptor, null, options)
-
                             options.inSampleSize = ImageUtils.calculateInSampleSize(options, 2048, 2048)
                             options.inJustDecodeBounds = false
-
                             val bitmap = BitmapFactory.decodeFileDescriptor(pfd.fileDescriptor, null, options)
-
-                            // Handle EXIF orientation for TIFF fallback too
                             val orientation = try {
                                 holder.binding.root.context.contentResolver.openInputStream(uri)?.use { input ->
                                     androidx.exifinterface.media.ExifInterface(input).getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION, androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL)
                                 } ?: androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL
                             } catch (e: Exception) { androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL }
-
                             return@withContext bitmap?.let { ImageUtils.rotateBitmap(it, orientation) }
                         }
                     } catch (e: Exception) {
@@ -141,7 +127,6 @@ class ImageViewerAdapter(
         holder.loadJob?.cancel()
         holder.binding.imageView.visibility = View.VISIBLE
         holder.binding.loadingIndicator.visibility = View.VISIBLE
-
         holder.loadJob = scope.launch {
             val composite = ImageUtils.generateHalfFrameComposite(
                 holder.binding.root.context,
@@ -149,7 +134,6 @@ class ImageViewerAdapter(
                 group.dngUri2,
                 group.hfLayout
             )
-
             if (composite != null) {
                 holder.binding.imageView.setImageBitmap(composite)
             } else {
@@ -158,8 +142,6 @@ class ImageViewerAdapter(
             holder.binding.loadingIndicator.visibility = View.GONE
         }
     }
-
-
 
     private fun loadWithGlide(holder: ViewHolder, uri: Uri, skipCache: Boolean = false) {
         Glide.with(holder.binding.imageView)
@@ -176,7 +158,6 @@ class ImageViewerAdapter(
                     super.onLoadFailed(errorDrawable)
                     holder.binding.loadingIndicator.visibility = android.view.View.GONE
                 }
-
                 override fun onResourceReady(
                     resource: android.graphics.drawable.Drawable,
                     transition: com.bumptech.glide.request.transition.Transition<in android.graphics.drawable.Drawable>?
@@ -190,4 +171,21 @@ class ImageViewerAdapter(
     override fun getItemCount(): Int = groups.size
 
     fun getGroup(position: Int): ImageGroup = groups[position]
+
+    fun setFormat(position: Int, format: String) {
+        val group = groups[position]
+        val holder = recyclerView?.findViewHolderForAdapterPosition(position) as? ViewHolder ?: return
+        if (holder.currentFormat == format) return
+        holder.currentFormat = format
+        when (format) {
+            "JPG" -> group.jpgUri?.let { loadImage(holder, it) }
+            "TIFF" -> group.tiffUri?.let { loadImage(holder, it) }
+            "DNG" -> if (group.isHalfFrame()) loadHalfFrameDngs(holder, group) else group.dngUri?.let { loadImage(holder, it) }
+        }
+    }
+
+    fun getSelectedFormat(position: Int): String {
+        val holder = recyclerView?.findViewHolderForAdapterPosition(position) as? ViewHolder
+        return holder?.currentFormat ?: "JPG"
+    }
 }

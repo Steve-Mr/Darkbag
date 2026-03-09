@@ -2380,7 +2380,7 @@ class CameraFragment : Fragment() {
 
         val container = binding.lensControlsContainer ?: return
 
-        val colorPrimary = MaterialColors.getColor(container, com.google.android.material.R.attr.colorPrimary)
+        val colorPrimary = MaterialColors.getColor(container, android.R.attr.colorPrimary)
         val colorOnSurface = MaterialColors.getColor(container, com.google.android.material.R.attr.colorOnSurface)
 
         val isBackCamera = lensFacing == CameraSelector.LENS_FACING_BACK
@@ -2659,7 +2659,7 @@ class CameraFragment : Fragment() {
             val currentName = prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, null)
 
             val colorOnSurface = MaterialColors.getColor(holder.itemView, com.google.android.material.R.attr.colorOnSurface)
-            val colorPrimary = MaterialColors.getColor(holder.itemView, com.google.android.material.R.attr.colorPrimary)
+            val colorPrimary = MaterialColors.getColor(holder.itemView, android.R.attr.colorPrimary)
 
             holder.text.setTextColor(colorOnSurface)
             holder.text.textSize = 12f
