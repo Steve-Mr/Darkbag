@@ -246,6 +246,7 @@ class ImageRepository(private val context: Context) {
                 }
             }
         } catch (e: Exception) {
+            android.util.Log.e("ImageRepository", "Failed to read baseline exposure from $uri", e)
             null
         }
     }

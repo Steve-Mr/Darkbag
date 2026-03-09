@@ -615,6 +615,10 @@ class ImageViewerFragment : Fragment() {
         })
 
         val changeListener = com.google.android.material.slider.Slider.OnChangeListener { slider, value, fromUser ->
+            if (slider.id == R.id.slider_exposure) {
+                sheetBinding.tvExposureValue.text = String.format("%.2f EV", value)
+            }
+
             if (fromUser) {
                 val current = currentEditConfig ?: return@OnChangeListener
                 markAdjusted()
@@ -649,9 +653,6 @@ class ImageViewerFragment : Fragment() {
         }
 
         sheetBinding.sliderExposure.addOnChangeListener(changeListener)
-        sheetBinding.sliderExposure.addOnChangeListener { _, value, _ ->
-            sheetBinding.tvExposureValue.text = String.format("%.2f EV", value)
-        }
         sheetBinding.sliderContrast.addOnChangeListener(changeListener)
         sheetBinding.sliderSaturation.addOnChangeListener(changeListener)
         sheetBinding.sliderHighlights.addOnChangeListener(changeListener)

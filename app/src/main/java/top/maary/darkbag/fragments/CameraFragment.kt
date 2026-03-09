@@ -2991,19 +2991,11 @@ class CameraFragment : Fragment() {
                                 1.0f
                             }
 
-                            val result = captureResults[image.imageInfo.timestamp]
-                            val curIso = result?.get(CaptureResult.SENSOR_SENSITIVITY) ?: 100
-                            val curTime = result?.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: 10_000_000L
-                            val validIsoRange = isoRange ?: android.util.Range(100, 3200)
-                            val validTimeRange = exposureTimeRange ?: android.util.Range(1000L, 1_000_000_000L)
-                            val underexposureMode = prefs.getString(SettingsFragment.KEY_HDR_UNDEREXPOSURE_MODE, "Dynamic (Experimental)") ?: "Dynamic (Experimental)"
-                            val digitalGain = if (isHdrPlusEnabled) {
-                                ExposureUtils.calculateHdrPlusExposure(curIso, curTime, validIsoRange, validTimeRange, underexposureMode, lastClippingRatio).digitalGain
-                            } else 1.0f
-
-                            if (isFrame1Trigger) {
-                                writeScopedHalfFrameStep(prefs, 1, timing?.shutterClick, digitalGain = digitalGain)
-                            }
+                            val digitalGain = getDigitalGainAndUpdateStep(
+                                image.imageInfo.timestamp,
+                                isFrame1Trigger,
+                                timing?.shutterClick
+                            )
 
                             val holder = copyImageToHolder(
                                 image, currentZoom, getCombinedOrientation(), currentLens?.physicalId, hfMetadata?.copy(digitalGain = digitalGain)
@@ -3939,19 +3931,11 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         1.0f
                     }
                     if (image.format == android.graphics.ImageFormat.RAW_SENSOR) {
-                        val result = captureResults[image.timestamp]
-                        val curIso = result?.get(CaptureResult.SENSOR_SENSITIVITY) ?: 100
-                        val curTime = result?.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: 10_000_000L
-                        val validIsoRange = isoRange ?: android.util.Range(100, 3200)
-                        val validTimeRange = exposureTimeRange ?: android.util.Range(1000L, 1_000_000_000L)
-                        val underexposureMode = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE).getString(SettingsFragment.KEY_HDR_UNDEREXPOSURE_MODE, "Dynamic (Experimental)") ?: "Dynamic (Experimental)"
-                        val digitalGain = if (isHdrPlusEnabled) {
-                            ExposureUtils.calculateHdrPlusExposure(curIso, curTime, validIsoRange, validTimeRange, underexposureMode, lastClippingRatio).digitalGain
-                        } else 1.0f
-
-                        if (isFrame1Trigger) {
-                            writeScopedHalfFrameStep(requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE), 1, timing?.shutterClick, digitalGain = digitalGain)
-                        }
+                        val digitalGain = getDigitalGainAndUpdateStep(
+                            image.timestamp,
+                            isFrame1Trigger,
+                            timing?.shutterClick
+                        )
 
                         val holder = copyAndroidImageToHolder(image, currentZoom, getCombinedOrientation(), currentLens?.id, hfMetadata?.copy(digitalGain = digitalGain)).copy(timing = timing, digitalGain = digitalGain)
                         image.close()
@@ -4318,6 +4302,33 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         camera2Thread?.quitSafely()
         camera2Thread = null
         camera2Handler = null
+    }
+
+    private fun getDigitalGainAndUpdateStep(
+        timestamp: Long,
+        isFrame1Trigger: Boolean,
+        shutterClickTime: Long?
+    ): Float {
+        val result = captureResults[timestamp]
+        val curIso = result?.get(CaptureResult.SENSOR_SENSITIVITY) ?: 100
+        val curTime = result?.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: 10_000_000L
+        val validIsoRange = isoRange ?: android.util.Range(100, 3200)
+        val validTimeRange = exposureTimeRange ?: android.util.Range(1000L, 1_000_000_000L)
+
+        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val underexposureMode = prefs.getString(SettingsFragment.KEY_HDR_UNDEREXPOSURE_MODE, "Dynamic (Experimental)") ?: "Dynamic (Experimental)"
+
+        val digitalGain = if (isHdrPlusEnabled) {
+            ExposureUtils.calculateHdrPlusExposure(
+                curIso, curTime, validIsoRange, validTimeRange, underexposureMode, lastClippingRatio
+            ).digitalGain
+        } else 1.0f
+
+        if (isFrame1Trigger) {
+            writeScopedHalfFrameStep(prefs, 1, shutterClickTime, digitalGain = digitalGain)
+        }
+
+        return digitalGain
     }
 
     private fun syncManualFocusAfterTap() {
