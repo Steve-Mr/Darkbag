@@ -115,44 +115,6 @@
             android:layout_height="wrap_content" />
     </com.google.android.material.button.MaterialSplitButton>
 
-    <!-- Top Center: Format Switcher (M3 Connected Button Group) -->
-    <com.google.android.material.button.MaterialButtonToggleGroup
-        android:id="@+id/formatToggleGroup"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        app:singleSelection="true"
-        app:selectionRequired="true"
-        app:layout_constraintTop_toBottomOf="@id/toolbar"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent">
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnJpg"
-            style="@style/Widget.Material3.Button.OutlinedButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="JPG"
-            android:textColor="@android:color/white" />
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnTiff"
-            style="@style/Widget.Material3.Button.OutlinedButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="TIFF"
-            android:textColor="@android:color/white" />
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnDng"
-            style="@style/Widget.Material3.Button.OutlinedButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="DNG"
-            android:textColor="@android:color/white" />
-
-    </com.google.android.material.button.MaterialButtonToggleGroup>
-
     <!-- Bottom Left: Log/LUT and Half-frame controls -->
     <LinearLayout
         android:id="@+id/bottom_left_controls"

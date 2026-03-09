@@ -50,25 +50,61 @@ class ImageViewerAdapter(
         holder.loadJob?.cancel()
         holder.binding.imageView.resetZoom()
         holder.binding.imageView.onTapped = { onImageTapped?.invoke() }
-        holder.binding.imageView.onZoomChanged = { isZoomed -> onZoomChanged?.invoke(isZoomed) }
+        holder.binding.imageView.onZoomChanged = { isZoomed ->
+            onZoomChanged?.invoke(isZoomed)
+            holder.binding.formatToggleGroup.visibility = if (isZoomed) View.GONE else View.VISIBLE
+        }
+
+        setupButtons(holder, group)
 
         // Default to JPG if available, else DNG, else TIFF
         when {
             group.jpgUri != null -> {
                 holder.currentFormat = "JPG"
+                holder.binding.formatToggleGroup.check(R.id.btnJpg)
                 loadImage(holder, group.jpgUri)
             }
             group.isHalfFrame() -> {
                 holder.currentFormat = "DNG"
+                holder.binding.formatToggleGroup.check(R.id.btnDng)
                 loadHalfFrameDngs(holder, group)
             }
             group.dngUri != null -> {
                 holder.currentFormat = "DNG"
+                holder.binding.formatToggleGroup.check(R.id.btnDng)
                 loadImage(holder, group.dngUri)
             }
             group.tiffUri != null -> {
                 holder.currentFormat = "TIFF"
+                holder.binding.formatToggleGroup.check(R.id.btnTiff)
                 loadImage(holder, group.tiffUri)
+            }
+        }
+    }
+
+    private fun setupButtons(holder: ViewHolder, group: ImageGroup) {
+        with(holder.binding) {
+            btnJpg.visibility = if (group.jpgUri != null) View.VISIBLE else View.GONE
+            btnTiff.visibility = if (group.tiffUri != null) View.VISIBLE else View.GONE
+            btnDng.visibility = if (group.dngUri != null || group.dngUri1 != null || group.dngUri2 != null) View.VISIBLE else View.GONE
+
+            formatToggleGroup.addOnButtonCheckedListener { _, checkedId, isChecked ->
+                if (isChecked) {
+                    when (checkedId) {
+                        R.id.btnJpg -> {
+                            holder.currentFormat = "JPG"
+                            group.jpgUri?.let { loadImage(holder, it) }
+                        }
+                        R.id.btnTiff -> {
+                            holder.currentFormat = "TIFF"
+                            group.tiffUri?.let { loadImage(holder, it) }
+                        }
+                        R.id.btnDng -> {
+                            holder.currentFormat = "DNG"
+                            if (group.isHalfFrame()) loadHalfFrameDngs(holder, group) else group.dngUri?.let { loadImage(holder, it) }
+                        }
+                    }
+                }
             }
         }
     }
@@ -177,15 +213,22 @@ class ImageViewerAdapter(
         val holder = recyclerView?.findViewHolderForAdapterPosition(position) as? ViewHolder ?: return
         if (holder.currentFormat == format) return
         holder.currentFormat = format
-        when (format) {
-            "JPG" -> group.jpgUri?.let { loadImage(holder, it) }
-            "TIFF" -> group.tiffUri?.let { loadImage(holder, it) }
-            "DNG" -> if (group.isHalfFrame()) loadHalfFrameDngs(holder, group) else group.dngUri?.let { loadImage(holder, it) }
+        val targetId = when (format) {
+            "JPG" -> R.id.btnJpg
+            "TIFF" -> R.id.btnTiff
+            "DNG" -> R.id.btnDng
+            else -> R.id.btnJpg
         }
+        holder.binding.formatToggleGroup.check(targetId)
     }
 
     fun getSelectedFormat(position: Int): String {
         val holder = recyclerView?.findViewHolderForAdapterPosition(position) as? ViewHolder
         return holder?.currentFormat ?: "JPG"
+    }
+
+    fun setUiVisibility(position: Int, isVisible: Boolean) {
+        val holder = recyclerView?.findViewHolderForAdapterPosition(position) as? ViewHolder ?: return
+        holder.binding.formatToggleGroup.visibility = if (isVisible) View.VISIBLE else View.GONE
     }
 }

@@ -107,7 +107,6 @@ class ImageViewerFragment : Fragment() {
                     resetAdjustments()
                 }
                 updateControlsVisibility()
-                updateFormatSwitcher()
             }
         })
     }
@@ -267,7 +266,6 @@ class ImageViewerFragment : Fragment() {
             }
         }
 
-        setupFormatSwitcher()
     }
 
     private fun markAdjusted() {
@@ -307,50 +305,21 @@ class ImageViewerFragment : Fragment() {
     private fun performShare() {
         val currentIndex = binding.imagePager.currentItem
         val currentGroup = adapter.getGroup(currentIndex)
-        val selectedFormat = binding.formatToggleGroup.checkedButtonId
+        val selectedFormat = adapter.getSelectedFormat(currentIndex)
 
-        if (selectedFormat == R.id.btnDng && currentGroup.isHalfFrame()) {
+        if (selectedFormat == "DNG" && currentGroup.isHalfFrame()) {
             showHalfFrameShareSheet(currentGroup)
         } else {
             val currentUri = when (selectedFormat) {
-                R.id.btnJpg -> currentGroup.jpgUri
-                R.id.btnTiff -> currentGroup.tiffUri
-                R.id.btnDng -> currentGroup.dngUri ?: currentGroup.dngUri1 ?: currentGroup.dngUri2
+                "JPG" -> currentGroup.jpgUri
+                "TIFF" -> currentGroup.tiffUri
+                "DNG" -> currentGroup.dngUri ?: currentGroup.dngUri1 ?: currentGroup.dngUri2
                 else -> currentGroup.jpgUri ?: currentGroup.dngUri ?: currentGroup.dngUri1 ?: currentGroup.dngUri2 ?: currentGroup.tiffUri
             }
             currentUri?.let { shareImages(listOf(it)) }
         }
     }
 
-    private fun setupFormatSwitcher() {
-        binding.formatToggleGroup.addOnButtonCheckedListener { group: com.google.android.material.button.MaterialButtonToggleGroup, checkedId: Int, isChecked: Boolean ->
-            if (isChecked) {
-                val format = when (checkedId) {
-                    R.id.btnJpg -> "JPG"
-                    R.id.btnTiff -> "TIFF"
-                    R.id.btnDng -> "DNG"
-                    else -> "JPG"
-                }
-                adapter.setFormat(binding.imagePager.currentItem, format)
-            }
-        }
-    }
-
-    private fun updateFormatSwitcher() {
-        val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
-        binding.btnJpg.visibility = if (currentGroup.jpgUri != null) View.VISIBLE else View.GONE
-        binding.btnTiff.visibility = if (currentGroup.tiffUri != null) View.VISIBLE else View.GONE
-        binding.btnDng.visibility = if (currentGroup.dngUri != null || currentGroup.dngUri1 != null) View.VISIBLE else View.GONE
-
-        val currentFormat = adapter.getSelectedFormat(binding.imagePager.currentItem)
-        val targetId = when (currentFormat) {
-            "JPG" -> R.id.btnJpg
-            "TIFF" -> R.id.btnTiff
-            "DNG" -> R.id.btnDng
-            else -> R.id.btnJpg
-        }
-        binding.formatToggleGroup.check(targetId)
-    }
 
     private fun updateEditUi() {
         currentEditConfig?.let { config ->
@@ -790,10 +759,11 @@ class ImageViewerFragment : Fragment() {
 
             if (bitmap != null) {
                 if (!processOnlySelected) {
+                    val currentIndex = binding.imagePager.currentItem
                     val holder = (binding.imagePager.getChildAt(0) as? androidx.recyclerview.widget.RecyclerView)
-                        ?.findViewHolderForAdapterPosition(binding.imagePager.currentItem) as? ImageViewerAdapter.ViewHolder
+                        ?.findViewHolderForAdapterPosition(currentIndex) as? ImageViewerAdapter.ViewHolder
                     holder?.binding?.imageView?.setImageBitmap(bitmap)
-                    binding.formatToggleGroup.check(R.id.btnDng)
+                    adapter.setFormat(currentIndex, "DNG")
                 }
                 activeAdjustmentBinding?.editPreviewImage?.setImageBitmap(bitmap)
             }
@@ -1008,15 +978,15 @@ class ImageViewerFragment : Fragment() {
                     nextTargetUri = (nextGroup.jpgUri ?: nextGroup.dngUri ?: nextGroup.tiffUri)?.toString()
                 }
             } else {
-                val selectedFormat = binding.formatToggleGroup.checkedButtonId
-                if (selectedFormat == R.id.btnDng && group.isHalfFrame()) {
+                val selectedFormat = adapter.getSelectedFormat(binding.imagePager.currentItem)
+                if (selectedFormat == "DNG" && group.isHalfFrame()) {
                      group.dngUri1?.let { context.contentResolver.delete(it, null, null) }
                      group.dngUri2?.let { context.contentResolver.delete(it, null, null) }
                 } else {
                     val currentUri = when (selectedFormat) {
-                        R.id.btnJpg -> group.jpgUri
-                        R.id.btnTiff -> group.tiffUri
-                        R.id.btnDng -> group.dngUri
+                        "JPG" -> group.jpgUri
+                        "TIFF" -> group.tiffUri
+                        "DNG" -> group.dngUri ?: group.dngUri1 ?: group.dngUri2
                         else -> group.jpgUri ?: group.dngUri ?: group.dngUri1 ?: group.dngUri2 ?: group.tiffUri
                     }
                     currentUri?.let { context.contentResolver.delete(it, null, null) }
@@ -1057,14 +1027,14 @@ class ImageViewerFragment : Fragment() {
         binding.toolbar.visibility = View.VISIBLE
         binding.splitShare.visibility = if (isAdjusted) View.GONE else View.VISIBLE
         binding.splitSave.visibility = if (isAdjusted) View.VISIBLE else View.GONE
-        binding.formatToggleGroup.visibility = View.VISIBLE
         binding.bottomLeftControls.visibility = View.VISIBLE
         binding.bottomRightControls.visibility = View.VISIBLE
+
+        adapter.setUiVisibility(binding.imagePager.currentItem, true)
 
         binding.toolbar.animate().translationY(0f).setDuration(200).setListener(null).start()
         binding.splitShare.animate().translationY(0f).setDuration(200).setListener(null).start()
         binding.splitSave.animate().translationY(0f).setDuration(200).setListener(null).start()
-        binding.formatToggleGroup.animate().translationY(0f).setDuration(200).setListener(null).start()
         binding.bottomLeftControls.animate().translationY(0f).setDuration(200).setListener(null).start()
         binding.bottomRightControls.animate().translationY(0f).setDuration(200).setListener(null).start()
     }
@@ -1072,10 +1042,12 @@ class ImageViewerFragment : Fragment() {
     private fun hideUi() {
         if (!isUiVisible) return
         isUiVisible = false
+
+        adapter.setUiVisibility(binding.imagePager.currentItem, false)
+
         binding.toolbar.animate().translationY(-binding.toolbar.height.toFloat()).setDuration(200).start()
         binding.splitShare.animate().translationY(-binding.toolbar.height.toFloat()).setDuration(200).start()
         binding.splitSave.animate().translationY(-binding.toolbar.height.toFloat()).setDuration(200).start()
-        binding.formatToggleGroup.animate().translationY(-binding.formatToggleGroup.height.toFloat() - 100).setDuration(200).start()
         binding.bottomLeftControls.animate().translationY(binding.bottomLeftControls.height.toFloat() + 100).setDuration(200).start()
         binding.bottomRightControls.animate().translationY(binding.bottomRightControls.height.toFloat() + 100).setDuration(200).start()
     }
@@ -1104,9 +1076,6 @@ class ImageViewerFragment : Fragment() {
             binding.bottomRightControls.updateLayoutParams<ViewGroup.MarginLayoutParams> {
                 bottomMargin = systemBars.bottom + marginSmall
                 rightMargin = systemBars.right + marginSmall
-            }
-            binding.formatToggleGroup.updateLayoutParams<ViewGroup.MarginLayoutParams> {
-                topMargin = systemBars.top + marginSmall + binding.toolbar.height
             }
             insets
         }
