@@ -219,6 +219,11 @@ class ImageViewerFragment : Fragment() {
             showLutMenu()
         }
 
+        binding.touchOverlay.setOnClickListener {
+            binding.lutListContainer.visibility = View.GONE
+            binding.touchOverlay.visibility = View.GONE
+        }
+
         binding.btnTimestamp.setOnClickListener {
             val current = currentEditConfig ?: return@setOnClickListener
             currentEditConfig = current.copy(showTimestamp = !current.showTimestamp)
@@ -486,6 +491,7 @@ class ImageViewerFragment : Fragment() {
         val container = binding.lutListContainer
         val rv = binding.lutList
 
+        binding.touchOverlay.visibility = View.VISIBLE
         container.visibility = View.VISIBLE
         rv.layoutManager = androidx.recyclerview.widget.LinearLayoutManager(requireContext())
         rv.adapter = object : androidx.recyclerview.widget.RecyclerView.Adapter<androidx.recyclerview.widget.RecyclerView.ViewHolder>() {
@@ -507,6 +513,7 @@ class ImageViewerFragment : Fragment() {
                     onSelected(title, position)
                     if (autoDismiss) {
                         container.visibility = View.GONE
+                        binding.touchOverlay.visibility = View.GONE
                     }
                 }
             }
@@ -1050,12 +1057,14 @@ class ImageViewerFragment : Fragment() {
         binding.toolbar.visibility = View.VISIBLE
         binding.splitShare.visibility = if (isAdjusted) View.GONE else View.VISIBLE
         binding.splitSave.visibility = if (isAdjusted) View.VISIBLE else View.GONE
+        binding.formatToggleGroup.visibility = View.VISIBLE
         binding.bottomLeftControls.visibility = View.VISIBLE
         binding.bottomRightControls.visibility = View.VISIBLE
 
         binding.toolbar.animate().translationY(0f).setDuration(200).setListener(null).start()
         binding.splitShare.animate().translationY(0f).setDuration(200).setListener(null).start()
         binding.splitSave.animate().translationY(0f).setDuration(200).setListener(null).start()
+        binding.formatToggleGroup.animate().translationY(0f).setDuration(200).setListener(null).start()
         binding.bottomLeftControls.animate().translationY(0f).setDuration(200).setListener(null).start()
         binding.bottomRightControls.animate().translationY(0f).setDuration(200).setListener(null).start()
     }
@@ -1066,6 +1075,7 @@ class ImageViewerFragment : Fragment() {
         binding.toolbar.animate().translationY(-binding.toolbar.height.toFloat()).setDuration(200).start()
         binding.splitShare.animate().translationY(-binding.toolbar.height.toFloat()).setDuration(200).start()
         binding.splitSave.animate().translationY(-binding.toolbar.height.toFloat()).setDuration(200).start()
+        binding.formatToggleGroup.animate().translationY(-binding.formatToggleGroup.height.toFloat() - 100).setDuration(200).start()
         binding.bottomLeftControls.animate().translationY(binding.bottomLeftControls.height.toFloat() + 100).setDuration(200).start()
         binding.bottomRightControls.animate().translationY(binding.bottomRightControls.height.toFloat() + 100).setDuration(200).start()
     }
@@ -1094,6 +1104,9 @@ class ImageViewerFragment : Fragment() {
             binding.bottomRightControls.updateLayoutParams<ViewGroup.MarginLayoutParams> {
                 bottomMargin = systemBars.bottom + marginSmall
                 rightMargin = systemBars.right + marginSmall
+            }
+            binding.formatToggleGroup.updateLayoutParams<ViewGroup.MarginLayoutParams> {
+                topMargin = systemBars.top + marginSmall + binding.toolbar.height
             }
             insets
         }

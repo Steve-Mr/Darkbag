@@ -15,6 +15,16 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent" />
 
+    <!-- Full-screen touch overlay for dismissing menus -->
+    <View
+        android:id="@+id/touch_overlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone"
+        android:clickable="true"
+        android:focusable="true"
+        android:background="@android:color/transparent" />
+
     <!-- Half-frame Selection Overlays (Keep for logic) -->
     <View
         android:id="@+id/hf_selection_1"
@@ -105,6 +115,44 @@
             android:layout_height="wrap_content" />
     </com.google.android.material.button.MaterialSplitButton>
 
+    <!-- Top Center: Format Switcher (M3 Connected Button Group) -->
+    <com.google.android.material.button.MaterialButtonToggleGroup
+        android:id="@+id/formatToggleGroup"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        app:singleSelection="true"
+        app:selectionRequired="true"
+        app:layout_constraintTop_toBottomOf="@id/toolbar"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnJpg"
+            style="@style/Widget.Material3.Button.OutlinedButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="JPG"
+            android:textColor="@android:color/white" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnTiff"
+            style="@style/Widget.Material3.Button.OutlinedButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="TIFF"
+            android:textColor="@android:color/white" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnDng"
+            style="@style/Widget.Material3.Button.OutlinedButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="DNG"
+            android:textColor="@android:color/white" />
+
+    </com.google.android.material.button.MaterialButtonToggleGroup>
+
     <!-- Bottom Left: Log/LUT and Half-frame controls -->
     <LinearLayout
         android:id="@+id/bottom_left_controls"
@@ -152,6 +200,7 @@
             style="@style/Widget.Material3.Button.TonalButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:maxWidth="200dp"
             android:text="Log: None / LUT: None"
             android:textAllCaps="false"
             android:ellipsize="end"
@@ -159,7 +208,7 @@
             app:icon="@drawable/ic_lut" />
     </LinearLayout>
 
-    <!-- Bottom Right: Adjust FAB and Format Switcher -->
+    <!-- Bottom Right: Adjust FAB -->
     <LinearLayout
         android:id="@+id/bottom_right_controls"
         android:layout_width="wrap_content"
@@ -175,43 +224,10 @@
             android:id="@+id/fab_adjust"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="16dp"
             android:contentDescription="Adjust"
             app:srcCompat="@drawable/ic_edit"
             style="@style/Widget.Material3.FloatingActionButton.Primary" />
 
-        <com.google.android.material.button.MaterialButtonToggleGroup
-            android:id="@+id/formatToggleGroup"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            app:singleSelection="true"
-            app:selectionRequired="true">
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btnJpg"
-                style="@style/Widget.Material3.Button.OutlinedButton"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="JPG"
-                android:textColor="@android:color/white" />
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btnTiff"
-                style="@style/Widget.Material3.Button.OutlinedButton"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="TIFF"
-                android:textColor="@android:color/white" />
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btnDng"
-                style="@style/Widget.Material3.Button.OutlinedButton"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="DNG"
-                android:textColor="@android:color/white" />
-
-        </com.google.android.material.button.MaterialButtonToggleGroup>
     </LinearLayout>
 
     <!-- LUT Selection List Overlay -->
