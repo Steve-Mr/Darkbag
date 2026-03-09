@@ -105,6 +105,8 @@ class ImageViewerFragment : Fragment() {
             override fun onPageSelected(position: Int) {
                 if (isAdjusted) {
                     resetAdjustments()
+                } else {
+                    currentEditConfig = null
                 }
                 updateControlsVisibility()
             }
@@ -144,6 +146,7 @@ class ImageViewerFragment : Fragment() {
         cachedBitmap2?.recycle()
         cachedBitmap2 = null
         lastPreviewConfig = null
+        selectedDngIndex = 0
         previewJob?.cancel()
 
         currentEditConfig = group.editConfig?.copy() ?: top.maary.darkbag.models.EditConfig(
