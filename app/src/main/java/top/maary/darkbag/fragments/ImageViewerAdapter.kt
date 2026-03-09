@@ -61,22 +61,22 @@ class ImageViewerAdapter(
         when {
             group.jpgUri != null -> {
                 holder.currentFormat = "JPG"
-                holder.binding.formatToggleGroup.check(R.id.btnJpg)
+                selectButton(holder, R.id.btnJpg)
                 loadImage(holder, group.jpgUri)
             }
             group.isHalfFrame() -> {
                 holder.currentFormat = "DNG"
-                holder.binding.formatToggleGroup.check(R.id.btnDng)
+                selectButton(holder, R.id.btnDng)
                 loadHalfFrameDngs(holder, group)
             }
             group.dngUri != null -> {
                 holder.currentFormat = "DNG"
-                holder.binding.formatToggleGroup.check(R.id.btnDng)
+                selectButton(holder, R.id.btnDng)
                 loadImage(holder, group.dngUri)
             }
             group.tiffUri != null -> {
                 holder.currentFormat = "TIFF"
-                holder.binding.formatToggleGroup.check(R.id.btnTiff)
+                selectButton(holder, R.id.btnTiff)
                 loadImage(holder, group.tiffUri)
             }
         }
@@ -88,22 +88,40 @@ class ImageViewerAdapter(
             btnTiff.visibility = if (group.tiffUri != null) View.VISIBLE else View.GONE
             btnDng.visibility = if (group.dngUri != null || group.dngUri1 != null || group.dngUri2 != null) View.VISIBLE else View.GONE
 
-            formatToggleGroup.addOnButtonCheckedListener { _, checkedId, isChecked ->
-                if (isChecked) {
-                    when (checkedId) {
-                        R.id.btnJpg -> {
-                            holder.currentFormat = "JPG"
-                            group.jpgUri?.let { loadImage(holder, it) }
-                        }
-                        R.id.btnTiff -> {
-                            holder.currentFormat = "TIFF"
-                            group.tiffUri?.let { loadImage(holder, it) }
-                        }
-                        R.id.btnDng -> {
-                            holder.currentFormat = "DNG"
-                            if (group.isHalfFrame()) loadHalfFrameDngs(holder, group) else group.dngUri?.let { loadImage(holder, it) }
-                        }
-                    }
+            btnJpg.setOnClickListener {
+                holder.currentFormat = "JPG"
+                selectButton(holder, R.id.btnJpg)
+                group.jpgUri?.let { loadImage(holder, it) }
+            }
+            btnTiff.setOnClickListener {
+                holder.currentFormat = "TIFF"
+                selectButton(holder, R.id.btnTiff)
+                group.tiffUri?.let { loadImage(holder, it) }
+            }
+            btnDng.setOnClickListener {
+                holder.currentFormat = "DNG"
+                selectButton(holder, R.id.btnDng)
+                if (group.isHalfFrame()) loadHalfFrameDngs(holder, group) else group.dngUri?.let { loadImage(holder, it) }
+            }
+        }
+    }
+
+    private fun selectButton(holder: ViewHolder, selectedId: Int) {
+        val group = holder.binding.formatToggleGroup
+        for (i in 0 until group.childCount) {
+            val child = group.getChildAt(i) as? com.google.android.material.button.MaterialButton
+            if (child != null) {
+                val isSelected = child.id == selectedId
+                child.isSelected = isSelected
+                // For M3 Connected Button Group, we might need to manually handle the "checked" visual state
+                // if we are not using a ToggleGroup with singleSelection.
+                // But MaterialButtonGroup.Connected is just a container.
+                // Actually, the user might want a toggle behavior.
+                // If using MaterialButtonGroup, we use the standard button selection state or tonal style.
+                if (isSelected) {
+                    child.setAlpha(1.0f)
+                } else {
+                    child.setAlpha(0.6f)
                 }
             }
         }
@@ -219,7 +237,13 @@ class ImageViewerAdapter(
             "DNG" -> R.id.btnDng
             else -> R.id.btnJpg
         }
-        holder.binding.formatToggleGroup.check(targetId)
+        selectButton(holder, targetId)
+        // If we want to actually reload the image when format is set externally:
+        when (format) {
+            "JPG" -> group.jpgUri?.let { loadImage(holder, it) }
+            "TIFF" -> group.tiffUri?.let { loadImage(holder, it) }
+            "DNG" -> if (group.isHalfFrame()) loadHalfFrameDngs(holder, group) else group.dngUri?.let { loadImage(holder, it) }
+        }
     }
 
     fun getSelectedFormat(position: Int): String {
