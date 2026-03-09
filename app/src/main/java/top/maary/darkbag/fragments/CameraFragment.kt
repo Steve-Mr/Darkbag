@@ -2518,7 +2518,7 @@ class CameraFragment : Fragment() {
         val effectiveDegrees = if (isHalfFrameModeEnabled) {
             val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
             val layout = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUTS[0])
-            if (layout == SettingsFragment.HALF_FRAME_LAYOUTS[1]) 270 else 0
+            if (layout == SettingsFragment.HALF_FRAME_LAYOUTS[1]) 90 else 0
         } else {
             deviceOrientationDegrees
         }

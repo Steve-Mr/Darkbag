@@ -136,6 +136,16 @@ class ImageViewerFragment : Fragment() {
     }
 
     private fun prepareEditConfig(group: ImageGroup) {
+        // Reset cached data to prevent cross-contamination between different image groups
+        sourceDngBytes = null
+        sourceDngBytes2 = null
+        cachedBitmap1?.recycle()
+        cachedBitmap1 = null
+        cachedBitmap2?.recycle()
+        cachedBitmap2 = null
+        lastPreviewConfig = null
+        previewJob?.cancel()
+
         currentEditConfig = group.editConfig?.copy() ?: top.maary.darkbag.models.EditConfig(
             adjustments = if (group.isHalfFrame()) listOf(top.maary.darkbag.models.BasicAdjustments(), top.maary.darkbag.models.BasicAdjustments()) else null
         )
@@ -1047,15 +1057,18 @@ class ImageViewerFragment : Fragment() {
 
         adapter.setUiVisibility(false)
 
-        binding.toolbar.animate().translationY(-binding.toolbar.height.toFloat()).alpha(0f).setDuration(200)
+        val topShift = -(binding.toolbar.height + (binding.toolbar.layoutParams as ViewGroup.MarginLayoutParams).topMargin).toFloat()
+        val bottomShift = (binding.bottomLeftControls.height + (binding.bottomLeftControls.layoutParams as ViewGroup.MarginLayoutParams).bottomMargin).toFloat()
+
+        binding.toolbar.animate().translationY(topShift).alpha(0f).setDuration(200)
             .withEndAction { binding.toolbar.visibility = View.GONE }.start()
-        binding.splitShare.animate().translationY(-binding.toolbar.height.toFloat()).alpha(0f).setDuration(200)
+        binding.splitShare.animate().translationY(topShift).alpha(0f).setDuration(200)
             .withEndAction { binding.splitShare.visibility = View.GONE }.start()
-        binding.splitSave.animate().translationY(-binding.toolbar.height.toFloat()).alpha(0f).setDuration(200)
+        binding.splitSave.animate().translationY(topShift).alpha(0f).setDuration(200)
             .withEndAction { binding.splitSave.visibility = View.GONE }.start()
-        binding.bottomLeftControls.animate().translationY(binding.bottomLeftControls.height.toFloat() + 100).alpha(0f).setDuration(200)
+        binding.bottomLeftControls.animate().translationY(bottomShift).alpha(0f).setDuration(200)
             .withEndAction { binding.bottomLeftControls.visibility = View.GONE }.start()
-        binding.bottomRightControls.animate().translationY(binding.bottomRightControls.height.toFloat() + 100).alpha(0f).setDuration(200)
+        binding.bottomRightControls.animate().translationY(bottomShift).alpha(0f).setDuration(200)
             .withEndAction { binding.bottomRightControls.visibility = View.GONE }.start()
     }
 
