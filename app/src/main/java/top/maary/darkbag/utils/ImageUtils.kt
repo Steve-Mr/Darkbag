@@ -78,8 +78,8 @@ object ImageUtils {
             var bitmap: Bitmap? = null
             var orientation = ExifInterface.ORIENTATION_NORMAL
 
-            context.contentResolver.openInputStream(uri)?.use { input ->
-                val exif = ExifInterface(input)
+            context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                val exif = ExifInterface(pfd.fileDescriptor)
                 orientation = exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
                 if (exif.hasThumbnail()) {
                     val thumb = exif.thumbnailBytes

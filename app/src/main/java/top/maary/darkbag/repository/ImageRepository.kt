@@ -82,17 +82,14 @@ class ImageRepository(private val context: Context) {
                     name.contains("_HF1") && name.endsWith(".dng", ignoreCase = true) -> {
                         builder.dngUri1 = file.uri
                         builder.updateTime(file.lastModified())
-                        if (builder.editConfig == null) builder.editConfig = readDngBaselineExposure(file.uri, true, 0)
                     }
                     name.contains("_HF2") && name.endsWith(".dng", ignoreCase = true) -> {
                         builder.dngUri2 = file.uri
                         builder.updateTime(file.lastModified())
-                        if (builder.editConfig == null) builder.editConfig = readDngBaselineExposure(file.uri, true, 1)
                     }
                     name.endsWith(".dng", ignoreCase = true) -> {
                         builder.dngUri = file.uri
                         builder.updateTime(file.lastModified())
-                        if (builder.editConfig == null) builder.editConfig = readDngBaselineExposure(file.uri, false)
                     }
                     name.endsWith(".tiff", ignoreCase = true) || name.endsWith(".tif", ignoreCase = true) -> {
                         builder.tiffUri = file.uri
@@ -165,15 +162,12 @@ class ImageRepository(private val context: Context) {
                     }
                     name.contains("_HF1") && (mime == "image/x-adobe-dng" || name.endsWith(".dng", ignoreCase = true)) -> {
                         builder.dngUri1 = uri
-                        if (builder.editConfig == null) builder.editConfig = readDngBaselineExposure(uri, true, 0)
                     }
                     name.contains("_HF2") && (mime == "image/x-adobe-dng" || name.endsWith(".dng", ignoreCase = true)) -> {
                         builder.dngUri2 = uri
-                        if (builder.editConfig == null) builder.editConfig = readDngBaselineExposure(uri, true, 1)
                     }
                     mime == "image/x-adobe-dng" || name.endsWith(".dng", ignoreCase = true) -> {
                         builder.dngUri = uri
-                        if (builder.editConfig == null) builder.editConfig = readDngBaselineExposure(uri, false)
                     }
                     mime == "image/tiff" -> builder.tiffUri = uri
                 }
@@ -235,10 +229,10 @@ class ImageRepository(private val context: Context) {
         }
     }
 
-    private fun readDngBaselineExposure(uri: Uri, isHalfFrame: Boolean, index: Int = 0): EditConfig? {
+    fun readDngBaselineExposure(uri: Uri, isHalfFrame: Boolean, index: Int = 0): EditConfig? {
         return try {
-            context.contentResolver.openInputStream(uri)?.use { input ->
-                val exif = androidx.exifinterface.media.ExifInterface(input)
+            context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                val exif = androidx.exifinterface.media.ExifInterface(pfd.fileDescriptor)
                 // TAG_BASELINE_EXPOSURE is 50730
                 val baselineExposure = exif.getAttributeDouble("BaselineExposure", 0.0).toFloat()
                 val digitalGain = Math.pow(2.0, baselineExposure.toDouble()).toFloat()
@@ -246,8 +240,6 @@ class ImageRepository(private val context: Context) {
                 if (isHalfFrame) {
                     val adjs = mutableListOf(top.maary.darkbag.models.BasicAdjustments(), top.maary.darkbag.models.BasicAdjustments())
                     adjs[index] = top.maary.darkbag.models.BasicAdjustments(exposure = baselineExposure, digitalGain = digitalGain)
-                    // If we found Frame 2 first, we still only have Frame 2's info.
-                    // This is a partial EditConfig that will be merged/overwritten when JPG is found or Frame 1 is found.
                     EditConfig(adjustments = adjs)
                 } else {
                     EditConfig(exposure = baselineExposure, digitalGain = digitalGain)

@@ -149,20 +149,7 @@ class ImageViewerFragment : Fragment() {
         selectedDngIndex = 0
         previewJob?.cancel()
 
-        currentEditConfig = group.editConfig?.let {
-             if (it.exposure == 0f && it.adjustments == null) {
-                 val baseEv = if (it.digitalGain > 0f) kotlin.math.log2(it.digitalGain) else 0f
-                 it.copy(exposure = baseEv)
-             } else if (it.adjustments != null) {
-                 val newAdjs = it.adjustments.map { adj ->
-                     if (adj.exposure == 0f) {
-                         val baseEv = if (adj.digitalGain > 0f) kotlin.math.log2(adj.digitalGain) else 0f
-                         adj.copy(exposure = baseEv)
-                     } else adj
-                 }
-                 it.copy(adjustments = newAdjs)
-             } else it
-        }?.copy() ?: top.maary.darkbag.models.EditConfig(
+        currentEditConfig = group.editConfig?.copy() ?: top.maary.darkbag.models.EditConfig(
             adjustments = if (group.isHalfFrame()) listOf(top.maary.darkbag.models.BasicAdjustments(), top.maary.darkbag.models.BasicAdjustments()) else null
         )
         updateEditUi()
@@ -184,6 +171,43 @@ class ImageViewerFragment : Fragment() {
                         sourceDngBytes2 = java.io.FileInputStream(pfd.fileDescriptor).use { it.readBytes() }
                     }
                 }
+
+                // Optimization: Load digital gain if missing
+                if (currentEditConfig?.digitalGain == 1.0f && currentEditConfig?.adjustments == null) {
+                    val configFromExif = repository.readDngBaselineExposure(dngUri1, false)
+                    if (configFromExif != null) {
+                        withContext(Dispatchers.Main) {
+                            val current = currentEditConfig ?: return@withContext
+                            if (current.exposure == 0f) {
+                                currentEditConfig = current.copy(
+                                    digitalGain = configFromExif.digitalGain,
+                                    exposure = if (configFromExif.digitalGain > 0f) kotlin.math.log2(configFromExif.digitalGain) else 0f
+                                )
+                            }
+                        }
+                    }
+                } else if (currentEditConfig?.adjustments != null) {
+                    val adjs = currentEditConfig?.adjustments?.toMutableList() ?: return@launch
+                    var updated = false
+                    if (adjs.getOrNull(0)?.digitalGain == 1.0f) {
+                        repository.readDngBaselineExposure(dngUri1, true, 0)?.adjustments?.get(0)?.let { adj ->
+                            adjs[0] = if (adjs[0].exposure == 0f) adj else adjs[0].copy(digitalGain = adj.digitalGain)
+                            updated = true
+                        }
+                    }
+                    if (dngUri2 != null && adjs.getOrNull(1)?.digitalGain == 1.0f) {
+                        repository.readDngBaselineExposure(dngUri2, true, 1)?.adjustments?.get(1)?.let { adj ->
+                            adjs[1] = if (adjs[1].exposure == 0f) adj else adjs[1].copy(digitalGain = adj.digitalGain)
+                            updated = true
+                        }
+                    }
+                    if (updated) {
+                        withContext(Dispatchers.Main) {
+                            currentEditConfig = currentEditConfig?.copy(adjustments = adjs)
+                        }
+                    }
+                }
+
             } catch (e: Exception) {
                 android.util.Log.e("ImageViewerFragment", "Failed to load source DNG bytes", e)
             }
