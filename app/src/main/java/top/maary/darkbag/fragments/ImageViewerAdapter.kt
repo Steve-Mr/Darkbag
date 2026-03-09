@@ -109,7 +109,13 @@ class ImageViewerAdapter(
                 if (selectedFormats[position] == "DNG") return@setOnClickListener
                 selectedFormats[position] = "DNG"
                 selectButton(holder, R.id.btnDng)
-                if (group.isHalfFrame()) loadHalfFrameDngs(holder, group) else group.dngUri?.let { loadImage(holder, it) }
+
+                // Optimization: If a JPG exists, use it as a placeholder for the DNG tab to avoid immediate heavy RAW decoding
+                if (group.jpgUri != null && !group.isHalfFrame()) {
+                    loadWithGlide(holder, group.jpgUri, skipCache = false)
+                } else {
+                    if (group.isHalfFrame()) loadHalfFrameDngs(holder, group) else group.dngUri?.let { loadImage(holder, it) }
+                }
             }
         }
     }

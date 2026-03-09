@@ -149,19 +149,34 @@ class ImageViewerFragment : Fragment() {
         selectedDngIndex = 0
         previewJob?.cancel()
 
-        currentEditConfig = group.editConfig?.copy() ?: top.maary.darkbag.models.EditConfig(
+        currentEditConfig = group.editConfig?.let {
+            if (it.exposure == 0f && it.adjustments == null) {
+                val baseEv = if (it.digitalGain > 0f) kotlin.math.log2(it.digitalGain) else 0f
+                it.copy(exposure = baseEv)
+            } else if (it.adjustments != null) {
+                val newAdjs = it.adjustments.map { adj ->
+                    if (adj.exposure == 0f) {
+                        val baseEv = if (adj.digitalGain > 0f) kotlin.math.log2(adj.digitalGain) else 0f
+                        adj.copy(exposure = baseEv)
+                    } else adj
+                }
+                it.copy(adjustments = newAdjs)
+            } else it
+        }?.copy() ?: top.maary.darkbag.models.EditConfig(
             adjustments = if (group.isHalfFrame()) listOf(top.maary.darkbag.models.BasicAdjustments(), top.maary.darkbag.models.BasicAdjustments()) else null
         )
         updateEditUi()
-        loadDngBytes(group)
+        // DNG bytes and deep EXIF will be loaded on-demand when entering edit flow
     }
 
-    private fun loadDngBytes(group: ImageGroup) {
+    private suspend fun ensureDngBytesLoaded() {
+        if (sourceDngBytes != null) return
+        val group = adapter.getGroup(binding.imagePager.currentItem)
         val dngUri1 = group.dngUri ?: group.dngUri1 ?: return
         val dngUri2 = group.dngUri2
         val context = context ?: return
 
-        lifecycleScope.launch(Dispatchers.IO) {
+        withContext(Dispatchers.IO) {
             try {
                 context.contentResolver.openFileDescriptor(dngUri1, "r")?.use { pfd ->
                     sourceDngBytes = java.io.FileInputStream(pfd.fileDescriptor).use { it.readBytes() }
@@ -172,42 +187,44 @@ class ImageViewerFragment : Fragment() {
                     }
                 }
 
-                // Optimization: Load digital gain if missing
-                if (currentEditConfig?.digitalGain == 1.0f && currentEditConfig?.adjustments == null) {
-                    val configFromExif = repository.readDngBaselineExposure(dngUri1, false)
-                    if (configFromExif != null) {
-                        withContext(Dispatchers.Main) {
-                            val current = currentEditConfig ?: return@withContext
-                            if (current.exposure == 0f) {
-                                currentEditConfig = current.copy(
-                                    digitalGain = configFromExif.digitalGain,
-                                    exposure = if (configFromExif.digitalGain > 0f) kotlin.math.log2(configFromExif.digitalGain) else 0f
-                                )
+                // Fallback: Load digital gain from DNG EXIF only if missing from JPG
+                val currentConfig = currentEditConfig
+                if (currentConfig != null) {
+                    if (currentConfig.digitalGain == 1.0f && currentConfig.adjustments == null && currentConfig.exposure == 0f) {
+                        repository.readDngBaselineExposure(dngUri1, false)?.let { configFromExif ->
+                            withContext(Dispatchers.Main) {
+                                if (currentEditConfig?.exposure == 0f) {
+                                    currentEditConfig = currentEditConfig?.copy(
+                                        digitalGain = configFromExif.digitalGain,
+                                        exposure = if (configFromExif.digitalGain > 0f) kotlin.math.log2(configFromExif.digitalGain) else 0f
+                                    )
+                                    updateEditUi()
+                                }
+                            }
+                        }
+                    } else if (currentConfig.adjustments != null) {
+                        val adjs = currentConfig.adjustments.toMutableList()
+                        var updated = false
+                        if (adjs.getOrNull(0)?.digitalGain == 1.0f && adjs.getOrNull(0)?.exposure == 0f) {
+                            repository.readDngBaselineExposure(dngUri1, true, 0)?.adjustments?.get(0)?.let { adj ->
+                                adjs[0] = adj
+                                updated = true
+                            }
+                        }
+                        if (dngUri2 != null && adjs.getOrNull(1)?.digitalGain == 1.0f && adjs.getOrNull(1)?.exposure == 0f) {
+                            repository.readDngBaselineExposure(dngUri2, true, 1)?.adjustments?.get(1)?.let { adj ->
+                                adjs[1] = adj
+                                updated = true
+                            }
+                        }
+                        if (updated) {
+                            withContext(Dispatchers.Main) {
+                                currentEditConfig = currentEditConfig?.copy(adjustments = adjs)
+                                updateEditUi()
                             }
                         }
                     }
-                } else if (currentEditConfig?.adjustments != null) {
-                    val adjs = currentEditConfig?.adjustments?.toMutableList() ?: return@launch
-                    var updated = false
-                    if (adjs.getOrNull(0)?.digitalGain == 1.0f) {
-                        repository.readDngBaselineExposure(dngUri1, true, 0)?.adjustments?.get(0)?.let { adj ->
-                            adjs[0] = if (adjs[0].exposure == 0f) adj else adjs[0].copy(digitalGain = adj.digitalGain)
-                            updated = true
-                        }
-                    }
-                    if (dngUri2 != null && adjs.getOrNull(1)?.digitalGain == 1.0f) {
-                        repository.readDngBaselineExposure(dngUri2, true, 1)?.adjustments?.get(1)?.let { adj ->
-                            adjs[1] = if (adjs[1].exposure == 0f) adj else adjs[1].copy(digitalGain = adj.digitalGain)
-                            updated = true
-                        }
-                    }
-                    if (updated) {
-                        withContext(Dispatchers.Main) {
-                            currentEditConfig = currentEditConfig?.copy(adjustments = adjs)
-                        }
-                    }
                 }
-
             } catch (e: Exception) {
                 android.util.Log.e("ImageViewerFragment", "Failed to load source DNG bytes", e)
             }
@@ -275,30 +292,39 @@ class ImageViewerFragment : Fragment() {
         }
 
         binding.btnTimestamp.setOnClickListener {
-            val current = currentEditConfig ?: return@setOnClickListener
-            currentEditConfig = current.copy(showTimestamp = !current.showTimestamp)
-            markAdjusted()
-            updateEffectsButtons()
-            applyEditPreview()
+            lifecycleScope.launch {
+                ensureDngBytesLoaded()
+                val current = currentEditConfig ?: return@launch
+                currentEditConfig = current.copy(showTimestamp = !current.showTimestamp)
+                markAdjusted()
+                updateEffectsButtons()
+                applyEditPreview()
+            }
         }
 
         binding.btnFlare.setOnClickListener {
-            val current = currentEditConfig ?: return@setOnClickListener
-            val nextFlare = when (current.flareType) {
-                -1 -> 0
-                0 -> 1
-                1 -> 2
-                2 -> -1
-                else -> -1
+            lifecycleScope.launch {
+                ensureDngBytesLoaded()
+                val current = currentEditConfig ?: return@launch
+                val nextFlare = when (current.flareType) {
+                    -1 -> 0
+                    0 -> 1
+                    1 -> 2
+                    2 -> -1
+                    else -> -1
+                }
+                currentEditConfig = current.copy(flareType = nextFlare)
+                markAdjusted()
+                updateEffectsButtons()
+                applyEditPreview()
             }
-            currentEditConfig = current.copy(flareType = nextFlare)
-            markAdjusted()
-            updateEffectsButtons()
-            applyEditPreview()
         }
 
         binding.fabAdjust.setOnClickListener {
-            showAdjustmentsBottomSheet()
+            lifecycleScope.launch {
+                ensureDngBytesLoaded()
+                showAdjustmentsBottomSheet()
+            }
         }
 
         binding.hfSelection1.setOnClickListener {
@@ -470,14 +496,17 @@ class ImageViewerFragment : Fragment() {
             if (position == 0) {
                 showLutMenu()
             } else {
-                currentEditConfig = currentEditConfig?.copy(log = selectedLog)
-                if (selectedLog == "None") {
-                    currentEditConfig = currentEditConfig?.copy(lut = "None")
+                lifecycleScope.launch {
+                    ensureDngBytesLoaded()
+                    currentEditConfig = currentEditConfig?.copy(log = selectedLog)
+                    if (selectedLog == "None") {
+                        currentEditConfig = currentEditConfig?.copy(lut = "None")
+                    }
+                    markAdjusted()
+                    updateEditUi()
+                    showLutMenu()
+                    applyEditPreview()
                 }
-                markAdjusted()
-                updateEditUi()
-                showLutMenu()
-                applyEditPreview()
             }
         }
     }
@@ -493,16 +522,19 @@ class ImageViewerFragment : Fragment() {
             if (position == 0) {
                 showLutMenu()
             } else {
-                if (position == 1) {
-                    currentEditConfig = currentEditConfig?.copy(lut = "None")
-                } else {
-                    val filename = luts[position - 2].name
-                    currentEditConfig = currentEditConfig?.copy(lut = filename)
+                lifecycleScope.launch {
+                    ensureDngBytesLoaded()
+                    if (position == 1) {
+                        currentEditConfig = currentEditConfig?.copy(lut = "None")
+                    } else {
+                        val filename = luts[position - 2].name
+                        currentEditConfig = currentEditConfig?.copy(lut = filename)
+                    }
+                    markAdjusted()
+                    updateEditUi()
+                    showLutMenu()
+                    applyEditPreview()
                 }
-                markAdjusted()
-                updateEditUi()
-                showLutMenu()
-                applyEditPreview()
             }
         }
     }
@@ -665,6 +697,13 @@ class ImageViewerFragment : Fragment() {
 
     private fun applyEditPreview() {
         val config = currentEditConfig ?: return
+        lifecycleScope.launch {
+            ensureDngBytesLoaded()
+            applyEditPreviewInternal(config)
+        }
+    }
+
+    private fun applyEditPreviewInternal(config: top.maary.darkbag.models.EditConfig) {
         val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
         val dngUri1 = currentGroup.dngUri ?: currentGroup.dngUri1 ?: return
         val dngUri2 = currentGroup.dngUri2
@@ -837,6 +876,7 @@ class ImageViewerFragment : Fragment() {
         val dngUri2 = currentGroup.dngUri2
 
         lifecycleScope.launch {
+            ensureDngBytesLoaded()
             withContext(Dispatchers.IO) {
                 try {
                     val context = requireContext()
