@@ -81,7 +81,7 @@ class ExpressiveShutterButton @JvmOverloads constructor(
     }
 
     private fun setupColors() {
-        colorPrimary = MaterialColors.getColor(this, com.google.android.material.R.attr.colorPrimary)
+        colorPrimary = MaterialColors.getColor(this, android.R.attr.colorPrimary)
         colorOnPrimary = MaterialColors.getColor(this, com.google.android.material.R.attr.colorOnPrimary)
         colorPrimaryContainer = MaterialColors.getColor(this, com.google.android.material.R.attr.colorPrimaryContainer)
         colorOnPrimaryContainer = MaterialColors.getColor(this, com.google.android.material.R.attr.colorOnPrimaryContainer)
@@ -137,7 +137,7 @@ class ExpressiveShutterButton @JvmOverloads constructor(
         shapePath = polygon.toPath()
 
         // Create Ripple with Star Mask
-        val rippleColor = MaterialColors.getColor(this, com.google.android.material.R.attr.colorControlHighlight)
+        val rippleColor = MaterialColors.getColor(this, android.R.attr.colorControlHighlight)
         val maskPath = Path(shapePath)
         val maskDrawable = ShapeDrawable(PathShape(maskPath, width.toFloat(), height.toFloat()))
 
