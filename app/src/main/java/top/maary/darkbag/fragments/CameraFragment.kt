@@ -85,7 +85,6 @@ import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.core.view.setPadding
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
-import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import androidx.navigation.Navigation
 import androidx.window.layout.WindowMetricsCalculator
 import top.maary.darkbag.KEY_EVENT_ACTION
@@ -139,8 +138,6 @@ class CameraFragment : Fragment() {
     private val fragmentCameraBinding get() = _fragmentCameraBinding!!
 
     private var cameraUiContainerBinding: CameraUiContainerBinding? = null
-
-    private lateinit var broadcastManager: LocalBroadcastManager
 
     private lateinit var mediaStoreUtils: MediaStoreUtils
 
@@ -362,17 +359,6 @@ class CameraFragment : Fragment() {
         val halfFrameMetadata: HalfFrameManager.Metadata? = null
     )
 
-    /** Volume down button receiver used to trigger shutter */
-    private val volumeDownReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context, intent: Intent) {
-            when (intent.getIntExtra(KEY_EVENT_EXTRA, KeyEvent.KEYCODE_UNKNOWN)) {
-                // When the volume down button is pressed, simulate a shutter button click
-                KeyEvent.KEYCODE_VOLUME_DOWN -> {
-                    cameraUiContainerBinding?.cameraCaptureButton?.simulateClick()
-                }
-            }
-        }
-    }
 
     /**
      * We need a display listener for orientation changes that do not trigger a configuration
@@ -453,7 +439,6 @@ class CameraFragment : Fragment() {
         lutProcessor = null
 
         // Unregister the broadcast receivers and listeners
-        broadcastManager.unregisterReceiver(volumeDownReceiver)
         displayManager.unregisterDisplayListener(displayListener)
     }
 
@@ -508,11 +493,14 @@ class CameraFragment : Fragment() {
         // Initialize our background executor
         cameraExecutor = Executors.newSingleThreadExecutor()
 
-        broadcastManager = LocalBroadcastManager.getInstance(view.context)
-
-        // Set up the intent filter that will receive events from our main activity
-        val filter = IntentFilter().apply { addAction(KEY_EVENT_ACTION) }
-        broadcastManager.registerReceiver(volumeDownReceiver, filter)
+        // Handle volume key events from global flow
+        viewLifecycleOwner.lifecycleScope.launch {
+            (requireContext().applicationContext as MainApplication).keyEventFlow.collect { event ->
+                if (event.keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
+                    cameraUiContainerBinding?.cameraCaptureButton?.simulateClick()
+                }
+            }
+        }
 
         // Every time the orientation of device changes, update rotation for use cases
         displayManager.registerDisplayListener(displayListener, null)

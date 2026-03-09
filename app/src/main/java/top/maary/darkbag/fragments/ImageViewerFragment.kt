@@ -146,14 +146,15 @@ class ImageViewerFragment : Fragment() {
     private fun loadDngBytes(group: ImageGroup) {
         val dngUri1 = group.dngUri ?: group.dngUri1 ?: return
         val dngUri2 = group.dngUri2
+        val context = context ?: return
 
         lifecycleScope.launch(Dispatchers.IO) {
             try {
-                requireContext().contentResolver.openFileDescriptor(dngUri1, "r")?.use { pfd ->
+                context.contentResolver.openFileDescriptor(dngUri1, "r")?.use { pfd ->
                     sourceDngBytes = java.io.FileInputStream(pfd.fileDescriptor).use { it.readBytes() }
                 }
                 dngUri2?.let { uri ->
-                    requireContext().contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                    context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
                         sourceDngBytes2 = java.io.FileInputStream(pfd.fileDescriptor).use { it.readBytes() }
                     }
                 }
@@ -960,8 +961,8 @@ class ImageViewerFragment : Fragment() {
     }
 
     private fun deleteImage(group: ImageGroup, deleteGroup: Boolean) {
+        val context = context ?: return
         lifecycleScope.launch {
-            val context = this@ImageViewerFragment.context ?: return@launch
             var nextTargetUri: String? = null
             val currentIndex = binding.imagePager.currentItem
 
@@ -1031,7 +1032,7 @@ class ImageViewerFragment : Fragment() {
         binding.bottomLeftControls.visibility = View.VISIBLE
         binding.bottomRightControls.visibility = View.VISIBLE
 
-        adapter.setUiVisibility(binding.imagePager.currentItem, true)
+        adapter.setUiVisibility(true)
 
         binding.toolbar.animate().translationY(0f).alpha(1f).setDuration(200).setListener(null).start()
         binding.splitShare.animate().translationY(0f).alpha(1f).setDuration(200).setListener(null).start()
@@ -1044,13 +1045,18 @@ class ImageViewerFragment : Fragment() {
         if (!isUiVisible) return
         isUiVisible = false
 
-        adapter.setUiVisibility(binding.imagePager.currentItem, false)
+        adapter.setUiVisibility(false)
 
-        binding.toolbar.animate().translationY(-binding.toolbar.height.toFloat()).alpha(0f).setDuration(200).start()
-        binding.splitShare.animate().translationY(-binding.toolbar.height.toFloat()).alpha(0f).setDuration(200).start()
-        binding.splitSave.animate().translationY(-binding.toolbar.height.toFloat()).alpha(0f).setDuration(200).start()
-        binding.bottomLeftControls.animate().translationY(binding.bottomLeftControls.height.toFloat() + 100).alpha(0f).setDuration(200).start()
-        binding.bottomRightControls.animate().translationY(binding.bottomRightControls.height.toFloat() + 100).alpha(0f).setDuration(200).start()
+        binding.toolbar.animate().translationY(-binding.toolbar.height.toFloat()).alpha(0f).setDuration(200)
+            .withEndAction { binding.toolbar.visibility = View.GONE }.start()
+        binding.splitShare.animate().translationY(-binding.toolbar.height.toFloat()).alpha(0f).setDuration(200)
+            .withEndAction { binding.splitShare.visibility = View.GONE }.start()
+        binding.splitSave.animate().translationY(-binding.toolbar.height.toFloat()).alpha(0f).setDuration(200)
+            .withEndAction { binding.splitSave.visibility = View.GONE }.start()
+        binding.bottomLeftControls.animate().translationY(binding.bottomLeftControls.height.toFloat() + 100).alpha(0f).setDuration(200)
+            .withEndAction { binding.bottomLeftControls.visibility = View.GONE }.start()
+        binding.bottomRightControls.animate().translationY(binding.bottomRightControls.height.toFloat() + 100).alpha(0f).setDuration(200)
+            .withEndAction { binding.bottomRightControls.visibility = View.GONE }.start()
     }
 
     private fun setupEdgeToEdge() {

@@ -22,10 +22,11 @@ class ImageViewerAdapter(
     var onImageTapped: (() -> Unit)? = null
     var onZoomChanged: ((Boolean) -> Unit)? = null
     private var recyclerView: RecyclerView? = null
+    private val selectedFormats = mutableMapOf<Int, String>()
+    private var isUiVisible = true
 
     class ViewHolder(val binding: ItemImageGroupBinding) : RecyclerView.ViewHolder(binding.root) {
         var loadJob: Job? = null
-        var currentFormat: String = "JPG"
     }
 
     override fun onAttachedToRecyclerView(recyclerView: RecyclerView) {
@@ -50,56 +51,63 @@ class ImageViewerAdapter(
         holder.loadJob?.cancel()
         holder.binding.imageView.resetZoom()
         holder.binding.imageView.onTapped = { onImageTapped?.invoke() }
+
+        holder.binding.formatToggleGroup.visibility = if (isUiVisible) View.VISIBLE else View.GONE
+        holder.binding.formatToggleGroup.alpha = if (isUiVisible) 1f else 0f
+
         holder.binding.imageView.onZoomChanged = { isZoomed ->
             onZoomChanged?.invoke(isZoomed)
-            holder.binding.formatToggleGroup.visibility = if (isZoomed) View.GONE else View.VISIBLE
+            val shouldShow = isUiVisible && !isZoomed
+            holder.binding.formatToggleGroup.visibility = if (shouldShow) View.VISIBLE else View.GONE
+            holder.binding.formatToggleGroup.alpha = if (shouldShow) 1f else 0f
         }
 
-        setupButtons(holder, group)
+        setupButtons(holder, group, position)
 
-        // Default to JPG if available, else DNG, else TIFF
-        when {
-            group.jpgUri != null -> {
-                holder.currentFormat = "JPG"
-                selectButton(holder, R.id.btnJpg)
-                loadImage(holder, group.jpgUri)
-            }
-            group.isHalfFrame() -> {
-                holder.currentFormat = "DNG"
-                selectButton(holder, R.id.btnDng)
-                loadHalfFrameDngs(holder, group)
-            }
-            group.dngUri != null -> {
-                holder.currentFormat = "DNG"
-                selectButton(holder, R.id.btnDng)
-                loadImage(holder, group.dngUri)
-            }
-            group.tiffUri != null -> {
-                holder.currentFormat = "TIFF"
-                selectButton(holder, R.id.btnTiff)
-                loadImage(holder, group.tiffUri)
-            }
+        val format = selectedFormats[position] ?: when {
+            group.jpgUri != null -> "JPG"
+            group.isHalfFrame() || group.dngUri != null -> "DNG"
+            group.tiffUri != null -> "TIFF"
+            else -> "JPG"
+        }
+        selectedFormats[position] = format
+
+        val targetId = when (format) {
+            "JPG" -> R.id.btnJpg
+            "TIFF" -> R.id.btnTiff
+            "DNG" -> R.id.btnDng
+            else -> R.id.btnJpg
+        }
+        selectButton(holder, targetId)
+
+        when (format) {
+            "JPG" -> group.jpgUri?.let { loadImage(holder, it) }
+            "TIFF" -> group.tiffUri?.let { loadImage(holder, it) }
+            "DNG" -> if (group.isHalfFrame()) loadHalfFrameDngs(holder, group) else group.dngUri?.let { loadImage(holder, it) }
         }
     }
 
-    private fun setupButtons(holder: ViewHolder, group: ImageGroup) {
+    private fun setupButtons(holder: ViewHolder, group: ImageGroup, position: Int) {
         with(holder.binding) {
             btnJpg.visibility = if (group.jpgUri != null) View.VISIBLE else View.GONE
             btnTiff.visibility = if (group.tiffUri != null) View.VISIBLE else View.GONE
             btnDng.visibility = if (group.dngUri != null || group.dngUri1 != null || group.dngUri2 != null) View.VISIBLE else View.GONE
 
             btnJpg.setOnClickListener {
-                holder.currentFormat = "JPG"
+                if (selectedFormats[position] == "JPG") return@setOnClickListener
+                selectedFormats[position] = "JPG"
                 selectButton(holder, R.id.btnJpg)
                 group.jpgUri?.let { loadImage(holder, it) }
             }
             btnTiff.setOnClickListener {
-                holder.currentFormat = "TIFF"
+                if (selectedFormats[position] == "TIFF") return@setOnClickListener
+                selectedFormats[position] = "TIFF"
                 selectButton(holder, R.id.btnTiff)
                 group.tiffUri?.let { loadImage(holder, it) }
             }
             btnDng.setOnClickListener {
-                holder.currentFormat = "DNG"
+                if (selectedFormats[position] == "DNG") return@setOnClickListener
+                selectedFormats[position] = "DNG"
                 selectButton(holder, R.id.btnDng)
                 if (group.isHalfFrame()) loadHalfFrameDngs(holder, group) else group.dngUri?.let { loadImage(holder, it) }
             }
@@ -109,17 +117,19 @@ class ImageViewerAdapter(
     private fun selectButton(holder: ViewHolder, selectedId: Int) {
         val group = holder.binding.formatToggleGroup
         val colorPrimary = com.google.android.material.color.MaterialColors.getColor(group, android.R.attr.colorPrimary)
+        val colorDimWhite = android.graphics.Color.parseColor("#B3FFFFFF") // 70% white
         val colorWhite = android.graphics.Color.WHITE
 
         for (i in 0 until group.childCount) {
             val child = group.getChildAt(i) as? com.google.android.material.button.MaterialButton
             if (child != null) {
                 val isSelected = child.id == selectedId
-                child.isEnabled = !isSelected
                 if (isSelected) {
                     child.setIconTint(android.content.res.ColorStateList.valueOf(colorPrimary))
+                    child.icon?.alpha = 255
                 } else {
                     child.setIconTint(android.content.res.ColorStateList.valueOf(colorWhite))
+                    child.icon?.alpha = 128
                 }
             }
         }
@@ -226,38 +236,49 @@ class ImageViewerAdapter(
 
     fun setFormat(position: Int, format: String) {
         val group = groups[position]
-        val holder = recyclerView?.findViewHolderForAdapterPosition(position) as? ViewHolder ?: return
-        if (holder.currentFormat == format) return
-        holder.currentFormat = format
-        val targetId = when (format) {
-            "JPG" -> R.id.btnJpg
-            "TIFF" -> R.id.btnTiff
-            "DNG" -> R.id.btnDng
-            else -> R.id.btnJpg
-        }
-        selectButton(holder, targetId)
-        // If we want to actually reload the image when format is set externally:
-        when (format) {
-            "JPG" -> group.jpgUri?.let { loadImage(holder, it) }
-            "TIFF" -> group.tiffUri?.let { loadImage(holder, it) }
-            "DNG" -> if (group.isHalfFrame()) loadHalfFrameDngs(holder, group) else group.dngUri?.let { loadImage(holder, it) }
+        if (selectedFormats[position] == format) return
+        selectedFormats[position] = format
+
+        val holder = recyclerView?.findViewHolderForAdapterPosition(position) as? ViewHolder
+        if (holder != null) {
+            val targetId = when (format) {
+                "JPG" -> R.id.btnJpg
+                "TIFF" -> R.id.btnTiff
+                "DNG" -> R.id.btnDng
+                else -> R.id.btnJpg
+            }
+            selectButton(holder, targetId)
+            when (format) {
+                "JPG" -> group.jpgUri?.let { loadImage(holder, it) }
+                "TIFF" -> group.tiffUri?.let { loadImage(holder, it) }
+                "DNG" -> if (group.isHalfFrame()) loadHalfFrameDngs(holder, group) else group.dngUri?.let { loadImage(holder, it) }
+            }
         }
     }
 
     fun getSelectedFormat(position: Int): String {
-        val holder = recyclerView?.findViewHolderForAdapterPosition(position) as? ViewHolder
-        return holder?.currentFormat ?: "JPG"
+        return selectedFormats[position] ?: "JPG"
     }
 
-    fun setUiVisibility(position: Int, isVisible: Boolean) {
-        val holder = recyclerView?.findViewHolderForAdapterPosition(position) as? ViewHolder ?: return
-        val targetAlpha = if (isVisible) 1.0f else 0.0f
-        holder.binding.formatToggleGroup.animate()
-            .alpha(targetAlpha)
-            .setDuration(200)
-            .withEndAction {
-                holder.binding.formatToggleGroup.visibility = if (isVisible) View.VISIBLE else View.GONE
+    fun setUiVisibility(isVisible: Boolean) {
+        this.isUiVisible = isVisible
+        recyclerView?.let { rv ->
+            for (i in 0 until itemCount) {
+                (rv.findViewHolderForAdapterPosition(i) as? ViewHolder)?.let { holder ->
+                    val group = holder.binding.formatToggleGroup
+                    if (isVisible) {
+                        group.visibility = View.VISIBLE
+                        group.animate().alpha(1f).setDuration(200).setListener(null).start()
+                    } else {
+                        group.animate().alpha(0f).setDuration(200)
+                            .setListener(object : android.animation.AnimatorListenerAdapter() {
+                                override fun onAnimationEnd(animation: android.animation.Animator) {
+                                    if (!isUiVisible) group.visibility = View.GONE
+                                }
+                            }).start()
+                    }
+                }
             }
-            .start()
+        }
     }
 }

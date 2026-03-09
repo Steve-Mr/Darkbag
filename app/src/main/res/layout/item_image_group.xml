@@ -29,7 +29,7 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent" />
 
-    <!-- Vertical Format Switcher -->
+    <!-- Vertical Format Switcher (M3 Glassmorphism Style) -->
     <com.google.android.material.button.MaterialButtonGroup
         android:id="@+id/formatToggleGroup"
         style="@style/Widget.Material3.MaterialButtonGroup.Connected"
@@ -43,11 +43,11 @@
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnJpg"
-            style="@style/Widget.Material3.Button.IconButton"
+            style="@style/Widget.Material3.Button.TonalButton"
             android:layout_width="56dp"
             android:layout_height="56dp"
             android:padding="0dp"
-            android:backgroundTint="#4DFFFFFF"
+            android:backgroundTint="#66000000"
             app:icon="@drawable/ic_photo"
             app:iconGravity="textStart"
             app:iconPadding="0dp"
@@ -55,11 +55,11 @@
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnTiff"
-            style="@style/Widget.Material3.Button.IconButton"
+            style="@style/Widget.Material3.Button.TonalButton"
             android:layout_width="56dp"
             android:layout_height="56dp"
             android:padding="0dp"
-            android:backgroundTint="#4DFFFFFF"
+            android:backgroundTint="#66000000"
             app:icon="@drawable/ic_tiff"
             app:iconGravity="textStart"
             app:iconPadding="0dp"
@@ -67,11 +67,11 @@
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnDng"
-            style="@style/Widget.Material3.Button.IconButton"
+            style="@style/Widget.Material3.Button.TonalButton"
             android:layout_width="56dp"
             android:layout_height="56dp"
             android:padding="0dp"
-            android:backgroundTint="#4DFFFFFF"
+            android:backgroundTint="#66000000"
             app:icon="@drawable/ic_raw"
             app:iconGravity="textStart"
             app:iconPadding="0dp"

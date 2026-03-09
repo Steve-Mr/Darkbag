@@ -6,6 +6,7 @@ import androidx.camera.camera2.Camera2Config
 import androidx.camera.core.CameraXConfig
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableSharedFlow
 
 /**
  * Set CameraX logging level to Log.ERROR to avoid excessive logcat messages.
@@ -15,6 +16,9 @@ import kotlinx.coroutines.SupervisorJob
 class MainApplication : Application(), CameraXConfig.Provider {
     // Global scope for background processing that should survive UI destruction
     val applicationScope = CoroutineScope(SupervisorJob())
+
+    // Global event flow to replace LocalBroadcastManager
+    val keyEventFlow = MutableSharedFlow<android.view.KeyEvent>(extraBufferCapacity = 1)
 
     override fun onCreate() {
         super.onCreate()
