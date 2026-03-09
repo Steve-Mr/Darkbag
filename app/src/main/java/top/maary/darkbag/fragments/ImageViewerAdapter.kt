@@ -52,7 +52,7 @@ class ImageViewerAdapter(
         holder.binding.imageView.onTapped = { onImageTapped?.invoke() }
         holder.binding.imageView.onZoomChanged = { isZoomed ->
             onZoomChanged?.invoke(isZoomed)
-            holder.binding.formatDock.visibility = if (isZoomed) View.GONE else View.VISIBLE
+            holder.binding.formatToggleGroup.visibility = if (isZoomed) View.GONE else View.VISIBLE
         }
 
         setupButtons(holder, group)
@@ -108,21 +108,20 @@ class ImageViewerAdapter(
 
     private fun selectButton(holder: ViewHolder, selectedId: Int) {
         val group = holder.binding.formatToggleGroup
-        val context = group.context
         val colorPrimary = com.google.android.material.color.MaterialColors.getColor(group, android.R.attr.colorPrimary)
-        val colorOnSurface = com.google.android.material.color.MaterialColors.getColor(group, com.google.android.material.R.attr.colorOnSurface)
+        val colorOnSurfaceVariant = com.google.android.material.color.MaterialColors.getColor(group, com.google.android.material.R.attr.colorOnSurfaceVariant)
 
         for (i in 0 until group.childCount) {
             val child = group.getChildAt(i) as? com.google.android.material.button.MaterialButton
             if (child != null) {
                 val isSelected = child.id == selectedId
-                child.isSelected = isSelected
+                child.isEnabled = !isSelected
                 if (isSelected) {
                     child.setIconTint(android.content.res.ColorStateList.valueOf(colorPrimary))
                     child.alpha = 1.0f
                 } else {
-                    child.setIconTint(android.content.res.ColorStateList.valueOf(colorOnSurface))
-                    child.alpha = 0.6f
+                    child.setIconTint(android.content.res.ColorStateList.valueOf(colorOnSurfaceVariant))
+                    child.alpha = 0.8f
                 }
             }
         }
@@ -254,6 +253,6 @@ class ImageViewerAdapter(
 
     fun setUiVisibility(position: Int, isVisible: Boolean) {
         val holder = recyclerView?.findViewHolderForAdapterPosition(position) as? ViewHolder ?: return
-        holder.binding.formatDock.visibility = if (isVisible) View.VISIBLE else View.GONE
+        holder.binding.formatToggleGroup.visibility = if (isVisible) View.VISIBLE else View.GONE
     }
 }
