@@ -166,7 +166,9 @@ class ImageRepository(private val context: Context) {
                     name.contains("_HF2") && (mime == "image/x-adobe-dng" || name.endsWith(".dng", ignoreCase = true)) -> {
                         builder.dngUri2 = uri
                     }
-                    mime == "image/x-adobe-dng" || name.endsWith(".dng", ignoreCase = true) -> builder.dngUri = uri
+                    mime == "image/x-adobe-dng" || name.endsWith(".dng", ignoreCase = true) -> {
+                        builder.dngUri = uri
+                    }
                     mime == "image/tiff" -> builder.tiffUri = uri
                 }
                 builder.updateTime(date)
@@ -200,7 +202,8 @@ class ImageRepository(private val context: Context) {
                         highlights = adjJson.optDouble("highlights", 0.0).toFloat(),
                         shadows = adjJson.optDouble("shadows", 0.0).toFloat(),
                         whites = adjJson.optDouble("whites", 0.0).toFloat(),
-                        blacks = adjJson.optDouble("blacks", 0.0).toFloat()
+                        blacks = adjJson.optDouble("blacks", 0.0).toFloat(),
+                        digitalGain = adjJson.optDouble("digital_gain", 1.0).toFloat()
                     )
                 }
             } else null
@@ -215,12 +218,35 @@ class ImageRepository(private val context: Context) {
                 shadows = json.optDouble("shadows", 0.0).toFloat(),
                 whites = json.optDouble("whites", 0.0).toFloat(),
                 blacks = json.optDouble("blacks", 0.0).toFloat(),
+                digitalGain = json.optDouble("digital_gain", 1.0).toFloat(),
                 adjustments = adjustments,
                 showTimestamp = json.optBoolean("show_timestamp", false),
                 flareType = json.optInt("flare_type", -1),
                 hfLayout = json.optString("hf_layout", null)
             )
         } catch (e: Exception) {
+            null
+        }
+    }
+
+    fun readDngBaselineExposure(uri: Uri, isHalfFrame: Boolean, index: Int = 0): EditConfig? {
+        return try {
+            context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                val exif = androidx.exifinterface.media.ExifInterface(pfd.fileDescriptor)
+                // TAG_BASELINE_EXPOSURE is 50730
+                val baselineExposure = exif.getAttributeDouble("BaselineExposure", 0.0).toFloat()
+                val digitalGain = Math.pow(2.0, baselineExposure.toDouble()).toFloat()
+
+                if (isHalfFrame) {
+                    val adjs = mutableListOf(top.maary.darkbag.models.BasicAdjustments(), top.maary.darkbag.models.BasicAdjustments())
+                    adjs[index] = top.maary.darkbag.models.BasicAdjustments(exposure = baselineExposure, digitalGain = digitalGain)
+                    EditConfig(adjustments = adjs)
+                } else {
+                    EditConfig(exposure = baselineExposure, digitalGain = digitalGain)
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("ImageRepository", "Failed to read baseline exposure from $uri", e)
             null
         }
     }

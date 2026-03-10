@@ -52,6 +52,7 @@ object ImageSaver {
         isFastPath: Boolean = false,
         halfFrameMetadata: HalfFrameManager.Metadata? = null,
         editConfig: EditConfig? = null,
+        digitalGain: Float = 1.0f,
         isAlreadyStitched: Boolean = false,
         onBitmapReady: ((Bitmap) -> Unit)? = null
     ): Uri? {
@@ -77,7 +78,7 @@ object ImageSaver {
                 val f = File(bmpPath!!)
                 if (f.exists() && f.length() > 0) {
                     if (isHalfFrameActive) {
-                        val finalPath = halfFrameManager.handleCapture(f.absolutePath, baseName, isFastPath, halfFrameMetadata)
+                        val finalPath = halfFrameManager.handleCapture(f.absolutePath, baseName, isFastPath, halfFrameMetadata, digitalGain = digitalGain)
 
                         if (isFastPath) {
                             val session = if (halfFrameMetadata != null) {
@@ -194,7 +195,7 @@ object ImageSaver {
                                     processedBitmap.compress(Bitmap.CompressFormat.JPEG, 95, out)
                                 }
 
-                                val finalPath = halfFrameManager.handleCapture(tempJpg.absolutePath, baseName, isFastPath, halfFrameMetadata)
+                                val finalPath = halfFrameManager.handleCapture(tempJpg.absolutePath, baseName, isFastPath, halfFrameMetadata, digitalGain = digitalGain)
 
                                 if (isFastPath) {
                                     val session = if (halfFrameMetadata != null) {
@@ -363,6 +364,14 @@ object ImageSaver {
                                 dngValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
                                 contentResolver.update(dngUri, dngValues, null, null)
                             }
+
+                            // Write BaselineExposure to DNG
+                            val gainToUse = editConfig?.digitalGain ?: digitalGain
+                            if (gainToUse != 1.0f) {
+                                val ev = kotlin.math.log2(gainToUse)
+                                writeDngBaselineExposure(context, dngUri, ev)
+                            }
+
                             finalRawUri = dngUri
                         } catch (e: Exception) {
                             Log.e(TAG, "Failed to save Linear DNG", e)
@@ -398,6 +407,20 @@ object ImageSaver {
         return finalJpgUri ?: finalRawUri ?: finalTiffUri
     }
 
+    fun writeDngBaselineExposure(context: Context, uri: Uri, exposure: Float) {
+        try {
+            context.contentResolver.openFileDescriptor(uri, "rw")?.use { pfd ->
+                val exif = ExifInterface(pfd.fileDescriptor)
+                // TAG_BASELINE_EXPOSURE is "BaselineExposure" in ExifInterface
+                exif.setAttribute("BaselineExposure", exposure.toString())
+                exif.saveAttributes()
+                Log.d(TAG, "Wrote BaselineExposure $exposure to DNG at $uri")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to write BaselineExposure to DNG for $uri", e)
+        }
+    }
+
     fun writeEditConfigToExif(context: Context, uri: Uri, editConfig: EditConfig) {
         try {
             val json = JSONObject().apply {
@@ -410,6 +433,7 @@ object ImageSaver {
                 put("shadows", editConfig.shadows.toDouble())
                 put("whites", editConfig.whites.toDouble())
                 put("blacks", editConfig.blacks.toDouble())
+                put("digital_gain", editConfig.digitalGain.toDouble())
 
                 editConfig.adjustments?.let { adjs ->
                     val array = org.json.JSONArray()
@@ -422,6 +446,7 @@ object ImageSaver {
                             put("shadows", adj.shadows.toDouble())
                             put("whites", adj.whites.toDouble())
                             put("blacks", adj.blacks.toDouble())
+                            put("digital_gain", adj.digitalGain.toDouble())
                         })
                     }
                     put("adjustments", array)

@@ -88,6 +88,10 @@
 #define TIFFTAG_OPCODELIST3 51022
 #endif
 
+#ifndef TIFFTAG_BASELINEEXPOSURE
+#define TIFFTAG_BASELINEEXPOSURE 50730
+#endif
+
 #ifndef TIFFTAG_CFAREPEATPATTERNDIM
 #define TIFFTAG_CFAREPEATPATTERNDIM 33421
 #endif
@@ -103,7 +107,8 @@ static const TIFFFieldInfo dng_field_info[] = {
     { TIFFTAG_WHITELEVEL, -1, -1, TIFF_LONG, FIELD_CUSTOM, 1, 1, const_cast<char*>("WhiteLevel") },
     { TIFFTAG_COLORMATRIX1, -1, -1, TIFF_RATIONAL, FIELD_CUSTOM, 1, 1, const_cast<char*>("ColorMatrix1") },
     { TIFFTAG_ASSHOTNEUTRAL, -1, -1, TIFF_RATIONAL, FIELD_CUSTOM, 1, 1, const_cast<char*>("AsShotNeutral") },
-    { TIFFTAG_CALIBRATIONILLUMINANT1, 1, 1, TIFF_SHORT, FIELD_CUSTOM, 1, 0, const_cast<char*>("CalibrationIlluminant1") }
+    { TIFFTAG_CALIBRATIONILLUMINANT1, 1, 1, TIFF_SHORT, FIELD_CUSTOM, 1, 0, const_cast<char*>("CalibrationIlluminant1") },
+    { TIFFTAG_BASELINEEXPOSURE, 1, 1, TIFF_SRATIONAL, FIELD_CUSTOM, 1, 0, const_cast<char*>("BaselineExposure") }
 };
 
 static void DNGTagExtender(TIFF *tif) {
@@ -756,7 +761,7 @@ bool write_tiff(const char* filename, int width, int height, const std::vector<u
     return true;
 }
 
-bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, int iso, long exposureTime, float fNumber, float focalLength, long captureTimeMillis, const std::vector<float>& ccm, int orientation, bool mirror) {
+bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, int iso, long exposureTime, float fNumber, float focalLength, long captureTimeMillis, const std::vector<float>& ccm, int orientation, bool mirror, float baselineExposure) {
     TIFFSetTagExtender(DNGTagExtender);
     TIFF* tif = TIFFOpen(filename, "w");
     if (!tif) return false;
@@ -820,6 +825,8 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
     TIFFSetField(tif, TIFFTAG_EXPOSURETIME, exposureTimeSec);
     TIFFSetField(tif, TIFFTAG_FNUMBER, fNumber);
     TIFFSetField(tif, TIFFTAG_FOCALLENGTH, focalLength);
+
+    TIFFSetField(tif, TIFFTAG_BASELINEEXPOSURE, baselineExposure);
 
     unsigned short iso_short = (unsigned short)iso;
     TIFFSetField(tif, TIFFTAG_ISOSPEEDRATINGS, (uint16_t)1, &iso_short);
