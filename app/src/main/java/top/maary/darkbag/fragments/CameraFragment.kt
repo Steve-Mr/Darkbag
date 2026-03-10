@@ -234,8 +234,8 @@ class CameraFragment : Fragment() {
         halfFrameTempPath = session.tempPath
     }
 
-    private fun writeScopedHalfFrameStep(prefs: SharedPreferences, step: Int, captureTimeMillis: Long? = null, digitalGain: Float = 1.0f) {
-        halfFrameSessionStore.markStep(step, captureTimeMillis, digitalGain = digitalGain)
+    private fun writeScopedHalfFrameStep(prefs: SharedPreferences, step: Int, captureTimeMillis: Long? = null, digitalGain: Float = 1.0f, flareType: Int = -1) {
+        halfFrameSessionStore.markStep(step, captureTimeMillis, digitalGain = digitalGain, flareType = flareType)
         halfFrameStep = step
         if (step == 0) {
             halfFrameTempPath = null
@@ -1318,13 +1318,16 @@ class CameraFragment : Fragment() {
                 SimpleDateFormat(FILENAME, Locale.US).format(timing.shutterClick)
             }
 
+            val flarePref = if (prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_LIGHT_LEAK, false)) 0 else -1
+            val resolvedFlare = if (flarePref == 0) Random().nextInt(2) + 1 else flarePref
+
             if (isFrame1Trigger) {
                 halfFrameSessionStore.clearCurrentSession(deleteTempFile = false)
                 halfFrameSessionStore.setBaseName(hfGroupId)
 
                 // For Frame 1 trigger, we might not have a config yet, but writeScopedHalfFrameStep
                 // will be updated after capture with the actual digitalGain in takeSinglePicture/triggerHdrPlusBurst
-                writeScopedHalfFrameStep(prefs, 1, timing.shutterClick)
+                writeScopedHalfFrameStep(prefs, 1, timing.shutterClick, flareType = resolvedFlare)
                 // Animate after shutter blackout
                 fragmentCameraBinding.viewFinder.postDelayed({
                     updateHalfFrameUI(animate = true)
@@ -1335,6 +1338,7 @@ class CameraFragment : Fragment() {
             var hfMetadataForTrigger: HalfFrameManager.Metadata? = null
             if (isHalfFrameModeEnabled) {
                 val session = halfFrameSessionStore.readSession()
+
                 hfMetadataForTrigger = HalfFrameManager.Metadata(
                     profile = session.profile,
                     dateStamp = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_DATE_STAMP, false),
@@ -1342,7 +1346,15 @@ class CameraFragment : Fragment() {
                     frame1BaseName = if (isFrame2Trigger) session.baseName else null,
                     frame1TempPath = if (isFrame2Trigger) session.tempPath else null,
                     frame1CaptureTime = if (isFrame2Trigger) session.captureTimeMillis else 0L,
-                    frame1DigitalGain = if (isFrame2Trigger) session.digitalGain else 1.0f
+                    frame1DigitalGain = if (isFrame2Trigger) session.digitalGain else 1.0f,
+                    flareType = if (isFrame2Trigger) session.flareType else resolvedFlare
+                )
+            } else {
+                hfMetadataForTrigger = HalfFrameManager.Metadata(
+                    profile = HalfFrameSessionStore.PROFILE_NORMAL,
+                    dateStamp = false,
+                    captureTimeMillis = timing.shutterClick,
+                    flareType = resolvedFlare
                 )
             }
 
@@ -1776,12 +1788,12 @@ class CameraFragment : Fragment() {
 
                 if (result < 0) throw RuntimeException("processSingleFrameRaw failed: $result")
 
-                val layout = if (image.halfFrameMetadata?.profile == HalfFrameSessionStore.PROFILE_HALF_TOP) "TB" else if (image.halfFrameMetadata != null) "SBS" else null
+                val layout = if (image.halfFrameMetadata?.profile == HalfFrameSessionStore.PROFILE_HALF_TOP) "TB" else if (image.halfFrameMetadata?.profile == HalfFrameSessionStore.PROFILE_HALF_SIDE) "SBS" else null
                 val editConfig = top.maary.darkbag.models.EditConfig(
                     log = targetLogName ?: "None",
                     lut = activeLutName ?: "None",
                     digitalGain = image.digitalGain,
-                    adjustments = if (image.halfFrameMetadata != null) {
+                    adjustments = if (image.halfFrameMetadata?.profile != null && image.halfFrameMetadata.profile != HalfFrameSessionStore.PROFILE_NORMAL) {
                         listOf(
                             top.maary.darkbag.models.BasicAdjustments(digitalGain = image.halfFrameMetadata.frame1DigitalGain),
                             top.maary.darkbag.models.BasicAdjustments(digitalGain = image.digitalGain)
@@ -1789,7 +1801,7 @@ class CameraFragment : Fragment() {
                     } else null,
                     hfLayout = layout,
                     showTimestamp = image.halfFrameMetadata?.dateStamp ?: false,
-                    flareType = if (prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_LIGHT_LEAK, false)) 0 else -1
+                    flareType = image.halfFrameMetadata?.flareType ?: -1
                 )
 
                 // 4. Fast Output Feedback (Thumbnail)
@@ -1864,6 +1876,7 @@ class CameraFragment : Fragment() {
                     workData.putLong("hfF1Time", hf.frame1CaptureTime)
                     workData.putFloat("hfGain", hf.digitalGain)
                     workData.putFloat("hfF1Gain", hf.frame1DigitalGain)
+                    workData.putInt("hfFlareType", hf.flareType)
                 }
 
                 val workRequest = androidx.work.OneTimeWorkRequestBuilder<HdrPlusExportWorker>()
@@ -3142,7 +3155,7 @@ class CameraFragment : Fragment() {
                 val burstSize = burstSizeStr.toIntOrNull() ?: 5
 
                 if (isFrame1Trigger) {
-                    writeScopedHalfFrameStep(prefs, 1, captureStartTime, digitalGain = config.digitalGain)
+                    writeScopedHalfFrameStep(prefs, 1, captureStartTime, digitalGain = config.digitalGain, flareType = hfMetadata?.flareType ?: -1)
                 }
 
                 hdrPlusBurstHelper = HdrPlusBurst(
@@ -3483,6 +3496,22 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     val mirror = shouldMirror
 
                     val fastJpegUri = if (saveJpg) {
+                        val layout = if (hfMetadata?.profile == HalfFrameSessionStore.PROFILE_HALF_TOP) "TB" else if (hfMetadata?.profile == HalfFrameSessionStore.PROFILE_HALF_SIDE) "SBS" else null
+                        val editConfig = top.maary.darkbag.models.EditConfig(
+                            log = targetLogName ?: "None",
+                            lut = activeLutName ?: "None",
+                            digitalGain = digitalGain,
+                            adjustments = if (hfMetadata?.profile != null && hfMetadata.profile != HalfFrameSessionStore.PROFILE_NORMAL) {
+                                listOf(
+                                    top.maary.darkbag.models.BasicAdjustments(digitalGain = hfMetadata.frame1DigitalGain),
+                                    top.maary.darkbag.models.BasicAdjustments(digitalGain = digitalGain)
+                                )
+                            } else null,
+                            hfLayout = layout,
+                            showTimestamp = hfMetadata?.dateStamp ?: false,
+                            flareType = hfMetadata?.flareType ?: -1
+                        )
+
                         ImageSaver.saveProcessedImage(
                             context = context,
                             inputBitmap = null,
@@ -3497,8 +3526,9 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                             jpgFolderUri = jpgFolderUri,
                             mirror = false, // Mirroring already handled in JNI
                             isFastPath = true,
-                        halfFrameMetadata = hfMetadata?.copy(digitalGain = digitalGain),
-                        digitalGain = digitalGain
+                            halfFrameMetadata = hfMetadata?.copy(digitalGain = digitalGain),
+                            editConfig = editConfig,
+                            digitalGain = digitalGain
                         )
                     } else {
                         null
@@ -3556,6 +3586,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         workData.putLong("hfF1Time", hf.frame1CaptureTime)
                         workData.putFloat("hfGain", hf.digitalGain)
                         workData.putFloat("hfF1Gain", hf.frame1DigitalGain)
+                        workData.putInt("hfFlareType", hf.flareType)
                     }
 
                     val workRequest = androidx.work.OneTimeWorkRequestBuilder<HdrPlusExportWorker>()
@@ -4022,7 +4053,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             val burstSize = (prefs.getString(SettingsFragment.KEY_HDR_BURST_COUNT, "5") ?: "5").toIntOrNull() ?: 5
 
             if (isFrame1Trigger) {
-                writeScopedHalfFrameStep(requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE), 1, captureStartTime, digitalGain = config.digitalGain)
+                writeScopedHalfFrameStep(requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE), 1, captureStartTime, digitalGain = config.digitalGain, flareType = hfMetadata?.flareType ?: -1)
             }
 
             hdrPlusBurstHelper = HdrPlusBurst(frameCount = burstSize, onBurstComplete = { frames ->
@@ -4329,7 +4360,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         } else 1.0f
 
         if (isFrame1Trigger) {
-            writeScopedHalfFrameStep(prefs, 1, shutterClickTime, digitalGain = digitalGain)
+            val session = halfFrameSessionStore.readSession()
+            writeScopedHalfFrameStep(prefs, 1, shutterClickTime, digitalGain = digitalGain, flareType = session.flareType)
         }
 
         return digitalGain

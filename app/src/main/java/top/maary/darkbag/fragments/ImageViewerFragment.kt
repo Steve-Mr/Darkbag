@@ -165,6 +165,16 @@ class ImageViewerFragment : Fragment() {
         }?.copy() ?: top.maary.darkbag.models.EditConfig(
             adjustments = if (group.isHalfFrame()) listOf(top.maary.darkbag.models.BasicAdjustments(), top.maary.darkbag.models.BasicAdjustments()) else null
         )
+
+        // Solidify "Random" flare type to prevent jumping during edits
+        currentEditConfig = currentEditConfig?.let { config ->
+            if (config.flareType == 0) {
+                val resolved = java.util.Random().nextInt(2) + 1
+                val updated = config.copy(flareType = resolved)
+                markAdjusted()
+                updated
+            } else config
+        }
         updateEditUi()
         // DNG bytes and deep EXIF will be loaded on-demand when entering edit flow
     }
@@ -307,11 +317,10 @@ class ImageViewerFragment : Fragment() {
                 ensureDngBytesLoaded()
                 val current = currentEditConfig ?: return@launch
                 val nextFlare = when (current.flareType) {
-                    -1 -> 0
-                    0 -> 1
+                    -1 -> 1
                     1 -> 2
                     2 -> -1
-                    else -> -1
+                    else -> 1
                 }
                 currentEditConfig = current.copy(flareType = nextFlare)
                 markAdjusted()
@@ -712,8 +721,12 @@ class ImageViewerFragment : Fragment() {
         previewJob?.cancel()
         previewJob = lifecycleScope.launch {
             delay(150)
-            val processOnlySelected = isIndividualEditMode && currentGroup.isHalfFrame()
-            val bitmap = withContext(Dispatchers.IO) {
+            val isIndividual = isIndividualEditMode && currentGroup.isHalfFrame()
+
+            var compositeBitmap: android.graphics.Bitmap? = null
+            var selectedFrameBitmap: android.graphics.Bitmap? = null
+
+            withContext(Dispatchers.IO) {
                 try {
                     val context = requireContext()
                     val logIndex = SettingsFragment.LOG_CURVES.indexOf(config.log)
@@ -775,23 +788,7 @@ class ImageViewerFragment : Fragment() {
                     }
 
                     if (!currentGroup.isHalfFrame()) {
-                        processSingle(sourceDngBytes, dngUri1, 0)
-                    } else if (processOnlySelected) {
-                         if (selectedDngIndex == 0) {
-                             if (lastPreviewConfig?.adjustments?.getOrNull(0) != config.adjustments?.getOrNull(0) ||
-                                 lastPreviewConfig?.log != config.log || lastPreviewConfig?.lut != config.lut || cachedBitmap1 == null) {
-                                 cachedBitmap1?.recycle()
-                                 cachedBitmap1 = processSingle(sourceDngBytes, dngUri1, 0)
-                             }
-                             cachedBitmap1
-                         } else {
-                             if (lastPreviewConfig?.adjustments?.getOrNull(1) != config.adjustments?.getOrNull(1) ||
-                                 lastPreviewConfig?.log != config.log || lastPreviewConfig?.lut != config.lut || cachedBitmap2 == null) {
-                                 cachedBitmap2?.recycle()
-                                 cachedBitmap2 = dngUri2?.let { processSingle(sourceDngBytes2, it, 1) }
-                             }
-                             cachedBitmap2
-                         }
+                        compositeBitmap = processSingle(sourceDngBytes, dngUri1, 0)
                     } else {
                         val forceUpdate1 = lastPreviewConfig == null ||
                                           lastPreviewConfig?.log != config.log ||
@@ -834,7 +831,7 @@ class ImageViewerFragment : Fragment() {
                                 else canvas.drawBitmap(it, 0f, h1 + gap, null)
                             }
 
-                            val finalComposite = top.maary.darkbag.utils.HalfFrameUtils.addEffects(
+                            compositeBitmap = top.maary.darkbag.utils.HalfFrameUtils.addEffects(
                                 composite,
                                 config.showTimestamp,
                                 config.flareType >= 0,
@@ -843,25 +840,39 @@ class ImageViewerFragment : Fragment() {
                                 time2 = currentGroup.captureTime,
                                 flareType = config.flareType
                             )
+
+                            if (isIndividual) {
+                                selectedFrameBitmap = if (selectedDngIndex == 0) {
+                                    android.graphics.Bitmap.createBitmap(compositeBitmap!!, 0, 0, w1, h1)
+                                } else {
+                                    if (isSBS) {
+                                        android.graphics.Bitmap.createBitmap(compositeBitmap!!, (w1 + gap).toInt(), 0, w2, h2)
+                                    } else {
+                                        android.graphics.Bitmap.createBitmap(compositeBitmap!!, 0, (h1 + gap).toInt(), w2, h2)
+                                    }
+                                }
+                            }
+
                             lastPreviewConfig = config.copy()
-                            finalComposite
-                        } else null
+                        }
                     }
                 } catch (e: Exception) {
                     android.util.Log.e("ImageViewerFragment", "Failed to generate edit preview", e)
-                    null
                 }
             }
 
-            if (bitmap != null) {
-                if (!processOnlySelected) {
-                    val currentIndex = binding.imagePager.currentItem
-                    val holder = (binding.imagePager.getChildAt(0) as? androidx.recyclerview.widget.RecyclerView)
-                        ?.findViewHolderForAdapterPosition(currentIndex) as? ImageViewerAdapter.ViewHolder
-                    holder?.binding?.imageView?.setImageBitmap(bitmap)
-                    adapter.setFormat(currentIndex, "DNG")
-                }
-                activeAdjustmentBinding?.editPreviewImage?.setImageBitmap(bitmap)
+            if (compositeBitmap != null) {
+                val currentIndex = binding.imagePager.currentItem
+                val holder = (binding.imagePager.getChildAt(0) as? androidx.recyclerview.widget.RecyclerView)
+                    ?.findViewHolderForAdapterPosition(currentIndex) as? ImageViewerAdapter.ViewHolder
+                holder?.binding?.imageView?.setImageBitmap(compositeBitmap)
+                adapter.setFormat(currentIndex, "DNG")
+            }
+
+            if (isIndividual && selectedFrameBitmap != null) {
+                activeAdjustmentBinding?.editPreviewImage?.setImageBitmap(selectedFrameBitmap)
+            } else if (compositeBitmap != null) {
+                activeAdjustmentBinding?.editPreviewImage?.setImageBitmap(compositeBitmap)
             }
         }
     }
@@ -963,6 +974,8 @@ class ImageViewerFragment : Fragment() {
                                 config.showTimestamp,
                                 config.flareType >= 0,
                                 currentGroup.hfLayout ?: "SBS",
+                                time1 = currentGroup.captureTime,
+                                time2 = currentGroup.captureTime,
                                 flareType = config.flareType
                             )
                             b1?.recycle()

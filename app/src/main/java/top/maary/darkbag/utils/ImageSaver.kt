@@ -364,6 +364,14 @@ object ImageSaver {
                                 dngValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
                                 contentResolver.update(dngUri, dngValues, null, null)
                             }
+
+                            // Write BaselineExposure to DNG
+                            val gainToUse = editConfig?.digitalGain ?: digitalGain
+                            if (gainToUse != 1.0f) {
+                                val ev = kotlin.math.log2(gainToUse)
+                                writeDngBaselineExposure(context, dngUri, ev)
+                            }
+
                             finalRawUri = dngUri
                         } catch (e: Exception) {
                             Log.e(TAG, "Failed to save Linear DNG", e)
@@ -397,6 +405,20 @@ object ImageSaver {
         if (isHalfFrameActive && finalJpgUri == null) return null
 
         return finalJpgUri ?: finalRawUri ?: finalTiffUri
+    }
+
+    fun writeDngBaselineExposure(context: Context, uri: Uri, exposure: Float) {
+        try {
+            context.contentResolver.openFileDescriptor(uri, "rw")?.use { pfd ->
+                val exif = ExifInterface(pfd.fileDescriptor)
+                // TAG_BASELINE_EXPOSURE is "BaselineExposure" in ExifInterface
+                exif.setAttribute("BaselineExposure", exposure.toString())
+                exif.saveAttributes()
+                Log.d(TAG, "Wrote BaselineExposure $exposure to DNG at $uri")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to write BaselineExposure to DNG for $uri", e)
+        }
     }
 
     fun writeEditConfigToExif(context: Context, uri: Uri, editConfig: EditConfig) {

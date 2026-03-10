@@ -24,7 +24,8 @@ class HalfFrameManager(private val context: Context) {
         val frame1TempPath: String? = null,
         val frame1CaptureTime: Long = 0L,
         val digitalGain: Float = 1.0f,
-        val frame1DigitalGain: Float = 1.0f
+        val frame1DigitalGain: Float = 1.0f,
+        val flareType: Int = -1
     )
 
     var step: Int
@@ -136,7 +137,8 @@ class HalfFrameManager(private val context: Context) {
                 if (stitchedBitmap == null) return null
 
                 val finalBitmap = HalfFrameUtils.addEffects(
-                    stitchedBitmap, dateStampEnabled, lightLeak, activeLayout, time1, time2
+                    stitchedBitmap, dateStampEnabled, lightLeak, activeLayout, time1, time2,
+                    flareType = metadata?.flareType ?: if (lightLeak) java.util.Random().nextInt(2) + 1 else -1
                 )
                 val stitchedFile = File(context.cacheDir, "stitched_hf_fast.jpg")
                 FileOutputStream(stitchedFile).use { out ->
@@ -165,7 +167,8 @@ class HalfFrameManager(private val context: Context) {
                 }
 
                 val finalBitmap = HalfFrameUtils.addEffects(
-                    stitchedBitmap, dateStampEnabled, lightLeak, activeLayout, time1, time2
+                    stitchedBitmap, dateStampEnabled, lightLeak, activeLayout, time1, time2,
+                    flareType = metadata?.flareType ?: if (lightLeak) java.util.Random().nextInt(2) + 1 else -1
                 )
                 val stitchedFile = File(context.cacheDir, "stitched_hf_${partnerBaseName}.jpg")
                 FileOutputStream(stitchedFile).use { out ->

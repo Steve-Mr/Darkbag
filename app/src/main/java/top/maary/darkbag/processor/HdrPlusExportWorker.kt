@@ -59,6 +59,7 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
         val hfF1Time = data.getLong("hfF1Time", 0L)
         val hfGain = data.getFloat("hfGain", 1.0f)
         val hfF1Gain = data.getFloat("hfF1Gain", 1.0f)
+        val hfFlareType = data.getInt("hfFlareType", -1)
 
         val hfMetadata = hfProfile?.let {
             HalfFrameManager.Metadata(
@@ -69,7 +70,8 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
                 frame1TempPath = hfF1Path,
                 frame1CaptureTime = hfF1Time,
                 digitalGain = hfGain,
-                frame1DigitalGain = hfF1Gain
+                frame1DigitalGain = hfF1Gain,
+                flareType = hfFlareType
             )
         }
 
@@ -79,12 +81,13 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
         )
         val activeLut = prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, "None")
         val targetLogStr = prefs.getString(SettingsFragment.KEY_TARGET_LOG, "None")
-        val layout = if (hfMetadata?.profile == HalfFrameSessionStore.PROFILE_HALF_TOP) "TB" else if (hfMetadata != null) "SBS" else null
+        val layout = if (hfMetadata?.profile == HalfFrameSessionStore.PROFILE_HALF_TOP) "TB" else if (hfMetadata?.profile == HalfFrameSessionStore.PROFILE_HALF_SIDE) "SBS" else null
+        val resolvedFlare = hfMetadata?.flareType ?: if (prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_LIGHT_LEAK, false)) java.util.Random().nextInt(2) + 1 else -1
         val editConfig = top.maary.darkbag.models.EditConfig(
             log = targetLogStr,
             lut = activeLut,
             digitalGain = digitalGain,
-            adjustments = if (hfMetadata != null) {
+            adjustments = if (hfMetadata?.profile != null && hfMetadata.profile != HalfFrameSessionStore.PROFILE_NORMAL) {
                 listOf(
                     top.maary.darkbag.models.BasicAdjustments(digitalGain = hfMetadata.frame1DigitalGain),
                     top.maary.darkbag.models.BasicAdjustments(digitalGain = hfMetadata.digitalGain)
@@ -92,7 +95,7 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
             } else null,
             hfLayout = layout,
             showTimestamp = hfMetadata?.dateStamp ?: false,
-            flareType = if (prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_LIGHT_LEAK, false)) 0 else -1
+            flareType = resolvedFlare
         )
 
         Log.d(TAG, "Background Export Worker started for $baseName")
