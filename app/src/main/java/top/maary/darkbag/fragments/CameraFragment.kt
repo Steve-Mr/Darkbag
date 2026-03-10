@@ -1862,6 +1862,8 @@ class CameraFragment : Fragment() {
                     hf.frame1BaseName?.let { workData.putString("hfF1Base", it) }
                     hf.frame1TempPath?.let { workData.putString("hfF1Path", it) }
                     workData.putLong("hfF1Time", hf.frame1CaptureTime)
+                    workData.putFloat("hfGain", hf.digitalGain)
+                    workData.putFloat("hfF1Gain", hf.frame1DigitalGain)
                 }
 
                 val workRequest = androidx.work.OneTimeWorkRequestBuilder<HdrPlusExportWorker>()
@@ -3545,13 +3547,15 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         .putString("rawFolderUri", rawFolderUri)
                         .putBoolean("mirror", mirror)
 
-                    hfMetadata?.let { hf ->
+                    hfMetadata?.copy(digitalGain = digitalGain)?.let { hf ->
                         workData.putString("hfProfile", hf.profile)
                         workData.putBoolean("hfDateStamp", hf.dateStamp)
                         workData.putLong("hfCaptureTime", hf.captureTimeMillis)
                         hf.frame1BaseName?.let { workData.putString("hfF1Base", it) }
                         hf.frame1TempPath?.let { workData.putString("hfF1Path", it) }
                         workData.putLong("hfF1Time", hf.frame1CaptureTime)
+                        workData.putFloat("hfGain", hf.digitalGain)
+                        workData.putFloat("hfF1Gain", hf.frame1DigitalGain)
                     }
 
                     val workRequest = androidx.work.OneTimeWorkRequestBuilder<HdrPlusExportWorker>()

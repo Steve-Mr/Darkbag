@@ -57,6 +57,8 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
         val hfF1Base = data.getString("hfF1Base")
         val hfF1Path = data.getString("hfF1Path")
         val hfF1Time = data.getLong("hfF1Time", 0L)
+        val hfGain = data.getFloat("hfGain", 1.0f)
+        val hfF1Gain = data.getFloat("hfF1Gain", 1.0f)
 
         val hfMetadata = hfProfile?.let {
             HalfFrameManager.Metadata(
@@ -65,7 +67,9 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
                 captureTimeMillis = hfCaptureTime,
                 frame1BaseName = hfF1Base,
                 frame1TempPath = hfF1Path,
-                frame1CaptureTime = hfF1Time
+                frame1CaptureTime = hfF1Time,
+                digitalGain = hfGain,
+                frame1DigitalGain = hfF1Gain
             )
         }
 
