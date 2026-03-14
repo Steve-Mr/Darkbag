@@ -735,9 +735,7 @@ class ImageViewerFragment : Fragment() {
 
         // Save current zoom state
         savedMatrix.set(imageView.imageMatrix)
-        val m = FloatArray(9)
-        imageView.imageMatrix.getValues(m)
-        savedScale = m[android.graphics.Matrix.MSCALE_X]
+        savedScale = imageView.saveScale
 
         imageView.resetZoom()
         adapter.cancelLoadJob(currentIndex, clearView = false)

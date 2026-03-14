@@ -37,7 +37,8 @@ class ZoomableImageView @JvmOverloads constructor(
 
     private var viewWidth = 0
     private var viewHeight = 0
-    private var saveScale = 1f
+    var saveScale = 1f
+        private set
     private var origWidth = 0f
     private var origHeight = 0f
 
@@ -241,6 +242,19 @@ class ZoomableImageView @JvmOverloads constructor(
     fun restoreZoomState(matrix: Matrix, scale: Float) {
         this.matrixValue.set(matrix)
         this.saveScale = scale
+
+        // Re-calculate original dimensions for current drawable to ensure fixTrans works
+        val drawable = drawable
+        if (drawable != null && drawable.intrinsicWidth != 0 && drawable.intrinsicHeight != 0 && viewWidth != 0 && viewHeight != 0) {
+            val bmWidth = drawable.intrinsicWidth
+            val bmHeight = drawable.intrinsicHeight
+            val scaleX = viewWidth.toFloat() / bmWidth
+            val scaleY = viewHeight.toFloat() / bmHeight
+            val baseScale = if (scaleX < scaleY) scaleX else scaleY
+            origWidth = viewWidth - 2 * ((viewWidth.toFloat() - baseScale * bmWidth) / 2)
+            origHeight = viewHeight - 2 * ((viewHeight.toFloat() - baseScale * bmHeight) / 2)
+        }
+
         imageMatrix = Matrix(this.matrixValue)
         invalidate()
         onZoomChanged?.invoke(saveScale > 1f)
