@@ -64,7 +64,7 @@ class ZoomableImageView @JvmOverloads constructor(
         mScaleDetector = ScaleGestureDetector(context, ScaleListener())
         mGestureDetector = GestureDetector(context, GestureListener())
         matrixValue = Matrix()
-        imageMatrix = matrixValue
+        imageMatrix = Matrix(matrixValue)
         scaleType = ScaleType.MATRIX
     }
 
@@ -112,7 +112,7 @@ class ZoomableImageView @JvmOverloads constructor(
             }
         }
 
-        imageMatrix = matrixValue
+        imageMatrix = Matrix(matrixValue)
         invalidate()
 
         // Handle ViewPager2 conflict: Intercept if zoomed in
@@ -186,7 +186,7 @@ class ZoomableImageView @JvmOverloads constructor(
 
             matrixValue.postScale(deltaScale, deltaScale, focusX, focusY)
             fixTrans()
-            imageMatrix = matrixValue
+            imageMatrix = Matrix(matrixValue)
             invalidate()
         }
         animator.addListener(object : android.animation.AnimatorListenerAdapter() {
@@ -241,7 +241,7 @@ class ZoomableImageView @JvmOverloads constructor(
     fun restoreZoomState(matrix: Matrix, scale: Float) {
         this.matrixValue.set(matrix)
         this.saveScale = scale
-        imageMatrix = this.matrixValue
+        imageMatrix = Matrix(this.matrixValue)
         invalidate()
         onZoomChanged?.invoke(saveScale > 1f)
     }
@@ -278,6 +278,6 @@ class ZoomableImageView @JvmOverloads constructor(
 
         origWidth = viewWidth - 2 * redundancyX
         origHeight = viewHeight - 2 * redundancyY
-        imageMatrix = matrixValue
+        imageMatrix = Matrix(matrixValue)
     }
 }

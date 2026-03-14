@@ -740,7 +740,7 @@ class ImageViewerFragment : Fragment() {
         savedScale = m[android.graphics.Matrix.MSCALE_X]
 
         imageView.resetZoom()
-        adapter.cancelLoadJob(currentIndex)
+        adapter.cancelLoadJob(currentIndex, clearView = false)
         com.bumptech.glide.Glide.with(imageView)
             .asBitmap()
             .load(jpgUri)

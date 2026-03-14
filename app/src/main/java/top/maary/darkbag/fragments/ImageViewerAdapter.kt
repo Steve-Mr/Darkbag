@@ -319,11 +319,13 @@ class ImageViewerAdapter(
         }
     }
 
-    fun cancelLoadJob(position: Int) {
+    fun cancelLoadJob(position: Int, clearView: Boolean = true) {
         val holder = recyclerView?.findViewHolderForAdapterPosition(position) as? ViewHolder
         if (holder != null) {
             holder.loadJob?.cancel()
-            Glide.with(holder.binding.imageView).clear(holder.binding.imageView)
+            if (clearView) {
+                Glide.with(holder.binding.imageView).clear(holder.binding.imageView)
+            }
             holder.binding.loadingIndicator.visibility = View.GONE
         }
     }
