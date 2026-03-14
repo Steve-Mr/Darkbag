@@ -722,6 +722,10 @@ class ImageViewerFragment : Fragment() {
         val dngUri2 = currentGroup.dngUri2
 
         activeAdjustmentBinding?.editPreviewLoading?.visibility = View.VISIBLE
+        val currentIndex = binding.imagePager.currentItem
+        val currentHolder = (binding.imagePager.getChildAt(0) as? androidx.recyclerview.widget.RecyclerView)
+            ?.findViewHolderForAdapterPosition(currentIndex) as? ImageViewerAdapter.ViewHolder
+        currentHolder?.binding?.loadingIndicator?.visibility = View.VISIBLE
 
         previewJob?.cancel()
         previewJob = lifecycleScope.launch {
@@ -881,6 +885,9 @@ class ImageViewerFragment : Fragment() {
                 activeAdjustmentBinding?.editPreviewImage?.setImageBitmap(compositeBitmap)
             }
             activeAdjustmentBinding?.editPreviewLoading?.visibility = View.GONE
+            val finalHolder = (binding.imagePager.getChildAt(0) as? androidx.recyclerview.widget.RecyclerView)
+                ?.findViewHolderForAdapterPosition(currentIndex) as? ImageViewerAdapter.ViewHolder
+            finalHolder?.binding?.loadingIndicator?.visibility = View.GONE
         }
     }
 
