@@ -24,6 +24,7 @@ class ImageViewerAdapter(
     private var recyclerView: RecyclerView? = null
     private val selectedFormats = mutableMapOf<Int, String>()
     private var isUiVisible = true
+    private var isFormatSwitcherPersistentHidden = false
 
     class ViewHolder(val binding: ItemImageGroupBinding) : RecyclerView.ViewHolder(binding.root) {
         var loadJob: Job? = null
@@ -52,14 +53,15 @@ class ImageViewerAdapter(
         holder.binding.imageView.resetZoom()
         holder.binding.imageView.onTapped = { onImageTapped?.invoke() }
 
-        holder.binding.formatToggleGroup.visibility = if (isUiVisible) View.VISIBLE else View.GONE
-        holder.binding.formatToggleGroup.alpha = if (isUiVisible) 1f else 0f
+        val shouldShow = isUiVisible && !isFormatSwitcherPersistentHidden
+        holder.binding.formatToggleGroup.visibility = if (shouldShow) View.VISIBLE else View.GONE
+        holder.binding.formatToggleGroup.alpha = if (shouldShow) 1f else 0f
 
         holder.binding.imageView.onZoomChanged = { isZoomed ->
             onZoomChanged?.invoke(isZoomed)
-            val shouldShow = isUiVisible && !isZoomed
-            holder.binding.formatToggleGroup.visibility = if (shouldShow) View.VISIBLE else View.GONE
-            holder.binding.formatToggleGroup.alpha = if (shouldShow) 1f else 0f
+            val currentlyShouldShow = isUiVisible && !isZoomed && !isFormatSwitcherPersistentHidden
+            holder.binding.formatToggleGroup.visibility = if (currentlyShouldShow) View.VISIBLE else View.GONE
+            holder.binding.formatToggleGroup.alpha = if (currentlyShouldShow) 1f else 0f
         }
 
         setupButtons(holder, group, position)
@@ -272,19 +274,53 @@ class ImageViewerAdapter(
             for (i in 0 until itemCount) {
                 (rv.findViewHolderForAdapterPosition(i) as? ViewHolder)?.let { holder ->
                     val group = holder.binding.formatToggleGroup
-                    if (isVisible) {
+                    val shouldBeVisible = isVisible && !isFormatSwitcherPersistentHidden
+                    if (shouldBeVisible) {
                         group.visibility = View.VISIBLE
                         group.animate().alpha(1f).setDuration(200).setListener(null).start()
                     } else {
                         group.animate().alpha(0f).setDuration(200)
                             .setListener(object : android.animation.AnimatorListenerAdapter() {
                                 override fun onAnimationEnd(animation: android.animation.Animator) {
-                                    if (!isUiVisible) group.visibility = View.GONE
+                                    if (!isUiVisible || isFormatSwitcherPersistentHidden) group.visibility = View.GONE
                                 }
                             }).start()
                     }
                 }
             }
+        }
+    }
+
+    fun setFormatSwitcherPersistentHidden(hidden: Boolean) {
+        if (this.isFormatSwitcherPersistentHidden == hidden) return
+        this.isFormatSwitcherPersistentHidden = hidden
+        recyclerView?.let { rv ->
+            for (i in 0 until itemCount) {
+                (rv.findViewHolderForAdapterPosition(i) as? ViewHolder)?.let { holder ->
+                    val group = holder.binding.formatToggleGroup
+                    val shouldBeVisible = isUiVisible && !isFormatSwitcherPersistentHidden
+                    if (shouldBeVisible) {
+                        group.visibility = View.VISIBLE
+                        group.animate().alpha(1f).setDuration(200).setListener(null).start()
+                    } else {
+                        group.animate().alpha(0f).setDuration(200)
+                            .setListener(object : android.animation.AnimatorListenerAdapter() {
+                                override fun onAnimationEnd(animation: android.animation.Animator) {
+                                    if (isFormatSwitcherPersistentHidden) group.visibility = View.GONE
+                                }
+                            }).start()
+                    }
+                }
+            }
+        }
+    }
+
+    fun cancelLoadJob(position: Int) {
+        val holder = recyclerView?.findViewHolderForAdapterPosition(position) as? ViewHolder
+        if (holder != null) {
+            holder.loadJob?.cancel()
+            Glide.with(holder.binding.imageView).clear(holder.binding.imageView)
+            holder.binding.loadingIndicator.visibility = View.GONE
         }
     }
 }
