@@ -42,6 +42,10 @@ class ImageViewerFragment : Fragment() {
     private var cachedBitmap2: android.graphics.Bitmap? = null
     private var lastPreviewConfig: top.maary.darkbag.models.EditConfig? = null
     private var activeAdjustmentBinding: top.maary.darkbag.databinding.BottomSheetEditAdjustmentsBinding? = null
+    private var lastCompositeBitmap: android.graphics.Bitmap? = null
+    private var isLongPressing = false
+    private var savedMatrix = android.graphics.Matrix()
+    private var savedScale = 1f
 
     private lateinit var lutManager: top.maary.darkbag.utils.LutManager
     private var previewJob: Job? = null
@@ -83,6 +87,8 @@ class ImageViewerFragment : Fragment() {
             adapter = ImageViewerAdapter(groups, lifecycleScope).apply {
                 onImageTapped = { toggleUi() }
                 onZoomChanged = { isZoomed -> if (isZoomed) hideUi() else showUi() }
+                onLongPressStarted = { handleLongPressStarted(it) }
+                onLongPressEnded = { handleLongPressEnded(it) }
                 setFormatSwitcherPersistentHidden(isAdjusted)
             }
             binding.imagePager.adapter = adapter
@@ -97,6 +103,7 @@ class ImageViewerFragment : Fragment() {
             if (initialPos != -1) {
                 binding.imagePager.setCurrentItem(initialPos, false)
             }
+            binding.imagePager.isUserInputEnabled = !isAdjusted
 
             setupActionButtons()
             updateControlsVisibility()
@@ -109,6 +116,7 @@ class ImageViewerFragment : Fragment() {
                 } else {
                     currentEditConfig = null
                 }
+                lastCompositeBitmap = null
                 updateControlsVisibility()
             }
         })
@@ -358,6 +366,7 @@ class ImageViewerFragment : Fragment() {
     private fun markAdjusted() {
         if (!isAdjusted) {
             isAdjusted = true
+            binding.imagePager.isUserInputEnabled = false
             adapter.setFormatSwitcherPersistentHidden(true)
             updateSplitButtons()
             updateToolbarIcon()
@@ -366,6 +375,7 @@ class ImageViewerFragment : Fragment() {
 
     private fun resetAdjustments() {
         isAdjusted = false
+        binding.imagePager.isUserInputEnabled = true
         adapter.setFormatSwitcherPersistentHidden(false)
         isIndividualEditMode = false
         sourceDngBytes = null
@@ -375,6 +385,7 @@ class ImageViewerFragment : Fragment() {
         cachedBitmap2?.recycle()
         cachedBitmap2 = null
         lastPreviewConfig = null
+        lastCompositeBitmap = null
         previewJob?.cancel()
         currentEditConfig = null
 
@@ -716,6 +727,48 @@ class ImageViewerFragment : Fragment() {
         }
     }
 
+    private fun handleLongPressStarted(imageView: top.maary.darkbag.ui.ZoomableImageView) {
+        if (!isAdjusted) return
+        view?.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+        val currentIndex = binding.imagePager.currentItem
+        val currentGroup = adapter.getGroup(currentIndex)
+        val jpgUri = currentGroup.jpgUri ?: return
+
+        isLongPressing = true
+
+        // Save current zoom state
+        savedMatrix.set(imageView.imageMatrix)
+        savedScale = imageView.saveScale
+
+        imageView.resetZoom()
+        adapter.cancelLoadJob(currentIndex, clearView = false)
+        com.bumptech.glide.Glide.with(imageView)
+            .asBitmap()
+            .load(jpgUri)
+            .placeholder(imageView.drawable)
+            .dontAnimate()
+            .diskCacheStrategy(com.bumptech.glide.load.engine.DiskCacheStrategy.NONE)
+            .skipMemoryCache(true)
+            .into(imageView)
+    }
+
+    private fun handleLongPressEnded(imageView: top.maary.darkbag.ui.ZoomableImageView) {
+        if (!isAdjusted) return
+        isLongPressing = false
+        val currentIndex = binding.imagePager.currentItem
+
+        com.bumptech.glide.Glide.with(imageView).clear(imageView)
+        if (lastCompositeBitmap != null) {
+            imageView.setImageBitmap(lastCompositeBitmap)
+        } else {
+            val format = adapter.getSelectedFormat(currentIndex)
+            adapter.setFormat(currentIndex, format)
+        }
+
+        // Restore zoom state
+        imageView.restoreZoomState(savedMatrix, savedScale)
+    }
+
     private fun applyEditPreviewInternal(config: top.maary.darkbag.models.EditConfig) {
         val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
         val dngUri1 = currentGroup.dngUri ?: currentGroup.dngUri1 ?: return
@@ -871,6 +924,12 @@ class ImageViewerFragment : Fragment() {
             }
 
             if (compositeBitmap != null) {
+                if (lastCompositeBitmap != compositeBitmap) {
+                    lastCompositeBitmap?.recycle()
+                    lastCompositeBitmap = compositeBitmap
+                }
+                if (isLongPressing) return@launch
+
                 val currentIndex = binding.imagePager.currentItem
                 adapter.cancelLoadJob(currentIndex)
                 val holder = (binding.imagePager.getChildAt(0) as? androidx.recyclerview.widget.RecyclerView)
@@ -1035,6 +1094,8 @@ class ImageViewerFragment : Fragment() {
                 adapter = ImageViewerAdapter(updatedGroups, lifecycleScope).apply {
                     onImageTapped = { toggleUi() }
                     onZoomChanged = { isZoomed -> if (isZoomed) hideUi() else showUi() }
+                    onLongPressStarted = { handleLongPressStarted(it) }
+                    onLongPressEnded = { handleLongPressEnded(it) }
                 }
                 binding.imagePager.adapter = adapter
                 binding.imagePager.setCurrentItem(newPos, false)

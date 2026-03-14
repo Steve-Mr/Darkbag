@@ -37,7 +37,8 @@ class ZoomableImageView @JvmOverloads constructor(
 
     private var viewWidth = 0
     private var viewHeight = 0
-    private var saveScale = 1f
+    var saveScale = 1f
+        private set
     private var origWidth = 0f
     private var origHeight = 0f
 
@@ -46,6 +47,11 @@ class ZoomableImageView @JvmOverloads constructor(
 
     var onTapped: (() -> Unit)? = null
     var onZoomChanged: ((Boolean) -> Unit)? = null
+    var onLongPressStarted: ((ZoomableImageView) -> Unit)? = null
+    var onLongPressEnded: ((ZoomableImageView) -> Unit)? = null
+
+    private var isLongPressing = false
+    private var isLongPressConsumed = false
 
     companion object {
         private const val NONE = 0
@@ -59,7 +65,7 @@ class ZoomableImageView @JvmOverloads constructor(
         mScaleDetector = ScaleGestureDetector(context, ScaleListener())
         mGestureDetector = GestureDetector(context, GestureListener())
         matrixValue = Matrix()
-        imageMatrix = matrixValue
+        imageMatrix = Matrix(matrixValue)
         scaleType = ScaleType.MATRIX
     }
 
@@ -71,13 +77,14 @@ class ZoomableImageView @JvmOverloads constructor(
 
         when (event.action) {
             MotionEvent.ACTION_DOWN -> {
+                isLongPressConsumed = false
                 last.set(curr)
                 start.set(last)
                 mode = DRAG
                 parent.requestDisallowInterceptTouchEvent(saveScale > 1f)
             }
             MotionEvent.ACTION_MOVE -> {
-                if (mode == DRAG) {
+                if (mode == DRAG && !isLongPressing) {
                     val deltaX = curr.x - last.x
                     val deltaY = curr.y - last.y
                     val fixTransX = getFixDragTrans(deltaX, viewWidth.toFloat(), origWidth * saveScale)
@@ -87,12 +94,18 @@ class ZoomableImageView @JvmOverloads constructor(
                     last.set(curr.x, curr.y)
                 }
             }
-            MotionEvent.ACTION_UP -> {
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                if (isLongPressing) {
+                    isLongPressing = false
+                    onLongPressEnded?.invoke(this@ZoomableImageView)
+                }
                 mode = NONE
-                val xDiff = abs(curr.x - start.x).toInt()
-                val yDiff = abs(curr.y - start.y).toInt()
-                if (xDiff < CLICK && yDiff < CLICK) {
-                    performClick()
+                if (event.action == MotionEvent.ACTION_UP) {
+                    val xDiff = abs(curr.x - start.x).toInt()
+                    val yDiff = abs(curr.y - start.y).toInt()
+                    if (xDiff < CLICK && yDiff < CLICK && !isLongPressConsumed) {
+                        performClick()
+                    }
                 }
             }
             MotionEvent.ACTION_POINTER_UP -> {
@@ -100,7 +113,7 @@ class ZoomableImageView @JvmOverloads constructor(
             }
         }
 
-        imageMatrix = matrixValue
+        imageMatrix = Matrix(matrixValue)
         invalidate()
 
         // Handle ViewPager2 conflict: Intercept if zoomed in
@@ -147,6 +160,12 @@ class ZoomableImageView @JvmOverloads constructor(
             return true
         }
 
+        override fun onLongPress(e: MotionEvent) {
+            isLongPressing = true
+            isLongPressConsumed = true
+            onLongPressStarted?.invoke(this@ZoomableImageView)
+        }
+
         override fun onDoubleTap(e: MotionEvent): Boolean {
             val targetScale = if (saveScale > 1f) 1f else 2.5f
             val focusX = e.x
@@ -168,7 +187,7 @@ class ZoomableImageView @JvmOverloads constructor(
 
             matrixValue.postScale(deltaScale, deltaScale, focusX, focusY)
             fixTrans()
-            imageMatrix = matrixValue
+            imageMatrix = Matrix(matrixValue)
             invalidate()
         }
         animator.addListener(object : android.animation.AnimatorListenerAdapter() {
@@ -220,6 +239,27 @@ class ZoomableImageView @JvmOverloads constructor(
         invalidate()
     }
 
+    fun restoreZoomState(matrix: Matrix, scale: Float) {
+        this.matrixValue.set(matrix)
+        this.saveScale = scale
+
+        // Re-calculate original dimensions for current drawable to ensure fixTrans works
+        val drawable = drawable
+        if (drawable != null && drawable.intrinsicWidth != 0 && drawable.intrinsicHeight != 0 && viewWidth != 0 && viewHeight != 0) {
+            val bmWidth = drawable.intrinsicWidth
+            val bmHeight = drawable.intrinsicHeight
+            val scaleX = viewWidth.toFloat() / bmWidth
+            val scaleY = viewHeight.toFloat() / bmHeight
+            val baseScale = if (scaleX < scaleY) scaleX else scaleY
+            origWidth = viewWidth - 2 * ((viewWidth.toFloat() - baseScale * bmWidth) / 2)
+            origHeight = viewHeight - 2 * ((viewHeight.toFloat() - baseScale * bmHeight) / 2)
+        }
+
+        imageMatrix = Matrix(this.matrixValue)
+        invalidate()
+        onZoomChanged?.invoke(saveScale > 1f)
+    }
+
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         super.onMeasure(widthMeasureSpec, heightMeasureSpec)
         val newWidth = MeasureSpec.getSize(widthMeasureSpec)
@@ -252,6 +292,6 @@ class ZoomableImageView @JvmOverloads constructor(
 
         origWidth = viewWidth - 2 * redundancyX
         origHeight = viewHeight - 2 * redundancyY
-        imageMatrix = matrixValue
+        imageMatrix = Matrix(matrixValue)
     }
 }

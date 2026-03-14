@@ -21,6 +21,8 @@ class ImageViewerAdapter(
 
     var onImageTapped: (() -> Unit)? = null
     var onZoomChanged: ((Boolean) -> Unit)? = null
+    var onLongPressStarted: ((top.maary.darkbag.ui.ZoomableImageView) -> Unit)? = null
+    var onLongPressEnded: ((top.maary.darkbag.ui.ZoomableImageView) -> Unit)? = null
     private var recyclerView: RecyclerView? = null
     private val selectedFormats = mutableMapOf<Int, String>()
     private var isUiVisible = true
@@ -52,6 +54,8 @@ class ImageViewerAdapter(
         holder.loadJob?.cancel()
         holder.binding.imageView.resetZoom()
         holder.binding.imageView.onTapped = { onImageTapped?.invoke() }
+        holder.binding.imageView.onLongPressStarted = { onLongPressStarted?.invoke(it) }
+        holder.binding.imageView.onLongPressEnded = { onLongPressEnded?.invoke(it) }
 
         val shouldShow = isUiVisible && !isFormatSwitcherPersistentHidden
         holder.binding.formatToggleGroup.visibility = if (shouldShow) View.VISIBLE else View.GONE
@@ -315,11 +319,13 @@ class ImageViewerAdapter(
         }
     }
 
-    fun cancelLoadJob(position: Int) {
+    fun cancelLoadJob(position: Int, clearView: Boolean = true) {
         val holder = recyclerView?.findViewHolderForAdapterPosition(position) as? ViewHolder
         if (holder != null) {
             holder.loadJob?.cancel()
-            Glide.with(holder.binding.imageView).clear(holder.binding.imageView)
+            if (clearView) {
+                Glide.with(holder.binding.imageView).clear(holder.binding.imageView)
+            }
             holder.binding.loadingIndicator.visibility = View.GONE
         }
     }
