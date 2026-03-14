@@ -19,7 +19,7 @@ data class ImageGroup(
     val editConfig: EditConfig? = null
 ) : Parcelable {
     fun hasAny(): Boolean = jpgUri != null || tiffUri != null || dngUri != null || dngUri1 != null || dngUri2 != null
-    fun isHalfFrame(): Boolean = dngUri1 != null || dngUri2 != null || hfLayout != null
+    fun isHalfFrame(): Boolean = dngUri1 != null || dngUri2 != null || hfLayout == "SBS" || hfLayout == "TB"
 }
 
 @Parcelize

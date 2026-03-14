@@ -1318,8 +1318,11 @@ class CameraFragment : Fragment() {
                 SimpleDateFormat(FILENAME, Locale.US).format(timing.shutterClick)
             }
 
-            val flarePref = if (prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_LIGHT_LEAK, false)) 0 else -1
-            val resolvedFlare = if (flarePref == 0) Random().nextInt(2) + 1 else flarePref
+            var resolvedFlare = -1
+            if (isHalfFrameModeEnabled) {
+                val flarePref = if (prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_LIGHT_LEAK, false)) 0 else -1
+                resolvedFlare = if (flarePref == 0) Random().nextInt(2) + 1 else flarePref
+            }
 
             if (isFrame1Trigger) {
                 halfFrameSessionStore.clearCurrentSession(deleteTempFile = false)
@@ -1354,7 +1357,7 @@ class CameraFragment : Fragment() {
                     profile = HalfFrameSessionStore.PROFILE_NORMAL,
                     dateStamp = false,
                     captureTimeMillis = timing.shutterClick,
-                    flareType = resolvedFlare
+                    flareType = -1
                 )
             }
 
