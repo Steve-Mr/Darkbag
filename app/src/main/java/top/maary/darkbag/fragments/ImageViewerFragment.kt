@@ -721,6 +721,8 @@ class ImageViewerFragment : Fragment() {
         val dngUri1 = currentGroup.dngUri ?: currentGroup.dngUri1 ?: return
         val dngUri2 = currentGroup.dngUri2
 
+        activeAdjustmentBinding?.editPreviewLoading?.visibility = View.VISIBLE
+
         previewJob?.cancel()
         previewJob = lifecycleScope.launch {
             delay(150)
@@ -878,6 +880,7 @@ class ImageViewerFragment : Fragment() {
             } else if (compositeBitmap != null) {
                 activeAdjustmentBinding?.editPreviewImage?.setImageBitmap(compositeBitmap)
             }
+            activeAdjustmentBinding?.editPreviewLoading?.visibility = View.GONE
         }
     }
 
