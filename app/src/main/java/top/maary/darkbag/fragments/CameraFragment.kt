@@ -1353,12 +1353,7 @@ class CameraFragment : Fragment() {
                     flareType = if (isFrame2Trigger) session.flareType else resolvedFlare
                 )
             } else {
-                hfMetadataForTrigger = HalfFrameManager.Metadata(
-                    profile = HalfFrameSessionStore.PROFILE_NORMAL,
-                    dateStamp = false,
-                    captureTimeMillis = timing.shutterClick,
-                    flareType = -1
-                )
+                hfMetadataForTrigger = null
             }
 
             if (isFrame2Trigger) {
