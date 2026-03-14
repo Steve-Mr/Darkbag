@@ -763,16 +763,7 @@ class ImageViewerFragment : Fragment() {
         }
 
         // Restore zoom state
-        try {
-            val fieldScale = top.maary.darkbag.ui.ZoomableImageView::class.java.getDeclaredField("saveScale")
-            fieldScale.isAccessible = true
-            fieldScale.set(imageView, savedScale)
-
-            imageView.imageMatrix = savedMatrix
-            imageView.invalidate()
-        } catch (e: Exception) {
-            android.util.Log.e("ImageViewerFragment", "Failed to restore zoom state", e)
-        }
+        imageView.restoreZoomState(savedMatrix, savedScale)
     }
 
     private fun applyEditPreviewInternal(config: top.maary.darkbag.models.EditConfig) {

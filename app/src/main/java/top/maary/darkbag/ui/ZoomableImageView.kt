@@ -238,6 +238,14 @@ class ZoomableImageView @JvmOverloads constructor(
         invalidate()
     }
 
+    fun restoreZoomState(matrix: Matrix, scale: Float) {
+        this.matrixValue.set(matrix)
+        this.saveScale = scale
+        imageMatrix = this.matrixValue
+        invalidate()
+        onZoomChanged?.invoke(saveScale > 1f)
+    }
+
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         super.onMeasure(widthMeasureSpec, heightMeasureSpec)
         val newWidth = MeasureSpec.getSize(widthMeasureSpec)
