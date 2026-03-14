@@ -46,6 +46,11 @@ class ZoomableImageView @JvmOverloads constructor(
 
     var onTapped: (() -> Unit)? = null
     var onZoomChanged: ((Boolean) -> Unit)? = null
+    var onLongPressStarted: ((ZoomableImageView) -> Unit)? = null
+    var onLongPressEnded: ((ZoomableImageView) -> Unit)? = null
+
+    private var isLongPressing = false
+    private var isLongPressConsumed = false
 
     companion object {
         private const val NONE = 0
@@ -71,6 +76,7 @@ class ZoomableImageView @JvmOverloads constructor(
 
         when (event.action) {
             MotionEvent.ACTION_DOWN -> {
+                isLongPressConsumed = false
                 last.set(curr)
                 start.set(last)
                 mode = DRAG
@@ -87,12 +93,18 @@ class ZoomableImageView @JvmOverloads constructor(
                     last.set(curr.x, curr.y)
                 }
             }
-            MotionEvent.ACTION_UP -> {
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                if (isLongPressing) {
+                    isLongPressing = false
+                    onLongPressEnded?.invoke(this@ZoomableImageView)
+                }
                 mode = NONE
-                val xDiff = abs(curr.x - start.x).toInt()
-                val yDiff = abs(curr.y - start.y).toInt()
-                if (xDiff < CLICK && yDiff < CLICK) {
-                    performClick()
+                if (event.action == MotionEvent.ACTION_UP) {
+                    val xDiff = abs(curr.x - start.x).toInt()
+                    val yDiff = abs(curr.y - start.y).toInt()
+                    if (xDiff < CLICK && yDiff < CLICK && !isLongPressConsumed) {
+                        performClick()
+                    }
                 }
             }
             MotionEvent.ACTION_POINTER_UP -> {
@@ -145,6 +157,12 @@ class ZoomableImageView @JvmOverloads constructor(
         override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
             onTapped?.invoke()
             return true
+        }
+
+        override fun onLongPress(e: MotionEvent) {
+            isLongPressing = true
+            isLongPressConsumed = true
+            onLongPressStarted?.invoke(this@ZoomableImageView)
         }
 
         override fun onDoubleTap(e: MotionEvent): Boolean {
