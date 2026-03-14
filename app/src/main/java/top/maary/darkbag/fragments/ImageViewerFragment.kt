@@ -103,6 +103,7 @@ class ImageViewerFragment : Fragment() {
             if (initialPos != -1) {
                 binding.imagePager.setCurrentItem(initialPos, false)
             }
+            binding.imagePager.isUserInputEnabled = !isAdjusted
 
             setupActionButtons()
             updateControlsVisibility()
@@ -365,6 +366,7 @@ class ImageViewerFragment : Fragment() {
     private fun markAdjusted() {
         if (!isAdjusted) {
             isAdjusted = true
+            binding.imagePager.isUserInputEnabled = false
             adapter.setFormatSwitcherPersistentHidden(true)
             updateSplitButtons()
             updateToolbarIcon()
@@ -373,6 +375,7 @@ class ImageViewerFragment : Fragment() {
 
     private fun resetAdjustments() {
         isAdjusted = false
+        binding.imagePager.isUserInputEnabled = true
         adapter.setFormatSwitcherPersistentHidden(false)
         isIndividualEditMode = false
         sourceDngBytes = null
