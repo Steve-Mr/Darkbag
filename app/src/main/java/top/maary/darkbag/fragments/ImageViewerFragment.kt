@@ -744,6 +744,8 @@ class ImageViewerFragment : Fragment() {
         com.bumptech.glide.Glide.with(imageView)
             .asBitmap()
             .load(jpgUri)
+            .placeholder(imageView.drawable)
+            .dontAnimate()
             .diskCacheStrategy(com.bumptech.glide.load.engine.DiskCacheStrategy.NONE)
             .skipMemoryCache(true)
             .into(imageView)

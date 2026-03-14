@@ -83,7 +83,7 @@ class ZoomableImageView @JvmOverloads constructor(
                 parent.requestDisallowInterceptTouchEvent(saveScale > 1f)
             }
             MotionEvent.ACTION_MOVE -> {
-                if (mode == DRAG) {
+                if (mode == DRAG && !isLongPressing) {
                     val deltaX = curr.x - last.x
                     val deltaY = curr.y - last.y
                     val fixTransX = getFixDragTrans(deltaX, viewWidth.toFloat(), origWidth * saveScale)
