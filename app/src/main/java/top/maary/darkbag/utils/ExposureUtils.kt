@@ -24,6 +24,7 @@ object ExposureUtils {
     private const val CLIPPING_TO_EV_FACTOR = 15.0
     private const val MAX_ADDITIONAL_UNDEREXPOSURE_STOPS = 2.0
     private const val GAIN_DAMPENING_FACTOR = 0.2
+    private const val MIN_UNDEREXPOSURE_FACTOR = 0.001f
 
     data class ExposureConfig(
         val iso: Int,
@@ -87,7 +88,7 @@ object ExposureUtils {
                     }
                 }
             }
-        }
+        }.coerceAtMost(1.0f) // Never allow an EV increase during underexposure modes
 
         // Apply additional underexposure if highlights are clipping (Pixel-based refinement)
         if (underexposureMode == "Dynamic (Experimental)" && clippingRatio > CLIPPING_RATIO_THRESHOLD) {
@@ -98,14 +99,18 @@ object ExposureUtils {
              underexposeFactor *= (0.5).pow(additionalUnderexposure).toFloat()
         }
 
+        // Final safety check: underexposeFactor must be between 0 and 1.
+        underexposeFactor = underexposeFactor.coerceIn(MIN_UNDEREXPOSURE_FACTOR, 1.0f)
+
+        // CORRECT: Target exposure is REDUCED by multiplying baseline by underexposeFactor (e.g., * 0.125)
         val targetTotalExposure = baselineTotalExposure * underexposeFactor
 
         // 3. Exposure Factorization (The "Payload" Strategy)
         // Goal: Achieve targetTotalExposure using specific constraints.
         // Constraints:
-        // - Stage 1: Prioritize Shutter Speed (Short Time) to freeze motion. Max 8ms.
-        // - Stage 2: If 8ms insufficient, increase ISO up to 4x Base.
-        // - Stage 3: If still insufficient, increase both beyond limits.
+        // - Stage 1: Prioritize ISO (keep it at minIso). Max 8ms shutter speed.
+        // - Stage 2: If 8ms insufficient (too dark), increase ISO up to 4x minIso.
+        // - Stage 3: If still insufficient, increase both proportionally (sqrt split).
 
         var targetIso = minIso
         var targetTime = minTime
@@ -116,42 +121,41 @@ object ExposureUtils {
         // Helper to calculate resulting exposure
         fun currentExposure(): Double = targetIso.toDouble() * targetTime.toDouble()
 
-        // Stage 1: Increase Time up to 8ms, keeping ISO at Min
+        // Stage 1: Target achieved by Shutter Speed alone, keeping ISO at Min.
         // We want: minIso * T = targetTotalExposure => T = target / minIso
         val neededTimeS1 = (targetTotalExposure / minIso).toLong()
-        targetTime = neededTimeS1.coerceIn(minTime, timeLimit8ms)
-        targetIso = minIso
-
-        if (currentExposure() < targetTotalExposure) {
-            // Stage 2: Increase ISO up to 4x, keeping Time at 8ms
+        if (neededTimeS1 <= timeLimit8ms) {
+            targetTime = max(minTime, neededTimeS1)
+            targetIso = minIso
+        } else {
+            // Stage 2: 8ms shutter is not enough, start increasing ISO.
             // We want: I * 8ms = targetTotalExposure => I = target / 8ms
+            targetTime = timeLimit8ms
             val neededIsoS2 = (targetTotalExposure / timeLimit8ms).toInt()
-            targetIso = neededIsoS2.coerceIn(minIso, isoLimit4x)
-            targetTime = timeLimit8ms // Locked at 8ms
 
-            if (currentExposure() < targetTotalExposure) {
-                // Stage 3: Increase both Time and ISO beyond limits
-                // The prompt says "increase both... log space proportional".
-                // Simple implementation:
-                // Distribute the remaining required gain equally between Time and ISO?
-                // Or prioritize Time up to a hard limit (e.g. 100ms) then ISO?
-                // Prompt: "Simultaneously increase... until limits (100ms, 96x gain)".
-
+            if (neededIsoS2 <= isoLimit4x) {
+                targetIso = max(minIso, neededIsoS2)
+            } else {
+                // Stage 3: Both 8ms and 4x ISO are not enough, increase both beyond limits.
+                targetIso = isoLimit4x
+                targetTime = timeLimit8ms
                 val remainingFactor = targetTotalExposure / currentExposure()
+
                 // Split factor: sqrt(factor) to ISO, sqrt(factor) to Time
-                // This keeps them balanced in log space.
                 val splitFactor = kotlin.math.sqrt(remainingFactor)
 
                 val neededIsoS3 = (targetIso * splitFactor).toInt()
                 val neededTimeS3 = (targetTime * splitFactor).toLong()
 
                 targetIso = neededIsoS3.coerceIn(minIso, maxIso)
-                targetTime = neededTimeS3.coerceIn(minTime, maxTime) // Camera max, not 100ms hard limit
+                targetTime = neededTimeS3.coerceIn(minTime, maxTime)
             }
         }
 
         // 4. Final Gain Calculation
-        // Calculate gain based on ACTUALLY achieved exposure to avoid overexposure boost when hardware hits its floor.
+        // Digital Gain (DG) must be the inverse of the actual exposure reduction.
+        // DG = (Baseline Exposure) / (Actual Exposure)
+        // If we reduced exposure by 1/8 (underexposeFactor = 0.125), DG should be 8.0.
         val actualTotalExposure = targetIso.toDouble() * targetTime.toDouble()
         var digitalGain = (baselineTotalExposure / actualTotalExposure).toFloat()
 
