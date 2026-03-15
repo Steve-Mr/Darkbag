@@ -159,6 +159,10 @@ class ImageViewerFragment : Fragment() {
 
         updateSplitButtons()
         updateToolbarIcon()
+        updateEditUi()
+        updateEffectsButtons()
+        updateSelectionFeedback()
+        updateBackPressedCallbackState()
     }
 
     private fun prepareEditConfig(group: ImageGroup) {
@@ -198,6 +202,7 @@ class ImageViewerFragment : Fragment() {
             } else config
         }
         updateEditUi()
+        updateEffectsButtons()
         // DNG bytes and deep EXIF will be loaded on-demand when entering edit flow
     }
 
@@ -392,7 +397,6 @@ class ImageViewerFragment : Fragment() {
         isAdjusted = false
         binding.imagePager.isUserInputEnabled = true
         adapter.setFormatSwitcherPersistentHidden(false)
-        updateBackPressedCallbackState()
         isIndividualEditMode = false
         sourceDngBytes = null
         sourceDngBytes2 = null
@@ -405,8 +409,6 @@ class ImageViewerFragment : Fragment() {
         previewJob?.cancel()
         currentEditConfig = null
 
-        binding.hfSelection1.visibility = View.GONE
-        binding.hfSelection2.visibility = View.GONE
         binding.lutListContainer.visibility = View.GONE
 
         val currentIndex = binding.imagePager.currentItem
@@ -414,8 +416,7 @@ class ImageViewerFragment : Fragment() {
 
         val currentGroup = adapter.getGroup(currentIndex)
         prepareEditConfig(currentGroup)
-        updateSplitButtons()
-        updateToolbarIcon()
+        updateControlsVisibility()
     }
 
     private fun performShare() {
