@@ -14,6 +14,7 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import android.view.MenuItem
 import androidx.appcompat.widget.PopupMenu
+import androidx.activity.OnBackPressedCallback
 import androidx.navigation.fragment.findNavController
 import androidx.navigation.fragment.navArgs
 import androidx.viewpager2.widget.ViewPager2
@@ -50,6 +51,18 @@ class ImageViewerFragment : Fragment() {
     private lateinit var lutManager: top.maary.darkbag.utils.LutManager
     private var previewJob: Job? = null
 
+    private val backPressedCallback = object : OnBackPressedCallback(false) {
+        override fun handleOnBackPressed() {
+            if (binding.lutListContainer.visibility == View.VISIBLE) {
+                binding.lutListContainer.visibility = View.GONE
+                binding.touchOverlay.visibility = View.GONE
+                updateBackPressedCallbackState()
+            } else if (isAdjusted) {
+                showDiscardChangesDialog()
+            }
+        }
+    }
+
     override fun onCreateView(
         inflater: LayoutInflater,
         container: ViewGroup?,
@@ -66,6 +79,8 @@ class ImageViewerFragment : Fragment() {
         lutManager = top.maary.darkbag.utils.LutManager(requireContext())
         setupEdgeToEdge()
         setupToolbar()
+
+        requireActivity().onBackPressedDispatcher.addCallback(viewLifecycleOwner, backPressedCallback)
 
         childFragmentManager.setFragmentResultListener(HalfFrameShareSheet.REQUEST_KEY, viewLifecycleOwner) { _, bundle ->
             val uris = bundle.getParcelableArrayList<android.net.Uri>(HalfFrameShareSheet.BUNDLE_KEY_URIS)
@@ -144,6 +159,10 @@ class ImageViewerFragment : Fragment() {
 
         updateSplitButtons()
         updateToolbarIcon()
+        updateEditUi()
+        updateEffectsButtons()
+        updateSelectionFeedback()
+        updateBackPressedCallbackState()
     }
 
     private fun prepareEditConfig(group: ImageGroup) {
@@ -179,12 +198,11 @@ class ImageViewerFragment : Fragment() {
         currentEditConfig = currentEditConfig?.let { config ->
             if (config.flareType == 0) {
                 val resolved = java.util.Random().nextInt(2) + 1
-                val updated = config.copy(flareType = resolved)
-                markAdjusted()
-                updated
+                config.copy(flareType = resolved)
             } else config
         }
         updateEditUi()
+        updateEffectsButtons()
         // DNG bytes and deep EXIF will be loaded on-demand when entering edit flow
     }
 
@@ -308,6 +326,7 @@ class ImageViewerFragment : Fragment() {
         binding.touchOverlay.setOnClickListener {
             binding.lutListContainer.visibility = View.GONE
             binding.touchOverlay.visibility = View.GONE
+            updateBackPressedCallbackState()
         }
 
         binding.btnTimestamp.setOnClickListener {
@@ -370,6 +389,7 @@ class ImageViewerFragment : Fragment() {
             adapter.setFormatSwitcherPersistentHidden(true)
             updateSplitButtons()
             updateToolbarIcon()
+            updateBackPressedCallbackState()
         }
     }
 
@@ -389,8 +409,6 @@ class ImageViewerFragment : Fragment() {
         previewJob?.cancel()
         currentEditConfig = null
 
-        binding.hfSelection1.visibility = View.GONE
-        binding.hfSelection2.visibility = View.GONE
         binding.lutListContainer.visibility = View.GONE
 
         val currentIndex = binding.imagePager.currentItem
@@ -398,8 +416,7 @@ class ImageViewerFragment : Fragment() {
 
         val currentGroup = adapter.getGroup(currentIndex)
         prepareEditConfig(currentGroup)
-        updateSplitButtons()
-        updateToolbarIcon()
+        updateControlsVisibility()
     }
 
     private fun performShare() {
@@ -507,6 +524,7 @@ class ImageViewerFragment : Fragment() {
                 showLutSelectionMenu()
             }
         }
+        updateBackPressedCallbackState()
     }
 
     private fun showLogSelectionMenu() {
@@ -589,6 +607,7 @@ class ImageViewerFragment : Fragment() {
                     if (autoDismiss) {
                         container.visibility = View.GONE
                         binding.touchOverlay.visibility = View.GONE
+                        updateBackPressedCallbackState()
                     }
                 }
             }
@@ -1195,8 +1214,12 @@ class ImageViewerFragment : Fragment() {
 
     private fun setupToolbar() {
         binding.toolbar.setNavigationOnClickListener {
-            if (isAdjusted) {
-                resetAdjustments()
+            if (binding.lutListContainer.visibility == View.VISIBLE) {
+                binding.lutListContainer.visibility = View.GONE
+                binding.touchOverlay.visibility = View.GONE
+                updateBackPressedCallbackState()
+            } else if (isAdjusted) {
+                showDiscardChangesDialog()
             } else {
                 findNavController().navigateUp()
             }
@@ -1274,6 +1297,21 @@ class ImageViewerFragment : Fragment() {
             }
             insets
         }
+    }
+
+    private fun updateBackPressedCallbackState() {
+        backPressedCallback.isEnabled = isAdjusted || binding.lutListContainer.visibility == View.VISIBLE
+    }
+
+    private fun showDiscardChangesDialog() {
+        com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
+            .setTitle(R.string.discard_changes_title)
+            .setMessage(R.string.discard_changes_message)
+            .setNegativeButton(R.string.cancel, null)
+            .setPositiveButton(R.string.discard) { _, _ ->
+                resetAdjustments()
+            }
+            .show()
     }
 
     override fun onDestroyView() {
