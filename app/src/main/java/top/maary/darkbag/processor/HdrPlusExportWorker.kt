@@ -95,7 +95,8 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
             } else null,
             hfLayout = layout,
             showTimestamp = hfMetadata?.dateStamp ?: false,
-            flareType = resolvedFlare
+            flareType = resolvedFlare,
+            zoomFactor = zoomFactor
         )
 
         Log.d(TAG, "Background Export Worker started for $baseName")
