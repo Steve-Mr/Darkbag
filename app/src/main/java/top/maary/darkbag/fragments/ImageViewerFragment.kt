@@ -1307,12 +1307,9 @@ class ImageViewerFragment : Fragment() {
         com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
             .setTitle(R.string.discard_changes_title)
             .setMessage(R.string.discard_changes_message)
-            .setNeutralButton(R.string.cancel, null)
-            .setNegativeButton(R.string.discard) { _, _ ->
+            .setNegativeButton(R.string.cancel, null)
+            .setPositiveButton(R.string.discard) { _, _ ->
                 resetAdjustments()
-            }
-            .setPositiveButton(R.string.save) { _, _ ->
-                saveEdit(isReplacement = true)
             }
             .show()
     }
