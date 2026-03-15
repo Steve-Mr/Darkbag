@@ -29,43 +29,54 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent" />
 
-    <com.google.android.material.button.MaterialButtonToggleGroup
-        android:id="@+id/format_toggle_group"
+    <!-- Vertical Format Switcher (M3 Glassmorphism Style) -->
+    <com.google.android.material.button.MaterialButtonGroup
+        android:id="@+id/formatToggleGroup"
+        style="@style/Widget.Material3.MaterialButtonGroup.Connected"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginBottom="80dp"
+        android:layout_marginEnd="16dp"
+        android:orientation="vertical"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:singleSelection="true">
+        app:layout_constraintTop_toTopOf="parent">
 
         <com.google.android.material.button.MaterialButton
-            android:id="@+id/btn_jpg"
-            style="@style/Widget.Material3.Button.OutlinedButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="JPG"
-            android:textColor="?attr/colorOnSurface"
+            android:id="@+id/btnJpg"
+            style="@style/Widget.Material3.Button.TonalButton"
+            android:layout_width="56dp"
+            android:layout_height="56dp"
+            android:padding="0dp"
+            android:backgroundTint="#66000000"
+            app:icon="@drawable/ic_photo"
+            app:iconGravity="textStart"
+            app:iconPadding="0dp"
             android:visibility="gone" />
 
         <com.google.android.material.button.MaterialButton
-            android:id="@+id/btn_tiff"
-            style="@style/Widget.Material3.Button.OutlinedButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="TIFF"
-            android:textColor="?attr/colorOnSurface"
+            android:id="@+id/btnTiff"
+            style="@style/Widget.Material3.Button.TonalButton"
+            android:layout_width="56dp"
+            android:layout_height="56dp"
+            android:padding="0dp"
+            android:backgroundTint="#66000000"
+            app:icon="@drawable/ic_tiff"
+            app:iconGravity="textStart"
+            app:iconPadding="0dp"
             android:visibility="gone" />
 
         <com.google.android.material.button.MaterialButton
-            android:id="@+id/btn_dng"
-            style="@style/Widget.Material3.Button.OutlinedButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="DNG"
-            android:textColor="?attr/colorOnSurface"
+            android:id="@+id/btnDng"
+            style="@style/Widget.Material3.Button.TonalButton"
+            android:layout_width="56dp"
+            android:layout_height="56dp"
+            android:padding="0dp"
+            android:backgroundTint="#66000000"
+            app:icon="@drawable/ic_raw"
+            app:iconGravity="textStart"
+            app:iconPadding="0dp"
             android:visibility="gone" />
 
-    </com.google.android.material.button.MaterialButtonToggleGroup>
+    </com.google.android.material.button.MaterialButtonGroup>
 
 </androidx.constraintlayout.widget.ConstraintLayout>

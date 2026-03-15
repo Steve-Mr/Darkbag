@@ -13,7 +13,9 @@ class HalfFrameSessionStore(private val context: Context) {
         val step: Int,
         val tempPath: String?,
         val baseName: String?,
-        val captureTimeMillis: Long
+        val captureTimeMillis: Long,
+        val digitalGain: Float = 1.0f,
+        val flareType: Int = -1
     )
 
     fun currentProfile(): String {
@@ -29,6 +31,8 @@ class HalfFrameSessionStore(private val context: Context) {
         val tempPath = prefs.getString(key(SettingsFragment.KEY_HALF_FRAME_TEMP_PATH, activeProfile), null)
         val baseName = prefs.getString(key(SettingsFragment.KEY_HALF_FRAME_BASE_NAME, activeProfile), null)
         val captureTime = prefs.getLong(key(KEY_CAPTURE_TIME, activeProfile), 0L)
+        val digitalGain = prefs.getFloat(key(KEY_DIGITAL_GAIN, activeProfile), 1.0f)
+        val flareType = prefs.getInt(key(KEY_FLARE_TYPE, activeProfile), -1)
 
         var resolvedStep = step
         var resolvedTemp = tempPath
@@ -47,20 +51,26 @@ class HalfFrameSessionStore(private val context: Context) {
                     .remove(key(SettingsFragment.KEY_HALF_FRAME_TEMP_PATH, activeProfile))
                     .remove(key(SettingsFragment.KEY_HALF_FRAME_BASE_NAME, activeProfile))
                     .remove(key(KEY_CAPTURE_TIME, activeProfile))
+                    .remove(key(KEY_DIGITAL_GAIN, activeProfile))
+                    .remove(key(KEY_FLARE_TYPE, activeProfile))
                     .apply()
             }
         }
 
-        return Session(activeProfile, resolvedStep, resolvedTemp, resolvedBase, captureTime)
+        return Session(activeProfile, resolvedStep, resolvedTemp, resolvedBase, captureTime, digitalGain, flareType)
     }
 
-    fun markStep(step: Int, captureTimeMillis: Long? = null, profile: String? = null) {
+    fun markStep(step: Int, captureTimeMillis: Long? = null, profile: String? = null, digitalGain: Float = 1.0f, flareType: Int = -1) {
         val activeProfile = profile ?: currentProfile()
         val editor = prefs.edit().putInt(key(SettingsFragment.KEY_HALF_FRAME_STEP, activeProfile), step)
         if (step == 1) {
             editor.putLong(key(KEY_CAPTURE_TIME, activeProfile), captureTimeMillis ?: System.currentTimeMillis())
+            editor.putFloat(key(KEY_DIGITAL_GAIN, activeProfile), digitalGain)
+            editor.putInt(key(KEY_FLARE_TYPE, activeProfile), flareType)
         } else {
             editor.remove(key(KEY_CAPTURE_TIME, activeProfile))
+            editor.remove(key(KEY_DIGITAL_GAIN, activeProfile))
+            editor.remove(key(KEY_FLARE_TYPE, activeProfile))
         }
         editor.apply()
     }
@@ -81,6 +91,8 @@ class HalfFrameSessionStore(private val context: Context) {
             .remove(key(SettingsFragment.KEY_HALF_FRAME_TEMP_PATH, profile))
             .remove(key(SettingsFragment.KEY_HALF_FRAME_BASE_NAME, profile))
             .remove(key(KEY_CAPTURE_TIME, profile))
+            .remove(key(KEY_DIGITAL_GAIN, profile))
+            .remove(key(KEY_FLARE_TYPE, profile))
             .apply()
     }
 
@@ -103,6 +115,8 @@ class HalfFrameSessionStore(private val context: Context) {
 
     companion object {
         private const val KEY_CAPTURE_TIME = "half_frame_capture_time"
+        private const val KEY_DIGITAL_GAIN = "half_frame_digital_gain"
+        private const val KEY_FLARE_TYPE = "half_frame_flare_type"
         private const val MAX_RECOVER_WINDOW_MS = 120_000L
         const val PROFILE_NORMAL = "normal"
         const val PROFILE_HALF_SIDE = "half_side"

@@ -45,8 +45,15 @@ bool process_and_save_image(
     float gain,
     int targetLog,
     const LUT3D& lut,
-    const char* tiffPath,
-    const char* jpgPath,
+    float exposure = 0.0f,
+    float contrast = 0.0f,
+    float saturation = 0.0f,
+    float highlights = 0.0f,
+    float shadows = 0.0f,
+    float whites = 0.0f,
+    float blacks = 0.0f,
+    const char* tiffPath = nullptr,
+    const char* jpgPath = nullptr,
     int sourceColorSpace = 0,
     const float* ccm = nullptr,
     const float* wb = nullptr,
@@ -61,7 +68,7 @@ bool process_and_save_image(
 // --- File Writers ---
 bool write_tiff(const char* filename, int width, int height, const std::vector<unsigned short>& data, int orientation = 0, bool mirror = false);
 
-bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, int iso, long exposureTime, float fNumber, float focalLength, long captureTimeMillis, const std::vector<float>& ccm, int orientation, bool mirror = false);
+bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, int iso, long exposureTime, float fNumber, float focalLength, long captureTimeMillis, const std::vector<float>& ccm, int orientation, bool mirror = false, float baselineExposure = 0.0f);
 
 bool write_bmp(const char* filename, int width, int height, const std::vector<unsigned short>& data);
 

@@ -40,11 +40,21 @@ object ColorProcessor {
         dngData: ByteArray,
         targetLog: Int,
         lutPath: String?,
+        exposure: Float = 0f,
+        contrast: Float = 0f,
+        saturation: Float = 0f,
+        highlights: Float = 0f,
+        shadows: Float = 0f,
+        whites: Float = 0f,
+        blacks: Float = 0f,
+        digitalGain: Float = 1.0f,
         outputTiffPath: String?,
         outputJpgPath: String?,
         useGpu: Boolean,
         orientation: Int,
-        mirror: Boolean
+        mirror: Boolean,
+        outputBitmap: android.graphics.Bitmap? = null,
+        downsampleFactor: Int = 1
     ): Int
 
     /**
@@ -114,6 +124,13 @@ object ColorProcessor {
         digitalGain: Float,
         targetLog: Int,
         lutPath: String?,
+        exposure: Float = 0f,
+        contrast: Float = 0f,
+        saturation: Float = 0f,
+        highlights: Float = 0f,
+        shadows: Float = 0f,
+        whites: Float = 0f,
+        blacks: Float = 0f,
         tiffPath: String?,
         jpgPath: String?,
         dngPath: String?,

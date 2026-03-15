@@ -28,6 +28,9 @@
 #ifndef TIFFTAG_FOCALLENGTH
 #define TIFFTAG_FOCALLENGTH 37386
 #endif
+#ifndef TIFFTAG_DATETIMEORIGINAL
+#define TIFFTAG_DATETIMEORIGINAL 36867
+#endif
 
 // Define LinearRaw
 #ifndef PHOTOMETRIC_LINEAR_RAW
@@ -85,6 +88,10 @@
 #define TIFFTAG_OPCODELIST3 51022
 #endif
 
+#ifndef TIFFTAG_BASELINEEXPOSURE
+#define TIFFTAG_BASELINEEXPOSURE 50730
+#endif
+
 #ifndef TIFFTAG_CFAREPEATPATTERNDIM
 #define TIFFTAG_CFAREPEATPATTERNDIM 33421
 #endif
@@ -100,7 +107,8 @@ static const TIFFFieldInfo dng_field_info[] = {
     { TIFFTAG_WHITELEVEL, -1, -1, TIFF_LONG, FIELD_CUSTOM, 1, 1, const_cast<char*>("WhiteLevel") },
     { TIFFTAG_COLORMATRIX1, -1, -1, TIFF_RATIONAL, FIELD_CUSTOM, 1, 1, const_cast<char*>("ColorMatrix1") },
     { TIFFTAG_ASSHOTNEUTRAL, -1, -1, TIFF_RATIONAL, FIELD_CUSTOM, 1, 1, const_cast<char*>("AsShotNeutral") },
-    { TIFFTAG_CALIBRATIONILLUMINANT1, 1, 1, TIFF_SHORT, FIELD_CUSTOM, 1, 0, const_cast<char*>("CalibrationIlluminant1") }
+    { TIFFTAG_CALIBRATIONILLUMINANT1, 1, 1, TIFF_SHORT, FIELD_CUSTOM, 1, 0, const_cast<char*>("CalibrationIlluminant1") },
+    { TIFFTAG_BASELINEEXPOSURE, 1, 1, TIFF_SRATIONAL, FIELD_CUSTOM, 1, 0, const_cast<char*>("BaselineExposure") }
 };
 
 static void DNGTagExtender(TIFF *tif) {
@@ -442,6 +450,8 @@ AdaptiveEdgeComp calculate_adaptive_edge_comp(const std::vector<unsigned short>&
 bool process_and_save_image(
     const std::vector<unsigned short>& inputImage,
     int width, int height, float gain, int targetLog, const LUT3D& lut,
+    float exposure, float contrast, float saturation,
+    float highlights, float shadows, float whites, float blacks,
     const char* tiffPath, const char* jpgPath, int sourceColorSpace,
     const float* ccm, const float* wb, int orientation, unsigned char* out_rgb_buffer,
     bool isPreview, int downsampleFactor, float zoomFactor, bool mirror
@@ -474,9 +484,12 @@ bool process_and_save_image(
         x = std::max(0, std::min(x, width - 1));
         y = std::max(0, std::min(y, height - 1));
         size_t idx = (static_cast<size_t>(y) * width + x) * 3;
-        float norm_r = (float)inputImage[idx + 0] / 65535.0f * gain;
-        float norm_g = (float)inputImage[idx + 1] / 65535.0f * gain;
-        float norm_b = (float)inputImage[idx + 2] / 65535.0f * gain;
+
+        // 1. Exposure (Linear Space)
+        float exp_gain = std::pow(2.0f, exposure);
+        float norm_r = (float)inputImage[idx + 0] / 65535.0f * gain * exp_gain;
+        float norm_g = (float)inputImage[idx + 1] / 65535.0f * gain * exp_gain;
+        float norm_b = (float)inputImage[idx + 2] / 65535.0f * gain * exp_gain;
 
         if (edgeComp.enabled) {
             const float nx = (x - edgeComp.centerX) * edgeComp.invMaxRadius;
@@ -516,6 +529,48 @@ bool process_and_save_image(
         if (stageB) *stageB = color;
 
         color.r = apply_log(color.r, targetLog); color.g = apply_log(color.g, targetLog); color.b = apply_log(color.b, targetLog);
+
+        // 2. Contrast & Saturation (Log Space)
+        auto apply_contrast = [&](float v) {
+            return std::clamp((v - 0.5f) * (contrast + 1.0f) + 0.5f, 0.0f, 1.0f);
+        };
+        color.r = apply_contrast(color.r);
+        color.g = apply_contrast(color.g);
+        color.b = apply_contrast(color.b);
+
+        float luma = 0.2126f * color.r + 0.7152f * color.g + 0.0722f * color.b;
+        color.r = std::clamp(luma + (color.r - luma) * (saturation + 1.0f), 0.0f, 1.0f);
+        color.g = std::clamp(luma + (color.g - luma) * (saturation + 1.0f), 0.0f, 1.0f);
+        color.b = std::clamp(luma + (color.b - luma) * (saturation + 1.0f), 0.0f, 1.0f);
+
+        // 3. Highlights / Shadows / Whites / Blacks (Log Space)
+        auto apply_hswb = [&](float v) {
+            // Highlights: affecting upper range
+            if (highlights != 0.0f) {
+                float weight = std::pow(std::clamp(v, 0.0f, 1.0f), 2.0f);
+                v += highlights * weight * 0.2f;
+            }
+            // Shadows: affecting lower range
+            if (shadows != 0.0f) {
+                float weight = std::pow(1.0f - std::clamp(v, 0.0f, 1.0f), 2.0f);
+                v += shadows * weight * 0.2f;
+            }
+            // Whites: offset upper
+            if (whites != 0.0f) {
+                float weight = std::clamp((v - 0.5f) * 2.0f, 0.0f, 1.0f);
+                v += whites * weight * 0.2f;
+            }
+            // Blacks: offset lower
+            if (blacks != 0.0f) {
+                float weight = std::clamp((0.5f - v) * 2.0f, 0.0f, 1.0f);
+                v += blacks * weight * 0.2f;
+            }
+            return std::clamp(v, 0.0f, 1.0f);
+        };
+        color.r = apply_hswb(color.r);
+        color.g = apply_hswb(color.g);
+        color.b = apply_hswb(color.b);
+
         if (stageC) *stageC = color;
 
         if (lut.size > 0) color = apply_lut(lut, color);
@@ -550,9 +605,21 @@ bool process_and_save_image(
 
                 Vec3 color = process_pixel(cropX + sx * downsampleFactor, cropY + sy * downsampleFactor, nullptr, nullptr, nullptr);
                 size_t outIdx = (static_cast<size_t>(py) * finalW_zoomed + px) * 3;
-                previewRgb8[outIdx + 0] = (unsigned char)std::max(0.0f, std::min(255.0f, color.r * 255.0f + 0.5f));
-                previewRgb8[outIdx + 1] = (unsigned char)std::max(0.0f, std::min(255.0f, color.g * 255.0f + 0.5f));
-                previewRgb8[outIdx + 2] = (unsigned char)std::max(0.0f, std::min(255.0f, color.b * 255.0f + 0.5f));
+                unsigned char r8 = (unsigned char)std::max(0.0f, std::min(255.0f, color.r * 255.0f + 0.5f));
+                unsigned char g8 = (unsigned char)std::max(0.0f, std::min(255.0f, color.g * 255.0f + 0.5f));
+                unsigned char b8 = (unsigned char)std::max(0.0f, std::min(255.0f, color.b * 255.0f + 0.5f));
+
+                previewRgb8[outIdx + 0] = r8;
+                previewRgb8[outIdx + 1] = g8;
+                previewRgb8[outIdx + 2] = b8;
+
+                if (out_rgb_buffer) {
+                    size_t bIdx = (static_cast<size_t>(py) * finalW_zoomed + px) * 4;
+                    out_rgb_buffer[bIdx+0] = r8;
+                    out_rgb_buffer[bIdx+1] = g8;
+                    out_rgb_buffer[bIdx+2] = b8;
+                    out_rgb_buffer[bIdx+3] = 255;
+                }
             }
         }
     } else {
@@ -592,9 +659,8 @@ bool process_and_save_image(
                 }
 
                 // Note: out_rgb_buffer is usually for preview only, but we keep it here if needed.
-                // It expects original dimensions though. This part might need adjustment if used for rotated large images.
-                if (out_rgb_buffer && !swapDims) {
-                    size_t bIdx = (static_cast<size_t>(py) * finalW + px) * 4;
+                if (out_rgb_buffer) {
+                    size_t bIdx = (static_cast<size_t>(py) * finalW_zoomed + px) * 4;
                     out_rgb_buffer[bIdx+0] = (unsigned char)std::min(255, (processedImage[outIdx+0] + 128) >> 8);
                     out_rgb_buffer[bIdx+1] = (unsigned char)std::min(255, (processedImage[outIdx+1] + 128) >> 8);
                     out_rgb_buffer[bIdx+2] = (unsigned char)std::min(255, (processedImage[outIdx+2] + 128) >> 8);
@@ -695,7 +761,7 @@ bool write_tiff(const char* filename, int width, int height, const std::vector<u
     return true;
 }
 
-bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, int iso, long exposureTime, float fNumber, float focalLength, long captureTimeMillis, const std::vector<float>& ccm, int orientation, bool mirror) {
+bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, int iso, long exposureTime, float fNumber, float focalLength, long captureTimeMillis, const std::vector<float>& ccm, int orientation, bool mirror, float baselineExposure) {
     TIFFSetTagExtender(DNGTagExtender);
     TIFF* tif = TIFFOpen(filename, "w");
     if (!tif) return false;
@@ -731,6 +797,7 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
     char buffer[20];
     strftime(buffer, 20, "%Y:%m:%d %H:%M:%S", timeinfo);
     TIFFSetField(tif, TIFFTAG_DATETIME, buffer);
+    TIFFSetField(tif, TIFFTAG_DATETIMEORIGINAL, buffer);
 
     static const uint8_t dng_version[] = {1, 4, 0, 0};
     TIFFSetField(tif, TIFFTAG_DNGVERSION, dng_version);
@@ -758,6 +825,8 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
     TIFFSetField(tif, TIFFTAG_EXPOSURETIME, exposureTimeSec);
     TIFFSetField(tif, TIFFTAG_FNUMBER, fNumber);
     TIFFSetField(tif, TIFFTAG_FOCALLENGTH, focalLength);
+
+    TIFFSetField(tif, TIFFTAG_BASELINEEXPOSURE, baselineExposure);
 
     unsigned short iso_short = (unsigned short)iso;
     TIFFSetField(tif, TIFFTAG_ISOSPEEDRATINGS, (uint16_t)1, &iso_short);

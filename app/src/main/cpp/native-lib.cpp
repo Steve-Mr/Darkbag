@@ -8,6 +8,7 @@
 #include <sstream>
 #include <iostream>
 #include <memory>
+#include <android/bitmap.h>
 #include <libraw/libraw.h>
 #include "ColorPipe.h"
 
@@ -22,11 +23,21 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRaw(
         jbyteArray dngData,
         jint targetLog,
         jstring lutPath,
+        jfloat exposure,
+        jfloat contrast,
+        jfloat saturation,
+        jfloat highlights,
+        jfloat shadows,
+        jfloat whites,
+        jfloat blacks,
+        jfloat digitalGain,
         jstring outputTiffPath,
         jstring outputJpgPath,
         jboolean useGpu, // Ignored in new pipeline
         jint orientation,
-        jboolean mirror
+        jboolean mirror,
+        jobject outputBitmap,
+        jint downsampleFactor
 ) {
     LOGD("Native processRaw started using LibRaw.");
 
@@ -108,26 +119,32 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRaw(
     const char* tiff_path_cstr = (outputTiffPath) ? env->GetStringUTFChars(outputTiffPath, 0) : nullptr;
     const char* jpg_path_cstr = (outputJpgPath) ? env->GetStringUTFChars(outputJpgPath, 0) : nullptr;
 
-    // Use Shared Pipeline (Gain = 1.0 for standard LibRaw output)
+    unsigned char* bitmapPixels = nullptr;
+    if (outputBitmap) AndroidBitmap_lockPixels(env, outputBitmap, (void**)&bitmapPixels);
+
+    // Use Shared Pipeline
     bool saveOk = process_and_save_image(
         rawImage,
         image->width,
         image->height,
-        1.0f,
+        digitalGain,
         targetLog,
         lut,
+        exposure, contrast, saturation, highlights, shadows, whites, blacks,
         tiff_path_cstr,
         jpg_path_cstr,
         0, // sourceColorSpace = ProPhoto (LibRaw output_color=4)
         nullptr, // ccm is not used for ProPhoto path
         nullptr, // wb is not used for ProPhoto path (LibRaw handles it)
         (int)orientation,
-        nullptr, // out_rgb_buffer
-        false, // isPreview
-        1, // downsampleFactor
+        bitmapPixels, // out_rgb_buffer
+        outputBitmap != nullptr, // isPreview
+        (int)downsampleFactor, // downsampleFactor
         1.0f, // zoomFactor
         (bool)mirror
     );
+
+    if (outputBitmap && bitmapPixels) AndroidBitmap_unlockPixels(env, outputBitmap);
 
     // Release Strings
     if (outputTiffPath) env->ReleaseStringUTFChars(outputTiffPath, tiff_path_cstr);

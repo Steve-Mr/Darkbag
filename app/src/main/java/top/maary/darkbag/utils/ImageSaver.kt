@@ -11,6 +11,8 @@ import android.os.Build
 import android.provider.MediaStore
 import android.util.Log
 import androidx.exifinterface.media.ExifInterface
+import org.json.JSONObject
+import top.maary.darkbag.models.EditConfig
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -49,10 +51,13 @@ object ImageSaver {
         mirror: Boolean = false,
         isFastPath: Boolean = false,
         halfFrameMetadata: HalfFrameManager.Metadata? = null,
+        editConfig: EditConfig? = null,
+        digitalGain: Float = 1.0f,
+        isAlreadyStitched: Boolean = false,
         onBitmapReady: ((Bitmap) -> Unit)? = null
     ): Uri? {
         val halfFrameManager = HalfFrameManager(context)
-        val isHalfFrameActive = halfFrameMetadata != null || halfFrameManager.isEnabled
+        val isHalfFrameActive = !isAlreadyStitched && (halfFrameMetadata != null || halfFrameManager.isEnabled)
 
         val actualSaveJpg = if (isHalfFrameActive) halfFrameManager.saveJpg else saveJpg
         val actualSaveRaw = if (isHalfFrameActive) halfFrameManager.saveRaw else saveRaw
@@ -73,7 +78,7 @@ object ImageSaver {
                 val f = File(bmpPath!!)
                 if (f.exists() && f.length() > 0) {
                     if (isHalfFrameActive) {
-                        val finalPath = halfFrameManager.handleCapture(f.absolutePath, baseName, isFastPath, halfFrameMetadata)
+                        val finalPath = halfFrameManager.handleCapture(f.absolutePath, baseName, isFastPath, halfFrameMetadata, digitalGain = digitalGain)
 
                         if (isFastPath) {
                             val session = if (halfFrameMetadata != null) {
@@ -88,7 +93,7 @@ object ImageSaver {
                                 ColorProcessor.halfFrameFlow.tryEmit(2)
                                 if (finalPath != null) {
                                     val finalFile = File(finalPath)
-                                    finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri) { out ->
+                                    finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri, editConfig = editConfig) { out ->
                                         finalFile.inputStream().use { it.copyTo(out) }
                                     }
                                 }
@@ -97,9 +102,9 @@ object ImageSaver {
                             if (finalPath != null) {
                                 val finalFile = File(finalPath)
                                 if (jpgFolderUri != null) {
-                                    finalJpgUri = saveFileToFolder(context, finalFile, "$baseName.jpg", "image/jpeg", jpgFolderUri)
+                                finalJpgUri = saveFileToFolder(context, finalFile, "$baseName.jpg", "image/jpeg", jpgFolderUri, editConfig = editConfig)
                                 } else {
-                                    finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri) { out ->
+                                finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri, editConfig = editConfig) { out ->
                                         finalFile.inputStream().use { it.copyTo(out) }
                                     }
                                 }
@@ -111,9 +116,9 @@ object ImageSaver {
                     } else {
                         val finalFile = f
                         if (jpgFolderUri != null) {
-                            finalJpgUri = saveFileToFolder(context, finalFile, "$baseName.jpg", "image/jpeg", jpgFolderUri)
+                            finalJpgUri = saveFileToFolder(context, finalFile, "$baseName.jpg", "image/jpeg", jpgFolderUri, editConfig = editConfig)
                         } else {
-                            finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri) { out ->
+                            finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri, editConfig = editConfig) { out ->
                                 finalFile.inputStream().use { it.copyTo(out) }
                             }
                         }
@@ -190,7 +195,7 @@ object ImageSaver {
                                     processedBitmap.compress(Bitmap.CompressFormat.JPEG, 95, out)
                                 }
 
-                                val finalPath = halfFrameManager.handleCapture(tempJpg.absolutePath, baseName, isFastPath, halfFrameMetadata)
+                                val finalPath = halfFrameManager.handleCapture(tempJpg.absolutePath, baseName, isFastPath, halfFrameMetadata, digitalGain = digitalGain)
 
                                 if (isFastPath) {
                                     val session = if (halfFrameMetadata != null) {
@@ -210,7 +215,8 @@ object ImageSaver {
                                                 "$baseName.jpg",
                                                 targetUri,
                                                 processedBitmap.width,
-                                                processedBitmap.height
+                                                processedBitmap.height,
+                                                editConfig = editConfig
                                             ) { out ->
                                                 finalFile.inputStream().use { it.copyTo(out) }
                                             }
@@ -220,7 +226,7 @@ object ImageSaver {
                                     if (finalPath != null) {
                                         val finalFile = File(finalPath)
                                         if (jpgFolderUri != null) {
-                                            finalJpgUri = saveFileToFolder(context, finalFile, "$baseName.jpg", "image/jpeg", jpgFolderUri)
+                                        finalJpgUri = saveFileToFolder(context, finalFile, "$baseName.jpg", "image/jpeg", jpgFolderUri, editConfig = editConfig)
                                         } else {
                                             val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                                             BitmapFactory.decodeFile(finalPath, options)
@@ -232,7 +238,8 @@ object ImageSaver {
                                                 "$baseName.jpg",
                                                 targetUri,
                                                 finalW,
-                                                finalH
+                                                finalH,
+                                                editConfig = editConfig
                                             ) { out ->
                                                 finalFile.inputStream().use { it.copyTo(out) }
                                             }
@@ -250,14 +257,15 @@ object ImageSaver {
                                     processedBitmap.compress(Bitmap.CompressFormat.JPEG, 95, out)
                                 }
                                 if (jpgFolderUri != null) {
-                                    finalJpgUri = saveFileToFolder(context, tempJpg, "$baseName.jpg", "image/jpeg", jpgFolderUri)
+                                    finalJpgUri = saveFileToFolder(context, tempJpg, "$baseName.jpg", "image/jpeg", jpgFolderUri, editConfig = editConfig)
                                 } else {
                                     finalJpgUri = saveJpegToMediaStore(
                                         context,
                                         "$baseName.jpg",
                                         targetUri,
                                         processedBitmap.width,
-                                        processedBitmap.height
+                                        processedBitmap.height,
+                                        editConfig = editConfig
                                     ) { out ->
                                         tempJpg.inputStream().use { it.copyTo(out) }
                                     }
@@ -356,6 +364,14 @@ object ImageSaver {
                                 dngValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
                                 contentResolver.update(dngUri, dngValues, null, null)
                             }
+
+                            // Write BaselineExposure to DNG
+                            val gainToUse = editConfig?.digitalGain ?: digitalGain
+                            if (gainToUse != 1.0f) {
+                                val ev = kotlin.math.log2(gainToUse)
+                                writeDngBaselineExposure(context, dngUri, ev)
+                            }
+
                             finalRawUri = dngUri
                         } catch (e: Exception) {
                             Log.e(TAG, "Failed to save Linear DNG", e)
@@ -389,6 +405,64 @@ object ImageSaver {
         if (isHalfFrameActive && finalJpgUri == null) return null
 
         return finalJpgUri ?: finalRawUri ?: finalTiffUri
+    }
+
+    fun writeDngBaselineExposure(context: Context, uri: Uri, exposure: Float) {
+        try {
+            context.contentResolver.openFileDescriptor(uri, "rw")?.use { pfd ->
+                val exif = ExifInterface(pfd.fileDescriptor)
+                // TAG_BASELINE_EXPOSURE is "BaselineExposure" in ExifInterface
+                exif.setAttribute("BaselineExposure", exposure.toString())
+                exif.saveAttributes()
+                Log.d(TAG, "Wrote BaselineExposure $exposure to DNG at $uri")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to write BaselineExposure to DNG for $uri", e)
+        }
+    }
+
+    fun writeEditConfigToExif(context: Context, uri: Uri, editConfig: EditConfig) {
+        try {
+            val json = JSONObject().apply {
+                put("log", editConfig.log)
+                put("lut", editConfig.lut)
+                put("exposure", editConfig.exposure.toDouble())
+                put("contrast", editConfig.contrast.toDouble())
+                put("saturation", editConfig.saturation.toDouble())
+                put("highlights", editConfig.highlights.toDouble())
+                put("shadows", editConfig.shadows.toDouble())
+                put("whites", editConfig.whites.toDouble())
+                put("blacks", editConfig.blacks.toDouble())
+                put("digital_gain", editConfig.digitalGain.toDouble())
+
+                editConfig.adjustments?.let { adjs ->
+                    val array = org.json.JSONArray()
+                    adjs.forEach { adj ->
+                        array.put(JSONObject().apply {
+                            put("exposure", adj.exposure.toDouble())
+                            put("contrast", adj.contrast.toDouble())
+                            put("saturation", adj.saturation.toDouble())
+                            put("highlights", adj.highlights.toDouble())
+                            put("shadows", adj.shadows.toDouble())
+                            put("whites", adj.whites.toDouble())
+                            put("blacks", adj.blacks.toDouble())
+                            put("digital_gain", adj.digitalGain.toDouble())
+                        })
+                    }
+                    put("adjustments", array)
+                }
+                put("show_timestamp", editConfig.showTimestamp)
+                put("flare_type", editConfig.flareType)
+                put("hf_layout", editConfig.hfLayout)
+            }
+            context.contentResolver.openFileDescriptor(uri, "rw")?.use { pfd ->
+                val exif = ExifInterface(pfd.fileDescriptor)
+                exif.setAttribute(ExifInterface.TAG_USER_COMMENT, json.toString())
+                exif.saveAttributes()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to write EditConfig to EXIF for $uri", e)
+        }
     }
 
     private fun saveDebugStageImagesToMediaStore(context: Context, baseName: String, sourcePath: String) {
@@ -441,7 +515,7 @@ object ImageSaver {
         }
     }
 
-    private fun saveFileToFolder(context: Context, sourceFile: File, displayName: String, mimeType: String, folderUri: String): Uri? {
+    private fun saveFileToFolder(context: Context, sourceFile: File, displayName: String, mimeType: String, folderUri: String, editConfig: EditConfig? = null): Uri? {
         try {
             val treeUri = Uri.parse(folderUri)
             val parentFolder = androidx.documentfile.provider.DocumentFile.fromTreeUri(context, treeUri)
@@ -450,6 +524,11 @@ object ImageSaver {
                 context.contentResolver.openOutputStream(newFile.uri)?.use { out ->
                     FileInputStream(sourceFile).copyTo(out)
                 }
+
+                if (editConfig != null && mimeType == "image/jpeg") {
+                    writeEditConfigToExif(context, newFile.uri, editConfig)
+                }
+
                 Log.i(TAG, "Saved $displayName to custom folder: ${newFile.uri}")
                 return newFile.uri
             } else {
@@ -470,6 +549,7 @@ object ImageSaver {
         targetUri: Uri?,
         width: Int? = null,
         height: Int? = null,
+        editConfig: EditConfig? = null,
         writeData: (OutputStream) -> Unit
     ): Uri? {
         val contentResolver = context.contentResolver
@@ -524,6 +604,10 @@ object ImageSaver {
                         Log.e(TAG, "Failed to clear IS_PENDING for $uri", e)
                     }
                 }
+                if (editConfig != null) {
+                    writeEditConfigToExif(context, uri, editConfig)
+                }
+
                 if (isReplacement) {
                     Log.i(TAG, "Replaced JPEG at $uri")
                 } else {

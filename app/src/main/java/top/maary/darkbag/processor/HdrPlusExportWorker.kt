@@ -1,6 +1,7 @@
 package top.maary.darkbag.processor
 import top.maary.darkbag.fragments.SettingsFragment
 import top.maary.darkbag.utils.HalfFrameManager
+import top.maary.darkbag.utils.HalfFrameSessionStore
 
 import android.content.Context
 import android.net.Uri
@@ -18,7 +19,7 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
         val height = data.getInt("height", 0)
         val orientation = data.getInt("orientation", 0)
         val digitalGain = data.getFloat("digitalGain", 1.0f)
-        val targetLog = data.getInt("targetLog", 0)
+        val targetLogInt = data.getInt("targetLog", 0)
         val lutPath = data.getString("lutPath")
         val tiffPath = data.getString("tiffPath")
         val jpgPath = data.getString("jpgPath")
@@ -56,6 +57,9 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
         val hfF1Base = data.getString("hfF1Base")
         val hfF1Path = data.getString("hfF1Path")
         val hfF1Time = data.getLong("hfF1Time", 0L)
+        val hfGain = data.getFloat("hfGain", 1.0f)
+        val hfF1Gain = data.getFloat("hfF1Gain", 1.0f)
+        val hfFlareType = data.getInt("hfFlareType", -1)
 
         val hfMetadata = hfProfile?.let {
             HalfFrameManager.Metadata(
@@ -64,17 +68,65 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
                 captureTimeMillis = hfCaptureTime,
                 frame1BaseName = hfF1Base,
                 frame1TempPath = hfF1Path,
-                frame1CaptureTime = hfF1Time
+                frame1CaptureTime = hfF1Time,
+                digitalGain = hfGain,
+                frame1DigitalGain = hfF1Gain,
+                flareType = hfFlareType
             )
         }
+
+        val prefs = applicationContext.getSharedPreferences(
+            SettingsFragment.PREFS_NAME,
+            Context.MODE_PRIVATE
+        )
+        val activeLut = prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, "None")
+        val targetLogStr = prefs.getString(SettingsFragment.KEY_TARGET_LOG, "None")
+        val layout = if (hfMetadata?.profile == HalfFrameSessionStore.PROFILE_HALF_TOP) "TB" else if (hfMetadata?.profile == HalfFrameSessionStore.PROFILE_HALF_SIDE) "SBS" else null
+        val resolvedFlare = hfMetadata?.flareType ?: if (prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_LIGHT_LEAK, false)) java.util.Random().nextInt(2) + 1 else -1
+        val editConfig = top.maary.darkbag.models.EditConfig(
+            log = targetLogStr,
+            lut = activeLut,
+            digitalGain = digitalGain,
+            adjustments = if (hfMetadata?.profile != null && hfMetadata.profile != HalfFrameSessionStore.PROFILE_NORMAL) {
+                listOf(
+                    top.maary.darkbag.models.BasicAdjustments(digitalGain = hfMetadata.frame1DigitalGain),
+                    top.maary.darkbag.models.BasicAdjustments(digitalGain = hfMetadata.digitalGain)
+                )
+            } else null,
+            hfLayout = layout,
+            showTimestamp = hfMetadata?.dateStamp ?: false,
+            flareType = resolvedFlare
+        )
 
         Log.d(TAG, "Background Export Worker started for $baseName")
 
         val ret = ColorProcessor.exportHdrPlus(
-            tempRawPath, width, height, orientation, digitalGain, targetLog,
-            lutPath, tiffPath, jpgPath, dngPath,
-            iso, exposureTime, fNumber, focalLength, captureTimeMillis,
-            ccm, whiteBalance, zoomFactor, mirror
+            tempRawPath = tempRawPath,
+            width = width,
+            height = height,
+            orientation = orientation,
+            digitalGain = digitalGain,
+            targetLog = targetLogInt,
+            lutPath = lutPath,
+            exposure = editConfig?.exposure ?: 0f,
+            contrast = editConfig?.contrast ?: 0f,
+            saturation = editConfig?.saturation ?: 0f,
+            highlights = editConfig?.highlights ?: 0f,
+            shadows = editConfig?.shadows ?: 0f,
+            whites = editConfig?.whites ?: 0f,
+            blacks = editConfig?.blacks ?: 0f,
+            tiffPath = tiffPath,
+            jpgPath = jpgPath,
+            dngPath = dngPath,
+            iso = iso,
+            exposureTime = exposureTime,
+            fNumber = fNumber,
+            focalLength = focalLength,
+            captureTimeMillis = captureTimeMillis,
+            ccm = ccm,
+            whiteBalance = whiteBalance,
+            zoomFactor = zoomFactor,
+            mirror = mirror
         )
 
         if (ret == 0) {
@@ -99,7 +151,9 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
                 rawFolderUri = rawFolderUri,
                 targetUri = targetUri?.let { Uri.parse(it) },
                 mirror = false, // already handled by JNI
-                halfFrameMetadata = hfMetadata
+                halfFrameMetadata = hfMetadata,
+                editConfig = editConfig,
+                digitalGain = digitalGain
             )
 
             Log.d(TAG, "Background Export Worker finished successfully for $baseName. finalUri=$finalUri")

@@ -37,7 +37,7 @@ object HalfFrameUtils {
         val firstRaw = BitmapFactory.decodeFile(firstPath) ?: return null
         val secondRaw = BitmapFactory.decodeFile(secondPath) ?: return null
 
-        val isSideBySide = layout == "Side-by-side" || layout == "左右排列" || layout.contains("side", ignoreCase = true)
+        val isSideBySide = layout == "Side-by-side" || layout == "左右排列" || layout.contains("side", ignoreCase = true) || layout == "SBS"
 
         // Side-by-side wants Portrait inputs; Top-bottom wants Landscape inputs
         val firstBitmap = ensureOrientation(firstRaw, isSideBySide)
@@ -140,7 +140,8 @@ object HalfFrameUtils {
         lightLeak: Boolean,
         layout: String,
         time1: Long = System.currentTimeMillis(),
-        time2: Long = System.currentTimeMillis()
+        time2: Long = System.currentTimeMillis(),
+        flareType: Int = 0 // 0: random, 1: vertical, 2: corner, -1: none
     ): Bitmap {
         var result = bitmap
 
@@ -148,8 +149,8 @@ object HalfFrameUtils {
             result = addDateStampToBoth(result, layout, time1, time2)
         }
 
-        if (lightLeak) {
-            result = addLightLeak(result)
+        if (lightLeak || flareType >= 0) {
+            result = addLightLeak(result, flareType)
         }
 
         return result
@@ -167,7 +168,13 @@ object HalfFrameUtils {
         val isSideBySide = layout == "Side-by-side" ||
                           layout == "左右排列" ||
                           layout.contains("side", ignoreCase = true) ||
+                          layout == "SBS" ||
                           (layout.isEmpty() && bitmap.width > bitmap.height)
+
+        val isTopBottom = layout == "Top-bottom" ||
+                          layout == "上下排列" ||
+                          layout.contains("top", ignoreCase = true) ||
+                          layout == "TB"
 
         val paint = Paint().apply {
             color = Color.parseColor("#FF8C00") // Classic orange
@@ -183,7 +190,7 @@ object HalfFrameUtils {
         val textWidth = paint.measureText(dateText2)
         val margin = textWidth * 0.2f
 
-        if (isSideBySide) {
+        if (isSideBySide && !isTopBottom) {
             // Side-by-side (Wide): [ Frame 1 (Portrait) | Divider | Frame 2 (Portrait) ]
             // Actually, we can just use the center gap.
             val centerGapX = bitmap.width / 2f
@@ -211,12 +218,12 @@ object HalfFrameUtils {
         return workingBitmap
     }
 
-    private fun addLightLeak(bitmap: Bitmap): Bitmap {
+    private fun addLightLeak(bitmap: Bitmap, flareType: Int = 0): Bitmap {
+        if (flareType == -1) return bitmap
         val workingBitmap = if (bitmap.isMutable) bitmap else bitmap.copy(Bitmap.Config.ARGB_8888, true)
         val canvas = Canvas(workingBitmap)
 
-        val random = Random()
-        val leakType = random.nextInt(2)
+        val leakType = if (flareType == 0) Random().nextInt(2) else flareType - 1
 
         val paint = Paint().apply {
             style = Paint.Style.FILL

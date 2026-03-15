@@ -22,7 +22,10 @@ class HalfFrameManager(private val context: Context) {
         val captureTimeMillis: Long = System.currentTimeMillis(),
         val frame1BaseName: String? = null,
         val frame1TempPath: String? = null,
-        val frame1CaptureTime: Long = 0L
+        val frame1CaptureTime: Long = 0L,
+        val digitalGain: Float = 1.0f,
+        val frame1DigitalGain: Float = 1.0f,
+        val flareType: Int = -1
     )
 
     var step: Int
@@ -70,7 +73,8 @@ class HalfFrameManager(private val context: Context) {
         currentJpgPath: String,
         baseName: String,
         isFastPath: Boolean,
-        metadata: Metadata? = null
+        metadata: Metadata? = null,
+        digitalGain: Float = 1.0f
     ): String? {
         val activeProfile = metadata?.profile ?: sessionStore.currentProfile()
         val isManualMode = metadata != null
@@ -96,12 +100,12 @@ class HalfFrameManager(private val context: Context) {
             File(currentJpgPath).copyTo(tempFile, overwrite = true)
             sessionStore.setTempPath(tempFile.absolutePath, activeProfile)
 
-            // Store capture time for date stamp. Only update step on fast path to avoid race with frame 2
+            // Store capture time and digital gain. Only update step on fast path to avoid race with frame 2
             if (isFastPath) {
                 if (metadata != null) {
-                    sessionStore.markStep(1, metadata.captureTimeMillis, activeProfile)
+                    sessionStore.markStep(1, metadata.captureTimeMillis, activeProfile, digitalGain = metadata.digitalGain)
                 } else {
-                    sessionStore.markStep(1, tempFile.lastModified(), activeProfile)
+                    sessionStore.markStep(1, tempFile.lastModified(), activeProfile, digitalGain = digitalGain)
                 }
             }
 
@@ -133,7 +137,8 @@ class HalfFrameManager(private val context: Context) {
                 if (stitchedBitmap == null) return null
 
                 val finalBitmap = HalfFrameUtils.addEffects(
-                    stitchedBitmap, dateStampEnabled, lightLeak, activeLayout, time1, time2
+                    stitchedBitmap, dateStampEnabled, lightLeak, activeLayout, time1, time2,
+                    flareType = metadata?.flareType ?: if (lightLeak) java.util.Random().nextInt(2) + 1 else -1
                 )
                 val stitchedFile = File(context.cacheDir, "stitched_hf_fast.jpg")
                 FileOutputStream(stitchedFile).use { out ->
@@ -162,22 +167,14 @@ class HalfFrameManager(private val context: Context) {
                 }
 
                 val finalBitmap = HalfFrameUtils.addEffects(
-                    stitchedBitmap, dateStampEnabled, lightLeak, activeLayout, time1, time2
+                    stitchedBitmap, dateStampEnabled, lightLeak, activeLayout, time1, time2,
+                    flareType = metadata?.flareType ?: if (lightLeak) java.util.Random().nextInt(2) + 1 else -1
                 )
                 val stitchedFile = File(context.cacheDir, "stitched_hf_${partnerBaseName}.jpg")
                 FileOutputStream(stitchedFile).use { out ->
                     finalBitmap.compress(Bitmap.CompressFormat.JPEG, 95, out)
                 }
 
-                // Add layout metadata to EXIF
-                try {
-                    val exif = androidx.exifinterface.media.ExifInterface(stitchedFile.absolutePath)
-                    val layoutInfo = if (activeLayout == SettingsFragment.HALF_FRAME_LAYOUTS[1]) "TB" else "SBS"
-                    exif.setAttribute(androidx.exifinterface.media.ExifInterface.TAG_USER_COMMENT, "HF_LAYOUT:$layoutInfo")
-                    exif.saveAttributes()
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to write HF layout metadata", e)
-                }
                 if (finalBitmap != stitchedBitmap) stitchedBitmap.recycle()
                 finalBitmap.recycle()
 

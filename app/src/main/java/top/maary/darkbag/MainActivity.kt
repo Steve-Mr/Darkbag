@@ -22,7 +22,6 @@ import android.os.Bundle
 import android.view.KeyEvent
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
-import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import androidx.navigation.fragment.NavHostFragment
 import top.maary.darkbag.databinding.ActivityMainBinding
 import com.google.android.material.color.DynamicColors
@@ -69,12 +68,11 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
     }
 
-    /** When key down event is triggered, relay it via local broadcast so fragments can handle it */
+    /** When key down event is triggered, relay it via local flow so fragments can handle it */
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
         return when (keyCode) {
             KeyEvent.KEYCODE_VOLUME_DOWN -> {
-                val intent = Intent(KEY_EVENT_ACTION).apply { putExtra(KEY_EVENT_EXTRA, keyCode) }
-                LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
+                (application as MainApplication).keyEventFlow.tryEmit(event)
                 true
             }
             else -> super.onKeyDown(keyCode, event)

@@ -132,7 +132,7 @@ class LutManagementFragment : Fragment() {
             holder.tvName.text = displayName
 
             if (isActive) {
-                val colorPrimary = MaterialColors.getColor(holder.itemView, com.google.android.material.R.attr.colorPrimary)
+                val colorPrimary = MaterialColors.getColor(holder.itemView, android.R.attr.colorPrimary)
                 holder.tvName.setTextColor(colorPrimary)
             } else {
                 val colorOnSurface = MaterialColors.getColor(holder.itemView, com.google.android.material.R.attr.colorOnSurface)
