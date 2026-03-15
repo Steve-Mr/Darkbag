@@ -89,7 +89,7 @@ class ImageViewerAdapter(
         when (format) {
             "JPG" -> group.jpgUri?.let { loadImage(holder, it) }
             "TIFF" -> group.tiffUri?.let { loadImage(holder, it) }
-            "DNG" -> if (group.isHalfFrame()) loadHalfFrameDngs(holder, group) else group.dngUri?.let { loadImage(holder, it, group.editConfig?.zoomFactor ?: 1.0f) }
+            "DNG" -> if (group.isHalfFrame()) loadHalfFrameDngs(holder, group) else group.dngUri?.let { loadImage(holder, it) }
         }
     }
 
@@ -119,9 +119,9 @@ class ImageViewerAdapter(
                 // Optimization: If a JPG exists, use it as a placeholder for the DNG tab to avoid immediate heavy RAW decoding
                 if (group.jpgUri != null && !group.isHalfFrame()) {
                     loadWithGlide(holder, group.jpgUri, skipCache = false)
-                    group.dngUri?.let { loadImage(holder, it, group.editConfig?.zoomFactor ?: 1.0f) }
+                    group.dngUri?.let { loadImage(holder, it) }
                 } else {
-                    if (group.isHalfFrame()) loadHalfFrameDngs(holder, group) else group.dngUri?.let { loadImage(holder, it, group.editConfig?.zoomFactor ?: 1.0f) }
+                    if (group.isHalfFrame()) loadHalfFrameDngs(holder, group) else group.dngUri?.let { loadImage(holder, it) }
                 }
             }
         }
@@ -207,8 +207,7 @@ class ImageViewerAdapter(
                 holder.binding.root.context,
                 group.dngUri1,
                 group.dngUri2,
-                group.hfLayout,
-                group.editConfig?.zoomFactor ?: 1.0f
+                group.hfLayout
             )
             if (composite != null) {
                 holder.binding.imageView.setImageBitmap(composite)
@@ -265,7 +264,7 @@ class ImageViewerAdapter(
             when (format) {
                 "JPG" -> group.jpgUri?.let { loadImage(holder, it) }
                 "TIFF" -> group.tiffUri?.let { loadImage(holder, it) }
-                "DNG" -> if (group.isHalfFrame()) loadHalfFrameDngs(holder, group) else group.dngUri?.let { loadImage(holder, it, group.editConfig?.zoomFactor ?: 1.0f) }
+                "DNG" -> if (group.isHalfFrame()) loadHalfFrameDngs(holder, group) else group.dngUri?.let { loadImage(holder, it) }
             }
         }
     }

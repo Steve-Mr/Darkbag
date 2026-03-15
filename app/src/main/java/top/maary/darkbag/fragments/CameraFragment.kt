@@ -1799,7 +1799,8 @@ class CameraFragment : Fragment() {
                     } else null,
                     hfLayout = layout,
                     showTimestamp = image.halfFrameMetadata?.dateStamp ?: false,
-                    flareType = image.halfFrameMetadata?.flareType ?: -1
+                    flareType = image.halfFrameMetadata?.flareType ?: -1,
+                    zoomFactor = image.zoomRatio
                 )
 
                 // 4. Fast Output Feedback (Thumbnail)
@@ -3507,7 +3508,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                             } else null,
                             hfLayout = layout,
                             showTimestamp = hfMetadata?.dateStamp ?: false,
-                            flareType = hfMetadata?.flareType ?: -1
+                            flareType = hfMetadata?.flareType ?: -1,
+                            zoomFactor = 1.0f // Zoom already handled in JNI
                         )
 
                         ImageSaver.saveProcessedImage(
