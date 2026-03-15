@@ -37,7 +37,8 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRaw(
         jint orientation,
         jboolean mirror,
         jobject outputBitmap,
-        jint downsampleFactor
+        jint downsampleFactor,
+        jfloat zoomFactor
 ) {
     LOGD("Native processRaw started using LibRaw.");
 
@@ -140,7 +141,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRaw(
         bitmapPixels, // out_rgb_buffer
         outputBitmap != nullptr, // isPreview
         (int)downsampleFactor, // downsampleFactor
-        1.0f, // zoomFactor
+        (float)zoomFactor, // zoomFactor
         (bool)mirror
     );
 

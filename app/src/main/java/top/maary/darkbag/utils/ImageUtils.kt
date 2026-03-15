@@ -13,10 +13,11 @@ object ImageUtils {
         context: Context,
         uri1: Uri?,
         uri2: Uri?,
-        layout: String? // "SBS" or "TB"
+        layout: String?, // "SBS" or "TB"
+        zoomFactor: Float = 1.0f
     ): Bitmap? = withContext(Dispatchers.IO) {
-        val bit1 = uri1?.let { decodeDngThumbnail(context, it) }
-        val bit2 = uri2?.let { decodeDngThumbnail(context, it) }
+        val bit1 = uri1?.let { decodeDngThumbnail(context, it, zoomFactor) }
+        val bit2 = uri2?.let { decodeDngThumbnail(context, it, zoomFactor) }
 
         if (bit1 == null && bit2 == null) return@withContext null
 
@@ -73,7 +74,7 @@ object ImageUtils {
         return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
     }
 
-    suspend fun decodeDngThumbnail(context: Context, uri: Uri): Bitmap? = withContext(Dispatchers.IO) {
+    suspend fun decodeDngThumbnail(context: Context, uri: Uri, zoomFactor: Float = 1.0f): Bitmap? = withContext(Dispatchers.IO) {
         try {
             var bitmap: Bitmap? = null
             var orientation = ExifInterface.ORIENTATION_NORMAL
@@ -101,7 +102,21 @@ object ImageUtils {
                 }
             }
 
-            return@withContext bitmap?.let { rotateBitmap(it, orientation) }
+            val rotated = bitmap?.let { rotateBitmap(it, orientation) }
+            return@withContext if (rotated != null && zoomFactor > 1.05f) {
+                val newWidth = (rotated.width / zoomFactor).toInt()
+                val newHeight = (rotated.height / zoomFactor).toInt()
+                val x = (rotated.width - newWidth) / 2
+                val y = (rotated.height - newHeight) / 2
+                val safeX = kotlin.math.max(0, x)
+                val safeY = kotlin.math.max(0, y)
+                val safeWidth = kotlin.math.min(newWidth, rotated.width - safeX)
+                val safeHeight = kotlin.math.min(newHeight, rotated.height - safeY)
+
+                val cropped = Bitmap.createBitmap(rotated, safeX, safeY, safeWidth, safeHeight)
+                if (cropped != rotated) rotated.recycle()
+                cropped
+            } else rotated
         } catch (e: Exception) {
             android.util.Log.e("ImageUtils", "Failed to decode DNG: $uri", e)
         }

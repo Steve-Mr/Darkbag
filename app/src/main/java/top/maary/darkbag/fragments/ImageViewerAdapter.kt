@@ -89,7 +89,7 @@ class ImageViewerAdapter(
         when (format) {
             "JPG" -> group.jpgUri?.let { loadImage(holder, it) }
             "TIFF" -> group.tiffUri?.let { loadImage(holder, it) }
-            "DNG" -> if (group.isHalfFrame()) loadHalfFrameDngs(holder, group) else group.dngUri?.let { loadImage(holder, it) }
+            "DNG" -> if (group.isHalfFrame()) loadHalfFrameDngs(holder, group) else group.dngUri?.let { loadImage(holder, it, group.editConfig?.zoomFactor ?: 1.0f) }
         }
     }
 
@@ -119,8 +119,9 @@ class ImageViewerAdapter(
                 // Optimization: If a JPG exists, use it as a placeholder for the DNG tab to avoid immediate heavy RAW decoding
                 if (group.jpgUri != null && !group.isHalfFrame()) {
                     loadWithGlide(holder, group.jpgUri, skipCache = false)
+                    group.dngUri?.let { loadImage(holder, it, group.editConfig?.zoomFactor ?: 1.0f) }
                 } else {
-                    if (group.isHalfFrame()) loadHalfFrameDngs(holder, group) else group.dngUri?.let { loadImage(holder, it) }
+                    if (group.isHalfFrame()) loadHalfFrameDngs(holder, group) else group.dngUri?.let { loadImage(holder, it, group.editConfig?.zoomFactor ?: 1.0f) }
                 }
             }
         }
@@ -147,7 +148,7 @@ class ImageViewerAdapter(
         }
     }
 
-    private fun loadImage(holder: ViewHolder, uri: Uri) {
+    private fun loadImage(holder: ViewHolder, uri: Uri, zoomFactor: Float = 1.0f) {
         holder.loadJob?.cancel()
         holder.binding.imageView.visibility = View.VISIBLE
         holder.binding.loadingIndicator.visibility = View.VISIBLE
@@ -161,7 +162,7 @@ class ImageViewerAdapter(
                     try {
                         val contentResolver = holder.binding.root.context.contentResolver
                         if (isDng) {
-                            val thumb = ImageUtils.decodeDngThumbnail(holder.binding.root.context, uri)
+                            val thumb = ImageUtils.decodeDngThumbnail(holder.binding.root.context, uri, zoomFactor)
                             if (thumb != null) return@withContext thumb
                         }
 
@@ -206,7 +207,8 @@ class ImageViewerAdapter(
                 holder.binding.root.context,
                 group.dngUri1,
                 group.dngUri2,
-                group.hfLayout
+                group.hfLayout,
+                group.editConfig?.zoomFactor ?: 1.0f
             )
             if (composite != null) {
                 holder.binding.imageView.setImageBitmap(composite)
@@ -263,7 +265,7 @@ class ImageViewerAdapter(
             when (format) {
                 "JPG" -> group.jpgUri?.let { loadImage(holder, it) }
                 "TIFF" -> group.tiffUri?.let { loadImage(holder, it) }
-                "DNG" -> if (group.isHalfFrame()) loadHalfFrameDngs(holder, group) else group.dngUri?.let { loadImage(holder, it) }
+                "DNG" -> if (group.isHalfFrame()) loadHalfFrameDngs(holder, group) else group.dngUri?.let { loadImage(holder, it, group.editConfig?.zoomFactor ?: 1.0f) }
             }
         }
     }

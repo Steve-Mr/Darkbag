@@ -863,7 +863,8 @@ class ImageViewerFragment : Fragment() {
                             orientation = rotDegrees,
                             mirror = false,
                             outputBitmap = previewBitmap,
-                            downsampleFactor = ds
+                            downsampleFactor = ds,
+                            zoomFactor = config.zoomFactor
                         )
                         return previewBitmap
                     }
@@ -1032,7 +1033,8 @@ class ImageViewerFragment : Fragment() {
                             orientation = rotDegrees,
                             mirror = false,
                             outputBitmap = previewBitmap,
-                            downsampleFactor = 1
+                            downsampleFactor = 1,
+                            zoomFactor = config.zoomFactor
                         )
                         return previewBitmap
                     }

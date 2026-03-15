@@ -93,7 +93,7 @@ object ImageSaver {
                                 ColorProcessor.halfFrameFlow.tryEmit(2)
                                 if (finalPath != null) {
                                     val finalFile = File(finalPath)
-                                    finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri, editConfig = editConfig) { out ->
+                                    finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri, editConfig = editConfig, zoomFactor = zoomFactor) { out ->
                                         finalFile.inputStream().use { it.copyTo(out) }
                                     }
                                 }
@@ -102,9 +102,9 @@ object ImageSaver {
                             if (finalPath != null) {
                                 val finalFile = File(finalPath)
                                 if (jpgFolderUri != null) {
-                                finalJpgUri = saveFileToFolder(context, finalFile, "$baseName.jpg", "image/jpeg", jpgFolderUri, editConfig = editConfig)
+                                    finalJpgUri = saveFileToFolder(context, finalFile, "$baseName.jpg", "image/jpeg", jpgFolderUri, editConfig = editConfig, zoomFactor = zoomFactor)
                                 } else {
-                                finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri, editConfig = editConfig) { out ->
+                                    finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri, editConfig = editConfig, zoomFactor = zoomFactor) { out ->
                                         finalFile.inputStream().use { it.copyTo(out) }
                                     }
                                 }
@@ -116,9 +116,9 @@ object ImageSaver {
                     } else {
                         val finalFile = f
                         if (jpgFolderUri != null) {
-                            finalJpgUri = saveFileToFolder(context, finalFile, "$baseName.jpg", "image/jpeg", jpgFolderUri, editConfig = editConfig)
+                            finalJpgUri = saveFileToFolder(context, finalFile, "$baseName.jpg", "image/jpeg", jpgFolderUri, editConfig = editConfig, zoomFactor = zoomFactor)
                         } else {
-                            finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri, editConfig = editConfig) { out ->
+                            finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri, editConfig = editConfig, zoomFactor = zoomFactor) { out ->
                                 finalFile.inputStream().use { it.copyTo(out) }
                             }
                         }
@@ -239,7 +239,8 @@ object ImageSaver {
                                                 targetUri,
                                                 finalW,
                                                 finalH,
-                                                editConfig = editConfig
+                                                editConfig = editConfig,
+                                                zoomFactor = zoomFactor
                                             ) { out ->
                                                 finalFile.inputStream().use { it.copyTo(out) }
                                             }
@@ -257,7 +258,7 @@ object ImageSaver {
                                     processedBitmap.compress(Bitmap.CompressFormat.JPEG, 95, out)
                                 }
                                 if (jpgFolderUri != null) {
-                                    finalJpgUri = saveFileToFolder(context, tempJpg, "$baseName.jpg", "image/jpeg", jpgFolderUri, editConfig = editConfig)
+                                    finalJpgUri = saveFileToFolder(context, tempJpg, "$baseName.jpg", "image/jpeg", jpgFolderUri, editConfig = editConfig, zoomFactor = zoomFactor)
                                 } else {
                                     finalJpgUri = saveJpegToMediaStore(
                                         context,
@@ -265,7 +266,8 @@ object ImageSaver {
                                         targetUri,
                                         processedBitmap.width,
                                         processedBitmap.height,
-                                        editConfig = editConfig
+                                        editConfig = editConfig,
+                                        zoomFactor = zoomFactor
                                     ) { out ->
                                         tempJpg.inputStream().use { it.copyTo(out) }
                                     }
@@ -454,6 +456,7 @@ object ImageSaver {
                 put("show_timestamp", editConfig.showTimestamp)
                 put("flare_type", editConfig.flareType)
                 put("hf_layout", editConfig.hfLayout)
+                put("zoom_factor", editConfig.zoomFactor.toDouble())
             }
             context.contentResolver.openFileDescriptor(uri, "rw")?.use { pfd ->
                 val exif = ExifInterface(pfd.fileDescriptor)
@@ -515,7 +518,7 @@ object ImageSaver {
         }
     }
 
-    private fun saveFileToFolder(context: Context, sourceFile: File, displayName: String, mimeType: String, folderUri: String, editConfig: EditConfig? = null): Uri? {
+    private fun saveFileToFolder(context: Context, sourceFile: File, displayName: String, mimeType: String, folderUri: String, editConfig: EditConfig? = null, zoomFactor: Float = 1.0f): Uri? {
         try {
             val treeUri = Uri.parse(folderUri)
             val parentFolder = androidx.documentfile.provider.DocumentFile.fromTreeUri(context, treeUri)
@@ -525,8 +528,13 @@ object ImageSaver {
                     FileInputStream(sourceFile).copyTo(out)
                 }
 
-                if (editConfig != null && mimeType == "image/jpeg") {
-                    writeEditConfigToExif(context, newFile.uri, editConfig)
+                // If editConfig exists, prioritize its zoomFactor
+                val finalEditConfig = editConfig?.let {
+                    if (it.zoomFactor == 1.0f && zoomFactor > 1.0f) it.copy(zoomFactor = zoomFactor) else it
+                } ?: if (zoomFactor > 1.0f) EditConfig(zoomFactor = zoomFactor) else null
+
+                if (finalEditConfig != null && mimeType == "image/jpeg") {
+                    writeEditConfigToExif(context, newFile.uri, finalEditConfig)
                 }
 
                 Log.i(TAG, "Saved $displayName to custom folder: ${newFile.uri}")
@@ -550,6 +558,7 @@ object ImageSaver {
         width: Int? = null,
         height: Int? = null,
         editConfig: EditConfig? = null,
+        zoomFactor: Float = 1.0f,
         writeData: (OutputStream) -> Unit
     ): Uri? {
         val contentResolver = context.contentResolver
@@ -557,6 +566,11 @@ object ImageSaver {
 
         var uri = targetUri
         val isReplacement = uri != null
+
+        // If editConfig exists, prioritize its zoomFactor
+        val finalEditConfig = editConfig?.let {
+            if (it.zoomFactor == 1.0f && zoomFactor > 1.0f) it.copy(zoomFactor = zoomFactor) else it
+        } ?: if (zoomFactor > 1.0f) EditConfig(zoomFactor = zoomFactor) else null
 
         try {
             if (uri == null) {
@@ -604,8 +618,8 @@ object ImageSaver {
                         Log.e(TAG, "Failed to clear IS_PENDING for $uri", e)
                     }
                 }
-                if (editConfig != null) {
-                    writeEditConfigToExif(context, uri, editConfig)
+                if (finalEditConfig != null) {
+                    writeEditConfigToExif(context, uri, finalEditConfig)
                 }
 
                 if (isReplacement) {
