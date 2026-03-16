@@ -1334,10 +1334,6 @@ class CameraFragment : Fragment() {
                 // For Frame 1 trigger, we might not have a config yet, but writeScopedHalfFrameStep
                 // will be updated after capture with the actual digitalGain in takeSinglePicture/triggerHdrPlusBurst
                 writeScopedHalfFrameStep(prefs, 1, timing.shutterClick, flareType = resolvedFlare)
-                // Animate slightly faster to sync with blackout fade
-                fragmentCameraBinding.viewFinder.postDelayed({
-                    updateHalfFrameUI(animate = true)
-                }, 50)
                 showProcessingAnimation()
             }
 
@@ -1361,10 +1357,6 @@ class CameraFragment : Fragment() {
 
             if (isFrame2Trigger) {
                 writeScopedHalfFrameStep(prefs, 0)
-                // Animate slightly faster to sync with blackout fade
-                fragmentCameraBinding.viewFinder.postDelayed({
-                    updateHalfFrameUI(animate = true)
-                }, 50)
 
                 showProcessingAnimation() // Immediate indicator on click for second frame
                 cameraUiContainerBinding?.photoViewButton?.visibility = View.VISIBLE // Show thumbnail container for progress indicator
@@ -3102,7 +3094,11 @@ class CameraFragment : Fragment() {
             cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = false
         }
 
-        showShutterBlackout()
+        showShutterBlackout {
+            if (isHalfFrameModeEnabled) {
+                updateHalfFrameUI(animate = true)
+            }
+        }
     }
 
     private fun triggerHdrPlusBurst(
@@ -3191,7 +3187,11 @@ class CameraFragment : Fragment() {
                 cameraUiContainerBinding?.cameraCaptureButton?.startRotation()
                 cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = false
 
-                showShutterBlackout()
+                showShutterBlackout {
+                    if (isHalfFrameModeEnabled) {
+                        updateHalfFrameUI(animate = true)
+                    }
+                }
 
                 Toast.makeText(
                     requireContext(),
@@ -4031,7 +4031,11 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
             session.capture(request.build(), object : android.hardware.camera2.CameraCaptureSession.CaptureCallback() {
                 override fun onCaptureStarted(session: android.hardware.camera2.CameraCaptureSession, request: android.hardware.camera2.CaptureRequest, timestamp: Long, frameNumber: Long) {
-                    showShutterBlackout()
+                    showShutterBlackout {
+                        if (isHalfFrameModeEnabled) {
+                            updateHalfFrameUI(animate = true)
+                        }
+                    }
                     if (isFrame1Trigger) {
                         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
                         triggerAutoBurst(prefs)
@@ -4093,7 +4097,11 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 cameraUiContainerBinding?.cameraCaptureButton?.setProgress(0f)
                 cameraUiContainerBinding?.cameraCaptureButton?.startRotation()
                 cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = false
-                showShutterBlackout()
+                showShutterBlackout {
+                    if (isHalfFrameModeEnabled) {
+                        updateHalfFrameUI(animate = true)
+                    }
+                }
             }
 
             val burstRequests = mutableListOf<android.hardware.camera2.CaptureRequest>()
@@ -4419,7 +4427,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         }
     }
 
-    private fun showShutterBlackout() {
+    private fun showShutterBlackout(onComplete: (() -> Unit)? = null) {
         val vfBinding = _fragmentCameraBinding ?: return
         val blackout = vfBinding.viewFinderBlackout ?: return
         val vf = vfBinding.viewFinder
@@ -4434,6 +4442,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             blackout.bringToFront()
             blackout.postDelayed({
                 _fragmentCameraBinding?.viewFinderBlackout?.visibility = View.INVISIBLE
+                onComplete?.invoke()
             }, 100L) // Use 100ms to ensure visibility during processing
         }
     }
@@ -4562,7 +4571,9 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         val snapshot = vfBinding.halfFrameSnapshot ?: return
         val gap = vfBinding.halfFrameGapIndicator ?: return
 
-        // Direction logic: SBS moves Left (-X), TB moves Right (+X)
+        // Direction logic based on user request:
+        // SBS: Shot 1 -> Shot 2 move LEFT (-X). Shot 2 -> Shot 1 move LEFT (-X).
+        // TB: Shot 1 -> Shot 2 move RIGHT (+X). Shot 2 -> Shot 1 move RIGHT (+X).
         val moveFactor = if (isTopBottom) 1f else -1f
         val duration = 500L
         val interpolator = android.view.animation.AccelerateDecelerateInterpolator()
@@ -4572,7 +4583,10 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         if (bitmap != null) {
             snapshot.setImageBitmap(bitmap)
             snapshot.visibility = View.VISIBLE
-            snapshot.translationX = vf.translationX
+            // Use current VF position (before step update) as start
+            // Since we updated halfFrameStep BEFORE calling updateHalfFrameUI,
+            // the previous translation was actually -targetShift (the opposite side)
+            snapshot.translationX = -targetShift
             snapshot.scaleX = vf.scaleX
             snapshot.scaleY = vf.scaleY
             snapshot.layoutParams.width = vf.width
@@ -4581,13 +4595,14 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         }
 
         // 2. Gap logic (only show when moving FROM Shot 1 TO Shot 2)
+        // Note: halfFrameStep has already been updated to 1 when this is called for "Shot 1 complete"
         if (halfFrameStep == 1) {
             gap.visibility = View.VISIBLE
             val scaledVfWidth = vf.width * vf.scaleX
             gap.translationX = if (isTopBottom) {
-                vf.translationX - gapWidth // Gap is to the LEFT of Shot 1 in TB
+                snapshot.translationX - gapWidth // Gap is to the LEFT of Shot 1 in TB (moving RIGHT)
             } else {
-                vf.translationX + scaledVfWidth // Gap is to the RIGHT of Shot 1 in SBS
+                snapshot.translationX + scaledVfWidth // Gap is to the RIGHT of Shot 1 in SBS (moving LEFT)
             }
             gap.layoutParams.width = gapWidth.toInt()
             gap.layoutParams.height = (vf.height * vf.scaleY).toInt()
@@ -4596,10 +4611,11 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             gap.visibility = View.GONE
         }
 
-        // 3. Prepare Live ViewFinder to slide in from opposite side
+        // 3. Prepare Live ViewFinder to slide in from "behind" or opposite side
         vf.animate().cancel()
-        // Start position is current target + distance of one stage width in opposite direction of roll
+        // We want it to arrive at targetShift. It comes from the opposite direction of motion.
         vf.translationX = targetShift - (moveFactor * stageW)
+        vf.alpha = 1f
 
         // 4. Perform animations
         snapshot.animate()

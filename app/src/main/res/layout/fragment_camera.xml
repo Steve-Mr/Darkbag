@@ -65,7 +65,8 @@
                 android:visibility="gone"
                 app:layout_constraintTop_toTopOf="@id/view_finder"
                 app:layout_constraintBottom_toBottomOf="@id/view_finder"
-                app:layout_constraintStart_toStartOf="parent" />
+                app:layout_constraintStart_toStartOf="@id/view_finder"
+                app:layout_constraintEnd_toEndOf="@id/view_finder" />
 
             <View
                 android:id="@+id/halfFrameGapIndicator"
@@ -75,7 +76,8 @@
                 android:visibility="gone"
                 app:layout_constraintTop_toTopOf="@id/view_finder"
                 app:layout_constraintBottom_toBottomOf="@id/view_finder"
-                app:layout_constraintStart_toStartOf="parent" />
+                app:layout_constraintStart_toStartOf="@id/view_finder"
+                app:layout_constraintEnd_toEndOf="@id/view_finder" />
 
             <View
                 android:id="@+id/halfFrameFilmEdgeTop"
