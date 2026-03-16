@@ -5,9 +5,11 @@ import top.maary.darkbag.utils.HalfFrameSessionStore
 
 import android.content.Context
 import android.net.Uri
+import android.os.Build
 import android.util.Log
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
+import top.maary.darkbag.models.CaptureMetadata
 import top.maary.darkbag.utils.ImageSaver
 
 class HdrPlusExportWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
@@ -83,6 +85,20 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
         val targetLogStr = prefs.getString(SettingsFragment.KEY_TARGET_LOG, "None")
         val layout = if (hfMetadata?.profile == HalfFrameSessionStore.PROFILE_HALF_TOP) "TB" else if (hfMetadata?.profile == HalfFrameSessionStore.PROFILE_HALF_SIDE) "SBS" else null
         val resolvedFlare = hfMetadata?.flareType ?: if (prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_LIGHT_LEAK, false)) java.util.Random().nextInt(2) + 1 else -1
+
+        val isHalfFrame = hfMetadata?.profile != null && hfMetadata.profile != HalfFrameSessionStore.PROFILE_NORMAL
+        val captureMetadata = if (!isHalfFrame) {
+            CaptureMetadata(
+                iso = iso,
+                exposureTime = exposureTime,
+                fNumber = fNumber,
+                focalLength = focalLength,
+                dateTimeOriginal = captureTimeMillis,
+                make = Build.MANUFACTURER,
+                model = Build.MODEL
+            )
+        } else null
+
         val editConfig = top.maary.darkbag.models.EditConfig(
             log = targetLogStr,
             lut = activeLut,
@@ -154,7 +170,8 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
                 mirror = false, // already handled by JNI
                 halfFrameMetadata = hfMetadata,
                 editConfig = editConfig,
-                digitalGain = digitalGain
+                digitalGain = digitalGain,
+                captureMetadata = captureMetadata
             )
 
             Log.d(TAG, "Background Export Worker finished successfully for $baseName. finalUri=$finalUri")

@@ -13,16 +13,24 @@ import android.content.Context
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.view.MenuItem
+import android.widget.TextView
 import androidx.appcompat.widget.PopupMenu
 import androidx.activity.OnBackPressedCallback
+import androidx.exifinterface.media.ExifInterface
 import androidx.navigation.fragment.findNavController
 import androidx.navigation.fragment.navArgs
 import androidx.viewpager2.widget.ViewPager2
+import com.google.android.material.bottomsheet.BottomSheetDialog
 import kotlinx.coroutines.*
 import top.maary.darkbag.R
+import top.maary.darkbag.databinding.BottomSheetImageDetailsBinding
 import top.maary.darkbag.databinding.FragmentImageViewerBinding
+import top.maary.darkbag.databinding.ItemDetailRowBinding
 import top.maary.darkbag.models.ImageGroup
 import top.maary.darkbag.repository.ImageRepository
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class ImageViewerFragment : Fragment() {
 
@@ -317,6 +325,10 @@ class ImageViewerFragment : Fragment() {
                 true
             }
             popup.show()
+        }
+
+        binding.btnDetails.setOnClickListener {
+            showImageDetails()
         }
 
         binding.btnLogLut.setOnClickListener {
@@ -1155,6 +1167,173 @@ class ImageViewerFragment : Fragment() {
             .show(childFragmentManager, HalfFrameShareSheet.TAG)
     }
 
+    private fun showImageDetails() {
+        val viewerBinding = _binding ?: return
+        val currentIndex = binding.imagePager.currentItem
+        val currentGroup = adapter.getGroup(currentIndex)
+        val selectedFormat = adapter.getSelectedFormat(currentIndex)
+
+        val uri = when (selectedFormat) {
+            "JPG" -> currentGroup.jpgUri
+            "TIFF" -> currentGroup.tiffUri
+            "DNG" -> currentGroup.dngUri ?: currentGroup.dngUri1 ?: currentGroup.dngUri2
+            else -> currentGroup.jpgUri ?: currentGroup.dngUri ?: currentGroup.tiffUri
+        } ?: return
+
+        val dialog = BottomSheetDialog(requireContext())
+        val detailsBinding = BottomSheetImageDetailsBinding.inflate(layoutInflater)
+        dialog.setContentView(detailsBinding.root)
+
+        // Ensure edge-to-edge support for the BottomSheet
+        dialog.window?.let { window ->
+            window.navigationBarColor = android.graphics.Color.TRANSPARENT
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                window.setDecorFitsSystemWindows(false)
+            }
+        }
+
+        ViewCompat.setOnApplyWindowInsetsListener(detailsBinding.root) { v, insets ->
+            val navigationBars = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
+            v.setPadding(v.paddingLeft, v.paddingTop, v.paddingRight, navigationBars.bottom + resources.getDimensionPixelSize(R.dimen.margin_medium))
+            insets
+        }
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            val context = requireContext()
+            val details = mutableListOf<Pair<String, String>>()
+            val techDetails = mutableListOf<Pair<String, String>>()
+            val configDetails = mutableListOf<Pair<String, String>>()
+
+            try {
+                context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                    val exif = ExifInterface(pfd.fileDescriptor)
+
+                    // Basic Info
+                    val fileName = getFileName(context, uri)
+                    details.add("File Name" to fileName)
+
+                    val fileSize = getFileSize(context, uri)
+                    details.add("File Size" to fileSize)
+
+                    val width = exif.getAttributeInt(ExifInterface.TAG_IMAGE_WIDTH, 0)
+                    val height = exif.getAttributeInt(ExifInterface.TAG_IMAGE_LENGTH, 0)
+                    if (width > 0 && height > 0) {
+                        details.add("Resolution" to "${width}x${height} (${String.format("%.1f MP", width * height / 1000000f)})")
+                    }
+
+                    val dateStr = exif.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL) ?: exif.getAttribute(ExifInterface.TAG_DATETIME)
+                    dateStr?.let { details.add("Date & Time" to it) }
+
+                    details.add("Path" to (uri.path ?: "Unknown"))
+
+                    // Technical Info
+                    val make = exif.getAttribute(ExifInterface.TAG_MAKE)
+                    val model = exif.getAttribute(ExifInterface.TAG_MODEL)
+                    if (make != null || model != null) {
+                        techDetails.add("Device" to "${make ?: ""} ${model ?: ""}".trim())
+                    }
+
+                    val iso = exif.getAttribute(ExifInterface.TAG_ISO_SPEED_RATINGS)
+                    iso?.let { techDetails.add("ISO" to it) }
+
+                    val exposureTime = exif.getAttributeDouble(ExifInterface.TAG_EXPOSURE_TIME, 0.0)
+                    if (exposureTime > 0) {
+                        val expStr = if (exposureTime < 1.0) {
+                            "1/${Math.round(1.0 / exposureTime)}s"
+                        } else {
+                            "${String.format("%.1f", exposureTime)}s"
+                        }
+                        techDetails.add("Shutter Speed" to expStr)
+                    }
+
+                    val fNumber = exif.getAttributeDouble(ExifInterface.TAG_F_NUMBER, 0.0)
+                    if (fNumber > 0) techDetails.add("Aperture" to "f/${fNumber}")
+
+                    val focalLength = exif.getAttributeDouble(ExifInterface.TAG_FOCAL_LENGTH, 0.0)
+                    if (focalLength > 0) techDetails.add("Focal Length" to "${focalLength}mm")
+
+                    // Config Info (UserComment)
+                    val comment = exif.getAttribute(ExifInterface.TAG_USER_COMMENT)
+                    if (comment?.startsWith("{") == true) {
+                        try {
+                            val json = org.json.JSONObject(comment)
+                            val keys = json.keys()
+                            while (keys.hasNext()) {
+                                val key = keys.next()
+                                if (key == "adjustments") continue
+                                val value = json.get(key)
+                                val label = key.replace("_", " ").replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.US) else it.toString() }
+                                configDetails.add(label to value.toString())
+                            }
+                        } catch (e: Exception) {
+                            configDetails.add("Custom Info" to comment)
+                        }
+                    } else if (comment != null) {
+                        configDetails.add("Custom Info" to comment)
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("ImageViewerFragment", "Error reading details", e)
+            }
+
+            withContext(Dispatchers.Main) {
+                details.forEach { addDetailRow(detailsBinding.layoutBasicInfo, it.first, it.second) }
+                techDetails.forEach { addDetailRow(detailsBinding.layoutTechInfo, it.first, it.second) }
+                if (configDetails.isEmpty()) {
+                    detailsBinding.cardConfigInfo.visibility = android.view.View.GONE
+                    detailsBinding.tvConfigHeader.visibility = android.view.View.GONE
+                } else {
+                    configDetails.forEach { addDetailRow(detailsBinding.layoutConfigInfo, it.first, it.second) }
+                }
+            }
+        }
+        dialog.show()
+    }
+
+    private fun addDetailRow(container: ViewGroup, label: String, value: String) {
+        val rowBinding = ItemDetailRowBinding.inflate(layoutInflater, container, true)
+        rowBinding.tvLabel.text = label
+        rowBinding.tvValue.text = value
+    }
+
+    private fun getFileName(context: Context, uri: Uri): String {
+        return try {
+            val cursor = context.contentResolver.query(uri, null, null, null, null)
+            cursor?.use {
+                if (it.moveToFirst()) {
+                    val index = it.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                    if (index != -1) it.getString(index) else uri.lastPathSegment ?: "Unknown"
+                } else uri.lastPathSegment ?: "Unknown"
+            } ?: uri.lastPathSegment ?: "Unknown"
+        } catch (e: Exception) {
+            uri.lastPathSegment ?: "Unknown"
+        }
+    }
+
+    private fun getFileSize(context: Context, uri: Uri): String {
+        return try {
+            val cursor = context.contentResolver.query(uri, null, null, null, null)
+            cursor?.use {
+                if (it.moveToFirst()) {
+                    val index = it.getColumnIndex(android.provider.OpenableColumns.SIZE)
+                    if (index != -1) {
+                        val size = it.getLong(index)
+                        formatFileSize(size)
+                    } else "Unknown"
+                } else "Unknown"
+            } ?: "Unknown"
+        } catch (e: Exception) {
+            "Unknown"
+        }
+    }
+
+    private fun formatFileSize(size: Long): String {
+        if (size <= 0) return "0 B"
+        val units = arrayOf("B", "KB", "MB", "GB", "TB")
+        val digitGroups = (Math.log10(size.toDouble()) / Math.log10(1024.0)).toInt()
+        return String.format("%.1f %s", size / Math.pow(1024.0, digitGroups.toDouble()), units[digitGroups])
+    }
+
     private fun showDeleteDialog(group: ImageGroup) {
         val options = arrayOf("Delete this format only", "Delete entire group")
         var checkedItem = 1
@@ -1266,6 +1445,7 @@ class ImageViewerFragment : Fragment() {
 
         binding.toolbar.animate().translationY(topShift).alpha(0f).setDuration(200)
             .withEndAction { binding.toolbar.visibility = View.GONE }.start()
+        binding.btnDetails.animate().alpha(0f).setDuration(200).start()
         binding.splitShare.animate().translationY(topShift).alpha(0f).setDuration(200)
             .withEndAction { binding.splitShare.visibility = View.GONE }.start()
         binding.splitSave.animate().translationY(topShift).alpha(0f).setDuration(200)

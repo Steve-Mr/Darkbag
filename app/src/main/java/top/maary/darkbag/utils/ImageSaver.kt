@@ -12,6 +12,7 @@ import android.provider.MediaStore
 import android.util.Log
 import androidx.exifinterface.media.ExifInterface
 import org.json.JSONObject
+import top.maary.darkbag.models.CaptureMetadata
 import top.maary.darkbag.models.EditConfig
 import java.io.File
 import java.io.FileInputStream
@@ -54,6 +55,7 @@ object ImageSaver {
         editConfig: EditConfig? = null,
         digitalGain: Float = 1.0f,
         isAlreadyStitched: Boolean = false,
+        captureMetadata: CaptureMetadata? = null,
         onBitmapReady: ((Bitmap) -> Unit)? = null
     ): Uri? {
         val halfFrameManager = HalfFrameManager(context)
@@ -93,7 +95,7 @@ object ImageSaver {
                                 ColorProcessor.halfFrameFlow.tryEmit(2)
                                 if (finalPath != null) {
                                     val finalFile = File(finalPath)
-                                    finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri, editConfig = editConfig, zoomFactor = zoomFactor) { out ->
+                                    finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri, editConfig = editConfig, zoomFactor = zoomFactor, captureMetadata = captureMetadata) { out ->
                                         finalFile.inputStream().use { it.copyTo(out) }
                                     }
                                 }
@@ -102,9 +104,9 @@ object ImageSaver {
                             if (finalPath != null) {
                                 val finalFile = File(finalPath)
                                 if (jpgFolderUri != null) {
-                                    finalJpgUri = saveFileToFolder(context, finalFile, "$baseName.jpg", "image/jpeg", jpgFolderUri, editConfig = editConfig, zoomFactor = zoomFactor)
+                                    finalJpgUri = saveFileToFolder(context, finalFile, "$baseName.jpg", "image/jpeg", jpgFolderUri, editConfig = editConfig, zoomFactor = zoomFactor, captureMetadata = captureMetadata)
                                 } else {
-                                    finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri, editConfig = editConfig, zoomFactor = zoomFactor) { out ->
+                                    finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri, editConfig = editConfig, zoomFactor = zoomFactor, captureMetadata = captureMetadata) { out ->
                                         finalFile.inputStream().use { it.copyTo(out) }
                                     }
                                 }
@@ -116,9 +118,9 @@ object ImageSaver {
                     } else {
                         val finalFile = f
                         if (jpgFolderUri != null) {
-                            finalJpgUri = saveFileToFolder(context, finalFile, "$baseName.jpg", "image/jpeg", jpgFolderUri, editConfig = editConfig, zoomFactor = zoomFactor)
+                            finalJpgUri = saveFileToFolder(context, finalFile, "$baseName.jpg", "image/jpeg", jpgFolderUri, editConfig = editConfig, zoomFactor = zoomFactor, captureMetadata = captureMetadata)
                         } else {
-                            finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri, editConfig = editConfig, zoomFactor = zoomFactor) { out ->
+                            finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri, editConfig = editConfig, zoomFactor = zoomFactor, captureMetadata = captureMetadata) { out ->
                                 finalFile.inputStream().use { it.copyTo(out) }
                             }
                         }
@@ -216,7 +218,8 @@ object ImageSaver {
                                                 targetUri,
                                                 processedBitmap.width,
                                                 processedBitmap.height,
-                                                editConfig = editConfig
+                                                editConfig = editConfig,
+                                                captureMetadata = captureMetadata
                                             ) { out ->
                                                 finalFile.inputStream().use { it.copyTo(out) }
                                             }
@@ -240,7 +243,8 @@ object ImageSaver {
                                                 finalW,
                                                 finalH,
                                                 editConfig = editConfig,
-                                                zoomFactor = zoomFactor
+                                                zoomFactor = zoomFactor,
+                                                captureMetadata = captureMetadata
                                             ) { out ->
                                                 finalFile.inputStream().use { it.copyTo(out) }
                                             }
@@ -258,7 +262,7 @@ object ImageSaver {
                                     processedBitmap.compress(Bitmap.CompressFormat.JPEG, 95, out)
                                 }
                                 if (jpgFolderUri != null) {
-                                    finalJpgUri = saveFileToFolder(context, tempJpg, "$baseName.jpg", "image/jpeg", jpgFolderUri, editConfig = editConfig, zoomFactor = zoomFactor)
+                                    finalJpgUri = saveFileToFolder(context, tempJpg, "$baseName.jpg", "image/jpeg", jpgFolderUri, editConfig = editConfig, zoomFactor = zoomFactor, captureMetadata = captureMetadata)
                                 } else {
                                     finalJpgUri = saveJpegToMediaStore(
                                         context,
@@ -267,7 +271,8 @@ object ImageSaver {
                                         processedBitmap.width,
                                         processedBitmap.height,
                                         editConfig = editConfig,
-                                        zoomFactor = zoomFactor
+                                        zoomFactor = zoomFactor,
+                                        captureMetadata = captureMetadata
                                     ) { out ->
                                         tempJpg.inputStream().use { it.copyTo(out) }
                                     }
@@ -367,12 +372,8 @@ object ImageSaver {
                                 contentResolver.update(dngUri, dngValues, null, null)
                             }
 
-                            // Write BaselineExposure to DNG
-                            val gainToUse = editConfig?.digitalGain ?: digitalGain
-                            if (gainToUse != 1.0f) {
-                                val ev = kotlin.math.log2(gainToUse)
-                                writeDngBaselineExposure(context, dngUri, ev)
-                            }
+                            // Write Metadata and BaselineExposure to DNG
+                            writeDngMetadata(context, dngUri, editConfig, digitalGain, captureMetadata)
 
                             finalRawUri = dngUri
                         } catch (e: Exception) {
@@ -409,23 +410,48 @@ object ImageSaver {
         return finalJpgUri ?: finalRawUri ?: finalTiffUri
     }
 
-    fun writeDngBaselineExposure(context: Context, uri: Uri, exposure: Float) {
+    fun writeDngMetadata(context: Context, uri: Uri, editConfig: EditConfig?, digitalGain: Float, captureMetadata: CaptureMetadata?) {
         try {
             context.contentResolver.openFileDescriptor(uri, "rw")?.use { pfd ->
                 val exif = ExifInterface(pfd.fileDescriptor)
-                // TAG_BASELINE_EXPOSURE is "BaselineExposure" in ExifInterface
-                exif.setAttribute("BaselineExposure", exposure.toString())
+
+                // 1. Digital Gain
+                val gainToUse = editConfig?.digitalGain ?: digitalGain
+                if (gainToUse != 1.0f) {
+                    val ev = kotlin.math.log2(gainToUse)
+                    exif.setAttribute("BaselineExposure", ev.toString())
+                    Log.d(TAG, "Wrote BaselineExposure $ev to DNG at $uri")
+                }
+
+                // 2. Standard EXIF
+                captureMetadata?.let { meta ->
+                    meta.iso?.let { exif.setAttribute(ExifInterface.TAG_ISO_SPEED_RATINGS, it.toString()) }
+                    meta.exposureTime?.let {
+                        val exposureInSec = it.toDouble() / 1_000_000_000.0
+                        exif.setAttribute(ExifInterface.TAG_EXPOSURE_TIME, exposureInSec.toString())
+                    }
+                    meta.fNumber?.let { exif.setAttribute(ExifInterface.TAG_F_NUMBER, it.toString()) }
+                    meta.focalLength?.let { exif.setAttribute(ExifInterface.TAG_FOCAL_LENGTH, it.toString()) }
+                    meta.dateTimeOriginal?.let {
+                        val sdf = java.text.SimpleDateFormat("yyyy:MM:dd HH:mm:ss", java.util.Locale.US)
+                        val dateStr = sdf.format(java.util.Date(it))
+                        exif.setAttribute(ExifInterface.TAG_DATETIME_ORIGINAL, dateStr)
+                    }
+                    meta.make?.let { exif.setAttribute(ExifInterface.TAG_MAKE, it) }
+                    meta.model?.let { exif.setAttribute(ExifInterface.TAG_MODEL, it) }
+                }
+
                 exif.saveAttributes()
-                Log.d(TAG, "Wrote BaselineExposure $exposure to DNG at $uri")
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to write BaselineExposure to DNG for $uri", e)
+            Log.e(TAG, "Failed to write metadata to DNG for $uri", e)
         }
     }
 
-    fun writeEditConfigToExif(context: Context, uri: Uri, editConfig: EditConfig) {
+    fun writeMetadataToExif(context: Context, uri: Uri, editConfig: EditConfig?, captureMetadata: CaptureMetadata?) {
         try {
-            val json = JSONObject().apply {
+            val json = editConfig?.let { cfg ->
+                JSONObject().apply {
                 put("log", editConfig.log)
                 put("lut", editConfig.lut)
                 put("exposure", editConfig.exposure.toDouble())
@@ -456,11 +482,32 @@ object ImageSaver {
                 put("show_timestamp", editConfig.showTimestamp)
                 put("flare_type", editConfig.flareType)
                 put("hf_layout", editConfig.hfLayout)
-                put("zoom_factor", editConfig.zoomFactor.toDouble())
+                put("zoom_factor", cfg.zoomFactor.toDouble())
+            }
             }
             context.contentResolver.openFileDescriptor(uri, "rw")?.use { pfd ->
                 val exif = ExifInterface(pfd.fileDescriptor)
-                exif.setAttribute(ExifInterface.TAG_USER_COMMENT, json.toString())
+                if (json != null) {
+                    exif.setAttribute(ExifInterface.TAG_USER_COMMENT, json.toString())
+                }
+
+                captureMetadata?.let { meta ->
+                    meta.iso?.let { exif.setAttribute(ExifInterface.TAG_ISO_SPEED_RATINGS, it.toString()) }
+                    meta.exposureTime?.let {
+                        val exposureInSec = it.toDouble() / 1_000_000_000.0
+                        exif.setAttribute(ExifInterface.TAG_EXPOSURE_TIME, exposureInSec.toString())
+                    }
+                    meta.fNumber?.let { exif.setAttribute(ExifInterface.TAG_F_NUMBER, it.toString()) }
+                    meta.focalLength?.let { exif.setAttribute(ExifInterface.TAG_FOCAL_LENGTH, it.toString()) }
+                    meta.dateTimeOriginal?.let {
+                        val sdf = java.text.SimpleDateFormat("yyyy:MM:dd HH:mm:ss", java.util.Locale.US)
+                        val dateStr = sdf.format(java.util.Date(it))
+                        exif.setAttribute(ExifInterface.TAG_DATETIME_ORIGINAL, dateStr)
+                    }
+                    meta.make?.let { exif.setAttribute(ExifInterface.TAG_MAKE, it) }
+                    meta.model?.let { exif.setAttribute(ExifInterface.TAG_MODEL, it) }
+                }
+
                 exif.saveAttributes()
             }
         } catch (e: Exception) {
@@ -518,7 +565,7 @@ object ImageSaver {
         }
     }
 
-    private fun saveFileToFolder(context: Context, sourceFile: File, displayName: String, mimeType: String, folderUri: String, editConfig: EditConfig? = null, zoomFactor: Float = 1.0f): Uri? {
+    private fun saveFileToFolder(context: Context, sourceFile: File, displayName: String, mimeType: String, folderUri: String, editConfig: EditConfig? = null, zoomFactor: Float = 1.0f, captureMetadata: CaptureMetadata? = null): Uri? {
         try {
             val treeUri = Uri.parse(folderUri)
             val parentFolder = androidx.documentfile.provider.DocumentFile.fromTreeUri(context, treeUri)
@@ -530,8 +577,10 @@ object ImageSaver {
 
                 val finalEditConfig = createFinalEditConfig(editConfig, zoomFactor)
 
-                if (finalEditConfig != null && mimeType == "image/jpeg") {
-                    writeEditConfigToExif(context, newFile.uri, finalEditConfig)
+                if (mimeType == "image/jpeg") {
+                    writeMetadataToExif(context, newFile.uri, finalEditConfig, captureMetadata)
+                } else if (mimeType == "image/x-adobe-dng") {
+                    writeDngMetadata(context, newFile.uri, finalEditConfig, 1.0f, captureMetadata)
                 }
 
                 Log.i(TAG, "Saved $displayName to custom folder: ${newFile.uri}")
@@ -563,6 +612,7 @@ object ImageSaver {
         height: Int? = null,
         editConfig: EditConfig? = null,
         zoomFactor: Float = 1.0f,
+        captureMetadata: CaptureMetadata? = null,
         writeData: (OutputStream) -> Unit
     ): Uri? {
         val contentResolver = context.contentResolver
@@ -619,9 +669,7 @@ object ImageSaver {
                         Log.e(TAG, "Failed to clear IS_PENDING for $uri", e)
                     }
                 }
-                if (finalEditConfig != null) {
-                    writeEditConfigToExif(context, uri, finalEditConfig)
-                }
+                writeMetadataToExif(context, uri, finalEditConfig, captureMetadata)
 
                 if (isReplacement) {
                     Log.i(TAG, "Replaced JPEG at $uri")
