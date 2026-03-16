@@ -79,7 +79,7 @@
 
             <View
                 android:id="@+id/halfFrameFilmEdgeTop"
-                android:layout_width="1200dp"
+                android:layout_width="2000dp"
                 android:layout_height="32dp"
                 android:background="@drawable/bg_film_edge"
                 android:visibility="gone"
@@ -89,7 +89,7 @@
 
             <View
                 android:id="@+id/halfFrameFilmEdgeBottom"
-                android:layout_width="1200dp"
+                android:layout_width="2000dp"
                 android:layout_height="32dp"
                 android:background="@drawable/bg_film_edge"
                 android:rotation="180"
