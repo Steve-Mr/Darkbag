@@ -839,8 +839,10 @@ class ImageViewerFragment : Fragment() {
                             else -> 0
                         }
 
-                        val bmpW = if (rotDegrees == 90 || rotDegrees == 270) options.outHeight / ds else options.outWidth / ds
-                        val bmpH = if (rotDegrees == 90 || rotDegrees == 270) options.outWidth / ds else options.outHeight / ds
+                        val fullW = if (rotDegrees == 90 || rotDegrees == 270) options.outHeight / ds else options.outWidth / ds
+                        val fullH = if (rotDegrees == 90 || rotDegrees == 270) options.outWidth / ds else options.outHeight / ds
+                        val bmpW = (fullW / config.zoomFactor).toInt()
+                        val bmpH = (fullH / config.zoomFactor).toInt()
                         val previewBitmap = android.graphics.Bitmap.createBitmap(bmpW, bmpH, android.graphics.Bitmap.Config.ARGB_8888)
 
                         val adj = if (currentGroup.isHalfFrame()) config.adjustments?.get(index) ?: top.maary.darkbag.models.BasicAdjustments() else config.toBasic()
@@ -1010,8 +1012,10 @@ class ImageViewerFragment : Fragment() {
                             androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270 -> 270
                             else -> 0
                         }
-                        val bmpW = if (rotDegrees == 90 || rotDegrees == 270) options.outHeight else options.outWidth
-                        val bmpH = if (rotDegrees == 90 || rotDegrees == 270) options.outWidth else options.outHeight
+                        val fullW = if (rotDegrees == 90 || rotDegrees == 270) options.outHeight else options.outWidth
+                        val fullH = if (rotDegrees == 90 || rotDegrees == 270) options.outWidth else options.outHeight
+                        val bmpW = (fullW / config.zoomFactor).toInt()
+                        val bmpH = (fullH / config.zoomFactor).toInt()
                         val previewBitmap = android.graphics.Bitmap.createBitmap(bmpW, bmpH, android.graphics.Bitmap.Config.ARGB_8888)
                         val adj = if (currentGroup.isHalfFrame()) config.adjustments?.get(index) ?: top.maary.darkbag.models.BasicAdjustments() else config.toBasic()
 
