@@ -1213,7 +1213,7 @@ class CameraFragment : Fragment() {
                     val vfContainerId = vfBinding.viewFinderContainer.id
                     val topId = uiBinding.topRightControls?.id
                     val bottomId = uiBinding.bottomIslandCard?.id
-                    val lensRowId = uiBinding.lensControlRow?.id
+                    val lensRowId = vfBinding.lensControlRowInner.id
                     val manualId = uiBinding.manualControlsRoot?.id
 
                     if (topId != null && bottomId != null) {
@@ -4464,7 +4464,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         }
     }
 
-        private fun updateHalfFrameUI(animate: Boolean = false) {
+    private fun updateHalfFrameUI(animate: Boolean = false) {
         val uiBinding = cameraUiContainerBinding ?: return
         val vfBinding = fragmentCameraBinding
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
@@ -4534,16 +4534,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             val isTopBottom = layout == SettingsFragment.HALF_FRAME_LAYOUTS[1]
             val gapRatio = HalfFrameUtils.GAP_RATIO
 
-            val stageRatioStr: String
-            val frameRatioStr: String
-
-            if (isTopBottom) {
-                stageRatioStr = "H,$baseH:${baseW + gapRatio * baseH}"
-                frameRatioStr = "W,$baseH:$baseW"
-            } else {
-                stageRatioStr = "W,${baseW + gapRatio * baseH}:$baseH"
-                frameRatioStr = "W,$baseW:$baseH"
-            }
+            val stageRatioStr = "W,${baseW + gapRatio * baseH}:$baseH"
+            val frameRatioStr = "W,$baseW:$baseH"
 
             (vfBinding.viewFinderContainer.layoutParams as? androidx.constraintlayout.widget.ConstraintLayout.LayoutParams)?.let { lp ->
                 if (lp.dimensionRatio != stageRatioStr) {
@@ -4572,14 +4564,19 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             val refDim = if (isTopBottom) vfBinding.viewFinder.width else vfBinding.viewFinder.height
             val gapSize = HalfFrameUtils.calculateGap(refDim).toFloat()
             val shift = gapSize / 2f
-            val targetShift = if (halfFrameStep == 0) -shift else shift
+
+            val targetShift = if (isTopBottom) {
+                if (halfFrameStep == 0) shift else -shift
+            } else {
+                if (halfFrameStep == 0) -shift else shift
+            }
 
             if (animate) {
                 performHalfFrameAdvanceAnimation(targetShift, stageW, gapSize, isTopBottom)
             } else {
                 vfBinding.viewFinder.animate().cancel()
-                vfBinding.viewFinder.translationX = if (isTopBottom) 0f else targetShift
-                vfBinding.viewFinder.translationY = if (isTopBottom) targetShift else 0f
+                vfBinding.viewFinder.translationX = targetShift
+                vfBinding.viewFinder.translationY = 0f
                 vfBinding.lensControlRowInner.translationX = vfBinding.viewFinder.translationX
                 vfBinding.lensControlRowInner.translationY = vfBinding.viewFinder.translationY
 
@@ -4587,7 +4584,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 snapshotView.visibility = View.GONE
             }
 
-            val rotation = if (isTopBottom) android.view.Surface.ROTATION_90 else android.view.Surface.ROTATION_0
+            val rotation = android.view.Surface.ROTATION_0
             preview?.targetRotation = rotation
             imageCapture?.targetRotation = rotation
             imageAnalyzer?.targetRotation = rotation
@@ -4602,14 +4599,13 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         val lensRow = vfBinding.lensControlRowInner
 
         val startShiftX = vf.translationX
-        val startShiftY = vf.translationY
 
         val bitmap = vf.bitmap
         if (bitmap != null) {
             snapshot.setImageBitmap(bitmap)
             snapshot.visibility = View.VISIBLE
             snapshot.translationX = startShiftX
-            snapshot.translationY = startShiftY
+            snapshot.translationY = 0f
             snapshot.layoutParams.width = vf.width
             snapshot.layoutParams.height = vf.height
             snapshot.requestLayout()
@@ -4617,16 +4613,13 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
         gap.visibility = View.VISIBLE
         if (isTopBottom) {
-            gap.translationY = if (halfFrameStep == 1) startShiftY - gapSize else startShiftY + vf.height
-            gap.translationX = 0f
-            gap.layoutParams.width = vf.width
-            gap.layoutParams.height = gapSize.toInt()
+            gap.translationX = if (halfFrameStep == 1) startShiftX - gapSize else startShiftX + vf.width
         } else {
             gap.translationX = if (halfFrameStep == 1) startShiftX + vf.width else startShiftX - gapSize
-            gap.translationY = 0f
-            gap.layoutParams.width = gapSize.toInt()
-            gap.layoutParams.height = vf.height
         }
+        gap.translationY = 0f
+        gap.layoutParams.width = gapSize.toInt()
+        gap.layoutParams.height = vf.height
         gap.requestLayout()
 
         vf.animate().cancel()
@@ -4635,38 +4628,29 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         val duration = 450L
         val interpolator = android.view.animation.AccelerateDecelerateInterpolator()
 
-        if (isTopBottom) {
-            val dist = vf.height + gapSize
-            val moveDir = if (halfFrameStep == 1) -1f else 1f
-
-            vf.translationY = targetShift + (if (halfFrameStep == 1) dist else -dist)
-
-            snapshot.animate().translationYBy(moveDir * dist).setDuration(duration).setInterpolator(interpolator).withEndAction {
-                snapshot.visibility = View.GONE
-                snapshot.setImageBitmap(null)
-            }.start()
-            gap.animate().translationYBy(moveDir * dist).setDuration(duration).setInterpolator(interpolator).start()
-            vf.animate().translationY(targetShift).setDuration(duration).setInterpolator(interpolator).start()
+        val dist = vf.width + gapSize
+        val moveDir = if (isTopBottom) {
+            if (halfFrameStep == 1) -1f else 1f
         } else {
-            val dist = vf.width + gapSize
-            val moveDir = if (halfFrameStep == 1) -1f else 1f
-
-            vf.translationX = targetShift + (if (halfFrameStep == 1) dist else -dist)
-
-            snapshot.animate().translationXBy(moveDir * dist).setDuration(duration).setInterpolator(interpolator).withEndAction {
-                snapshot.visibility = View.GONE
-                snapshot.setImageBitmap(null)
-            }.start()
-            gap.animate().translationXBy(moveDir * dist).setDuration(duration).setInterpolator(interpolator).start()
-            vf.animate().translationX(targetShift).setDuration(duration).setInterpolator(interpolator).start()
+            if (halfFrameStep == 1) 1f else -1f
         }
 
-        lensRow.animate().translationX(if (isTopBottom) 0f else targetShift)
-            .translationY(if (isTopBottom) targetShift else 0f)
+        vf.translationX = targetShift - (moveDir * dist)
+
+        snapshot.animate().translationXBy(moveDir * dist).setDuration(duration).setInterpolator(interpolator).withEndAction {
+            snapshot.visibility = View.GONE
+            snapshot.setImageBitmap(null)
+        }.start()
+        gap.animate().translationXBy(moveDir * dist).setDuration(duration).setInterpolator(interpolator).start()
+        vf.animate().translationX(targetShift).setDuration(duration).setInterpolator(interpolator).start()
+
+        lensRow.animate().translationX(targetShift)
+            .translationY(0f)
             .setDuration(duration).setInterpolator(interpolator).start()
 
         animateFilmEdgeRoll(isTopBottom, duration)
     }
+
     private fun animateFilmEdgeRoll(isTopBottom: Boolean, duration: Long = 360L) {
         val vfBinding = fragmentCameraBinding
         val topEdge = vfBinding.halfFrameFilmEdgeTop

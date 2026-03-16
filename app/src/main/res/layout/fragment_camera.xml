@@ -33,6 +33,7 @@
         app:strokeWidth="0dp"
         app:cardElevation="0dp"
         app:layout_constraintDimensionRatio="H,4:3"
+        app:layout_constraintVertical_bias="0.5"
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toStartOf="parent"
@@ -88,7 +89,7 @@
 
             <View
                 android:id="@+id/half_frame_film_edge_top"
-                android:layout_width="0dp"
+                android:layout_width="1200dp"
                 android:layout_height="32dp"
                 android:background="@drawable/bg_film_edge"
                 android:visibility="gone"
@@ -98,7 +99,7 @@
 
             <View
                 android:id="@+id/half_frame_film_edge_bottom"
-                android:layout_width="0dp"
+                android:layout_width="1200dp"
                 android:layout_height="32dp"
                 android:background="@drawable/bg_film_edge"
                 android:rotation="180"
