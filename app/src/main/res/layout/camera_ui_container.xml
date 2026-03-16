@@ -23,9 +23,9 @@
         android:layout_height="0dp"
         android:scaleType="centerCrop"
         android:visibility="gone"
-        app:layout_constraintTop_toTopOf="@id/view_finder"
-        app:layout_constraintBottom_toBottomOf="@id/view_finder"
-        app:layout_constraintStart_toStartOf="parent" />
+        app:layout_constraintTop_toTopOf="@id/view_finder_container"
+        app:layout_constraintBottom_toBottomOf="@id/view_finder_container"
+        app:layout_constraintStart_toStartOf="@id/view_finder_container" />
 
     <View
         android:id="@+id/half_frame_gap_indicator"
@@ -33,28 +33,30 @@
         android:layout_height="0dp"
         android:background="@android:color/black"
         android:visibility="gone"
-        app:layout_constraintTop_toTopOf="@id/view_finder"
-        app:layout_constraintBottom_toBottomOf="@id/view_finder"
-        app:layout_constraintStart_toStartOf="parent" />
+        app:layout_constraintTop_toTopOf="@id/view_finder_container"
+        app:layout_constraintBottom_toBottomOf="@id/view_finder_container"
+        app:layout_constraintStart_toStartOf="@id/view_finder_container" />
 
     <View
         android:id="@+id/half_frame_film_edge_top"
-        android:layout_width="1200dp"
+        android:layout_width="0dp"
         android:layout_height="32dp"
         android:background="@drawable/bg_film_edge"
         android:visibility="gone"
-        app:layout_constraintBottom_toTopOf="@id/view_finder"
-        app:layout_constraintStart_toStartOf="parent" />
+        app:layout_constraintBottom_toTopOf="@id/view_finder_container"
+        app:layout_constraintStart_toStartOf="@id/view_finder_container"
+        app:layout_constraintEnd_toEndOf="@id/view_finder_container" />
 
     <View
         android:id="@+id/half_frame_film_edge_bottom"
-        android:layout_width="1200dp"
+        android:layout_width="0dp"
         android:layout_height="32dp"
         android:background="@drawable/bg_film_edge"
         android:rotation="180"
         android:visibility="gone"
-        app:layout_constraintTop_toBottomOf="@id/view_finder"
-        app:layout_constraintStart_toStartOf="parent" />
+        app:layout_constraintTop_toBottomOf="@id/view_finder_container"
+        app:layout_constraintStart_toStartOf="@id/view_finder_container"
+        app:layout_constraintEnd_toEndOf="@id/view_finder_container" />
 
     <View
         android:id="@+id/view_finder_blackout"
@@ -62,10 +64,10 @@
         android:layout_height="0dp"
         android:background="@android:color/black"
         android:visibility="invisible"
-        app:layout_constraintTop_toTopOf="@id/view_finder"
-        app:layout_constraintBottom_toBottomOf="@id/view_finder"
-        app:layout_constraintStart_toStartOf="@id/view_finder"
-        app:layout_constraintEnd_toEndOf="@id/view_finder" />
+        app:layout_constraintTop_toTopOf="@id/view_finder_container"
+        app:layout_constraintBottom_toBottomOf="@id/view_finder_container"
+        app:layout_constraintStart_toStartOf="@id/view_finder_container"
+        app:layout_constraintEnd_toEndOf="@id/view_finder_container" />
 
 
     <!-- Top Left Controls (HDR+ Pill) -->
