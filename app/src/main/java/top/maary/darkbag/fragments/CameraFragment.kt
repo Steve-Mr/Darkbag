@@ -101,6 +101,7 @@ import top.maary.darkbag.utils.HalfFrameSessionStore
 import top.maary.darkbag.utils.HalfFrameManager
 import top.maary.darkbag.processor.LutSurfaceProcessor
 import top.maary.darkbag.utils.ExposureUtils
+import top.maary.darkbag.utils.HalfFrameUtils
 import top.maary.darkbag.utils.simulateClick
 import com.bumptech.glide.Glide
 import com.bumptech.glide.request.RequestOptions
@@ -418,7 +419,7 @@ class CameraFragment : Fragment() {
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
         readScopedHalfFrameState(prefs, requireFileForStep1 = true)
         updateHalfFrameUI()
-        cameraUiContainerBinding?.modeSwitchButton?.let { updateModeSwitchIcon(it) }
+        fragmentCameraBinding.modeSwitchButton?.let { updateModeSwitchIcon(it) }
         applyUIVisibility()
     }
 
@@ -1218,13 +1219,7 @@ class CameraFragment : Fragment() {
                         constraintSet.connect(vfContainerId, androidx.constraintlayout.widget.ConstraintSet.BOTTOM, bottomAnchorId, androidx.constraintlayout.widget.ConstraintSet.TOP)
                         constraintSet.setVerticalBias(vfContainerId, 0.5f)
 
-                        // Constrain Lens Group Row to the bottom of the Viewfinder Container (above its bottom edge)
-                        if (lensRowId != null) {
-                            val marginXsmall = resources.getDimensionPixelSize(R.dimen.margin_xsmall)
-                            constraintSet.connect(lensRowId, androidx.constraintlayout.widget.ConstraintSet.BOTTOM, vfContainerId, androidx.constraintlayout.widget.ConstraintSet.BOTTOM, marginXsmall)
-                            constraintSet.connect(lensRowId, androidx.constraintlayout.widget.ConstraintSet.START, vfContainerId, androidx.constraintlayout.widget.ConstraintSet.START)
-                            constraintSet.connect(lensRowId, androidx.constraintlayout.widget.ConstraintSet.END, vfContainerId, androidx.constraintlayout.widget.ConstraintSet.END)
-                        }
+                        // Center Viewfinder Container between top bar and manual controls (or bottom island if manual is GONE)
                     }
 
                     constraintSet.applyTo(root)
@@ -1392,7 +1387,7 @@ class CameraFragment : Fragment() {
                 }
             }
         }
-        cameraUiContainerBinding?.cameraSwitchButtonAlt?.let {
+        fragmentCameraBinding.cameraSwitchButtonAlt?.let {
 
             // Disable the button until the camera is set up
             it.isEnabled = false
@@ -1437,7 +1432,7 @@ class CameraFragment : Fragment() {
         }
 
         // Mode Switch Button (Lens Row)
-        cameraUiContainerBinding?.modeSwitchButton?.let { btn ->
+        fragmentCameraBinding.modeSwitchButton?.let { btn ->
             updateModeSwitchIcon(btn)
             btn.setOnClickListener {
                 cycleCaptureMode()
@@ -1468,11 +1463,11 @@ class CameraFragment : Fragment() {
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
         val showSwitch = prefs.getBoolean(SettingsFragment.KEY_SHOW_CAMERA_SWITCH_BUTTON, true)
         try {
-            cameraUiContainerBinding?.cameraSwitchButtonAlt?.isEnabled =
+            fragmentCameraBinding.cameraSwitchButtonAlt?.isEnabled =
                 hasBackCamera() && hasFrontCamera()
-            cameraUiContainerBinding?.cameraSwitchButtonAlt?.visibility = if (showSwitch) View.VISIBLE else View.GONE
+            fragmentCameraBinding.cameraSwitchButtonAlt?.visibility = if (showSwitch) View.VISIBLE else View.GONE
         } catch (exception: CameraInfoUnavailableException) {
-            cameraUiContainerBinding?.cameraSwitchButtonAlt?.isEnabled = false
+            fragmentCameraBinding.cameraSwitchButtonAlt?.isEnabled = false
         }
     }
 
@@ -2287,8 +2282,8 @@ class CameraFragment : Fragment() {
 
     private fun initLensControls() {
         val binding = cameraUiContainerBinding ?: return
-        val container = binding.lensControlsContainer ?: return
-        val row = binding.lensControlRow ?: return
+        val container = fragmentCameraBinding.lensControlsContainer ?: return
+        val row = fragmentCameraBinding.lensControlRowInner ?: return
 
         // Row visibility is managed by applyUIVisibility()
         applyUIVisibility()
@@ -2404,9 +2399,9 @@ class CameraFragment : Fragment() {
         val binding = cameraUiContainerBinding ?: return
 
         // Ensure the row containing the switch button is always visible
-        binding.lensControlRow?.visibility = View.VISIBLE
+        fragmentCameraBinding.lensControlRowInner?.visibility = View.VISIBLE
 
-        val container = binding.lensControlsContainer ?: return
+        val container = fragmentCameraBinding.lensControlsContainer ?: return
 
         val colorPrimary = MaterialColors.getColor(container, android.R.attr.colorPrimary)
         val colorOnSurface = MaterialColors.getColor(container, com.google.android.material.R.attr.colorOnSurface)
@@ -2461,7 +2456,7 @@ class CameraFragment : Fragment() {
             }
         }
 
-        binding.lensControlsCard?.visibility = if (container.childCount > 1 && showLensControls) View.VISIBLE else View.GONE
+        fragmentCameraBinding.lensControlsCard?.visibility = if (container.childCount > 1 && showLensControls) View.VISIBLE else View.GONE
     }
 
     private fun updateZoom(animate: Boolean) {
@@ -4439,21 +4434,20 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
     }
 
     private fun showShutterBlackout() {
-        val binding = cameraUiContainerBinding ?: return
-        val blackout = binding.viewFinderBlackout ?: return
-        val vfContainer = fragmentCameraBinding.viewFinderContainer
+        val vfBinding = fragmentCameraBinding
+        val blackout = vfBinding.viewFinderBlackout
+        val vf = vfBinding.viewFinder
         blackout.post {
-            // Sync translation and scaling with the ViewFinder Container to ensure full coverage in Half-frame mode
-            blackout.translationX = vfContainer.translationX
-            blackout.translationY = vfContainer.translationY
-            blackout.scaleX = vfContainer.scaleX
-            blackout.scaleY = vfContainer.scaleY
+            blackout.translationX = vf.translationX
+            blackout.translationY = vf.translationY
+            blackout.scaleX = vf.scaleX
+            blackout.scaleY = vf.scaleY
 
             blackout.visibility = View.VISIBLE
             blackout.bringToFront()
             blackout.postDelayed({
-                cameraUiContainerBinding?.viewFinderBlackout?.visibility = View.INVISIBLE
-            }, 100L) // Use 100ms to ensure visibility during processing
+                vfBinding.viewFinderBlackout.visibility = View.INVISIBLE
+            }, 100L)
         }
     }
 
@@ -4462,48 +4456,35 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         val vfBinding = fragmentCameraBinding
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
 
-        // Post all updates to the viewfinder container to avoid requestLayout() during layout pass
-        // and ensure consistent ordering of state changes.
         vfBinding.viewFinderContainer.post {
-            // Re-read enabled state inside the post to ensure we use the latest value
             val isEnabled = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_MODE, false)
             isHalfFrameModeEnabled = isEnabled
             readScopedHalfFrameState(prefs)
 
-            val gapView = uiBinding.halfFrameGapIndicator ?: return@post
-            val snapshotView = uiBinding.halfFrameSnapshot ?: return@post
-            val edgeTopView = uiBinding.halfFrameFilmEdgeTop ?: return@post
-            val edgeBottomView = uiBinding.halfFrameFilmEdgeBottom ?: return@post
+            val gapView = vfBinding.halfFrameGapIndicator
+            val snapshotView = vfBinding.halfFrameSnapshot
+            val edgeTopView = vfBinding.halfFrameFilmEdgeTop
+            val edgeBottomView = vfBinding.halfFrameFilmEdgeBottom
 
             if (!isEnabled) {
-                if (uiBinding.tvHalfFrameStep?.visibility != View.GONE) {
-                    uiBinding.tvHalfFrameStep?.visibility = View.GONE
-                }
-                if (gapView.visibility != View.GONE) gapView.visibility = View.GONE
-                if (snapshotView.visibility != View.GONE) snapshotView.visibility = View.GONE
-                if (edgeTopView.visibility != View.GONE) edgeTopView.visibility = View.GONE
-                if (edgeBottomView.visibility != View.GONE) edgeBottomView.visibility = View.GONE
+                uiBinding.tvHalfFrameStep?.visibility = View.GONE
+                gapView.visibility = View.GONE
+                snapshotView.visibility = View.GONE
+                edgeTopView.visibility = View.GONE
+                edgeBottomView.visibility = View.GONE
 
                 (vfBinding.viewFinderContainer.layoutParams as? androidx.constraintlayout.widget.ConstraintLayout.LayoutParams)?.let { lp ->
-                    if (lp.width != 0 || lp.height != 0) {
-                        lp.width = 0
-                        lp.height = 0
-                        vfBinding.viewFinderContainer.layoutParams = lp
-                    }
+                    lp.dimensionRatio = "H,4:3"
+                    lp.width = 0
+                    lp.height = 0
+                    vfBinding.viewFinderContainer.layoutParams = lp
                 }
 
-                vfBinding.viewFinderContainer.scaleX = 1f
-                vfBinding.viewFinderContainer.scaleY = 1f
-                vfBinding.viewFinderContainer.translationX = 0f
-                vfBinding.viewFinderContainer.translationY = 0f
-                uiBinding.lensControlRow?.translationX = 0f
+                vfBinding.viewFinder.translationX = 0f
+                vfBinding.viewFinder.translationY = 0f
+                vfBinding.lensControlRowInner.translationX = 0f
+                vfBinding.lensControlRowInner.translationY = 0f
 
-                if (uiBinding.photoViewButton?.visibility != View.VISIBLE) {
-                    uiBinding.photoViewButton?.visibility = View.VISIBLE
-                    uiBinding.photoViewButton?.alpha = 1f
-                }
-
-                // Restore dynamic rotation for use cases
                 val rotation = when (deviceOrientationDegrees) {
                     90 -> android.view.Surface.ROTATION_270
                     180 -> android.view.Surface.ROTATION_180
@@ -4517,194 +4498,145 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 return@post
             }
 
-            // Enabled path
-            if (uiBinding.tvHalfFrameStep?.visibility != View.VISIBLE) {
-                uiBinding.tvHalfFrameStep?.visibility = View.VISIBLE
-            }
-            val stepText = if (halfFrameStep == 0) "1/2" else "2/2"
-            if (uiBinding.tvHalfFrameStep?.text != stepText) {
-                uiBinding.tvHalfFrameStep?.text = stepText
-            }
+            uiBinding.tvHalfFrameStep?.visibility = View.VISIBLE
+            uiBinding.tvHalfFrameStep?.text = if (halfFrameStep == 0) "1/2" else "2/2"
 
-            // Hide thumbnail button during processing of Shot 1 and throughout Shot 2
             if (halfFrameStep == 1) {
                 uiBinding.photoViewButton?.visibility = View.INVISIBLE
             } else if (processingCount == 0) {
                 uiBinding.photoViewButton?.visibility = View.VISIBLE
-                uiBinding.photoViewButton?.alpha = 1f
             }
-
-            if (halfFrameBaseFinderWidth <= 0 || halfFrameBaseFinderHeight <= 0) {
-                halfFrameBaseFinderWidth = vfBinding.viewFinderContainer.width
-                halfFrameBaseFinderHeight = vfBinding.viewFinderContainer.height
-
-                // Fallback to root container if view is not yet measured
-                if (halfFrameBaseFinderWidth <= 0 || halfFrameBaseFinderHeight <= 0) {
-                    vfBinding.root
-                        .takeIf { it.width > 0 && it.height > 0 }
-                        ?.let { root ->
-                            halfFrameBaseFinderWidth = root.width - 2 * resources.getDimensionPixelSize(R.dimen.margin_medium)
-                            halfFrameBaseFinderHeight = root.height
-                        }
-                }
-            }
-
-            val totalW = halfFrameBaseFinderWidth.toFloat()
-            val totalH = halfFrameBaseFinderHeight.toFloat()
-            if (totalW <= 0f || totalH <= 0f) return@post
-
-            val gapWidthBase = (totalW * 0.12f).coerceAtLeast(60f)
-            // Keep the viewfinder aspect ratio by applying a uniform scale on both axes.
-            val scale = totalW / (totalW + gapWidthBase)
-            val gapWidthScaled = gapWidthBase * scale
-            val shift = gapWidthScaled / 2f
-
-            if (edgeTopView.visibility != View.VISIBLE) edgeTopView.visibility = View.VISIBLE
-            if (edgeBottomView.visibility != View.VISIBLE) edgeBottomView.visibility = View.VISIBLE
-            edgeTopView.bringToFront()
-            edgeBottomView.bringToFront()
-
-            val targetW = (totalW * scale).toInt()
-            val targetH = (totalH * scale).toInt()
-            (vfBinding.viewFinderContainer.layoutParams as? androidx.constraintlayout.widget.ConstraintLayout.LayoutParams)?.let { lp ->
-                if (lp.width != targetW || lp.height != targetH) {
-                    lp.width = targetW
-                    lp.height = targetH
-                    vfBinding.viewFinderContainer.layoutParams = lp
-
-                    gapView.layoutParams.width = gapWidthScaled.toInt()
-                    gapView.requestLayout()
-                }
-            }
-
-            vfBinding.viewFinderContainer.scaleX = 1f
-            vfBinding.viewFinderContainer.scaleY = 1f
 
             val layout = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUTS[0])
             val isTopBottom = layout == SettingsFragment.HALF_FRAME_LAYOUTS[1]
 
-            val baseShift = if (halfFrameStep == 0) -shift else shift
-            val targetShift = if (isTopBottom) -baseShift else baseShift
+            val stageRatio = if (isTopBottom) "H,4:3.12" else "W,3.12:4"
+
+            (vfBinding.viewFinderContainer.layoutParams as? androidx.constraintlayout.widget.ConstraintLayout.LayoutParams)?.let { lp ->
+                if (lp.dimensionRatio != stageRatio) {
+                    lp.dimensionRatio = stageRatio
+                    lp.width = 0
+                    lp.height = 0
+                    vfBinding.viewFinderContainer.layoutParams = lp
+                }
+            }
+
+            edgeTopView.visibility = View.VISIBLE
+            edgeBottomView.visibility = View.VISIBLE
+
+            val stageW = vfBinding.viewFinderContainer.width.toFloat()
+            val stageH = vfBinding.viewFinderContainer.height.toFloat()
+            if (stageW <= 0 || stageH <= 0) return@post
+
+            val refDim = if (isTopBottom) vfBinding.viewFinder.width else vfBinding.viewFinder.height
+            val gapSize = HalfFrameUtils.calculateGap(refDim).toFloat()
+
+            val shift = gapSize / 2f
+            val targetShift = if (halfFrameStep == 0) -shift else shift
 
             if (animate) {
-                performHalfFrameAdvanceAnimation(targetShift, totalW, gapWidthScaled, isTopBottom)
+                performHalfFrameAdvanceAnimation(targetShift, stageW, gapSize, isTopBottom)
             } else {
-                vfBinding.viewFinderContainer.animate().cancel()
-                vfBinding.viewFinderContainer.translationX = targetShift
-                uiBinding.lensControlRow?.translationX = targetShift
-                // Ensure viewfinder is visible after lens/engine switch
-                vfBinding.viewFinderContainer.alpha = 1f
+                vfBinding.viewFinder.animate().cancel()
+                vfBinding.viewFinder.translationX = if (isTopBottom) 0f else targetShift
+                vfBinding.viewFinder.translationY = if (isTopBottom) targetShift else 0f
+                vfBinding.lensControlRowInner.translationX = vfBinding.viewFinder.translationX
+                vfBinding.lensControlRowInner.translationY = vfBinding.viewFinder.translationY
+
                 gapView.visibility = View.GONE
                 snapshotView.visibility = View.GONE
             }
 
-            if (vfBinding.viewFinderContainer.translationY != 0f) {
-                vfBinding.viewFinderContainer.translationY = 0f
-            }
-
-            // Force fixed rotation for half-frame mode
-            val rotation = if (isTopBottom) {
-                android.view.Surface.ROTATION_90 // Corresponds to 270 orientation (Right is Up)
-            } else {
-                android.view.Surface.ROTATION_0 // Corresponds to 0 orientation (Top is Up)
-            }
+            val rotation = if (isTopBottom) android.view.Surface.ROTATION_90 else android.view.Surface.ROTATION_0
             preview?.targetRotation = rotation
             imageCapture?.targetRotation = rotation
             imageAnalyzer?.targetRotation = rotation
         }
     }
 
-    private fun performHalfFrameAdvanceAnimation(targetShift: Float, totalW: Float, gapWidth: Float, isTopBottom: Boolean) {
-        val uiBinding = cameraUiContainerBinding ?: return
-        val vfContainer = fragmentCameraBinding.viewFinderContainer
-        val snapshot = uiBinding.halfFrameSnapshot ?: return
-        val gap = uiBinding.halfFrameGapIndicator ?: return
-        val lensRow = uiBinding.lensControlRow
+    private fun performHalfFrameAdvanceAnimation(targetShift: Float, stageW: Float, gapSize: Float, isTopBottom: Boolean) {
+        val vfBinding = fragmentCameraBinding
+        val vf = vfBinding.viewFinder
+        val snapshot = vfBinding.halfFrameSnapshot
+        val gap = vfBinding.halfFrameGapIndicator
+        val lensRow = vfBinding.lensControlRowInner
 
-        // Since snapshot and gap are constrained to vfContainer, their translationX is relative to vfContainer's base position.
-        val startShift = vfContainer.translationX
+        val startShiftX = vf.translationX
+        val startShiftY = vf.translationY
 
-        // 1. Take Snapshot of current viewfinder
-        val bitmap = fragmentCameraBinding.viewFinder.bitmap
+        val bitmap = vf.bitmap
         if (bitmap != null) {
             snapshot.setImageBitmap(bitmap)
             snapshot.visibility = View.VISIBLE
-            // Snapshot's layout is constrained to vfContainer, so its translationX is relative to vfContainer
-            snapshot.translationX = startShift
-            // Ensure snapshot matches VF visible area perfectly
-            snapshot.layoutParams.width = vfContainer.width
-            snapshot.layoutParams.height = vfContainer.height
+            snapshot.translationX = startShiftX
+            snapshot.translationY = startShiftY
+            snapshot.layoutParams.width = vf.width
+            snapshot.layoutParams.height = vf.height
             snapshot.requestLayout()
         }
 
-        // 2. Prepare Gap (constrained to vfContainer)
         gap.visibility = View.VISIBLE
-        // If Side-by-side: Shot 1 is left, Gap is to its right.
-        // If Top-bottom: Shot 1 is right, Gap is to its left.
-        gap.translationX = if (isTopBottom) {
-            if (halfFrameStep == 1) startShift - gapWidth else startShift + vfContainer.width
+        if (isTopBottom) {
+            gap.translationY = if (halfFrameStep == 1) startShiftY - gapSize else startShiftY + vf.height
+            gap.translationX = 0f
+            gap.layoutParams.width = vf.width
+            gap.layoutParams.height = gapSize.toInt()
         } else {
-            if (halfFrameStep == 1) startShift + vfContainer.width else startShift - gapWidth
+            gap.translationX = if (halfFrameStep == 1) startShiftX + vf.width else startShiftX - gapSize
+            gap.translationY = 0f
+            gap.layoutParams.width = gapSize.toInt()
+            gap.layoutParams.height = vf.height
         }
-        gap.layoutParams.height = vfContainer.height
         gap.requestLayout()
 
-        // 3. Prepare ViewFinder Container for "coming in"
-        // Side-by-side: moves left (-totalW), starts at targetShift + totalW
-        // Top-bottom: moves right (+totalW), starts at targetShift - totalW
-        vfContainer.animate().cancel()
-        val moveDirectionFactor = if (isTopBottom) 1f else -1f
-        vfContainer.translationX = targetShift - (moveDirectionFactor * totalW)
+        vf.animate().cancel()
+        lensRow.animate().cancel()
 
-        // 4. Animate everything by exactly totalW
         val duration = 450L
         val interpolator = android.view.animation.AccelerateDecelerateInterpolator()
-        val moveDist = moveDirectionFactor * totalW
 
-        snapshot.animate()
-            .translationX(snapshot.translationX + moveDist)
-            .setDuration(duration)
-            .setInterpolator(interpolator)
-            .withEndAction {
+        if (isTopBottom) {
+            val dist = vf.height + gapSize
+            val moveDir = if (halfFrameStep == 1) -1f else 1f
+
+            vf.translationY = targetShift + (if (halfFrameStep == 1) dist else -dist)
+
+            snapshot.animate().translationYBy(moveDir * dist).setDuration(duration).setInterpolator(interpolator).withEndAction {
                 snapshot.visibility = View.GONE
                 snapshot.setImageBitmap(null)
-            }
-            .start()
+            }.start()
+            gap.animate().translationYBy(moveDir * dist).setDuration(duration).setInterpolator(interpolator).start()
+            vf.animate().translationY(targetShift).setDuration(duration).setInterpolator(interpolator).start()
+        } else {
+            val dist = vf.width + gapSize
+            val moveDir = if (halfFrameStep == 1) -1f else 1f
 
-        gap.animate()
-            .translationX(gap.translationX + moveDist)
-            .setDuration(duration)
-            .setInterpolator(interpolator)
-            .withEndAction { gap.visibility = View.GONE }
-            .start()
+            vf.translationX = targetShift + (if (halfFrameStep == 1) dist else -dist)
 
-        vfContainer.animate()
-            .translationX(targetShift)
-            .setDuration(duration)
-            .setInterpolator(interpolator)
-            .start()
+            snapshot.animate().translationXBy(moveDir * dist).setDuration(duration).setInterpolator(interpolator).withEndAction {
+                snapshot.visibility = View.GONE
+                snapshot.setImageBitmap(null)
+            }.start()
+            gap.animate().translationXBy(moveDir * dist).setDuration(duration).setInterpolator(interpolator).start()
+            vf.animate().translationX(targetShift).setDuration(duration).setInterpolator(interpolator).start()
+        }
 
-        lensRow?.animate()?.cancel()
-        lensRow?.animate()
-            ?.translationX(targetShift)
-            ?.setDuration(duration)
-            ?.setInterpolator(interpolator)
-            ?.start()
+        lensRow.animate().translationX(if (isTopBottom) 0f else targetShift)
+            .translationY(if (isTopBottom) targetShift else 0f)
+            .setDuration(duration).setInterpolator(interpolator).start()
 
         animateFilmEdgeRoll(isTopBottom, duration)
     }
 
     private fun animateFilmEdgeRoll(isTopBottom: Boolean, duration: Long = 360L) {
-        val uiBinding = cameraUiContainerBinding ?: return
-        val topEdge = uiBinding.halfFrameFilmEdgeTop ?: return
-        val bottomEdge = uiBinding.halfFrameFilmEdgeBottom ?: return
+        val vfBinding = fragmentCameraBinding
+        val topEdge = vfBinding.halfFrameFilmEdgeTop
+        val bottomEdge = vfBinding.halfFrameFilmEdgeBottom
 
         topEdge.animate().cancel()
         bottomEdge.animate().cancel()
 
-        // Sprocket hole period is 30/1200 of the view width (based on 1200dp vector with 30dp spacing)
         val periodPx = (30f / 1200f) * topEdge.width
-        // Move by multiple periods to cover about 40% of the screen width for a "roll" feel
         val rollDistance = periodPx * ( (resources.displayMetrics.widthPixels * 0.4f) / periodPx ).toInt()
         val dist = if (isTopBottom) rollDistance else -rollDistance
 
@@ -4802,14 +4734,14 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
         binding.hdrPlusPill?.visibility = if (showHdrPill) View.VISIBLE else View.GONE
         binding.settingsButton?.visibility = if (showSettings) View.VISIBLE else View.GONE
-        binding.cameraSwitchButtonAlt?.visibility = if (showSwitch) View.VISIBLE else View.GONE
-        binding.modeSwitchButton?.visibility = if (showModeSwitch) View.VISIBLE else View.GONE
+        fragmentCameraBinding.cameraSwitchButtonAlt?.visibility = if (showSwitch) View.VISIBLE else View.GONE
+        fragmentCameraBinding.modeSwitchButton?.visibility = if (showModeSwitch) View.VISIBLE else View.GONE
 
-        val hasMultipleLenses = binding.lensControlsContainer?.childCount ?: 0 > 1
-        binding.lensControlsCard?.visibility = if (showLensControls && hasMultipleLenses) View.VISIBLE else View.GONE
+        val hasMultipleLenses = fragmentCameraBinding.lensControlsContainer?.childCount ?: 0 > 1
+        fragmentCameraBinding.lensControlsCard?.visibility = if (showLensControls && hasMultipleLenses) View.VISIBLE else View.GONE
 
         // Hide the whole row if all its components are hidden
-        binding.lensControlRow?.visibility = if (showSwitch || showModeSwitch || (showLensControls && hasMultipleLenses)) View.VISIBLE else View.GONE
+        fragmentCameraBinding.lensControlRowInner?.visibility = if (showSwitch || showModeSwitch || (showLensControls && hasMultipleLenses)) View.VISIBLE else View.GONE
 
         binding.lutSwitcherButton?.visibility = if (showLutSwitcher) View.VISIBLE else View.GONE
 
