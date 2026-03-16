@@ -1799,7 +1799,8 @@ class CameraFragment : Fragment() {
                     } else null,
                     hfLayout = layout,
                     showTimestamp = image.halfFrameMetadata?.dateStamp ?: false,
-                    flareType = image.halfFrameMetadata?.flareType ?: -1
+                    flareType = image.halfFrameMetadata?.flareType ?: -1,
+                    zoomFactor = image.zoomRatio
                 )
 
                 // 4. Fast Output Feedback (Thumbnail)
@@ -1808,7 +1809,7 @@ class CameraFragment : Fragment() {
                     inputBitmap = null,
                     bmpPath = if (saveJpg) tempJpgFile.absolutePath else null,
                     rotationDegrees = 0,
-                    zoomFactor = 1.0f,
+                    zoomFactor = image.zoomRatio,
                     baseName = dngName,
                     linearDngPath = if (dngWritten) bayerDngFile.absolutePath else null,
                     tiffPath = null,
@@ -3507,7 +3508,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                             } else null,
                             hfLayout = layout,
                             showTimestamp = hfMetadata?.dateStamp ?: false,
-                            flareType = hfMetadata?.flareType ?: -1
+                            flareType = hfMetadata?.flareType ?: -1,
+                            zoomFactor = currentZoom
                         )
 
                         ImageSaver.saveProcessedImage(
@@ -3515,7 +3517,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                             inputBitmap = null,
                             bmpPath = tempJpgFile.absolutePath,
                             rotationDegrees = 0, // Rotation already handled in JNI
-                            zoomFactor = 1.0f, // Zoom already handled in JNI
+                            zoomFactor = currentZoom,
                             baseName = dngName,
                             linearDngPath = null,
                             tiffPath = null,

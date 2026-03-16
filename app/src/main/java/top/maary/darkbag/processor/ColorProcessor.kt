@@ -54,7 +54,8 @@ object ColorProcessor {
         orientation: Int,
         mirror: Boolean,
         outputBitmap: android.graphics.Bitmap? = null,
-        downsampleFactor: Int = 1
+        downsampleFactor: Int = 1,
+        zoomFactor: Float = 1.0f
     ): Int
 
     /**
