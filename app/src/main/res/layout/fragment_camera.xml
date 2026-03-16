@@ -18,7 +18,7 @@
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/camera_container"
-    android:background="?attr/colorSurface"
+    android:background="@android:color/system_surface_container_lowest_dark"
     android:clipChildren="false"
     android:layout_width="match_parent"
     android:layout_height="match_parent">
@@ -29,7 +29,7 @@
         android:layout_height="0dp"
         android:layout_marginHorizontal="@dimen/margin_medium"
         app:cardCornerRadius="@dimen/radius_medium"
-        app:cardBackgroundColor="@android:color/black"
+        app:cardBackgroundColor="@android:color/system_surface_container_dark"
         app:strokeWidth="0dp"
         app:cardElevation="0dp"
         app:cardPreventCornerOverlap="false"
@@ -45,7 +45,7 @@
             android:id="@+id/viewFinderStage"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:background="?attr/colorSurfaceContainerLowest"
+            android:background="@android:color/system_surface_container_dark"
             android:clipChildren="true">
 
             <top.maary.darkbag.utils.AutoFitTextureView
