@@ -528,10 +528,7 @@ object ImageSaver {
                     FileInputStream(sourceFile).copyTo(out)
                 }
 
-                // If editConfig exists, prioritize its zoomFactor
-                val finalEditConfig = editConfig?.let {
-                    if (it.zoomFactor == 1.0f && zoomFactor > 1.0f) it.copy(zoomFactor = zoomFactor) else it
-                } ?: if (zoomFactor > 1.0f) EditConfig(zoomFactor = zoomFactor) else null
+                val finalEditConfig = createFinalEditConfig(editConfig, zoomFactor)
 
                 if (finalEditConfig != null && mimeType == "image/jpeg") {
                     writeEditConfigToExif(context, newFile.uri, finalEditConfig)
@@ -546,6 +543,13 @@ object ImageSaver {
             Log.e(TAG, "Error saving $displayName to custom folder", e)
         }
         return null
+    }
+
+    private fun createFinalEditConfig(editConfig: EditConfig?, zoomFactor: Float): EditConfig? {
+        // Use 1.05f threshold to match project conventions for meaningful zoom
+        return editConfig?.let {
+            if (it.zoomFactor <= 1.05f && zoomFactor > 1.05f) it.copy(zoomFactor = zoomFactor) else it
+        } ?: if (zoomFactor > 1.05f) EditConfig(zoomFactor = zoomFactor) else null
     }
 
     /**
@@ -567,10 +571,7 @@ object ImageSaver {
         var uri = targetUri
         val isReplacement = uri != null
 
-        // If editConfig exists, prioritize its zoomFactor
-        val finalEditConfig = editConfig?.let {
-            if (it.zoomFactor == 1.0f && zoomFactor > 1.0f) it.copy(zoomFactor = zoomFactor) else it
-        } ?: if (zoomFactor > 1.0f) EditConfig(zoomFactor = zoomFactor) else null
+        val finalEditConfig = createFinalEditConfig(editConfig, zoomFactor)
 
         try {
             if (uri == null) {

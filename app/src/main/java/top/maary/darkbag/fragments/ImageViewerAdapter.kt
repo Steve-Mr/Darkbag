@@ -85,12 +85,7 @@ class ImageViewerAdapter(
             else -> R.id.btnJpg
         }
         selectButton(holder, targetId)
-
-        when (format) {
-            "JPG" -> group.jpgUri?.let { loadImage(holder, it) }
-            "TIFF" -> group.tiffUri?.let { loadImage(holder, it) }
-            "DNG" -> if (group.isHalfFrame()) loadHalfFrameDngs(holder, group) else group.dngUri?.let { loadImage(holder, it) }
-        }
+        loadSelectedFormat(holder, group, format)
     }
 
     private fun setupButtons(holder: ViewHolder, group: ImageGroup, position: Int) {
@@ -103,19 +98,28 @@ class ImageViewerAdapter(
                 if (selectedFormats[position] == "JPG") return@setOnClickListener
                 selectedFormats[position] = "JPG"
                 selectButton(holder, R.id.btnJpg)
-                group.jpgUri?.let { loadImage(holder, it) }
+                loadSelectedFormat(holder, group, "JPG")
             }
             btnTiff.setOnClickListener {
                 if (selectedFormats[position] == "TIFF") return@setOnClickListener
                 selectedFormats[position] = "TIFF"
                 selectButton(holder, R.id.btnTiff)
-                group.tiffUri?.let { loadImage(holder, it) }
+                loadSelectedFormat(holder, group, "TIFF")
             }
             btnDng.setOnClickListener {
                 if (selectedFormats[position] == "DNG") return@setOnClickListener
                 selectedFormats[position] = "DNG"
                 selectButton(holder, R.id.btnDng)
+                loadSelectedFormat(holder, group, "DNG")
+            }
+        }
+    }
 
+    private fun loadSelectedFormat(holder: ViewHolder, group: ImageGroup, format: String) {
+        when (format) {
+            "JPG" -> group.jpgUri?.let { loadImage(holder, it) }
+            "TIFF" -> group.tiffUri?.let { loadImage(holder, it) }
+            "DNG" -> {
                 // Optimization: If a JPG exists, use it as a placeholder for the DNG tab to avoid immediate heavy RAW decoding
                 if (group.jpgUri != null && !group.isHalfFrame()) {
                     loadWithGlide(holder, group.jpgUri, skipCache = false)
@@ -261,11 +265,7 @@ class ImageViewerAdapter(
                 else -> R.id.btnJpg
             }
             selectButton(holder, targetId)
-            when (format) {
-                "JPG" -> group.jpgUri?.let { loadImage(holder, it) }
-                "TIFF" -> group.tiffUri?.let { loadImage(holder, it) }
-                "DNG" -> if (group.isHalfFrame()) loadHalfFrameDngs(holder, group) else group.dngUri?.let { loadImage(holder, it) }
-            }
+            loadSelectedFormat(holder, group, format)
         }
     }
 
