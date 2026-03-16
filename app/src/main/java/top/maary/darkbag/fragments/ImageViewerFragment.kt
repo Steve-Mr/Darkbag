@@ -460,10 +460,16 @@ class ImageViewerFragment : Fragment() {
 
     private fun updateEffectsButtons() {
         val config = currentEditConfig ?: return
+        val iconRes = when (config.flareType) {
+            1 -> R.drawable.ic_flare_side
+            2 -> R.drawable.ic_flare_corner
+            else -> R.drawable.ic_flare_none
+        }
         binding.btnTimestamp.setIconTintResource(if (config.showTimestamp) R.color.vibrant_orange else android.R.color.white)
         binding.btnTimestamp.alpha = if (config.showTimestamp) 1.0f else 0.6f
 
         binding.btnFlare.setIconTintResource(if (config.flareType != -1) R.color.vibrant_pink else android.R.color.white)
+        binding.btnFlare.setIconResource( iconRes )
         binding.btnFlare.alpha = if (config.flareType != -1) 1.0f else 0.6f
     }
 
