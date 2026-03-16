@@ -32,6 +32,7 @@
         app:cardBackgroundColor="@android:color/black"
         app:strokeWidth="0dp"
         app:cardElevation="0dp"
+        app:layout_constraintDimensionRatio="H,4:3"
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toStartOf="parent"
@@ -46,8 +47,9 @@
 
             <top.maary.darkbag.utils.AutoFitTextureView
                 android:id="@+id/view_finder"
-                android:layout_width="wrap_content"
+                android:layout_width="0dp"
                 android:layout_height="0dp"
+                app:layout_constraintDimensionRatio="H,4:3"
                 app:layout_constraintTop_toTopOf="parent"
                 app:layout_constraintBottom_toBottomOf="parent"
                 app:layout_constraintStart_toStartOf="parent"

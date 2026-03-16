@@ -1132,6 +1132,19 @@ class CameraFragment : Fragment() {
 
 
     /** Method used to re-draw the camera UI controls, called every time configuration changes. */
+    private fun getBaseAspectRatio(): Pair<Int, Int> {
+        val resolution = imageCapture?.resolutionInfo?.resolution
+        if (resolution != null) {
+            // Sensor often provides resolution in Landscape (e.g. 4000x3000)
+            val w = resolution.width
+            val h = resolution.height
+            // We want the relative ratio.
+            // In our UI, portrait metrics often result in 3:4 view.
+            return if (w > h) h to w else w to h
+        }
+        return 3 to 4 // Default Portrait-oriented ratio
+    }
+
     private fun updateCameraUi() {
         val root = _fragmentCameraBinding?.root as? androidx.constraintlayout.widget.ConstraintLayout ?: return
 
@@ -1214,7 +1227,7 @@ class CameraFragment : Fragment() {
                         }
 
                         constraintSet.constrainHeight(vfContainerId, androidx.constraintlayout.widget.ConstraintSet.MATCH_CONSTRAINT)
-                        constraintSet.constrainDefaultHeight(vfContainerId, androidx.constraintlayout.widget.ConstraintSet.MATCH_CONSTRAINT_WRAP)
+
                         constraintSet.connect(vfContainerId, androidx.constraintlayout.widget.ConstraintSet.TOP, topId, androidx.constraintlayout.widget.ConstraintSet.BOTTOM)
                         constraintSet.connect(vfContainerId, androidx.constraintlayout.widget.ConstraintSet.BOTTOM, bottomAnchorId, androidx.constraintlayout.widget.ConstraintSet.TOP)
                         constraintSet.setVerticalBias(vfContainerId, 0.5f)
@@ -4451,7 +4464,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         }
     }
 
-    private fun updateHalfFrameUI(animate: Boolean = false) {
+        private fun updateHalfFrameUI(animate: Boolean = false) {
         val uiBinding = cameraUiContainerBinding ?: return
         val vfBinding = fragmentCameraBinding
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
@@ -4466,6 +4479,10 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             val edgeTopView = vfBinding.halfFrameFilmEdgeTop
             val edgeBottomView = vfBinding.halfFrameFilmEdgeBottom
 
+            val baseRatio = getBaseAspectRatio()
+            val baseW = baseRatio.first.toFloat()
+            val baseH = baseRatio.second.toFloat()
+
             if (!isEnabled) {
                 uiBinding.tvHalfFrameStep?.visibility = View.GONE
                 gapView.visibility = View.GONE
@@ -4474,10 +4491,16 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 edgeBottomView.visibility = View.GONE
 
                 (vfBinding.viewFinderContainer.layoutParams as? androidx.constraintlayout.widget.ConstraintLayout.LayoutParams)?.let { lp ->
-                    lp.dimensionRatio = "H,4:3"
+                    lp.dimensionRatio = "W,$baseW:$baseH"
                     lp.width = 0
                     lp.height = 0
                     vfBinding.viewFinderContainer.layoutParams = lp
+                }
+                (vfBinding.viewFinder.layoutParams as? androidx.constraintlayout.widget.ConstraintLayout.LayoutParams)?.let { lp ->
+                    lp.dimensionRatio = "W,$baseW:$baseH"
+                    lp.width = 0
+                    lp.height = 0
+                    vfBinding.viewFinder.layoutParams = lp
                 }
 
                 vfBinding.viewFinder.translationX = 0f
@@ -4509,15 +4532,33 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
             val layout = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUTS[0])
             val isTopBottom = layout == SettingsFragment.HALF_FRAME_LAYOUTS[1]
+            val gapRatio = HalfFrameUtils.GAP_RATIO
 
-            val stageRatio = if (isTopBottom) "H,4:3.12" else "W,3.12:4"
+            val stageRatioStr: String
+            val frameRatioStr: String
+
+            if (isTopBottom) {
+                stageRatioStr = "H,$baseH:${baseW + gapRatio * baseH}"
+                frameRatioStr = "W,$baseH:$baseW"
+            } else {
+                stageRatioStr = "W,${baseW + gapRatio * baseH}:$baseH"
+                frameRatioStr = "W,$baseW:$baseH"
+            }
 
             (vfBinding.viewFinderContainer.layoutParams as? androidx.constraintlayout.widget.ConstraintLayout.LayoutParams)?.let { lp ->
-                if (lp.dimensionRatio != stageRatio) {
-                    lp.dimensionRatio = stageRatio
+                if (lp.dimensionRatio != stageRatioStr) {
+                    lp.dimensionRatio = stageRatioStr
                     lp.width = 0
                     lp.height = 0
                     vfBinding.viewFinderContainer.layoutParams = lp
+                }
+            }
+            (vfBinding.viewFinder.layoutParams as? androidx.constraintlayout.widget.ConstraintLayout.LayoutParams)?.let { lp ->
+                if (lp.dimensionRatio != frameRatioStr) {
+                    lp.dimensionRatio = frameRatioStr
+                    lp.width = 0
+                    lp.height = 0
+                    vfBinding.viewFinder.layoutParams = lp
                 }
             }
 
@@ -4530,7 +4571,6 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
             val refDim = if (isTopBottom) vfBinding.viewFinder.width else vfBinding.viewFinder.height
             val gapSize = HalfFrameUtils.calculateGap(refDim).toFloat()
-
             val shift = gapSize / 2f
             val targetShift = if (halfFrameStep == 0) -shift else shift
 
@@ -4627,7 +4667,6 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
         animateFilmEdgeRoll(isTopBottom, duration)
     }
-
     private fun animateFilmEdgeRoll(isTopBottom: Boolean, duration: Long = 360L) {
         val vfBinding = fragmentCameraBinding
         val topEdge = vfBinding.halfFrameFilmEdgeTop
