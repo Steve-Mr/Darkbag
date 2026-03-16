@@ -219,8 +219,6 @@ class CameraFragment : Fragment() {
     private var isHalfFrameModeEnabled = false
     private var halfFrameStep = 0
     private var halfFrameTempPath: String? = null
-    private var halfFrameBaseFinderWidth = 0
-    private var halfFrameBaseFinderHeight = 0
     private lateinit var halfFrameSessionStore: HalfFrameSessionStore
 
     private var isOisSupported = false
@@ -865,11 +863,21 @@ class CameraFragment : Fragment() {
         // Force 4:3 Aspect Ratio for the container
         val metrics = windowMetricsCalculator.computeCurrentWindowMetrics(requireActivity()).bounds
         val ratio = if (metrics.width() < metrics.height()) "3:4" else "4:3"
-        (_fragmentCameraBinding?.viewFinderContainer?.layoutParams as? androidx.constraintlayout.widget.ConstraintLayout.LayoutParams)?.let { lp ->
+        val viewFinder = _fragmentCameraBinding?.viewFinder
+        val viewFinderContainer = _fragmentCameraBinding?.viewFinderContainer
+
+        (viewFinderContainer?.layoutParams as? androidx.constraintlayout.widget.ConstraintLayout.LayoutParams)?.let { lp ->
             if (lp.dimensionRatio != ratio) {
                 lp.dimensionRatio = ratio
-                _fragmentCameraBinding?.viewFinderContainer?.layoutParams = lp
+                viewFinderContainer.layoutParams = lp
             }
+        }
+
+        // Also update the AutoFitTextureView's internal ratio
+        if (ratio == "3:4") {
+            viewFinder?.setAspectRatio(3, 4)
+        } else {
+            viewFinder?.setAspectRatio(4, 3)
         }
 
         // Decide Engine: Camera2 (Hard Switch) or CameraX
@@ -1201,14 +1209,21 @@ class CameraFragment : Fragment() {
                             bottomId
                         }
 
+                        val marginMedium = resources.getDimensionPixelSize(R.dimen.margin_medium)
+                        constraintSet.connect(containerId, androidx.constraintlayout.widget.ConstraintSet.START, androidx.constraintlayout.widget.ConstraintSet.PARENT_ID, androidx.constraintlayout.widget.ConstraintSet.START, marginMedium)
+                        constraintSet.connect(containerId, androidx.constraintlayout.widget.ConstraintSet.END, androidx.constraintlayout.widget.ConstraintSet.PARENT_ID, androidx.constraintlayout.widget.ConstraintSet.END, marginMedium)
+
                         constraintSet.constrainHeight(containerId, androidx.constraintlayout.widget.ConstraintSet.MATCH_CONSTRAINT)
-                        constraintSet.constrainDefaultHeight(containerId, androidx.constraintlayout.widget.ConstraintSet.MATCH_CONSTRAINT_WRAP)
                         constraintSet.connect(containerId, androidx.constraintlayout.widget.ConstraintSet.TOP, topId, androidx.constraintlayout.widget.ConstraintSet.BOTTOM)
                         constraintSet.connect(containerId, androidx.constraintlayout.widget.ConstraintSet.BOTTOM, bottomAnchorId, androidx.constraintlayout.widget.ConstraintSet.TOP)
                         constraintSet.setVerticalBias(containerId, 0.5f)
                     }
 
                     constraintSet.applyTo(root)
+
+                    // Ensure clipping
+                    vfBinding.viewFinderContainer.clipToOutline = true
+                    vfBinding.viewFinderStage.clipToOutline = true
                 }
 
                 WindowInsetsCompat.CONSUMED
