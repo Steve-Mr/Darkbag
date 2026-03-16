@@ -1705,17 +1705,14 @@ class CameraFragment : Fragment() {
                     if (lutFile.exists()) nativeLutPath = lutFile.absolutePath
                 }
 
-                val saveTiff = prefs.getBoolean(SettingsFragment.KEY_SAVE_TIFF, false)
                 val saveJpg = prefs.getBoolean(SettingsFragment.KEY_SAVE_JPG, true)
                 val saveRaw = prefs.getBoolean(SettingsFragment.KEY_SAVE_RAW, true)
                 val jpgFolderUri = prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
-                val tiffFolderUri = prefs.getString(SettingsFragment.KEY_TIFF_STORAGE_URI, null)
                 val rawFolderUri = prefs.getString(SettingsFragment.KEY_RAW_STORAGE_URI, null)
 
                 val tempRawFile = File(context.cacheDir, "$dngName.tmp.raw")
                 val tempJpgFile = File(context.cacheDir, "$dngName.tmp.jpg")
                 val fullResJpgFile = File(context.cacheDir, "${dngName}_full.jpg")
-                val tiffFile = File(context.cacheDir, "$dngName.tiff")
                 val linearDngFile = File(context.cacheDir, "${dngName}_linear.dng")
                 val bayerDngFile = File(context.cacheDir, "${dngName}_bayer.dng")
                 var dngWritten = false
@@ -1772,7 +1769,6 @@ class CameraFragment : Fragment() {
                     captureTimeMillis = captureTime,
                     targetLog = targetLogIndex,
                     lutPath = nativeLutPath,
-                    outputTiffPath = null,
                     outputJpgPath = if (saveJpg) tempJpgFile.absolutePath else null, // Fast JPG
                     outputDngPath = null,
                     digitalGain = image.digitalGain,
@@ -1825,9 +1821,7 @@ class CameraFragment : Fragment() {
                     zoomFactor = image.zoomRatio,
                     baseName = dngName,
                     linearDngPath = if (dngWritten) bayerDngFile.absolutePath else null,
-                    tiffPath = null,
                     saveJpg = saveJpg,
-                    saveTiff = false,
                     saveRaw = saveRaw,
                     jpgFolderUri = jpgFolderUri,
                     rawFolderUri = rawFolderUri,
@@ -1860,7 +1854,6 @@ class CameraFragment : Fragment() {
                     .putFloat("digitalGain", image.digitalGain)
                     .putInt("targetLog", targetLogIndex)
                     .putString("lutPath", nativeLutPath)
-                    .putString("tiffPath", if (saveTiff) tiffFile.absolutePath else null)
                     .putString("jpgPath", if (saveJpg) fullResJpgFile.absolutePath else null)
                     .putString("targetUri", fastOutputUri?.toString())
                     .putFloat("zoomFactor", image.zoomRatio)
@@ -1872,11 +1865,9 @@ class CameraFragment : Fragment() {
                     .putFloatArray("ccm", ccm)
                     .putFloatArray("whiteBalance", wb)
                     .putString("baseName", dngName)
-                    .putBoolean("saveTiff", saveTiff)
                     .putBoolean("saveJpg", saveJpg)
                     .putBoolean("saveRaw", saveRaw)
                     .putString("jpgFolderUri", jpgFolderUri)
-                    .putString("tiffFolderUri", tiffFolderUri)
                     .putString("rawFolderUri", rawFolderUri)
                     .putBoolean("mirror", mirror)
 
@@ -2967,9 +2958,7 @@ class CameraFragment : Fragment() {
                     zoomFactor = zoomFactor,
                     baseName = name,
                     linearDngPath = null,
-                    tiffPath = null,
                     saveJpg = true,
-                    saveTiff = false,
                     jpgFolderUri = jpgFolderUri,
                     mirror = mirror,
                     halfFrameMetadata = halfFrameMetadata,
@@ -3466,16 +3455,12 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 } else {
                     SimpleDateFormat(FILENAME, Locale.US).format(System.currentTimeMillis()) + "_HDRPLUS"
                 }
-                val saveTiff = prefs.getBoolean(SettingsFragment.KEY_SAVE_TIFF, false)
                 val saveJpg = prefs.getBoolean(SettingsFragment.KEY_SAVE_JPG, true)
                 val saveRaw = prefs.getBoolean(SettingsFragment.KEY_SAVE_RAW, true)
                 val jpgFolderUri = prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
-                val tiffFolderUri = prefs.getString(SettingsFragment.KEY_TIFF_STORAGE_URI, null)
                 val rawFolderUri = prefs.getString(SettingsFragment.KEY_RAW_STORAGE_URI, null)
                 val hqBackgroundExport = prefs.getBoolean(SettingsFragment.KEY_HQ_BACKGROUND_EXPORT, false)
 
-                val tiffFile = File(context.cacheDir, "$dngName.tiff")
-                val tiffPath = if(saveTiff) tiffFile.absolutePath else null
                 val tempRawFile = File(context.cacheDir, "$dngName.tmp.raw")
                 val tempJpgFile = File(context.cacheDir, "$dngName.tmp.jpg")
                 val fullResJpgFile = File(context.cacheDir, "${dngName}_full.jpg")
@@ -3483,7 +3468,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 val linearDngFile = File(context.cacheDir, "${dngName}_linear.dng")
                 val linearDngPath = linearDngFile.absolutePath
 
-                Log.d(TAG, "Output Paths: TIFF=$tiffPath, DNG=$linearDngPath")
+                    Log.d(TAG, "Output Paths: DNG=$linearDngPath")
 
                 val jniStartTime = System.currentTimeMillis()
                 buffers.forEach { it.rewind() }
@@ -3505,7 +3490,6 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     iso, exposureTime, fNumber, focalLength, captureTime,
                     targetLogIndex,
                     nativeLutPath,
-                    null, // outputTiffPath
                     if (saveJpg) tempJpgFile.absolutePath else null, // outputJpgPath (fast preview)
                     null, // outputDngPath (finalize in background)
                     digitalGain,
@@ -3564,9 +3548,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                             zoomFactor = currentZoom,
                             baseName = dngName,
                             linearDngPath = null,
-                            tiffPath = null,
                             saveJpg = true,
-                            saveTiff = false,
                             jpgFolderUri = jpgFolderUri,
                             mirror = false, // Mirroring already handled in JNI
                             isFastPath = true,
@@ -3601,7 +3583,6 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         .putFloat("digitalGain", digitalGain)
                         .putInt("targetLog", targetLogIndex)
                         .putString("lutPath", nativeLutPath)
-                        .putString("tiffPath", tiffPath)
                         .putString("jpgPath", if (saveJpg) fullResJpgFile.absolutePath else null)
                         .putString("targetUri", fastJpegUri?.toString()) // Replace fast JPEG in place
                         .putFloat("zoomFactor", currentZoom)
@@ -3614,11 +3595,9 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         .putFloatArray("ccm", ccm)
                         .putFloatArray("whiteBalance", wb)
                         .putString("baseName", dngName)
-                        .putBoolean("saveTiff", saveTiff)
                         .putBoolean("saveJpg", saveJpg)
                         .putBoolean("saveRaw", saveRaw)
                         .putString("jpgFolderUri", jpgFolderUri)
-                        .putString("tiffFolderUri", tiffFolderUri)
                         .putString("rawFolderUri", rawFolderUri)
                         .putBoolean("mirror", mirror)
 
@@ -3672,7 +3651,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                             * sRGB: ${debugStats[11]}ms
                           - Post: ${postTime}ms
                           - DNG Encode: ${dngEncodeTime}ms
-                          - Save(Log/TIFF/BMP): ${nativeSaveTime}ms
+                          - Save(Log/BMP): ${nativeSaveTime}ms
                           - DNG Wait(get): ${dngWaitTime}ms
                         Save (IO/Compress): ${saveTime}ms
                         HQ Export Mode: ${if (hqBackgroundExport) "Background" else "Inline"}

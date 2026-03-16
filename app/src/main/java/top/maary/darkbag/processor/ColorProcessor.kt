@@ -15,13 +15,11 @@ object ColorProcessor {
 
     data class BackgroundSaveEvent(
         val baseName: String,
-        val tiffPath: String?,
         val dngPath: String?,
         val jpgPath: String?,
         val targetUri: String?,
         val zoomFactor: Float,
         val orientation: Int,
-        val saveTiff: Boolean,
         val saveJpg: Boolean
     )
 
@@ -29,7 +27,6 @@ object ColorProcessor {
      * @param dngData Byte array containing the full DNG file.
      * @param targetLog Index of target log curve.
      * @param lutPath Path to .cube file.
-     * @param outputTiffPath Output path for TIFF.
      * @param outputJpgPath Output path for JPEG.
      * @param useGpu Whether to use GPU acceleration.
      * @param orientation Orientation in degrees.
@@ -48,7 +45,6 @@ object ColorProcessor {
         whites: Float = 0f,
         blacks: Float = 0f,
         digitalGain: Float = 1.0f,
-        outputTiffPath: String?,
         outputJpgPath: String?,
         useGpu: Boolean,
         orientation: Int,
@@ -81,7 +77,6 @@ object ColorProcessor {
         captureTimeMillis: Long,
         targetLog: Int,
         lutPath: String?,
-        outputTiffPath: String?,
         outputJpgPath: String?,
         outputDngPath: String?,
         digitalGain: Float,
@@ -105,16 +100,14 @@ object ColorProcessor {
     @JvmStatic
     fun onBackgroundSaveComplete(
         baseName: String,
-        tiffPath: String?,
         dngPath: String?,
         jpgPath: String?,
         targetUri: String?,
         zoomFactor: Float,
         orientation: Int,
-        saveTiff: Boolean,
         saveJpg: Boolean
     ) {
-        backgroundSaveFlow.tryEmit(BackgroundSaveEvent(baseName, tiffPath, dngPath, jpgPath, targetUri, zoomFactor, orientation, saveTiff, saveJpg))
+        backgroundSaveFlow.tryEmit(BackgroundSaveEvent(baseName, dngPath, jpgPath, targetUri, zoomFactor, orientation, saveJpg))
     }
 
     external fun exportHdrPlus(
@@ -132,7 +125,6 @@ object ColorProcessor {
         shadows: Float = 0f,
         whites: Float = 0f,
         blacks: Float = 0f,
-        tiffPath: String?,
         jpgPath: String?,
         dngPath: String?,
         iso: Int,
@@ -169,7 +161,6 @@ object ColorProcessor {
         captureTimeMillis: Long,
         targetLog: Int,
         lutPath: String?,
-        outputTiffPath: String?,
         outputJpgPath: String?,
         outputDngPath: String?,
         digitalGain: Float,

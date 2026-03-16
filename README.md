@@ -16,7 +16,7 @@ To use the HDR+ feature:
 2. Tap the **HDR+** toggle in the camera interface to enable it (icon turns blue).
 3. Press the shutter button. The app will capture a burst of 3 RAW frames.
 4. The frames are aligned and merged using the [timothybrooks/hdr-plus](https://github.com/timothybrooks/hdr-plus) algorithm (implemented in Halide) to reduce noise and increase dynamic range.
-5. The result is saved as a new RAW (DNG) file, along with optional TIFF/JPG outputs.
+5. The result is saved as a new RAW (DNG) file, along with optional JPG outputs.
 
 ## Build
 

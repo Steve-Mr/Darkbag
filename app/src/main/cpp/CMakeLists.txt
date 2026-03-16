@@ -11,6 +11,8 @@ include(download_halide.cmake)
 include_directories(${HALIDE_INCLUDE_DIR})
 
 # --- LibTIFF (FetchContent) ---
+# LibTIFF is kept because it's required for DNG writing in ColorPipe.cpp.
+# TIFF output format support has been removed from the application level.
 include(FetchContent)
 
 # Disable LibTIFF optional dependencies/tools to keep build minimal

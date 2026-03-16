@@ -24,8 +24,7 @@ class ImageRepository(private val context: Context) {
         // 1. Scan prioritized SAF folders
         val safFolders = listOf(
             prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null) to "jpg",
-            prefs.getString(SettingsFragment.KEY_RAW_STORAGE_URI, null) to "dng",
-            prefs.getString(SettingsFragment.KEY_TIFF_STORAGE_URI, null) to "tiff"
+            prefs.getString(SettingsFragment.KEY_RAW_STORAGE_URI, null) to "dng"
         )
 
         for ((folderUri, _) in safFolders) {
@@ -89,10 +88,6 @@ class ImageRepository(private val context: Context) {
                     }
                     name.endsWith(".dng", ignoreCase = true) -> {
                         builder.dngUri = file.uri
-                        builder.updateTime(file.lastModified())
-                    }
-                    name.endsWith(".tiff", ignoreCase = true) || name.endsWith(".tif", ignoreCase = true) -> {
-                        builder.tiffUri = file.uri
                         builder.updateTime(file.lastModified())
                     }
                 }
@@ -169,7 +164,6 @@ class ImageRepository(private val context: Context) {
                     mime == "image/x-adobe-dng" || name.endsWith(".dng", ignoreCase = true) -> {
                         builder.dngUri = uri
                     }
-                    mime == "image/tiff" -> builder.tiffUri = uri
                 }
                 builder.updateTime(date)
             }
@@ -265,7 +259,6 @@ class ImageRepository(private val context: Context) {
 
     private class ImageGroupBuilder(val baseName: String) {
         var jpgUri: Uri? = null
-        var tiffUri: Uri? = null
         var dngUri: Uri? = null
         var dngUri1: Uri? = null
         var dngUri2: Uri? = null
@@ -279,6 +272,6 @@ class ImageRepository(private val context: Context) {
             if (time > captureTime) captureTime = time
         }
 
-        fun build() = ImageGroup(baseName, jpgUri, tiffUri, dngUri, dngUri1, dngUri2, hfLayout, width, height, captureTime, editConfig)
+        fun build() = ImageGroup(baseName, jpgUri, dngUri, dngUri1, dngUri2, hfLayout, width, height, captureTime, editConfig)
     }
 }

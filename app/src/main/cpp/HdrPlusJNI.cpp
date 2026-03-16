@@ -139,7 +139,7 @@ extern "C" JNIEXPORT jint JNICALL
 Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
     JNIEnv* env, jobject /* this */, jstring tempRawPath, jint width, jint height, jint orientation, jfloat digitalGain, jint targetLog, jstring lutPath,
     jfloat exposure, jfloat contrast, jfloat saturation, jfloat highlights, jfloat shadows, jfloat whites, jfloat blacks,
-    jstring tiffPath, jstring jpgPath, jstring dngPath,
+    jstring jpgPath, jstring dngPath,
     jint iso, jlong exposureTime, jfloat fNumber, jfloat focalLength, jlong captureTimeMillis, jfloatArray ccm, jfloatArray whiteBalance, jfloat zoomFactor, jboolean mirror
 ) {
     LOGD("Native exportHdrPlus started.");
@@ -178,7 +178,6 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
     const char* lut_path_cstr = (lutPath) ? env->GetStringUTFChars(lutPath, 0) : nullptr;
     LUT3D lut; if (lut_path_cstr) { lut = load_lut(lut_path_cstr); env->ReleaseStringUTFChars(lutPath, lut_path_cstr); }
 
-    const char* tiff_path_cstr = (tiffPath) ? env->GetStringUTFChars(tiffPath, 0) : nullptr;
     const char* jpg_path_cstr = (jpgPath) ? env->GetStringUTFChars(jpgPath, 0) : nullptr;
     const char* dng_path_cstr = (dngPath) ? env->GetStringUTFChars(dngPath, 0) : nullptr;
 
@@ -189,14 +188,12 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
     }
 
     bool saveOk = true;
-    if (tiff_path_cstr || jpg_path_cstr) {
-        LOGD("Exporting TIFF/JPG: TIFF=%s, JPG=%s", tiff_path_cstr ? tiff_path_cstr : "null", jpg_path_cstr ? jpg_path_cstr : "null");
+    if (jpg_path_cstr) {
+        LOGD("Exporting JPG: JPG=%s", jpg_path_cstr);
         saveOk = process_and_save_image(finalImage, width, height, digitalGain, targetLog, lut,
                                         exposure, contrast, saturation, highlights, shadows, whites, blacks,
-                                        tiff_path_cstr, jpg_path_cstr, 1, ccmVec.data(), wbVec.data(), orientation, nullptr, false, 1, zoomFactor, (bool)mirror);
+                                        jpg_path_cstr, 1, ccmVec.data(), wbVec.data(), orientation, nullptr, false, 1, zoomFactor, (bool)mirror);
     }
-
-    if (tiffPath && tiff_path_cstr) env->ReleaseStringUTFChars(tiffPath, tiff_path_cstr);
     if (jpgPath && jpg_path_cstr) env->ReleaseStringUTFChars(jpgPath, jpg_path_cstr);
     if (dngPath && dng_path_cstr) env->ReleaseStringUTFChars(dngPath, dng_path_cstr);
 
@@ -213,7 +210,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
 extern "C" JNIEXPORT jint JNICALL
 Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
     JNIEnv* env, jobject /* this */, jobjectArray dngBuffers, jint width, jint height, jint orientation, jint whiteLevel, jintArray blackLevelPattern, jfloatArray lensShadingMap, jint lensShadingRows, jint lensShadingCols, jboolean useSensorColorMatrix, jfloatArray whiteBalance, jfloatArray ccm, jfloatArray ccmAlt, jboolean exportMatrixAB, jint cfaPattern,
-    jint iso, jlong exposureTime, jfloat fNumber, jfloat focalLength, jlong captureTimeMillis, jint targetLog, jstring lutPath, jstring outputTiffPath, jstring outputJpgPath, jstring outputDngPath,
+    jint iso, jlong exposureTime, jfloat fNumber, jfloat focalLength, jlong captureTimeMillis, jint targetLog, jstring lutPath, jstring outputJpgPath, jstring outputDngPath,
     jfloat digitalGain, jlongArray debugStats, jobject outputBitmap, jstring tempRawPath, jfloat zoomFactor, jboolean mirror
 ) {
     LOGD("Native processHdrPlus started.");
@@ -375,11 +372,9 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
     }
     auto postDurationMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - postStart).count();
 
-    const char* tiff_p_cstr = (outputTiffPath) ? env->GetStringUTFChars(outputTiffPath, 0) : nullptr;
     const char* jpg_p_cstr = (outputJpgPath) ? env->GetStringUTFChars(outputJpgPath, 0) : nullptr;
     const char* dng_p_cstr = (outputDngPath) ? env->GetStringUTFChars(outputDngPath, 0) : nullptr;
-    std::string tiffPathStr = tiff_p_cstr ? tiff_p_cstr : "", jpgPathStr = jpg_p_cstr ? jpg_p_cstr : "", dngPathStr = dng_p_cstr ? dng_p_cstr : "";
-    if (outputTiffPath && tiff_p_cstr) env->ReleaseStringUTFChars(outputTiffPath, tiff_p_cstr);
+    std::string jpgPathStr = jpg_p_cstr ? jpg_p_cstr : "", dngPathStr = dng_p_cstr ? dng_p_cstr : "";
     if (outputJpgPath && jpg_p_cstr) env->ReleaseStringUTFChars(outputJpgPath, jpg_p_cstr);
     if (outputDngPath && dng_p_cstr) env->ReleaseStringUTFChars(outputDngPath, dng_p_cstr);
 
@@ -387,7 +382,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
     if (bitmapPixels) {
         process_and_save_image(finalImage, width, height, digitalGain, targetLog, lut,
                                 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, // HSWB not used for preview in standard pipe yet
-                                nullptr, nullptr, 1, ccmVec.data(), wbVec.data(), orientation, bitmapPixels, true, 4, zoomFactor, (bool)mirror);
+                                nullptr, 1, ccmVec.data(), wbVec.data(), orientation, bitmapPixels, true, 4, zoomFactor, (bool)mirror);
         AndroidBitmap_unlockPixels(env, outputBitmap);
     }
 
@@ -397,16 +392,16 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
         env->ReleaseStringUTFChars(tempRawPath, tr_p_cstr);
     }
 
-    if (!tiffPathStr.empty() || !jpgPathStr.empty() || !dngPathStr.empty()) {
+    if (!jpgPathStr.empty() || !dngPathStr.empty()) {
         if (!dngPathStr.empty()) {
             float baselineExposure = (digitalGain > 0.0f) ? std::log2(digitalGain) : 0.0f;
             write_dng(dngPathStr.c_str(), width, height, finalImage, kMax16BitValue, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation, (bool)mirror, baselineExposure);
         }
 
-        if (!tiffPathStr.empty() || !jpgPathStr.empty()) {
+        if (!jpgPathStr.empty()) {
             process_and_save_image(finalImage, width, height, digitalGain, targetLog, lut,
                                     0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
-                                    tiffPathStr.empty()?nullptr:tiffPathStr.c_str(), jpgPathStr.empty()?nullptr:jpgPathStr.c_str(), 1, ccmVec.data(), wbVec.data(), orientation, nullptr, true, 4, zoomFactor, (bool)mirror);
+                                    jpgPathStr.c_str(), 1, ccmVec.data(), wbVec.data(), orientation, nullptr, true, 4, zoomFactor, (bool)mirror);
 
             if (exportMatrixAB && !jpgPathStr.empty() && ccmAltVec.size() == 9) {
                 std::string suffix = useSensorColorMatrix ? "_AB_CAPTURE_CCM.jpg" : "_AB_SENSOR_CCM.jpg";
@@ -416,7 +411,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
                 altJpgPath = altJpgPath.substr(0, dot) + suffix;
                 process_and_save_image(finalImage, width, height, digitalGain, targetLog, lut,
                                         0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
-                                        nullptr, altJpgPath.c_str(), 1, ccmAltVec.data(), wbVec.data(), orientation, nullptr, false, 1, zoomFactor, (bool)mirror);
+                                        altJpgPath.c_str(), 1, ccmAltVec.data(), wbVec.data(), orientation, nullptr, false, 1, zoomFactor, (bool)mirror);
             }
         }
     }
@@ -427,7 +422,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
 extern "C" JNIEXPORT jint JNICALL
 Java_top_maary_darkbag_processor_ColorProcessor_processSingleFrameRaw(
     JNIEnv* env, jobject /* this */, jobject bayerBuffer, jint width, jint height, jint orientation, jint whiteLevel, jintArray blackLevelPattern, jfloatArray lensShadingMap, jint lensShadingRows, jint lensShadingCols, jfloatArray whiteBalance, jfloatArray ccm, jint cfaPattern,
-    jint iso, jlong exposureTime, jfloat fNumber, jfloat focalLength, jlong captureTimeMillis, jint targetLog, jstring lutPath, jstring outputTiffPath, jstring outputJpgPath, jstring outputDngPath,
+    jint iso, jlong exposureTime, jfloat fNumber, jfloat focalLength, jlong captureTimeMillis, jint targetLog, jstring lutPath, jstring outputJpgPath, jstring outputDngPath,
     jfloat digitalGain, jlongArray debugStats, jobject outputBitmap, jstring tempRawPath, jfloat zoomFactor, jboolean mirror
 ) {
     LOGD("Native processSingleFrameRaw started.");
@@ -443,6 +438,6 @@ Java_top_maary_darkbag_processor_ColorProcessor_processSingleFrameRaw(
         whiteBalance, ccm, nullptr, // ccmAlt
         false, // exportMatrixAB
         cfaPattern, iso, exposureTime, fNumber, focalLength, captureTimeMillis, targetLog, lutPath,
-        outputTiffPath, outputJpgPath, outputDngPath, digitalGain, debugStats, outputBitmap, tempRawPath, zoomFactor, mirror
+        outputJpgPath, outputDngPath, digitalGain, debugStats, outputBitmap, tempRawPath, zoomFactor, mirror
     );
 }

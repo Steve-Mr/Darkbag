@@ -501,36 +501,6 @@
                         <Space android:layout_width="match_parent" android:layout_height="@dimen/spacing_small" />
                     </LinearLayout>
 
-                    <com.google.android.material.checkbox.MaterialCheckBox
-                        android:id="@+id/cb_save_tiff"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="Save TIFF (16-bit)" />
-
-                    <LinearLayout
-                        android:id="@+id/layout_tiff_storage"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:orientation="vertical"
-                        android:paddingStart="40dp"
-                        android:clickable="true"
-                        android:focusable="true"
-                        android:background="?attr/selectableItemBackground"
-                        android:visibility="gone">
-                        <TextView
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:text="TIFF Storage Location"
-                            android:textSize="12sp"
-                            android:textColor="?attr/colorOutline"/>
-                        <TextView
-                            android:id="@+id/tv_tiff_path"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:text="Default"
-                            android:textSize="14sp" />
-                        <Space android:layout_width="match_parent" android:layout_height="@dimen/spacing_small" />
-                    </LinearLayout>
 
                     <com.google.android.material.checkbox.MaterialCheckBox
                         android:id="@+id/cb_save_raw"
@@ -568,7 +538,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="@dimen/spacing_small"
-                        android:text="High-quality export in background (TIFF/DNG)"
+                        android:text="High-quality export in background (DNG)"
                         android:textSize="14sp" />
 
                 </LinearLayout>

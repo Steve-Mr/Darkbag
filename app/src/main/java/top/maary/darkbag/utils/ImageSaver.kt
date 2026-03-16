@@ -25,7 +25,7 @@ object ImageSaver {
     private const val TAG = "ImageSaver"
 
     /**
-     * Shared helper to handle Bitmap post-processing (Rotate, Crop, Compress) and Saving (JPG, TIFF, LinearDNG).
+     * Shared helper to handle Bitmap post-processing (Rotate, Crop, Compress) and Saving (JPG, LinearDNG).
      * Deletes input temp files after saving.
      *
      * @param rotationDegrees The degrees of rotation to apply to the [inputBitmap] or the bitmap at [bmpPath].
@@ -41,12 +41,9 @@ object ImageSaver {
         zoomFactor: Float,
         baseName: String,
         linearDngPath: String?,
-        tiffPath: String?,
         saveJpg: Boolean,
-        saveTiff: Boolean,
         saveRaw: Boolean = true,
         jpgFolderUri: String? = null,
-        tiffFolderUri: String? = null,
         rawFolderUri: String? = null,
         targetUri: Uri? = null,
         mirror: Boolean = false,
@@ -63,11 +60,9 @@ object ImageSaver {
 
         val actualSaveJpg = if (isHalfFrameActive) halfFrameManager.saveJpg else saveJpg
         val actualSaveRaw = if (isHalfFrameActive) halfFrameManager.saveRaw else saveRaw
-        val actualSaveTiff = if (isHalfFrameActive) false else saveTiff
 
         val contentResolver = context.contentResolver
         var finalJpgUri: Uri? = null
-        var finalTiffUri: Uri? = null
         var finalRawUri: Uri? = null
 
         // 1. Process Input Bitmap or JPEG File from JNI -> Final MediaStore JPG
@@ -296,50 +291,7 @@ object ImageSaver {
             }
         }
 
-        // 2. Save TIFF
-        if (actualSaveTiff && tiffPath != null) {
-            val tiffFile = File(tiffPath)
-            if (tiffFile.exists()) {
-                if (tiffFolderUri != null) {
-                    finalTiffUri = saveFileToFolder(context, tiffFile, "$baseName.tiff", "image/tiff", tiffFolderUri)
-                } else {
-                    val tiffValues = ContentValues().apply {
-                        put(MediaStore.MediaColumns.DISPLAY_NAME, "$baseName.tiff")
-                        put(MediaStore.MediaColumns.MIME_TYPE, "image/tiff")
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                            put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/Darkbag")
-                            put(MediaStore.MediaColumns.IS_PENDING, 1)
-                        }
-                    }
-                    val tiffUri = contentResolver.insert(
-                        MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                        tiffValues
-                    )
-                    if (tiffUri != null) {
-                        try {
-                            contentResolver.openOutputStream(tiffUri)?.use { out ->
-                                FileInputStream(tiffFile).copyTo(out)
-                            }
-
-                            updateExifOrientation(context, tiffUri, getExifOrientation(rotationDegrees, mirror))
-
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                                tiffValues.clear()
-                                tiffValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
-                                contentResolver.update(tiffUri, tiffValues, null, null)
-                            }
-                            finalTiffUri = tiffUri
-                        } catch (e: Exception) {
-                            Log.e(TAG, "Failed to save TIFF", e)
-                            contentResolver.delete(tiffUri, null, null)
-                        }
-                    }
-                }
-                tiffFile.delete()
-            }
-        }
-
-        // 3. Save DNG (Bayer or Linear)
+        // 2. Save DNG (Bayer or Linear)
         if (actualSaveRaw && linearDngPath != null) {
             val dngFile = File(linearDngPath)
             if (dngFile.exists()) {
@@ -391,23 +343,21 @@ object ImageSaver {
             ColorProcessor.backgroundSaveFlow.tryEmit(
                 ColorProcessor.BackgroundSaveEvent(
                     baseName = baseName,
-                    tiffPath = tiffPath,
                     dngPath = linearDngPath,
                     jpgPath = bmpPath,
                     targetUri = finalJpgUri.toString(),
                     zoomFactor = zoomFactor,
                     orientation = rotationDegrees,
-                    saveTiff = saveTiff,
                     saveJpg = saveJpg
                 )
             )
         }
 
-        // Priority for thumbnail: JPEG > DNG > TIFF
+        // Priority for thumbnail: JPEG > DNG
         // For half-frame mode, we strictly avoid DNG thumbnails to prevent showing single frames
         if (isHalfFrameActive && finalJpgUri == null) return null
 
-        return finalJpgUri ?: finalRawUri ?: finalTiffUri
+        return finalJpgUri ?: finalRawUri
     }
 
     private fun writeStandardExif(exif: ExifInterface, captureMetadata: CaptureMetadata?) {
