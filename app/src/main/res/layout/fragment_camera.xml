@@ -84,7 +84,8 @@
                 android:background="@drawable/bg_film_edge"
                 android:visibility="gone"
                 app:layout_constraintTop_toTopOf="parent"
-                app:layout_constraintStart_toStartOf="parent" />
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintEnd_toEndOf="parent" />
 
             <View
                 android:id="@+id/halfFrameFilmEdgeBottom"
@@ -94,7 +95,8 @@
                 android:rotation="180"
                 android:visibility="gone"
                 app:layout_constraintBottom_toBottomOf="parent"
-                app:layout_constraintStart_toStartOf="parent" />
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintEnd_toEndOf="parent" />
 
             <View
                 android:id="@+id/viewFinderBlackout"
@@ -124,7 +126,7 @@
                 android:orientation="horizontal"
                 android:gravity="center_vertical"
                 android:visibility="visible"
-                app:layout_constraintBottom_toBottomOf="parent"
+                app:layout_constraintBottom_toTopOf="@id/halfFrameFilmEdgeBottom"
                 app:layout_constraintStart_toStartOf="parent"
                 app:layout_constraintEnd_toEndOf="parent"
                 android:layout_marginBottom="@dimen/margin_xsmall">

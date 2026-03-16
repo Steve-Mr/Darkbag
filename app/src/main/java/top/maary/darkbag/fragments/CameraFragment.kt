@@ -4459,6 +4459,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 if (edgeTopView.visibility != View.GONE) edgeTopView.visibility = View.GONE
                 if (edgeBottomView.visibility != View.GONE) edgeBottomView.visibility = View.GONE
 
+                vfBinding.viewFinder.animate().cancel()
                 vfBinding.viewFinder.scaleX = 1f
                 vfBinding.viewFinder.scaleY = 1f
                 vfBinding.viewFinder.translationX = 0f
@@ -4523,7 +4524,11 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             val targetShift = if (isTopBottom) -baseShift else baseShift
 
             if (animate) {
-                performHalfFrameAdvanceAnimation(targetShift, stageW, gapWidth * scale, isTopBottom)
+                if (halfFrameStep == 1) { // Transition from Shot 1 to Shot 2
+                    performHalfFrameAdvanceAnimation(targetShift, stageW, gapWidth * scale, isTopBottom)
+                } else { // Reset from Shot 2 back to ready for Shot 1
+                    performHalfFrameResetAnimation(targetShift, duration = 500L)
+                }
             } else {
                 vfBinding.viewFinder.animate().cancel()
                 vfBinding.viewFinder.translationX = targetShift
@@ -4549,23 +4554,31 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         }
     }
 
-    private fun performHalfFrameAdvanceAnimation(targetShift: Float, totalW: Float, gapWidth: Float, isTopBottom: Boolean) {
+    private fun performHalfFrameResetAnimation(targetShift: Float, duration: Long) {
+        val vfBinding = _fragmentCameraBinding ?: return
+        val vf = vfBinding.viewFinder
+        val interpolator = android.view.animation.AccelerateDecelerateInterpolator()
+
+        vf.animate().cancel()
+        vf.animate()
+            .translationX(targetShift)
+            .setDuration(duration)
+            .setInterpolator(interpolator)
+            .start()
+    }
+
+    private fun performHalfFrameAdvanceAnimation(targetShift: Float, stageW: Float, gapWidth: Float, isTopBottom: Boolean) {
         val vfBinding = _fragmentCameraBinding ?: return
         val vf = vfBinding.viewFinder
         val snapshot = vfBinding.halfFrameSnapshot ?: return
         val gap = vfBinding.halfFrameGapIndicator ?: return
-
-        // VF base position (centered)
-        val vfBaseX = (totalW - vf.width) / 2f
-        val startShift = vf.translationX
-        val currentVfLeft = vfBaseX + startShift
 
         // 1. Take Snapshot of current viewfinder
         val bitmap = vf.bitmap
         if (bitmap != null) {
             snapshot.setImageBitmap(bitmap)
             snapshot.visibility = View.VISIBLE
-            snapshot.translationX = currentVfLeft
+            snapshot.translationX = vf.translationX
             snapshot.scaleX = vf.scaleX
             snapshot.scaleY = vf.scaleY
             snapshot.layoutParams.width = vf.width
@@ -4577,26 +4590,29 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         gap.visibility = View.VISIBLE
         val scaledVfWidth = vf.width * vf.scaleX
         gap.translationX = if (isTopBottom) {
-            if (halfFrameStep == 1) currentVfLeft - gapWidth else currentVfLeft + scaledVfWidth
+             vf.translationX - gapWidth // Gap is to the LEFT of Shot 1 in TB
         } else {
-            if (halfFrameStep == 1) currentVfLeft + scaledVfWidth else currentVfLeft - gapWidth
+             vf.translationX + scaledVfWidth // Gap is to the RIGHT of Shot 1 in SBS
         }
         gap.layoutParams.width = gapWidth.toInt()
         gap.layoutParams.height = (vf.height * vf.scaleY).toInt()
         gap.requestLayout()
 
-        // 3. Prepare ViewFinder for "coming in"
+        // 3. Prepare ViewFinder for "coming in" from the opposite side
         vf.animate().cancel()
-        val moveDirectionFactor = if (isTopBottom) 1f else -1f
-        vf.translationX = targetShift - (moveDirectionFactor * totalW)
+        // SBS: Shot 1 moves Left out. Gap moves Left out. Shot 2 moves in from Right.
+        // TB: Shot 1 moves Right out. Gap moves Right out. Shot 2 moves in from Left.
+        val moveOutFactor = if (isTopBottom) 1f else -1f // Right for TB, Left for SBS
+        val moveInFactor = -moveOutFactor
 
-        // 4. Animate everything by exactly totalW
-        val duration = 450L
+        vf.translationX = targetShift - (moveInFactor * stageW)
+
+        // 4. Animate everything
+        val duration = 500L
         val interpolator = android.view.animation.AccelerateDecelerateInterpolator()
-        val moveDist = moveDirectionFactor * totalW
 
         snapshot.animate()
-            .translationX(currentVfLeft + moveDist)
+            .translationX(snapshot.translationX + (moveOutFactor * stageW))
             .setDuration(duration)
             .setInterpolator(interpolator)
             .withEndAction {
@@ -4606,7 +4622,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             .start()
 
         gap.animate()
-            .translationX(gap.translationX + moveDist)
+            .translationX(gap.translationX + (moveOutFactor * stageW))
             .setDuration(duration)
             .setInterpolator(interpolator)
             .withEndAction { gap.visibility = View.GONE }
@@ -4621,7 +4637,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         animateFilmEdgeRoll(isTopBottom, duration)
     }
 
-    private fun animateFilmEdgeRoll(isTopBottom: Boolean, duration: Long = 360L) {
+    private fun animateFilmEdgeRoll(isTopBottom: Boolean, duration: Long = 500L) {
         val vfBinding = _fragmentCameraBinding ?: return
         val topEdge = vfBinding.halfFrameFilmEdgeTop ?: return
         val bottomEdge = vfBinding.halfFrameFilmEdgeBottom ?: return
@@ -4629,10 +4645,10 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         topEdge.animate().cancel()
         bottomEdge.animate().cancel()
 
-        // Sprocket hole period is 30/1200 of the view width (based on 1200dp vector with 30dp spacing)
+        // Sprocket hole period is 30 units in a 1200 unit width vector.
         val periodPx = (30f / 1200f) * topEdge.width
-        // Move by multiple periods to cover about 40% of the screen width for a "roll" feel
-        val rollDistance = periodPx * ( (resources.displayMetrics.widthPixels * 0.4f) / periodPx ).toInt()
+        // Move by exactly 4 periods to ensure a seamless reset
+        val rollDistance = periodPx * 4
         val dist = if (isTopBottom) rollDistance else -rollDistance
 
         val interpolator = android.view.animation.AccelerateDecelerateInterpolator()
