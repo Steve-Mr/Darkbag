@@ -4520,11 +4520,11 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             val stageH = vfBinding.viewFinderStage.height.toFloat()
             if (stageW <= 0f || stageH <= 0f) return@post
 
+            // Consistent physical scale for film strip effect
+            val scale = 0.88f
+            val scaledVfWidth = stageW * scale
+            // The gap between frames when sliding
             val gapWidth = (stageW * 0.12f).coerceAtLeast(60f)
-            // Keep the viewfinder aspect ratio by applying a uniform scale on both axes.
-            // In half-frame mode, we shrink the VF slightly to reveal the gap.
-            val scale = stageW / (stageW + gapWidth)
-            val shift = (gapWidth * scale) / 2f
 
             if (edgeTopView.visibility != View.VISIBLE) edgeTopView.visibility = View.VISIBLE
             if (edgeBottomView.visibility != View.VISIBLE) edgeBottomView.visibility = View.VISIBLE
@@ -4535,15 +4535,26 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             val layout = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUTS[0])
             val isTopBottom = layout == SettingsFragment.HALF_FRAME_LAYOUTS[1]
 
-            val baseShift = if (halfFrameStep == 0) -shift else shift
-            val targetShift = if (isTopBottom) -baseShift else baseShift
+            // SBS Alignment: Shot 1 is LEFT, Shot 2 is RIGHT.
+            // In a centered constraint, LEFT is -X shift, RIGHT is +X shift.
+            val horizontalMargin = (stageW - scaledVfWidth) / 2f
+            val shift = horizontalMargin
+
+            // Calculate Target Translation based on Step and Layout
+            val targetShift = if (isTopBottom) {
+                 // TB (Logical Right-to-Left Advance): Shot 1 is RIGHT (+X), Shot 2 is LEFT (-X)
+                 if (halfFrameStep == 0) shift else -shift
+            } else {
+                 // SBS (Logical Left-to-Right Advance): Shot 1 is LEFT (-X), Shot 2 is RIGHT (+X)
+                 if (halfFrameStep == 0) -shift else shift
+            }
 
             if (animate) {
-                performHalfFrameAdvanceAnimation(targetShift, stageW, gapWidth * scale, isTopBottom)
+                performHalfFrameAdvanceAnimation(targetShift, stageW, gapWidth, isTopBottom)
             } else {
                 vfBinding.viewFinder.animate().cancel()
                 vfBinding.viewFinder.translationX = targetShift
-                // Ensure viewfinder is visible after lens/engine switch
+                // Ensure viewfinder is visible
                 vfBinding.viewFinder.alpha = 1f
                 gapView.visibility = View.GONE
                 snapshotView.visibility = View.GONE
@@ -4571,55 +4582,62 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         val snapshot = vfBinding.halfFrameSnapshot ?: return
         val gap = vfBinding.halfFrameGapIndicator ?: return
 
-        // Direction logic based on user request:
-        // SBS: Shot 1 -> Shot 2 move LEFT (-X). Shot 2 -> Shot 1 move LEFT (-X).
-        // TB: Shot 1 -> Shot 2 move RIGHT (+X). Shot 2 -> Shot 1 move RIGHT (+X).
-        val moveFactor = if (isTopBottom) 1f else -1f
-        val duration = 500L
+        // Film Advance Logic:
+        // SBS: Frames are laid out HORIZONTALLY. Advance is always LEFT (-X).
+        // TB: Frames are laid out VERTICALLY? No, the user asked for RIGHT (+X) movement.
+        // We follow the user's specific request for directions.
+        val rollDirection = if (isTopBottom) 1f else -1f
+        val duration = 600L
         val interpolator = android.view.animation.AccelerateDecelerateInterpolator()
 
-        // 1. Snapshot logic
+        val scaledVfWidth = stageW * vf.scaleX
+
+        // 1. Setup Snapshot (representing the frame that just finished)
         val bitmap = pendingVfSnapshot
         if (bitmap != null) {
             snapshot.setImageBitmap(bitmap)
             snapshot.visibility = View.VISIBLE
-            // Use current VF position (before step update) as start
-            // Since we updated halfFrameStep BEFORE calling updateHalfFrameUI,
-            // the previous translation was actually -targetShift (the opposite side)
-            snapshot.translationX = -targetShift
             snapshot.scaleX = vf.scaleX
             snapshot.scaleY = vf.scaleY
-            snapshot.layoutParams.width = vf.width
-            snapshot.layoutParams.height = vf.height
-            snapshot.requestLayout()
+            // Start from where the VF was before the step change
+            snapshot.translationX = if (halfFrameStep == 1) -targetShift else -targetShift
         }
 
-        // 2. Gap logic (only show when moving FROM Shot 1 TO Shot 2)
-        // Note: halfFrameStep has already been updated to 1 when this is called for "Shot 1 complete"
+        // 2. Setup Gap (only when advancing from Shot 1 to Shot 2)
+        // If halfFrameStep == 1, we just finished Shot 1.
         if (halfFrameStep == 1) {
             gap.visibility = View.VISIBLE
-            val scaledVfWidth = vf.width * vf.scaleX
-            gap.translationX = if (isTopBottom) {
-                snapshot.translationX - gapWidth // Gap is to the LEFT of Shot 1 in TB (moving RIGHT)
-            } else {
-                snapshot.translationX + scaledVfWidth // Gap is to the RIGHT of Shot 1 in SBS (moving LEFT)
-            }
+            gap.scaleX = 1f
+            gap.scaleY = vf.scaleY
             gap.layoutParams.width = gapWidth.toInt()
-            gap.layoutParams.height = (vf.height * vf.scaleY).toInt()
             gap.requestLayout()
+
+            // Position gap adjacent to the snapshot in the direction of advance
+            gap.translationX = if (isTopBottom) {
+                snapshot.translationX - gapWidth // Advance RIGHT -> Gap is to the LEFT of Snapshot
+            } else {
+                snapshot.translationX + scaledVfWidth // Advance LEFT -> Gap is to the RIGHT of Snapshot
+            }
         } else {
             gap.visibility = View.GONE
         }
 
-        // 3. Prepare Live ViewFinder to slide in from "behind" or opposite side
+        // 3. Setup entering ViewFinder
+        // It should enter from the opposite side of the roll
         vf.animate().cancel()
-        // We want it to arrive at targetShift. It comes from the opposite direction of motion.
-        vf.translationX = targetShift - (moveFactor * stageW)
+        val totalSlideDist = if (halfFrameStep == 1) {
+            scaledVfWidth + gapWidth
+        } else {
+            stageW // Or just enough to clear the view
+        }
+        vf.translationX = targetShift - (rollDirection * totalSlideDist)
         vf.alpha = 1f
 
-        // 4. Perform animations
+        // 4. Execute Unified Animation
+        val advanceDist = rollDirection * totalSlideDist
+
         snapshot.animate()
-            .translationX(snapshot.translationX + (moveFactor * stageW))
+            .translationXBy(advanceDist)
             .setDuration(duration)
             .setInterpolator(interpolator)
             .withEndAction {
@@ -4631,7 +4649,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
         if (gap.visibility == View.VISIBLE) {
             gap.animate()
-                .translationX(gap.translationX + (moveFactor * stageW))
+                .translationXBy(advanceDist)
                 .setDuration(duration)
                 .setInterpolator(interpolator)
                 .withEndAction { gap.visibility = View.GONE }
@@ -4661,8 +4679,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         )
         // Move by exactly 10 periods to ensure a seamless reset and a convincing roll
         val rollDistance = periodPx * 10
-        val moveFactor = if (isTopBottom) 1f else -1f // Match VF move direction
-        val dist = moveFactor * rollDistance
+        val rollDirection = if (isTopBottom) 1f else -1f // Match Frame Advance direction
+        val dist = rollDirection * rollDistance
 
         val interpolator = android.view.animation.AccelerateDecelerateInterpolator()
 
