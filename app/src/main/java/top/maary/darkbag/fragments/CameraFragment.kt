@@ -75,6 +75,7 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.concurrent.futures.await
 import top.maary.darkbag.MainApplication
 import top.maary.darkbag.processor.ColorProcessor
+import top.maary.darkbag.models.CaptureMetadata
 import top.maary.darkbag.processor.HdrPlusExportWorker
 import top.maary.darkbag.utils.ImageSaver
 import java.io.File
@@ -1804,6 +1805,18 @@ class CameraFragment : Fragment() {
                 )
 
                 // 4. Fast Output Feedback (Thumbnail)
+                val captureMetadata = if (image.halfFrameMetadata == null) {
+                    CaptureMetadata(
+                        iso = iso,
+                        exposureTime = exposureTime,
+                        fNumber = fNumber,
+                        focalLength = focalLength,
+                        dateTimeOriginal = captureTime,
+                        make = Build.MANUFACTURER,
+                        model = Build.MODEL
+                    )
+                } else null
+
                 val fastOutputUri = ImageSaver.saveProcessedImage(
                     context = context,
                     inputBitmap = null,
@@ -1822,7 +1835,8 @@ class CameraFragment : Fragment() {
                     isFastPath = true,
                     halfFrameMetadata = image.halfFrameMetadata,
                     editConfig = editConfig,
-                    digitalGain = image.digitalGain
+                    digitalGain = image.digitalGain,
+                    captureMetadata = captureMetadata
                 )
 
                 timing?.firstOutputWritten = System.currentTimeMillis()
@@ -2532,6 +2546,19 @@ class CameraFragment : Fragment() {
             .start()
     }
 
+    private fun createCaptureMetadataFromTimestamp(timestamp: Long): CaptureMetadata {
+        val result = captureResults[timestamp]
+        return CaptureMetadata(
+            iso = result?.get(CaptureResult.SENSOR_SENSITIVITY),
+            exposureTime = result?.get(CaptureResult.SENSOR_EXPOSURE_TIME),
+            fNumber = result?.get(CaptureResult.LENS_APERTURE),
+            focalLength = result?.get(CaptureResult.LENS_FOCAL_LENGTH),
+            dateTimeOriginal = System.currentTimeMillis(),
+            make = Build.MANUFACTURER,
+            model = Build.MODEL
+        )
+    }
+
     private fun getCombinedOrientation(): Int {
         val sensorOrientation = try {
             val lens = currentLens
@@ -2917,7 +2944,8 @@ class CameraFragment : Fragment() {
         data: ByteArray,
         rotationDegrees: Int,
         zoomFactor: Float,
-        halfFrameMetadata: HalfFrameManager.Metadata? = null
+        halfFrameMetadata: HalfFrameManager.Metadata? = null,
+        captureMetadata: CaptureMetadata? = null
     ) {
         val appContext = requireContext().applicationContext
         val mirror = shouldMirror
@@ -2944,7 +2972,8 @@ class CameraFragment : Fragment() {
                     saveTiff = false,
                     jpgFolderUri = jpgFolderUri,
                     mirror = mirror,
-                    halfFrameMetadata = halfFrameMetadata
+                    halfFrameMetadata = halfFrameMetadata,
+                    captureMetadata = captureMetadata
                 )
                 withContext(Dispatchers.Main) {
                     val uiPrefs = appContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
@@ -3062,7 +3091,10 @@ class CameraFragment : Fragment() {
                         if (!isFrame1Trigger) {
                             showProcessingAnimation()
                         }
-                        saveJpegFallback(data, rotation, currentZoom, hfMetadata)
+
+                        val captureMetadata = if (hfMetadata == null) createCaptureMetadataFromTimestamp(image.imageInfo.timestamp) else null
+
+                        saveJpegFallback(data, rotation, currentZoom, hfMetadata, captureMetadata)
                     }
                 }
 
@@ -3494,6 +3526,18 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
                     val mirror = shouldMirror
 
+                    val captureMetadata = if (hfMetadata == null) {
+                        CaptureMetadata(
+                            iso = iso?.toInt(),
+                            exposureTime = exposureTime,
+                            fNumber = fNumber,
+                            focalLength = focalLength,
+                            dateTimeOriginal = captureTime,
+                            make = Build.MANUFACTURER,
+                            model = Build.MODEL
+                        )
+                    } else null
+
                     val fastJpegUri = if (saveJpg) {
                         val layout = if (hfMetadata?.profile == HalfFrameSessionStore.PROFILE_HALF_TOP) "TB" else if (hfMetadata?.profile == HalfFrameSessionStore.PROFILE_HALF_SIDE) "SBS" else null
                         val editConfig = top.maary.darkbag.models.EditConfig(
@@ -3528,7 +3572,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                             isFastPath = true,
                             halfFrameMetadata = hfMetadata?.copy(digitalGain = digitalGain),
                             editConfig = editConfig,
-                            digitalGain = digitalGain
+                            digitalGain = digitalGain,
+                            captureMetadata = captureMetadata
                         )
                     } else {
                         null
@@ -3991,7 +4036,10 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         if (!isFrame1Trigger) {
                             showProcessingAnimation()
                         }
-                        saveJpegFallback(data, 0, currentZoom, hfMetadata) // Rotation handled by C2 JPEG_ORIENTATION
+
+                        val captureMetadata = if (hfMetadata == null) createCaptureMetadataFromTimestamp(image.timestamp) else null
+
+                        saveJpegFallback(data, 0, currentZoom, hfMetadata, captureMetadata) // Rotation handled by C2 JPEG_ORIENTATION
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to process Camera2 image", e)

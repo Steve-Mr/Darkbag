@@ -58,13 +58,24 @@
     <!-- Top Toolbar (Back / Cancel Edit) -->
     <com.google.android.material.appbar.MaterialToolbar
         android:id="@+id/toolbar"
-        android:layout_width="wrap_content"
+        android:layout_width="0dp"
         android:layout_height="?attr/actionBarSize"
         android:background="@android:color/transparent"
         app:navigationIcon="@drawable/ic_back"
         app:navigationIconTint="@android:color/white"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent" />
+        app:layout_constraintEnd_toStartOf="@+id/split_share"
+        app:layout_constraintTop_toTopOf="parent">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_details"
+            style="@style/Widget.Material3.Button.IconButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            app:icon="@drawable/ic_info"
+            app:iconTint="@android:color/white" />
+
+    </com.google.android.material.appbar.MaterialToolbar>
 
     <!-- Top Right: Split Buttons -->
     <com.google.android.material.button.MaterialSplitButton
