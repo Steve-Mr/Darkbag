@@ -31,6 +31,9 @@ import top.maary.darkbag.repository.ImageRepository
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.math.log10
+import kotlin.math.pow
+import kotlin.math.round
 
 class ImageViewerFragment : Fragment() {
 
@@ -1239,7 +1242,7 @@ class ImageViewerFragment : Fragment() {
                     val exposureTime = exif.getAttributeDouble(ExifInterface.TAG_EXPOSURE_TIME, 0.0)
                     if (exposureTime > 0) {
                         val expStr = if (exposureTime < 1.0) {
-                            "1/${Math.round(1.0 / exposureTime)}s"
+                            "1/${round(1.0 / exposureTime).toInt()}s"
                         } else {
                             "${String.format("%.1f", exposureTime)}s"
                         }
@@ -1296,42 +1299,34 @@ class ImageViewerFragment : Fragment() {
         rowBinding.tvValue.text = value
     }
 
-    private fun getFileName(context: Context, uri: Uri): String {
+    private fun queryContentResolver(context: Context, uri: Uri, columnName: String): String? {
         return try {
-            val cursor = context.contentResolver.query(uri, null, null, null, null)
-            cursor?.use {
-                if (it.moveToFirst()) {
-                    val index = it.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
-                    if (index != -1) it.getString(index) else uri.lastPathSegment ?: "Unknown"
-                } else uri.lastPathSegment ?: "Unknown"
-            } ?: uri.lastPathSegment ?: "Unknown"
+            context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val index = cursor.getColumnIndex(columnName)
+                    if (index != -1) cursor.getString(index) else null
+                } else null
+            }
         } catch (e: Exception) {
-            uri.lastPathSegment ?: "Unknown"
+            null
         }
     }
 
+    private fun getFileName(context: Context, uri: Uri): String {
+        return queryContentResolver(context, uri, android.provider.OpenableColumns.DISPLAY_NAME)
+            ?: uri.lastPathSegment ?: "Unknown"
+    }
+
     private fun getFileSize(context: Context, uri: Uri): String {
-        return try {
-            val cursor = context.contentResolver.query(uri, null, null, null, null)
-            cursor?.use {
-                if (it.moveToFirst()) {
-                    val index = it.getColumnIndex(android.provider.OpenableColumns.SIZE)
-                    if (index != -1) {
-                        val size = it.getLong(index)
-                        formatFileSize(size)
-                    } else "Unknown"
-                } else "Unknown"
-            } ?: "Unknown"
-        } catch (e: Exception) {
-            "Unknown"
-        }
+        val sizeStr = queryContentResolver(context, uri, android.provider.OpenableColumns.SIZE)
+        return sizeStr?.toLongOrNull()?.let { formatFileSize(it) } ?: "Unknown"
     }
 
     private fun formatFileSize(size: Long): String {
         if (size <= 0) return "0 B"
         val units = arrayOf("B", "KB", "MB", "GB", "TB")
-        val digitGroups = (Math.log10(size.toDouble()) / Math.log10(1024.0)).toInt()
-        return String.format("%.1f %s", size / Math.pow(1024.0, digitGroups.toDouble()), units[digitGroups])
+        val digitGroups = (log10(size.toDouble()) / log10(1024.0)).toInt()
+        return String.format("%.1f %s", size / 1024.0.pow(digitGroups.toDouble()), units[digitGroups])
     }
 
     private fun showDeleteDialog(group: ImageGroup) {

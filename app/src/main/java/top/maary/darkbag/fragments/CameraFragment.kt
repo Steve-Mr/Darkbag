@@ -2546,6 +2546,19 @@ class CameraFragment : Fragment() {
             .start()
     }
 
+    private fun createCaptureMetadataFromTimestamp(timestamp: Long): CaptureMetadata {
+        val result = captureResults[timestamp]
+        return CaptureMetadata(
+            iso = result?.get(CaptureResult.SENSOR_SENSITIVITY),
+            exposureTime = result?.get(CaptureResult.SENSOR_EXPOSURE_TIME),
+            fNumber = result?.get(CaptureResult.LENS_APERTURE),
+            focalLength = result?.get(CaptureResult.LENS_FOCAL_LENGTH),
+            dateTimeOriginal = System.currentTimeMillis(),
+            make = Build.MANUFACTURER,
+            model = Build.MODEL
+        )
+    }
+
     private fun getCombinedOrientation(): Int {
         val sensorOrientation = try {
             val lens = currentLens
@@ -3079,18 +3092,7 @@ class CameraFragment : Fragment() {
                             showProcessingAnimation()
                         }
 
-                        val captureMetadata = if (hfMetadata == null) {
-                            val result = captureResults[image.imageInfo.timestamp]
-                            CaptureMetadata(
-                                iso = result?.get(CaptureResult.SENSOR_SENSITIVITY),
-                                exposureTime = result?.get(CaptureResult.SENSOR_EXPOSURE_TIME),
-                                fNumber = result?.get(CaptureResult.LENS_APERTURE),
-                                focalLength = result?.get(CaptureResult.LENS_FOCAL_LENGTH),
-                                dateTimeOriginal = System.currentTimeMillis(),
-                                make = Build.MANUFACTURER,
-                                model = Build.MODEL
-                            )
-                        } else null
+                        val captureMetadata = if (hfMetadata == null) createCaptureMetadataFromTimestamp(image.imageInfo.timestamp) else null
 
                         saveJpegFallback(data, rotation, currentZoom, hfMetadata, captureMetadata)
                     }
@@ -4035,18 +4037,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                             showProcessingAnimation()
                         }
 
-                        val captureMetadata = if (hfMetadata == null) {
-                            val result = captureResults[image.timestamp]
-                            CaptureMetadata(
-                                iso = result?.get(CaptureResult.SENSOR_SENSITIVITY),
-                                exposureTime = result?.get(CaptureResult.SENSOR_EXPOSURE_TIME),
-                                fNumber = result?.get(CaptureResult.LENS_APERTURE),
-                                focalLength = result?.get(CaptureResult.LENS_FOCAL_LENGTH),
-                                dateTimeOriginal = System.currentTimeMillis(),
-                                make = Build.MANUFACTURER,
-                                model = Build.MODEL
-                            )
-                        } else null
+                        val captureMetadata = if (hfMetadata == null) createCaptureMetadataFromTimestamp(image.timestamp) else null
 
                         saveJpegFallback(data, 0, currentZoom, hfMetadata, captureMetadata) // Rotation handled by C2 JPEG_ORIENTATION
                     }

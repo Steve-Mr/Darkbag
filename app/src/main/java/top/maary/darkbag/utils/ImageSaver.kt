@@ -410,6 +410,25 @@ object ImageSaver {
         return finalJpgUri ?: finalRawUri ?: finalTiffUri
     }
 
+    private fun writeStandardExif(exif: ExifInterface, captureMetadata: CaptureMetadata?) {
+        captureMetadata?.let { meta ->
+            meta.iso?.let { exif.setAttribute(ExifInterface.TAG_ISO_SPEED_RATINGS, it.toString()) }
+            meta.exposureTime?.let {
+                val exposureInSec = it.toDouble() / 1_000_000_000.0
+                exif.setAttribute(ExifInterface.TAG_EXPOSURE_TIME, exposureInSec.toString())
+            }
+            meta.fNumber?.let { exif.setAttribute(ExifInterface.TAG_F_NUMBER, it.toString()) }
+            meta.focalLength?.let { exif.setAttribute(ExifInterface.TAG_FOCAL_LENGTH, it.toString()) }
+            meta.dateTimeOriginal?.let {
+                val sdf = java.text.SimpleDateFormat("yyyy:MM:dd HH:mm:ss", java.util.Locale.US)
+                val dateStr = sdf.format(java.util.Date(it))
+                exif.setAttribute(ExifInterface.TAG_DATETIME_ORIGINAL, dateStr)
+            }
+            meta.make?.let { exif.setAttribute(ExifInterface.TAG_MAKE, it) }
+            meta.model?.let { exif.setAttribute(ExifInterface.TAG_MODEL, it) }
+        }
+    }
+
     fun writeDngMetadata(context: Context, uri: Uri, editConfig: EditConfig?, digitalGain: Float, captureMetadata: CaptureMetadata?) {
         try {
             context.contentResolver.openFileDescriptor(uri, "rw")?.use { pfd ->
@@ -424,22 +443,7 @@ object ImageSaver {
                 }
 
                 // 2. Standard EXIF
-                captureMetadata?.let { meta ->
-                    meta.iso?.let { exif.setAttribute(ExifInterface.TAG_ISO_SPEED_RATINGS, it.toString()) }
-                    meta.exposureTime?.let {
-                        val exposureInSec = it.toDouble() / 1_000_000_000.0
-                        exif.setAttribute(ExifInterface.TAG_EXPOSURE_TIME, exposureInSec.toString())
-                    }
-                    meta.fNumber?.let { exif.setAttribute(ExifInterface.TAG_F_NUMBER, it.toString()) }
-                    meta.focalLength?.let { exif.setAttribute(ExifInterface.TAG_FOCAL_LENGTH, it.toString()) }
-                    meta.dateTimeOriginal?.let {
-                        val sdf = java.text.SimpleDateFormat("yyyy:MM:dd HH:mm:ss", java.util.Locale.US)
-                        val dateStr = sdf.format(java.util.Date(it))
-                        exif.setAttribute(ExifInterface.TAG_DATETIME_ORIGINAL, dateStr)
-                    }
-                    meta.make?.let { exif.setAttribute(ExifInterface.TAG_MAKE, it) }
-                    meta.model?.let { exif.setAttribute(ExifInterface.TAG_MODEL, it) }
-                }
+                writeStandardExif(exif, captureMetadata)
 
                 exif.saveAttributes()
             }
@@ -491,22 +495,7 @@ object ImageSaver {
                     exif.setAttribute(ExifInterface.TAG_USER_COMMENT, json.toString())
                 }
 
-                captureMetadata?.let { meta ->
-                    meta.iso?.let { exif.setAttribute(ExifInterface.TAG_ISO_SPEED_RATINGS, it.toString()) }
-                    meta.exposureTime?.let {
-                        val exposureInSec = it.toDouble() / 1_000_000_000.0
-                        exif.setAttribute(ExifInterface.TAG_EXPOSURE_TIME, exposureInSec.toString())
-                    }
-                    meta.fNumber?.let { exif.setAttribute(ExifInterface.TAG_F_NUMBER, it.toString()) }
-                    meta.focalLength?.let { exif.setAttribute(ExifInterface.TAG_FOCAL_LENGTH, it.toString()) }
-                    meta.dateTimeOriginal?.let {
-                        val sdf = java.text.SimpleDateFormat("yyyy:MM:dd HH:mm:ss", java.util.Locale.US)
-                        val dateStr = sdf.format(java.util.Date(it))
-                        exif.setAttribute(ExifInterface.TAG_DATETIME_ORIGINAL, dateStr)
-                    }
-                    meta.make?.let { exif.setAttribute(ExifInterface.TAG_MAKE, it) }
-                    meta.model?.let { exif.setAttribute(ExifInterface.TAG_MODEL, it) }
-                }
+                writeStandardExif(exif, captureMetadata)
 
                 exif.saveAttributes()
             }
