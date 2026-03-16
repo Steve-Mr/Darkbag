@@ -145,7 +145,12 @@ class SettingsFragment : Fragment() {
         val savedLog = prefs.getString(KEY_TARGET_LOG, "None")
         binding.menuTargetLog.setText(savedLog, false)
         binding.menuTargetLog.setOnItemClickListener { _, _, position, _ ->
-            prefs.edit().putString(KEY_TARGET_LOG, LOG_CURVES[position]).apply()
+            val selectedLog = LOG_CURVES[position]
+            val editor = prefs.edit().putString(KEY_TARGET_LOG, selectedLog)
+            if (selectedLog == "None") {
+                editor.remove(KEY_ACTIVE_LUT)
+            }
+            editor.apply()
             updateCheckboxStates()
             updateStorageVisibility()
         }
