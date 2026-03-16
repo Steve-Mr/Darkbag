@@ -125,7 +125,11 @@ class ImageViewerAdapter(
                     loadWithGlide(holder, group.jpgUri, skipCache = false)
                     group.dngUri?.let { loadImage(holder, it) }
                 } else {
-                    if (group.isHalfFrame()) loadHalfFrameDngs(holder, group) else group.dngUri?.let { loadImage(holder, it) }
+                    if (group.isHalfFrame()) {
+                        loadHalfFrameDngs(holder, group, group.editConfig?.zoomFactor ?: 1.0f)
+                    } else {
+                        group.dngUri?.let { loadImage(holder, it) }
+                    }
                 }
             }
         }
@@ -202,7 +206,7 @@ class ImageViewerAdapter(
         }
     }
 
-    private fun loadHalfFrameDngs(holder: ViewHolder, group: ImageGroup) {
+    private fun loadHalfFrameDngs(holder: ViewHolder, group: ImageGroup, zoomFactor: Float = 1.0f) {
         holder.loadJob?.cancel()
         holder.binding.imageView.visibility = View.VISIBLE
         holder.binding.loadingIndicator.visibility = View.VISIBLE
@@ -211,7 +215,8 @@ class ImageViewerAdapter(
                 holder.binding.root.context,
                 group.dngUri1,
                 group.dngUri2,
-                group.hfLayout
+                group.hfLayout,
+                zoomFactor
             )
             if (composite != null) {
                 holder.binding.imageView.setImageBitmap(composite)
