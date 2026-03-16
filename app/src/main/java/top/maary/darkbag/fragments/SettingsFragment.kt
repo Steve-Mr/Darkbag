@@ -145,7 +145,12 @@ class SettingsFragment : Fragment() {
         val savedLog = prefs.getString(KEY_TARGET_LOG, "None")
         binding.menuTargetLog.setText(savedLog, false)
         binding.menuTargetLog.setOnItemClickListener { _, _, position, _ ->
-            prefs.edit().putString(KEY_TARGET_LOG, LOG_CURVES[position]).apply()
+            val selectedLog = LOG_CURVES[position]
+            val editor = prefs.edit().putString(KEY_TARGET_LOG, selectedLog)
+            if (selectedLog == "None") {
+                editor.remove(KEY_ACTIVE_LUT)
+            }
+            editor.apply()
             updateCheckboxStates()
             updateStorageVisibility()
         }
@@ -226,25 +231,21 @@ class SettingsFragment : Fragment() {
     private fun updateCheckboxStates() {
         val isLut = isLutActive()
         var isJpg = binding.cbSaveJpg.isChecked
-        var isTiff = binding.cbSaveTiff.isChecked
         var isRaw = binding.cbSaveRaw.isChecked
 
         if (isLut) {
-            // Requirement: jpg/tiff at least one selected.
-            if (!isJpg && !isTiff) {
+            // Requirement: JPG must be selected if LUT is active, as we don't save LUT to RAW.
+            if (!isJpg) {
                 isJpg = true
                 binding.cbSaveJpg.isChecked = true
                 prefs.edit().putBoolean(KEY_SAVE_JPG, true).apply()
             }
-            // If only one of (jpg, tiff) is selected, it becomes disabled.
-            binding.cbSaveJpg.isEnabled = !(isJpg && !isTiff)
-            binding.cbSaveTiff.isEnabled = !(isTiff && !isJpg)
+            binding.cbSaveJpg.isEnabled = false // Force JPG if LUT active
             binding.cbSaveRaw.isEnabled = true
         } else {
-            // Requirement: at least one of (jpg, tiff, raw) selected.
-            val count = (if (isJpg) 1 else 0) + (if (isTiff) 1 else 0) + (if (isRaw) 1 else 0)
+            // Requirement: at least one of (jpg, raw) selected.
+            val count = (if (isJpg) 1 else 0) + (if (isRaw) 1 else 0)
             binding.cbSaveJpg.isEnabled = !(isJpg && count == 1)
-            binding.cbSaveTiff.isEnabled = !(isTiff && count == 1)
             binding.cbSaveRaw.isEnabled = !(isRaw && count == 1)
         }
     }
@@ -252,15 +253,8 @@ class SettingsFragment : Fragment() {
     private fun setupCheckboxes() {
         setupSwitch(binding.switchLivePreview, KEY_ENABLE_LUT_PREVIEW)
 
-        binding.cbSaveTiff.isChecked = prefs.getBoolean(KEY_SAVE_TIFF, false)
         binding.cbSaveJpg.isChecked = prefs.getBoolean(KEY_SAVE_JPG, true)
         binding.cbSaveRaw.isChecked = prefs.getBoolean(KEY_SAVE_RAW, true)
-
-        binding.cbSaveTiff.setOnCheckedChangeListener { _, isChecked ->
-            prefs.edit().putBoolean(KEY_SAVE_TIFF, isChecked).apply()
-            updateCheckboxStates()
-            updateStorageVisibility()
-        }
 
         binding.cbSaveJpg.setOnCheckedChangeListener { _, isChecked ->
             prefs.edit().putBoolean(KEY_SAVE_JPG, isChecked).apply()
@@ -314,11 +308,9 @@ class SettingsFragment : Fragment() {
 
     private fun updateStorageVisibility() {
         binding.layoutJpgStorage.visibility = if (binding.cbSaveJpg.isChecked) View.VISIBLE else View.GONE
-        binding.layoutTiffStorage.visibility = if (binding.cbSaveTiff.isChecked) View.VISIBLE else View.GONE
         binding.layoutRawStorage.visibility = if (binding.cbSaveRaw.isChecked) View.VISIBLE else View.GONE
 
         binding.tvJpgPath.text = prefs.getString(KEY_JPG_STORAGE_URI_NAME, "Default (Pictures/Darkbag)")
-        binding.tvTiffPath.text = prefs.getString(KEY_TIFF_STORAGE_URI_NAME, "Default (Pictures/Darkbag)")
         binding.tvRawPath.text = prefs.getString(KEY_RAW_STORAGE_URI_NAME, "Default (Pictures/Darkbag)")
     }
 
@@ -336,19 +328,6 @@ class SettingsFragment : Fragment() {
         }
     }
 
-    private val tiffPicker = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
-        uri?.let {
-            val takeFlags: Int = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-            requireContext().contentResolver.takePersistableUriPermission(it, takeFlags)
-
-            val folderName = MediaStoreUtils.getFolderNameFromUri(requireContext(), it)
-            prefs.edit()
-                .putString(KEY_TIFF_STORAGE_URI, it.toString())
-                .putString(KEY_TIFF_STORAGE_URI_NAME, folderName)
-                .apply()
-            updateStorageVisibility()
-        }
-    }
 
     private val rawPicker = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         uri?.let {
@@ -375,9 +354,6 @@ class SettingsFragment : Fragment() {
         binding.layoutJpgStorage.setOnClickListener {
             jpgPicker.launch(null)
         }
-        binding.layoutTiffStorage.setOnClickListener {
-            tiffPicker.launch(null)
-        }
         binding.layoutRawStorage.setOnClickListener {
             rawPicker.launch(null)
         }
@@ -393,7 +369,6 @@ class SettingsFragment : Fragment() {
         const val KEY_TARGET_LOG = "target_log"
         const val KEY_LUT_URI = "lut_uri"
         const val KEY_ACTIVE_LUT = "active_lut_filename"
-        const val KEY_SAVE_TIFF = "save_tiff"
         const val KEY_SAVE_JPG = "save_jpg"
         const val KEY_HQ_BACKGROUND_EXPORT = "hq_background_export"
         const val KEY_USE_GPU = "use_gpu"
@@ -420,8 +395,6 @@ class SettingsFragment : Fragment() {
         const val KEY_SAVE_RAW = "save_raw"
         const val KEY_JPG_STORAGE_URI = "jpg_storage_uri"
         const val KEY_JPG_STORAGE_URI_NAME = "jpg_storage_uri_name"
-        const val KEY_TIFF_STORAGE_URI = "tiff_storage_uri"
-        const val KEY_TIFF_STORAGE_URI_NAME = "tiff_storage_uri_name"
         const val KEY_RAW_STORAGE_URI = "raw_storage_uri"
         const val KEY_RAW_STORAGE_URI_NAME = "raw_storage_uri_name"
         const val KEY_LAST_CAPTURE_URI = "last_capture_uri"

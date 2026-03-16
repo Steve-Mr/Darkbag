@@ -73,14 +73,12 @@ class ImageViewerAdapter(
         val format = selectedFormats[position] ?: when {
             group.jpgUri != null -> "JPG"
             group.isHalfFrame() || group.dngUri != null -> "DNG"
-            group.tiffUri != null -> "TIFF"
             else -> "JPG"
         }
         selectedFormats[position] = format
 
         val targetId = when (format) {
             "JPG" -> R.id.btnJpg
-            "TIFF" -> R.id.btnTiff
             "DNG" -> R.id.btnDng
             else -> R.id.btnJpg
         }
@@ -91,7 +89,6 @@ class ImageViewerAdapter(
     private fun setupButtons(holder: ViewHolder, group: ImageGroup, position: Int) {
         with(holder.binding) {
             btnJpg.visibility = if (group.jpgUri != null) View.VISIBLE else View.GONE
-            btnTiff.visibility = if (group.tiffUri != null) View.VISIBLE else View.GONE
             btnDng.visibility = if (group.dngUri != null || group.dngUri1 != null || group.dngUri2 != null) View.VISIBLE else View.GONE
 
             btnJpg.setOnClickListener {
@@ -99,12 +96,6 @@ class ImageViewerAdapter(
                 selectedFormats[position] = "JPG"
                 selectButton(holder, R.id.btnJpg)
                 loadSelectedFormat(holder, group, "JPG")
-            }
-            btnTiff.setOnClickListener {
-                if (selectedFormats[position] == "TIFF") return@setOnClickListener
-                selectedFormats[position] = "TIFF"
-                selectButton(holder, R.id.btnTiff)
-                loadSelectedFormat(holder, group, "TIFF")
             }
             btnDng.setOnClickListener {
                 if (selectedFormats[position] == "DNG") return@setOnClickListener
@@ -118,7 +109,6 @@ class ImageViewerAdapter(
     private fun loadSelectedFormat(holder: ViewHolder, group: ImageGroup, format: String) {
         when (format) {
             "JPG" -> group.jpgUri?.let { loadImage(holder, it) }
-            "TIFF" -> group.tiffUri?.let { loadImage(holder, it) }
             "DNG" -> {
                 // Optimization: If a JPG exists, use it as a placeholder for the DNG tab to avoid immediate heavy RAW decoding
                 if (group.jpgUri != null && !group.isHalfFrame()) {
@@ -162,17 +152,14 @@ class ImageViewerAdapter(
         holder.binding.loadingIndicator.visibility = View.VISIBLE
 
         val isDng = uri.toString().endsWith(".dng", ignoreCase = true)
-        val isTiff = uri.toString().endsWith(".tiff", ignoreCase = true) || uri.toString().endsWith(".tif", ignoreCase = true)
 
-        if (isDng || isTiff) {
+        if (isDng) {
             holder.loadJob = scope.launch {
                 val bitmap = withContext(Dispatchers.IO) {
                     try {
                         val contentResolver = holder.binding.root.context.contentResolver
-                        if (isDng) {
-                            val thumb = ImageUtils.decodeDngThumbnail(holder.binding.root.context, uri, zoomFactor)
-                            if (thumb != null) return@withContext thumb
-                        }
+                        val thumb = ImageUtils.decodeDngThumbnail(holder.binding.root.context, uri, zoomFactor)
+                        if (thumb != null) return@withContext thumb
 
                         contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
                             val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -265,7 +252,6 @@ class ImageViewerAdapter(
         if (holder != null) {
             val targetId = when (format) {
                 "JPG" -> R.id.btnJpg
-                "TIFF" -> R.id.btnTiff
                 "DNG" -> R.id.btnDng
                 else -> R.id.btnJpg
             }

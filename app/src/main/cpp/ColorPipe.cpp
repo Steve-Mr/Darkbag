@@ -452,12 +452,12 @@ bool process_and_save_image(
     int width, int height, float gain, int targetLog, const LUT3D& lut,
     float exposure, float contrast, float saturation,
     float highlights, float shadows, float whites, float blacks,
-    const char* tiffPath, const char* jpgPath, int sourceColorSpace,
+    const char* jpgPath, int sourceColorSpace,
     const float* ccm, const float* wb, int orientation, unsigned char* out_rgb_buffer,
     bool isPreview, int downsampleFactor, float zoomFactor, bool mirror
 ) {
-    LOGD("process_and_save_image: %dx%d, gain=%.2f, log=%d, lut=%d, tiff=%s, jpg=%s, preview=%d, ds=%d, zoom=%.2f, mirror=%d",
-         width, height, gain, targetLog, lut.size, tiffPath ? tiffPath : "null", jpgPath ? jpgPath : "null", isPreview, downsampleFactor, zoomFactor, mirror);
+    LOGD("process_and_save_image: %dx%d, gain=%.2f, log=%d, lut=%d, jpg=%s, preview=%d, ds=%d, zoom=%.2f, mirror=%d",
+         width, height, gain, targetLog, lut.size, jpgPath ? jpgPath : "null", isPreview, downsampleFactor, zoomFactor, mirror);
     int outW = width / downsampleFactor, outH = height / downsampleFactor;
     bool swapDims = (orientation == 90 || orientation == 270);
     int finalW = swapDims ? outH : outW, finalH = swapDims ? outW : outH;
@@ -471,7 +471,7 @@ bool process_and_save_image(
     // B: after color-space matrix transform (before log/LUT)
     // C: after log curve (before LUT)
     const bool enableStageDebug = false;
-    std::string debugBasePath = jpgPath ? std::string(jpgPath) : (tiffPath ? std::string(tiffPath) : std::string());
+    std::string debugBasePath = jpgPath ? std::string(jpgPath) : std::string();
     std::string debugPathA = enableStageDebug ? build_debug_stage_path(debugBasePath.c_str(), "_debug_A_linear") : std::string();
     std::string debugPathB = enableStageDebug ? build_debug_stage_path(debugBasePath.c_str(), "_debug_B_matrix") : std::string();
     std::string debugPathC = enableStageDebug ? build_debug_stage_path(debugBasePath.c_str(), "_debug_C_log") : std::string();
@@ -670,12 +670,6 @@ bool process_and_save_image(
         }
     }
 
-    bool tiffOk = true;
-    if (tiffPath) {
-        tiffOk = write_tiff(tiffPath, finalW_zoomed, finalH_zoomed, processedImage, 0, false); // orientation 0 because already rotated and mirrored in pixels
-        if (!tiffOk) LOGE("write_tiff failed for %s", tiffPath);
-    }
-
     bool jpgOk = true;
     if (jpgPath) {
         if (isPreview && !previewRgb8.empty()) {
@@ -703,7 +697,7 @@ bool process_and_save_image(
              debugPathC.c_str(), (int)cOk);
     }
 
-    return tiffOk && jpgOk;
+    return jpgOk;
 }
 
 bool write_jpeg(const char* filename, int width, int height, const std::vector<unsigned short>& data, int quality) {
@@ -728,37 +722,6 @@ bool write_jpeg(const char* filename, int width, int height, const std::vector<u
         LOGE("stbi_write_jpg failed for %s", filename);
     }
     return res != 0;
-}
-
-bool write_tiff(const char* filename, int width, int height, const std::vector<unsigned short>& data, int orientation, bool mirror) {
-    TIFF* tif = TIFFOpen(filename, "w");
-    if (!tif) return false;
-
-    TIFFSetField(tif, TIFFTAG_IMAGEWIDTH, width);
-    TIFFSetField(tif, TIFFTAG_IMAGELENGTH, height);
-    TIFFSetField(tif, TIFFTAG_BITSPERSAMPLE, 16);
-    TIFFSetField(tif, TIFFTAG_SAMPLESPERPIXEL, 3);
-    TIFFSetField(tif, TIFFTAG_COMPRESSION, COMPRESSION_NONE);
-    TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_RGB);
-    TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG);
-
-    uint16_t tiffOrientation = 1;
-    switch (orientation) {
-        case 90: tiffOrientation = mirror ? 5 : 6; break;
-        case 180: tiffOrientation = mirror ? 4 : 3; break;
-        case 270: tiffOrientation = mirror ? 7 : 8; break;
-        default: tiffOrientation = mirror ? 2 : 1; break;
-    }
-    TIFFSetField(tif, TIFFTAG_ORIENTATION, tiffOrientation);
-    TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, height);
-
-    if (TIFFWriteEncodedStrip(tif, 0, (void*)data.data(), static_cast<size_t>(width) * height * 3 * sizeof(unsigned short)) < 0) {
-        TIFFClose(tif);
-        return false;
-    }
-
-    TIFFClose(tif);
-    return true;
 }
 
 bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, int iso, long exposureTime, float fNumber, float focalLength, long captureTimeMillis, const std::vector<float>& ccm, int orientation, bool mirror, float baselineExposure) {

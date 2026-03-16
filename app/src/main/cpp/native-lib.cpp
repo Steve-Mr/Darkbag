@@ -31,7 +31,6 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRaw(
         jfloat whites,
         jfloat blacks,
         jfloat digitalGain,
-        jstring outputTiffPath,
         jstring outputJpgPath,
         jboolean useGpu, // Ignored in new pipeline
         jint orientation,
@@ -117,7 +116,6 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRaw(
     std::copy(src, src + (image->width * image->height * 3), rawImage.begin());
 
     // Paths
-    const char* tiff_path_cstr = (outputTiffPath) ? env->GetStringUTFChars(outputTiffPath, 0) : nullptr;
     const char* jpg_path_cstr = (outputJpgPath) ? env->GetStringUTFChars(outputJpgPath, 0) : nullptr;
 
     unsigned char* bitmapPixels = nullptr;
@@ -132,7 +130,6 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRaw(
         targetLog,
         lut,
         exposure, contrast, saturation, highlights, shadows, whites, blacks,
-        tiff_path_cstr,
         jpg_path_cstr,
         0, // sourceColorSpace = ProPhoto (LibRaw output_color=4)
         nullptr, // ccm is not used for ProPhoto path
@@ -148,7 +145,6 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRaw(
     if (outputBitmap && bitmapPixels) AndroidBitmap_unlockPixels(env, outputBitmap);
 
     // Release Strings
-    if (outputTiffPath) env->ReleaseStringUTFChars(outputTiffPath, tiff_path_cstr);
     if (outputJpgPath) env->ReleaseStringUTFChars(outputJpgPath, jpg_path_cstr);
 
     // Cleanup

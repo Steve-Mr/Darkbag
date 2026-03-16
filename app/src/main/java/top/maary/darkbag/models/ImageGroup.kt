@@ -8,7 +8,6 @@ import kotlinx.parcelize.Parcelize
 data class ImageGroup(
     val baseName: String,
     val jpgUri: Uri? = null,
-    val tiffUri: Uri? = null,
     val dngUri: Uri? = null, // Legacy / Standard
     val dngUri1: Uri? = null, // Half-frame Frame 1
     val dngUri2: Uri? = null, // Half-frame Frame 2
@@ -18,7 +17,7 @@ data class ImageGroup(
     val captureTime: Long = 0L,
     val editConfig: EditConfig? = null
 ) : Parcelable {
-    fun hasAny(): Boolean = jpgUri != null || tiffUri != null || dngUri != null || dngUri1 != null || dngUri2 != null
+    fun hasAny(): Boolean = jpgUri != null || dngUri != null || dngUri1 != null || dngUri2 != null
     fun isHalfFrame(): Boolean = dngUri1 != null || dngUri2 != null || hfLayout == "SBS" || hfLayout == "TB"
 }
 

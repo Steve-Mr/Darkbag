@@ -123,8 +123,7 @@ class ImageViewerFragment : Fragment() {
                 it.jpgUri?.toString() == targetUri ||
                 it.dngUri?.toString() == targetUri ||
                 it.dngUri1?.toString() == targetUri ||
-                it.dngUri2?.toString() == targetUri ||
-                it.tiffUri?.toString() == targetUri
+                it.dngUri2?.toString() == targetUri
             }
             if (initialPos != -1) {
                 binding.imagePager.setCurrentItem(initialPos, false)
@@ -444,9 +443,8 @@ class ImageViewerFragment : Fragment() {
         } else {
             val currentUri = when (selectedFormat) {
                 "JPG" -> currentGroup.jpgUri
-                "TIFF" -> currentGroup.tiffUri
                 "DNG" -> currentGroup.dngUri ?: currentGroup.dngUri1 ?: currentGroup.dngUri2
-                else -> currentGroup.jpgUri ?: currentGroup.dngUri ?: currentGroup.dngUri1 ?: currentGroup.dngUri2 ?: currentGroup.tiffUri
+                else -> currentGroup.jpgUri ?: currentGroup.dngUri ?: currentGroup.dngUri1 ?: currentGroup.dngUri2
             }
             currentUri?.let { shareImages(listOf(it)) }
         }
@@ -874,7 +872,6 @@ class ImageViewerFragment : Fragment() {
                             whites = adj.whites,
                             blacks = adj.blacks,
                             digitalGain = 1.0f, // Gain is already in adj.exposure
-                            outputTiffPath = null,
                             outputJpgPath = null,
                             useGpu = false,
                             orientation = rotDegrees,
@@ -1046,7 +1043,6 @@ class ImageViewerFragment : Fragment() {
                             whites = adj.whites,
                             blacks = adj.blacks,
                             digitalGain = 1.0f, // Gain is already in adj.exposure
-                            outputTiffPath = null,
                             outputJpgPath = null,
                             useGpu = false,
                             orientation = rotDegrees,
@@ -1111,9 +1107,7 @@ class ImageViewerFragment : Fragment() {
                             zoomFactor = 1.0f,
                             baseName = baseName,
                             linearDngPath = null,
-                            tiffPath = null,
                             saveJpg = true,
-                            saveTiff = false,
                             saveRaw = false,
                             targetUri = targetUri,
                             jpgFolderUri = if (isReplacement) null else jpgFolderUri,
@@ -1178,9 +1172,8 @@ class ImageViewerFragment : Fragment() {
 
         val uri = when (selectedFormat) {
             "JPG" -> currentGroup.jpgUri
-            "TIFF" -> currentGroup.tiffUri
             "DNG" -> currentGroup.dngUri ?: currentGroup.dngUri1 ?: currentGroup.dngUri2
-            else -> currentGroup.jpgUri ?: currentGroup.dngUri ?: currentGroup.tiffUri
+            else -> currentGroup.jpgUri ?: currentGroup.dngUri
         } ?: return
 
         val dialog = BottomSheetDialog(requireContext())
@@ -1352,7 +1345,6 @@ class ImageViewerFragment : Fragment() {
 
             if (deleteGroup) {
                 group.jpgUri?.let { context.contentResolver.delete(it, null, null) }
-                group.tiffUri?.let { context.contentResolver.delete(it, null, null) }
                 group.dngUri?.let { context.contentResolver.delete(it, null, null) }
                 group.dngUri1?.let { context.contentResolver.delete(it, null, null) }
                 group.dngUri2?.let { context.contentResolver.delete(it, null, null) }
@@ -1360,7 +1352,7 @@ class ImageViewerFragment : Fragment() {
                 if (adapter.itemCount > 1) {
                     val nextIndex = if (currentIndex < adapter.itemCount - 1) currentIndex + 1 else currentIndex - 1
                     val nextGroup = adapter.getGroup(nextIndex)
-                    nextTargetUri = (nextGroup.jpgUri ?: nextGroup.dngUri ?: nextGroup.tiffUri)?.toString()
+                    nextTargetUri = (nextGroup.jpgUri ?: nextGroup.dngUri)?.toString()
                 }
             } else {
                 val selectedFormat = adapter.getSelectedFormat(binding.imagePager.currentItem)
@@ -1370,21 +1362,20 @@ class ImageViewerFragment : Fragment() {
                 } else {
                     val currentUri = when (selectedFormat) {
                         "JPG" -> group.jpgUri
-                        "TIFF" -> group.tiffUri
                         "DNG" -> group.dngUri ?: group.dngUri1 ?: group.dngUri2
-                        else -> group.jpgUri ?: group.dngUri ?: group.dngUri1 ?: group.dngUri2 ?: group.tiffUri
+                        else -> group.jpgUri ?: group.dngUri ?: group.dngUri1 ?: group.dngUri2
                     }
                     currentUri?.let { context.contentResolver.delete(it, null, null) }
                 }
 
                 val remainingGroup = repository.getGroupedImages().find { it.baseName == group.baseName }
                 nextTargetUri = if (remainingGroup != null) {
-                    (remainingGroup.jpgUri ?: remainingGroup.dngUri ?: remainingGroup.tiffUri)?.toString()
+                    (remainingGroup.jpgUri ?: remainingGroup.dngUri)?.toString()
                 } else {
                     if (adapter.itemCount > 1) {
                         val nextIndex = if (currentIndex < adapter.itemCount - 1) currentIndex + 1 else currentIndex - 1
                         val nextGroup = adapter.getGroup(nextIndex)
-                        (nextGroup.jpgUri ?: nextGroup.dngUri ?: nextGroup.tiffUri)?.toString()
+                        (nextGroup.jpgUri ?: nextGroup.dngUri)?.toString()
                     } else null
                 }
             }

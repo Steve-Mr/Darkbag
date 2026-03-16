@@ -23,7 +23,6 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
         val digitalGain = data.getFloat("digitalGain", 1.0f)
         val targetLogInt = data.getInt("targetLog", 0)
         val lutPath = data.getString("lutPath")
-        val tiffPath = data.getString("tiffPath")
         val jpgPath = data.getString("jpgPath")
         val targetUri = data.getString("targetUri")
         val zoomFactor = data.getFloat("zoomFactor", 1.0f)
@@ -45,11 +44,9 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
             return Result.failure()
         }
         val baseName = data.getString("baseName") ?: "HDRPLUS"
-        val saveTiff = data.getBoolean("saveTiff", true)
         val saveJpg = data.getBoolean("saveJpg", true)
         val saveRaw = data.getBoolean("saveRaw", true)
         val jpgFolderUri = data.getString("jpgFolderUri")
-        val tiffFolderUri = data.getString("tiffFolderUri")
         val rawFolderUri = data.getString("rawFolderUri")
         val mirror = data.getBoolean("mirror", false)
 
@@ -132,7 +129,6 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
             shadows = editConfig?.shadows ?: 0f,
             whites = editConfig?.whites ?: 0f,
             blacks = editConfig?.blacks ?: 0f,
-            tiffPath = tiffPath,
             jpgPath = jpgPath,
             dngPath = dngPath,
             iso = iso,
@@ -159,12 +155,9 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
                 zoomFactor = 1.0f, // zoom 1.0 (already handled by JNI)
                 baseName = baseName,
                 linearDngPath = dngPath,
-                tiffPath = tiffPath,
                 saveJpg = saveJpg,
-                saveTiff = saveTiff,
                 saveRaw = saveRaw,
                 jpgFolderUri = jpgFolderUri,
-                tiffFolderUri = tiffFolderUri,
                 rawFolderUri = rawFolderUri,
                 targetUri = targetUri?.let { Uri.parse(it) },
                 mirror = false, // already handled by JNI
@@ -187,14 +180,14 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
             // Still notify UI for thumbnail update if possible
             // We pass null for paths to signal that saving is already done
             ColorProcessor.onBackgroundSaveComplete(
-                baseName, null, null, null, finalUri?.toString(), zoomFactor, orientation, saveTiff, saveJpg
+                baseName, null, null, finalUri?.toString(), zoomFactor, orientation, saveJpg
             )
             return Result.success()
         } else {
             Log.e(TAG, "Background Export Worker failed with code $ret")
             // Notify UI to stop animation even on failure
             ColorProcessor.onBackgroundSaveComplete(
-                baseName, null, null, null, null, zoomFactor, orientation, saveTiff, saveJpg
+                baseName, null, null, null, zoomFactor, orientation, saveJpg
             )
             return Result.failure()
         }

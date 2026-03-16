@@ -73,8 +73,7 @@ class MediaStoreUtils(private val context: Context) {
         // 2. Search prioritized folders
         val priorityList = listOf(
             prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null) to "image/jpeg",
-            prefs.getString(SettingsFragment.KEY_RAW_STORAGE_URI, null) to "image/x-adobe-dng",
-            prefs.getString(SettingsFragment.KEY_TIFF_STORAGE_URI, null) to "image/tiff"
+            prefs.getString(SettingsFragment.KEY_RAW_STORAGE_URI, null) to "image/x-adobe-dng"
         )
 
         for ((folderUri, mimeType) in priorityList) {
@@ -122,7 +121,7 @@ class MediaStoreUtils(private val context: Context) {
     }
 
     private fun getLatestMediaStoreImageFiltered(context: Context): Uri? {
-        val priorityMimes = listOf("image/jpeg", "image/x-adobe-dng", "image/tiff")
+        val priorityMimes = listOf("image/jpeg", "image/x-adobe-dng")
         for (mime in priorityMimes) {
             val uri = queryLatestInMediaStore(context, mime)
             if (uri != null) return uri
