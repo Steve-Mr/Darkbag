@@ -17,8 +17,12 @@ import top.maary.darkbag.utils.ImageUtils
 
 class ImageViewerAdapter(
     private val groups: List<ImageGroup>,
-    private val scope: CoroutineScope
+    private val scope: CoroutineScope,
+    context: android.content.Context
 ) : RecyclerView.Adapter<ImageViewerAdapter.ViewHolder>() {
+
+    private val margin = context.resources.getDimensionPixelSize(R.dimen.margin_medium).toFloat()
+    private val radius = context.resources.getDimension(R.dimen.radius_medium)
 
     var onImageTapped: (() -> Unit)? = null
     var onZoomChanged: ((Boolean) -> Unit)? = null
@@ -54,8 +58,6 @@ class ImageViewerAdapter(
         val group = groups[position]
         holder.loadJob?.cancel()
 
-        val margin = holder.itemView.context.resources.getDimensionPixelSize(R.dimen.margin_medium).toFloat()
-        val radius = holder.itemView.context.resources.getDimension(R.dimen.radius_medium)
         holder.binding.imageView.setVisualParams(margin, radius)
 
         holder.binding.imageView.onTapped = { onImageTapped?.invoke() }

@@ -125,7 +125,7 @@ class ImageViewerFragment : Fragment() {
                 findNavController().navigateUp()
                 return@launch
             }
-            adapter = ImageViewerAdapter(groups, lifecycleScope).apply {
+            adapter = ImageViewerAdapter(groups, lifecycleScope, requireContext()).apply {
                 onImageTapped = { toggleUi() }
                 onZoomChanged = { isZoomed -> if (isZoomed) hideUi() else showUi() }
                 onLongPressStarted = { handleLongPressStarted(it) }
@@ -310,27 +310,19 @@ class ImageViewerFragment : Fragment() {
             binding.btnShareMenu.isCheckable = true
             binding.btnShareMenu.isChecked = true
             val popup = PopupMenu(requireContext(), it)
-            popup.menu.add(0, 1, 0, "Details").apply {
+            popup.menu.add(0, MENU_DETAILS, 0, "Details").apply {
                 setIcon(R.drawable.ic_info)
             }
-            popup.menu.add(0, 2, 0, "Delete").apply {
+            popup.menu.add(0, MENU_DELETE, 0, "Delete").apply {
                 setIcon(R.drawable.ic_delete)
             }
 
-            try {
-                val field = popup.javaClass.getDeclaredField("mPopup")
-                field.isAccessible = true
-                val menuHelper = field.get(popup)
-                val setForceShowIcon = menuHelper.javaClass.getDeclaredMethod("setForceShowIcon", Boolean::class.java)
-                setForceShowIcon.invoke(menuHelper, true)
-            } catch (e: Exception) {
-                android.util.Log.e("ImageViewerFragment", "Failed to force icons in PopupMenu", e)
-            }
+            forceShowIcons(popup)
 
             popup.setOnMenuItemClickListener { item ->
                 when (item.itemId) {
-                    1 -> showImageDetails()
-                    2 -> {
+                    MENU_DETAILS -> showImageDetails()
+                    MENU_DELETE -> {
                         val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
                         showDeleteDialog(currentGroup)
                     }
@@ -348,22 +340,14 @@ class ImageViewerFragment : Fragment() {
             binding.btnSaveMenu.isCheckable = true
             binding.btnSaveMenu.isChecked = true
             val popup = PopupMenu(requireContext(), it)
-            popup.menu.add(0, 1, 0, "Save as new file").apply {
+            popup.menu.add(0, MENU_SAVE_AS, 0, "Save as new file").apply {
                 setIcon(R.drawable.ic_save_as)
             }
 
-            try {
-                val field = popup.javaClass.getDeclaredField("mPopup")
-                field.isAccessible = true
-                val menuHelper = field.get(popup)
-                val setForceShowIcon = menuHelper.javaClass.getDeclaredMethod("setForceShowIcon", Boolean::class.java)
-                setForceShowIcon.invoke(menuHelper, true)
-            } catch (e: Exception) {
-                android.util.Log.e("ImageViewerFragment", "Failed to force icons in PopupMenu", e)
-            }
+            forceShowIcons(popup)
 
             popup.setOnMenuItemClickListener { item ->
-                if (item.itemId == 1) {
+                if (item.itemId == MENU_SAVE_AS) {
                     saveEdit(isReplacement = false)
                 }
                 true
@@ -1166,7 +1150,7 @@ class ImageViewerFragment : Fragment() {
             if (updatedGroups.isNotEmpty()) {
                 val targetBaseName = currentGroup.baseName
                 val newPos = updatedGroups.indexOfFirst { it.baseName == targetBaseName }.coerceAtLeast(0)
-                adapter = ImageViewerAdapter(updatedGroups, lifecycleScope).apply {
+            adapter = ImageViewerAdapter(updatedGroups, lifecycleScope, requireContext()).apply {
                     onImageTapped = { toggleUi() }
                     onZoomChanged = { isZoomed -> if (isZoomed) hideUi() else showUi() }
                     onLongPressStarted = { handleLongPressStarted(it) }
@@ -1521,9 +1505,31 @@ class ImageViewerFragment : Fragment() {
             .show()
     }
 
+    private fun forceShowIcons(popup: PopupMenu) {
+        try {
+            val field = popup.javaClass.getDeclaredField("mPopup")
+            field.isAccessible = true
+            val menuHelper = field.get(popup)
+            val setForceShowIcon = menuHelper.javaClass.getDeclaredMethod("setForceShowIcon", Boolean::class.java)
+            setForceShowIcon.invoke(menuHelper, true)
+        } catch (e: NoSuchFieldException) {
+            android.util.Log.e("ImageViewerFragment", "mPopup field not found in PopupMenu", e)
+        } catch (e: NoSuchMethodException) {
+            android.util.Log.e("ImageViewerFragment", "setForceShowIcon method not found", e)
+        } catch (e: Exception) {
+            android.util.Log.e("ImageViewerFragment", "Unexpected error forcing icons", e)
+        }
+    }
+
     override fun onDestroyView() {
         binding.imagePager.unregisterOnPageChangeCallback(pageChangeCallback)
         super.onDestroyView()
         _binding = null
+    }
+
+    companion object {
+        private const val MENU_DETAILS = 1
+        private const val MENU_DELETE = 2
+        private const val MENU_SAVE_AS = 3
     }
 }

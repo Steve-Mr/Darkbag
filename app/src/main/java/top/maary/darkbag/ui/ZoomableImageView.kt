@@ -63,6 +63,7 @@ class ZoomableImageView @JvmOverloads constructor(
         private const val DRAG = 1
         private const val ZOOM = 2
         private const val CLICK = 3
+        private const val OUTLINE_TRANSITION_RANGE = 0.05f
     }
 
     init {
@@ -76,7 +77,7 @@ class ZoomableImageView @JvmOverloads constructor(
         outlineProvider = object : android.view.ViewOutlineProvider() {
             override fun getOutline(view: android.view.View, outline: android.graphics.Outline) {
                 // Smoothly interpolate between card shape and full screen
-                val t = ((saveScale - 1.0f) / 0.05f).coerceIn(0f, 1f)
+                val t = ((saveScale - 1.0f) / OUTLINE_TRANSITION_RANGE).coerceIn(0f, 1f)
 
                 val left = (redundancyX * (1f - t)).toInt()
                 val top = (redundancyY * (1f - t)).toInt()
