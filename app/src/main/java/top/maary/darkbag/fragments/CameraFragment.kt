@@ -4578,16 +4578,11 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             snapshot.translationX = vf.translationX
             snapshot.scaleX = vf.scaleX
             snapshot.scaleY = vf.scaleY
-            var needsLayout = false
-            if (snapshot.layoutParams.width != vf.width) {
+            if (snapshot.layoutParams.width != vf.width || snapshot.layoutParams.height != vf.height) {
                 snapshot.layoutParams.width = vf.width
-                needsLayout = true
-            }
-            if (snapshot.layoutParams.height != vf.height) {
                 snapshot.layoutParams.height = vf.height
-                needsLayout = true
+                snapshot.requestLayout()
             }
-            if (needsLayout) snapshot.requestLayout()
         }
 
         // 2. Gap logic (only show when moving FROM Shot 1 TO Shot 2)
@@ -4599,18 +4594,13 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             } else {
                 vf.translationX + scaledVfWidth // Gap is to the RIGHT of Shot 1 in SBS
             }
-            var needsLayout = false
             val targetWidth = gapWidth.toInt()
             val targetHeight = (vf.height * vf.scaleY).toInt()
-            if (gap.layoutParams.width != targetWidth) {
+            if (gap.layoutParams.width != targetWidth || gap.layoutParams.height != targetHeight) {
                 gap.layoutParams.width = targetWidth
-                needsLayout = true
-            }
-            if (gap.layoutParams.height != targetHeight) {
                 gap.layoutParams.height = targetHeight
-                needsLayout = true
+                gap.requestLayout()
             }
-            if (needsLayout) gap.requestLayout()
         } else {
             gap.visibility = View.GONE
         }
