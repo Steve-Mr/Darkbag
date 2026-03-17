@@ -5,6 +5,7 @@ import android.net.Uri
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import androidx.core.view.updateLayoutParams
 import androidx.recyclerview.widget.RecyclerView
 import com.bumptech.glide.Glide
 import com.bumptech.glide.load.engine.DiskCacheStrategy
@@ -53,6 +54,21 @@ class ImageViewerAdapter(
         val group = groups[position]
         holder.loadJob?.cancel()
         holder.binding.imageView.resetZoom()
+
+        // Apply clipToOutline for CardView
+        holder.binding.imageCard.clipToOutline = true
+        val margin = holder.itemView.context.resources.getDimensionPixelSize(R.dimen.margin_medium)
+        val radius = holder.itemView.context.resources.getDimension(R.dimen.radius_medium)
+        holder.binding.imageCard.radius = radius
+        holder.binding.imageCard.updateLayoutParams<ViewGroup.MarginLayoutParams> {
+            marginStart = margin
+            marginEnd = margin
+        }
+
+        // Reset CardView constraints/state to prevent jumping
+        holder.binding.imageCard.updateLayoutParams<androidx.constraintlayout.widget.ConstraintLayout.LayoutParams> {
+            dimensionRatio = null
+        }
         holder.binding.imageView.onTapped = { onImageTapped?.invoke() }
         holder.binding.imageView.onLongPressStarted = { onLongPressStarted?.invoke(it) }
         holder.binding.imageView.onLongPressEnded = { onLongPressEnded?.invoke(it) }
@@ -66,6 +82,25 @@ class ImageViewerAdapter(
             val currentlyShouldShow = isUiVisible && !isZoomed && !isFormatSwitcherPersistentHidden
             holder.binding.formatToggleGroup.visibility = if (currentlyShouldShow) View.VISIBLE else View.GONE
             holder.binding.formatToggleGroup.alpha = if (currentlyShouldShow) 1f else 0f
+
+            // Expand CardView to full screen when zoomed
+            val margin = if (isZoomed) 0 else holder.itemView.context.resources.getDimensionPixelSize(R.dimen.margin_medium)
+            val radius = if (isZoomed) 0f else holder.itemView.context.resources.getDimension(R.dimen.radius_medium)
+
+            holder.binding.imageCard.updateLayoutParams<androidx.constraintlayout.widget.ConstraintLayout.LayoutParams> {
+                marginStart = margin
+                marginEnd = margin
+                if (isZoomed) {
+                    dimensionRatio = null
+                } else {
+                    holder.binding.imageView.drawable?.let {
+                        if (it.intrinsicWidth > 0 && it.intrinsicHeight > 0) {
+                            dimensionRatio = "${it.intrinsicWidth}:${it.intrinsicHeight}"
+                        }
+                    }
+                }
+            }
+            holder.binding.imageCard.radius = radius
         }
 
         setupButtons(holder, group, position)
@@ -182,6 +217,10 @@ class ImageViewerAdapter(
                 }
 
                 if (bitmap != null) {
+                    val ratio = "${bitmap.width}:${bitmap.height}"
+                    holder.binding.imageCard.updateLayoutParams<androidx.constraintlayout.widget.ConstraintLayout.LayoutParams> {
+                        dimensionRatio = ratio
+                    }
                     holder.binding.imageView.setImageBitmap(bitmap)
                     holder.binding.loadingIndicator.visibility = View.GONE
                 } else {
@@ -206,6 +245,10 @@ class ImageViewerAdapter(
                 zoomFactor
             )
             if (composite != null) {
+                val ratio = "${composite.width}:${composite.height}"
+                holder.binding.imageCard.updateLayoutParams<androidx.constraintlayout.widget.ConstraintLayout.LayoutParams> {
+                    dimensionRatio = ratio
+                }
                 holder.binding.imageView.setImageBitmap(composite)
             } else {
                 holder.binding.imageView.setImageResource(android.R.drawable.ic_menu_gallery)
@@ -234,6 +277,13 @@ class ImageViewerAdapter(
                     transition: com.bumptech.glide.request.transition.Transition<in android.graphics.drawable.Drawable>?
                 ) {
                     super.onResourceReady(resource, transition)
+                    val width = resource.intrinsicWidth
+                    val height = resource.intrinsicHeight
+                    if (width > 0 && height > 0) {
+                        holder.binding.imageCard.updateLayoutParams<androidx.constraintlayout.widget.ConstraintLayout.LayoutParams> {
+                            dimensionRatio = "$width:$height"
+                        }
+                    }
                     holder.binding.loadingIndicator.visibility = android.view.View.GONE
                 }
             })

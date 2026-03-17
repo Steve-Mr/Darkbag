@@ -82,27 +82,18 @@
         android:orientation="vertical"
         app:layout_constraintGuide_percent="0.5" />
 
-    <!-- Top Toolbar (Back / Cancel Edit) -->
-    <com.google.android.material.appbar.MaterialToolbar
-        android:id="@+id/toolbar"
-        android:layout_width="0dp"
-        android:layout_height="?attr/actionBarSize"
-        android:background="@android:color/transparent"
-        app:navigationIcon="@drawable/ic_back"
-        app:navigationIconTint="@android:color/white"
+    <!-- Top Bar Navigation -->
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btn_navigation"
+        style="@style/Widget.Material3.Button.IconButton"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:layout_marginStart="12dp"
+        app:icon="@drawable/ic_back"
+        app:iconTint="@android:color/white"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toStartOf="@+id/split_share"
-        app:layout_constraintTop_toTopOf="parent">
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btn_details"
-            style="@style/Widget.Material3.Button.IconButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            app:icon="@drawable/ic_info"
-            app:iconTint="@android:color/white" />
-
-    </com.google.android.material.appbar.MaterialToolbar>
+        app:layout_constraintTop_toTopOf="@id/split_share"
+        app:layout_constraintBottom_toBottomOf="@id/split_share" />
 
     <!-- Top Right: Split Buttons -->
     <com.google.android.material.button.MaterialSplitButton
@@ -110,9 +101,8 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginEnd="16dp"
-        app:layout_constraintBottom_toBottomOf="@id/toolbar"
         app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintTop_toTopOf="@id/toolbar">
+        app:layout_constraintTop_toTopOf="parent">
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btn_share_main"
@@ -126,7 +116,8 @@
             android:id="@+id/btn_share_menu"
             style="?attr/materialSplitButtonIconFilledTonalStyle"
             android:layout_width="wrap_content"
-            android:layout_height="wrap_content" />
+            android:layout_height="wrap_content"
+            app:icon="@drawable/m3_split_button_chevron_avd" />
     </com.google.android.material.button.MaterialSplitButton>
 
     <com.google.android.material.button.MaterialSplitButton
@@ -135,9 +126,8 @@
         android:layout_height="wrap_content"
         android:layout_marginEnd="16dp"
         android:visibility="gone"
-        app:layout_constraintBottom_toBottomOf="@id/toolbar"
         app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintTop_toTopOf="@id/toolbar">
+        app:layout_constraintTop_toTopOf="parent">
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btn_save_main"
@@ -150,7 +140,8 @@
             android:id="@+id/btn_save_menu"
             style="?attr/materialSplitButtonIconFilledStyle"
             android:layout_width="wrap_content"
-            android:layout_height="wrap_content" />
+            android:layout_height="wrap_content"
+            app:icon="@drawable/m3_split_button_chevron_avd" />
     </com.google.android.material.button.MaterialSplitButton>
 
     <!-- Bottom Left: Log/LUT and Half-frame controls -->
