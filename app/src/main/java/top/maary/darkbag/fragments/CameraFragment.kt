@@ -4468,6 +4468,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 if (edgeBottomView.visibility != View.GONE) edgeBottomView.visibility = View.GONE
 
                 vfBinding.viewFinder.animate().cancel()
+                vfBinding.viewFinder.alpha = 1f
                 vfBinding.viewFinder.scaleX = 1f
                 vfBinding.viewFinder.scaleY = 1f
                 vfBinding.viewFinder.translationX = 0f
