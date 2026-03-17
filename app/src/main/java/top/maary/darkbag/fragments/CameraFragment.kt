@@ -221,6 +221,7 @@ class CameraFragment : Fragment() {
     private var halfFrameStep = 0
     private var halfFrameTempPath: String? = null
     private lateinit var halfFrameSessionStore: HalfFrameSessionStore
+    private var isHalfFrameUiAnimating = false
 
     private var isOisSupported = false
     private var isHdrOisEnabledPref = true
@@ -535,7 +536,7 @@ class CameraFragment : Fragment() {
         updateHalfFrameUI()
         updateShutterOrientation()
         _fragmentCameraBinding?.viewFinderContainer?.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
-            if (isHalfFrameModeEnabled) {
+            if (isHalfFrameModeEnabled && !isHalfFrameUiAnimating) {
                 updateHalfFrameUI()
             }
         }
@@ -4457,6 +4458,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             val edgeBottomView = vfBinding.halfFrameFilmEdgeBottom ?: return@post
 
             if (!isEnabled) {
+                isHalfFrameUiAnimating = false
                 if (uiBinding.tvHalfFrameStep?.visibility != View.GONE) {
                     uiBinding.tvHalfFrameStep?.visibility = View.GONE
                 }
@@ -4532,6 +4534,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             if (animate) {
                 performHalfFrameAdvanceAnimation(targetShift, stageW, gapWidth * scale, isTopBottom)
             } else {
+                isHalfFrameUiAnimating = false
                 vfBinding.viewFinder.animate().cancel()
                 vfBinding.viewFinder.translationX = targetShift
                 // Ensure viewfinder is visible after lens/engine switch
@@ -4575,9 +4578,11 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             snapshot.translationX = vf.translationX
             snapshot.scaleX = vf.scaleX
             snapshot.scaleY = vf.scaleY
-            snapshot.layoutParams.width = vf.width
-            snapshot.layoutParams.height = vf.height
-            snapshot.requestLayout()
+            if (snapshot.layoutParams.width != vf.width || snapshot.layoutParams.height != vf.height) {
+                snapshot.layoutParams.width = vf.width
+                snapshot.layoutParams.height = vf.height
+                snapshot.requestLayout()
+            }
         }
 
         // 2. Gap logic (only show when moving FROM Shot 1 TO Shot 2)
@@ -4589,15 +4594,20 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             } else {
                 vf.translationX + scaledVfWidth // Gap is to the RIGHT of Shot 1 in SBS
             }
-            gap.layoutParams.width = gapWidth.toInt()
-            gap.layoutParams.height = (vf.height * vf.scaleY).toInt()
-            gap.requestLayout()
+            val targetWidth = gapWidth.toInt()
+            val targetHeight = (vf.height * vf.scaleY).toInt()
+            if (gap.layoutParams.width != targetWidth || gap.layoutParams.height != targetHeight) {
+                gap.layoutParams.width = targetWidth
+                gap.layoutParams.height = targetHeight
+                gap.requestLayout()
+            }
         } else {
             gap.visibility = View.GONE
         }
 
         // 3. Prepare Live ViewFinder to slide in from opposite side
         vf.animate().cancel()
+        isHalfFrameUiAnimating = true
         // Start position is current target + distance of one stage width in opposite direction of roll
         vf.translationX = targetShift - (moveFactor * stageW)
 
@@ -4626,6 +4636,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             .translationX(targetShift)
             .setDuration(duration)
             .setInterpolator(interpolator)
+            .withEndAction { isHalfFrameUiAnimating = false }
             .start()
 
         animateFilmEdgeRoll(isTopBottom, duration)
