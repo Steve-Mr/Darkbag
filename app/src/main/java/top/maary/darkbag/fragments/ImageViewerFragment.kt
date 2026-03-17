@@ -1446,7 +1446,7 @@ class ImageViewerFragment : Fragment() {
         if (isUiVisible) return
         isUiVisible = true
 
-        binding.btnNavigation.visibility = View.VISIBLE
+        binding.topBarContainer.visibility = View.VISIBLE
         binding.splitShare.visibility = if (isAdjusted) View.GONE else View.VISIBLE
         binding.splitSave.visibility = if (isAdjusted) View.VISIBLE else View.GONE
         binding.bottomLeftControls.visibility = View.VISIBLE
@@ -1454,9 +1454,7 @@ class ImageViewerFragment : Fragment() {
 
         adapter.setUiVisibility(true)
 
-        binding.btnNavigation.animate().translationY(0f).alpha(1f).setDuration(200).setListener(null).start()
-        binding.splitShare.animate().translationY(0f).alpha(1f).setDuration(200).setListener(null).start()
-        binding.splitSave.animate().translationY(0f).alpha(1f).setDuration(200).setListener(null).start()
+        binding.topBarContainer.animate().translationY(0f).alpha(1f).setDuration(200).setListener(null).start()
         binding.bottomLeftControls.animate().translationY(0f).alpha(1f).setDuration(200).setListener(null).start()
         binding.bottomRightControls.animate().translationY(0f).alpha(1f).setDuration(200).setListener(null).start()
     }
@@ -1467,15 +1465,11 @@ class ImageViewerFragment : Fragment() {
 
         adapter.setUiVisibility(false)
 
-        val topShift = -(binding.splitShare.height + (binding.splitShare.layoutParams as ViewGroup.MarginLayoutParams).topMargin).toFloat()
+        val topShift = -(binding.topBarContainer.height + (binding.topBarContainer.layoutParams as ViewGroup.MarginLayoutParams).topMargin).toFloat()
         val bottomShift = (binding.bottomLeftControls.height + (binding.bottomLeftControls.layoutParams as ViewGroup.MarginLayoutParams).bottomMargin).toFloat()
 
-        binding.btnNavigation.animate().translationY(topShift).alpha(0f).setDuration(200)
-            .withEndAction { binding.btnNavigation.visibility = View.GONE }.start()
-        binding.splitShare.animate().translationY(topShift).alpha(0f).setDuration(200)
-            .withEndAction { binding.splitShare.visibility = View.GONE }.start()
-        binding.splitSave.animate().translationY(topShift).alpha(0f).setDuration(200)
-            .withEndAction { binding.splitSave.visibility = View.GONE }.start()
+        binding.topBarContainer.animate().translationY(topShift).alpha(0f).setDuration(200)
+            .withEndAction { binding.topBarContainer.visibility = View.GONE }.start()
         binding.bottomLeftControls.animate().translationY(bottomShift).alpha(0f).setDuration(200)
             .withEndAction { binding.bottomLeftControls.visibility = View.GONE }.start()
         binding.bottomRightControls.animate().translationY(bottomShift).alpha(0f).setDuration(200)
@@ -1487,16 +1481,16 @@ class ImageViewerFragment : Fragment() {
         ViewCompat.setOnApplyWindowInsetsListener(binding.viewerRoot) { v, insets ->
             val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
 
-            binding.btnNavigation.updateLayoutParams<ViewGroup.MarginLayoutParams> {
+            binding.topBarContainer.updateLayoutParams<ViewGroup.MarginLayoutParams> {
                 topMargin = systemBars.top
+            }
+            binding.btnNavigation.updateLayoutParams<ViewGroup.MarginLayoutParams> {
                 leftMargin = resources.getDimensionPixelSize(R.dimen.rect_button_margin)
             }
             binding.splitShare.updateLayoutParams<ViewGroup.MarginLayoutParams> {
-                topMargin = systemBars.top
                 rightMargin = systemBars.right + marginSmall
             }
             binding.splitSave.updateLayoutParams<ViewGroup.MarginLayoutParams> {
-                topMargin = systemBars.top
                 rightMargin = systemBars.right + marginSmall
             }
             binding.bottomLeftControls.updateLayoutParams<ViewGroup.MarginLayoutParams> {

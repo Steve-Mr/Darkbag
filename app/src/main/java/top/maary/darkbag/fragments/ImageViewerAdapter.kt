@@ -92,7 +92,15 @@ class ImageViewerAdapter(
                 marginEnd = margin
                 if (isZoomed) {
                     dimensionRatio = null
+                    width = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.MATCH_PARENT
+                    height = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.MATCH_PARENT
+                    constrainedWidth = false
+                    constrainedHeight = false
                 } else {
+                    width = 0
+                    height = 0
+                    constrainedWidth = true
+                    constrainedHeight = true
                     holder.binding.imageView.drawable?.let {
                         if (it.intrinsicWidth > 0 && it.intrinsicHeight > 0) {
                             dimensionRatio = "${it.intrinsicWidth}:${it.intrinsicHeight}"
