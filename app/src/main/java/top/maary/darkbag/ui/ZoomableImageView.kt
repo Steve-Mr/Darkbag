@@ -75,19 +75,16 @@ class ZoomableImageView @JvmOverloads constructor(
         clipToOutline = true
         outlineProvider = object : android.view.ViewOutlineProvider() {
             override fun getOutline(view: android.view.View, outline: android.graphics.Outline) {
-                if (saveScale > 1.0f) {
-                    outline.setRect(0, 0, view.width, view.height)
-                } else {
-                    val margin = visualMargin.toInt()
-                    val radius = visualCornerRadius
-                    outline.setRoundRect(
-                        (redundancyX + margin).toInt(),
-                        (redundancyY).toInt(),
-                        (view.width - redundancyX - margin).toInt(),
-                        (view.height - redundancyY).toInt(),
-                        radius
-                    )
-                }
+                // Smoothly interpolate between card shape and full screen
+                val t = ((saveScale - 1.0f) / 0.05f).coerceIn(0f, 1f)
+
+                val left = (redundancyX * (1f - t)).toInt()
+                val top = (redundancyY * (1f - t)).toInt()
+                val right = (view.width - (redundancyX * (1f - t))).toInt()
+                val bottom = (view.height - (redundancyY * (1f - t))).toInt()
+                val radius = visualCornerRadius * (1f - t)
+
+                outline.setRoundRect(left, top, right, bottom, radius)
             }
         }
     }
@@ -276,8 +273,9 @@ class ZoomableImageView @JvmOverloads constructor(
             val bmHeight = drawable.intrinsicHeight
 
             val availableWidth = viewWidth - 2 * visualMargin
+            val availableHeight = viewHeight - 2 * visualMargin
             val scaleX = availableWidth / bmWidth
-            val scaleY = viewHeight.toFloat() / bmHeight
+            val scaleY = availableHeight / bmHeight
             val baseScale = if (scaleX < scaleY) scaleX else scaleY
 
             redundancyX = (viewWidth.toFloat() - baseScale * bmWidth) / 2
@@ -318,8 +316,9 @@ class ZoomableImageView @JvmOverloads constructor(
         val bmHeight = drawable.intrinsicHeight
 
         val availableWidth = viewWidth - 2 * visualMargin
+        val availableHeight = viewHeight - 2 * visualMargin
         val scaleX = availableWidth / bmWidth
-        val scaleY = viewHeight.toFloat() / bmHeight
+        val scaleY = availableHeight / bmHeight
         val scale = if (scaleX < scaleY) scaleX else scaleY
 
         matrixValue.setScale(scale, scale)
