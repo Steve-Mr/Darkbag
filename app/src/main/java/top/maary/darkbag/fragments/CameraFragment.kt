@@ -2564,8 +2564,8 @@ class CameraFragment : Fragment() {
 
         val effectiveDegrees = if (isHalfFrameModeEnabled) {
             val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-            val layout = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUTS[0])
-            if (layout == SettingsFragment.HALF_FRAME_LAYOUTS[1]) 270 else 0
+            val layout = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUT_SBS)
+            if (layout == SettingsFragment.HALF_FRAME_LAYOUT_TB) 270 else 0
         } else {
             deviceOrientationDegrees
         }
@@ -4525,8 +4525,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             vfBinding.viewFinder.scaleX = scale
             vfBinding.viewFinder.scaleY = scale
 
-            val layout = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUTS[0])
-            val isTopBottom = layout == SettingsFragment.HALF_FRAME_LAYOUTS[1]
+            val layout = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUT_SBS)
+            val isTopBottom = layout == SettingsFragment.HALF_FRAME_LAYOUT_TB
 
             val baseShift = if (halfFrameStep == 0) -shift else shift
             val targetShift = if (isTopBottom) -baseShift else baseShift
@@ -4679,12 +4679,12 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
     private fun cycleCaptureMode() {
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
         val currentMode = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_MODE, false)
-        val currentLayout = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUTS[0])
+        val currentLayout = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUT_SBS)
 
         val (newMode, newLayout) = when {
-            !currentMode -> true to SettingsFragment.HALF_FRAME_LAYOUTS[0] // Normal -> Side-by-side
-            currentLayout == SettingsFragment.HALF_FRAME_LAYOUTS[0] -> true to SettingsFragment.HALF_FRAME_LAYOUTS[1] // Side-by-side -> Top-bottom
-            else -> false to SettingsFragment.HALF_FRAME_LAYOUTS[0] // Top-bottom -> Normal
+            !currentMode -> true to SettingsFragment.HALF_FRAME_LAYOUT_SBS // Normal -> Side-by-side
+            currentLayout == SettingsFragment.HALF_FRAME_LAYOUT_SBS -> true to SettingsFragment.HALF_FRAME_LAYOUT_TB // Side-by-side -> Top-bottom
+            else -> false to SettingsFragment.HALF_FRAME_LAYOUT_SBS // Top-bottom -> Normal
         }
 
         prefs.edit()
@@ -4775,10 +4775,10 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         }
 
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        val layout = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUTS[0])
+        val layout = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUT_SBS)
 
         // Half-frame forces output orientation. Dot points to the fixed "Up" of the output frame.
-        return if (layout == SettingsFragment.HALF_FRAME_LAYOUTS[1]) {
+        return if (layout == SettingsFragment.HALF_FRAME_LAYOUT_TB) {
             // Top-bottom forces Landscape. Right side is Up.
             90f
         } else {
