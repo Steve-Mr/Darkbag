@@ -21,8 +21,8 @@ class HalfFrameSessionStore(private val context: Context) {
     fun currentProfile(): String {
         val mode = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_MODE, false)
         if (!mode) return PROFILE_NORMAL
-        val layout = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUTS[0])
-        return if (layout == SettingsFragment.HALF_FRAME_LAYOUTS[0]) PROFILE_HALF_SIDE else PROFILE_HALF_TOP
+        val layout = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUT_SBS)
+        return if (layout == SettingsFragment.HALF_FRAME_LAYOUT_SBS) PROFILE_HALF_SIDE else PROFILE_HALF_TOP
     }
 
     fun readSession(strict: Boolean = false, profile: String? = null): Session {
