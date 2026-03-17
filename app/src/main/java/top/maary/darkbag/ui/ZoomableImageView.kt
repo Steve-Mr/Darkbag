@@ -53,6 +53,11 @@ class ZoomableImageView @JvmOverloads constructor(
     private var isLongPressing = false
     private var isLongPressConsumed = false
 
+    private var visualMargin = 0f
+    private var visualCornerRadius = 0f
+    private var redundancyX = 0f
+    private var redundancyY = 0f
+
     companion object {
         private const val NONE = 0
         private const val DRAG = 1
@@ -67,6 +72,24 @@ class ZoomableImageView @JvmOverloads constructor(
         matrixValue = Matrix()
         imageMatrix = Matrix(matrixValue)
         scaleType = ScaleType.MATRIX
+        clipToOutline = true
+        outlineProvider = object : android.view.ViewOutlineProvider() {
+            override fun getOutline(view: android.view.View, outline: android.graphics.Outline) {
+                if (saveScale > 1.0f) {
+                    outline.setRect(0, 0, view.width, view.height)
+                } else {
+                    val margin = visualMargin.toInt()
+                    val radius = visualCornerRadius
+                    outline.setRoundRect(
+                        (redundancyX + margin).toInt(),
+                        (redundancyY).toInt(),
+                        (view.width - redundancyX - margin).toInt(),
+                        (view.height - redundancyY).toInt(),
+                        radius
+                    )
+                }
+            }
+        }
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
@@ -149,6 +172,7 @@ class ZoomableImageView @JvmOverloads constructor(
             }
 
             fixTrans()
+            invalidateOutline()
             onZoomChanged?.invoke(saveScale > 1f)
             return true
             }
@@ -189,6 +213,7 @@ class ZoomableImageView @JvmOverloads constructor(
             fixTrans()
             imageMatrix = Matrix(matrixValue)
             invalidate()
+            invalidateOutline()
         }
         animator.addListener(object : android.animation.AnimatorListenerAdapter() {
             override fun onAnimationEnd(animation: android.animation.Animator) {
@@ -237,6 +262,7 @@ class ZoomableImageView @JvmOverloads constructor(
         matrixValue.reset()
         fitCenter()
         invalidate()
+        invalidateOutline()
     }
 
     fun restoreZoomState(matrix: Matrix, scale: Float) {
@@ -248,16 +274,28 @@ class ZoomableImageView @JvmOverloads constructor(
         if (drawable != null && drawable.intrinsicWidth != 0 && drawable.intrinsicHeight != 0 && viewWidth != 0 && viewHeight != 0) {
             val bmWidth = drawable.intrinsicWidth
             val bmHeight = drawable.intrinsicHeight
-            val scaleX = viewWidth.toFloat() / bmWidth
+
+            val availableWidth = viewWidth - 2 * visualMargin
+            val scaleX = availableWidth / bmWidth
             val scaleY = viewHeight.toFloat() / bmHeight
             val baseScale = if (scaleX < scaleY) scaleX else scaleY
-            origWidth = viewWidth - 2 * ((viewWidth.toFloat() - baseScale * bmWidth) / 2)
-            origHeight = viewHeight - 2 * ((viewHeight.toFloat() - baseScale * bmHeight) / 2)
+
+            redundancyX = (viewWidth.toFloat() - baseScale * bmWidth) / 2
+            redundancyY = (viewHeight.toFloat() - baseScale * bmHeight) / 2
+            origWidth = viewWidth - 2 * redundancyX
+            origHeight = viewHeight - 2 * redundancyY
         }
 
         imageMatrix = Matrix(this.matrixValue)
         invalidate()
+        invalidateOutline()
         onZoomChanged?.invoke(saveScale > 1f)
+    }
+
+    fun setVisualParams(margin: Float, radius: Float) {
+        this.visualMargin = margin
+        this.visualCornerRadius = radius
+        resetZoom()
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
@@ -279,15 +317,16 @@ class ZoomableImageView @JvmOverloads constructor(
         val bmWidth = drawable.intrinsicWidth
         val bmHeight = drawable.intrinsicHeight
 
-        val scaleX = viewWidth.toFloat() / bmWidth
+        val availableWidth = viewWidth - 2 * visualMargin
+        val scaleX = availableWidth / bmWidth
         val scaleY = viewHeight.toFloat() / bmHeight
         val scale = if (scaleX < scaleY) scaleX else scaleY
 
         matrixValue.setScale(scale, scale)
 
         // Center the image
-        val redundancyY = (viewHeight.toFloat() - scale * bmHeight) / 2
-        val redundancyX = (viewWidth.toFloat() - scale * bmWidth) / 2
+        redundancyY = (viewHeight.toFloat() - scale * bmHeight) / 2
+        redundancyX = (viewWidth.toFloat() - scale * bmWidth) / 2
         matrixValue.postTranslate(redundancyX, redundancyY)
 
         origWidth = viewWidth - 2 * redundancyX

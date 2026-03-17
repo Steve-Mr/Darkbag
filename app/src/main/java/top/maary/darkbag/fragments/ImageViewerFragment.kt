@@ -850,6 +850,7 @@ class ImageViewerFragment : Fragment() {
         val currentHolder = (binding.imagePager.getChildAt(0) as? androidx.recyclerview.widget.RecyclerView)
             ?.findViewHolderForAdapterPosition(currentIndex) as? ImageViewerAdapter.ViewHolder
         currentHolder?.binding?.loadingIndicator?.visibility = View.VISIBLE
+        currentHolder?.binding?.imageView?.invalidateOutline()
 
         previewJob?.cancel()
         previewJob = lifecycleScope.launch {
