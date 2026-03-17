@@ -77,6 +77,7 @@ import top.maary.darkbag.MainApplication
 import top.maary.darkbag.processor.ColorProcessor
 import top.maary.darkbag.models.CaptureMetadata
 import top.maary.darkbag.processor.HdrPlusExportWorker
+import top.maary.darkbag.repository.ImageRepository
 import top.maary.darkbag.utils.ImageSaver
 import java.io.File
 import java.io.FileOutputStream
@@ -168,6 +169,7 @@ class CameraFragment : Fragment() {
     private var lutProcessor: LutSurfaceProcessor? = null
     private lateinit var lutManager: LutManager
     private lateinit var cameraRepository: CameraRepository
+    private lateinit var imageRepository: ImageRepository
     private var availableLenses: List<LensInfo> = emptyList()
     private var currentLens: LensInfo? = null
 
@@ -515,6 +517,7 @@ class CameraFragment : Fragment() {
 
         lutManager = LutManager(requireContext())
         cameraRepository = CameraRepository(requireContext())
+        imageRepository = ImageRepository(requireContext())
 
         // Initialize Preferences
         val prefs =
@@ -1174,7 +1177,7 @@ class CameraFragment : Fragment() {
             }
             // Warm ImageViewer data cache so first entry is faster.
             kotlin.runCatching {
-                top.maary.darkbag.repository.ImageRepository(context).getGroupedImages()
+                imageRepository.getGroupedImages()
             }.onFailure {
                 android.util.Log.w(TAG, "Failed to warm image repository cache", it)
             }
