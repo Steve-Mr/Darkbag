@@ -17,29 +17,47 @@ import java.io.File
 
 class ImageRepository(private val context: Context) {
 
-    suspend fun getGroupedImages(): List<ImageGroup> = withContext(Dispatchers.IO) {
-        val groups = mutableMapOf<String, ImageGroupBuilder>()
-        val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+    companion object {
+        @Volatile
+        private var cachedGroups: List<ImageGroup>? = null
+    }
 
-        // 1. Scan prioritized SAF folders
-        val safFolders = listOf(
-            prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null) to "jpg",
-            prefs.getString(SettingsFragment.KEY_RAW_STORAGE_URI, null) to "dng"
-        )
-
-        for ((folderUri, _) in safFolders) {
-            if (folderUri != null) {
-                scanSafFolder(folderUri, groups)
-            }
+    suspend fun getGroupedImages(forceRefresh: Boolean = false): List<ImageGroup> {
+        if (!forceRefresh) {
+            cachedGroups?.let { return it }
         }
 
-        // 2. Scan MediaStore for Darkbag folder
-        scanMediaStore(groups)
+        return withContext(Dispatchers.IO) {
+            val groups = mutableMapOf<String, ImageGroupBuilder>()
+            val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
 
-        groups.values
-            .map { it.build() }
-            .filter { it.hasAny() }
-            .sortedByDescending { it.captureTime }
+            // 1. Scan prioritized SAF folders
+            val safFolders = listOf(
+                prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null) to "jpg",
+                prefs.getString(SettingsFragment.KEY_RAW_STORAGE_URI, null) to "dng"
+            )
+
+            for ((folderUri, _) in safFolders) {
+                if (folderUri != null) {
+                    scanSafFolder(folderUri, groups)
+                }
+            }
+
+            // 2. Scan MediaStore for Darkbag folder
+            scanMediaStore(groups)
+
+            val result = groups.values
+                .map { it.build() }
+                .filter { it.hasAny() }
+                .sortedByDescending { it.captureTime }
+
+            cachedGroups = result
+            result
+        }
+    }
+
+    fun invalidateCache() {
+        cachedGroups = null
     }
 
     private fun scanSafFolder(folderUri: String, groups: MutableMap<String, ImageGroupBuilder>) {

@@ -61,6 +61,17 @@ class ImageViewerFragment : Fragment() {
 
     private lateinit var lutManager: top.maary.darkbag.utils.LutManager
     private var previewJob: Job? = null
+    private val pageChangeCallback = object : ViewPager2.OnPageChangeCallback() {
+        override fun onPageSelected(position: Int) {
+            if (isAdjusted) {
+                resetAdjustments()
+            } else {
+                currentEditConfig = null
+            }
+            lastCompositeBitmap = null
+            updateControlsVisibility()
+        }
+    }
 
     private val backPressedCallback = object : OnBackPressedCallback(false) {
         override fun handleOnBackPressed() {
@@ -100,12 +111,16 @@ class ImageViewerFragment : Fragment() {
             }
         }
 
+        binding.imagePager.registerOnPageChangeCallback(pageChangeCallback)
         loadImages()
     }
 
-    private fun loadImages(targetUri: String? = args.initialUri) {
+    private fun loadImages(targetUri: String? = args.initialUri, forceRefresh: Boolean = false) {
+        binding.initialLoadingContainer.visibility = View.VISIBLE
+        binding.imagePager.visibility = View.INVISIBLE
+
         lifecycleScope.launch {
-            val groups = repository.getGroupedImages()
+            val groups = repository.getGroupedImages(forceRefresh = forceRefresh)
             if (groups.isEmpty()) {
                 findNavController().navigateUp()
                 return@launch
@@ -132,19 +147,10 @@ class ImageViewerFragment : Fragment() {
 
             setupActionButtons()
             updateControlsVisibility()
-        }
 
-        binding.imagePager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
-            override fun onPageSelected(position: Int) {
-                if (isAdjusted) {
-                    resetAdjustments()
-                } else {
-                    currentEditConfig = null
-                }
-                lastCompositeBitmap = null
-                updateControlsVisibility()
-            }
-        })
+            binding.imagePager.visibility = View.VISIBLE
+            binding.initialLoadingContainer.visibility = View.GONE
+        }
     }
 
     private fun updateControlsVisibility() {
@@ -1121,7 +1127,8 @@ class ImageViewerFragment : Fragment() {
             }
 
             resetAdjustments()
-            val updatedGroups = repository.getGroupedImages()
+            repository.invalidateCache()
+            val updatedGroups = repository.getGroupedImages(forceRefresh = true)
             if (updatedGroups.isNotEmpty()) {
                 val targetBaseName = currentGroup.baseName
                 val newPos = updatedGroups.indexOfFirst { it.baseName == targetBaseName }.coerceAtLeast(0)
@@ -1368,7 +1375,8 @@ class ImageViewerFragment : Fragment() {
                     currentUri?.let { context.contentResolver.delete(it, null, null) }
                 }
 
-                val remainingGroup = repository.getGroupedImages().find { it.baseName == group.baseName }
+                repository.invalidateCache()
+                val remainingGroup = repository.getGroupedImages(forceRefresh = true).find { it.baseName == group.baseName }
                 nextTargetUri = if (remainingGroup != null) {
                     (remainingGroup.jpgUri ?: remainingGroup.dngUri)?.toString()
                 } else {
@@ -1379,7 +1387,7 @@ class ImageViewerFragment : Fragment() {
                     } else null
                 }
             }
-            loadImages(nextTargetUri)
+            loadImages(nextTargetUri, forceRefresh = true)
         }
     }
 
@@ -1487,6 +1495,7 @@ class ImageViewerFragment : Fragment() {
     }
 
     override fun onDestroyView() {
+        binding.imagePager.unregisterOnPageChangeCallback(pageChangeCallback)
         super.onDestroyView()
         _binding = null
     }

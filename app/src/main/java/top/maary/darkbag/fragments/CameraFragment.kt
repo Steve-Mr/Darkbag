@@ -1167,9 +1167,16 @@ class CameraFragment : Fragment() {
 
         // In the background, load latest photo taken (if any) for gallery thumbnail
         lifecycleScope.launch {
-            val thumbnailUri = mediaStoreUtils.getLatestAppImage(requireContext())
+            val context = requireContext()
+            val thumbnailUri = mediaStoreUtils.getLatestAppImage(context)
             thumbnailUri?.let {
                 setGalleryThumbnail(it.toString())
+            }
+            // Warm ImageViewer data cache so first entry is faster.
+            kotlin.runCatching {
+                top.maary.darkbag.repository.ImageRepository(context).getGroupedImages()
+            }.onFailure {
+                android.util.Log.w(TAG, "Failed to warm image repository cache", it)
             }
         }
 
