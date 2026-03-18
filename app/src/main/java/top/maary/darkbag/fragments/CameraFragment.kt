@@ -1316,7 +1316,7 @@ class CameraFragment : Fragment() {
             val hfGroupId = if (isFrame2Trigger) {
                 halfFrameSessionStore.readSession().baseName
             } else {
-                SimpleDateFormat(FILENAME, Locale.US).format(timing.shutterClick)
+                top.maary.darkbag.utils.ImageUtils.getBaseName(SimpleDateFormat(FILENAME, Locale.US).format(timing.shutterClick))
             }
 
             var resolvedFlare = -1
