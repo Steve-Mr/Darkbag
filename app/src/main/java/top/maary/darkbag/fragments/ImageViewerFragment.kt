@@ -116,7 +116,7 @@ class ImageViewerFragment : Fragment() {
     }
 
     private fun loadImages(targetUri: String? = args.initialUri, forceRefresh: Boolean = false) {
-        binding.initialLoadingContainer.visibility = View.VISIBLE
+        binding.initialLoadingIndicator.visibility = View.VISIBLE
         binding.imagePager.visibility = View.INVISIBLE
 
         lifecycleScope.launch {
@@ -149,7 +149,7 @@ class ImageViewerFragment : Fragment() {
             updateControlsVisibility()
 
             binding.imagePager.visibility = View.VISIBLE
-            binding.initialLoadingContainer.visibility = View.GONE
+            binding.initialLoadingIndicator.visibility = View.GONE
         }
     }
 
@@ -1462,7 +1462,7 @@ class ImageViewerFragment : Fragment() {
     }
 
     private fun setupEdgeToEdge() {
-        val marginSmall = resources.getDimensionPixelSize(R.dimen.margin_small)
+        val marginMedium = resources.getDimensionPixelSize(R.dimen.margin_medium)
         ViewCompat.setOnApplyWindowInsetsListener(binding.viewerRoot) { v, insets ->
             val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
 
@@ -1470,21 +1470,21 @@ class ImageViewerFragment : Fragment() {
                 topMargin = systemBars.top
             }
             binding.btnNavigation.updateLayoutParams<ViewGroup.MarginLayoutParams> {
-                leftMargin = resources.getDimensionPixelSize(R.dimen.rect_button_margin)
+                leftMargin = marginMedium
             }
             binding.splitShare.updateLayoutParams<ViewGroup.MarginLayoutParams> {
-                rightMargin = systemBars.right + marginSmall
+                rightMargin = systemBars.right + marginMedium
             }
             binding.splitSave.updateLayoutParams<ViewGroup.MarginLayoutParams> {
-                rightMargin = systemBars.right + marginSmall
+                rightMargin = systemBars.right + marginMedium
             }
             binding.bottomLeftControls.updateLayoutParams<ViewGroup.MarginLayoutParams> {
-                bottomMargin = systemBars.bottom + marginSmall
-                leftMargin = systemBars.left + marginSmall
+                bottomMargin = systemBars.bottom + marginMedium
+                leftMargin = systemBars.left + marginMedium
             }
             binding.bottomRightControls.updateLayoutParams<ViewGroup.MarginLayoutParams> {
-                bottomMargin = systemBars.bottom + marginSmall
-                rightMargin = systemBars.right + marginSmall
+                bottomMargin = systemBars.bottom + marginMedium
+                rightMargin = systemBars.right + marginMedium
             }
             insets
         }
@@ -1506,6 +1506,10 @@ class ImageViewerFragment : Fragment() {
     }
 
     private fun forceShowIcons(popup: PopupMenu) {
+        val colorOnSurface = com.google.android.material.color.MaterialColors.getColor(requireContext(), com.google.android.material.R.attr.colorOnSurface, android.graphics.Color.WHITE)
+        for (i in 0 until popup.menu.size()) {
+            popup.menu.getItem(i).icon?.setTint(colorOnSurface)
+        }
         try {
             val field = popup.javaClass.getDeclaredField("mPopup")
             field.isAccessible = true

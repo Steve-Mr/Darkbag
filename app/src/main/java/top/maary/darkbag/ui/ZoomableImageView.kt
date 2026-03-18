@@ -63,7 +63,7 @@ class ZoomableImageView @JvmOverloads constructor(
         private const val DRAG = 1
         private const val ZOOM = 2
         private const val CLICK = 3
-        private const val OUTLINE_TRANSITION_RANGE = 0.05f
+        private const val OUTLINE_TRANSITION_RANGE = 0.1f
     }
 
     init {
