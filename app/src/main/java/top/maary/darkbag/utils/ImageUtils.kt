@@ -148,4 +148,16 @@ object ImageUtils {
         }
         return inSampleSize
     }
+
+    fun getBaseName(fileName: String): String {
+        return fileName.substringBeforeLast(".")
+            .replace("_linear", "")
+            .replace("_bayer", "")
+            .replace("_HDRPLUS", "")
+            .replace("_full", "")
+            .replace("_HF1", "")
+            .replace("_HF2", "")
+            .replace("_stitched", "")
+            .replace("stitched_hf_", "")
+    }
 }

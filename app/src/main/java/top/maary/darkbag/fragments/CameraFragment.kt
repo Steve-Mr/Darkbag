@@ -100,6 +100,7 @@ import top.maary.darkbag.utils.MediaStoreUtils
 import top.maary.darkbag.utils.LutManager
 import top.maary.darkbag.utils.HalfFrameSessionStore
 import top.maary.darkbag.utils.HalfFrameManager
+import top.maary.darkbag.utils.ImageUtils
 import top.maary.darkbag.processor.LutSurfaceProcessor
 import top.maary.darkbag.utils.ExposureUtils
 import top.maary.darkbag.utils.simulateClick
@@ -1327,7 +1328,8 @@ class CameraFragment : Fragment() {
             val isFrame2Trigger = isHalfFrameModeEnabled && halfFrameStep == 1
 
             val hfGroupId = if (isFrame2Trigger) {
-                halfFrameSessionStore.readSession().baseName
+                val sessionBase = halfFrameSessionStore.readSession().baseName
+                if (sessionBase != null) ImageUtils.getBaseName(sessionBase) else SimpleDateFormat(FILENAME, Locale.US).format(timing.shutterClick)
             } else {
                 SimpleDateFormat(FILENAME, Locale.US).format(timing.shutterClick)
             }

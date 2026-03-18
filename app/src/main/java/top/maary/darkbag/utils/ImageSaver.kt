@@ -75,7 +75,8 @@ object ImageSaver {
                 val f = File(bmpPath!!)
                 if (f.exists() && f.length() > 0) {
                     if (isHalfFrameActive) {
-                        val finalPath = halfFrameManager.handleCapture(f.absolutePath, baseName, isFastPath, halfFrameMetadata, digitalGain = digitalGain)
+                            val cleanBase = ImageUtils.getBaseName(baseName)
+                            val finalPath = halfFrameManager.handleCapture(f.absolutePath, cleanBase, isFastPath, halfFrameMetadata, digitalGain = digitalGain)
 
                         if (isFastPath) {
                             val session = if (halfFrameMetadata != null) {
@@ -84,13 +85,14 @@ object ImageSaver {
                                 HalfFrameSessionStore(context).readSession()
                             }
 
-                            if (session.baseName == baseName) {
+                            if (session.baseName == cleanBase) {
                                 ColorProcessor.halfFrameFlow.tryEmit(1)
                             } else {
                                 ColorProcessor.halfFrameFlow.tryEmit(2)
                                 if (finalPath != null) {
                                     val finalFile = File(finalPath)
-                                    finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri, editConfig = editConfig, zoomFactor = zoomFactor, captureMetadata = captureMetadata) { out ->
+                                    val finalDisplayName = "${cleanBase}_stitched.jpg"
+                                    finalJpgUri = saveJpegToMediaStore(context, finalDisplayName, targetUri, editConfig = editConfig, zoomFactor = zoomFactor, captureMetadata = captureMetadata) { out ->
                                         finalFile.inputStream().use { it.copyTo(out) }
                                     }
                                 }
@@ -98,10 +100,11 @@ object ImageSaver {
                         } else {
                             if (finalPath != null) {
                                 val finalFile = File(finalPath)
+                                    val finalDisplayName = "${cleanBase}_stitched.jpg"
                                 if (jpgFolderUri != null) {
-                                    finalJpgUri = saveFileToFolder(context, finalFile, "$baseName.jpg", "image/jpeg", jpgFolderUri, editConfig = editConfig, zoomFactor = zoomFactor, captureMetadata = captureMetadata)
+                                        finalJpgUri = saveFileToFolder(context, finalFile, finalDisplayName, "image/jpeg", jpgFolderUri, editConfig = editConfig, zoomFactor = zoomFactor, captureMetadata = captureMetadata)
                                 } else {
-                                    finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri, editConfig = editConfig, zoomFactor = zoomFactor, captureMetadata = captureMetadata) { out ->
+                                        finalJpgUri = saveJpegToMediaStore(context, finalDisplayName, targetUri, editConfig = editConfig, zoomFactor = zoomFactor, captureMetadata = captureMetadata) { out ->
                                         finalFile.inputStream().use { it.copyTo(out) }
                                     }
                                 }
@@ -192,7 +195,8 @@ object ImageSaver {
                                     processedBitmap.compress(Bitmap.CompressFormat.JPEG, 95, out)
                                 }
 
-                                val finalPath = halfFrameManager.handleCapture(tempJpg.absolutePath, baseName, isFastPath, halfFrameMetadata, digitalGain = digitalGain)
+                                val cleanBase = ImageUtils.getBaseName(baseName)
+                                val finalPath = halfFrameManager.handleCapture(tempJpg.absolutePath, cleanBase, isFastPath, halfFrameMetadata, digitalGain = digitalGain)
 
                                 if (isFastPath) {
                                     val session = if (halfFrameMetadata != null) {
@@ -201,15 +205,16 @@ object ImageSaver {
                                         HalfFrameSessionStore(context).readSession()
                                     }
 
-                                    if (session.baseName == baseName) {
+                                    if (session.baseName == cleanBase) {
                                         ColorProcessor.halfFrameFlow.tryEmit(1)
                                     } else {
                                         ColorProcessor.halfFrameFlow.tryEmit(2)
                                         if (finalPath != null) {
                                             val finalFile = File(finalPath)
+                                            val finalDisplayName = "${cleanBase}_stitched.jpg"
                                             finalJpgUri = saveJpegToMediaStore(
                                                 context,
-                                                "$baseName.jpg",
+                                                finalDisplayName,
                                                 targetUri,
                                                 processedBitmap.width,
                                                 processedBitmap.height,
@@ -223,8 +228,9 @@ object ImageSaver {
                                 } else {
                                     if (finalPath != null) {
                                         val finalFile = File(finalPath)
+                                        val finalDisplayName = "${cleanBase}_stitched.jpg"
                                         if (jpgFolderUri != null) {
-                                        finalJpgUri = saveFileToFolder(context, finalFile, "$baseName.jpg", "image/jpeg", jpgFolderUri, editConfig = editConfig)
+                                        finalJpgUri = saveFileToFolder(context, finalFile, finalDisplayName, "image/jpeg", jpgFolderUri, editConfig = editConfig)
                                         } else {
                                             val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                                             BitmapFactory.decodeFile(finalPath, options)
@@ -233,7 +239,7 @@ object ImageSaver {
 
                                             finalJpgUri = saveJpegToMediaStore(
                                                 context,
-                                                "$baseName.jpg",
+                                                finalDisplayName,
                                                 targetUri,
                                                 finalW,
                                                 finalH,

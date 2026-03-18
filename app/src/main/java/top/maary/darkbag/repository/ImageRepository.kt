@@ -13,6 +13,7 @@ import org.json.JSONObject
 import top.maary.darkbag.fragments.SettingsFragment
 import top.maary.darkbag.models.EditConfig
 import top.maary.darkbag.models.ImageGroup
+import top.maary.darkbag.utils.ImageUtils
 import java.io.File
 
 class ImageRepository(private val context: Context) {
@@ -66,7 +67,7 @@ class ImageRepository(private val context: Context) {
             val root = DocumentFile.fromTreeUri(context, treeUri)
             root?.listFiles()?.forEach { file ->
                 val name = file.name ?: return@forEach
-                val baseName = getBaseName(name)
+                val baseName = ImageUtils.getBaseName(name)
                 val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
 
                 when {
@@ -96,12 +97,12 @@ class ImageRepository(private val context: Context) {
                             android.util.Log.w("ImageRepository", "Failed to read EXIF from ${file.uri}", e)
                         }
                     }
-                    name.contains("_HF1") && name.endsWith(".dng", ignoreCase = true) -> {
-                        builder.dngUri1 = file.uri
-                        builder.updateTime(file.lastModified())
-                    }
                     name.contains("_HF2") && name.endsWith(".dng", ignoreCase = true) -> {
                         builder.dngUri2 = file.uri
+                        builder.updateTime(file.lastModified())
+                    }
+                    name.contains("_HF1") && name.endsWith(".dng", ignoreCase = true) -> {
+                        builder.dngUri1 = file.uri
                         builder.updateTime(file.lastModified())
                     }
                     name.endsWith(".dng", ignoreCase = true) -> {
@@ -145,7 +146,7 @@ class ImageRepository(private val context: Context) {
                 val mime = cursor.getString(mimeColumn)
                 val uri = ContentUris.withAppendedId(collection, id)
 
-                val baseName = getBaseName(name)
+                val baseName = ImageUtils.getBaseName(name)
                 val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
 
                 when {
@@ -173,11 +174,11 @@ class ImageRepository(private val context: Context) {
                             android.util.Log.w("ImageRepository", "Failed to read EXIF from $uri", e)
                         }
                     }
-                    name.contains("_HF1") && (mime == "image/x-adobe-dng" || name.endsWith(".dng", ignoreCase = true)) -> {
-                        builder.dngUri1 = uri
-                    }
                     name.contains("_HF2") && (mime == "image/x-adobe-dng" || name.endsWith(".dng", ignoreCase = true)) -> {
                         builder.dngUri2 = uri
+                    }
+                    name.contains("_HF1") && (mime == "image/x-adobe-dng" || name.endsWith(".dng", ignoreCase = true)) -> {
+                        builder.dngUri1 = uri
                     }
                     mime == "image/x-adobe-dng" || name.endsWith(".dng", ignoreCase = true) -> {
                         builder.dngUri = uri
@@ -264,16 +265,6 @@ class ImageRepository(private val context: Context) {
         }
     }
 
-    private fun getBaseName(fileName: String): String {
-        return fileName.substringBeforeLast(".")
-            .replace("_linear", "")
-            .replace("_bayer", "")
-            .replace("_HDRPLUS", "")
-            .replace("_full", "")
-            .replace("_HF1", "")
-            .replace("_HF2", "")
-            .replace("stitched_hf_", "")
-    }
 
     private class ImageGroupBuilder(val baseName: String) {
         var jpgUri: Uri? = null
