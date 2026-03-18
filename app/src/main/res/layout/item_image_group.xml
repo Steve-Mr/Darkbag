@@ -5,18 +5,11 @@
     android:layout_height="match_parent"
     android:background="@android:color/black">
 
-    <androidx.constraintlayout.widget.ConstraintLayout
-        android:id="@+id/image_container"
+    <top.maary.darkbag.ui.ZoomableImageView
+        android:id="@+id/image_view"
         android:layout_width="match_parent"
-        android:layout_height="match_parent">
-
-        <top.maary.darkbag.ui.ZoomableImageView
-            android:id="@+id/image_view"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:contentDescription="Full size image" />
-
-    </androidx.constraintlayout.widget.ConstraintLayout>
+        android:layout_height="match_parent"
+        android:contentDescription="Full size image" />
 
     <com.google.android.material.progressindicator.CircularProgressIndicator
         android:id="@+id/loading_indicator"

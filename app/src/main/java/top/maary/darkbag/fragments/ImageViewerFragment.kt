@@ -116,7 +116,7 @@ class ImageViewerFragment : Fragment() {
     }
 
     private fun loadImages(targetUri: String? = args.initialUri, forceRefresh: Boolean = false) {
-        binding.initialLoadingContainer.visibility = View.VISIBLE
+        binding.initialLoadingIndicator.visibility = View.VISIBLE
         binding.imagePager.visibility = View.INVISIBLE
 
         lifecycleScope.launch {
@@ -125,7 +125,7 @@ class ImageViewerFragment : Fragment() {
                 findNavController().navigateUp()
                 return@launch
             }
-            adapter = ImageViewerAdapter(groups, lifecycleScope).apply {
+            adapter = ImageViewerAdapter(groups, lifecycleScope, requireContext()).apply {
                 onImageTapped = { toggleUi() }
                 onZoomChanged = { isZoomed -> if (isZoomed) hideUi() else showUi() }
                 onLongPressStarted = { handleLongPressStarted(it) }
@@ -149,7 +149,7 @@ class ImageViewerFragment : Fragment() {
             updateControlsVisibility()
 
             binding.imagePager.visibility = View.VISIBLE
-            binding.initialLoadingContainer.visibility = View.GONE
+            binding.initialLoadingIndicator.visibility = View.GONE
         }
     }
 
@@ -296,11 +296,10 @@ class ImageViewerFragment : Fragment() {
 
     private fun updateToolbarIcon() {
         if (isAdjusted) {
-            binding.toolbar.setNavigationIcon(R.drawable.ic_close)
+            binding.btnNavigation.setIconResource(R.drawable.ic_close)
         } else {
-            binding.toolbar.setNavigationIcon(R.drawable.ic_back)
+            binding.btnNavigation.setIconResource(R.drawable.ic_back)
         }
-        binding.toolbar.navigationIcon?.setTint(android.graphics.Color.WHITE)
     }
 
     private fun setupActionButtons() {
@@ -308,15 +307,29 @@ class ImageViewerFragment : Fragment() {
             performShare()
         }
         binding.btnShareMenu.setOnClickListener {
+            binding.btnShareMenu.isCheckable = true
+            binding.btnShareMenu.isChecked = true
             val popup = PopupMenu(requireContext(), it)
-            popup.menu.add(0, 1, 0, "Delete")
+            popup.menu.add(0, MENU_DETAILS, 0, "Details").apply {
+                setIcon(R.drawable.ic_info)
+            }
+            popup.menu.add(0, MENU_DELETE, 0, "Delete").apply {
+                setIcon(R.drawable.ic_delete)
+            }
+
+            forceShowIcons(popup)
+
             popup.setOnMenuItemClickListener { item ->
-                if (item.itemId == 1) {
-                    val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
-                    showDeleteDialog(currentGroup)
+                when (item.itemId) {
+                    MENU_DETAILS -> showImageDetails()
+                    MENU_DELETE -> {
+                        val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
+                        showDeleteDialog(currentGroup)
+                    }
                 }
                 true
             }
+            popup.setOnDismissListener { binding.btnShareMenu.isChecked = false }
             popup.show()
         }
 
@@ -324,19 +337,23 @@ class ImageViewerFragment : Fragment() {
             saveEdit(isReplacement = true)
         }
         binding.btnSaveMenu.setOnClickListener {
+            binding.btnSaveMenu.isCheckable = true
+            binding.btnSaveMenu.isChecked = true
             val popup = PopupMenu(requireContext(), it)
-            popup.menu.add(0, 1, 0, "Save as new file")
+            popup.menu.add(0, MENU_SAVE_AS, 0, "Save as new file").apply {
+                setIcon(R.drawable.ic_save_as)
+            }
+
+            forceShowIcons(popup)
+
             popup.setOnMenuItemClickListener { item ->
-                if (item.itemId == 1) {
+                if (item.itemId == MENU_SAVE_AS) {
                     saveEdit(isReplacement = false)
                 }
                 true
             }
+            popup.setOnDismissListener { binding.btnSaveMenu.isChecked = false }
             popup.show()
-        }
-
-        binding.btnDetails.setOnClickListener {
-            showImageDetails()
         }
 
         binding.btnLogLut.setOnClickListener {
@@ -817,6 +834,7 @@ class ImageViewerFragment : Fragment() {
         val currentHolder = (binding.imagePager.getChildAt(0) as? androidx.recyclerview.widget.RecyclerView)
             ?.findViewHolderForAdapterPosition(currentIndex) as? ImageViewerAdapter.ViewHolder
         currentHolder?.binding?.loadingIndicator?.visibility = View.VISIBLE
+        currentHolder?.binding?.imageView?.invalidateOutline()
 
         previewJob?.cancel()
         previewJob = lifecycleScope.launch {
@@ -1132,7 +1150,7 @@ class ImageViewerFragment : Fragment() {
             if (updatedGroups.isNotEmpty()) {
                 val targetBaseName = currentGroup.baseName
                 val newPos = updatedGroups.indexOfFirst { it.baseName == targetBaseName }.coerceAtLeast(0)
-                adapter = ImageViewerAdapter(updatedGroups, lifecycleScope).apply {
+            adapter = ImageViewerAdapter(updatedGroups, lifecycleScope, requireContext()).apply {
                     onImageTapped = { toggleUi() }
                     onZoomChanged = { isZoomed -> if (isZoomed) hideUi() else showUi() }
                     onLongPressStarted = { handleLongPressStarted(it) }
@@ -1392,7 +1410,7 @@ class ImageViewerFragment : Fragment() {
     }
 
     private fun setupToolbar() {
-        binding.toolbar.setNavigationOnClickListener {
+        binding.btnNavigation.setOnClickListener {
             if (binding.lutListContainer.visibility == View.VISIBLE) {
                 binding.lutListContainer.visibility = View.GONE
                 binding.touchOverlay.visibility = View.GONE
@@ -1413,7 +1431,7 @@ class ImageViewerFragment : Fragment() {
         if (isUiVisible) return
         isUiVisible = true
 
-        binding.toolbar.visibility = View.VISIBLE
+        binding.topBarContainer.visibility = View.VISIBLE
         binding.splitShare.visibility = if (isAdjusted) View.GONE else View.VISIBLE
         binding.splitSave.visibility = if (isAdjusted) View.VISIBLE else View.GONE
         binding.bottomLeftControls.visibility = View.VISIBLE
@@ -1421,9 +1439,7 @@ class ImageViewerFragment : Fragment() {
 
         adapter.setUiVisibility(true)
 
-        binding.toolbar.animate().translationY(0f).alpha(1f).setDuration(200).setListener(null).start()
-        binding.splitShare.animate().translationY(0f).alpha(1f).setDuration(200).setListener(null).start()
-        binding.splitSave.animate().translationY(0f).alpha(1f).setDuration(200).setListener(null).start()
+        binding.topBarContainer.animate().translationY(0f).alpha(1f).setDuration(200).setListener(null).start()
         binding.bottomLeftControls.animate().translationY(0f).alpha(1f).setDuration(200).setListener(null).start()
         binding.bottomRightControls.animate().translationY(0f).alpha(1f).setDuration(200).setListener(null).start()
     }
@@ -1434,16 +1450,11 @@ class ImageViewerFragment : Fragment() {
 
         adapter.setUiVisibility(false)
 
-        val topShift = -(binding.toolbar.height + (binding.toolbar.layoutParams as ViewGroup.MarginLayoutParams).topMargin).toFloat()
+        val topShift = -(binding.topBarContainer.height + (binding.topBarContainer.layoutParams as ViewGroup.MarginLayoutParams).topMargin).toFloat()
         val bottomShift = (binding.bottomLeftControls.height + (binding.bottomLeftControls.layoutParams as ViewGroup.MarginLayoutParams).bottomMargin).toFloat()
 
-        binding.toolbar.animate().translationY(topShift).alpha(0f).setDuration(200)
-            .withEndAction { binding.toolbar.visibility = View.GONE }.start()
-        binding.btnDetails.animate().alpha(0f).setDuration(200).start()
-        binding.splitShare.animate().translationY(topShift).alpha(0f).setDuration(200)
-            .withEndAction { binding.splitShare.visibility = View.GONE }.start()
-        binding.splitSave.animate().translationY(topShift).alpha(0f).setDuration(200)
-            .withEndAction { binding.splitSave.visibility = View.GONE }.start()
+        binding.topBarContainer.animate().translationY(topShift).alpha(0f).setDuration(200)
+            .withEndAction { binding.topBarContainer.visibility = View.GONE }.start()
         binding.bottomLeftControls.animate().translationY(bottomShift).alpha(0f).setDuration(200)
             .withEndAction { binding.bottomLeftControls.visibility = View.GONE }.start()
         binding.bottomRightControls.animate().translationY(bottomShift).alpha(0f).setDuration(200)
@@ -1451,29 +1462,29 @@ class ImageViewerFragment : Fragment() {
     }
 
     private fun setupEdgeToEdge() {
-        val marginSmall = resources.getDimensionPixelSize(R.dimen.margin_small)
+        val marginMedium = resources.getDimensionPixelSize(R.dimen.margin_medium)
         ViewCompat.setOnApplyWindowInsetsListener(binding.viewerRoot) { v, insets ->
             val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
 
-            binding.toolbar.updateLayoutParams<ViewGroup.MarginLayoutParams> {
+            binding.topBarContainer.updateLayoutParams<ViewGroup.MarginLayoutParams> {
                 topMargin = systemBars.top
-                leftMargin = systemBars.left
+            }
+            binding.btnNavigation.updateLayoutParams<ViewGroup.MarginLayoutParams> {
+                leftMargin = marginMedium
             }
             binding.splitShare.updateLayoutParams<ViewGroup.MarginLayoutParams> {
-                topMargin = systemBars.top
-                rightMargin = systemBars.right + marginSmall
+                rightMargin = systemBars.right + marginMedium
             }
             binding.splitSave.updateLayoutParams<ViewGroup.MarginLayoutParams> {
-                topMargin = systemBars.top
-                rightMargin = systemBars.right + marginSmall
+                rightMargin = systemBars.right + marginMedium
             }
             binding.bottomLeftControls.updateLayoutParams<ViewGroup.MarginLayoutParams> {
-                bottomMargin = systemBars.bottom + marginSmall
-                leftMargin = systemBars.left + marginSmall
+                bottomMargin = systemBars.bottom + marginMedium
+                leftMargin = systemBars.left + marginMedium
             }
             binding.bottomRightControls.updateLayoutParams<ViewGroup.MarginLayoutParams> {
-                bottomMargin = systemBars.bottom + marginSmall
-                rightMargin = systemBars.right + marginSmall
+                bottomMargin = systemBars.bottom + marginMedium
+                rightMargin = systemBars.right + marginMedium
             }
             insets
         }
@@ -1494,9 +1505,35 @@ class ImageViewerFragment : Fragment() {
             .show()
     }
 
+    private fun forceShowIcons(popup: PopupMenu) {
+        val colorOnSurface = com.google.android.material.color.MaterialColors.getColor(requireContext(), com.google.android.material.R.attr.colorOnSurface, android.graphics.Color.WHITE)
+        for (i in 0 until popup.menu.size()) {
+            popup.menu.getItem(i).icon?.setTint(colorOnSurface)
+        }
+        try {
+            val field = popup.javaClass.getDeclaredField("mPopup")
+            field.isAccessible = true
+            val menuHelper = field.get(popup)
+            val setForceShowIcon = menuHelper.javaClass.getDeclaredMethod("setForceShowIcon", Boolean::class.java)
+            setForceShowIcon.invoke(menuHelper, true)
+        } catch (e: NoSuchFieldException) {
+            android.util.Log.e("ImageViewerFragment", "mPopup field not found in PopupMenu", e)
+        } catch (e: NoSuchMethodException) {
+            android.util.Log.e("ImageViewerFragment", "setForceShowIcon method not found", e)
+        } catch (e: Exception) {
+            android.util.Log.e("ImageViewerFragment", "Unexpected error forcing icons", e)
+        }
+    }
+
     override fun onDestroyView() {
         binding.imagePager.unregisterOnPageChangeCallback(pageChangeCallback)
         super.onDestroyView()
         _binding = null
+    }
+
+    companion object {
+        private const val MENU_DETAILS = 1
+        private const val MENU_DELETE = 2
+        private const val MENU_SAVE_AS = 3
     }
 }

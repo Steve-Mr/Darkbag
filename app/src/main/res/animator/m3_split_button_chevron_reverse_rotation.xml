@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<set xmlns:android="http://schemas.android.com/apk/res/android">
+    <objectAnimator
+        android:duration="200"
+        android:propertyName="rotation"
+        android:valueFrom="0"
+        android:valueTo="-180"
+        android:interpolator="@animator/m3_split_button_chevron_overshoot_interpolator"
+        android:valueType="floatType"
+        android:fillAfter="true"/>
+</set>
