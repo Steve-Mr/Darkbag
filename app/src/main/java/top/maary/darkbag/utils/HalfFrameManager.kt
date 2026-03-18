@@ -170,7 +170,7 @@ class HalfFrameManager(private val context: Context) {
                     stitchedBitmap, dateStampEnabled, lightLeak, activeLayout, time1, time2,
                     flareType = metadata?.flareType ?: if (lightLeak) java.util.Random().nextInt(2) + 1 else -1
                 )
-                val stitchedFile = File(context.cacheDir, "stitched_hf_${partnerBaseName}.jpg")
+                val stitchedFile = File(context.cacheDir, "${partnerBaseName}_stitched.jpg")
                 FileOutputStream(stitchedFile).use { out ->
                     finalBitmap.compress(Bitmap.CompressFormat.JPEG, 95, out)
                 }

@@ -68,11 +68,11 @@ class ImageRepository(private val context: Context) {
                 val name = file.name ?: return@forEach
                 val baseName = getBaseName(name)
                 val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
+                val lastModified = file.lastModified()
 
                 when {
                     name.endsWith(".jpg", ignoreCase = true) || name.endsWith(".jpeg", ignoreCase = true) -> {
-                        builder.jpgUri = file.uri
-                        builder.updateTime(file.lastModified())
+                        builder.setJpg(file.uri, lastModified)
                         // Try reading EXIF for layout and dimensions
                         try {
                             context.contentResolver.openFileDescriptor(file.uri, "r")?.use { pfd ->
@@ -96,17 +96,14 @@ class ImageRepository(private val context: Context) {
                             android.util.Log.w("ImageRepository", "Failed to read EXIF from ${file.uri}", e)
                         }
                     }
-                    name.contains("_HF1") && name.endsWith(".dng", ignoreCase = true) -> {
-                        builder.dngUri1 = file.uri
-                        builder.updateTime(file.lastModified())
-                    }
                     name.contains("_HF2") && name.endsWith(".dng", ignoreCase = true) -> {
-                        builder.dngUri2 = file.uri
-                        builder.updateTime(file.lastModified())
+                        builder.setDng2(file.uri, lastModified)
+                    }
+                    name.contains("_HF1") && name.endsWith(".dng", ignoreCase = true) -> {
+                        builder.setDng1(file.uri, lastModified)
                     }
                     name.endsWith(".dng", ignoreCase = true) -> {
-                        builder.dngUri = file.uri
-                        builder.updateTime(file.lastModified())
+                        builder.setDng(file.uri, lastModified)
                     }
                 }
             }
@@ -150,7 +147,7 @@ class ImageRepository(private val context: Context) {
 
                 when {
                     mime == "image/jpeg" -> {
-                        builder.jpgUri = uri
+                        builder.setJpg(uri, date)
                         try {
                             context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
                                 val exif = androidx.exifinterface.media.ExifInterface(pfd.fileDescriptor)
@@ -173,17 +170,16 @@ class ImageRepository(private val context: Context) {
                             android.util.Log.w("ImageRepository", "Failed to read EXIF from $uri", e)
                         }
                     }
-                    name.contains("_HF1") && (mime == "image/x-adobe-dng" || name.endsWith(".dng", ignoreCase = true)) -> {
-                        builder.dngUri1 = uri
-                    }
                     name.contains("_HF2") && (mime == "image/x-adobe-dng" || name.endsWith(".dng", ignoreCase = true)) -> {
-                        builder.dngUri2 = uri
+                        builder.setDng2(uri, date)
+                    }
+                    name.contains("_HF1") && (mime == "image/x-adobe-dng" || name.endsWith(".dng", ignoreCase = true)) -> {
+                        builder.setDng1(uri, date)
                     }
                     mime == "image/x-adobe-dng" || name.endsWith(".dng", ignoreCase = true) -> {
-                        builder.dngUri = uri
+                        builder.setDng(uri, date)
                     }
                 }
-                builder.updateTime(date)
             }
         }
     }
@@ -265,26 +261,58 @@ class ImageRepository(private val context: Context) {
     }
 
     private fun getBaseName(fileName: String): String {
-        return fileName.substringBeforeLast(".")
-            .replace("_linear", "")
-            .replace("_bayer", "")
-            .replace("_HDRPLUS", "")
-            .replace("_full", "")
-            .replace("_HF1", "")
-            .replace("_HF2", "")
-            .replace("stitched_hf_", "")
+        return top.maary.darkbag.utils.ImageUtils.getBaseName(fileName)
     }
 
     private class ImageGroupBuilder(val baseName: String) {
         var jpgUri: Uri? = null
+        private var jpgTime: Long = 0L
         var dngUri: Uri? = null
+        private var dngTime: Long = 0L
         var dngUri1: Uri? = null
+        private var dngUri1Time: Long = 0L
         var dngUri2: Uri? = null
+        private var dngUri2Time: Long = 0L
         var hfLayout: String? = null
         var width: Int = 0
         var height: Int = 0
         var captureTime: Long = 0L
         var editConfig: EditConfig? = null
+
+        fun setJpg(uri: Uri, time: Long) {
+            // Prefer _stitched or simply newer JPG if both exist
+            if (jpgUri == null || time > jpgTime) {
+                jpgUri = uri
+                jpgTime = time
+            }
+            updateTime(time)
+        }
+
+        fun setDng(uri: Uri, time: Long) {
+            if (dngUri == null || time > dngTime) {
+                dngUri = uri
+                dngTime = time
+            }
+            updateTime(time)
+        }
+
+        fun setDng1(uri: Uri, time: Long) {
+            // For HF1, prefer the one with earlier time in case of conflict
+            if (dngUri1 == null || time < dngUri1Time) {
+                dngUri1 = uri
+                dngUri1Time = time
+            }
+            updateTime(time)
+        }
+
+        fun setDng2(uri: Uri, time: Long) {
+            // For HF2, prefer the one with later time in case of conflict
+            if (dngUri2 == null || time > dngUri2Time) {
+                dngUri2 = uri
+                dngUri2Time = time
+            }
+            updateTime(time)
+        }
 
         fun updateTime(time: Long) {
             if (time > captureTime) captureTime = time
