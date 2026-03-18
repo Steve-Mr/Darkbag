@@ -221,7 +221,7 @@ class SettingsFragment : Fragment() {
         // Half-frame Layout
         val halfFrameLayoutAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, HALF_FRAME_LAYOUTS)
         binding.menuHalfFrameLayout.setAdapter(halfFrameLayoutAdapter)
-        val savedHalfFrameLayout = prefs.getString(KEY_HALF_FRAME_LAYOUT, HALF_FRAME_LAYOUTS[0])
+        val savedHalfFrameLayout = prefs.getString(KEY_HALF_FRAME_LAYOUT, HALF_FRAME_LAYOUT_SBS)
         binding.menuHalfFrameLayout.setText(savedHalfFrameLayout, false)
         binding.menuHalfFrameLayout.setOnItemClickListener { _, _, position, _ ->
             prefs.edit().putString(KEY_HALF_FRAME_LAYOUT, HALF_FRAME_LAYOUTS[position]).apply()
@@ -414,7 +414,10 @@ class SettingsFragment : Fragment() {
         val ANTIBANDING_MODES = listOf("Auto", "50Hz", "60Hz", "Off")
         val BURST_SIZES = listOf("3", "4", "5", "6", "7", "8")
         val HDR_UNDEREXPOSURE_MODES = listOf("Off", "-1 EV", "-2 EV", "Dynamic (Experimental)")
-        val HALF_FRAME_LAYOUTS = listOf("Side-by-side", "Top-bottom")
+
+        const val HALF_FRAME_LAYOUT_SBS = "Side-by-side"
+        const val HALF_FRAME_LAYOUT_TB = "Top-bottom"
+        val HALF_FRAME_LAYOUTS = listOf(HALF_FRAME_LAYOUT_SBS, HALF_FRAME_LAYOUT_TB)
 
         val LOG_CURVES = listOf(
             "None",

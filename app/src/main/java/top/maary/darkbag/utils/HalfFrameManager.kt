@@ -44,7 +44,7 @@ class HalfFrameManager(private val context: Context) {
         get() = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_MODE, false)
 
     val layout: String
-        get() = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUTS[0]) ?: SettingsFragment.HALF_FRAME_LAYOUTS[0]
+        get() = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUT_SBS) ?: SettingsFragment.HALF_FRAME_LAYOUT_SBS
 
     val downsample: Boolean
         get() = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_DOWNSAMPLE, true)
@@ -123,7 +123,7 @@ class HalfFrameManager(private val context: Context) {
             val partnerBaseName = metadata?.frame1BaseName ?: session.baseName
             val dateStampEnabled = metadata?.dateStamp ?: dateStamp
             val activeLayout = if (activeProfile == HalfFrameSessionStore.PROFILE_HALF_TOP)
-                SettingsFragment.HALF_FRAME_LAYOUTS[1] else SettingsFragment.HALF_FRAME_LAYOUTS[0]
+                SettingsFragment.HALF_FRAME_LAYOUT_TB else SettingsFragment.HALF_FRAME_LAYOUT_SBS
 
             if (isFastPath) {
                 // Perform fast stitching for immediate thumbnail feedback
