@@ -140,7 +140,8 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
     JNIEnv* env, jobject /* this */, jstring tempRawPath, jint width, jint height, jint orientation, jfloat digitalGain, jint targetLog, jstring lutPath,
     jfloat exposure, jfloat contrast, jfloat saturation, jfloat highlights, jfloat shadows, jfloat whites, jfloat blacks,
     jstring jpgPath, jstring dngPath,
-    jint iso, jlong exposureTime, jfloat fNumber, jfloat focalLength, jlong captureTimeMillis, jfloatArray ccm, jfloatArray whiteBalance, jfloat zoomFactor, jboolean mirror
+    jint iso, jlong exposureTime, jfloat fNumber, jfloat focalLength, jlong captureTimeMillis, jfloatArray ccm, jfloatArray whiteBalance, jfloat zoomFactor, jboolean mirror,
+    jstring make, jstring model, jstring uniqueCameraModel, jstring software, jstring imageDescription
 ) {
     LOGD("Native exportHdrPlus started.");
     std::lock_guard<std::mutex> lock(g_hdrPlusMutex);
@@ -180,11 +181,22 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
 
     const char* jpg_path_cstr = (jpgPath) ? env->GetStringUTFChars(jpgPath, 0) : nullptr;
     const char* dng_path_cstr = (dngPath) ? env->GetStringUTFChars(dngPath, 0) : nullptr;
+    const char* make_cstr = (make) ? env->GetStringUTFChars(make, 0) : nullptr;
+    const char* model_cstr = (model) ? env->GetStringUTFChars(model, 0) : nullptr;
+    const char* unique_model_cstr = (uniqueCameraModel) ? env->GetStringUTFChars(uniqueCameraModel, 0) : nullptr;
+    const char* software_cstr = (software) ? env->GetStringUTFChars(software, 0) : nullptr;
+    const char* image_description_cstr = (imageDescription) ? env->GetStringUTFChars(imageDescription, 0) : nullptr;
+
+    const std::string makeStr = make_cstr ? make_cstr : "Unknown";
+    const std::string modelStr = model_cstr ? model_cstr : "Unknown";
+    const std::string uniqueModelStr = unique_model_cstr ? unique_model_cstr : modelStr;
+    const std::string softwareStr = software_cstr ? software_cstr : "Darkbag HDR+";
+    const std::string imageDescriptionStr = image_description_cstr ? image_description_cstr : "Processed by Darkbag HDR+";
 
     if (dng_path_cstr) {
         LOGD("Exporting DNG to %s", dng_path_cstr);
         float baselineExposure = (digitalGain > 0.0f) ? std::log2(digitalGain) : 0.0f;
-        write_dng(dng_path_cstr, width, height, finalImage, kMax16BitValue, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation, (bool)mirror, baselineExposure);
+        write_dng(dng_path_cstr, width, height, finalImage, kMax16BitValue, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, makeStr, modelStr, uniqueModelStr, softwareStr, imageDescriptionStr, orientation, (bool)mirror, baselineExposure);
     }
 
     bool saveOk = true;
@@ -196,6 +208,11 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
     }
     if (jpgPath && jpg_path_cstr) env->ReleaseStringUTFChars(jpgPath, jpg_path_cstr);
     if (dngPath && dng_path_cstr) env->ReleaseStringUTFChars(dngPath, dng_path_cstr);
+    if (make && make_cstr) env->ReleaseStringUTFChars(make, make_cstr);
+    if (model && model_cstr) env->ReleaseStringUTFChars(model, model_cstr);
+    if (uniqueCameraModel && unique_model_cstr) env->ReleaseStringUTFChars(uniqueCameraModel, unique_model_cstr);
+    if (software && software_cstr) env->ReleaseStringUTFChars(software, software_cstr);
+    if (imageDescription && image_description_cstr) env->ReleaseStringUTFChars(imageDescription, image_description_cstr);
 
     const char* temp_path_cstr_del = env->GetStringUTFChars(tempRawPath, 0);
     if (temp_path_cstr_del) {
@@ -395,7 +412,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
     if (!jpgPathStr.empty() || !dngPathStr.empty()) {
         if (!dngPathStr.empty()) {
             float baselineExposure = (digitalGain > 0.0f) ? std::log2(digitalGain) : 0.0f;
-            write_dng(dngPathStr.c_str(), width, height, finalImage, kMax16BitValue, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation, (bool)mirror, baselineExposure);
+            write_dng(dngPathStr.c_str(), width, height, finalImage, kMax16BitValue, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, "Google", "HDR+ Device", "HDR+ Device", "Darkbag HDR+", "Processed by Darkbag HDR+", orientation, (bool)mirror, baselineExposure);
         }
 
         if (!jpgPathStr.empty()) {

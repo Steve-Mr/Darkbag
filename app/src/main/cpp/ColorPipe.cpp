@@ -724,7 +724,7 @@ bool write_jpeg(const char* filename, int width, int height, const std::vector<u
     return res != 0;
 }
 
-bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, int iso, long exposureTime, float fNumber, float focalLength, long captureTimeMillis, const std::vector<float>& ccm, int orientation, bool mirror, float baselineExposure) {
+bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, int iso, long exposureTime, float fNumber, float focalLength, long captureTimeMillis, const std::vector<float>& ccm, const std::string& make, const std::string& model, const std::string& uniqueCameraModel, const std::string& software, const std::string& imageDescription, int orientation, bool mirror, float baselineExposure) {
     TIFFSetTagExtender(DNGTagExtender);
     TIFF* tif = TIFFOpen(filename, "w");
     if (!tif) return false;
@@ -748,12 +748,10 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
     TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, height);
     TIFFSetField(tif, TIFFTAG_SUBFILETYPE, 0);
 
-    static const char* make = "Google";
-    TIFFSetField(tif, TIFFTAG_MAKE, make);
-    static const char* model = "HDR+ Device";
-    TIFFSetField(tif, TIFFTAG_MODEL, model);
-    static const char* software = "Darkbag HDR+";
-    TIFFSetField(tif, TIFFTAG_SOFTWARE, software);
+    TIFFSetField(tif, TIFFTAG_MAKE, make.c_str());
+    TIFFSetField(tif, TIFFTAG_MODEL, model.c_str());
+    TIFFSetField(tif, TIFFTAG_SOFTWARE, software.c_str());
+    TIFFSetField(tif, TIFFTAG_IMAGEDESCRIPTION, imageDescription.c_str());
 
     time_t raw_time = (time_t)(captureTimeMillis / 1000);
     struct tm * timeinfo = localtime(&raw_time);
@@ -766,7 +764,7 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
     TIFFSetField(tif, TIFFTAG_DNGVERSION, dng_version);
     static const uint8_t dng_backward_version[] = {1, 1, 0, 0};
     TIFFSetField(tif, TIFFTAG_DNGBACKWARDVERSION, dng_backward_version);
-    TIFFSetField(tif, TIFFTAG_UNIQUECAMERAMODEL, model);
+    TIFFSetField(tif, TIFFTAG_UNIQUECAMERAMODEL, uniqueCameraModel.c_str());
 
     uint32_t white_level_val = (uint32_t)whiteLevel;
     if (white_level_val == 0) white_level_val = 65535;

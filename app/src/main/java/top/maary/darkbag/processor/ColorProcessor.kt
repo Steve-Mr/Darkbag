@@ -135,7 +135,12 @@ object ColorProcessor {
         ccm: FloatArray,
         whiteBalance: FloatArray,
         zoomFactor: Float,
-        mirror: Boolean
+        mirror: Boolean,
+        make: String,
+        model: String,
+        uniqueCameraModel: String,
+        software: String,
+        imageDescription: String
     ): Int
 
     external fun processHdrPlus(

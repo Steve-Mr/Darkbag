@@ -19,6 +19,7 @@ object ImageUtils {
             .replace("_HF2", "")
             .replace("_stitched", "")
             .replace("stitched_hf_", "")
+            .replace(top.maary.darkbag.utils.DarkbagIdentity.FILE_PREFIX, "")
     }
 
     suspend fun generateHalfFrameComposite(

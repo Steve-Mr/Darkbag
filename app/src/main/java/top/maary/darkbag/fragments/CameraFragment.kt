@@ -97,6 +97,7 @@ import top.maary.darkbag.databinding.FragmentCameraBinding
 import top.maary.darkbag.utils.ANIMATION_FAST_MILLIS
 import top.maary.darkbag.utils.ANIMATION_SLOW_MILLIS
 import top.maary.darkbag.utils.MediaStoreUtils
+import top.maary.darkbag.utils.DarkbagIdentity
 import top.maary.darkbag.utils.LutManager
 import top.maary.darkbag.utils.HalfFrameSessionStore
 import top.maary.darkbag.utils.HalfFrameManager
@@ -1626,9 +1627,9 @@ class CameraFragment : Fragment() {
                 val dngName = if (image.halfFrameMetadata != null) {
                     val suffix = if (image.halfFrameMetadata.frame1BaseName != null) "_HF2" else "_HF1"
                     val group = image.halfFrameMetadata.frame1BaseName ?: SimpleDateFormat(FILENAME, Locale.US).format(image.halfFrameMetadata.captureTimeMillis)
-                    group + suffix
+                    DarkbagIdentity.prefixedBaseName(group + suffix)
                 } else {
-                    SimpleDateFormat(FILENAME, Locale.US).format(System.currentTimeMillis())
+                    DarkbagIdentity.prefixedBaseName(SimpleDateFormat(FILENAME, Locale.US).format(System.currentTimeMillis()))
                 }
 
                 Log.d(
@@ -1732,6 +1733,7 @@ class CameraFragment : Fragment() {
                 if (saveRaw) {
                     try {
                         val dngCreator = android.hardware.camera2.DngCreator(chars, captureResult)
+                        dngCreator.setDescription(DarkbagIdentity.imageDescription(isHdrPlus = false))
 
                         // Map rotation to DngCreator orientation
                         val dngOrientation = when (image.combinedOrientation) {
@@ -3464,9 +3466,9 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 val dngName = if (hfMetadata != null) {
                     val suffix = if (hfMetadata.frame1BaseName != null) "_HF2" else "_HF1"
                     val group = hfMetadata.frame1BaseName ?: SimpleDateFormat(FILENAME, Locale.US).format(hfMetadata.captureTimeMillis)
-                    group + suffix + "_HDRPLUS"
+                    DarkbagIdentity.prefixedBaseName(group + suffix + "_HDRPLUS")
                 } else {
-                    SimpleDateFormat(FILENAME, Locale.US).format(System.currentTimeMillis()) + "_HDRPLUS"
+                    DarkbagIdentity.prefixedBaseName(SimpleDateFormat(FILENAME, Locale.US).format(System.currentTimeMillis()) + "_HDRPLUS")
                 }
                 val saveJpg = prefs.getBoolean(SettingsFragment.KEY_SAVE_JPG, true)
                 val saveRaw = prefs.getBoolean(SettingsFragment.KEY_SAVE_RAW, true)

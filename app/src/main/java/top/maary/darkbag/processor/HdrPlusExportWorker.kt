@@ -11,6 +11,7 @@ import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import top.maary.darkbag.models.CaptureMetadata
 import top.maary.darkbag.utils.ImageSaver
+import top.maary.darkbag.utils.DarkbagIdentity
 
 class HdrPlusExportWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
 
@@ -139,7 +140,12 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
             ccm = ccm,
             whiteBalance = whiteBalance,
             zoomFactor = zoomFactor,
-            mirror = mirror
+            mirror = mirror,
+            make = DarkbagIdentity.normalizedManufacturer(),
+            model = DarkbagIdentity.normalizedModel(),
+            uniqueCameraModel = DarkbagIdentity.uniqueCameraModel(),
+            software = DarkbagIdentity.softwareString(isHdrPlus = true),
+            imageDescription = DarkbagIdentity.imageDescription(isHdrPlus = true)
         )
 
         if (ret == 0) {

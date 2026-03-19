@@ -297,6 +297,7 @@ object ImageSaver {
             if (dngFile.exists()) {
                 val baseSuffix = if (linearDngPath.contains("_linear")) "_linear" else ""
                 val dngDisplayName = "$baseName$baseSuffix.dng"
+                val shouldAugmentDngWithExif = !linearDngPath.contains("_linear", ignoreCase = true)
                 if (rawFolderUri != null) {
                     finalRawUri = saveFileToFolder(context, dngFile, dngDisplayName, "image/x-adobe-dng", rawFolderUri)
                 } else {
@@ -324,8 +325,12 @@ object ImageSaver {
                                 contentResolver.update(dngUri, dngValues, null, null)
                             }
 
-                            // Write Metadata and BaselineExposure to DNG
-                            writeDngMetadata(context, dngUri, editConfig, digitalGain, captureMetadata)
+                            // Only augment Bayer DNGs via ExifInterface. HDR+ linear DNGs should
+                            // carry their final metadata from the native writer to avoid a second
+                            // structural rewrite pass.
+                            if (shouldAugmentDngWithExif) {
+                                writeDngMetadata(context, dngUri, editConfig, digitalGain, captureMetadata)
+                            }
 
                             finalRawUri = dngUri
                         } catch (e: Exception) {
@@ -379,6 +384,23 @@ object ImageSaver {
         }
     }
 
+    private fun applyDarkbagIdentity(
+        exif: ExifInterface,
+        isHdrPlus: Boolean,
+        captureMetadata: CaptureMetadata?,
+        imageDescriptionOverride: String? = null
+    ) {
+        val manufacturer = captureMetadata?.make?.takeIf { it.isNotBlank() } ?: DarkbagIdentity.normalizedManufacturer()
+        val model = captureMetadata?.model?.takeIf { it.isNotBlank() } ?: DarkbagIdentity.normalizedModel()
+        exif.setAttribute(ExifInterface.TAG_MAKE, manufacturer)
+        exif.setAttribute(ExifInterface.TAG_MODEL, model)
+        exif.setAttribute(ExifInterface.TAG_SOFTWARE, DarkbagIdentity.softwareString(isHdrPlus))
+        exif.setAttribute(
+            ExifInterface.TAG_IMAGE_DESCRIPTION,
+            imageDescriptionOverride ?: DarkbagIdentity.imageDescription(isHdrPlus)
+        )
+    }
+
     fun writeDngMetadata(context: Context, uri: Uri, editConfig: EditConfig?, digitalGain: Float, captureMetadata: CaptureMetadata?) {
         try {
             context.contentResolver.openFileDescriptor(uri, "rw")?.use { pfd ->
@@ -394,6 +416,7 @@ object ImageSaver {
 
                 // 2. Standard EXIF
                 writeStandardExif(exif, captureMetadata)
+                applyDarkbagIdentity(exif, isHdrPlus = false, captureMetadata = captureMetadata)
 
                 exif.saveAttributes()
             }
@@ -446,6 +469,9 @@ object ImageSaver {
                 }
 
                 writeStandardExif(exif, captureMetadata)
+                val isHdrPlus = (editConfig?.log ?: "").contains("HDR+", ignoreCase = true) ||
+                    uri.toString().contains("_HDRPLUS", ignoreCase = true)
+                applyDarkbagIdentity(exif, isHdrPlus = isHdrPlus, captureMetadata = captureMetadata)
 
                 exif.saveAttributes()
             }
@@ -519,7 +545,9 @@ object ImageSaver {
                 if (mimeType == "image/jpeg") {
                     writeMetadataToExif(context, newFile.uri, finalEditConfig, captureMetadata)
                 } else if (mimeType == "image/x-adobe-dng") {
-                    writeDngMetadata(context, newFile.uri, finalEditConfig, 1.0f, captureMetadata)
+                    if (!sourceFile.name.contains("_linear", ignoreCase = true)) {
+                        writeDngMetadata(context, newFile.uri, finalEditConfig, 1.0f, captureMetadata)
+                    }
                 }
 
                 Log.i(TAG, "Saved $displayName to custom folder: ${newFile.uri}")

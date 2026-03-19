@@ -65,7 +65,7 @@ bool process_and_save_image(
 );
 
 // --- File Writers ---
-bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, int iso, long exposureTime, float fNumber, float focalLength, long captureTimeMillis, const std::vector<float>& ccm, int orientation, bool mirror = false, float baselineExposure = 0.0f);
+bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, int iso, long exposureTime, float fNumber, float focalLength, long captureTimeMillis, const std::vector<float>& ccm, const std::string& make, const std::string& model, const std::string& uniqueCameraModel, const std::string& software, const std::string& imageDescription, int orientation, bool mirror = false, float baselineExposure = 0.0f);
 
 bool write_bmp(const char* filename, int width, int height, const std::vector<unsigned short>& data);
 
