@@ -112,7 +112,7 @@ class ImageViewerFragment : Fragment() {
         }
 
         binding.imagePager.registerOnPageChangeCallback(pageChangeCallback)
-        loadImages()
+        loadImages(forceRefresh = true)
     }
 
     private fun loadImages(targetUri: String? = args.initialUri, forceRefresh: Boolean = false) {

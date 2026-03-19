@@ -574,6 +574,7 @@ class CameraFragment : Fragment() {
                         if (event.targetUri != null) {
                             Log.d(TAG, "Update thumbnail for ${event.baseName}: ${event.targetUri}")
                             withContext(Dispatchers.Main) {
+                                imageRepository.invalidateCache()
                                 prefs.edit().putString(SettingsFragment.KEY_LAST_CAPTURE_URI, event.targetUri).apply()
                                 setGalleryThumbnail(event.targetUri)
                             }
@@ -1852,6 +1853,7 @@ class CameraFragment : Fragment() {
 
                 withContext(Dispatchers.Main) {
                     if (fastOutputUri != null) {
+                        imageRepository.invalidateCache()
                         prefs.edit().putString(SettingsFragment.KEY_LAST_CAPTURE_URI, fastOutputUri.toString()).apply()
                         setGalleryThumbnail(fastOutputUri.toString())
                     } else if (isHalfFrameModeEnabled && prefs.getInt(scopedHalfFrameStepKey(prefs), 0) == 1) {
@@ -2982,6 +2984,7 @@ class CameraFragment : Fragment() {
                 withContext(Dispatchers.Main) {
                     val uiPrefs = appContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
                     if (uri != null) {
+                        imageRepository.invalidateCache()
                         uiPrefs.edit().putString(SettingsFragment.KEY_LAST_CAPTURE_URI, uri.toString()).apply()
                         setGalleryThumbnail(uri.toString())
                     } else if (isHalfFrameModeEnabled && uiPrefs.getInt(scopedHalfFrameStepKey(uiPrefs), 0) == 1) {
@@ -3578,6 +3581,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
                     withContext(Dispatchers.Main) {
                         if (fastJpegUri != null) {
+                            imageRepository.invalidateCache()
                             prefs.edit().putString(SettingsFragment.KEY_LAST_CAPTURE_URI, fastJpegUri.toString()).apply()
                             setGalleryThumbnail(fastJpegUri.toString())
                         } else if (isHalfFrameModeEnabled && prefs.getInt(scopedHalfFrameStepKey(prefs), 0) == 1) {
