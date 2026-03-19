@@ -297,7 +297,6 @@ object ImageSaver {
             if (dngFile.exists()) {
                 val baseSuffix = if (linearDngPath.contains("_linear")) "_linear" else ""
                 val dngDisplayName = "$baseName$baseSuffix.dng"
-                val shouldAugmentDngWithExif = !linearDngPath.contains("_linear", ignoreCase = true)
                 if (rawFolderUri != null) {
                     finalRawUri = saveFileToFolder(context, dngFile, dngDisplayName, "image/x-adobe-dng", rawFolderUri)
                 } else {
@@ -323,13 +322,6 @@ object ImageSaver {
                                 dngValues.clear()
                                 dngValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
                                 contentResolver.update(dngUri, dngValues, null, null)
-                            }
-
-                            // Only augment Bayer DNGs via ExifInterface. HDR+ linear DNGs should
-                            // carry their final metadata from the native writer to avoid a second
-                            // structural rewrite pass.
-                            if (shouldAugmentDngWithExif) {
-                                writeDngMetadata(context, dngUri, editConfig, digitalGain, captureMetadata)
                             }
 
                             finalRawUri = dngUri
@@ -399,30 +391,6 @@ object ImageSaver {
             ExifInterface.TAG_IMAGE_DESCRIPTION,
             imageDescriptionOverride ?: DarkbagIdentity.imageDescription(isHdrPlus)
         )
-    }
-
-    fun writeDngMetadata(context: Context, uri: Uri, editConfig: EditConfig?, digitalGain: Float, captureMetadata: CaptureMetadata?) {
-        try {
-            context.contentResolver.openFileDescriptor(uri, "rw")?.use { pfd ->
-                val exif = ExifInterface(pfd.fileDescriptor)
-
-                // 1. Digital Gain
-                val gainToUse = editConfig?.digitalGain ?: digitalGain
-                if (gainToUse != 1.0f) {
-                    val ev = kotlin.math.log2(gainToUse)
-                    exif.setAttribute("BaselineExposure", ev.toString())
-                    Log.d(TAG, "Wrote BaselineExposure $ev to DNG at $uri")
-                }
-
-                // 2. Standard EXIF
-                writeStandardExif(exif, captureMetadata)
-                applyDarkbagIdentity(exif, isHdrPlus = false, captureMetadata = captureMetadata)
-
-                exif.saveAttributes()
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to write metadata to DNG for $uri", e)
-        }
     }
 
     fun writeMetadataToExif(context: Context, uri: Uri, editConfig: EditConfig?, captureMetadata: CaptureMetadata?) {
@@ -544,10 +512,6 @@ object ImageSaver {
 
                 if (mimeType == "image/jpeg") {
                     writeMetadataToExif(context, newFile.uri, finalEditConfig, captureMetadata)
-                } else if (mimeType == "image/x-adobe-dng") {
-                    if (!sourceFile.name.contains("_linear", ignoreCase = true)) {
-                        writeDngMetadata(context, newFile.uri, finalEditConfig, 1.0f, captureMetadata)
-                    }
                 }
 
                 Log.i(TAG, "Saved $displayName to custom folder: ${newFile.uri}")

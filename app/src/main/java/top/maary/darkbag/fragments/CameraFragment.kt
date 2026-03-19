@@ -1731,29 +1731,6 @@ class CameraFragment : Fragment() {
                 val linearDngFile = File(context.cacheDir, "${dngName}_linear.dng")
                 val bayerDngFile = File(context.cacheDir, "${dngName}_bayer.dng")
                 var dngWritten = false
-                if (saveRaw) {
-                    try {
-                        val dngCreator = android.hardware.camera2.DngCreator(chars, captureResult)
-                        dngCreator.setDescription(DarkbagIdentity.imageDescription(isHdrPlus = false))
-
-                        // Map rotation to DngCreator orientation
-                        val dngOrientation = when (image.combinedOrientation) {
-                            90 -> ExifInterface.ORIENTATION_ROTATE_90
-                            180 -> ExifInterface.ORIENTATION_ROTATE_180
-                            270 -> ExifInterface.ORIENTATION_ROTATE_270
-                            else -> ExifInterface.ORIENTATION_NORMAL
-                        }
-                        dngCreator.setOrientation(dngOrientation)
-
-                        FileOutputStream(bayerDngFile).use { out ->
-                            dngCreator.writeByteBuffer(out, Size(image.width, image.height), image.data, 0)
-                        }
-                        dngWritten = true
-                        Log.d(TAG, "DNG saved using DngCreator: ${bayerDngFile.absolutePath}")
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Failed to save DNG using DngCreator", e)
-                    }
-                }
 
                 val iso = captureResult.get(android.hardware.camera2.CaptureResult.SENSOR_SENSITIVITY) ?: 100
                 val exposureTime = captureResult.get(android.hardware.camera2.CaptureResult.SENSOR_EXPOSURE_TIME) ?: 10_000_000L
@@ -1798,6 +1775,39 @@ class CameraFragment : Fragment() {
                 timing?.jniDone = System.currentTimeMillis()
 
                 if (result < 0) throw RuntimeException("processSingleFrameRaw failed: $result")
+
+                if (saveRaw) {
+                    try {
+                        val dngCreator = android.hardware.camera2.DngCreator(chars, captureResult)
+                        dngCreator.setDescription(DarkbagIdentity.imageDescription(isHdrPlus = false))
+
+                        // Map rotation to DngCreator orientation
+                        val dngOrientation = when (image.combinedOrientation) {
+                            90 -> ExifInterface.ORIENTATION_ROTATE_90
+                            180 -> ExifInterface.ORIENTATION_ROTATE_180
+                            270 -> ExifInterface.ORIENTATION_ROTATE_270
+                            else -> ExifInterface.ORIENTATION_NORMAL
+                        }
+                        dngCreator.setOrientation(dngOrientation)
+                        createDngThumbnailBitmap(tempJpgFile)?.let { thumb ->
+                            try {
+                                dngCreator.setThumbnail(thumb)
+                            } finally {
+                                thumb.recycle()
+                            }
+                        }
+
+                        val dngBuffer = image.data.duplicate()
+                        dngBuffer.rewind()
+                        FileOutputStream(bayerDngFile).use { out ->
+                            dngCreator.writeByteBuffer(out, Size(image.width, image.height), dngBuffer, 0)
+                        }
+                        dngWritten = true
+                        Log.d(TAG, "DNG saved using DngCreator: ${bayerDngFile.absolutePath}")
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to save DNG using DngCreator", e)
+                    }
+                }
 
                 val layout = if (image.halfFrameMetadata?.profile == HalfFrameSessionStore.PROFILE_HALF_TOP) "TB" else if (image.halfFrameMetadata?.profile == HalfFrameSessionStore.PROFILE_HALF_SIDE) "SBS" else null
                 val editConfig = top.maary.darkbag.models.EditConfig(
@@ -4833,6 +4843,25 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             inputStream,
             0
         )
+    }
+
+    private fun createDngThumbnailBitmap(sourceJpeg: File, maxDimension: Int = 512): android.graphics.Bitmap? {
+        if (!sourceJpeg.exists() || sourceJpeg.length() <= 0L) return null
+
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(sourceJpeg.absolutePath, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+
+        var inSampleSize = 1
+        while ((bounds.outWidth / inSampleSize) > maxDimension || (bounds.outHeight / inSampleSize) > maxDimension) {
+            inSampleSize *= 2
+        }
+
+        val decodeOpts = BitmapFactory.Options().apply {
+            this.inSampleSize = inSampleSize
+            inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888
+        }
+        return BitmapFactory.decodeFile(sourceJpeg.absolutePath, decodeOpts)
     }
 
     private fun getMeteringRectangle(

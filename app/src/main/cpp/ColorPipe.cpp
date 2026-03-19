@@ -724,6 +724,34 @@ bool write_jpeg(const char* filename, int width, int height, const std::vector<u
     return res != 0;
 }
 
+static std::vector<unsigned char> make_preview_rgb8(
+    const std::vector<unsigned short>& data,
+    int width,
+    int height,
+    int targetLongEdge,
+    int& outWidth,
+    int& outHeight
+) {
+    const int longEdge = std::max(width, height);
+    const int scale = std::max(1, (longEdge + targetLongEdge - 1) / targetLongEdge);
+    outWidth = std::max(1, width / scale);
+    outHeight = std::max(1, height / scale);
+
+    std::vector<unsigned char> preview(static_cast<size_t>(outWidth) * outHeight * 3);
+    for (int y = 0; y < outHeight; ++y) {
+        const int srcY = std::min(height - 1, y * scale);
+        for (int x = 0; x < outWidth; ++x) {
+            const int srcX = std::min(width - 1, x * scale);
+            const size_t srcIdx = (static_cast<size_t>(srcY) * width + srcX) * 3;
+            const size_t dstIdx = (static_cast<size_t>(y) * outWidth + x) * 3;
+            preview[dstIdx + 0] = (unsigned char)std::min(255, (data[srcIdx + 0] + 128) >> 8);
+            preview[dstIdx + 1] = (unsigned char)std::min(255, (data[srcIdx + 1] + 128) >> 8);
+            preview[dstIdx + 2] = (unsigned char)std::min(255, (data[srcIdx + 2] + 128) >> 8);
+        }
+    }
+    return preview;
+}
+
 bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, int iso, long exposureTime, float fNumber, float focalLength, long captureTimeMillis, const std::vector<float>& ccm, const std::string& make, const std::string& model, const std::string& uniqueCameraModel, const std::string& software, const std::string& imageDescription, int orientation, bool mirror, float baselineExposure) {
     TIFFSetTagExtender(DNGTagExtender);
     TIFF* tif = TIFFOpen(filename, "w");
@@ -793,6 +821,38 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
     TIFFSetField(tif, TIFFTAG_ISOSPEEDRATINGS, (uint16_t)1, &iso_short);
 
     if (TIFFWriteEncodedStrip(tif, 0, (void*)data.data(), static_cast<size_t>(width) * height * 3 * sizeof(unsigned short)) < 0) {
+        TIFFClose(tif);
+        return false;
+    }
+
+    if (!TIFFWriteDirectory(tif)) {
+        TIFFClose(tif);
+        return false;
+    }
+
+    int previewWidth = 0;
+    int previewHeight = 0;
+    std::vector<unsigned char> previewRgb8 = make_preview_rgb8(data, width, height, 512, previewWidth, previewHeight);
+    TIFFSetField(tif, TIFFTAG_SUBFILETYPE, FILETYPE_REDUCEDIMAGE);
+    TIFFSetField(tif, TIFFTAG_IMAGEWIDTH, previewWidth);
+    TIFFSetField(tif, TIFFTAG_IMAGELENGTH, previewHeight);
+    TIFFSetField(tif, TIFFTAG_BITSPERSAMPLE, 8);
+    TIFFSetField(tif, TIFFTAG_COMPRESSION, COMPRESSION_NONE);
+    TIFFSetField(tif, TIFFTAG_ORIENTATION, tiffOrientation);
+    TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_RGB);
+    TIFFSetField(tif, TIFFTAG_SAMPLESPERPIXEL, 3);
+    TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG);
+    TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, previewHeight);
+    TIFFSetField(tif, TIFFTAG_MAKE, make.c_str());
+    TIFFSetField(tif, TIFFTAG_MODEL, model.c_str());
+    TIFFSetField(tif, TIFFTAG_SOFTWARE, software.c_str());
+    TIFFSetField(tif, TIFFTAG_IMAGEDESCRIPTION, "Darkbag Embedded Preview");
+    if (TIFFWriteEncodedStrip(tif, 0, previewRgb8.data(), static_cast<tmsize_t>(previewRgb8.size())) < 0) {
+        TIFFClose(tif);
+        return false;
+    }
+
+    if (!TIFFWriteDirectory(tif)) {
         TIFFClose(tif);
         return false;
     }
