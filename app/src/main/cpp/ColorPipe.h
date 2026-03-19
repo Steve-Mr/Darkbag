@@ -71,4 +71,6 @@ bool write_bmp(const char* filename, int width, int height, const std::vector<un
 
 bool write_jpeg(const char* filename, int width, int height, const std::vector<unsigned short>& data, int quality);
 
+int compute_preview_downsample_factor(int width, int height, int targetLongEdge);
+
 #endif // COLOR_PIPE_H

@@ -396,10 +396,12 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
     if (outputDngPath && dng_p_cstr) env->ReleaseStringUTFChars(outputDngPath, dng_p_cstr);
 
     auto saveStart = std::chrono::high_resolution_clock::now();
+    const int fastPreviewDownsample = compute_preview_downsample_factor(width, height, 1280);
+
     if (bitmapPixels) {
         process_and_save_image(finalImage, width, height, digitalGain, targetLog, lut,
                                 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, // HSWB not used for preview in standard pipe yet
-                                nullptr, 1, ccmVec.data(), wbVec.data(), orientation, bitmapPixels, true, 4, zoomFactor, (bool)mirror);
+                                nullptr, 1, ccmVec.data(), wbVec.data(), orientation, bitmapPixels, true, fastPreviewDownsample, zoomFactor, (bool)mirror);
         AndroidBitmap_unlockPixels(env, outputBitmap);
     }
 
@@ -418,7 +420,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
         if (!jpgPathStr.empty()) {
             process_and_save_image(finalImage, width, height, digitalGain, targetLog, lut,
                                     0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
-                                    jpgPathStr.c_str(), 1, ccmVec.data(), wbVec.data(), orientation, nullptr, true, 4, zoomFactor, (bool)mirror);
+                                    jpgPathStr.c_str(), 1, ccmVec.data(), wbVec.data(), orientation, nullptr, true, fastPreviewDownsample, zoomFactor, (bool)mirror);
 
             if (exportMatrixAB && !jpgPathStr.empty() && ccmAltVec.size() == 9) {
                 std::string suffix = useSensorColorMatrix ? "_AB_CAPTURE_CCM.jpg" : "_AB_SENSOR_CCM.jpg";

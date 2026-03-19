@@ -90,7 +90,7 @@ object ImageSaver {
                                 ColorProcessor.halfFrameFlow.tryEmit(2)
                                 if (finalPath != null) {
                                     val finalFile = File(finalPath)
-                                    finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri, editConfig = editConfig, zoomFactor = zoomFactor, captureMetadata = captureMetadata) { out ->
+                                    finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri, editConfig = editConfig, zoomFactor = zoomFactor, captureMetadata = captureMetadata, writeExifMetadata = !isFastPath) { out ->
                                         finalFile.inputStream().use { it.copyTo(out) }
                                     }
                                 }
@@ -99,9 +99,9 @@ object ImageSaver {
                             if (finalPath != null) {
                                 val finalFile = File(finalPath)
                                 if (jpgFolderUri != null) {
-                                    finalJpgUri = saveFileToFolder(context, finalFile, "$baseName.jpg", "image/jpeg", jpgFolderUri, editConfig = editConfig, zoomFactor = zoomFactor, captureMetadata = captureMetadata)
+                                    finalJpgUri = saveFileToFolder(context, finalFile, "$baseName.jpg", "image/jpeg", jpgFolderUri, editConfig = editConfig, zoomFactor = zoomFactor, captureMetadata = captureMetadata, writeExifMetadata = !isFastPath)
                                 } else {
-                                    finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri, editConfig = editConfig, zoomFactor = zoomFactor, captureMetadata = captureMetadata) { out ->
+                                    finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri, editConfig = editConfig, zoomFactor = zoomFactor, captureMetadata = captureMetadata, writeExifMetadata = !isFastPath) { out ->
                                         finalFile.inputStream().use { it.copyTo(out) }
                                     }
                                 }
@@ -113,9 +113,9 @@ object ImageSaver {
                     } else {
                         val finalFile = f
                         if (jpgFolderUri != null) {
-                            finalJpgUri = saveFileToFolder(context, finalFile, "$baseName.jpg", "image/jpeg", jpgFolderUri, editConfig = editConfig, zoomFactor = zoomFactor, captureMetadata = captureMetadata)
+                            finalJpgUri = saveFileToFolder(context, finalFile, "$baseName.jpg", "image/jpeg", jpgFolderUri, editConfig = editConfig, zoomFactor = zoomFactor, captureMetadata = captureMetadata, writeExifMetadata = !isFastPath)
                         } else {
-                            finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri, editConfig = editConfig, zoomFactor = zoomFactor, captureMetadata = captureMetadata) { out ->
+                            finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri, editConfig = editConfig, zoomFactor = zoomFactor, captureMetadata = captureMetadata, writeExifMetadata = !isFastPath) { out ->
                                 finalFile.inputStream().use { it.copyTo(out) }
                             }
                         }
@@ -498,7 +498,7 @@ object ImageSaver {
         }
     }
 
-    private fun saveFileToFolder(context: Context, sourceFile: File, displayName: String, mimeType: String, folderUri: String, editConfig: EditConfig? = null, zoomFactor: Float = 1.0f, captureMetadata: CaptureMetadata? = null): Uri? {
+    private fun saveFileToFolder(context: Context, sourceFile: File, displayName: String, mimeType: String, folderUri: String, editConfig: EditConfig? = null, zoomFactor: Float = 1.0f, captureMetadata: CaptureMetadata? = null, writeExifMetadata: Boolean = true): Uri? {
         try {
             val treeUri = Uri.parse(folderUri)
             val parentFolder = androidx.documentfile.provider.DocumentFile.fromTreeUri(context, treeUri)
@@ -510,7 +510,7 @@ object ImageSaver {
 
                 val finalEditConfig = createFinalEditConfig(editConfig, zoomFactor)
 
-                if (mimeType == "image/jpeg") {
+                if (mimeType == "image/jpeg" && writeExifMetadata) {
                     writeMetadataToExif(context, newFile.uri, finalEditConfig, captureMetadata)
                 }
 
@@ -544,6 +544,7 @@ object ImageSaver {
         editConfig: EditConfig? = null,
         zoomFactor: Float = 1.0f,
         captureMetadata: CaptureMetadata? = null,
+        writeExifMetadata: Boolean = true,
         writeData: (OutputStream) -> Unit
     ): Uri? {
         val contentResolver = context.contentResolver
@@ -600,7 +601,9 @@ object ImageSaver {
                         Log.e(TAG, "Failed to clear IS_PENDING for $uri", e)
                     }
                 }
-                writeMetadataToExif(context, uri, finalEditConfig, captureMetadata)
+                if (writeExifMetadata) {
+                    writeMetadataToExif(context, uri, finalEditConfig, captureMetadata)
+                }
 
                 if (isReplacement) {
                     Log.i(TAG, "Replaced JPEG at $uri")

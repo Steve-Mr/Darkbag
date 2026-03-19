@@ -14,6 +14,7 @@
 #include <future>
 #include <array>
 #include <cstdio>
+#include <cstdint>
 
 // Define missing tags if needed (Standard EXIF tags)
 #ifndef TIFFTAG_EXPOSURETIME
@@ -670,12 +671,13 @@ bool process_and_save_image(
         }
     }
 
+    const int jpegQuality = isPreview ? 78 : 95;
     bool jpgOk = true;
     if (jpgPath) {
         if (isPreview && !previewRgb8.empty()) {
-            jpgOk = stbi_write_jpg(jpgPath, finalW_zoomed, finalH_zoomed, 3, previewRgb8.data(), 95) != 0;
+            jpgOk = stbi_write_jpg(jpgPath, finalW_zoomed, finalH_zoomed, 3, previewRgb8.data(), jpegQuality) != 0;
         } else {
-            jpgOk = write_jpeg(jpgPath, finalW_zoomed, finalH_zoomed, processedImage, 95);
+            jpgOk = write_jpeg(jpgPath, finalW_zoomed, finalH_zoomed, processedImage, jpegQuality);
         }
         if (!jpgOk) LOGE("write_jpeg/stbi_write_jpg failed for %s", jpgPath);
         else {
@@ -722,6 +724,36 @@ bool write_jpeg(const char* filename, int width, int height, const std::vector<u
         LOGE("stbi_write_jpg failed for %s", filename);
     }
     return res != 0;
+}
+
+int compute_preview_downsample_factor(int width, int height, int targetLongEdge) {
+    if (width <= 0 || height <= 0 || targetLongEdge <= 0) return 1;
+    const int longEdge = std::max(width, height);
+    return std::max(1, (longEdge + targetLongEdge - 1) / targetLongEdge);
+}
+
+struct JpegBufferContext {
+    std::vector<unsigned char> bytes;
+};
+
+static void write_jpeg_to_memory(void* context, void* data, int size) {
+    if (!context || !data || size <= 0) return;
+    auto* ctx = static_cast<JpegBufferContext*>(context);
+    auto* src = static_cast<unsigned char*>(data);
+    ctx->bytes.insert(ctx->bytes.end(), src, src + size);
+}
+
+static std::vector<unsigned char> encode_rgb8_jpeg(
+    const std::vector<unsigned char>& rgb8,
+    int width,
+    int height,
+    int quality
+) {
+    JpegBufferContext ctx;
+    if (!rgb8.empty() && width > 0 && height > 0) {
+        stbi_write_jpg_to_func(write_jpeg_to_memory, &ctx, width, height, 3, rgb8.data(), quality);
+    }
+    return ctx.bytes;
 }
 
 static std::vector<unsigned char> make_preview_rgb8(
@@ -830,31 +862,49 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
         return false;
     }
 
-    int previewWidth = 0;
-    int previewHeight = 0;
-    std::vector<unsigned char> previewRgb8 = make_preview_rgb8(data, width, height, 512, previewWidth, previewHeight);
-    TIFFSetField(tif, TIFFTAG_SUBFILETYPE, FILETYPE_REDUCEDIMAGE);
-    TIFFSetField(tif, TIFFTAG_IMAGEWIDTH, previewWidth);
-    TIFFSetField(tif, TIFFTAG_IMAGELENGTH, previewHeight);
-    TIFFSetField(tif, TIFFTAG_BITSPERSAMPLE, 8);
-    TIFFSetField(tif, TIFFTAG_COMPRESSION, COMPRESSION_NONE);
-    TIFFSetField(tif, TIFFTAG_ORIENTATION, tiffOrientation);
-    TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_RGB);
-    TIFFSetField(tif, TIFFTAG_SAMPLESPERPIXEL, 3);
-    TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG);
-    TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, previewHeight);
-    TIFFSetField(tif, TIFFTAG_MAKE, make.c_str());
-    TIFFSetField(tif, TIFFTAG_MODEL, model.c_str());
-    TIFFSetField(tif, TIFFTAG_SOFTWARE, software.c_str());
-    TIFFSetField(tif, TIFFTAG_IMAGEDESCRIPTION, "Darkbag Embedded Preview");
-    if (TIFFWriteEncodedStrip(tif, 0, previewRgb8.data(), static_cast<tmsize_t>(previewRgb8.size())) < 0) {
-        TIFFClose(tif);
-        return false;
-    }
+    const struct PreviewSpec {
+        int targetLongEdge;
+        const char* description;
+    } previewSpecs[] = {
+        {512, "Darkbag Embedded JPEG Thumbnail"},
+        {2048, "Darkbag Embedded JPEG Preview"},
+    };
 
-    if (!TIFFWriteDirectory(tif)) {
-        TIFFClose(tif);
-        return false;
+    for (const auto& spec : previewSpecs) {
+        int previewWidth = 0;
+        int previewHeight = 0;
+        std::vector<unsigned char> previewRgb8 = make_preview_rgb8(data, width, height, spec.targetLongEdge, previewWidth, previewHeight);
+        std::vector<unsigned char> jpegPreview = encode_rgb8_jpeg(previewRgb8, previewWidth, previewHeight, 82);
+        if (jpegPreview.empty()) {
+            TIFFClose(tif);
+            return false;
+        }
+
+        TIFFSetField(tif, TIFFTAG_SUBFILETYPE, FILETYPE_REDUCEDIMAGE);
+        TIFFSetField(tif, TIFFTAG_IMAGEWIDTH, previewWidth);
+        TIFFSetField(tif, TIFFTAG_IMAGELENGTH, previewHeight);
+        TIFFSetField(tif, TIFFTAG_BITSPERSAMPLE, 8);
+        TIFFSetField(tif, TIFFTAG_COMPRESSION, COMPRESSION_JPEG);
+        TIFFSetField(tif, TIFFTAG_ORIENTATION, tiffOrientation);
+        TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_YCBCR);
+        TIFFSetField(tif, TIFFTAG_SAMPLESPERPIXEL, 3);
+        TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG);
+        TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, previewHeight);
+        TIFFSetField(tif, TIFFTAG_JPEGCOLORMODE, JPEGCOLORMODE_RGB);
+        TIFFSetField(tif, TIFFTAG_MAKE, make.c_str());
+        TIFFSetField(tif, TIFFTAG_MODEL, model.c_str());
+        TIFFSetField(tif, TIFFTAG_SOFTWARE, software.c_str());
+        TIFFSetField(tif, TIFFTAG_IMAGEDESCRIPTION, spec.description);
+
+        if (TIFFWriteRawStrip(tif, 0, jpegPreview.data(), static_cast<tmsize_t>(jpegPreview.size())) < 0) {
+            TIFFClose(tif);
+            return false;
+        }
+
+        if (!TIFFWriteDirectory(tif)) {
+            TIFFClose(tif);
+            return false;
+        }
     }
 
     TIFFClose(tif);
