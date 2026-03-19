@@ -65,7 +65,7 @@ class MediaStoreUtils(private val context: Context) {
         val lastUriStr = prefs.getString(SettingsFragment.KEY_LAST_CAPTURE_URI, null)
         if (lastUriStr != null) {
             val lastUri = Uri.parse(lastUriStr)
-            if (verifyUriExists(context, lastUri)) {
+            if (verifyUriExists(context, lastUri) && isDarkbagAssetUri(context, lastUri)) {
                 return lastUri
             }
         }
@@ -102,6 +102,18 @@ class MediaStoreUtils(private val context: Context) {
             } else {
                 File(uri.path ?: return false).exists()
             }
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    private fun isDarkbagAssetUri(context: Context, uri: Uri): Boolean {
+        return try {
+            val name = when (uri.scheme) {
+                "content" -> androidx.documentfile.provider.DocumentFile.fromSingleUri(context, uri)?.name
+                else -> File(uri.path ?: return false).name
+            }
+            name?.startsWith(DarkbagIdentity.FILE_PREFIX, ignoreCase = true) == true
         } catch (e: Exception) {
             false
         }
