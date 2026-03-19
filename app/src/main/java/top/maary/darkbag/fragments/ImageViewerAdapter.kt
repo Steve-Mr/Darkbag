@@ -1,6 +1,6 @@
 package top.maary.darkbag.fragments
 
-import android.graphics.BitmapFactory
+import android.graphics.drawable.BitmapDrawable
 import android.net.Uri
 import android.view.LayoutInflater
 import android.view.View
@@ -162,37 +162,43 @@ class ImageViewerAdapter(
 
         if (isDng) {
             holder.loadJob = scope.launch {
-                val bitmap = withContext(Dispatchers.IO) {
-                    try {
-                        val contentResolver = holder.binding.root.context.contentResolver
-                        val thumb = ImageUtils.decodeDngThumbnail(holder.binding.root.context, uri, zoomFactor)
-                        if (thumb != null) return@withContext thumb
+                val context = holder.binding.root.context
+                var thumbnailBitmap: android.graphics.Bitmap? = null
+                var renderedBitmap: android.graphics.Bitmap? = null
 
-                        contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
-                            val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                            BitmapFactory.decodeFileDescriptor(pfd.fileDescriptor, null, options)
-                            options.inSampleSize = ImageUtils.calculateInSampleSize(options, 2048, 2048)
-                            options.inJustDecodeBounds = false
-                            val bitmap = BitmapFactory.decodeFileDescriptor(pfd.fileDescriptor, null, options)
-                            val orientation = try {
-                                holder.binding.root.context.contentResolver.openInputStream(uri)?.use { input ->
-                                    androidx.exifinterface.media.ExifInterface(input).getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION, androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL)
-                                } ?: androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL
-                            } catch (e: Exception) { androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL }
-                            return@withContext bitmap?.let { ImageUtils.rotateBitmap(it, orientation) }
-                        }
-                    } catch (e: Exception) {
-                        android.util.Log.e("ImageViewerAdapter", "Failed to decode preview: $uri", e)
-                        null
+                try {
+                    thumbnailBitmap = ImageUtils.decodeDngThumbnail(context, uri, zoomFactor)
+                    ensureActive()
+
+                    if (thumbnailBitmap != null) {
+                        holder.binding.imageView.setImageBitmap(thumbnailBitmap)
                     }
-                    null
-                }
 
-                if (bitmap != null) {
-                    holder.binding.imageView.setImageBitmap(bitmap)
+                    renderedBitmap = ImageUtils.renderDngBitmap(context, uri, zoomFactor = zoomFactor)
+                    ensureActive()
+
+                    if (renderedBitmap != null) {
+                        val previousBitmap = (holder.binding.imageView.drawable as? BitmapDrawable)?.bitmap
+                        holder.binding.imageView.setImageBitmap(renderedBitmap)
+                        if (previousBitmap != null && previousBitmap !== renderedBitmap && previousBitmap !== thumbnailBitmap && !previousBitmap.isRecycled) {
+                            previousBitmap.recycle()
+                        }
+                    } else if (thumbnailBitmap == null) {
+                        loadWithGlide(holder, uri)
+                        return@launch
+                    }
+                } catch (e: CancellationException) {
+                    renderedBitmap?.takeIf { !it.isRecycled }?.recycle()
+                    throw e
+                } catch (e: Exception) {
+                    renderedBitmap?.takeIf { !it.isRecycled }?.recycle()
+                    android.util.Log.e("ImageViewerAdapter", "Failed to load DNG image: $uri", e)
+                    if (thumbnailBitmap == null) {
+                        loadWithGlide(holder, uri)
+                        return@launch
+                    }
+                } finally {
                     holder.binding.loadingIndicator.visibility = View.GONE
-                } else {
-                    loadWithGlide(holder, uri)
                 }
             }
         } else {
@@ -247,6 +253,16 @@ class ImageViewerAdapter(
     }
 
     override fun getItemCount(): Int = groups.size
+
+    override fun onViewRecycled(holder: ViewHolder) {
+        holder.loadJob?.cancel()
+        val currentBitmap = (holder.binding.imageView.drawable as? BitmapDrawable)?.bitmap
+        Glide.with(holder.binding.imageView).clear(holder.binding.imageView)
+        currentBitmap?.let { bitmap -> if (!bitmap.isRecycled) bitmap.recycle() }
+        holder.binding.imageView.setImageDrawable(null)
+        holder.binding.loadingIndicator.visibility = View.GONE
+        super.onViewRecycled(holder)
+    }
 
     fun getGroup(position: Int): ImageGroup = groups[position]
 
@@ -323,7 +339,10 @@ class ImageViewerAdapter(
         if (holder != null) {
             holder.loadJob?.cancel()
             if (clearView) {
+                val currentBitmap = (holder.binding.imageView.drawable as? BitmapDrawable)?.bitmap
                 Glide.with(holder.binding.imageView).clear(holder.binding.imageView)
+                currentBitmap?.let { bitmap -> if (!bitmap.isRecycled) bitmap.recycle() }
+                holder.binding.imageView.setImageDrawable(null)
             }
             holder.binding.loadingIndicator.visibility = View.GONE
         }

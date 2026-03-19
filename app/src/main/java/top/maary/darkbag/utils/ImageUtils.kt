@@ -4,8 +4,10 @@ import android.content.Context
 import android.graphics.*
 import android.net.Uri
 import androidx.exifinterface.media.ExifInterface
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import top.maary.darkbag.processor.ColorProcessor
 
 object ImageUtils {
 
@@ -113,27 +115,98 @@ object ImageUtils {
                     options.inJustDecodeBounds = false
                     bitmap = BitmapFactory.decodeFileDescriptor(pfd.fileDescriptor, null, options)
                 }
+                bitmap = bitmap?.let { rotateBitmap(it, orientation) }
             }
 
-            val rotated = bitmap?.let { rotateBitmap(it, orientation) }
-            return@withContext if (rotated != null && zoomFactor > 1.05f) {
-                val newWidth = (rotated.width / zoomFactor).toInt()
-                val newHeight = (rotated.height / zoomFactor).toInt()
-                val x = (rotated.width - newWidth) / 2
-                val y = (rotated.height - newHeight) / 2
+            return@withContext if (bitmap != null && zoomFactor > 1.05f) {
+                val newWidth = (bitmap.width / zoomFactor).toInt()
+                val newHeight = (bitmap.height / zoomFactor).toInt()
+                val x = (bitmap.width - newWidth) / 2
+                val y = (bitmap.height - newHeight) / 2
                 val safeX = kotlin.math.max(0, x)
                 val safeY = kotlin.math.max(0, y)
-                val safeWidth = kotlin.math.min(newWidth, rotated.width - safeX)
-                val safeHeight = kotlin.math.min(newHeight, rotated.height - safeY)
+                val safeWidth = kotlin.math.min(newWidth, bitmap.width - safeX)
+                val safeHeight = kotlin.math.min(newHeight, bitmap.height - safeY)
 
-                val cropped = Bitmap.createBitmap(rotated, safeX, safeY, safeWidth, safeHeight)
-                if (cropped != rotated) rotated.recycle()
+                val cropped = Bitmap.createBitmap(bitmap, safeX, safeY, safeWidth, safeHeight)
+                if (cropped != bitmap) bitmap.recycle()
                 cropped
-            } else rotated
+            } else bitmap
         } catch (e: Exception) {
             android.util.Log.e("ImageUtils", "Failed to decode DNG: $uri", e)
         }
         null
+    }
+
+    suspend fun renderDngBitmap(
+        context: Context,
+        uri: Uri,
+        reqWidth: Int = 2048,
+        reqHeight: Int = 2048,
+        zoomFactor: Float = 1.0f
+    ): Bitmap? = withContext(Dispatchers.IO) {
+        try {
+            coroutineContext.ensureActive()
+            val dngBytes = context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                java.io.FileInputStream(pfd.fileDescriptor).use { it.readBytes() }
+            } ?: return@withContext null
+
+            coroutineContext.ensureActive()
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeByteArray(dngBytes, 0, dngBytes.size, bounds)
+            val downsample = calculateInSampleSize(bounds, reqWidth, reqHeight)
+
+            val orientation = try {
+                context.contentResolver.openInputStream(uri)?.use { input ->
+                    ExifInterface(input).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
+                } ?: ExifInterface.ORIENTATION_NORMAL
+            } catch (e: Exception) {
+                ExifInterface.ORIENTATION_NORMAL
+            }
+
+            val rotDegrees = when (orientation) {
+                ExifInterface.ORIENTATION_ROTATE_90 -> 90
+                ExifInterface.ORIENTATION_ROTATE_180 -> 180
+                ExifInterface.ORIENTATION_ROTATE_270 -> 270
+                else -> 0
+            }
+
+            val fullW = if (rotDegrees == 90 || rotDegrees == 270) bounds.outHeight / downsample else bounds.outWidth / downsample
+            val fullH = if (rotDegrees == 90 || rotDegrees == 270) bounds.outWidth / downsample else bounds.outHeight / downsample
+            if (fullW <= 0 || fullH <= 0) return@withContext null
+
+            val bmpW = kotlin.math.max(1, (fullW / zoomFactor).toInt())
+            val bmpH = kotlin.math.max(1, (fullH / zoomFactor).toInt())
+            val bitmap = Bitmap.createBitmap(bmpW, bmpH, Bitmap.Config.ARGB_8888)
+
+            coroutineContext.ensureActive()
+            val result = ColorProcessor.processRaw(
+                dngData = dngBytes,
+                targetLog = 0,
+                lutPath = null,
+                digitalGain = 1.0f,
+                outputJpgPath = null,
+                useGpu = false,
+                orientation = rotDegrees,
+                mirror = false,
+                outputBitmap = bitmap,
+                downsampleFactor = downsample,
+                zoomFactor = zoomFactor
+            )
+
+            if (result < 0) {
+                bitmap.recycle()
+                return@withContext null
+            }
+
+            coroutineContext.ensureActive()
+            bitmap
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            android.util.Log.e("ImageUtils", "Failed to render DNG bitmap: $uri", e)
+            null
+        }
     }
 
     fun rotateBitmap(bitmap: Bitmap, orientation: Int): Bitmap {

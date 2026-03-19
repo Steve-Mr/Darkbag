@@ -761,24 +761,53 @@ static std::vector<unsigned char> make_preview_rgb8(
     int width,
     int height,
     int targetLongEdge,
+    int orientation,
+    bool mirror,
+    float gain,
     int& outWidth,
     int& outHeight
 ) {
     const int longEdge = std::max(width, height);
     const int scale = std::max(1, (longEdge + targetLongEdge - 1) / targetLongEdge);
-    outWidth = std::max(1, width / scale);
-    outHeight = std::max(1, height / scale);
+    const int sampledWidth = std::max(1, width / scale);
+    const int sampledHeight = std::max(1, height / scale);
+    const bool swapDims = (orientation == 90 || orientation == 270);
+    outWidth = swapDims ? sampledHeight : sampledWidth;
+    outHeight = swapDims ? sampledWidth : sampledHeight;
 
     std::vector<unsigned char> preview(static_cast<size_t>(outWidth) * outHeight * 3);
     for (int y = 0; y < outHeight; ++y) {
-        const int srcY = std::min(height - 1, y * scale);
         for (int x = 0; x < outWidth; ++x) {
-            const int srcX = std::min(width - 1, x * scale);
+            int sx = x;
+            int sy = y;
+            const int opx = mirror ? (outWidth - 1 - x) : x;
+            if (orientation == 90) {
+                sx = y;
+                sy = (outWidth - 1) - opx;
+            } else if (orientation == 180) {
+                sx = (outWidth - 1) - opx;
+                sy = (outHeight - 1) - y;
+            } else if (orientation == 270) {
+                sx = (outHeight - 1) - y;
+                sy = opx;
+            } else {
+                sx = opx;
+            }
+
+            const int srcX = std::min(width - 1, sx * scale);
+            const int srcY = std::min(height - 1, sy * scale);
             const size_t srcIdx = (static_cast<size_t>(srcY) * width + srcX) * 3;
             const size_t dstIdx = (static_cast<size_t>(y) * outWidth + x) * 3;
-            preview[dstIdx + 0] = (unsigned char)std::min(255, (data[srcIdx + 0] + 128) >> 8);
-            preview[dstIdx + 1] = (unsigned char)std::min(255, (data[srcIdx + 1] + 128) >> 8);
-            preview[dstIdx + 2] = (unsigned char)std::min(255, (data[srcIdx + 2] + 128) >> 8);
+
+            auto encodePreviewChannel = [&](unsigned short sample) -> unsigned char {
+                const float linear = std::clamp((sample / 65535.0f) * gain, 0.0f, 1.0f);
+                const float gammaEncoded = std::pow(linear, 1.0f / 2.2f);
+                return (unsigned char)std::clamp(gammaEncoded * 255.0f + 0.5f, 0.0f, 255.0f);
+            };
+
+            preview[dstIdx + 0] = encodePreviewChannel(data[srcIdx + 0]);
+            preview[dstIdx + 1] = encodePreviewChannel(data[srcIdx + 1]);
+            preview[dstIdx + 2] = encodePreviewChannel(data[srcIdx + 2]);
         }
     }
     return preview;
@@ -873,7 +902,18 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
     for (const auto& spec : previewSpecs) {
         int previewWidth = 0;
         int previewHeight = 0;
-        std::vector<unsigned char> previewRgb8 = make_preview_rgb8(data, width, height, spec.targetLongEdge, previewWidth, previewHeight);
+        const float previewGain = baselineExposure != 0.0f ? std::exp2(baselineExposure) : 1.0f;
+        std::vector<unsigned char> previewRgb8 = make_preview_rgb8(
+            data,
+            width,
+            height,
+            spec.targetLongEdge,
+            orientation,
+            mirror,
+            previewGain,
+            previewWidth,
+            previewHeight
+        );
         std::vector<unsigned char> jpegPreview = encode_rgb8_jpeg(previewRgb8, previewWidth, previewHeight, 82);
         if (jpegPreview.empty()) {
             TIFFClose(tif);
@@ -885,7 +925,7 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
         TIFFSetField(tif, TIFFTAG_IMAGELENGTH, previewHeight);
         TIFFSetField(tif, TIFFTAG_BITSPERSAMPLE, 8);
         TIFFSetField(tif, TIFFTAG_COMPRESSION, COMPRESSION_JPEG);
-        TIFFSetField(tif, TIFFTAG_ORIENTATION, tiffOrientation);
+        TIFFSetField(tif, TIFFTAG_ORIENTATION, ORIENTATION_TOPLEFT);
         TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_YCBCR);
         TIFFSetField(tif, TIFFTAG_SAMPLESPERPIXEL, 3);
         TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG);
