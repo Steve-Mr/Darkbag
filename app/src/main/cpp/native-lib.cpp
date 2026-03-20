@@ -125,7 +125,9 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRaw(
         AndroidBitmap_getInfo(env, outputBitmap, &info);
         out_w = info.width;
         out_h = info.height;
-        AndroidBitmap_lockPixels(env, outputBitmap, (void**)&bitmapPixels);
+        if (AndroidBitmap_lockPixels(env, outputBitmap, (void**)&bitmapPixels) != ANDROID_BITMAP_RESULT_SUCCESS) {
+            bitmapPixels = nullptr;
+        }
     }
 
     // Use Shared Pipeline
@@ -151,7 +153,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRaw(
         (bool)mirror
     );
 
-    if (outputBitmap && bitmapPixels) AndroidBitmap_unlockPixels(env, outputBitmap);
+    if (bitmapPixels) AndroidBitmap_unlockPixels(env, outputBitmap);
 
     // Release Strings
     if (outputJpgPath) env->ReleaseStringUTFChars(outputJpgPath, jpg_path_cstr);

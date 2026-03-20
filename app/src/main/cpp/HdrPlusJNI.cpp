@@ -404,6 +404,9 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
         AndroidBitmap_getInfo(env, outputBitmap, &info);
         out_w = info.width;
         out_h = info.height;
+    }
+
+    if (bitmapPixels) {
         process_and_save_image(finalImage, width, height, digitalGain, targetLog, lut,
                                 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, // HSWB not used for preview in standard pipe yet
                                 nullptr, 1, ccmVec.data(), wbVec.data(), orientation, bitmapPixels, out_w, out_h, true, fastPreviewDownsample, zoomFactor, (bool)mirror);
