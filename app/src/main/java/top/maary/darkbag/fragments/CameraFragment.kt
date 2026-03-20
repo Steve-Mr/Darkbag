@@ -4908,7 +4908,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         val scale = minOf(255f / decoded.width.toFloat(), 255f / decoded.height.toFloat(), 1.0f)
         val scaledWidth = maxOf(1, kotlin.math.floor(decoded.width * scale).toInt())
         val scaledHeight = maxOf(1, kotlin.math.floor(decoded.height * scale).toInt())
-        val scaled = Bitmap.createScaledBitmap(decoded, scaledWidth, scaledHeight, true)
+        val scaled = android.graphics.Bitmap.createScaledBitmap(decoded, scaledWidth, scaledHeight, true)
         if (scaled != decoded) decoded.recycle()
         return scaled
     }
