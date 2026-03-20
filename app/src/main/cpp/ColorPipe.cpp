@@ -455,6 +455,7 @@ bool process_and_save_image(
     float highlights, float shadows, float whites, float blacks,
     const char* jpgPath, int sourceColorSpace,
     const float* ccm, const float* wb, int orientation, unsigned char* out_rgb_buffer,
+    int out_width, int out_height,
     bool isPreview, int downsampleFactor, float zoomFactor, bool mirror
 ) {
     LOGD("process_and_save_image: %dx%d, gain=%.2f, log=%d, lut=%d, jpg=%s, preview=%d, ds=%d, zoom=%.2f, mirror=%d",
@@ -593,19 +594,30 @@ bool process_and_save_image(
     }
 
     if (isPreview) {
-        previewRgb8.resize(static_cast<size_t>(finalW_zoomed) * finalH_zoomed * 3);
-        #pragma omp parallel for
-        for (int py = 0; py < finalH_zoomed; py++) {
-            for (int px = 0; px < finalW_zoomed; px++) {
-                int sx, sy;
-                int opx = mirror ? (finalW_zoomed - 1 - px) : px;
-                if (orientation == 90) { sx = py; sy = (finalW_zoomed - 1) - opx; }
-                else if (orientation == 180) { sx = (finalW_zoomed - 1) - opx; sy = (finalH_zoomed - 1) - py; }
-                else if (orientation == 270) { sx = (finalH_zoomed - 1) - py; sy = opx; }
-                else { sx = opx; sy = py; }
+        // If a bitmap buffer is provided, prioritize its dimensions.
+        // This ensures no out-of-bounds writes even if Kotlin and JNI have different size expectations.
+        int renderW = (out_rgb_buffer && out_width > 0) ? out_width : finalW_zoomed;
+        int renderH = (out_rgb_buffer && out_height > 0) ? out_height : finalH_zoomed;
 
-                Vec3 color = process_pixel(cropX + sx * downsampleFactor, cropY + sy * downsampleFactor, nullptr, nullptr, nullptr);
-                size_t outIdx = (static_cast<size_t>(py) * finalW_zoomed + px) * 3;
+        previewRgb8.resize(static_cast<size_t>(renderW) * renderH * 3);
+        #pragma omp parallel for
+        for (int py = 0; py < renderH; py++) {
+            for (int px = 0; px < renderW; px++) {
+                int sx, sy;
+                int opx = mirror ? (renderW - 1 - px) : px;
+
+                // Map back to source pixels using the actual render dimensions
+                // This is safer than using downsampleFactor directly if dimensions mismatch
+                float fx = (float)opx / renderW * (swapDims ? cropH : cropW);
+                float fy = (float)py / renderH * (swapDims ? cropW : cropH);
+
+                if (orientation == 90) { sx = (int)fy; sy = (cropH - 1) - (int)fx; }
+                else if (orientation == 180) { sx = (cropW - 1) - (int)fx; sy = (cropH - 1) - (int)fy; }
+                else if (orientation == 270) { sx = (cropW - 1) - (int)fy; sy = (int)fx; }
+                else { sx = (int)fx; sy = (int)fy; }
+
+                Vec3 color = process_pixel(cropX + sx, cropY + sy, nullptr, nullptr, nullptr);
+                size_t outIdx = (static_cast<size_t>(py) * renderW + px) * 3;
                 unsigned char r8 = (unsigned char)std::max(0.0f, std::min(255.0f, color.r * 255.0f + 0.5f));
                 unsigned char g8 = (unsigned char)std::max(0.0f, std::min(255.0f, color.g * 255.0f + 0.5f));
                 unsigned char b8 = (unsigned char)std::max(0.0f, std::min(255.0f, color.b * 255.0f + 0.5f));
@@ -615,7 +627,7 @@ bool process_and_save_image(
                 previewRgb8[outIdx + 2] = b8;
 
                 if (out_rgb_buffer) {
-                    size_t bIdx = (static_cast<size_t>(py) * finalW_zoomed + px) * 4;
+                    size_t bIdx = (static_cast<size_t>(py) * renderW + px) * 4;
                     out_rgb_buffer[bIdx+0] = r8;
                     out_rgb_buffer[bIdx+1] = g8;
                     out_rgb_buffer[bIdx+2] = b8;
@@ -623,6 +635,9 @@ bool process_and_save_image(
                 }
             }
         }
+        // Update dimensions for JPEG writing if we used bitmap dimensions
+        finalW_zoomed = renderW;
+        finalH_zoomed = renderH;
     } else {
         processedImage.resize(static_cast<size_t>(finalW_zoomed) * finalH_zoomed * 3);
         #pragma omp parallel for
@@ -630,10 +645,14 @@ bool process_and_save_image(
             for (int px = 0; px < finalW_zoomed; px++) {
                 int sx, sy;
                 int opx = mirror ? (finalW_zoomed - 1 - px) : px;
-                if (orientation == 90) { sx = py; sy = (finalW_zoomed - 1) - opx; }
-                else if (orientation == 180) { sx = (finalW_zoomed - 1) - opx; sy = (finalH_zoomed - 1) - py; }
-                else if (orientation == 270) { sx = (finalH_zoomed - 1) - py; sy = opx; }
-                else { sx = opx; sy = py; }
+
+                float fx = (float)opx / finalW_zoomed * (swapDims ? cropH : cropW);
+                float fy = (float)py / finalH_zoomed * (swapDims ? cropW : cropH);
+
+                if (orientation == 90) { sx = (int)fy; sy = (cropH - 1) - (int)fx; }
+                else if (orientation == 180) { sx = (cropW - 1) - (int)fx; sy = (cropH - 1) - (int)fy; }
+                else if (orientation == 270) { sx = (cropW - 1) - (int)fy; sy = (int)fx; }
+                else { sx = (int)fx; sy = (int)fy; }
 
                 Vec3 stageA{}, stageB{}, stageC{};
                 Vec3 color = process_pixel(cropX + sx, cropY + sy,

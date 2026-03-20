@@ -58,6 +58,8 @@ bool process_and_save_image(
     const float* wb = nullptr,
     int orientation = 0,
     unsigned char* out_rgb_buffer = nullptr,
+    int out_width = 0,
+    int out_height = 0,
     bool isPreview = false,
     int downsampleFactor = 1,
     float zoomFactor = 1.0f,

@@ -118,8 +118,15 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRaw(
     // Paths
     const char* jpg_path_cstr = (outputJpgPath) ? env->GetStringUTFChars(outputJpgPath, 0) : nullptr;
 
+    AndroidBitmapInfo info;
+    int out_w = 0, out_h = 0;
     unsigned char* bitmapPixels = nullptr;
-    if (outputBitmap) AndroidBitmap_lockPixels(env, outputBitmap, (void**)&bitmapPixels);
+    if (outputBitmap) {
+        AndroidBitmap_getInfo(env, outputBitmap, &info);
+        out_w = info.width;
+        out_h = info.height;
+        AndroidBitmap_lockPixels(env, outputBitmap, (void**)&bitmapPixels);
+    }
 
     // Use Shared Pipeline
     bool saveOk = process_and_save_image(
@@ -136,6 +143,8 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRaw(
         nullptr, // wb is not used for ProPhoto path (LibRaw handles it)
         (int)orientation,
         bitmapPixels, // out_rgb_buffer
+        out_w,
+        out_h,
         outputBitmap != nullptr, // isPreview
         (int)downsampleFactor, // downsampleFactor
         (float)zoomFactor, // zoomFactor
