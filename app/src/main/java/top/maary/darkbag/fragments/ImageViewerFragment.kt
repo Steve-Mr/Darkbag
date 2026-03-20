@@ -22,11 +22,13 @@ import androidx.navigation.fragment.navArgs
 import androidx.viewpager2.widget.ViewPager2
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.collect
 import top.maary.darkbag.R
 import top.maary.darkbag.databinding.BottomSheetImageDetailsBinding
 import top.maary.darkbag.databinding.FragmentImageViewerBinding
 import top.maary.darkbag.databinding.ItemDetailRowBinding
 import top.maary.darkbag.models.ImageGroup
+import top.maary.darkbag.processor.ColorProcessor
 import top.maary.darkbag.repository.ImageRepository
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -113,6 +115,16 @@ class ImageViewerFragment : Fragment() {
 
         binding.imagePager.registerOnPageChangeCallback(pageChangeCallback)
         loadImages(forceRefresh = true)
+
+        viewLifecycleOwner.lifecycleScope.launch {
+            ColorProcessor.backgroundSaveFlow.collect { event ->
+                if (isAdjusted || !::adapter.isInitialized) return@collect
+                val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
+                if (event.baseName == currentGroup.baseName || event.targetUri == currentGroup.jpgUri?.toString()) {
+                    refreshViewerContent()
+                }
+            }
+        }
     }
 
     private fun loadImages(targetUri: String? = args.initialUri, forceRefresh: Boolean = false) {
@@ -150,6 +162,35 @@ class ImageViewerFragment : Fragment() {
 
             binding.imagePager.visibility = View.VISIBLE
             binding.initialLoadingIndicator.visibility = View.GONE
+        }
+    }
+
+    private fun refreshViewerContent() {
+        if (!::adapter.isInitialized) return
+
+        val currentIndex = binding.imagePager.currentItem
+        val currentGroup = adapter.getGroup(currentIndex)
+        val currentBaseName = currentGroup.baseName
+        val currentFormat = adapter.getSelectedFormat(currentIndex)
+
+        lifecycleScope.launch {
+            repository.invalidateCache()
+            val groups = repository.getGroupedImages(forceRefresh = true)
+            if (groups.isEmpty()) return@launch
+
+            adapter = ImageViewerAdapter(groups, lifecycleScope, requireContext()).apply {
+                onImageTapped = { toggleUi() }
+                onZoomChanged = { isZoomed -> if (isZoomed) hideUi() else showUi() }
+                onLongPressStarted = { handleLongPressStarted(it) }
+                onLongPressEnded = { handleLongPressEnded(it) }
+                setFormatSwitcherPersistentHidden(isAdjusted)
+            }
+            binding.imagePager.adapter = adapter
+
+            val newIndex = groups.indexOfFirst { it.baseName == currentBaseName }.takeIf { it >= 0 } ?: currentIndex.coerceAtMost(groups.lastIndex)
+            binding.imagePager.setCurrentItem(newIndex, false)
+            adapter.setFormat(newIndex, currentFormat)
+            updateControlsVisibility()
         }
     }
 

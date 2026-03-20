@@ -1,6 +1,5 @@
 package top.maary.darkbag.fragments
 
-import android.graphics.drawable.BitmapDrawable
 import android.net.Uri
 import android.view.LayoutInflater
 import android.view.View
@@ -117,17 +116,56 @@ class ImageViewerAdapter(
         when (format) {
             "JPG" -> group.jpgUri?.let { loadImage(holder, it) }
             "DNG" -> {
-                // Optimization: If a JPG exists, use it as a placeholder for the DNG tab to avoid immediate heavy RAW decoding
-                if (group.jpgUri != null && !group.isHalfFrame()) {
-                    loadWithGlide(holder, group.jpgUri, skipCache = false)
-                    group.dngUri?.let { loadImage(holder, it) }
+                if (group.isHalfFrame()) {
+                    loadHalfFrameDngs(holder, group, group.editConfig?.zoomFactor ?: 1.0f)
                 } else {
-                    if (group.isHalfFrame()) {
-                        loadHalfFrameDngs(holder, group, group.editConfig?.zoomFactor ?: 1.0f)
-                    } else {
-                        group.dngUri?.let { loadImage(holder, it) }
-                    }
+                    group.dngUri?.let { loadImage(holder, it) }
                 }
+            }
+        }
+    }
+
+    private fun setBitmapAndRecyclePrevious(holder: ViewHolder, bitmap: android.graphics.Bitmap) {
+        val previousBitmap = (holder.binding.imageView.drawable as? android.graphics.drawable.BitmapDrawable)?.bitmap
+        holder.binding.imageView.setImageBitmap(bitmap)
+        if (previousBitmap != null && previousBitmap !== bitmap && !previousBitmap.isRecycled) {
+            previousBitmap.recycle()
+        }
+    }
+
+    private fun clearCurrentBitmap(holder: ViewHolder) {
+        val currentBitmap = (holder.binding.imageView.drawable as? android.graphics.drawable.BitmapDrawable)?.bitmap
+        Glide.with(holder.binding.imageView).clear(holder.binding.imageView)
+        currentBitmap?.let { bitmap ->
+            if (!bitmap.isRecycled) bitmap.recycle()
+        }
+        holder.binding.imageView.setImageDrawable(null)
+    }
+
+    private fun loadDngThumbnailOnly(holder: ViewHolder, uri: Uri, zoomFactor: Float = 1.0f) {
+        holder.loadJob?.cancel()
+        holder.binding.imageView.visibility = View.VISIBLE
+        holder.binding.loadingIndicator.visibility = View.VISIBLE
+
+        holder.loadJob = scope.launch {
+            try {
+                val thumbnailBitmap = ImageUtils.decodeDngThumbnail(holder.binding.root.context, uri, zoomFactor)
+                ensureActive()
+
+                if (thumbnailBitmap != null) {
+                    setBitmapAndRecyclePrevious(holder, thumbnailBitmap)
+                } else {
+                    loadWithGlide(holder, uri)
+                    return@launch
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                android.util.Log.e("ImageViewerAdapter", "Failed to load DNG thumbnail: $uri", e)
+                loadWithGlide(holder, uri)
+                return@launch
+            } finally {
+                holder.binding.loadingIndicator.visibility = View.GONE
             }
         }
     }
@@ -158,49 +196,8 @@ class ImageViewerAdapter(
         holder.binding.imageView.visibility = View.VISIBLE
         holder.binding.loadingIndicator.visibility = View.VISIBLE
 
-        val isDng = uri.toString().endsWith(".dng", ignoreCase = true)
-
-        if (isDng) {
-            holder.loadJob = scope.launch {
-                val context = holder.binding.root.context
-                var thumbnailBitmap: android.graphics.Bitmap? = null
-                var renderedBitmap: android.graphics.Bitmap? = null
-
-                try {
-                    thumbnailBitmap = ImageUtils.decodeDngThumbnail(context, uri, zoomFactor)
-                    ensureActive()
-
-                    if (thumbnailBitmap != null) {
-                        holder.binding.imageView.setImageBitmap(thumbnailBitmap)
-                    }
-
-                    renderedBitmap = ImageUtils.renderDngBitmap(context, uri, zoomFactor = zoomFactor)
-                    ensureActive()
-
-                    if (renderedBitmap != null) {
-                        val previousBitmap = (holder.binding.imageView.drawable as? BitmapDrawable)?.bitmap
-                        holder.binding.imageView.setImageBitmap(renderedBitmap)
-                        if (previousBitmap != null && previousBitmap !== renderedBitmap && previousBitmap !== thumbnailBitmap && !previousBitmap.isRecycled) {
-                            previousBitmap.recycle()
-                        }
-                    } else if (thumbnailBitmap == null) {
-                        loadWithGlide(holder, uri)
-                        return@launch
-                    }
-                } catch (e: CancellationException) {
-                    renderedBitmap?.takeIf { !it.isRecycled }?.recycle()
-                    throw e
-                } catch (e: Exception) {
-                    renderedBitmap?.takeIf { !it.isRecycled }?.recycle()
-                    android.util.Log.e("ImageViewerAdapter", "Failed to load DNG image: $uri", e)
-                    if (thumbnailBitmap == null) {
-                        loadWithGlide(holder, uri)
-                        return@launch
-                    }
-                } finally {
-                    holder.binding.loadingIndicator.visibility = View.GONE
-                }
-            }
+        if (uri.toString().endsWith(".dng", ignoreCase = true)) {
+            loadDngThumbnailOnly(holder, uri, zoomFactor)
         } else {
             loadWithGlide(holder, uri, skipCache = true)
         }
@@ -256,10 +253,7 @@ class ImageViewerAdapter(
 
     override fun onViewRecycled(holder: ViewHolder) {
         holder.loadJob?.cancel()
-        val currentBitmap = (holder.binding.imageView.drawable as? BitmapDrawable)?.bitmap
-        Glide.with(holder.binding.imageView).clear(holder.binding.imageView)
-        currentBitmap?.let { bitmap -> if (!bitmap.isRecycled) bitmap.recycle() }
-        holder.binding.imageView.setImageDrawable(null)
+        clearCurrentBitmap(holder)
         holder.binding.loadingIndicator.visibility = View.GONE
         super.onViewRecycled(holder)
     }
@@ -339,10 +333,7 @@ class ImageViewerAdapter(
         if (holder != null) {
             holder.loadJob?.cancel()
             if (clearView) {
-                val currentBitmap = (holder.binding.imageView.drawable as? BitmapDrawable)?.bitmap
-                Glide.with(holder.binding.imageView).clear(holder.binding.imageView)
-                currentBitmap?.let { bitmap -> if (!bitmap.isRecycled) bitmap.recycle() }
-                holder.binding.imageView.setImageDrawable(null)
+                clearCurrentBitmap(holder)
             }
             holder.binding.loadingIndicator.visibility = View.GONE
         }
