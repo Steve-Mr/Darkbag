@@ -11,5 +11,8 @@ data class CaptureMetadata(
     val focalLength: Float? = null,
     val dateTimeOriginal: Long? = null,
     val make: String? = null,
-    val model: String? = null
+    val model: String? = null,
+    val uniqueCameraModel: String? = null,
+    val software: String? = null,
+    val imageDescription: String? = null
 ) : Parcelable
