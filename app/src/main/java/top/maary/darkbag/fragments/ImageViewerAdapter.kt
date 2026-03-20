@@ -236,6 +236,8 @@ class ImageViewerAdapter(
             } catch (e: Exception) {
                 android.util.Log.e("ImageViewerAdapter", "Failed to load half-frame DNGs", e)
                 composite?.recycle()
+                clearCurrentBitmap(holder)
+                holder.binding.imageView.setImageResource(android.R.drawable.ic_menu_gallery)
             } finally {
                 holder.binding.loadingIndicator.visibility = View.GONE
             }
