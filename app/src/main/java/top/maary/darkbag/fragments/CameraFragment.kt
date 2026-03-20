@@ -1727,6 +1727,7 @@ class CameraFragment : Fragment() {
 
                 val tempRawFile = File(context.cacheDir, "$dngName.tmp.raw")
                 val tempJpgFile = File(context.cacheDir, "$dngName.tmp.jpg")
+                val tempDngThumbFile = File(context.cacheDir, "$dngName.tmp.dngthumb.jpg")
                 val fullResJpgFile = File(context.cacheDir, "${dngName}_full.jpg")
                 val linearDngFile = File(context.cacheDir, "${dngName}_linear.dng")
                 val bayerDngFile = File(context.cacheDir, "${dngName}_bayer.dng")
@@ -1778,6 +1779,44 @@ class CameraFragment : Fragment() {
 
                 if (saveRaw) {
                     try {
+                        val shouldRenderNeutralDngThumbnail = !saveJpg || targetLogIndex != 0 || !nativeLutPath.isNullOrBlank()
+                        val dngThumbnailSource = if (shouldRenderNeutralDngThumbnail) {
+                            val thumbResult = ColorProcessor.processSingleFrameRaw(
+                                bayerBuffer = image.data,
+                                width = image.width,
+                                height = image.height,
+                                orientation = image.combinedOrientation,
+                                whiteLevel = whiteLevel,
+                                blackLevelPattern = blackLevelPattern,
+                                lensShadingMap = lensShadingMapData,
+                                lensShadingRows = lensShadingRows,
+                                lensShadingCols = lensShadingCols,
+                                whiteBalance = wb,
+                                ccm = ccm,
+                                cfaPattern = cfa,
+                                iso = iso,
+                                exposureTime = exposureTime,
+                                fNumber = fNumber,
+                                focalLength = focalLength,
+                                captureTimeMillis = captureTime,
+                                targetLog = 0,
+                                lutPath = null,
+                                outputJpgPath = tempDngThumbFile.absolutePath,
+                                outputDngPath = null,
+                                digitalGain = image.digitalGain,
+                                debugStats = null,
+                                outputBitmap = null,
+                                tempRawPath = null,
+                                zoomFactor = image.zoomRatio,
+                                mirror = mirror
+                            )
+                            if (thumbResult >= 0 && tempDngThumbFile.exists() && tempDngThumbFile.length() > 0L) tempDngThumbFile else null
+                        } else if (tempJpgFile.exists() && tempJpgFile.length() > 0L) {
+                            tempJpgFile
+                        } else {
+                            null
+                        }
+
                         val dngCreator = android.hardware.camera2.DngCreator(chars, captureResult)
                         dngCreator.setDescription(DarkbagIdentity.imageDescription(isHdrPlus = false))
 
@@ -1789,7 +1828,7 @@ class CameraFragment : Fragment() {
                             else -> ExifInterface.ORIENTATION_NORMAL
                         }
                         dngCreator.setOrientation(dngOrientation)
-                        createDngThumbnailBitmap(tempJpgFile)?.let { thumb ->
+                        dngThumbnailSource?.let { createDngThumbnailBitmap(it) }?.let { thumb ->
                             try {
                                 dngCreator.setThumbnail(thumb)
                             } finally {
@@ -1806,6 +1845,8 @@ class CameraFragment : Fragment() {
                         Log.d(TAG, "DNG saved using DngCreator: ${bayerDngFile.absolutePath}")
                     } catch (e: Exception) {
                         Log.e(TAG, "Failed to save DNG using DngCreator", e)
+                    } finally {
+                        tempDngThumbFile.delete()
                     }
                 }
 
@@ -4845,7 +4886,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         )
     }
 
-    private fun createDngThumbnailBitmap(sourceJpeg: File, maxDimension: Int = 512): android.graphics.Bitmap? {
+    private fun createDngThumbnailBitmap(sourceJpeg: File, maxDimension: Int = 240): android.graphics.Bitmap? {
         if (!sourceJpeg.exists() || sourceJpeg.length() <= 0L) return null
 
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -4861,7 +4902,15 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             this.inSampleSize = inSampleSize
             inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888
         }
-        return BitmapFactory.decodeFile(sourceJpeg.absolutePath, decodeOpts)
+        val decoded = BitmapFactory.decodeFile(sourceJpeg.absolutePath, decodeOpts) ?: return null
+        if (decoded.width < 256 && decoded.height < 256) return decoded
+
+        val scale = minOf(255f / decoded.width.toFloat(), 255f / decoded.height.toFloat(), 1.0f)
+        val scaledWidth = maxOf(1, kotlin.math.floor(decoded.width * scale).toInt())
+        val scaledHeight = maxOf(1, kotlin.math.floor(decoded.height * scale).toInt())
+        val scaled = Bitmap.createScaledBitmap(decoded, scaledWidth, scaledHeight, true)
+        if (scaled != decoded) decoded.recycle()
+        return scaled
     }
 
     private fun getMeteringRectangle(
