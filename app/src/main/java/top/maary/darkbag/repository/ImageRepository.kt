@@ -321,6 +321,18 @@ class ImageRepository(private val context: Context) {
             if (time > captureTime) captureTime = time
         }
 
-        fun build() = ImageGroup(baseName, jpgUri, dngUri, dngUri1, dngUri2, hfLayout, width, height, captureTime, editConfig)
+        fun build() = ImageGroup(
+            baseName,
+            jpgUri,
+            dngUri,
+            dngUri1,
+            dngUri2,
+            hfLayout,
+            width,
+            height,
+            captureTime,
+            maxOf(jpgTime, dngTime, dngUri1Time, dngUri2Time),
+            editConfig
+        )
     }
 }

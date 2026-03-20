@@ -119,10 +119,7 @@ class ImageViewerFragment : Fragment() {
         viewLifecycleOwner.lifecycleScope.launch {
             ColorProcessor.backgroundSaveFlow.collect { event ->
                 if (isAdjusted || !::adapter.isInitialized) return@collect
-                val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
-                if (event.baseName == currentGroup.baseName || event.targetUri == currentGroup.jpgUri?.toString()) {
-                    refreshViewerContent()
-                }
+                handleBackgroundSaveEvent(event)
             }
         }
     }
@@ -165,32 +162,34 @@ class ImageViewerFragment : Fragment() {
         }
     }
 
-    private fun refreshViewerContent() {
-        if (!::adapter.isInitialized) return
+    private fun handleBackgroundSaveEvent(event: ColorProcessor.BackgroundSaveEvent) {
+        val groups = adapter.getGroups().toMutableList()
+        val index = adapter.findGroupIndex(event.baseName)
 
-        val currentIndex = binding.imagePager.currentItem
-        val currentGroup = adapter.getGroup(currentIndex)
-        val currentBaseName = currentGroup.baseName
-        val currentFormat = adapter.getSelectedFormat(currentIndex)
+        if (index != -1) {
+            val oldGroup = groups[index]
+            val newJpgUri = event.targetUri?.let { Uri.parse(it) } ?: oldGroup.jpgUri
+            val newDngUri = event.dngPath?.let { Uri.parse(it) } ?: oldGroup.dngUri
 
-        lifecycleScope.launch {
-            repository.invalidateCache()
-            val groups = repository.getGroupedImages(forceRefresh = true)
-            if (groups.isEmpty()) return@launch
+            val newGroup = oldGroup.copy(
+                jpgUri = newJpgUri,
+                dngUri = newDngUri,
+                lastModified = System.currentTimeMillis()
+            )
+            groups[index] = newGroup
+            adapter.updateGroups(groups)
 
-            adapter = ImageViewerAdapter(groups, lifecycleScope, requireContext()).apply {
-                onImageTapped = { toggleUi() }
-                onZoomChanged = { isZoomed -> if (isZoomed) hideUi() else showUi() }
-                onLongPressStarted = { handleLongPressStarted(it) }
-                onLongPressEnded = { handleLongPressEnded(it) }
-                setFormatSwitcherPersistentHidden(isAdjusted)
+            if (index == binding.imagePager.currentItem) {
+                updateControlsVisibility()
             }
-            binding.imagePager.adapter = adapter
-
-            val newIndex = groups.indexOfFirst { it.baseName == currentBaseName }.takeIf { it >= 0 } ?: currentIndex.coerceAtMost(groups.lastIndex)
-            binding.imagePager.setCurrentItem(newIndex, false)
-            adapter.setFormat(newIndex, currentFormat)
-            updateControlsVisibility()
+        } else {
+            // New image group saved (maybe from background processing of a very recent shot)
+            // Trigger a full repository refresh to include the new item
+            lifecycleScope.launch {
+                repository.invalidateCache()
+                val newGroups = repository.getGroupedImages(forceRefresh = true)
+                adapter.updateGroups(newGroups)
+            }
         }
     }
 

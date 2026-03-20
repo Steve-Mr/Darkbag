@@ -15,7 +15,7 @@ import top.maary.darkbag.models.ImageGroup
 import top.maary.darkbag.utils.ImageUtils
 
 class ImageViewerAdapter(
-    private val groups: List<ImageGroup>,
+    private var groups: List<ImageGroup>,
     private val scope: CoroutineScope,
     context: android.content.Context
 ) : RecyclerView.Adapter<ImageViewerAdapter.ViewHolder>() {
@@ -115,7 +115,7 @@ class ImageViewerAdapter(
 
     private fun loadSelectedFormat(holder: ViewHolder, group: ImageGroup, format: String) {
         when (format) {
-            "JPG" -> group.jpgUri?.let { loadImage(holder, it) }
+            "JPG" -> group.jpgUri?.let { loadImage(holder, it, version = group.lastModified) }
             "DNG" -> {
                 if (group.isHalfFrame()) {
                     loadHalfFrameDngs(holder, group, group.editConfig?.zoomFactor ?: 1.0f)
@@ -196,7 +196,7 @@ class ImageViewerAdapter(
         }
     }
 
-    private fun loadImage(holder: ViewHolder, uri: Uri, zoomFactor: Float = 1.0f) {
+    private fun loadImage(holder: ViewHolder, uri: Uri, zoomFactor: Float = 1.0f, version: Long = 0L) {
         holder.loadJob?.cancel()
         holder.binding.imageView.visibility = View.VISIBLE
         holder.binding.loadingIndicator.visibility = View.VISIBLE
@@ -204,7 +204,7 @@ class ImageViewerAdapter(
         if (uri.toString().endsWith(".dng", ignoreCase = true)) {
             loadDngThumbnailOnly(holder, uri, zoomFactor)
         } else {
-            loadWithGlide(holder, uri, skipCache = true)
+            loadWithGlide(holder, uri, skipCache = true, version = version)
         }
     }
 
@@ -244,12 +244,19 @@ class ImageViewerAdapter(
         }
     }
 
-    private fun loadWithGlide(holder: ViewHolder, uri: Uri, skipCache: Boolean = false) {
+    private fun loadWithGlide(holder: ViewHolder, uri: Uri, skipCache: Boolean = false, version: Long = 0L) {
         clearCurrentBitmap(holder)
+
+        val model = if (version > 0) {
+            com.bumptech.glide.signature.ObjectKey(version)
+        } else {
+            null
+        }
 
         Glide.with(holder.binding.imageView)
             .asDrawable()
             .load(uri)
+            .let { if (model != null) it.signature(model) else it }
             .apply {
                 if (skipCache) {
                     diskCacheStrategy(DiskCacheStrategy.NONE)
@@ -281,6 +288,8 @@ class ImageViewerAdapter(
     }
 
     fun getGroup(position: Int): ImageGroup = groups[position]
+
+    fun getGroups(): List<ImageGroup> = groups
 
     fun setFormat(position: Int, format: String) {
         val group = groups[position]
@@ -359,5 +368,24 @@ class ImageViewerAdapter(
             }
             holder.binding.loadingIndicator.visibility = View.GONE
         }
+    }
+
+    fun updateGroups(newGroups: List<ImageGroup>) {
+        val diffResult = androidx.recyclerview.widget.DiffUtil.calculateDiff(object : androidx.recyclerview.widget.DiffUtil.Callback() {
+            override fun getOldListSize(): Int = groups.size
+            override fun getNewListSize(): Int = newGroups.size
+            override fun areItemsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean {
+                return groups[oldItemPosition].baseName == newGroups[newItemPosition].baseName
+            }
+            override fun areContentsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean {
+                return groups[oldItemPosition] == newGroups[newItemPosition]
+            }
+        })
+        groups = newGroups
+        diffResult.dispatchUpdatesTo(this)
+    }
+
+    fun findGroupIndex(baseName: String): Int {
+        return groups.indexOfFirst { it.baseName == baseName }
     }
 }
