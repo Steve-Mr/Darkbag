@@ -68,13 +68,13 @@ extern "C" void halide_print(void* user_context, const char* str) {
 }
 
 struct HalideStageStats {
-    long align = 0;
-    long merge = 0;
-    long black_white = 0;
-    long white_balance = 0;
-    long demosaic = 0;
-    long denoise = 0;
-    long srgb = 0;
+    int64_t align = 0;
+    int64_t merge = 0;
+    int64_t black_white = 0;
+    int64_t white_balance = 0;
+    int64_t demosaic = 0;
+    int64_t denoise = 0;
+    int64_t srgb = 0;
 };
 
 HalideStageStats parseHalideReport(const std::string& report) {
@@ -95,7 +95,7 @@ HalideStageStats parseHalideReport(const std::string& report) {
                 continue;
             }
             std::string unit = match[3].str();
-            long ms = (unit == "s") ? (long)(val * 1000) : (long)val;
+            int64_t ms = (unit == "s") ? (int64_t)(val * 1000) : (int64_t)val;
 
             if (name.find("alignment") != std::string::npos || name.find("layer_") != std::string::npos) stats.align += ms;
             else if (name.find("merge_") != std::string::npos) stats.merge += ms;
@@ -155,10 +155,10 @@ int getIntField(JNIEnv* env, jobject obj, jfieldID fieldID, int defaultValue) {
     return result;
 }
 
-long getLongField(JNIEnv* env, jobject obj, jfieldID fieldID, long defaultValue) {
+int64_t getLongField(JNIEnv* env, jobject obj, jfieldID fieldID, int64_t defaultValue) {
     jobject boxed = env->GetObjectField(obj, fieldID);
     if (!boxed) return defaultValue;
-    long result = (long)env->CallLongMethod(boxed, g_boxedMethods.longValue);
+    int64_t result = (int64_t)env->CallLongMethod(boxed, g_boxedMethods.longValue);
     env->DeleteLocalRef(boxed);
     return result;
 }
@@ -197,43 +197,57 @@ extern "C" jint JNI_OnLoad(JavaVM* vm, void* reserved) {
     if (vm->GetEnv((void**)&env, JNI_VERSION_1_6) != JNI_OK) return JNI_ERR;
 
     jclass colorProcClazz = env->FindClass("top/maary/darkbag/processor/ColorProcessor");
-    if (colorProcClazz) g_colorProcessorClass = (jclass)env->NewGlobalRef(colorProcClazz);
+    if (!colorProcClazz) return JNI_ERR;
+    g_colorProcessorClass = (jclass)env->NewGlobalRef(colorProcClazz);
 
     jclass byteBufClazz = env->FindClass("java/nio/ByteBuffer");
-    if (byteBufClazz) g_byteBufferClass = (jclass)env->NewGlobalRef(byteBufClazz);
+    if (!byteBufClazz) return JNI_ERR;
+    g_byteBufferClass = (jclass)env->NewGlobalRef(byteBufClazz);
 
     jclass metadataClazz = env->FindClass("top/maary/darkbag/models/CaptureMetadata");
-    if (metadataClazz) {
-        g_captureMetadataClass = (jclass)env->NewGlobalRef(metadataClazz);
-        g_metadataFields.iso = env->GetFieldID(metadataClazz, "iso", "Ljava/lang/Integer;");
-        g_metadataFields.exposureTime = env->GetFieldID(metadataClazz, "exposureTime", "Ljava/lang/Long;");
-        g_metadataFields.fNumber = env->GetFieldID(metadataClazz, "fNumber", "Ljava/lang/Float;");
-        g_metadataFields.focalLength = env->GetFieldID(metadataClazz, "focalLength", "Ljava/lang/Float;");
-        g_metadataFields.dateTimeOriginal = env->GetFieldID(metadataClazz, "dateTimeOriginal", "Ljava/lang/Long;");
-        g_metadataFields.make = env->GetFieldID(metadataClazz, "make", "Ljava/lang/String;");
-        g_metadataFields.model = env->GetFieldID(metadataClazz, "model", "Ljava/lang/String;");
-        g_metadataFields.uniqueCameraModel = env->GetFieldID(metadataClazz, "uniqueCameraModel", "Ljava/lang/String;");
-        g_metadataFields.software = env->GetFieldID(metadataClazz, "software", "Ljava/lang/String;");
-        g_metadataFields.imageDescription = env->GetFieldID(metadataClazz, "imageDescription", "Ljava/lang/String;");
+    if (!metadataClazz) return JNI_ERR;
+    g_captureMetadataClass = (jclass)env->NewGlobalRef(metadataClazz);
+
+    auto getField = [&](jclass clazz, const char* name, const char* sig) -> jfieldID {
+        jfieldID fid = env->GetFieldID(clazz, name, sig);
+        if (!fid) {
+            LOGE("Failed to find field %s with signature %s", name, sig);
+        }
+        return fid;
+    };
+
+    g_metadataFields.iso = getField(metadataClazz, "iso", "Ljava/lang/Integer;");
+    g_metadataFields.exposureTime = getField(metadataClazz, "exposureTime", "Ljava/lang/Long;");
+    g_metadataFields.fNumber = getField(metadataClazz, "fNumber", "Ljava/lang/Float;");
+    g_metadataFields.focalLength = getField(metadataClazz, "focalLength", "Ljava/lang/Float;");
+    g_metadataFields.dateTimeOriginal = getField(metadataClazz, "dateTimeOriginal", "Ljava/lang/Long;");
+    g_metadataFields.make = getField(metadataClazz, "make", "Ljava/lang/String;");
+    g_metadataFields.model = getField(metadataClazz, "model", "Ljava/lang/String;");
+    g_metadataFields.uniqueCameraModel = getField(metadataClazz, "uniqueCameraModel", "Ljava/lang/String;");
+    g_metadataFields.software = getField(metadataClazz, "software", "Ljava/lang/String;");
+    g_metadataFields.imageDescription = getField(metadataClazz, "imageDescription", "Ljava/lang/String;");
+
+    if (!g_metadataFields.iso || !g_metadataFields.exposureTime || !g_metadataFields.fNumber ||
+        !g_metadataFields.focalLength || !g_metadataFields.dateTimeOriginal || !g_metadataFields.make ||
+        !g_metadataFields.model || !g_metadataFields.uniqueCameraModel || !g_metadataFields.software ||
+        !g_metadataFields.imageDescription) {
+        return JNI_ERR;
     }
 
-    jclass intClazz = env->FindClass("java/lang/Integer");
-    if (intClazz) {
-        g_integerClass = (jclass)env->NewGlobalRef(intClazz);
-        g_boxedMethods.intValue = env->GetMethodID(intClazz, "intValue", "()I");
-    }
+    auto getBoxedInfo = [&](const char* clazzName, const char* methodName, const char* sig, jclass& outClazz, jmethodID& outMethod) -> bool {
+        jclass clazz = env->FindClass(clazzName);
+        if (!clazz) return false;
+        outClazz = (jclass)env->NewGlobalRef(clazz);
+        outMethod = env->GetMethodID(clazz, methodName, sig);
+        if (!outMethod) {
+            LOGE("Failed to find method %s with signature %s in class %s", methodName, sig, clazzName);
+        }
+        return outMethod != nullptr;
+    };
 
-    jclass longClazz = env->FindClass("java/lang/Long");
-    if (longClazz) {
-        g_longClass = (jclass)env->NewGlobalRef(longClazz);
-        g_boxedMethods.longValue = env->GetMethodID(longClazz, "longValue", "()J");
-    }
-
-    jclass floatClazz = env->FindClass("java/lang/Float");
-    if (floatClazz) {
-        g_floatClass = (jclass)env->NewGlobalRef(floatClazz);
-        g_boxedMethods.floatValue = env->GetMethodID(floatClazz, "floatValue", "()F");
-    }
+    if (!getBoxedInfo("java/lang/Integer", "intValue", "()I", g_integerClass, g_boxedMethods.intValue)) return JNI_ERR;
+    if (!getBoxedInfo("java/lang/Long", "longValue", "()J", g_longClass, g_boxedMethods.longValue)) return JNI_ERR;
+    if (!getBoxedInfo("java/lang/Float", "floatValue", "()F", g_floatClass, g_boxedMethods.floatValue)) return JNI_ERR;
 
     return JNI_VERSION_1_6;
 }

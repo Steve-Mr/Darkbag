@@ -3,6 +3,7 @@
 
 #include <vector>
 #include <string>
+#include <cstdint>
 #include <fstream>
 #include <sstream>
 #include <cmath>
@@ -69,10 +70,10 @@ bool process_and_save_image(
 // --- File Writers ---
 struct ImageMetadata {
     int iso = 0;
-    long exposureTime = 0;
+    int64_t exposureTime = 0;
     float fNumber = 0.0f;
     float focalLength = 0.0f;
-    long captureTimeMillis = 0;
+    int64_t captureTimeMillis = 0;
     std::string make;
     std::string model;
     std::string uniqueCameraModel;
