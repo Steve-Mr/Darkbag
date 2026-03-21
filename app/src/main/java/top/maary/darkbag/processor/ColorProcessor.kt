@@ -2,6 +2,7 @@ package top.maary.darkbag.processor
 
 import java.nio.ByteBuffer
 import kotlinx.coroutines.flow.MutableSharedFlow
+import top.maary.darkbag.models.CaptureMetadata
 
 object ColorProcessor {
     init {
@@ -70,11 +71,6 @@ object ColorProcessor {
         whiteBalance: FloatArray,
         ccm: FloatArray,
         cfaPattern: Int,
-        iso: Int,
-        exposureTime: Long,
-        fNumber: Float,
-        focalLength: Float,
-        captureTimeMillis: Long,
         targetLog: Int,
         lutPath: String?,
         outputJpgPath: String?,
@@ -84,7 +80,8 @@ object ColorProcessor {
         outputBitmap: android.graphics.Bitmap? = null,
         tempRawPath: String? = null,
         zoomFactor: Float,
-        mirror: Boolean
+        mirror: Boolean,
+        metadata: CaptureMetadata
     ): Int
 
     /**
@@ -127,20 +124,11 @@ object ColorProcessor {
         blacks: Float = 0f,
         jpgPath: String?,
         dngPath: String?,
-        iso: Int,
-        exposureTime: Long,
-        fNumber: Float,
-        focalLength: Float,
-        captureTimeMillis: Long,
         ccm: FloatArray,
         whiteBalance: FloatArray,
         zoomFactor: Float,
         mirror: Boolean,
-        make: String,
-        model: String,
-        uniqueCameraModel: String,
-        software: String,
-        imageDescription: String
+        metadata: CaptureMetadata
     ): Int
 
     external fun processHdrPlus(
@@ -159,11 +147,6 @@ object ColorProcessor {
         ccmAlt: FloatArray?,      // alternate [3x3] for AB compare
         exportMatrixAB: Boolean,
         cfaPattern: Int,
-        iso: Int,
-        exposureTime: Long,
-        fNumber: Float,
-        focalLength: Float,
-        captureTimeMillis: Long,
         targetLog: Int,
         lutPath: String?,
         outputJpgPath: String?,
@@ -173,6 +156,7 @@ object ColorProcessor {
         outputBitmap: android.graphics.Bitmap? = null,
         tempRawPath: String? = null,
         zoomFactor: Float,
-        mirror: Boolean
+        mirror: Boolean,
+        metadata: CaptureMetadata
     ): Int
 }

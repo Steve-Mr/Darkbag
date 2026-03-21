@@ -85,17 +85,18 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
         val resolvedFlare = hfMetadata?.flareType ?: if (prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_LIGHT_LEAK, false)) java.util.Random().nextInt(2) + 1 else -1
 
         val isHalfFrame = hfMetadata?.profile != null && hfMetadata.profile != HalfFrameSessionStore.PROFILE_NORMAL
-        val captureMetadata = if (!isHalfFrame) {
-            CaptureMetadata(
-                iso = iso,
-                exposureTime = exposureTime,
-                fNumber = fNumber,
-                focalLength = focalLength,
-                dateTimeOriginal = captureTimeMillis,
-                make = Build.MANUFACTURER,
-                model = Build.MODEL
-            )
-        } else null
+        val captureMetadata = CaptureMetadata(
+            iso = iso,
+            exposureTime = exposureTime,
+            fNumber = fNumber,
+            focalLength = focalLength,
+            dateTimeOriginal = captureTimeMillis,
+            make = DarkbagIdentity.normalizedManufacturer(),
+            model = DarkbagIdentity.normalizedModel(),
+            uniqueCameraModel = DarkbagIdentity.uniqueCameraModel(),
+            software = DarkbagIdentity.softwareString(isHdrPlus = true),
+            imageDescription = DarkbagIdentity.imageDescription(isHdrPlus = true)
+        )
 
         val editConfig = top.maary.darkbag.models.EditConfig(
             log = targetLogStr,
@@ -132,20 +133,11 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
             blacks = editConfig?.blacks ?: 0f,
             jpgPath = jpgPath,
             dngPath = dngPath,
-            iso = iso,
-            exposureTime = exposureTime,
-            fNumber = fNumber,
-            focalLength = focalLength,
-            captureTimeMillis = captureTimeMillis,
             ccm = ccm,
             whiteBalance = whiteBalance,
             zoomFactor = zoomFactor,
             mirror = mirror,
-            make = DarkbagIdentity.normalizedManufacturer(),
-            model = DarkbagIdentity.normalizedModel(),
-            uniqueCameraModel = DarkbagIdentity.uniqueCameraModel(),
-            software = DarkbagIdentity.softwareString(isHdrPlus = true),
-            imageDescription = DarkbagIdentity.imageDescription(isHdrPlus = true)
+            metadata = captureMetadata
         )
 
         if (ret == 0) {

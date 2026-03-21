@@ -1742,6 +1742,19 @@ class CameraFragment : Fragment() {
                 val debugStats = LongArray(15)
                 val mirror = shouldMirror
 
+                val captureMetadata = CaptureMetadata(
+                    iso = iso,
+                    exposureTime = exposureTime,
+                    fNumber = fNumber,
+                    focalLength = focalLength,
+                    dateTimeOriginal = captureTime,
+                    make = DarkbagIdentity.normalizedManufacturer(),
+                    model = DarkbagIdentity.normalizedModel(),
+                    uniqueCameraModel = DarkbagIdentity.uniqueCameraModel(targetCharId),
+                    software = DarkbagIdentity.softwareString(isHdrPlus = false),
+                    imageDescription = DarkbagIdentity.imageDescription(isHdrPlus = false)
+                )
+
                 // 3. JNI Halide Processing
                 val result = ColorProcessor.processSingleFrameRaw(
                     bayerBuffer = image.data,
@@ -1756,11 +1769,6 @@ class CameraFragment : Fragment() {
                     whiteBalance = wb,
                     ccm = ccm,
                     cfaPattern = cfa,
-                    iso = iso,
-                    exposureTime = exposureTime,
-                    fNumber = fNumber,
-                    focalLength = focalLength,
-                    captureTimeMillis = captureTime,
                     targetLog = targetLogIndex,
                     lutPath = nativeLutPath,
                     outputJpgPath = if (saveJpg) tempJpgFile.absolutePath else null, // Fast JPG
@@ -1770,7 +1778,8 @@ class CameraFragment : Fragment() {
                     outputBitmap = null,
                     tempRawPath = tempRawFile.absolutePath,
                     zoomFactor = image.zoomRatio,
-                    mirror = mirror
+                    mirror = mirror,
+                    metadata = captureMetadata
                 )
 
                 timing?.jniDone = System.currentTimeMillis()
@@ -1794,11 +1803,6 @@ class CameraFragment : Fragment() {
                                 whiteBalance = wb,
                                 ccm = ccm,
                                 cfaPattern = cfa,
-                                iso = iso,
-                                exposureTime = exposureTime,
-                                fNumber = fNumber,
-                                focalLength = focalLength,
-                                captureTimeMillis = captureTime,
                                 targetLog = 0,
                                 lutPath = null,
                                 outputJpgPath = tempDngThumbFile.absolutePath,
@@ -1808,7 +1812,8 @@ class CameraFragment : Fragment() {
                                 outputBitmap = null,
                                 tempRawPath = null,
                                 zoomFactor = image.zoomRatio,
-                                mirror = mirror
+                                mirror = mirror,
+                                metadata = captureMetadata
                             )
                             if (thumbResult >= 0 && tempDngThumbFile.exists() && tempDngThumbFile.length() > 0L) tempDngThumbFile else null
                         } else if (tempJpgFile.exists() && tempJpgFile.length() > 0L) {
@@ -1868,18 +1873,6 @@ class CameraFragment : Fragment() {
                 )
 
                 // 4. Fast Output Feedback (Thumbnail)
-                val captureMetadata = if (image.halfFrameMetadata == null) {
-                    CaptureMetadata(
-                        iso = iso,
-                        exposureTime = exposureTime,
-                        fNumber = fNumber,
-                        focalLength = focalLength,
-                        dateTimeOriginal = captureTime,
-                        make = Build.MANUFACTURER,
-                        model = Build.MODEL
-                    )
-                } else null
-
                 val fastOutputUri = ImageSaver.saveProcessedImage(
                     context = context,
                     inputBitmap = null,
@@ -3549,6 +3542,19 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 // 2) optional fast downsampled JPEG (tempJpgPath) for immediate gallery update.
                 val mirror = shouldMirror
 
+                val captureMetadata = CaptureMetadata(
+                    iso = iso?.toInt(),
+                    exposureTime = exposureTime,
+                    fNumber = fNumber,
+                    focalLength = focalLength,
+                    dateTimeOriginal = captureTime,
+                    make = DarkbagIdentity.normalizedManufacturer(),
+                    model = DarkbagIdentity.normalizedModel(),
+                    uniqueCameraModel = DarkbagIdentity.uniqueCameraModel(targetCharId),
+                    software = DarkbagIdentity.softwareString(isHdrPlus = true),
+                    imageDescription = DarkbagIdentity.imageDescription(isHdrPlus = true)
+                )
+
                 val ret = ColorProcessor.processHdrPlus(
                     buffers,
                     width, height,
@@ -3556,7 +3562,6 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     whiteLevel, blackLevelPattern,
                     lensShadingMapData, lensShadingRows, lensShadingCols, useSensorColorMatrix,
                     wb, ccm, ccmAlt, exportMatrixAB, cfa,
-                    iso, exposureTime, fNumber, focalLength, captureTime,
                     targetLogIndex,
                     nativeLutPath,
                     if (saveJpg) tempJpgFile.absolutePath else null, // outputJpgPath (fast preview)
@@ -3566,7 +3571,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     null, // outputBitmap
                     tempRawFile.absolutePath,
                     currentZoom,
-                    mirror
+                    mirror,
+                    metadata = captureMetadata
                 )
 
                 val jniEndTime = System.currentTimeMillis()
@@ -3578,18 +3584,6 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     val saveStartTime = System.currentTimeMillis()
 
                     val mirror = shouldMirror
-
-                    val captureMetadata = if (hfMetadata == null) {
-                        CaptureMetadata(
-                            iso = iso?.toInt(),
-                            exposureTime = exposureTime,
-                            fNumber = fNumber,
-                            focalLength = focalLength,
-                            dateTimeOriginal = captureTime,
-                            make = Build.MANUFACTURER,
-                            model = Build.MODEL
-                        )
-                    } else null
 
                     val fastJpegUri = if (saveJpg) {
                         val layout = if (hfMetadata?.profile == HalfFrameSessionStore.PROFILE_HALF_TOP) "TB" else if (hfMetadata?.profile == HalfFrameSessionStore.PROFILE_HALF_SIDE) "SBS" else null

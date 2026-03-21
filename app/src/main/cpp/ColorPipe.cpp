@@ -832,7 +832,7 @@ static std::vector<unsigned char> make_preview_rgb8(
     return preview;
 }
 
-bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, int iso, long exposureTime, float fNumber, float focalLength, long captureTimeMillis, const std::vector<float>& ccm, const std::string& make, const std::string& model, const std::string& uniqueCameraModel, const std::string& software, const std::string& imageDescription, int orientation, bool mirror, float baselineExposure) {
+bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, const std::vector<float>& ccm, const ImageMetadata& metadata, int orientation, bool mirror, float baselineExposure) {
     TIFFSetTagExtender(DNGTagExtender);
     TIFF* tif = TIFFOpen(filename, "w");
     if (!tif) return false;
@@ -856,12 +856,12 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
     TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, height);
     TIFFSetField(tif, TIFFTAG_SUBFILETYPE, 0);
 
-    TIFFSetField(tif, TIFFTAG_MAKE, make.c_str());
-    TIFFSetField(tif, TIFFTAG_MODEL, model.c_str());
-    TIFFSetField(tif, TIFFTAG_SOFTWARE, software.c_str());
-    TIFFSetField(tif, TIFFTAG_IMAGEDESCRIPTION, imageDescription.c_str());
+    TIFFSetField(tif, TIFFTAG_MAKE, metadata.make.c_str());
+    TIFFSetField(tif, TIFFTAG_MODEL, metadata.model.c_str());
+    TIFFSetField(tif, TIFFTAG_SOFTWARE, metadata.software.c_str());
+    TIFFSetField(tif, TIFFTAG_IMAGEDESCRIPTION, metadata.imageDescription.c_str());
 
-    time_t raw_time = (time_t)(captureTimeMillis / 1000);
+    time_t raw_time = (time_t)(metadata.captureTimeMillis / 1000);
     struct tm * timeinfo = localtime(&raw_time);
     char buffer[20];
     strftime(buffer, 20, "%Y:%m:%d %H:%M:%S", timeinfo);
@@ -872,7 +872,7 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
     TIFFSetField(tif, TIFFTAG_DNGVERSION, dng_version);
     static const uint8_t dng_backward_version[] = {1, 1, 0, 0};
     TIFFSetField(tif, TIFFTAG_DNGBACKWARDVERSION, dng_backward_version);
-    TIFFSetField(tif, TIFFTAG_UNIQUECAMERAMODEL, uniqueCameraModel.c_str());
+    TIFFSetField(tif, TIFFTAG_UNIQUECAMERAMODEL, metadata.uniqueCameraModel.c_str());
 
     uint32_t white_level_val = (uint32_t)whiteLevel;
     if (white_level_val == 0) white_level_val = 65535;
@@ -890,14 +890,14 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
     TIFFSetField(tif, TIFFTAG_ASSHOTNEUTRAL, 3, as_shot_neutral);
 
     TIFFSetField(tif, TIFFTAG_CALIBRATIONILLUMINANT1, 21);
-    float exposureTimeSec = (float)exposureTime / 1000000000.0f;
+    float exposureTimeSec = (float)metadata.exposureTime / 1000000000.0f;
     TIFFSetField(tif, TIFFTAG_EXPOSURETIME, exposureTimeSec);
-    TIFFSetField(tif, TIFFTAG_FNUMBER, fNumber);
-    TIFFSetField(tif, TIFFTAG_FOCALLENGTH, focalLength);
+    TIFFSetField(tif, TIFFTAG_FNUMBER, metadata.fNumber);
+    TIFFSetField(tif, TIFFTAG_FOCALLENGTH, metadata.focalLength);
 
     TIFFSetField(tif, TIFFTAG_BASELINEEXPOSURE, baselineExposure);
 
-    unsigned short iso_short = (unsigned short)iso;
+    unsigned short iso_short = (unsigned short)metadata.iso;
     TIFFSetField(tif, TIFFTAG_ISOSPEEDRATINGS, (uint16_t)1, &iso_short);
 
     if (TIFFWriteEncodedStrip(tif, 0, (void*)data.data(), static_cast<size_t>(width) * height * 3 * sizeof(unsigned short)) < 0) {
@@ -950,9 +950,9 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
         TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG);
         TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, previewHeight);
         TIFFSetField(tif, TIFFTAG_JPEGCOLORMODE, JPEGCOLORMODE_RGB);
-        TIFFSetField(tif, TIFFTAG_MAKE, make.c_str());
-        TIFFSetField(tif, TIFFTAG_MODEL, model.c_str());
-        TIFFSetField(tif, TIFFTAG_SOFTWARE, software.c_str());
+        TIFFSetField(tif, TIFFTAG_MAKE, metadata.make.c_str());
+        TIFFSetField(tif, TIFFTAG_MODEL, metadata.model.c_str());
+        TIFFSetField(tif, TIFFTAG_SOFTWARE, metadata.software.c_str());
         TIFFSetField(tif, TIFFTAG_IMAGEDESCRIPTION, spec.description);
 
         if (TIFFWriteRawStrip(tif, 0, jpegPreview.data(), static_cast<tmsize_t>(jpegPreview.size())) < 0) {
