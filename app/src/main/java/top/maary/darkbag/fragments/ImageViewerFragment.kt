@@ -48,6 +48,9 @@ class ImageViewerFragment : Fragment() {
 
     private var isAdjusted = false
     private var isEditingAdjustments = false
+    private var systemTopInset = 0
+    private var systemBottomInset = 0
+    private var topBarHeight = 0
     private var configBeforeEditing: top.maary.darkbag.models.EditConfig? = null
     private var currentEditConfig: top.maary.darkbag.models.EditConfig? = null
     private var selectedDngIndex = 0 // 0 or 1 for half-frame
@@ -200,8 +203,9 @@ class ImageViewerFragment : Fragment() {
         val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
         val canEdit = currentGroup.dngUri != null || currentGroup.dngUri1 != null
 
-        val visibility = if (canEdit) View.VISIBLE else View.GONE
+        val visibility = if (canEdit && !isEditingAdjustments) View.VISIBLE else View.GONE
         binding.bottomLeftControls.visibility = visibility
+        binding.bottomRightControls.visibility = visibility
         binding.fabAdjust.visibility = visibility
 
         if (canEdit && currentEditConfig == null) {
@@ -327,7 +331,7 @@ class ImageViewerFragment : Fragment() {
     }
 
     private fun updateSplitButtons() {
-        if (isAdjusted) {
+        if (isAdjusted || isEditingAdjustments) {
             binding.splitShare.visibility = View.GONE
             binding.splitSave.visibility = View.VISIBLE
         } else {
@@ -337,7 +341,7 @@ class ImageViewerFragment : Fragment() {
     }
 
     private fun updateToolbarIcon() {
-        if (isAdjusted) {
+        if (isAdjusted || isEditingAdjustments) {
             binding.btnNavigation.setIconResource(R.drawable.ic_close)
         } else {
             binding.btnNavigation.setIconResource(R.drawable.ic_back)
@@ -437,9 +441,9 @@ class ImageViewerFragment : Fragment() {
         }
 
         binding.fabAdjust.setOnClickListener {
+            showAdjustmentsBottomSheet()
             lifecycleScope.launch {
                 ensureDngBytesLoaded()
-                showAdjustmentsBottomSheet()
             }
         }
 
@@ -766,6 +770,11 @@ class ImageViewerFragment : Fragment() {
         configBeforeEditing = currentEditConfig?.copy()
 
         binding.imagePager.isUserInputEnabled = false
+        adapter.setFormatSwitcherPersistentHidden(true)
+
+        updateSplitButtons()
+        updateToolbarIcon()
+        updateViewportPadding()
 
         // Hide standard controls
         binding.bottomLeftControls.visibility = View.GONE
@@ -814,6 +823,8 @@ class ImageViewerFragment : Fragment() {
         }
 
         binding.imagePager.isUserInputEnabled = !isAdjusted
+
+        updateViewportPadding()
 
         val isLandscape = resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
         val anim = binding.editAdjustmentPanel.animate()
@@ -1535,6 +1546,8 @@ class ImageViewerFragment : Fragment() {
                 binding.lutListContainer.visibility = View.GONE
                 binding.touchOverlay.visibility = View.GONE
                 updateBackPressedCallbackState()
+            } else if (isEditingAdjustments) {
+                exitEditMode(apply = false)
             } else if (isAdjusted) {
                 showDiscardChangesDialog()
             } else {
@@ -1544,6 +1557,7 @@ class ImageViewerFragment : Fragment() {
     }
 
     private fun toggleUi() {
+        if (isEditingAdjustments) return
         if (isUiVisible) hideUi() else showUi()
     }
 
@@ -1552,16 +1566,15 @@ class ImageViewerFragment : Fragment() {
         isUiVisible = true
 
         binding.topBarContainer.visibility = View.VISIBLE
-        binding.splitShare.visibility = if (isAdjusted) View.GONE else View.VISIBLE
-        binding.splitSave.visibility = if (isAdjusted) View.VISIBLE else View.GONE
-        binding.bottomLeftControls.visibility = View.VISIBLE
-        binding.bottomRightControls.visibility = View.VISIBLE
+        updateSplitButtons()
+        updateControlsVisibility()
 
         adapter.setUiVisibility(true)
 
         binding.topBarContainer.animate().translationY(0f).alpha(1f).setDuration(200).setListener(null).start()
         binding.bottomLeftControls.animate().translationY(0f).alpha(1f).setDuration(200).setListener(null).start()
         binding.bottomRightControls.animate().translationY(0f).alpha(1f).setDuration(200).setListener(null).start()
+        updateViewportPadding()
     }
 
     private fun hideUi() {
@@ -1579,12 +1592,25 @@ class ImageViewerFragment : Fragment() {
             .withEndAction { binding.bottomLeftControls.visibility = View.GONE }.start()
         binding.bottomRightControls.animate().translationY(bottomShift).alpha(0f).setDuration(200)
             .withEndAction { binding.bottomRightControls.visibility = View.GONE }.start()
+        updateViewportPadding()
     }
 
     private fun setupEdgeToEdge() {
         val marginMedium = resources.getDimensionPixelSize(R.dimen.margin_medium)
+
+        binding.topBarContainer.addOnLayoutChangeListener { _, _, top, _, bottom, _, _, _, _ ->
+            val newHeight = bottom - top
+            if (newHeight > 0 && newHeight != topBarHeight) {
+                topBarHeight = newHeight
+                updateViewportPadding()
+            }
+        }
+
         ViewCompat.setOnApplyWindowInsetsListener(binding.viewerRoot) { v, insets ->
             val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            systemTopInset = systemBars.top
+            systemBottomInset = systemBars.bottom
+            updateViewportPadding()
 
             binding.topBarContainer.updateLayoutParams<ViewGroup.MarginLayoutParams> {
                 topMargin = systemBars.top
@@ -1608,15 +1634,57 @@ class ImageViewerFragment : Fragment() {
             }
 
             val isLandscape = resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
-            binding.editAdjustmentPanel.updateLayoutParams<ViewGroup.MarginLayoutParams> {
-                if (isLandscape) {
-                    rightMargin = systemBars.right
-                } else {
-                    bottomMargin = systemBars.bottom
-                }
-            }
+            binding.editAdjustmentPanel.setPadding(
+                0, 0,
+                if (isLandscape) systemBars.right else 0,
+                if (isLandscape) 0 else systemBars.bottom
+            )
+
             insets
         }
+    }
+
+    private fun updateViewportPadding() {
+        val isLandscape = resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+
+        val topPadding: Int
+        val bottomPadding: Int
+
+        if (isEditingAdjustments) {
+            topPadding = systemTopInset + topBarHeight
+            if (isLandscape) {
+                bottomPadding = topPadding
+            } else {
+                // In portrait edit mode, clear the adjustment panel (including its card margins and system insets)
+                bottomPadding = binding.editAdjustmentPanel.height
+            }
+        } else if (isUiVisible) {
+            topPadding = systemTopInset + topBarHeight
+            bottomPadding = topPadding // SYMMETRIC CENTERING
+        } else {
+            topPadding = 0
+            bottomPadding = 0
+        }
+
+        android.transition.TransitionManager.beginDelayedTransition(binding.viewerRoot, android.transition.AutoTransition().apply {
+            duration = 200
+            addTarget(binding.imagePager)
+        })
+        binding.imagePager.setPadding(0, topPadding, 0, bottomPadding)
+
+        // Ensure half-frame masks match the visible viewport
+        val lp1 = binding.hfSelection1.layoutParams as ViewGroup.MarginLayoutParams
+        val lp2 = binding.hfSelection2.layoutParams as ViewGroup.MarginLayoutParams
+        val lpDiv = binding.hfSelectionDivider.layoutParams as ViewGroup.MarginLayoutParams
+        lp1.topMargin = topPadding
+        lp1.bottomMargin = bottomPadding
+        lp2.topMargin = topPadding
+        lp2.bottomMargin = bottomPadding
+        lpDiv.topMargin = topPadding
+        lpDiv.bottomMargin = bottomPadding
+        binding.hfSelection1.layoutParams = lp1
+        binding.hfSelection2.layoutParams = lp2
+        binding.hfSelectionDivider.layoutParams = lpDiv
     }
 
     private fun updateBackPressedCallbackState() {
