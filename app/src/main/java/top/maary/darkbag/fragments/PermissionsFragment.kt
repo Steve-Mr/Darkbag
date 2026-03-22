@@ -32,7 +32,9 @@ import androidx.navigation.Navigation
 import top.maary.darkbag.R
 import kotlinx.coroutines.launch
 
-private var PERMISSIONS_REQUIRED = arrayOf(Manifest.permission.CAMERA)
+private var PERMISSIONS_REQUIRED = arrayOf(
+    Manifest.permission.CAMERA
+)
 
 /**
  * The sole purpose of this fragment is to request permissions and, once granted, display the
@@ -43,12 +45,17 @@ class PermissionsFragment : Fragment() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // add the storage access permission request for Android 9 and below.
-        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
-            val permissionList = PERMISSIONS_REQUIRED.toMutableList()
-            permissionList.add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
-            PERMISSIONS_REQUIRED = permissionList.toTypedArray()
+        val permissionList = PERMISSIONS_REQUIRED.toMutableList()
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            permissionList.add(Manifest.permission.READ_MEDIA_IMAGES)
+        } else {
+            permissionList.add(Manifest.permission.READ_EXTERNAL_STORAGE)
+            if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
+                permissionList.add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+            }
         }
+        PERMISSIONS_REQUIRED = permissionList.toTypedArray()
 
         if (!hasPermissions(requireContext())) {
             // Request camera-related permissions

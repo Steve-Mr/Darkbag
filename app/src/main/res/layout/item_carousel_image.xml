@@ -1,31 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
-<com.google.android.material.card.MaterialCardView xmlns:android="http://schemas.android.com/apk/res/android"
+<com.google.android.material.carousel.MaskableFrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/card_carousel_item"
-    style="@style/Widget.Material3.CardView.Elevated"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:layout_margin="4dp"
-    app:cardCornerRadius="@dimen/radius_medium">
+    app:shapeAppearance="?attr/shapeAppearanceMediumComponent">
 
-    <FrameLayout
+    <ImageView
+        android:id="@+id/iv_thumbnail"
         android:layout_width="match_parent"
-        android:layout_height="match_parent">
+        android:layout_height="match_parent"
+        android:scaleType="centerCrop" />
 
-        <ImageView
-            android:id="@+id/iv_thumbnail"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:scaleType="centerCrop" />
+    <ImageView
+        android:id="@+id/iv_format_badge"
+        android:layout_width="24dp"
+        android:layout_height="24dp"
+        android:layout_gravity="top|end"
+        android:layout_margin="8dp"
+        android:src="@drawable/ic_raw"
+        app:tint="?attr/colorOnSurface" />
 
-        <ImageView
-            android:id="@+id/iv_format_badge"
-            android:layout_width="24dp"
-            android:layout_height="24dp"
-            android:layout_gravity="top|end"
-            android:layout_margin="8dp"
-            android:src="@drawable/ic_raw"
-            app:tint="?attr/colorOnSurface" />
-
-    </FrameLayout>
-</com.google.android.material.card.MaterialCardView>
+</com.google.android.material.carousel.MaskableFrameLayout>

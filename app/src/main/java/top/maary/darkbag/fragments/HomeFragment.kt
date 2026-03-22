@@ -38,8 +38,18 @@ class HomeFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         repository = ImageRepository(requireContext())
+        setupEdgeToEdge()
         setupUi()
         loadData()
+    }
+
+    private fun setupEdgeToEdge() {
+        androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(binding.homeRoot) { v, insets ->
+            val systemBars = insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+            binding.toolbar.setPadding(0, systemBars.top, 0, 0)
+            binding.homeRoot.setPadding(systemBars.left, 0, systemBars.right, systemBars.bottom)
+            insets
+        }
     }
 
     private fun setupUi() {
