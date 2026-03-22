@@ -49,19 +49,6 @@
         app:layout_constraintStart_toStartOf="@id/image_pager"
         app:layout_constraintEnd_toEndOf="@id/image_pager" />
 
-    <com.google.android.material.progressindicator.CircularProgressIndicator
-        android:id="@+id/initial_loading_indicator"
-        style="@style/Widget.Material3Expressive.CircularProgressIndicator.Wavy"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:indeterminate="true"
-        android:elevation="10dp"
-        app:indicatorSize="48dp"
-        app:layout_constraintTop_toTopOf="@id/image_pager"
-        app:layout_constraintBottom_toBottomOf="@id/image_pager"
-        app:layout_constraintStart_toStartOf="@id/image_pager"
-        app:layout_constraintEnd_toEndOf="@id/image_pager" />
-
     <!-- Full-screen touch overlay for dismissing menus -->
     <View
         android:id="@+id/touch_overlay"
@@ -386,6 +373,19 @@
             </androidx.constraintlayout.widget.ConstraintLayout>
         </com.google.android.material.card.MaterialCardView>
     </androidx.constraintlayout.widget.ConstraintLayout>
+
+    <com.google.android.material.progressindicator.CircularProgressIndicator
+        android:id="@+id/initial_loading_indicator"
+        style="@style/Widget.Material3Expressive.CircularProgressIndicator.Wavy"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:indeterminate="true"
+        android:elevation="10dp"
+        app:indicatorSize="48dp"
+        app:layout_constraintTop_toTopOf="@id/image_pager"
+        app:layout_constraintBottom_toBottomOf="@id/image_pager"
+        app:layout_constraintStart_toStartOf="@id/image_pager"
+        app:layout_constraintEnd_toEndOf="@id/image_pager" />
 
     <!-- LUT Selection List Overlay -->
     <com.google.android.material.card.MaterialCardView

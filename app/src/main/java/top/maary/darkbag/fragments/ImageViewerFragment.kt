@@ -998,7 +998,12 @@ class ImageViewerFragment : Fragment() {
         val currentIndex = binding.imagePager.currentItem
         val currentHolder = (binding.imagePager.getChildAt(0) as? androidx.recyclerview.widget.RecyclerView)
             ?.findViewHolderForAdapterPosition(currentIndex) as? ImageViewerAdapter.ViewHolder
-        currentHolder?.binding?.loadingIndicator?.visibility = View.VISIBLE
+
+        if (isEditingAdjustments) {
+            binding.initialLoadingIndicator.visibility = View.VISIBLE
+        } else {
+            currentHolder?.binding?.loadingIndicator?.visibility = View.VISIBLE
+        }
         currentHolder?.binding?.imageView?.invalidateOutline()
 
         previewJob?.cancel()
@@ -1168,6 +1173,7 @@ class ImageViewerFragment : Fragment() {
             val finalHolder = (binding.imagePager.getChildAt(0) as? androidx.recyclerview.widget.RecyclerView)
                 ?.findViewHolderForAdapterPosition(currentIndex) as? ImageViewerAdapter.ViewHolder
             finalHolder?.binding?.loadingIndicator?.visibility = View.GONE
+            binding.initialLoadingIndicator.visibility = View.GONE
         }
     }
 
@@ -1714,21 +1720,28 @@ class ImageViewerFragment : Fragment() {
         val lp1 = binding.hfSelection1.layoutParams as ViewGroup.MarginLayoutParams
         val lp2 = binding.hfSelection2.layoutParams as ViewGroup.MarginLayoutParams
         val lpDiv = binding.hfSelectionDivider.layoutParams as ViewGroup.MarginLayoutParams
+        val lpProgress = binding.initialLoadingIndicator.layoutParams as ViewGroup.MarginLayoutParams
 
         lp1.topMargin = topPadding
         lp1.bottomMargin = if (isTB) 0 else bottomPadding
         lp1.leftMargin = 0
-        lp1.rightMargin = if (!isTB) 0 else 0 // sidebyside uses divider, handled by constraints
+        lp1.rightMargin = 0
 
         lp2.topMargin = if (isTB) 0 else topPadding
         lp2.bottomMargin = bottomPadding
+        lp2.leftMargin = 0
+        lp2.rightMargin = 0
 
         lpDiv.topMargin = topPadding
         lpDiv.bottomMargin = bottomPadding
 
+        lpProgress.topMargin = topPadding
+        lpProgress.bottomMargin = bottomPadding
+
         binding.hfSelection1.layoutParams = lp1
         binding.hfSelection2.layoutParams = lp2
         binding.hfSelectionDivider.layoutParams = lpDiv
+        binding.initialLoadingIndicator.layoutParams = lpProgress
     }
 
     private fun updateBackPressedCallbackState() {
