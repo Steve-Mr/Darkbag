@@ -59,8 +59,9 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRaw(
     }
 
     // Unpack
-    if (RawProcessor.unpack() != LIBRAW_SUCCESS) {
-        LOGE("LibRaw unpack failed");
+    int unpack_ret = RawProcessor.unpack();
+    if (unpack_ret != LIBRAW_SUCCESS) {
+        LOGE("LibRaw unpack failed: %d (%s)", unpack_ret, libraw_strerror(unpack_ret));
         RawProcessor.recycle();
         delete[] buf;
         return -1;
@@ -110,16 +111,23 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRaw(
         env->ReleaseStringUTFChars(lutPath, lut_path_cstr);
     }
 
-    // Copy LibRaw data to std::vector for shared processing
-    std::vector<unsigned short> rawImage(image->width * image->height * 3);
-    unsigned short* src = (unsigned short*)image->data;
-    std::copy(src, src + (image->width * image->height * 3), rawImage.begin());
+    // Wrap LibRaw data for shared processing
+    std::vector<unsigned short> rawImage;
+    rawImage.assign((unsigned short*)image->data, ((unsigned short*)image->data) + (image->width * image->height * 3));
 
     // Paths
     const char* jpg_path_cstr = (outputJpgPath) ? env->GetStringUTFChars(outputJpgPath, 0) : nullptr;
 
     unsigned char* bitmapPixels = nullptr;
-    if (outputBitmap) AndroidBitmap_lockPixels(env, outputBitmap, (void**)&bitmapPixels);
+    int outW = 0, outH = 0;
+    if (outputBitmap) {
+        AndroidBitmapInfo info;
+        if (AndroidBitmap_getInfo(env, outputBitmap, &info) == ANDROID_BITMAP_RESULT_SUCCESS) {
+            outW = info.width;
+            outH = info.height;
+            AndroidBitmap_lockPixels(env, outputBitmap, (void**)&bitmapPixels);
+        }
+    }
 
     // Use Shared Pipeline
     bool saveOk = process_and_save_image(
@@ -136,6 +144,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRaw(
         nullptr, // wb is not used for ProPhoto path (LibRaw handles it)
         (int)orientation,
         bitmapPixels, // out_rgb_buffer
+        outW, outH,
         outputBitmap != nullptr, // isPreview
         (int)downsampleFactor, // downsampleFactor
         (float)zoomFactor, // zoomFactor

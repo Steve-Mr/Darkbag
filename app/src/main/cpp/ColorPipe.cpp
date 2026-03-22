@@ -233,11 +233,7 @@ float vlog(float x) {
     else return 5.6f * x + 0.125f;
 }
 float apply_log(float x, int type) {
-    // Note: Log curves handle x < 0 usually by clipping or linear extension.
-    // We clamp slightly above 0 if needed, but linear extension is better for noise.
-    // Use a robust check that also handles NaN (NaN > 0 is false)
     x = (x > 0.0f) ? x : 0.0f;
-
     switch (type) {
         case 1: return arri_logc3(x);
         case 2:
@@ -286,16 +282,15 @@ Vec3 apply_lut(const LUT3D& lut, Vec3 color) {
     if (lut.size <= 0 || lut.data.empty()) return color;
     float scale = static_cast<float>(lut.size - 1);
 
-    // Robust clamping that handles NaN
-    auto clamp01 = [](float v) {
+    auto clamp01_local = [](float v) {
         if (!(v > 0.0f)) return 0.0f;
         if (v > 1.0f) return 1.0f;
         return v;
     };
 
-    float r = clamp01(color.r) * scale;
-    float g = clamp01(color.g) * scale;
-    float b = clamp01(color.b) * scale;
+    float r = clamp01_local(color.r) * scale;
+    float g = clamp01_local(color.g) * scale;
+    float b = clamp01_local(color.b) * scale;
     int r0 = (int)r; int r1 = std::min(r0 + 1, lut.size - 1);
     int g0 = (int)g; int g1 = std::min(g0 + 1, lut.size - 1);
     int b0 = (int)b; int b1 = std::min(b0 + 1, lut.size - 1);
@@ -346,7 +341,7 @@ constexpr float kBlendEndRadius = 1.0f;
 inline float safe_div(float a, float b) {
     return (b > 1e-6f) ? (a / b) : 1.0f;
 }
-inline float clamp01(float v) {
+inline float clamp01_local(float v) {
     if (!(v > 0.0f)) return 0.0f;
     if (v > 1.0f) return 1.0f;
     return v;
@@ -419,8 +414,6 @@ AdaptiveEdgeComp calculate_adaptive_edge_comp(const std::vector<unsigned short>&
     float centerGvsRB = safe_div(centerMean[1], 0.5f * (centerMean[0] + centerMean[2]));
     float edgeGvsRB = safe_div(edgeMean[1], 0.5f * (edgeMean[0] + edgeMean[2]));
 
-    // Conditionally enable compensation when edge luma drop and green shift are detected.
-    // Gains are derived from center/edge statistics and clamped to safe bounds.
     bool needsComp = (edgeLuma < centerLuma * kLumaDropThreshold) && (edgeGvsRB > centerGvsRB * kGreenShiftThreshold);
     edgeComp.lumaEdgeGain = std::clamp(1.0f + (safe_div(centerLuma, edgeLuma) - 1.0f) * kCompStrength, kMinLumaEdgeGain, kMaxLumaEdgeGain);
 
@@ -454,22 +447,18 @@ bool process_and_save_image(
     float highlights, float shadows, float whites, float blacks,
     const char* jpgPath, int sourceColorSpace,
     const float* ccm, const float* wb, int orientation, unsigned char* out_rgb_buffer,
+    int outW, int outH,
     bool isPreview, int downsampleFactor, float zoomFactor, bool mirror
 ) {
-    LOGD("process_and_save_image: %dx%d, gain=%.2f, log=%d, lut=%d, jpg=%s, preview=%d, ds=%d, zoom=%.2f, mirror=%d",
-         width, height, gain, targetLog, lut.size, jpgPath ? jpgPath : "null", isPreview, downsampleFactor, zoomFactor, mirror);
-    int outW = width / downsampleFactor, outH = height / downsampleFactor;
+    LOGD("process_and_save_image: %dx%d -> %dx%d, gain=%.2f, log=%d, lut=%d, preview=%d, ds=%d, zoom=%.2f, mirror=%d",
+         width, height, outW, outH, gain, targetLog, lut.size, isPreview, downsampleFactor, zoomFactor, mirror);
+
     bool swapDims = (orientation == 90 || orientation == 270);
-    int finalW = swapDims ? outH : outW, finalH = swapDims ? outW : outH;
     Matrix3x3 effective_CCM = {0}; if (sourceColorSpace == 1 && ccm) std::copy(ccm, ccm + 9, effective_CCM.m);
     std::vector<unsigned short> processedImage; std::vector<unsigned char> previewRgb8;
 
     AdaptiveEdgeComp edgeComp = calculate_adaptive_edge_comp(inputImage, width, height);
 
-    // Debug stage split output (A/B/C):
-    // A: linear RGB input after adaptive edge compensation
-    // B: after color-space matrix transform (before log/LUT)
-    // C: after log curve (before LUT)
     const bool enableStageDebug = false;
     std::string debugBasePath = jpgPath ? std::string(jpgPath) : std::string();
     std::string debugPathA = enableStageDebug ? build_debug_stage_path(debugBasePath.c_str(), "_debug_A_linear") : std::string();
@@ -480,9 +469,9 @@ bool process_and_save_image(
     std::vector<unsigned char> debugB8;
     std::vector<unsigned char> debugC8;
 
-    auto process_pixel = [&](int x, int y, Vec3* stageA, Vec3* stageB, Vec3* stageC) -> Vec3 {
-        x = std::max(0, std::min(x, width - 1));
-        y = std::max(0, std::min(y, height - 1));
+    auto process_pixel = [&](float x_in, float y_in, Vec3* stageA, Vec3* stageB, Vec3* stageC) -> Vec3 {
+        int x = std::max(0, std::min((int)x_in, width - 1));
+        int y = std::max(0, std::min((int)y_in, height - 1));
         size_t idx = (static_cast<size_t>(y) * width + x) * 3;
 
         // 1. Exposure (Linear Space)
@@ -496,7 +485,6 @@ bool process_and_save_image(
             const float ny = (y - edgeComp.centerY) * edgeComp.invMaxRadius;
             float r = std::sqrt(nx * nx + ny * ny);
 
-            // Smooth radial blend: start near 55% radius and fully applied at edges.
             float t = std::clamp((r - kBlendStartRadius) / (kBlendEndRadius - kBlendStartRadius), 0.0f, 1.0f);
             t = t * t * (3.0f - 2.0f * t); // smoothstep
 
@@ -545,22 +533,18 @@ bool process_and_save_image(
 
         // 3. Highlights / Shadows / Whites / Blacks (Log Space)
         auto apply_hswb = [&](float v) {
-            // Highlights: affecting upper range
             if (highlights != 0.0f) {
                 float weight = std::pow(std::clamp(v, 0.0f, 1.0f), 2.0f);
                 v += highlights * weight * 0.2f;
             }
-            // Shadows: affecting lower range
             if (shadows != 0.0f) {
                 float weight = std::pow(1.0f - std::clamp(v, 0.0f, 1.0f), 2.0f);
                 v += shadows * weight * 0.2f;
             }
-            // Whites: offset upper
             if (whites != 0.0f) {
                 float weight = std::clamp((v - 0.5f) * 2.0f, 0.0f, 1.0f);
                 v += whites * weight * 0.2f;
             }
-            // Blacks: offset lower
             if (blacks != 0.0f) {
                 float weight = std::clamp((0.5f - v) * 2.0f, 0.0f, 1.0f);
                 v += blacks * weight * 0.2f;
@@ -576,91 +560,82 @@ bool process_and_save_image(
         if (lut.size > 0) color = apply_lut(lut, color);
         return color;
     };
-    int cropW = (int)(width / zoomFactor);
-    int cropH = (int)(height / zoomFactor);
-    int cropX = (width - cropW) / 2;
-    int cropY = (height - cropH) / 2;
 
-    int finalW_zoomed = swapDims ? (cropH / downsampleFactor) : (cropW / downsampleFactor);
-    int finalH_zoomed = swapDims ? (cropW / downsampleFactor) : (cropH / downsampleFactor);
+    float cropW = (float)width / zoomFactor;
+    float cropH = (float)height / zoomFactor;
+    float cropX = (width - cropW) / 2.0f;
+    float cropY = (height - cropH) / 2.0f;
+
+    int finalW_out = (outW > 0) ? outW : (swapDims ? (int)(cropH / downsampleFactor) : (int)(cropW / downsampleFactor));
+    int finalH_out = (outH > 0) ? outH : (swapDims ? (int)(cropW / downsampleFactor) : (int)(cropH / downsampleFactor));
 
     if (enableStageDebug) {
-        size_t n = static_cast<size_t>(finalW_zoomed) * finalH_zoomed * 3;
+        size_t n = static_cast<size_t>(finalW_out) * finalH_out * 3;
         debugA8.resize(n);
         debugB8.resize(n);
         debugC8.resize(n);
     }
 
     if (isPreview) {
-        previewRgb8.resize(static_cast<size_t>(finalW_zoomed) * finalH_zoomed * 3);
+        previewRgb8.resize(static_cast<size_t>(finalW_out) * finalH_out * 3);
         #pragma omp parallel for
-        for (int py = 0; py < finalH_zoomed; py++) {
-            for (int px = 0; px < finalW_zoomed; px++) {
-                int sx, sy;
-                int opx = mirror ? (finalW_zoomed - 1 - px) : px;
-                if (orientation == 90) { sx = py; sy = (finalW_zoomed - 1) - opx; }
-                else if (orientation == 180) { sx = (finalW_zoomed - 1) - opx; sy = (finalH_zoomed - 1) - py; }
-                else if (orientation == 270) { sx = (finalH_zoomed - 1) - py; sy = opx; }
-                else { sx = opx; sy = py; }
-
-                Vec3 color = process_pixel(cropX + sx * downsampleFactor, cropY + sy * downsampleFactor, nullptr, nullptr, nullptr);
-                size_t outIdx = (static_cast<size_t>(py) * finalW_zoomed + px) * 3;
+        for (int py = 0; py < finalH_out; py++) {
+            for (int px = 0; px < finalW_out; px++) {
+                float sx, sy;
+                int opx = mirror ? (finalW_out - 1 - px) : px;
+                float fx = (float)opx / (float)finalW_out;
+                float fy = (float)py / (float)finalH_out;
+                if (orientation == 90) { sx = fy * cropW; sy = (1.0f - fx) * cropH; }
+                else if (orientation == 180) { sx = (1.0f - fx) * cropW; sy = (1.0f - fy) * cropH; }
+                else if (orientation == 270) { sx = (1.0f - fy) * cropW; sy = fx * cropH; }
+                else { sx = fx * cropW; sy = fy * cropH; }
+                Vec3 color = process_pixel(cropX + sx, cropY + sy, nullptr, nullptr, nullptr);
+                size_t outIdx = (static_cast<size_t>(py) * finalW_out + px) * 3;
                 unsigned char r8 = (unsigned char)std::max(0.0f, std::min(255.0f, color.r * 255.0f + 0.5f));
                 unsigned char g8 = (unsigned char)std::max(0.0f, std::min(255.0f, color.g * 255.0f + 0.5f));
                 unsigned char b8 = (unsigned char)std::max(0.0f, std::min(255.0f, color.b * 255.0f + 0.5f));
-
-                previewRgb8[outIdx + 0] = r8;
-                previewRgb8[outIdx + 1] = g8;
-                previewRgb8[outIdx + 2] = b8;
-
+                previewRgb8[outIdx + 0] = r8; previewRgb8[outIdx + 1] = g8; previewRgb8[outIdx + 2] = b8;
                 if (out_rgb_buffer) {
-                    size_t bIdx = (static_cast<size_t>(py) * finalW_zoomed + px) * 4;
-                    out_rgb_buffer[bIdx+0] = r8;
-                    out_rgb_buffer[bIdx+1] = g8;
-                    out_rgb_buffer[bIdx+2] = b8;
-                    out_rgb_buffer[bIdx+3] = 255;
+                    size_t bIdx = (static_cast<size_t>(py) * finalW_out + px) * 4;
+                    out_rgb_buffer[bIdx+0] = r8; out_rgb_buffer[bIdx+1] = g8; out_rgb_buffer[bIdx+2] = b8; out_rgb_buffer[bIdx+3] = 255;
                 }
             }
         }
     } else {
-        processedImage.resize(static_cast<size_t>(finalW_zoomed) * finalH_zoomed * 3);
+        processedImage.resize(static_cast<size_t>(finalW_out) * finalH_out * 3);
         #pragma omp parallel for
-        for (int py = 0; py < finalH_zoomed; py++) {
-            for (int px = 0; px < finalW_zoomed; px++) {
-                int sx, sy;
-                int opx = mirror ? (finalW_zoomed - 1 - px) : px;
-                if (orientation == 90) { sx = py; sy = (finalW_zoomed - 1) - opx; }
-                else if (orientation == 180) { sx = (finalW_zoomed - 1) - opx; sy = (finalH_zoomed - 1) - py; }
-                else if (orientation == 270) { sx = (finalH_zoomed - 1) - py; sy = opx; }
-                else { sx = opx; sy = py; }
-
+        for (int py = 0; py < finalH_out; py++) {
+            for (int px = 0; px < finalW_out; px++) {
+                float sx, sy;
+                int opx = mirror ? (finalW_out - 1 - px) : px;
+                float fx = (float)opx / (float)finalW_out;
+                float fy = (float)py / (float)finalH_out;
+                if (orientation == 90) { sx = fy * cropW; sy = (1.0f - fx) * cropH; }
+                else if (orientation == 180) { sx = (1.0f - fx) * cropW; sy = (1.0f - fy) * cropH; }
+                else if (orientation == 270) { sx = (1.0f - fy) * cropW; sy = fx * cropH; }
+                else { sx = fx * cropW; sy = fy * cropH; }
                 Vec3 stageA{}, stageB{}, stageC{};
                 Vec3 color = process_pixel(cropX + sx, cropY + sy,
                                            enableStageDebug ? &stageA : nullptr,
                                            enableStageDebug ? &stageB : nullptr,
                                            enableStageDebug ? &stageC : nullptr);
-                size_t outIdx = (static_cast<size_t>(py) * finalW_zoomed + px) * 3;
+                size_t outIdx = (static_cast<size_t>(py) * finalW_out + px) * 3;
                 processedImage[outIdx + 0] = (unsigned short)std::max(0.0f, std::min(65535.0f, color.r * 65535.0f));
                 processedImage[outIdx + 1] = (unsigned short)std::max(0.0f, std::min(65535.0f, color.g * 65535.0f));
                 processedImage[outIdx + 2] = (unsigned short)std::max(0.0f, std::min(65535.0f, color.b * 65535.0f));
-
                 if (enableStageDebug) {
-                    debugA8[outIdx + 0] = (unsigned char)(clamp01(stageA.r) * 255.0f);
-                    debugA8[outIdx + 1] = (unsigned char)(clamp01(stageA.g) * 255.0f);
-                    debugA8[outIdx + 2] = (unsigned char)(clamp01(stageA.b) * 255.0f);
-
-                    debugB8[outIdx + 0] = (unsigned char)(clamp01(stageB.r) * 255.0f);
-                    debugB8[outIdx + 1] = (unsigned char)(clamp01(stageB.g) * 255.0f);
-                    debugB8[outIdx + 2] = (unsigned char)(clamp01(stageB.b) * 255.0f);
-
-                    debugC8[outIdx + 0] = (unsigned char)(clamp01(stageC.r) * 255.0f);
-                    debugC8[outIdx + 1] = (unsigned char)(clamp01(stageC.g) * 255.0f);
-                    debugC8[outIdx + 2] = (unsigned char)(clamp01(stageC.b) * 255.0f);
+                    debugA8[outIdx + 0] = (unsigned char)(clamp01_local(stageA.r) * 255.0f);
+                    debugA8[outIdx + 1] = (unsigned char)(clamp01_local(stageA.g) * 255.0f);
+                    debugA8[outIdx + 2] = (unsigned char)(clamp01_local(stageA.b) * 255.0f);
+                    debugB8[outIdx + 0] = (unsigned char)(clamp01_local(stageB.r) * 255.0f);
+                    debugB8[outIdx + 1] = (unsigned char)(clamp01_local(stageB.g) * 255.0f);
+                    debugB8[outIdx + 2] = (unsigned char)(clamp01_local(stageB.b) * 255.0f);
+                    debugC8[outIdx + 0] = (unsigned char)(clamp01_local(stageC.r) * 255.0f);
+                    debugC8[outIdx + 1] = (unsigned char)(clamp01_local(stageC.g) * 255.0f);
+                    debugC8[outIdx + 2] = (unsigned char)(clamp01_local(stageC.b) * 255.0f);
                 }
-
-                // Note: out_rgb_buffer is usually for preview only, but we keep it here if needed.
                 if (out_rgb_buffer) {
-                    size_t bIdx = (static_cast<size_t>(py) * finalW_zoomed + px) * 4;
+                    size_t bIdx = (static_cast<size_t>(py) * finalW_out + px) * 4;
                     out_rgb_buffer[bIdx+0] = (unsigned char)std::min(255, (processedImage[outIdx+0] + 128) >> 8);
                     out_rgb_buffer[bIdx+1] = (unsigned char)std::min(255, (processedImage[outIdx+1] + 128) >> 8);
                     out_rgb_buffer[bIdx+2] = (unsigned char)std::min(255, (processedImage[outIdx+2] + 128) >> 8);
@@ -673,30 +648,17 @@ bool process_and_save_image(
     bool jpgOk = true;
     if (jpgPath) {
         if (isPreview && !previewRgb8.empty()) {
-            jpgOk = stbi_write_jpg(jpgPath, finalW_zoomed, finalH_zoomed, 3, previewRgb8.data(), 95) != 0;
+            jpgOk = stbi_write_jpg(jpgPath, finalW_out, finalH_out, 3, previewRgb8.data(), 95) != 0;
         } else {
-            jpgOk = write_jpeg(jpgPath, finalW_zoomed, finalH_zoomed, processedImage, 95);
+            jpgOk = write_jpeg(jpgPath, finalW_out, finalH_out, processedImage, 95);
         }
         if (!jpgOk) LOGE("write_jpeg/stbi_write_jpg failed for %s", jpgPath);
-        else {
-            std::ifstream f(jpgPath, std::ios::binary | std::ios::ate);
-            if (f.is_open()) {
-                LOGD("Successfully wrote JPEG: %s, size: %lld bytes", jpgPath, (long long)f.tellg());
-            } else {
-                LOGE("Wrote JPEG but could not verify existence: %s", jpgPath);
-            }
-        }
     }
     if (enableStageDebug && !debugA8.empty()) {
-        bool aOk = stbi_write_jpg(debugPathA.c_str(), finalW_zoomed, finalH_zoomed, 3, debugA8.data(), 95) != 0;
-        bool bOk = stbi_write_jpg(debugPathB.c_str(), finalW_zoomed, finalH_zoomed, 3, debugB8.data(), 95) != 0;
-        bool cOk = stbi_write_jpg(debugPathC.c_str(), finalW_zoomed, finalH_zoomed, 3, debugC8.data(), 95) != 0;
-        LOGD("Stage debug outputs: A=%s (%d), B=%s (%d), C=%s (%d)",
-             debugPathA.c_str(), (int)aOk,
-             debugPathB.c_str(), (int)bOk,
-             debugPathC.c_str(), (int)cOk);
+        stbi_write_jpg(debugPathA.c_str(), finalW_out, finalH_out, 3, debugA8.data(), 95);
+        stbi_write_jpg(debugPathB.c_str(), finalW_out, finalH_out, 3, debugB8.data(), 95);
+        stbi_write_jpg(debugPathC.c_str(), finalW_out, finalH_out, 3, debugC8.data(), 95);
     }
-
     return jpgOk;
 }
 
@@ -710,7 +672,6 @@ bool write_jpeg(const char* filename, int width, int height, const std::vector<u
         LOGE("Failed to allocate memory for JPEG conversion: %zu bytes", total_pixels * 3);
         return false;
     }
-
     #pragma omp parallel for
     for (size_t i = 0; i < total_pixels; i++) {
         rgb8[i * 3 + 0] = (unsigned char)std::min(255, (data[i * 3 + 0] + 128) >> 8);
@@ -718,9 +679,6 @@ bool write_jpeg(const char* filename, int width, int height, const std::vector<u
         rgb8[i * 3 + 2] = (unsigned char)std::min(255, (data[i * 3 + 2] + 128) >> 8);
     }
     int res = stbi_write_jpg(filename, width, height, 3, rgb8.data(), quality);
-    if (res == 0) {
-        LOGE("stbi_write_jpg failed for %s", filename);
-    }
     return res != 0;
 }
 
@@ -728,12 +686,10 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
     TIFFSetTagExtender(DNGTagExtender);
     TIFF* tif = TIFFOpen(filename, "w");
     if (!tif) return false;
-
     TIFFSetField(tif, TIFFTAG_IMAGEWIDTH, width);
     TIFFSetField(tif, TIFFTAG_IMAGELENGTH, height);
     TIFFSetField(tif, TIFFTAG_BITSPERSAMPLE, 16);
     TIFFSetField(tif, TIFFTAG_COMPRESSION, COMPRESSION_NONE);
-
     uint16_t tiffOrientation = 1;
     switch (orientation) {
         case 90: tiffOrientation = mirror ? 5 : 6; break;
@@ -747,83 +703,55 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
     TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG);
     TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, height);
     TIFFSetField(tif, TIFFTAG_SUBFILETYPE, 0);
-
-    static const char* make = "Google";
-    TIFFSetField(tif, TIFFTAG_MAKE, make);
-    static const char* model = "HDR+ Device";
-    TIFFSetField(tif, TIFFTAG_MODEL, model);
-    static const char* software = "Darkbag HDR+";
-    TIFFSetField(tif, TIFFTAG_SOFTWARE, software);
-
+    TIFFSetField(tif, TIFFTAG_MAKE, "Google");
+    TIFFSetField(tif, TIFFTAG_MODEL, "HDR+ Device");
+    TIFFSetField(tif, TIFFTAG_SOFTWARE, "Darkbag HDR+");
     time_t raw_time = (time_t)(captureTimeMillis / 1000);
     struct tm * timeinfo = localtime(&raw_time);
-    char buffer[20];
-    strftime(buffer, 20, "%Y:%m:%d %H:%M:%S", timeinfo);
+    char buffer[20]; strftime(buffer, 20, "%Y:%m:%d %H:%M:%S", timeinfo);
     TIFFSetField(tif, TIFFTAG_DATETIME, buffer);
     TIFFSetField(tif, TIFFTAG_DATETIMEORIGINAL, buffer);
-
     static const uint8_t dng_version[] = {1, 4, 0, 0};
     TIFFSetField(tif, TIFFTAG_DNGVERSION, dng_version);
     static const uint8_t dng_backward_version[] = {1, 1, 0, 0};
     TIFFSetField(tif, TIFFTAG_DNGBACKWARDVERSION, dng_backward_version);
-    TIFFSetField(tif, TIFFTAG_UNIQUECAMERAMODEL, model);
-
-    uint32_t white_level_val = (uint32_t)whiteLevel;
-    if (white_level_val == 0) white_level_val = 65535;
+    TIFFSetField(tif, TIFFTAG_UNIQUECAMERAMODEL, "HDR+ Device");
+    uint32_t white_level_val = (uint32_t)whiteLevel; if (white_level_val == 0) white_level_val = 65535;
     TIFFSetField(tif, TIFFTAG_WHITELEVEL, 1, &white_level_val);
-    uint32_t black_level_val = 0;
-    TIFFSetField(tif, TIFFTAG_BLACKLEVEL, 1, &black_level_val);
-
-    Matrix3x3 ccmMat;
-    std::copy(ccm.begin(), ccm.begin() + 9, ccmMat.m);
+    uint32_t black_level_val = 0; TIFFSetField(tif, TIFFTAG_BLACKLEVEL, 1, &black_level_val);
+    Matrix3x3 ccmMat; std::copy(ccm.begin(), ccm.begin() + 9, ccmMat.m);
     Matrix3x3 invCcm = invert(ccmMat);
     Matrix3x3 colorMatrix1 = multiply(invCcm, M_XYZ_to_sRGB_D65);
     TIFFSetField(tif, TIFFTAG_COLORMATRIX1, 9, colorMatrix1.m);
-
     static const float as_shot_neutral[] = {1.0f, 1.0f, 1.0f};
     TIFFSetField(tif, TIFFTAG_ASSHOTNEUTRAL, 3, as_shot_neutral);
-
     TIFFSetField(tif, TIFFTAG_CALIBRATIONILLUMINANT1, 21);
     float exposureTimeSec = (float)exposureTime / 1000000000.0f;
     TIFFSetField(tif, TIFFTAG_EXPOSURETIME, exposureTimeSec);
     TIFFSetField(tif, TIFFTAG_FNUMBER, fNumber);
     TIFFSetField(tif, TIFFTAG_FOCALLENGTH, focalLength);
-
     TIFFSetField(tif, TIFFTAG_BASELINEEXPOSURE, baselineExposure);
-
     unsigned short iso_short = (unsigned short)iso;
     TIFFSetField(tif, TIFFTAG_ISOSPEEDRATINGS, (uint16_t)1, &iso_short);
-
     if (TIFFWriteEncodedStrip(tif, 0, (void*)data.data(), static_cast<size_t>(width) * height * 3 * sizeof(unsigned short)) < 0) {
-        TIFFClose(tif);
-        return false;
+        TIFFClose(tif); return false;
     }
-
-    TIFFClose(tif);
-    return true;
+    TIFFClose(tif); return true;
 }
 
 
 bool write_bmp(const char* filename, int width, int height, const std::vector<unsigned short>& data) {
     std::ofstream file(filename, std::ios::binary);
     if (!file.is_open()) return false;
-
     size_t padded_width = (static_cast<size_t>(width) * 3 + 3) & (~3);
     size_t size = 54 + padded_width * height;
-
     unsigned char header[54] = {0};
-    header[0] = 'B';
-    header[1] = 'M';
+    header[0] = 'B'; header[1] = 'M';
     *(int*)&header[2] = static_cast<int>(size);
-    *(int*)&header[10] = 54;
-    *(int*)&header[14] = 40;
-    *(int*)&header[18] = width;
-    *(int*)&header[22] = height;
-    *(short*)&header[26] = 1;
-    *(short*)&header[28] = 24;
-
+    *(int*)&header[10] = 54; *(int*)&header[14] = 40;
+    *(int*)&header[18] = width; *(int*)&header[22] = height;
+    *(short*)&header[26] = 1; *(short*)&header[28] = 24;
     file.write((char*)header, 54);
-
     std::vector<unsigned char> line(padded_width, 0);
     for (int y = height - 1; y >= 0; y--) {
         for (int x = 0; x < width; x++) {
@@ -834,8 +762,5 @@ bool write_bmp(const char* filename, int width, int height, const std::vector<un
         }
         file.write((char*)line.data(), padded_width);
     }
-
-    bool result = file.good();
-    file.close();
-    return result;
+    bool result = file.good(); file.close(); return result;
 }

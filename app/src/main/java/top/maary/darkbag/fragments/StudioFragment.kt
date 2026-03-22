@@ -13,7 +13,7 @@ import androidx.navigation.fragment.findNavController
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.bumptech.glide.Glide
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.*
 import top.maary.darkbag.R
 import top.maary.darkbag.databinding.FragmentStudioBinding
 import top.maary.darkbag.databinding.ItemStudioImageBinding
@@ -71,9 +71,11 @@ class StudioFragment : Fragment() {
     }
 
     private fun loadImages() {
+        binding.loadingIndicator.visibility = View.VISIBLE
         lifecycleScope.launch {
             val groups = repository.getGroupedImages(forceRefresh = true)
             binding.rvStudio.adapter = StudioAdapter(groups)
+            binding.loadingIndicator.visibility = View.GONE
         }
     }
 
@@ -119,7 +121,9 @@ class StudioFragment : Fragment() {
         RecyclerView.Adapter<StudioAdapter.ViewHolder>() {
 
         inner class ViewHolder(val binding: ItemStudioImageBinding) :
-            RecyclerView.ViewHolder(binding.root)
+            RecyclerView.ViewHolder(binding.root) {
+            var loadJob: Job? = null
+        }
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
             val binding = ItemStudioImageBinding.inflate(
@@ -129,13 +133,34 @@ class StudioFragment : Fragment() {
         }
 
         override fun onBindViewHolder(holder: ViewHolder, position: Int) {
+            holder.loadJob?.cancel()
             val group = groups[position]
-            val uri = group.jpgUri ?: group.dngUri ?: group.dngUri1
+            val uri = group.jpgUri ?: group.dngUri ?: group.dngUri1 ?: return
 
-            Glide.with(holder.binding.ivThumbnail)
-                .load(uri)
-                .centerCrop()
-                .into(holder.binding.ivThumbnail)
+            val isDng = group.dngUri != null || group.dngUri1 != null
+
+            if (isDng) {
+                holder.binding.ivThumbnail.setImageResource(R.drawable.ic_photo)
+                holder.loadJob = lifecycleScope.launch {
+                    val thumb = withContext(Dispatchers.IO) {
+                         top.maary.darkbag.utils.ImageUtils.decodeDngThumbnail(requireContext(), uri, 1.0f)
+                    }
+                    if (thumb != null) {
+                        holder.binding.ivThumbnail.setImageBitmap(thumb)
+                    } else {
+                        Glide.with(holder.binding.ivThumbnail)
+                            .load(uri)
+                            .centerCrop()
+                            .error(R.drawable.ic_close)
+                            .into(holder.binding.ivThumbnail)
+                    }
+                }
+            } else {
+                Glide.with(holder.binding.ivThumbnail)
+                    .load(uri)
+                    .centerCrop()
+                    .into(holder.binding.ivThumbnail)
+            }
 
             holder.binding.tvName.text = group.baseName
 
