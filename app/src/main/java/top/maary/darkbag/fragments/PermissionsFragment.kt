@@ -32,7 +32,16 @@ import androidx.navigation.Navigation
 import top.maary.darkbag.R
 import kotlinx.coroutines.launch
 
-private var PERMISSIONS_REQUIRED = arrayOf(Manifest.permission.CAMERA)
+private var PERMISSIONS_REQUIRED = mutableListOf(Manifest.permission.CAMERA).apply {
+    if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
+        add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+    }
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        add(Manifest.permission.READ_MEDIA_IMAGES)
+    } else {
+        add(Manifest.permission.READ_EXTERNAL_STORAGE)
+    }
+}.toTypedArray()
 
 /**
  * The sole purpose of this fragment is to request permissions and, once granted, display the
@@ -42,13 +51,6 @@ class PermissionsFragment : Fragment() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
-        // add the storage access permission request for Android 9 and below.
-        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
-            val permissionList = PERMISSIONS_REQUIRED.toMutableList()
-            permissionList.add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
-            PERMISSIONS_REQUIRED = permissionList.toTypedArray()
-        }
 
         if (!hasPermissions(requireContext())) {
             // Request camera-related permissions
@@ -61,9 +63,22 @@ class PermissionsFragment : Fragment() {
     private fun navigateToCamera() {
         lifecycleScope.launch {
             lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-                Navigation.findNavController(requireActivity(), R.id.fragment_container).navigate(
-                    PermissionsFragmentDirections.actionPermissionsToCamera()
-                )
+                val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                val enableCamera = prefs.getBoolean(SettingsFragment.KEY_ENABLE_CAMERA, true)
+                val enableStudio = prefs.getBoolean(SettingsFragment.KEY_ENABLE_STUDIO, true)
+                val startupMode = prefs.getString(SettingsFragment.KEY_STARTUP_MODE, "Camera")
+
+                val navController = Navigation.findNavController(requireActivity(), R.id.fragment_container)
+
+                if (startupMode == "Studio" && enableStudio) {
+                    navController.navigate(R.id.studio_fragment)
+                } else if (enableCamera) {
+                    navController.navigate(PermissionsFragmentDirections.actionPermissionsToCamera())
+                } else if (enableStudio) {
+                    navController.navigate(R.id.studio_fragment)
+                } else {
+                    navController.navigate(PermissionsFragmentDirections.actionPermissionsToCamera())
+                }
             }
         }
     }

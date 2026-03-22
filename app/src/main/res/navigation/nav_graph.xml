@@ -55,6 +55,15 @@
     </fragment>
 
     <fragment
+        android:id="@+id/studio_fragment"
+        android:name="top.maary.darkbag.fragments.StudioFragment"
+        android:label="StudioFragment">
+        <action
+            android:id="@+id/action_studio_to_image_viewer"
+            app:destination="@id/image_viewer_fragment" />
+    </fragment>
+
+    <fragment
         android:id="@+id/image_viewer_fragment"
         android:name="top.maary.darkbag.fragments.ImageViewerFragment"
         android:label="ImageViewerFragment">

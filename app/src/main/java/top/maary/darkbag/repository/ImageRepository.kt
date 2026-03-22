@@ -43,7 +43,10 @@ class ImageRepository(private val context: Context) {
                 }
             }
 
-            // 2. Scan MediaStore for Darkbag folder
+            // 2. Scan MediaStore for ALL DNG files
+            scanAllDngs(groups)
+
+            // 3. Scan MediaStore for Darkbag folder
             scanMediaStore(groups)
 
             val result = groups.values
@@ -109,6 +112,44 @@ class ImageRepository(private val context: Context) {
             }
         } catch (e: Exception) {
             android.util.Log.e("ImageRepository", "Failed to scan SAF folder: $folderUri", e)
+        }
+    }
+
+    private fun scanAllDngs(groups: MutableMap<String, ImageGroupBuilder>) {
+        val collection = MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+        val projection = arrayOf(
+            MediaStore.MediaColumns._ID,
+            MediaStore.MediaColumns.DISPLAY_NAME,
+            MediaStore.MediaColumns.DATE_ADDED,
+            MediaStore.MediaColumns.MIME_TYPE
+        )
+
+        val selection = "${MediaStore.MediaColumns.MIME_TYPE} = ?"
+        val selectionArgs = arrayOf("image/x-adobe-dng")
+
+        context.contentResolver.query(collection, projection, selection, selectionArgs, null)?.use { cursor ->
+            val idColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
+            val nameColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
+            val dateColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_ADDED)
+            val uriColumn = MediaStore.MediaColumns._ID
+
+            while (cursor.moveToNext()) {
+                val id = cursor.getLong(idColumn)
+                val name = cursor.getString(nameColumn)
+                val date = cursor.getLong(dateColumn) * 1000
+                val uri = ContentUris.withAppendedId(collection, id)
+
+                val baseName = getBaseName(name)
+                val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
+
+                if (name.contains("_HF2")) {
+                    builder.setDng2(uri, date)
+                } else if (name.contains("_HF1")) {
+                    builder.setDng1(uri, date)
+                } else {
+                    builder.setDng(uri, date)
+                }
+            }
         }
     }
 

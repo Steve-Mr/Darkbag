@@ -120,7 +120,38 @@ class ImageViewerFragment : Fragment() {
         binding.imagePager.visibility = View.INVISIBLE
 
         lifecycleScope.launch {
-            val groups = repository.getGroupedImages(forceRefresh = forceRefresh)
+            val groups = repository.getGroupedImages(forceRefresh = forceRefresh).toMutableList()
+
+            // Handle virtual groups from external URIs or stitching
+            if (targetUri != null && targetUri.contains("|")) {
+                val uris = targetUri.split("|")
+                val u1 = Uri.parse(uris[0])
+                val u2 = Uri.parse(uris[1])
+                val virtualGroup = ImageGroup(
+                    baseName = "Stitched_" + System.currentTimeMillis(),
+                    jpgUri = null,
+                    dngUri = null,
+                    dngUri1 = u1,
+                    dngUri2 = u2,
+                    hfLayout = "SBS", // Default for manual stitching
+                    width = 0,
+                    height = 0,
+                    captureTime = System.currentTimeMillis()
+                )
+                groups.add(0, virtualGroup)
+            } else if (targetUri != null && groups.none { it.jpgUri?.toString() == targetUri || it.dngUri?.toString() == targetUri || it.dngUri1?.toString() == targetUri }) {
+                // External single image
+                val u = Uri.parse(targetUri)
+                val isDng = targetUri.endsWith(".dng", ignoreCase = true) || context?.contentResolver?.getType(u) == "image/x-adobe-dng"
+                val virtualGroup = ImageGroup(
+                    baseName = u.lastPathSegment ?: "External",
+                    jpgUri = if (isDng) null else u,
+                    dngUri = if (isDng) u else null,
+                    captureTime = System.currentTimeMillis()
+                )
+                groups.add(0, virtualGroup)
+            }
+
             if (groups.isEmpty()) {
                 findNavController().navigateUp()
                 return@launch
@@ -134,12 +165,17 @@ class ImageViewerFragment : Fragment() {
             }
             binding.imagePager.adapter = adapter
 
-            val initialPos = groups.indexOfFirst {
-                it.jpgUri?.toString() == targetUri ||
-                it.dngUri?.toString() == targetUri ||
-                it.dngUri1?.toString() == targetUri ||
-                it.dngUri2?.toString() == targetUri
+            val initialPos = if (targetUri?.contains("|") == true || (targetUri != null && !groups.any { it.jpgUri?.toString() == targetUri || it.dngUri?.toString() == targetUri || it.dngUri1?.toString() == targetUri })) {
+                0
+            } else {
+                groups.indexOfFirst {
+                    it.jpgUri?.toString() == targetUri ||
+                    it.dngUri?.toString() == targetUri ||
+                    it.dngUri1?.toString() == targetUri ||
+                    it.dngUri2?.toString() == targetUri
+                }
             }
+
             if (initialPos != -1) {
                 binding.imagePager.setCurrentItem(initialPos, false)
             }
@@ -1120,8 +1156,17 @@ class ImageViewerFragment : Fragment() {
                     finalBitmap?.let { bitmap ->
                         val baseName = if (isReplacement) currentGroup.baseName else "${currentGroup.baseName}_edited_${System.currentTimeMillis()}"
                         val targetUri = if (isReplacement) currentGroup.jpgUri else null
-                        val jpgFolderUri = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-                            .getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
+
+                        val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                        val jpgFolderUri = prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
+                        val exportFolderUri = prefs.getString(SettingsFragment.KEY_EXPORT_STORAGE_URI, null)
+
+                        // Use export folder for external images or if specifically set
+                        val finalFolderUri = if (currentGroup.jpgUri == null && currentGroup.dngUri == null && currentGroup.dngUri1 == null) {
+                            exportFolderUri ?: jpgFolderUri
+                        } else {
+                             if (isReplacement) null else (exportFolderUri ?: jpgFolderUri)
+                        }
 
                         top.maary.darkbag.utils.ImageSaver.saveProcessedImage(
                             context = context,
@@ -1134,7 +1179,7 @@ class ImageViewerFragment : Fragment() {
                             saveJpg = true,
                             saveRaw = false,
                             targetUri = targetUri,
-                            jpgFolderUri = if (isReplacement) null else jpgFolderUri,
+                            jpgFolderUri = if (isReplacement) null else finalFolderUri,
                                 editConfig = config,
                                 isAlreadyStitched = currentGroup.isHalfFrame()
                         )

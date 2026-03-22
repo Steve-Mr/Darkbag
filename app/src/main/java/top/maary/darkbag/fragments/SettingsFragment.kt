@@ -66,6 +66,7 @@ class SettingsFragment : Fragment() {
         setupAboutSection()
         setupMenus()
         setupCheckboxes()
+        setupNavigationCheckboxes()
         setupStoragePickers()
         setupNavigation()
         updateDebugStats()
@@ -226,6 +227,16 @@ class SettingsFragment : Fragment() {
         binding.menuHalfFrameLayout.setOnItemClickListener { _, _, position, _ ->
             prefs.edit().putString(KEY_HALF_FRAME_LAYOUT, HALF_FRAME_LAYOUTS[position]).apply()
         }
+
+        // Startup Mode
+        val startupModes = listOf("Camera", "Studio")
+        val startupAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, startupModes)
+        binding.menuStartupMode.setAdapter(startupAdapter)
+        val savedStartup = prefs.getString(KEY_STARTUP_MODE, "Camera")
+        binding.menuStartupMode.setText(savedStartup, false)
+        binding.menuStartupMode.setOnItemClickListener { _, _, position, _ ->
+            prefs.edit().putString(KEY_STARTUP_MODE, startupModes[position]).apply()
+        }
     }
 
     private fun updateCheckboxStates() {
@@ -309,9 +320,11 @@ class SettingsFragment : Fragment() {
     private fun updateStorageVisibility() {
         binding.layoutJpgStorage.visibility = if (binding.cbSaveJpg.isChecked) View.VISIBLE else View.GONE
         binding.layoutRawStorage.visibility = if (binding.cbSaveRaw.isChecked) View.VISIBLE else View.GONE
+        binding.layoutExportStorage.visibility = if (prefs.getBoolean(KEY_ENABLE_STUDIO, true)) View.VISIBLE else View.GONE
 
         binding.tvJpgPath.text = prefs.getString(KEY_JPG_STORAGE_URI_NAME, "Default (Pictures/Darkbag)")
         binding.tvRawPath.text = prefs.getString(KEY_RAW_STORAGE_URI_NAME, "Default (Pictures/Darkbag)")
+        binding.tvExportPath.text = prefs.getString(KEY_EXPORT_STORAGE_URI_NAME, "Default (Pictures/Darkbag)")
     }
 
     private val jpgPicker = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
@@ -343,6 +356,47 @@ class SettingsFragment : Fragment() {
         }
     }
 
+    private val exportPicker = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        uri?.let {
+            val takeFlags: Int = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            requireContext().contentResolver.takePersistableUriPermission(it, takeFlags)
+
+            val folderName = MediaStoreUtils.getFolderNameFromUri(requireContext(), it)
+            prefs.edit()
+                .putString(KEY_EXPORT_STORAGE_URI, it.toString())
+                .putString(KEY_EXPORT_STORAGE_URI_NAME, folderName)
+                .apply()
+            updateStorageVisibility()
+        }
+    }
+
+    private fun setupNavigationCheckboxes() {
+        val switchCamera = binding.switchEnableCamera
+        val switchStudio = binding.switchEnableStudio
+
+        switchCamera.isChecked = prefs.getBoolean(KEY_ENABLE_CAMERA, true)
+        switchStudio.isChecked = prefs.getBoolean(KEY_ENABLE_STUDIO, true)
+
+        switchCamera.setOnCheckedChangeListener { _, isChecked ->
+            if (!isChecked && !switchStudio.isChecked) {
+                switchCamera.isChecked = true
+                Toast.makeText(requireContext(), "At least one mode must be enabled", Toast.LENGTH_SHORT).show()
+            } else {
+                prefs.edit().putBoolean(KEY_ENABLE_CAMERA, isChecked).apply()
+            }
+        }
+
+        switchStudio.setOnCheckedChangeListener { _, isChecked ->
+            if (!isChecked && !switchCamera.isChecked) {
+                switchStudio.isChecked = true
+                Toast.makeText(requireContext(), "At least one mode must be enabled", Toast.LENGTH_SHORT).show()
+            } else {
+                prefs.edit().putBoolean(KEY_ENABLE_STUDIO, isChecked).apply()
+                updateStorageVisibility()
+            }
+        }
+    }
+
     private fun setupSwitch(switch: com.google.android.material.materialswitch.MaterialSwitch, key: String, defaultValue: Boolean = true) {
         switch.isChecked = prefs.getBoolean(key, defaultValue)
         switch.setOnCheckedChangeListener { _, isChecked ->
@@ -356,6 +410,9 @@ class SettingsFragment : Fragment() {
         }
         binding.layoutRawStorage.setOnClickListener {
             rawPicker.launch(null)
+        }
+        binding.layoutExportStorage.setOnClickListener {
+            exportPicker.launch(null)
         }
     }
 
@@ -409,6 +466,12 @@ class SettingsFragment : Fragment() {
         const val KEY_HALF_FRAME_SAVE_JPG = "half_frame_save_jpg"
         const val KEY_HALF_FRAME_SAVE_RAW = "half_frame_save_raw"
         const val KEY_HALF_FRAME_BASE_NAME = "half_frame_base_name"
+
+        const val KEY_ENABLE_CAMERA = "enable_camera_mode"
+        const val KEY_ENABLE_STUDIO = "enable_studio_mode"
+        const val KEY_STARTUP_MODE = "startup_mode"
+        const val KEY_EXPORT_STORAGE_URI = "export_storage_uri"
+        const val KEY_EXPORT_STORAGE_URI_NAME = "export_storage_uri_name"
 
         val FOCAL_LENGTHS = listOf("24", "28", "35")
         val ANTIBANDING_MODES = listOf("Auto", "50Hz", "60Hz", "Off")

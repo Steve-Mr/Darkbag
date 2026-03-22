@@ -64,6 +64,18 @@
                 <category android:name="android.intent.category.DEFAULT"/>
             </intent-filter>
 
+            <!-- Support Share and Open As -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="image/*" />
+            </intent-filter>
+
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="image/*" />
+            </intent-filter>
 
             <!-- Declare notch support -->
             <meta-data android:name="android.notch_support" android:value="true"/>
