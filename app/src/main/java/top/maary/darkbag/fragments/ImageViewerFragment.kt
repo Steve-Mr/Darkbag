@@ -74,6 +74,20 @@ class ImageViewerFragment : Fragment() {
                 currentEditConfig = null
                 sourceDngBytes = null
                 sourceDngBytes2 = null
+
+                // Clear active view before recycling
+                val currentIndex = binding.imagePager.currentItem
+                val currentHolder = (binding.imagePager.getChildAt(0) as? androidx.recyclerview.widget.RecyclerView)
+                    ?.findViewHolderForAdapterPosition(currentIndex) as? ImageViewerAdapter.ViewHolder
+                currentHolder?.binding?.imageView?.let { iv ->
+                    if (iv.drawable is android.graphics.drawable.BitmapDrawable) {
+                        val bmp = (iv.drawable as android.graphics.drawable.BitmapDrawable).bitmap
+                        if (bmp == lastCompositeBitmap || bmp == cachedBitmap1 || bmp == cachedBitmap2) {
+                            iv.setImageDrawable(null)
+                        }
+                    }
+                }
+
                 cachedBitmap1?.recycle()
                 cachedBitmap1 = null
                 cachedBitmap2?.recycle()
@@ -1137,8 +1151,9 @@ class ImageViewerFragment : Fragment() {
 
             if (compositeBitmap != null) {
                 if (lastCompositeBitmap != compositeBitmap) {
-                    lastCompositeBitmap?.recycle()
+                    val old = lastCompositeBitmap
                     lastCompositeBitmap = compositeBitmap
+                    old?.recycle()
                 }
                 if (isLongPressing) return@launch
 
@@ -1259,6 +1274,9 @@ class ImageViewerFragment : Fragment() {
                                 time2 = currentGroup.captureTime,
                                 flareType = config.flareType
                             )
+                            if (finalComposite != composite) {
+                                composite.recycle()
+                            }
                             b1?.recycle()
                             b2?.recycle()
                             finalComposite
@@ -1690,15 +1708,24 @@ class ImageViewerFragment : Fragment() {
         binding.imagePager.setPadding(0, topPadding, 0, bottomPadding)
 
         // Ensure half-frame masks match the visible viewport
+        val currentGroup = if (::adapter.isInitialized && adapter.itemCount > 0) adapter.getGroup(binding.imagePager.currentItem) else null
+        val isTB = currentGroup?.hfLayout == "TB"
+
         val lp1 = binding.hfSelection1.layoutParams as ViewGroup.MarginLayoutParams
         val lp2 = binding.hfSelection2.layoutParams as ViewGroup.MarginLayoutParams
         val lpDiv = binding.hfSelectionDivider.layoutParams as ViewGroup.MarginLayoutParams
+
         lp1.topMargin = topPadding
-        lp1.bottomMargin = bottomPadding
-        lp2.topMargin = topPadding
+        lp1.bottomMargin = if (isTB) 0 else bottomPadding
+        lp1.leftMargin = 0
+        lp1.rightMargin = if (!isTB) 0 else 0 // sidebyside uses divider, handled by constraints
+
+        lp2.topMargin = if (isTB) 0 else topPadding
         lp2.bottomMargin = bottomPadding
+
         lpDiv.topMargin = topPadding
         lpDiv.bottomMargin = bottomPadding
+
         binding.hfSelection1.layoutParams = lp1
         binding.hfSelection2.layoutParams = lp2
         binding.hfSelectionDivider.layoutParams = lpDiv
