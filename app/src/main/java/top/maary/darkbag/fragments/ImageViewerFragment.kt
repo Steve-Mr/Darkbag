@@ -611,30 +611,26 @@ class ImageViewerFragment : Fragment() {
             binding.hfSelection1.visibility = if (selectedDngIndex == 1) View.VISIBLE else View.GONE
             binding.hfSelection2.visibility = if (selectedDngIndex == 0) View.VISIBLE else View.GONE
 
-            val dividerLp = binding.hfSelectionDivider.layoutParams as androidx.constraintlayout.widget.ConstraintLayout.LayoutParams
-            dividerLp.orientation = if (isTB) androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.HORIZONTAL else androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.VERTICAL
-            binding.hfSelectionDivider.layoutParams = dividerLp
-
             val lp1 = binding.hfSelection1.layoutParams as androidx.constraintlayout.widget.ConstraintLayout.LayoutParams
             val lp2 = binding.hfSelection2.layoutParams as androidx.constraintlayout.widget.ConstraintLayout.LayoutParams
 
             if (isTB) {
                 lp1.bottomToBottom = -1
                 lp1.bottomToTop = R.id.hf_selection_divider
-                lp1.endToEnd = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.PARENT_ID
+                lp1.endToEnd = R.id.image_pager
                 lp1.endToStart = -1
 
                 lp2.topToTop = -1
                 lp2.topToBottom = R.id.hf_selection_divider
-                lp2.startToStart = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.PARENT_ID
+                lp2.startToStart = R.id.image_pager
                 lp2.startToEnd = -1
             } else {
-                lp1.bottomToBottom = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.PARENT_ID
+                lp1.bottomToBottom = R.id.image_pager
                 lp1.bottomToTop = -1
                 lp1.endToEnd = -1
                 lp1.endToStart = R.id.hf_selection_divider
 
-                lp2.topToTop = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.PARENT_ID
+                lp2.topToTop = R.id.image_pager
                 lp2.topToBottom = -1
                 lp2.startToStart = -1
                 lp2.startToEnd = R.id.hf_selection_divider
@@ -1609,6 +1605,15 @@ class ImageViewerFragment : Fragment() {
             binding.bottomRightControls.updateLayoutParams<ViewGroup.MarginLayoutParams> {
                 bottomMargin = systemBars.bottom + marginMedium
                 rightMargin = systemBars.right + marginMedium
+            }
+
+            val isLandscape = resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+            binding.editAdjustmentPanel.updateLayoutParams<ViewGroup.MarginLayoutParams> {
+                if (isLandscape) {
+                    rightMargin = systemBars.right
+                } else {
+                    bottomMargin = systemBars.bottom
+                }
             }
             insets
         }
