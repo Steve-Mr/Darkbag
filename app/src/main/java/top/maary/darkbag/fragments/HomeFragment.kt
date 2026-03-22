@@ -4,6 +4,7 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.ImageView
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import androidx.navigation.fragment.findNavController
@@ -11,15 +12,17 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.bumptech.glide.Glide
 import com.google.android.material.carousel.CarouselLayoutManager
-import com.google.android.material.carousel.HeroCarouselStrategy
 import com.google.android.material.carousel.MultiBrowseCarouselStrategy
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import top.maary.darkbag.R
 import top.maary.darkbag.databinding.FragmentHomeBinding
 import top.maary.darkbag.databinding.ItemCarouselImageBinding
 import top.maary.darkbag.databinding.ItemFolderRowBinding
 import top.maary.darkbag.models.ImageGroup
 import top.maary.darkbag.repository.ImageRepository
+import top.maary.darkbag.utils.ImageUtils
 
 class HomeFragment : Fragment() {
 
@@ -44,10 +47,15 @@ class HomeFragment : Fragment() {
     }
 
     private fun setupEdgeToEdge() {
-        androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(binding.homeRoot) { v, insets ->
+        androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(binding.homeRoot) { _, insets ->
             val systemBars = insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.systemBars())
             binding.toolbar.setPadding(0, systemBars.top, 0, 0)
-            binding.homeRoot.setPadding(systemBars.left, 0, systemBars.right, systemBars.bottom)
+            binding.homeContentContainer.setPadding(
+                systemBars.left,
+                0,
+                systemBars.right,
+                systemBars.bottom
+            )
             insets
         }
     }
@@ -57,7 +65,7 @@ class HomeFragment : Fragment() {
         binding.rvExternalFolders.layoutManager = LinearLayoutManager(requireContext())
 
         binding.btnSeeAll.setOnClickListener {
-            // findNavController().navigate(R.id.action_home_to_gallery)
+            findNavController().navigate(R.id.action_home_to_gallery)
         }
 
         binding.cardCameraEntry.setOnClickListener {
@@ -81,13 +89,15 @@ class HomeFragment : Fragment() {
 
             // Update Darkbag Carousel
             binding.rvDarkbagCarousel.adapter = CarouselAdapter(darkbagGroups) { group ->
-                val action = HomeFragmentDirections.actionHomeToImageViewer((group.jpgUri ?: group.dngUri).toString())
+                val uri = group.jpgUri ?: group.dngUri ?: group.dngUri1
+                val action = HomeFragmentDirections.actionHomeToImageViewer(uri.toString())
                 findNavController().navigate(action)
             }
 
             // Update External Folders
             binding.rvExternalFolders.adapter = FolderRowAdapter(externalGroupsByFolder) { group ->
-                val action = HomeFragmentDirections.actionHomeToImageViewer((group.jpgUri ?: group.dngUri).toString())
+                val uri = group.jpgUri ?: group.dngUri ?: group.dngUri1
+                val action = HomeFragmentDirections.actionHomeToImageViewer(uri.toString())
                 findNavController().navigate(action)
             }
         }
@@ -96,6 +106,25 @@ class HomeFragment : Fragment() {
     override fun onDestroyView() {
         super.onDestroyView()
         _binding = null
+    }
+
+    private fun loadPreview(imageView: ImageView, group: ImageGroup) {
+        val context = imageView.context
+        val uri = group.jpgUri ?: group.dngUri ?: group.dngUri1 ?: return
+
+        if (uri.toString().endsWith(".dng", ignoreCase = true)) {
+            // Use specialized DNG decoder for thumbnails
+            lifecycleScope.launch {
+                val bitmap = ImageUtils.decodeDngThumbnail(context, uri)
+                if (bitmap != null) {
+                    imageView.setImageBitmap(bitmap)
+                } else {
+                    Glide.with(imageView).load(uri).centerCrop().into(imageView)
+                }
+            }
+        } else {
+            Glide.with(imageView).load(uri).centerCrop().into(imageView)
+        }
     }
 
     inner class CarouselAdapter(
@@ -112,10 +141,7 @@ class HomeFragment : Fragment() {
 
         override fun onBindViewHolder(holder: ViewHolder, position: Int) {
             val item = items[position]
-            Glide.with(holder.binding.ivThumbnail)
-                .load(item.jpgUri ?: item.dngUri)
-                .centerCrop()
-                .into(holder.binding.ivThumbnail)
+            loadPreview(holder.binding.ivThumbnail, item)
 
             holder.binding.ivFormatBadge.visibility = if (item.dngUri != null || item.dngUri1 != null) View.VISIBLE else View.GONE
             holder.binding.root.setOnClickListener { onItemClick(item) }

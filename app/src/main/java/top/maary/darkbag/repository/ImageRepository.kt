@@ -31,19 +31,17 @@ class ImageRepository(private val context: Context) {
             val groups = mutableMapOf<String, ImageGroupBuilder>()
             val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
 
-            // 1. Scan prioritized SAF folders
+            // 1. Scan prioritized SAF folders (usually Darkbag's own storage)
             val safFolders = listOf(
-                prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null) to "jpg",
-                prefs.getString(SettingsFragment.KEY_RAW_STORAGE_URI, null) to "dng"
-            )
+                prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null),
+                prefs.getString(SettingsFragment.KEY_RAW_STORAGE_URI, null)
+            ).filterNotNull().distinct()
 
-            for ((folderUri, _) in safFolders) {
-                if (folderUri != null) {
-                    scanSafFolder(folderUri, groups)
-                }
+            for (folderUri in safFolders) {
+                scanSafFolder(folderUri, groups)
             }
 
-            // 2. Scan MediaStore for Darkbag folder and other DNGs
+            // 2. Scan MediaStore for Images (including DNGs)
             scanMediaStore(groups)
 
             val result = groups.values
@@ -67,16 +65,17 @@ class ImageRepository(private val context: Context) {
             val folderName = root?.name ?: "Unknown"
             root?.listFiles()?.forEach { file ->
                 val name = file.name ?: return@forEach
+                if (!isImageOrDng(name)) return@forEach
+
                 val baseName = getBaseName(name)
-                // For SAF folders (likely Darkbag ones), we use a global key or qualified key
-                val key = "SAF_$baseName"
+                // Use a consistent key for Darkbag files
+                val key = "DB_$baseName"
                 val builder = groups.getOrPut(key) { ImageGroupBuilder(baseName).apply {
                     this.folderName = folderName
                     this.isDarkbag = true
                 } }
-                val lastModified = file.lastModified()
 
-                processFile(file.uri, name, lastModified, builder)
+                processFile(file.uri, name, file.lastModified(), builder)
             }
         } catch (e: Exception) {
             android.util.Log.e("ImageRepository", "Failed to scan SAF folder: $folderUri", e)
@@ -88,7 +87,7 @@ class ImageRepository(private val context: Context) {
         val projection = arrayOf(
             MediaStore.MediaColumns._ID,
             MediaStore.MediaColumns.DISPLAY_NAME,
-            MediaStore.MediaColumns.DATE_ADDED,
+            MediaStore.MediaColumns.DATE_MODIFIED,
             MediaStore.MediaColumns.MIME_TYPE,
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) MediaStore.MediaColumns.RELATIVE_PATH else MediaStore.MediaColumns.DATA
         )
@@ -96,7 +95,7 @@ class ImageRepository(private val context: Context) {
         context.contentResolver.query(collection, projection, null, null, null)?.use { cursor ->
             val idColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
             val nameColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
-            val dateColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_ADDED)
+            val dateColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_MODIFIED)
             val mimeColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.MIME_TYPE)
             val pathColumn = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.RELATIVE_PATH)
@@ -106,10 +105,10 @@ class ImageRepository(private val context: Context) {
 
             while (cursor.moveToNext()) {
                 val id = cursor.getLong(idColumn)
-                val name = cursor.getString(nameColumn)
+                val name = cursor.getString(nameColumn) ?: continue
                 val date = cursor.getLong(dateColumn) * 1000 // Convert to ms
                 val mime = cursor.getString(mimeColumn)
-                val rawPath = cursor.getString(pathColumn)
+                val rawPath = cursor.getString(pathColumn) ?: ""
                 val uri = ContentUris.withAppendedId(collection, id)
 
                 val folderName = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -118,12 +117,12 @@ class ImageRepository(private val context: Context) {
                     File(rawPath).parentFile?.name ?: "Pictures"
                 }
 
-                val isDarkbag = rawPath.contains("Darkbag", ignoreCase = true)
+                val isDarkbag = rawPath.contains("Darkbag", ignoreCase = true) || name.contains("HDRPLUS", ignoreCase = true)
                 val baseName = getBaseName(name)
 
                 // Grouping strategy:
-                // Darkbag files are grouped by baseName globally (as they might span folders)
-                // External files are grouped by baseName + folder to avoid collisions
+                // Darkbag files are grouped by baseName globally
+                // External files are grouped by baseName + folder
                 val key = if (isDarkbag) "DB_$baseName" else "EXT_${folderName}_$baseName"
 
                 val builder = groups.getOrPut(key) {
@@ -138,13 +137,20 @@ class ImageRepository(private val context: Context) {
         }
     }
 
+    private fun isImageOrDng(name: String): Boolean {
+        return name.endsWith(".jpg", ignoreCase = true) ||
+               name.endsWith(".jpeg", ignoreCase = true) ||
+               name.endsWith(".dng", ignoreCase = true)
+    }
+
     private fun processFile(uri: Uri, name: String, time: Long, builder: ImageGroupBuilder, mime: String? = null) {
         val isJpg = mime == "image/jpeg" || name.endsWith(".jpg", ignoreCase = true) || name.endsWith(".jpeg", ignoreCase = true)
-        val isDng = mime == "image/x-adobe-dng" || name.endsWith(".dng", ignoreCase = true)
+        val isDng = mime == "image/x-adobe-dng" || name.endsWith(".dng", ignoreCase = true) || mime == "image/dng"
 
         when {
             isJpg -> {
                 builder.setJpg(uri, time)
+                // Read EXIF for Darkbag specific metadata
                 try {
                     context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
                         val exif = androidx.exifinterface.media.ExifInterface(pfd.fileDescriptor)
@@ -163,9 +169,7 @@ class ImageRepository(private val context: Context) {
                             builder.height = h
                         }
                     }
-                } catch (e: Exception) {
-                    // android.util.Log.w("ImageRepository", "Failed to read EXIF from $uri", e)
-                }
+                } catch (e: Exception) { }
             }
             name.contains("_HF2") && isDng -> {
                 builder.setDng2(uri, time)
@@ -237,7 +241,6 @@ class ImageRepository(private val context: Context) {
         return try {
             context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
                 val exif = androidx.exifinterface.media.ExifInterface(pfd.fileDescriptor)
-                // TAG_BASELINE_EXPOSURE is 50730
                 val baselineExposure = exif.getAttributeDouble("BaselineExposure", 0.0).toFloat()
                 val digitalGain = Math.pow(2.0, baselineExposure.toDouble()).toFloat()
 
@@ -250,7 +253,6 @@ class ImageRepository(private val context: Context) {
                 }
             }
         } catch (e: Exception) {
-            android.util.Log.e("ImageRepository", "Failed to read baseline exposure from $uri", e)
             null
         }
     }

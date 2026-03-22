@@ -2,6 +2,7 @@ package top.maary.darkbag.fragments
 
 import android.os.Bundle
 import android.view.*
+import android.widget.ImageView
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import androidx.navigation.fragment.findNavController
@@ -16,6 +17,9 @@ import top.maary.darkbag.R
 import top.maary.darkbag.databinding.*
 import top.maary.darkbag.models.ImageGroup
 import top.maary.darkbag.repository.ImageRepository
+import top.maary.darkbag.utils.ImageUtils
+import java.text.SimpleDateFormat
+import java.util.*
 
 class GalleryFragment : Fragment() {
 
@@ -42,10 +46,15 @@ class GalleryFragment : Fragment() {
     }
 
     private fun setupEdgeToEdge() {
-        androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(binding.root) { v, insets ->
+        androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(binding.root) { _, insets ->
             val systemBars = insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.systemBars())
             binding.toolbar.setPadding(0, systemBars.top, 0, 0)
-            v.setPadding(systemBars.left, 0, systemBars.right, systemBars.bottom)
+            binding.galleryContentContainer.setPadding(
+                systemBars.left,
+                0,
+                systemBars.right,
+                systemBars.bottom
+            )
             insets
         }
     }
@@ -83,7 +92,8 @@ class GalleryFragment : Fragment() {
             val otherGroups = allGroups.filter { !it.isDarkbag }
 
             binding.rvDarkbagCarousel.adapter = CarouselAdapter(darkbagGroups) { group ->
-                val action = GalleryFragmentDirections.actionGalleryToImageViewer((group.jpgUri ?: group.dngUri).toString())
+                val uri = group.jpgUri ?: group.dngUri ?: group.dngUri1
+                val action = GalleryFragmentDirections.actionGalleryToImageViewer(uri.toString())
                 findNavController().navigate(action)
             }
 
@@ -127,6 +137,24 @@ class GalleryFragment : Fragment() {
         _binding = null
     }
 
+    private fun loadPreview(imageView: ImageView, group: ImageGroup) {
+        val context = imageView.context
+        val uri = group.jpgUri ?: group.dngUri ?: group.dngUri1 ?: return
+
+        if (uri.toString().endsWith(".dng", ignoreCase = true)) {
+            lifecycleScope.launch {
+                val bitmap = ImageUtils.decodeDngThumbnail(context, uri)
+                if (bitmap != null) {
+                    imageView.setImageBitmap(bitmap)
+                } else {
+                    Glide.with(imageView).load(uri).centerCrop().into(imageView)
+                }
+            }
+        } else {
+            Glide.with(imageView).load(uri).centerCrop().into(imageView)
+        }
+    }
+
     inner class GalleryGridAdapter(
         private val items: List<ImageGroup>
     ) : RecyclerView.Adapter<GalleryGridAdapter.ViewHolder>() {
@@ -140,10 +168,7 @@ class GalleryFragment : Fragment() {
 
         override fun onBindViewHolder(holder: ViewHolder, position: Int) {
             val item = items[position]
-            Glide.with(holder.binding.ivThumbnail)
-                .load(item.jpgUri ?: item.dngUri)
-                .centerCrop()
-                .into(holder.binding.ivThumbnail)
+            loadPreview(holder.binding.ivThumbnail, item)
 
             holder.binding.ivFormatBadge.visibility = if (item.dngUri != null) View.VISIBLE else View.GONE
 
@@ -161,7 +186,8 @@ class GalleryFragment : Fragment() {
                     notifyItemChanged(position)
                     binding.fabStitch.isEnabled = selectedItems.size == 2
                 } else {
-                        val action = GalleryFragmentDirections.actionGalleryToImageViewer((item.jpgUri ?: item.dngUri).toString())
+                    val uri = item.jpgUri ?: item.dngUri ?: item.dngUri1
+                    val action = GalleryFragmentDirections.actionGalleryToImageViewer(uri.toString())
                     findNavController().navigate(action)
                 }
             }
@@ -184,10 +210,7 @@ class GalleryFragment : Fragment() {
 
         override fun onBindViewHolder(holder: ViewHolder, position: Int) {
             val item = items[position]
-            Glide.with(holder.binding.ivThumbnail)
-                .load(item.jpgUri ?: item.dngUri)
-                .centerCrop()
-                .into(holder.binding.ivThumbnail)
+            loadPreview(holder.binding.ivThumbnail, item)
             holder.binding.root.setOnClickListener { onItemClick(item) }
         }
 
