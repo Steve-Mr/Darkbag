@@ -94,7 +94,6 @@ class ImageViewerFragment : Fragment() {
                 cachedBitmap2 = null
                 lastCompositeBitmap?.recycle()
                 lastCompositeBitmap = null
-                System.gc()
             }
             updateControlsVisibility()
         }
@@ -320,6 +319,7 @@ class ImageViewerFragment : Fragment() {
                                         exposure = if (configFromExif.digitalGain > 0f) kotlin.math.log2(configFromExif.digitalGain) else 0f
                                     )
                                     updateEditUi()
+                                    if (isEditingAdjustments) updateSlidersInPanel()
                                 }
                             }
                         }
@@ -342,6 +342,7 @@ class ImageViewerFragment : Fragment() {
                             withContext(Dispatchers.Main) {
                                 currentEditConfig = currentEditConfig?.copy(adjustments = adjs)
                                 updateEditUi()
+                                if (isEditingAdjustments) updateSlidersInPanel()
                             }
                         }
                     }
@@ -513,10 +514,25 @@ class ImageViewerFragment : Fragment() {
 
                 val updateConfig: (top.maary.darkbag.models.BasicAdjustments) -> top.maary.darkbag.models.BasicAdjustments = { old ->
                     when (tabPos) {
-                        0 -> if (slider.id == R.id.slider_1) old.copy(exposure = value) else old.copy(contrast = value)
-                        1 -> if (slider.id == R.id.slider_1) old.copy(highlights = value) else old.copy(shadows = value)
-                        2 -> if (slider.id == R.id.slider_1) old.copy(whites = value) else old.copy(blacks = value)
-                        3 -> old.copy(saturation = value)
+                        0 -> when (slider.id) { // Light
+                            R.id.slider_1 -> old.copy(exposure = value)
+                            R.id.slider_2 -> old.copy(contrast = value)
+                            else -> old
+                        }
+                        1 -> when (slider.id) { // Range
+                            R.id.slider_1 -> old.copy(highlights = value)
+                            R.id.slider_2 -> old.copy(shadows = value)
+                            else -> old
+                        }
+                        2 -> when (slider.id) { // Tone
+                            R.id.slider_1 -> old.copy(whites = value)
+                            R.id.slider_2 -> old.copy(blacks = value)
+                            else -> old
+                        }
+                        3 -> when (slider.id) { // Color
+                            R.id.slider_1 -> old.copy(saturation = value)
+                            else -> old
+                        }
                         else -> old
                     }
                 }
@@ -576,7 +592,6 @@ class ImageViewerFragment : Fragment() {
         adapter.setFormatSwitcherPersistentHidden(false)
         sourceDngBytes = null
         sourceDngBytes2 = null
-        System.gc()
         cachedBitmap1?.recycle()
         cachedBitmap1 = null
         cachedBitmap2?.recycle()
@@ -888,51 +903,51 @@ class ImageViewerFragment : Fragment() {
         when (tabPos) {
             0 -> { // Light
                 binding.tvLabel1.text = "Exposure"
-                binding.slider1.valueFrom = -4f
-                binding.slider1.valueTo = 4f
-                binding.slider1.value = target.exposure.coerceIn(-4f, 4f)
+                binding.slider1.valueFrom = EXPOSURE_MIN
+                binding.slider1.valueTo = EXPOSURE_MAX
+                binding.slider1.value = target.exposure.coerceIn(EXPOSURE_MIN, EXPOSURE_MAX)
                 binding.tvValue1.text = String.format("%.2f EV", target.exposure)
 
                 binding.layoutSlider2.visibility = View.VISIBLE
                 binding.tvLabel2.text = "Contrast"
-                binding.slider2.valueFrom = -1f
-                binding.slider2.valueTo = 1f
-                binding.slider2.value = target.contrast.coerceIn(-1f, 1f)
+                binding.slider2.valueFrom = ADJUSTMENT_MIN
+                binding.slider2.valueTo = ADJUSTMENT_MAX
+                binding.slider2.value = target.contrast.coerceIn(ADJUSTMENT_MIN, ADJUSTMENT_MAX)
                 binding.tvValue2.text = String.format("%.2f", target.contrast)
             }
             1 -> { // Range
                 binding.tvLabel1.text = "Highlights"
-                binding.slider1.valueFrom = -1f
-                binding.slider1.valueTo = 1f
-                binding.slider1.value = target.highlights.coerceIn(-1f, 1f)
+                binding.slider1.valueFrom = ADJUSTMENT_MIN
+                binding.slider1.valueTo = ADJUSTMENT_MAX
+                binding.slider1.value = target.highlights.coerceIn(ADJUSTMENT_MIN, ADJUSTMENT_MAX)
                 binding.tvValue1.text = String.format("%.2f", target.highlights)
 
                 binding.layoutSlider2.visibility = View.VISIBLE
                 binding.tvLabel2.text = "Shadows"
-                binding.slider2.valueFrom = -1f
-                binding.slider2.valueTo = 1f
-                binding.slider2.value = target.shadows.coerceIn(-1f, 1f)
+                binding.slider2.valueFrom = ADJUSTMENT_MIN
+                binding.slider2.valueTo = ADJUSTMENT_MAX
+                binding.slider2.value = target.shadows.coerceIn(ADJUSTMENT_MIN, ADJUSTMENT_MAX)
                 binding.tvValue2.text = String.format("%.2f", target.shadows)
             }
             2 -> { // Tone
                 binding.tvLabel1.text = "Whites"
-                binding.slider1.valueFrom = -1f
-                binding.slider1.valueTo = 1f
-                binding.slider1.value = target.whites.coerceIn(-1f, 1f)
+                binding.slider1.valueFrom = ADJUSTMENT_MIN
+                binding.slider1.valueTo = ADJUSTMENT_MAX
+                binding.slider1.value = target.whites.coerceIn(ADJUSTMENT_MIN, ADJUSTMENT_MAX)
                 binding.tvValue1.text = String.format("%.2f", target.whites)
 
                 binding.layoutSlider2.visibility = View.VISIBLE
                 binding.tvLabel2.text = "Blacks"
-                binding.slider2.valueFrom = -1f
-                binding.slider2.valueTo = 1f
-                binding.slider2.value = target.blacks.coerceIn(-1f, 1f)
+                binding.slider2.valueFrom = ADJUSTMENT_MIN
+                binding.slider2.valueTo = ADJUSTMENT_MAX
+                binding.slider2.value = target.blacks.coerceIn(ADJUSTMENT_MIN, ADJUSTMENT_MAX)
                 binding.tvValue2.text = String.format("%.2f", target.blacks)
             }
             3 -> { // Color
                 binding.tvLabel1.text = "Saturation"
-                binding.slider1.valueFrom = -1f
-                binding.slider1.valueTo = 1f
-                binding.slider1.value = target.saturation.coerceIn(-1f, 1f)
+                binding.slider1.valueFrom = ADJUSTMENT_MIN
+                binding.slider1.valueTo = ADJUSTMENT_MAX
+                binding.slider1.value = target.saturation.coerceIn(ADJUSTMENT_MIN, ADJUSTMENT_MAX)
                 binding.tvValue1.text = String.format("%.2f", target.saturation)
 
                 binding.layoutSlider2.visibility = View.GONE
@@ -1793,5 +1808,10 @@ class ImageViewerFragment : Fragment() {
         private const val MENU_DETAILS = 1
         private const val MENU_DELETE = 2
         private const val MENU_SAVE_AS = 3
+
+        private const val EXPOSURE_MIN = -4f
+        private const val EXPOSURE_MAX = 4f
+        private const val ADJUSTMENT_MIN = -1f
+        private const val ADJUSTMENT_MAX = 1f
     }
 }
