@@ -61,9 +61,15 @@ class PermissionsFragment : Fragment() {
     private fun navigateToCamera() {
         lifecycleScope.launch {
             lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-                Navigation.findNavController(requireActivity(), R.id.fragment_container).navigate(
-                    PermissionsFragmentDirections.actionPermissionsToCamera()
-                )
+                val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                val entryMode = prefs.getString(SettingsFragment.KEY_ENTRY_MODE, "Home Screen")
+                val navController = Navigation.findNavController(requireActivity(), R.id.fragment_container)
+
+                when (entryMode) {
+                    "Camera" -> navController.navigate(R.id.action_permissions_to_camera_direct)
+                    "Gallery" -> navController.navigate(R.id.action_permissions_to_gallery)
+                    else -> navController.navigate(R.id.action_permissions_to_home)
+                }
             }
         }
     }

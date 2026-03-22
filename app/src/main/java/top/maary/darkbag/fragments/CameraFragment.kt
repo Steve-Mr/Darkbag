@@ -402,9 +402,9 @@ class CameraFragment : Fragment() {
         // Make sure that all permissions are still present, since the
         // user could have removed them while the app was in paused state.
         if (!PermissionsFragment.hasPermissions(requireContext())) {
-            Navigation.findNavController(requireActivity(), R.id.fragment_container).navigate(
-                CameraFragmentDirections.actionCameraToPermissions()
-            )
+            // Find current destination to decide which action to use (safe args might differ)
+            val navController = Navigation.findNavController(requireActivity(), R.id.fragment_container)
+            navController.popBackStack(R.id.permissions_fragment, false)
             return
         }
 

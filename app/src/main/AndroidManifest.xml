@@ -64,6 +64,16 @@
                 <category android:name="android.intent.category.DEFAULT"/>
             </intent-filter>
 
+            <!-- External Edit Intent -->
+            <intent-filter>
+                <action android:name="android.intent.action.EDIT" />
+                <action android:name="android.intent.action.VIEW" />
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="image/x-adobe-dng" />
+                <data android:mimeType="image/jpeg" />
+            </intent-filter>
+
 
             <!-- Declare notch support -->
             <meta-data android:name="android.notch_support" android:value="true"/>

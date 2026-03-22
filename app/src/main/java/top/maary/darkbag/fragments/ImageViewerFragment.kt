@@ -112,7 +112,29 @@ class ImageViewerFragment : Fragment() {
         }
 
         binding.imagePager.registerOnPageChangeCallback(pageChangeCallback)
-        loadImages()
+
+        val stitchedGroup = arguments?.getParcelable<ImageGroup>("stitched_group")
+        if (stitchedGroup != null) {
+            loadStitchedGroup(stitchedGroup)
+        } else {
+            loadImages()
+        }
+    }
+
+    private fun loadStitchedGroup(group: ImageGroup) {
+        binding.initialLoadingIndicator.visibility = View.GONE
+        binding.imagePager.visibility = View.VISIBLE
+        val groups = listOf(group)
+        adapter = ImageViewerAdapter(groups, lifecycleScope, requireContext()).apply {
+            onImageTapped = { toggleUi() }
+            onZoomChanged = { isZoomed -> if (isZoomed) hideUi() else showUi() }
+            onLongPressStarted = { handleLongPressStarted(it) }
+            onLongPressEnded = { handleLongPressEnded(it) }
+            setFormatSwitcherPersistentHidden(isAdjusted)
+        }
+        binding.imagePager.adapter = adapter
+        setupActionButtons()
+        updateControlsVisibility()
     }
 
     private fun loadImages(targetUri: String? = args.initialUri, forceRefresh: Boolean = false) {

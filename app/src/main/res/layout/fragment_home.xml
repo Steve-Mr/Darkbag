@@ -1,0 +1,149 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.coordinatorlayout.widget.CoordinatorLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/home_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="?attr/colorSurface">
+
+    <com.google.android.material.appbar.AppBarLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@android:color/transparent"
+        app:elevation="0dp">
+
+        <com.google.android.material.appbar.MaterialToolbar
+            android:id="@+id/toolbar"
+            android:layout_width="match_parent"
+            android:layout_height="?attr/actionBarSize"
+            app:title="Darkbag"
+            app:titleCentered="true"
+            app:menu="@menu/menu_home" />
+
+    </com.google.android.material.appbar.AppBarLayout>
+
+    <androidx.core.widget.NestedScrollView
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        app:layout_behavior="@string/appbar_scrolling_view_behavior">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingBottom="100dp">
+
+            <!-- Darkbag Carousel Section -->
+            <RelativeLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/margin_medium"
+                android:paddingHorizontal="@dimen/margin_medium">
+
+                <TextView
+                    android:id="@+id/tv_darkbag_header"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Darkbag Shots"
+                    android:textAppearance="?attr/textAppearanceTitleLarge"
+                    android:textColor="?attr/colorOnSurface" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_see_all"
+                    style="@style/Widget.Material3.Button.TextButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_alignParentEnd="true"
+                    android:layout_centerVertical="true"
+                    android:text="See all"
+                    app:icon="@drawable/ic_photo"
+                    app:iconGravity="end" />
+            </RelativeLayout>
+
+            <com.google.android.material.carousel.MaskableFrameLayout
+                android:layout_width="match_parent"
+                android:layout_height="200dp"
+                android:layout_marginTop="@dimen/margin_small"
+                app:shapeAppearance="?attr/shapeAppearanceLargeComponent">
+
+                <androidx.recyclerview.widget.RecyclerView
+                    android:id="@+id/rv_darkbag_carousel"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:clipChildren="false"
+                    android:clipToPadding="false" />
+            </com.google.android.material.carousel.MaskableFrameLayout>
+
+            <!-- External RAW Folders Section -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="@dimen/margin_medium"
+                android:layout_marginTop="@dimen/margin_large"
+                android:text="Other RAW Collections"
+                android:textAppearance="?attr/textAppearanceTitleLarge"
+                android:textColor="?attr/colorOnSurface" />
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/rv_external_folders"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/margin_small"
+                android:nestedScrollingEnabled="false" />
+
+            <!-- Camera Entry (Expressive Card) -->
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/card_camera_entry"
+                style="@style/Widget.Material3.CardView.Elevated"
+                android:layout_width="match_parent"
+                android:layout_height="200dp"
+                android:layout_marginHorizontal="@dimen/margin_medium"
+                android:layout_marginTop="@dimen/margin_large"
+                app:cardBackgroundColor="?attr/colorPrimaryContainer"
+                app:cardCornerRadius="@dimen/radius_large">
+
+                <FrameLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent">
+
+                    <ImageView
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:alpha="0.2"
+                        android:scaleType="centerCrop"
+                        android:src="@drawable/ic_shutter"
+                        app:tint="?attr/colorOnPrimaryContainer" />
+
+                    <LinearLayout
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_gravity="center"
+                        android:gravity="center"
+                        android:orientation="vertical">
+
+                        <com.google.android.material.floatingactionbutton.FloatingActionButton
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:clickable="false"
+                            android:src="@drawable/ic_shutter"
+                            app:backgroundTint="?attr/colorPrimary"
+                            app:fabCustomSize="80dp"
+                            app:maxImageSize="48dp"
+                            app:tint="?attr/colorOnPrimary" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="@dimen/margin_small"
+                            android:text="Open Camera"
+                            android:textAppearance="?attr/textAppearanceHeadlineSmall"
+                            android:textColor="?attr/colorOnPrimaryContainer" />
+                    </LinearLayout>
+                </FrameLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+        </LinearLayout>
+    </androidx.core.widget.NestedScrollView>
+
+</androidx.coordinatorlayout.widget.CoordinatorLayout>

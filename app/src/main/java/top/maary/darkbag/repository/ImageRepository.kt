@@ -43,7 +43,7 @@ class ImageRepository(private val context: Context) {
                 }
             }
 
-            // 2. Scan MediaStore for Darkbag folder
+            // 2. Scan MediaStore for Darkbag folder and other DNGs
             scanMediaStore(groups)
 
             val result = groups.values
@@ -64,48 +64,19 @@ class ImageRepository(private val context: Context) {
         try {
             val treeUri = Uri.parse(folderUri)
             val root = DocumentFile.fromTreeUri(context, treeUri)
+            val folderName = root?.name ?: "Unknown"
             root?.listFiles()?.forEach { file ->
                 val name = file.name ?: return@forEach
                 val baseName = getBaseName(name)
-                val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
+                // For SAF folders (likely Darkbag ones), we use a global key or qualified key
+                val key = "SAF_$baseName"
+                val builder = groups.getOrPut(key) { ImageGroupBuilder(baseName).apply {
+                    this.folderName = folderName
+                    this.isDarkbag = true
+                } }
                 val lastModified = file.lastModified()
 
-                when {
-                    name.endsWith(".jpg", ignoreCase = true) || name.endsWith(".jpeg", ignoreCase = true) -> {
-                        builder.setJpg(file.uri, lastModified)
-                        // Try reading EXIF for layout and dimensions
-                        try {
-                            context.contentResolver.openFileDescriptor(file.uri, "r")?.use { pfd ->
-                                val exif = androidx.exifinterface.media.ExifInterface(pfd.fileDescriptor)
-                                val comment = exif.getAttribute(androidx.exifinterface.media.ExifInterface.TAG_USER_COMMENT)
-                                parseUserComment(comment, builder)
-
-                                val orientation = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION, androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL)
-                                val w = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_IMAGE_WIDTH, 0)
-                                val h = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_IMAGE_LENGTH, 0)
-
-                                if (orientation == androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90 || orientation == androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270) {
-                                    builder.width = h
-                                    builder.height = w
-                                } else {
-                                    builder.width = w
-                                    builder.height = h
-                                }
-                            }
-                        } catch (e: Exception) {
-                            android.util.Log.w("ImageRepository", "Failed to read EXIF from ${file.uri}", e)
-                        }
-                    }
-                    name.contains("_HF2") && name.endsWith(".dng", ignoreCase = true) -> {
-                        builder.setDng2(file.uri, lastModified)
-                    }
-                    name.contains("_HF1") && name.endsWith(".dng", ignoreCase = true) -> {
-                        builder.setDng1(file.uri, lastModified)
-                    }
-                    name.endsWith(".dng", ignoreCase = true) -> {
-                        builder.setDng(file.uri, lastModified)
-                    }
-                }
+                processFile(file.uri, name, lastModified, builder)
             }
         } catch (e: Exception) {
             android.util.Log.e("ImageRepository", "Failed to scan SAF folder: $folderUri", e)
@@ -118,68 +89,92 @@ class ImageRepository(private val context: Context) {
             MediaStore.MediaColumns._ID,
             MediaStore.MediaColumns.DISPLAY_NAME,
             MediaStore.MediaColumns.DATE_ADDED,
-            MediaStore.MediaColumns.MIME_TYPE
+            MediaStore.MediaColumns.MIME_TYPE,
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) MediaStore.MediaColumns.RELATIVE_PATH else MediaStore.MediaColumns.DATA
         )
 
-        val selection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ?"
-        } else {
-            "${MediaStore.MediaColumns.DATA} LIKE ?"
-        }
-        val pathFilter = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) "Pictures/Darkbag%" else "%Pictures/Darkbag%"
-        val selectionArgs = arrayOf(pathFilter)
-
-        context.contentResolver.query(collection, projection, selection, selectionArgs, null)?.use { cursor ->
+        context.contentResolver.query(collection, projection, null, null, null)?.use { cursor ->
             val idColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
             val nameColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
             val dateColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_ADDED)
             val mimeColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.MIME_TYPE)
+            val pathColumn = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.RELATIVE_PATH)
+            } else {
+                cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATA)
+            }
 
             while (cursor.moveToNext()) {
                 val id = cursor.getLong(idColumn)
                 val name = cursor.getString(nameColumn)
                 val date = cursor.getLong(dateColumn) * 1000 // Convert to ms
                 val mime = cursor.getString(mimeColumn)
+                val rawPath = cursor.getString(pathColumn)
                 val uri = ContentUris.withAppendedId(collection, id)
 
+                val folderName = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    rawPath.trim('/').split('/').lastOrNull() ?: "Pictures"
+                } else {
+                    File(rawPath).parentFile?.name ?: "Pictures"
+                }
+
+                val isDarkbag = rawPath.contains("Darkbag", ignoreCase = true)
                 val baseName = getBaseName(name)
-                val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
 
-                when {
-                    mime == "image/jpeg" -> {
-                        builder.setJpg(uri, date)
-                        try {
-                            context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
-                                val exif = androidx.exifinterface.media.ExifInterface(pfd.fileDescriptor)
-                                val comment = exif.getAttribute(androidx.exifinterface.media.ExifInterface.TAG_USER_COMMENT)
-                                parseUserComment(comment, builder)
+                // Grouping strategy:
+                // Darkbag files are grouped by baseName globally (as they might span folders)
+                // External files are grouped by baseName + folder to avoid collisions
+                val key = if (isDarkbag) "DB_$baseName" else "EXT_${folderName}_$baseName"
 
-                                val orientation = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION, androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL)
-                                val w = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_IMAGE_WIDTH, 0)
-                                val h = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_IMAGE_LENGTH, 0)
-
-                                if (orientation == androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90 || orientation == androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270) {
-                                    builder.width = h
-                                    builder.height = w
-                                } else {
-                                    builder.width = w
-                                    builder.height = h
-                                }
-                            }
-                        } catch (e: Exception) {
-                            android.util.Log.w("ImageRepository", "Failed to read EXIF from $uri", e)
-                        }
-                    }
-                    name.contains("_HF2") && (mime == "image/x-adobe-dng" || name.endsWith(".dng", ignoreCase = true)) -> {
-                        builder.setDng2(uri, date)
-                    }
-                    name.contains("_HF1") && (mime == "image/x-adobe-dng" || name.endsWith(".dng", ignoreCase = true)) -> {
-                        builder.setDng1(uri, date)
-                    }
-                    mime == "image/x-adobe-dng" || name.endsWith(".dng", ignoreCase = true) -> {
-                        builder.setDng(uri, date)
+                val builder = groups.getOrPut(key) {
+                    ImageGroupBuilder(baseName).apply {
+                        this.folderName = folderName
+                        this.isDarkbag = isDarkbag
                     }
                 }
+
+                processFile(uri, name, date, builder, mime)
+            }
+        }
+    }
+
+    private fun processFile(uri: Uri, name: String, time: Long, builder: ImageGroupBuilder, mime: String? = null) {
+        val isJpg = mime == "image/jpeg" || name.endsWith(".jpg", ignoreCase = true) || name.endsWith(".jpeg", ignoreCase = true)
+        val isDng = mime == "image/x-adobe-dng" || name.endsWith(".dng", ignoreCase = true)
+
+        when {
+            isJpg -> {
+                builder.setJpg(uri, time)
+                try {
+                    context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                        val exif = androidx.exifinterface.media.ExifInterface(pfd.fileDescriptor)
+                        val comment = exif.getAttribute(androidx.exifinterface.media.ExifInterface.TAG_USER_COMMENT)
+                        parseUserComment(comment, builder)
+
+                        val orientation = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION, androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL)
+                        val w = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_IMAGE_WIDTH, 0)
+                        val h = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_IMAGE_LENGTH, 0)
+
+                        if (orientation == androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90 || orientation == androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270) {
+                            builder.width = h
+                            builder.height = w
+                        } else {
+                            builder.width = w
+                            builder.height = h
+                        }
+                    }
+                } catch (e: Exception) {
+                    // android.util.Log.w("ImageRepository", "Failed to read EXIF from $uri", e)
+                }
+            }
+            name.contains("_HF2") && isDng -> {
+                builder.setDng2(uri, time)
+            }
+            name.contains("_HF1") && isDng -> {
+                builder.setDng1(uri, time)
+            }
+            isDng -> {
+                builder.setDng(uri, time)
             }
         }
     }
@@ -278,9 +273,10 @@ class ImageRepository(private val context: Context) {
         var height: Int = 0
         var captureTime: Long = 0L
         var editConfig: EditConfig? = null
+        var folderName: String? = null
+        var isDarkbag: Boolean = false
 
         fun setJpg(uri: Uri, time: Long) {
-            // Prefer _stitched or simply newer JPG if both exist
             if (jpgUri == null || time > jpgTime) {
                 jpgUri = uri
                 jpgTime = time
@@ -297,7 +293,6 @@ class ImageRepository(private val context: Context) {
         }
 
         fun setDng1(uri: Uri, time: Long) {
-            // For HF1, prefer the one with earlier time in case of conflict
             if (dngUri1 == null || time < dngUri1Time) {
                 dngUri1 = uri
                 dngUri1Time = time
@@ -306,7 +301,6 @@ class ImageRepository(private val context: Context) {
         }
 
         fun setDng2(uri: Uri, time: Long) {
-            // For HF2, prefer the one with later time in case of conflict
             if (dngUri2 == null || time > dngUri2Time) {
                 dngUri2 = uri
                 dngUri2Time = time
@@ -318,6 +312,6 @@ class ImageRepository(private val context: Context) {
             if (time > captureTime) captureTime = time
         }
 
-        fun build() = ImageGroup(baseName, jpgUri, dngUri, dngUri1, dngUri2, hfLayout, width, height, captureTime, editConfig)
+        fun build() = ImageGroup(baseName, jpgUri, dngUri, dngUri1, dngUri2, hfLayout, width, height, captureTime, editConfig, folderName, isDarkbag)
     }
 }

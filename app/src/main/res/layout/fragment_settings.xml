@@ -37,6 +37,44 @@
             android:orientation="vertical"
             android:padding="@dimen/margin_medium">
 
+            <!-- General Settings Section -->
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="@dimen/spacing_medium"
+                android:text="General"
+                android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+                android:textColor="?attr/colorPrimary" />
+
+            <com.google.android.material.card.MaterialCardView
+                style="@style/Widget.Material3.CardView.Filled"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="@dimen/margin_medium">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="@dimen/padding_medium">
+
+                    <com.google.android.material.textfield.TextInputLayout
+                        style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:hint="App Entry Mode">
+
+                        <AutoCompleteTextView
+                            android:id="@+id/menu_entry_mode"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:inputType="none"
+                            android:text="Home Screen" />
+                    </com.google.android.material.textfield.TextInputLayout>
+
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
             <!-- Style Section -->
             <TextView
                 android:layout_width="match_parent"

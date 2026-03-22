@@ -15,7 +15,9 @@ data class ImageGroup(
     val width: Int = 0,
     val height: Int = 0,
     val captureTime: Long = 0L,
-    val editConfig: EditConfig? = null
+    val editConfig: EditConfig? = null,
+    val folderName: String? = null,
+    val isDarkbag: Boolean = false
 ) : Parcelable {
     fun hasAny(): Boolean = jpgUri != null || dngUri != null || dngUri1 != null || dngUri2 != null
     fun isHalfFrame(): Boolean = dngUri1 != null || dngUri2 != null || hfLayout == "SBS" || hfLayout == "TB"

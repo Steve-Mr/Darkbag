@@ -53,13 +53,40 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun handleIntent(intent: Intent) {
-        if (intent.getStringExtra(SHORTCUT_EXTRA_KEY) == SHORTCUT_VALUE_SETTINGS) {
-            val navHostFragment = supportFragmentManager.findFragmentById(R.id.fragment_container) as? NavHostFragment
-            navHostFragment?.navController?.let { navController ->
-                // Ensure we are not already on settings
+        val navHostFragment = supportFragmentManager.findFragmentById(R.id.fragment_container) as? NavHostFragment
+        val navController = navHostFragment?.navController ?: return
+
+        when (intent.getStringExtra(SHORTCUT_EXTRA_KEY)) {
+            SHORTCUT_VALUE_SETTINGS -> {
                 if (navController.currentDestination?.id != R.id.settings_fragment) {
                     navController.navigate(R.id.settings_fragment)
                 }
+            }
+            "camera" -> {
+                if (navController.currentDestination?.id != R.id.camera_fragment) {
+                    navController.navigate(R.id.camera_fragment)
+                }
+            }
+            "gallery" -> {
+                if (navController.currentDestination?.id != R.id.gallery_fragment) {
+                    navController.navigate(R.id.gallery_fragment)
+                }
+            }
+        }
+
+        // Handle External View/Edit/Send Intents
+        if (intent.action == Intent.ACTION_VIEW || intent.action == Intent.ACTION_EDIT || intent.action == Intent.ACTION_SEND) {
+            val uri = if (intent.action == Intent.ACTION_SEND) {
+                intent.getParcelableExtra<android.net.Uri>(Intent.EXTRA_STREAM)
+            } else {
+                intent.data
+            }
+
+            uri?.let {
+                val bundle = android.os.Bundle().apply {
+                    putString("initial_uri", it.toString())
+                }
+                navController.navigate(R.id.image_viewer_fragment, bundle)
             }
         }
     }

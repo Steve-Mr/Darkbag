@@ -209,6 +209,16 @@ class SettingsFragment : Fragment() {
             }
         }
 
+        // App Entry Mode
+        val entryModes = listOf("Home Screen", "Camera", "Gallery")
+        val entryAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, entryModes)
+        binding.menuEntryMode.setAdapter(entryAdapter)
+        val savedEntry = prefs.getString(KEY_ENTRY_MODE, "Home Screen")
+        binding.menuEntryMode.setText(savedEntry, false)
+        binding.menuEntryMode.setOnItemClickListener { _, _, position, _ ->
+            prefs.edit().putString(KEY_ENTRY_MODE, entryModes[position]).apply()
+        }
+
         // Antibanding
         val antibandingAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, ANTIBANDING_MODES)
         binding.menuAntibanding.setAdapter(antibandingAdapter)
@@ -409,6 +419,7 @@ class SettingsFragment : Fragment() {
         const val KEY_HALF_FRAME_SAVE_JPG = "half_frame_save_jpg"
         const val KEY_HALF_FRAME_SAVE_RAW = "half_frame_save_raw"
         const val KEY_HALF_FRAME_BASE_NAME = "half_frame_base_name"
+        const val KEY_ENTRY_MODE = "app_entry_mode"
 
         val FOCAL_LENGTHS = listOf("24", "28", "35")
         val ANTIBANDING_MODES = listOf("Auto", "50Hz", "60Hz", "Off")

@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.coordinatorlayout.widget.CoordinatorLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="?attr/colorSurface">
+
+    <com.google.android.material.appbar.AppBarLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="?attr/colorSurface"
+        app:elevation="0dp">
+
+        <com.google.android.material.appbar.MaterialToolbar
+            android:id="@+id/toolbar"
+            android:layout_width="match_parent"
+            android:layout_height="?attr/actionBarSize"
+            app:navigationIcon="@drawable/ic_back"
+            app:title="Gallery"
+            app:menu="@menu/menu_gallery" />
+
+    </com.google.android.material.appbar.AppBarLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        app:layout_behavior="@string/appbar_scrolling_view_behavior">
+
+        <!-- Fixed Top Carousel -->
+        <LinearLayout
+            android:id="@+id/darkbag_section"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingBottom="@dimen/margin_small"
+            android:background="?attr/colorSurface">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="@dimen/margin_medium"
+                android:text="Darkbag Shots"
+                android:textAppearance="?attr/textAppearanceTitleSmall"
+                android:textColor="?attr/colorPrimary" />
+
+            <com.google.android.material.carousel.MaskableFrameLayout
+                android:layout_width="match_parent"
+                android:layout_height="120dp"
+                android:layout_marginTop="@dimen/spacing_small"
+                app:shapeAppearance="?attr/shapeAppearanceMediumComponent">
+
+                <androidx.recyclerview.widget.RecyclerView
+                    android:id="@+id/rv_darkbag_carousel"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:clipChildren="false"
+                    android:clipToPadding="false" />
+            </com.google.android.material.carousel.MaskableFrameLayout>
+        </LinearLayout>
+
+        <!-- Gallery Grid Section with different background and rounded top -->
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:background="?attr/colorSurfaceContainer">
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:background="@drawable/bg_gallery_container" />
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/rv_gallery"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:clipToPadding="false"
+                android:paddingTop="@dimen/margin_small"
+                android:paddingBottom="80dp" />
+
+        </FrameLayout>
+    </LinearLayout>
+
+    <com.google.android.material.floatingactionbutton.ExtendedFloatingActionButton
+        android:id="@+id/fab_stitch"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|center_horizontal"
+        android:layout_marginBottom="@dimen/margin_medium"
+        android:text="Stitch Half-Frame"
+        android:visibility="gone"
+        app:icon="@drawable/ic_mode_half_side" />
+
+</androidx.coordinatorlayout.widget.CoordinatorLayout>
