@@ -72,8 +72,16 @@ class ImageViewerFragment : Fragment() {
                 resetAdjustments()
             } else {
                 currentEditConfig = null
+                sourceDngBytes = null
+                sourceDngBytes2 = null
+                cachedBitmap1?.recycle()
+                cachedBitmap1 = null
+                cachedBitmap2?.recycle()
+                cachedBitmap2 = null
+                lastCompositeBitmap?.recycle()
+                lastCompositeBitmap = null
+                System.gc()
             }
-            lastCompositeBitmap = null
             updateControlsVisibility()
         }
     }
@@ -554,6 +562,7 @@ class ImageViewerFragment : Fragment() {
         adapter.setFormatSwitcherPersistentHidden(false)
         sourceDngBytes = null
         sourceDngBytes2 = null
+        System.gc()
         cachedBitmap1?.recycle()
         cachedBitmap1 = null
         cachedBitmap2?.recycle()
@@ -799,6 +808,11 @@ class ImageViewerFragment : Fragment() {
             .translationY(0f)
             .setDuration(300)
             .start()
+
+        // Wait for layout to ensure height is calculated for viewport padding
+        binding.editAdjustmentPanel.post {
+            updateViewportPadding()
+        }
 
         val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
         if (currentGroup.isHalfFrame()) {
@@ -1097,6 +1111,9 @@ class ImageViewerFragment : Fragment() {
                                 time2 = currentGroup.captureTime,
                                 flareType = config.flareType
                             )
+                            if (compositeBitmap != composite) {
+                                composite.recycle()
+                            }
 
                             if (isIndividual) {
                                 selectedFrameBitmap = if (selectedDngIndex == 0) {

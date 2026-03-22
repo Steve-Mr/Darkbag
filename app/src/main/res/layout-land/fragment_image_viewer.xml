@@ -216,7 +216,7 @@
         android:id="@+id/edit_adjustment_panel"
         android:layout_width="320dp"
         android:layout_height="match_parent"
-        android:background="#22000000"
+        android:background="@android:color/transparent"
         android:visibility="gone"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintTop_toTopOf="parent">
