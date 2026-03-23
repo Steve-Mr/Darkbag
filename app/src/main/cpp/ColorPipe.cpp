@@ -613,6 +613,9 @@ bool process_and_save_image(
                 }
             }
         }
+        // Update dimensions for JPEG writing if we used bitmap dimensions
+        finalW_zoomed = renderW;
+        finalH_zoomed = renderH;
     } else {
         processedImage.resize(static_cast<size_t>(finalW_out) * finalH_out * 3);
         #pragma omp parallel for
