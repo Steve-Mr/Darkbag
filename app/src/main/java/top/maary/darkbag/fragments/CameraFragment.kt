@@ -1162,10 +1162,9 @@ class CameraFragment : Fragment() {
         }
         viewsToRemove.forEach { root.removeView(it) }
 
-        // Use a themed context to ensure Material3 attributes are resolvable during inflation
-        val themedContext = android.view.ContextThemeWrapper(requireContext(), R.style.AppTheme)
+        // Use layoutInflater directly which is already themed by the activity/fragment
         cameraUiContainerBinding = CameraUiContainerBinding.inflate(
-            LayoutInflater.from(themedContext),
+            layoutInflater,
             root
         )
 
