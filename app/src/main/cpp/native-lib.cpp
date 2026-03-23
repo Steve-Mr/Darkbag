@@ -123,14 +123,16 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRawNative(
     // Paths
     const char* jpg_path_cstr = (outputJpgPath) ? env->GetStringUTFChars(outputJpgPath, 0) : nullptr;
 
+    AndroidBitmapInfo info;
+    int out_w = 0, out_h = 0;
     unsigned char* bitmapPixels = nullptr;
-    int outW = 0, outH = 0;
     if (outputBitmap) {
-        AndroidBitmapInfo info;
         if (AndroidBitmap_getInfo(env, outputBitmap, &info) == ANDROID_BITMAP_RESULT_SUCCESS) {
-            outW = info.width;
-            outH = info.height;
-            AndroidBitmap_lockPixels(env, outputBitmap, (void**)&bitmapPixels);
+            out_w = info.width;
+            out_h = info.height;
+            if (AndroidBitmap_lockPixels(env, outputBitmap, (void**)&bitmapPixels) != ANDROID_BITMAP_RESULT_SUCCESS) {
+                bitmapPixels = nullptr;
+            }
         }
     }
 
@@ -149,14 +151,15 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRawNative(
         nullptr, // wb is not used for ProPhoto path (LibRaw handles it)
         (int)orientation,
         bitmapPixels, // out_rgb_buffer
-        outW, outH,
+        out_w,
+        out_h,
         outputBitmap != nullptr, // isPreview
         1, // Fixed: don't double-downsample after LibRaw
         (float)zoomFactor, // zoomFactor
         (bool)mirror
     );
 
-    if (outputBitmap && bitmapPixels) AndroidBitmap_unlockPixels(env, outputBitmap);
+    if (bitmapPixels) AndroidBitmap_unlockPixels(env, outputBitmap);
 
     // Release Strings
     if (outputJpgPath) env->ReleaseStringUTFChars(outputJpgPath, jpg_path_cstr);

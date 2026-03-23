@@ -97,6 +97,7 @@ import top.maary.darkbag.databinding.FragmentCameraBinding
 import top.maary.darkbag.utils.ANIMATION_FAST_MILLIS
 import top.maary.darkbag.utils.ANIMATION_SLOW_MILLIS
 import top.maary.darkbag.utils.MediaStoreUtils
+import top.maary.darkbag.utils.DarkbagIdentity
 import top.maary.darkbag.utils.LutManager
 import top.maary.darkbag.utils.HalfFrameSessionStore
 import top.maary.darkbag.utils.HalfFrameManager
@@ -573,6 +574,7 @@ class CameraFragment : Fragment() {
                         if (event.targetUri != null) {
                             Log.d(TAG, "Update thumbnail for ${event.baseName}: ${event.targetUri}")
                             withContext(Dispatchers.Main) {
+                                imageRepository.invalidateCache()
                                 prefs.edit().putString(SettingsFragment.KEY_LAST_CAPTURE_URI, event.targetUri).apply()
                                 setGalleryThumbnail(event.targetUri)
                             }
@@ -1626,9 +1628,9 @@ class CameraFragment : Fragment() {
                 val dngName = if (image.halfFrameMetadata != null) {
                     val suffix = if (image.halfFrameMetadata.frame1BaseName != null) "_HF2" else "_HF1"
                     val group = image.halfFrameMetadata.frame1BaseName ?: SimpleDateFormat(FILENAME, Locale.US).format(image.halfFrameMetadata.captureTimeMillis)
-                    group + suffix
+                    DarkbagIdentity.prefixedBaseName(group + suffix)
                 } else {
-                    SimpleDateFormat(FILENAME, Locale.US).format(System.currentTimeMillis())
+                    DarkbagIdentity.prefixedBaseName(SimpleDateFormat(FILENAME, Locale.US).format(System.currentTimeMillis()))
                 }
 
                 Log.d(
@@ -1725,32 +1727,11 @@ class CameraFragment : Fragment() {
 
                 val tempRawFile = File(context.cacheDir, "$dngName.tmp.raw")
                 val tempJpgFile = File(context.cacheDir, "$dngName.tmp.jpg")
+                val tempDngThumbFile = File(context.cacheDir, "$dngName.tmp.dngthumb.jpg")
                 val fullResJpgFile = File(context.cacheDir, "${dngName}_full.jpg")
                 val linearDngFile = File(context.cacheDir, "${dngName}_linear.dng")
                 val bayerDngFile = File(context.cacheDir, "${dngName}_bayer.dng")
                 var dngWritten = false
-                if (saveRaw) {
-                    try {
-                        val dngCreator = android.hardware.camera2.DngCreator(chars, captureResult)
-
-                        // Map rotation to DngCreator orientation
-                        val dngOrientation = when (image.combinedOrientation) {
-                            90 -> ExifInterface.ORIENTATION_ROTATE_90
-                            180 -> ExifInterface.ORIENTATION_ROTATE_180
-                            270 -> ExifInterface.ORIENTATION_ROTATE_270
-                            else -> ExifInterface.ORIENTATION_NORMAL
-                        }
-                        dngCreator.setOrientation(dngOrientation)
-
-                        FileOutputStream(bayerDngFile).use { out ->
-                            dngCreator.writeByteBuffer(out, Size(image.width, image.height), image.data, 0)
-                        }
-                        dngWritten = true
-                        Log.d(TAG, "DNG saved using DngCreator: ${bayerDngFile.absolutePath}")
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Failed to save DNG using DngCreator", e)
-                    }
-                }
 
                 val iso = captureResult.get(android.hardware.camera2.CaptureResult.SENSOR_SENSITIVITY) ?: 100
                 val exposureTime = captureResult.get(android.hardware.camera2.CaptureResult.SENSOR_EXPOSURE_TIME) ?: 10_000_000L
@@ -1760,6 +1741,19 @@ class CameraFragment : Fragment() {
 
                 val debugStats = LongArray(15)
                 val mirror = shouldMirror
+
+                val captureMetadata = CaptureMetadata(
+                    iso = iso,
+                    exposureTime = exposureTime,
+                    fNumber = fNumber,
+                    focalLength = focalLength,
+                    dateTimeOriginal = captureTime,
+                    make = DarkbagIdentity.normalizedManufacturer(),
+                    model = DarkbagIdentity.normalizedModel(),
+                    uniqueCameraModel = DarkbagIdentity.uniqueCameraModel(targetCharId),
+                    software = DarkbagIdentity.softwareString(isHdrPlus = false),
+                    imageDescription = DarkbagIdentity.imageDescription(isHdrPlus = false)
+                )
 
                 // 3. JNI Halide Processing
                 val result = ColorProcessor.processSingleFrameRaw(
@@ -1775,11 +1769,6 @@ class CameraFragment : Fragment() {
                     whiteBalance = wb,
                     ccm = ccm,
                     cfaPattern = cfa,
-                    iso = iso,
-                    exposureTime = exposureTime,
-                    fNumber = fNumber,
-                    focalLength = focalLength,
-                    captureTimeMillis = captureTime,
                     targetLog = targetLogIndex,
                     lutPath = nativeLutPath,
                     outputJpgPath = if (saveJpg) tempJpgFile.absolutePath else null, // Fast JPG
@@ -1789,12 +1778,82 @@ class CameraFragment : Fragment() {
                     outputBitmap = null,
                     tempRawPath = tempRawFile.absolutePath,
                     zoomFactor = image.zoomRatio,
-                    mirror = mirror
+                    mirror = mirror,
+                    metadata = captureMetadata
                 )
 
                 timing?.jniDone = System.currentTimeMillis()
 
                 if (result < 0) throw RuntimeException("processSingleFrameRaw failed: $result")
+
+                if (saveRaw) {
+                    try {
+                        val shouldRenderNeutralDngThumbnail = !saveJpg || targetLogIndex != 0 || !nativeLutPath.isNullOrBlank()
+                        val dngThumbnailSource = if (shouldRenderNeutralDngThumbnail) {
+                            val thumbResult = ColorProcessor.processSingleFrameRaw(
+                                bayerBuffer = image.data,
+                                width = image.width,
+                                height = image.height,
+                                orientation = image.combinedOrientation,
+                                whiteLevel = whiteLevel,
+                                blackLevelPattern = blackLevelPattern,
+                                lensShadingMap = lensShadingMapData,
+                                lensShadingRows = lensShadingRows,
+                                lensShadingCols = lensShadingCols,
+                                whiteBalance = wb,
+                                ccm = ccm,
+                                cfaPattern = cfa,
+                                targetLog = 0,
+                                lutPath = null,
+                                outputJpgPath = tempDngThumbFile.absolutePath,
+                                outputDngPath = null,
+                                digitalGain = image.digitalGain,
+                                debugStats = null,
+                                outputBitmap = null,
+                                tempRawPath = null,
+                                zoomFactor = image.zoomRatio,
+                                mirror = mirror,
+                                metadata = captureMetadata
+                            )
+                            if (thumbResult >= 0 && tempDngThumbFile.exists() && tempDngThumbFile.length() > 0L) tempDngThumbFile else null
+                        } else if (tempJpgFile.exists() && tempJpgFile.length() > 0L) {
+                            tempJpgFile
+                        } else {
+                            null
+                        }
+
+                        val dngCreator = android.hardware.camera2.DngCreator(chars, captureResult)
+                        dngCreator.setDescription(DarkbagIdentity.imageDescription(isHdrPlus = false))
+
+                        // Map rotation to DngCreator orientation
+                        val dngOrientation = when (image.combinedOrientation) {
+                            90 -> ExifInterface.ORIENTATION_ROTATE_90
+                            180 -> ExifInterface.ORIENTATION_ROTATE_180
+                            270 -> ExifInterface.ORIENTATION_ROTATE_270
+                            else -> ExifInterface.ORIENTATION_NORMAL
+                        }
+                        dngCreator.setOrientation(dngOrientation)
+                        dngThumbnailSource?.let { createDngThumbnailBitmap(it) }?.let { thumb ->
+                            try {
+                                dngCreator.setThumbnail(thumb)
+                            } finally {
+                                thumb.recycle()
+                            }
+                        }
+
+                        val dngBuffer = image.data.duplicate()
+                        dngBuffer.rewind()
+                        FileOutputStream(bayerDngFile).use { out ->
+                            dngCreator.writeByteBuffer(out, Size(image.width, image.height), dngBuffer, 0)
+                        }
+                        dngWritten = true
+                        Log.d(TAG, "DNG saved using DngCreator: ${bayerDngFile.absolutePath}")
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to save DNG using DngCreator", e)
+                    } finally {
+                        tempDngThumbFile.delete()
+                    }
+                }
 
                 val layout = if (image.halfFrameMetadata?.profile == HalfFrameSessionStore.PROFILE_HALF_TOP) "TB" else if (image.halfFrameMetadata?.profile == HalfFrameSessionStore.PROFILE_HALF_SIDE) "SBS" else null
                 val editConfig = top.maary.darkbag.models.EditConfig(
@@ -1814,18 +1873,6 @@ class CameraFragment : Fragment() {
                 )
 
                 // 4. Fast Output Feedback (Thumbnail)
-                val captureMetadata = if (image.halfFrameMetadata == null) {
-                    CaptureMetadata(
-                        iso = iso,
-                        exposureTime = exposureTime,
-                        fNumber = fNumber,
-                        focalLength = focalLength,
-                        dateTimeOriginal = captureTime,
-                        make = Build.MANUFACTURER,
-                        model = Build.MODEL
-                    )
-                } else null
-
                 val fastOutputUri = ImageSaver.saveProcessedImage(
                     context = context,
                     inputBitmap = null,
@@ -1850,6 +1897,7 @@ class CameraFragment : Fragment() {
 
                 withContext(Dispatchers.Main) {
                     if (fastOutputUri != null) {
+                        imageRepository.invalidateCache()
                         prefs.edit().putString(SettingsFragment.KEY_LAST_CAPTURE_URI, fastOutputUri.toString()).apply()
                         setGalleryThumbnail(fastOutputUri.toString())
                     } else if (isHalfFrameModeEnabled && prefs.getInt(scopedHalfFrameStepKey(prefs), 0) == 1) {
@@ -2980,6 +3028,7 @@ class CameraFragment : Fragment() {
                 withContext(Dispatchers.Main) {
                     val uiPrefs = appContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
                     if (uri != null) {
+                        imageRepository.invalidateCache()
                         uiPrefs.edit().putString(SettingsFragment.KEY_LAST_CAPTURE_URI, uri.toString()).apply()
                         setGalleryThumbnail(uri.toString())
                     } else if (isHalfFrameModeEnabled && uiPrefs.getInt(scopedHalfFrameStepKey(uiPrefs), 0) == 1) {
@@ -3464,9 +3513,9 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 val dngName = if (hfMetadata != null) {
                     val suffix = if (hfMetadata.frame1BaseName != null) "_HF2" else "_HF1"
                     val group = hfMetadata.frame1BaseName ?: SimpleDateFormat(FILENAME, Locale.US).format(hfMetadata.captureTimeMillis)
-                    group + suffix + "_HDRPLUS"
+                    DarkbagIdentity.prefixedBaseName(group + suffix + "_HDRPLUS")
                 } else {
-                    SimpleDateFormat(FILENAME, Locale.US).format(System.currentTimeMillis()) + "_HDRPLUS"
+                    DarkbagIdentity.prefixedBaseName(SimpleDateFormat(FILENAME, Locale.US).format(System.currentTimeMillis()) + "_HDRPLUS")
                 }
                 val saveJpg = prefs.getBoolean(SettingsFragment.KEY_SAVE_JPG, true)
                 val saveRaw = prefs.getBoolean(SettingsFragment.KEY_SAVE_RAW, true)
@@ -3493,6 +3542,19 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 // 2) optional fast downsampled JPEG (tempJpgPath) for immediate gallery update.
                 val mirror = shouldMirror
 
+                val captureMetadata = CaptureMetadata(
+                    iso = iso?.toInt(),
+                    exposureTime = exposureTime,
+                    fNumber = fNumber,
+                    focalLength = focalLength,
+                    dateTimeOriginal = captureTime,
+                    make = DarkbagIdentity.normalizedManufacturer(),
+                    model = DarkbagIdentity.normalizedModel(),
+                    uniqueCameraModel = DarkbagIdentity.uniqueCameraModel(targetCharId),
+                    software = DarkbagIdentity.softwareString(isHdrPlus = true),
+                    imageDescription = DarkbagIdentity.imageDescription(isHdrPlus = true)
+                )
+
                 val ret = ColorProcessor.processHdrPlus(
                     buffers,
                     width, height,
@@ -3500,7 +3562,6 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     whiteLevel, blackLevelPattern,
                     lensShadingMapData, lensShadingRows, lensShadingCols, useSensorColorMatrix,
                     wb, ccm, ccmAlt, exportMatrixAB, cfa,
-                    iso, exposureTime, fNumber, focalLength, captureTime,
                     targetLogIndex,
                     nativeLutPath,
                     if (saveJpg) tempJpgFile.absolutePath else null, // outputJpgPath (fast preview)
@@ -3510,7 +3571,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     null, // outputBitmap
                     tempRawFile.absolutePath,
                     currentZoom,
-                    mirror
+                    mirror,
+                    metadata = captureMetadata
                 )
 
                 val jniEndTime = System.currentTimeMillis()
@@ -3522,18 +3584,6 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     val saveStartTime = System.currentTimeMillis()
 
                     val mirror = shouldMirror
-
-                    val captureMetadata = if (hfMetadata == null) {
-                        CaptureMetadata(
-                            iso = iso?.toInt(),
-                            exposureTime = exposureTime,
-                            fNumber = fNumber,
-                            focalLength = focalLength,
-                            dateTimeOriginal = captureTime,
-                            make = Build.MANUFACTURER,
-                            model = Build.MODEL
-                        )
-                    } else null
 
                     val fastJpegUri = if (saveJpg) {
                         val layout = if (hfMetadata?.profile == HalfFrameSessionStore.PROFILE_HALF_TOP) "TB" else if (hfMetadata?.profile == HalfFrameSessionStore.PROFILE_HALF_SIDE) "SBS" else null
@@ -3576,6 +3626,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
                     withContext(Dispatchers.Main) {
                         if (fastJpegUri != null) {
+                            imageRepository.invalidateCache()
                             prefs.edit().putString(SettingsFragment.KEY_LAST_CAPTURE_URI, fastJpegUri.toString()).apply()
                             setGalleryThumbnail(fastJpegUri.toString())
                         } else if (isHalfFrameModeEnabled && prefs.getInt(scopedHalfFrameStepKey(prefs), 0) == 1) {
@@ -4827,6 +4878,33 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             inputStream,
             0
         )
+    }
+
+    private fun createDngThumbnailBitmap(sourceJpeg: File, maxDimension: Int = 240): android.graphics.Bitmap? {
+        if (!sourceJpeg.exists() || sourceJpeg.length() <= 0L) return null
+
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(sourceJpeg.absolutePath, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+
+        var inSampleSize = 1
+        while ((bounds.outWidth / inSampleSize) > maxDimension || (bounds.outHeight / inSampleSize) > maxDimension) {
+            inSampleSize *= 2
+        }
+
+        val decodeOpts = BitmapFactory.Options().apply {
+            this.inSampleSize = inSampleSize
+            inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888
+        }
+        val decoded = BitmapFactory.decodeFile(sourceJpeg.absolutePath, decodeOpts) ?: return null
+        if (decoded.width < 256 && decoded.height < 256) return decoded
+
+        val scale = minOf(255f / decoded.width.toFloat(), 255f / decoded.height.toFloat(), 1.0f)
+        val scaledWidth = maxOf(1, kotlin.math.floor(decoded.width * scale).toInt())
+        val scaledHeight = maxOf(1, kotlin.math.floor(decoded.height * scale).toInt())
+        val scaled = android.graphics.Bitmap.createScaledBitmap(decoded, scaledWidth, scaledHeight, true)
+        if (scaled != decoded) decoded.recycle()
+        return scaled
     }
 
     private fun getMeteringRectangle(

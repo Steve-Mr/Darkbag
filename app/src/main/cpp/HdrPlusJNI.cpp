@@ -37,6 +37,30 @@ constexpr uint16_t kMax16BitValue = 65535; // 2^16 - 1
 JavaVM* g_jvm = nullptr;
 jclass g_colorProcessorClass = nullptr;
 jclass g_byteBufferClass = nullptr;
+jclass g_captureMetadataClass = nullptr;
+jclass g_integerClass = nullptr;
+jclass g_longClass = nullptr;
+jclass g_floatClass = nullptr;
+
+struct CaptureMetadataFieldIDs {
+    jfieldID iso;
+    jfieldID exposureTime;
+    jfieldID fNumber;
+    jfieldID focalLength;
+    jfieldID dateTimeOriginal;
+    jfieldID make;
+    jfieldID model;
+    jfieldID uniqueCameraModel;
+    jfieldID software;
+    jfieldID imageDescription;
+} g_metadataFields;
+
+struct BoxedMethodIDs {
+    jmethodID intValue;
+    jmethodID longValue;
+    jmethodID floatValue;
+} g_boxedMethods;
+
 thread_local std::string halide_report_buffer;
 
 extern "C" void halide_print(void* user_context, const char* str) {
@@ -44,13 +68,13 @@ extern "C" void halide_print(void* user_context, const char* str) {
 }
 
 struct HalideStageStats {
-    long align = 0;
-    long merge = 0;
-    long black_white = 0;
-    long white_balance = 0;
-    long demosaic = 0;
-    long denoise = 0;
-    long srgb = 0;
+    int64_t align = 0;
+    int64_t merge = 0;
+    int64_t black_white = 0;
+    int64_t white_balance = 0;
+    int64_t demosaic = 0;
+    int64_t denoise = 0;
+    int64_t srgb = 0;
 };
 
 HalideStageStats parseHalideReport(const std::string& report) {
@@ -71,7 +95,7 @@ HalideStageStats parseHalideReport(const std::string& report) {
                 continue;
             }
             std::string unit = match[3].str();
-            long ms = (unit == "s") ? (long)(val * 1000) : (long)val;
+            int64_t ms = (unit == "s") ? (int64_t)(val * 1000) : (int64_t)val;
 
             if (name.find("alignment") != std::string::npos || name.find("layer_") != std::string::npos) stats.align += ms;
             else if (name.find("merge_") != std::string::npos) stats.merge += ms;
@@ -113,6 +137,58 @@ struct GlobalBuffers {
 GlobalBuffers g_hdrPlusBuffers;
 std::mutex g_hdrPlusMutex;
 
+std::string getStringField(JNIEnv* env, jobject obj, jfieldID fieldID, const std::string& defaultValue) {
+    jstring jstr = (jstring)env->GetObjectField(obj, fieldID);
+    if (!jstr) return defaultValue;
+    const char* cstr = env->GetStringUTFChars(jstr, nullptr);
+    std::string result = cstr ? cstr : defaultValue;
+    if (cstr) env->ReleaseStringUTFChars(jstr, cstr);
+    env->DeleteLocalRef(jstr);
+    return result;
+}
+
+int getIntField(JNIEnv* env, jobject obj, jfieldID fieldID, int defaultValue) {
+    jobject boxed = env->GetObjectField(obj, fieldID);
+    if (!boxed) return defaultValue;
+    int result = env->CallIntMethod(boxed, g_boxedMethods.intValue);
+    env->DeleteLocalRef(boxed);
+    return result;
+}
+
+int64_t getLongField(JNIEnv* env, jobject obj, jfieldID fieldID, int64_t defaultValue) {
+    jobject boxed = env->GetObjectField(obj, fieldID);
+    if (!boxed) return defaultValue;
+    int64_t result = (int64_t)env->CallLongMethod(boxed, g_boxedMethods.longValue);
+    env->DeleteLocalRef(boxed);
+    return result;
+}
+
+float getFloatField(JNIEnv* env, jobject obj, jfieldID fieldID, float defaultValue) {
+    jobject boxed = env->GetObjectField(obj, fieldID);
+    if (!boxed) return defaultValue;
+    float result = env->CallFloatMethod(boxed, g_boxedMethods.floatValue);
+    env->DeleteLocalRef(boxed);
+    return result;
+}
+
+ImageMetadata metadataFromJava(JNIEnv* env, jobject metadataObj) {
+    ImageMetadata meta;
+    if (!metadataObj) return meta;
+
+    meta.iso = getIntField(env, metadataObj, g_metadataFields.iso, 100);
+    meta.exposureTime = getLongField(env, metadataObj, g_metadataFields.exposureTime, 10000000L);
+    meta.fNumber = getFloatField(env, metadataObj, g_metadataFields.fNumber, 1.8f);
+    meta.focalLength = getFloatField(env, metadataObj, g_metadataFields.focalLength, 0.0f);
+    meta.captureTimeMillis = getLongField(env, metadataObj, g_metadataFields.dateTimeOriginal, 0);
+    meta.make = getStringField(env, metadataObj, g_metadataFields.make, "Unknown");
+    meta.model = getStringField(env, metadataObj, g_metadataFields.model, "Unknown");
+    meta.uniqueCameraModel = getStringField(env, metadataObj, g_metadataFields.uniqueCameraModel, meta.model);
+    meta.software = getStringField(env, metadataObj, g_metadataFields.software, "Darkbag HDR+");
+    meta.imageDescription = getStringField(env, metadataObj, g_metadataFields.imageDescription, "Processed by Darkbag HDR+");
+
+    return meta;
+}
+
 } // namespace
 
 extern "C" jint JNI_OnLoad(JavaVM* vm, void* reserved) {
@@ -121,10 +197,57 @@ extern "C" jint JNI_OnLoad(JavaVM* vm, void* reserved) {
     if (vm->GetEnv((void**)&env, JNI_VERSION_1_6) != JNI_OK) return JNI_ERR;
 
     jclass colorProcClazz = env->FindClass("top/maary/darkbag/processor/ColorProcessor");
-    if (colorProcClazz) g_colorProcessorClass = (jclass)env->NewGlobalRef(colorProcClazz);
+    if (!colorProcClazz) return JNI_ERR;
+    g_colorProcessorClass = (jclass)env->NewGlobalRef(colorProcClazz);
 
     jclass byteBufClazz = env->FindClass("java/nio/ByteBuffer");
-    if (byteBufClazz) g_byteBufferClass = (jclass)env->NewGlobalRef(byteBufClazz);
+    if (!byteBufClazz) return JNI_ERR;
+    g_byteBufferClass = (jclass)env->NewGlobalRef(byteBufClazz);
+
+    jclass metadataClazz = env->FindClass("top/maary/darkbag/models/CaptureMetadata");
+    if (!metadataClazz) return JNI_ERR;
+    g_captureMetadataClass = (jclass)env->NewGlobalRef(metadataClazz);
+
+    auto getField = [&](jclass clazz, const char* name, const char* sig) -> jfieldID {
+        jfieldID fid = env->GetFieldID(clazz, name, sig);
+        if (!fid) {
+            LOGE("Failed to find field %s with signature %s", name, sig);
+        }
+        return fid;
+    };
+
+    g_metadataFields.iso = getField(metadataClazz, "iso", "Ljava/lang/Integer;");
+    g_metadataFields.exposureTime = getField(metadataClazz, "exposureTime", "Ljava/lang/Long;");
+    g_metadataFields.fNumber = getField(metadataClazz, "fNumber", "Ljava/lang/Float;");
+    g_metadataFields.focalLength = getField(metadataClazz, "focalLength", "Ljava/lang/Float;");
+    g_metadataFields.dateTimeOriginal = getField(metadataClazz, "dateTimeOriginal", "Ljava/lang/Long;");
+    g_metadataFields.make = getField(metadataClazz, "make", "Ljava/lang/String;");
+    g_metadataFields.model = getField(metadataClazz, "model", "Ljava/lang/String;");
+    g_metadataFields.uniqueCameraModel = getField(metadataClazz, "uniqueCameraModel", "Ljava/lang/String;");
+    g_metadataFields.software = getField(metadataClazz, "software", "Ljava/lang/String;");
+    g_metadataFields.imageDescription = getField(metadataClazz, "imageDescription", "Ljava/lang/String;");
+
+    if (!g_metadataFields.iso || !g_metadataFields.exposureTime || !g_metadataFields.fNumber ||
+        !g_metadataFields.focalLength || !g_metadataFields.dateTimeOriginal || !g_metadataFields.make ||
+        !g_metadataFields.model || !g_metadataFields.uniqueCameraModel || !g_metadataFields.software ||
+        !g_metadataFields.imageDescription) {
+        return JNI_ERR;
+    }
+
+    auto getBoxedInfo = [&](const char* clazzName, const char* methodName, const char* sig, jclass& outClazz, jmethodID& outMethod) -> bool {
+        jclass clazz = env->FindClass(clazzName);
+        if (!clazz) return false;
+        outClazz = (jclass)env->NewGlobalRef(clazz);
+        outMethod = env->GetMethodID(clazz, methodName, sig);
+        if (!outMethod) {
+            LOGE("Failed to find method %s with signature %s in class %s", methodName, sig, clazzName);
+        }
+        return outMethod != nullptr;
+    };
+
+    if (!getBoxedInfo("java/lang/Integer", "intValue", "()I", g_integerClass, g_boxedMethods.intValue)) return JNI_ERR;
+    if (!getBoxedInfo("java/lang/Long", "longValue", "()J", g_longClass, g_boxedMethods.longValue)) return JNI_ERR;
+    if (!getBoxedInfo("java/lang/Float", "floatValue", "()F", g_floatClass, g_boxedMethods.floatValue)) return JNI_ERR;
 
     return JNI_VERSION_1_6;
 }
@@ -140,7 +263,8 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlusNative(
     JNIEnv* env, jobject /* this */, jstring tempRawPath, jint width, jint height, jint orientation, jfloat digitalGain, jint targetLog, jstring lutPath,
     jfloat exposure, jfloat contrast, jfloat saturation, jfloat highlights, jfloat shadows, jfloat whites, jfloat blacks,
     jstring jpgPath, jstring dngPath,
-    jint iso, jlong exposureTime, jfloat fNumber, jfloat focalLength, jlong captureTimeMillis, jfloatArray ccm, jfloatArray whiteBalance, jfloat zoomFactor, jboolean mirror
+    jfloatArray ccm, jfloatArray whiteBalance, jfloat zoomFactor, jboolean mirror,
+    jobject metadata
 ) {
     LOGD("Native exportHdrPlus started.");
     std::lock_guard<std::mutex> lock(g_hdrPlusMutex);
@@ -181,10 +305,12 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlusNative(
     const char* jpg_path_cstr = (jpgPath) ? env->GetStringUTFChars(jpgPath, 0) : nullptr;
     const char* dng_path_cstr = (dngPath) ? env->GetStringUTFChars(dngPath, 0) : nullptr;
 
+    ImageMetadata meta = metadataFromJava(env, metadata);
+
     if (dng_path_cstr) {
         LOGD("Exporting DNG to %s", dng_path_cstr);
         float baselineExposure = (digitalGain > 0.0f) ? std::log2(digitalGain) : 0.0f;
-        write_dng(dng_path_cstr, width, height, finalImage, kMax16BitValue, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation, (bool)mirror, baselineExposure);
+        write_dng(dng_path_cstr, width, height, finalImage, kMax16BitValue, ccmVec, meta, orientation, (bool)mirror, baselineExposure);
     }
 
     bool saveOk = true;
@@ -210,8 +336,9 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlusNative(
 extern "C" JNIEXPORT jint JNICALL
 Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlusNative(
     JNIEnv* env, jobject /* this */, jobjectArray dngBuffers, jint width, jint height, jint orientation, jint whiteLevel, jintArray blackLevelPattern, jfloatArray lensShadingMap, jint lensShadingRows, jint lensShadingCols, jboolean useSensorColorMatrix, jfloatArray whiteBalance, jfloatArray ccm, jfloatArray ccmAlt, jboolean exportMatrixAB, jint cfaPattern,
-    jint iso, jlong exposureTime, jfloat fNumber, jfloat focalLength, jlong captureTimeMillis, jint targetLog, jstring lutPath, jstring outputJpgPath, jstring outputDngPath,
-    jfloat digitalGain, jlongArray debugStats, jobject outputBitmap, jstring tempRawPath, jfloat zoomFactor, jboolean mirror
+    jint targetLog, jstring lutPath, jstring outputJpgPath, jstring outputDngPath,
+    jfloat digitalGain, jlongArray debugStats, jobject outputBitmap, jstring tempRawPath, jfloat zoomFactor, jboolean mirror,
+    jobject metadata
 ) {
     LOGD("Native processHdrPlus started.");
     (void)useSensorColorMatrix;
@@ -379,16 +506,21 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlusNative(
     if (outputDngPath && dng_p_cstr) env->ReleaseStringUTFChars(outputDngPath, dng_p_cstr);
 
     auto saveStart = std::chrono::high_resolution_clock::now();
-    if (bitmapPixels) {
-        AndroidBitmapInfo info;
-        int outW = 0, outH = 0;
+    const int fastPreviewDownsample = compute_preview_downsample_factor(width, height, 1280);
+
+    AndroidBitmapInfo info;
+    int out_w = 0, out_h = 0;
+    if (outputBitmap) {
         if (AndroidBitmap_getInfo(env, outputBitmap, &info) == ANDROID_BITMAP_RESULT_SUCCESS) {
-            outW = info.width;
-            outH = info.height;
+            out_w = info.width;
+            out_h = info.height;
         }
+    }
+
+    if (bitmapPixels) {
         process_and_save_image(finalImage, width, height, digitalGain, targetLog, lut,
                                 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, // HSWB not used for preview in standard pipe yet
-                                nullptr, 1, ccmVec.data(), wbVec.data(), orientation, bitmapPixels, outW, outH, true, 4, zoomFactor, (bool)mirror);
+                                nullptr, 1, ccmVec.data(), wbVec.data(), orientation, bitmapPixels, out_w, out_h, true, fastPreviewDownsample, zoomFactor, (bool)mirror);
         AndroidBitmap_unlockPixels(env, outputBitmap);
     }
 
@@ -399,15 +531,16 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlusNative(
     }
 
     if (!jpgPathStr.empty() || !dngPathStr.empty()) {
+        ImageMetadata meta = metadataFromJava(env, metadata);
         if (!dngPathStr.empty()) {
             float baselineExposure = (digitalGain > 0.0f) ? std::log2(digitalGain) : 0.0f;
-            write_dng(dngPathStr.c_str(), width, height, finalImage, kMax16BitValue, iso, exposureTime, fNumber, focalLength, captureTimeMillis, ccmVec, orientation, (bool)mirror, baselineExposure);
+            write_dng(dngPathStr.c_str(), width, height, finalImage, kMax16BitValue, ccmVec, meta, orientation, (bool)mirror, baselineExposure);
         }
 
         if (!jpgPathStr.empty()) {
             process_and_save_image(finalImage, width, height, digitalGain, targetLog, lut,
                                     0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
-                                    jpgPathStr.c_str(), 1, ccmVec.data(), wbVec.data(), orientation, nullptr, 0, 0, true, 4, zoomFactor, (bool)mirror);
+                                    jpgPathStr.c_str(), 1, ccmVec.data(), wbVec.data(), orientation, nullptr, 0, 0, true, fastPreviewDownsample, zoomFactor, (bool)mirror);
 
             if (exportMatrixAB && !jpgPathStr.empty() && ccmAltVec.size() == 9) {
                 std::string suffix = useSensorColorMatrix ? "_AB_CAPTURE_CCM.jpg" : "_AB_SENSOR_CCM.jpg";
@@ -428,8 +561,9 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlusNative(
 extern "C" JNIEXPORT jint JNICALL
 Java_top_maary_darkbag_processor_ColorProcessor_processSingleFrameRawNative(
     JNIEnv* env, jobject /* this */, jobject bayerBuffer, jint width, jint height, jint orientation, jint whiteLevel, jintArray blackLevelPattern, jfloatArray lensShadingMap, jint lensShadingRows, jint lensShadingCols, jfloatArray whiteBalance, jfloatArray ccm, jint cfaPattern,
-    jint iso, jlong exposureTime, jfloat fNumber, jfloat focalLength, jlong captureTimeMillis, jint targetLog, jstring lutPath, jstring outputJpgPath, jstring outputDngPath,
-    jfloat digitalGain, jlongArray debugStats, jobject outputBitmap, jstring tempRawPath, jfloat zoomFactor, jboolean mirror
+    jint targetLog, jstring lutPath, jstring outputJpgPath, jstring outputDngPath,
+    jfloat digitalGain, jlongArray debugStats, jobject outputBitmap, jstring tempRawPath, jfloat zoomFactor, jboolean mirror,
+    jobject metadata
 ) {
     LOGD("Native processSingleFrameRaw started.");
 
@@ -438,10 +572,10 @@ Java_top_maary_darkbag_processor_ColorProcessor_processSingleFrameRawNative(
 
     return Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlusNative(
         env, nullptr, dngBuffers, width, height, orientation, whiteLevel, blackLevelPattern, lensShadingMap, lensShadingRows, lensShadingCols,
-        false,
-        whiteBalance, ccm, nullptr,
-        false,
-        cfaPattern, iso, exposureTime, fNumber, focalLength, captureTimeMillis, targetLog, lutPath,
-        outputJpgPath, outputDngPath, digitalGain, debugStats, outputBitmap, tempRawPath, zoomFactor, mirror
+        false, // useSensorColorMatrix
+        whiteBalance, ccm, nullptr, // ccmAlt
+        false, // exportMatrixAB
+        cfaPattern, targetLog, lutPath,
+        outputJpgPath, outputDngPath, digitalGain, debugStats, outputBitmap, tempRawPath, zoomFactor, mirror, metadata
     );
 }

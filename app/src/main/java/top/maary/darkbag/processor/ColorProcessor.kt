@@ -4,6 +4,7 @@ import java.nio.ByteBuffer
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import top.maary.darkbag.models.CaptureMetadata
 
 object ColorProcessor {
     private val nativeMutex = Mutex()
@@ -102,11 +103,6 @@ object ColorProcessor {
         whiteBalance: FloatArray,
         ccm: FloatArray,
         cfaPattern: Int,
-        iso: Int,
-        exposureTime: Long,
-        fNumber: Float,
-        focalLength: Float,
-        captureTimeMillis: Long,
         targetLog: Int,
         lutPath: String?,
         outputJpgPath: String?,
@@ -116,14 +112,15 @@ object ColorProcessor {
         outputBitmap: android.graphics.Bitmap? = null,
         tempRawPath: String? = null,
         zoomFactor: Float,
-        mirror: Boolean
+        mirror: Boolean,
+        metadata: CaptureMetadata
     ): Int = nativeMutex.withLock {
         processSingleFrameRawNative(
             bayerBuffer, width, height, orientation, whiteLevel,
             blackLevelPattern, lensShadingMap, lensShadingRows, lensShadingCols,
-            whiteBalance, ccm, cfaPattern, iso, exposureTime, fNumber, focalLength,
-            captureTimeMillis, targetLog, lutPath, outputJpgPath, outputDngPath,
-            digitalGain, debugStats, outputBitmap, tempRawPath, zoomFactor, mirror
+            whiteBalance, ccm, cfaPattern, targetLog, lutPath, outputJpgPath, outputDngPath,
+            digitalGain, debugStats, outputBitmap, tempRawPath, zoomFactor, mirror,
+            metadata
         )
     }
 
@@ -140,11 +137,6 @@ object ColorProcessor {
         whiteBalance: FloatArray,
         ccm: FloatArray,
         cfaPattern: Int,
-        iso: Int,
-        exposureTime: Long,
-        fNumber: Float,
-        focalLength: Float,
-        captureTimeMillis: Long,
         targetLog: Int,
         lutPath: String?,
         outputJpgPath: String?,
@@ -154,7 +146,8 @@ object ColorProcessor {
         outputBitmap: android.graphics.Bitmap? = null,
         tempRawPath: String? = null,
         zoomFactor: Float,
-        mirror: Boolean
+        mirror: Boolean,
+        metadata: CaptureMetadata
     ): Int
 
     /**
@@ -197,21 +190,16 @@ object ColorProcessor {
         blacks: Float = 0f,
         jpgPath: String?,
         dngPath: String?,
-        iso: Int,
-        exposureTime: Long,
-        fNumber: Float,
-        focalLength: Float,
-        captureTimeMillis: Long,
         ccm: FloatArray,
         whiteBalance: FloatArray,
         zoomFactor: Float,
-        mirror: Boolean
+        mirror: Boolean,
+        metadata: CaptureMetadata
     ): Int = nativeMutex.withLock {
         exportHdrPlusNative(
             tempRawPath, width, height, orientation, digitalGain, targetLog, lutPath,
             exposure, contrast, saturation, highlights, shadows, whites, blacks,
-            jpgPath, dngPath, iso, exposureTime, fNumber, focalLength,
-            captureTimeMillis, ccm, whiteBalance, zoomFactor, mirror
+            jpgPath, dngPath, ccm, whiteBalance, zoomFactor, mirror, metadata
         )
     }
 
@@ -232,15 +220,11 @@ object ColorProcessor {
         blacks: Float,
         jpgPath: String?,
         dngPath: String?,
-        iso: Int,
-        exposureTime: Long,
-        fNumber: Float,
-        focalLength: Float,
-        captureTimeMillis: Long,
         ccm: FloatArray,
         whiteBalance: FloatArray,
         zoomFactor: Float,
-        mirror: Boolean
+        mirror: Boolean,
+        metadata: CaptureMetadata
     ): Int
 
     suspend fun processHdrPlus(
@@ -259,11 +243,6 @@ object ColorProcessor {
         ccmAlt: FloatArray?,      // alternate [3x3] for AB compare
         exportMatrixAB: Boolean,
         cfaPattern: Int,
-        iso: Int,
-        exposureTime: Long,
-        fNumber: Float,
-        focalLength: Float,
-        captureTimeMillis: Long,
         targetLog: Int,
         lutPath: String?,
         outputJpgPath: String?,
@@ -273,15 +252,15 @@ object ColorProcessor {
         outputBitmap: android.graphics.Bitmap? = null,
         tempRawPath: String? = null,
         zoomFactor: Float,
-        mirror: Boolean
+        mirror: Boolean,
+        metadata: CaptureMetadata
     ): Int = nativeMutex.withLock {
         processHdrPlusNative(
             dngBuffers, width, height, orientation, whiteLevel, blackLevelPattern,
             lensShadingMap, lensShadingRows, lensShadingCols, useSensorColorMatrix,
-            whiteBalance, ccm, ccmAlt, exportMatrixAB, cfaPattern, iso,
-            exposureTime, fNumber, focalLength, captureTimeMillis, targetLog,
+            whiteBalance, ccm, ccmAlt, exportMatrixAB, cfaPattern, targetLog,
             lutPath, outputJpgPath, outputDngPath, digitalGain, debugStats,
-            outputBitmap, tempRawPath, zoomFactor, mirror
+            outputBitmap, tempRawPath, zoomFactor, mirror, metadata
         )
     }
 
@@ -301,11 +280,6 @@ object ColorProcessor {
         ccmAlt: FloatArray?,
         exportMatrixAB: Boolean,
         cfaPattern: Int,
-        iso: Int,
-        exposureTime: Long,
-        fNumber: Float,
-        focalLength: Float,
-        captureTimeMillis: Long,
         targetLog: Int,
         lutPath: String?,
         outputJpgPath: String?,
@@ -315,6 +289,7 @@ object ColorProcessor {
         outputBitmap: android.graphics.Bitmap? = null,
         tempRawPath: String? = null,
         zoomFactor: Float,
-        mirror: Boolean
+        mirror: Boolean,
+        metadata: CaptureMetadata
     ): Int
 }

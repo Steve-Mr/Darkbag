@@ -1,6 +1,5 @@
 package top.maary.darkbag.fragments
 
-import android.graphics.BitmapFactory
 import android.net.Uri
 import android.view.LayoutInflater
 import android.view.View
@@ -16,7 +15,7 @@ import top.maary.darkbag.models.ImageGroup
 import top.maary.darkbag.utils.ImageUtils
 
 class ImageViewerAdapter(
-    private val groups: List<ImageGroup>,
+    private var groups: List<ImageGroup>,
     private val scope: CoroutineScope,
     context: android.content.Context
 ) : RecyclerView.Adapter<ImageViewerAdapter.ViewHolder>() {
@@ -35,6 +34,7 @@ class ImageViewerAdapter(
 
     class ViewHolder(val binding: ItemImageGroupBinding) : RecyclerView.ViewHolder(binding.root) {
         var loadJob: Job? = null
+        var manualBitmap: android.graphics.Bitmap? = null
     }
 
     override fun onAttachedToRecyclerView(recyclerView: RecyclerView) {
@@ -115,19 +115,62 @@ class ImageViewerAdapter(
 
     private fun loadSelectedFormat(holder: ViewHolder, group: ImageGroup, format: String) {
         when (format) {
-            "JPG" -> group.jpgUri?.let { loadImage(holder, it) }
+            "JPG" -> group.jpgUri?.let { loadImage(holder, it, version = group.lastModified) }
             "DNG" -> {
-                // Optimization: If a JPG exists, use it as a placeholder for the DNG tab to avoid immediate heavy RAW decoding
-                if (group.jpgUri != null && !group.isHalfFrame()) {
-                    loadWithGlide(holder, group.jpgUri, skipCache = false)
-                    group.dngUri?.let { loadImage(holder, it) }
+                if (group.isHalfFrame()) {
+                    loadHalfFrameDngs(holder, group, group.editConfig?.zoomFactor ?: 1.0f)
                 } else {
-                    if (group.isHalfFrame()) {
-                        loadHalfFrameDngs(holder, group, group.editConfig?.zoomFactor ?: 1.0f)
-                    } else {
-                        group.dngUri?.let { loadImage(holder, it) }
-                    }
+                    group.dngUri?.let { loadImage(holder, it) }
                 }
+            }
+        }
+    }
+
+    private fun setBitmapAndRecyclePrevious(holder: ViewHolder, bitmap: android.graphics.Bitmap) {
+        Glide.with(holder.binding.imageView).clear(holder.binding.imageView)
+        val oldManual = holder.manualBitmap
+        if (oldManual != null && oldManual !== bitmap && !oldManual.isRecycled) {
+            oldManual.recycle()
+        }
+        holder.manualBitmap = bitmap
+        holder.binding.imageView.setImageBitmap(bitmap)
+    }
+
+    private fun clearCurrentBitmap(holder: ViewHolder) {
+        Glide.with(holder.binding.imageView).clear(holder.binding.imageView)
+        holder.manualBitmap?.let { bitmap ->
+            if (!bitmap.isRecycled) bitmap.recycle()
+        }
+        holder.manualBitmap = null
+        holder.binding.imageView.setImageDrawable(null)
+    }
+
+    private fun loadDngThumbnailOnly(holder: ViewHolder, uri: Uri, zoomFactor: Float = 1.0f) {
+        holder.loadJob?.cancel()
+        holder.binding.imageView.visibility = View.VISIBLE
+        holder.binding.loadingIndicator.visibility = View.VISIBLE
+
+        holder.loadJob = scope.launch {
+            var thumbnailBitmap: android.graphics.Bitmap? = null
+            try {
+                thumbnailBitmap = ImageUtils.decodeDngThumbnail(holder.binding.root.context, uri, zoomFactor)
+                ensureActive()
+
+                if (thumbnailBitmap != null) {
+                    setBitmapAndRecyclePrevious(holder, thumbnailBitmap)
+                    thumbnailBitmap = null // Now owned by ViewHolder
+                } else {
+                    loadWithGlide(holder, uri)
+                }
+            } catch (e: CancellationException) {
+                thumbnailBitmap?.recycle()
+                throw e
+            } catch (e: Exception) {
+                android.util.Log.e("ImageViewerAdapter", "Failed to load DNG thumbnail: $uri", e)
+                thumbnailBitmap?.recycle()
+                loadWithGlide(holder, uri)
+            } finally {
+                holder.binding.loadingIndicator.visibility = View.GONE
             }
         }
     }
@@ -153,50 +196,15 @@ class ImageViewerAdapter(
         }
     }
 
-    private fun loadImage(holder: ViewHolder, uri: Uri, zoomFactor: Float = 1.0f) {
+    private fun loadImage(holder: ViewHolder, uri: Uri, zoomFactor: Float = 1.0f, version: Long = 0L) {
         holder.loadJob?.cancel()
         holder.binding.imageView.visibility = View.VISIBLE
         holder.binding.loadingIndicator.visibility = View.VISIBLE
 
-        val isDng = uri.toString().endsWith(".dng", ignoreCase = true)
-
-        if (isDng) {
-            holder.loadJob = scope.launch {
-                val bitmap = withContext(Dispatchers.IO) {
-                    try {
-                        val contentResolver = holder.binding.root.context.contentResolver
-                        val thumb = ImageUtils.decodeDngThumbnail(holder.binding.root.context, uri, zoomFactor)
-                        if (thumb != null) return@withContext thumb
-
-                        contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
-                            val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                            BitmapFactory.decodeFileDescriptor(pfd.fileDescriptor, null, options)
-                            options.inSampleSize = ImageUtils.calculateInSampleSize(options, 2048, 2048)
-                            options.inJustDecodeBounds = false
-                            val bitmap = BitmapFactory.decodeFileDescriptor(pfd.fileDescriptor, null, options)
-                            val orientation = try {
-                                holder.binding.root.context.contentResolver.openInputStream(uri)?.use { input ->
-                                    androidx.exifinterface.media.ExifInterface(input).getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION, androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL)
-                                } ?: androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL
-                            } catch (e: Exception) { androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL }
-                            return@withContext bitmap?.let { ImageUtils.rotateBitmap(it, orientation) }
-                        }
-                    } catch (e: Exception) {
-                        android.util.Log.e("ImageViewerAdapter", "Failed to decode preview: $uri", e)
-                        null
-                    }
-                    null
-                }
-
-                if (bitmap != null) {
-                    holder.binding.imageView.setImageBitmap(bitmap)
-                    holder.binding.loadingIndicator.visibility = View.GONE
-                } else {
-                    loadWithGlide(holder, uri)
-                }
-            }
+        if (uri.toString().endsWith(".dng", ignoreCase = true)) {
+            loadDngThumbnailOnly(holder, uri, zoomFactor)
         } else {
-            loadWithGlide(holder, uri, skipCache = true)
+            loadWithGlide(holder, uri, skipCache = true, version = version)
         }
     }
 
@@ -205,26 +213,50 @@ class ImageViewerAdapter(
         holder.binding.imageView.visibility = View.VISIBLE
         holder.binding.loadingIndicator.visibility = View.VISIBLE
         holder.loadJob = scope.launch {
-            val composite = ImageUtils.generateHalfFrameComposite(
-                holder.binding.root.context,
-                group.dngUri1,
-                group.dngUri2,
-                group.hfLayout,
-                zoomFactor
-            )
-            if (composite != null) {
-                holder.binding.imageView.setImageBitmap(composite)
-            } else {
+            var composite: android.graphics.Bitmap? = null
+            try {
+                composite = ImageUtils.generateHalfFrameComposite(
+                    holder.binding.root.context,
+                    group.dngUri1,
+                    group.dngUri2,
+                    group.hfLayout,
+                    zoomFactor
+                )
+                ensureActive()
+                if (composite != null) {
+                    setBitmapAndRecyclePrevious(holder, composite)
+                    composite = null // Now owned by ViewHolder
+                } else {
+                    clearCurrentBitmap(holder)
+                    holder.binding.imageView.setImageResource(android.R.drawable.ic_menu_gallery)
+                }
+            } catch (e: CancellationException) {
+                composite?.recycle()
+                throw e
+            } catch (e: Exception) {
+                android.util.Log.e("ImageViewerAdapter", "Failed to load half-frame DNGs", e)
+                composite?.recycle()
+                clearCurrentBitmap(holder)
                 holder.binding.imageView.setImageResource(android.R.drawable.ic_menu_gallery)
+            } finally {
+                holder.binding.loadingIndicator.visibility = View.GONE
             }
-            holder.binding.loadingIndicator.visibility = View.GONE
         }
     }
 
-    private fun loadWithGlide(holder: ViewHolder, uri: Uri, skipCache: Boolean = false) {
+    private fun loadWithGlide(holder: ViewHolder, uri: Uri, skipCache: Boolean = false, version: Long = 0L) {
+        clearCurrentBitmap(holder)
+
+        val model = if (version > 0) {
+            com.bumptech.glide.signature.ObjectKey(version)
+        } else {
+            null
+        }
+
         Glide.with(holder.binding.imageView)
             .asDrawable()
             .load(uri)
+            .let { if (model != null) it.signature(model) else it }
             .apply {
                 if (skipCache) {
                     diskCacheStrategy(DiskCacheStrategy.NONE)
@@ -248,7 +280,16 @@ class ImageViewerAdapter(
 
     override fun getItemCount(): Int = groups.size
 
+    override fun onViewRecycled(holder: ViewHolder) {
+        holder.loadJob?.cancel()
+        clearCurrentBitmap(holder)
+        holder.binding.loadingIndicator.visibility = View.GONE
+        super.onViewRecycled(holder)
+    }
+
     fun getGroup(position: Int): ImageGroup = groups[position]
+
+    fun getGroups(): List<ImageGroup> = groups
 
     fun setFormat(position: Int, format: String) {
         val group = groups[position]
@@ -323,9 +364,28 @@ class ImageViewerAdapter(
         if (holder != null) {
             holder.loadJob?.cancel()
             if (clearView) {
-                Glide.with(holder.binding.imageView).clear(holder.binding.imageView)
+                clearCurrentBitmap(holder)
             }
             holder.binding.loadingIndicator.visibility = View.GONE
         }
+    }
+
+    fun updateGroups(newGroups: List<ImageGroup>) {
+        val diffResult = androidx.recyclerview.widget.DiffUtil.calculateDiff(object : androidx.recyclerview.widget.DiffUtil.Callback() {
+            override fun getOldListSize(): Int = groups.size
+            override fun getNewListSize(): Int = newGroups.size
+            override fun areItemsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean {
+                return groups[oldItemPosition].baseName == newGroups[newItemPosition].baseName
+            }
+            override fun areContentsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean {
+                return groups[oldItemPosition] == newGroups[newItemPosition]
+            }
+        })
+        groups = newGroups
+        diffResult.dispatchUpdatesTo(this)
+    }
+
+    fun findGroupIndex(baseName: String): Int {
+        return groups.indexOfFirst { it.baseName == baseName }
     }
 }
