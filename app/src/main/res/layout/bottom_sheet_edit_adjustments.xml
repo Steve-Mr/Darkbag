@@ -8,6 +8,7 @@
     android:background="?attr/colorSurface">
 
     <com.google.android.material.card.MaterialCardView
+        app:strokeColor="@null"
         android:id="@+id/edit_preview_card"
         android:layout_width="match_parent"
         android:layout_height="200dp"
@@ -35,6 +36,7 @@
     </com.google.android.material.card.MaterialCardView>
 
     <com.google.android.material.button.MaterialButtonToggleGroup
+            app:strokeColor="@null"
         android:id="@+id/group_frame_selection"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
@@ -44,12 +46,14 @@
         app:singleSelection="true"
         app:selectionRequired="true">
         <com.google.android.material.button.MaterialButton
+            app:strokeColor="@null"
             android:id="@+id/btn_select_frame1"
             style="@style/Widget.Material3.Button.OutlinedButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="Frame 1" />
         <com.google.android.material.button.MaterialButton
+            app:strokeColor="@null"
             android:id="@+id/btn_select_frame2"
             style="@style/Widget.Material3.Button.OutlinedButton"
             android:layout_width="wrap_content"

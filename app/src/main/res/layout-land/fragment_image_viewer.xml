@@ -70,6 +70,7 @@
         app:layout_constraintTop_toTopOf="parent">
 
         <com.google.android.material.button.MaterialButton
+            app:strokeColor="@null"
             android:id="@+id/btn_navigation"
             style="@style/Widget.Material3.Button.IconButton.Filled.Tonal"
             android:layout_width="48dp"
@@ -90,6 +91,7 @@
             app:layout_constraintTop_toTopOf="parent"
             app:layout_constraintBottom_toBottomOf="parent">
             <com.google.android.material.button.MaterialButton
+            app:strokeColor="@null"
                 android:id="@+id/btn_share_main"
                 style="@style/Widget.Material3.Button.TonalButton"
                 android:layout_width="wrap_content"
@@ -98,6 +100,7 @@
                 app:icon="@drawable/ic_share"
                 app:iconTint="?attr/colorOnSecondaryContainer" />
             <com.google.android.material.button.MaterialButton
+            app:strokeColor="@null"
                 android:id="@+id/btn_share_menu"
                 style="?attr/materialSplitButtonIconFilledTonalStyle"
                 android:layout_width="wrap_content"
@@ -117,6 +120,7 @@
             app:layout_constraintTop_toTopOf="parent"
             app:layout_constraintBottom_toBottomOf="parent">
             <com.google.android.material.button.MaterialButton
+            app:strokeColor="@null"
                 android:id="@+id/btn_save_main"
                 style="@style/Widget.Material3.Button"
                 android:layout_width="wrap_content"
@@ -125,6 +129,7 @@
                 app:icon="@drawable/ic_save"
                 app:iconTint="?attr/colorOnPrimary" />
             <com.google.android.material.button.MaterialButton
+            app:strokeColor="@null"
                 android:id="@+id/btn_save_menu"
                 style="?attr/materialSplitButtonIconFilledStyle"
                 android:layout_width="wrap_content"
@@ -152,6 +157,7 @@
             android:orientation="horizontal"
             android:visibility="gone">
             <com.google.android.material.button.MaterialButton
+            app:strokeColor="@null"
                 android:id="@+id/btn_timestamp"
                 style="@style/Widget.Material3.Button.TonalButton"
                 android:layout_width="48dp"
@@ -159,6 +165,7 @@
                 android:padding="0dp"
                 app:icon="@drawable/ic_photo" />
             <com.google.android.material.button.MaterialButton
+            app:strokeColor="@null"
                 android:id="@+id/btn_flare"
                 style="@style/Widget.Material3.Button.TonalButton"
                 android:layout_width="48dp"
@@ -168,6 +175,7 @@
                 app:icon="@drawable/ic_hdr_dynamic" />
 
             <com.google.android.material.button.MaterialButton
+            app:strokeColor="@null"
                 android:id="@+id/btn_swap_frames"
                 style="@style/Widget.Material3.Button.TonalButton"
                 android:layout_width="48dp"
@@ -177,6 +185,7 @@
                 app:icon="@drawable/ic_swap_horiz" />
         </LinearLayout>
         <com.google.android.material.button.MaterialButton
+            app:strokeColor="@null"
             android:id="@+id/btn_log_lut"
             style="@style/Widget.Material3.Button.TonalButton"
             android:layout_width="wrap_content"
@@ -219,6 +228,7 @@
         app:layout_constraintTop_toTopOf="parent">
 
         <com.google.android.material.card.MaterialCardView
+        app:strokeColor="@null"
             android:id="@+id/adjustment_island"
             style="@style/Widget.Material3.CardView.Elevated"
             android:layout_width="match_parent"
@@ -330,6 +340,7 @@
                     app:layout_constraintBottom_toBottomOf="parent">
 
                     <com.google.android.material.button.MaterialButton
+            app:strokeColor="@null"
                         android:id="@+id/btn_edit_cancel"
                         style="@style/Widget.Material3.Button.TextButton"
                         android:layout_width="wrap_content"
@@ -339,6 +350,7 @@
                         app:layout_constraintTop_toTopOf="parent" />
 
                     <com.google.android.material.button.MaterialButton
+            app:strokeColor="@null"
                         android:id="@+id/btn_edit_done"
                         style="@style/Widget.Material3.Button.TonalButton"
                         android:layout_width="wrap_content"
@@ -348,6 +360,7 @@
                         app:layout_constraintTop_toTopOf="parent" />
 
                     <com.google.android.material.button.MaterialButtonToggleGroup
+            app:strokeColor="@null"
                         android:id="@+id/group_frame_selection_integrated"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
@@ -359,12 +372,14 @@
                         app:layout_constraintStart_toStartOf="parent"
                         app:layout_constraintEnd_toEndOf="parent">
                         <com.google.android.material.button.MaterialButton
+            app:strokeColor="@null"
                             android:id="@+id/btn_select_frame1_integrated"
                             style="@style/Widget.Material3.Button.OutlinedButton"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:text="F1" />
                         <com.google.android.material.button.MaterialButton
+            app:strokeColor="@null"
                             android:id="@+id/btn_select_frame2_integrated"
                             style="@style/Widget.Material3.Button.OutlinedButton"
                             android:layout_width="wrap_content"
@@ -390,6 +405,7 @@
         app:layout_constraintEnd_toEndOf="@id/image_pager" />
 
     <com.google.android.material.card.MaterialCardView
+        app:strokeColor="@null"
         android:id="@+id/lut_list_container"
         style="@style/Widget.Material3.CardView.Filled"
         android:layout_width="240dp"
