@@ -1273,6 +1273,10 @@ class ImageViewerFragment : Fragment() {
         val dngUri1 = currentGroup.dngUri ?: currentGroup.dngUri1 ?: return
         val dngUri2 = currentGroup.dngUri2
 
+        // Force "Save as New" for external images
+        val isExternal = currentGroup.jpgUri == null && currentGroup.dngUri == null && currentGroup.dngUri1 == null
+        val actualIsReplacement = if (isExternal) false else isReplacement
+
         lifecycleScope.launch {
             ensureDngBytesLoaded()
             withContext(Dispatchers.IO) {
@@ -1417,18 +1421,18 @@ class ImageViewerFragment : Fragment() {
                     }
 
                     if (finalBitmap != null || tempJpgPath != null) {
-                        val baseName = if (isReplacement) currentGroup.baseName else "${currentGroup.baseName}_edited_${System.currentTimeMillis()}"
-                        val targetUri = if (isReplacement) currentGroup.jpgUri else null
+                        val baseName = if (actualIsReplacement) currentGroup.baseName else "${currentGroup.baseName}_edited_${System.currentTimeMillis()}"
+                        val targetUri = if (actualIsReplacement) currentGroup.jpgUri else null
 
                         val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
                         val jpgFolderUri = prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
                         val exportFolderUri = prefs.getString(SettingsFragment.KEY_EXPORT_STORAGE_URI, null)
 
                         // Use export folder for external images or if specifically set
-                        val finalFolderUri = if (currentGroup.jpgUri == null && currentGroup.dngUri == null && currentGroup.dngUri1 == null) {
+                        val finalFolderUri = if (isExternal) {
                             exportFolderUri ?: jpgFolderUri
                         } else {
-                             if (isReplacement) null else (exportFolderUri ?: jpgFolderUri)
+                             if (actualIsReplacement) null else (exportFolderUri ?: jpgFolderUri)
                         }
 
                         top.maary.darkbag.utils.ImageSaver.saveProcessedImage(
@@ -1442,7 +1446,7 @@ class ImageViewerFragment : Fragment() {
                             saveJpg = true,
                             saveRaw = false,
                             targetUri = targetUri,
-                            jpgFolderUri = if (isReplacement) null else finalFolderUri,
+                            jpgFolderUri = if (actualIsReplacement) null else finalFolderUri,
                                 editConfig = config,
                                 isAlreadyStitched = currentGroup.isHalfFrame(),
                                 sourceDngUri = currentGroup.dngUri ?: currentGroup.dngUri1
