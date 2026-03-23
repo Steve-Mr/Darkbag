@@ -267,6 +267,7 @@ extern "C" JNIEXPORT jint JNICALL
 Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlusNative(
     JNIEnv* env, jobject /* this */, jstring tempRawPath, jint width, jint height, jint orientation, jfloat digitalGain, jint targetLog, jstring lutPath,
     jfloat exposure, jfloat contrast, jfloat saturation, jfloat highlights, jfloat shadows, jfloat whites, jfloat blacks,
+    jfloat temperature, jfloat tint, jfloat clarity, jfloat dehaze,
     jstring jpgPath, jstring dngPath,
     jfloatArray ccm, jfloatArray whiteBalance, jfloat zoomFactor, jboolean mirror,
     jobject metadata
@@ -331,6 +332,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlusNative(
         LOGD("Exporting JPG: JPG=%s", jpg_path_cstr);
         saveOk = process_and_save_image(finalImage, width, height, digitalGain, targetLog, lut,
                                         exposure, contrast, saturation, highlights, shadows, whites, blacks,
+                                        temperature, tint, clarity, dehaze,
                                         jpg_path_cstr, 1, ccmVec.data(), wbVec.data(), orientation, nullptr, 0, 0, false, 1, zoomFactor, (bool)mirror);
     }
     if (jpgPath && jpg_path_cstr) env->ReleaseStringUTFChars(jpgPath, jpg_path_cstr);
@@ -532,7 +534,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlusNative(
 
     if (bitmapPixels) {
         process_and_save_image(finalImage, width, height, digitalGain, targetLog, lut,
-                                0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, // HSWB not used for preview in standard pipe yet
+                                0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, // Added missing args
                                 nullptr, 1, ccmVec.data(), wbVec.data(), orientation, bitmapPixels, out_w, info.height, true, fastPreviewDownsample, zoomFactor, (bool)mirror);
         AndroidBitmap_unlockPixels(env, outputBitmap);
     }
@@ -560,7 +562,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlusNative(
 
         if (!jpgPathStr.empty()) {
             process_and_save_image(finalImage, width, height, digitalGain, targetLog, lut,
-                                    0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                                    0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
                                     jpgPathStr.c_str(), 1, ccmVec.data(), wbVec.data(), orientation, nullptr, 0, 0, true, fastPreviewDownsample, zoomFactor, (bool)mirror);
 
             if (exportMatrixAB && !jpgPathStr.empty() && ccmAltVec.size() == 9) {
@@ -570,7 +572,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlusNative(
                 if (dot == std::string::npos) dot = altJpgPath.size();
                 altJpgPath = altJpgPath.substr(0, dot) + suffix;
                 process_and_save_image(finalImage, width, height, digitalGain, targetLog, lut,
-                                        0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                                        0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
                                         altJpgPath.c_str(), 1, ccmAltVec.data(), wbVec.data(), orientation, nullptr, 0, 0, false, 1, zoomFactor, (bool)mirror);
             }
         }
@@ -599,4 +601,72 @@ Java_top_maary_darkbag_processor_ColorProcessor_processSingleFrameRawNative(
         cfaPattern, targetLog, lutPath,
         outputJpgPath, outputDngPath, digitalGain, debugStats, outputBitmap, tempRawPath, zoomFactor, mirror, metadata
     );
+}
+
+extern "C" JNIEXPORT jfloatArray JNICALL
+Java_top_maary_darkbag_processor_ColorProcessor_calculateAutoWB(
+    JNIEnv* env, jobject /* this */, jbyteArray dngData
+) {
+    jsize len = env->GetArrayLength(dngData);
+    if (len <= 0) return nullptr;
+
+    unsigned char* buf = new unsigned char[len];
+    env->GetByteArrayRegion(dngData, 0, len, (jbyte*)buf);
+
+    LibRaw RawProcessor;
+    if (RawProcessor.open_buffer(buf, len) != LIBRAW_SUCCESS) {
+        delete[] buf;
+        return nullptr;
+    }
+
+    // We don't necessarily need to unpack if we just want to run some AWB logic on the RAW.
+    // However, LibRaw's AWB might need some metadata or basic unpacking.
+    // For "Gray World", we need access to raw data.
+
+    if (RawProcessor.unpack() != LIBRAW_SUCCESS) {
+        RawProcessor.recycle();
+        delete[] buf;
+        return nullptr;
+    }
+
+    // Safe implementation using minimal dcraw_process to ensure color data is populated.
+    RawProcessor.imgdata.params.half_size = 1;
+    RawProcessor.imgdata.params.output_bps = 16;
+    RawProcessor.imgdata.params.no_auto_bright = 1;
+    RawProcessor.imgdata.params.gamm[0] = 1.0;
+    RawProcessor.imgdata.params.gamm[1] = 1.0;
+
+    long long sumR = 0, sumG = 0, sumB = 0;
+    int count = 0;
+
+    if (RawProcessor.dcraw_process() == LIBRAW_SUCCESS) {
+        int ret = 0;
+        libraw_processed_image_t* image = RawProcessor.dcraw_make_mem_image(&ret);
+        if (image && image->type == LIBRAW_IMAGE_BITMAP && image->bits == 16) {
+            unsigned short* data = (unsigned short*)image->data;
+            // Subsample for speed
+            for (int i = 0; i < image->width * image->height; i += 16) {
+                sumR += data[i * 3 + 0];
+                sumG += data[i * 3 + 1];
+                sumB += data[i * 3 + 2];
+                count++;
+            }
+            LibRaw::dcraw_clear_mem(image);
+        }
+    }
+
+    RawProcessor.recycle();
+    delete[] buf;
+
+    if (count == 0) return nullptr;
+
+    float avgR = (float)sumR / count;
+    float avgG = (float)sumG / count;
+    float avgB = (float)sumB / count;
+    float gray = (avgR + avgG + avgB) / 3.0f;
+
+    jfloatArray result = env->NewFloatArray(3);
+    float wb[3] = { gray / avgR, gray / avgG, gray / avgB };
+    env->SetFloatArrayRegion(result, 0, 3, wb);
+    return result;
 }

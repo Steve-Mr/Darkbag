@@ -446,6 +446,7 @@ bool process_and_save_image(
     int width, int height, float gain, int targetLog, const LUT3D& lut,
     float exposure, float contrast, float saturation,
     float highlights, float shadows, float whites, float blacks,
+    float temperature, float tint, float clarity, float dehaze,
     const char* jpgPath, int sourceColorSpace,
     const float* ccm, const float* wb, int orientation, unsigned char* out_rgb_buffer,
     int out_width, int out_height,
@@ -461,6 +462,7 @@ bool process_and_save_image(
     AdaptiveEdgeComp edgeComp = calculate_adaptive_edge_comp(inputImage, width, height);
 
     const bool enableStageDebug = false;
+
     std::string debugBasePath = jpgPath ? std::string(jpgPath) : std::string();
     std::string debugPathA = enableStageDebug ? build_debug_stage_path(debugBasePath.c_str(), "_debug_A_linear") : std::string();
     std::string debugPathB = enableStageDebug ? build_debug_stage_path(debugBasePath.c_str(), "_debug_B_matrix") : std::string();
@@ -470,16 +472,30 @@ bool process_and_save_image(
     std::vector<unsigned char> debugB8;
     std::vector<unsigned char> debugC8;
 
+    // --- Pre-process constants for Temperature/Tint ---
+    // Standard white point D65 is approx 6500K.
+    // temperature: -1.0 (Cool/Blue) to 1.0 (Warm/Yellow)
+    // tint: -1.0 (Green) to 1.0 (品红/Magenta)
+    float temp_r = 1.0f, temp_b = 1.0f;
+    if (temperature > 0) { // Warm: increase R, decrease B
+        temp_r += temperature * 0.4f;
+        temp_b -= temperature * 0.2f;
+    } else if (temperature < 0) { // Cool: decrease R, increase B
+        temp_r += temperature * 0.2f;
+        temp_b -= temperature * 0.4f;
+    }
+    float tint_g = 1.0f - tint * 0.2f; // Magenta: decrease G. Green: increase G.
+
     auto process_pixel = [&](float x_in, float y_in, Vec3* stageA, Vec3* stageB, Vec3* stageC) -> Vec3 {
         int x = std::max(0, std::min((int)x_in, width - 1));
         int y = std::max(0, std::min((int)y_in, height - 1));
         size_t idx = (static_cast<size_t>(y) * width + x) * 3;
 
-        // 1. Exposure (Linear Space)
+        // 1. Exposure & WB (Linear Space)
         float exp_gain = std::pow(2.0f, exposure);
-        float norm_r = (float)inputImage[idx + 0] / 65535.0f * gain * exp_gain;
-        float norm_g = (float)inputImage[idx + 1] / 65535.0f * gain * exp_gain;
-        float norm_b = (float)inputImage[idx + 2] / 65535.0f * gain * exp_gain;
+        float norm_r = (float)inputImage[idx + 0] / 65535.0f * gain * exp_gain * temp_r;
+        float norm_g = (float)inputImage[idx + 1] / 65535.0f * gain * exp_gain * tint_g;
+        float norm_b = (float)inputImage[idx + 2] / 65535.0f * gain * exp_gain * temp_b;
 
         if (edgeComp.enabled) {
             const float nx = (x - edgeComp.centerX) * edgeComp.invMaxRadius;
@@ -523,6 +539,31 @@ bool process_and_save_image(
         auto apply_contrast = [&](float v) {
             return std::clamp((v - 0.5f) * (contrast + 1.0f) + 0.5f, 0.0f, 1.0f);
         };
+
+        if (clarity != 0.0f || dehaze != 0.0f) {
+            // Global approximation of dehaze: simple black level shift based on global average
+            if (dehaze != 0.0f) {
+                // Approximate dehaze by increasing contrast and decreasing black level
+                float d = dehaze * 0.3f;
+                color.r = std::clamp((color.r - d) / (1.0f - d), 0.0f, 1.0f);
+                color.g = std::clamp((color.g - d) / (1.0f - d), 0.0f, 1.0f);
+                color.b = std::clamp((color.b - d) / (1.0f - d), 0.0f, 1.0f);
+            }
+            // Clarity: global mid-tone contrast boost as proxy
+            if (clarity != 0.0f) {
+                float mid = 0.5f;
+                float c = clarity * 0.2f;
+                auto apply_clarity_proxy = [&](float v) {
+                    float dist = v - mid;
+                    float weight = 1.0f - std::abs(dist) * 2.0f;
+                    weight = std::max(0.0f, weight);
+                    return v + dist * c * weight;
+                };
+                color.r = std::clamp(apply_clarity_proxy(color.r), 0.0f, 1.0f);
+                color.g = std::clamp(apply_clarity_proxy(color.g), 0.0f, 1.0f);
+                color.b = std::clamp(apply_clarity_proxy(color.b), 0.0f, 1.0f);
+            }
+        }
         color.r = apply_contrast(color.r);
         color.g = apply_contrast(color.g);
         color.b = apply_contrast(color.b);

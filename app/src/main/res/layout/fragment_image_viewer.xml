@@ -248,9 +248,9 @@
                     app:tabMode="fixed"
                     app:layout_constraintTop_toTopOf="parent">
                     <com.google.android.material.tabs.TabItem android:text="Light" />
-                    <com.google.android.material.tabs.TabItem android:text="Range" />
-                    <com.google.android.material.tabs.TabItem android:text="Tone" />
                     <com.google.android.material.tabs.TabItem android:text="Color" />
+                    <com.google.android.material.tabs.TabItem android:text="Detail" />
+                    <com.google.android.material.tabs.TabItem android:text="Tone" />
                 </com.google.android.material.tabs.TabLayout>
 
                 <LinearLayout
@@ -273,7 +273,7 @@
                             android:id="@+id/tv_label_1"
                             android:layout_width="80dp"
                             android:layout_height="wrap_content"
-                            android:text="Exposure"
+                            android:text="Label 1"
                             android:textAppearance="?attr/textAppearanceLabelLarge" />
                         <com.google.android.material.slider.Slider
                             android:id="@+id/slider_1"
@@ -300,7 +300,7 @@
                             android:id="@+id/tv_label_2"
                             android:layout_width="80dp"
                             android:layout_height="wrap_content"
-                            android:text="Contrast"
+                            android:text="Label 2"
                             android:textAppearance="?attr/textAppearanceLabelLarge" />
                         <com.google.android.material.slider.Slider
                             android:id="@+id/slider_2"
@@ -309,6 +309,60 @@
                             android:layout_weight="1" />
                         <TextView
                             android:id="@+id/tv_value_2"
+                            android:layout_width="60dp"
+                            android:layout_height="wrap_content"
+                            android:gravity="end"
+                            android:text="0.00"
+                            android:textAppearance="?attr/textAppearanceLabelLarge"
+                            android:textColor="?attr/colorPrimary" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:id="@+id/layout_slider_3"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical">
+                        <TextView
+                            android:id="@+id/tv_label_3"
+                            android:layout_width="80dp"
+                            android:layout_height="wrap_content"
+                            android:text="Label 3"
+                            android:textAppearance="?attr/textAppearanceLabelLarge" />
+                        <com.google.android.material.slider.Slider
+                            android:id="@+id/slider_3"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1" />
+                        <TextView
+                            android:id="@+id/tv_value_3"
+                            android:layout_width="60dp"
+                            android:layout_height="wrap_content"
+                            android:gravity="end"
+                            android:text="0.00"
+                            android:textAppearance="?attr/textAppearanceLabelLarge"
+                            android:textColor="?attr/colorPrimary" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:id="@+id/layout_slider_4"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical">
+                        <TextView
+                            android:id="@+id/tv_label_4"
+                            android:layout_width="80dp"
+                            android:layout_height="wrap_content"
+                            android:text="Label 4"
+                            android:textAppearance="?attr/textAppearanceLabelLarge" />
+                        <com.google.android.material.slider.Slider
+                            android:id="@+id/slider_4"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1" />
+                        <TextView
+                            android:id="@+id/tv_value_4"
                             android:layout_width="60dp"
                             android:layout_height="wrap_content"
                             android:gravity="end"
@@ -334,6 +388,16 @@
                         android:layout_height="wrap_content"
                         android:text="@string/cancel"
                         app:layout_constraintStart_toStartOf="parent"
+                        app:layout_constraintTop_toTopOf="parent" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btn_auto_wb"
+                        style="@style/Widget.Material3.Button.TextButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Auto WB"
+                        android:visibility="gone"
+                        app:layout_constraintStart_toEndOf="@id/btn_edit_cancel"
                         app:layout_constraintTop_toTopOf="parent" />
 
                     <!-- Frame Selector for Half-frame mode -->

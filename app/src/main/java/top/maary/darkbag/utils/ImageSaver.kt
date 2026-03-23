@@ -465,6 +465,10 @@ object ImageSaver {
                 put("shadows", editConfig.shadows.toDouble())
                 put("whites", editConfig.whites.toDouble())
                 put("blacks", editConfig.blacks.toDouble())
+                put("temperature", editConfig.temperature.toDouble())
+                put("tint", editConfig.tint.toDouble())
+                put("clarity", editConfig.clarity.toDouble())
+                put("dehaze", editConfig.dehaze.toDouble())
                 put("digital_gain", editConfig.digitalGain.toDouble())
 
                 editConfig.adjustments?.let { adjs ->
@@ -478,6 +482,10 @@ object ImageSaver {
                             put("shadows", adj.shadows.toDouble())
                             put("whites", adj.whites.toDouble())
                             put("blacks", adj.blacks.toDouble())
+                            put("temperature", adj.temperature.toDouble())
+                            put("tint", adj.tint.toDouble())
+                            put("clarity", adj.clarity.toDouble())
+                            put("dehaze", adj.dehaze.toDouble())
                             put("digital_gain", adj.digitalGain.toDouble())
                         })
                     }

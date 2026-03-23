@@ -579,18 +579,22 @@ class ImageViewerFragment : Fragment() {
                             R.id.slider_2 -> old.copy(contrast = value)
                             else -> old
                         }
-                        1 -> when (slider.id) { // Range
+                        1 -> when (slider.id) { // Color
+                            R.id.slider_1 -> old.copy(temperature = value)
+                            R.id.slider_2 -> old.copy(tint = value)
+                            R.id.slider_3 -> old.copy(saturation = value)
+                            else -> old
+                        }
+                        2 -> when (slider.id) { // Detail
+                            R.id.slider_1 -> old.copy(clarity = value)
+                            R.id.slider_2 -> old.copy(dehaze = value)
+                            else -> old
+                        }
+                        3 -> when (slider.id) { // Tone
                             R.id.slider_1 -> old.copy(highlights = value)
                             R.id.slider_2 -> old.copy(shadows = value)
-                            else -> old
-                        }
-                        2 -> when (slider.id) { // Tone
-                            R.id.slider_1 -> old.copy(whites = value)
-                            R.id.slider_2 -> old.copy(blacks = value)
-                            else -> old
-                        }
-                        3 -> when (slider.id) { // Color
-                            R.id.slider_1 -> old.copy(saturation = value)
+                            R.id.slider_3 -> old.copy(whites = value)
+                            R.id.slider_4 -> old.copy(blacks = value)
                             else -> old
                         }
                         else -> old
@@ -610,20 +614,74 @@ class ImageViewerFragment : Fragment() {
                         shadows = basic.shadows,
                         whites = basic.whites,
                         blacks = basic.blacks,
+                        temperature = basic.temperature,
+                        tint = basic.tint,
+                        clarity = basic.clarity,
+                        dehaze = basic.dehaze,
                         saturation = basic.saturation
                     )
                 }
 
-                if (slider.id == R.id.slider_1) {
-                    binding.tvValue1.text = if (tabPos == 0) String.format("%.2f EV", value) else String.format("%.2f", value)
-                } else {
-                    binding.tvValue2.text = String.format("%.2f", value)
+                when (slider.id) {
+                    R.id.slider_1 -> binding.tvValue1.text = if (tabPos == 0) String.format("%.2f EV", value) else String.format("%.2f", value)
+                    R.id.slider_2 -> binding.tvValue2.text = String.format("%.2f", value)
+                    R.id.slider_3 -> binding.tvValue3.text = String.format("%.2f", value)
+                    R.id.slider_4 -> binding.tvValue4.text = String.format("%.2f", value)
                 }
                 applyEditPreview()
             }
         }
         binding.slider1.addOnChangeListener(sliderChangeListener)
         binding.slider2.addOnChangeListener(sliderChangeListener)
+        binding.slider3.addOnChangeListener(sliderChangeListener)
+        binding.slider4.addOnChangeListener(sliderChangeListener)
+
+        binding.btnAutoWb?.setOnClickListener {
+            lifecycleScope.launch {
+                ensureDngBytesLoaded()
+                val dng = if (selectedDngIndex == 0) sourceDngBytes else sourceDngBytes2
+                if (dng != null) {
+                    binding.initialLoadingIndicator?.visibility = View.VISIBLE
+                    val wb = withContext(Dispatchers.IO) {
+                        repository.calculateAutoWB(dng)
+                    }
+                    binding.initialLoadingIndicator?.visibility = View.GONE
+                    if (wb != null) {
+                        // Approximate mapping from [r, g, b] multipliers to Temp/Tint sliders
+                        // Temp slider (r/b balance): Warm (more r) -> temperature > 0. Cool (more b) -> temperature < 0.
+                        // Tint slider (g balance): Magenta (less g) -> tint > 0. Green (more g) -> tint < 0.
+
+                        val r = wb[0]
+                        val g = wb[1]
+                        val b = wb[2]
+
+                        // normalize by green
+                        val nr = r / g
+                        val nb = b / g
+
+                        // Very rough approximation:
+                        val autoTemp = ((nr - nb) * 2.0f).coerceIn(-1.0f, 1.0f)
+                        val autoTint = ((1.0f - g) * 2.0f).coerceIn(-1.0f, 1.0f)
+
+                        val config = currentEditConfig ?: return@launch
+                        val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
+
+                        markAdjusted()
+                        if (currentGroup.isHalfFrame()) {
+                            val adjs = config.adjustments?.toMutableList() ?: mutableListOf(top.maary.darkbag.models.BasicAdjustments(), top.maary.darkbag.models.BasicAdjustments())
+                            adjs[selectedDngIndex] = adjs[selectedDngIndex].copy(temperature = autoTemp, tint = autoTint)
+                            currentEditConfig = config.copy(adjustments = adjs)
+                        } else {
+                            currentEditConfig = config.copy(temperature = autoTemp, tint = autoTint)
+                        }
+                        updateSlidersInPanel()
+                        applyEditPreview()
+
+                        android.widget.Toast.makeText(requireContext(), "Auto WB applied", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        }
 
         binding.groupFrameSelectionIntegrated.addOnButtonCheckedListener { _, checkedId, isChecked ->
             if (isChecked) {
@@ -950,6 +1008,7 @@ class ImageViewerFragment : Fragment() {
     }
 
     private fun updateSlidersInPanel() {
+        val binding = _binding ?: return
         val config = currentEditConfig ?: return
         val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
         val tabPos = binding.editTabs.selectedTabPosition
@@ -960,6 +1019,8 @@ class ImageViewerFragment : Fragment() {
             config.toBasic()
         }
 
+        binding.btnAutoWb?.visibility = if (tabPos == 1) View.VISIBLE else View.GONE
+
         when (tabPos) {
             0 -> { // Light
                 binding.tvLabel1.text = "Exposure"
@@ -968,49 +1029,82 @@ class ImageViewerFragment : Fragment() {
                 binding.slider1.value = target.exposure.coerceIn(EXPOSURE_MIN, EXPOSURE_MAX)
                 binding.tvValue1.text = String.format("%.2f EV", target.exposure)
 
-                binding.layoutSlider2.visibility = View.VISIBLE
+                binding.layoutSlider2?.visibility = View.VISIBLE
                 binding.tvLabel2.text = "Contrast"
                 binding.slider2.valueFrom = ADJUSTMENT_MIN
                 binding.slider2.valueTo = ADJUSTMENT_MAX
                 binding.slider2.value = target.contrast.coerceIn(ADJUSTMENT_MIN, ADJUSTMENT_MAX)
                 binding.tvValue2.text = String.format("%.2f", target.contrast)
+
+                binding.layoutSlider3?.visibility = View.GONE
+                binding.layoutSlider4?.visibility = View.GONE
             }
-            1 -> { // Range
+            1 -> { // Color
+                binding.tvLabel1.text = "Temp"
+                binding.slider1.valueFrom = ADJUSTMENT_MIN
+                binding.slider1.valueTo = ADJUSTMENT_MAX
+                binding.slider1.value = target.temperature.coerceIn(ADJUSTMENT_MIN, ADJUSTMENT_MAX)
+                binding.tvValue1.text = String.format("%.2f", target.temperature)
+
+                binding.layoutSlider2?.visibility = View.VISIBLE
+                binding.tvLabel2.text = "Tint"
+                binding.slider2.valueFrom = ADJUSTMENT_MIN
+                binding.slider2.valueTo = ADJUSTMENT_MAX
+                binding.slider2.value = target.tint.coerceIn(ADJUSTMENT_MIN, ADJUSTMENT_MAX)
+                binding.tvValue2.text = String.format("%.2f", target.tint)
+
+                binding.layoutSlider3?.visibility = View.VISIBLE
+                binding.layoutSlider4?.visibility = View.GONE
+                binding.tvLabel3.text = "Saturation"
+                binding.slider3.valueFrom = ADJUSTMENT_MIN
+                binding.slider3.valueTo = ADJUSTMENT_MAX
+                binding.slider3.value = target.saturation.coerceIn(ADJUSTMENT_MIN, ADJUSTMENT_MAX)
+                binding.tvValue3.text = String.format("%.2f", target.saturation)
+            }
+            2 -> { // Detail
+                binding.tvLabel1.text = "Clarity"
+                binding.slider1.valueFrom = ADJUSTMENT_MIN
+                binding.slider1.valueTo = ADJUSTMENT_MAX
+                binding.slider1.value = target.clarity.coerceIn(ADJUSTMENT_MIN, ADJUSTMENT_MAX)
+                binding.tvValue1.text = String.format("%.2f", target.clarity)
+
+                binding.layoutSlider2?.visibility = View.VISIBLE
+                binding.tvLabel2.text = "Dehaze"
+                binding.slider2.valueFrom = ADJUSTMENT_MIN
+                binding.slider2.valueTo = ADJUSTMENT_MAX
+                binding.slider2.value = target.dehaze.coerceIn(ADJUSTMENT_MIN, ADJUSTMENT_MAX)
+                binding.tvValue2.text = String.format("%.2f", target.dehaze)
+
+                binding.layoutSlider3?.visibility = View.GONE
+                binding.layoutSlider4?.visibility = View.GONE
+            }
+            3 -> { // Tone
                 binding.tvLabel1.text = "Highlights"
                 binding.slider1.valueFrom = ADJUSTMENT_MIN
                 binding.slider1.valueTo = ADJUSTMENT_MAX
                 binding.slider1.value = target.highlights.coerceIn(ADJUSTMENT_MIN, ADJUSTMENT_MAX)
                 binding.tvValue1.text = String.format("%.2f", target.highlights)
 
-                binding.layoutSlider2.visibility = View.VISIBLE
+                binding.layoutSlider2?.visibility = View.VISIBLE
                 binding.tvLabel2.text = "Shadows"
                 binding.slider2.valueFrom = ADJUSTMENT_MIN
                 binding.slider2.valueTo = ADJUSTMENT_MAX
                 binding.slider2.value = target.shadows.coerceIn(ADJUSTMENT_MIN, ADJUSTMENT_MAX)
                 binding.tvValue2.text = String.format("%.2f", target.shadows)
-            }
-            2 -> { // Tone
-                binding.tvLabel1.text = "Whites"
-                binding.slider1.valueFrom = ADJUSTMENT_MIN
-                binding.slider1.valueTo = ADJUSTMENT_MAX
-                binding.slider1.value = target.whites.coerceIn(ADJUSTMENT_MIN, ADJUSTMENT_MAX)
-                binding.tvValue1.text = String.format("%.2f", target.whites)
 
-                binding.layoutSlider2.visibility = View.VISIBLE
-                binding.tvLabel2.text = "Blacks"
-                binding.slider2.valueFrom = ADJUSTMENT_MIN
-                binding.slider2.valueTo = ADJUSTMENT_MAX
-                binding.slider2.value = target.blacks.coerceIn(ADJUSTMENT_MIN, ADJUSTMENT_MAX)
-                binding.tvValue2.text = String.format("%.2f", target.blacks)
-            }
-            3 -> { // Color
-                binding.tvLabel1.text = "Saturation"
-                binding.slider1.valueFrom = ADJUSTMENT_MIN
-                binding.slider1.valueTo = ADJUSTMENT_MAX
-                binding.slider1.value = target.saturation.coerceIn(ADJUSTMENT_MIN, ADJUSTMENT_MAX)
-                binding.tvValue1.text = String.format("%.2f", target.saturation)
+                binding.layoutSlider3?.visibility = View.VISIBLE
+                binding.tvLabel3.text = "Whites"
+                binding.slider3.valueFrom = ADJUSTMENT_MIN
+                binding.slider3.valueTo = ADJUSTMENT_MAX
+                binding.slider3.value = target.whites.coerceIn(ADJUSTMENT_MIN, ADJUSTMENT_MAX)
+                binding.tvValue3.text = String.format("%.2f", target.whites)
 
-                binding.layoutSlider2.visibility = View.GONE
+                binding.layoutSlider4?.visibility = View.VISIBLE
+                binding.tvLabel4.text = "Blacks"
+                binding.slider4.valueFrom = ADJUSTMENT_MIN
+                binding.slider4.valueTo = ADJUSTMENT_MAX
+                binding.slider4.value = target.blacks.coerceIn(ADJUSTMENT_MIN, ADJUSTMENT_MAX)
+                binding.tvValue4.text = String.format("%.2f", target.blacks)
             }
         }
     }
@@ -1151,6 +1245,10 @@ class ImageViewerFragment : Fragment() {
                             shadows = adj.shadows,
                             whites = adj.whites,
                             blacks = adj.blacks,
+                            temperature = adj.temperature,
+                            tint = adj.tint,
+                            clarity = adj.clarity,
+                            dehaze = adj.dehaze,
                             digitalGain = 1.0f,
                             outputJpgPath = null,
                             useGpu = false,
@@ -1264,7 +1362,8 @@ class ImageViewerFragment : Fragment() {
     }
 
     private fun top.maary.darkbag.models.EditConfig.toBasic() = top.maary.darkbag.models.BasicAdjustments(
-        exposure, contrast, saturation, highlights, shadows, whites, blacks
+        exposure, contrast, saturation, highlights, shadows, whites, blacks,
+        temperature, tint, clarity, dehaze
     )
 
     private fun saveEdit(isReplacement: Boolean) {
@@ -1322,6 +1421,10 @@ class ImageViewerFragment : Fragment() {
                                 shadows = adj.shadows,
                                 whites = adj.whites,
                                 blacks = adj.blacks,
+                                temperature = adj.temperature,
+                                tint = adj.tint,
+                                clarity = adj.clarity,
+                                dehaze = adj.dehaze,
                                 digitalGain = 1.0f,
                                 outputJpgPath = targetJpgPath,
                                 useGpu = false,
@@ -1361,6 +1464,10 @@ class ImageViewerFragment : Fragment() {
                                 shadows = adj.shadows,
                                 whites = adj.whites,
                                 blacks = adj.blacks,
+                                temperature = adj.temperature,
+                                tint = adj.tint,
+                                clarity = adj.clarity,
+                                dehaze = adj.dehaze,
                                 digitalGain = 1.0f,
                                 outputJpgPath = null,
                                 useGpu = false,

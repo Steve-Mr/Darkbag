@@ -64,6 +64,10 @@ class ImageRepository(private val context: Context) {
         cachedGroups = null
     }
 
+    suspend fun calculateAutoWB(dngData: ByteArray): FloatArray? = withContext(Dispatchers.IO) {
+        top.maary.darkbag.processor.ColorProcessor.calculateAutoWB(dngData)
+    }
+
     private fun scanSafFolder(folderUri: String, groups: MutableMap<String, ImageGroupBuilder>) {
         try {
             val treeUri = Uri.parse(folderUri)
@@ -255,6 +259,10 @@ class ImageRepository(private val context: Context) {
                         shadows = adjJson.optDouble("shadows", 0.0).toFloat(),
                         whites = adjJson.optDouble("whites", 0.0).toFloat(),
                         blacks = adjJson.optDouble("blacks", 0.0).toFloat(),
+                            temperature = adjJson.optDouble("temperature", 0.0).toFloat(),
+                            tint = adjJson.optDouble("tint", 0.0).toFloat(),
+                            clarity = adjJson.optDouble("clarity", 0.0).toFloat(),
+                            dehaze = adjJson.optDouble("dehaze", 0.0).toFloat(),
                         digitalGain = adjJson.optDouble("digital_gain", 1.0).toFloat()
                     )
                 }
@@ -270,6 +278,10 @@ class ImageRepository(private val context: Context) {
                 shadows = json.optDouble("shadows", 0.0).toFloat(),
                 whites = json.optDouble("whites", 0.0).toFloat(),
                 blacks = json.optDouble("blacks", 0.0).toFloat(),
+                temperature = json.optDouble("temperature", 0.0).toFloat(),
+                tint = json.optDouble("tint", 0.0).toFloat(),
+                clarity = json.optDouble("clarity", 0.0).toFloat(),
+                dehaze = json.optDouble("dehaze", 0.0).toFloat(),
                 digitalGain = json.optDouble("digital_gain", 1.0).toFloat(),
                 adjustments = adjustments,
                 showTimestamp = json.optBoolean("show_timestamp", false),

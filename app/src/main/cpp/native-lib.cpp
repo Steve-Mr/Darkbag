@@ -30,6 +30,10 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRawNative(
         jfloat shadows,
         jfloat whites,
         jfloat blacks,
+        jfloat temperature,
+        jfloat tint,
+        jfloat clarity,
+        jfloat dehaze,
         jfloat digitalGain,
         jstring outputJpgPath,
         jboolean useGpu, // Ignored in new pipeline
@@ -145,6 +149,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRawNative(
         targetLog,
         lut,
         exposure, contrast, saturation, highlights, shadows, whites, blacks,
+        temperature, tint, clarity, dehaze,
         jpg_path_cstr,
         0, // sourceColorSpace = ProPhoto (LibRaw output_color=4)
         nullptr, // ccm is not used for ProPhoto path

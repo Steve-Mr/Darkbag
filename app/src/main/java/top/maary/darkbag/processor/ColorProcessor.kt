@@ -49,6 +49,10 @@ object ColorProcessor {
         shadows: Float = 0f,
         whites: Float = 0f,
         blacks: Float = 0f,
+        temperature: Float = 0f,
+        tint: Float = 0f,
+        clarity: Float = 0f,
+        dehaze: Float = 0f,
         digitalGain: Float = 1.0f,
         outputJpgPath: String?,
         useGpu: Boolean,
@@ -60,8 +64,8 @@ object ColorProcessor {
     ): Int = nativeMutex.withLock {
         processRawNative(
             dngData, targetLog, lutPath, exposure, contrast, saturation,
-            highlights, shadows, whites, blacks, digitalGain,
-            outputJpgPath, useGpu, orientation, mirror, outputBitmap,
+            highlights, shadows, whites, blacks, temperature, tint, clarity, dehaze,
+            digitalGain, outputJpgPath, useGpu, orientation, mirror, outputBitmap,
             downsampleFactor, zoomFactor
         )
     }
@@ -77,6 +81,10 @@ object ColorProcessor {
         shadows: Float,
         whites: Float,
         blacks: Float,
+        temperature: Float,
+        tint: Float,
+        clarity: Float,
+        dehaze: Float,
         digitalGain: Float,
         outputJpgPath: String?,
         useGpu: Boolean,
@@ -158,6 +166,11 @@ object ColorProcessor {
     external fun loadLutData(lutPath: String): FloatArray?
 
     /**
+     * Calculates Auto White Balance (AWB) multipliers [r, g, b] for the given DNG data.
+     */
+    external fun calculateAutoWB(dngData: ByteArray): FloatArray?
+
+    /**
      * Callback for background export completion. Called from JNI thread.
      */
     @JvmStatic
@@ -188,6 +201,10 @@ object ColorProcessor {
         shadows: Float = 0f,
         whites: Float = 0f,
         blacks: Float = 0f,
+        temperature: Float = 0f,
+        tint: Float = 0f,
+        clarity: Float = 0f,
+        dehaze: Float = 0f,
         jpgPath: String?,
         dngPath: String?,
         ccm: FloatArray,
@@ -199,6 +216,7 @@ object ColorProcessor {
         exportHdrPlusNative(
             tempRawPath, width, height, orientation, digitalGain, targetLog, lutPath,
             exposure, contrast, saturation, highlights, shadows, whites, blacks,
+            temperature, tint, clarity, dehaze,
             jpgPath, dngPath, ccm, whiteBalance, zoomFactor, mirror, metadata
         )
     }
@@ -218,6 +236,10 @@ object ColorProcessor {
         shadows: Float,
         whites: Float,
         blacks: Float,
+        temperature: Float,
+        tint: Float,
+        clarity: Float,
+        dehaze: Float,
         jpgPath: String?,
         dngPath: String?,
         ccm: FloatArray,
