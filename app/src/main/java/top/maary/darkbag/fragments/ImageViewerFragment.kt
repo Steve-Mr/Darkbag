@@ -22,11 +22,13 @@ import androidx.navigation.fragment.navArgs
 import androidx.viewpager2.widget.ViewPager2
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.collect
 import top.maary.darkbag.R
 import top.maary.darkbag.databinding.BottomSheetImageDetailsBinding
 import top.maary.darkbag.databinding.FragmentImageViewerBinding
 import top.maary.darkbag.databinding.ItemDetailRowBinding
 import top.maary.darkbag.models.ImageGroup
+import top.maary.darkbag.processor.ColorProcessor
 import top.maary.darkbag.repository.ImageRepository
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -45,7 +47,11 @@ class ImageViewerFragment : Fragment() {
     private lateinit var adapter: ImageViewerAdapter
 
     private var isAdjusted = false
-    private var isIndividualEditMode = false
+    private var isEditingAdjustments = false
+    private var systemTopInset = 0
+    private var systemBottomInset = 0
+    private var topBarHeight = 0
+    private var configBeforeEditing: top.maary.darkbag.models.EditConfig? = null
     private var currentEditConfig: top.maary.darkbag.models.EditConfig? = null
     private var selectedDngIndex = 0 // 0 or 1 for half-frame
     private var sourceDngBytes: ByteArray? = null
@@ -53,7 +59,6 @@ class ImageViewerFragment : Fragment() {
     private var cachedBitmap1: android.graphics.Bitmap? = null
     private var cachedBitmap2: android.graphics.Bitmap? = null
     private var lastPreviewConfig: top.maary.darkbag.models.EditConfig? = null
-    private var activeAdjustmentBinding: top.maary.darkbag.databinding.BottomSheetEditAdjustmentsBinding? = null
     private var lastCompositeBitmap: android.graphics.Bitmap? = null
     private var isLongPressing = false
     private var savedMatrix = android.graphics.Matrix()
@@ -67,8 +72,29 @@ class ImageViewerFragment : Fragment() {
                 resetAdjustments()
             } else {
                 currentEditConfig = null
+                sourceDngBytes = null
+                sourceDngBytes2 = null
+
+                // Clear active view before recycling
+                val currentIndex = binding.imagePager.currentItem
+                val currentHolder = (binding.imagePager.getChildAt(0) as? androidx.recyclerview.widget.RecyclerView)
+                    ?.findViewHolderForAdapterPosition(currentIndex) as? ImageViewerAdapter.ViewHolder
+                currentHolder?.binding?.imageView?.let { iv ->
+                    if (iv.drawable is android.graphics.drawable.BitmapDrawable) {
+                        val bmp = (iv.drawable as android.graphics.drawable.BitmapDrawable).bitmap
+                        if (bmp == lastCompositeBitmap || bmp == cachedBitmap1 || bmp == cachedBitmap2) {
+                            iv.setImageDrawable(null)
+                        }
+                    }
+                }
+
+                cachedBitmap1?.recycle()
+                cachedBitmap1 = null
+                cachedBitmap2?.recycle()
+                cachedBitmap2 = null
+                lastCompositeBitmap?.recycle()
+                lastCompositeBitmap = null
             }
-            lastCompositeBitmap = null
             updateControlsVisibility()
         }
     }
@@ -79,6 +105,8 @@ class ImageViewerFragment : Fragment() {
                 binding.lutListContainer.visibility = View.GONE
                 binding.touchOverlay.visibility = View.GONE
                 updateBackPressedCallbackState()
+            } else if (isEditingAdjustments) {
+                exitEditMode(apply = false)
             } else if (isAdjusted) {
                 showDiscardChangesDialog()
             }
@@ -112,7 +140,14 @@ class ImageViewerFragment : Fragment() {
         }
 
         binding.imagePager.registerOnPageChangeCallback(pageChangeCallback)
-        loadImages()
+        loadImages(forceRefresh = true)
+
+        viewLifecycleOwner.lifecycleScope.launch {
+            ColorProcessor.backgroundSaveFlow.collect { event ->
+                if (isAdjusted || !::adapter.isInitialized) return@collect
+                handleBackgroundSaveEvent(event)
+            }
+        }
     }
 
     private fun loadImages(targetUri: String? = args.initialUri, forceRefresh: Boolean = false) {
@@ -153,13 +188,45 @@ class ImageViewerFragment : Fragment() {
         }
     }
 
+    private fun handleBackgroundSaveEvent(event: ColorProcessor.BackgroundSaveEvent) {
+        val groups = adapter.getGroups().toMutableList()
+        val index = adapter.findGroupIndex(event.baseName)
+
+        if (index != -1) {
+            val oldGroup = groups[index]
+            val newJpgUri = event.targetUri?.let { Uri.parse(it) } ?: oldGroup.jpgUri
+            val newDngUri = event.dngPath?.let { Uri.parse(it) } ?: oldGroup.dngUri
+
+            val newGroup = oldGroup.copy(
+                jpgUri = newJpgUri,
+                dngUri = newDngUri,
+                lastModified = System.currentTimeMillis()
+            )
+            groups[index] = newGroup
+            adapter.updateGroups(groups)
+
+            if (index == binding.imagePager.currentItem) {
+                updateControlsVisibility()
+            }
+        } else {
+            // New image group saved (maybe from background processing of a very recent shot)
+            // Trigger a full repository refresh to include the new item
+            lifecycleScope.launch {
+                repository.invalidateCache()
+                val newGroups = repository.getGroupedImages(forceRefresh = true)
+                adapter.updateGroups(newGroups)
+            }
+        }
+    }
+
     private fun updateControlsVisibility() {
         if (!::adapter.isInitialized || adapter.itemCount == 0) return
         val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
         val canEdit = currentGroup.dngUri != null || currentGroup.dngUri1 != null
 
-        val visibility = if (canEdit) View.VISIBLE else View.GONE
+        val visibility = if (canEdit && !isEditingAdjustments) View.VISIBLE else View.GONE
         binding.bottomLeftControls.visibility = visibility
+        binding.bottomRightControls.visibility = visibility
         binding.fabAdjust.visibility = visibility
 
         if (canEdit && currentEditConfig == null) {
@@ -252,6 +319,7 @@ class ImageViewerFragment : Fragment() {
                                         exposure = if (configFromExif.digitalGain > 0f) kotlin.math.log2(configFromExif.digitalGain) else 0f
                                     )
                                     updateEditUi()
+                                    if (isEditingAdjustments) updateSlidersInPanel()
                                 }
                             }
                         }
@@ -274,6 +342,7 @@ class ImageViewerFragment : Fragment() {
                             withContext(Dispatchers.Main) {
                                 currentEditConfig = currentEditConfig?.copy(adjustments = adjs)
                                 updateEditUi()
+                                if (isEditingAdjustments) updateSlidersInPanel()
                             }
                         }
                     }
@@ -285,7 +354,7 @@ class ImageViewerFragment : Fragment() {
     }
 
     private fun updateSplitButtons() {
-        if (isAdjusted) {
+        if (isAdjusted || isEditingAdjustments) {
             binding.splitShare.visibility = View.GONE
             binding.splitSave.visibility = View.VISIBLE
         } else {
@@ -295,7 +364,7 @@ class ImageViewerFragment : Fragment() {
     }
 
     private fun updateToolbarIcon() {
-        if (isAdjusted) {
+        if (isAdjusted || isEditingAdjustments) {
             binding.btnNavigation.setIconResource(R.drawable.ic_close)
         } else {
             binding.btnNavigation.setIconResource(R.drawable.ic_back)
@@ -395,9 +464,9 @@ class ImageViewerFragment : Fragment() {
         }
 
         binding.fabAdjust.setOnClickListener {
+            showAdjustmentsBottomSheet()
             lifecycleScope.launch {
                 ensureDngBytesLoaded()
-                showAdjustmentsBottomSheet()
             }
         }
 
@@ -405,7 +474,8 @@ class ImageViewerFragment : Fragment() {
             if (selectedDngIndex != 0) {
                 selectedDngIndex = 0
                 updateSelectionFeedback()
-                activeAdjustmentBinding?.let { updateSlidersInSheet(it) }
+                updateSlidersInPanel()
+                applyEditPreview()
             }
         }
 
@@ -413,16 +483,101 @@ class ImageViewerFragment : Fragment() {
             if (selectedDngIndex != 1) {
                 selectedDngIndex = 1
                 updateSelectionFeedback()
-                activeAdjustmentBinding?.let { updateSlidersInSheet(it) }
+                updateSlidersInPanel()
+                applyEditPreview()
             }
         }
 
+        binding.btnEditDone.setOnClickListener {
+            exitEditMode(apply = true)
+        }
+
+        binding.btnEditCancel.setOnClickListener {
+            exitEditMode(apply = false)
+        }
+
+        binding.editTabs.addOnTabSelectedListener(object : com.google.android.material.tabs.TabLayout.OnTabSelectedListener {
+            override fun onTabSelected(tab: com.google.android.material.tabs.TabLayout.Tab?) {
+                updateSlidersInPanel()
+            }
+            override fun onTabUnselected(tab: com.google.android.material.tabs.TabLayout.Tab?) {}
+            override fun onTabReselected(tab: com.google.android.material.tabs.TabLayout.Tab?) {}
+        })
+
+        val sliderChangeListener = com.google.android.material.slider.Slider.OnChangeListener { slider, value, fromUser ->
+            if (fromUser) {
+                val config = currentEditConfig ?: return@OnChangeListener
+                val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
+                val tabPos = binding.editTabs.selectedTabPosition
+
+                markAdjusted()
+
+                val updateConfig: (top.maary.darkbag.models.BasicAdjustments) -> top.maary.darkbag.models.BasicAdjustments = { old ->
+                    when (tabPos) {
+                        0 -> when (slider.id) { // Light
+                            R.id.slider_1 -> old.copy(exposure = value)
+                            R.id.slider_2 -> old.copy(contrast = value)
+                            else -> old
+                        }
+                        1 -> when (slider.id) { // Range
+                            R.id.slider_1 -> old.copy(highlights = value)
+                            R.id.slider_2 -> old.copy(shadows = value)
+                            else -> old
+                        }
+                        2 -> when (slider.id) { // Tone
+                            R.id.slider_1 -> old.copy(whites = value)
+                            R.id.slider_2 -> old.copy(blacks = value)
+                            else -> old
+                        }
+                        3 -> when (slider.id) { // Color
+                            R.id.slider_1 -> old.copy(saturation = value)
+                            else -> old
+                        }
+                        else -> old
+                    }
+                }
+
+                if (currentGroup.isHalfFrame()) {
+                    val adjs = config.adjustments?.toMutableList() ?: mutableListOf(top.maary.darkbag.models.BasicAdjustments(), top.maary.darkbag.models.BasicAdjustments())
+                    adjs[selectedDngIndex] = updateConfig(adjs[selectedDngIndex])
+                    currentEditConfig = config.copy(adjustments = adjs)
+                } else {
+                    val basic = updateConfig(config.toBasic())
+                    currentEditConfig = config.copy(
+                        exposure = basic.exposure,
+                        contrast = basic.contrast,
+                        highlights = basic.highlights,
+                        shadows = basic.shadows,
+                        whites = basic.whites,
+                        blacks = basic.blacks,
+                        saturation = basic.saturation
+                    )
+                }
+
+                if (slider.id == R.id.slider_1) {
+                    binding.tvValue1.text = if (tabPos == 0) String.format("%.2f EV", value) else String.format("%.2f", value)
+                } else {
+                    binding.tvValue2.text = String.format("%.2f", value)
+                }
+                applyEditPreview()
+            }
+        }
+        binding.slider1.addOnChangeListener(sliderChangeListener)
+        binding.slider2.addOnChangeListener(sliderChangeListener)
+
+        binding.groupFrameSelectionIntegrated.addOnButtonCheckedListener { _, checkedId, isChecked ->
+            if (isChecked) {
+                selectedDngIndex = if (checkedId == R.id.btn_select_frame1_integrated) 0 else 1
+                updateSelectionFeedback()
+                updateSlidersInPanel()
+                applyEditPreview()
+            }
+        }
     }
 
     private fun markAdjusted() {
         if (!isAdjusted) {
             isAdjusted = true
-            binding.imagePager.isUserInputEnabled = false
             adapter.setFormatSwitcherPersistentHidden(true)
             updateSplitButtons()
             updateToolbarIcon()
@@ -432,9 +587,9 @@ class ImageViewerFragment : Fragment() {
 
     private fun resetAdjustments() {
         isAdjusted = false
+        exitEditMode(apply = false)
         binding.imagePager.isUserInputEnabled = true
         adapter.setFormatSwitcherPersistentHidden(false)
-        isIndividualEditMode = false
         sourceDngBytes = null
         sourceDngBytes2 = null
         cachedBitmap1?.recycle()
@@ -494,53 +649,44 @@ class ImageViewerFragment : Fragment() {
         val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
         val isTB = currentGroup.hfLayout == "TB"
 
-        val dimColor = 0x66000000.toInt()
-        val activeColor = 0x00000000.toInt()
+        if (isEditingAdjustments && currentGroup.isHalfFrame()) {
+            binding.hfSelection1.visibility = if (selectedDngIndex == 1) View.VISIBLE else View.GONE
+            binding.hfSelection2.visibility = if (selectedDngIndex == 0) View.VISIBLE else View.GONE
 
-        if (isIndividualEditMode) {
-            binding.hfSelection1.visibility = View.VISIBLE
-            binding.hfSelection2.visibility = View.VISIBLE
-            val dividerLp = binding.hfSelectionDivider.layoutParams as androidx.constraintlayout.widget.ConstraintLayout.LayoutParams
-            dividerLp.orientation = if (isTB) androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.HORIZONTAL else androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.VERTICAL
-            binding.hfSelectionDivider.layoutParams = dividerLp
+            val lp1 = binding.hfSelection1.layoutParams as androidx.constraintlayout.widget.ConstraintLayout.LayoutParams
+            val lp2 = binding.hfSelection2.layoutParams as androidx.constraintlayout.widget.ConstraintLayout.LayoutParams
+
+            if (isTB) {
+                lp1.bottomToBottom = -1
+                lp1.bottomToTop = R.id.hf_selection_divider
+                lp1.endToEnd = R.id.image_pager
+                lp1.endToStart = -1
+
+                lp2.topToTop = -1
+                lp2.topToBottom = R.id.hf_selection_divider
+                lp2.startToStart = R.id.image_pager
+                lp2.startToEnd = -1
+            } else {
+                lp1.bottomToBottom = R.id.image_pager
+                lp1.bottomToTop = -1
+                lp1.endToEnd = -1
+                lp1.endToStart = R.id.hf_selection_divider
+
+                lp2.topToTop = R.id.image_pager
+                lp2.topToBottom = -1
+                lp2.startToStart = -1
+                lp2.startToEnd = R.id.hf_selection_divider
+            }
+            binding.hfSelection1.layoutParams = lp1
+            binding.hfSelection2.layoutParams = lp2
         } else {
             binding.hfSelection1.visibility = View.GONE
             binding.hfSelection2.visibility = View.GONE
         }
-
-        binding.hfSelection1.setBackgroundColor(if (isIndividualEditMode && selectedDngIndex == 0) activeColor else if (isIndividualEditMode) dimColor else activeColor)
-        binding.hfSelection2.setBackgroundColor(if (isIndividualEditMode && selectedDngIndex == 1) activeColor else if (isIndividualEditMode) dimColor else activeColor)
-
-        val lp1 = binding.hfSelection1.layoutParams as androidx.constraintlayout.widget.ConstraintLayout.LayoutParams
-        val lp2 = binding.hfSelection2.layoutParams as androidx.constraintlayout.widget.ConstraintLayout.LayoutParams
-
-        if (isTB) {
-            lp1.bottomToBottom = -1
-            lp1.bottomToTop = R.id.hf_selection_divider
-            lp1.endToEnd = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.PARENT_ID
-            lp1.endToStart = -1
-
-            lp2.topToTop = -1
-            lp2.topToBottom = R.id.hf_selection_divider
-            lp2.startToStart = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.PARENT_ID
-            lp2.startToEnd = -1
-        } else {
-            lp1.bottomToBottom = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.PARENT_ID
-            lp1.bottomToTop = -1
-            lp1.endToEnd = -1
-            lp1.endToStart = R.id.hf_selection_divider
-
-            lp2.topToTop = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.PARENT_ID
-            lp2.topToBottom = -1
-            lp2.startToStart = -1
-            lp2.startToEnd = R.id.hf_selection_divider
-        }
-        binding.hfSelection1.layoutParams = lp1
-        binding.hfSelection2.layoutParams = lp2
     }
 
     private fun showLutMenu() {
-        if (activeAdjustmentBinding != null) return
+        if (isEditingAdjustments) return
 
         val currentLog = currentEditConfig?.log ?: "None"
         val currentLut = currentEditConfig?.lut?.substringBeforeLast(".") ?: "None"
@@ -652,126 +798,161 @@ class ImageViewerFragment : Fragment() {
     }
 
     private fun showAdjustmentsBottomSheet() {
-        val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
-        if (currentGroup.isHalfFrame() && !isIndividualEditMode) {
-            isIndividualEditMode = true
-            updateSelectionFeedback()
-        }
-
-        val dialog = com.google.android.material.bottomsheet.BottomSheetDialog(requireContext())
-        val sheetBinding = top.maary.darkbag.databinding.BottomSheetEditAdjustmentsBinding.inflate(layoutInflater)
-        activeAdjustmentBinding = sheetBinding
-        dialog.setContentView(sheetBinding.root)
-
-        val config = currentEditConfig ?: return
-
-        if (currentGroup.isHalfFrame()) {
-            sheetBinding.editPreviewCard.visibility = View.VISIBLE
-            sheetBinding.groupFrameSelection.visibility = View.VISIBLE
-            sheetBinding.groupFrameSelection.check(if (selectedDngIndex == 0) R.id.btn_select_frame1 else R.id.btn_select_frame2)
-
-            sheetBinding.groupFrameSelection.addOnButtonCheckedListener { _, checkedId, isChecked ->
-                if (isChecked) {
-                    selectedDngIndex = if (checkedId == R.id.btn_select_frame1) 0 else 1
-                    updateSelectionFeedback()
-                    updateSlidersInSheet(sheetBinding)
-                    applyEditPreview()
-                }
-            }
-        }
-
-        updateSlidersInSheet(sheetBinding)
-        applyEditPreview()
-
-        sheetBinding.editTabs.addOnTabSelectedListener(object : com.google.android.material.tabs.TabLayout.OnTabSelectedListener {
-            override fun onTabSelected(tab: com.google.android.material.tabs.TabLayout.Tab?) {
-                sheetBinding.layoutLight.visibility = if (tab?.position == 0) View.VISIBLE else View.GONE
-                sheetBinding.layoutColor.visibility = if (tab?.position == 1) View.VISIBLE else View.GONE
-            }
-            override fun onTabUnselected(tab: com.google.android.material.tabs.TabLayout.Tab?) {}
-            override fun onTabReselected(tab: com.google.android.material.tabs.TabLayout.Tab?) {}
-        })
-
-        val changeListener = com.google.android.material.slider.Slider.OnChangeListener { slider, value, fromUser ->
-            if (slider.id == R.id.slider_exposure) {
-                sheetBinding.tvExposureValue.text = String.format("%.2f EV", value)
-            }
-
-            if (fromUser) {
-                val current = currentEditConfig ?: return@OnChangeListener
-                markAdjusted()
-                if (currentGroup.isHalfFrame()) {
-                    val adjs = current.adjustments?.toMutableList() ?: mutableListOf(top.maary.darkbag.models.BasicAdjustments(), top.maary.darkbag.models.BasicAdjustments())
-                    val old = adjs[selectedDngIndex]
-                    adjs[selectedDngIndex] = when (slider.id) {
-                        R.id.slider_exposure -> old.copy(exposure = value)
-                        R.id.slider_contrast -> old.copy(contrast = value)
-                        R.id.slider_saturation -> old.copy(saturation = value)
-                        R.id.slider_highlights -> old.copy(highlights = value)
-                        R.id.slider_shadows -> old.copy(shadows = value)
-                        R.id.slider_whites -> old.copy(whites = value)
-                        R.id.slider_blacks -> old.copy(blacks = value)
-                        else -> old
-                    }
-                    currentEditConfig = current.copy(adjustments = adjs)
-                } else {
-                    currentEditConfig = when (slider.id) {
-                        R.id.slider_exposure -> currentEditConfig?.copy(exposure = value)
-                        R.id.slider_contrast -> currentEditConfig?.copy(contrast = value)
-                        R.id.slider_saturation -> currentEditConfig?.copy(saturation = value)
-                        R.id.slider_highlights -> currentEditConfig?.copy(highlights = value)
-                        R.id.slider_shadows -> currentEditConfig?.copy(shadows = value)
-                        R.id.slider_whites -> currentEditConfig?.copy(whites = value)
-                        R.id.slider_blacks -> currentEditConfig?.copy(blacks = value)
-                        else -> currentEditConfig
-                    }
-                }
-                applyEditPreview()
-            }
-        }
-
-        sheetBinding.sliderExposure.addOnChangeListener(changeListener)
-        sheetBinding.sliderContrast.addOnChangeListener(changeListener)
-        sheetBinding.sliderSaturation.addOnChangeListener(changeListener)
-        sheetBinding.sliderHighlights.addOnChangeListener(changeListener)
-        sheetBinding.sliderShadows.addOnChangeListener(changeListener)
-        sheetBinding.sliderWhites.addOnChangeListener(changeListener)
-        sheetBinding.sliderBlacks.addOnChangeListener(changeListener)
-
-        dialog.setOnDismissListener {
-            isIndividualEditMode = false
-            activeAdjustmentBinding = null
-            updateSelectionFeedback()
-            applyEditPreview()
-        }
-        dialog.show()
+        enterEditMode()
     }
 
-    private fun updateSlidersInSheet(sheetBinding: top.maary.darkbag.databinding.BottomSheetEditAdjustmentsBinding) {
+    private fun enterEditMode() {
+        if (!isUiVisible) showUi()
+        if (isEditingAdjustments) return
+        isEditingAdjustments = true
+        configBeforeEditing = currentEditConfig?.copy()
+
+        binding.imagePager.isUserInputEnabled = false
+        adapter.setFormatSwitcherPersistentHidden(true)
+
+        updateSplitButtons()
+        updateToolbarIcon()
+        updateViewportPadding()
+
+        // Hide standard controls
+        binding.bottomLeftControls.visibility = View.GONE
+        binding.bottomRightControls.visibility = View.GONE
+
+        // Show edit panel with animation
+        binding.editAdjustmentPanel.visibility = View.VISIBLE
+        binding.editAdjustmentPanel.alpha = 0f
+
+        val isLandscape = resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+        if (isLandscape) {
+            binding.editAdjustmentPanel.translationX = 100f
+            binding.editAdjustmentPanel.translationY = 0f
+        } else {
+            binding.editAdjustmentPanel.translationX = 0f
+            binding.editAdjustmentPanel.translationY = 100f
+        }
+
+        binding.editAdjustmentPanel.animate()
+            .alpha(1f)
+            .translationX(0f)
+            .translationY(0f)
+            .setDuration(300)
+            .start()
+
+        // Wait for layout to ensure height is calculated for viewport padding
+        binding.editAdjustmentPanel.post {
+            updateViewportPadding()
+        }
+
+        val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
+        if (currentGroup.isHalfFrame()) {
+            binding.groupFrameSelectionIntegrated.visibility = View.VISIBLE
+            binding.groupFrameSelectionIntegrated.check(if (selectedDngIndex == 0) R.id.btn_select_frame1_integrated else R.id.btn_select_frame2_integrated)
+        } else {
+            binding.groupFrameSelectionIntegrated.visibility = View.GONE
+        }
+
+        updateSlidersInPanel()
+        updateSelectionFeedback()
+        updateBackPressedCallbackState()
+    }
+
+    private fun exitEditMode(apply: Boolean) {
+        if (!isEditingAdjustments) return
+        isEditingAdjustments = false
+
+        if (!apply) {
+            currentEditConfig = configBeforeEditing?.copy()
+            applyEditPreview()
+        }
+
+        binding.imagePager.isUserInputEnabled = !isAdjusted
+
+        updateViewportPadding()
+
+        val isLandscape = resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+        val anim = binding.editAdjustmentPanel.animate()
+            .alpha(0f)
+            .setDuration(200)
+            .withEndAction {
+                binding.editAdjustmentPanel.visibility = View.GONE
+                updateControlsVisibility()
+            }
+
+        if (isLandscape) {
+            anim.translationX(100f)
+        } else {
+            anim.translationY(100f)
+        }
+        anim.start()
+
+        updateSelectionFeedback()
+        updateBackPressedCallbackState()
+    }
+
+    private fun updateSlidersInPanel() {
         val config = currentEditConfig ?: return
         val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
+        val tabPos = binding.editTabs.selectedTabPosition
 
         val target = if (currentGroup.isHalfFrame()) {
             config.adjustments?.getOrNull(selectedDngIndex) ?: top.maary.darkbag.models.BasicAdjustments()
         } else {
-            top.maary.darkbag.models.BasicAdjustments(
-                exposure = config.exposure,
-                contrast = config.contrast,
-                saturation = config.saturation,
-                highlights = config.highlights,
-                shadows = config.shadows,
-                whites = config.whites,
-                blacks = config.blacks
-            )
+            config.toBasic()
         }
-        sheetBinding.sliderExposure.value = target.exposure
-        sheetBinding.tvExposureValue.text = String.format("%.2f EV", target.exposure)
-        sheetBinding.sliderContrast.value = target.contrast
-        sheetBinding.sliderSaturation.value = target.saturation
-        sheetBinding.sliderHighlights.value = target.highlights
-        sheetBinding.sliderShadows.value = target.shadows
-        sheetBinding.sliderWhites.value = target.whites
-        sheetBinding.sliderBlacks.value = target.blacks
+
+        when (tabPos) {
+            0 -> { // Light
+                binding.tvLabel1.text = "Exposure"
+                binding.slider1.valueFrom = EXPOSURE_MIN
+                binding.slider1.valueTo = EXPOSURE_MAX
+                binding.slider1.value = target.exposure.coerceIn(EXPOSURE_MIN, EXPOSURE_MAX)
+                binding.tvValue1.text = String.format("%.2f EV", target.exposure)
+
+                binding.layoutSlider2.visibility = View.VISIBLE
+                binding.tvLabel2.text = "Contrast"
+                binding.slider2.valueFrom = ADJUSTMENT_MIN
+                binding.slider2.valueTo = ADJUSTMENT_MAX
+                binding.slider2.value = target.contrast.coerceIn(ADJUSTMENT_MIN, ADJUSTMENT_MAX)
+                binding.tvValue2.text = String.format("%.2f", target.contrast)
+            }
+            1 -> { // Range
+                binding.tvLabel1.text = "Highlights"
+                binding.slider1.valueFrom = ADJUSTMENT_MIN
+                binding.slider1.valueTo = ADJUSTMENT_MAX
+                binding.slider1.value = target.highlights.coerceIn(ADJUSTMENT_MIN, ADJUSTMENT_MAX)
+                binding.tvValue1.text = String.format("%.2f", target.highlights)
+
+                binding.layoutSlider2.visibility = View.VISIBLE
+                binding.tvLabel2.text = "Shadows"
+                binding.slider2.valueFrom = ADJUSTMENT_MIN
+                binding.slider2.valueTo = ADJUSTMENT_MAX
+                binding.slider2.value = target.shadows.coerceIn(ADJUSTMENT_MIN, ADJUSTMENT_MAX)
+                binding.tvValue2.text = String.format("%.2f", target.shadows)
+            }
+            2 -> { // Tone
+                binding.tvLabel1.text = "Whites"
+                binding.slider1.valueFrom = ADJUSTMENT_MIN
+                binding.slider1.valueTo = ADJUSTMENT_MAX
+                binding.slider1.value = target.whites.coerceIn(ADJUSTMENT_MIN, ADJUSTMENT_MAX)
+                binding.tvValue1.text = String.format("%.2f", target.whites)
+
+                binding.layoutSlider2.visibility = View.VISIBLE
+                binding.tvLabel2.text = "Blacks"
+                binding.slider2.valueFrom = ADJUSTMENT_MIN
+                binding.slider2.valueTo = ADJUSTMENT_MAX
+                binding.slider2.value = target.blacks.coerceIn(ADJUSTMENT_MIN, ADJUSTMENT_MAX)
+                binding.tvValue2.text = String.format("%.2f", target.blacks)
+            }
+            3 -> { // Color
+                binding.tvLabel1.text = "Saturation"
+                binding.slider1.valueFrom = ADJUSTMENT_MIN
+                binding.slider1.valueTo = ADJUSTMENT_MAX
+                binding.slider1.value = target.saturation.coerceIn(ADJUSTMENT_MIN, ADJUSTMENT_MAX)
+                binding.tvValue1.text = String.format("%.2f", target.saturation)
+
+                binding.layoutSlider2.visibility = View.GONE
+            }
+        }
     }
 
     private fun applyEditPreview() {
@@ -829,17 +1010,21 @@ class ImageViewerFragment : Fragment() {
         val dngUri1 = currentGroup.dngUri ?: currentGroup.dngUri1 ?: return
         val dngUri2 = currentGroup.dngUri2
 
-        activeAdjustmentBinding?.editPreviewLoading?.visibility = View.VISIBLE
         val currentIndex = binding.imagePager.currentItem
         val currentHolder = (binding.imagePager.getChildAt(0) as? androidx.recyclerview.widget.RecyclerView)
             ?.findViewHolderForAdapterPosition(currentIndex) as? ImageViewerAdapter.ViewHolder
-        currentHolder?.binding?.loadingIndicator?.visibility = View.VISIBLE
+
+        if (isEditingAdjustments) {
+            binding.initialLoadingIndicator.visibility = View.VISIBLE
+        } else {
+            currentHolder?.binding?.loadingIndicator?.visibility = View.VISIBLE
+        }
         currentHolder?.binding?.imageView?.invalidateOutline()
 
         previewJob?.cancel()
         previewJob = lifecycleScope.launch {
             delay(150)
-            val isIndividual = isIndividualEditMode && currentGroup.isHalfFrame()
+            val isIndividual = isEditingAdjustments && currentGroup.isHalfFrame()
 
             var compositeBitmap: android.graphics.Bitmap? = null
             var selectedFrameBitmap: android.graphics.Bitmap? = null
@@ -960,6 +1145,9 @@ class ImageViewerFragment : Fragment() {
                                 time2 = currentGroup.captureTime,
                                 flareType = config.flareType
                             )
+                            if (compositeBitmap != composite) {
+                                composite.recycle()
+                            }
 
                             if (isIndividual) {
                                 selectedFrameBitmap = if (selectedDngIndex == 0) {
@@ -983,8 +1171,9 @@ class ImageViewerFragment : Fragment() {
 
             if (compositeBitmap != null) {
                 if (lastCompositeBitmap != compositeBitmap) {
-                    lastCompositeBitmap?.recycle()
+                    val old = lastCompositeBitmap
                     lastCompositeBitmap = compositeBitmap
+                    old?.recycle()
                 }
                 if (isLongPressing) return@launch
 
@@ -996,15 +1185,10 @@ class ImageViewerFragment : Fragment() {
                 holder?.binding?.loadingIndicator?.visibility = View.GONE
             }
 
-            if (isIndividual && selectedFrameBitmap != null) {
-                activeAdjustmentBinding?.editPreviewImage?.setImageBitmap(selectedFrameBitmap)
-            } else if (compositeBitmap != null) {
-                activeAdjustmentBinding?.editPreviewImage?.setImageBitmap(compositeBitmap)
-            }
-            activeAdjustmentBinding?.editPreviewLoading?.visibility = View.GONE
             val finalHolder = (binding.imagePager.getChildAt(0) as? androidx.recyclerview.widget.RecyclerView)
                 ?.findViewHolderForAdapterPosition(currentIndex) as? ImageViewerAdapter.ViewHolder
             finalHolder?.binding?.loadingIndicator?.visibility = View.GONE
+            binding.initialLoadingIndicator.visibility = View.GONE
         }
     }
 
@@ -1111,6 +1295,9 @@ class ImageViewerFragment : Fragment() {
                                 time2 = currentGroup.captureTime,
                                 flareType = config.flareType
                             )
+                            if (finalComposite != composite) {
+                                composite.recycle()
+                            }
                             b1?.recycle()
                             b2?.recycle()
                             finalComposite
@@ -1415,6 +1602,8 @@ class ImageViewerFragment : Fragment() {
                 binding.lutListContainer.visibility = View.GONE
                 binding.touchOverlay.visibility = View.GONE
                 updateBackPressedCallbackState()
+            } else if (isEditingAdjustments) {
+                exitEditMode(apply = false)
             } else if (isAdjusted) {
                 showDiscardChangesDialog()
             } else {
@@ -1424,6 +1613,7 @@ class ImageViewerFragment : Fragment() {
     }
 
     private fun toggleUi() {
+        if (isEditingAdjustments) return
         if (isUiVisible) hideUi() else showUi()
     }
 
@@ -1432,16 +1622,15 @@ class ImageViewerFragment : Fragment() {
         isUiVisible = true
 
         binding.topBarContainer.visibility = View.VISIBLE
-        binding.splitShare.visibility = if (isAdjusted) View.GONE else View.VISIBLE
-        binding.splitSave.visibility = if (isAdjusted) View.VISIBLE else View.GONE
-        binding.bottomLeftControls.visibility = View.VISIBLE
-        binding.bottomRightControls.visibility = View.VISIBLE
+        updateSplitButtons()
+        updateControlsVisibility()
 
         adapter.setUiVisibility(true)
 
         binding.topBarContainer.animate().translationY(0f).alpha(1f).setDuration(200).setListener(null).start()
         binding.bottomLeftControls.animate().translationY(0f).alpha(1f).setDuration(200).setListener(null).start()
         binding.bottomRightControls.animate().translationY(0f).alpha(1f).setDuration(200).setListener(null).start()
+        updateViewportPadding()
     }
 
     private fun hideUi() {
@@ -1459,12 +1648,25 @@ class ImageViewerFragment : Fragment() {
             .withEndAction { binding.bottomLeftControls.visibility = View.GONE }.start()
         binding.bottomRightControls.animate().translationY(bottomShift).alpha(0f).setDuration(200)
             .withEndAction { binding.bottomRightControls.visibility = View.GONE }.start()
+        updateViewportPadding()
     }
 
     private fun setupEdgeToEdge() {
         val marginMedium = resources.getDimensionPixelSize(R.dimen.margin_medium)
+
+        binding.topBarContainer.addOnLayoutChangeListener { _, _, top, _, bottom, _, _, _, _ ->
+            val newHeight = bottom - top
+            if (newHeight > 0 && newHeight != topBarHeight) {
+                topBarHeight = newHeight
+                updateViewportPadding()
+            }
+        }
+
         ViewCompat.setOnApplyWindowInsetsListener(binding.viewerRoot) { v, insets ->
             val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            systemTopInset = systemBars.top
+            systemBottomInset = systemBars.bottom
+            updateViewportPadding()
 
             binding.topBarContainer.updateLayoutParams<ViewGroup.MarginLayoutParams> {
                 topMargin = systemBars.top
@@ -1486,15 +1688,86 @@ class ImageViewerFragment : Fragment() {
                 bottomMargin = systemBars.bottom + marginMedium
                 rightMargin = systemBars.right + marginMedium
             }
+
+            val isLandscape = resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+            binding.editAdjustmentPanel.setPadding(
+                0, 0,
+                if (isLandscape) systemBars.right else 0,
+                if (isLandscape) 0 else systemBars.bottom
+            )
+
             insets
         }
     }
 
+    private fun updateViewportPadding() {
+        val isLandscape = resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+
+        val topPadding: Int
+        val bottomPadding: Int
+
+        if (isEditingAdjustments) {
+            topPadding = systemTopInset + topBarHeight
+            if (isLandscape) {
+                bottomPadding = topPadding
+            } else {
+                // In portrait edit mode, clear the adjustment panel (including its card margins and system insets)
+                bottomPadding = binding.editAdjustmentPanel.height
+            }
+        } else if (isUiVisible) {
+            topPadding = systemTopInset + topBarHeight
+            bottomPadding = topPadding // SYMMETRIC CENTERING
+        } else {
+            topPadding = 0
+            bottomPadding = 0
+        }
+
+        android.transition.TransitionManager.beginDelayedTransition(binding.viewerRoot, android.transition.AutoTransition().apply {
+            duration = 200
+            addTarget(binding.imagePager)
+        })
+        binding.imagePager.setPadding(0, topPadding, 0, bottomPadding)
+
+        // Ensure half-frame masks match the visible viewport
+        val currentGroup = if (::adapter.isInitialized && adapter.itemCount > 0) adapter.getGroup(binding.imagePager.currentItem) else null
+        val isTB = currentGroup?.hfLayout == "TB"
+
+        val lp1 = binding.hfSelection1.layoutParams as ViewGroup.MarginLayoutParams
+        val lp2 = binding.hfSelection2.layoutParams as ViewGroup.MarginLayoutParams
+        val lpDiv = binding.hfSelectionDivider.layoutParams as ViewGroup.MarginLayoutParams
+        val lpProgress = binding.initialLoadingIndicator.layoutParams as ViewGroup.MarginLayoutParams
+
+        lp1.topMargin = topPadding
+        lp1.bottomMargin = if (isTB) 0 else bottomPadding
+        lp1.leftMargin = 0
+        lp1.rightMargin = 0
+
+        lp2.topMargin = if (isTB) 0 else topPadding
+        lp2.bottomMargin = bottomPadding
+        lp2.leftMargin = 0
+        lp2.rightMargin = 0
+
+        lpDiv.topMargin = topPadding
+        lpDiv.bottomMargin = bottomPadding
+
+        lpProgress.topMargin = topPadding
+        lpProgress.bottomMargin = bottomPadding
+
+        binding.hfSelection1.layoutParams = lp1
+        binding.hfSelection2.layoutParams = lp2
+        binding.hfSelectionDivider.layoutParams = lpDiv
+        binding.initialLoadingIndicator.layoutParams = lpProgress
+    }
+
     private fun updateBackPressedCallbackState() {
-        backPressedCallback.isEnabled = isAdjusted || binding.lutListContainer.visibility == View.VISIBLE
+        backPressedCallback.isEnabled = isAdjusted || isEditingAdjustments || binding.lutListContainer.visibility == View.VISIBLE
     }
 
     private fun showDiscardChangesDialog() {
+        if (isEditingAdjustments) {
+            exitEditMode(apply = false)
+            return
+        }
         com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
             .setTitle(R.string.discard_changes_title)
             .setMessage(R.string.discard_changes_message)
@@ -1535,5 +1808,10 @@ class ImageViewerFragment : Fragment() {
         private const val MENU_DETAILS = 1
         private const val MENU_DELETE = 2
         private const val MENU_SAVE_AS = 3
+
+        private const val EXPOSURE_MIN = -4f
+        private const val EXPOSURE_MAX = 4f
+        private const val ADJUSTMENT_MIN = -1f
+        private const val ADJUSTMENT_MAX = 1f
     }
 }

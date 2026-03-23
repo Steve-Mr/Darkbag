@@ -3,6 +3,7 @@
 
 #include <vector>
 #include <string>
+#include <cstdint>
 #include <fstream>
 #include <sstream>
 #include <cmath>
@@ -58,6 +59,8 @@ bool process_and_save_image(
     const float* wb = nullptr,
     int orientation = 0,
     unsigned char* out_rgb_buffer = nullptr,
+    int out_width = 0,
+    int out_height = 0,
     bool isPreview = false,
     int downsampleFactor = 1,
     float zoomFactor = 1.0f,
@@ -65,10 +68,25 @@ bool process_and_save_image(
 );
 
 // --- File Writers ---
-bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, int iso, long exposureTime, float fNumber, float focalLength, long captureTimeMillis, const std::vector<float>& ccm, int orientation, bool mirror = false, float baselineExposure = 0.0f);
+struct ImageMetadata {
+    int iso = 0;
+    int64_t exposureTime = 0;
+    float fNumber = 0.0f;
+    float focalLength = 0.0f;
+    int64_t captureTimeMillis = 0;
+    std::string make;
+    std::string model;
+    std::string uniqueCameraModel;
+    std::string software;
+    std::string imageDescription;
+};
+
+bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, const std::vector<float>& ccm, const ImageMetadata& metadata, int orientation, bool mirror = false, float baselineExposure = 0.0f);
 
 bool write_bmp(const char* filename, int width, int height, const std::vector<unsigned short>& data);
 
 bool write_jpeg(const char* filename, int width, int height, const std::vector<unsigned short>& data, int quality);
+
+int compute_preview_downsample_factor(int width, int height, int targetLongEdge);
 
 #endif // COLOR_PIPE_H

@@ -10,6 +10,9 @@ data class CaptureMetadata(
     val fNumber: Float? = null,
     val focalLength: Float? = null,
     val dateTimeOriginal: Long? = null,
-    val make: String? = "Google",
-    val model: String? = "HDR+ Device"
+    val make: String? = null,
+    val model: String? = null,
+    val uniqueCameraModel: String? = null,
+    val software: String? = null,
+    val imageDescription: String? = null
 ) : Parcelable

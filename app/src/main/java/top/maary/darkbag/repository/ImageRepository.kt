@@ -13,6 +13,7 @@ import org.json.JSONObject
 import top.maary.darkbag.fragments.SettingsFragment
 import top.maary.darkbag.models.EditConfig
 import top.maary.darkbag.models.ImageGroup
+import top.maary.darkbag.utils.DarkbagIdentity
 import java.io.File
 
 class ImageRepository(private val context: Context) {
@@ -66,6 +67,7 @@ class ImageRepository(private val context: Context) {
             val root = DocumentFile.fromTreeUri(context, treeUri)
             root?.listFiles()?.forEach { file ->
                 val name = file.name ?: return@forEach
+                if (!name.startsWith(DarkbagIdentity.FILE_PREFIX, ignoreCase = true)) return@forEach
                 val baseName = getBaseName(name)
                 val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
                 val lastModified = file.lastModified()
@@ -138,6 +140,7 @@ class ImageRepository(private val context: Context) {
             while (cursor.moveToNext()) {
                 val id = cursor.getLong(idColumn)
                 val name = cursor.getString(nameColumn)
+                if (!name.startsWith(DarkbagIdentity.FILE_PREFIX, ignoreCase = true)) continue
                 val date = cursor.getLong(dateColumn) * 1000 // Convert to ms
                 val mime = cursor.getString(mimeColumn)
                 val uri = ContentUris.withAppendedId(collection, id)
@@ -318,6 +321,18 @@ class ImageRepository(private val context: Context) {
             if (time > captureTime) captureTime = time
         }
 
-        fun build() = ImageGroup(baseName, jpgUri, dngUri, dngUri1, dngUri2, hfLayout, width, height, captureTime, editConfig)
+        fun build() = ImageGroup(
+            baseName,
+            jpgUri,
+            dngUri,
+            dngUri1,
+            dngUri2,
+            hfLayout,
+            width,
+            height,
+            captureTime,
+            maxOf(jpgTime, dngTime, dngUri1Time, dngUri2Time),
+            editConfig
+        )
     }
 }

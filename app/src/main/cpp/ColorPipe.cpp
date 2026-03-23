@@ -14,6 +14,7 @@
 #include <future>
 #include <array>
 #include <cstdio>
+#include <cstdint>
 
 // Define missing tags if needed (Standard EXIF tags)
 #ifndef TIFFTAG_EXPOSURETIME
@@ -454,6 +455,7 @@ bool process_and_save_image(
     float highlights, float shadows, float whites, float blacks,
     const char* jpgPath, int sourceColorSpace,
     const float* ccm, const float* wb, int orientation, unsigned char* out_rgb_buffer,
+    int out_width, int out_height,
     bool isPreview, int downsampleFactor, float zoomFactor, bool mirror
 ) {
     LOGD("process_and_save_image: %dx%d, gain=%.2f, log=%d, lut=%d, jpg=%s, preview=%d, ds=%d, zoom=%.2f, mirror=%d",
@@ -592,19 +594,30 @@ bool process_and_save_image(
     }
 
     if (isPreview) {
-        previewRgb8.resize(static_cast<size_t>(finalW_zoomed) * finalH_zoomed * 3);
-        #pragma omp parallel for
-        for (int py = 0; py < finalH_zoomed; py++) {
-            for (int px = 0; px < finalW_zoomed; px++) {
-                int sx, sy;
-                int opx = mirror ? (finalW_zoomed - 1 - px) : px;
-                if (orientation == 90) { sx = py; sy = (finalW_zoomed - 1) - opx; }
-                else if (orientation == 180) { sx = (finalW_zoomed - 1) - opx; sy = (finalH_zoomed - 1) - py; }
-                else if (orientation == 270) { sx = (finalH_zoomed - 1) - py; sy = opx; }
-                else { sx = opx; sy = py; }
+        // If a bitmap buffer is provided, prioritize its dimensions.
+        // This ensures no out-of-bounds writes even if Kotlin and JNI have different size expectations.
+        int renderW = (out_rgb_buffer && out_width > 0) ? out_width : finalW_zoomed;
+        int renderH = (out_rgb_buffer && out_height > 0) ? out_height : finalH_zoomed;
 
-                Vec3 color = process_pixel(cropX + sx * downsampleFactor, cropY + sy * downsampleFactor, nullptr, nullptr, nullptr);
-                size_t outIdx = (static_cast<size_t>(py) * finalW_zoomed + px) * 3;
+        previewRgb8.resize(static_cast<size_t>(renderW) * renderH * 3);
+        #pragma omp parallel for
+        for (int py = 0; py < renderH; py++) {
+            for (int px = 0; px < renderW; px++) {
+                int sx, sy;
+                int opx = mirror ? (renderW - 1 - px) : px;
+
+                // Map back to source pixels using the actual render dimensions
+                // This is safer than using downsampleFactor directly if dimensions mismatch
+                float fx = (float)opx / renderW * (swapDims ? cropH : cropW);
+                float fy = (float)py / renderH * (swapDims ? cropW : cropH);
+
+                if (orientation == 90) { sx = (int)fy; sy = (cropH - 1) - (int)fx; }
+                else if (orientation == 180) { sx = (cropW - 1) - (int)fx; sy = (cropH - 1) - (int)fy; }
+                else if (orientation == 270) { sx = (cropW - 1) - (int)fy; sy = (int)fx; }
+                else { sx = (int)fx; sy = (int)fy; }
+
+                Vec3 color = process_pixel(cropX + sx, cropY + sy, nullptr, nullptr, nullptr);
+                size_t outIdx = (static_cast<size_t>(py) * renderW + px) * 3;
                 unsigned char r8 = (unsigned char)std::max(0.0f, std::min(255.0f, color.r * 255.0f + 0.5f));
                 unsigned char g8 = (unsigned char)std::max(0.0f, std::min(255.0f, color.g * 255.0f + 0.5f));
                 unsigned char b8 = (unsigned char)std::max(0.0f, std::min(255.0f, color.b * 255.0f + 0.5f));
@@ -614,7 +627,7 @@ bool process_and_save_image(
                 previewRgb8[outIdx + 2] = b8;
 
                 if (out_rgb_buffer) {
-                    size_t bIdx = (static_cast<size_t>(py) * finalW_zoomed + px) * 4;
+                    size_t bIdx = (static_cast<size_t>(py) * renderW + px) * 4;
                     out_rgb_buffer[bIdx+0] = r8;
                     out_rgb_buffer[bIdx+1] = g8;
                     out_rgb_buffer[bIdx+2] = b8;
@@ -622,6 +635,9 @@ bool process_and_save_image(
                 }
             }
         }
+        // Update dimensions for JPEG writing if we used bitmap dimensions
+        finalW_zoomed = renderW;
+        finalH_zoomed = renderH;
     } else {
         processedImage.resize(static_cast<size_t>(finalW_zoomed) * finalH_zoomed * 3);
         #pragma omp parallel for
@@ -629,10 +645,14 @@ bool process_and_save_image(
             for (int px = 0; px < finalW_zoomed; px++) {
                 int sx, sy;
                 int opx = mirror ? (finalW_zoomed - 1 - px) : px;
-                if (orientation == 90) { sx = py; sy = (finalW_zoomed - 1) - opx; }
-                else if (orientation == 180) { sx = (finalW_zoomed - 1) - opx; sy = (finalH_zoomed - 1) - py; }
-                else if (orientation == 270) { sx = (finalH_zoomed - 1) - py; sy = opx; }
-                else { sx = opx; sy = py; }
+
+                float fx = (float)opx / finalW_zoomed * (swapDims ? cropH : cropW);
+                float fy = (float)py / finalH_zoomed * (swapDims ? cropW : cropH);
+
+                if (orientation == 90) { sx = (int)fy; sy = (cropH - 1) - (int)fx; }
+                else if (orientation == 180) { sx = (cropW - 1) - (int)fx; sy = (cropH - 1) - (int)fy; }
+                else if (orientation == 270) { sx = (cropW - 1) - (int)fy; sy = (int)fx; }
+                else { sx = (int)fx; sy = (int)fy; }
 
                 Vec3 stageA{}, stageB{}, stageC{};
                 Vec3 color = process_pixel(cropX + sx, cropY + sy,
@@ -670,12 +690,13 @@ bool process_and_save_image(
         }
     }
 
+    const int jpegQuality = isPreview ? 78 : 95;
     bool jpgOk = true;
     if (jpgPath) {
         if (isPreview && !previewRgb8.empty()) {
-            jpgOk = stbi_write_jpg(jpgPath, finalW_zoomed, finalH_zoomed, 3, previewRgb8.data(), 95) != 0;
+            jpgOk = stbi_write_jpg(jpgPath, finalW_zoomed, finalH_zoomed, 3, previewRgb8.data(), jpegQuality) != 0;
         } else {
-            jpgOk = write_jpeg(jpgPath, finalW_zoomed, finalH_zoomed, processedImage, 95);
+            jpgOk = write_jpeg(jpgPath, finalW_zoomed, finalH_zoomed, processedImage, jpegQuality);
         }
         if (!jpgOk) LOGE("write_jpeg/stbi_write_jpg failed for %s", jpgPath);
         else {
@@ -724,7 +745,94 @@ bool write_jpeg(const char* filename, int width, int height, const std::vector<u
     return res != 0;
 }
 
-bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, int iso, long exposureTime, float fNumber, float focalLength, long captureTimeMillis, const std::vector<float>& ccm, int orientation, bool mirror, float baselineExposure) {
+int compute_preview_downsample_factor(int width, int height, int targetLongEdge) {
+    if (width <= 0 || height <= 0 || targetLongEdge <= 0) return 1;
+    const int longEdge = std::max(width, height);
+    return std::max(1, (longEdge + targetLongEdge - 1) / targetLongEdge);
+}
+
+struct JpegBufferContext {
+    std::vector<unsigned char> bytes;
+};
+
+static void write_jpeg_to_memory(void* context, void* data, int size) {
+    if (!context || !data || size <= 0) return;
+    auto* ctx = static_cast<JpegBufferContext*>(context);
+    auto* src = static_cast<unsigned char*>(data);
+    ctx->bytes.insert(ctx->bytes.end(), src, src + size);
+}
+
+static std::vector<unsigned char> encode_rgb8_jpeg(
+    const std::vector<unsigned char>& rgb8,
+    int width,
+    int height,
+    int quality
+) {
+    JpegBufferContext ctx;
+    if (!rgb8.empty() && width > 0 && height > 0) {
+        stbi_write_jpg_to_func(write_jpeg_to_memory, &ctx, width, height, 3, rgb8.data(), quality);
+    }
+    return ctx.bytes;
+}
+
+static std::vector<unsigned char> make_preview_rgb8(
+    const std::vector<unsigned short>& data,
+    int width,
+    int height,
+    int targetLongEdge,
+    int orientation,
+    bool mirror,
+    float gain,
+    int& outWidth,
+    int& outHeight
+) {
+    const int longEdge = std::max(width, height);
+    const int scale = std::max(1, (longEdge + targetLongEdge - 1) / targetLongEdge);
+    const int sampledWidth = std::max(1, width / scale);
+    const int sampledHeight = std::max(1, height / scale);
+    const bool swapDims = (orientation == 90 || orientation == 270);
+    outWidth = swapDims ? sampledHeight : sampledWidth;
+    outHeight = swapDims ? sampledWidth : sampledHeight;
+
+    std::vector<unsigned char> preview(static_cast<size_t>(outWidth) * outHeight * 3);
+    for (int y = 0; y < outHeight; ++y) {
+        for (int x = 0; x < outWidth; ++x) {
+            int sx = x;
+            int sy = y;
+            const int opx = mirror ? (outWidth - 1 - x) : x;
+            if (orientation == 90) {
+                sx = y;
+                sy = (outWidth - 1) - opx;
+            } else if (orientation == 180) {
+                sx = (outWidth - 1) - opx;
+                sy = (outHeight - 1) - y;
+            } else if (orientation == 270) {
+                sx = (outHeight - 1) - y;
+                sy = opx;
+            } else {
+                sx = opx;
+            }
+
+            const int srcX = std::min(width - 1, sx * scale);
+            const int srcY = std::min(height - 1, sy * scale);
+            const size_t srcIdx = (static_cast<size_t>(srcY) * width + srcX) * 3;
+            const size_t dstIdx = (static_cast<size_t>(y) * outWidth + x) * 3;
+
+            auto encodePreviewChannel = [&](unsigned short sample) -> unsigned char {
+                const float linear = std::clamp((sample / 65535.0f) * gain, 0.0f, 1.0f);
+                const float gammaEncoded = std::pow(linear, 1.0f / 2.2f);
+                return (unsigned char)std::clamp(gammaEncoded * 255.0f + 0.5f, 0.0f, 255.0f);
+            };
+
+            preview[dstIdx + 0] = encodePreviewChannel(data[srcIdx + 0]);
+            preview[dstIdx + 1] = encodePreviewChannel(data[srcIdx + 1]);
+            preview[dstIdx + 2] = encodePreviewChannel(data[srcIdx + 2]);
+        }
+    }
+    return preview;
+}
+
+bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, const std::vector<float>& ccm, const ImageMetadata& metadata, int orientation, bool mirror, float baselineExposure) {
     TIFFSetTagExtender(DNGTagExtender);
     TIFF* tif = TIFFOpen(filename, "w");
     if (!tif) return false;
@@ -748,14 +856,12 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
     TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, height);
     TIFFSetField(tif, TIFFTAG_SUBFILETYPE, 0);
 
-    static const char* make = "Google";
-    TIFFSetField(tif, TIFFTAG_MAKE, make);
-    static const char* model = "HDR+ Device";
-    TIFFSetField(tif, TIFFTAG_MODEL, model);
-    static const char* software = "Darkbag HDR+";
-    TIFFSetField(tif, TIFFTAG_SOFTWARE, software);
+    TIFFSetField(tif, TIFFTAG_MAKE, metadata.make.c_str());
+    TIFFSetField(tif, TIFFTAG_MODEL, metadata.model.c_str());
+    TIFFSetField(tif, TIFFTAG_SOFTWARE, metadata.software.c_str());
+    TIFFSetField(tif, TIFFTAG_IMAGEDESCRIPTION, metadata.imageDescription.c_str());
 
-    time_t raw_time = (time_t)(captureTimeMillis / 1000);
+    time_t raw_time = (time_t)(metadata.captureTimeMillis / 1000);
     struct tm * timeinfo = localtime(&raw_time);
     char buffer[20];
     strftime(buffer, 20, "%Y:%m:%d %H:%M:%S", timeinfo);
@@ -766,7 +872,7 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
     TIFFSetField(tif, TIFFTAG_DNGVERSION, dng_version);
     static const uint8_t dng_backward_version[] = {1, 1, 0, 0};
     TIFFSetField(tif, TIFFTAG_DNGBACKWARDVERSION, dng_backward_version);
-    TIFFSetField(tif, TIFFTAG_UNIQUECAMERAMODEL, model);
+    TIFFSetField(tif, TIFFTAG_UNIQUECAMERAMODEL, metadata.uniqueCameraModel.c_str());
 
     uint32_t white_level_val = (uint32_t)whiteLevel;
     if (white_level_val == 0) white_level_val = 65535;
@@ -784,19 +890,80 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
     TIFFSetField(tif, TIFFTAG_ASSHOTNEUTRAL, 3, as_shot_neutral);
 
     TIFFSetField(tif, TIFFTAG_CALIBRATIONILLUMINANT1, 21);
-    float exposureTimeSec = (float)exposureTime / 1000000000.0f;
+    float exposureTimeSec = (float)metadata.exposureTime / 1000000000.0f;
     TIFFSetField(tif, TIFFTAG_EXPOSURETIME, exposureTimeSec);
-    TIFFSetField(tif, TIFFTAG_FNUMBER, fNumber);
-    TIFFSetField(tif, TIFFTAG_FOCALLENGTH, focalLength);
+    TIFFSetField(tif, TIFFTAG_FNUMBER, metadata.fNumber);
+    TIFFSetField(tif, TIFFTAG_FOCALLENGTH, metadata.focalLength);
 
     TIFFSetField(tif, TIFFTAG_BASELINEEXPOSURE, baselineExposure);
 
-    unsigned short iso_short = (unsigned short)iso;
+    unsigned short iso_short = (unsigned short)metadata.iso;
     TIFFSetField(tif, TIFFTAG_ISOSPEEDRATINGS, (uint16_t)1, &iso_short);
 
     if (TIFFWriteEncodedStrip(tif, 0, (void*)data.data(), static_cast<size_t>(width) * height * 3 * sizeof(unsigned short)) < 0) {
         TIFFClose(tif);
         return false;
+    }
+
+    if (!TIFFWriteDirectory(tif)) {
+        TIFFClose(tif);
+        return false;
+    }
+
+    const struct PreviewSpec {
+        int targetLongEdge;
+        const char* description;
+    } previewSpecs[] = {
+        {512, "Darkbag Embedded JPEG Thumbnail"},
+        {2048, "Darkbag Embedded JPEG Preview"},
+    };
+
+    for (const auto& spec : previewSpecs) {
+        int previewWidth = 0;
+        int previewHeight = 0;
+        const float previewGain = baselineExposure != 0.0f ? std::exp2(baselineExposure) : 1.0f;
+        std::vector<unsigned char> previewRgb8 = make_preview_rgb8(
+            data,
+            width,
+            height,
+            spec.targetLongEdge,
+            orientation,
+            mirror,
+            previewGain,
+            previewWidth,
+            previewHeight
+        );
+        std::vector<unsigned char> jpegPreview = encode_rgb8_jpeg(previewRgb8, previewWidth, previewHeight, 82);
+        if (jpegPreview.empty()) {
+            TIFFClose(tif);
+            return false;
+        }
+
+        TIFFSetField(tif, TIFFTAG_SUBFILETYPE, FILETYPE_REDUCEDIMAGE);
+        TIFFSetField(tif, TIFFTAG_IMAGEWIDTH, previewWidth);
+        TIFFSetField(tif, TIFFTAG_IMAGELENGTH, previewHeight);
+        TIFFSetField(tif, TIFFTAG_BITSPERSAMPLE, 8);
+        TIFFSetField(tif, TIFFTAG_COMPRESSION, COMPRESSION_JPEG);
+        TIFFSetField(tif, TIFFTAG_ORIENTATION, ORIENTATION_TOPLEFT);
+        TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_YCBCR);
+        TIFFSetField(tif, TIFFTAG_SAMPLESPERPIXEL, 3);
+        TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG);
+        TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, previewHeight);
+        TIFFSetField(tif, TIFFTAG_JPEGCOLORMODE, JPEGCOLORMODE_RGB);
+        TIFFSetField(tif, TIFFTAG_MAKE, metadata.make.c_str());
+        TIFFSetField(tif, TIFFTAG_MODEL, metadata.model.c_str());
+        TIFFSetField(tif, TIFFTAG_SOFTWARE, metadata.software.c_str());
+        TIFFSetField(tif, TIFFTAG_IMAGEDESCRIPTION, spec.description);
+
+        if (TIFFWriteRawStrip(tif, 0, jpegPreview.data(), static_cast<tmsize_t>(jpegPreview.size())) < 0) {
+            TIFFClose(tif);
+            return false;
+        }
+
+        if (!TIFFWriteDirectory(tif)) {
+            TIFFClose(tif);
+            return false;
+        }
     }
 
     TIFFClose(tif);

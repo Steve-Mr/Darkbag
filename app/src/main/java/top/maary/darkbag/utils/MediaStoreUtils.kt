@@ -65,7 +65,7 @@ class MediaStoreUtils(private val context: Context) {
         val lastUriStr = prefs.getString(SettingsFragment.KEY_LAST_CAPTURE_URI, null)
         if (lastUriStr != null) {
             val lastUri = Uri.parse(lastUriStr)
-            if (verifyUriExists(context, lastUri)) {
+            if (verifyUriExists(context, lastUri) && isDarkbagAssetUri(context, lastUri)) {
                 return lastUri
             }
         }
@@ -107,12 +107,28 @@ class MediaStoreUtils(private val context: Context) {
         }
     }
 
+    private fun isDarkbagAssetUri(context: Context, uri: Uri): Boolean {
+        return try {
+            val name = when (uri.scheme) {
+                "content" -> androidx.documentfile.provider.DocumentFile.fromSingleUri(context, uri)?.name
+                else -> File(uri.path ?: return false).name
+            }
+            name?.startsWith(DarkbagIdentity.FILE_PREFIX, ignoreCase = true) == true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
     private fun getLatestFileInSAF(context: Context, folderUri: String, mimeType: String): Uri? {
         return try {
             val treeUri = Uri.parse(folderUri)
             val root = androidx.documentfile.provider.DocumentFile.fromTreeUri(context, treeUri)
             root?.listFiles()
-                ?.filter { it.type == mimeType || (mimeType == "image/x-adobe-dng" && it.name?.endsWith(".dng", ignoreCase = true) == true) }
+                ?.filter {
+                    val name = it.name ?: return@filter false
+                    name.startsWith(DarkbagIdentity.FILE_PREFIX, ignoreCase = true) &&
+                        (it.type == mimeType || (mimeType == "image/x-adobe-dng" && name.endsWith(".dng", ignoreCase = true)))
+                }
                 ?.maxByOrNull { it.lastModified() }
                 ?.uri
         } catch (e: Exception) {
@@ -133,12 +149,12 @@ class MediaStoreUtils(private val context: Context) {
         val collection = MediaStore.Images.Media.EXTERNAL_CONTENT_URI
         val projection = arrayOf(MediaStore.MediaColumns._ID)
         val selection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ? AND ${MediaStore.MediaColumns.MIME_TYPE} = ?"
+            "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ? AND ${MediaStore.MediaColumns.MIME_TYPE} = ? AND ${MediaStore.MediaColumns.DISPLAY_NAME} LIKE ?"
         } else {
-            "${MediaStore.MediaColumns.DATA} LIKE ? AND ${MediaStore.MediaColumns.MIME_TYPE} = ?"
+            "${MediaStore.MediaColumns.DATA} LIKE ? AND ${MediaStore.MediaColumns.MIME_TYPE} = ? AND ${MediaStore.MediaColumns.DISPLAY_NAME} LIKE ?"
         }
         val pathFilter = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) "Pictures/Darkbag%" else "%Pictures/Darkbag%"
-        val selectionArgs = arrayOf(pathFilter, mimeType)
+        val selectionArgs = arrayOf(pathFilter, mimeType, "${DarkbagIdentity.FILE_PREFIX}%")
         val sortOrder = "${MediaStore.MediaColumns.DATE_ADDED} DESC"
 
         try {
