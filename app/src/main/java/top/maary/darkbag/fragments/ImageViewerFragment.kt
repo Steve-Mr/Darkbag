@@ -23,6 +23,7 @@ import androidx.viewpager2.widget.ViewPager2
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.sync.withLock
 import top.maary.darkbag.R
 import top.maary.darkbag.databinding.BottomSheetImageDetailsBinding
 import top.maary.darkbag.databinding.FragmentImageViewerBinding
@@ -65,6 +66,7 @@ class ImageViewerFragment : Fragment() {
     private var savedScale = 1f
 
     private lateinit var lutManager: top.maary.darkbag.utils.LutManager
+    private val previewMutex = kotlinx.coroutines.sync.Mutex()
     private var previewJob: Job? = null
     private val pageChangeCallback = object : ViewPager2.OnPageChangeCallback() {
         override fun onPageSelected(position: Int) {
@@ -180,14 +182,51 @@ class ImageViewerFragment : Fragment() {
                 )
                 groups.add(0, virtualGroup)
             } else if (targetUri != null && groups.none { it.jpgUri?.toString() == targetUri || it.dngUri?.toString() == targetUri || it.dngUri1?.toString() == targetUri }) {
-                // External single image
+                // External or recently captured image not yet grouped
                 val u = Uri.parse(targetUri)
                 val isDng = targetUri.endsWith(".dng", ignoreCase = true) || context?.contentResolver?.getType(u) == "image/x-adobe-dng"
+
+                val name = repository.resolveFilename(u) ?: u.lastPathSegment ?: "External"
+                val baseName = top.maary.darkbag.utils.ImageUtils.getBaseName(name)
+
+                // Read EXIF to check for half-frame layout and capture time
+                var hfLayout: String? = null
+                var captureTime = System.currentTimeMillis()
+                var editConfig: top.maary.darkbag.models.EditConfig? = null
+
+                try {
+                    requireContext().contentResolver.openFileDescriptor(u, "r")?.use { pfd ->
+                        val exif = androidx.exifinterface.media.ExifInterface(pfd.fileDescriptor)
+                        val comment = exif.getAttribute(androidx.exifinterface.media.ExifInterface.TAG_USER_COMMENT)
+                        editConfig = top.maary.darkbag.utils.ImageUtils.parseUserComment(comment)
+                        hfLayout = editConfig?.hfLayout
+
+                        val dateStr = exif.getAttribute(androidx.exifinterface.media.ExifInterface.TAG_DATETIME_ORIGINAL) ?: exif.getAttribute(androidx.exifinterface.media.ExifInterface.TAG_DATETIME)
+                        if (dateStr != null) {
+                            val sdf = java.text.SimpleDateFormat("yyyy:MM:dd HH:mm:ss", java.util.Locale.US)
+                            captureTime = sdf.parse(dateStr)?.time ?: captureTime
+                        }
+                    }
+                } catch (e: Exception) {}
+
+                // If half-frame, try to find RAW siblings
+                var hf1: Uri? = null
+                var hf2: Uri? = null
+                if (hfLayout != null) {
+                    val siblings = repository.findSiblingsForUri(u, baseName)
+                    hf1 = siblings.first
+                    hf2 = siblings.second
+                }
+
                 val virtualGroup = ImageGroup(
-                    baseName = u.lastPathSegment ?: "External",
+                    baseName = baseName,
                     jpgUri = if (isDng) null else u,
                     dngUri = if (isDng) u else null,
-                    captureTime = System.currentTimeMillis()
+                    dngUri1 = hf1,
+                    dngUri2 = hf2,
+                    hfLayout = hfLayout,
+                    captureTime = captureTime,
+                    editConfig = editConfig
                 )
                 groups.add(0, virtualGroup)
             }
@@ -349,7 +388,11 @@ class ImageViewerFragment : Fragment() {
         // DNG bytes and deep EXIF will be loaded on-demand when entering edit flow
     }
 
-    private suspend fun ensureDngBytesLoaded() {
+    private suspend fun ensureDngBytesLoaded() = previewMutex.withLock {
+        ensureDngBytesLoadedInternal()
+    }
+
+    private suspend fun ensureDngBytesLoadedInternal() {
         if (sourceDngBytes != null) return
         val group = adapter.getGroup(binding.imagePager.currentItem)
         val dngUri1 = group.dngUri ?: group.dngUri1 ?: return
@@ -496,79 +539,86 @@ class ImageViewerFragment : Fragment() {
         }
 
         binding.btnTimestamp.setOnClickListener {
-            lifecycleScope.launch {
-                ensureDngBytesLoaded()
-                val current = currentEditConfig ?: return@launch
-                currentEditConfig = current.copy(showTimestamp = !current.showTimestamp)
-                markAdjusted()
-                updateEffectsButtons()
-                applyEditPreview()
-            }
+            val current = currentEditConfig ?: return@setOnClickListener
+            currentEditConfig = current.copy(showTimestamp = !current.showTimestamp)
+            markAdjusted()
+            updateEffectsButtons()
+            applyEditPreview()
         }
 
         binding.btnFlare.setOnClickListener {
-            lifecycleScope.launch {
-                ensureDngBytesLoaded()
-                val current = currentEditConfig ?: return@launch
-                val nextFlare = when (current.flareType) {
-                    -1 -> 1
-                    1 -> 2
-                    2 -> -1
-                    else -> 1
-                }
-                currentEditConfig = current.copy(flareType = nextFlare)
-                markAdjusted()
-                updateEffectsButtons()
-                applyEditPreview()
+            val current = currentEditConfig ?: return@setOnClickListener
+            val nextFlare = when (current.flareType) {
+                -1 -> 1
+                1 -> 2
+                2 -> -1
+                else -> 1
             }
+            currentEditConfig = current.copy(flareType = nextFlare)
+            markAdjusted()
+            updateEffectsButtons()
+            applyEditPreview()
         }
 
         binding.btnSwapFrames.setOnClickListener {
             val group = adapter.getGroup(binding.imagePager.currentItem)
             if (!group.isHalfFrame()) return@setOnClickListener
 
-            lifecycleScope.launch {
-                ensureDngBytesLoaded()
-                val current = currentEditConfig ?: return@launch
+            previewJob?.cancel()
+            previewJob = lifecycleScope.launch {
+                showProgress(true)
+                previewMutex.withLock {
+                    ensureDngBytesLoadedInternal()
+                    val current = currentEditConfig ?: return@withLock
 
-                // Swap bytes and cached bitmaps
-                val tempBytes = sourceDngBytes
-                sourceDngBytes = sourceDngBytes2
-                sourceDngBytes2 = tempBytes
+                    // Swap bytes and cached bitmaps
+                    val tempBytes = sourceDngBytes
+                    sourceDngBytes = sourceDngBytes2
+                    sourceDngBytes2 = tempBytes
 
-                val tempBitmap = cachedBitmap1
-                cachedBitmap1 = cachedBitmap2
-                cachedBitmap2 = tempBitmap
+                    val tempBitmap = cachedBitmap1
+                    cachedBitmap1 = cachedBitmap2
+                    cachedBitmap2 = tempBitmap
 
-                // Swap adjustments in config
-                val adjs = current.adjustments?.toMutableList() ?: mutableListOf(top.maary.darkbag.models.BasicAdjustments(), top.maary.darkbag.models.BasicAdjustments())
-                if (adjs.size >= 2) {
-                    val tempAdj = adjs[0]
-                    adjs[0] = adjs[1]
-                    adjs[1] = tempAdj
+                    // Swap adjustments in config
+                    val adjs = current.adjustments?.toMutableList() ?: mutableListOf(top.maary.darkbag.models.BasicAdjustments(), top.maary.darkbag.models.BasicAdjustments())
+                    if (adjs.size >= 2) {
+                        val tempAdj = adjs[0]
+                        adjs[0] = adjs[1]
+                        adjs[1] = tempAdj
+                    }
+
+                    // Swap URIs and Timestamps in ImageGroup
+                    val updatedGroup = group.copy(
+                        dngUri1 = group.dngUri2,
+                        dngUri2 = group.dngUri1,
+                        captureTime1 = group.captureTime2,
+                        captureTime2 = group.captureTime1
+                    )
+
+                    currentEditConfig = current.copy(adjustments = adjs)
+                    adapter.updateGroupAt(binding.imagePager.currentItem, updatedGroup)
+
+                    markAdjusted()
+                    try {
+                        applyEditPreviewInternal(currentEditConfig!!)
+                    } finally {
+                        updateSlidersInPanel()
+                        showProgress(false)
+                    }
                 }
-
-                // Swap URIs and Timestamps in ImageGroup
-                val updatedGroup = group.copy(
-                    dngUri1 = group.dngUri2,
-                    dngUri2 = group.dngUri1,
-                    captureTime1 = group.captureTime2,
-                    captureTime2 = group.captureTime1
-                )
-
-                currentEditConfig = current.copy(adjustments = adjs)
-                adapter.updateGroupAt(binding.imagePager.currentItem, updatedGroup)
-
-                markAdjusted()
-                applyEditPreview()
-                updateSlidersInPanel()
             }
         }
 
         binding.fabAdjust.setOnClickListener {
             showAdjustmentsBottomSheet()
             lifecycleScope.launch {
-                ensureDngBytesLoaded()
+                showProgress(true)
+                try {
+                    ensureDngBytesLoaded()
+                } finally {
+                    showProgress(false)
+                }
             }
         }
 
@@ -1066,9 +1116,12 @@ class ImageViewerFragment : Fragment() {
 
     private fun applyEditPreview() {
         val config = currentEditConfig ?: return
-        lifecycleScope.launch {
-            ensureDngBytesLoaded()
-            applyEditPreviewInternal(config)
+        previewJob?.cancel()
+        previewJob = lifecycleScope.launch {
+            delay(150)
+            previewMutex.withLock {
+                applyEditPreviewInternal(config)
+            }
         }
     }
 
@@ -1114,33 +1167,45 @@ class ImageViewerFragment : Fragment() {
         imageView.restoreZoomState(savedMatrix, savedScale)
     }
 
-    private fun applyEditPreviewInternal(config: top.maary.darkbag.models.EditConfig) {
-        val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
-        val dngUri1 = currentGroup.dngUri ?: currentGroup.dngUri1 ?: return
-        val dngUri2 = currentGroup.dngUri2
-
+    private fun showProgress(visible: Boolean) {
         val currentIndex = binding.imagePager.currentItem
         val currentHolder = (binding.imagePager.getChildAt(0) as? androidx.recyclerview.widget.RecyclerView)
             ?.findViewHolderForAdapterPosition(currentIndex) as? ImageViewerAdapter.ViewHolder
 
-        if (isEditingAdjustments) {
-            binding.initialLoadingIndicator.visibility = View.VISIBLE
+        if (visible) {
+            if (isEditingAdjustments) {
+                binding.initialLoadingIndicator.visibility = View.VISIBLE
+            } else {
+                currentHolder?.binding?.loadingIndicator?.visibility = View.VISIBLE
+            }
         } else {
-            currentHolder?.binding?.loadingIndicator?.visibility = View.VISIBLE
+            binding.initialLoadingIndicator.visibility = View.GONE
+            currentHolder?.binding?.loadingIndicator?.visibility = View.GONE
         }
+    }
+
+    private suspend fun applyEditPreviewInternal(config: top.maary.darkbag.models.EditConfig) = coroutineScope {
+        val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
+        val dngUri1 = currentGroup.dngUri ?: currentGroup.dngUri1 ?: return@coroutineScope
+        val dngUri2 = currentGroup.dngUri2
+
+        showProgress(true)
+        val currentIndex = binding.imagePager.currentItem
+        val currentHolder = (binding.imagePager.getChildAt(0) as? androidx.recyclerview.widget.RecyclerView)
+            ?.findViewHolderForAdapterPosition(currentIndex) as? ImageViewerAdapter.ViewHolder
         currentHolder?.binding?.imageView?.invalidateOutline()
 
-        previewJob?.cancel()
-        previewJob = lifecycleScope.launch {
-            delay(150)
+        try {
+            ensureDngBytesLoadedInternal()
+            ensureActive()
             val isIndividual = isEditingAdjustments && currentGroup.isHalfFrame()
 
-            var compositeBitmap: android.graphics.Bitmap? = null
-            var selectedFrameBitmap: android.graphics.Bitmap? = null
+                var compositeBitmap: android.graphics.Bitmap? = null
+                var selectedFrameBitmap: android.graphics.Bitmap? = null
 
-            withContext(Dispatchers.IO) {
-                try {
-                    val context = requireContext()
+                withContext(Dispatchers.IO) {
+                    try {
+                        val context = requireContext()
                     val logIndex = SettingsFragment.LOG_CURVES.indexOf(config.log)
                     val lutPath = if (config.lut != null && config.lut != "None") {
                         java.io.File(lutManager.lutDir, config.lut).absolutePath
@@ -1189,6 +1254,7 @@ class ImageViewerFragment : Fragment() {
 
                         val adj = if (currentGroup.isHalfFrame()) config.adjustments?.get(index) ?: top.maary.darkbag.models.BasicAdjustments() else config.toBasic()
 
+                        ensureActive()
                         top.maary.darkbag.processor.ColorProcessor.processRaw(
                             dngData = finalBytes,
                             targetLog = logIndex,
@@ -1256,6 +1322,7 @@ class ImageViewerFragment : Fragment() {
                                 else canvas.drawBitmap(it, 0f, h1 + gap, null)
                             }
 
+                            coroutineContext.ensureActive()
                             compositeBitmap = top.maary.darkbag.utils.HalfFrameUtils.addEffects(
                                 composite,
                                 config.showTimestamp,
@@ -1268,6 +1335,7 @@ class ImageViewerFragment : Fragment() {
                             if (compositeBitmap != composite) {
                                 composite.recycle()
                             }
+                            ensureActive()
 
                             if (isIndividual) {
                                 selectedFrameBitmap = if (selectedDngIndex == 0) {
@@ -1289,26 +1357,23 @@ class ImageViewerFragment : Fragment() {
                 }
             }
 
-            if (compositeBitmap != null) {
-                if (lastCompositeBitmap != compositeBitmap) {
-                    val old = lastCompositeBitmap
-                    lastCompositeBitmap = compositeBitmap
-                    old?.recycle()
+                if (compositeBitmap != null) {
+                ensureActive()
+                    if (lastCompositeBitmap != compositeBitmap) {
+                        val old = lastCompositeBitmap
+                        lastCompositeBitmap = compositeBitmap
+                        old?.recycle()
+                    }
+                    if (isLongPressing) return@coroutineScope
+
+                    val pos = binding.imagePager.currentItem
+                    adapter.cancelLoadJob(pos)
+                    val holder = (binding.imagePager.getChildAt(0) as? androidx.recyclerview.widget.RecyclerView)
+                        ?.findViewHolderForAdapterPosition(pos) as? ImageViewerAdapter.ViewHolder
+                    holder?.binding?.imageView?.setImageBitmap(compositeBitmap)
                 }
-                if (isLongPressing) return@launch
-
-                val currentIndex = binding.imagePager.currentItem
-                adapter.cancelLoadJob(currentIndex)
-                val holder = (binding.imagePager.getChildAt(0) as? androidx.recyclerview.widget.RecyclerView)
-                    ?.findViewHolderForAdapterPosition(currentIndex) as? ImageViewerAdapter.ViewHolder
-                holder?.binding?.imageView?.setImageBitmap(compositeBitmap)
-                holder?.binding?.loadingIndicator?.visibility = View.GONE
-            }
-
-            val finalHolder = (binding.imagePager.getChildAt(0) as? androidx.recyclerview.widget.RecyclerView)
-                ?.findViewHolderForAdapterPosition(currentIndex) as? ImageViewerAdapter.ViewHolder
-            finalHolder?.binding?.loadingIndicator?.visibility = View.GONE
-            binding.initialLoadingIndicator.visibility = View.GONE
+        } finally {
+            showProgress(false)
         }
     }
 
