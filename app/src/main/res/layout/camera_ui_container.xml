@@ -115,11 +115,11 @@
 
             <!-- Tabs -->
             <com.google.android.material.button.MaterialButtonToggleGroup
-            app:strokeColor="@null"
                 android:id="@+id/manual_tabs"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:gravity="center"
+                app:strokeColor="@null"
                 app:selectionRequired="false"
                 app:singleSelection="true">
 

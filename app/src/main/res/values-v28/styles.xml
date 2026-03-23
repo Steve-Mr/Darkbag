@@ -11,7 +11,7 @@
         <!-- Typography -->
         <item name="android:fontFamily">sans-serif-medium</item>
 
-        <!-- Fallbacks for Material3 attributes that might fail to resolve on some devices (Android 15+) -->
+        <!-- Fallbacks for Material3 attributes (Android 15 compatibility) -->
         <item name="colorSurfaceContainer">?attr/colorSurface</item>
         <item name="colorSurfaceContainerLow">?attr/colorSurface</item>
         <item name="colorSurfaceContainerHigh">?attr/colorSurface</item>
@@ -23,12 +23,10 @@
         <item name="materialCardViewStyle">@style/Widget.App.CardView</item>
         <item name="shapeableImageViewStyle">@style/Widget.App.ShapeableImageView</item>
 
-        <!-- Also override specific button styles that might bypass the generic materialButtonStyle -->
+        <!-- Button variants -->
         <item name="materialButtonOutlinedStyle">@style/Widget.App.Button.Outlined</item>
         <item name="materialButtonTonalStyle">@style/Widget.App.Button.Tonal</item>
         <item name="materialButtonTextStyle">@style/Widget.App.Button.Text</item>
-        <item name="floatingActionButtonStyle">@style/Widget.App.FloatingActionButton</item>
-        <item name="extendedFloatingActionButtonStyle">@style/Widget.App.ExtendedFloatingActionButton</item>
     </style>
 
 </resources>

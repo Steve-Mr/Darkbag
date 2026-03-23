@@ -27,7 +27,6 @@
 
     <!-- Vertical Format Switcher (M3 Glassmorphism Style) -->
     <com.google.android.material.button.MaterialButtonGroup
-            app:strokeColor="@null"
         android:id="@+id/formatToggleGroup"
         style="@style/Widget.Material3.MaterialButtonGroup.Connected"
         android:layout_width="wrap_content"
@@ -39,7 +38,6 @@
         app:layout_constraintTop_toTopOf="parent">
 
         <com.google.android.material.button.MaterialButton
-            app:strokeColor="@null"
             android:id="@+id/btnJpg"
             style="@style/Widget.Material3.Button.TonalButton"
             android:layout_width="56dp"
@@ -53,7 +51,6 @@
 
 
         <com.google.android.material.button.MaterialButton
-            app:strokeColor="@null"
             android:id="@+id/btnDng"
             style="@style/Widget.Material3.Button.TonalButton"
             android:layout_width="56dp"

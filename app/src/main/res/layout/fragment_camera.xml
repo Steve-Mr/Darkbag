@@ -30,7 +30,6 @@
         android:layout_marginHorizontal="@dimen/margin_medium"
         app:cardCornerRadius="@dimen/radius_medium"
         app:cardBackgroundColor="@android:color/system_surface_container_dark"
-        app:strokeColor="@null"
         app:strokeWidth="0dp"
         app:cardElevation="0dp"
         app:cardPreventCornerOverlap="false"
@@ -140,7 +139,6 @@
                     android:layout_marginEnd="@dimen/spacing_small"
                     app:icon="@drawable/ic_switch"
                     app:iconTint="?attr/colorOnSurface"
-                    app:strokeColor="@null"
                     android:backgroundTint="?attr/colorSurfaceContainerHighest"
                     android:contentDescription="@string/switch_camera_button_alt" />
 
@@ -152,7 +150,6 @@
                     android:layout_marginEnd="@dimen/spacing_small"
                     app:icon="@drawable/ic_mode_normal"
                     app:iconTint="?attr/colorOnSurface"
-                    app:strokeColor="@null"
                     android:backgroundTint="?attr/colorSurfaceContainerHighest"
                     android:contentDescription="Switch Capture Mode" />
 
@@ -162,7 +159,6 @@
                     android:layout_height="wrap_content"
                     app:cardCornerRadius="26dp"
                     app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
-                    app:strokeColor="@null"
                     app:strokeWidth="0dp"
                     android:visibility="gone">
 

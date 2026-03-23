@@ -28,7 +28,6 @@
 
         <!-- Basic Info Section -->
         <com.google.android.material.card.MaterialCardView
-        app:strokeColor="@null"
             style="@style/Widget.Material3.CardView.Filled"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -55,7 +54,6 @@
             android:textColor="?attr/colorPrimary" />
 
         <com.google.android.material.card.MaterialCardView
-        app:strokeColor="@null"
             style="@style/Widget.Material3.CardView.Filled"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -83,7 +81,6 @@
             android:textColor="?attr/colorPrimary" />
 
         <com.google.android.material.card.MaterialCardView
-        app:strokeColor="@null"
             android:id="@+id/card_config_info"
             style="@style/Widget.Material3.CardView.Filled"
             android:layout_width="match_parent"
