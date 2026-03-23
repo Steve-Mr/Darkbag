@@ -388,4 +388,12 @@ class ImageViewerAdapter(
     fun findGroupIndex(baseName: String): Int {
         return groups.indexOfFirst { it.baseName == baseName }
     }
+
+    fun updateGroupAt(position: Int, newGroup: ImageGroup) {
+        if (position < 0 || position >= groups.size) return
+        val updatedList = groups.toMutableList()
+        updatedList[position] = newGroup
+        groups = updatedList
+        notifyItemChanged(position)
+    }
 }

@@ -363,10 +363,6 @@ class ImageRepository(private val context: Context) {
         }
 
         fun build(): ImageGroup {
-            val finalTime1 = if (dngUri1 != null) top.maary.darkbag.utils.ImageUtils.getCaptureTime(context, dngUri1!!).takeIf { it > 0 } ?: dngUri1Time else captureTime
-            val finalTime2 = if (dngUri2 != null) top.maary.darkbag.utils.ImageUtils.getCaptureTime(context, dngUri2!!).takeIf { it > 0 } ?: dngUri2Time else captureTime
-            val finalTime = if (dngUri != null) top.maary.darkbag.utils.ImageUtils.getCaptureTime(context, dngUri!!).takeIf { it > 0 } ?: captureTime else captureTime
-
             return ImageGroup(
                 baseName,
                 jpgUri,
@@ -376,9 +372,9 @@ class ImageRepository(private val context: Context) {
                 hfLayout,
                 width,
                 height,
-                finalTime,
-                finalTime1,
-                finalTime2,
+                captureTime,
+                dngUri1Time,
+                dngUri2Time,
                 maxOf(jpgTime, dngTime, dngUri1Time, dngUri2Time),
                 editConfig
             )

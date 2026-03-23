@@ -274,6 +274,25 @@ class ImageViewerFragment : Fragment() {
             prepareEditConfig(currentGroup)
         }
 
+        if (currentGroup.isHalfFrame() && (currentGroup.captureTime1 == 0L || currentGroup.captureTime2 == 0L)) {
+            lifecycleScope.launch(Dispatchers.IO) {
+                val t1 = currentGroup.dngUri1?.let { top.maary.darkbag.utils.ImageUtils.getCaptureTime(requireContext(), it) } ?: 0L
+                val t2 = currentGroup.dngUri2?.let { top.maary.darkbag.utils.ImageUtils.getCaptureTime(requireContext(), it) } ?: 0L
+                if (t1 > 0 || t2 > 0) {
+                    val updatedGroup = currentGroup.copy(
+                        captureTime1 = if (t1 > 0) t1 else currentGroup.captureTime1,
+                        captureTime2 = if (t2 > 0) t2 else currentGroup.captureTime2,
+                        captureTime = maxOf(t1, t2).takeIf { it > 0 } ?: currentGroup.captureTime
+                    )
+                    withContext(Dispatchers.Main) {
+                        if (binding.imagePager.currentItem == adapter.getGroups().indexOf(currentGroup)) {
+                            adapter.updateGroupAt(binding.imagePager.currentItem, updatedGroup)
+                        }
+                    }
+                }
+            }
+        }
+
         if (currentGroup.isHalfFrame()) {
             binding.hfExtraControls.visibility = View.VISIBLE
             updateEffectsButtons()
