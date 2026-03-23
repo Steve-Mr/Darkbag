@@ -159,19 +159,24 @@ class ImageViewerFragment : Fragment() {
 
             // Handle virtual groups from external URIs or stitching
             if (targetUri != null && targetUri.contains("|")) {
-                val uris = targetUri.split("|")
-                val u1 = Uri.parse(uris[0])
-                val u2 = Uri.parse(uris[1])
+                val parts = targetUri.split("|")
+                val u1 = Uri.parse(parts[0])
+                val u2 = Uri.parse(parts[1])
+                val layout = if (parts.size > 2) parts[2] else "SBS"
+                val time1 = top.maary.darkbag.utils.ImageUtils.getCaptureTime(requireContext(), u1)
+                val time2 = top.maary.darkbag.utils.ImageUtils.getCaptureTime(requireContext(), u2)
                 val virtualGroup = ImageGroup(
                     baseName = "Stitched_" + System.currentTimeMillis(),
                     jpgUri = null,
                     dngUri = null,
                     dngUri1 = u1,
                     dngUri2 = u2,
-                    hfLayout = "SBS", // Default for manual stitching
+                    hfLayout = layout,
                     width = 0,
                     height = 0,
-                    captureTime = System.currentTimeMillis()
+                    captureTime = maxOf(time1, time2).takeIf { it > 0 } ?: System.currentTimeMillis(),
+                    captureTime1 = time1,
+                    captureTime2 = time2
                 )
                 groups.add(0, virtualGroup)
             } else if (targetUri != null && groups.none { it.jpgUri?.toString() == targetUri || it.dngUri?.toString() == targetUri || it.dngUri1?.toString() == targetUri }) {
@@ -1188,8 +1193,8 @@ class ImageViewerFragment : Fragment() {
                                 config.showTimestamp,
                                 config.flareType >= 0,
                                 currentGroup.hfLayout ?: "SBS",
-                                time1 = currentGroup.captureTime,
-                                time2 = currentGroup.captureTime,
+                                time1 = currentGroup.captureTime1.takeIf { it > 0 } ?: currentGroup.captureTime,
+                                time2 = currentGroup.captureTime2.takeIf { it > 0 } ?: currentGroup.captureTime,
                                 flareType = config.flareType
                             )
                             if (compositeBitmap != composite) {
@@ -1379,8 +1384,8 @@ class ImageViewerFragment : Fragment() {
                                 config.showTimestamp,
                                 config.flareType >= 0,
                                 currentGroup.hfLayout ?: "SBS",
-                                time1 = currentGroup.captureTime,
-                                time2 = currentGroup.captureTime,
+                                time1 = currentGroup.captureTime1.takeIf { it > 0 } ?: currentGroup.captureTime,
+                                time2 = currentGroup.captureTime2.takeIf { it > 0 } ?: currentGroup.captureTime,
                                 flareType = config.flareType
                             )
                             if (finalComposite != composite) {
@@ -1420,7 +1425,8 @@ class ImageViewerFragment : Fragment() {
                             targetUri = targetUri,
                             jpgFolderUri = if (isReplacement) null else finalFolderUri,
                                 editConfig = config,
-                                isAlreadyStitched = currentGroup.isHalfFrame()
+                                isAlreadyStitched = currentGroup.isHalfFrame(),
+                                sourceDngUri = currentGroup.dngUri ?: currentGroup.dngUri1
                         )
                     }
                 } catch (e: Exception) {

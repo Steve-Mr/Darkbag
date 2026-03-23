@@ -56,7 +56,7 @@ class StudioFragment : Fragment() {
             v.setPadding(v.paddingLeft, v.paddingTop, v.paddingRight, systemBars.bottom + resources.getDimensionPixelSize(R.dimen.margin_xlarge))
             insets
         }
-        ViewCompat.setOnApplyWindowInsetsListener(binding.fabStudioEdit) { v, insets ->
+        ViewCompat.setOnApplyWindowInsetsListener(binding.llStudioActions) { v, insets ->
             val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
             v.updateLayoutParams<ViewGroup.MarginLayoutParams> {
                 bottomMargin = systemBars.bottom + resources.getDimensionPixelSize(R.dimen.margin_large)
@@ -82,23 +82,29 @@ class StudioFragment : Fragment() {
     private fun setupFab() {
         binding.fabStudioEdit.setOnClickListener {
             if (selectedItems.isEmpty()) return@setOnClickListener
-
             val first = selectedItems[0]
-            val second = selectedItems.getOrNull(1)
+            val action = StudioFragmentDirections.actionStudioToImageViewer(
+                initialUri = (first.dngUri ?: first.dngUri1 ?: first.jpgUri).toString()
+            )
+            findNavController().navigate(action)
+        }
 
-            if (second != null) {
-                // For stitching, we'll pass both URIs via the initialUri parameter by joining them with a separator
-                val compositeUri = "${(first.dngUri ?: first.dngUri1 ?: first.jpgUri)}|${(second.dngUri ?: second.dngUri1 ?: second.jpgUri)}"
-                val action = StudioFragmentDirections.actionStudioToImageViewer(
-                    initialUri = compositeUri
-                )
-                findNavController().navigate(action)
-            } else {
-                val action = StudioFragmentDirections.actionStudioToImageViewer(
-                    initialUri = (first.dngUri ?: first.dngUri1 ?: first.jpgUri).toString()
-                )
-                findNavController().navigate(action)
-            }
+        binding.fabStudioStitchSbs.setOnClickListener {
+            if (selectedItems.size < 2) return@setOnClickListener
+            val first = selectedItems[0]
+            val second = selectedItems[1]
+            val compositeUri = "${(first.dngUri ?: first.dngUri1 ?: first.jpgUri)}|${(second.dngUri ?: second.dngUri1 ?: second.jpgUri)}|SBS"
+            val action = StudioFragmentDirections.actionStudioToImageViewer(initialUri = compositeUri)
+            findNavController().navigate(action)
+        }
+
+        binding.fabStudioStitchTb.setOnClickListener {
+            if (selectedItems.size < 2) return@setOnClickListener
+            val first = selectedItems[0]
+            val second = selectedItems[1]
+            val compositeUri = "${(first.dngUri ?: first.dngUri1 ?: first.jpgUri)}|${(second.dngUri ?: second.dngUri1 ?: second.jpgUri)}|TB"
+            val action = StudioFragmentDirections.actionStudioToImageViewer(initialUri = compositeUri)
+            findNavController().navigate(action)
         }
     }
 
@@ -112,8 +118,18 @@ class StudioFragment : Fragment() {
         }
 
         isSelectionMode = selectedItems.isNotEmpty()
-        binding.fabStudioEdit.visibility = if (isSelectionMode) View.VISIBLE else View.GONE
-        binding.fabStudioEdit.text = if (selectedItems.size == 2) "Stitch & Edit" else "Edit"
+        binding.llStudioActions.visibility = if (isSelectionMode) View.VISIBLE else View.GONE
+
+        if (selectedItems.size == 2) {
+            binding.fabStudioEdit.visibility = View.GONE
+            binding.fabStudioStitchSbs.visibility = View.VISIBLE
+            binding.fabStudioStitchTb.visibility = View.VISIBLE
+        } else {
+            binding.fabStudioEdit.visibility = if (isSelectionMode) View.VISIBLE else View.GONE
+            binding.fabStudioStitchSbs.visibility = View.GONE
+            binding.fabStudioStitchTb.visibility = View.GONE
+        }
+
         binding.rvStudio.adapter?.notifyDataSetChanged()
     }
 

@@ -234,4 +234,20 @@ object ImageUtils {
         }
         return inSampleSize
     }
+
+    fun getCaptureTime(context: Context, uri: Uri): Long {
+        return try {
+            context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                val exif = ExifInterface(pfd.fileDescriptor)
+                val dateStr = exif.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL)
+                    ?: exif.getAttribute(ExifInterface.TAG_DATETIME)
+                if (dateStr != null) {
+                    val sdf = java.text.SimpleDateFormat("yyyy:MM:dd HH:mm:ss", java.util.Locale.US)
+                    sdf.parse(dateStr)?.time ?: 0L
+                } else 0L
+            } ?: 0L
+        } catch (e: Exception) {
+            0L
+        }
+    }
 }

@@ -162,7 +162,16 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRawNative(
     if (bitmapPixels) AndroidBitmap_unlockPixels(env, outputBitmap);
 
     // Release Strings
-    if (outputJpgPath) env->ReleaseStringUTFChars(outputJpgPath, jpg_path_cstr);
+    if (outputJpgPath && jpg_path_cstr) {
+        std::string path(jpg_path_cstr);
+        env->ReleaseStringUTFChars(outputJpgPath, jpg_path_cstr);
+
+        // Post-process EXIF for external images if necessary.
+        // Note: process_and_save_image currently uses a fixed "Captured with Darkbag" description.
+        // For external images, it should be "Processed by Darkbag".
+        // Since we are using standard ImageSaver.writeMetadataToExif in Kotlin for the final save,
+        // this might already be handled. But for direct JNI saves, we should be careful.
+    }
 
     // Cleanup
     LibRaw::dcraw_clear_mem(image);

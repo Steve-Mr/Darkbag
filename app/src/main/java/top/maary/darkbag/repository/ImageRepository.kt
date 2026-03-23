@@ -308,7 +308,7 @@ class ImageRepository(private val context: Context) {
         return top.maary.darkbag.utils.ImageUtils.getBaseName(fileName)
     }
 
-    private class ImageGroupBuilder(val baseName: String) {
+    private inner class ImageGroupBuilder(val baseName: String) {
         var jpgUri: Uri? = null
         private var jpgTime: Long = 0L
         var dngUri: Uri? = null
@@ -362,18 +362,26 @@ class ImageRepository(private val context: Context) {
             if (time > captureTime) captureTime = time
         }
 
-        fun build() = ImageGroup(
-            baseName,
-            jpgUri,
-            dngUri,
-            dngUri1,
-            dngUri2,
-            hfLayout,
-            width,
-            height,
-            captureTime,
-            maxOf(jpgTime, dngTime, dngUri1Time, dngUri2Time),
-            editConfig
-        )
+        fun build(): ImageGroup {
+            val finalTime1 = if (dngUri1 != null) top.maary.darkbag.utils.ImageUtils.getCaptureTime(context, dngUri1!!).takeIf { it > 0 } ?: dngUri1Time else captureTime
+            val finalTime2 = if (dngUri2 != null) top.maary.darkbag.utils.ImageUtils.getCaptureTime(context, dngUri2!!).takeIf { it > 0 } ?: dngUri2Time else captureTime
+            val finalTime = if (dngUri != null) top.maary.darkbag.utils.ImageUtils.getCaptureTime(context, dngUri!!).takeIf { it > 0 } ?: captureTime else captureTime
+
+            return ImageGroup(
+                baseName,
+                jpgUri,
+                dngUri,
+                dngUri1,
+                dngUri2,
+                hfLayout,
+                width,
+                height,
+                finalTime,
+                finalTime1,
+                finalTime2,
+                maxOf(jpgTime, dngTime, dngUri1Time, dngUri2Time),
+                editConfig
+            )
+        }
     }
 }
