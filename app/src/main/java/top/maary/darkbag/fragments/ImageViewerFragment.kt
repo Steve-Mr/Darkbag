@@ -523,6 +523,48 @@ class ImageViewerFragment : Fragment() {
             }
         }
 
+        binding.btnSwapFrames.setOnClickListener {
+            val group = adapter.getGroup(binding.imagePager.currentItem)
+            if (!group.isHalfFrame()) return@setOnClickListener
+
+            lifecycleScope.launch {
+                ensureDngBytesLoaded()
+                val current = currentEditConfig ?: return@launch
+
+                // Swap bytes and cached bitmaps
+                val tempBytes = sourceDngBytes
+                sourceDngBytes = sourceDngBytes2
+                sourceDngBytes2 = tempBytes
+
+                val tempBitmap = cachedBitmap1
+                cachedBitmap1 = cachedBitmap2
+                cachedBitmap2 = tempBitmap
+
+                // Swap adjustments in config
+                val adjs = current.adjustments?.toMutableList() ?: mutableListOf(top.maary.darkbag.models.BasicAdjustments(), top.maary.darkbag.models.BasicAdjustments())
+                if (adjs.size >= 2) {
+                    val tempAdj = adjs[0]
+                    adjs[0] = adjs[1]
+                    adjs[1] = tempAdj
+                }
+
+                // Swap URIs and Timestamps in ImageGroup
+                val updatedGroup = group.copy(
+                    dngUri1 = group.dngUri2,
+                    dngUri2 = group.dngUri1,
+                    captureTime1 = group.captureTime2,
+                    captureTime2 = group.captureTime1
+                )
+
+                currentEditConfig = current.copy(adjustments = adjs)
+                adapter.updateGroupAt(binding.imagePager.currentItem, updatedGroup)
+
+                markAdjusted()
+                applyEditPreview()
+                updateSlidersInPanel()
+            }
+        }
+
         binding.fabAdjust.setOnClickListener {
             showAdjustmentsBottomSheet()
             lifecycleScope.launch {
@@ -703,6 +745,13 @@ class ImageViewerFragment : Fragment() {
 
         binding.btnFlare.setIconTintResource(if (config.flareType != -1) R.color.vibrant_pink else android.R.color.white)
         binding.btnFlare.alpha = if (config.flareType != -1) 1.0f else 0.6f
+
+        val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
+        if (currentGroup.hfLayout == "TB") {
+            binding.btnSwapFrames.setIconResource(R.drawable.ic_swap_vert)
+        } else {
+            binding.btnSwapFrames.setIconResource(R.drawable.ic_swap_horiz)
+        }
     }
 
     private fun updateSelectionFeedback() {
@@ -1274,7 +1323,7 @@ class ImageViewerFragment : Fragment() {
         val dngUri2 = currentGroup.dngUri2
 
         // Force "Save as New" for external images
-        val isExternal = currentGroup.jpgUri == null && currentGroup.dngUri == null && currentGroup.dngUri1 == null
+        val isExternal = !currentGroup.baseName.startsWith(top.maary.darkbag.utils.DarkbagIdentity.FILE_PREFIX)
         val actualIsReplacement = if (isExternal) false else isReplacement
 
         lifecycleScope.launch {
@@ -1449,7 +1498,8 @@ class ImageViewerFragment : Fragment() {
                             jpgFolderUri = if (actualIsReplacement) null else finalFolderUri,
                                 editConfig = config,
                                 isAlreadyStitched = currentGroup.isHalfFrame(),
-                                sourceDngUri = currentGroup.dngUri ?: currentGroup.dngUri1
+                                sourceDngUri = currentGroup.dngUri ?: currentGroup.dngUri1,
+                                isExternal = isExternal
                         )
                     }
                 } catch (e: Exception) {

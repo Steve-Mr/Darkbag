@@ -51,6 +51,8 @@
         android:layout_height="wrap_content"
         android:layout_marginBottom="24dp"
         android:orientation="horizontal"
+        android:clipChildren="false"
+        android:clipToPadding="false"
         android:visibility="gone"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toStartOf="parent"

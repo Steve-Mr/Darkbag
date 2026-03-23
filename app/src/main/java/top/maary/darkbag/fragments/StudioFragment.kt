@@ -45,6 +45,15 @@ class StudioFragment : Fragment() {
         setupFab()
     }
 
+    override fun onResume() {
+        super.onResume()
+        // Reset selection when returning to studio
+        selectedItems.clear()
+        isSelectionMode = false
+        binding.llStudioActions.visibility = View.GONE
+        binding.rvStudio.adapter?.notifyDataSetChanged()
+    }
+
     private fun setupEdgeToEdge() {
         ViewCompat.setOnApplyWindowInsetsListener(binding.appBar) { v, insets ->
             val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())

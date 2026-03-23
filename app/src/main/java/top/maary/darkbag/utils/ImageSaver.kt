@@ -54,6 +54,7 @@ object ImageSaver {
         isAlreadyStitched: Boolean = false,
         captureMetadata: CaptureMetadata? = null,
         sourceDngUri: Uri? = null,
+        isExternal: Boolean = false,
         onBitmapReady: ((Bitmap) -> Unit)? = null
     ): Uri? {
         val halfFrameManager = HalfFrameManager(context)
@@ -63,8 +64,6 @@ object ImageSaver {
 
         val actualSaveJpg = if (isHalfFrameActive) halfFrameManager.saveJpg else saveJpg
         val actualSaveRaw = if (isHalfFrameActive) halfFrameManager.saveRaw else saveRaw
-
-        val isExternal = !baseName.startsWith(DarkbagIdentity.FILE_PREFIX)
 
         val contentResolver = context.contentResolver
         var finalJpgUri: Uri? = null
