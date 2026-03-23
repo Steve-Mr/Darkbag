@@ -17,7 +17,7 @@
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 
 extern "C" JNIEXPORT jint JNICALL
-Java_top_maary_darkbag_processor_ColorProcessor_processRaw(
+Java_top_maary_darkbag_processor_ColorProcessor_processRawNative(
         JNIEnv* env,
         jobject /* this */,
         jbyteArray dngData,
@@ -74,7 +74,12 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRaw(
     RawProcessor.imgdata.params.no_auto_bright = 1;
     RawProcessor.imgdata.params.use_camera_wb = 1;
     RawProcessor.imgdata.params.output_color = 4; // ProPhotoRGB
-    RawProcessor.imgdata.params.user_flip = 0;    // Disable internal rotation to avoid double-rotation with Kotlin
+    RawProcessor.imgdata.params.user_flip = 0;    // Disable internal rotation
+
+    // Optimization for preview
+    if (downsampleFactor >= 2) {
+        RawProcessor.imgdata.params.half_size = 1;
+    }
 
     // Process
     if (RawProcessor.dcraw_process() != LIBRAW_SUCCESS) {
@@ -146,7 +151,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRaw(
         bitmapPixels, // out_rgb_buffer
         outW, outH,
         outputBitmap != nullptr, // isPreview
-        (int)downsampleFactor, // downsampleFactor
+        1, // Fixed: don't double-downsample after LibRaw
         (float)zoomFactor, // zoomFactor
         (bool)mirror
     );

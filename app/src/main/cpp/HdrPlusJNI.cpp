@@ -136,7 +136,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_initMemoryPool(JNIEnv* env, jobj
 }
 
 extern "C" JNIEXPORT jint JNICALL
-Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
+Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlusNative(
     JNIEnv* env, jobject /* this */, jstring tempRawPath, jint width, jint height, jint orientation, jfloat digitalGain, jint targetLog, jstring lutPath,
     jfloat exposure, jfloat contrast, jfloat saturation, jfloat highlights, jfloat shadows, jfloat whites, jfloat blacks,
     jstring jpgPath, jstring dngPath,
@@ -192,7 +192,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
         LOGD("Exporting JPG: JPG=%s", jpg_path_cstr);
         saveOk = process_and_save_image(finalImage, width, height, digitalGain, targetLog, lut,
                                         exposure, contrast, saturation, highlights, shadows, whites, blacks,
-                                        jpg_path_cstr, 1, ccmVec.data(), wbVec.data(), orientation, nullptr, false, 1, zoomFactor, (bool)mirror);
+                                        jpg_path_cstr, 1, ccmVec.data(), wbVec.data(), orientation, nullptr, 0, 0, false, 1, zoomFactor, (bool)mirror);
     }
     if (jpgPath && jpg_path_cstr) env->ReleaseStringUTFChars(jpgPath, jpg_path_cstr);
     if (dngPath && dng_path_cstr) env->ReleaseStringUTFChars(dngPath, dng_path_cstr);
@@ -208,7 +208,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
 }
 
 extern "C" JNIEXPORT jint JNICALL
-Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
+Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlusNative(
     JNIEnv* env, jobject /* this */, jobjectArray dngBuffers, jint width, jint height, jint orientation, jint whiteLevel, jintArray blackLevelPattern, jfloatArray lensShadingMap, jint lensShadingRows, jint lensShadingCols, jboolean useSensorColorMatrix, jfloatArray whiteBalance, jfloatArray ccm, jfloatArray ccmAlt, jboolean exportMatrixAB, jint cfaPattern,
     jint iso, jlong exposureTime, jfloat fNumber, jfloat focalLength, jlong captureTimeMillis, jint targetLog, jstring lutPath, jstring outputJpgPath, jstring outputDngPath,
     jfloat digitalGain, jlongArray debugStats, jobject outputBitmap, jstring tempRawPath, jfloat zoomFactor, jboolean mirror
@@ -380,9 +380,15 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
 
     auto saveStart = std::chrono::high_resolution_clock::now();
     if (bitmapPixels) {
+        AndroidBitmapInfo info;
+        int outW = 0, outH = 0;
+        if (AndroidBitmap_getInfo(env, outputBitmap, &info) == ANDROID_BITMAP_RESULT_SUCCESS) {
+            outW = info.width;
+            outH = info.height;
+        }
         process_and_save_image(finalImage, width, height, digitalGain, targetLog, lut,
                                 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, // HSWB not used for preview in standard pipe yet
-                                nullptr, 1, ccmVec.data(), wbVec.data(), orientation, bitmapPixels, true, 4, zoomFactor, (bool)mirror);
+                                nullptr, 1, ccmVec.data(), wbVec.data(), orientation, bitmapPixels, outW, outH, true, 4, zoomFactor, (bool)mirror);
         AndroidBitmap_unlockPixels(env, outputBitmap);
     }
 
@@ -401,7 +407,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
         if (!jpgPathStr.empty()) {
             process_and_save_image(finalImage, width, height, digitalGain, targetLog, lut,
                                     0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
-                                    jpgPathStr.c_str(), 1, ccmVec.data(), wbVec.data(), orientation, nullptr, true, 4, zoomFactor, (bool)mirror);
+                                    jpgPathStr.c_str(), 1, ccmVec.data(), wbVec.data(), orientation, nullptr, 0, 0, true, 4, zoomFactor, (bool)mirror);
 
             if (exportMatrixAB && !jpgPathStr.empty() && ccmAltVec.size() == 9) {
                 std::string suffix = useSensorColorMatrix ? "_AB_CAPTURE_CCM.jpg" : "_AB_SENSOR_CCM.jpg";
@@ -411,7 +417,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
                 altJpgPath = altJpgPath.substr(0, dot) + suffix;
                 process_and_save_image(finalImage, width, height, digitalGain, targetLog, lut,
                                         0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
-                                        altJpgPath.c_str(), 1, ccmAltVec.data(), wbVec.data(), orientation, nullptr, false, 1, zoomFactor, (bool)mirror);
+                                        altJpgPath.c_str(), 1, ccmAltVec.data(), wbVec.data(), orientation, nullptr, 0, 0, false, 1, zoomFactor, (bool)mirror);
             }
         }
     }
@@ -420,23 +426,21 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
 }
 
 extern "C" JNIEXPORT jint JNICALL
-Java_top_maary_darkbag_processor_ColorProcessor_processSingleFrameRaw(
+Java_top_maary_darkbag_processor_ColorProcessor_processSingleFrameRawNative(
     JNIEnv* env, jobject /* this */, jobject bayerBuffer, jint width, jint height, jint orientation, jint whiteLevel, jintArray blackLevelPattern, jfloatArray lensShadingMap, jint lensShadingRows, jint lensShadingCols, jfloatArray whiteBalance, jfloatArray ccm, jint cfaPattern,
     jint iso, jlong exposureTime, jfloat fNumber, jfloat focalLength, jlong captureTimeMillis, jint targetLog, jstring lutPath, jstring outputJpgPath, jstring outputDngPath,
     jfloat digitalGain, jlongArray debugStats, jobject outputBitmap, jstring tempRawPath, jfloat zoomFactor, jboolean mirror
 ) {
     LOGD("Native processSingleFrameRaw started.");
 
-    // Repurpose processHdrPlus logic by wrapping the single buffer in an array
     jobjectArray dngBuffers = env->NewObjectArray(1, g_byteBufferClass, nullptr);
     env->SetObjectArrayElement(dngBuffers, 0, bayerBuffer);
 
-    // Call the existing processHdrPlus logic.
-    return Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
+    return Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlusNative(
         env, nullptr, dngBuffers, width, height, orientation, whiteLevel, blackLevelPattern, lensShadingMap, lensShadingRows, lensShadingCols,
-        false, // useSensorColorMatrix
-        whiteBalance, ccm, nullptr, // ccmAlt
-        false, // exportMatrixAB
+        false,
+        whiteBalance, ccm, nullptr,
+        false,
         cfaPattern, iso, exposureTime, fNumber, focalLength, captureTimeMillis, targetLog, lutPath,
         outputJpgPath, outputDngPath, digitalGain, debugStats, outputBitmap, tempRawPath, zoomFactor, mirror
     );

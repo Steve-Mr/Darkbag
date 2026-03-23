@@ -56,7 +56,9 @@ object ImageSaver {
         onBitmapReady: ((Bitmap) -> Unit)? = null
     ): Uri? {
         val halfFrameManager = HalfFrameManager(context)
-        val isHalfFrameActive = !isAlreadyStitched && (halfFrameMetadata != null || halfFrameManager.isEnabled)
+        // A save is considered half-frame only if it's coming from a capture flow (halfFrameMetadata != null)
+        // Global half-frame toggle should not affect general image saving/editing from Studio.
+        val isHalfFrameActive = !isAlreadyStitched && halfFrameMetadata != null
 
         val actualSaveJpg = if (isHalfFrameActive) halfFrameManager.saveJpg else saveJpg
         val actualSaveRaw = if (isHalfFrameActive) halfFrameManager.saveRaw else saveRaw

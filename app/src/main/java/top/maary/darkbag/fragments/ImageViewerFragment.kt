@@ -888,7 +888,7 @@ class ImageViewerFragment : Fragment() {
                         java.io.File(lutManager.lutDir, config.lut).absolutePath
                     } else null
 
-                    fun processSingle(bytes: ByteArray?, uri: Uri, index: Int): android.graphics.Bitmap? {
+                    suspend fun processSingle(bytes: ByteArray?, uri: Uri, index: Int): android.graphics.Bitmap? {
                         val finalBytes = bytes ?: run {
                              context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
                                 java.io.FileInputStream(pfd.fileDescriptor).use { it.readBytes() }
@@ -912,8 +912,19 @@ class ImageViewerFragment : Fragment() {
                             else -> 0
                         }
 
-                        val fullW = if (rotDegrees == 90 || rotDegrees == 270) options.outHeight / ds else options.outWidth / ds
-                        val fullH = if (rotDegrees == 90 || rotDegrees == 270) options.outWidth / ds else options.outHeight / ds
+                        val exifWidth = try {
+                            context.contentResolver.openInputStream(uri)?.use { input ->
+                                ExifInterface(input).getAttributeInt(ExifInterface.TAG_IMAGE_WIDTH, options.outWidth)
+                            } ?: options.outWidth
+                        } catch (e: Exception) { options.outWidth }
+                        val exifHeight = try {
+                            context.contentResolver.openInputStream(uri)?.use { input ->
+                                ExifInterface(input).getAttributeInt(ExifInterface.TAG_IMAGE_LENGTH, options.outHeight)
+                            } ?: options.outHeight
+                        } catch (e: Exception) { options.outHeight }
+
+                        val fullW = if (rotDegrees == 90 || rotDegrees == 270) exifHeight / ds else exifWidth / ds
+                        val fullH = if (rotDegrees == 90 || rotDegrees == 270) exifWidth / ds else exifHeight / ds
                         val bmpW = (fullW / config.zoomFactor).toInt()
                         val bmpH = (fullH / config.zoomFactor).toInt()
                         val previewBitmap = android.graphics.Bitmap.createBitmap(bmpW, bmpH, android.graphics.Bitmap.Config.ARGB_8888)
@@ -931,7 +942,7 @@ class ImageViewerFragment : Fragment() {
                             shadows = adj.shadows,
                             whites = adj.whites,
                             blacks = adj.blacks,
-                            digitalGain = 1.0f, // Gain is already in adj.exposure
+                            digitalGain = 1.0f,
                             outputJpgPath = null,
                             useGpu = false,
                             orientation = rotDegrees,
@@ -1064,7 +1075,7 @@ class ImageViewerFragment : Fragment() {
                         java.io.File(lutManager.lutDir, config.lut).absolutePath
                     } else null
 
-                    fun processFull(bytes: ByteArray?, uri: Uri, index: Int): android.graphics.Bitmap? {
+                    suspend fun processFull(bytes: ByteArray?, uri: Uri, index: Int, targetJpgPath: String? = null): android.graphics.Bitmap? {
                         val finalBytes = bytes ?: run {
                             context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
                                 java.io.FileInputStream(pfd.fileDescriptor).use { it.readBytes() }
@@ -1084,38 +1095,79 @@ class ImageViewerFragment : Fragment() {
                             androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270 -> 270
                             else -> 0
                         }
-                        val fullW = if (rotDegrees == 90 || rotDegrees == 270) options.outHeight else options.outWidth
-                        val fullH = if (rotDegrees == 90 || rotDegrees == 270) options.outWidth else options.outHeight
-                        val bmpW = (fullW / config.zoomFactor).toInt()
-                        val bmpH = (fullH / config.zoomFactor).toInt()
-                        val previewBitmap = android.graphics.Bitmap.createBitmap(bmpW, bmpH, android.graphics.Bitmap.Config.ARGB_8888)
+
                         val adj = if (currentGroup.isHalfFrame()) config.adjustments?.get(index) ?: top.maary.darkbag.models.BasicAdjustments() else config.toBasic()
 
-                        top.maary.darkbag.processor.ColorProcessor.processRaw(
-                            dngData = finalBytes,
-                            targetLog = logIndex,
-                            lutPath = lutPath,
-                            exposure = adj.exposure,
-                            contrast = adj.contrast,
-                            saturation = adj.saturation,
-                            highlights = adj.highlights,
-                            shadows = adj.shadows,
-                            whites = adj.whites,
-                            blacks = adj.blacks,
-                            digitalGain = 1.0f, // Gain is already in adj.exposure
-                            outputJpgPath = null,
-                            useGpu = false,
-                            orientation = rotDegrees,
-                            mirror = false,
-                            outputBitmap = previewBitmap,
-                            downsampleFactor = 1,
-                            zoomFactor = config.zoomFactor
-                        )
-                        return previewBitmap
+                        if (targetJpgPath != null) {
+                            top.maary.darkbag.processor.ColorProcessor.processRaw(
+                                dngData = finalBytes,
+                                targetLog = logIndex,
+                                lutPath = lutPath,
+                                exposure = adj.exposure,
+                                contrast = adj.contrast,
+                                saturation = adj.saturation,
+                                highlights = adj.highlights,
+                                shadows = adj.shadows,
+                                whites = adj.whites,
+                                blacks = adj.blacks,
+                                digitalGain = 1.0f,
+                                outputJpgPath = targetJpgPath,
+                                useGpu = false,
+                                orientation = rotDegrees,
+                                mirror = false,
+                                outputBitmap = null,
+                                downsampleFactor = 1,
+                                zoomFactor = config.zoomFactor
+                            )
+                            return null
+                        } else {
+                            val exifWidth = try {
+                                context.contentResolver.openInputStream(uri)?.use { input ->
+                                    ExifInterface(input).getAttributeInt(ExifInterface.TAG_IMAGE_WIDTH, options.outWidth)
+                                } ?: options.outWidth
+                            } catch (e: Exception) { options.outWidth }
+                            val exifHeight = try {
+                                context.contentResolver.openInputStream(uri)?.use { input ->
+                                    ExifInterface(input).getAttributeInt(ExifInterface.TAG_IMAGE_LENGTH, options.outHeight)
+                                } ?: options.outHeight
+                            } catch (e: Exception) { options.outHeight }
+
+                            val fullW = if (rotDegrees == 90 || rotDegrees == 270) exifHeight else exifWidth
+                            val fullH = if (rotDegrees == 90 || rotDegrees == 270) exifWidth else exifHeight
+                            val bmpW = (fullW / config.zoomFactor).toInt()
+                            val bmpH = (fullH / config.zoomFactor).toInt()
+                            val previewBitmap = android.graphics.Bitmap.createBitmap(bmpW, bmpH, android.graphics.Bitmap.Config.ARGB_8888)
+
+                            top.maary.darkbag.processor.ColorProcessor.processRaw(
+                                dngData = finalBytes,
+                                targetLog = logIndex,
+                                lutPath = lutPath,
+                                exposure = adj.exposure,
+                                contrast = adj.contrast,
+                                saturation = adj.saturation,
+                                highlights = adj.highlights,
+                                shadows = adj.shadows,
+                                whites = adj.whites,
+                                blacks = adj.blacks,
+                                digitalGain = 1.0f,
+                                outputJpgPath = null,
+                                useGpu = false,
+                                orientation = rotDegrees,
+                                mirror = false,
+                                outputBitmap = previewBitmap,
+                                downsampleFactor = 1,
+                                zoomFactor = config.zoomFactor
+                            )
+                            return previewBitmap
+                        }
                     }
 
+                    var tempJpgPath: String? = null
                     val finalBitmap: android.graphics.Bitmap? = if (!currentGroup.isHalfFrame()) {
-                        processFull(sourceDngBytes, dngUri1, 0)
+                        val tempFile = java.io.File(context.cacheDir, "studio_edit_${System.currentTimeMillis()}.jpg")
+                        tempJpgPath = tempFile.absolutePath
+                        processFull(sourceDngBytes, dngUri1, 0, tempJpgPath)
+                        null
                     } else {
                         val b1 = processFull(sourceDngBytes, dngUri1, 0)
                         val b2 = dngUri2?.let { processFull(sourceDngBytes2, it, 1) }
@@ -1153,7 +1205,7 @@ class ImageViewerFragment : Fragment() {
                         } else null
                     }
 
-                    finalBitmap?.let { bitmap ->
+                    if (finalBitmap != null || tempJpgPath != null) {
                         val baseName = if (isReplacement) currentGroup.baseName else "${currentGroup.baseName}_edited_${System.currentTimeMillis()}"
                         val targetUri = if (isReplacement) currentGroup.jpgUri else null
 
@@ -1170,8 +1222,8 @@ class ImageViewerFragment : Fragment() {
 
                         top.maary.darkbag.utils.ImageSaver.saveProcessedImage(
                             context = context,
-                            inputBitmap = bitmap,
-                            bmpPath = null,
+                            inputBitmap = finalBitmap,
+                            bmpPath = tempJpgPath,
                             rotationDegrees = 0,
                             zoomFactor = 1.0f,
                             baseName = baseName,

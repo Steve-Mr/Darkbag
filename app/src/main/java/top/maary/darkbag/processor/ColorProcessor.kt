@@ -2,8 +2,12 @@ package top.maary.darkbag.processor
 
 import java.nio.ByteBuffer
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 object ColorProcessor {
+    private val nativeMutex = Mutex()
+
     init {
         System.loadLibrary("native-lib")
     }
@@ -33,7 +37,7 @@ object ColorProcessor {
      * @param mirror Whether to mirror horizontally.
      * @return 0 for GPU Success, 1 for CPU Success (Fallback or requested), -1 for Failure.
      */
-    external fun processRaw(
+    suspend fun processRaw(
         dngData: ByteArray,
         targetLog: Int,
         lutPath: String?,
@@ -52,12 +56,78 @@ object ColorProcessor {
         outputBitmap: android.graphics.Bitmap? = null,
         downsampleFactor: Int = 1,
         zoomFactor: Float = 1.0f
+    ): Int = nativeMutex.withLock {
+        processRawNative(
+            dngData, targetLog, lutPath, exposure, contrast, saturation,
+            highlights, shadows, whites, blacks, digitalGain,
+            outputJpgPath, useGpu, orientation, mirror, outputBitmap,
+            downsampleFactor, zoomFactor
+        )
+    }
+
+    private external fun processRawNative(
+        dngData: ByteArray,
+        targetLog: Int,
+        lutPath: String?,
+        exposure: Float,
+        contrast: Float,
+        saturation: Float,
+        highlights: Float,
+        shadows: Float,
+        whites: Float,
+        blacks: Float,
+        digitalGain: Float,
+        outputJpgPath: String?,
+        useGpu: Boolean,
+        orientation: Int,
+        mirror: Boolean,
+        outputBitmap: android.graphics.Bitmap?,
+        downsampleFactor: Int,
+        zoomFactor: Float
     ): Int
 
     /**
      * Optimized single frame processing using the Halide pipeline.
      */
-    external fun processSingleFrameRaw(
+    suspend fun processSingleFrameRaw(
+        bayerBuffer: ByteBuffer,
+        width: Int,
+        height: Int,
+        orientation: Int,
+        whiteLevel: Int,
+        blackLevelPattern: IntArray,
+        lensShadingMap: FloatArray?,
+        lensShadingRows: Int,
+        lensShadingCols: Int,
+        whiteBalance: FloatArray,
+        ccm: FloatArray,
+        cfaPattern: Int,
+        iso: Int,
+        exposureTime: Long,
+        fNumber: Float,
+        focalLength: Float,
+        captureTimeMillis: Long,
+        targetLog: Int,
+        lutPath: String?,
+        outputJpgPath: String?,
+        outputDngPath: String?,
+        digitalGain: Float,
+        debugStats: LongArray?,
+        outputBitmap: android.graphics.Bitmap? = null,
+        tempRawPath: String? = null,
+        zoomFactor: Float,
+        mirror: Boolean
+    ): Int = nativeMutex.withLock {
+        processSingleFrameRawNative(
+            bayerBuffer, width, height, orientation, whiteLevel,
+            blackLevelPattern, lensShadingMap, lensShadingRows, lensShadingCols,
+            whiteBalance, ccm, cfaPattern, iso, exposureTime, fNumber, focalLength,
+            captureTimeMillis, targetLog, lutPath, outputJpgPath, outputDngPath,
+            digitalGain, debugStats, outputBitmap, tempRawPath, zoomFactor, mirror
+        )
+    }
+
+    private external fun processSingleFrameRawNative(
         bayerBuffer: ByteBuffer,
         width: Int,
         height: Int,
@@ -110,7 +180,7 @@ object ColorProcessor {
         backgroundSaveFlow.tryEmit(BackgroundSaveEvent(baseName, dngPath, jpgPath, targetUri, zoomFactor, orientation, saveJpg))
     }
 
-    external fun exportHdrPlus(
+    suspend fun exportHdrPlus(
         tempRawPath: String,
         width: Int,
         height: Int,
@@ -136,9 +206,44 @@ object ColorProcessor {
         whiteBalance: FloatArray,
         zoomFactor: Float,
         mirror: Boolean
+    ): Int = nativeMutex.withLock {
+        exportHdrPlusNative(
+            tempRawPath, width, height, orientation, digitalGain, targetLog, lutPath,
+            exposure, contrast, saturation, highlights, shadows, whites, blacks,
+            jpgPath, dngPath, iso, exposureTime, fNumber, focalLength,
+            captureTimeMillis, ccm, whiteBalance, zoomFactor, mirror
+        )
+    }
+
+    private external fun exportHdrPlusNative(
+        tempRawPath: String,
+        width: Int,
+        height: Int,
+        orientation: Int,
+        digitalGain: Float,
+        targetLog: Int,
+        lutPath: String?,
+        exposure: Float,
+        contrast: Float,
+        saturation: Float,
+        highlights: Float,
+        shadows: Float,
+        whites: Float,
+        blacks: Float,
+        jpgPath: String?,
+        dngPath: String?,
+        iso: Int,
+        exposureTime: Long,
+        fNumber: Float,
+        focalLength: Float,
+        captureTimeMillis: Long,
+        ccm: FloatArray,
+        whiteBalance: FloatArray,
+        zoomFactor: Float,
+        mirror: Boolean
     ): Int
 
-    external fun processHdrPlus(
+    suspend fun processHdrPlus(
         dngBuffers: Array<ByteBuffer>,
         width: Int,
         height: Int,
@@ -165,6 +270,48 @@ object ColorProcessor {
         outputDngPath: String?,
         digitalGain: Float,
         debugStats: LongArray?, // [0] Halide, [1] Copy, [2] Post, [3] DNG Encode, [4] Save, [5] DNG Wait, [6] Total, [7] Align, [8] Merge, [9] Demosaic, [10] Denoise, [11] sRGB, [12] JNI Prep, [13] BlackWhite, [14] WB
+        outputBitmap: android.graphics.Bitmap? = null,
+        tempRawPath: String? = null,
+        zoomFactor: Float,
+        mirror: Boolean
+    ): Int = nativeMutex.withLock {
+        processHdrPlusNative(
+            dngBuffers, width, height, orientation, whiteLevel, blackLevelPattern,
+            lensShadingMap, lensShadingRows, lensShadingCols, useSensorColorMatrix,
+            whiteBalance, ccm, ccmAlt, exportMatrixAB, cfaPattern, iso,
+            exposureTime, fNumber, focalLength, captureTimeMillis, targetLog,
+            lutPath, outputJpgPath, outputDngPath, digitalGain, debugStats,
+            outputBitmap, tempRawPath, zoomFactor, mirror
+        )
+    }
+
+    private external fun processHdrPlusNative(
+        dngBuffers: Array<ByteBuffer>,
+        width: Int,
+        height: Int,
+        orientation: Int,
+        whiteLevel: Int,
+        blackLevelPattern: IntArray,
+        lensShadingMap: FloatArray?,
+        lensShadingRows: Int,
+        lensShadingCols: Int,
+        useSensorColorMatrix: Boolean,
+        whiteBalance: FloatArray,
+        ccm: FloatArray,
+        ccmAlt: FloatArray?,
+        exportMatrixAB: Boolean,
+        cfaPattern: Int,
+        iso: Int,
+        exposureTime: Long,
+        fNumber: Float,
+        focalLength: Float,
+        captureTimeMillis: Long,
+        targetLog: Int,
+        lutPath: String?,
+        outputJpgPath: String?,
+        outputDngPath: String?,
+        digitalGain: Float,
+        debugStats: LongArray?,
         outputBitmap: android.graphics.Bitmap? = null,
         tempRawPath: String? = null,
         zoomFactor: Float,
