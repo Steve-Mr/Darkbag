@@ -27,6 +27,7 @@
         android:layout_marginStart="@dimen/margin_medium"
         app:cardCornerRadius="24dp"
         app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+        app:strokeColor="@null"
         app:strokeWidth="0dp"
         app:layout_constraintTop_toTopOf="@id/top_right_controls"
         app:layout_constraintBottom_toBottomOf="@id/top_right_controls"
@@ -74,6 +75,7 @@
             android:layout_marginEnd="@dimen/spacing_medium"
             app:icon="@drawable/ic_flash_off"
             app:iconTint="?attr/colorOnSurface"
+            app:strokeColor="@null"
             android:backgroundTint="?attr/colorSurfaceContainerHigh"
             android:contentDescription="@string/toggle_flash"
             android:visibility="gone" />
@@ -85,6 +87,7 @@
             android:layout_height="wrap_content"
             app:icon="@drawable/ic_settings"
             app:iconTint="?attr/colorOnSurface"
+            app:strokeColor="@null"
             android:backgroundTint="?attr/colorSurfaceContainerHigh"
             android:contentDescription="@string/settings_button_alt" />
     </LinearLayout>
@@ -99,6 +102,7 @@
         android:layout_marginHorizontal="@dimen/margin_medium"
         android:layout_marginBottom="@dimen/spacing_medium"
         android:visibility="gone"
+        app:strokeColor="@null"
         app:layout_constraintBottom_toTopOf="@id/bottom_island_card"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent">
@@ -124,6 +128,7 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
+                    app:strokeColor="@null"
                     android:text="Focus" />
 
                 <com.google.android.material.button.MaterialButton
@@ -132,6 +137,7 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
+                    app:strokeColor="@null"
                     android:text="ISO" />
 
                 <com.google.android.material.button.MaterialButton
@@ -140,6 +146,7 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
+                    app:strokeColor="@null"
                     android:text="Sec" />
 
                 <com.google.android.material.button.MaterialButton
@@ -148,6 +155,7 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
+                    app:strokeColor="@null"
                     android:text="EV" />
             </com.google.android.material.button.MaterialButtonToggleGroup>
 
@@ -189,6 +197,7 @@
                         style="@style/Widget.Material3.Button.TextButton"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
+                        app:strokeColor="@null"
                         android:text="Auto" />
                 </LinearLayout>
 
@@ -207,6 +216,7 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginEnd="@dimen/spacing_medium"
+                        app:strokeColor="@null"
                         android:text="Macro" />
 
                     <com.google.android.material.button.MaterialButton
@@ -214,6 +224,7 @@
                         style="@style/Widget.Material3.Button.TonalButton"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
+                        app:strokeColor="@null"
                         android:text="Infinity" />
                 </LinearLayout>
 
@@ -229,6 +240,7 @@
         android:layout_height="wrap_content"
         android:layout_margin="@dimen/margin_medium"
         android:alpha="0.9"
+        app:strokeColor="@null"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent">
@@ -253,6 +265,7 @@
                 android:layout_height="48dp"
                 app:shapeAppearanceOverlay="@style/ShapeAppearance.App.LutSwitcher"
                 app:backgroundTint="?attr/colorSurfaceContainerHighest"
+                app:strokeColor="@null"
                 android:text="None"
                 android:textAllCaps="false"
                 android:textColor="?attr/colorOnSurface"
@@ -332,6 +345,7 @@
         android:visibility="gone"
         app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
         app:cardCornerRadius="@dimen/radius_medium"
+        app:strokeColor="@null"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintBottom_toTopOf="@id/bottom_island_card"
         app:layout_constrainedHeight="true"

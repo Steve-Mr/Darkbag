@@ -28,6 +28,7 @@
 
     <!-- Expressive Button Style -->
     <style name="Widget.App.Button.Expressive" parent="Widget.Material3.Button">
+        <item name="strokeColor">@null</item>
         <item name="cornerRadius">@dimen/radius_large</item>
         <item name="android:paddingVertical">@dimen/spacing_medium</item>
         <item name="android:paddingHorizontal">@dimen/spacing_large</item>
@@ -36,6 +37,7 @@
 
     <!-- Large Expressive Icon Button -->
     <style name="Widget.App.Button.IconButton.Large" parent="Widget.Material3.Button.IconButton">
+        <item name="strokeColor">@null</item>
         <item name="iconSize">32dp</item>
     </style>
 
@@ -44,6 +46,7 @@
         <item name="materialThemeOverlay">@style/ThemeOverlay.Material3.DynamicColors.Dark</item>
         <item name="cardCornerRadius">@dimen/radius_xlarge</item>
         <item name="cardBackgroundColor">?attr/colorSurfaceContainer</item>
+        <item name="strokeColor">@null</item>
         <item name="strokeWidth">0dp</item>
     </style>
 
@@ -53,10 +56,12 @@
     </style>
 
     <style name="Widget.App.Button.OutlinedButton.Connected" parent="Widget.Material3.Button.OutlinedButton">
+        <item name="strokeColor">@null</item>
         <item name="cornerRadius">0dp</item>
     </style>
 
     <style name="Widget.App.Button.Lens" parent="Widget.Material3.Button.TonalButton">
+        <item name="strokeColor">@null</item>
         <item name="android:insetTop">0dp</item>
         <item name="android:insetBottom">0dp</item>
         <item name="android:paddingHorizontal">0dp</item>
