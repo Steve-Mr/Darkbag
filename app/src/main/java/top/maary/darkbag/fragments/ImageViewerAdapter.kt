@@ -31,6 +31,7 @@ class ImageViewerAdapter(
     private val selectedFormats = mutableMapOf<Int, String>()
     private var isUiVisible = true
     private var isFormatSwitcherPersistentHidden = false
+    private var isRenderLocked = false
 
     class ViewHolder(val binding: ItemImageGroupBinding) : RecyclerView.ViewHolder(binding.root) {
         var loadJob: Job? = null
@@ -90,7 +91,9 @@ class ImageViewerAdapter(
             else -> R.id.btnJpg
         }
         selectButton(holder, targetId)
-        loadSelectedFormat(holder, group, format)
+        if (!isRenderLocked) {
+            loadSelectedFormat(holder, group, format)
+        }
     }
 
     private fun setupButtons(holder: ViewHolder, group: ImageGroup, position: Int) {
@@ -114,6 +117,7 @@ class ImageViewerAdapter(
     }
 
     private fun loadSelectedFormat(holder: ViewHolder, group: ImageGroup, format: String) {
+        if (isRenderLocked) return
         when (format) {
             "JPG" -> group.jpgUri?.let { loadImage(holder, it, version = group.lastModified) }
             "DNG" -> {
@@ -333,6 +337,10 @@ class ImageViewerAdapter(
                 }
             }
         }
+    }
+
+    fun setRenderLocked(locked: Boolean) {
+        this.isRenderLocked = locked
     }
 
     fun setFormatSwitcherPersistentHidden(hidden: Boolean) {

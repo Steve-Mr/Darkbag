@@ -571,14 +571,16 @@ class ImageViewerFragment : Fragment() {
                     ensureDngBytesLoadedInternal()
                     val current = currentEditConfig ?: return@withLock
 
-                    // Swap bytes and cached bitmaps
+                    // Swap bytes and force clean re-render
                     val tempBytes = sourceDngBytes
                     sourceDngBytes = sourceDngBytes2
                     sourceDngBytes2 = tempBytes
 
-                    val tempBitmap = cachedBitmap1
-                    cachedBitmap1 = cachedBitmap2
-                    cachedBitmap2 = tempBitmap
+                    cachedBitmap1?.recycle()
+                    cachedBitmap1 = null
+                    cachedBitmap2?.recycle()
+                    cachedBitmap2 = null
+                    lastPreviewConfig = null
 
                     // Swap adjustments in config
                     val adjs = current.adjustments?.toMutableList() ?: mutableListOf(top.maary.darkbag.models.BasicAdjustments(), top.maary.darkbag.models.BasicAdjustments())
@@ -731,6 +733,7 @@ class ImageViewerFragment : Fragment() {
         if (!isAdjusted) {
             isAdjusted = true
             adapter.setFormatSwitcherPersistentHidden(true)
+            adapter.setRenderLocked(true)
             updateSplitButtons()
             updateToolbarIcon()
             updateBackPressedCallbackState()
@@ -742,6 +745,7 @@ class ImageViewerFragment : Fragment() {
         exitEditMode(apply = false)
         binding.imagePager.isUserInputEnabled = true
         adapter.setFormatSwitcherPersistentHidden(false)
+        adapter.setRenderLocked(false)
         sourceDngBytes = null
         sourceDngBytes2 = null
         cachedBitmap1?.recycle()
@@ -1118,7 +1122,7 @@ class ImageViewerFragment : Fragment() {
         val config = currentEditConfig ?: return
         previewJob?.cancel()
         previewJob = lifecycleScope.launch {
-            delay(150)
+            delay(150) // Debounce slider movements
             previewMutex.withLock {
                 applyEditPreviewInternal(config)
             }
