@@ -577,15 +577,15 @@ class ImageViewerFragment : Fragment() {
                     ensureDngBytesLoadedInternal()
                     val current = currentEditConfig ?: return@withLock
 
-                    // Swap bytes and force clean re-render
+                    // Swap bytes
                     val tempBytes = sourceDngBytes
                     sourceDngBytes = sourceDngBytes2
                     sourceDngBytes2 = tempBytes
 
-                    cachedBitmap1?.recycle()
-                    cachedBitmap1 = null
-                    cachedBitmap2?.recycle()
-                    cachedBitmap2 = null
+                    // Swap cached bitmaps
+                    val tempBitmap = cachedBitmap1
+                    cachedBitmap1 = cachedBitmap2
+                    cachedBitmap2 = tempBitmap
                     lastPreviewConfig = null
 
                     // Swap adjustments in config
@@ -606,9 +606,24 @@ class ImageViewerFragment : Fragment() {
 
                     currentEditConfig = current.copy(adjustments = adjs)
                     adapter.updateGroupAt(binding.imagePager.currentItem, updatedGroup)
-
                     markAdjusted()
+
+                    // INSTANT FAST PATH: Update UI using existing cached bitmaps
+                    val fastComposite = createCompositeFromCache(currentEditConfig!!, updatedGroup, cachedBitmap1, cachedBitmap2)
+                    if (fastComposite != null) {
+                        val old = lastCompositeBitmap
+                        lastCompositeBitmap = fastComposite
+                        old?.recycle()
+
+                        val pos = binding.imagePager.currentItem
+                        adapter.cancelLoadJob(pos)
+                        val holder = (binding.imagePager.getChildAt(0) as? androidx.recyclerview.widget.RecyclerView)
+                            ?.findViewHolderForAdapterPosition(pos) as? ImageViewerAdapter.ViewHolder
+                        holder?.binding?.imageView?.setImageBitmap(fastComposite)
+                    }
+
                     try {
+                        // Silent update in background for HQ/State consistency
                         applyEditPreviewInternal(currentEditConfig!!)
                     } finally {
                         updateSlidersInPanel()
@@ -1194,6 +1209,46 @@ class ImageViewerFragment : Fragment() {
         }
     }
 
+    private fun createCompositeFromCache(
+        config: top.maary.darkbag.models.EditConfig,
+        group: ImageGroup,
+        b1: android.graphics.Bitmap?,
+        b2: android.graphics.Bitmap?
+    ): android.graphics.Bitmap? {
+        if (b1 == null && b2 == null) return null
+        val isSBS = group.hfLayout != "TB"
+        val gap = top.maary.darkbag.utils.HalfFrameUtils.calculateGap(maxOf(b1?.width ?: 0, b1?.height ?: 0)).toFloat()
+        val w1 = b1?.width ?: b2?.width ?: 0
+        val h1 = b1?.height ?: b2?.height ?: 0
+        val w2 = b2?.width ?: w1
+        val h2 = b2?.height ?: h1
+        val resW = if (isSBS) (w1 + gap + w2).toInt() else maxOf(w1, w2)
+        val resH = if (isSBS) maxOf(h1, h2) else (h1 + gap + h2).toInt()
+
+        val composite = android.graphics.Bitmap.createBitmap(resW, resH, android.graphics.Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(composite)
+        canvas.drawColor(android.graphics.Color.BLACK)
+        b1?.let { canvas.drawBitmap(it, 0f, 0f, null) }
+        b2?.let {
+            if (isSBS) canvas.drawBitmap(it, w1 + gap, 0f, null)
+            else canvas.drawBitmap(it, 0f, h1 + gap, null)
+        }
+
+        val finalComposite = top.maary.darkbag.utils.HalfFrameUtils.addEffects(
+            composite,
+            config.showTimestamp,
+            config.flareType >= 0,
+            group.hfLayout ?: "SBS",
+            time1 = group.captureTime1.takeIf { it > 0 } ?: group.captureTime,
+            time2 = group.captureTime2.takeIf { it > 0 } ?: group.captureTime,
+            flareType = config.flareType
+        )
+        if (finalComposite != composite) {
+            composite.recycle()
+        }
+        return finalComposite
+    }
+
     private suspend fun applyEditPreviewInternal(config: top.maary.darkbag.models.EditConfig) = coroutineScope {
         val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
         val dngUri1 = currentGroup.dngUri ?: currentGroup.dngUri1 ?: return@coroutineScope
@@ -1314,40 +1369,18 @@ class ImageViewerFragment : Fragment() {
                         val b2 = cachedBitmap2
 
                         if (b1 != null || b2 != null) {
-                            val isSBS = currentGroup.hfLayout != "TB"
-                            val gap = top.maary.darkbag.utils.HalfFrameUtils.calculateGap(maxOf(b1?.width ?: 0, b1?.height ?: 0)).toFloat()
-                            val w1 = b1?.width ?: b2?.width ?: 0
-                            val h1 = b1?.height ?: b2?.height ?: 0
-                            val w2 = b2?.width ?: w1
-                            val h2 = b2?.height ?: h1
-                            val resW = if (isSBS) (w1 + gap + w2).toInt() else maxOf(w1, w2)
-                            val resH = if (isSBS) maxOf(h1, h2) else (h1 + gap + h2).toInt()
-
-                            val composite = android.graphics.Bitmap.createBitmap(resW, resH, android.graphics.Bitmap.Config.ARGB_8888)
-                            val canvas = android.graphics.Canvas(composite)
-                            canvas.drawColor(android.graphics.Color.BLACK)
-                            b1?.let { canvas.drawBitmap(it, 0f, 0f, null) }
-                            b2?.let {
-                                if (isSBS) canvas.drawBitmap(it, w1 + gap, 0f, null)
-                                else canvas.drawBitmap(it, 0f, h1 + gap, null)
-                            }
-
                             coroutineContext.ensureActive()
-                            compositeBitmap = top.maary.darkbag.utils.HalfFrameUtils.addEffects(
-                                composite,
-                                config.showTimestamp,
-                                config.flareType >= 0,
-                                currentGroup.hfLayout ?: "SBS",
-                                time1 = currentGroup.captureTime1.takeIf { it > 0 } ?: currentGroup.captureTime,
-                                time2 = currentGroup.captureTime2.takeIf { it > 0 } ?: currentGroup.captureTime,
-                                flareType = config.flareType
-                            )
-                            if (compositeBitmap != composite) {
-                                composite.recycle()
-                            }
+                            compositeBitmap = createCompositeFromCache(config, currentGroup, b1, b2)
                             ensureActive()
 
-                            if (isIndividual) {
+                            if (isIndividual && compositeBitmap != null) {
+                                val isSBS = currentGroup.hfLayout != "TB"
+                                val gap = top.maary.darkbag.utils.HalfFrameUtils.calculateGap(maxOf(b1?.width ?: 0, b1?.height ?: 0)).toFloat()
+                                val w1 = b1?.width ?: b2?.width ?: 0
+                                val h1 = b1?.height ?: b2?.height ?: 0
+                                val w2 = b2?.width ?: w1
+                                val h2 = b2?.height ?: h1
+
                                 selectedFrameBitmap = if (selectedDngIndex == 0) {
                                     android.graphics.Bitmap.createBitmap(compositeBitmap!!, 0, 0, w1, h1)
                                 } else {
