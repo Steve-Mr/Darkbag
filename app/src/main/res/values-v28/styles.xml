@@ -21,12 +21,6 @@
         <!-- Global fix for Material3 strokeColor resolution issue -->
         <item name="materialButtonStyle">@style/Widget.App.Button</item>
         <item name="materialCardViewStyle">@style/Widget.App.CardView</item>
-        <item name="shapeableImageViewStyle">@style/Widget.App.ShapeableImageView</item>
-
-        <!-- Button variants -->
-        <item name="materialButtonOutlinedStyle">@style/Widget.App.Button.Outlined</item>
-        <item name="materialButtonTonalStyle">@style/Widget.App.Button.Tonal</item>
-        <item name="materialButtonTextStyle">@style/Widget.App.Button.Text</item>
     </style>
 
 </resources>

@@ -47,6 +47,7 @@
                 android:textColor="?attr/colorPrimary" />
 
             <com.google.android.material.card.MaterialCardView
+        app:strokeColor="@null"
                 style="@style/Widget.Material3.CardView.Filled"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -86,6 +87,7 @@
                     <Space android:layout_width="match_parent" android:layout_height="@dimen/spacing_large" />
 
                     <com.google.android.material.button.MaterialButton
+        app:strokeColor="@null"
                         android:id="@+id/btn_manage_luts"
                         style="@style/Widget.Material3.Button.TonalButton"
                         android:layout_width="match_parent"
@@ -106,6 +108,7 @@
                 android:textColor="?attr/colorPrimary" />
 
             <com.google.android.material.card.MaterialCardView
+        app:strokeColor="@null"
                 style="@style/Widget.Material3.CardView.Filled"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -173,6 +176,7 @@
                 android:textColor="?attr/colorPrimary" />
 
             <com.google.android.material.card.MaterialCardView
+        app:strokeColor="@null"
                 style="@style/Widget.Material3.CardView.Filled"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -229,6 +233,7 @@
                 android:textColor="?attr/colorPrimary" />
 
             <com.google.android.material.card.MaterialCardView
+        app:strokeColor="@null"
                 style="@style/Widget.Material3.CardView.Filled"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -314,6 +319,7 @@
                 android:textColor="?attr/colorPrimary" />
 
             <com.google.android.material.card.MaterialCardView
+        app:strokeColor="@null"
                 style="@style/Widget.Material3.CardView.Filled"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -345,6 +351,7 @@
                 android:textColor="?attr/colorPrimary" />
 
             <com.google.android.material.card.MaterialCardView
+        app:strokeColor="@null"
                 style="@style/Widget.Material3.CardView.Filled"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -436,6 +443,7 @@
                 android:layout_marginBottom="@dimen/spacing_medium" />
 
             <com.google.android.material.card.MaterialCardView
+        app:strokeColor="@null"
                 style="@style/Widget.Material3.CardView.Filled"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -515,6 +523,7 @@
                 android:layout_marginBottom="@dimen/spacing_medium" />
 
             <com.google.android.material.card.MaterialCardView
+        app:strokeColor="@null"
                 style="@style/Widget.Material3.CardView.Filled"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -643,6 +652,7 @@
                     android:layout_marginBottom="@dimen/spacing_medium" />
 
                 <com.google.android.material.card.MaterialCardView
+        app:strokeColor="@null"
                     style="@style/Widget.Material3.CardView.Filled"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
@@ -712,6 +722,7 @@
                 android:layout_marginBottom="@dimen/spacing_medium" />
 
             <com.google.android.material.card.MaterialCardView
+        app:strokeColor="@null"
                 android:id="@+id/card_about"
                 style="@style/Widget.Material3.CardView.Filled"
                 android:layout_width="match_parent"

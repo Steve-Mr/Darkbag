@@ -30,6 +30,7 @@
         app:layout_constraintTop_toBottomOf="@id/tv_title">
 
         <com.google.android.material.card.MaterialCardView
+        app:strokeColor="@null"
             android:id="@+id/card_frame1"
             android:layout_width="0dp"
             android:layout_height="200dp"
@@ -57,6 +58,7 @@
         </com.google.android.material.card.MaterialCardView>
 
         <com.google.android.material.card.MaterialCardView
+        app:strokeColor="@null"
             android:id="@+id/card_frame2"
             android:layout_width="0dp"
             android:layout_height="200dp"
@@ -86,6 +88,7 @@
     </LinearLayout>
 
     <com.google.android.material.button.MaterialButton
+        app:strokeColor="@null"
         android:id="@+id/btn_share_both"
         style="@style/Widget.Material3.Button.TonalButton"
         android:layout_width="match_parent"

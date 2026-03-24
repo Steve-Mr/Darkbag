@@ -35,12 +35,6 @@
         <!-- Global fix for Material3 strokeColor resolution issue -->
         <item name="materialButtonStyle">@style/Widget.App.Button</item>
         <item name="materialCardViewStyle">@style/Widget.App.CardView</item>
-        <item name="shapeableImageViewStyle">@style/Widget.App.ShapeableImageView</item>
-
-        <!-- Button variants -->
-        <item name="materialButtonOutlinedStyle">@style/Widget.App.Button.Outlined</item>
-        <item name="materialButtonTonalStyle">@style/Widget.App.Button.Tonal</item>
-        <item name="materialButtonTextStyle">@style/Widget.App.Button.Text</item>
     </style>
 
     <!-- Global Base Styles to disable strokeColor -->
@@ -48,23 +42,8 @@
         <item name="strokeColor">@null</item>
     </style>
 
-    <style name="Widget.App.Button.Outlined" parent="Widget.Material3.Button.OutlinedButton">
-        <item name="strokeColor">@null</item>
-    </style>
-
-    <style name="Widget.App.Button.Tonal" parent="Widget.Material3.Button.TonalButton">
-        <item name="strokeColor">@null</item>
-    </style>
-
-    <style name="Widget.App.Button.Text" parent="Widget.Material3.Button.TextButton">
-        <item name="strokeColor">@null</item>
-    </style>
 
     <style name="Widget.App.CardView" parent="Widget.Material3.CardView.Filled">
-        <item name="strokeColor">@null</item>
-    </style>
-
-    <style name="Widget.App.ShapeableImageView" parent="Widget.Material3.ShapeableImageView">
         <item name="strokeColor">@null</item>
     </style>
 
