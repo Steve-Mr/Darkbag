@@ -68,19 +68,19 @@ class MainActivity : AppCompatActivity() {
             val shouldShow = (destination.id == R.id.camera_fragment || destination.id == R.id.studio_fragment) && (enableCamera && enableStudio)
 
             if (shouldShow) {
-                if (activityMainBinding.navView.visibility != View.VISIBLE) {
-                    activityMainBinding.navView.visibility = View.VISIBLE
-                    activityMainBinding.navView.alpha = 0f
-                    activityMainBinding.navView.animate().alpha(1f).setDuration(200).start()
-                }
+                activityMainBinding.navView.animate()
+                    .translationY(0f)
+                    .alpha(1f)
+                    .setDuration(300)
+                    .withStartAction { activityMainBinding.navView.visibility = View.VISIBLE }
+                    .start()
             } else {
-                if (activityMainBinding.navView.visibility == View.VISIBLE) {
-                    activityMainBinding.navView.animate()
-                        .alpha(0f)
-                        .setDuration(200)
-                        .withEndAction { activityMainBinding.navView.visibility = View.GONE }
-                        .start()
-                }
+                activityMainBinding.navView.animate()
+                    .translationY(activityMainBinding.navView.height.toFloat())
+                    .alpha(0f)
+                    .setDuration(300)
+                    .withEndAction { activityMainBinding.navView.visibility = View.GONE }
+                    .start()
             }
         }
 

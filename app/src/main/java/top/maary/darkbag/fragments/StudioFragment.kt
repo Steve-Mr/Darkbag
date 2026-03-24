@@ -62,13 +62,19 @@ class StudioFragment : Fragment() {
         }
         ViewCompat.setOnApplyWindowInsetsListener(binding.rvStudio) { v, insets ->
             val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            v.setPadding(v.paddingLeft, v.paddingTop, v.paddingRight, systemBars.bottom + resources.getDimensionPixelSize(R.dimen.margin_xlarge))
+            val navView = requireActivity().findViewById<View>(R.id.nav_view)
+            val navHeight = if (navView?.visibility == View.VISIBLE) navView.height else 0
+
+            v.setPadding(v.paddingLeft, v.paddingTop, v.paddingRight, systemBars.bottom + navHeight + resources.getDimensionPixelSize(R.dimen.margin_xlarge))
             insets
         }
         ViewCompat.setOnApplyWindowInsetsListener(binding.llStudioActions) { v, insets ->
             val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            val navView = requireActivity().findViewById<View>(R.id.nav_view)
+            val navHeight = if (navView?.visibility == View.VISIBLE) navView.height else 0
+
             v.updateLayoutParams<ViewGroup.MarginLayoutParams> {
-                bottomMargin = systemBars.bottom + resources.getDimensionPixelSize(R.dimen.margin_large)
+                bottomMargin = systemBars.bottom + navHeight + resources.getDimensionPixelSize(R.dimen.margin_large)
             }
             insets
         }

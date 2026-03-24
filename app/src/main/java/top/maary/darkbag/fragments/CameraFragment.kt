@@ -1195,11 +1195,14 @@ class CameraFragment : Fragment() {
                     WindowInsetsCompat.Type.displayCutout() or
                     WindowInsetsCompat.Type.mandatorySystemGestures()
                 )
+                val navView = requireActivity().findViewById<View>(R.id.nav_view)
+                val navHeight = if (navView?.visibility == View.VISIBLE) navView.height else 0
+
                 view.updatePadding(
                     left = insets.left,
                     top = insets.top,
                     right = insets.right,
-                    bottom = insets.bottom
+                    bottom = insets.bottom + navHeight
                 )
 
                 // Update Viewfinder and Lens Group constraints
