@@ -188,7 +188,6 @@ class ImageViewerFragment : Fragment() {
                     captureTime2 = time2
                 )
                 groups.add(0, virtualGroup)
-                markAdjusted()
             } else if (targetUri != null && groups.none { it.jpgUri?.toString() == targetUri || it.dngUri?.toString() == targetUri || it.dngUri1?.toString() == targetUri }) {
                 // External or recently captured image not yet grouped
                 val u = Uri.parse(targetUri)
@@ -267,6 +266,12 @@ class ImageViewerFragment : Fragment() {
             if (initialPos != -1) {
                 binding.imagePager.setCurrentItem(initialPos, false)
             }
+
+            if (targetUri?.contains("|") == true) {
+                markAdjusted()
+                applyEditPreview()
+            }
+
             binding.imagePager.isUserInputEnabled = !isAdjusted
 
             setupActionButtons()
@@ -1257,7 +1262,8 @@ class ImageViewerFragment : Fragment() {
             if (b == null) return null
             val isPortrait = b.height >= b.width
             if (isPortrait == wantPortrait) return b
-            val matrix = android.graphics.Matrix().apply { postRotate(90f) }
+            val degrees = if (wantPortrait) 90f else 270f
+            val matrix = android.graphics.Matrix().apply { postRotate(degrees) }
             return android.graphics.Bitmap.createBitmap(b, 0, 0, b.width, b.height, matrix, true)
         }
 
@@ -1368,7 +1374,7 @@ class ImageViewerFragment : Fragment() {
                             val currentIsPortrait = currentHeight >= currentWidth
                             val wantPortrait = currentGroup.hfLayout != "TB"
                             if (currentIsPortrait != wantPortrait) {
-                                rotDegrees = (rotDegrees + 90) % 360
+                                rotDegrees = (rotDegrees + (if (wantPortrait) 90 else 270)) % 360
                             }
                         }
 
@@ -1552,7 +1558,7 @@ class ImageViewerFragment : Fragment() {
                             val currentIsPortrait = currentHeight >= currentWidth
                             val wantPortrait = currentGroup.hfLayout != "TB"
                             if (currentIsPortrait != wantPortrait) {
-                                rotDegrees = (rotDegrees + 90) % 360
+                                rotDegrees = (rotDegrees + (if (wantPortrait) 90 else 270)) % 360
                             }
                         }
 

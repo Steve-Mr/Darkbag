@@ -91,6 +91,8 @@ class StudioFragment : Fragment() {
             val groups = repository.getGroupedImages(forceRefresh = true)
             binding.rvStudio.adapter = StudioAdapter(groups)
             binding.loadingIndicator.visibility = View.GONE
+            // Ensure action buttons are correctly positioned after layout refresh
+            binding.root.requestApplyInsets()
         }
     }
 
