@@ -65,14 +65,22 @@ class MainActivity : AppCompatActivity() {
             val enableCamera = prefs.getBoolean(SettingsFragment.KEY_ENABLE_CAMERA, true)
             val enableStudio = prefs.getBoolean(SettingsFragment.KEY_ENABLE_STUDIO, true)
 
-            if (destination.id == R.id.camera_fragment || destination.id == R.id.studio_fragment) {
-                if (enableCamera && enableStudio) {
+            val shouldShow = (destination.id == R.id.camera_fragment || destination.id == R.id.studio_fragment) && (enableCamera && enableStudio)
+
+            if (shouldShow) {
+                if (activityMainBinding.navView.visibility != View.VISIBLE) {
                     activityMainBinding.navView.visibility = View.VISIBLE
-                } else {
-                    activityMainBinding.navView.visibility = View.GONE
+                    activityMainBinding.navView.alpha = 0f
+                    activityMainBinding.navView.animate().alpha(1f).setDuration(200).start()
                 }
             } else {
-                activityMainBinding.navView.visibility = View.GONE
+                if (activityMainBinding.navView.visibility == View.VISIBLE) {
+                    activityMainBinding.navView.animate()
+                        .alpha(0f)
+                        .setDuration(200)
+                        .withEndAction { activityMainBinding.navView.visibility = View.GONE }
+                        .start()
+                }
             }
         }
 
@@ -112,6 +120,7 @@ class MainActivity : AppCompatActivity() {
     private fun navigateToViewer(navController: NavController, uri: Uri) {
         val args = Bundle().apply {
             putString("initial_uri", uri.toString())
+            putBoolean("only_darkbag", false)
         }
         navController.navigate(R.id.image_viewer_fragment, args)
     }

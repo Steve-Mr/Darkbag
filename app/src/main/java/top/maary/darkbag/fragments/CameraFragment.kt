@@ -1473,8 +1473,11 @@ class CameraFragment : Fragment() {
             lifecycleScope.launch {
                 val uri = mediaStoreUtils.getLatestAppImage(requireContext())
                 if (uri != null) {
-                    Navigation.findNavController(requireActivity(), R.id.fragment_container)
-                        .navigate(CameraFragmentDirections.actionCameraToImageViewer(uri.toString()))
+                    val action = CameraFragmentDirections.actionCameraToImageViewer(
+                        initialUri = uri.toString(),
+                        onlyDarkbag = true
+                    )
+                    Navigation.findNavController(requireActivity(), R.id.fragment_container).navigate(action)
                 }
             }
         }

@@ -157,7 +157,13 @@ class ImageViewerFragment : Fragment() {
         binding.imagePager.visibility = View.INVISIBLE
 
         lifecycleScope.launch {
-            val groups = repository.getGroupedImages(forceRefresh = forceRefresh).toMutableList()
+            var groups = repository.getGroupedImages(forceRefresh = forceRefresh).toMutableList()
+
+            if (args.onlyDarkbag) {
+                groups = groups.filter {
+                    it.baseName.startsWith(top.maary.darkbag.utils.DarkbagIdentity.FILE_PREFIX)
+                }.toMutableList()
+            }
 
             // Handle virtual groups from external URIs or stitching
             if (targetUri != null && targetUri.contains("|")) {
