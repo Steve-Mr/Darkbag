@@ -11,6 +11,7 @@ import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import android.content.Context
 import android.graphics.BitmapFactory
+import com.bumptech.glide.Glide
 import android.net.Uri
 import android.view.MenuItem
 import android.widget.TextView
@@ -246,6 +247,7 @@ class ImageViewerFragment : Fragment() {
                 onZoomChanged = { isZoomed -> if (isZoomed) hideUi() else showUi() }
                 onLongPressStarted = { handleLongPressStarted(it) }
                 onLongPressEnded = { handleLongPressEnded(it) }
+                previewProvider = { pos -> if (pos == binding.imagePager.currentItem) lastCompositeBitmap else null }
                 setFormatSwitcherPersistentHidden(isAdjusted)
             }
             binding.imagePager.adapter = adapter
@@ -586,7 +588,17 @@ class ImageViewerFragment : Fragment() {
                     val tempBitmap = cachedBitmap1
                     cachedBitmap1 = cachedBitmap2
                     cachedBitmap2 = tempBitmap
-                    lastPreviewConfig = null
+
+                    // Swap adjustments in last preview config to match swapped cached bitmaps
+                    lastPreviewConfig = lastPreviewConfig?.let { lp ->
+                        val lpAdjs = lp.adjustments?.toMutableList()
+                        if (lpAdjs != null && lpAdjs.size >= 2) {
+                            val t = lpAdjs[0]
+                            lpAdjs[0] = lpAdjs[1]
+                            lpAdjs[1] = t
+                        }
+                        lp.copy(adjustments = lpAdjs)
+                    }
 
                     // Swap adjustments in config
                     val adjs = current.adjustments?.toMutableList() ?: mutableListOf(top.maary.darkbag.models.BasicAdjustments(), top.maary.darkbag.models.BasicAdjustments())
@@ -605,7 +617,6 @@ class ImageViewerFragment : Fragment() {
                     )
 
                     currentEditConfig = current.copy(adjustments = adjs)
-                    adapter.updateGroupAt(binding.imagePager.currentItem, updatedGroup)
                     markAdjusted()
 
                     // INSTANT FAST PATH: Update UI using existing cached bitmaps
@@ -613,13 +624,25 @@ class ImageViewerFragment : Fragment() {
                     if (fastComposite != null) {
                         val old = lastCompositeBitmap
                         lastCompositeBitmap = fastComposite
-                        old?.recycle()
+                        // Do NOT recycle 'old' yet, it might still be in use by the view until the next frame.
+                        // ImageViewerAdapter.setBitmapAndRecyclePrevious handles this more safely.
 
                         val pos = binding.imagePager.currentItem
-                        adapter.cancelLoadJob(pos)
+                        adapter.cancelLoadJob(pos, clearView = false)
+                        adapter.updateGroupAt(pos, updatedGroup, payload = "SWAP")
+
                         val holder = (binding.imagePager.getChildAt(0) as? androidx.recyclerview.widget.RecyclerView)
                             ?.findViewHolderForAdapterPosition(pos) as? ImageViewerAdapter.ViewHolder
-                        holder?.binding?.imageView?.setImageBitmap(fastComposite)
+
+                        holder?.let {
+                            Glide.with(it.binding.imageView).clear(it.binding.imageView)
+                            val oldManual = it.manualBitmap
+                            if (oldManual != null && oldManual !== fastComposite && !oldManual.isRecycled) {
+                                oldManual.recycle()
+                            }
+                            it.manualBitmap = fastComposite
+                            it.binding.imageView.setImageBitmap(fastComposite)
+                        }
                     }
 
                     try {
@@ -1405,15 +1428,23 @@ class ImageViewerFragment : Fragment() {
                     if (lastCompositeBitmap != compositeBitmap) {
                         val old = lastCompositeBitmap
                         lastCompositeBitmap = compositeBitmap
-                        old?.recycle()
+                        // Do NOT recycle 'old' yet, it's safer to let the adapter handle it via setBitmapAndRecyclePrevious
+                        // or clean up when exiting the fragment/switching pages.
                     }
                     if (isLongPressing) return@coroutineScope
 
                     val pos = binding.imagePager.currentItem
-                    adapter.cancelLoadJob(pos)
                     val holder = (binding.imagePager.getChildAt(0) as? androidx.recyclerview.widget.RecyclerView)
                         ?.findViewHolderForAdapterPosition(pos) as? ImageViewerAdapter.ViewHolder
-                    holder?.binding?.imageView?.setImageBitmap(compositeBitmap)
+                    holder?.let {
+                        adapter.cancelLoadJob(pos, clearView = false)
+                        val oldManual = it.manualBitmap
+                        if (oldManual != null && oldManual !== compositeBitmap && !oldManual.isRecycled) {
+                            oldManual.recycle()
+                        }
+                        it.manualBitmap = compositeBitmap
+                        it.binding.imageView.setImageBitmap(compositeBitmap)
+                    }
                 }
         } finally {
             showProgress(false)
@@ -1626,6 +1657,7 @@ class ImageViewerFragment : Fragment() {
                     onZoomChanged = { isZoomed -> if (isZoomed) hideUi() else showUi() }
                     onLongPressStarted = { handleLongPressStarted(it) }
                     onLongPressEnded = { handleLongPressEnded(it) }
+                    previewProvider = { pos -> if (pos == binding.imagePager.currentItem) lastCompositeBitmap else null }
                 }
                 binding.imagePager.adapter = adapter
                 binding.imagePager.setCurrentItem(newPos, false)

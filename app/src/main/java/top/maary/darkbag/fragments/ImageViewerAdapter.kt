@@ -27,6 +27,7 @@ class ImageViewerAdapter(
     var onZoomChanged: ((Boolean) -> Unit)? = null
     var onLongPressStarted: ((top.maary.darkbag.ui.ZoomableImageView) -> Unit)? = null
     var onLongPressEnded: ((top.maary.darkbag.ui.ZoomableImageView) -> Unit)? = null
+    var previewProvider: ((Int) -> android.graphics.Bitmap?)? = null
     private var recyclerView: RecyclerView? = null
     private val selectedFormats = mutableMapOf<Int, String>()
     private var isUiVisible = true
@@ -56,7 +57,18 @@ class ImageViewerAdapter(
     }
 
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
+        onBindViewHolder(holder, position, emptyList())
+    }
+
+    override fun onBindViewHolder(holder: ViewHolder, position: Int, payloads: List<Any>) {
         val group = groups[position]
+
+        if (payloads.isNotEmpty()) {
+            // Partial update for swap or metadata
+            setupButtons(holder, group, position)
+            return
+        }
+
         holder.loadJob?.cancel()
 
         holder.binding.imageView.setVisualParams(margin, radius)
@@ -91,7 +103,13 @@ class ImageViewerAdapter(
             else -> R.id.btnJpg
         }
         selectButton(holder, targetId)
-        if (!isRenderLocked) {
+
+        if (isRenderLocked) {
+            // Try to restore preview from fragment if available
+            previewProvider?.invoke(position)?.let {
+                setBitmapAndRecyclePrevious(holder, it)
+            }
+        } else {
             loadSelectedFormat(holder, group, format)
         }
     }
@@ -397,11 +415,15 @@ class ImageViewerAdapter(
         return groups.indexOfFirst { it.baseName == baseName }
     }
 
-    fun updateGroupAt(position: Int, newGroup: ImageGroup) {
+    fun updateGroupAt(position: Int, newGroup: ImageGroup, payload: Any? = null) {
         if (position < 0 || position >= groups.size) return
         val updatedList = groups.toMutableList()
         updatedList[position] = newGroup
         groups = updatedList
-        notifyItemChanged(position)
+        if (payload != null) {
+            notifyItemChanged(position, payload)
+        } else {
+            notifyItemChanged(position)
+        }
     }
 }
