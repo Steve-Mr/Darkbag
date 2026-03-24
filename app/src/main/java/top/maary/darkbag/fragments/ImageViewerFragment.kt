@@ -588,7 +588,17 @@ class ImageViewerFragment : Fragment() {
                     val tempBitmap = cachedBitmap1
                     cachedBitmap1 = cachedBitmap2
                     cachedBitmap2 = tempBitmap
-                    lastPreviewConfig = null
+
+                    // Swap adjustments in last preview config to match swapped cached bitmaps
+                    lastPreviewConfig = lastPreviewConfig?.let { lp ->
+                        val lpAdjs = lp.adjustments?.toMutableList()
+                        if (lpAdjs != null && lpAdjs.size >= 2) {
+                            val t = lpAdjs[0]
+                            lpAdjs[0] = lpAdjs[1]
+                            lpAdjs[1] = t
+                        }
+                        lp.copy(adjustments = lpAdjs)
+                    }
 
                     // Swap adjustments in config
                     val adjs = current.adjustments?.toMutableList() ?: mutableListOf(top.maary.darkbag.models.BasicAdjustments(), top.maary.darkbag.models.BasicAdjustments())
