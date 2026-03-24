@@ -628,6 +628,7 @@ class ImageViewerFragment : Fragment() {
                         // ImageViewerAdapter.setBitmapAndRecyclePrevious handles this more safely.
 
                         val pos = binding.imagePager.currentItem
+                        adapter.cancelLoadJob(pos, clearView = false)
                         adapter.updateGroupAt(pos, updatedGroup, payload = "SWAP")
 
                         val holder = (binding.imagePager.getChildAt(0) as? androidx.recyclerview.widget.RecyclerView)
@@ -635,6 +636,10 @@ class ImageViewerFragment : Fragment() {
 
                         holder?.let {
                             Glide.with(it.binding.imageView).clear(it.binding.imageView)
+                            val oldManual = it.manualBitmap
+                            if (oldManual != null && oldManual !== fastComposite && !oldManual.isRecycled) {
+                                oldManual.recycle()
+                            }
                             it.manualBitmap = fastComposite
                             it.binding.imageView.setImageBitmap(fastComposite)
                         }
@@ -1433,6 +1438,10 @@ class ImageViewerFragment : Fragment() {
                         ?.findViewHolderForAdapterPosition(pos) as? ImageViewerAdapter.ViewHolder
                     holder?.let {
                         adapter.cancelLoadJob(pos, clearView = false)
+                        val oldManual = it.manualBitmap
+                        if (oldManual != null && oldManual !== compositeBitmap && !oldManual.isRecycled) {
+                            oldManual.recycle()
+                        }
                         it.manualBitmap = compositeBitmap
                         it.binding.imageView.setImageBitmap(compositeBitmap)
                     }
