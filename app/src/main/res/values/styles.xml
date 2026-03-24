@@ -25,6 +25,11 @@
         <!-- Typography -->
         <item name="android:fontFamily">sans-serif-medium</item>
 
+        <!-- Ensure base Material attributes are defined to prevent resolution failures -->
+        <item name="isLightTheme">false</item>
+        <item name="colorControlHighlight">#40FFFFFF</item>
+        <item name="colorControlNormal">?attr/colorOnSurface</item>
+
         <!-- Fallbacks for Material3 attributes (Android 15 compatibility) -->
         <item name="colorSurfaceContainer">?attr/colorSurface</item>
         <item name="colorSurfaceContainerLow">?attr/colorSurface</item>

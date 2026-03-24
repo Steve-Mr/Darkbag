@@ -1162,9 +1162,10 @@ class CameraFragment : Fragment() {
         }
         viewsToRemove.forEach { root.removeView(it) }
 
-        // Use layoutInflater directly which is already themed by the activity/fragment
+        // Explicitly use activity's layoutInflater to ensure full theme (Dynamic Colors, AppTheme) is present.
+        // This avoids issues with fragmented context when inflating complex Material3 components.
         cameraUiContainerBinding = CameraUiContainerBinding.inflate(
-            layoutInflater,
+            LayoutInflater.from(requireActivity()),
             root
         )
 
