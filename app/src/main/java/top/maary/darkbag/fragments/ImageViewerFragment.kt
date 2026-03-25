@@ -164,7 +164,9 @@ class ImageViewerFragment : Fragment() {
         lifecycleScope.launch {
             var groups = repository.getGroupedImages(forceRefresh = forceRefresh).toMutableList()
 
-            if (args.onlyDarkbag) {
+            if (args.isStudioMode) {
+                groups = repository.getStudioGroups(forceRefresh = forceRefresh).toMutableList()
+            } else if (args.onlyDarkbag) {
                 groups = groups.filter {
                     it.baseName.startsWith(top.maary.darkbag.utils.DarkbagIdentity.FILE_PREFIX)
                 }.toMutableList()
@@ -1505,7 +1507,7 @@ class ImageViewerFragment : Fragment() {
         val dngUri2 = currentGroup.dngUri2
 
         // Force "Save as New" for external images
-        val isExternal = !currentGroup.baseName.startsWith(top.maary.darkbag.utils.DarkbagIdentity.FILE_PREFIX)
+        val isExternal = !args.isStudioMode && !currentGroup.baseName.startsWith(top.maary.darkbag.utils.DarkbagIdentity.FILE_PREFIX)
         val actualIsReplacement = if (isExternal) false else isReplacement
 
         lifecycleScope.launch {
@@ -1700,7 +1702,7 @@ class ImageViewerFragment : Fragment() {
             showProgress(false, forceGlobal = true)
 
             repository.invalidateCache()
-            val updatedGroups = repository.getGroupedImages(forceRefresh = true)
+            val updatedGroups = if (args.isStudioMode) repository.getStudioGroups(forceRefresh = true) else repository.getGroupedImages(forceRefresh = true)
             if (updatedGroups.isNotEmpty()) {
                 // Determine which group to navigate to
                 val targetBaseName = if (actualIsReplacement) {
@@ -1913,6 +1915,16 @@ class ImageViewerFragment : Fragment() {
     }
 
     private fun showDeleteDialog(group: ImageGroup) {
+        if (args.isStudioMode) {
+            com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
+                .setTitle("Remove from Studio")
+                .setMessage("Are you sure you want to remove this item from Studio? The original RAW file will be deleted from internal storage, but any exported JPGs will remain in your gallery.")
+                .setPositiveButton("Delete") { _, _ -> deleteImage(group, true) }
+                .setNegativeButton("Cancel", null)
+                .show()
+            return
+        }
+
         val options = arrayOf("Delete this format only", "Delete entire group")
         var checkedItem = 1
         com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
@@ -1933,17 +1945,13 @@ class ImageViewerFragment : Fragment() {
             var nextTargetUri: String? = null
             val currentIndex = binding.imagePager.currentItem
 
-            if (deleteGroup) {
+            if (args.isStudioMode) {
+                repository.deleteStudioGroup(group)
+            } else if (deleteGroup) {
                 group.jpgUri?.let { context.contentResolver.delete(it, null, null) }
                 group.dngUri?.let { context.contentResolver.delete(it, null, null) }
                 group.dngUri1?.let { context.contentResolver.delete(it, null, null) }
                 group.dngUri2?.let { context.contentResolver.delete(it, null, null) }
-
-                if (adapter.itemCount > 1) {
-                    val nextIndex = if (currentIndex < adapter.itemCount - 1) currentIndex + 1 else currentIndex - 1
-                    val nextGroup = adapter.getGroup(nextIndex)
-                    nextTargetUri = (nextGroup.jpgUri ?: nextGroup.dngUri)?.toString()
-                }
             } else {
                 val selectedFormat = adapter.getSelectedFormat(binding.imagePager.currentItem)
                 if (selectedFormat == "DNG" && group.isHalfFrame()) {
@@ -1957,20 +1965,27 @@ class ImageViewerFragment : Fragment() {
                     }
                     currentUri?.let { context.contentResolver.delete(it, null, null) }
                 }
-
-                repository.invalidateCache()
-                val remainingGroup = repository.getGroupedImages(forceRefresh = true).find { it.baseName == group.baseName }
-                nextTargetUri = if (remainingGroup != null) {
-                    (remainingGroup.jpgUri ?: remainingGroup.dngUri)?.toString()
-                } else {
-                    if (adapter.itemCount > 1) {
-                        val nextIndex = if (currentIndex < adapter.itemCount - 1) currentIndex + 1 else currentIndex - 1
-                        val nextGroup = adapter.getGroup(nextIndex)
-                        (nextGroup.jpgUri ?: nextGroup.dngUri)?.toString()
-                    } else null
-                }
             }
-            loadImages(nextTargetUri, forceRefresh = true)
+
+            repository.invalidateCache()
+            val remainingGroups = if (args.isStudioMode) repository.getStudioGroups(forceRefresh = true) else repository.getGroupedImages(forceRefresh = true)
+            val remainingGroup = remainingGroups.find { it.baseName == group.baseName }
+
+            nextTargetUri = if (remainingGroup != null) {
+                (remainingGroup.jpgUri ?: remainingGroup.dngUri ?: remainingGroup.dngUri1)?.toString()
+            } else {
+                if (adapter.itemCount > 1) {
+                    val nextIndex = if (currentIndex < adapter.itemCount - 1) currentIndex + 1 else currentIndex - 1
+                    val nextGroup = adapter.getGroup(nextIndex)
+                    (nextGroup.jpgUri ?: nextGroup.dngUri ?: nextGroup.dngUri1)?.toString()
+                } else null
+            }
+
+            if (nextTargetUri == null) {
+                findNavController().navigateUp()
+            } else {
+                loadImages(nextTargetUri, forceRefresh = true)
+            }
         }
     }
 
@@ -2148,11 +2163,11 @@ class ImageViewerFragment : Fragment() {
         }
 
         val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
-        val isVirtual = currentGroup.baseName.startsWith("Stitched_")
+        val isVirtual = currentGroup.baseName.startsWith("Stitched_") || (args.isStudioMode && isAdjusted)
 
         com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
-            .setTitle(if (isVirtual) "Discard Stitch?" else getString(R.string.discard_changes_title))
-            .setMessage(if (isVirtual) "Are you sure you want to discard this stitch and go back?" else getString(R.string.discard_changes_message))
+            .setTitle(if (isVirtual) "Discard Changes?" else getString(R.string.discard_changes_title))
+            .setMessage(if (isVirtual) "Are you sure you want to discard your edits and go back?" else getString(R.string.discard_changes_message))
             .setNegativeButton(R.string.cancel, null)
             .setPositiveButton(R.string.discard) { _, _ ->
                 if (isVirtual) {

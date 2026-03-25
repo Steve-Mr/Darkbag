@@ -21,6 +21,14 @@ class ImageRepository(private val context: Context) {
     companion object {
         @Volatile
         private var cachedGroups: List<ImageGroup>? = null
+        @Volatile
+        private var cachedStudioGroups: List<ImageGroup>? = null
+
+        const val STUDIO_DIR = "studio_assets"
+    }
+
+    private val studioFolder: File by lazy {
+        File(context.filesDir, STUDIO_DIR).apply { if (!exists()) mkdirs() }
     }
 
     suspend fun getGroupedImages(forceRefresh: Boolean = false): List<ImageGroup> {
@@ -62,6 +70,7 @@ class ImageRepository(private val context: Context) {
 
     fun invalidateCache() {
         cachedGroups = null
+        cachedStudioGroups = null
     }
 
     fun resolveFilename(uri: Uri): String? {
@@ -352,6 +361,147 @@ class ImageRepository(private val context: Context) {
 
     private fun getBaseName(fileName: String): String {
         return top.maary.darkbag.utils.ImageUtils.getBaseName(fileName)
+    }
+
+    suspend fun getStudioGroups(forceRefresh: Boolean = false): List<ImageGroup> {
+        if (!forceRefresh) {
+            cachedStudioGroups?.let { return it }
+        }
+
+        return withContext(Dispatchers.IO) {
+            val groups = mutableMapOf<String, ImageGroupBuilder>()
+            val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+
+            // 1. Scan internal studio folder
+            scanStudioFolder(groups)
+
+            // 2. Scan external JPG storage and Darkbag folder to find matching JPGs for the internal DNGs
+            val jpgFolderUri = prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
+            val exportFolderUri = prefs.getString(SettingsFragment.KEY_EXPORT_STORAGE_URI, null)
+
+            val externalFolders = mutableSetOf<String>()
+            jpgFolderUri?.let { externalFolders.add(it) }
+            exportFolderUri?.let { externalFolders.add(it) }
+
+            // Only search for JPGs that match existing internal DNG base names to maintain sandbox isolation
+            val internalBaseNames = groups.keys.toSet()
+
+            for (folderUri in externalFolders) {
+                scanSafFolderForMatchingJpgs(folderUri, groups, internalBaseNames)
+            }
+
+            // Also scan MediaStore Darkbag folder for matching JPGs
+            scanMediaStoreForMatchingJpgs(groups, internalBaseNames)
+
+            val result = groups.values
+                .map { it.build() }
+                .filter { it.hasAny() }
+                .sortedByDescending { it.captureTime }
+
+            cachedStudioGroups = result
+            result
+        }
+    }
+
+    private fun scanStudioFolder(groups: MutableMap<String, ImageGroupBuilder>) {
+        val files = studioFolder.listFiles() ?: return
+        for (file in files) {
+            val name = file.name
+            if (!name.endsWith(".dng", ignoreCase = true)) continue
+
+            val baseName = getBaseName(name)
+            val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
+            val lastModified = file.lastModified()
+            val uri = Uri.fromFile(file)
+
+            when {
+                name.contains("_HF2") -> builder.setDng2(uri, lastModified)
+                name.contains("_HF1") -> builder.setDng1(uri, lastModified)
+                else -> builder.setDng(uri, lastModified)
+            }
+        }
+    }
+
+    private fun scanSafFolderForMatchingJpgs(folderUri: String, groups: MutableMap<String, ImageGroupBuilder>, filter: Set<String>) {
+        try {
+            val treeUri = Uri.parse(folderUri)
+            val root = DocumentFile.fromTreeUri(context, treeUri)
+            root?.listFiles()?.forEach { file ->
+                val name = file.name ?: return@forEach
+                if (!name.endsWith(".jpg", ignoreCase = true) && !name.endsWith(".jpeg", ignoreCase = true)) return@forEach
+
+                val baseName = getBaseName(name)
+                if (!filter.contains(baseName)) return@forEach
+
+                val builder = groups[baseName] ?: return@forEach
+                builder.setJpg(file.uri, file.lastModified())
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("ImageRepository", "Failed to scan SAF for matching JPGs", e)
+        }
+    }
+
+    private fun scanMediaStoreForMatchingJpgs(groups: MutableMap<String, ImageGroupBuilder>, filter: Set<String>) {
+        val collection = MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+        val projection = arrayOf(
+            MediaStore.MediaColumns._ID,
+            MediaStore.MediaColumns.DISPLAY_NAME,
+            MediaStore.MediaColumns.DATE_ADDED,
+            MediaStore.MediaColumns.MIME_TYPE
+        )
+
+        val selection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ? AND ${MediaStore.MediaColumns.MIME_TYPE} = ?"
+        } else {
+            "${MediaStore.MediaColumns.DATA} LIKE ? AND ${MediaStore.MediaColumns.MIME_TYPE} = ?"
+        }
+        val pathFilter = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) "Pictures/Darkbag%" else "%Pictures/Darkbag%"
+        val selectionArgs = arrayOf(pathFilter, "image/jpeg")
+
+        context.contentResolver.query(collection, projection, selection, selectionArgs, null)?.use { cursor ->
+            val idColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
+            val nameColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
+            val dateColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_ADDED)
+
+            while (cursor.moveToNext()) {
+                val name = cursor.getString(nameColumn)
+                val baseName = getBaseName(name)
+                if (!filter.contains(baseName)) continue
+
+                val id = cursor.getLong(idColumn)
+                val uri = ContentUris.withAppendedId(collection, id)
+                val date = cursor.getLong(dateColumn) * 1000
+
+                groups[baseName]?.setJpg(uri, date)
+            }
+        }
+    }
+
+    suspend fun importToStudio(uri: Uri, targetBaseName: String? = null, suffix: String? = null): Uri? = withContext(Dispatchers.IO) {
+        try {
+            val name = resolveFilename(uri) ?: "imported_${System.currentTimeMillis()}.dng"
+            val finalBaseName = targetBaseName ?: getBaseName(name)
+            val finalName = if (suffix != null) "${finalBaseName}${suffix}.dng" else "${finalBaseName}.dng"
+            val destFile = File(studioFolder, finalName)
+
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                destFile.outputStream().use { output ->
+                    input.copyTo(output)
+                }
+            }
+            Uri.fromFile(destFile)
+        } catch (e: Exception) {
+            android.util.Log.e("ImageRepository", "Failed to import file to studio", e)
+            null
+        }
+    }
+
+    fun deleteStudioGroup(group: ImageGroup) {
+        group.dngUri?.let { if (it.scheme == "file") File(it.path!!).delete() }
+        group.dngUri1?.let { if (it.scheme == "file") File(it.path!!).delete() }
+        group.dngUri2?.let { if (it.scheme == "file") File(it.path!!).delete() }
+        // We do NOT delete the JPG as it is in external storage and might be valuable to the user
+        invalidateCache()
     }
 
     private inner class ImageGroupBuilder(val baseName: String) {

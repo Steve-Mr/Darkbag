@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="24dp">
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Choose Stitching Layout"
+        android:textAppearance="?attr/textAppearanceHeadlineSmall" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="Select how the two images should be combined."
+        android:textAppearance="?attr/textAppearanceBodyMedium"
+        android:alpha="0.7" />
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btn_sbs"
+        style="@style/Widget.Material3.Button.TonalButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="24dp"
+        android:text="Side-by-Side (Vertical)"
+        app:icon="@drawable/ic_swap_horiz" />
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btn_tb"
+        style="@style/Widget.Material3.Button.TonalButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:text="Top-Bottom (Horizontal)"
+        app:icon="@drawable/ic_swap_vert" />
+
+</LinearLayout>
