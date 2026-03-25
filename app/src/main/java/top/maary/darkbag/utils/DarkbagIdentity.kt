@@ -24,9 +24,9 @@ object DarkbagIdentity {
         "Darkbag ${BuildConfig.VERSION_NAME}"
     }
 
-    fun imageDescription(isHdrPlus: Boolean): String = if (isHdrPlus) {
-        "Processed by Darkbag HDR+"
-    } else {
-        "Captured with Darkbag"
+    fun imageDescription(isHdrPlus: Boolean, isExternal: Boolean = false): String = when {
+        isHdrPlus -> "Processed by Darkbag HDR+"
+        isExternal -> "Processed by Darkbag"
+        else -> "Captured with Darkbag"
     }
 }

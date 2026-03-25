@@ -52,7 +52,7 @@ class ImageRepository(private val context: Context) {
 
             val result = groups.values
                 .map { it.build() }
-                .filter { it.hasAny() }
+                .filter { it.hasAny() && (it.dngUri != null || it.dngUri1 != null || it.dngUri2 != null) }
                 .sortedByDescending { it.captureTime }
 
             cachedGroups = result
@@ -64,13 +64,104 @@ class ImageRepository(private val context: Context) {
         cachedGroups = null
     }
 
+    fun resolveFilename(uri: Uri): String? {
+        if (uri.scheme == "file") return File(uri.path ?: "").name
+        return try {
+            context.contentResolver.query(uri, arrayOf(MediaStore.MediaColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) cursor.getString(0) else null
+            }
+        } catch (e: Exception) {
+            null
+        } ?: try {
+            DocumentFile.fromSingleUri(context, uri)?.name
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    fun findSiblingsForUri(uri: Uri, baseName: String): Pair<Uri?, Uri?> {
+        var hf1: Uri? = null
+        var hf2: Uri? = null
+
+        // 1. Try MediaStore in the same folder
+        val collection = MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+        val projection = arrayOf(MediaStore.MediaColumns._ID, MediaStore.MediaColumns.DISPLAY_NAME)
+
+        val selection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            "${MediaStore.MediaColumns.RELATIVE_PATH} = ? AND ${MediaStore.MediaColumns.DISPLAY_NAME} LIKE ?"
+        } else {
+            "${MediaStore.MediaColumns.DATA} LIKE ?"
+        }
+
+        val relativePath = try {
+            context.contentResolver.query(uri, arrayOf(MediaStore.MediaColumns.RELATIVE_PATH), null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) cursor.getString(0) else null
+            }
+        } catch (e: Exception) { null }
+
+        val selectionArgs = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && relativePath != null) {
+            arrayOf(relativePath, "$baseName%")
+        } else {
+            arrayOf("%$baseName%")
+        }
+
+        context.contentResolver.query(collection, projection, selection, selectionArgs, null)?.use { cursor ->
+            val idCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
+            val nameCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
+            while (cursor.moveToNext()) {
+                val name = cursor.getString(nameCol)
+                val id = cursor.getLong(idCol)
+                val siblingUri = ContentUris.withAppendedId(collection, id)
+                if (name.contains("_HF1") && name.endsWith(".dng", ignoreCase = true)) hf1 = siblingUri
+                if (name.contains("_HF2") && name.endsWith(".dng", ignoreCase = true)) hf2 = siblingUri
+            }
+        }
+
+        // 2. Try configured folders and fallback to SAF
+        if (hf1 == null || hf2 == null) {
+            val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+            val folders = mutableListOf<String>()
+            prefs.getString(SettingsFragment.KEY_RAW_STORAGE_URI, null)?.let { folders.add(it) }
+            prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)?.let { folders.add(it) }
+
+            for (folderUri in folders) {
+                try {
+                    val root = DocumentFile.fromTreeUri(context, Uri.parse(folderUri))
+                    root?.listFiles()?.forEach { file ->
+                        val name = file.name ?: return@forEach
+                        if (name.startsWith(baseName)) {
+                            if (name.contains("_HF1") && name.endsWith(".dng", ignoreCase = true)) hf1 = file.uri
+                            if (name.contains("_HF2") && name.endsWith(".dng", ignoreCase = true)) hf2 = file.uri
+                        }
+                    }
+                } catch (e: Exception) {}
+                if (hf1 != null && hf2 != null) break
+            }
+
+            if (hf1 == null || hf2 == null) {
+                try {
+                    val document = DocumentFile.fromSingleUri(context, uri)
+                    val parent = document?.parentFile
+                    parent?.listFiles()?.forEach { file ->
+                        val name = file.name ?: return@forEach
+                        if (name.startsWith(baseName)) {
+                            if (name.contains("_HF1") && name.endsWith(".dng", ignoreCase = true)) hf1 = file.uri
+                            if (name.contains("_HF2") && name.endsWith(".dng", ignoreCase = true)) hf2 = file.uri
+                        }
+                    }
+                } catch (e: Exception) {}
+            }
+        }
+
+        return hf1 to hf2
+    }
+
     private fun scanSafFolder(folderUri: String, groups: MutableMap<String, ImageGroupBuilder>) {
         try {
             val treeUri = Uri.parse(folderUri)
             val root = DocumentFile.fromTreeUri(context, treeUri)
             root?.listFiles()?.forEach { file ->
                 val name = file.name ?: return@forEach
-                if (!name.startsWith(DarkbagIdentity.FILE_PREFIX, ignoreCase = true)) return@forEach
                 val baseName = getBaseName(name)
                 val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
                 val lastModified = file.lastModified()
@@ -181,7 +272,6 @@ class ImageRepository(private val context: Context) {
             while (cursor.moveToNext()) {
                 val id = cursor.getLong(idColumn)
                 val name = cursor.getString(nameColumn)
-                if (!name.startsWith(DarkbagIdentity.FILE_PREFIX, ignoreCase = true)) continue
                 val date = cursor.getLong(dateColumn) * 1000 // Convert to ms
                 val mime = cursor.getString(mimeColumn)
                 val uri = ContentUris.withAppendedId(collection, id)
@@ -229,56 +319,12 @@ class ImageRepository(private val context: Context) {
     }
 
     private fun parseUserComment(comment: String?, builder: ImageGroupBuilder) {
-        if (comment?.startsWith("HF_LAYOUT:") == true) {
-            builder.hfLayout = comment.substringAfter("HF_LAYOUT:")
-        } else if (comment?.startsWith("{") == true) {
-            val config = parseEditConfig(comment)
+        val config = top.maary.darkbag.utils.ImageUtils.parseUserComment(comment)
+        if (config != null) {
             builder.editConfig = config
-            if (config?.hfLayout != null) {
+            if (config.hfLayout != null) {
                 builder.hfLayout = config.hfLayout
             }
-        }
-    }
-
-    private fun parseEditConfig(jsonStr: String): EditConfig? {
-        return try {
-            val json = JSONObject(jsonStr)
-            val adjustmentsArray = json.optJSONArray("adjustments")
-            val adjustments = if (adjustmentsArray != null) {
-                List(adjustmentsArray.length()) { i ->
-                    val adjJson = adjustmentsArray.getJSONObject(i)
-                    top.maary.darkbag.models.BasicAdjustments(
-                        exposure = adjJson.optDouble("exposure", 0.0).toFloat(),
-                        contrast = adjJson.optDouble("contrast", 0.0).toFloat(),
-                        saturation = adjJson.optDouble("saturation", 0.0).toFloat(),
-                        highlights = adjJson.optDouble("highlights", 0.0).toFloat(),
-                        shadows = adjJson.optDouble("shadows", 0.0).toFloat(),
-                        whites = adjJson.optDouble("whites", 0.0).toFloat(),
-                        blacks = adjJson.optDouble("blacks", 0.0).toFloat(),
-                        digitalGain = adjJson.optDouble("digital_gain", 1.0).toFloat()
-                    )
-                }
-            } else null
-
-            EditConfig(
-                log = json.optString("log", "None"),
-                lut = json.optString("lut", "None"),
-                exposure = json.optDouble("exposure", 0.0).toFloat(),
-                contrast = json.optDouble("contrast", 0.0).toFloat(),
-                saturation = json.optDouble("saturation", 0.0).toFloat(),
-                highlights = json.optDouble("highlights", 0.0).toFloat(),
-                shadows = json.optDouble("shadows", 0.0).toFloat(),
-                whites = json.optDouble("whites", 0.0).toFloat(),
-                blacks = json.optDouble("blacks", 0.0).toFloat(),
-                digitalGain = json.optDouble("digital_gain", 1.0).toFloat(),
-                adjustments = adjustments,
-                showTimestamp = json.optBoolean("show_timestamp", false),
-                flareType = json.optInt("flare_type", -1),
-                hfLayout = json.optString("hf_layout", null),
-                zoomFactor = json.optDouble("zoom_factor", 1.0).toFloat()
-            )
-        } catch (e: Exception) {
-            null
         }
     }
 
@@ -308,7 +354,7 @@ class ImageRepository(private val context: Context) {
         return top.maary.darkbag.utils.ImageUtils.getBaseName(fileName)
     }
 
-    private class ImageGroupBuilder(val baseName: String) {
+    private inner class ImageGroupBuilder(val baseName: String) {
         var jpgUri: Uri? = null
         private var jpgTime: Long = 0L
         var dngUri: Uri? = null
@@ -362,18 +408,22 @@ class ImageRepository(private val context: Context) {
             if (time > captureTime) captureTime = time
         }
 
-        fun build() = ImageGroup(
-            baseName,
-            jpgUri,
-            dngUri,
-            dngUri1,
-            dngUri2,
-            hfLayout,
-            width,
-            height,
-            captureTime,
-            maxOf(jpgTime, dngTime, dngUri1Time, dngUri2Time),
-            editConfig
-        )
+        fun build(): ImageGroup {
+            return ImageGroup(
+                baseName,
+                jpgUri,
+                dngUri,
+                dngUri1,
+                dngUri2,
+                hfLayout,
+                width,
+                height,
+                captureTime,
+                dngUri1Time,
+                dngUri2Time,
+                maxOf(jpgTime, dngTime, dngUri1Time, dngUri2Time),
+                editConfig
+            )
+        }
     }
 }

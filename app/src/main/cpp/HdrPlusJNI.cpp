@@ -189,6 +189,11 @@ ImageMetadata metadataFromJava(JNIEnv* env, jobject metadataObj) {
     return meta;
 }
 
+// Helper to determine if an image is external based on baseName
+bool isExternalImage(const std::string& baseName) {
+    return baseName.compare(0, 5, "DBAG_") != 0;
+}
+
 } // namespace
 
 extern "C" jint JNI_OnLoad(JavaVM* vm, void* reserved) {
@@ -306,6 +311,14 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlusNative(
     const char* dng_path_cstr = (dngPath) ? env->GetStringUTFChars(dngPath, 0) : nullptr;
 
     ImageMetadata meta = metadataFromJava(env, metadata);
+    if (jpg_path_cstr) {
+        std::string baseName = jpg_path_cstr;
+        size_t lastSlash = baseName.find_last_of('/');
+        if (lastSlash != std::string::npos) baseName = baseName.substr(lastSlash + 1);
+        if (isExternalImage(baseName)) {
+            meta.imageDescription = "Processed by Darkbag";
+        }
+    }
 
     if (dng_path_cstr) {
         LOGD("Exporting DNG to %s", dng_path_cstr);
@@ -520,7 +533,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlusNative(
     if (bitmapPixels) {
         process_and_save_image(finalImage, width, height, digitalGain, targetLog, lut,
                                 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, // HSWB not used for preview in standard pipe yet
-                                nullptr, 1, ccmVec.data(), wbVec.data(), orientation, bitmapPixels, out_w, out_h, true, fastPreviewDownsample, zoomFactor, (bool)mirror);
+                                nullptr, 1, ccmVec.data(), wbVec.data(), orientation, bitmapPixels, out_w, info.height, true, fastPreviewDownsample, zoomFactor, (bool)mirror);
         AndroidBitmap_unlockPixels(env, outputBitmap);
     }
 
@@ -532,6 +545,14 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlusNative(
 
     if (!jpgPathStr.empty() || !dngPathStr.empty()) {
         ImageMetadata meta = metadataFromJava(env, metadata);
+        if (!jpgPathStr.empty()) {
+            std::string baseName = jpgPathStr;
+            size_t lastSlash = baseName.find_last_of('/');
+            if (lastSlash != std::string::npos) baseName = baseName.substr(lastSlash + 1);
+            if (isExternalImage(baseName)) {
+                meta.imageDescription = "Processed by Darkbag";
+            }
+        }
         if (!dngPathStr.empty()) {
             float baselineExposure = (digitalGain > 0.0f) ? std::log2(digitalGain) : 0.0f;
             write_dng(dngPathStr.c_str(), width, height, finalImage, kMax16BitValue, ccmVec, meta, orientation, (bool)mirror, baselineExposure);

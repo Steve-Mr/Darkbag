@@ -15,6 +15,8 @@ data class ImageGroup(
     val width: Int = 0,
     val height: Int = 0,
     val captureTime: Long = 0L,
+    val captureTime1: Long = 0L,
+    val captureTime2: Long = 0L,
     val lastModified: Long = 0L,
     val editConfig: EditConfig? = null
 ) : Parcelable {

@@ -27,10 +27,12 @@ class ImageViewerAdapter(
     var onZoomChanged: ((Boolean) -> Unit)? = null
     var onLongPressStarted: ((top.maary.darkbag.ui.ZoomableImageView) -> Unit)? = null
     var onLongPressEnded: ((top.maary.darkbag.ui.ZoomableImageView) -> Unit)? = null
+    var previewProvider: ((Int) -> android.graphics.Bitmap?)? = null
     private var recyclerView: RecyclerView? = null
     private val selectedFormats = mutableMapOf<Int, String>()
     private var isUiVisible = true
     private var isFormatSwitcherPersistentHidden = false
+    private var isRenderLocked = false
 
     class ViewHolder(val binding: ItemImageGroupBinding) : RecyclerView.ViewHolder(binding.root) {
         var loadJob: Job? = null
@@ -55,7 +57,18 @@ class ImageViewerAdapter(
     }
 
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
+        onBindViewHolder(holder, position, emptyList())
+    }
+
+    override fun onBindViewHolder(holder: ViewHolder, position: Int, payloads: List<Any>) {
         val group = groups[position]
+
+        if (payloads.isNotEmpty()) {
+            // Partial update for swap or metadata
+            setupButtons(holder, group, position)
+            return
+        }
+
         holder.loadJob?.cancel()
 
         holder.binding.imageView.setVisualParams(margin, radius)
@@ -90,7 +103,15 @@ class ImageViewerAdapter(
             else -> R.id.btnJpg
         }
         selectButton(holder, targetId)
-        loadSelectedFormat(holder, group, format)
+
+        if (isRenderLocked) {
+            // Try to restore preview from fragment if available
+            previewProvider?.invoke(position)?.let {
+                setBitmapAndRecyclePrevious(holder, it)
+            }
+        } else {
+            loadSelectedFormat(holder, group, format)
+        }
     }
 
     private fun setupButtons(holder: ViewHolder, group: ImageGroup, position: Int) {
@@ -114,6 +135,7 @@ class ImageViewerAdapter(
     }
 
     private fun loadSelectedFormat(holder: ViewHolder, group: ImageGroup, format: String) {
+        if (isRenderLocked) return
         when (format) {
             "JPG" -> group.jpgUri?.let { loadImage(holder, it, version = group.lastModified) }
             "DNG" -> {
@@ -335,6 +357,10 @@ class ImageViewerAdapter(
         }
     }
 
+    fun setRenderLocked(locked: Boolean) {
+        this.isRenderLocked = locked
+    }
+
     fun setFormatSwitcherPersistentHidden(hidden: Boolean) {
         if (this.isFormatSwitcherPersistentHidden == hidden) return
         this.isFormatSwitcherPersistentHidden = hidden
@@ -387,5 +413,17 @@ class ImageViewerAdapter(
 
     fun findGroupIndex(baseName: String): Int {
         return groups.indexOfFirst { it.baseName == baseName }
+    }
+
+    fun updateGroupAt(position: Int, newGroup: ImageGroup, payload: Any? = null) {
+        if (position < 0 || position >= groups.size) return
+        val updatedList = groups.toMutableList()
+        updatedList[position] = newGroup
+        groups = updatedList
+        if (payload != null) {
+            notifyItemChanged(position, payload)
+        } else {
+            notifyItemChanged(position)
+        }
     }
 }

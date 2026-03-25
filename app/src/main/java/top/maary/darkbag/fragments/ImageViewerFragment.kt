@@ -11,6 +11,7 @@ import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import android.content.Context
 import android.graphics.BitmapFactory
+import com.bumptech.glide.Glide
 import android.net.Uri
 import android.view.MenuItem
 import android.widget.TextView
@@ -23,6 +24,7 @@ import androidx.viewpager2.widget.ViewPager2
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.sync.withLock
 import top.maary.darkbag.R
 import top.maary.darkbag.databinding.BottomSheetImageDetailsBinding
 import top.maary.darkbag.databinding.FragmentImageViewerBinding
@@ -65,12 +67,17 @@ class ImageViewerFragment : Fragment() {
     private var savedScale = 1f
 
     private lateinit var lutManager: top.maary.darkbag.utils.LutManager
+    private val previewMutex = kotlinx.coroutines.sync.Mutex()
     private var previewJob: Job? = null
+    private var lastPageIndex = -1
     private val pageChangeCallback = object : ViewPager2.OnPageChangeCallback() {
         override fun onPageSelected(position: Int) {
-            if (isAdjusted) {
+            val indexChanged = lastPageIndex != -1 && lastPageIndex != position
+            lastPageIndex = position
+
+            if (isAdjusted && indexChanged) {
                 resetAdjustments()
-            } else {
+            } else if (!isAdjusted) {
                 currentEditConfig = null
                 sourceDngBytes = null
                 sourceDngBytes2 = null
@@ -155,34 +162,82 @@ class ImageViewerFragment : Fragment() {
         binding.imagePager.visibility = View.INVISIBLE
 
         lifecycleScope.launch {
-            val groups = repository.getGroupedImages(forceRefresh = forceRefresh).toMutableList()
+            var groups = repository.getGroupedImages(forceRefresh = forceRefresh).toMutableList()
+
+            if (args.onlyDarkbag) {
+                groups = groups.filter {
+                    it.baseName.startsWith(top.maary.darkbag.utils.DarkbagIdentity.FILE_PREFIX)
+                }.toMutableList()
+            }
 
             // Handle virtual groups from external URIs or stitching
             if (targetUri != null && targetUri.contains("|")) {
-                val uris = targetUri.split("|")
-                val u1 = Uri.parse(uris[0])
-                val u2 = Uri.parse(uris[1])
+                val parts = targetUri.split("|")
+                val u1 = Uri.parse(parts[0])
+                val u2 = Uri.parse(parts[1])
+                val layout = if (parts.size > 2) parts[2] else "SBS"
+                val time1 = top.maary.darkbag.utils.ImageUtils.getCaptureTime(requireContext(), u1)
+                val time2 = top.maary.darkbag.utils.ImageUtils.getCaptureTime(requireContext(), u2)
                 val virtualGroup = ImageGroup(
                     baseName = "Stitched_" + System.currentTimeMillis(),
                     jpgUri = null,
                     dngUri = null,
                     dngUri1 = u1,
                     dngUri2 = u2,
-                    hfLayout = "SBS", // Default for manual stitching
+                    hfLayout = layout,
                     width = 0,
                     height = 0,
-                    captureTime = System.currentTimeMillis()
+                    captureTime = maxOf(time1, time2).takeIf { it > 0 } ?: System.currentTimeMillis(),
+                    captureTime1 = time1,
+                    captureTime2 = time2
                 )
                 groups.add(0, virtualGroup)
             } else if (targetUri != null && groups.none { it.jpgUri?.toString() == targetUri || it.dngUri?.toString() == targetUri || it.dngUri1?.toString() == targetUri }) {
-                // External single image
+                // External or recently captured image not yet grouped
                 val u = Uri.parse(targetUri)
                 val isDng = targetUri.endsWith(".dng", ignoreCase = true) || context?.contentResolver?.getType(u) == "image/x-adobe-dng"
+
+                val name = repository.resolveFilename(u) ?: u.lastPathSegment ?: "External"
+                val baseName = top.maary.darkbag.utils.ImageUtils.getBaseName(name)
+
+                // Read EXIF to check for half-frame layout and capture time
+                var hfLayout: String? = null
+                var captureTime = System.currentTimeMillis()
+                var editConfig: top.maary.darkbag.models.EditConfig? = null
+
+                try {
+                    requireContext().contentResolver.openFileDescriptor(u, "r")?.use { pfd ->
+                        val exif = androidx.exifinterface.media.ExifInterface(pfd.fileDescriptor)
+                        val comment = exif.getAttribute(androidx.exifinterface.media.ExifInterface.TAG_USER_COMMENT)
+                        editConfig = top.maary.darkbag.utils.ImageUtils.parseUserComment(comment)
+                        hfLayout = editConfig?.hfLayout
+
+                        val dateStr = exif.getAttribute(androidx.exifinterface.media.ExifInterface.TAG_DATETIME_ORIGINAL) ?: exif.getAttribute(androidx.exifinterface.media.ExifInterface.TAG_DATETIME)
+                        if (dateStr != null) {
+                            val sdf = java.text.SimpleDateFormat("yyyy:MM:dd HH:mm:ss", java.util.Locale.US)
+                            captureTime = sdf.parse(dateStr)?.time ?: captureTime
+                        }
+                    }
+                } catch (e: Exception) {}
+
+                // If half-frame, try to find RAW siblings
+                var hf1: Uri? = null
+                var hf2: Uri? = null
+                if (hfLayout != null) {
+                    val siblings = repository.findSiblingsForUri(u, baseName)
+                    hf1 = siblings.first
+                    hf2 = siblings.second
+                }
+
                 val virtualGroup = ImageGroup(
-                    baseName = u.lastPathSegment ?: "External",
+                    baseName = baseName,
                     jpgUri = if (isDng) null else u,
                     dngUri = if (isDng) u else null,
-                    captureTime = System.currentTimeMillis()
+                    dngUri1 = hf1,
+                    dngUri2 = hf2,
+                    hfLayout = hfLayout,
+                    captureTime = captureTime,
+                    editConfig = editConfig
                 )
                 groups.add(0, virtualGroup)
             }
@@ -196,6 +251,7 @@ class ImageViewerFragment : Fragment() {
                 onZoomChanged = { isZoomed -> if (isZoomed) hideUi() else showUi() }
                 onLongPressStarted = { handleLongPressStarted(it) }
                 onLongPressEnded = { handleLongPressEnded(it) }
+                previewProvider = { pos -> if (pos == binding.imagePager.currentItem) lastCompositeBitmap else null }
                 setFormatSwitcherPersistentHidden(isAdjusted)
             }
             binding.imagePager.adapter = adapter
@@ -212,12 +268,19 @@ class ImageViewerFragment : Fragment() {
             }
 
             if (initialPos != -1) {
+                lastPageIndex = initialPos
                 binding.imagePager.setCurrentItem(initialPos, false)
             }
-            binding.imagePager.isUserInputEnabled = !isAdjusted
 
             setupActionButtons()
             updateControlsVisibility()
+
+            if (targetUri?.contains("|") == true) {
+                markAdjusted()
+                applyEditPreview()
+            }
+
+            binding.imagePager.isUserInputEnabled = !isAdjusted
 
             binding.imagePager.visibility = View.VISIBLE
             binding.initialLoadingIndicator.visibility = View.GONE
@@ -269,6 +332,25 @@ class ImageViewerFragment : Fragment() {
             prepareEditConfig(currentGroup)
         }
 
+        if (currentGroup.isHalfFrame() && (currentGroup.captureTime1 == 0L || currentGroup.captureTime2 == 0L)) {
+            lifecycleScope.launch(Dispatchers.IO) {
+                val t1 = currentGroup.dngUri1?.let { top.maary.darkbag.utils.ImageUtils.getCaptureTime(requireContext(), it) } ?: 0L
+                val t2 = currentGroup.dngUri2?.let { top.maary.darkbag.utils.ImageUtils.getCaptureTime(requireContext(), it) } ?: 0L
+                if (t1 > 0 || t2 > 0) {
+                    val updatedGroup = currentGroup.copy(
+                        captureTime1 = if (t1 > 0) t1 else currentGroup.captureTime1,
+                        captureTime2 = if (t2 > 0) t2 else currentGroup.captureTime2,
+                        captureTime = maxOf(t1, t2).takeIf { it > 0 } ?: currentGroup.captureTime
+                    )
+                    withContext(Dispatchers.Main) {
+                        if (binding.imagePager.currentItem == adapter.getGroups().indexOf(currentGroup)) {
+                            adapter.updateGroupAt(binding.imagePager.currentItem, updatedGroup)
+                        }
+                    }
+                }
+            }
+        }
+
         if (currentGroup.isHalfFrame()) {
             binding.hfExtraControls.visibility = View.VISIBLE
             updateEffectsButtons()
@@ -296,6 +378,8 @@ class ImageViewerFragment : Fragment() {
         selectedDngIndex = 0
         previewJob?.cancel()
 
+        val isNewStitch = args.initialUri?.contains("|") == true && group.baseName.startsWith("Stitched_")
+
         currentEditConfig = group.editConfig?.let {
             if (it.exposure == 0f && it.adjustments == null) {
                 val baseEv = if (it.digitalGain > 0f) kotlin.math.log2(it.digitalGain) else 0f
@@ -309,9 +393,16 @@ class ImageViewerFragment : Fragment() {
                 }
                 it.copy(adjustments = newAdjs)
             } else it
-        }?.copy() ?: top.maary.darkbag.models.EditConfig(
-            adjustments = if (group.isHalfFrame()) listOf(top.maary.darkbag.models.BasicAdjustments(), top.maary.darkbag.models.BasicAdjustments()) else null
-        )
+        }?.copy() ?: run {
+            val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+            top.maary.darkbag.models.EditConfig(
+                adjustments = if (group.isHalfFrame()) listOf(top.maary.darkbag.models.BasicAdjustments(), top.maary.darkbag.models.BasicAdjustments()) else null,
+                showTimestamp = if (isNewStitch) prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_DATE_STAMP, false) else false,
+                flareType = if (isNewStitch) {
+                    if (prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_LIGHT_LEAK, false)) 0 else -1
+                } else -1
+            )
+        }
 
         // Solidify "Random" flare type to prevent jumping during edits
         currentEditConfig = currentEditConfig?.let { config ->
@@ -325,7 +416,11 @@ class ImageViewerFragment : Fragment() {
         // DNG bytes and deep EXIF will be loaded on-demand when entering edit flow
     }
 
-    private suspend fun ensureDngBytesLoaded() {
+    private suspend fun ensureDngBytesLoaded() = previewMutex.withLock {
+        ensureDngBytesLoadedInternal()
+    }
+
+    private suspend fun ensureDngBytesLoadedInternal() {
         if (sourceDngBytes != null) return
         val group = adapter.getGroup(binding.imagePager.currentItem)
         val dngUri1 = group.dngUri ?: group.dngUri1 ?: return
@@ -472,37 +567,124 @@ class ImageViewerFragment : Fragment() {
         }
 
         binding.btnTimestamp.setOnClickListener {
-            lifecycleScope.launch {
-                ensureDngBytesLoaded()
-                val current = currentEditConfig ?: return@launch
-                currentEditConfig = current.copy(showTimestamp = !current.showTimestamp)
-                markAdjusted()
-                updateEffectsButtons()
-                applyEditPreview()
-            }
+            val current = currentEditConfig ?: return@setOnClickListener
+            currentEditConfig = current.copy(showTimestamp = !current.showTimestamp)
+            markAdjusted()
+            updateEffectsButtons()
+            applyEditPreview()
         }
 
         binding.btnFlare.setOnClickListener {
-            lifecycleScope.launch {
-                ensureDngBytesLoaded()
-                val current = currentEditConfig ?: return@launch
-                val nextFlare = when (current.flareType) {
-                    -1 -> 1
-                    1 -> 2
-                    2 -> -1
-                    else -> 1
+            val current = currentEditConfig ?: return@setOnClickListener
+            val nextFlare = when (current.flareType) {
+                -1 -> 1
+                1 -> 2
+                2 -> -1
+                else -> 1
+            }
+            currentEditConfig = current.copy(flareType = nextFlare)
+            markAdjusted()
+            updateEffectsButtons()
+            applyEditPreview()
+        }
+
+        binding.btnSwapFrames.setOnClickListener {
+            val group = adapter.getGroup(binding.imagePager.currentItem)
+            if (!group.isHalfFrame()) return@setOnClickListener
+
+            previewJob?.cancel()
+            previewJob = lifecycleScope.launch {
+                showProgress(true)
+                previewMutex.withLock {
+                    ensureDngBytesLoadedInternal()
+                    val current = currentEditConfig ?: return@withLock
+
+                    // Swap bytes
+                    val tempBytes = sourceDngBytes
+                    sourceDngBytes = sourceDngBytes2
+                    sourceDngBytes2 = tempBytes
+
+                    // Swap cached bitmaps
+                    val tempBitmap = cachedBitmap1
+                    cachedBitmap1 = cachedBitmap2
+                    cachedBitmap2 = tempBitmap
+
+                    // Swap adjustments in last preview config to match swapped cached bitmaps
+                    lastPreviewConfig = lastPreviewConfig?.let { lp ->
+                        val lpAdjs = lp.adjustments?.toMutableList()
+                        if (lpAdjs != null && lpAdjs.size >= 2) {
+                            val t = lpAdjs[0]
+                            lpAdjs[0] = lpAdjs[1]
+                            lpAdjs[1] = t
+                        }
+                        lp.copy(adjustments = lpAdjs)
+                    }
+
+                    // Swap adjustments in config
+                    val adjs = current.adjustments?.toMutableList() ?: mutableListOf(top.maary.darkbag.models.BasicAdjustments(), top.maary.darkbag.models.BasicAdjustments())
+                    if (adjs.size >= 2) {
+                        val tempAdj = adjs[0]
+                        adjs[0] = adjs[1]
+                        adjs[1] = tempAdj
+                    }
+
+                    // Swap URIs and Timestamps in ImageGroup
+                    val updatedGroup = group.copy(
+                        dngUri1 = group.dngUri2,
+                        dngUri2 = group.dngUri1,
+                        captureTime1 = group.captureTime2,
+                        captureTime2 = group.captureTime1
+                    )
+
+                    currentEditConfig = current.copy(adjustments = adjs)
+                    markAdjusted()
+
+                    // INSTANT FAST PATH: Update UI using existing cached bitmaps
+                    val fastComposite = createCompositeFromCache(currentEditConfig!!, updatedGroup, cachedBitmap1, cachedBitmap2)
+                    if (fastComposite != null) {
+                        val old = lastCompositeBitmap
+                        lastCompositeBitmap = fastComposite
+                        // Do NOT recycle 'old' yet, it might still be in use by the view until the next frame.
+                        // ImageViewerAdapter.setBitmapAndRecyclePrevious handles this more safely.
+
+                        val pos = binding.imagePager.currentItem
+                        adapter.cancelLoadJob(pos, clearView = false)
+                        adapter.updateGroupAt(pos, updatedGroup, payload = "SWAP")
+
+                        val holder = (binding.imagePager.getChildAt(0) as? androidx.recyclerview.widget.RecyclerView)
+                            ?.findViewHolderForAdapterPosition(pos) as? ImageViewerAdapter.ViewHolder
+
+                        holder?.let {
+                            Glide.with(it.binding.imageView).clear(it.binding.imageView)
+                            val oldManual = it.manualBitmap
+                            if (oldManual != null && oldManual !== fastComposite && !oldManual.isRecycled) {
+                                oldManual.recycle()
+                            }
+                            it.manualBitmap = fastComposite
+                            it.binding.imageView.setImageBitmap(fastComposite)
+                        }
+                    }
+
+                    try {
+                        // Silent update in background for HQ/State consistency
+                        applyEditPreviewInternal(currentEditConfig!!)
+                    } finally {
+                        updateSlidersInPanel()
+                        showProgress(false)
+                    }
                 }
-                currentEditConfig = current.copy(flareType = nextFlare)
-                markAdjusted()
-                updateEffectsButtons()
-                applyEditPreview()
             }
         }
 
         binding.fabAdjust.setOnClickListener {
             showAdjustmentsBottomSheet()
             lifecycleScope.launch {
-                ensureDngBytesLoaded()
+                showProgress(true)
+                try {
+                    ensureDngBytesLoaded()
+                } finally {
+                    showProgress(false)
+                }
             }
         }
 
@@ -614,7 +796,10 @@ class ImageViewerFragment : Fragment() {
     private fun markAdjusted() {
         if (!isAdjusted) {
             isAdjusted = true
-            adapter.setFormatSwitcherPersistentHidden(true)
+            if (::adapter.isInitialized) {
+                adapter.setFormatSwitcherPersistentHidden(true)
+                adapter.setRenderLocked(true)
+            }
             updateSplitButtons()
             updateToolbarIcon()
             updateBackPressedCallbackState()
@@ -626,6 +811,7 @@ class ImageViewerFragment : Fragment() {
         exitEditMode(apply = false)
         binding.imagePager.isUserInputEnabled = true
         adapter.setFormatSwitcherPersistentHidden(false)
+        adapter.setRenderLocked(false)
         sourceDngBytes = null
         sourceDngBytes2 = null
         cachedBitmap1?.recycle()
@@ -679,6 +865,13 @@ class ImageViewerFragment : Fragment() {
 
         binding.btnFlare.setIconTintResource(if (config.flareType != -1) R.color.vibrant_pink else android.R.color.white)
         binding.btnFlare.alpha = if (config.flareType != -1) 1.0f else 0.6f
+
+        val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
+        if (currentGroup.hfLayout == "TB") {
+            binding.btnSwapFrames.setIconResource(R.drawable.ic_swap_vert)
+        } else {
+            binding.btnSwapFrames.setIconResource(R.drawable.ic_swap_horiz)
+        }
     }
 
     private fun updateSelectionFeedback() {
@@ -993,9 +1186,12 @@ class ImageViewerFragment : Fragment() {
 
     private fun applyEditPreview() {
         val config = currentEditConfig ?: return
-        lifecycleScope.launch {
-            ensureDngBytesLoaded()
-            applyEditPreviewInternal(config)
+        previewJob?.cancel()
+        previewJob = lifecycleScope.launch {
+            delay(150) // Debounce slider movements
+            previewMutex.withLock {
+                applyEditPreviewInternal(config)
+            }
         }
     }
 
@@ -1041,33 +1237,102 @@ class ImageViewerFragment : Fragment() {
         imageView.restoreZoomState(savedMatrix, savedScale)
     }
 
-    private fun applyEditPreviewInternal(config: top.maary.darkbag.models.EditConfig) {
-        val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
-        val dngUri1 = currentGroup.dngUri ?: currentGroup.dngUri1 ?: return
-        val dngUri2 = currentGroup.dngUri2
-
+    private fun showProgress(visible: Boolean, forceGlobal: Boolean = false) {
         val currentIndex = binding.imagePager.currentItem
         val currentHolder = (binding.imagePager.getChildAt(0) as? androidx.recyclerview.widget.RecyclerView)
             ?.findViewHolderForAdapterPosition(currentIndex) as? ImageViewerAdapter.ViewHolder
 
-        if (isEditingAdjustments) {
-            binding.initialLoadingIndicator.visibility = View.VISIBLE
+        if (visible) {
+            if (isEditingAdjustments || forceGlobal) {
+                binding.initialLoadingIndicator.visibility = View.VISIBLE
+            } else {
+                currentHolder?.binding?.loadingIndicator?.visibility = View.VISIBLE
+            }
         } else {
-            currentHolder?.binding?.loadingIndicator?.visibility = View.VISIBLE
+            binding.initialLoadingIndicator.visibility = View.GONE
+            currentHolder?.binding?.loadingIndicator?.visibility = View.GONE
         }
+    }
+
+    private fun createCompositeFromCache(
+        config: top.maary.darkbag.models.EditConfig,
+        group: ImageGroup,
+        b1: android.graphics.Bitmap?,
+        b2: android.graphics.Bitmap?
+    ): android.graphics.Bitmap? {
+        if (b1 == null && b2 == null) return null
+
+        val wantPortrait = group.hfLayout != "TB"
+        fun orient(b: android.graphics.Bitmap?): android.graphics.Bitmap? {
+            if (b == null) return null
+            val isPortrait = b.height >= b.width
+            if (isPortrait == wantPortrait) return b
+            val degrees = if (wantPortrait) 90f else 270f
+            val matrix = android.graphics.Matrix().apply { postRotate(degrees) }
+            return android.graphics.Bitmap.createBitmap(b, 0, 0, b.width, b.height, matrix, true)
+        }
+
+        val ob1 = orient(b1)
+        val ob2 = orient(b2)
+
+        val isSBS = group.hfLayout != "TB"
+        val gap = top.maary.darkbag.utils.HalfFrameUtils.calculateGap(maxOf(ob1?.width ?: 0, ob1?.height ?: 0)).toFloat()
+        val w1 = ob1?.width ?: ob2?.width ?: 0
+        val h1 = ob1?.height ?: ob2?.height ?: 0
+        val w2 = ob2?.width ?: w1
+        val h2 = ob2?.height ?: h1
+        val resW = if (isSBS) (w1 + gap + w2).toInt() else maxOf(w1, w2)
+        val resH = if (isSBS) maxOf(h1, h2) else (h1 + gap + h2).toInt()
+
+        val composite = android.graphics.Bitmap.createBitmap(resW, resH, android.graphics.Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(composite)
+        canvas.drawColor(android.graphics.Color.BLACK)
+        ob1?.let { canvas.drawBitmap(it, 0f, 0f, null) }
+        ob2?.let {
+            if (isSBS) canvas.drawBitmap(it, w1 + gap, 0f, null)
+            else canvas.drawBitmap(it, 0f, h1 + gap, null)
+        }
+
+        if (ob1 != b1) ob1?.recycle()
+        if (ob2 != b2) ob2?.recycle()
+
+        val finalComposite = top.maary.darkbag.utils.HalfFrameUtils.addEffects(
+            composite,
+            config.showTimestamp,
+            config.flareType >= 0,
+            group.hfLayout ?: "SBS",
+            time1 = group.captureTime1.takeIf { it > 0 } ?: group.captureTime,
+            time2 = group.captureTime2.takeIf { it > 0 } ?: group.captureTime,
+            flareType = config.flareType
+        )
+        if (finalComposite != composite) {
+            composite.recycle()
+        }
+        return finalComposite
+    }
+
+    private suspend fun applyEditPreviewInternal(config: top.maary.darkbag.models.EditConfig) = coroutineScope {
+        val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
+        val dngUri1 = currentGroup.dngUri ?: currentGroup.dngUri1 ?: return@coroutineScope
+        val dngUri2 = currentGroup.dngUri2
+
+        showProgress(true)
+        val currentIndex = binding.imagePager.currentItem
+        val currentHolder = (binding.imagePager.getChildAt(0) as? androidx.recyclerview.widget.RecyclerView)
+            ?.findViewHolderForAdapterPosition(currentIndex) as? ImageViewerAdapter.ViewHolder
         currentHolder?.binding?.imageView?.invalidateOutline()
 
-        previewJob?.cancel()
-        previewJob = lifecycleScope.launch {
-            delay(150)
+        try {
+            ensureDngBytesLoadedInternal()
+            ensureActive()
             val isIndividual = isEditingAdjustments && currentGroup.isHalfFrame()
 
-            var compositeBitmap: android.graphics.Bitmap? = null
-            var selectedFrameBitmap: android.graphics.Bitmap? = null
+                var compositeBitmap: android.graphics.Bitmap? = null
+                var selectedFrameBitmap: android.graphics.Bitmap? = null
 
-            withContext(Dispatchers.IO) {
-                try {
-                    val context = requireContext()
+                withContext(Dispatchers.IO) {
+                    try {
+                        val context = requireContext()
                     val logIndex = SettingsFragment.LOG_CURVES.indexOf(config.log)
                     val lutPath = if (config.lut != null && config.lut != "None") {
                         java.io.File(lutManager.lutDir, config.lut).absolutePath
@@ -1090,7 +1355,7 @@ class ImageViewerFragment : Fragment() {
                             } ?: androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL
                         } catch (e: Exception) { androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL }
 
-                        val rotDegrees = when(orientation) {
+                        var rotDegrees = when(orientation) {
                             androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90 -> 90
                             androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_180 -> 180
                             androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270 -> 270
@@ -1108,6 +1373,10 @@ class ImageViewerFragment : Fragment() {
                             } ?: options.outHeight
                         } catch (e: Exception) { options.outHeight }
 
+                        if (currentGroup.isHalfFrame()) {
+                            rotDegrees = getAdjustedRotationForHalfFrame(rotDegrees, exifWidth, exifHeight, currentGroup)
+                        }
+
                         val fullW = if (rotDegrees == 90 || rotDegrees == 270) exifHeight / ds else exifWidth / ds
                         val fullH = if (rotDegrees == 90 || rotDegrees == 270) exifWidth / ds else exifHeight / ds
                         val bmpW = (fullW / config.zoomFactor).toInt()
@@ -1116,6 +1385,7 @@ class ImageViewerFragment : Fragment() {
 
                         val adj = if (currentGroup.isHalfFrame()) config.adjustments?.get(index) ?: top.maary.darkbag.models.BasicAdjustments() else config.toBasic()
 
+                        ensureActive()
                         top.maary.darkbag.processor.ColorProcessor.processRaw(
                             dngData = finalBytes,
                             targetLog = logIndex,
@@ -1165,38 +1435,18 @@ class ImageViewerFragment : Fragment() {
                         val b2 = cachedBitmap2
 
                         if (b1 != null || b2 != null) {
-                            val isSBS = currentGroup.hfLayout != "TB"
-                            val gap = top.maary.darkbag.utils.HalfFrameUtils.calculateGap(maxOf(b1?.width ?: 0, b1?.height ?: 0)).toFloat()
-                            val w1 = b1?.width ?: b2?.width ?: 0
-                            val h1 = b1?.height ?: b2?.height ?: 0
-                            val w2 = b2?.width ?: w1
-                            val h2 = b2?.height ?: h1
-                            val resW = if (isSBS) (w1 + gap + w2).toInt() else maxOf(w1, w2)
-                            val resH = if (isSBS) maxOf(h1, h2) else (h1 + gap + h2).toInt()
+                            coroutineContext.ensureActive()
+                            compositeBitmap = createCompositeFromCache(config, currentGroup, b1, b2)
+                            ensureActive()
 
-                            val composite = android.graphics.Bitmap.createBitmap(resW, resH, android.graphics.Bitmap.Config.ARGB_8888)
-                            val canvas = android.graphics.Canvas(composite)
-                            canvas.drawColor(android.graphics.Color.BLACK)
-                            b1?.let { canvas.drawBitmap(it, 0f, 0f, null) }
-                            b2?.let {
-                                if (isSBS) canvas.drawBitmap(it, w1 + gap, 0f, null)
-                                else canvas.drawBitmap(it, 0f, h1 + gap, null)
-                            }
+                            if (isIndividual && compositeBitmap != null) {
+                                val isSBS = currentGroup.hfLayout != "TB"
+                                val gap = top.maary.darkbag.utils.HalfFrameUtils.calculateGap(maxOf(b1?.width ?: 0, b1?.height ?: 0)).toFloat()
+                                val w1 = b1?.width ?: b2?.width ?: 0
+                                val h1 = b1?.height ?: b2?.height ?: 0
+                                val w2 = b2?.width ?: w1
+                                val h2 = b2?.height ?: h1
 
-                            compositeBitmap = top.maary.darkbag.utils.HalfFrameUtils.addEffects(
-                                composite,
-                                config.showTimestamp,
-                                config.flareType >= 0,
-                                currentGroup.hfLayout ?: "SBS",
-                                time1 = currentGroup.captureTime,
-                                time2 = currentGroup.captureTime,
-                                flareType = config.flareType
-                            )
-                            if (compositeBitmap != composite) {
-                                composite.recycle()
-                            }
-
-                            if (isIndividual) {
                                 selectedFrameBitmap = if (selectedDngIndex == 0) {
                                     android.graphics.Bitmap.createBitmap(compositeBitmap!!, 0, 0, w1, h1)
                                 } else {
@@ -1216,26 +1466,31 @@ class ImageViewerFragment : Fragment() {
                 }
             }
 
-            if (compositeBitmap != null) {
-                if (lastCompositeBitmap != compositeBitmap) {
-                    val old = lastCompositeBitmap
-                    lastCompositeBitmap = compositeBitmap
-                    old?.recycle()
+                if (compositeBitmap != null) {
+                ensureActive()
+                    if (lastCompositeBitmap != compositeBitmap) {
+                        val old = lastCompositeBitmap
+                        lastCompositeBitmap = compositeBitmap
+                        // Do NOT recycle 'old' yet, it's safer to let the adapter handle it via setBitmapAndRecyclePrevious
+                        // or clean up when exiting the fragment/switching pages.
+                    }
+                    if (isLongPressing) return@coroutineScope
+
+                    val pos = binding.imagePager.currentItem
+                    val holder = (binding.imagePager.getChildAt(0) as? androidx.recyclerview.widget.RecyclerView)
+                        ?.findViewHolderForAdapterPosition(pos) as? ImageViewerAdapter.ViewHolder
+                    holder?.let {
+                        adapter.cancelLoadJob(pos, clearView = false)
+                        val oldManual = it.manualBitmap
+                        if (oldManual != null && oldManual !== compositeBitmap && !oldManual.isRecycled) {
+                            oldManual.recycle()
+                        }
+                        it.manualBitmap = compositeBitmap
+                        it.binding.imageView.setImageBitmap(compositeBitmap)
+                    }
                 }
-                if (isLongPressing) return@launch
-
-                val currentIndex = binding.imagePager.currentItem
-                adapter.cancelLoadJob(currentIndex)
-                val holder = (binding.imagePager.getChildAt(0) as? androidx.recyclerview.widget.RecyclerView)
-                    ?.findViewHolderForAdapterPosition(currentIndex) as? ImageViewerAdapter.ViewHolder
-                holder?.binding?.imageView?.setImageBitmap(compositeBitmap)
-                holder?.binding?.loadingIndicator?.visibility = View.GONE
-            }
-
-            val finalHolder = (binding.imagePager.getChildAt(0) as? androidx.recyclerview.widget.RecyclerView)
-                ?.findViewHolderForAdapterPosition(currentIndex) as? ImageViewerAdapter.ViewHolder
-            finalHolder?.binding?.loadingIndicator?.visibility = View.GONE
-            binding.initialLoadingIndicator.visibility = View.GONE
+        } finally {
+            showProgress(false)
         }
     }
 
@@ -1249,7 +1504,12 @@ class ImageViewerFragment : Fragment() {
         val dngUri1 = currentGroup.dngUri ?: currentGroup.dngUri1 ?: return
         val dngUri2 = currentGroup.dngUri2
 
+        // Force "Save as New" for external images
+        val isExternal = !currentGroup.baseName.startsWith(top.maary.darkbag.utils.DarkbagIdentity.FILE_PREFIX)
+        val actualIsReplacement = if (isExternal) false else isReplacement
+
         lifecycleScope.launch {
+            showProgress(true, forceGlobal = true)
             ensureDngBytesLoaded()
             withContext(Dispatchers.IO) {
                 try {
@@ -1273,11 +1533,26 @@ class ImageViewerFragment : Fragment() {
                             } ?: androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL
                         } catch (e: Exception) { androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL }
 
-                        val rotDegrees = when(orientation) {
+                        var rotDegrees = when(orientation) {
                             androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90 -> 90
                             androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_180 -> 180
                             androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270 -> 270
                             else -> 0
+                        }
+
+                        val exifWidth = try {
+                            context.contentResolver.openInputStream(uri)?.use { input ->
+                                ExifInterface(input).getAttributeInt(ExifInterface.TAG_IMAGE_WIDTH, options.outWidth)
+                            } ?: options.outWidth
+                        } catch (e: Exception) { options.outWidth }
+                        val exifHeight = try {
+                            context.contentResolver.openInputStream(uri)?.use { input ->
+                                ExifInterface(input).getAttributeInt(ExifInterface.TAG_IMAGE_LENGTH, options.outHeight)
+                            } ?: options.outHeight
+                        } catch (e: Exception) { options.outHeight }
+
+                        if (currentGroup.isHalfFrame()) {
+                            rotDegrees = getAdjustedRotationForHalfFrame(rotDegrees, exifWidth, exifHeight, currentGroup)
                         }
 
                         val adj = if (currentGroup.isHalfFrame()) config.adjustments?.get(index) ?: top.maary.darkbag.models.BasicAdjustments() else config.toBasic()
@@ -1305,17 +1580,6 @@ class ImageViewerFragment : Fragment() {
                             )
                             return null
                         } else {
-                            val exifWidth = try {
-                                context.contentResolver.openInputStream(uri)?.use { input ->
-                                    ExifInterface(input).getAttributeInt(ExifInterface.TAG_IMAGE_WIDTH, options.outWidth)
-                                } ?: options.outWidth
-                            } catch (e: Exception) { options.outWidth }
-                            val exifHeight = try {
-                                context.contentResolver.openInputStream(uri)?.use { input ->
-                                    ExifInterface(input).getAttributeInt(ExifInterface.TAG_IMAGE_LENGTH, options.outHeight)
-                                } ?: options.outHeight
-                            } catch (e: Exception) { options.outHeight }
-
                             val fullW = if (rotDegrees == 90 || rotDegrees == 270) exifHeight else exifWidth
                             val fullH = if (rotDegrees == 90 || rotDegrees == 270) exifWidth else exifHeight
                             val bmpW = (fullW / config.zoomFactor).toInt()
@@ -1379,8 +1643,8 @@ class ImageViewerFragment : Fragment() {
                                 config.showTimestamp,
                                 config.flareType >= 0,
                                 currentGroup.hfLayout ?: "SBS",
-                                time1 = currentGroup.captureTime,
-                                time2 = currentGroup.captureTime,
+                                time1 = currentGroup.captureTime1.takeIf { it > 0 } ?: currentGroup.captureTime,
+                                time2 = currentGroup.captureTime2.takeIf { it > 0 } ?: currentGroup.captureTime,
                                 flareType = config.flareType
                             )
                             if (finalComposite != composite) {
@@ -1393,18 +1657,21 @@ class ImageViewerFragment : Fragment() {
                     }
 
                     if (finalBitmap != null || tempJpgPath != null) {
-                        val baseName = if (isReplacement) currentGroup.baseName else "${currentGroup.baseName}_edited_${System.currentTimeMillis()}"
-                        val targetUri = if (isReplacement) currentGroup.jpgUri else null
+                        var baseName = if (actualIsReplacement) currentGroup.baseName else "${currentGroup.baseName}_edited_${System.currentTimeMillis()}"
+                        if (isExternal && !baseName.startsWith(top.maary.darkbag.utils.DarkbagIdentity.FILE_PREFIX)) {
+                            baseName = top.maary.darkbag.utils.DarkbagIdentity.FILE_PREFIX + baseName
+                        }
+                        val targetUri = if (actualIsReplacement) currentGroup.jpgUri else null
 
                         val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
                         val jpgFolderUri = prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
                         val exportFolderUri = prefs.getString(SettingsFragment.KEY_EXPORT_STORAGE_URI, null)
 
                         // Use export folder for external images or if specifically set
-                        val finalFolderUri = if (currentGroup.jpgUri == null && currentGroup.dngUri == null && currentGroup.dngUri1 == null) {
+                        val finalFolderUri = if (isExternal) {
                             exportFolderUri ?: jpgFolderUri
                         } else {
-                             if (isReplacement) null else (exportFolderUri ?: jpgFolderUri)
+                             if (actualIsReplacement) null else (exportFolderUri ?: jpgFolderUri)
                         }
 
                         top.maary.darkbag.utils.ImageSaver.saveProcessedImage(
@@ -1418,9 +1685,11 @@ class ImageViewerFragment : Fragment() {
                             saveJpg = true,
                             saveRaw = false,
                             targetUri = targetUri,
-                            jpgFolderUri = if (isReplacement) null else finalFolderUri,
+                            jpgFolderUri = if (actualIsReplacement) null else finalFolderUri,
                                 editConfig = config,
-                                isAlreadyStitched = currentGroup.isHalfFrame()
+                                isAlreadyStitched = currentGroup.isHalfFrame(),
+                                sourceDngUri = currentGroup.dngUri ?: currentGroup.dngUri1,
+                                isExternal = isExternal
                         )
                     }
                 } catch (e: Exception) {
@@ -1428,17 +1697,29 @@ class ImageViewerFragment : Fragment() {
                 }
             }
 
-            resetAdjustments()
+            showProgress(false, forceGlobal = true)
+
             repository.invalidateCache()
             val updatedGroups = repository.getGroupedImages(forceRefresh = true)
             if (updatedGroups.isNotEmpty()) {
-                val targetBaseName = currentGroup.baseName
+                // Determine which group to navigate to
+                val targetBaseName = if (actualIsReplacement) {
+                    currentGroup.baseName
+                } else {
+                    // For "Save As", the new file is usually the most recent
+                    updatedGroups.first().baseName
+                }
+
                 val newPos = updatedGroups.indexOfFirst { it.baseName == targetBaseName }.coerceAtLeast(0)
+
+                isAdjusted = false
+                isEditingAdjustments = false
             adapter = ImageViewerAdapter(updatedGroups, lifecycleScope, requireContext()).apply {
                     onImageTapped = { toggleUi() }
                     onZoomChanged = { isZoomed -> if (isZoomed) hideUi() else showUi() }
                     onLongPressStarted = { handleLongPressStarted(it) }
                     onLongPressEnded = { handleLongPressEnded(it) }
+                    previewProvider = { pos -> if (pos == binding.imagePager.currentItem) lastCompositeBitmap else null }
                 }
                 binding.imagePager.adapter = adapter
                 binding.imagePager.setCurrentItem(newPos, false)
@@ -1865,14 +2146,39 @@ class ImageViewerFragment : Fragment() {
             exitEditMode(apply = false)
             return
         }
+
+        val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
+        val isVirtual = currentGroup.baseName.startsWith("Stitched_")
+
         com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
-            .setTitle(R.string.discard_changes_title)
-            .setMessage(R.string.discard_changes_message)
+            .setTitle(if (isVirtual) "Discard Stitch?" else getString(R.string.discard_changes_title))
+            .setMessage(if (isVirtual) "Are you sure you want to discard this stitch and go back?" else getString(R.string.discard_changes_message))
             .setNegativeButton(R.string.cancel, null)
             .setPositiveButton(R.string.discard) { _, _ ->
-                resetAdjustments()
+                if (isVirtual) {
+                    findNavController().navigateUp()
+                } else {
+                    resetAdjustments()
+                }
             }
             .show()
+    }
+
+    private fun getAdjustedRotationForHalfFrame(
+        currentRotation: Int,
+        imageWidth: Int,
+        imageHeight: Int,
+        group: ImageGroup
+    ): Int {
+        val currentWidth = if (currentRotation == 90 || currentRotation == 270) imageHeight else imageWidth
+        val currentHeight = if (currentRotation == 90 || currentRotation == 270) imageWidth else imageHeight
+        val isPortrait = currentHeight >= currentWidth
+        val wantPortrait = group.hfLayout != "TB"
+        return if (isPortrait != wantPortrait) {
+            (currentRotation + (if (wantPortrait) 90 else 270)) % 360
+        } else {
+            currentRotation
+        }
     }
 
     private fun forceShowIcons(popup: PopupMenu) {

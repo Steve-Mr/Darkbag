@@ -13,6 +13,7 @@ object ImageUtils {
 
     fun getBaseName(fileName: String): String {
         return fileName.substringBeforeLast(".")
+            .replace(DarkbagIdentity.FILE_PREFIX, "")
             .replace("_linear", "")
             .replace("_bayer", "")
             .replace("_HDRPLUS", "")
@@ -21,7 +22,59 @@ object ImageUtils {
             .replace("_HF2", "")
             .replace("_stitched", "")
             .replace("stitched_hf_", "")
-            .replace(top.maary.darkbag.utils.DarkbagIdentity.FILE_PREFIX, "")
+    }
+
+    fun parseUserComment(comment: String?): top.maary.darkbag.models.EditConfig? {
+        if (comment == null) return null
+        if (comment.startsWith("HF_LAYOUT:")) {
+            val layout = comment.substringAfter("HF_LAYOUT:")
+            return top.maary.darkbag.models.EditConfig(hfLayout = layout)
+        } else if (comment.startsWith("{")) {
+            return parseEditConfig(comment)
+        }
+        return null
+    }
+
+    fun parseEditConfig(jsonStr: String): top.maary.darkbag.models.EditConfig? {
+        return try {
+            val json = org.json.JSONObject(jsonStr)
+            val adjustmentsArray = json.optJSONArray("adjustments")
+            val adjustments = if (adjustmentsArray != null) {
+                List(adjustmentsArray.length()) { i ->
+                    val adjJson = adjustmentsArray.getJSONObject(i)
+                    top.maary.darkbag.models.BasicAdjustments(
+                        exposure = adjJson.optDouble("exposure", 0.0).toFloat(),
+                        contrast = adjJson.optDouble("contrast", 0.0).toFloat(),
+                        saturation = adjJson.optDouble("saturation", 0.0).toFloat(),
+                        highlights = adjJson.optDouble("highlights", 0.0).toFloat(),
+                        shadows = adjJson.optDouble("shadows", 0.0).toFloat(),
+                        whites = adjJson.optDouble("whites", 0.0).toFloat(),
+                        blacks = adjJson.optDouble("blacks", 0.0).toFloat(),
+                        digitalGain = adjJson.optDouble("digital_gain", 1.0).toFloat()
+                    )
+                }
+            } else null
+
+            top.maary.darkbag.models.EditConfig(
+                log = json.optString("log", "None"),
+                lut = json.optString("lut", "None"),
+                exposure = json.optDouble("exposure", 0.0).toFloat(),
+                contrast = json.optDouble("contrast", 0.0).toFloat(),
+                saturation = json.optDouble("saturation", 0.0).toFloat(),
+                highlights = json.optDouble("highlights", 0.0).toFloat(),
+                shadows = json.optDouble("shadows", 0.0).toFloat(),
+                whites = json.optDouble("whites", 0.0).toFloat(),
+                blacks = json.optDouble("blacks", 0.0).toFloat(),
+                digitalGain = json.optDouble("digital_gain", 1.0).toFloat(),
+                adjustments = adjustments,
+                showTimestamp = json.optBoolean("show_timestamp", false),
+                flareType = json.optInt("flare_type", -1),
+                hfLayout = json.optString("hf_layout", "").takeIf { it.isNotBlank() },
+                zoomFactor = json.optDouble("zoom_factor", 1.0).toFloat()
+            )
+        } catch (e: Exception) {
+            null
+        }
     }
 
     suspend fun generateHalfFrameComposite(
@@ -85,7 +138,8 @@ object ImageUtils {
             return bitmap.copy(config, true)
         }
 
-        val matrix = Matrix().apply { postRotate(90f) }
+        val degrees = if (wantPortrait) 90f else 270f
+        val matrix = Matrix().apply { postRotate(degrees) }
         return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
     }
 
@@ -233,5 +287,21 @@ object ImageUtils {
             }
         }
         return inSampleSize
+    }
+
+    fun getCaptureTime(context: Context, uri: Uri): Long {
+        return try {
+            context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                val exif = ExifInterface(pfd.fileDescriptor)
+                val dateStr = exif.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL)
+                    ?: exif.getAttribute(ExifInterface.TAG_DATETIME)
+                if (dateStr != null) {
+                    val sdf = java.text.SimpleDateFormat("yyyy:MM:dd HH:mm:ss", java.util.Locale.US)
+                    sdf.parse(dateStr)?.time ?: 0L
+                } else 0L
+            } ?: 0L
+        } catch (e: Exception) {
+            0L
+        }
     }
 }
