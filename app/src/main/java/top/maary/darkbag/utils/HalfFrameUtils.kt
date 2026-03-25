@@ -21,7 +21,8 @@ object HalfFrameUtils {
         val isPortrait = bitmap.height >= bitmap.width
         if (isPortrait == wantPortrait) return bitmap
 
-        val matrix = Matrix().apply { postRotate(90f) }
+        val degrees = if (wantPortrait) 90f else 270f
+        val matrix = Matrix().apply { postRotate(degrees) }
         return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
     }
 

@@ -69,11 +69,15 @@ class ImageViewerFragment : Fragment() {
     private lateinit var lutManager: top.maary.darkbag.utils.LutManager
     private val previewMutex = kotlinx.coroutines.sync.Mutex()
     private var previewJob: Job? = null
+    private var lastPageIndex = -1
     private val pageChangeCallback = object : ViewPager2.OnPageChangeCallback() {
         override fun onPageSelected(position: Int) {
-            if (isAdjusted) {
+            val indexChanged = lastPageIndex != -1 && lastPageIndex != position
+            lastPageIndex = position
+
+            if (isAdjusted && indexChanged) {
                 resetAdjustments()
-            } else {
+            } else if (!isAdjusted) {
                 currentEditConfig = null
                 sourceDngBytes = null
                 sourceDngBytes2 = null
@@ -264,8 +268,12 @@ class ImageViewerFragment : Fragment() {
             }
 
             if (initialPos != -1) {
+                lastPageIndex = initialPos
                 binding.imagePager.setCurrentItem(initialPos, false)
             }
+
+            setupActionButtons()
+            updateControlsVisibility()
 
             if (targetUri?.contains("|") == true) {
                 markAdjusted()
@@ -273,9 +281,6 @@ class ImageViewerFragment : Fragment() {
             }
 
             binding.imagePager.isUserInputEnabled = !isAdjusted
-
-            setupActionButtons()
-            updateControlsVisibility()
 
             binding.imagePager.visibility = View.VISIBLE
             binding.initialLoadingIndicator.visibility = View.GONE
