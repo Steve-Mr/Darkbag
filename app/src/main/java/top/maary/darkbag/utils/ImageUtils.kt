@@ -13,6 +13,7 @@ object ImageUtils {
 
     fun getBaseName(fileName: String): String {
         return fileName.substringBeforeLast(".")
+            .replace(DarkbagIdentity.FILE_PREFIX, "")
             .replace("_linear", "")
             .replace("_bayer", "")
             .replace("_HDRPLUS", "")

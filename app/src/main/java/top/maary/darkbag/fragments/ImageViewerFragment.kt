@@ -1237,13 +1237,13 @@ class ImageViewerFragment : Fragment() {
         imageView.restoreZoomState(savedMatrix, savedScale)
     }
 
-    private fun showProgress(visible: Boolean) {
+    private fun showProgress(visible: Boolean, forceGlobal: Boolean = false) {
         val currentIndex = binding.imagePager.currentItem
         val currentHolder = (binding.imagePager.getChildAt(0) as? androidx.recyclerview.widget.RecyclerView)
             ?.findViewHolderForAdapterPosition(currentIndex) as? ImageViewerAdapter.ViewHolder
 
         if (visible) {
-            if (isEditingAdjustments) {
+            if (isEditingAdjustments || forceGlobal) {
                 binding.initialLoadingIndicator.visibility = View.VISIBLE
             } else {
                 currentHolder?.binding?.loadingIndicator?.visibility = View.VISIBLE
@@ -1515,7 +1515,7 @@ class ImageViewerFragment : Fragment() {
         val actualIsReplacement = if (isExternal) false else isReplacement
 
         lifecycleScope.launch {
-            showProgress(true)
+            showProgress(true, forceGlobal = true)
             ensureDngBytesLoaded()
             withContext(Dispatchers.IO) {
                 try {
@@ -1669,7 +1669,10 @@ class ImageViewerFragment : Fragment() {
                     }
 
                     if (finalBitmap != null || tempJpgPath != null) {
-                        val baseName = if (actualIsReplacement) currentGroup.baseName else "${currentGroup.baseName}_edited_${System.currentTimeMillis()}"
+                        var baseName = if (actualIsReplacement) currentGroup.baseName else "${currentGroup.baseName}_edited_${System.currentTimeMillis()}"
+                        if (isExternal && !baseName.startsWith(top.maary.darkbag.utils.DarkbagIdentity.FILE_PREFIX)) {
+                            baseName = top.maary.darkbag.utils.DarkbagIdentity.FILE_PREFIX + baseName
+                        }
                         val targetUri = if (actualIsReplacement) currentGroup.jpgUri else null
 
                         val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
@@ -1706,13 +1709,23 @@ class ImageViewerFragment : Fragment() {
                 }
             }
 
-            showProgress(false)
-            resetAdjustments()
+            showProgress(false, forceGlobal = true)
+
             repository.invalidateCache()
             val updatedGroups = repository.getGroupedImages(forceRefresh = true)
             if (updatedGroups.isNotEmpty()) {
-                val targetBaseName = currentGroup.baseName
+                // Determine which group to navigate to
+                val targetBaseName = if (actualIsReplacement) {
+                    currentGroup.baseName
+                } else {
+                    // For "Save As", the new file is usually the most recent
+                    updatedGroups.first().baseName
+                }
+
                 val newPos = updatedGroups.indexOfFirst { it.baseName == targetBaseName }.coerceAtLeast(0)
+
+                isAdjusted = false
+                isEditingAdjustments = false
             adapter = ImageViewerAdapter(updatedGroups, lifecycleScope, requireContext()).apply {
                     onImageTapped = { toggleUi() }
                     onZoomChanged = { isZoomed -> if (isZoomed) hideUi() else showUi() }
@@ -2145,12 +2158,20 @@ class ImageViewerFragment : Fragment() {
             exitEditMode(apply = false)
             return
         }
+
+        val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
+        val isVirtual = currentGroup.baseName.startsWith("Stitched_")
+
         com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
-            .setTitle(R.string.discard_changes_title)
-            .setMessage(R.string.discard_changes_message)
+            .setTitle(if (isVirtual) "Discard Stitch?" else getString(R.string.discard_changes_title))
+            .setMessage(if (isVirtual) "Are you sure you want to discard this stitch and go back?" else getString(R.string.discard_changes_message))
             .setNegativeButton(R.string.cancel, null)
             .setPositiveButton(R.string.discard) { _, _ ->
-                resetAdjustments()
+                if (isVirtual) {
+                    findNavController().navigateUp()
+                } else {
+                    resetAdjustments()
+                }
             }
             .show()
     }
