@@ -1374,13 +1374,7 @@ class ImageViewerFragment : Fragment() {
                         } catch (e: Exception) { options.outHeight }
 
                         if (currentGroup.isHalfFrame()) {
-                            val currentWidth = if (rotDegrees == 90 || rotDegrees == 270) exifHeight else exifWidth
-                            val currentHeight = if (rotDegrees == 90 || rotDegrees == 270) exifWidth else exifHeight
-                            val currentIsPortrait = currentHeight >= currentWidth
-                            val wantPortrait = currentGroup.hfLayout != "TB"
-                            if (currentIsPortrait != wantPortrait) {
-                                rotDegrees = (rotDegrees + (if (wantPortrait) 90 else 270)) % 360
-                            }
+                            rotDegrees = getAdjustedRotationForHalfFrame(rotDegrees, exifWidth, exifHeight, currentGroup)
                         }
 
                         val fullW = if (rotDegrees == 90 || rotDegrees == 270) exifHeight / ds else exifWidth / ds
@@ -1558,13 +1552,7 @@ class ImageViewerFragment : Fragment() {
                         } catch (e: Exception) { options.outHeight }
 
                         if (currentGroup.isHalfFrame()) {
-                            val currentWidth = if (rotDegrees == 90 || rotDegrees == 270) exifHeight else exifWidth
-                            val currentHeight = if (rotDegrees == 90 || rotDegrees == 270) exifWidth else exifHeight
-                            val currentIsPortrait = currentHeight >= currentWidth
-                            val wantPortrait = currentGroup.hfLayout != "TB"
-                            if (currentIsPortrait != wantPortrait) {
-                                rotDegrees = (rotDegrees + (if (wantPortrait) 90 else 270)) % 360
-                            }
+                            rotDegrees = getAdjustedRotationForHalfFrame(rotDegrees, exifWidth, exifHeight, currentGroup)
                         }
 
                         val adj = if (currentGroup.isHalfFrame()) config.adjustments?.get(index) ?: top.maary.darkbag.models.BasicAdjustments() else config.toBasic()
@@ -2174,6 +2162,23 @@ class ImageViewerFragment : Fragment() {
                 }
             }
             .show()
+    }
+
+    private fun getAdjustedRotationForHalfFrame(
+        currentRotation: Int,
+        imageWidth: Int,
+        imageHeight: Int,
+        group: ImageGroup
+    ): Int {
+        val currentWidth = if (currentRotation == 90 || currentRotation == 270) imageHeight else imageWidth
+        val currentHeight = if (currentRotation == 90 || currentRotation == 270) imageWidth else imageHeight
+        val isPortrait = currentHeight >= currentWidth
+        val wantPortrait = group.hfLayout != "TB"
+        return if (isPortrait != wantPortrait) {
+            (currentRotation + (if (wantPortrait) 90 else 270)) % 360
+        } else {
+            currentRotation
+        }
     }
 
     private fun forceShowIcons(popup: PopupMenu) {
