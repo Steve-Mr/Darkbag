@@ -69,11 +69,15 @@ class ImageViewerFragment : Fragment() {
     private lateinit var lutManager: top.maary.darkbag.utils.LutManager
     private val previewMutex = kotlinx.coroutines.sync.Mutex()
     private var previewJob: Job? = null
+    private var lastPageIndex = -1
     private val pageChangeCallback = object : ViewPager2.OnPageChangeCallback() {
         override fun onPageSelected(position: Int) {
-            if (isAdjusted) {
+            val indexChanged = lastPageIndex != -1 && lastPageIndex != position
+            lastPageIndex = position
+
+            if (isAdjusted && indexChanged) {
                 resetAdjustments()
-            } else {
+            } else if (!isAdjusted) {
                 currentEditConfig = null
                 sourceDngBytes = null
                 sourceDngBytes2 = null
@@ -264,12 +268,19 @@ class ImageViewerFragment : Fragment() {
             }
 
             if (initialPos != -1) {
+                lastPageIndex = initialPos
                 binding.imagePager.setCurrentItem(initialPos, false)
             }
-            binding.imagePager.isUserInputEnabled = !isAdjusted
 
             setupActionButtons()
             updateControlsVisibility()
+
+            if (targetUri?.contains("|") == true) {
+                markAdjusted()
+                applyEditPreview()
+            }
+
+            binding.imagePager.isUserInputEnabled = !isAdjusted
 
             binding.imagePager.visibility = View.VISIBLE
             binding.initialLoadingIndicator.visibility = View.GONE
@@ -367,6 +378,8 @@ class ImageViewerFragment : Fragment() {
         selectedDngIndex = 0
         previewJob?.cancel()
 
+        val isNewStitch = args.initialUri?.contains("|") == true && group.baseName.startsWith("Stitched_")
+
         currentEditConfig = group.editConfig?.let {
             if (it.exposure == 0f && it.adjustments == null) {
                 val baseEv = if (it.digitalGain > 0f) kotlin.math.log2(it.digitalGain) else 0f
@@ -380,9 +393,16 @@ class ImageViewerFragment : Fragment() {
                 }
                 it.copy(adjustments = newAdjs)
             } else it
-        }?.copy() ?: top.maary.darkbag.models.EditConfig(
-            adjustments = if (group.isHalfFrame()) listOf(top.maary.darkbag.models.BasicAdjustments(), top.maary.darkbag.models.BasicAdjustments()) else null
-        )
+        }?.copy() ?: run {
+            val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+            top.maary.darkbag.models.EditConfig(
+                adjustments = if (group.isHalfFrame()) listOf(top.maary.darkbag.models.BasicAdjustments(), top.maary.darkbag.models.BasicAdjustments()) else null,
+                showTimestamp = if (isNewStitch) prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_DATE_STAMP, false) else false,
+                flareType = if (isNewStitch) {
+                    if (prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_LIGHT_LEAK, false)) 0 else -1
+                } else -1
+            )
+        }
 
         // Solidify "Random" flare type to prevent jumping during edits
         currentEditConfig = currentEditConfig?.let { config ->
@@ -776,8 +796,10 @@ class ImageViewerFragment : Fragment() {
     private fun markAdjusted() {
         if (!isAdjusted) {
             isAdjusted = true
-            adapter.setFormatSwitcherPersistentHidden(true)
-            adapter.setRenderLocked(true)
+            if (::adapter.isInitialized) {
+                adapter.setFormatSwitcherPersistentHidden(true)
+                adapter.setRenderLocked(true)
+            }
             updateSplitButtons()
             updateToolbarIcon()
             updateBackPressedCallbackState()
@@ -1215,13 +1237,13 @@ class ImageViewerFragment : Fragment() {
         imageView.restoreZoomState(savedMatrix, savedScale)
     }
 
-    private fun showProgress(visible: Boolean) {
+    private fun showProgress(visible: Boolean, forceGlobal: Boolean = false) {
         val currentIndex = binding.imagePager.currentItem
         val currentHolder = (binding.imagePager.getChildAt(0) as? androidx.recyclerview.widget.RecyclerView)
             ?.findViewHolderForAdapterPosition(currentIndex) as? ImageViewerAdapter.ViewHolder
 
         if (visible) {
-            if (isEditingAdjustments) {
+            if (isEditingAdjustments || forceGlobal) {
                 binding.initialLoadingIndicator.visibility = View.VISIBLE
             } else {
                 currentHolder?.binding?.loadingIndicator?.visibility = View.VISIBLE
@@ -1239,23 +1261,40 @@ class ImageViewerFragment : Fragment() {
         b2: android.graphics.Bitmap?
     ): android.graphics.Bitmap? {
         if (b1 == null && b2 == null) return null
+
+        val wantPortrait = group.hfLayout != "TB"
+        fun orient(b: android.graphics.Bitmap?): android.graphics.Bitmap? {
+            if (b == null) return null
+            val isPortrait = b.height >= b.width
+            if (isPortrait == wantPortrait) return b
+            val degrees = if (wantPortrait) 90f else 270f
+            val matrix = android.graphics.Matrix().apply { postRotate(degrees) }
+            return android.graphics.Bitmap.createBitmap(b, 0, 0, b.width, b.height, matrix, true)
+        }
+
+        val ob1 = orient(b1)
+        val ob2 = orient(b2)
+
         val isSBS = group.hfLayout != "TB"
-        val gap = top.maary.darkbag.utils.HalfFrameUtils.calculateGap(maxOf(b1?.width ?: 0, b1?.height ?: 0)).toFloat()
-        val w1 = b1?.width ?: b2?.width ?: 0
-        val h1 = b1?.height ?: b2?.height ?: 0
-        val w2 = b2?.width ?: w1
-        val h2 = b2?.height ?: h1
+        val gap = top.maary.darkbag.utils.HalfFrameUtils.calculateGap(maxOf(ob1?.width ?: 0, ob1?.height ?: 0)).toFloat()
+        val w1 = ob1?.width ?: ob2?.width ?: 0
+        val h1 = ob1?.height ?: ob2?.height ?: 0
+        val w2 = ob2?.width ?: w1
+        val h2 = ob2?.height ?: h1
         val resW = if (isSBS) (w1 + gap + w2).toInt() else maxOf(w1, w2)
         val resH = if (isSBS) maxOf(h1, h2) else (h1 + gap + h2).toInt()
 
         val composite = android.graphics.Bitmap.createBitmap(resW, resH, android.graphics.Bitmap.Config.ARGB_8888)
         val canvas = android.graphics.Canvas(composite)
         canvas.drawColor(android.graphics.Color.BLACK)
-        b1?.let { canvas.drawBitmap(it, 0f, 0f, null) }
-        b2?.let {
+        ob1?.let { canvas.drawBitmap(it, 0f, 0f, null) }
+        ob2?.let {
             if (isSBS) canvas.drawBitmap(it, w1 + gap, 0f, null)
             else canvas.drawBitmap(it, 0f, h1 + gap, null)
         }
+
+        if (ob1 != b1) ob1?.recycle()
+        if (ob2 != b2) ob2?.recycle()
 
         val finalComposite = top.maary.darkbag.utils.HalfFrameUtils.addEffects(
             composite,
@@ -1316,7 +1355,7 @@ class ImageViewerFragment : Fragment() {
                             } ?: androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL
                         } catch (e: Exception) { androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL }
 
-                        val rotDegrees = when(orientation) {
+                        var rotDegrees = when(orientation) {
                             androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90 -> 90
                             androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_180 -> 180
                             androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270 -> 270
@@ -1333,6 +1372,10 @@ class ImageViewerFragment : Fragment() {
                                 ExifInterface(input).getAttributeInt(ExifInterface.TAG_IMAGE_LENGTH, options.outHeight)
                             } ?: options.outHeight
                         } catch (e: Exception) { options.outHeight }
+
+                        if (currentGroup.isHalfFrame()) {
+                            rotDegrees = getAdjustedRotationForHalfFrame(rotDegrees, exifWidth, exifHeight, currentGroup)
+                        }
 
                         val fullW = if (rotDegrees == 90 || rotDegrees == 270) exifHeight / ds else exifWidth / ds
                         val fullH = if (rotDegrees == 90 || rotDegrees == 270) exifWidth / ds else exifHeight / ds
@@ -1466,6 +1509,7 @@ class ImageViewerFragment : Fragment() {
         val actualIsReplacement = if (isExternal) false else isReplacement
 
         lifecycleScope.launch {
+            showProgress(true, forceGlobal = true)
             ensureDngBytesLoaded()
             withContext(Dispatchers.IO) {
                 try {
@@ -1489,11 +1533,26 @@ class ImageViewerFragment : Fragment() {
                             } ?: androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL
                         } catch (e: Exception) { androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL }
 
-                        val rotDegrees = when(orientation) {
+                        var rotDegrees = when(orientation) {
                             androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90 -> 90
                             androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_180 -> 180
                             androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270 -> 270
                             else -> 0
+                        }
+
+                        val exifWidth = try {
+                            context.contentResolver.openInputStream(uri)?.use { input ->
+                                ExifInterface(input).getAttributeInt(ExifInterface.TAG_IMAGE_WIDTH, options.outWidth)
+                            } ?: options.outWidth
+                        } catch (e: Exception) { options.outWidth }
+                        val exifHeight = try {
+                            context.contentResolver.openInputStream(uri)?.use { input ->
+                                ExifInterface(input).getAttributeInt(ExifInterface.TAG_IMAGE_LENGTH, options.outHeight)
+                            } ?: options.outHeight
+                        } catch (e: Exception) { options.outHeight }
+
+                        if (currentGroup.isHalfFrame()) {
+                            rotDegrees = getAdjustedRotationForHalfFrame(rotDegrees, exifWidth, exifHeight, currentGroup)
                         }
 
                         val adj = if (currentGroup.isHalfFrame()) config.adjustments?.get(index) ?: top.maary.darkbag.models.BasicAdjustments() else config.toBasic()
@@ -1521,17 +1580,6 @@ class ImageViewerFragment : Fragment() {
                             )
                             return null
                         } else {
-                            val exifWidth = try {
-                                context.contentResolver.openInputStream(uri)?.use { input ->
-                                    ExifInterface(input).getAttributeInt(ExifInterface.TAG_IMAGE_WIDTH, options.outWidth)
-                                } ?: options.outWidth
-                            } catch (e: Exception) { options.outWidth }
-                            val exifHeight = try {
-                                context.contentResolver.openInputStream(uri)?.use { input ->
-                                    ExifInterface(input).getAttributeInt(ExifInterface.TAG_IMAGE_LENGTH, options.outHeight)
-                                } ?: options.outHeight
-                            } catch (e: Exception) { options.outHeight }
-
                             val fullW = if (rotDegrees == 90 || rotDegrees == 270) exifHeight else exifWidth
                             val fullH = if (rotDegrees == 90 || rotDegrees == 270) exifWidth else exifHeight
                             val bmpW = (fullW / config.zoomFactor).toInt()
@@ -1609,7 +1657,10 @@ class ImageViewerFragment : Fragment() {
                     }
 
                     if (finalBitmap != null || tempJpgPath != null) {
-                        val baseName = if (actualIsReplacement) currentGroup.baseName else "${currentGroup.baseName}_edited_${System.currentTimeMillis()}"
+                        var baseName = if (actualIsReplacement) currentGroup.baseName else "${currentGroup.baseName}_edited_${System.currentTimeMillis()}"
+                        if (isExternal && !baseName.startsWith(top.maary.darkbag.utils.DarkbagIdentity.FILE_PREFIX)) {
+                            baseName = top.maary.darkbag.utils.DarkbagIdentity.FILE_PREFIX + baseName
+                        }
                         val targetUri = if (actualIsReplacement) currentGroup.jpgUri else null
 
                         val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
@@ -1646,12 +1697,23 @@ class ImageViewerFragment : Fragment() {
                 }
             }
 
-            resetAdjustments()
+            showProgress(false, forceGlobal = true)
+
             repository.invalidateCache()
             val updatedGroups = repository.getGroupedImages(forceRefresh = true)
             if (updatedGroups.isNotEmpty()) {
-                val targetBaseName = currentGroup.baseName
+                // Determine which group to navigate to
+                val targetBaseName = if (actualIsReplacement) {
+                    currentGroup.baseName
+                } else {
+                    // For "Save As", the new file is usually the most recent
+                    updatedGroups.first().baseName
+                }
+
                 val newPos = updatedGroups.indexOfFirst { it.baseName == targetBaseName }.coerceAtLeast(0)
+
+                isAdjusted = false
+                isEditingAdjustments = false
             adapter = ImageViewerAdapter(updatedGroups, lifecycleScope, requireContext()).apply {
                     onImageTapped = { toggleUi() }
                     onZoomChanged = { isZoomed -> if (isZoomed) hideUi() else showUi() }
@@ -2084,14 +2146,39 @@ class ImageViewerFragment : Fragment() {
             exitEditMode(apply = false)
             return
         }
+
+        val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
+        val isVirtual = currentGroup.baseName.startsWith("Stitched_")
+
         com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
-            .setTitle(R.string.discard_changes_title)
-            .setMessage(R.string.discard_changes_message)
+            .setTitle(if (isVirtual) "Discard Stitch?" else getString(R.string.discard_changes_title))
+            .setMessage(if (isVirtual) "Are you sure you want to discard this stitch and go back?" else getString(R.string.discard_changes_message))
             .setNegativeButton(R.string.cancel, null)
             .setPositiveButton(R.string.discard) { _, _ ->
-                resetAdjustments()
+                if (isVirtual) {
+                    findNavController().navigateUp()
+                } else {
+                    resetAdjustments()
+                }
             }
             .show()
+    }
+
+    private fun getAdjustedRotationForHalfFrame(
+        currentRotation: Int,
+        imageWidth: Int,
+        imageHeight: Int,
+        group: ImageGroup
+    ): Int {
+        val currentWidth = if (currentRotation == 90 || currentRotation == 270) imageHeight else imageWidth
+        val currentHeight = if (currentRotation == 90 || currentRotation == 270) imageWidth else imageHeight
+        val isPortrait = currentHeight >= currentWidth
+        val wantPortrait = group.hfLayout != "TB"
+        return if (isPortrait != wantPortrait) {
+            (currentRotation + (if (wantPortrait) 90 else 270)) % 360
+        } else {
+            currentRotation
+        }
     }
 
     private fun forceShowIcons(popup: PopupMenu) {

@@ -91,6 +91,8 @@ class StudioFragment : Fragment() {
             val groups = repository.getGroupedImages(forceRefresh = true)
             binding.rvStudio.adapter = StudioAdapter(groups)
             binding.loadingIndicator.visibility = View.GONE
+            // Ensure action buttons are correctly positioned after layout refresh
+            binding.root.requestApplyInsets()
         }
     }
 
@@ -166,31 +168,29 @@ class StudioFragment : Fragment() {
         override fun onBindViewHolder(holder: ViewHolder, position: Int) {
             holder.loadJob?.cancel()
             val group = groups[position]
-            val uri = group.jpgUri ?: group.dngUri ?: group.dngUri1 ?: return
 
-            val isDng = group.dngUri != null || group.dngUri1 != null
-
-            if (isDng) {
+            if (group.jpgUri != null) {
+                Glide.with(holder.binding.ivThumbnail)
+                    .load(group.jpgUri)
+                    .centerCrop()
+                    .into(holder.binding.ivThumbnail)
+            } else {
+                val dngUri = group.dngUri ?: group.dngUri1 ?: return
                 holder.binding.ivThumbnail.setImageResource(R.drawable.ic_photo)
                 holder.loadJob = lifecycleScope.launch {
                     val thumb = withContext(Dispatchers.IO) {
-                         top.maary.darkbag.utils.ImageUtils.decodeDngThumbnail(requireContext(), uri, 1.0f)
+                         top.maary.darkbag.utils.ImageUtils.decodeDngThumbnail(requireContext(), dngUri, 1.0f)
                     }
                     if (thumb != null) {
                         holder.binding.ivThumbnail.setImageBitmap(thumb)
                     } else {
                         Glide.with(holder.binding.ivThumbnail)
-                            .load(uri)
+                            .load(dngUri)
                             .centerCrop()
                             .error(R.drawable.ic_close)
                             .into(holder.binding.ivThumbnail)
                     }
                 }
-            } else {
-                Glide.with(holder.binding.ivThumbnail)
-                    .load(uri)
-                    .centerCrop()
-                    .into(holder.binding.ivThumbnail)
             }
 
             holder.binding.tvName.text = group.baseName

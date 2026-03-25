@@ -52,7 +52,7 @@ class ImageRepository(private val context: Context) {
 
             val result = groups.values
                 .map { it.build() }
-                .filter { it.hasAny() }
+                .filter { it.hasAny() && (it.dngUri != null || it.dngUri1 != null || it.dngUri2 != null) }
                 .sortedByDescending { it.captureTime }
 
             cachedGroups = result
@@ -162,7 +162,6 @@ class ImageRepository(private val context: Context) {
             val root = DocumentFile.fromTreeUri(context, treeUri)
             root?.listFiles()?.forEach { file ->
                 val name = file.name ?: return@forEach
-                if (!name.startsWith(DarkbagIdentity.FILE_PREFIX, ignoreCase = true)) return@forEach
                 val baseName = getBaseName(name)
                 val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
                 val lastModified = file.lastModified()
@@ -273,7 +272,6 @@ class ImageRepository(private val context: Context) {
             while (cursor.moveToNext()) {
                 val id = cursor.getLong(idColumn)
                 val name = cursor.getString(nameColumn)
-                if (!name.startsWith(DarkbagIdentity.FILE_PREFIX, ignoreCase = true)) continue
                 val date = cursor.getLong(dateColumn) * 1000 // Convert to ms
                 val mime = cursor.getString(mimeColumn)
                 val uri = ContentUris.withAppendedId(collection, id)

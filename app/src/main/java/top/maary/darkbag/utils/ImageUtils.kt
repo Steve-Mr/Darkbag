@@ -13,6 +13,7 @@ object ImageUtils {
 
     fun getBaseName(fileName: String): String {
         return fileName.substringBeforeLast(".")
+            .replace(DarkbagIdentity.FILE_PREFIX, "")
             .replace("_linear", "")
             .replace("_bayer", "")
             .replace("_HDRPLUS", "")
@@ -137,7 +138,8 @@ object ImageUtils {
             return bitmap.copy(config, true)
         }
 
-        val matrix = Matrix().apply { postRotate(90f) }
+        val degrees = if (wantPortrait) 90f else 270f
+        val matrix = Matrix().apply { postRotate(degrees) }
         return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
     }
 
