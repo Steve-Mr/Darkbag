@@ -217,15 +217,18 @@ class ImageViewerFragment : Fragment() {
                 it.jpgUri?.toString() == targetUri ||
                 it.dngUri?.toString() == targetUri ||
                 it.dngUri1?.toString() == targetUri ||
+                it.dngUri2?.toString() == targetUri ||
                 it.jpgUri?.lastPathSegment == Uri.parse(targetUri).lastPathSegment ||
-                it.dngUri?.lastPathSegment == Uri.parse(targetUri).lastPathSegment
+                it.dngUri?.lastPathSegment == Uri.parse(targetUri).lastPathSegment ||
+                it.dngUri1?.lastPathSegment == Uri.parse(targetUri).lastPathSegment ||
+                it.dngUri2?.lastPathSegment == Uri.parse(targetUri).lastPathSegment
             }) {
                 // External or recently captured image not yet grouped
                 val u = Uri.parse(targetUri)
                 val isDng = targetUri.endsWith(".dng", ignoreCase = true) || context?.contentResolver?.getType(u) == "image/x-adobe-dng"
 
                 val name = repository.resolveFilename(u) ?: u.lastPathSegment ?: "External"
-                val baseName = top.maary.darkbag.utils.ImageUtils.getBaseName(name)
+                val baseName = top.maary.darkbag.utils.ImageUtils.getBaseName(name, keepPrefix = (currentMode == ViewerMode.CAMERA))
 
                 // Read EXIF to check for half-frame layout and capture time
                 var hfLayout: String? = null
@@ -287,8 +290,11 @@ class ImageViewerFragment : Fragment() {
                 it.jpgUri?.toString() == targetUri ||
                 it.dngUri?.toString() == targetUri ||
                 it.dngUri1?.toString() == targetUri ||
+                it.dngUri2?.toString() == targetUri ||
                 it.jpgUri?.lastPathSegment == Uri.parse(targetUri).lastPathSegment ||
-                it.dngUri?.lastPathSegment == Uri.parse(targetUri).lastPathSegment
+                it.dngUri?.lastPathSegment == Uri.parse(targetUri).lastPathSegment ||
+                it.dngUri1?.lastPathSegment == Uri.parse(targetUri).lastPathSegment ||
+                it.dngUri2?.lastPathSegment == Uri.parse(targetUri).lastPathSegment
             })) {
                 0
             } else {
@@ -1742,7 +1748,7 @@ class ImageViewerFragment : Fragment() {
 
                         // Use the new baseName if we promoted the group
                         if (args.isStudioMode && currentGroup.isHalfFrame() && currentGroup.baseName.startsWith("Stitched_")) {
-                             baseName = top.maary.darkbag.utils.ImageUtils.getBaseName(repository.resolveFilename(finalDng1) ?: "")
+                             baseName = top.maary.darkbag.utils.ImageUtils.getBaseName(repository.resolveFilename(finalDng1) ?: "", keepPrefix = false)
                         }
 
                         if (isExternal && !baseName.startsWith(top.maary.darkbag.utils.DarkbagIdentity.FILE_PREFIX)) {
@@ -1799,7 +1805,12 @@ class ImageViewerFragment : Fragment() {
                     effectiveBaseName
                 } else {
                     // For "Save As", the new file is usually the most recent
+                // For Studio, use the baseName without prefix
+                if (args.isStudioMode) {
+                    top.maary.darkbag.utils.ImageUtils.getBaseName(effectiveBaseName, false)
+                } else {
                     updatedGroups.first().baseName
+                }
                 }
 
                 val newPos = updatedGroups.indexOfFirst { it.baseName == targetBaseName }.coerceAtLeast(0)

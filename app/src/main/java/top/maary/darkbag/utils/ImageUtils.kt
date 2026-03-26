@@ -11,9 +11,9 @@ import top.maary.darkbag.processor.ColorProcessor
 
 object ImageUtils {
 
-    fun getBaseName(fileName: String): String {
-        return fileName.substringBeforeLast(".")
-            .replace(DarkbagIdentity.FILE_PREFIX, "")
+    fun getBaseName(fileName: String, keepPrefix: Boolean = true): String {
+        val base = fileName.substringBeforeLast(".")
+        val withoutSuffixes = base
             .replace("_linear", "")
             .replace("_bayer", "")
             .replace("_HDRPLUS", "")
@@ -22,6 +22,8 @@ object ImageUtils {
             .replace("_HF2", "")
             .replace("_stitched", "")
             .replace("stitched_hf_", "")
+
+        return if (keepPrefix) withoutSuffixes else withoutSuffixes.replace(DarkbagIdentity.FILE_PREFIX, "")
     }
 
     fun parseUserComment(comment: String?): top.maary.darkbag.models.EditConfig? {

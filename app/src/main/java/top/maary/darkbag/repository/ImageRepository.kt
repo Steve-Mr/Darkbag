@@ -60,7 +60,7 @@ class ImageRepository(private val context: Context) {
 
             val result = groups.values
                 .map { it.build() }
-                .filter { it.hasAny() && (it.dngUri != null || it.dngUri1 != null || it.dngUri2 != null) }
+                .filter { it.hasAny() }
                 .sortedByDescending { it.captureTime }
 
             cachedGroups = result
@@ -165,13 +165,13 @@ class ImageRepository(private val context: Context) {
         return hf1 to hf2
     }
 
-    private fun scanSafFolder(folderUri: String, groups: MutableMap<String, ImageGroupBuilder>) {
+    private fun scanSafFolder(folderUri: String, groups: MutableMap<String, ImageGroupBuilder>, keepPrefix: Boolean = true) {
         try {
             val treeUri = Uri.parse(folderUri)
             val root = DocumentFile.fromTreeUri(context, treeUri)
             root?.listFiles()?.forEach { file ->
                 val name = file.name ?: return@forEach
-                val baseName = getBaseName(name)
+                val baseName = getBaseName(name, keepPrefix)
                 val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
                 val lastModified = file.lastModified()
 
@@ -217,7 +217,7 @@ class ImageRepository(private val context: Context) {
         }
     }
 
-    private fun scanAllDngs(groups: MutableMap<String, ImageGroupBuilder>) {
+    private fun scanAllDngs(groups: MutableMap<String, ImageGroupBuilder>, keepPrefix: Boolean = true) {
         val collection = MediaStore.Images.Media.EXTERNAL_CONTENT_URI
         val projection = arrayOf(
             MediaStore.MediaColumns._ID,
@@ -241,7 +241,7 @@ class ImageRepository(private val context: Context) {
                 val date = cursor.getLong(dateColumn) * 1000
                 val uri = ContentUris.withAppendedId(collection, id)
 
-                val baseName = getBaseName(name)
+                val baseName = getBaseName(name, keepPrefix)
                 val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
 
                 if (name.contains("_HF2")) {
@@ -255,7 +255,7 @@ class ImageRepository(private val context: Context) {
         }
     }
 
-    private fun scanMediaStore(groups: MutableMap<String, ImageGroupBuilder>) {
+    private fun scanMediaStore(groups: MutableMap<String, ImageGroupBuilder>, keepPrefix: Boolean = true) {
         val collection = MediaStore.Images.Media.EXTERNAL_CONTENT_URI
         val projection = arrayOf(
             MediaStore.MediaColumns._ID,
@@ -285,7 +285,7 @@ class ImageRepository(private val context: Context) {
                 val mime = cursor.getString(mimeColumn)
                 val uri = ContentUris.withAppendedId(collection, id)
 
-                val baseName = getBaseName(name)
+                val baseName = getBaseName(name, keepPrefix)
                 val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
 
                 when {
@@ -359,8 +359,8 @@ class ImageRepository(private val context: Context) {
         }
     }
 
-    private fun getBaseName(fileName: String): String {
-        return top.maary.darkbag.utils.ImageUtils.getBaseName(fileName)
+    private fun getBaseName(fileName: String, keepPrefix: Boolean = true): String {
+        return top.maary.darkbag.utils.ImageUtils.getBaseName(fileName, keepPrefix)
     }
 
     suspend fun getStudioGroups(forceRefresh: Boolean = false): List<ImageGroup> {
@@ -409,7 +409,7 @@ class ImageRepository(private val context: Context) {
             val name = file.name
             if (!name.endsWith(".dng", ignoreCase = true)) continue
 
-            val baseName = getBaseName(name)
+            val baseName = getBaseName(name, keepPrefix = false)
             val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
             val lastModified = file.lastModified()
             val uri = Uri.fromFile(file)
@@ -449,7 +449,7 @@ class ImageRepository(private val context: Context) {
                 val name = file.name ?: return@forEach
                 if (!name.endsWith(".jpg", ignoreCase = true) && !name.endsWith(".jpeg", ignoreCase = true)) return@forEach
 
-                val baseName = getBaseName(name)
+                val baseName = getBaseName(name, keepPrefix = false)
                 if (!filter.contains(baseName)) return@forEach
 
                 val builder = groups[baseName] ?: return@forEach
@@ -484,7 +484,7 @@ class ImageRepository(private val context: Context) {
 
             while (cursor.moveToNext()) {
                 val name = cursor.getString(nameColumn)
-                val baseName = getBaseName(name)
+                val baseName = getBaseName(name, keepPrefix = false)
                 if (!filter.contains(baseName)) continue
 
                 val id = cursor.getLong(idColumn)
@@ -499,7 +499,7 @@ class ImageRepository(private val context: Context) {
     suspend fun importToStudio(uri: Uri, targetBaseName: String? = null, suffix: String? = null): Uri? = withContext(Dispatchers.IO) {
         try {
             val name = resolveFilename(uri) ?: "imported_${System.currentTimeMillis()}.dng"
-            val finalBaseName = targetBaseName ?: getBaseName(name)
+            val finalBaseName = targetBaseName ?: getBaseName(name, keepPrefix = false)
             var finalName = if (suffix != null) "${finalBaseName}${suffix}.dng" else "${finalBaseName}.dng"
 
             // Avoid overwriting if possible
