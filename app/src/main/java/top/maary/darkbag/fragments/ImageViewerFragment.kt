@@ -191,7 +191,7 @@ class ImageViewerFragment : Fragment() {
 
             // Handle virtual groups from external URIs or stitching
             if (allowVirtualGroup && targetUri != null && targetUri.contains("|")) {
-                val parts = targetUri.split("|")
+                val parts = targetUri.split('|')
                 val u1 = Uri.parse(parts[0])
                 val u2 = Uri.parse(parts[1])
                 val layout = if (parts.size > 2) parts[2] else "SBS"
@@ -1300,51 +1300,78 @@ class ImageViewerFragment : Fragment() {
         b1: android.graphics.Bitmap?,
         b2: android.graphics.Bitmap?
     ): android.graphics.Bitmap? {
-        if (b1 == null && b2 == null) return null
+        return composeHalfFrameBitmaps(config, group, b1, b2)
+    }
+
+    private fun safeCopyBitmap(src: android.graphics.Bitmap?): android.graphics.Bitmap? {
+        if (src == null || src.isRecycled) return null
+        return try {
+            src.copy(android.graphics.Bitmap.Config.ARGB_8888, false)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun orientForLayout(
+        src: android.graphics.Bitmap?,
+        layout: String
+    ): android.graphics.Bitmap? {
+        if (src == null || src.isRecycled) return null
+        val wantPortrait = layout != "TB"
+        val isPortrait = src.height >= src.width
+        if (isPortrait == wantPortrait) return src
+        val degrees = if (wantPortrait) 90f else 270f
+        val matrix = android.graphics.Matrix().apply { postRotate(degrees) }
+        return try {
+            android.graphics.Bitmap.createBitmap(src, 0, 0, src.width, src.height, matrix, true)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun composeHalfFrameBitmaps(
+        config: top.maary.darkbag.models.EditConfig,
+        group: ImageGroup,
+        b1: android.graphics.Bitmap?,
+        b2: android.graphics.Bitmap?
+    ): android.graphics.Bitmap? {
+        if ((b1 == null || b1.isRecycled) && (b2 == null || b2.isRecycled)) return null
 
         val layout = group.hfLayout ?: "SBS"
-        val wantPortrait = layout != "TB"
-        fun orient(b: android.graphics.Bitmap?): android.graphics.Bitmap? {
-            if (b == null) return null
-            val isPortrait = b.height >= b.width
-            if (isPortrait == wantPortrait) return b
-            val degrees = if (wantPortrait) 90f else 270f
-            val matrix = android.graphics.Matrix().apply { postRotate(degrees) }
-            return android.graphics.Bitmap.createBitmap(b, 0, 0, b.width, b.height, matrix, true)
-        }
+        var ob1 = orientForLayout(safeCopyBitmap(b1), layout)
+        var ob2 = orientForLayout(safeCopyBitmap(b2), layout)
 
-        var ob1 = orient(b1)
-        var ob2 = orient(b2)
+        if (ob1 == null && ob2 == null) return null
 
-        // Scaling logic for mismatched resolutions
+        // Scale larger frame to the smaller frame's reference axis to avoid mismatch artifacts.
         if (ob1 != null && ob2 != null) {
             if (layout == "TB") {
-                if (ob1.width != ob2.width) {
-                    if (ob1.width > ob2.width) {
-                        val scale = ob2.width.toFloat() / ob1.width
-                        val scaled = android.graphics.Bitmap.createScaledBitmap(ob1, ob2.width, (ob1.height * scale).toInt(), true)
-                        if (scaled != ob1 && scaled != b1) ob1.recycle()
-                        ob1 = scaled
-                    } else {
-                        val scale = ob1.width.toFloat() / ob2.width
-                        val scaled = android.graphics.Bitmap.createScaledBitmap(ob2, ob1.width, (ob2.height * scale).toInt(), true)
-                        if (scaled != ob2 && scaled != b2) ob2.recycle()
-                        ob2 = scaled
-                    }
+                val targetWidth = minOf(ob1.width, ob2.width)
+                if (ob1.width != targetWidth) {
+                    val scale = targetWidth.toFloat() / ob1.width.toFloat()
+                    val scaled = android.graphics.Bitmap.createScaledBitmap(ob1, targetWidth, maxOf(1, (ob1.height * scale).toInt()), true)
+                    ob1.recycle()
+                    ob1 = scaled
+                }
+                if (ob2.width != targetWidth) {
+                    val scale = targetWidth.toFloat() / ob2.width.toFloat()
+                    val scaled = android.graphics.Bitmap.createScaledBitmap(ob2, targetWidth, maxOf(1, (ob2.height * scale).toInt()), true)
+                    ob2.recycle()
+                    ob2 = scaled
                 }
             } else {
-                if (ob1.height != ob2.height) {
-                    if (ob1.height > ob2.height) {
-                        val scale = ob2.height.toFloat() / ob1.height
-                        val scaled = android.graphics.Bitmap.createScaledBitmap(ob1, (ob1.width * scale).toInt(), ob2.height, true)
-                        if (scaled != ob1 && scaled != b1) ob1.recycle()
-                        ob1 = scaled
-                    } else {
-                        val scale = ob1.height.toFloat() / ob2.height
-                        val scaled = android.graphics.Bitmap.createScaledBitmap(ob2, (ob2.width * scale).toInt(), ob1.height, true)
-                        if (scaled != ob2 && scaled != b2) ob2.recycle()
-                        ob2 = scaled
-                    }
+                val targetHeight = minOf(ob1.height, ob2.height)
+                if (ob1.height != targetHeight) {
+                    val scale = targetHeight.toFloat() / ob1.height.toFloat()
+                    val scaled = android.graphics.Bitmap.createScaledBitmap(ob1, maxOf(1, (ob1.width * scale).toInt()), targetHeight, true)
+                    ob1.recycle()
+                    ob1 = scaled
+                }
+                if (ob2.height != targetHeight) {
+                    val scale = targetHeight.toFloat() / ob2.height.toFloat()
+                    val scaled = android.graphics.Bitmap.createScaledBitmap(ob2, maxOf(1, (ob2.width * scale).toInt()), targetHeight, true)
+                    ob2.recycle()
+                    ob2 = scaled
                 }
             }
         }
@@ -1353,7 +1380,6 @@ class ImageViewerFragment : Fragment() {
         val h1 = ob1?.height ?: ob2?.height ?: 0
         val w2 = ob2?.width ?: w1
         val h2 = ob2?.height ?: h1
-
         val isSBS = layout != "TB"
         val gap = top.maary.darkbag.utils.HalfFrameUtils.calculateGap(maxOf(w1, h1)).toFloat()
         val resW = if (isSBS) (w1 + gap + w2).toInt() else maxOf(w1, w2)
@@ -1363,26 +1389,21 @@ class ImageViewerFragment : Fragment() {
         val canvas = android.graphics.Canvas(composite)
         canvas.drawColor(android.graphics.Color.BLACK)
         ob1?.let { canvas.drawBitmap(it, 0f, 0f, null) }
-        ob2?.let {
-            if (isSBS) canvas.drawBitmap(it, w1 + gap, 0f, null)
-            else canvas.drawBitmap(it, 0f, h1 + gap, null)
-        }
+        ob2?.let { if (isSBS) canvas.drawBitmap(it, w1 + gap, 0f, null) else canvas.drawBitmap(it, 0f, h1 + gap, null) }
 
-        if (ob1 != b1) ob1?.recycle()
-        if (ob2 != b2) ob2?.recycle()
+        ob1?.recycle()
+        ob2?.recycle()
 
         val finalComposite = top.maary.darkbag.utils.HalfFrameUtils.addEffects(
             composite,
             config.showTimestamp,
             config.flareType >= 0,
-            group.hfLayout ?: "SBS",
+            layout,
             time1 = group.captureTime1.takeIf { it > 0 } ?: group.captureTime,
             time2 = group.captureTime2.takeIf { it > 0 } ?: group.captureTime,
             flareType = config.flareType
         )
-        if (finalComposite != composite) {
-            composite.recycle()
-        }
+        if (finalComposite != composite) composite.recycle()
         return finalComposite
     }
 
@@ -1705,41 +1726,12 @@ class ImageViewerFragment : Fragment() {
                     } else {
                         val b1 = processFull(sourceDngBytes, dngUri1, 0)
                         val b2 = dngUri2?.let { processFull(sourceDngBytes2, it, 1) }
-
-                        if (b1 != null || b2 != null) {
-                            val isSBS = currentGroup.hfLayout != "TB"
-                            val gap = top.maary.darkbag.utils.HalfFrameUtils.calculateGap(maxOf(b1?.width ?: 0, b1?.height ?: 0)).toFloat()
-                            val w1 = b1?.width ?: b2?.width ?: 0
-                            val h1 = b1?.height ?: b2?.height ?: 0
-                            val w2 = b2?.width ?: w1
-                            val h2 = b2?.height ?: h1
-                            val resW = if (isSBS) (w1 + gap + w2).toInt() else maxOf(w1, w2)
-                            val resH = if (isSBS) maxOf(h1, h2) else (h1 + gap + h2).toInt()
-
-                            val composite = android.graphics.Bitmap.createBitmap(resW, resH, android.graphics.Bitmap.Config.ARGB_8888)
-                            val canvas = android.graphics.Canvas(composite)
-                            canvas.drawColor(android.graphics.Color.BLACK)
-                            b1?.let { canvas.drawBitmap(it, 0f, 0f, null) }
-                            b2?.let {
-                                if (isSBS) canvas.drawBitmap(it, w1 + gap, 0f, null)
-                                else canvas.drawBitmap(it, 0f, h1 + gap, null)
-                            }
-                            val finalComposite = top.maary.darkbag.utils.HalfFrameUtils.addEffects(
-                                composite,
-                                config.showTimestamp,
-                                config.flareType >= 0,
-                                currentGroup.hfLayout ?: "SBS",
-                                time1 = currentGroup.captureTime1.takeIf { it > 0 } ?: currentGroup.captureTime,
-                                time2 = currentGroup.captureTime2.takeIf { it > 0 } ?: currentGroup.captureTime,
-                                flareType = config.flareType
-                            )
-                            if (finalComposite != composite) {
-                                composite.recycle()
-                            }
-                            b1?.recycle()
-                            b2?.recycle()
-                            finalComposite
-                        } else null
+                        try {
+                            if (b1 != null || b2 != null) composeHalfFrameBitmaps(config, currentGroup, b1, b2) else null
+                        } finally {
+                            if (b1 != null && !b1.isRecycled) b1.recycle()
+                            if (b2 != null && !b2.isRecycled) b2.recycle()
+                        }
                     }
 
                     if (finalBitmap != null || tempJpgPath != null) {

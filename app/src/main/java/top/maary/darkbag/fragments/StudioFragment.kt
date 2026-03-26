@@ -29,6 +29,7 @@ class StudioFragment : Fragment() {
     private var _binding: FragmentStudioBinding? = null
     private val binding get() = _binding!!
     private lateinit var repository: ImageRepository
+    private lateinit var studioAdapter: StudioAdapter
     private val selectedItems = mutableListOf<ImageGroup>()
     private var isSelectionMode = false
 
@@ -103,15 +104,20 @@ class StudioFragment : Fragment() {
 
     private fun setupRecyclerView() {
         binding.rvStudio.layoutManager = StaggeredGridLayoutManager(2, StaggeredGridLayoutManager.VERTICAL).apply {
-            gapStrategy = StaggeredGridLayoutManager.GAP_HANDLING_MOVE_ITEMS_BETWEEN_SPANS
+            // Prevent aggressive item moves that cause visible waterfall "jumping".
+            gapStrategy = StaggeredGridLayoutManager.GAP_HANDLING_NONE
         }
+        binding.rvStudio.setHasFixedSize(true)
+        binding.rvStudio.itemAnimator = null
+        studioAdapter = StudioAdapter()
+        binding.rvStudio.adapter = studioAdapter
     }
 
     private fun loadImages() {
         binding.loadingIndicator.visibility = View.VISIBLE
         lifecycleScope.launch {
             val groups = repository.getStudioGroups(forceRefresh = true)
-            binding.rvStudio.adapter = StudioAdapter(groups)
+            studioAdapter.submitGroups(groups)
             binding.loadingIndicator.visibility = View.GONE
 
             val isEmpty = groups.isEmpty()
@@ -212,7 +218,7 @@ class StudioFragment : Fragment() {
         isSelectionMode = false
         binding.cvStudioActions.visibility = View.GONE
         updateStitchVisibility()
-        binding.rvStudio.adapter?.notifyDataSetChanged()
+        if (::studioAdapter.isInitialized) studioAdapter.notifyDataSetChanged()
     }
 
     private fun toggleSelection(group: ImageGroup) {
@@ -227,7 +233,7 @@ class StudioFragment : Fragment() {
         isSelectionMode = selectedItems.isNotEmpty()
         binding.cvStudioActions.visibility = if (isSelectionMode) View.VISIBLE else View.GONE
         updateStitchVisibility()
-        binding.rvStudio.adapter?.notifyDataSetChanged()
+        if (::studioAdapter.isInitialized) studioAdapter.notifyDataSetChanged()
     }
 
     private fun updateStitchVisibility() {
@@ -235,8 +241,19 @@ class StudioFragment : Fragment() {
         binding.btnStitch?.visibility = if (canStitch) View.VISIBLE else View.GONE
     }
 
-    inner class StudioAdapter(private val groups: List<ImageGroup>) :
+    inner class StudioAdapter :
         RecyclerView.Adapter<StudioAdapter.ViewHolder>() {
+        private val groups = mutableListOf<ImageGroup>()
+
+        init {
+            setHasStableIds(true)
+        }
+
+        fun submitGroups(newGroups: List<ImageGroup>) {
+            groups.clear()
+            groups.addAll(newGroups)
+            notifyDataSetChanged()
+        }
 
         inner class ViewHolder(val binding: ItemStudioImageBinding) :
             RecyclerView.ViewHolder(binding.root) {
@@ -261,7 +278,7 @@ class StudioFragment : Fragment() {
                 }
             } else {
                 holder.binding.ivThumbnail.updateLayoutParams<androidx.constraintlayout.widget.ConstraintLayout.LayoutParams> {
-                    dimensionRatio = null
+                    dimensionRatio = "1:1"
                 }
             }
 
@@ -278,14 +295,10 @@ class StudioFragment : Fragment() {
                 }
 
                 if (thumb != null) {
+                    if (holder.bindingAdapterPosition != position) return@launch
                     holder.binding.ivThumbnail.setImageBitmap(thumb)
-                    if (group.width == 0) {
-                         // Update metadata for stability next time
-                         val updated = group.copy(width = thumb.width, height = thumb.height)
-                         // We don't notifyDataSetChanged here to avoid loops, just update the list
-                         // and it will be better on next scroll/bind
-                    }
                 } else {
+                    if (holder.bindingAdapterPosition != position) return@launch
                     Glide.with(holder.binding.ivThumbnail)
                         .load(group.jpgUri ?: group.dngUri ?: group.dngUri1)
                         .placeholder(R.drawable.ic_photo)
@@ -320,6 +333,10 @@ class StudioFragment : Fragment() {
         }
 
         override fun getItemCount() = groups.size
+
+        override fun getItemId(position: Int): Long {
+            return groups[position].baseName.hashCode().toLong()
+        }
     }
 
     override fun onDestroyView() {
