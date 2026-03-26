@@ -369,11 +369,11 @@ class ImageRepository(private val context: Context) {
         }
 
         return withContext(Dispatchers.IO) {
-            val groups = mutableMapOf<String, ImageGroupBuilder>()
+            val studioGroups = mutableMapOf<String, ImageGroupBuilder>()
             val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
 
             // 1. Scan internal studio folder
-            scanStudioFolder(groups)
+            scanStudioFolder(studioGroups)
 
             // 2. Scan external JPG storage and Darkbag folder to find matching JPGs for the internal DNGs
             val jpgFolderUri = prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
@@ -384,16 +384,16 @@ class ImageRepository(private val context: Context) {
             exportFolderUri?.let { externalFolders.add(it) }
 
             // Only search for JPGs that match existing internal DNG base names to maintain sandbox isolation
-            val internalBaseNames = groups.keys.toSet()
+            val internalBaseNames = studioGroups.keys.toSet()
 
             for (folderUri in externalFolders) {
-                scanSafFolderForMatchingJpgs(folderUri, groups, internalBaseNames)
+                scanSafFolderForMatchingJpgs(folderUri, studioGroups, internalBaseNames)
             }
 
             // Also scan MediaStore Darkbag folder for matching JPGs
-            scanMediaStoreForMatchingJpgs(groups, internalBaseNames)
+            scanMediaStoreForMatchingJpgs(studioGroups, internalBaseNames)
 
-            val result = groups.values
+            val result = studioGroups.values
                 .map { it.build() }
                 .filter { it.hasAny() }
                 .sortedByDescending { it.captureTime }

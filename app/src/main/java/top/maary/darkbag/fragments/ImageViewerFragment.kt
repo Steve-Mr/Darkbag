@@ -157,19 +157,38 @@ class ImageViewerFragment : Fragment() {
         }
     }
 
+    enum class ViewerMode { CAMERA, STUDIO, EXTERNAL }
+    private var currentMode = ViewerMode.CAMERA
+
     private fun loadImages(targetUri: String? = args.initialUri, forceRefresh: Boolean = false) {
         binding.initialLoadingIndicator.visibility = View.VISIBLE
         binding.imagePager.visibility = View.INVISIBLE
 
-        lifecycleScope.launch {
-            var groups = repository.getGroupedImages(forceRefresh = forceRefresh).toMutableList()
+        currentMode = when {
+            args.isStudioMode -> ViewerMode.STUDIO
+            targetUri != null && targetUri.contains("|") -> ViewerMode.STUDIO
+            targetUri != null && targetUri.startsWith("content://") && !targetUri.contains("darkbag") -> ViewerMode.EXTERNAL
+            else -> ViewerMode.CAMERA
+        }
 
-            if (args.isStudioMode) {
-                groups = repository.getStudioGroups(forceRefresh = forceRefresh).toMutableList()
-            } else if (args.onlyDarkbag) {
-                groups = groups.filter {
-                    it.baseName.startsWith(top.maary.darkbag.utils.DarkbagIdentity.FILE_PREFIX)
-                }.toMutableList()
+        lifecycleScope.launch {
+            var groups = mutableListOf<ImageGroup>()
+
+            when (currentMode) {
+                ViewerMode.STUDIO -> {
+                    groups = repository.getStudioGroups(forceRefresh = forceRefresh).toMutableList()
+                }
+                ViewerMode.CAMERA -> {
+                    groups = repository.getGroupedImages(forceRefresh = forceRefresh).toMutableList()
+                    if (args.onlyDarkbag) {
+                        groups = groups.filter {
+                            it.baseName.startsWith(top.maary.darkbag.utils.DarkbagIdentity.FILE_PREFIX)
+                        }.toMutableList()
+                    }
+                }
+                ViewerMode.EXTERNAL -> {
+                    // Start empty, will be filled by virtual group logic below
+                }
             }
 
             // Handle virtual groups from external URIs or stitching
@@ -194,7 +213,13 @@ class ImageViewerFragment : Fragment() {
                     captureTime2 = time2
                 )
                 groups.add(0, virtualGroup)
-            } else if (targetUri != null && groups.none { it.jpgUri?.toString() == targetUri || it.dngUri?.toString() == targetUri || it.dngUri1?.toString() == targetUri }) {
+            } else if (targetUri != null && groups.none {
+                it.jpgUri?.toString() == targetUri ||
+                it.dngUri?.toString() == targetUri ||
+                it.dngUri1?.toString() == targetUri ||
+                it.jpgUri?.lastPathSegment == Uri.parse(targetUri).lastPathSegment ||
+                it.dngUri?.lastPathSegment == Uri.parse(targetUri).lastPathSegment
+            }) {
                 // External or recently captured image not yet grouped
                 val u = Uri.parse(targetUri)
                 val isDng = targetUri.endsWith(".dng", ignoreCase = true) || context?.contentResolver?.getType(u) == "image/x-adobe-dng"
@@ -248,7 +273,7 @@ class ImageViewerFragment : Fragment() {
                 findNavController().navigateUp()
                 return@launch
             }
-            adapter = ImageViewerAdapter(groups, lifecycleScope, requireContext()).apply {
+            adapter = ImageViewerAdapter(groups, lifecycleScope, requireContext(), currentMode).apply {
                 onImageTapped = { toggleUi() }
                 onZoomChanged = { isZoomed -> if (isZoomed) hideUi() else showUi() }
                 onLongPressStarted = { handleLongPressStarted(it) }
@@ -258,14 +283,22 @@ class ImageViewerFragment : Fragment() {
             }
             binding.imagePager.adapter = adapter
 
-            val initialPos = if (targetUri?.contains("|") == true || (targetUri != null && !groups.any { it.jpgUri?.toString() == targetUri || it.dngUri?.toString() == targetUri || it.dngUri1?.toString() == targetUri })) {
+            val initialPos = if (targetUri?.contains("|") == true || (targetUri != null && groups.none {
+                it.jpgUri?.toString() == targetUri ||
+                it.dngUri?.toString() == targetUri ||
+                it.dngUri1?.toString() == targetUri ||
+                it.jpgUri?.lastPathSegment == Uri.parse(targetUri).lastPathSegment ||
+                it.dngUri?.lastPathSegment == Uri.parse(targetUri).lastPathSegment
+            })) {
                 0
             } else {
                 groups.indexOfFirst {
                     it.jpgUri?.toString() == targetUri ||
                     it.dngUri?.toString() == targetUri ||
                     it.dngUri1?.toString() == targetUri ||
-                    it.dngUri2?.toString() == targetUri
+                    it.dngUri2?.toString() == targetUri ||
+                    it.jpgUri?.lastPathSegment == Uri.parse(targetUri).lastPathSegment ||
+                    it.dngUri?.lastPathSegment == Uri.parse(targetUri).lastPathSegment
                 }
             }
 
@@ -1754,7 +1787,12 @@ class ImageViewerFragment : Fragment() {
             showProgress(false, forceGlobal = true)
 
             repository.invalidateCache()
-            val updatedGroups = if (args.isStudioMode) repository.getStudioGroups(forceRefresh = true) else repository.getGroupedImages(forceRefresh = true)
+            val updatedGroups = when (currentMode) {
+                ViewerMode.STUDIO -> repository.getStudioGroups(forceRefresh = true)
+                ViewerMode.CAMERA -> repository.getGroupedImages(forceRefresh = true)
+                ViewerMode.EXTERNAL -> emptyList()
+            }
+
             if (updatedGroups.isNotEmpty()) {
                 // Determine which group to navigate to
                 val targetBaseName = if (actualIsReplacement) {
@@ -1768,7 +1806,7 @@ class ImageViewerFragment : Fragment() {
 
                 isAdjusted = false
                 isEditingAdjustments = false
-            adapter = ImageViewerAdapter(updatedGroups, lifecycleScope, requireContext()).apply {
+                adapter = ImageViewerAdapter(updatedGroups, lifecycleScope, requireContext(), currentMode).apply {
                     onImageTapped = { toggleUi() }
                     onZoomChanged = { isZoomed -> if (isZoomed) hideUi() else showUi() }
                     onLongPressStarted = { handleLongPressStarted(it) }

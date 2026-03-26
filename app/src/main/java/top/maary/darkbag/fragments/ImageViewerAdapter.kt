@@ -17,7 +17,8 @@ import top.maary.darkbag.utils.ImageUtils
 class ImageViewerAdapter(
     private var groups: List<ImageGroup>,
     private val scope: CoroutineScope,
-    context: android.content.Context
+    context: android.content.Context,
+    private val mode: ImageViewerFragment.ViewerMode = ImageViewerFragment.ViewerMode.CAMERA
 ) : RecyclerView.Adapter<ImageViewerAdapter.ViewHolder>() {
 
     private val margin = context.resources.getDimensionPixelSize(R.dimen.margin_medium).toFloat()
@@ -91,9 +92,13 @@ class ImageViewerAdapter(
         setupButtons(holder, group, position)
 
         val format = selectedFormats[position] ?: when {
-            group.jpgUri != null -> "JPG"
-            group.dngUri != null || group.dngUri1 != null -> "DNG"
-            else -> "JPG"
+            mode == ImageViewerFragment.ViewerMode.STUDIO -> {
+                if (group.jpgUri != null) "JPG" else "DNG"
+            }
+            else -> {
+                // Camera mode or External: check priority
+                if (group.jpgUri != null) "JPG" else "DNG"
+            }
         }
         selectedFormats[position] = format
 
