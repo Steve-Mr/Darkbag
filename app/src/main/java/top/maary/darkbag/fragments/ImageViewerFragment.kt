@@ -165,12 +165,8 @@ class ImageViewerFragment : Fragment() {
         binding.imagePager.visibility = View.INVISIBLE
 
         currentMode = when {
-            args.isStudioMode -> ViewerMode.STUDIO
-            // Camera entry explicitly asks for Darkbag-scoped browsing.
-            // Do not infer EXTERNAL from a generic content:// URI here, because
-            // MediaStore URIs usually do not include the filename prefix.
+            args.isStudioMode || (targetUri?.contains("|") == true) -> ViewerMode.STUDIO
             args.onlyDarkbag -> ViewerMode.CAMERA
-            targetUri != null && targetUri.contains("|") -> ViewerMode.STUDIO
             targetUri != null && targetUri.startsWith("content://") && !targetUri.contains("darkbag") -> ViewerMode.EXTERNAL
             else -> ViewerMode.CAMERA
         }
@@ -184,19 +180,17 @@ class ImageViewerFragment : Fragment() {
                 }
                 ViewerMode.CAMERA -> {
                     groups = repository.getGroupedImages(forceRefresh = forceRefresh).toMutableList()
-                    if (args.onlyDarkbag) {
-                        groups = groups.filter {
-                            it.baseName.startsWith(top.maary.darkbag.utils.DarkbagIdentity.FILE_PREFIX)
-                        }.toMutableList()
-                    }
                 }
                 ViewerMode.EXTERNAL -> {
                     // Start empty, will be filled by virtual group logic below
                 }
             }
 
+            // Keep Camera path aligned with ff6f behavior: real grouped list only.
+            val allowVirtualGroup = currentMode != ViewerMode.CAMERA
+
             // Handle virtual groups from external URIs or stitching
-            if (targetUri != null && targetUri.contains("|")) {
+            if (allowVirtualGroup && targetUri != null && targetUri.contains("|")) {
                 val parts = targetUri.split("|")
                 val u1 = Uri.parse(parts[0])
                 val u2 = Uri.parse(parts[1])
@@ -217,7 +211,7 @@ class ImageViewerFragment : Fragment() {
                     captureTime2 = time2
                 )
                 groups.add(0, virtualGroup)
-            } else if (targetUri != null && groups.none {
+            } else if (allowVirtualGroup && targetUri != null && groups.none {
                 it.jpgUri?.toString() == targetUri ||
                 it.dngUri?.toString() == targetUri ||
                 it.dngUri1?.toString() == targetUri ||
@@ -287,13 +281,20 @@ class ImageViewerFragment : Fragment() {
             }
             binding.imagePager.adapter = adapter
 
-            val initialPos = if (targetUri?.contains("|") == true || (targetUri != null && groups.none {
-                it.jpgUri?.toString() == targetUri ||
-                it.dngUri?.toString() == targetUri ||
-                it.dngUri1?.toString() == targetUri ||
-                it.jpgUri?.lastPathSegment == Uri.parse(targetUri).lastPathSegment ||
-                it.dngUri?.lastPathSegment == Uri.parse(targetUri).lastPathSegment
-            })) {
+            val initialPos = if (currentMode == ViewerMode.CAMERA) {
+                groups.indexOfFirst {
+                    it.jpgUri?.toString() == targetUri ||
+                    it.dngUri?.toString() == targetUri ||
+                    it.dngUri1?.toString() == targetUri ||
+                    it.dngUri2?.toString() == targetUri
+                }
+            } else if (targetUri?.contains("|") == true || (targetUri != null && groups.none {
+                    it.jpgUri?.toString() == targetUri ||
+                    it.dngUri?.toString() == targetUri ||
+                    it.dngUri1?.toString() == targetUri ||
+                    it.jpgUri?.lastPathSegment == Uri.parse(targetUri).lastPathSegment ||
+                    it.dngUri?.lastPathSegment == Uri.parse(targetUri).lastPathSegment
+                })) {
                 0
             } else {
                 groups.indexOfFirst {
@@ -314,7 +315,7 @@ class ImageViewerFragment : Fragment() {
             setupActionButtons()
             updateControlsVisibility()
 
-            if (targetUri?.contains("|") == true) {
+            if (currentMode == ViewerMode.STUDIO && targetUri?.contains("|") == true) {
                 markAdjusted()
                 applyEditPreview()
             }
@@ -417,7 +418,7 @@ class ImageViewerFragment : Fragment() {
         selectedDngIndex = 0
         previewJob?.cancel()
 
-        val isNewStitch = args.initialUri?.contains("|") == true && group.baseName.startsWith("Stitched_")
+        val isNewStitch = currentMode == ViewerMode.STUDIO && group.baseName.startsWith("Stitched_")
 
         currentEditConfig = group.editConfig?.let {
             if (it.exposure == 0f && it.adjustments == null) {
@@ -1579,7 +1580,7 @@ class ImageViewerFragment : Fragment() {
         val dngUri2 = currentGroup.dngUri2
 
         // Force "Save as New" for external images
-        val isExternal = !args.isStudioMode && !currentGroup.baseName.startsWith(top.maary.darkbag.utils.DarkbagIdentity.FILE_PREFIX)
+        val isExternal = currentMode == ViewerMode.EXTERNAL
         val actualIsReplacement = if (isExternal) false else isReplacement
 
         lifecycleScope.launch {
@@ -1587,7 +1588,7 @@ class ImageViewerFragment : Fragment() {
 
             // Promotion for Studio: if we are saving a stitch for the first time, rename DNGs
             var effectiveBaseName = currentGroup.baseName
-            val (finalDng1, finalDng2) = if (args.isStudioMode && currentGroup.isHalfFrame() && dngUri2 != null && currentGroup.baseName.startsWith("Stitched_")) {
+            val (finalDng1, finalDng2) = if (currentMode == ViewerMode.STUDIO && currentGroup.isHalfFrame() && dngUri2 != null && currentGroup.baseName.startsWith("Stitched_")) {
                 val newBaseName = "STUDIO_GROUP_${System.currentTimeMillis()}"
                 effectiveBaseName = newBaseName
                 repository.promoteToGroup(dngUri1, dngUri2, newBaseName) ?: (dngUri1 to dngUri2)
@@ -1745,7 +1746,7 @@ class ImageViewerFragment : Fragment() {
                         var baseName = if (actualIsReplacement) currentGroup.baseName else "${currentGroup.baseName}_edited_${System.currentTimeMillis()}"
 
                         // Use the new baseName if we promoted the group
-                        if (args.isStudioMode && currentGroup.isHalfFrame() && currentGroup.baseName.startsWith("Stitched_")) {
+                        if (currentMode == ViewerMode.STUDIO && currentGroup.isHalfFrame() && currentGroup.baseName.startsWith("Stitched_")) {
                              baseName = top.maary.darkbag.utils.ImageUtils.getBaseName(repository.resolveFilename(finalDng1) ?: "")
                         }
 
@@ -2009,7 +2010,7 @@ class ImageViewerFragment : Fragment() {
     }
 
     private fun showDeleteDialog(group: ImageGroup) {
-        if (args.isStudioMode) {
+        if (currentMode == ViewerMode.STUDIO) {
             com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
                 .setTitle("Remove from Studio")
                 .setMessage("Are you sure you want to remove this item from Studio? The original RAW file will be deleted from internal storage, but any exported JPGs will remain in your gallery.")
@@ -2039,7 +2040,7 @@ class ImageViewerFragment : Fragment() {
             var nextTargetUri: String? = null
             val currentIndex = binding.imagePager.currentItem
 
-            if (args.isStudioMode) {
+            if (currentMode == ViewerMode.STUDIO) {
                 repository.deleteStudioGroup(group)
             } else if (deleteGroup) {
                 group.jpgUri?.let { context.contentResolver.delete(it, null, null) }
@@ -2062,7 +2063,7 @@ class ImageViewerFragment : Fragment() {
             }
 
             repository.invalidateCache()
-            val remainingGroups = if (args.isStudioMode) repository.getStudioGroups(forceRefresh = true) else repository.getGroupedImages(forceRefresh = true)
+            val remainingGroups = if (currentMode == ViewerMode.STUDIO) repository.getStudioGroups(forceRefresh = true) else repository.getGroupedImages(forceRefresh = true)
             val remainingGroup = remainingGroups.find { it.baseName == group.baseName }
 
             nextTargetUri = if (remainingGroup != null) {
@@ -2257,7 +2258,7 @@ class ImageViewerFragment : Fragment() {
         }
 
         val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
-        val isVirtual = currentGroup.baseName.startsWith("Stitched_") || (args.isStudioMode && isAdjusted)
+        val isVirtual = currentGroup.baseName.startsWith("Stitched_") || (currentMode == ViewerMode.STUDIO && isAdjusted)
 
         com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
             .setTitle(if (isVirtual) "Discard Changes?" else getString(R.string.discard_changes_title))
