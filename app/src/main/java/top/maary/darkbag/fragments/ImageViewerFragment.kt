@@ -166,6 +166,10 @@ class ImageViewerFragment : Fragment() {
 
         currentMode = when {
             args.isStudioMode -> ViewerMode.STUDIO
+            // Camera entry explicitly asks for Darkbag-scoped browsing.
+            // Do not infer EXTERNAL from a generic content:// URI here, because
+            // MediaStore URIs usually do not include the filename prefix.
+            args.onlyDarkbag -> ViewerMode.CAMERA
             targetUri != null && targetUri.contains("|") -> ViewerMode.STUDIO
             targetUri != null && targetUri.startsWith("content://") && !targetUri.contains("darkbag") -> ViewerMode.EXTERNAL
             else -> ViewerMode.CAMERA
