@@ -1264,7 +1264,8 @@ class ImageViewerFragment : Fragment() {
     ): android.graphics.Bitmap? {
         if (b1 == null && b2 == null) return null
 
-        val wantPortrait = group.hfLayout != "TB"
+        val layout = group.hfLayout ?: "SBS"
+        val wantPortrait = layout != "TB"
         fun orient(b: android.graphics.Bitmap?): android.graphics.Bitmap? {
             if (b == null) return null
             val isPortrait = b.height >= b.width
@@ -1274,15 +1275,49 @@ class ImageViewerFragment : Fragment() {
             return android.graphics.Bitmap.createBitmap(b, 0, 0, b.width, b.height, matrix, true)
         }
 
-        val ob1 = orient(b1)
-        val ob2 = orient(b2)
+        var ob1 = orient(b1)
+        var ob2 = orient(b2)
 
-        val isSBS = group.hfLayout != "TB"
-        val gap = top.maary.darkbag.utils.HalfFrameUtils.calculateGap(maxOf(ob1?.width ?: 0, ob1?.height ?: 0)).toFloat()
+        // Scaling logic for mismatched resolutions
+        if (ob1 != null && ob2 != null) {
+            if (layout == "TB") {
+                if (ob1.width != ob2.width) {
+                    if (ob1.width > ob2.width) {
+                        val scale = ob2.width.toFloat() / ob1.width
+                        val scaled = android.graphics.Bitmap.createScaledBitmap(ob1, ob2.width, (ob1.height * scale).toInt(), true)
+                        if (scaled != ob1 && scaled != b1) ob1.recycle()
+                        ob1 = scaled
+                    } else {
+                        val scale = ob1.width.toFloat() / ob2.width
+                        val scaled = android.graphics.Bitmap.createScaledBitmap(ob2, ob1.width, (ob2.height * scale).toInt(), true)
+                        if (scaled != ob2 && scaled != b2) ob2.recycle()
+                        ob2 = scaled
+                    }
+                }
+            } else {
+                if (ob1.height != ob2.height) {
+                    if (ob1.height > ob2.height) {
+                        val scale = ob2.height.toFloat() / ob1.height
+                        val scaled = android.graphics.Bitmap.createScaledBitmap(ob1, (ob1.width * scale).toInt(), ob2.height, true)
+                        if (scaled != ob1 && scaled != b1) ob1.recycle()
+                        ob1 = scaled
+                    } else {
+                        val scale = ob1.height.toFloat() / ob2.height
+                        val scaled = android.graphics.Bitmap.createScaledBitmap(ob2, (ob2.width * scale).toInt(), ob1.height, true)
+                        if (scaled != ob2 && scaled != b2) ob2.recycle()
+                        ob2 = scaled
+                    }
+                }
+            }
+        }
+
         val w1 = ob1?.width ?: ob2?.width ?: 0
         val h1 = ob1?.height ?: ob2?.height ?: 0
         val w2 = ob2?.width ?: w1
         val h2 = ob2?.height ?: h1
+
+        val isSBS = layout != "TB"
+        val gap = top.maary.darkbag.utils.HalfFrameUtils.calculateGap(maxOf(w1, h1)).toFloat()
         val resW = if (isSBS) (w1 + gap + w2).toInt() else maxOf(w1, w2)
         val resH = if (isSBS) maxOf(h1, h2) else (h1 + gap + h2).toInt()
 
@@ -1512,6 +1547,17 @@ class ImageViewerFragment : Fragment() {
 
         lifecycleScope.launch {
             showProgress(true, forceGlobal = true)
+
+            // Promotion for Studio: if we are saving a stitch for the first time, rename DNGs
+            var effectiveBaseName = currentGroup.baseName
+            val (finalDng1, finalDng2) = if (args.isStudioMode && currentGroup.isHalfFrame() && dngUri2 != null && currentGroup.baseName.startsWith("Stitched_")) {
+                val newBaseName = "STUDIO_GROUP_${System.currentTimeMillis()}"
+                effectiveBaseName = newBaseName
+                repository.promoteToGroup(dngUri1, dngUri2, newBaseName) ?: (dngUri1 to dngUri2)
+            } else {
+                dngUri1 to (dngUri2 ?: dngUri1)
+            }
+
             ensureDngBytesLoaded()
             withContext(Dispatchers.IO) {
                 try {
@@ -1660,6 +1706,12 @@ class ImageViewerFragment : Fragment() {
 
                     if (finalBitmap != null || tempJpgPath != null) {
                         var baseName = if (actualIsReplacement) currentGroup.baseName else "${currentGroup.baseName}_edited_${System.currentTimeMillis()}"
+
+                        // Use the new baseName if we promoted the group
+                        if (args.isStudioMode && currentGroup.isHalfFrame() && currentGroup.baseName.startsWith("Stitched_")) {
+                             baseName = top.maary.darkbag.utils.ImageUtils.getBaseName(repository.resolveFilename(finalDng1) ?: "")
+                        }
+
                         if (isExternal && !baseName.startsWith(top.maary.darkbag.utils.DarkbagIdentity.FILE_PREFIX)) {
                             baseName = top.maary.darkbag.utils.DarkbagIdentity.FILE_PREFIX + baseName
                         }
@@ -1690,7 +1742,7 @@ class ImageViewerFragment : Fragment() {
                             jpgFolderUri = if (actualIsReplacement) null else finalFolderUri,
                                 editConfig = config,
                                 isAlreadyStitched = currentGroup.isHalfFrame(),
-                                sourceDngUri = currentGroup.dngUri ?: currentGroup.dngUri1,
+                                sourceDngUri = finalDng1,
                                 isExternal = isExternal
                         )
                     }
@@ -1706,7 +1758,7 @@ class ImageViewerFragment : Fragment() {
             if (updatedGroups.isNotEmpty()) {
                 // Determine which group to navigate to
                 val targetBaseName = if (actualIsReplacement) {
-                    currentGroup.baseName
+                    effectiveBaseName
                 } else {
                     // For "Save As", the new file is usually the most recent
                     updatedGroups.first().baseName

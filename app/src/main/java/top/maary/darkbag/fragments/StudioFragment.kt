@@ -102,7 +102,9 @@ class StudioFragment : Fragment() {
     }
 
     private fun setupRecyclerView() {
-        binding.rvStudio.layoutManager = StaggeredGridLayoutManager(2, StaggeredGridLayoutManager.VERTICAL)
+        binding.rvStudio.layoutManager = StaggeredGridLayoutManager(2, StaggeredGridLayoutManager.VERTICAL).apply {
+            gapStrategy = StaggeredGridLayoutManager.GAP_HANDLING_MOVE_ITEMS_BETWEEN_SPANS
+        }
     }
 
     private fun loadImages() {
@@ -124,6 +126,12 @@ class StudioFragment : Fragment() {
         binding.btnImportEmpty.setOnClickListener { importLauncher.launch(arrayOf("image/*", "application/octet-stream")) }
         binding.fabImport.setOnClickListener { importLauncher.launch(arrayOf("image/*", "application/octet-stream")) }
 
+        binding.btnStitch?.setOnClickListener {
+            if (selectedItems.size == 2) {
+                showStitchModeSelection(selectedItems[0].dngUri!!, selectedItems[1].dngUri!!)
+            }
+        }
+
         binding.btnDelete.setOnClickListener {
             if (selectedItems.isEmpty()) return@setOnClickListener
             MaterialAlertDialogBuilder(requireContext())
@@ -143,14 +151,11 @@ class StudioFragment : Fragment() {
         lifecycleScope.launch {
             binding.loadingIndicator.visibility = View.VISIBLE
             val importedUris = mutableListOf<Uri>()
-            val baseName = "STUDIO_${System.currentTimeMillis()}"
 
             withContext(Dispatchers.IO) {
-                if (uris.size == 1) {
-                    repository.importToStudio(uris[0], baseName)?.let { importedUris.add(it) }
-                } else {
-                    repository.importToStudio(uris[0], baseName, "_HF1")?.let { importedUris.add(it) }
-                    repository.importToStudio(uris[1], baseName, "_HF2")?.let { importedUris.add(it) }
+                uris.forEachIndexed { index, uri ->
+                    val baseName = "STUDIO_${System.currentTimeMillis()}_$index"
+                    repository.importToStudio(uri, baseName)?.let { importedUris.add(it) }
                 }
             }
 
@@ -158,14 +163,32 @@ class StudioFragment : Fragment() {
             if (importedUris.size == uris.size) {
                 if (uris.size == 1) {
                     navigateToViewer(importedUris[0].toString())
+                } else if (uris.size == 2) {
+                    showStitchOrIndependentOption(importedUris[0], importedUris[1])
                 } else {
-                    showStitchModeSelection(importedUris[0], importedUris[1])
+                    Toast.makeText(requireContext(), "Imported ${uris.size} images", Toast.LENGTH_SHORT).show()
+                    loadImages()
                 }
             } else {
                 Toast.makeText(requireContext(), "Failed to import some files", Toast.LENGTH_SHORT).show()
                 loadImages()
             }
         }
+    }
+
+    private fun showStitchOrIndependentOption(u1: Uri, u2: Uri) {
+        val options = arrayOf("Stitch and Edit", "Import Independently")
+        MaterialAlertDialogBuilder(requireContext())
+            .setTitle("Import Options")
+            .setItems(options) { _, which ->
+                if (which == 0) {
+                    showStitchModeSelection(u1, u2)
+                } else {
+                    loadImages()
+                }
+            }
+            .setCancelable(false)
+            .show()
     }
 
     private fun showStitchModeSelection(u1: Uri, u2: Uri) {
@@ -188,6 +211,7 @@ class StudioFragment : Fragment() {
         selectedItems.clear()
         isSelectionMode = false
         binding.cvStudioActions.visibility = View.GONE
+        updateStitchVisibility()
         binding.rvStudio.adapter?.notifyDataSetChanged()
     }
 
@@ -195,12 +219,20 @@ class StudioFragment : Fragment() {
         if (selectedItems.contains(group)) {
             selectedItems.remove(group)
         } else {
-            selectedItems.add(group)
+            if (selectedItems.size < 2) {
+                selectedItems.add(group)
+            }
         }
 
         isSelectionMode = selectedItems.isNotEmpty()
         binding.cvStudioActions.visibility = if (isSelectionMode) View.VISIBLE else View.GONE
+        updateStitchVisibility()
         binding.rvStudio.adapter?.notifyDataSetChanged()
+    }
+
+    private fun updateStitchVisibility() {
+        val canStitch = selectedItems.size == 2 && selectedItems.all { it.dngUri != null && !it.isHalfFrame() }
+        binding.btnStitch?.visibility = if (canStitch) View.VISIBLE else View.GONE
     }
 
     inner class StudioAdapter(private val groups: List<ImageGroup>) :
@@ -222,6 +254,17 @@ class StudioFragment : Fragment() {
             holder.loadJob?.cancel()
             val group = groups[position]
 
+            // Stability: Set Dimension Ratio if metadata exists
+            if (group.width > 0 && group.height > 0) {
+                holder.binding.ivThumbnail.updateLayoutParams<androidx.constraintlayout.widget.ConstraintLayout.LayoutParams> {
+                    dimensionRatio = "${group.width}:${group.height}"
+                }
+            } else {
+                holder.binding.ivThumbnail.updateLayoutParams<androidx.constraintlayout.widget.ConstraintLayout.LayoutParams> {
+                    dimensionRatio = null
+                }
+            }
+
             // Thumbnail loading
             holder.binding.ivThumbnail.setImageDrawable(null)
             holder.loadJob = lifecycleScope.launch {
@@ -236,6 +279,12 @@ class StudioFragment : Fragment() {
 
                 if (thumb != null) {
                     holder.binding.ivThumbnail.setImageBitmap(thumb)
+                    if (group.width == 0) {
+                         // Update metadata for stability next time
+                         val updated = group.copy(width = thumb.width, height = thumb.height)
+                         // We don't notifyDataSetChanged here to avoid loops, just update the list
+                         // and it will be better on next scroll/bind
+                    }
                 } else {
                     Glide.with(holder.binding.ivThumbnail)
                         .load(group.jpgUri ?: group.dngUri ?: group.dngUri1)
@@ -245,7 +294,6 @@ class StudioFragment : Fragment() {
                 }
             }
 
-            holder.binding.tvName.text = group.baseName
             holder.binding.ivHalfFrameIndicator.visibility = if (group.isHalfFrame()) View.VISIBLE else View.GONE
 
             val isSelected = selectedItems.contains(group)

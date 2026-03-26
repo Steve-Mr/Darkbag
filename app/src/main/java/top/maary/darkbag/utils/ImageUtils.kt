@@ -90,21 +90,55 @@ object ImageUtils {
         if (bit1 == null && bit2 == null) return@withContext null
 
         val wantPortrait = layout != "TB"
-        val oriented1 = bit1?.let { ensureOrientation(it, wantPortrait) }
-        val oriented2 = bit2?.let { ensureOrientation(it, wantPortrait) }
+        var oriented1 = bit1?.let { ensureOrientation(it, wantPortrait) }
+        var oriented2 = bit2?.let { ensureOrientation(it, wantPortrait) }
 
         try {
-            // Use first available frame as reference for dimensions
-            val ref = oriented1 ?: oriented2!!
-            val w = ref.width
-            val h = ref.height
+            // Resolution Matching: Scale higher-res image down to match lower-res image
+            if (oriented1 != null && oriented2 != null) {
+                if (layout == "TB") {
+                    // Match width
+                    if (oriented1.width != oriented2.width) {
+                        if (oriented1.width > oriented2.width) {
+                            val scale = oriented2.width.toFloat() / oriented1.width
+                            val scaled = Bitmap.createScaledBitmap(oriented1, oriented2.width, (oriented1.height * scale).toInt(), true)
+                            if (scaled != oriented1) oriented1.recycle()
+                            oriented1 = scaled
+                        } else {
+                            val scale = oriented1.width.toFloat() / oriented2.width
+                            val scaled = Bitmap.createScaledBitmap(oriented2, oriented1.width, (oriented2.height * scale).toInt(), true)
+                            if (scaled != oriented2) oriented2.recycle()
+                            oriented2 = scaled
+                        }
+                    }
+                } else {
+                    // Match height (SBS)
+                    if (oriented1.height != oriented2.height) {
+                        if (oriented1.height > oriented2.height) {
+                            val scale = oriented2.height.toFloat() / oriented1.height
+                            val scaled = Bitmap.createScaledBitmap(oriented1, (oriented1.width * scale).toInt(), oriented2.height, true)
+                            if (scaled != oriented1) oriented1.recycle()
+                            oriented1 = scaled
+                        } else {
+                            val scale = oriented1.height.toFloat() / oriented2.height
+                            val scaled = Bitmap.createScaledBitmap(oriented2, (oriented2.width * scale).toInt(), oriented1.height, true)
+                            if (scaled != oriented2) oriented2.recycle()
+                            oriented2 = scaled
+                        }
+                    }
+                }
+            }
+
+            val w1 = oriented1?.width ?: oriented2?.width ?: 0
+            val h1 = oriented1?.height ?: oriented2?.height ?: 0
+            val w2 = oriented2?.width ?: w1
+            val h2 = oriented2?.height ?: h1
 
             val isSBS = layout != "TB"
-            // Ensure gap calculation matches HalfFrameUtils (use long dimension of single frame)
-            val gap = HalfFrameUtils.calculateGap(maxOf(w, h)).toFloat()
+            val gap = HalfFrameUtils.calculateGap(maxOf(w1, h1)).toFloat()
 
-            val resultW = if (isSBS) (w * 2 + gap).toInt() else w
-            val resultH = if (isSBS) h else (h * 2 + gap).toInt()
+            val resultW = if (isSBS) (w1 + w2 + gap).toInt() else maxOf(w1, w2)
+            val resultH = if (isSBS) maxOf(h1, h2) else (h1 + h2 + gap).toInt()
 
             val composite = Bitmap.createBitmap(resultW, resultH, Bitmap.Config.ARGB_8888)
             val canvas = Canvas(composite)
@@ -114,10 +148,10 @@ object ImageUtils {
 
             if (isSBS) {
                 oriented1?.let { canvas.drawBitmap(it, 0f, 0f, paint) }
-                oriented2?.let { canvas.drawBitmap(it, w + gap, 0f, paint) }
+                oriented2?.let { canvas.drawBitmap(it, w1 + gap, 0f, paint) }
             } else {
                 oriented1?.let { canvas.drawBitmap(it, 0f, 0f, paint) }
-                oriented2?.let { canvas.drawBitmap(it, 0f, h + gap, paint) }
+                oriented2?.let { canvas.drawBitmap(it, 0f, h1 + gap, paint) }
             }
 
             return@withContext composite

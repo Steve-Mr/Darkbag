@@ -92,7 +92,7 @@ class ImageViewerAdapter(
 
         val format = selectedFormats[position] ?: when {
             group.jpgUri != null -> "JPG"
-            group.isHalfFrame() || group.dngUri != null -> "DNG"
+            group.dngUri != null || group.dngUri1 != null -> "DNG"
             else -> "JPG"
         }
         selectedFormats[position] = format

@@ -419,6 +419,25 @@ class ImageRepository(private val context: Context) {
                 name.contains("_HF1") -> builder.setDng1(uri, lastModified)
                 else -> builder.setDng(uri, lastModified)
             }
+
+            // Extract dimensions for waterfall layout stability
+            try {
+                val exif = androidx.exifinterface.media.ExifInterface(file.absolutePath)
+                val orientation = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION, androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL)
+                val w = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_IMAGE_WIDTH, 0)
+                val h = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_IMAGE_LENGTH, 0)
+                if (w > 0 && h > 0) {
+                    if (orientation == androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90 || orientation == androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270) {
+                        builder.width = h
+                        builder.height = w
+                    } else {
+                        builder.width = w
+                        builder.height = h
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("ImageRepository", "Failed to read dimensions for $name", e)
+            }
         }
     }
 
@@ -481,8 +500,14 @@ class ImageRepository(private val context: Context) {
         try {
             val name = resolveFilename(uri) ?: "imported_${System.currentTimeMillis()}.dng"
             val finalBaseName = targetBaseName ?: getBaseName(name)
-            val finalName = if (suffix != null) "${finalBaseName}${suffix}.dng" else "${finalBaseName}.dng"
-            val destFile = File(studioFolder, finalName)
+            var finalName = if (suffix != null) "${finalBaseName}${suffix}.dng" else "${finalBaseName}.dng"
+
+            // Avoid overwriting if possible
+            var destFile = File(studioFolder, finalName)
+            if (destFile.exists()) {
+                finalName = "${finalBaseName}_${System.currentTimeMillis()}${suffix ?: ""}.dng"
+                destFile = File(studioFolder, finalName)
+            }
 
             context.contentResolver.openInputStream(uri)?.use { input ->
                 destFile.outputStream().use { output ->
@@ -492,6 +517,31 @@ class ImageRepository(private val context: Context) {
             Uri.fromFile(destFile)
         } catch (e: Exception) {
             android.util.Log.e("ImageRepository", "Failed to import file to studio", e)
+            null
+        }
+    }
+
+    suspend fun promoteToGroup(uri1: Uri, uri2: Uri, newBaseName: String): Pair<Uri, Uri>? = withContext(Dispatchers.IO) {
+        try {
+            val file1 = if (uri1.scheme == "file") File(uri1.path!!) else null
+            val file2 = if (uri2.scheme == "file") File(uri2.path!!) else null
+
+            if (file1 == null || file2 == null || !file1.exists() || !file2.exists()) return@withContext null
+
+            val dest1 = File(studioFolder, "${newBaseName}_HF1.dng")
+            val dest2 = File(studioFolder, "${newBaseName}_HF2.dng")
+
+            // If it's the same file (already promoted), skip
+            if (file1.absolutePath == dest1.absolutePath && file2.absolutePath == dest2.absolutePath) {
+                return@withContext uri1 to uri2
+            }
+
+            if (file1.renameTo(dest1) && file2.renameTo(dest2)) {
+                invalidateCache()
+                Uri.fromFile(dest1) to Uri.fromFile(dest2)
+            } else null
+        } catch (e: Exception) {
+            android.util.Log.e("ImageRepository", "Failed to promote to group", e)
             null
         }
     }

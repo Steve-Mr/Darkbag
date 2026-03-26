@@ -113,6 +113,15 @@
             android:padding="8dp">
 
             <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_stitch"
+                style="@style/Widget.Material3.Button.TextButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Stitch"
+                android:visibility="gone"
+                app:icon="@drawable/ic_swap_horiz" />
+
+            <com.google.android.material.button.MaterialButton
                 android:id="@+id/btn_delete"
                 style="@style/Widget.Material3.Button.TextButton"
                 android:layout_width="wrap_content"
