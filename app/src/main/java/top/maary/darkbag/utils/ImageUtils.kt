@@ -13,7 +13,6 @@ object ImageUtils {
 
     fun getBaseName(fileName: String): String {
         return fileName.substringBeforeLast(".")
-            .replace(DarkbagIdentity.FILE_PREFIX, "")
             .replace("_linear", "")
             .replace("_bayer", "")
             .replace("_HDRPLUS", "")
@@ -189,6 +188,7 @@ object ImageUtils {
                     val thumb = exif.thumbnailBytes
                     if (thumb != null) {
                         bitmap = BitmapFactory.decodeByteArray(thumb, 0, thumb.size)
+                        bitmap = bitmap?.let { rotateBitmap(it, orientation) }
                     }
                 }
             }

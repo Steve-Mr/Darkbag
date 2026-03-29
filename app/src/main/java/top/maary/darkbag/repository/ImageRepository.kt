@@ -454,6 +454,14 @@ class ImageRepository(private val context: Context) {
 
                 val builder = groups[baseName] ?: return@forEach
                 builder.setJpg(file.uri, file.lastModified())
+
+                try {
+                    context.contentResolver.openFileDescriptor(file.uri, "r")?.use { pfd ->
+                        val exif = androidx.exifinterface.media.ExifInterface(pfd.fileDescriptor)
+                        val comment = exif.getAttribute(androidx.exifinterface.media.ExifInterface.TAG_USER_COMMENT)
+                        parseUserComment(comment, builder)
+                    }
+                } catch (e: Exception) {}
             }
         } catch (e: Exception) {
             android.util.Log.e("ImageRepository", "Failed to scan SAF for matching JPGs", e)
@@ -491,7 +499,16 @@ class ImageRepository(private val context: Context) {
                 val uri = ContentUris.withAppendedId(collection, id)
                 val date = cursor.getLong(dateColumn) * 1000
 
-                groups[baseName]?.setJpg(uri, date)
+                val builder = groups[baseName] ?: continue
+                builder.setJpg(uri, date)
+
+                try {
+                    context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                        val exif = androidx.exifinterface.media.ExifInterface(pfd.fileDescriptor)
+                        val comment = exif.getAttribute(androidx.exifinterface.media.ExifInterface.TAG_USER_COMMENT)
+                        parseUserComment(comment, builder)
+                    }
+                } catch (e: Exception) {}
             }
         }
     }

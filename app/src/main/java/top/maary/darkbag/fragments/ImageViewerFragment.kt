@@ -180,6 +180,9 @@ class ImageViewerFragment : Fragment() {
                 }
                 ViewerMode.CAMERA -> {
                     groups = repository.getGroupedImages(forceRefresh = forceRefresh).toMutableList()
+                    if (args.onlyDarkbag) {
+                        groups.retainAll { it.baseName.startsWith(top.maary.darkbag.utils.DarkbagIdentity.FILE_PREFIX) }
+                    }
                 }
                 ViewerMode.EXTERNAL -> {
                     // Start empty, will be filled by virtual group logic below
@@ -440,7 +443,8 @@ class ImageViewerFragment : Fragment() {
                 showTimestamp = if (isNewStitch) prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_DATE_STAMP, false) else false,
                 flareType = if (isNewStitch) {
                     if (prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_LIGHT_LEAK, false)) 0 else -1
-                } else -1
+                } else -1,
+                hfLayout = group.hfLayout
             )
         }
 
