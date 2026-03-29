@@ -114,17 +114,17 @@ class StudioFragment : Fragment() {
     }
 
     private fun loadImages() {
-        binding.loadingIndicator.visibility = View.VISIBLE
+        _binding?.loadingIndicator?.visibility = View.VISIBLE
         lifecycleScope.launch {
             val groups = repository.getStudioGroups(forceRefresh = true)
             studioAdapter.submitGroups(groups)
-            binding.loadingIndicator.visibility = View.GONE
+            _binding?.loadingIndicator?.visibility = View.GONE
 
             val isEmpty = groups.isEmpty()
-            binding.emptyState.visibility = if (isEmpty) View.VISIBLE else View.GONE
-            binding.fabImport.visibility = if (isEmpty) View.GONE else View.VISIBLE
+            _binding?.emptyState?.visibility = if (isEmpty) View.VISIBLE else View.GONE
+            _binding?.fabImport?.visibility = if (isEmpty) View.GONE else View.VISIBLE
 
-            binding.root.requestApplyInsets()
+            _binding?.root?.requestApplyInsets()
         }
     }
 
@@ -155,7 +155,7 @@ class StudioFragment : Fragment() {
 
     private fun handleImportedUris(uris: List<Uri>) {
         lifecycleScope.launch {
-            binding.loadingIndicator.visibility = View.VISIBLE
+            _binding?.loadingIndicator?.visibility = View.VISIBLE
             val importedUris = mutableListOf<Uri>()
 
             withContext(Dispatchers.IO) {
@@ -165,7 +165,9 @@ class StudioFragment : Fragment() {
                 }
             }
 
-            binding.loadingIndicator.visibility = View.GONE
+            _binding?.loadingIndicator?.visibility = View.GONE
+            if (!isAdded) return@launch
+
             if (importedUris.size == uris.size) {
                 if (uris.size == 1) {
                     navigateToViewer(importedUris[0].toString())
@@ -206,11 +208,16 @@ class StudioFragment : Fragment() {
     }
 
     private fun navigateToViewer(uri: String) {
+        if (!isAdded) return
         val action = StudioFragmentDirections.actionStudioToImageViewer(
             initialUri = uri,
             isStudioMode = true
         )
-        findNavController().navigate(action)
+        try {
+            findNavController().navigate(action)
+        } catch (e: Exception) {
+            android.util.Log.e("StudioFragment", "Navigation failed", e)
+        }
     }
 
     private fun clearSelection() {
