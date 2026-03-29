@@ -181,7 +181,12 @@ class ImageViewerFragment : Fragment() {
                 ViewerMode.CAMERA -> {
                     groups = repository.getGroupedImages(forceRefresh = forceRefresh).toMutableList()
                     if (args.onlyDarkbag) {
-                        groups.retainAll { it.baseName.startsWith(top.maary.darkbag.utils.DarkbagIdentity.FILE_PREFIX) }
+                        groups.retainAll { group ->
+                            listOfNotNull(group.jpgUri, group.dngUri, group.dngUri1, group.dngUri2).any { uri ->
+                                val name = repository.resolveFilename(uri) ?: ""
+                                name.startsWith(top.maary.darkbag.utils.DarkbagIdentity.FILE_PREFIX)
+                            }
+                        }
                     }
                 }
                 ViewerMode.EXTERNAL -> {

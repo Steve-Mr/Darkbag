@@ -496,6 +496,9 @@ object ImageSaver {
 
                 if (sourceDngUri != null) {
                     copyExifFromDng(context, sourceDngUri, exif)
+                    // Reset orientation to Normal (1) after copying from DNG.
+                    // The output JPEG already has its pixels rotated/flipped to be upright.
+                    exif.setAttribute(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL.toString())
                 }
 
                 writeStandardExif(context, exif, captureMetadata, editConfig)
