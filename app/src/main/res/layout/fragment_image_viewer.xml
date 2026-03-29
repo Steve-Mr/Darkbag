@@ -101,7 +101,7 @@
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btn_share_menu"
-                style="?attr/materialSplitButtonIconFilledTonalStyle"
+                style="@style/Widget.Material3.Button.IconButton.Filled.Tonal"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:checkable="true"
@@ -130,7 +130,7 @@
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btn_save_menu"
-                style="?attr/materialSplitButtonIconFilledStyle"
+                style="@style/Widget.Material3.Button.IconButton.Filled"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:checkable="true"

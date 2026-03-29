@@ -303,6 +303,7 @@ class StudioFragment : Fragment() {
                         .load(group.jpgUri ?: group.dngUri ?: group.dngUri1)
                         .placeholder(R.drawable.ic_photo)
                         .error(R.drawable.ic_close)
+                        .override(512, 512)
                         .into(holder.binding.ivThumbnail)
                 }
             }
