@@ -1472,9 +1472,13 @@ class CameraFragment : Fragment() {
 
         // Listener for button used to view the most recent photo
         cameraUiContainerBinding?.photoViewButton?.setOnClickListener {
-            // Only navigate when the gallery has photos
             lifecycleScope.launch {
-                val uri = mediaStoreUtils.getLatestAppImage(requireContext())
+                val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                val fastUri = prefs.getString(SettingsFragment.KEY_LAST_CAPTURE_URI, null)?.let { Uri.parse(it) }
+                val uri = fastUri ?: withContext(Dispatchers.IO) {
+                    mediaStoreUtils.getLatestAppImage(requireContext())
+                }
+
                 if (uri != null) {
                     val action = CameraFragmentDirections.actionCameraToImageViewer(
                         initialUri = uri.toString(),

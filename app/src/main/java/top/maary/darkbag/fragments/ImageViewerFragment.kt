@@ -147,7 +147,7 @@ class ImageViewerFragment : Fragment() {
         }
 
         binding.imagePager.registerOnPageChangeCallback(pageChangeCallback)
-        loadImages(forceRefresh = true)
+        loadImages(forceRefresh = false)
 
         viewLifecycleOwner.lifecycleScope.launch {
             ColorProcessor.backgroundSaveFlow.collect { event ->
@@ -173,6 +173,7 @@ class ImageViewerFragment : Fragment() {
 
         lifecycleScope.launch {
             var groups = mutableListOf<ImageGroup>()
+            val parsedTargetUri = targetUri?.let { Uri.parse(it) }
 
             when (currentMode) {
                 ViewerMode.STUDIO -> {
@@ -188,6 +189,17 @@ class ImageViewerFragment : Fragment() {
                             }
                         }
                     }
+                    if (!forceRefresh && targetUri != null && groups.none { groupMatchesTarget(it, targetUri, parsedTargetUri) }) {
+                        groups = repository.getGroupedImages(forceRefresh = true).toMutableList()
+                        if (args.onlyDarkbag) {
+                            groups.retainAll { group ->
+                                listOfNotNull(group.jpgUri, group.dngUri, group.dngUri1, group.dngUri2).any { uri ->
+                                    val name = repository.resolveFilename(uri) ?: ""
+                                    name.startsWith(top.maary.darkbag.utils.DarkbagIdentity.FILE_PREFIX)
+                                }
+                            }
+                        }
+                    }
                 }
                 ViewerMode.EXTERNAL -> {
                     // Start empty, will be filled by virtual group logic below
@@ -196,6 +208,7 @@ class ImageViewerFragment : Fragment() {
 
             // Keep Camera path aligned with ff6f behavior: real grouped list only.
             val allowVirtualGroup = currentMode != ViewerMode.CAMERA
+            val isMissingTarget = targetUri != null && groups.none { groupMatchesTarget(it, targetUri, parsedTargetUri) }
 
             // Handle virtual groups from external URIs or stitching
             if (allowVirtualGroup && targetUri != null && targetUri.contains("|")) {
@@ -219,15 +232,9 @@ class ImageViewerFragment : Fragment() {
                     captureTime2 = time2
                 )
                 groups.add(0, virtualGroup)
-            } else if (allowVirtualGroup && targetUri != null && groups.none {
-                it.jpgUri?.toString() == targetUri ||
-                it.dngUri?.toString() == targetUri ||
-                it.dngUri1?.toString() == targetUri ||
-                it.jpgUri?.lastPathSegment == Uri.parse(targetUri).lastPathSegment ||
-                it.dngUri?.lastPathSegment == Uri.parse(targetUri).lastPathSegment
-            }) {
+            } else if ((allowVirtualGroup || currentMode == ViewerMode.CAMERA) && targetUri != null && isMissingTarget) {
                 // External or recently captured image not yet grouped
-                val u = Uri.parse(targetUri)
+                val u = parsedTargetUri ?: Uri.parse(targetUri)
                 val isDng = targetUri.endsWith(".dng", ignoreCase = true) || context?.contentResolver?.getType(u) == "image/x-adobe-dng"
 
                 val name = repository.resolveFilename(u) ?: u.lastPathSegment ?: "External"
@@ -291,27 +298,15 @@ class ImageViewerFragment : Fragment() {
 
             val initialPos = if (currentMode == ViewerMode.CAMERA) {
                 groups.indexOfFirst {
-                    it.jpgUri?.toString() == targetUri ||
-                    it.dngUri?.toString() == targetUri ||
-                    it.dngUri1?.toString() == targetUri ||
-                    it.dngUri2?.toString() == targetUri
+                    groupMatchesTarget(it, targetUri, parsedTargetUri)
                 }
             } else if (targetUri?.contains("|") == true || (targetUri != null && groups.none {
-                    it.jpgUri?.toString() == targetUri ||
-                    it.dngUri?.toString() == targetUri ||
-                    it.dngUri1?.toString() == targetUri ||
-                    it.jpgUri?.lastPathSegment == Uri.parse(targetUri).lastPathSegment ||
-                    it.dngUri?.lastPathSegment == Uri.parse(targetUri).lastPathSegment
+                    groupMatchesTarget(it, targetUri, parsedTargetUri)
                 })) {
                 0
             } else {
                 groups.indexOfFirst {
-                    it.jpgUri?.toString() == targetUri ||
-                    it.dngUri?.toString() == targetUri ||
-                    it.dngUri1?.toString() == targetUri ||
-                    it.dngUri2?.toString() == targetUri ||
-                    it.jpgUri?.lastPathSegment == Uri.parse(targetUri).lastPathSegment ||
-                    it.dngUri?.lastPathSegment == Uri.parse(targetUri).lastPathSegment
+                    groupMatchesTarget(it, targetUri, parsedTargetUri)
                 }
             }
 
@@ -335,6 +330,18 @@ class ImageViewerFragment : Fragment() {
         }
     }
 
+    private fun groupMatchesTarget(group: ImageGroup, targetUri: String?, parsedTarget: Uri?): Boolean {
+        if (targetUri == null) return false
+        return group.jpgUri?.toString() == targetUri ||
+            group.dngUri?.toString() == targetUri ||
+            group.dngUri1?.toString() == targetUri ||
+            group.dngUri2?.toString() == targetUri ||
+            (parsedTarget != null && (
+                group.jpgUri?.lastPathSegment == parsedTarget.lastPathSegment ||
+                    group.dngUri?.lastPathSegment == parsedTarget.lastPathSegment
+                ))
+    }
+
     private fun handleBackgroundSaveEvent(event: ColorProcessor.BackgroundSaveEvent) {
         val groups = adapter.getGroups().toMutableList()
         val index = adapter.findGroupIndex(event.baseName)
@@ -342,7 +349,10 @@ class ImageViewerFragment : Fragment() {
         if (index != -1) {
             val oldGroup = groups[index]
             val newJpgUri = event.targetUri?.let { Uri.parse(it) } ?: oldGroup.jpgUri
-            val newDngUri = event.dngPath?.let { Uri.parse(it) } ?: oldGroup.dngUri
+            val newDngUri = event.dngPath
+                ?.takeIf { it.startsWith("content://") }
+                ?.let { Uri.parse(it) }
+                ?: oldGroup.dngUri
 
             val newGroup = oldGroup.copy(
                 jpgUri = newJpgUri,
@@ -354,6 +364,21 @@ class ImageViewerFragment : Fragment() {
 
             if (index == binding.imagePager.currentItem) {
                 updateControlsVisibility()
+            }
+
+            val dngPathNeedsRefresh = event.dngPath != null && !event.dngPath.startsWith("content://")
+            if (dngPathNeedsRefresh && currentMode == ViewerMode.CAMERA) {
+                lifecycleScope.launch {
+                    repository.invalidateCache()
+                    val refreshed = repository.getGroupedImages(forceRefresh = true)
+                    val currentBaseName = adapter.getGroup(binding.imagePager.currentItem).baseName
+                    adapter.updateGroups(refreshed)
+                    val newIndex = refreshed.indexOfFirst { it.baseName == currentBaseName }
+                    if (newIndex >= 0) {
+                        binding.imagePager.setCurrentItem(newIndex, false)
+                    }
+                    updateControlsVisibility()
+                }
             }
         } else {
             // New image group saved (maybe from background processing of a very recent shot)

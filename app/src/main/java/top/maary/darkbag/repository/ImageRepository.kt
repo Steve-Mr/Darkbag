@@ -60,7 +60,7 @@ class ImageRepository(private val context: Context) {
 
             val result = groups.values
                 .map { it.build() }
-                .filter { it.hasAny() && (it.dngUri != null || it.dngUri1 != null || it.dngUri2 != null) }
+                .filter { it.hasAny() }
                 .sortedByDescending { it.captureTime }
 
             cachedGroups = result

@@ -175,11 +175,14 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
                 prefs.edit().putString(SettingsFragment.KEY_LAST_CAPTURE_URI, finalUri.toString()).apply()
             }
 
-            // Still notify UI for thumbnail update if possible
-            // We pass null for paths to signal that saving is already done
-            ColorProcessor.onBackgroundSaveComplete(
-                baseName, null, null, finalUri?.toString(), zoomFactor, orientation, saveJpg
-            )
+            // saveProcessedImage() already emits backgroundSaveFlow for successful JPG saves.
+            // Avoid duplicate UI events unless we still need a completion signal.
+            val emittedBySaver = saveJpg && finalUri != null
+            if (!emittedBySaver) {
+                ColorProcessor.onBackgroundSaveComplete(
+                    baseName, null, null, finalUri?.toString(), zoomFactor, orientation, saveJpg
+                )
+            }
             return Result.success()
         } else {
             Log.e(TAG, "Background Export Worker failed with code $ret")
