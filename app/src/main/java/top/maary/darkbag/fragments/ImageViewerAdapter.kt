@@ -180,7 +180,9 @@ class ImageViewerAdapter(
         holder.loadJob = scope.launch {
             var thumbnailBitmap: android.graphics.Bitmap? = null
             try {
-                thumbnailBitmap = ImageUtils.decodeDngThumbnail(holder.binding.root.context, uri, zoomFactor)
+                thumbnailBitmap = withContext(Dispatchers.Default) {
+                    ImageUtils.decodeDngThumbnail(holder.binding.root.context, uri, zoomFactor)
+                }
                 ensureActive()
 
                 if (thumbnailBitmap != null) {
@@ -242,13 +244,15 @@ class ImageViewerAdapter(
         holder.loadJob = scope.launch {
             var composite: android.graphics.Bitmap? = null
             try {
-                composite = ImageUtils.generateHalfFrameComposite(
-                    holder.binding.root.context,
-                    group.dngUri1,
-                    group.dngUri2,
-                    group.hfLayout,
-                    zoomFactor
-                )
+                composite = withContext(Dispatchers.Default) {
+                    ImageUtils.generateHalfFrameComposite(
+                        holder.binding.root.context,
+                        group.dngUri1,
+                        group.dngUri2,
+                        group.hfLayout,
+                        zoomFactor
+                    )
+                }
                 ensureActive()
                 if (composite != null) {
                     setBitmapAndRecyclePrevious(holder, composite)
