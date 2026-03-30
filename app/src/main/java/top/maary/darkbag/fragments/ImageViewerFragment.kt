@@ -147,7 +147,7 @@ class ImageViewerFragment : Fragment() {
         }
 
         binding.imagePager.registerOnPageChangeCallback(pageChangeCallback)
-        loadImages(forceRefresh = true)
+        loadImages(forceRefresh = false)
 
         viewLifecycleOwner.lifecycleScope.launch {
             ColorProcessor.backgroundSaveFlow.collect { event ->
@@ -172,107 +172,111 @@ class ImageViewerFragment : Fragment() {
         }
 
         lifecycleScope.launch {
-            var groups = mutableListOf<ImageGroup>()
+            val shouldForce = forceRefresh || targetUri == null
 
-            when (currentMode) {
-                ViewerMode.STUDIO -> {
-                    groups = repository.getStudioGroups(forceRefresh = forceRefresh).toMutableList()
-                }
-                ViewerMode.CAMERA -> {
-                    groups = repository.getGroupedImages(forceRefresh = forceRefresh).toMutableList()
-                    if (args.onlyDarkbag) {
-                        groups.retainAll { group ->
-                            listOfNotNull(group.jpgUri, group.dngUri, group.dngUri1, group.dngUri2).any { uri ->
-                                val name = repository.resolveFilename(uri) ?: ""
-                                name.startsWith(top.maary.darkbag.utils.DarkbagIdentity.FILE_PREFIX)
+            val groups = withContext(Dispatchers.IO) {
+                val list = mutableListOf<ImageGroup>()
+                when (currentMode) {
+                    ViewerMode.STUDIO -> {
+                        list.addAll(repository.getStudioGroups(forceRefresh = shouldForce))
+                    }
+                    ViewerMode.CAMERA -> {
+                        list.addAll(repository.getGroupedImages(forceRefresh = shouldForce))
+                        if (args.onlyDarkbag) {
+                            list.retainAll { group ->
+                                listOfNotNull(group.jpgUri, group.dngUri, group.dngUri1, group.dngUri2).any { uri ->
+                                    val name = repository.resolveFilename(uri) ?: ""
+                                    name.startsWith(top.maary.darkbag.utils.DarkbagIdentity.FILE_PREFIX)
+                                }
                             }
                         }
                     }
-                }
-                ViewerMode.EXTERNAL -> {
-                    // Start empty, will be filled by virtual group logic below
-                }
-            }
-
-            // Keep Camera path aligned with ff6f behavior: real grouped list only.
-            val allowVirtualGroup = currentMode != ViewerMode.CAMERA
-
-            // Handle virtual groups from external URIs or stitching
-            if (allowVirtualGroup && targetUri != null && targetUri.contains("|")) {
-                val parts = targetUri.split('|')
-                val u1 = Uri.parse(parts[0])
-                val u2 = Uri.parse(parts[1])
-                val layout = if (parts.size > 2) parts[2] else "SBS"
-                val time1 = top.maary.darkbag.utils.ImageUtils.getCaptureTime(requireContext(), u1)
-                val time2 = top.maary.darkbag.utils.ImageUtils.getCaptureTime(requireContext(), u2)
-                val virtualGroup = ImageGroup(
-                    baseName = "Stitched_" + System.currentTimeMillis(),
-                    jpgUri = null,
-                    dngUri = null,
-                    dngUri1 = u1,
-                    dngUri2 = u2,
-                    hfLayout = layout,
-                    width = 0,
-                    height = 0,
-                    captureTime = maxOf(time1, time2).takeIf { it > 0 } ?: System.currentTimeMillis(),
-                    captureTime1 = time1,
-                    captureTime2 = time2
-                )
-                groups.add(0, virtualGroup)
-            } else if (allowVirtualGroup && targetUri != null && groups.none {
-                it.jpgUri?.toString() == targetUri ||
-                it.dngUri?.toString() == targetUri ||
-                it.dngUri1?.toString() == targetUri ||
-                it.jpgUri?.lastPathSegment == Uri.parse(targetUri).lastPathSegment ||
-                it.dngUri?.lastPathSegment == Uri.parse(targetUri).lastPathSegment
-            }) {
-                // External or recently captured image not yet grouped
-                val u = Uri.parse(targetUri)
-                val isDng = targetUri.endsWith(".dng", ignoreCase = true) || context?.contentResolver?.getType(u) == "image/x-adobe-dng"
-
-                val name = repository.resolveFilename(u) ?: u.lastPathSegment ?: "External"
-                val baseName = top.maary.darkbag.utils.ImageUtils.getBaseName(name)
-
-                // Read EXIF to check for half-frame layout and capture time
-                var hfLayout: String? = null
-                var captureTime = System.currentTimeMillis()
-                var editConfig: top.maary.darkbag.models.EditConfig? = null
-
-                try {
-                    requireContext().contentResolver.openFileDescriptor(u, "r")?.use { pfd ->
-                        val exif = androidx.exifinterface.media.ExifInterface(pfd.fileDescriptor)
-                        val comment = exif.getAttribute(androidx.exifinterface.media.ExifInterface.TAG_USER_COMMENT)
-                        editConfig = top.maary.darkbag.utils.ImageUtils.parseUserComment(comment)
-                        hfLayout = editConfig?.hfLayout
-
-                        val dateStr = exif.getAttribute(androidx.exifinterface.media.ExifInterface.TAG_DATETIME_ORIGINAL) ?: exif.getAttribute(androidx.exifinterface.media.ExifInterface.TAG_DATETIME)
-                        if (dateStr != null) {
-                            val sdf = java.text.SimpleDateFormat("yyyy:MM:dd HH:mm:ss", java.util.Locale.US)
-                            captureTime = sdf.parse(dateStr)?.time ?: captureTime
-                        }
+                    ViewerMode.EXTERNAL -> {
+                        // Start empty
                     }
-                } catch (e: Exception) {}
-
-                // If half-frame, try to find RAW siblings
-                var hf1: Uri? = null
-                var hf2: Uri? = null
-                if (hfLayout != null) {
-                    val siblings = repository.findSiblingsForUri(u, baseName)
-                    hf1 = siblings.first
-                    hf2 = siblings.second
                 }
 
-                val virtualGroup = ImageGroup(
-                    baseName = baseName,
-                    jpgUri = if (isDng) null else u,
-                    dngUri = if (isDng) u else null,
-                    dngUri1 = hf1,
-                    dngUri2 = hf2,
-                    hfLayout = hfLayout,
-                    captureTime = captureTime,
-                    editConfig = editConfig
-                )
-                groups.add(0, virtualGroup)
+                // Keep Camera path aligned with ff6f behavior: real grouped list only.
+                val allowVirtualGroup = currentMode != ViewerMode.CAMERA
+
+                // Handle virtual groups from external URIs or stitching
+                if (allowVirtualGroup && targetUri != null && targetUri.contains("|")) {
+                    val parts = targetUri.split('|')
+                    val u1 = Uri.parse(parts[0])
+                    val u2 = Uri.parse(parts[1])
+                    val layout = if (parts.size > 2) parts[2] else "SBS"
+                    val time1 = top.maary.darkbag.utils.ImageUtils.getCaptureTime(requireContext(), u1)
+                    val time2 = top.maary.darkbag.utils.ImageUtils.getCaptureTime(requireContext(), u2)
+                    val virtualGroup = ImageGroup(
+                        baseName = "Stitched_" + System.currentTimeMillis(),
+                        jpgUri = null,
+                        dngUri = null,
+                        dngUri1 = u1,
+                        dngUri2 = u2,
+                        hfLayout = layout,
+                        width = 0,
+                        height = 0,
+                        captureTime = maxOf(time1, time2).takeIf { it > 0 } ?: System.currentTimeMillis(),
+                        captureTime1 = time1,
+                        captureTime2 = time2
+                    )
+                    list.add(0, virtualGroup)
+                } else if (allowVirtualGroup && targetUri != null && list.none {
+                        it.jpgUri?.toString() == targetUri ||
+                                it.dngUri?.toString() == targetUri ||
+                                it.dngUri1?.toString() == targetUri ||
+                                it.jpgUri?.lastPathSegment == Uri.parse(targetUri).lastPathSegment ||
+                                it.dngUri?.lastPathSegment == Uri.parse(targetUri).lastPathSegment
+                    }) {
+                    // External or recently captured image not yet grouped
+                    val u = Uri.parse(targetUri)
+                    val isDng = targetUri.endsWith(".dng", ignoreCase = true) || context?.contentResolver?.getType(u) == "image/x-adobe-dng"
+
+                    val name = repository.resolveFilename(u) ?: u.lastPathSegment ?: "External"
+                    val baseName = top.maary.darkbag.utils.ImageUtils.getBaseName(name)
+
+                    // Read EXIF to check for half-frame layout and capture time
+                    var hfLayout: String? = null
+                    var captureTime = System.currentTimeMillis()
+                    var editConfig: top.maary.darkbag.models.EditConfig? = null
+
+                    try {
+                        requireContext().contentResolver.openFileDescriptor(u, "r")?.use { pfd ->
+                            val exif = androidx.exifinterface.media.ExifInterface(pfd.fileDescriptor)
+                            val comment = exif.getAttribute(androidx.exifinterface.media.ExifInterface.TAG_USER_COMMENT)
+                            editConfig = top.maary.darkbag.utils.ImageUtils.parseUserComment(comment)
+                            hfLayout = editConfig?.hfLayout
+
+                            val dateStr = exif.getAttribute(androidx.exifinterface.media.ExifInterface.TAG_DATETIME_ORIGINAL) ?: exif.getAttribute(androidx.exifinterface.media.ExifInterface.TAG_DATETIME)
+                            if (dateStr != null) {
+                                val sdf = java.text.SimpleDateFormat("yyyy:MM:dd HH:mm:ss", java.util.Locale.US)
+                                captureTime = sdf.parse(dateStr)?.time ?: captureTime
+                            }
+                        }
+                    } catch (e: Exception) {}
+
+                    // If half-frame, try to find RAW siblings
+                    var hf1: Uri? = null
+                    var hf2: Uri? = null
+                    if (hfLayout != null) {
+                        val siblings = repository.findSiblingsForUri(u, baseName)
+                        hf1 = siblings.first
+                        hf2 = siblings.second
+                    }
+
+                    val virtualGroup = ImageGroup(
+                        baseName = baseName,
+                        jpgUri = if (isDng) null else u,
+                        dngUri = if (isDng) u else null,
+                        dngUri1 = hf1,
+                        dngUri2 = hf2,
+                        hfLayout = hfLayout,
+                        captureTime = captureTime,
+                        editConfig = editConfig
+                    )
+                    list.add(0, virtualGroup)
+                }
+                list
             }
 
             if (groups.isEmpty()) {
@@ -354,6 +358,9 @@ class ImageViewerFragment : Fragment() {
 
             if (index == binding.imagePager.currentItem) {
                 updateControlsVisibility()
+                // Force adapter to reload the image from URI (HQ JPG)
+                val format = adapter.getSelectedFormat(index)
+                adapter.notifyItemChanged(index, "RELOAD_IMAGE")
             }
         } else {
             // New image group saved (maybe from background processing of a very recent shot)

@@ -64,6 +64,12 @@ class ImageViewerAdapter(
     override fun onBindViewHolder(holder: ViewHolder, position: Int, payloads: List<Any>) {
         val group = groups[position]
 
+        if (payloads.contains("RELOAD_IMAGE")) {
+            val format = selectedFormats[position] ?: "JPG"
+            loadSelectedFormat(holder, group, format)
+            return
+        }
+
         if (payloads.isNotEmpty()) {
             // Partial update for swap or metadata
             setupButtons(holder, group, position)
@@ -402,18 +408,22 @@ class ImageViewerAdapter(
     }
 
     fun updateGroups(newGroups: List<ImageGroup>) {
-        val diffResult = androidx.recyclerview.widget.DiffUtil.calculateDiff(object : androidx.recyclerview.widget.DiffUtil.Callback() {
-            override fun getOldListSize(): Int = groups.size
-            override fun getNewListSize(): Int = newGroups.size
-            override fun areItemsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean {
-                return groups[oldItemPosition].baseName == newGroups[newItemPosition].baseName
+        scope.launch {
+            val diffResult = withContext(Dispatchers.Default) {
+                androidx.recyclerview.widget.DiffUtil.calculateDiff(object : androidx.recyclerview.widget.DiffUtil.Callback() {
+                    override fun getOldListSize(): Int = groups.size
+                    override fun getNewListSize(): Int = newGroups.size
+                    override fun areItemsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean {
+                        return groups[oldItemPosition].baseName == newGroups[newItemPosition].baseName
+                    }
+                    override fun areContentsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean {
+                        return groups[oldItemPosition] == newGroups[newItemPosition]
+                    }
+                })
             }
-            override fun areContentsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean {
-                return groups[oldItemPosition] == newGroups[newItemPosition]
-            }
-        })
-        groups = newGroups
-        diffResult.dispatchUpdatesTo(this)
+            groups = newGroups
+            diffResult.dispatchUpdatesTo(this@ImageViewerAdapter)
+        }
     }
 
     fun findGroupIndex(baseName: String): Int {
