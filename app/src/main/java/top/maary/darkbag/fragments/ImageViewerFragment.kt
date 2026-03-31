@@ -1338,6 +1338,7 @@ class ImageViewerFragment : Fragment() {
                                 editConfig = config,
                                 isAlreadyStitched = currentGroup.isHalfFrame()
                         )
+                        bitmap.recycle()
                     }
                 } catch (e: Exception) {
                     android.util.Log.e("ImageViewerFragment", "Failed to save edit", e)
@@ -1460,7 +1461,7 @@ class ImageViewerFragment : Fragment() {
                     }
 
                     if (!currentGroup.isHalfFrame()) {
-                        processFullToTiff(sourceDngBytes, dngUri1, 0, tempTiff.absolutePath)
+                        processFullToTiff(sourceDngBytes, dngUri1, 0, tempTiff.absolutePath)?.recycle()
                     } else {
                         val b1 = processFullToTiff(sourceDngBytes, dngUri1, 0, null)
                         val b2 = dngUri2?.let { processFullToTiff(sourceDngBytes2, it, 1, null) }

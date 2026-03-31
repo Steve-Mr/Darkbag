@@ -37,6 +37,11 @@ struct BoxedMethodIDs {
     jmethodID floatValue;
 } g_boxedMethods;
 
+jclass g_integerClass = nullptr;
+jclass g_longClass = nullptr;
+jclass g_floatClass = nullptr;
+jclass g_metadataClass = nullptr;
+
 std::string getStringField(JNIEnv* env, jobject obj, jfieldID fieldID, const std::string& defaultValue) {
     jstring jstr = (jstring)env->GetObjectField(obj, fieldID);
     if (!jstr) return defaultValue;
@@ -50,9 +55,7 @@ std::string getStringField(JNIEnv* env, jobject obj, jfieldID fieldID, const std
 int getIntField(JNIEnv* env, jobject obj, jfieldID fieldID, int defaultValue) {
     jobject boxed = env->GetObjectField(obj, fieldID);
     if (!boxed) return defaultValue;
-    jclass integerClass = env->FindClass("java/lang/Integer");
-    jmethodID intValue = env->GetMethodID(integerClass, "intValue", "()I");
-    int result = env->CallIntMethod(boxed, intValue);
+    int result = env->CallIntMethod(boxed, g_boxedMethods.intValue);
     env->DeleteLocalRef(boxed);
     return result;
 }
@@ -60,9 +63,7 @@ int getIntField(JNIEnv* env, jobject obj, jfieldID fieldID, int defaultValue) {
 int64_t getLongField(JNIEnv* env, jobject obj, jfieldID fieldID, int64_t defaultValue) {
     jobject boxed = env->GetObjectField(obj, fieldID);
     if (!boxed) return defaultValue;
-    jclass longClass = env->FindClass("java/lang/Long");
-    jmethodID longValue = env->GetMethodID(longClass, "longValue", "()J");
-    int64_t result = (int64_t)env->CallLongMethod(boxed, longValue);
+    int64_t result = (int64_t)env->CallLongMethod(boxed, g_boxedMethods.longValue);
     env->DeleteLocalRef(boxed);
     return result;
 }
@@ -70,37 +71,61 @@ int64_t getLongField(JNIEnv* env, jobject obj, jfieldID fieldID, int64_t default
 float getFloatField(JNIEnv* env, jobject obj, jfieldID fieldID, float defaultValue) {
     jobject boxed = env->GetObjectField(obj, fieldID);
     if (!boxed) return defaultValue;
-    jclass floatClass = env->FindClass("java/lang/Float");
-    jmethodID floatValue = env->GetMethodID(floatClass, "floatValue", "()F");
-    float result = env->CallFloatMethod(boxed, floatValue);
+    float result = env->CallFloatMethod(boxed, g_boxedMethods.floatValue);
     env->DeleteLocalRef(boxed);
     return result;
+}
+
+void ensureIDsInitialized(JNIEnv* env) {
+    static bool initialized = false;
+    if (initialized) return;
+
+    jclass integerClass = env->FindClass("java/lang/Integer");
+    g_boxedMethods.intValue = env->GetMethodID(integerClass, "intValue", "()I");
+
+    jclass longClass = env->FindClass("java/lang/Long");
+    g_boxedMethods.longValue = env->GetMethodID(longClass, "longValue", "()J");
+
+    jclass floatClass = env->FindClass("java/lang/Float");
+    g_boxedMethods.floatValue = env->GetMethodID(floatClass, "floatValue", "()F");
+
+    jclass metadataClazz = env->FindClass("top/maary/darkbag/models/CaptureMetadata");
+    g_metadataFields.iso = env->GetFieldID(metadataClazz, "iso", "Ljava/lang/Integer;");
+    g_metadataFields.exposureTime = env->GetFieldID(metadataClazz, "exposureTime", "Ljava/lang/Long;");
+    g_metadataFields.fNumber = env->GetFieldID(metadataClazz, "fNumber", "Ljava/lang/Float;");
+    g_metadataFields.focalLength = env->GetFieldID(metadataClazz, "focalLength", "Ljava/lang/Float;");
+    g_metadataFields.dateTimeOriginal = env->GetFieldID(metadataClazz, "dateTimeOriginal", "Ljava/lang/Long;");
+    g_metadataFields.make = env->GetFieldID(metadataClazz, "make", "Ljava/lang/String;");
+    g_metadataFields.model = env->GetFieldID(metadataClazz, "model", "Ljava/lang/String;");
+    g_metadataFields.uniqueCameraModel = env->GetFieldID(metadataClazz, "uniqueCameraModel", "Ljava/lang/String;");
+    g_metadataFields.software = env->GetFieldID(metadataClazz, "software", "Ljava/lang/String;");
+    g_metadataFields.imageDescription = env->GetFieldID(metadataClazz, "imageDescription", "Ljava/lang/String;");
+
+    initialized = true;
 }
 
 ImageMetadata metadataFromJava(JNIEnv* env, jobject metadataObj) {
     ImageMetadata meta;
     if (!metadataObj) return meta;
 
-    jclass metadataClazz = env->GetObjectClass(metadataObj);
-    auto getField = [&](const char* name, const char* sig) -> jfieldID {
-        return env->GetFieldID(metadataClazz, name, sig);
-    };
+    ensureIDsInitialized(env);
 
-    meta.iso = getIntField(env, metadataObj, getField("iso", "Ljava/lang/Integer;"), 100);
-    meta.exposureTime = getLongField(env, metadataObj, getField("exposureTime", "Ljava/lang/Long;"), 10000000L);
-    meta.fNumber = getFloatField(env, metadataObj, getField("fNumber", "Ljava/lang/Float;"), 1.8f);
-    meta.focalLength = getFloatField(env, metadataObj, getField("focalLength", "Ljava/lang/Float;"), 0.0f);
-    meta.captureTimeMillis = getLongField(env, metadataObj, getField("dateTimeOriginal", "Ljava/lang/Long;"), 0);
-    meta.make = getStringField(env, metadataObj, getField("make", "Ljava/lang/String;"), "Unknown");
-    meta.model = getStringField(env, metadataObj, getField("model", "Ljava/lang/String;"), "Unknown");
-    meta.uniqueCameraModel = getStringField(env, metadataObj, getField("uniqueCameraModel", "Ljava/lang/String;"), meta.model);
-    meta.software = getStringField(env, metadataObj, getField("software", "Ljava/lang/String;"), "Darkbag");
-    meta.imageDescription = getStringField(env, metadataObj, getField("imageDescription", "Ljava/lang/String;"), "Processed by Darkbag");
+    meta.iso = getIntField(env, metadataObj, g_metadataFields.iso, 100);
+    meta.exposureTime = getLongField(env, metadataObj, g_metadataFields.exposureTime, 10000000L);
+    meta.fNumber = getFloatField(env, metadataObj, g_metadataFields.fNumber, 1.8f);
+    meta.focalLength = getFloatField(env, metadataObj, g_metadataFields.focalLength, 0.0f);
+    meta.captureTimeMillis = getLongField(env, metadataObj, g_metadataFields.dateTimeOriginal, 0);
+    meta.make = getStringField(env, metadataObj, g_metadataFields.make, "Unknown");
+    meta.model = getStringField(env, metadataObj, g_metadataFields.model, "Unknown");
+    meta.uniqueCameraModel = getStringField(env, metadataObj, g_metadataFields.uniqueCameraModel, meta.model);
+    meta.software = getStringField(env, metadataObj, g_metadataFields.software, "Darkbag");
+    meta.imageDescription = getStringField(env, metadataObj, g_metadataFields.imageDescription, "Processed by Darkbag");
 
     return meta;
 }
 
 } // namespace
+
 
 extern "C" JNIEXPORT jint JNICALL
 Java_top_maary_darkbag_processor_ColorProcessor_processRaw(
@@ -196,6 +221,12 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRaw(
     if (lut_path_cstr) {
         lut = load_lut(lut_path_cstr);
         env->ReleaseStringUTFChars(lutPath, lut_path_cstr);
+    } else if (lutPath) {
+        LOGE("GetStringUTFChars failed for lutPath");
+        LibRaw::dcraw_clear_mem(image);
+        RawProcessor.recycle();
+        delete[] buf;
+        return -1;
     }
 
     // Copy LibRaw data to std::vector for shared processing
@@ -205,7 +236,9 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRaw(
 
     // Paths
     const char* jpg_path_cstr = (outputJpgPath) ? env->GetStringUTFChars(outputJpgPath, 0) : nullptr;
+    if (outputJpgPath && !jpg_path_cstr) { LOGE("GetStringUTFChars failed for outputJpgPath"); }
     const char* tiff_path_cstr = (outputTiffPath) ? env->GetStringUTFChars(outputTiffPath, 0) : nullptr;
+    if (outputTiffPath && !tiff_path_cstr) { LOGE("GetStringUTFChars failed for outputTiffPath"); }
 
     AndroidBitmapInfo info;
     int out_w = 0, out_h = 0;
@@ -304,10 +337,14 @@ Java_top_maary_darkbag_processor_ColorProcessor_saveBitmapToTiff(
     if (AndroidBitmap_lockPixels(env, bitmap, &pixels) < 0) return false;
 
     const char* path = env->GetStringUTFChars(outputTiffPath, 0);
-    ImageMetadata meta = metadataFromJava(env, metadataObj);
-    bool ok = write_tiff_rgba8(path, info.width, info.height, (unsigned char*)pixels, &meta);
-
-    env->ReleaseStringUTFChars(outputTiffPath, path);
+    bool ok = false;
+    if (path) {
+        ImageMetadata meta = metadataFromJava(env, metadataObj);
+        ok = write_tiff_rgba8(path, info.width, info.height, (unsigned char*)pixels, &meta);
+        env->ReleaseStringUTFChars(outputTiffPath, path);
+    } else {
+        LOGE("GetStringUTFChars failed for outputTiffPath in saveBitmapToTiff");
+    }
     AndroidBitmap_unlockPixels(env, bitmap);
 
     return ok;

@@ -753,13 +753,13 @@ bool write_tiff(const char* filename, int width, int height, const std::vector<u
         TIFFSetField(tif, TIFFTAG_IMAGEDESCRIPTION, metadata->imageDescription.c_str());
 
         time_t raw_time = (time_t)(metadata->captureTimeMillis / 1000);
-        struct tm * timeinfo = localtime(&raw_time);
+        struct tm timeinfo;
+        localtime_r(&raw_time, &timeinfo);
         char buffer[20];
-        strftime(buffer, 20, "%Y:%m:%d %H:%M:%S", timeinfo);
+        strftime(buffer, 20, "%Y:%m:%d %H:%M:%S", &timeinfo);
         TIFFSetField(tif, TIFFTAG_DATETIME, buffer);
     }
 
-    tsize_t line_size = 3 * width * sizeof(unsigned short);
     for (int y = 0; y < height; y++) {
         if (TIFFWriteScanline(tif, (void*)&data[static_cast<size_t>(y) * width * 3], y, 0) < 0) {
             LOGE("Error writing TIFF scanline %d", y);
@@ -775,7 +775,10 @@ bool write_tiff(const char* filename, int width, int height, const std::vector<u
 bool write_tiff_rgba8(const char* filename, int width, int height, const unsigned char* data, const ImageMetadata* metadata) {
     LOGD("write_tiff_rgba8: %s, %dx%d", filename, width, height);
     TIFF* tif = TIFFOpen(filename, "w");
-    if (!tif) return false;
+    if (!tif) {
+        LOGE("Could not open TIFF for writing: %s", filename);
+        return false;
+    }
 
     TIFFSetField(tif, TIFFTAG_IMAGEWIDTH, width);
     TIFFSetField(tif, TIFFTAG_IMAGELENGTH, height);
@@ -794,9 +797,10 @@ bool write_tiff_rgba8(const char* filename, int width, int height, const unsigne
         TIFFSetField(tif, TIFFTAG_IMAGEDESCRIPTION, metadata->imageDescription.c_str());
 
         time_t raw_time = (time_t)(metadata->captureTimeMillis / 1000);
-        struct tm * timeinfo = localtime(&raw_time);
+        struct tm timeinfo;
+        localtime_r(&raw_time, &timeinfo);
         char buffer[20];
-        strftime(buffer, 20, "%Y:%m:%d %H:%M:%S", timeinfo);
+        strftime(buffer, 20, "%Y:%m:%d %H:%M:%S", &timeinfo);
         TIFFSetField(tif, TIFFTAG_DATETIME, buffer);
     }
 
