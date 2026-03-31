@@ -53,7 +53,8 @@ object ColorProcessor {
         mirror: Boolean,
         outputBitmap: android.graphics.Bitmap? = null,
         downsampleFactor: Int = 1,
-        zoomFactor: Float = 1.0f
+        zoomFactor: Float = 1.0f,
+        metadata: CaptureMetadata? = null
     ): Int
 
     /**
@@ -96,9 +97,13 @@ object ColorProcessor {
      * Saves an existing RGBA Bitmap to a TIFF file.
      * Useful for saving stitched half-frame images with effects already applied.
      */
+    /**
+     * Saves an existing RGBA Bitmap to a TIFF file with metadata.
+     */
     external fun saveBitmapToTiff(
         bitmap: android.graphics.Bitmap,
-        outputTiffPath: String
+        outputTiffPath: String,
+        metadata: CaptureMetadata
     ): Boolean
 
     /**

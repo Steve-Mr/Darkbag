@@ -222,7 +222,7 @@ object ImageSaver {
                                             if (tiffPath != null) {
                                                 // Since finalPath is a stitched JPEG, we need to decode it to bitmap to save as TIFF
                                                 BitmapFactory.decodeFile(finalPath)?.let {
-                                                    top.maary.darkbag.processor.ColorProcessor.saveBitmapToTiff(it, tiffPath)
+                                                    top.maary.darkbag.processor.ColorProcessor.saveBitmapToTiff(it, tiffPath, captureMetadata ?: top.maary.darkbag.models.CaptureMetadata())
                                                     it.recycle()
                                                 }
                                             }
@@ -280,7 +280,7 @@ object ImageSaver {
                                         tempJpg.inputStream().use { it.copyTo(out) }
                                     }
                                     if (tiffPath != null) {
-                                        top.maary.darkbag.processor.ColorProcessor.saveBitmapToTiff(processedBitmap, tiffPath)
+                                        top.maary.darkbag.processor.ColorProcessor.saveBitmapToTiff(processedBitmap, tiffPath, captureMetadata ?: top.maary.darkbag.models.CaptureMetadata())
                                     }
                                 }
                                 tempJpg.delete()

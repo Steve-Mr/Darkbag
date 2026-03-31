@@ -38,7 +38,8 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRaw(
         jboolean mirror,
         jobject outputBitmap,
         jint downsampleFactor,
-        jfloat zoomFactor
+        jfloat zoomFactor,
+        jobject metadataObj
 ) {
     LOGD("Native processRaw started using LibRaw.");
 
@@ -132,6 +133,11 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRaw(
         }
     }
 
+    ImageMetadata meta;
+    if (metadataObj) {
+        meta = metadataFromJava(env, metadataObj);
+    }
+
     // Use Shared Pipeline
     bool saveOk = process_and_save_image(
         rawImage,
@@ -143,6 +149,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRaw(
         exposure, contrast, saturation, highlights, shadows, whites, blacks,
         jpg_path_cstr,
         tiff_path_cstr,
+        metadataObj ? &meta : nullptr,
         0, // sourceColorSpace = ProPhoto (LibRaw output_color=4)
         nullptr, // ccm is not used for ProPhoto path
         nullptr, // wb is not used for ProPhoto path (LibRaw handles it)
@@ -200,7 +207,8 @@ Java_top_maary_darkbag_processor_ColorProcessor_saveBitmapToTiff(
         JNIEnv* env,
         jobject /* this */,
         jobject bitmap,
-        jstring outputTiffPath) {
+        jstring outputTiffPath,
+        jobject metadataObj) {
 
     AndroidBitmapInfo info;
     if (AndroidBitmap_getInfo(env, bitmap, &info) < 0) return false;
@@ -210,7 +218,8 @@ Java_top_maary_darkbag_processor_ColorProcessor_saveBitmapToTiff(
     if (AndroidBitmap_lockPixels(env, bitmap, &pixels) < 0) return false;
 
     const char* path = env->GetStringUTFChars(outputTiffPath, 0);
-    bool ok = write_tiff_rgba8(path, info.width, info.height, (unsigned char*)pixels);
+    ImageMetadata meta = metadataFromJava(env, metadataObj);
+    bool ok = write_tiff_rgba8(path, info.width, info.height, (unsigned char*)pixels, &meta);
 
     env->ReleaseStringUTFChars(outputTiffPath, path);
     AndroidBitmap_unlockPixels(env, bitmap);

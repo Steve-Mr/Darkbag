@@ -1077,6 +1077,9 @@ class ImageViewerFragment : Fragment() {
 
                         val adj = if (currentGroup.isHalfFrame()) config.adjustments?.get(index) ?: top.maary.darkbag.models.BasicAdjustments() else config.toBasic()
 
+                        val meta = repository.getCaptureMetadata(uri) ?: top.maary.darkbag.models.CaptureMetadata()
+                        // Use a private JNI call or update current one to support metadata for TIFF?
+                        // For now we use the existing one but we should ideally pass metadata.
                         top.maary.darkbag.processor.ColorProcessor.processRaw(
                             dngData = finalBytes,
                             targetLog = logIndex,
@@ -1265,7 +1268,8 @@ class ImageViewerFragment : Fragment() {
                             mirror = false,
                             outputBitmap = previewBitmap,
                             downsampleFactor = 1,
-                            zoomFactor = config.zoomFactor
+                            zoomFactor = config.zoomFactor,
+                            metadata = meta
                         )
                         return previewBitmap
                     }
@@ -1392,9 +1396,9 @@ class ImageViewerFragment : Fragment() {
                     val context = requireContext()
 
                     // Cleanup old temp tiff files
-                    context.cacheDir.listFiles { file -> file.name.endsWith(".tiff") }?.forEach { it.delete() }
+                    context.cacheDir.listFiles { file -> file.name.endsWith(".tiff") || file.name.endsWith(".tif") }?.forEach { it.delete() }
 
-                    val tempTiff = java.io.File(context.cacheDir, "${currentGroup.baseName}_${System.currentTimeMillis()}.tiff")
+                    val tempTiff = java.io.File(context.cacheDir, "${currentGroup.baseName}_${System.currentTimeMillis()}.tif")
 
                     val logIndex = SettingsFragment.LOG_CURVES.indexOf(config.log)
                     val lutPath = if (config.lut != null && config.lut != "None") {
@@ -1485,7 +1489,8 @@ class ImageViewerFragment : Fragment() {
                                 time2 = currentGroup.captureTime,
                                 flareType = config.flareType
                             )
-                            top.maary.darkbag.processor.ColorProcessor.saveBitmapToTiff(finalComposite, tempTiff.absolutePath)
+                            val meta = repository.getCaptureMetadata(currentGroup.dngUri ?: currentGroup.dngUri1 ?: Uri.EMPTY) ?: top.maary.darkbag.models.CaptureMetadata()
+                            top.maary.darkbag.processor.ColorProcessor.saveBitmapToTiff(finalComposite, tempTiff.absolutePath, meta)
 
                             if (finalComposite != composite) {
                                 composite.recycle()

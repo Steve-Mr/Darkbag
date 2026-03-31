@@ -453,7 +453,7 @@ bool process_and_save_image(
     int width, int height, float gain, int targetLog, const LUT3D& lut,
     float exposure, float contrast, float saturation,
     float highlights, float shadows, float whites, float blacks,
-    const char* jpgPath, const char* tiffPath, int sourceColorSpace,
+    const char* jpgPath, const char* tiffPath, const ImageMetadata* metadata, int sourceColorSpace,
     const float* ccm, const float* wb, int orientation, unsigned char* out_rgb_buffer,
     int out_width, int out_height,
     bool isPreview, int downsampleFactor, float zoomFactor, bool mirror
@@ -692,7 +692,7 @@ bool process_and_save_image(
 
     bool tiffOk = true;
     if (tiffPath && !isPreview) {
-        tiffOk = write_tiff(tiffPath, finalW_zoomed, finalH_zoomed, processedImage);
+        tiffOk = write_tiff(tiffPath, finalW_zoomed, finalH_zoomed, processedImage, metadata);
         if (!tiffOk) LOGE("write_tiff failed for %s", tiffPath);
         else LOGD("Successfully wrote TIFF: %s", tiffPath);
     }
@@ -728,7 +728,7 @@ bool process_and_save_image(
     return jpgOk;
 }
 
-bool write_tiff(const char* filename, int width, int height, const std::vector<unsigned short>& data) {
+bool write_tiff(const char* filename, int width, int height, const std::vector<unsigned short>& data, const ImageMetadata* metadata) {
     LOGD("write_tiff: %s, %dx%d", filename, width, height);
     TIFF* tif = TIFFOpen(filename, "w");
     if (!tif) {
@@ -742,8 +742,21 @@ bool write_tiff(const char* filename, int width, int height, const std::vector<u
     TIFFSetField(tif, TIFFTAG_SAMPLESPERPIXEL, 3);
     TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_RGB);
     TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG);
-    TIFFSetField(tif, TIFFTAG_COMPRESSION, COMPRESSION_LZW);
+    TIFFSetField(tif, TIFFTAG_COMPRESSION, COMPRESSION_NONE);
     TIFFSetField(tif, TIFFTAG_ORIENTATION, ORIENTATION_TOPLEFT);
+
+    if (metadata) {
+        TIFFSetField(tif, TIFFTAG_MAKE, metadata->make.c_str());
+        TIFFSetField(tif, TIFFTAG_MODEL, metadata->model.c_str());
+        TIFFSetField(tif, TIFFTAG_SOFTWARE, metadata->software.c_str());
+        TIFFSetField(tif, TIFFTAG_IMAGEDESCRIPTION, metadata->imageDescription.c_str());
+
+        time_t raw_time = (time_t)(metadata->captureTimeMillis / 1000);
+        struct tm * timeinfo = localtime(&raw_time);
+        char buffer[20];
+        strftime(buffer, 20, "%Y:%m:%d %H:%M:%S", timeinfo);
+        TIFFSetField(tif, TIFFTAG_DATETIME, buffer);
+    }
 
     tsize_t line_size = 3 * width * sizeof(unsigned short);
     for (int y = 0; y < height; y++) {
@@ -758,7 +771,7 @@ bool write_tiff(const char* filename, int width, int height, const std::vector<u
     return true;
 }
 
-bool write_tiff_rgba8(const char* filename, int width, int height, const unsigned char* data) {
+bool write_tiff_rgba8(const char* filename, int width, int height, const unsigned char* data, const ImageMetadata* metadata) {
     LOGD("write_tiff_rgba8: %s, %dx%d", filename, width, height);
     TIFF* tif = TIFFOpen(filename, "w");
     if (!tif) return false;
@@ -766,14 +779,33 @@ bool write_tiff_rgba8(const char* filename, int width, int height, const unsigne
     TIFFSetField(tif, TIFFTAG_IMAGEWIDTH, width);
     TIFFSetField(tif, TIFFTAG_IMAGELENGTH, height);
     TIFFSetField(tif, TIFFTAG_BITSPERSAMPLE, 8);
-    TIFFSetField(tif, TIFFTAG_SAMPLESPERPIXEL, 4);
+    TIFFSetField(tif, TIFFTAG_SAMPLESPERPIXEL, 3); // Force 3 channels (RGB)
     TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_RGB);
     TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG);
-    TIFFSetField(tif, TIFFTAG_COMPRESSION, COMPRESSION_LZW);
+    TIFFSetField(tif, TIFFTAG_COMPRESSION, COMPRESSION_NONE);
     TIFFSetField(tif, TIFFTAG_ORIENTATION, ORIENTATION_TOPLEFT);
 
+    if (metadata) {
+        TIFFSetField(tif, TIFFTAG_MAKE, metadata->make.c_str());
+        TIFFSetField(tif, TIFFTAG_MODEL, metadata->model.c_str());
+        TIFFSetField(tif, TIFFTAG_SOFTWARE, metadata->software.c_str());
+        TIFFSetField(tif, TIFFTAG_IMAGEDESCRIPTION, metadata->imageDescription.c_str());
+
+        time_t raw_time = (time_t)(metadata->captureTimeMillis / 1000);
+        struct tm * timeinfo = localtime(&raw_time);
+        char buffer[20];
+        strftime(buffer, 20, "%Y:%m:%d %H:%M:%S", timeinfo);
+        TIFFSetField(tif, TIFFTAG_DATETIME, buffer);
+    }
+
+    std::vector<unsigned char> row(static_cast<size_t>(width) * 3);
     for (int y = 0; y < height; y++) {
-        if (TIFFWriteScanline(tif, (void*)&data[static_cast<size_t>(y) * width * 4], y, 0) < 0) {
+        for (int x = 0; x < width; x++) {
+            row[x * 3 + 0] = data[(static_cast<size_t>(y) * width + x) * 4 + 0];
+            row[x * 3 + 1] = data[(static_cast<size_t>(y) * width + x) * 4 + 1];
+            row[x * 3 + 2] = data[(static_cast<size_t>(y) * width + x) * 4 + 2];
+        }
+        if (TIFFWriteScanline(tif, (void*)row.data(), y, 0) < 0) {
             TIFFClose(tif);
             return false;
         }

@@ -55,6 +55,7 @@ bool process_and_save_image(
     float blacks = 0.0f,
     const char* jpgPath = nullptr,
     const char* tiffPath = nullptr,
+    const ImageMetadata* metadata = nullptr,
     int sourceColorSpace = 0,
     const float* ccm = nullptr,
     const float* wb = nullptr,
@@ -88,9 +89,9 @@ bool write_bmp(const char* filename, int width, int height, const std::vector<un
 
 bool write_jpeg(const char* filename, int width, int height, const std::vector<unsigned short>& data, int quality);
 
-bool write_tiff(const char* filename, int width, int height, const std::vector<unsigned short>& data);
+bool write_tiff(const char* filename, int width, int height, const std::vector<unsigned short>& data, const ImageMetadata* metadata = nullptr);
 
-bool write_tiff_rgba8(const char* filename, int width, int height, const unsigned char* data);
+bool write_tiff_rgba8(const char* filename, int width, int height, const unsigned char* data, const ImageMetadata* metadata = nullptr);
 
 int compute_preview_downsample_factor(int width, int height, int targetLongEdge);
 
