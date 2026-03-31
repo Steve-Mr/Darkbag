@@ -354,7 +354,7 @@ class ImageRepository(private val context: Context) {
                 adjustments = adjustments,
                 showTimestamp = json.optBoolean("show_timestamp", false),
                 flareType = json.optInt("flare_type", -1),
-                hfLayout = if (json.isNull("hf_layout")) null else json.optString("hf_layout"),
+                hfLayout = if (json.has("hf_layout")) json.optString("hf_layout") else null,
                 zoomFactor = json.optDouble("zoom_factor", 1.0).toFloat()
             )
         } catch (e: Exception) {

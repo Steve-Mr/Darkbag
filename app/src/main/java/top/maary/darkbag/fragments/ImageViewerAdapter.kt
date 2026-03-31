@@ -35,6 +35,7 @@ class ImageViewerAdapter(
     class ViewHolder(val binding: ItemImageGroupBinding) : RecyclerView.ViewHolder(binding.root) {
         var loadJob: Job? = null
         var manualBitmap: android.graphics.Bitmap? = null
+        var currentUri: Uri? = null
     }
 
     override fun onAttachedToRecyclerView(recyclerView: RecyclerView) {
@@ -52,6 +53,17 @@ class ImageViewerAdapter(
             LayoutInflater.from(parent.context), parent, false
         )
         return ViewHolder(binding)
+    }
+
+    override fun onBindViewHolder(holder: ViewHolder, position: Int, payloads: MutableList<Any>) {
+        if (payloads.isNotEmpty()) {
+            val group = groups[position]
+            setupButtons(holder, group, position)
+            // If it was DNG and layout changed, we might need full reload,
+            // but for simple metadataLoaded update, button setup is enough.
+            return
+        }
+        super.onBindViewHolder(holder, position, payloads)
     }
 
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
@@ -146,14 +158,19 @@ class ImageViewerAdapter(
     }
 
     private fun loadDngThumbnailOnly(holder: ViewHolder, uri: Uri, zoomFactor: Float = 1.0f) {
+        if (holder.currentUri == uri && holder.binding.imageView.drawable != null) {
+            return
+        }
         holder.loadJob?.cancel()
+        holder.currentUri = uri
         holder.binding.imageView.visibility = View.VISIBLE
         holder.binding.loadingIndicator.visibility = View.VISIBLE
 
         holder.loadJob = scope.launch {
             var thumbnailBitmap: android.graphics.Bitmap? = null
             try {
-                thumbnailBitmap = ImageUtils.decodeDngThumbnail(holder.binding.root.context, uri, zoomFactor)
+                thumbnailBitmap =
+                    ImageUtils.decodeDngThumbnail(holder.binding.root.context, uri, zoomFactor)
                 ensureActive()
 
                 if (thumbnailBitmap != null) {
@@ -197,6 +214,9 @@ class ImageViewerAdapter(
     }
 
     private fun loadImage(holder: ViewHolder, uri: Uri, zoomFactor: Float = 1.0f, version: Long = 0L) {
+        if (holder.currentUri == uri && holder.binding.imageView.drawable != null) {
+            return
+        }
         holder.loadJob?.cancel()
         holder.binding.imageView.visibility = View.VISIBLE
         holder.binding.loadingIndicator.visibility = View.VISIBLE
@@ -209,7 +229,12 @@ class ImageViewerAdapter(
     }
 
     private fun loadHalfFrameDngs(holder: ViewHolder, group: ImageGroup, zoomFactor: Float = 1.0f) {
+        val compositeUri = Uri.parse("hf://${group.baseName}")
+        if (holder.currentUri == compositeUri && holder.binding.imageView.drawable != null) {
+            return
+        }
         holder.loadJob?.cancel()
+        holder.currentUri = compositeUri
         holder.binding.imageView.visibility = View.VISIBLE
         holder.binding.loadingIndicator.visibility = View.VISIBLE
         holder.loadJob = scope.launch {
@@ -245,7 +270,11 @@ class ImageViewerAdapter(
     }
 
     private fun loadWithGlide(holder: ViewHolder, uri: Uri, skipCache: Boolean = false, version: Long = 0L) {
+        if (holder.currentUri == uri && holder.binding.imageView.drawable != null) {
+            return
+        }
         clearCurrentBitmap(holder)
+        holder.currentUri = uri
 
         val model = if (version > 0) {
             com.bumptech.glide.signature.ObjectKey(version)
@@ -283,6 +312,7 @@ class ImageViewerAdapter(
     override fun onViewRecycled(holder: ViewHolder) {
         holder.loadJob?.cancel()
         clearCurrentBitmap(holder)
+        holder.currentUri = null
         holder.binding.loadingIndicator.visibility = View.GONE
         super.onViewRecycled(holder)
     }
@@ -385,6 +415,18 @@ class ImageViewerAdapter(
                     val old = oldGroups[oldItemPosition]
                     val new = newGroups[newItemPosition]
                     return old == new && old.metadataLoaded == new.metadataLoaded
+                }
+
+                override fun getChangePayload(oldItemPosition: Int, newItemPosition: Int): Any? {
+                    val old = oldGroups[oldItemPosition]
+                    val new = newGroups[newItemPosition]
+                    if (old.baseName == new.baseName &&
+                        old.jpgUri == new.jpgUri &&
+                        old.dngUri == new.dngUri &&
+                        old.metadataLoaded != new.metadataLoaded) {
+                        return "METADATA_LOADED"
+                    }
+                    return null
                 }
             })
             withContext(Dispatchers.Main) {
