@@ -23,6 +23,8 @@ import androidx.viewpager2.widget.ViewPager2
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.sync.withLock
+import kotlin.coroutines.resume
 import top.maary.darkbag.R
 import top.maary.darkbag.databinding.BottomSheetImageDetailsBinding
 import top.maary.darkbag.databinding.FragmentImageViewerBinding
@@ -66,17 +68,29 @@ class ImageViewerFragment : Fragment() {
 
     private lateinit var lutManager: top.maary.darkbag.utils.LutManager
     private var previewJob: Job? = null
+    private val adapterUpdateMutex = kotlinx.coroutines.sync.Mutex()
     private val pageChangeCallback = object : ViewPager2.OnPageChangeCallback() {
         override fun onPageSelected(position: Int) {
             val group = adapter.getGroup(position)
             if (!group.metadataLoaded) {
                 lifecycleScope.launch {
                     val updatedGroup = repository.loadMetadata(group)
-                    if (binding.imagePager.currentItem == position) {
-                        val groups = adapter.getGroups().toMutableList()
-                        groups[position] = updatedGroup
-                        adapter.updateGroups(groups)
-                        updateControlsVisibility()
+                    adapterUpdateMutex.withLock {
+                        val currentGroups = adapter.getGroups().toMutableList()
+                        val index = currentGroups.indexOfFirst { it.baseName == updatedGroup.baseName }
+                        if (index != -1) {
+                            currentGroups[index] = updatedGroup
+                            // Use a callback to ensure the differ has actually finished updating
+                            // before we allow the next lock holder to read getGroups()
+                            suspendCancellableCoroutine<Unit> { continuation ->
+                                adapter.updateGroups(currentGroups) {
+                                    if (continuation.isActive) continuation.resume(Unit)
+                                }
+                            }
+                            if (binding.imagePager.currentItem == position) {
+                                updateControlsVisibility()
+                            }
+                        }
                     }
                 }
             }

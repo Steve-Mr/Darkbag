@@ -407,8 +407,9 @@ class ImageRepository(private val context: Context) {
         }
 
         fun setJpg(uri: Uri, time: Long) {
-            // Prefer _stitched or simply newer JPG if both exist
-            if (jpgUri == null || time > jpgTime) {
+            // Avoid flipping URI if we already have one for the same file (within 2s)
+            // unless the new one is significantly newer (indicating a true update/edit)
+            if (jpgUri == null || (time > jpgTime + 2000)) {
                 jpgUri = uri
                 jpgTime = time
             }
@@ -416,7 +417,7 @@ class ImageRepository(private val context: Context) {
         }
 
         fun setDng(uri: Uri, time: Long) {
-            if (dngUri == null || time > dngTime) {
+            if (dngUri == null || (time > dngTime + 2000)) {
                 dngUri = uri
                 dngTime = time
             }
@@ -424,8 +425,7 @@ class ImageRepository(private val context: Context) {
         }
 
         fun setDng1(uri: Uri, time: Long) {
-            // For HF1, prefer the one with earlier time in case of conflict
-            if (dngUri1 == null || time < dngUri1Time) {
+            if (dngUri1 == null || (dngUri1Time - time > 2000)) {
                 dngUri1 = uri
                 dngUri1Time = time
             }
@@ -433,8 +433,7 @@ class ImageRepository(private val context: Context) {
         }
 
         fun setDng2(uri: Uri, time: Long) {
-            // For HF2, prefer the one with later time in case of conflict
-            if (dngUri2 == null || time > dngUri2Time) {
+            if (dngUri2 == null || (time > dngUri2Time + 2000)) {
                 dngUri2 = uri
                 dngUri2Time = time
             }
