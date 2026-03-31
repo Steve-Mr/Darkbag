@@ -1250,6 +1250,7 @@ class ImageViewerFragment : Fragment() {
                         val previewBitmap = android.graphics.Bitmap.createBitmap(bmpW, bmpH, android.graphics.Bitmap.Config.ARGB_8888)
                         val adj = if (currentGroup.isHalfFrame()) config.adjustments?.get(index) ?: top.maary.darkbag.models.BasicAdjustments() else config.toBasic()
 
+                        val meta = repository.getCaptureMetadata(uri)
                         top.maary.darkbag.processor.ColorProcessor.processRaw(
                             dngData = finalBytes,
                             targetLog = logIndex,
@@ -1432,6 +1433,7 @@ class ImageViewerFragment : Fragment() {
                         val previewBitmap = android.graphics.Bitmap.createBitmap(bmpW, bmpH, android.graphics.Bitmap.Config.ARGB_8888)
                         val adj = if (currentGroup.isHalfFrame()) config.adjustments?.get(index) ?: top.maary.darkbag.models.BasicAdjustments() else config.toBasic()
 
+                        val meta = repository.getCaptureMetadata(uri)
                         top.maary.darkbag.processor.ColorProcessor.processRaw(
                             dngData = finalBytes,
                             targetLog = logIndex,
@@ -1451,7 +1453,8 @@ class ImageViewerFragment : Fragment() {
                             mirror = false,
                             outputBitmap = previewBitmap,
                             downsampleFactor = 1,
-                            zoomFactor = config.zoomFactor
+                            zoomFactor = config.zoomFactor,
+                            metadata = meta
                         )
                         return previewBitmap
                     }

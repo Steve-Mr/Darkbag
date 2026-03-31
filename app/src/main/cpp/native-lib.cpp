@@ -16,6 +16,92 @@
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 
+namespace {
+
+struct CaptureMetadataFieldIDs {
+    jfieldID iso;
+    jfieldID exposureTime;
+    jfieldID fNumber;
+    jfieldID focalLength;
+    jfieldID dateTimeOriginal;
+    jfieldID make;
+    jfieldID model;
+    jfieldID uniqueCameraModel;
+    jfieldID software;
+    jfieldID imageDescription;
+} g_metadataFields;
+
+struct BoxedMethodIDs {
+    jmethodID intValue;
+    jmethodID longValue;
+    jmethodID floatValue;
+} g_boxedMethods;
+
+std::string getStringField(JNIEnv* env, jobject obj, jfieldID fieldID, const std::string& defaultValue) {
+    jstring jstr = (jstring)env->GetObjectField(obj, fieldID);
+    if (!jstr) return defaultValue;
+    const char* cstr = env->GetStringUTFChars(jstr, nullptr);
+    std::string result = cstr ? cstr : defaultValue;
+    if (cstr) env->ReleaseStringUTFChars(jstr, cstr);
+    env->DeleteLocalRef(jstr);
+    return result;
+}
+
+int getIntField(JNIEnv* env, jobject obj, jfieldID fieldID, int defaultValue) {
+    jobject boxed = env->GetObjectField(obj, fieldID);
+    if (!boxed) return defaultValue;
+    jclass integerClass = env->FindClass("java/lang/Integer");
+    jmethodID intValue = env->GetMethodID(integerClass, "intValue", "()I");
+    int result = env->CallIntMethod(boxed, intValue);
+    env->DeleteLocalRef(boxed);
+    return result;
+}
+
+int64_t getLongField(JNIEnv* env, jobject obj, jfieldID fieldID, int64_t defaultValue) {
+    jobject boxed = env->GetObjectField(obj, fieldID);
+    if (!boxed) return defaultValue;
+    jclass longClass = env->FindClass("java/lang/Long");
+    jmethodID longValue = env->GetMethodID(longClass, "longValue", "()J");
+    int64_t result = (int64_t)env->CallLongMethod(boxed, longValue);
+    env->DeleteLocalRef(boxed);
+    return result;
+}
+
+float getFloatField(JNIEnv* env, jobject obj, jfieldID fieldID, float defaultValue) {
+    jobject boxed = env->GetObjectField(obj, fieldID);
+    if (!boxed) return defaultValue;
+    jclass floatClass = env->FindClass("java/lang/Float");
+    jmethodID floatValue = env->GetMethodID(floatClass, "floatValue", "()F");
+    float result = env->CallFloatMethod(boxed, floatValue);
+    env->DeleteLocalRef(boxed);
+    return result;
+}
+
+ImageMetadata metadataFromJava(JNIEnv* env, jobject metadataObj) {
+    ImageMetadata meta;
+    if (!metadataObj) return meta;
+
+    jclass metadataClazz = env->GetObjectClass(metadataObj);
+    auto getField = [&](const char* name, const char* sig) -> jfieldID {
+        return env->GetFieldID(metadataClazz, name, sig);
+    };
+
+    meta.iso = getIntField(env, metadataObj, getField("iso", "Ljava/lang/Integer;"), 100);
+    meta.exposureTime = getLongField(env, metadataObj, getField("exposureTime", "Ljava/lang/Long;"), 10000000L);
+    meta.fNumber = getFloatField(env, metadataObj, getField("fNumber", "Ljava/lang/Float;"), 1.8f);
+    meta.focalLength = getFloatField(env, metadataObj, getField("focalLength", "Ljava/lang/Float;"), 0.0f);
+    meta.captureTimeMillis = getLongField(env, metadataObj, getField("dateTimeOriginal", "Ljava/lang/Long;"), 0);
+    meta.make = getStringField(env, metadataObj, getField("make", "Ljava/lang/String;"), "Unknown");
+    meta.model = getStringField(env, metadataObj, getField("model", "Ljava/lang/String;"), "Unknown");
+    meta.uniqueCameraModel = getStringField(env, metadataObj, getField("uniqueCameraModel", "Ljava/lang/String;"), meta.model);
+    meta.software = getStringField(env, metadataObj, getField("software", "Ljava/lang/String;"), "Darkbag");
+    meta.imageDescription = getStringField(env, metadataObj, getField("imageDescription", "Ljava/lang/String;"), "Processed by Darkbag");
+
+    return meta;
+}
+
+} // namespace
+
 extern "C" JNIEXPORT jint JNICALL
 Java_top_maary_darkbag_processor_ColorProcessor_processRaw(
         JNIEnv* env,
