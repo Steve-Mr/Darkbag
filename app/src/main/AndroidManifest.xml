@@ -73,19 +73,10 @@
 
         </activity>
 
-        <provider
-            android:name="androidx.core.content.FileProvider"
-            android:authorities="${applicationId}.fileprovider"
-            android:exported="false"
-            android:grantUriPermissions="true">
-            <meta-data
-                android:name="android.support.FILE_PROVIDER_PATHS"
-                android:resource="@xml/file_paths" />
-        </provider>
 
         <provider
-            android:name=".provider.HalfFrameDocumentsProvider"
-            android:authorities="top.maary.darkbag.halfframe.documents"
+            android:name=".provider.DarkbagDocumentsProvider"
+            android:authorities="top.maary.darkbag.documents"
             android:exported="true"
             android:grantUriPermissions="true"
             android:permission="android.permission.MANAGE_DOCUMENTS">

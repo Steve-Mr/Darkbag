@@ -1395,11 +1395,11 @@ class ImageViewerFragment : Fragment() {
             val tiffUri = withContext(Dispatchers.IO) {
                 try {
                     val context = requireContext()
+                    val exportDir = java.io.File(context.filesDir, "shared_exports")
+                    if (!exportDir.exists()) exportDir.mkdirs()
 
-                    // Cleanup old temp tiff files
-                    context.cacheDir.listFiles { file -> file.name.endsWith(".tiff") || file.name.endsWith(".tif") }?.forEach { it.delete() }
-
-                    val tempTiff = java.io.File(context.cacheDir, "${currentGroup.baseName}_${System.currentTimeMillis()}.tif")
+                    // Single file policy: reuse same filename to avoid storage bloat
+                    val tempTiff = java.io.File(exportDir, "latest_share_export.tif")
 
                     val logIndex = SettingsFragment.LOG_CURVES.indexOf(config.log)
                     val lutPath = if (config.lut != null && config.lut != "None") {
@@ -1504,7 +1504,10 @@ class ImageViewerFragment : Fragment() {
                         }
                     }
 
-                    androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", tempTiff)
+                    android.provider.DocumentsContract.buildDocumentUri(
+                        top.maary.darkbag.provider.DarkbagDocumentsProvider.AUTHORITY,
+                        "${top.maary.darkbag.provider.DarkbagDocumentsProvider.ROOT_ID_EXPORTS}:${tempTiff.name}"
+                    )
                 } catch (e: Exception) {
                     android.util.Log.e("ImageViewerFragment", "Failed to process TIFF for sharing", e)
                     null
