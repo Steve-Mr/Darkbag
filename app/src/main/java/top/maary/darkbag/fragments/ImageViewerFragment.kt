@@ -1451,7 +1451,7 @@ class ImageViewerFragment : Fragment() {
                             useGpu = false,
                             orientation = rotDegrees,
                             mirror = false,
-                            outputBitmap = previewBitmap,
+                            outputBitmap = if (targetTiffPath != null) null else previewBitmap,
                             downsampleFactor = 1,
                             zoomFactor = config.zoomFactor,
                             metadata = meta
@@ -1515,7 +1515,16 @@ class ImageViewerFragment : Fragment() {
             }
 
             binding.initialLoadingIndicator.visibility = View.GONE
-            tiffUri?.let { shareTiff(it) }
+            tiffUri?.let { uri ->
+                // Notify the system that the "Exports" root has changed
+                val childrenUri = android.provider.DocumentsContract.buildChildDocumentsUri(
+                    top.maary.darkbag.provider.DarkbagDocumentsProvider.AUTHORITY,
+                    top.maary.darkbag.provider.DarkbagDocumentsProvider.ROOT_ID_EXPORTS
+                )
+                requireContext().contentResolver.notifyChange(childrenUri, null)
+
+                shareTiff(uri)
+            }
         }
     }
 
