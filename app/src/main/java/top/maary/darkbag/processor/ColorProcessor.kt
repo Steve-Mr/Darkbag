@@ -47,6 +47,7 @@ object ColorProcessor {
         blacks: Float = 0f,
         digitalGain: Float = 1.0f,
         outputJpgPath: String?,
+        outputTiffPath: String? = null,
         useGpu: Boolean,
         orientation: Int,
         mirror: Boolean,
@@ -90,6 +91,15 @@ object ColorProcessor {
      * @return Float array of size N^3 * 3, or null if loading failed.
      */
     external fun loadLutData(lutPath: String): FloatArray?
+
+    /**
+     * Saves an existing RGBA Bitmap to a TIFF file.
+     * Useful for saving stitched half-frame images with effects already applied.
+     */
+    external fun saveBitmapToTiff(
+        bitmap: android.graphics.Bitmap,
+        outputTiffPath: String
+    ): Boolean
 
     /**
      * Callback for background export completion. Called from JNI thread.

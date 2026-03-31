@@ -32,6 +32,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRaw(
         jfloat blacks,
         jfloat digitalGain,
         jstring outputJpgPath,
+        jstring outputTiffPath,
         jboolean useGpu, // Ignored in new pipeline
         jint orientation,
         jboolean mirror,
@@ -117,6 +118,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRaw(
 
     // Paths
     const char* jpg_path_cstr = (outputJpgPath) ? env->GetStringUTFChars(outputJpgPath, 0) : nullptr;
+    const char* tiff_path_cstr = (outputTiffPath) ? env->GetStringUTFChars(outputTiffPath, 0) : nullptr;
 
     AndroidBitmapInfo info;
     int out_w = 0, out_h = 0;
@@ -140,6 +142,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRaw(
         lut,
         exposure, contrast, saturation, highlights, shadows, whites, blacks,
         jpg_path_cstr,
+        tiff_path_cstr,
         0, // sourceColorSpace = ProPhoto (LibRaw output_color=4)
         nullptr, // ccm is not used for ProPhoto path
         nullptr, // wb is not used for ProPhoto path (LibRaw handles it)
@@ -157,6 +160,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRaw(
 
     // Release Strings
     if (outputJpgPath) env->ReleaseStringUTFChars(outputJpgPath, jpg_path_cstr);
+    if (outputTiffPath) env->ReleaseStringUTFChars(outputTiffPath, tiff_path_cstr);
 
     // Cleanup
     LibRaw::dcraw_clear_mem(image);
@@ -189,4 +193,27 @@ Java_top_maary_darkbag_processor_ColorProcessor_loadLutData(
     jfloatArray result = env->NewFloatArray(floatData.size());
     env->SetFloatArrayRegion(result, 0, floatData.size(), floatData.data());
     return result;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_top_maary_darkbag_processor_ColorProcessor_saveBitmapToTiff(
+        JNIEnv* env,
+        jobject /* this */,
+        jobject bitmap,
+        jstring outputTiffPath) {
+
+    AndroidBitmapInfo info;
+    if (AndroidBitmap_getInfo(env, bitmap, &info) < 0) return false;
+    if (info.format != ANDROID_BITMAP_FORMAT_RGBA_8888) return false;
+
+    void* pixels;
+    if (AndroidBitmap_lockPixels(env, bitmap, &pixels) < 0) return false;
+
+    const char* path = env->GetStringUTFChars(outputTiffPath, 0);
+    bool ok = write_tiff_rgba8(path, info.width, info.height, (unsigned char*)pixels);
+
+    env->ReleaseStringUTFChars(outputTiffPath, path);
+    AndroidBitmap_unlockPixels(env, bitmap);
+
+    return ok;
 }

@@ -453,13 +453,13 @@ bool process_and_save_image(
     int width, int height, float gain, int targetLog, const LUT3D& lut,
     float exposure, float contrast, float saturation,
     float highlights, float shadows, float whites, float blacks,
-    const char* jpgPath, int sourceColorSpace,
+    const char* jpgPath, const char* tiffPath, int sourceColorSpace,
     const float* ccm, const float* wb, int orientation, unsigned char* out_rgb_buffer,
     int out_width, int out_height,
     bool isPreview, int downsampleFactor, float zoomFactor, bool mirror
 ) {
-    LOGD("process_and_save_image: %dx%d, gain=%.2f, log=%d, lut=%d, jpg=%s, preview=%d, ds=%d, zoom=%.2f, mirror=%d",
-         width, height, gain, targetLog, lut.size, jpgPath ? jpgPath : "null", isPreview, downsampleFactor, zoomFactor, mirror);
+    LOGD("process_and_save_image: %dx%d, gain=%.2f, log=%d, lut=%d, jpg=%s, tiff=%s, preview=%d, ds=%d, zoom=%.2f, mirror=%d",
+         width, height, gain, targetLog, lut.size, jpgPath ? jpgPath : "null", tiffPath ? tiffPath : "null", isPreview, downsampleFactor, zoomFactor, mirror);
     int outW = width / downsampleFactor, outH = height / downsampleFactor;
     bool swapDims = (orientation == 90 || orientation == 270);
     int finalW = swapDims ? outH : outW, finalH = swapDims ? outW : outH;
@@ -690,6 +690,13 @@ bool process_and_save_image(
         }
     }
 
+    bool tiffOk = true;
+    if (tiffPath && !isPreview) {
+        tiffOk = write_tiff(tiffPath, finalW_zoomed, finalH_zoomed, processedImage);
+        if (!tiffOk) LOGE("write_tiff failed for %s", tiffPath);
+        else LOGD("Successfully wrote TIFF: %s", tiffPath);
+    }
+
     const int jpegQuality = isPreview ? 78 : 95;
     bool jpgOk = true;
     if (jpgPath) {
@@ -719,6 +726,60 @@ bool process_and_save_image(
     }
 
     return jpgOk;
+}
+
+bool write_tiff(const char* filename, int width, int height, const std::vector<unsigned short>& data) {
+    LOGD("write_tiff: %s, %dx%d", filename, width, height);
+    TIFF* tif = TIFFOpen(filename, "w");
+    if (!tif) {
+        LOGE("Could not open TIFF for writing: %s", filename);
+        return false;
+    }
+
+    TIFFSetField(tif, TIFFTAG_IMAGEWIDTH, width);
+    TIFFSetField(tif, TIFFTAG_IMAGELENGTH, height);
+    TIFFSetField(tif, TIFFTAG_BITSPERSAMPLE, 16);
+    TIFFSetField(tif, TIFFTAG_SAMPLESPERPIXEL, 3);
+    TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_RGB);
+    TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG);
+    TIFFSetField(tif, TIFFTAG_COMPRESSION, COMPRESSION_LZW);
+    TIFFSetField(tif, TIFFTAG_ORIENTATION, ORIENTATION_TOPLEFT);
+
+    tsize_t line_size = 3 * width * sizeof(unsigned short);
+    for (int y = 0; y < height; y++) {
+        if (TIFFWriteScanline(tif, (void*)&data[static_cast<size_t>(y) * width * 3], y, 0) < 0) {
+            LOGE("Error writing TIFF scanline %d", y);
+            TIFFClose(tif);
+            return false;
+        }
+    }
+
+    TIFFClose(tif);
+    return true;
+}
+
+bool write_tiff_rgba8(const char* filename, int width, int height, const unsigned char* data) {
+    LOGD("write_tiff_rgba8: %s, %dx%d", filename, width, height);
+    TIFF* tif = TIFFOpen(filename, "w");
+    if (!tif) return false;
+
+    TIFFSetField(tif, TIFFTAG_IMAGEWIDTH, width);
+    TIFFSetField(tif, TIFFTAG_IMAGELENGTH, height);
+    TIFFSetField(tif, TIFFTAG_BITSPERSAMPLE, 8);
+    TIFFSetField(tif, TIFFTAG_SAMPLESPERPIXEL, 4);
+    TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_RGB);
+    TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG);
+    TIFFSetField(tif, TIFFTAG_COMPRESSION, COMPRESSION_LZW);
+    TIFFSetField(tif, TIFFTAG_ORIENTATION, ORIENTATION_TOPLEFT);
+
+    for (int y = 0; y < height; y++) {
+        if (TIFFWriteScanline(tif, (void*)&data[static_cast<size_t>(y) * width * 4], y, 0) < 0) {
+            TIFFClose(tif);
+            return false;
+        }
+    }
+    TIFFClose(tif);
+    return true;
 }
 
 bool write_jpeg(const char* filename, int width, int height, const std::vector<unsigned short>& data, int quality) {

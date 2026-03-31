@@ -53,6 +53,7 @@ object ImageSaver {
         digitalGain: Float = 1.0f,
         isAlreadyStitched: Boolean = false,
         captureMetadata: CaptureMetadata? = null,
+        tiffPath: String? = null,
         onBitmapReady: ((Bitmap) -> Unit)? = null
     ): Uri? {
         val halfFrameManager = HalfFrameManager(context)
@@ -218,6 +219,13 @@ object ImageSaver {
                                             ) { out ->
                                                 finalFile.inputStream().use { it.copyTo(out) }
                                             }
+                                            if (tiffPath != null) {
+                                                // Since finalPath is a stitched JPEG, we need to decode it to bitmap to save as TIFF
+                                                BitmapFactory.decodeFile(finalPath)?.let {
+                                                    top.maary.darkbag.processor.ColorProcessor.saveBitmapToTiff(it, tiffPath)
+                                                    it.recycle()
+                                                }
+                                            }
                                         }
                                     }
                                 } else {
@@ -270,6 +278,9 @@ object ImageSaver {
                                         captureMetadata = captureMetadata
                                     ) { out ->
                                         tempJpg.inputStream().use { it.copyTo(out) }
+                                    }
+                                    if (tiffPath != null) {
+                                        top.maary.darkbag.processor.ColorProcessor.saveBitmapToTiff(processedBitmap, tiffPath)
                                     }
                                 }
                                 tempJpg.delete()
