@@ -23,6 +23,8 @@ import androidx.viewpager2.widget.ViewPager2
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.sync.withLock
+import kotlin.coroutines.resume
 import top.maary.darkbag.R
 import top.maary.darkbag.databinding.BottomSheetImageDetailsBinding
 import top.maary.darkbag.databinding.FragmentImageViewerBinding
@@ -66,8 +68,33 @@ class ImageViewerFragment : Fragment() {
 
     private lateinit var lutManager: top.maary.darkbag.utils.LutManager
     private var previewJob: Job? = null
+    private val adapterUpdateMutex = kotlinx.coroutines.sync.Mutex()
     private val pageChangeCallback = object : ViewPager2.OnPageChangeCallback() {
         override fun onPageSelected(position: Int) {
+            val group = adapter.getGroup(position)
+            if (!group.metadataLoaded) {
+                lifecycleScope.launch {
+                    val updatedGroup = repository.loadMetadata(group)
+                    adapterUpdateMutex.withLock {
+                        val currentGroups = adapter.getGroups().toMutableList()
+                        val index = currentGroups.indexOfFirst { it.baseName == updatedGroup.baseName }
+                        if (index != -1) {
+                            currentGroups[index] = updatedGroup
+                            // Use a callback to ensure the differ has actually finished updating
+                            // before we allow the next lock holder to read getGroups()
+                            suspendCancellableCoroutine<Unit> { continuation ->
+                                adapter.updateGroups(currentGroups) {
+                                    if (continuation.isActive) continuation.resume(Unit)
+                                }
+                            }
+                            if (binding.imagePager.currentItem == position) {
+                                updateControlsVisibility()
+                            }
+                        }
+                    }
+                }
+            }
+
             if (isAdjusted) {
                 resetAdjustments()
             } else {
@@ -155,36 +182,52 @@ class ImageViewerFragment : Fragment() {
         binding.imagePager.visibility = View.INVISIBLE
 
         lifecycleScope.launch {
-            val groups = repository.getGroupedImages(forceRefresh = forceRefresh)
-            if (groups.isEmpty()) {
-                findNavController().navigateUp()
-                return@launch
-            }
-            adapter = ImageViewerAdapter(groups, lifecycleScope, requireContext()).apply {
-                onImageTapped = { toggleUi() }
-                onZoomChanged = { isZoomed -> if (isZoomed) hideUi() else showUi() }
-                onLongPressStarted = { handleLongPressStarted(it) }
-                onLongPressEnded = { handleLongPressEnded(it) }
-                setFormatSwitcherPersistentHidden(isAdjusted)
-            }
-            binding.imagePager.adapter = adapter
+            repository.getGroupedImagesFlow(targetUri).collect { groups ->
+                if (groups.isEmpty()) {
+                    findNavController().navigateUp()
+                    return@collect
+                }
 
-            val initialPos = groups.indexOfFirst {
-                it.jpgUri?.toString() == targetUri ||
-                it.dngUri?.toString() == targetUri ||
-                it.dngUri1?.toString() == targetUri ||
-                it.dngUri2?.toString() == targetUri
-            }
-            if (initialPos != -1) {
-                binding.imagePager.setCurrentItem(initialPos, false)
-            }
-            binding.imagePager.isUserInputEnabled = !isAdjusted
+                val isFirstLoad = !::adapter.isInitialized
 
-            setupActionButtons()
-            updateControlsVisibility()
+                if (isFirstLoad) {
+                    adapter = ImageViewerAdapter(groups, lifecycleScope, requireContext()).apply {
+                        onImageTapped = { toggleUi() }
+                        onZoomChanged = { isZoomed -> if (isZoomed) hideUi() else showUi() }
+                        onLongPressStarted = { handleLongPressStarted(it) }
+                        onLongPressEnded = { handleLongPressEnded(it) }
+                        setFormatSwitcherPersistentHidden(isAdjusted)
+                    }
+                    binding.imagePager.adapter = adapter
 
-            binding.imagePager.visibility = View.VISIBLE
-            binding.initialLoadingIndicator.visibility = View.GONE
+                    val initialPos = groups.indexOfFirst {
+                        it.jpgUri?.toString() == targetUri ||
+                                it.dngUri?.toString() == targetUri ||
+                                it.dngUri1?.toString() == targetUri ||
+                                it.dngUri2?.toString() == targetUri
+                    }
+                    if (initialPos != -1) {
+                        binding.imagePager.setCurrentItem(initialPos, false)
+
+                        // Load metadata for the initial image immediately
+                        val initialGroup = groups[initialPos]
+                        if (!initialGroup.metadataLoaded) {
+                            val updatedGroup = repository.loadMetadata(initialGroup)
+                            val updatedGroups = adapter.getGroups().toMutableList()
+                            updatedGroups[initialPos] = updatedGroup
+                            adapter.updateGroups(updatedGroups)
+                        }
+                    }
+                    binding.imagePager.isUserInputEnabled = !isAdjusted
+                    setupActionButtons()
+                    updateControlsVisibility()
+
+                    binding.imagePager.visibility = View.VISIBLE
+                    binding.initialLoadingIndicator.visibility = View.GONE
+                } else {
+                    adapter.updateGroups(groups)
+                }
+            }
         }
     }
 

@@ -7,6 +7,8 @@ import android.os.Build
 import android.provider.MediaStore
 import androidx.documentfile.provider.DocumentFile
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -30,7 +32,8 @@ class ImageRepository(private val context: Context) {
 
         return withContext(Dispatchers.IO) {
             val groups = mutableMapOf<String, ImageGroupBuilder>()
-            val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+            val prefs =
+                context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
 
             // 1. Scan prioritized SAF folders
             val safFolders = listOf(
@@ -57,11 +60,86 @@ class ImageRepository(private val context: Context) {
         }
     }
 
+    fun getGroupedImagesFlow(initialUri: String? = null): Flow<List<ImageGroup>> = flow {
+        val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val groups = mutableMapOf<String, ImageGroupBuilder>()
+
+        suspend fun emitCurrent() {
+            val sorted = groups.values
+                .map { it.build() }
+                .filter { it.hasAny() }
+                .sortedByDescending { it.captureTime }
+            cachedGroups = sorted
+            emit(sorted)
+        }
+
+        // Stage 1: Fast scan MediaStore (usually fastest as it's an indexed database)
+        withContext(Dispatchers.IO) {
+            scanMediaStore(groups, fast = true)
+        }
+        emitCurrent()
+
+        // Stage 2: Scan prioritized SAF folders
+        val safFolders = listOf(
+            prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null),
+            prefs.getString(SettingsFragment.KEY_RAW_STORAGE_URI, null)
+        )
+
+        for (folderUri in safFolders) {
+            if (folderUri != null) {
+                withContext(Dispatchers.IO) {
+                    scanSafFolder(folderUri, groups, fast = true)
+                }
+                emitCurrent()
+            }
+        }
+    }
+
+    suspend fun loadMetadata(group: ImageGroup): ImageGroup = withContext(Dispatchers.IO) {
+        if (group.metadataLoaded) return@withContext group
+
+        val builder = ImageGroupBuilder(group.baseName).applyFrom(group)
+
+        group.jpgUri?.let { uri ->
+            try {
+                context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                    val exif = androidx.exifinterface.media.ExifInterface(pfd.fileDescriptor)
+                    val comment =
+                        exif.getAttribute(androidx.exifinterface.media.ExifInterface.TAG_USER_COMMENT)
+                    parseUserComment(comment, builder)
+
+                    val orientation = exif.getAttributeInt(
+                        androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION,
+                        androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL
+                    )
+                    val w = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_IMAGE_WIDTH, 0)
+                    val h = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_IMAGE_LENGTH, 0)
+
+                    if (orientation == androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90 || orientation == androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270) {
+                        builder.width = h
+                        builder.height = w
+                    } else {
+                        builder.width = w
+                        builder.height = h
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("ImageRepository", "Failed to read EXIF from $uri", e)
+            }
+        }
+
+        builder.build().copy(metadataLoaded = true)
+    }
+
     fun invalidateCache() {
         cachedGroups = null
     }
 
-    private fun scanSafFolder(folderUri: String, groups: MutableMap<String, ImageGroupBuilder>) {
+    private fun scanSafFolder(
+        folderUri: String,
+        groups: MutableMap<String, ImageGroupBuilder>,
+        fast: Boolean = false
+    ) {
         try {
             val treeUri = Uri.parse(folderUri)
             val root = DocumentFile.fromTreeUri(context, treeUri)
@@ -73,18 +151,33 @@ class ImageRepository(private val context: Context) {
                 val lastModified = file.lastModified()
 
                 when {
-                    name.endsWith(".jpg", ignoreCase = true) || name.endsWith(".jpeg", ignoreCase = true) -> {
+                    name.endsWith(".jpg", ignoreCase = true) || name.endsWith(
+                        ".jpeg",
+                        ignoreCase = true
+                    ) -> {
                         builder.setJpg(file.uri, lastModified)
+                        if (!fast) {
                         // Try reading EXIF for layout and dimensions
                         try {
                             context.contentResolver.openFileDescriptor(file.uri, "r")?.use { pfd ->
-                                val exif = androidx.exifinterface.media.ExifInterface(pfd.fileDescriptor)
-                                val comment = exif.getAttribute(androidx.exifinterface.media.ExifInterface.TAG_USER_COMMENT)
+                                val exif =
+                                    androidx.exifinterface.media.ExifInterface(pfd.fileDescriptor)
+                                val comment =
+                                    exif.getAttribute(androidx.exifinterface.media.ExifInterface.TAG_USER_COMMENT)
                                 parseUserComment(comment, builder)
 
-                                val orientation = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION, androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL)
-                                val w = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_IMAGE_WIDTH, 0)
-                                val h = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_IMAGE_LENGTH, 0)
+                                val orientation = exif.getAttributeInt(
+                                    androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION,
+                                    androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL
+                                )
+                                val w = exif.getAttributeInt(
+                                    androidx.exifinterface.media.ExifInterface.TAG_IMAGE_WIDTH,
+                                    0
+                                )
+                                val h = exif.getAttributeInt(
+                                    androidx.exifinterface.media.ExifInterface.TAG_IMAGE_LENGTH,
+                                    0
+                                )
 
                                 if (orientation == androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90 || orientation == androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270) {
                                     builder.width = h
@@ -95,7 +188,12 @@ class ImageRepository(private val context: Context) {
                                 }
                             }
                         } catch (e: Exception) {
-                            android.util.Log.w("ImageRepository", "Failed to read EXIF from ${file.uri}", e)
+                            android.util.Log.w(
+                                "ImageRepository",
+                                "Failed to read EXIF from ${file.uri}",
+                                e
+                            )
+                        }
                         }
                     }
                     name.contains("_HF2") && name.endsWith(".dng", ignoreCase = true) -> {
@@ -114,7 +212,7 @@ class ImageRepository(private val context: Context) {
         }
     }
 
-    private fun scanMediaStore(groups: MutableMap<String, ImageGroupBuilder>) {
+    private fun scanMediaStore(groups: MutableMap<String, ImageGroupBuilder>, fast: Boolean = false) {
         val collection = MediaStore.Images.Media.EXTERNAL_CONTENT_URI
         val projection = arrayOf(
             MediaStore.MediaColumns._ID,
@@ -151,15 +249,27 @@ class ImageRepository(private val context: Context) {
                 when {
                     mime == "image/jpeg" -> {
                         builder.setJpg(uri, date)
+                        if (!fast) {
                         try {
                             context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
-                                val exif = androidx.exifinterface.media.ExifInterface(pfd.fileDescriptor)
-                                val comment = exif.getAttribute(androidx.exifinterface.media.ExifInterface.TAG_USER_COMMENT)
+                                val exif =
+                                    androidx.exifinterface.media.ExifInterface(pfd.fileDescriptor)
+                                val comment =
+                                    exif.getAttribute(androidx.exifinterface.media.ExifInterface.TAG_USER_COMMENT)
                                 parseUserComment(comment, builder)
 
-                                val orientation = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION, androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL)
-                                val w = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_IMAGE_WIDTH, 0)
-                                val h = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_IMAGE_LENGTH, 0)
+                                val orientation = exif.getAttributeInt(
+                                    androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION,
+                                    androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL
+                                )
+                                val w = exif.getAttributeInt(
+                                    androidx.exifinterface.media.ExifInterface.TAG_IMAGE_WIDTH,
+                                    0
+                                )
+                                val h = exif.getAttributeInt(
+                                    androidx.exifinterface.media.ExifInterface.TAG_IMAGE_LENGTH,
+                                    0
+                                )
 
                                 if (orientation == androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90 || orientation == androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270) {
                                     builder.width = h
@@ -171,6 +281,7 @@ class ImageRepository(private val context: Context) {
                             }
                         } catch (e: Exception) {
                             android.util.Log.w("ImageRepository", "Failed to read EXIF from $uri", e)
+                        }
                         }
                     }
                     name.contains("_HF2") && (mime == "image/x-adobe-dng" || name.endsWith(".dng", ignoreCase = true)) -> {
@@ -233,7 +344,7 @@ class ImageRepository(private val context: Context) {
                 adjustments = adjustments,
                 showTimestamp = json.optBoolean("show_timestamp", false),
                 flareType = json.optInt("flare_type", -1),
-                hfLayout = json.optString("hf_layout", null),
+                hfLayout = if (json.has("hf_layout")) json.optString("hf_layout") else null,
                 zoomFactor = json.optDouble("zoom_factor", 1.0).toFloat()
             )
         } catch (e: Exception) {
@@ -302,22 +413,36 @@ class ImageRepository(private val context: Context) {
 
     private class ImageGroupBuilder(val baseName: String) {
         var jpgUri: Uri? = null
-        private var jpgTime: Long = 0L
+        var jpgTime: Long = 0L
         var dngUri: Uri? = null
-        private var dngTime: Long = 0L
+        var dngTime: Long = 0L
         var dngUri1: Uri? = null
-        private var dngUri1Time: Long = 0L
+        var dngUri1Time: Long = 0L
         var dngUri2: Uri? = null
-        private var dngUri2Time: Long = 0L
+        var dngUri2Time: Long = 0L
         var hfLayout: String? = null
         var width: Int = 0
         var height: Int = 0
         var captureTime: Long = 0L
         var editConfig: EditConfig? = null
 
+        fun applyFrom(group: ImageGroup): ImageGroupBuilder {
+            jpgUri = group.jpgUri
+            dngUri = group.dngUri
+            dngUri1 = group.dngUri1
+            dngUri2 = group.dngUri2
+            hfLayout = group.hfLayout
+            width = group.width
+            height = group.height
+            captureTime = group.captureTime
+            editConfig = group.editConfig
+            return this
+        }
+
         fun setJpg(uri: Uri, time: Long) {
-            // Prefer _stitched or simply newer JPG if both exist
-            if (jpgUri == null || time > jpgTime) {
+            // Avoid flipping URI if we already have one for the same file (within 2s)
+            // unless the new one is significantly newer (indicating a true update/edit)
+            if (jpgUri == null || (time > jpgTime + 2000)) {
                 jpgUri = uri
                 jpgTime = time
             }
@@ -325,7 +450,7 @@ class ImageRepository(private val context: Context) {
         }
 
         fun setDng(uri: Uri, time: Long) {
-            if (dngUri == null || time > dngTime) {
+            if (dngUri == null || (time > dngTime + 2000)) {
                 dngUri = uri
                 dngTime = time
             }
@@ -333,8 +458,7 @@ class ImageRepository(private val context: Context) {
         }
 
         fun setDng1(uri: Uri, time: Long) {
-            // For HF1, prefer the one with earlier time in case of conflict
-            if (dngUri1 == null || time < dngUri1Time) {
+            if (dngUri1 == null || (dngUri1Time - time > 2000)) {
                 dngUri1 = uri
                 dngUri1Time = time
             }
@@ -342,8 +466,7 @@ class ImageRepository(private val context: Context) {
         }
 
         fun setDng2(uri: Uri, time: Long) {
-            // For HF2, prefer the one with later time in case of conflict
-            if (dngUri2 == null || time > dngUri2Time) {
+            if (dngUri2 == null || (time > dngUri2Time + 2000)) {
                 dngUri2 = uri
                 dngUri2Time = time
             }
@@ -365,7 +488,8 @@ class ImageRepository(private val context: Context) {
             height,
             captureTime,
             maxOf(jpgTime, dngTime, dngUri1Time, dngUri2Time),
-            editConfig
+            editConfig,
+            metadataLoaded = false
         )
     }
 }

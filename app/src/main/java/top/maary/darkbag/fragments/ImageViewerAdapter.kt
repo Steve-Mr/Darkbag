@@ -5,6 +5,8 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import androidx.core.view.updateLayoutParams
+import androidx.recyclerview.widget.AsyncListDiffer
+import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.RecyclerView
 import com.bumptech.glide.Glide
 import com.bumptech.glide.load.engine.DiskCacheStrategy
@@ -15,7 +17,7 @@ import top.maary.darkbag.models.ImageGroup
 import top.maary.darkbag.utils.ImageUtils
 
 class ImageViewerAdapter(
-    private var groups: List<ImageGroup>,
+    initialGroups: List<ImageGroup>,
     private val scope: CoroutineScope,
     context: android.content.Context
 ) : RecyclerView.Adapter<ImageViewerAdapter.ViewHolder>() {
@@ -32,9 +34,37 @@ class ImageViewerAdapter(
     private var isUiVisible = true
     private var isFormatSwitcherPersistentHidden = false
 
+    private val diffCallback = object : DiffUtil.ItemCallback<ImageGroup>() {
+        override fun areItemsTheSame(oldItem: ImageGroup, newItem: ImageGroup): Boolean {
+            return oldItem.baseName == newItem.baseName
+        }
+
+        override fun areContentsTheSame(oldItem: ImageGroup, newItem: ImageGroup): Boolean {
+            return oldItem == newItem && oldItem.metadataLoaded == newItem.metadataLoaded
+        }
+
+        override fun getChangePayload(oldItem: ImageGroup, newItem: ImageGroup): Any? {
+            val payloads = mutableSetOf<String>()
+            if (oldItem.jpgUri != newItem.jpgUri) payloads.add("JPG_URI_CHANGED")
+            if (oldItem.dngUri != newItem.dngUri || oldItem.dngUri1 != newItem.dngUri1 || oldItem.dngUri2 != newItem.dngUri2) payloads.add("DNG_AVAILABILITY_CHANGED")
+            if (oldItem.metadataLoaded != newItem.metadataLoaded) payloads.add("METADATA_LOADED")
+            if (oldItem.lastModified != newItem.lastModified) payloads.add("LAST_MODIFIED_CHANGED")
+            if (oldItem.editConfig != newItem.editConfig) payloads.add("EDIT_CONFIG_CHANGED")
+
+            return if (payloads.isEmpty()) null else payloads
+        }
+    }
+
+    private val differ = AsyncListDiffer(this, diffCallback)
+
+    init {
+        differ.submitList(initialGroups)
+    }
+
     class ViewHolder(val binding: ItemImageGroupBinding) : RecyclerView.ViewHolder(binding.root) {
         var loadJob: Job? = null
         var manualBitmap: android.graphics.Bitmap? = null
+        var currentUri: Uri? = null
     }
 
     override fun onAttachedToRecyclerView(recyclerView: RecyclerView) {
@@ -54,8 +84,29 @@ class ImageViewerAdapter(
         return ViewHolder(binding)
     }
 
+    override fun onBindViewHolder(holder: ViewHolder, position: Int, payloads: MutableList<Any>) {
+        if (payloads.isNotEmpty()) {
+            val group = differ.currentList[position]
+            val importantPayloads = setOf("JPG_URI_CHANGED", "LAST_MODIFIED_CHANGED", "EDIT_CONFIG_CHANGED")
+
+            val needsReload = payloads.any { payload ->
+                (payload as? Set<*>)?.any { it in importantPayloads } == true
+            }
+
+            if (needsReload) {
+                // Important changes that might require image reload
+                onBindViewHolder(holder, position)
+            } else {
+                // Minor changes (DNG appeared, metadata loaded) - just update buttons
+                setupButtons(holder, group, position)
+            }
+            return
+        }
+        super.onBindViewHolder(holder, position, payloads)
+    }
+
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
-        val group = groups[position]
+        val group = differ.currentList[position]
         holder.loadJob?.cancel()
 
         holder.binding.imageView.setVisualParams(margin, radius)
@@ -146,14 +197,20 @@ class ImageViewerAdapter(
     }
 
     private fun loadDngThumbnailOnly(holder: ViewHolder, uri: Uri, zoomFactor: Float = 1.0f) {
+        val trackingUri = uri.buildUpon().appendQueryParameter("zoom", zoomFactor.toString()).build()
+        if (holder.currentUri == trackingUri && holder.binding.imageView.drawable != null) {
+            return
+        }
         holder.loadJob?.cancel()
+        holder.currentUri = trackingUri
         holder.binding.imageView.visibility = View.VISIBLE
         holder.binding.loadingIndicator.visibility = View.VISIBLE
 
         holder.loadJob = scope.launch {
             var thumbnailBitmap: android.graphics.Bitmap? = null
             try {
-                thumbnailBitmap = ImageUtils.decodeDngThumbnail(holder.binding.root.context, uri, zoomFactor)
+                thumbnailBitmap =
+                    ImageUtils.decodeDngThumbnail(holder.binding.root.context, uri, zoomFactor)
                 ensureActive()
 
                 if (thumbnailBitmap != null) {
@@ -197,6 +254,10 @@ class ImageViewerAdapter(
     }
 
     private fun loadImage(holder: ViewHolder, uri: Uri, zoomFactor: Float = 1.0f, version: Long = 0L) {
+        if (holder.currentUri == uri && holder.binding.imageView.drawable != null) {
+            holder.binding.loadingIndicator.visibility = View.GONE
+            return
+        }
         holder.loadJob?.cancel()
         holder.binding.imageView.visibility = View.VISIBLE
         holder.binding.loadingIndicator.visibility = View.VISIBLE
@@ -204,12 +265,17 @@ class ImageViewerAdapter(
         if (uri.toString().endsWith(".dng", ignoreCase = true)) {
             loadDngThumbnailOnly(holder, uri, zoomFactor)
         } else {
-            loadWithGlide(holder, uri, skipCache = true, version = version)
+            loadWithGlide(holder, uri, version = version)
         }
     }
 
     private fun loadHalfFrameDngs(holder: ViewHolder, group: ImageGroup, zoomFactor: Float = 1.0f) {
+        val trackingUri = Uri.parse("hf://${group.baseName}?layout=${group.hfLayout}&zoom=$zoomFactor")
+        if (holder.currentUri == trackingUri && holder.binding.imageView.drawable != null) {
+            return
+        }
         holder.loadJob?.cancel()
+        holder.currentUri = trackingUri
         holder.binding.imageView.visibility = View.VISIBLE
         holder.binding.loadingIndicator.visibility = View.VISIBLE
         holder.loadJob = scope.launch {
@@ -244,8 +310,13 @@ class ImageViewerAdapter(
         }
     }
 
-    private fun loadWithGlide(holder: ViewHolder, uri: Uri, skipCache: Boolean = false, version: Long = 0L) {
-        clearCurrentBitmap(holder)
+    private fun loadWithGlide(holder: ViewHolder, uri: Uri, version: Long = 0L) {
+        if (holder.currentUri == uri && holder.binding.imageView.drawable != null) {
+            holder.binding.loadingIndicator.visibility = View.GONE
+            return
+        }
+        val previousDrawable = holder.binding.imageView.drawable
+        holder.currentUri = uri
 
         val model = if (version > 0) {
             com.bumptech.glide.signature.ObjectKey(version)
@@ -257,12 +328,7 @@ class ImageViewerAdapter(
             .asDrawable()
             .load(uri)
             .let { if (model != null) it.signature(model) else it }
-            .apply {
-                if (skipCache) {
-                    diskCacheStrategy(DiskCacheStrategy.NONE)
-                    skipMemoryCache(true)
-                }
-            }
+            .placeholder(previousDrawable)
             .into(object : com.bumptech.glide.request.target.DrawableImageViewTarget(holder.binding.imageView) {
                 override fun onLoadFailed(errorDrawable: android.graphics.drawable.Drawable?) {
                     super.onLoadFailed(errorDrawable)
@@ -278,21 +344,23 @@ class ImageViewerAdapter(
             })
     }
 
-    override fun getItemCount(): Int = groups.size
+    override fun getItemCount(): Int = differ.currentList.size
 
     override fun onViewRecycled(holder: ViewHolder) {
         holder.loadJob?.cancel()
         clearCurrentBitmap(holder)
+        holder.currentUri = null
         holder.binding.loadingIndicator.visibility = View.GONE
         super.onViewRecycled(holder)
     }
 
-    fun getGroup(position: Int): ImageGroup = groups[position]
+    fun getGroup(position: Int): ImageGroup = differ.currentList[position]
 
-    fun getGroups(): List<ImageGroup> = groups
+    fun getGroups(): List<ImageGroup> = differ.currentList
 
     fun setFormat(position: Int, format: String) {
-        val group = groups[position]
+        if (position >= differ.currentList.size) return
+        val group = differ.currentList[position]
         if (selectedFormats[position] == format) return
         selectedFormats[position] = format
 
@@ -370,22 +438,11 @@ class ImageViewerAdapter(
         }
     }
 
-    fun updateGroups(newGroups: List<ImageGroup>) {
-        val diffResult = androidx.recyclerview.widget.DiffUtil.calculateDiff(object : androidx.recyclerview.widget.DiffUtil.Callback() {
-            override fun getOldListSize(): Int = groups.size
-            override fun getNewListSize(): Int = newGroups.size
-            override fun areItemsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean {
-                return groups[oldItemPosition].baseName == newGroups[newItemPosition].baseName
-            }
-            override fun areContentsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean {
-                return groups[oldItemPosition] == newGroups[newItemPosition]
-            }
-        })
-        groups = newGroups
-        diffResult.dispatchUpdatesTo(this)
+    fun updateGroups(newGroups: List<ImageGroup>, commitCallback: (() -> Unit)? = null) {
+        differ.submitList(newGroups, commitCallback)
     }
 
     fun findGroupIndex(baseName: String): Int {
-        return groups.indexOfFirst { it.baseName == baseName }
+        return differ.currentList.indexOfFirst { it.baseName == baseName }
     }
 }
