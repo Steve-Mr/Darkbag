@@ -263,6 +263,39 @@ class ImageRepository(private val context: Context) {
         }
     }
 
+    fun getCaptureMetadata(uri: Uri): top.maary.darkbag.models.CaptureMetadata? {
+        if (uri == Uri.EMPTY) return null
+        return try {
+            context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                val exif = androidx.exifinterface.media.ExifInterface(pfd.fileDescriptor)
+                val iso = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_ISO_SPEED_RATINGS, 0).takeIf { it > 0 }
+                val exposureTime = (exif.getAttributeDouble(androidx.exifinterface.media.ExifInterface.TAG_EXPOSURE_TIME, 0.0) * 1_000_000_000).toLong().takeIf { it > 0 }
+                val fNumber = exif.getAttributeDouble(androidx.exifinterface.media.ExifInterface.TAG_F_NUMBER, 0.0).toFloat().takeIf { it > 0 }
+                val focalLength = exif.getAttributeDouble(androidx.exifinterface.media.ExifInterface.TAG_FOCAL_LENGTH, 0.0).toFloat().takeIf { it > 0 }
+                val dateTimeStr = exif.getAttribute(androidx.exifinterface.media.ExifInterface.TAG_DATETIME_ORIGINAL)
+                val dateTime = dateTimeStr?.let {
+                    val sdf = java.text.SimpleDateFormat("yyyy:MM:dd HH:mm:ss", java.util.Locale.US)
+                    sdf.parse(it)?.time
+                }
+                val make = exif.getAttribute(androidx.exifinterface.media.ExifInterface.TAG_MAKE)
+                val model = exif.getAttribute(androidx.exifinterface.media.ExifInterface.TAG_MODEL)
+
+                top.maary.darkbag.models.CaptureMetadata(
+                    iso = iso,
+                    exposureTime = exposureTime,
+                    fNumber = fNumber,
+                    focalLength = focalLength,
+                    dateTimeOriginal = dateTime,
+                    make = make,
+                    model = model
+                )
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("ImageRepository", "Failed to get capture metadata from $uri", e)
+            null
+        }
+    }
+
     private fun getBaseName(fileName: String): String {
         return top.maary.darkbag.utils.ImageUtils.getBaseName(fileName)
     }

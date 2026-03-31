@@ -171,23 +171,6 @@ float getFloatField(JNIEnv* env, jobject obj, jfieldID fieldID, float defaultVal
     return result;
 }
 
-ImageMetadata metadataFromJava(JNIEnv* env, jobject metadataObj) {
-    ImageMetadata meta;
-    if (!metadataObj) return meta;
-
-    meta.iso = getIntField(env, metadataObj, g_metadataFields.iso, 100);
-    meta.exposureTime = getLongField(env, metadataObj, g_metadataFields.exposureTime, 10000000L);
-    meta.fNumber = getFloatField(env, metadataObj, g_metadataFields.fNumber, 1.8f);
-    meta.focalLength = getFloatField(env, metadataObj, g_metadataFields.focalLength, 0.0f);
-    meta.captureTimeMillis = getLongField(env, metadataObj, g_metadataFields.dateTimeOriginal, 0);
-    meta.make = getStringField(env, metadataObj, g_metadataFields.make, "Unknown");
-    meta.model = getStringField(env, metadataObj, g_metadataFields.model, "Unknown");
-    meta.uniqueCameraModel = getStringField(env, metadataObj, g_metadataFields.uniqueCameraModel, meta.model);
-    meta.software = getStringField(env, metadataObj, g_metadataFields.software, "Darkbag HDR+");
-    meta.imageDescription = getStringField(env, metadataObj, g_metadataFields.imageDescription, "Processed by Darkbag HDR+");
-
-    return meta;
-}
 
 } // namespace
 
@@ -250,6 +233,24 @@ extern "C" jint JNI_OnLoad(JavaVM* vm, void* reserved) {
     if (!getBoxedInfo("java/lang/Float", "floatValue", "()F", g_floatClass, g_boxedMethods.floatValue)) return JNI_ERR;
 
     return JNI_VERSION_1_6;
+}
+
+ImageMetadata metadataFromJava(JNIEnv* env, jobject metadataObj) {
+    ImageMetadata meta;
+    if (!metadataObj) return meta;
+
+    meta.iso = getIntField(env, metadataObj, g_metadataFields.iso, 100);
+    meta.exposureTime = getLongField(env, metadataObj, g_metadataFields.exposureTime, 10000000L);
+    meta.fNumber = getFloatField(env, metadataObj, g_metadataFields.fNumber, 1.8f);
+    meta.focalLength = getFloatField(env, metadataObj, g_metadataFields.focalLength, 0.0f);
+    meta.captureTimeMillis = getLongField(env, metadataObj, g_metadataFields.dateTimeOriginal, 0);
+    meta.make = getStringField(env, metadataObj, g_metadataFields.make, "Unknown");
+    meta.model = getStringField(env, metadataObj, g_metadataFields.model, "Unknown");
+    meta.uniqueCameraModel = getStringField(env, metadataObj, g_metadataFields.uniqueCameraModel, meta.model);
+    meta.software = getStringField(env, metadataObj, g_metadataFields.software, "Darkbag");
+    meta.imageDescription = getStringField(env, metadataObj, g_metadataFields.imageDescription, "Processed by Darkbag");
+
+    return meta;
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -318,7 +319,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
         LOGD("Exporting JPG: JPG=%s", jpg_path_cstr);
         saveOk = process_and_save_image(finalImage, width, height, digitalGain, targetLog, lut,
                                         exposure, contrast, saturation, highlights, shadows, whites, blacks,
-                                        jpg_path_cstr, 1, ccmVec.data(), wbVec.data(), orientation, nullptr, 0, 0, false, 1, zoomFactor, (bool)mirror);
+                                        jpg_path_cstr, nullptr, &meta, 1, ccmVec.data(), wbVec.data(), orientation, nullptr, 0, 0, false, 1, zoomFactor, (bool)mirror);
     }
     if (jpgPath && jpg_path_cstr) env->ReleaseStringUTFChars(jpgPath, jpg_path_cstr);
     if (dngPath && dng_path_cstr) env->ReleaseStringUTFChars(dngPath, dng_path_cstr);
@@ -519,7 +520,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
     if (bitmapPixels) {
         process_and_save_image(finalImage, width, height, digitalGain, targetLog, lut,
                                 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, // HSWB not used for preview in standard pipe yet
-                                nullptr, 1, ccmVec.data(), wbVec.data(), orientation, bitmapPixels, out_w, out_h, true, fastPreviewDownsample, zoomFactor, (bool)mirror);
+                                nullptr, nullptr, nullptr, 1, ccmVec.data(), wbVec.data(), orientation, bitmapPixels, out_w, out_h, true, fastPreviewDownsample, zoomFactor, (bool)mirror);
         AndroidBitmap_unlockPixels(env, outputBitmap);
     }
 
@@ -539,7 +540,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
         if (!jpgPathStr.empty()) {
             process_and_save_image(finalImage, width, height, digitalGain, targetLog, lut,
                                     0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
-                                    jpgPathStr.c_str(), 1, ccmVec.data(), wbVec.data(), orientation, nullptr, 0, 0, true, fastPreviewDownsample, zoomFactor, (bool)mirror);
+                                    jpgPathStr.c_str(), nullptr, &meta, 1, ccmVec.data(), wbVec.data(), orientation, nullptr, 0, 0, true, fastPreviewDownsample, zoomFactor, (bool)mirror);
 
             if (exportMatrixAB && !jpgPathStr.empty() && ccmAltVec.size() == 9) {
                 std::string suffix = useSensorColorMatrix ? "_AB_CAPTURE_CCM.jpg" : "_AB_SENSOR_CCM.jpg";
@@ -549,7 +550,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
                 altJpgPath = altJpgPath.substr(0, dot) + suffix;
                 process_and_save_image(finalImage, width, height, digitalGain, targetLog, lut,
                                         0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
-                                        altJpgPath.c_str(), 1, ccmAltVec.data(), wbVec.data(), orientation, nullptr, 0, 0, false, 1, zoomFactor, (bool)mirror);
+                                        altJpgPath.c_str(), nullptr, &meta, 1, ccmAltVec.data(), wbVec.data(), orientation, nullptr, 0, 0, false, 1, zoomFactor, (bool)mirror);
             }
         }
     }

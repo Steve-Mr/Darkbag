@@ -10,6 +10,20 @@
 #include <algorithm>
 #include <iostream>
 
+// --- File Writers ---
+struct ImageMetadata {
+    int iso = 0;
+    int64_t exposureTime = 0;
+    float fNumber = 0.0f;
+    float focalLength = 0.0f;
+    int64_t captureTimeMillis = 0;
+    std::string make;
+    std::string model;
+    std::string uniqueCameraModel;
+    std::string software;
+    std::string imageDescription;
+};
+
 struct Vec3 {
     float r, g, b;
 };
@@ -54,6 +68,8 @@ bool process_and_save_image(
     float whites = 0.0f,
     float blacks = 0.0f,
     const char* jpgPath = nullptr,
+    const char* tiffPath = nullptr,
+    const ImageMetadata* metadata = nullptr,
     int sourceColorSpace = 0,
     const float* ccm = nullptr,
     const float* wb = nullptr,
@@ -67,25 +83,15 @@ bool process_and_save_image(
     bool mirror = false
 );
 
-// --- File Writers ---
-struct ImageMetadata {
-    int iso = 0;
-    int64_t exposureTime = 0;
-    float fNumber = 0.0f;
-    float focalLength = 0.0f;
-    int64_t captureTimeMillis = 0;
-    std::string make;
-    std::string model;
-    std::string uniqueCameraModel;
-    std::string software;
-    std::string imageDescription;
-};
-
 bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, const std::vector<float>& ccm, const ImageMetadata& metadata, int orientation, bool mirror = false, float baselineExposure = 0.0f);
 
 bool write_bmp(const char* filename, int width, int height, const std::vector<unsigned short>& data);
 
 bool write_jpeg(const char* filename, int width, int height, const std::vector<unsigned short>& data, int quality);
+
+bool write_tiff(const char* filename, int width, int height, const std::vector<unsigned short>& data, const ImageMetadata* metadata = nullptr);
+
+bool write_tiff_rgba8(const char* filename, int width, int height, const unsigned char* data, const ImageMetadata* metadata = nullptr);
 
 int compute_preview_downsample_factor(int width, int height, int targetLongEdge);
 

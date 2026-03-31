@@ -379,6 +379,9 @@ class ImageViewerFragment : Fragment() {
             binding.btnShareMenu.isCheckable = true
             binding.btnShareMenu.isChecked = true
             val popup = PopupMenu(requireContext(), it)
+            popup.menu.add(0, MENU_SHARE_TIFF, 0, getString(R.string.share_as_tiff)).apply {
+                setIcon(R.drawable.ic_photo)
+            }
             popup.menu.add(0, MENU_DETAILS, 0, "Details").apply {
                 setIcon(R.drawable.ic_info)
             }
@@ -390,6 +393,7 @@ class ImageViewerFragment : Fragment() {
 
             popup.setOnMenuItemClickListener { item ->
                 when (item.itemId) {
+                    MENU_SHARE_TIFF -> performShareAsTiff()
                     MENU_DETAILS -> showImageDetails()
                     MENU_DELETE -> {
                         val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
@@ -412,12 +416,16 @@ class ImageViewerFragment : Fragment() {
             popup.menu.add(0, MENU_SAVE_AS, 0, "Save as new file").apply {
                 setIcon(R.drawable.ic_save_as)
             }
+            popup.menu.add(0, MENU_SHARE_TIFF, 0, getString(R.string.share_as_tiff)).apply {
+                setIcon(R.drawable.ic_photo)
+            }
 
             forceShowIcons(popup)
 
             popup.setOnMenuItemClickListener { item ->
-                if (item.itemId == MENU_SAVE_AS) {
-                    saveEdit(isReplacement = false)
+                when (item.itemId) {
+                    MENU_SAVE_AS -> saveEdit(isReplacement = false)
+                    MENU_SHARE_TIFF -> performShareAsTiff()
                 }
                 true
             }
@@ -1069,6 +1077,9 @@ class ImageViewerFragment : Fragment() {
 
                         val adj = if (currentGroup.isHalfFrame()) config.adjustments?.get(index) ?: top.maary.darkbag.models.BasicAdjustments() else config.toBasic()
 
+                        val meta = repository.getCaptureMetadata(uri) ?: top.maary.darkbag.models.CaptureMetadata()
+                        // Use a private JNI call or update current one to support metadata for TIFF?
+                        // For now we use the existing one but we should ideally pass metadata.
                         top.maary.darkbag.processor.ColorProcessor.processRaw(
                             dngData = finalBytes,
                             targetLog = logIndex,
@@ -1239,6 +1250,7 @@ class ImageViewerFragment : Fragment() {
                         val previewBitmap = android.graphics.Bitmap.createBitmap(bmpW, bmpH, android.graphics.Bitmap.Config.ARGB_8888)
                         val adj = if (currentGroup.isHalfFrame()) config.adjustments?.get(index) ?: top.maary.darkbag.models.BasicAdjustments() else config.toBasic()
 
+                        val meta = repository.getCaptureMetadata(uri)
                         top.maary.darkbag.processor.ColorProcessor.processRaw(
                             dngData = finalBytes,
                             targetLog = logIndex,
@@ -1257,7 +1269,8 @@ class ImageViewerFragment : Fragment() {
                             mirror = false,
                             outputBitmap = previewBitmap,
                             downsampleFactor = 1,
-                            zoomFactor = config.zoomFactor
+                            zoomFactor = config.zoomFactor,
+                            metadata = meta
                         )
                         return previewBitmap
                     }
@@ -1325,6 +1338,7 @@ class ImageViewerFragment : Fragment() {
                                 editConfig = config,
                                 isAlreadyStitched = currentGroup.isHalfFrame()
                         )
+                        bitmap.recycle()
                     }
                 } catch (e: Exception) {
                     android.util.Log.e("ImageViewerFragment", "Failed to save edit", e)
@@ -1347,6 +1361,184 @@ class ImageViewerFragment : Fragment() {
                 binding.imagePager.setCurrentItem(newPos, false)
                 updateControlsVisibility()
             }
+        }
+    }
+
+    private fun performShareAsTiff() {
+        if (isEditingAdjustments) {
+            com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
+                .setTitle(R.string.share_as_tiff_dialog_title)
+                .setMessage(R.string.share_as_tiff_dialog_message)
+                .setPositiveButton(R.string.save_and_share) { _, _ ->
+                    saveEdit(isReplacement = true)
+                    processAndShareTiff()
+                }
+                .setNegativeButton(R.string.share_without_saving) { _, _ ->
+                    processAndShareTiff()
+                }
+                .setNeutralButton(R.string.cancel, null)
+                .show()
+        } else {
+            processAndShareTiff()
+        }
+    }
+
+    private fun processAndShareTiff() {
+        val config = currentEditConfig ?: return
+        val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
+        val dngUri1 = currentGroup.dngUri ?: currentGroup.dngUri1 ?: return
+        val dngUri2 = currentGroup.dngUri2
+
+        binding.initialLoadingIndicator.visibility = View.VISIBLE
+
+        lifecycleScope.launch {
+            ensureDngBytesLoaded()
+            val tiffUri = withContext(Dispatchers.IO) {
+                try {
+                    val context = requireContext()
+                    val exportDir = java.io.File(context.filesDir, "shared_exports")
+                    if (!exportDir.exists()) exportDir.mkdirs()
+
+                    // Single file policy: reuse same filename to avoid storage bloat
+                    val tempTiff = java.io.File(exportDir, "latest_share_export.tif")
+
+                    val logIndex = SettingsFragment.LOG_CURVES.indexOf(config.log)
+                    val lutPath = if (config.lut != null && config.lut != "None") {
+                        java.io.File(lutManager.lutDir, config.lut).absolutePath
+                    } else null
+
+                    fun processFullToTiff(bytes: ByteArray?, uri: Uri, index: Int, targetTiffPath: String?): android.graphics.Bitmap? {
+                        val finalBytes = bytes ?: run {
+                            context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                                java.io.FileInputStream(pfd.fileDescriptor).use { it.readBytes() }
+                            }
+                        } ?: return null
+                        val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                        BitmapFactory.decodeByteArray(finalBytes, 0, finalBytes.size, options)
+                        val orientation = try {
+                            context.contentResolver.openInputStream(uri)?.use { input ->
+                                androidx.exifinterface.media.ExifInterface(input).getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION, androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL)
+                            } ?: androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL
+                        } catch (e: Exception) { androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL }
+
+                        val rotDegrees = when(orientation) {
+                            androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90 -> 90
+                            androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_180 -> 180
+                            androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270 -> 270
+                            else -> 0
+                        }
+                        val fullW = if (rotDegrees == 90 || rotDegrees == 270) options.outHeight else options.outWidth
+                        val fullH = if (rotDegrees == 90 || rotDegrees == 270) options.outWidth else options.outHeight
+                        val bmpW = (fullW / config.zoomFactor).toInt()
+                        val bmpH = (fullH / config.zoomFactor).toInt()
+                        val previewBitmap = android.graphics.Bitmap.createBitmap(bmpW, bmpH, android.graphics.Bitmap.Config.ARGB_8888)
+                        val adj = if (currentGroup.isHalfFrame()) config.adjustments?.get(index) ?: top.maary.darkbag.models.BasicAdjustments() else config.toBasic()
+
+                        val meta = repository.getCaptureMetadata(uri)
+                        top.maary.darkbag.processor.ColorProcessor.processRaw(
+                            dngData = finalBytes,
+                            targetLog = logIndex,
+                            lutPath = lutPath,
+                            exposure = adj.exposure,
+                            contrast = adj.contrast,
+                            saturation = adj.saturation,
+                            highlights = adj.highlights,
+                            shadows = adj.shadows,
+                            whites = adj.whites,
+                            blacks = adj.blacks,
+                            digitalGain = 1.0f,
+                            outputJpgPath = null,
+                            outputTiffPath = targetTiffPath,
+                            useGpu = false,
+                            orientation = rotDegrees,
+                            mirror = false,
+                            outputBitmap = if (targetTiffPath != null) null else previewBitmap,
+                            downsampleFactor = 1,
+                            zoomFactor = config.zoomFactor,
+                            metadata = meta
+                        )
+                        return previewBitmap
+                    }
+
+                    if (!currentGroup.isHalfFrame()) {
+                        processFullToTiff(sourceDngBytes, dngUri1, 0, tempTiff.absolutePath)?.recycle()
+                    } else {
+                        val b1 = processFullToTiff(sourceDngBytes, dngUri1, 0, null)
+                        val b2 = dngUri2?.let { processFullToTiff(sourceDngBytes2, it, 1, null) }
+
+                        if (b1 != null || b2 != null) {
+                            val isSBS = currentGroup.hfLayout != "TB"
+                            val gap = top.maary.darkbag.utils.HalfFrameUtils.calculateGap(maxOf(b1?.width ?: 0, b1?.height ?: 0)).toFloat()
+                            val w1 = b1?.width ?: b2?.width ?: 0
+                            val h1 = b1?.height ?: b2?.height ?: 0
+                            val w2 = b2?.width ?: w1
+                            val h2 = b2?.height ?: h1
+                            val resW = if (isSBS) (w1 + gap + w2).toInt() else maxOf(w1, w2)
+                            val resH = if (isSBS) maxOf(h1, h2) else (h1 + gap + h2).toInt()
+
+                            val composite = android.graphics.Bitmap.createBitmap(resW, resH, android.graphics.Bitmap.Config.ARGB_8888)
+                            val canvas = android.graphics.Canvas(composite)
+                            canvas.drawColor(android.graphics.Color.BLACK)
+                            b1?.let { canvas.drawBitmap(it, 0f, 0f, null) }
+                            b2?.let {
+                                if (isSBS) canvas.drawBitmap(it, w1 + gap, 0f, null)
+                                else canvas.drawBitmap(it, 0f, h1 + gap, null)
+                            }
+                            val finalComposite = top.maary.darkbag.utils.HalfFrameUtils.addEffects(
+                                composite,
+                                config.showTimestamp,
+                                config.flareType >= 0,
+                                currentGroup.hfLayout ?: "SBS",
+                                time1 = currentGroup.captureTime,
+                                time2 = currentGroup.captureTime,
+                                flareType = config.flareType
+                            )
+                            val meta = repository.getCaptureMetadata(currentGroup.dngUri ?: currentGroup.dngUri1 ?: Uri.EMPTY) ?: top.maary.darkbag.models.CaptureMetadata()
+                            top.maary.darkbag.processor.ColorProcessor.saveBitmapToTiff(finalComposite, tempTiff.absolutePath, meta)
+
+                            if (finalComposite != composite) {
+                                composite.recycle()
+                            }
+                            finalComposite.recycle()
+                            b1?.recycle()
+                            b2?.recycle()
+                        }
+                    }
+
+                    android.provider.DocumentsContract.buildDocumentUri(
+                        top.maary.darkbag.provider.DarkbagDocumentsProvider.AUTHORITY,
+                        "${top.maary.darkbag.provider.DarkbagDocumentsProvider.ROOT_ID_EXPORTS}:${tempTiff.name}"
+                    )
+                } catch (e: Exception) {
+                    android.util.Log.e("ImageViewerFragment", "Failed to process TIFF for sharing", e)
+                    null
+                }
+            }
+
+            binding.initialLoadingIndicator.visibility = View.GONE
+            tiffUri?.let { uri ->
+                // Notify the system that the "Exports" root has changed
+                val childrenUri = android.provider.DocumentsContract.buildChildDocumentsUri(
+                    top.maary.darkbag.provider.DarkbagDocumentsProvider.AUTHORITY,
+                    top.maary.darkbag.provider.DarkbagDocumentsProvider.ROOT_ID_EXPORTS
+                )
+                requireContext().contentResolver.notifyChange(childrenUri, null)
+
+                shareTiff(uri)
+            }
+        }
+    }
+
+    private fun shareTiff(uri: Uri) {
+        val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+            type = "image/tiff"
+            putExtra(android.content.Intent.EXTRA_STREAM, uri)
+            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        try {
+            startActivity(android.content.Intent.createChooser(intent, "Share TIFF"))
+        } catch (e: android.content.ActivityNotFoundException) {
+            android.widget.Toast.makeText(requireContext(), "No app found to share TIFF.", android.widget.Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -1808,6 +2000,7 @@ class ImageViewerFragment : Fragment() {
         private const val MENU_DETAILS = 1
         private const val MENU_DELETE = 2
         private const val MENU_SAVE_AS = 3
+        private const val MENU_SHARE_TIFF = 4
 
         private const val EXPOSURE_MIN = -4f
         private const val EXPOSURE_MAX = 4f

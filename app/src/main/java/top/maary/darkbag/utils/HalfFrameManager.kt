@@ -8,7 +8,7 @@ import android.net.Uri
 import android.provider.DocumentsContract
 import android.util.Log
 import top.maary.darkbag.fragments.SettingsFragment
-import top.maary.darkbag.provider.HalfFrameDocumentsProvider
+import top.maary.darkbag.provider.DarkbagDocumentsProvider
 import java.io.File
 import java.io.FileOutputStream
 
@@ -189,13 +189,16 @@ class HalfFrameManager(private val context: Context) {
     /**
      * Gets a DocumentsProvider URI for the intermediate frame.
      */
+    /**
+     * Gets a DocumentsProvider URI for the intermediate frame.
+     */
     fun getIntermediateUri(): Uri? {
         val path = tempPath ?: return null
         val file = File(path)
         if (!file.exists()) return null
         return DocumentsContract.buildDocumentUri(
-            HalfFrameDocumentsProvider.AUTHORITY,
-            "file:${file.name}"
+            DarkbagDocumentsProvider.AUTHORITY,
+            "${DarkbagDocumentsProvider.ROOT_ID_INTERMEDIATES}:${file.name}"
         )
     }
 

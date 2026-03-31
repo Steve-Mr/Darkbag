@@ -73,9 +73,10 @@
 
         </activity>
 
+
         <provider
-            android:name=".provider.HalfFrameDocumentsProvider"
-            android:authorities="top.maary.darkbag.halfframe.documents"
+            android:name=".provider.DarkbagDocumentsProvider"
+            android:authorities="top.maary.darkbag.documents"
             android:exported="true"
             android:grantUriPermissions="true"
             android:permission="android.permission.MANAGE_DOCUMENTS">
