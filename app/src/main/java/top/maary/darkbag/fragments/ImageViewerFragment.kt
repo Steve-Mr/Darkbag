@@ -72,10 +72,10 @@ class ImageViewerFragment : Fragment() {
             if (!group.metadataLoaded) {
                 lifecycleScope.launch {
                     val updatedGroup = repository.loadMetadata(group)
+                    val groups = adapter.getGroups().toMutableList()
+                    groups[position] = updatedGroup
+                    adapter.updateGroups(groups)
                     if (binding.imagePager.currentItem == position) {
-                        val groups = adapter.getGroups().toMutableList()
-                        groups[position] = updatedGroup
-                        adapter.updateGroups(groups)
                         updateControlsVisibility()
                     }
                 }

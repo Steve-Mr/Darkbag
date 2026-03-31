@@ -44,20 +44,14 @@ class ImageViewerAdapter(
         }
 
         override fun getChangePayload(oldItem: ImageGroup, newItem: ImageGroup): Any? {
-            if (oldItem.baseName == newItem.baseName &&
-                oldItem.jpgUri == newItem.jpgUri &&
-                oldItem.dngUri == newItem.dngUri &&
-                oldItem.dngUri1 == newItem.dngUri1 &&
-                oldItem.dngUri2 == newItem.dngUri2 &&
-                oldItem.hfLayout == newItem.hfLayout &&
-                oldItem.width == newItem.width &&
-                oldItem.height == newItem.height &&
-                oldItem.editConfig == newItem.editConfig &&
-                oldItem.metadataLoaded != newItem.metadataLoaded
-            ) {
-                return "METADATA_LOADED"
-            }
-            return null
+            val payloads = mutableSetOf<String>()
+            if (oldItem.jpgUri != newItem.jpgUri) payloads.add("JPG_URI_CHANGED")
+            if (oldItem.dngUri != newItem.dngUri || oldItem.dngUri1 != newItem.dngUri1 || oldItem.dngUri2 != newItem.dngUri2) payloads.add("DNG_AVAILABILITY_CHANGED")
+            if (oldItem.metadataLoaded != newItem.metadataLoaded) payloads.add("METADATA_LOADED")
+            if (oldItem.lastModified != newItem.lastModified) payloads.add("LAST_MODIFIED_CHANGED")
+            if (oldItem.editConfig != newItem.editConfig) payloads.add("EDIT_CONFIG_CHANGED")
+
+            return if (payloads.isEmpty()) null else payloads
         }
     }
 
@@ -93,10 +87,21 @@ class ImageViewerAdapter(
     override fun onBindViewHolder(holder: ViewHolder, position: Int, payloads: MutableList<Any>) {
         if (payloads.isNotEmpty()) {
             val group = differ.currentList[position]
-            setupButtons(holder, group, position)
-            // If it was DNG and layout changed, we might need full reload,
-            // but for simple metadataLoaded update, button setup is enough.
-            return
+            val payloadSet = payloads[0] as? Set<*>
+
+            if (payloadSet != null) {
+                if (payloadSet.contains("JPG_URI_CHANGED") ||
+                    payloadSet.contains("LAST_MODIFIED_CHANGED") ||
+                    payloadSet.contains("EDIT_CONFIG_CHANGED")
+                ) {
+                    // Important changes that might require image reload
+                    onBindViewHolder(holder, position)
+                } else {
+                    // Minor changes (DNG appeared, metadata loaded) - just update buttons
+                    setupButtons(holder, group, position)
+                }
+                return
+            }
         }
         super.onBindViewHolder(holder, position, payloads)
     }
@@ -251,6 +256,7 @@ class ImageViewerAdapter(
 
     private fun loadImage(holder: ViewHolder, uri: Uri, zoomFactor: Float = 1.0f, version: Long = 0L) {
         if (holder.currentUri == uri && holder.binding.imageView.drawable != null) {
+            holder.binding.loadingIndicator.visibility = View.GONE
             return
         }
         holder.loadJob?.cancel()
@@ -260,7 +266,7 @@ class ImageViewerAdapter(
         if (uri.toString().endsWith(".dng", ignoreCase = true)) {
             loadDngThumbnailOnly(holder, uri, zoomFactor)
         } else {
-            loadWithGlide(holder, uri, skipCache = true, version = version)
+            loadWithGlide(holder, uri, version = version)
         }
     }
 
@@ -305,11 +311,12 @@ class ImageViewerAdapter(
         }
     }
 
-    private fun loadWithGlide(holder: ViewHolder, uri: Uri, skipCache: Boolean = false, version: Long = 0L) {
+    private fun loadWithGlide(holder: ViewHolder, uri: Uri, version: Long = 0L) {
         if (holder.currentUri == uri && holder.binding.imageView.drawable != null) {
+            holder.binding.loadingIndicator.visibility = View.GONE
             return
         }
-        clearCurrentBitmap(holder)
+        val previousDrawable = holder.binding.imageView.drawable
         holder.currentUri = uri
 
         val model = if (version > 0) {
@@ -322,12 +329,7 @@ class ImageViewerAdapter(
             .asDrawable()
             .load(uri)
             .let { if (model != null) it.signature(model) else it }
-            .apply {
-                if (skipCache) {
-                    diskCacheStrategy(DiskCacheStrategy.NONE)
-                    skipMemoryCache(true)
-                }
-            }
+            .placeholder(previousDrawable)
             .into(object : com.bumptech.glide.request.target.DrawableImageViewTarget(holder.binding.imageView) {
                 override fun onLoadFailed(errorDrawable: android.graphics.drawable.Drawable?) {
                     super.onLoadFailed(errorDrawable)
