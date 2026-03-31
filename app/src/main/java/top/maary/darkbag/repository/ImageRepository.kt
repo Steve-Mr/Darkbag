@@ -425,7 +425,7 @@ class ImageRepository(private val context: Context) {
         }
 
         fun setDng1(uri: Uri, time: Long) {
-            if (dngUri1 == null || (time < dngUri1Time && Math.abs(time - dngUri1Time) > 2000)) {
+            if (dngUri1 == null || (dngUri1Time - time > 2000)) {
                 dngUri1 = uri
                 dngUri1Time = time
             }

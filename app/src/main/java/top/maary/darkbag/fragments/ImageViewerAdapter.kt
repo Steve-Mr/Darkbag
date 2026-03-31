@@ -87,21 +87,20 @@ class ImageViewerAdapter(
     override fun onBindViewHolder(holder: ViewHolder, position: Int, payloads: MutableList<Any>) {
         if (payloads.isNotEmpty()) {
             val group = differ.currentList[position]
-            val payloadSet = payloads[0] as? Set<*>
+            val importantPayloads = setOf("JPG_URI_CHANGED", "LAST_MODIFIED_CHANGED", "EDIT_CONFIG_CHANGED")
 
-            if (payloadSet != null) {
-                if (payloadSet.contains("JPG_URI_CHANGED") ||
-                    payloadSet.contains("LAST_MODIFIED_CHANGED") ||
-                    payloadSet.contains("EDIT_CONFIG_CHANGED")
-                ) {
-                    // Important changes that might require image reload
-                    onBindViewHolder(holder, position)
-                } else {
-                    // Minor changes (DNG appeared, metadata loaded) - just update buttons
-                    setupButtons(holder, group, position)
-                }
-                return
+            val needsReload = payloads.any { payload ->
+                (payload as? Set<*>)?.any { it in importantPayloads } == true
             }
+
+            if (needsReload) {
+                // Important changes that might require image reload
+                onBindViewHolder(holder, position)
+            } else {
+                // Minor changes (DNG appeared, metadata loaded) - just update buttons
+                setupButtons(holder, group, position)
+            }
+            return
         }
         super.onBindViewHolder(holder, position, payloads)
     }
@@ -439,8 +438,8 @@ class ImageViewerAdapter(
         }
     }
 
-    fun updateGroups(newGroups: List<ImageGroup>) {
-        differ.submitList(newGroups)
+    fun updateGroups(newGroups: List<ImageGroup>, commitCallback: (() -> Unit)? = null) {
+        differ.submitList(newGroups, commitCallback)
     }
 
     fun findGroupIndex(baseName: String): Int {
