@@ -5,6 +5,8 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import androidx.core.view.updateLayoutParams
+import androidx.recyclerview.widget.AsyncListDiffer
+import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.RecyclerView
 import com.bumptech.glide.Glide
 import com.bumptech.glide.load.engine.DiskCacheStrategy
@@ -15,7 +17,7 @@ import top.maary.darkbag.models.ImageGroup
 import top.maary.darkbag.utils.ImageUtils
 
 class ImageViewerAdapter(
-    private var groups: List<ImageGroup>,
+    initialGroups: List<ImageGroup>,
     private val scope: CoroutineScope,
     context: android.content.Context
 ) : RecyclerView.Adapter<ImageViewerAdapter.ViewHolder>() {
@@ -31,6 +33,39 @@ class ImageViewerAdapter(
     private val selectedFormats = mutableMapOf<Int, String>()
     private var isUiVisible = true
     private var isFormatSwitcherPersistentHidden = false
+
+    private val diffCallback = object : DiffUtil.ItemCallback<ImageGroup>() {
+        override fun areItemsTheSame(oldItem: ImageGroup, newItem: ImageGroup): Boolean {
+            return oldItem.baseName == newItem.baseName
+        }
+
+        override fun areContentsTheSame(oldItem: ImageGroup, newItem: ImageGroup): Boolean {
+            return oldItem == newItem && oldItem.metadataLoaded == newItem.metadataLoaded
+        }
+
+        override fun getChangePayload(oldItem: ImageGroup, newItem: ImageGroup): Any? {
+            if (oldItem.baseName == newItem.baseName &&
+                oldItem.jpgUri == newItem.jpgUri &&
+                oldItem.dngUri == newItem.dngUri &&
+                oldItem.dngUri1 == newItem.dngUri1 &&
+                oldItem.dngUri2 == newItem.dngUri2 &&
+                oldItem.hfLayout == newItem.hfLayout &&
+                oldItem.width == newItem.width &&
+                oldItem.height == newItem.height &&
+                oldItem.editConfig == newItem.editConfig &&
+                oldItem.metadataLoaded != newItem.metadataLoaded
+            ) {
+                return "METADATA_LOADED"
+            }
+            return null
+        }
+    }
+
+    private val differ = AsyncListDiffer(this, diffCallback)
+
+    init {
+        differ.submitList(initialGroups)
+    }
 
     class ViewHolder(val binding: ItemImageGroupBinding) : RecyclerView.ViewHolder(binding.root) {
         var loadJob: Job? = null
@@ -57,7 +92,7 @@ class ImageViewerAdapter(
 
     override fun onBindViewHolder(holder: ViewHolder, position: Int, payloads: MutableList<Any>) {
         if (payloads.isNotEmpty()) {
-            val group = groups[position]
+            val group = differ.currentList[position]
             setupButtons(holder, group, position)
             // If it was DNG and layout changed, we might need full reload,
             // but for simple metadataLoaded update, button setup is enough.
@@ -67,7 +102,7 @@ class ImageViewerAdapter(
     }
 
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
-        val group = groups[position]
+        val group = differ.currentList[position]
         holder.loadJob?.cancel()
 
         holder.binding.imageView.setVisualParams(margin, radius)
@@ -158,11 +193,12 @@ class ImageViewerAdapter(
     }
 
     private fun loadDngThumbnailOnly(holder: ViewHolder, uri: Uri, zoomFactor: Float = 1.0f) {
-        if (holder.currentUri == uri && holder.binding.imageView.drawable != null) {
+        val trackingUri = uri.buildUpon().appendQueryParameter("zoom", zoomFactor.toString()).build()
+        if (holder.currentUri == trackingUri && holder.binding.imageView.drawable != null) {
             return
         }
         holder.loadJob?.cancel()
-        holder.currentUri = uri
+        holder.currentUri = trackingUri
         holder.binding.imageView.visibility = View.VISIBLE
         holder.binding.loadingIndicator.visibility = View.VISIBLE
 
@@ -229,12 +265,12 @@ class ImageViewerAdapter(
     }
 
     private fun loadHalfFrameDngs(holder: ViewHolder, group: ImageGroup, zoomFactor: Float = 1.0f) {
-        val compositeUri = Uri.parse("hf://${group.baseName}")
-        if (holder.currentUri == compositeUri && holder.binding.imageView.drawable != null) {
+        val trackingUri = Uri.parse("hf://${group.baseName}?layout=${group.hfLayout}&zoom=$zoomFactor")
+        if (holder.currentUri == trackingUri && holder.binding.imageView.drawable != null) {
             return
         }
         holder.loadJob?.cancel()
-        holder.currentUri = compositeUri
+        holder.currentUri = trackingUri
         holder.binding.imageView.visibility = View.VISIBLE
         holder.binding.loadingIndicator.visibility = View.VISIBLE
         holder.loadJob = scope.launch {
@@ -307,7 +343,7 @@ class ImageViewerAdapter(
             })
     }
 
-    override fun getItemCount(): Int = groups.size
+    override fun getItemCount(): Int = differ.currentList.size
 
     override fun onViewRecycled(holder: ViewHolder) {
         holder.loadJob?.cancel()
@@ -317,12 +353,13 @@ class ImageViewerAdapter(
         super.onViewRecycled(holder)
     }
 
-    fun getGroup(position: Int): ImageGroup = groups[position]
+    fun getGroup(position: Int): ImageGroup = differ.currentList[position]
 
-    fun getGroups(): List<ImageGroup> = groups
+    fun getGroups(): List<ImageGroup> = differ.currentList
 
     fun setFormat(position: Int, format: String) {
-        val group = groups[position]
+        if (position >= differ.currentList.size) return
+        val group = differ.currentList[position]
         if (selectedFormats[position] == format) return
         selectedFormats[position] = format
 
@@ -401,42 +438,10 @@ class ImageViewerAdapter(
     }
 
     fun updateGroups(newGroups: List<ImageGroup>) {
-        val oldGroups = groups
-        scope.launch(Dispatchers.Default) {
-            val diffResult = androidx.recyclerview.widget.DiffUtil.calculateDiff(object :
-                androidx.recyclerview.widget.DiffUtil.Callback() {
-                override fun getOldListSize(): Int = oldGroups.size
-                override fun getNewListSize(): Int = newGroups.size
-                override fun areItemsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean {
-                    return oldGroups[oldItemPosition].baseName == newGroups[newItemPosition].baseName
-                }
-
-                override fun areContentsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean {
-                    val old = oldGroups[oldItemPosition]
-                    val new = newGroups[newItemPosition]
-                    return old == new && old.metadataLoaded == new.metadataLoaded
-                }
-
-                override fun getChangePayload(oldItemPosition: Int, newItemPosition: Int): Any? {
-                    val old = oldGroups[oldItemPosition]
-                    val new = newGroups[newItemPosition]
-                    if (old.baseName == new.baseName &&
-                        old.jpgUri == new.jpgUri &&
-                        old.dngUri == new.dngUri &&
-                        old.metadataLoaded != new.metadataLoaded) {
-                        return "METADATA_LOADED"
-                    }
-                    return null
-                }
-            })
-            withContext(Dispatchers.Main) {
-                groups = newGroups
-                diffResult.dispatchUpdatesTo(this@ImageViewerAdapter)
-            }
-        }
+        differ.submitList(newGroups)
     }
 
     fun findGroupIndex(baseName: String): Int {
-        return groups.indexOfFirst { it.baseName == baseName }
+        return differ.currentList.indexOfFirst { it.baseName == baseName }
     }
 }

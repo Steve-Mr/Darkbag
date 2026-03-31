@@ -98,17 +98,7 @@ class ImageRepository(private val context: Context) {
     suspend fun loadMetadata(group: ImageGroup): ImageGroup = withContext(Dispatchers.IO) {
         if (group.metadataLoaded) return@withContext group
 
-        val builder = ImageGroupBuilder(group.baseName).apply {
-            jpgUri = group.jpgUri
-            dngUri = group.dngUri
-            dngUri1 = group.dngUri1
-            dngUri2 = group.dngUri2
-            hfLayout = group.hfLayout
-            width = group.width
-            height = group.height
-            captureTime = group.captureTime
-            editConfig = group.editConfig
-        }
+        val builder = ImageGroupBuilder(group.baseName).applyFrom(group)
 
         group.jpgUri?.let { uri ->
             try {
@@ -390,18 +380,31 @@ class ImageRepository(private val context: Context) {
 
     private class ImageGroupBuilder(val baseName: String) {
         var jpgUri: Uri? = null
-        private var jpgTime: Long = 0L
+        var jpgTime: Long = 0L
         var dngUri: Uri? = null
-        private var dngTime: Long = 0L
+        var dngTime: Long = 0L
         var dngUri1: Uri? = null
-        private var dngUri1Time: Long = 0L
+        var dngUri1Time: Long = 0L
         var dngUri2: Uri? = null
-        private var dngUri2Time: Long = 0L
+        var dngUri2Time: Long = 0L
         var hfLayout: String? = null
         var width: Int = 0
         var height: Int = 0
         var captureTime: Long = 0L
         var editConfig: EditConfig? = null
+
+        fun applyFrom(group: ImageGroup): ImageGroupBuilder {
+            jpgUri = group.jpgUri
+            dngUri = group.dngUri
+            dngUri1 = group.dngUri1
+            dngUri2 = group.dngUri2
+            hfLayout = group.hfLayout
+            width = group.width
+            height = group.height
+            captureTime = group.captureTime
+            editConfig = group.editConfig
+            return this
+        }
 
         fun setJpg(uri: Uri, time: Long) {
             // Prefer _stitched or simply newer JPG if both exist
