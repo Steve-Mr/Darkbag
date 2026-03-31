@@ -68,6 +68,19 @@ class ImageViewerFragment : Fragment() {
     private var previewJob: Job? = null
     private val pageChangeCallback = object : ViewPager2.OnPageChangeCallback() {
         override fun onPageSelected(position: Int) {
+            val group = adapter.getGroup(position)
+            if (!group.metadataLoaded) {
+                lifecycleScope.launch {
+                    val updatedGroup = repository.loadMetadata(group)
+                    if (binding.imagePager.currentItem == position) {
+                        val groups = adapter.getGroups().toMutableList()
+                        groups[position] = updatedGroup
+                        adapter.updateGroups(groups)
+                        updateControlsVisibility()
+                    }
+                }
+            }
+
             if (isAdjusted) {
                 resetAdjustments()
             } else {
@@ -155,36 +168,52 @@ class ImageViewerFragment : Fragment() {
         binding.imagePager.visibility = View.INVISIBLE
 
         lifecycleScope.launch {
-            val groups = repository.getGroupedImages(forceRefresh = forceRefresh)
-            if (groups.isEmpty()) {
-                findNavController().navigateUp()
-                return@launch
-            }
-            adapter = ImageViewerAdapter(groups, lifecycleScope, requireContext()).apply {
-                onImageTapped = { toggleUi() }
-                onZoomChanged = { isZoomed -> if (isZoomed) hideUi() else showUi() }
-                onLongPressStarted = { handleLongPressStarted(it) }
-                onLongPressEnded = { handleLongPressEnded(it) }
-                setFormatSwitcherPersistentHidden(isAdjusted)
-            }
-            binding.imagePager.adapter = adapter
+            repository.getGroupedImagesFlow(targetUri).collect { groups ->
+                if (groups.isEmpty()) {
+                    findNavController().navigateUp()
+                    return@collect
+                }
 
-            val initialPos = groups.indexOfFirst {
-                it.jpgUri?.toString() == targetUri ||
-                it.dngUri?.toString() == targetUri ||
-                it.dngUri1?.toString() == targetUri ||
-                it.dngUri2?.toString() == targetUri
-            }
-            if (initialPos != -1) {
-                binding.imagePager.setCurrentItem(initialPos, false)
-            }
-            binding.imagePager.isUserInputEnabled = !isAdjusted
+                val isFirstLoad = !::adapter.isInitialized
 
-            setupActionButtons()
-            updateControlsVisibility()
+                if (isFirstLoad) {
+                    adapter = ImageViewerAdapter(groups, lifecycleScope, requireContext()).apply {
+                        onImageTapped = { toggleUi() }
+                        onZoomChanged = { isZoomed -> if (isZoomed) hideUi() else showUi() }
+                        onLongPressStarted = { handleLongPressStarted(it) }
+                        onLongPressEnded = { handleLongPressEnded(it) }
+                        setFormatSwitcherPersistentHidden(isAdjusted)
+                    }
+                    binding.imagePager.adapter = adapter
 
-            binding.imagePager.visibility = View.VISIBLE
-            binding.initialLoadingIndicator.visibility = View.GONE
+                    val initialPos = groups.indexOfFirst {
+                        it.jpgUri?.toString() == targetUri ||
+                                it.dngUri?.toString() == targetUri ||
+                                it.dngUri1?.toString() == targetUri ||
+                                it.dngUri2?.toString() == targetUri
+                    }
+                    if (initialPos != -1) {
+                        binding.imagePager.setCurrentItem(initialPos, false)
+
+                        // Load metadata for the initial image immediately
+                        val initialGroup = groups[initialPos]
+                        if (!initialGroup.metadataLoaded) {
+                            val updatedGroup = repository.loadMetadata(initialGroup)
+                            val updatedGroups = adapter.getGroups().toMutableList()
+                            updatedGroups[initialPos] = updatedGroup
+                            adapter.updateGroups(updatedGroups)
+                        }
+                    }
+                    binding.imagePager.isUserInputEnabled = !isAdjusted
+                    setupActionButtons()
+                    updateControlsVisibility()
+
+                    binding.imagePager.visibility = View.VISIBLE
+                    binding.initialLoadingIndicator.visibility = View.GONE
+                } else {
+                    adapter.updateGroups(groups)
+                }
+            }
         }
     }
 

@@ -371,18 +371,27 @@ class ImageViewerAdapter(
     }
 
     fun updateGroups(newGroups: List<ImageGroup>) {
-        val diffResult = androidx.recyclerview.widget.DiffUtil.calculateDiff(object : androidx.recyclerview.widget.DiffUtil.Callback() {
-            override fun getOldListSize(): Int = groups.size
-            override fun getNewListSize(): Int = newGroups.size
-            override fun areItemsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean {
-                return groups[oldItemPosition].baseName == newGroups[newItemPosition].baseName
+        val oldGroups = groups
+        scope.launch(Dispatchers.Default) {
+            val diffResult = androidx.recyclerview.widget.DiffUtil.calculateDiff(object :
+                androidx.recyclerview.widget.DiffUtil.Callback() {
+                override fun getOldListSize(): Int = oldGroups.size
+                override fun getNewListSize(): Int = newGroups.size
+                override fun areItemsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean {
+                    return oldGroups[oldItemPosition].baseName == newGroups[newItemPosition].baseName
+                }
+
+                override fun areContentsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean {
+                    val old = oldGroups[oldItemPosition]
+                    val new = newGroups[newItemPosition]
+                    return old == new && old.metadataLoaded == new.metadataLoaded
+                }
+            })
+            withContext(Dispatchers.Main) {
+                groups = newGroups
+                diffResult.dispatchUpdatesTo(this@ImageViewerAdapter)
             }
-            override fun areContentsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean {
-                return groups[oldItemPosition] == newGroups[newItemPosition]
-            }
-        })
-        groups = newGroups
-        diffResult.dispatchUpdatesTo(this)
+        }
     }
 
     fun findGroupIndex(baseName: String): Int {
