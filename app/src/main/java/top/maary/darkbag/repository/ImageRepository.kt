@@ -411,7 +411,7 @@ class ImageRepository(private val context: Context) {
         return top.maary.darkbag.utils.ImageUtils.getBaseName(fileName)
     }
 
-    private class ImageGroupBuilder(val baseName: String) {
+    private inner class ImageGroupBuilder(val baseName: String) {
         var jpgUri: Uri? = null
         var jpgTime: Long = 0L
         var dngUri: Uri? = null
