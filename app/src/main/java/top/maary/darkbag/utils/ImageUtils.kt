@@ -60,11 +60,27 @@ object ImageUtils {
             val paint = Paint(Paint.FILTER_BITMAP_FLAG)
 
             if (isSBS) {
-                oriented1?.let { canvas.drawBitmap(it, 0f, 0f, paint) }
-                oriented2?.let { canvas.drawBitmap(it, w + gap, 0f, paint) }
+                if (oriented1 != null) {
+                    canvas.drawBitmap(oriented1, 0f, 0f, paint)
+                } else {
+                    drawPlaceholder(context, canvas, RectF(0f, 0f, w.toFloat(), h.toFloat()))
+                }
+                if (oriented2 != null) {
+                    canvas.drawBitmap(oriented2, w + gap, 0f, paint)
+                } else {
+                    drawPlaceholder(context, canvas, RectF(w + gap, 0f, w * 2 + gap, h.toFloat()))
+                }
             } else {
-                oriented1?.let { canvas.drawBitmap(it, 0f, 0f, paint) }
-                oriented2?.let { canvas.drawBitmap(it, 0f, h + gap, paint) }
+                if (oriented1 != null) {
+                    canvas.drawBitmap(oriented1, 0f, 0f, paint)
+                } else {
+                    drawPlaceholder(context, canvas, RectF(0f, 0f, w.toFloat(), h.toFloat()))
+                }
+                if (oriented2 != null) {
+                    canvas.drawBitmap(oriented2, 0f, h + gap, paint)
+                } else {
+                    drawPlaceholder(context, canvas, RectF(0f, h + gap, w.toFloat(), h * 2 + gap))
+                }
             }
 
             return@withContext composite
@@ -220,6 +236,24 @@ object ImageUtils {
         val rotated = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
         if (rotated != bitmap) bitmap.recycle()
         return rotated
+    }
+
+    private fun drawPlaceholder(context: Context, canvas: Canvas, rect: RectF) {
+        val paint = Paint().apply {
+            color = Color.DKGRAY
+            style = Paint.Style.FILL
+        }
+        canvas.drawRect(rect, paint)
+
+        val icon = androidx.core.content.ContextCompat.getDrawable(context, android.R.drawable.ic_menu_gallery)
+        icon?.let {
+            val iconSize = (kotlin.math.min(rect.width(), rect.height()) * 0.3f).toInt()
+            val left = (rect.centerX() - iconSize / 2).toInt()
+            val top = (rect.centerY() - iconSize / 2).toInt()
+            it.setBounds(left, top, left + iconSize, top + iconSize)
+            it.setTint(Color.LTGRAY)
+            it.draw(canvas)
+        }
     }
 
     fun calculateInSampleSize(options: BitmapFactory.Options, reqWidth: Int, reqHeight: Int): Int {

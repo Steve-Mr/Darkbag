@@ -265,7 +265,11 @@ class ImageViewerFragment : Fragment() {
     private fun updateControlsVisibility() {
         if (!::adapter.isInitialized || adapter.itemCount == 0) return
         val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
-        val canEdit = currentGroup.dngUri != null || currentGroup.dngUri1 != null
+
+        // 2.2: If partial (JPG exists but one DNG missing), no editing.
+        // 2.4: If dual DNGs exist but no JPG, editing is allowed.
+        // 2.5: If lone DNG (HF1 or HF2) exists and not in-progress, it is not a half-frame group, so that DNG is the source.
+        val canEdit = (currentGroup.dngUri != null || currentGroup.dngUri1 != null || currentGroup.dngUri2 != null) && !currentGroup.isPartial
 
         val visibility = if (canEdit && !isEditingAdjustments) View.VISIBLE else View.GONE
         binding.bottomLeftControls.visibility = visibility
@@ -276,7 +280,7 @@ class ImageViewerFragment : Fragment() {
             prepareEditConfig(currentGroup)
         }
 
-        if (currentGroup.isHalfFrame()) {
+        if (currentGroup.isHalfFrame() && !currentGroup.isPartial) {
             binding.hfExtraControls.visibility = View.VISIBLE
             updateEffectsButtons()
         } else {
@@ -335,14 +339,16 @@ class ImageViewerFragment : Fragment() {
     private suspend fun ensureDngBytesLoaded() {
         if (sourceDngBytes != null) return
         val group = adapter.getGroup(binding.imagePager.currentItem)
-        val dngUri1 = group.dngUri ?: group.dngUri1 ?: return
+        val dngUri1 = group.dngUri ?: group.dngUri1
         val dngUri2 = group.dngUri2
         val context = context ?: return
 
         withContext(Dispatchers.IO) {
             try {
-                context.contentResolver.openFileDescriptor(dngUri1, "r")?.use { pfd ->
-                    sourceDngBytes = java.io.FileInputStream(pfd.fileDescriptor).use { it.readBytes() }
+                dngUri1?.let { uri ->
+                    context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                        sourceDngBytes = java.io.FileInputStream(pfd.fileDescriptor).use { it.readBytes() }
+                    }
                 }
                 dngUri2?.let { uri ->
                     context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
@@ -354,7 +360,8 @@ class ImageViewerFragment : Fragment() {
                 val currentConfig = currentEditConfig
                 if (currentConfig != null) {
                     if (currentConfig.digitalGain == 1.0f && currentConfig.adjustments == null && currentConfig.exposure == 0f) {
-                        repository.readDngBaselineExposure(dngUri1, false)?.let { configFromExif ->
+                        val primaryUri = dngUri1 ?: dngUri2 ?: return@withContext
+                        repository.readDngBaselineExposure(primaryUri, false)?.let { configFromExif ->
                             withContext(Dispatchers.Main) {
                                 if (currentEditConfig?.exposure == 0f) {
                                     currentEditConfig = currentEditConfig?.copy(
@@ -369,7 +376,7 @@ class ImageViewerFragment : Fragment() {
                     } else if (currentConfig.adjustments != null) {
                         val adjs = currentConfig.adjustments.toMutableList()
                         var updated = false
-                        if (adjs.getOrNull(0)?.digitalGain == 1.0f && adjs.getOrNull(0)?.exposure == 0f) {
+                        if (dngUri1 != null && adjs.getOrNull(0)?.digitalGain == 1.0f && adjs.getOrNull(0)?.exposure == 0f) {
                             repository.readDngBaselineExposure(dngUri1, true, 0)?.adjustments?.get(0)?.let { adj ->
                                 adjs[0] = adj
                                 updated = true
@@ -1058,7 +1065,7 @@ class ImageViewerFragment : Fragment() {
 
     private fun applyEditPreviewInternal(config: top.maary.darkbag.models.EditConfig) {
         val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
-        val dngUri1 = currentGroup.dngUri ?: currentGroup.dngUri1 ?: return
+        val dngUri1 = currentGroup.dngUri ?: currentGroup.dngUri1
         val dngUri2 = currentGroup.dngUri2
 
         val currentIndex = binding.imagePager.currentItem
@@ -1147,7 +1154,9 @@ class ImageViewerFragment : Fragment() {
                     }
 
                     if (!currentGroup.isHalfFrame()) {
-                        compositeBitmap = processSingle(sourceDngBytes, dngUri1, 0)
+                        val primaryUri = dngUri1 ?: dngUri2 ?: return@withContext null
+                        val primaryBytes = if (dngUri1 != null) sourceDngBytes else sourceDngBytes2
+                        compositeBitmap = processSingle(primaryBytes, primaryUri!!, 0)
                     } else {
                         val forceUpdate1 = lastPreviewConfig == null ||
                                           lastPreviewConfig?.log != config.log ||
@@ -1161,7 +1170,7 @@ class ImageViewerFragment : Fragment() {
 
                         if (forceUpdate1 || cachedBitmap1 == null) {
                             cachedBitmap1?.recycle()
-                            cachedBitmap1 = processSingle(sourceDngBytes, dngUri1, 0)
+                            cachedBitmap1 = dngUri1?.let { processSingle(sourceDngBytes, it, 0) }
                         }
                         if (forceUpdate2 || cachedBitmap2 == null) {
                             cachedBitmap2?.recycle()
@@ -1253,7 +1262,7 @@ class ImageViewerFragment : Fragment() {
     private fun saveEdit(isReplacement: Boolean) {
         val config = currentEditConfig ?: return
         val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
-        val dngUri1 = currentGroup.dngUri ?: currentGroup.dngUri1 ?: return
+        val dngUri1 = currentGroup.dngUri ?: currentGroup.dngUri1
         val dngUri2 = currentGroup.dngUri2
 
         lifecycleScope.launch {
@@ -1319,9 +1328,11 @@ class ImageViewerFragment : Fragment() {
                     }
 
                     val finalBitmap: android.graphics.Bitmap? = if (!currentGroup.isHalfFrame()) {
-                        processFull(sourceDngBytes, dngUri1, 0)
+                        val primaryUri = dngUri1 ?: dngUri2 ?: return@withContext null
+                        val primaryBytes = if (dngUri1 != null) sourceDngBytes else sourceDngBytes2
+                        processFull(primaryBytes, primaryUri, 0)
                     } else {
-                        val b1 = processFull(sourceDngBytes, dngUri1, 0)
+                        val b1 = dngUri1?.let { processFull(sourceDngBytes, it, 0) }
                         val b2 = dngUri2?.let { processFull(sourceDngBytes2, it, 1) }
 
                         if (b1 != null || b2 != null) {
@@ -1429,7 +1440,7 @@ class ImageViewerFragment : Fragment() {
     private fun processAndShareTiff() {
         val config = currentEditConfig ?: return
         val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
-        val dngUri1 = currentGroup.dngUri ?: currentGroup.dngUri1 ?: return
+        val dngUri1 = currentGroup.dngUri ?: currentGroup.dngUri1
         val dngUri2 = currentGroup.dngUri2
 
         binding.initialLoadingIndicator.visibility = View.VISIBLE
@@ -1504,9 +1515,11 @@ class ImageViewerFragment : Fragment() {
                     }
 
                     if (!currentGroup.isHalfFrame()) {
-                        processFullToTiff(sourceDngBytes, dngUri1, 0, tempTiff.absolutePath)?.recycle()
+                        val primaryUri = dngUri1 ?: dngUri2 ?: return@withContext null
+                        val primaryBytes = if (dngUri1 != null) sourceDngBytes else sourceDngBytes2
+                        processFullToTiff(primaryBytes, primaryUri, 0, tempTiff.absolutePath)?.recycle()
                     } else {
-                        val b1 = processFullToTiff(sourceDngBytes, dngUri1, 0, null)
+                        val b1 = dngUri1?.let { processFullToTiff(sourceDngBytes, it, 0, null) }
                         val b2 = dngUri2?.let { processFullToTiff(sourceDngBytes2, it, 1, null) }
 
                         if (b1 != null || b2 != null) {
@@ -1536,7 +1549,8 @@ class ImageViewerFragment : Fragment() {
                                 time2 = currentGroup.captureTime,
                                 flareType = config.flareType
                             )
-                            val meta = repository.getCaptureMetadata(currentGroup.dngUri ?: currentGroup.dngUri1 ?: Uri.EMPTY) ?: top.maary.darkbag.models.CaptureMetadata()
+                            val primaryUri = currentGroup.dngUri ?: currentGroup.dngUri1 ?: currentGroup.dngUri2 ?: Uri.EMPTY
+                            val meta = repository.getCaptureMetadata(primaryUri) ?: top.maary.darkbag.models.CaptureMetadata()
                             top.maary.darkbag.processor.ColorProcessor.saveBitmapToTiff(finalComposite, tempTiff.absolutePath, meta)
 
                             if (finalComposite != composite) {

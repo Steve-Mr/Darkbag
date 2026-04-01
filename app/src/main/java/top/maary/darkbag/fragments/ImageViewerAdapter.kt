@@ -177,7 +177,8 @@ class ImageViewerAdapter(
                 if (group.isHalfFrame()) {
                     loadHalfFrameDngs(holder, group, group.editConfig?.zoomFactor ?: 1.0f)
                 } else {
-                    group.dngUri?.let { loadImage(holder, it) }
+                    val dngUri = group.dngUri ?: group.dngUri1 ?: group.dngUri2
+                    dngUri?.let { loadImage(holder, it) }
                 }
             }
         }
@@ -205,6 +206,7 @@ class ImageViewerAdapter(
     private fun loadDngThumbnailOnly(holder: ViewHolder, uri: Uri, zoomFactor: Float = 1.0f) {
         val trackingUri = uri.buildUpon().appendQueryParameter("zoom", zoomFactor.toString()).build()
         if (holder.currentUri == trackingUri && holder.binding.imageView.drawable != null) {
+            holder.binding.loadingIndicator.visibility = View.GONE
             return
         }
         holder.loadJob?.cancel()
@@ -278,6 +280,7 @@ class ImageViewerAdapter(
     private fun loadHalfFrameDngs(holder: ViewHolder, group: ImageGroup, zoomFactor: Float = 1.0f) {
         val trackingUri = Uri.parse("hf://${group.baseName}?layout=${group.hfLayout}&zoom=$zoomFactor")
         if (holder.currentUri == trackingUri && holder.binding.imageView.drawable != null) {
+            holder.binding.loadingIndicator.visibility = View.GONE
             return
         }
         holder.loadJob?.cancel()
