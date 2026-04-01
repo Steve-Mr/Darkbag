@@ -52,7 +52,7 @@ class ImageRepository(private val context: Context) {
 
             val result = groups.values
                 .map { it.build() }
-                .filter { it.hasAny() }
+                .filter { it.hasAny() && !it.isInProgress }
                 .sortedByDescending { it.captureTime }
 
             cachedGroups = result
@@ -67,7 +67,7 @@ class ImageRepository(private val context: Context) {
         suspend fun emitCurrent() {
             val sorted = groups.values
                 .map { it.build() }
-                .filter { it.hasAny() }
+                .filter { it.hasAny() && !it.isInProgress }
                 .sortedByDescending { it.captureTime }
             cachedGroups = sorted
             emit(sorted)
@@ -477,19 +477,52 @@ class ImageRepository(private val context: Context) {
             if (time > captureTime) captureTime = time
         }
 
-        fun build() = ImageGroup(
-            baseName,
-            jpgUri,
-            dngUri,
-            dngUri1,
-            dngUri2,
-            hfLayout,
-            width,
-            height,
-            captureTime,
-            maxOf(jpgTime, dngTime, dngUri1Time, dngUri2Time),
-            editConfig,
-            metadataLoaded = false
-        )
+        fun build(): ImageGroup {
+            var isInProgress = false
+            var isPartial = false
+
+            // Check for in-progress half-frame capture
+            if (dngUri1 != null && dngUri2 == null && jpgUri == null) {
+                val sideFile = top.maary.darkbag.utils.HalfFrameSessionStore(context).tempFileForProfile(top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_HALF_SIDE)
+                val topFile = top.maary.darkbag.utils.HalfFrameSessionStore(context).tempFileForProfile(top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_HALF_TOP)
+
+                val sideMatch = sideFile.exists() && Math.abs(sideFile.lastModified() - dngUri1Time) < 60000
+                val topMatch = topFile.exists() && Math.abs(topFile.lastModified() - dngUri1Time) < 60000
+
+                if (sideMatch || topMatch) {
+                    isInProgress = true
+                }
+            }
+
+            // Check for partial half-frame (JPG exists but exactly one DNG is missing)
+            if (jpgUri != null && (hfLayout == "SBS" || hfLayout == "TB" || hfLayout == "Side-by-side" || hfLayout == "Top-bottom")) {
+                if ((dngUri1 == null) xor (dngUri2 == null)) {
+                    isPartial = true
+                }
+            }
+
+            // If it's a half-frame DNG group but no layout is specified, default to SBS
+            var finalLayout = hfLayout
+            if (finalLayout == null && dngUri1 != null && dngUri2 != null && jpgUri == null) {
+                finalLayout = "SBS"
+            }
+
+            return ImageGroup(
+                baseName,
+                jpgUri,
+                dngUri,
+                dngUri1,
+                dngUri2,
+                finalLayout,
+                width,
+                height,
+                captureTime,
+                maxOf(jpgTime, dngTime, dngUri1Time, dngUri2Time),
+                editConfig,
+                metadataLoaded = false,
+                isInProgress = isInProgress,
+                isPartial = isPartial
+            )
+        }
     }
 }

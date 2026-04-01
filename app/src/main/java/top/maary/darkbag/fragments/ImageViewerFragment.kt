@@ -265,7 +265,11 @@ class ImageViewerFragment : Fragment() {
     private fun updateControlsVisibility() {
         if (!::adapter.isInitialized || adapter.itemCount == 0) return
         val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
-        val canEdit = currentGroup.dngUri != null || currentGroup.dngUri1 != null
+
+        // 2.2: If partial (JPG exists but one DNG missing), no editing.
+        // 2.4: If dual DNGs exist but no JPG, editing is allowed.
+        // 2.5: If lone DNG (HF1) exists and not in-progress, it is not a half-frame group, so dngUri1 is the source.
+        val canEdit = (currentGroup.dngUri != null || currentGroup.dngUri1 != null) && !currentGroup.isPartial
 
         val visibility = if (canEdit && !isEditingAdjustments) View.VISIBLE else View.GONE
         binding.bottomLeftControls.visibility = visibility
@@ -276,7 +280,7 @@ class ImageViewerFragment : Fragment() {
             prepareEditConfig(currentGroup)
         }
 
-        if (currentGroup.isHalfFrame()) {
+        if (currentGroup.isHalfFrame() && !currentGroup.isPartial) {
             binding.hfExtraControls.visibility = View.VISIBLE
             updateEffectsButtons()
         } else {

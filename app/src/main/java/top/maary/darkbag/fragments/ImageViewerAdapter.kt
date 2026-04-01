@@ -109,6 +109,7 @@ class ImageViewerAdapter(
         val group = differ.currentList[position]
         holder.loadJob?.cancel()
 
+
         holder.binding.imageView.setVisualParams(margin, radius)
 
         holder.binding.imageView.onTapped = { onImageTapped?.invoke() }
@@ -149,6 +150,12 @@ class ImageViewerAdapter(
             btnJpg.visibility = if (group.jpgUri != null) View.VISIBLE else View.GONE
             btnDng.visibility = if (group.dngUri != null || group.dngUri1 != null || group.dngUri2 != null) View.VISIBLE else View.GONE
 
+            if (group.isPartial) {
+                // For partial groups (JPG exists but one DNG is missing), we show both buttons
+                // but switching to DNG will show the composite with placeholder.
+                btnDng.visibility = View.VISIBLE
+            }
+
             btnJpg.setOnClickListener {
                 if (selectedFormats[position] == "JPG") return@setOnClickListener
                 selectedFormats[position] = "JPG"
@@ -171,7 +178,8 @@ class ImageViewerAdapter(
                 if (group.isHalfFrame()) {
                     loadHalfFrameDngs(holder, group, group.editConfig?.zoomFactor ?: 1.0f)
                 } else {
-                    group.dngUri?.let { loadImage(holder, it) }
+                    val dngUri = group.dngUri ?: group.dngUri1 ?: group.dngUri2
+                    dngUri?.let { loadImage(holder, it) }
                 }
             }
         }
@@ -199,6 +207,7 @@ class ImageViewerAdapter(
     private fun loadDngThumbnailOnly(holder: ViewHolder, uri: Uri, zoomFactor: Float = 1.0f) {
         val trackingUri = uri.buildUpon().appendQueryParameter("zoom", zoomFactor.toString()).build()
         if (holder.currentUri == trackingUri && holder.binding.imageView.drawable != null) {
+            holder.binding.loadingIndicator.visibility = View.GONE
             return
         }
         holder.loadJob?.cancel()
@@ -272,6 +281,7 @@ class ImageViewerAdapter(
     private fun loadHalfFrameDngs(holder: ViewHolder, group: ImageGroup, zoomFactor: Float = 1.0f) {
         val trackingUri = Uri.parse("hf://${group.baseName}?layout=${group.hfLayout}&zoom=$zoomFactor")
         if (holder.currentUri == trackingUri && holder.binding.imageView.drawable != null) {
+            holder.binding.loadingIndicator.visibility = View.GONE
             return
         }
         holder.loadJob?.cancel()

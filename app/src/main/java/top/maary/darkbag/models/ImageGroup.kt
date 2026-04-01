@@ -17,10 +17,17 @@ data class ImageGroup(
     val captureTime: Long = 0L,
     val lastModified: Long = 0L,
     val editConfig: EditConfig? = null,
-    val metadataLoaded: Boolean = false
+    val metadataLoaded: Boolean = false,
+    val isInProgress: Boolean = false,
+    val isPartial: Boolean = false
 ) : Parcelable {
     fun hasAny(): Boolean = jpgUri != null || dngUri != null || dngUri1 != null || dngUri2 != null
-    fun isHalfFrame(): Boolean = dngUri1 != null || dngUri2 != null || hfLayout == "SBS" || hfLayout == "TB"
+
+    // 2.5: Only true if it has both DNGs, a stitched JPG, or an explicit layout.
+    // If only dngUri1 exists and no jpg, it's NOT a half-frame group (shows as single image).
+    fun isHalfFrame(): Boolean = (dngUri1 != null && dngUri2 != null) ||
+                                (jpgUri != null && (hfLayout == "SBS" || hfLayout == "TB" || hfLayout == "Side-by-side" || hfLayout == "Top-bottom")) ||
+                                (hfLayout == "SBS" || hfLayout == "TB")
 }
 
 @Parcelize
