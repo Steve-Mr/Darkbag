@@ -17,10 +17,13 @@ data class ImageGroup(
     val captureTime: Long = 0L,
     val lastModified: Long = 0L,
     val editConfig: EditConfig? = null,
-    val metadataLoaded: Boolean = false
+    val metadataLoaded: Boolean = false,
+    val isInProgress: Boolean = false,
+    val isPartial: Boolean = false,
+    val intermediateUri: Uri? = null
 ) : Parcelable {
-    fun hasAny(): Boolean = jpgUri != null || dngUri != null || dngUri1 != null || dngUri2 != null
-    fun isHalfFrame(): Boolean = dngUri1 != null || dngUri2 != null || hfLayout == "SBS" || hfLayout == "TB"
+    fun hasAny(): Boolean = jpgUri != null || dngUri != null || dngUri1 != null || dngUri2 != null || intermediateUri != null
+    fun isHalfFrame(): Boolean = dngUri1 != null || dngUri2 != null || hfLayout == "SBS" || hfLayout == "TB" || isInProgress
 }
 
 @Parcelize

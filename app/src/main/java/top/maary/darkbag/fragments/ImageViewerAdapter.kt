@@ -146,8 +146,8 @@ class ImageViewerAdapter(
 
     private fun setupButtons(holder: ViewHolder, group: ImageGroup, position: Int) {
         with(holder.binding) {
-            btnJpg.visibility = if (group.jpgUri != null) View.VISIBLE else View.GONE
-            btnDng.visibility = if (group.dngUri != null || group.dngUri1 != null || group.dngUri2 != null) View.VISIBLE else View.GONE
+            btnJpg.visibility = if (group.jpgUri != null && !group.isInProgress) View.VISIBLE else View.GONE
+            btnDng.visibility = if ((group.dngUri != null || group.dngUri1 != null || group.dngUri2 != null) && !group.isInProgress) View.VISIBLE else View.GONE
 
             btnJpg.setOnClickListener {
                 if (selectedFormats[position] == "JPG") return@setOnClickListener
@@ -199,6 +199,7 @@ class ImageViewerAdapter(
     private fun loadDngThumbnailOnly(holder: ViewHolder, uri: Uri, zoomFactor: Float = 1.0f) {
         val trackingUri = uri.buildUpon().appendQueryParameter("zoom", zoomFactor.toString()).build()
         if (holder.currentUri == trackingUri && holder.binding.imageView.drawable != null) {
+            holder.binding.loadingIndicator.visibility = View.GONE
             return
         }
         holder.loadJob?.cancel()
@@ -270,8 +271,9 @@ class ImageViewerAdapter(
     }
 
     private fun loadHalfFrameDngs(holder: ViewHolder, group: ImageGroup, zoomFactor: Float = 1.0f) {
-        val trackingUri = Uri.parse("hf://${group.baseName}?layout=${group.hfLayout}&zoom=$zoomFactor")
+        val trackingUri = Uri.parse("hf://${group.baseName}?layout=${group.hfLayout}&zoom=$zoomFactor&inProgress=${group.isInProgress}")
         if (holder.currentUri == trackingUri && holder.binding.imageView.drawable != null) {
+            holder.binding.loadingIndicator.visibility = View.GONE
             return
         }
         holder.loadJob?.cancel()
@@ -286,7 +288,8 @@ class ImageViewerAdapter(
                     group.dngUri1,
                     group.dngUri2,
                     group.hfLayout,
-                    zoomFactor
+                    zoomFactor,
+                    group.intermediateUri
                 )
                 ensureActive()
                 if (composite != null) {

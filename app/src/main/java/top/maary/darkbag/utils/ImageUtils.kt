@@ -29,9 +29,15 @@ object ImageUtils {
         uri1: Uri?,
         uri2: Uri?,
         layout: String?, // "SBS" or "TB"
-        zoomFactor: Float = 1.0f
+        zoomFactor: Float = 1.0f,
+        intermediateUri: Uri? = null
     ): Bitmap? = withContext(Dispatchers.IO) {
-        val bit1 = uri1?.let { decodeDngThumbnail(context, it, zoomFactor) }
+        // Use intermediate JPG for first frame if provided (in-progress capture)
+        val bit1 = if (intermediateUri != null) {
+            decodeJpgThumbnail(context, intermediateUri, zoomFactor)
+        } else {
+            uri1?.let { decodeDngThumbnail(context, it, zoomFactor) }
+        }
         val bit2 = uri2?.let { decodeDngThumbnail(context, it, zoomFactor) }
 
         if (bit1 == null && bit2 == null) return@withContext null
@@ -60,11 +66,39 @@ object ImageUtils {
             val paint = Paint(Paint.FILTER_BITMAP_FLAG)
 
             if (isSBS) {
-                oriented1?.let { canvas.drawBitmap(it, 0f, 0f, paint) }
-                oriented2?.let { canvas.drawBitmap(it, w + gap, 0f, paint) }
+                if (oriented1 != null) {
+                    canvas.drawBitmap(oriented1, 0f, 0f, paint)
+                } else {
+                    // Frame 1 missing, use blurred Frame 2
+                    val placeholder = BlurUtils.blur(oriented2!!, 16)
+                    canvas.drawBitmap(placeholder, 0f, 0f, paint)
+                    placeholder.recycle()
+                }
+
+                if (oriented2 != null) {
+                    canvas.drawBitmap(oriented2, w + gap, 0f, paint)
+                } else {
+                    // Frame 2 missing, use blurred Frame 1
+                    val placeholder = BlurUtils.blur(oriented1!!, 16)
+                    canvas.drawBitmap(placeholder, w + gap, 0f, paint)
+                    placeholder.recycle()
+                }
             } else {
-                oriented1?.let { canvas.drawBitmap(it, 0f, 0f, paint) }
-                oriented2?.let { canvas.drawBitmap(it, 0f, h + gap, paint) }
+                if (oriented1 != null) {
+                    canvas.drawBitmap(oriented1, 0f, 0f, paint)
+                } else {
+                    val placeholder = BlurUtils.blur(oriented2!!, 16)
+                    canvas.drawBitmap(placeholder, 0f, 0f, paint)
+                    placeholder.recycle()
+                }
+
+                if (oriented2 != null) {
+                    canvas.drawBitmap(oriented2, 0f, h + gap, paint)
+                } else {
+                    val placeholder = BlurUtils.blur(oriented1!!, 16)
+                    canvas.drawBitmap(placeholder, 0f, h + gap, paint)
+                    placeholder.recycle()
+                }
             }
 
             return@withContext composite
@@ -75,6 +109,27 @@ object ImageUtils {
             // Cleanup oriented bitmaps as they are intermediate
             oriented1?.recycle()
             oriented2?.recycle()
+        }
+    }
+
+    private suspend fun decodeJpgThumbnail(context: Context, uri: Uri, zoomFactor: Float): Bitmap? = withContext(Dispatchers.IO) {
+        try {
+            var bitmap: Bitmap? = null
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                bitmap = BitmapFactory.decodeStream(input)
+            }
+            return@withContext if (bitmap != null && zoomFactor > 1.05f) {
+                val newWidth = (bitmap!!.width / zoomFactor).toInt()
+                val newHeight = (bitmap!!.height / zoomFactor).toInt()
+                val x = (bitmap!!.width - newWidth) / 2
+                val y = (bitmap!!.height - newHeight) / 2
+                val cropped = Bitmap.createBitmap(bitmap!!, x.coerceAtLeast(0), y.coerceAtLeast(0),
+                    newWidth.coerceAtMost(bitmap!!.width), newHeight.coerceAtMost(bitmap!!.height))
+                if (cropped != bitmap) bitmap!!.recycle()
+                cropped
+            } else bitmap
+        } catch (e: Exception) {
+            null
         }
     }
 

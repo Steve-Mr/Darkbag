@@ -265,16 +265,19 @@ class ImageViewerFragment : Fragment() {
     private fun updateControlsVisibility() {
         if (!::adapter.isInitialized || adapter.itemCount == 0) return
         val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
-        val canEdit = currentGroup.dngUri != null || currentGroup.dngUri1 != null
+        val canEdit = (currentGroup.dngUri != null || currentGroup.dngUri1 != null) && !currentGroup.isInProgress && !currentGroup.isPartial
+        val canShare = !currentGroup.isInProgress
 
-        val visibility = if (canEdit && !isEditingAdjustments) View.VISIBLE else View.GONE
-        binding.bottomLeftControls.visibility = visibility
-        binding.bottomRightControls.visibility = visibility
-        binding.fabAdjust.visibility = visibility
+        val editVisibility = if (canEdit && !isEditingAdjustments) View.VISIBLE else View.GONE
+        binding.bottomLeftControls.visibility = editVisibility
+        binding.bottomRightControls.visibility = editVisibility
+        binding.fabAdjust.visibility = editVisibility
 
         if (canEdit && currentEditConfig == null) {
             prepareEditConfig(currentGroup)
         }
+
+        binding.splitShare.visibility = if (canShare && !isAdjusted && !isEditingAdjustments) View.VISIBLE else View.GONE
 
         if (currentGroup.isHalfFrame()) {
             binding.hfExtraControls.visibility = View.VISIBLE
@@ -397,11 +400,14 @@ class ImageViewerFragment : Fragment() {
     }
 
     private fun updateSplitButtons() {
+        val currentGroup = if (::adapter.isInitialized && adapter.itemCount > 0) adapter.getGroup(binding.imagePager.currentItem) else null
+        val canShare = currentGroup?.isInProgress == false
+
         if (isAdjusted || isEditingAdjustments) {
             binding.splitShare.visibility = View.GONE
             binding.splitSave.visibility = View.VISIBLE
         } else {
-            binding.splitShare.visibility = View.VISIBLE
+            binding.splitShare.visibility = if (canShare) View.VISIBLE else View.GONE
             binding.splitSave.visibility = View.GONE
         }
     }

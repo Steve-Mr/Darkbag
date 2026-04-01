@@ -51,7 +51,7 @@ class ImageRepository(private val context: Context) {
             scanMediaStore(groups)
 
             val result = groups.values
-                .map { it.build() }
+                .map { it.build(context) }
                 .filter { it.hasAny() }
                 .sortedByDescending { it.captureTime }
 
@@ -66,7 +66,7 @@ class ImageRepository(private val context: Context) {
 
         suspend fun emitCurrent() {
             val sorted = groups.values
-                .map { it.build() }
+                .map { it.build(context) }
                 .filter { it.hasAny() }
                 .sortedByDescending { it.captureTime }
             cachedGroups = sorted
@@ -128,7 +128,7 @@ class ImageRepository(private val context: Context) {
             }
         }
 
-        builder.build().copy(metadataLoaded = true)
+        builder.build(context).copy(metadataLoaded = true)
     }
 
     fun invalidateCache() {
@@ -477,19 +477,49 @@ class ImageRepository(private val context: Context) {
             if (time > captureTime) captureTime = time
         }
 
-        fun build() = ImageGroup(
-            baseName,
-            jpgUri,
-            dngUri,
-            dngUri1,
-            dngUri2,
-            hfLayout,
-            width,
-            height,
-            captureTime,
-            maxOf(jpgTime, dngTime, dngUri1Time, dngUri2Time),
-            editConfig,
-            metadataLoaded = false
-        )
+        fun build(context: Context): ImageGroup {
+            var isInProgress = false
+            var intermediateUri: Uri? = null
+            var finalHfLayout = hfLayout
+
+            // Check for in-progress half-frame: Only HF1 DNG, no HF2 DNG, no JPG
+            if (dngUri1 != null && dngUri2 == null && jpgUri == null) {
+                val sessionStore = top.maary.darkbag.utils.HalfFrameSessionStore(context)
+                val sbsTemp = sessionStore.tempFileForProfile(top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_HALF_SIDE)
+                val tbTemp = sessionStore.tempFileForProfile(top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_HALF_TOP)
+
+                val timeDiffThreshold = 5000L // 5 seconds
+
+                if (sbsTemp.exists() && Math.abs(sbsTemp.lastModified() - dngUri1Time) < timeDiffThreshold) {
+                    isInProgress = true
+                    intermediateUri = Uri.fromFile(sbsTemp)
+                    finalHfLayout = SettingsFragment.HALF_FRAME_LAYOUT_SBS
+                } else if (tbTemp.exists() && Math.abs(tbTemp.lastModified() - dngUri1Time) < timeDiffThreshold) {
+                    isInProgress = true
+                    intermediateUri = Uri.fromFile(tbTemp)
+                    finalHfLayout = SettingsFragment.HALF_FRAME_LAYOUT_TB
+                }
+            }
+
+            val isPartial = (dngUri1 != null || dngUri2 != null) && jpgUri != null && (dngUri1 == null || dngUri2 == null)
+
+            return ImageGroup(
+                baseName,
+                jpgUri,
+                dngUri,
+                dngUri1,
+                dngUri2,
+                finalHfLayout,
+                width,
+                height,
+                captureTime,
+                maxOf(jpgTime, dngTime, dngUri1Time, dngUri2Time),
+                editConfig,
+                metadataLoaded = false,
+                isInProgress = isInProgress,
+                isPartial = isPartial,
+                intermediateUri = intermediateUri
+            )
+        }
     }
 }
