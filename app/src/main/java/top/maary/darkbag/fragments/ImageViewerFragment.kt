@@ -1170,7 +1170,7 @@ class ImageViewerFragment : Fragment() {
 
                         if (forceUpdate1 || cachedBitmap1 == null) {
                             cachedBitmap1?.recycle()
-                            cachedBitmap1 = processSingle(sourceDngBytes, dngUri1, 0)
+                            cachedBitmap1 = dngUri1?.let { processSingle(sourceDngBytes, it, 0) }
                         }
                         if (forceUpdate2 || cachedBitmap2 == null) {
                             cachedBitmap2?.recycle()
@@ -1330,9 +1330,9 @@ class ImageViewerFragment : Fragment() {
                     val finalBitmap: android.graphics.Bitmap? = if (!currentGroup.isHalfFrame()) {
                         val primaryUri = dngUri1 ?: dngUri2 ?: return@withContext null
                         val primaryBytes = if (dngUri1 != null) sourceDngBytes else sourceDngBytes2
-                        processFull(primaryBytes, primaryUri!!, 0)
+                        processFull(primaryBytes, primaryUri, 0)
                     } else {
-                        val b1 = processFull(sourceDngBytes, dngUri1, 0)
+                        val b1 = dngUri1?.let { processFull(sourceDngBytes, it, 0) }
                         val b2 = dngUri2?.let { processFull(sourceDngBytes2, it, 1) }
 
                         if (b1 != null || b2 != null) {
@@ -1517,9 +1517,9 @@ class ImageViewerFragment : Fragment() {
                     if (!currentGroup.isHalfFrame()) {
                         val primaryUri = dngUri1 ?: dngUri2 ?: return@withContext null
                         val primaryBytes = if (dngUri1 != null) sourceDngBytes else sourceDngBytes2
-                        processFullToTiff(primaryBytes, primaryUri!!, 0, tempTiff.absolutePath)?.recycle()
+                        processFullToTiff(primaryBytes, primaryUri, 0, tempTiff.absolutePath)?.recycle()
                     } else {
-                        val b1 = processFullToTiff(sourceDngBytes, dngUri1, 0, null)
+                        val b1 = dngUri1?.let { processFullToTiff(sourceDngBytes, it, 0, null) }
                         val b2 = dngUri2?.let { processFullToTiff(sourceDngBytes2, it, 1, null) }
 
                         if (b1 != null || b2 != null) {
