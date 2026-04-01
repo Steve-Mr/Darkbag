@@ -65,6 +65,8 @@ class ImageViewerAdapter(
         var loadJob: Job? = null
         var manualBitmap: android.graphics.Bitmap? = null
         var currentUri: Uri? = null
+        var currentBaseName: String? = null
+        var currentVersion: Long = 0L
     }
 
     override fun onAttachedToRecyclerView(recyclerView: RecyclerView) {
@@ -102,13 +104,16 @@ class ImageViewerAdapter(
             }
             return
         }
-        super.onBindViewHolder(holder, position, payloads)
+        onBindViewHolder(holder, position)
     }
 
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
         val group = differ.currentList[position]
         holder.loadJob?.cancel()
 
+        val isSameImage = holder.currentBaseName == group.baseName
+        holder.binding.imageView.setMaintainZoomOnNextImage(isSameImage)
+        holder.currentBaseName = group.baseName
 
         holder.binding.imageView.setVisualParams(margin, radius)
 
@@ -315,12 +320,13 @@ class ImageViewerAdapter(
     }
 
     private fun loadWithGlide(holder: ViewHolder, uri: Uri, version: Long = 0L) {
-        if (holder.currentUri == uri && holder.binding.imageView.drawable != null) {
+        if (holder.currentUri == uri && holder.currentVersion == version && holder.binding.imageView.drawable != null) {
             holder.binding.loadingIndicator.visibility = View.GONE
             return
         }
         val previousDrawable = holder.binding.imageView.drawable
         holder.currentUri = uri
+        holder.currentVersion = version
 
         val model = if (version > 0) {
             com.bumptech.glide.signature.ObjectKey(version)
@@ -354,6 +360,8 @@ class ImageViewerAdapter(
         holder.loadJob?.cancel()
         clearCurrentBitmap(holder)
         holder.currentUri = null
+        holder.currentBaseName = null
+        holder.currentVersion = 0L
         holder.binding.loadingIndicator.visibility = View.GONE
         super.onViewRecycled(holder)
     }
