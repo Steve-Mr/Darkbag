@@ -17,13 +17,37 @@ class ZoomableImageView @JvmOverloads constructor(
 ) : AppCompatImageView(context, attrs, defStyleAttr) {
 
     override fun setImageBitmap(bm: android.graphics.Bitmap?) {
-        super.setImageBitmap(bm)
-        resetZoom()
+        if (maintainZoomOnNextImage && bm != null && origWidth > 0f) {
+            super.setImageBitmap(bm)
+            maintainZoomOnNextImage = false
+            applyMaintainZoom(bm.width.toFloat(), bm.height.toFloat())
+        } else {
+            super.setImageBitmap(bm)
+            resetZoom()
+        }
     }
 
     override fun setImageDrawable(drawable: android.graphics.drawable.Drawable?) {
-        super.setImageDrawable(drawable)
-        resetZoom()
+        if (maintainZoomOnNextImage && drawable != null && origWidth > 0f) {
+            val bmWidth = drawable.intrinsicWidth.toFloat()
+            val bmHeight = drawable.intrinsicHeight.toFloat()
+            super.setImageDrawable(drawable)
+            maintainZoomOnNextImage = false
+            if (bmWidth > 0 && bmHeight > 0) {
+                applyMaintainZoom(bmWidth, bmHeight)
+            } else {
+                resetZoom()
+            }
+        } else {
+            super.setImageDrawable(drawable)
+            resetZoom()
+        }
+    }
+
+    private var maintainZoomOnNextImage = false
+
+    fun setMaintainZoomOnNextImage(maintain: Boolean) {
+        maintainZoomOnNextImage = maintain
     }
 
     private var matrixValue = Matrix()
@@ -292,9 +316,14 @@ class ZoomableImageView @JvmOverloads constructor(
     }
 
     fun setVisualParams(margin: Float, radius: Float) {
+        if (this.visualMargin == margin && this.visualCornerRadius == radius) return
         this.visualMargin = margin
         this.visualCornerRadius = radius
-        resetZoom()
+        if (saveScale > 1f) {
+            applyMaintainZoom()
+        } else {
+            resetZoom()
+        }
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
@@ -303,10 +332,65 @@ class ZoomableImageView @JvmOverloads constructor(
         val newHeight = MeasureSpec.getSize(heightMeasureSpec)
 
         if (newWidth != viewWidth || newHeight != viewHeight) {
+            val oldWidth = viewWidth
+            val oldHeight = viewHeight
             viewWidth = newWidth
             viewHeight = newHeight
-            resetZoom()
+
+            if (oldWidth > 0 && oldHeight > 0 && (saveScale > 1f || maintainZoomOnNextImage)) {
+                applyMaintainZoom()
+            } else {
+                resetZoom()
+            }
         }
+    }
+
+    private fun applyMaintainZoom(newBitmapWidth: Float = -1f, newBitmapHeight: Float = -1f) {
+        val drawable = drawable ?: return
+        val bmWidth = if (newBitmapWidth > 0) newBitmapWidth else drawable.intrinsicWidth.toFloat()
+        val bmHeight = if (newBitmapHeight > 0) newBitmapHeight else drawable.intrinsicHeight.toFloat()
+        if (bmWidth <= 0 || bmHeight <= 0) return
+
+        if (viewWidth == 0 || viewHeight == 0) return
+
+        // 1. Calculate current relative focus point in bitmap coordinates
+        val centerX = viewWidth / 2f
+        val centerY = viewHeight / 2f
+        matrixValue.getValues(m)
+        val transX = m[Matrix.MTRANS_X]
+        val transY = m[Matrix.MTRANS_Y]
+        val currentTotalScale = m[Matrix.MSCALE_X]
+
+        // If currentTotalScale is 0 (shouldn't happen if zoomed), fallback to center
+        val bitmapCenterX = if (currentTotalScale > 0) (centerX - transX) / currentTotalScale else bmWidth / 2f
+        val bitmapCenterY = if (currentTotalScale > 0) (centerY - transY) / currentTotalScale else bmHeight / 2f
+
+        // 2. Calculate new base scale for fit-center
+        val availableWidth = viewWidth - 2 * visualMargin
+        val availableHeight = viewHeight - 2 * visualMargin
+        val scaleX = availableWidth / bmWidth
+        val scaleY = availableHeight / bmHeight
+        val newBaseScale = minOf(scaleX, scaleY)
+
+        // 3. Update state
+        redundancyX = (viewWidth.toFloat() - newBaseScale * bmWidth) / 2
+        redundancyY = (viewHeight.toFloat() - newBaseScale * bmHeight) / 2
+        origWidth = newBaseScale * bmWidth
+        origHeight = newBaseScale * bmHeight
+
+        // 4. Calculate new matrix to keep the same bitmap point at view center
+        val newTotalScale = newBaseScale * saveScale
+        val newTransX = centerX - bitmapCenterX * newTotalScale
+        val newTransY = centerY - bitmapCenterY * newTotalScale
+
+        matrixValue.reset()
+        matrixValue.postScale(newTotalScale, newTotalScale)
+        matrixValue.postTranslate(newTransX, newTransY)
+
+        fixTrans()
+        imageMatrix = Matrix(matrixValue)
+        invalidate()
+        invalidateOutline()
     }
 
     private fun fitCenter() {
