@@ -150,12 +150,6 @@ class ImageViewerAdapter(
             btnJpg.visibility = if (group.jpgUri != null) View.VISIBLE else View.GONE
             btnDng.visibility = if (group.dngUri != null || group.dngUri1 != null || group.dngUri2 != null) View.VISIBLE else View.GONE
 
-            if (group.isPartial) {
-                // For partial groups (JPG exists but one DNG is missing), we show both buttons
-                // but switching to DNG will show the composite with placeholder.
-                btnDng.visibility = View.VISIBLE
-            }
-
             btnJpg.setOnClickListener {
                 if (selectedFormats[position] == "JPG") return@setOnClickListener
                 selectedFormats[position] = "JPG"
