@@ -370,7 +370,7 @@ class ZoomableImageView @JvmOverloads constructor(
         val availableHeight = viewHeight - 2 * visualMargin
         val scaleX = availableWidth / bmWidth
         val scaleY = availableHeight / bmHeight
-        val newBaseScale = if (scaleX < scaleY) scaleX else scaleY
+        val newBaseScale = minOf(scaleX, scaleY)
 
         // 3. Update state
         redundancyX = (viewWidth.toFloat() - newBaseScale * bmWidth) / 2

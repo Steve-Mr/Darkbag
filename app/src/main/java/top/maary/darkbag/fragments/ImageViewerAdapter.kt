@@ -112,11 +112,7 @@ class ImageViewerAdapter(
         holder.loadJob?.cancel()
 
         val isSameImage = holder.currentBaseName == group.baseName
-        if (isSameImage) {
-            holder.binding.imageView.setMaintainZoomOnNextImage(true)
-        } else {
-            holder.binding.imageView.setMaintainZoomOnNextImage(false)
-        }
+        holder.binding.imageView.setMaintainZoomOnNextImage(isSameImage)
         holder.currentBaseName = group.baseName
 
         holder.binding.imageView.setVisualParams(margin, radius)
