@@ -1154,9 +1154,9 @@ class ImageViewerFragment : Fragment() {
                     }
 
                     if (!currentGroup.isHalfFrame()) {
-                        val primaryUri = dngUri1 ?: dngUri2 ?: return@withContext
+                        val primaryUri = dngUri1 ?: dngUri2 ?: return@withContext null
                         val primaryBytes = if (dngUri1 != null) sourceDngBytes else sourceDngBytes2
-                        compositeBitmap = processSingle(primaryBytes, primaryUri, 0)
+                        compositeBitmap = processSingle(primaryBytes, primaryUri!!, 0)
                     } else {
                         val forceUpdate1 = lastPreviewConfig == null ||
                                           lastPreviewConfig?.log != config.log ||
@@ -1328,9 +1328,9 @@ class ImageViewerFragment : Fragment() {
                     }
 
                     val finalBitmap: android.graphics.Bitmap? = if (!currentGroup.isHalfFrame()) {
-                        val primaryUri = dngUri1 ?: dngUri2 ?: return@withContext
+                        val primaryUri = dngUri1 ?: dngUri2 ?: return@withContext null
                         val primaryBytes = if (dngUri1 != null) sourceDngBytes else sourceDngBytes2
-                        processFull(primaryBytes, primaryUri, 0)
+                        processFull(primaryBytes, primaryUri!!, 0)
                     } else {
                         val b1 = processFull(sourceDngBytes, dngUri1, 0)
                         val b2 = dngUri2?.let { processFull(sourceDngBytes2, it, 1) }
@@ -1515,9 +1515,9 @@ class ImageViewerFragment : Fragment() {
                     }
 
                     if (!currentGroup.isHalfFrame()) {
-                        val primaryUri = dngUri1 ?: dngUri2 ?: return@withContext
+                        val primaryUri = dngUri1 ?: dngUri2 ?: return@withContext null
                         val primaryBytes = if (dngUri1 != null) sourceDngBytes else sourceDngBytes2
-                        processFullToTiff(primaryBytes, primaryUri, 0, tempTiff.absolutePath)?.recycle()
+                        processFullToTiff(primaryBytes, primaryUri!!, 0, tempTiff.absolutePath)?.recycle()
                     } else {
                         val b1 = processFullToTiff(sourceDngBytes, dngUri1, 0, null)
                         val b2 = dngUri2?.let { processFullToTiff(sourceDngBytes2, it, 1, null) }
@@ -1549,7 +1549,8 @@ class ImageViewerFragment : Fragment() {
                                 time2 = currentGroup.captureTime,
                                 flareType = config.flareType
                             )
-                            val meta = repository.getCaptureMetadata(currentGroup.dngUri ?: currentGroup.dngUri1 ?: Uri.EMPTY) ?: top.maary.darkbag.models.CaptureMetadata()
+                            val primaryUri = currentGroup.dngUri ?: currentGroup.dngUri1 ?: currentGroup.dngUri2 ?: Uri.EMPTY
+                            val meta = repository.getCaptureMetadata(primaryUri) ?: top.maary.darkbag.models.CaptureMetadata()
                             top.maary.darkbag.processor.ColorProcessor.saveBitmapToTiff(finalComposite, tempTiff.absolutePath, meta)
 
                             if (finalComposite != composite) {
