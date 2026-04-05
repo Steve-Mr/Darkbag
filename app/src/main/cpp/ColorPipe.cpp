@@ -32,6 +32,33 @@
 #ifndef TIFFTAG_DATETIMEORIGINAL
 #define TIFFTAG_DATETIMEORIGINAL 36867
 #endif
+#ifndef TIFFTAG_DATETIMEDIGITIZED
+#define TIFFTAG_DATETIMEDIGITIZED 36868
+#endif
+#ifndef TIFFTAG_OFFSETTIME
+#define TIFFTAG_OFFSETTIME 36880
+#endif
+#ifndef TIFFTAG_OFFSETTIMEORIGINAL
+#define TIFFTAG_OFFSETTIMEORIGINAL 36881
+#endif
+#ifndef TIFFTAG_OFFSETTIMEDIGITIZED
+#define TIFFTAG_OFFSETTIMEDIGITIZED 36882
+#endif
+#ifndef TIFFTAG_SUBSECTIME
+#define TIFFTAG_SUBSECTIME 37520
+#endif
+#ifndef TIFFTAG_SUBSECTIMEORIGINAL
+#define TIFFTAG_SUBSECTIMEORIGINAL 37521
+#endif
+#ifndef TIFFTAG_SUBSECTIMEDIGITIZED
+#define TIFFTAG_SUBSECTIMEDIGITIZED 37522
+#endif
+#ifndef TIFFTAG_LENSMODEL
+#define TIFFTAG_LENSMODEL 0xA434
+#endif
+#ifndef TIFFTAG_FOCALLENGTHIN35MMFILM
+#define TIFFTAG_FOCALLENGTHIN35MMFILM 0xA405
+#endif
 
 // Define LinearRaw
 #ifndef PHOTOMETRIC_LINEAR_RAW
@@ -109,11 +136,33 @@ static const TIFFFieldInfo dng_field_info[] = {
     { TIFFTAG_COLORMATRIX1, -1, -1, TIFF_RATIONAL, FIELD_CUSTOM, 1, 1, const_cast<char*>("ColorMatrix1") },
     { TIFFTAG_ASSHOTNEUTRAL, -1, -1, TIFF_RATIONAL, FIELD_CUSTOM, 1, 1, const_cast<char*>("AsShotNeutral") },
     { TIFFTAG_CALIBRATIONILLUMINANT1, 1, 1, TIFF_SHORT, FIELD_CUSTOM, 1, 0, const_cast<char*>("CalibrationIlluminant1") },
-    { TIFFTAG_BASELINEEXPOSURE, 1, 1, TIFF_SRATIONAL, FIELD_CUSTOM, 1, 0, const_cast<char*>("BaselineExposure") }
+    { TIFFTAG_BASELINEEXPOSURE, 1, 1, TIFF_SRATIONAL, FIELD_CUSTOM, 1, 0, const_cast<char*>("BaselineExposure") },
+    { TIFFTAG_DATETIMEORIGINAL, -1, -1, TIFF_ASCII, FIELD_CUSTOM, 1, 0, const_cast<char*>("DateTimeOriginal") },
+    { TIFFTAG_DATETIMEDIGITIZED, -1, -1, TIFF_ASCII, FIELD_CUSTOM, 1, 0, const_cast<char*>("DateTimeDigitized") },
+    { TIFFTAG_OFFSETTIME, -1, -1, TIFF_ASCII, FIELD_CUSTOM, 1, 0, const_cast<char*>("OffsetTime") },
+    { TIFFTAG_OFFSETTIMEORIGINAL, -1, -1, TIFF_ASCII, FIELD_CUSTOM, 1, 0, const_cast<char*>("OffsetTimeOriginal") },
+    { TIFFTAG_OFFSETTIMEDIGITIZED, -1, -1, TIFF_ASCII, FIELD_CUSTOM, 1, 0, const_cast<char*>("OffsetTimeDigitized") },
+    { TIFFTAG_SUBSECTIME, -1, -1, TIFF_ASCII, FIELD_CUSTOM, 1, 0, const_cast<char*>("SubSecTime") },
+    { TIFFTAG_SUBSECTIMEORIGINAL, -1, -1, TIFF_ASCII, FIELD_CUSTOM, 1, 0, const_cast<char*>("SubSecTimeOriginal") },
+    { TIFFTAG_SUBSECTIMEDIGITIZED, -1, -1, TIFF_ASCII, FIELD_CUSTOM, 1, 0, const_cast<char*>("SubSecTimeDigitized") },
+    { TIFFTAG_LENSMODEL, -1, -1, TIFF_ASCII, FIELD_CUSTOM, 1, 0, const_cast<char*>("LensModel") },
+    { TIFFTAG_FOCALLENGTHIN35MMFILM, 1, 1, TIFF_SHORT, FIELD_CUSTOM, 1, 0, const_cast<char*>("FocalLengthIn35mmFilm") }
 };
 
 static void DNGTagExtender(TIFF *tif) {
     TIFFMergeFieldInfo(tif, dng_field_info, sizeof(dng_field_info) / sizeof(dng_field_info[0]));
+}
+
+// --- Metadata Helpers ---
+static void format_exif_time(int64_t millis, char* buffer) {
+    time_t raw_time = (time_t)(millis / 1000);
+    struct tm timeinfo;
+    localtime_r(&raw_time, &timeinfo);
+    strftime(buffer, 20, "%Y:%m:%d %H:%M:%S", &timeinfo);
+}
+
+static void format_exif_subsec(int64_t millis, char* buffer) {
+    sprintf(buffer, "%03d", (int)(millis % 1000));
 }
 
 // --- Matrix Math ---
@@ -751,13 +800,28 @@ bool write_tiff(const char* filename, int width, int height, const std::vector<u
         TIFFSetField(tif, TIFFTAG_MODEL, metadata->model.c_str());
         TIFFSetField(tif, TIFFTAG_SOFTWARE, metadata->software.c_str());
         TIFFSetField(tif, TIFFTAG_IMAGEDESCRIPTION, metadata->imageDescription.c_str());
+        if (!metadata->lensModel.empty()) {
+            TIFFSetField(tif, TIFFTAG_LENSMODEL, metadata->lensModel.c_str());
+        }
 
-        time_t raw_time = (time_t)(metadata->captureTimeMillis / 1000);
-        struct tm timeinfo;
-        localtime_r(&raw_time, &timeinfo);
         char buffer[20];
-        strftime(buffer, 20, "%Y:%m:%d %H:%M:%S", &timeinfo);
+        char subsec_buffer[4];
+
+        format_exif_time(metadata->captureTimeMillis, buffer);
         TIFFSetField(tif, TIFFTAG_DATETIME, buffer);
+        TIFFSetField(tif, TIFFTAG_DATETIMEORIGINAL, buffer);
+        format_exif_subsec(metadata->captureTimeMillis, subsec_buffer);
+        TIFFSetField(tif, TIFFTAG_SUBSECTIME, subsec_buffer);
+        TIFFSetField(tif, TIFFTAG_SUBSECTIMEORIGINAL, subsec_buffer);
+
+        format_exif_time(metadata->digitizedTimeMillis, buffer);
+        TIFFSetField(tif, TIFFTAG_DATETIMEDIGITIZED, buffer);
+        format_exif_subsec(metadata->digitizedTimeMillis, subsec_buffer);
+        TIFFSetField(tif, TIFFTAG_SUBSECTIMEDIGITIZED, subsec_buffer);
+
+        if (!metadata->offsetTime.empty()) TIFFSetField(tif, TIFFTAG_OFFSETTIME, metadata->offsetTime.c_str());
+        if (!metadata->offsetTimeOriginal.empty()) TIFFSetField(tif, TIFFTAG_OFFSETTIMEORIGINAL, metadata->offsetTimeOriginal.c_str());
+        if (!metadata->offsetTimeDigitized.empty()) TIFFSetField(tif, TIFFTAG_OFFSETTIMEDIGITIZED, metadata->offsetTimeDigitized.c_str());
     }
 
     for (int y = 0; y < height; y++) {
@@ -795,13 +859,28 @@ bool write_tiff_rgba8(const char* filename, int width, int height, const unsigne
         TIFFSetField(tif, TIFFTAG_MODEL, metadata->model.c_str());
         TIFFSetField(tif, TIFFTAG_SOFTWARE, metadata->software.c_str());
         TIFFSetField(tif, TIFFTAG_IMAGEDESCRIPTION, metadata->imageDescription.c_str());
+        if (!metadata->lensModel.empty()) {
+            TIFFSetField(tif, TIFFTAG_LENSMODEL, metadata->lensModel.c_str());
+        }
 
-        time_t raw_time = (time_t)(metadata->captureTimeMillis / 1000);
-        struct tm timeinfo;
-        localtime_r(&raw_time, &timeinfo);
         char buffer[20];
-        strftime(buffer, 20, "%Y:%m:%d %H:%M:%S", &timeinfo);
+        char subsec_buffer[4];
+
+        format_exif_time(metadata->captureTimeMillis, buffer);
         TIFFSetField(tif, TIFFTAG_DATETIME, buffer);
+        TIFFSetField(tif, TIFFTAG_DATETIMEORIGINAL, buffer);
+        format_exif_subsec(metadata->captureTimeMillis, subsec_buffer);
+        TIFFSetField(tif, TIFFTAG_SUBSECTIME, subsec_buffer);
+        TIFFSetField(tif, TIFFTAG_SUBSECTIMEORIGINAL, subsec_buffer);
+
+        format_exif_time(metadata->digitizedTimeMillis, buffer);
+        TIFFSetField(tif, TIFFTAG_DATETIMEDIGITIZED, buffer);
+        format_exif_subsec(metadata->digitizedTimeMillis, subsec_buffer);
+        TIFFSetField(tif, TIFFTAG_SUBSECTIMEDIGITIZED, subsec_buffer);
+
+        if (!metadata->offsetTime.empty()) TIFFSetField(tif, TIFFTAG_OFFSETTIME, metadata->offsetTime.c_str());
+        if (!metadata->offsetTimeOriginal.empty()) TIFFSetField(tif, TIFFTAG_OFFSETTIMEORIGINAL, metadata->offsetTimeOriginal.c_str());
+        if (!metadata->offsetTimeDigitized.empty()) TIFFSetField(tif, TIFFTAG_OFFSETTIMEDIGITIZED, metadata->offsetTimeDigitized.c_str());
     }
 
     std::vector<unsigned char> row(static_cast<size_t>(width) * 3);
@@ -959,13 +1038,28 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
     TIFFSetField(tif, TIFFTAG_MODEL, metadata.model.c_str());
     TIFFSetField(tif, TIFFTAG_SOFTWARE, metadata.software.c_str());
     TIFFSetField(tif, TIFFTAG_IMAGEDESCRIPTION, metadata.imageDescription.c_str());
+    if (!metadata.lensModel.empty()) {
+        TIFFSetField(tif, TIFFTAG_LENSMODEL, metadata.lensModel.c_str());
+    }
 
-    time_t raw_time = (time_t)(metadata.captureTimeMillis / 1000);
-    struct tm * timeinfo = localtime(&raw_time);
     char buffer[20];
-    strftime(buffer, 20, "%Y:%m:%d %H:%M:%S", timeinfo);
+    char subsec_buffer[4];
+
+    format_exif_time(metadata.captureTimeMillis, buffer);
     TIFFSetField(tif, TIFFTAG_DATETIME, buffer);
     TIFFSetField(tif, TIFFTAG_DATETIMEORIGINAL, buffer);
+    format_exif_subsec(metadata.captureTimeMillis, subsec_buffer);
+    TIFFSetField(tif, TIFFTAG_SUBSECTIME, subsec_buffer);
+    TIFFSetField(tif, TIFFTAG_SUBSECTIMEORIGINAL, subsec_buffer);
+
+    format_exif_time(metadata.digitizedTimeMillis, buffer);
+    TIFFSetField(tif, TIFFTAG_DATETIMEDIGITIZED, buffer);
+    format_exif_subsec(metadata.digitizedTimeMillis, subsec_buffer);
+    TIFFSetField(tif, TIFFTAG_SUBSECTIMEDIGITIZED, subsec_buffer);
+
+    if (!metadata.offsetTime.empty()) TIFFSetField(tif, TIFFTAG_OFFSETTIME, metadata.offsetTime.c_str());
+    if (!metadata.offsetTimeOriginal.empty()) TIFFSetField(tif, TIFFTAG_OFFSETTIMEORIGINAL, metadata.offsetTimeOriginal.c_str());
+    if (!metadata.offsetTimeDigitized.empty()) TIFFSetField(tif, TIFFTAG_OFFSETTIMEDIGITIZED, metadata.offsetTimeDigitized.c_str());
 
     static const uint8_t dng_version[] = {1, 4, 0, 0};
     TIFFSetField(tif, TIFFTAG_DNGVERSION, dng_version);
@@ -993,6 +1087,9 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
     TIFFSetField(tif, TIFFTAG_EXPOSURETIME, exposureTimeSec);
     TIFFSetField(tif, TIFFTAG_FNUMBER, metadata.fNumber);
     TIFFSetField(tif, TIFFTAG_FOCALLENGTH, metadata.focalLength);
+    if (metadata.focalLengthIn35mmFilm > 0) {
+        TIFFSetField(tif, TIFFTAG_FOCALLENGTHIN35MMFILM, (uint16_t)metadata.focalLengthIn35mmFilm);
+    }
 
     TIFFSetField(tif, TIFFTAG_BASELINEEXPOSURE, baselineExposure);
 

@@ -85,12 +85,17 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
         val resolvedFlare = hfMetadata?.flareType ?: if (prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_LIGHT_LEAK, false)) java.util.Random().nextInt(2) + 1 else -1
 
         val isHalfFrame = hfMetadata?.profile != null && hfMetadata.profile != HalfFrameSessionStore.PROFILE_NORMAL
+        val offset = java.text.SimpleDateFormat("XXX", java.util.Locale.US).format(java.util.Date(captureTimeMillis))
         val captureMetadata = CaptureMetadata(
             iso = iso,
             exposureTime = exposureTime,
             fNumber = fNumber,
             focalLength = focalLength,
             dateTimeOriginal = captureTimeMillis,
+            dateTimeDigitized = captureTimeMillis,
+            offsetTime = offset,
+            offsetTimeOriginal = offset,
+            offsetTimeDigitized = offset,
             make = DarkbagIdentity.normalizedManufacturer(),
             model = DarkbagIdentity.normalizedModel(),
             uniqueCameraModel = DarkbagIdentity.uniqueCameraModel(),

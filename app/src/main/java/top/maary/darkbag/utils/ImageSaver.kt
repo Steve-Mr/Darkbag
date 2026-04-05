@@ -335,6 +335,8 @@ object ImageSaver {
                                 contentResolver.update(dngUri, dngValues, null, null)
                             }
 
+                            writeMetadataToExif(context, dngUri, editConfig, captureMetadata)
+
                             finalRawUri = dngUri
                         } catch (e: Exception) {
                             Log.e(TAG, "Failed to save Linear DNG", e)
@@ -377,13 +379,39 @@ object ImageSaver {
             }
             meta.fNumber?.let { exif.setAttribute(ExifInterface.TAG_F_NUMBER, it.toString()) }
             meta.focalLength?.let { exif.setAttribute(ExifInterface.TAG_FOCAL_LENGTH, it.toString()) }
+            meta.focalLengthIn35mmFilm?.let { exif.setAttribute(ExifInterface.TAG_FOCAL_LENGTH_IN_35MM_FILM, it.toString()) }
+
+            val sdf = java.text.SimpleDateFormat("yyyy:MM:dd HH:mm:ss", java.util.Locale.US)
+            val subSecSdf = java.text.SimpleDateFormat("SSS", java.util.Locale.US)
+
             meta.dateTimeOriginal?.let {
-                val sdf = java.text.SimpleDateFormat("yyyy:MM:dd HH:mm:ss", java.util.Locale.US)
                 val dateStr = sdf.format(java.util.Date(it))
+                val subSecStr = subSecSdf.format(java.util.Date(it))
+                exif.setAttribute(ExifInterface.TAG_DATETIME, dateStr)
                 exif.setAttribute(ExifInterface.TAG_DATETIME_ORIGINAL, dateStr)
+                exif.setAttribute(ExifInterface.TAG_SUBSEC_TIME, subSecStr)
+                exif.setAttribute(ExifInterface.TAG_SUBSEC_TIME_ORIGINAL, subSecStr)
             }
+
+            meta.dateTimeDigitized?.let {
+                val dateStr = sdf.format(java.util.Date(it))
+                val subSecStr = subSecSdf.format(java.util.Date(it))
+                exif.setAttribute(ExifInterface.TAG_DATETIME_DIGITIZED, dateStr)
+                exif.setAttribute(ExifInterface.TAG_SUBSEC_TIME_DIGITIZED, subSecStr)
+            } ?: meta.dateTimeOriginal?.let {
+                val dateStr = sdf.format(java.util.Date(it))
+                val subSecStr = subSecSdf.format(java.util.Date(it))
+                exif.setAttribute(ExifInterface.TAG_DATETIME_DIGITIZED, dateStr)
+                exif.setAttribute(ExifInterface.TAG_SUBSEC_TIME_DIGITIZED, subSecStr)
+            }
+
+            meta.offsetTime?.let { exif.setAttribute(ExifInterface.TAG_OFFSET_TIME, it) }
+            meta.offsetTimeOriginal?.let { exif.setAttribute(ExifInterface.TAG_OFFSET_TIME_ORIGINAL, it) }
+            meta.offsetTimeDigitized?.let { exif.setAttribute(ExifInterface.TAG_OFFSET_TIME_DIGITIZED, it) }
+
             meta.make?.let { exif.setAttribute(ExifInterface.TAG_MAKE, it) }
             meta.model?.let { exif.setAttribute(ExifInterface.TAG_MODEL, it) }
+            meta.lensModel?.let { exif.setAttribute(ExifInterface.TAG_LENS_MODEL, it) }
         }
     }
 
@@ -521,7 +549,7 @@ object ImageSaver {
 
                 val finalEditConfig = createFinalEditConfig(editConfig, zoomFactor)
 
-                if (mimeType == "image/jpeg" && writeExifMetadata) {
+                if (writeExifMetadata && (mimeType == "image/jpeg" || mimeType == "image/x-adobe-dng")) {
                     writeMetadataToExif(context, newFile.uri, finalEditConfig, captureMetadata)
                 }
 

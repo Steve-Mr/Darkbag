@@ -1742,15 +1742,29 @@ class CameraFragment : Fragment() {
                 val debugStats = LongArray(15)
                 val mirror = shouldMirror
 
+                val offset = SimpleDateFormat("XXX", Locale.US).format(Date(captureTime))
+                val lensModel = chars.get(CameraCharacteristics.LENS_INFO_MODEL_ID)
+                val focalIn35mm = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.let { focalLengths ->
+                    val focal = captureResult.get(CaptureResult.LENS_FOCAL_LENGTH) ?: focalLengths.firstOrNull() ?: 0f
+                    val sensorWidth = chars.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)?.width ?: 36f
+                    (focal * 36f / sensorWidth).toInt()
+                }
+
                 val captureMetadata = CaptureMetadata(
                     iso = iso,
                     exposureTime = exposureTime,
                     fNumber = fNumber,
                     focalLength = focalLength,
+                    focalLengthIn35mmFilm = focalIn35mm,
                     dateTimeOriginal = captureTime,
+                    dateTimeDigitized = captureTime,
+                    offsetTime = offset,
+                    offsetTimeOriginal = offset,
+                    offsetTimeDigitized = offset,
                     make = DarkbagIdentity.normalizedManufacturer(),
                     model = DarkbagIdentity.normalizedModel(),
                     uniqueCameraModel = DarkbagIdentity.uniqueCameraModel(targetCharId),
+                    lensModel = lensModel,
                     software = DarkbagIdentity.softwareString(isHdrPlus = false),
                     imageDescription = DarkbagIdentity.imageDescription(isHdrPlus = false)
                 )
@@ -2600,14 +2614,20 @@ class CameraFragment : Fragment() {
 
     private fun createCaptureMetadataFromTimestamp(timestamp: Long): CaptureMetadata {
         val result = captureResults[timestamp]
+        val captureTime = System.currentTimeMillis()
+        val offset = SimpleDateFormat("XXX", Locale.US).format(Date(captureTime))
         return CaptureMetadata(
             iso = result?.get(CaptureResult.SENSOR_SENSITIVITY),
             exposureTime = result?.get(CaptureResult.SENSOR_EXPOSURE_TIME),
             fNumber = result?.get(CaptureResult.LENS_APERTURE),
             focalLength = result?.get(CaptureResult.LENS_FOCAL_LENGTH),
-            dateTimeOriginal = System.currentTimeMillis(),
-            make = Build.MANUFACTURER,
-            model = Build.MODEL
+            dateTimeOriginal = captureTime,
+            dateTimeDigitized = captureTime,
+            offsetTime = offset,
+            offsetTimeOriginal = offset,
+            offsetTimeDigitized = offset,
+            make = DarkbagIdentity.normalizedManufacturer(),
+            model = DarkbagIdentity.normalizedModel()
         )
     }
 
@@ -3542,15 +3562,29 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 // 2) optional fast downsampled JPEG (tempJpgPath) for immediate gallery update.
                 val mirror = shouldMirror
 
+                val offset = SimpleDateFormat("XXX", Locale.US).format(Date(captureTime))
+                val lensModel = chars?.get(CameraCharacteristics.LENS_INFO_MODEL_ID)
+                val focalIn35mm = chars?.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.let { focalLengths ->
+                    val focal = result?.get(CaptureResult.LENS_FOCAL_LENGTH) ?: focalLengths.firstOrNull() ?: 0f
+                    val sensorWidth = chars.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)?.width ?: 36f
+                    (focal * 36f / sensorWidth).toInt()
+                }
+
                 val captureMetadata = CaptureMetadata(
                     iso = iso?.toInt(),
                     exposureTime = exposureTime,
                     fNumber = fNumber,
                     focalLength = focalLength,
+                    focalLengthIn35mmFilm = focalIn35mm,
                     dateTimeOriginal = captureTime,
+                    dateTimeDigitized = captureTime,
+                    offsetTime = offset,
+                    offsetTimeOriginal = offset,
+                    offsetTimeDigitized = offset,
                     make = DarkbagIdentity.normalizedManufacturer(),
                     model = DarkbagIdentity.normalizedModel(),
                     uniqueCameraModel = DarkbagIdentity.uniqueCameraModel(targetCharId),
+                    lensModel = lensModel,
                     software = DarkbagIdentity.softwareString(isHdrPlus = true),
                     imageDescription = DarkbagIdentity.imageDescription(isHdrPlus = true)
                 )
