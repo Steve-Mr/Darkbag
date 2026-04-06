@@ -1742,29 +1742,15 @@ class CameraFragment : Fragment() {
                 val debugStats = LongArray(15)
                 val mirror = shouldMirror
 
-                val offset = SimpleDateFormat("XXX", Locale.US).format(Date(captureTime))
-                val focalIn35mm = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.let { focalLengths ->
-                    val focal = captureResult.get(CaptureResult.LENS_FOCAL_LENGTH) ?: focalLengths.firstOrNull() ?: 0f
-                    val sensorWidth = chars.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)?.width ?: 36f
-                    (focal * 36f / sensorWidth).toInt()
-                }
-
-                val captureMetadata = CaptureMetadata(
+                val captureMetadata = createCaptureMetadata(
                     iso = iso,
                     exposureTime = exposureTime,
                     fNumber = fNumber,
                     focalLength = focalLength,
-                    focalLengthIn35mmFilm = focalIn35mm,
-                    dateTimeOriginal = captureTime,
-                    dateTimeDigitized = captureTime,
-                    offsetTime = offset,
-                    offsetTimeOriginal = offset,
-                    offsetTimeDigitized = offset,
-                    make = DarkbagIdentity.normalizedManufacturer(),
-                    model = DarkbagIdentity.normalizedModel(),
-                    uniqueCameraModel = DarkbagIdentity.uniqueCameraModel(targetCharId),
-                    software = DarkbagIdentity.softwareString(isHdrPlus = false),
-                    imageDescription = DarkbagIdentity.imageDescription(isHdrPlus = false)
+                    captureTime = captureTime,
+                    targetCharId = targetCharId,
+                    isHdrPlus = false,
+                    captureResult = captureResult
                 )
 
                 // 3. JNI Halide Processing
@@ -2616,19 +2602,15 @@ class CameraFragment : Fragment() {
     private fun createCaptureMetadataFromTimestamp(timestamp: Long): CaptureMetadata {
         val result = captureResults[timestamp]
         val captureTime = System.currentTimeMillis()
-        val offset = SimpleDateFormat("XXX", Locale.US).format(Date(captureTime))
-        return CaptureMetadata(
+        return createCaptureMetadata(
             iso = result?.get(CaptureResult.SENSOR_SENSITIVITY),
             exposureTime = result?.get(CaptureResult.SENSOR_EXPOSURE_TIME),
             fNumber = result?.get(CaptureResult.LENS_APERTURE),
             focalLength = result?.get(CaptureResult.LENS_FOCAL_LENGTH),
-            dateTimeOriginal = captureTime,
-            dateTimeDigitized = captureTime,
-            offsetTime = offset,
-            offsetTimeOriginal = offset,
-            offsetTimeDigitized = offset,
-            make = DarkbagIdentity.normalizedManufacturer(),
-            model = DarkbagIdentity.normalizedModel()
+            captureTime = captureTime,
+            targetCharId = currentLens?.id,
+            isHdrPlus = isHdrPlusEnabled,
+            captureResult = result
         )
     }
 
@@ -3531,6 +3513,17 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 val focalLength = result?.get(android.hardware.camera2.CaptureResult.LENS_FOCAL_LENGTH) ?: 0.0f
                 val captureTime = System.currentTimeMillis()
 
+                val captureMetadata = createCaptureMetadata(
+                    iso = iso.toInt(),
+                    exposureTime = exposureTime,
+                    fNumber = fNumber,
+                    focalLength = focalLength,
+                    captureTime = captureTime,
+                    targetCharId = targetCharId,
+                    isHdrPlus = true,
+                    captureResult = result
+                )
+
                 val dngName = if (hfMetadata != null) {
                     val suffix = if (hfMetadata.frame1BaseName != null) "_HF2" else "_HF1"
                     val group = hfMetadata.frame1BaseName ?: SimpleDateFormat(FILENAME, Locale.US).format(hfMetadata.captureTimeMillis)
@@ -3562,31 +3555,6 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 // 1) intermediate linear RAW buffer (tempRawPath) for the ExportWorker,
                 // 2) optional fast downsampled JPEG (tempJpgPath) for immediate gallery update.
                 val mirror = shouldMirror
-
-                val offset = SimpleDateFormat("XXX", Locale.US).format(Date(captureTime))
-                val focalIn35mm = chars?.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.let { focalLengths ->
-                    val focal = result?.get(CaptureResult.LENS_FOCAL_LENGTH) ?: focalLengths.firstOrNull() ?: 0f
-                    val sensorWidth = chars?.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)?.width ?: 36f
-                    (focal * 36f / sensorWidth).toInt()
-                }
-
-                val captureMetadata = CaptureMetadata(
-                    iso = iso?.toInt(),
-                    exposureTime = exposureTime,
-                    fNumber = fNumber,
-                    focalLength = focalLength,
-                    focalLengthIn35mmFilm = focalIn35mm,
-                    dateTimeOriginal = captureTime,
-                    dateTimeDigitized = captureTime,
-                    offsetTime = offset,
-                    offsetTimeOriginal = offset,
-                    offsetTimeDigitized = offset,
-                    make = DarkbagIdentity.normalizedManufacturer(),
-                    model = DarkbagIdentity.normalizedModel(),
-                    uniqueCameraModel = DarkbagIdentity.uniqueCameraModel(targetCharId),
-                    software = DarkbagIdentity.softwareString(isHdrPlus = true),
-                    imageDescription = DarkbagIdentity.imageDescription(isHdrPlus = true)
-                )
 
                 val ret = ColorProcessor.processHdrPlus(
                     buffers,
@@ -4941,6 +4909,52 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         val scaled = android.graphics.Bitmap.createScaledBitmap(decoded, scaledWidth, scaledHeight, true)
         if (scaled != decoded) decoded.recycle()
         return scaled
+    }
+
+    private fun createCaptureMetadata(
+        iso: Int?,
+        exposureTime: Long?,
+        fNumber: Float?,
+        focalLength: Float?,
+        captureTime: Long,
+        targetCharId: String?,
+        isHdrPlus: Boolean,
+        captureResult: CaptureResult?
+    ): CaptureMetadata {
+        val offset = SimpleDateFormat("XXX", Locale.US).format(Date(captureTime))
+
+        // Get focal length in 35mm film equivalent
+        var focalIn35mm: Int? = null
+        try {
+            val chars = targetCharId?.let { camera2Manager.getCameraCharacteristics(it) }
+            if (chars != null) {
+                focalIn35mm = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.let { focalLengths ->
+                    val focal = captureResult?.get(CaptureResult.LENS_FOCAL_LENGTH) ?: focalLengths.firstOrNull() ?: 0f
+                    val sensorWidth = chars.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)?.width ?: 36f
+                    (focal * 36f / sensorWidth).toInt()
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to calculate focalLengthIn35mmFilm", e)
+        }
+
+        return CaptureMetadata(
+            iso = iso,
+            exposureTime = exposureTime,
+            fNumber = fNumber,
+            focalLength = focalLength,
+            focalLengthIn35mmFilm = focalIn35mm,
+            dateTimeOriginal = captureTime,
+            dateTimeDigitized = captureTime,
+            offsetTime = offset,
+            offsetTimeOriginal = offset,
+            offsetTimeDigitized = offset,
+            make = DarkbagIdentity.normalizedManufacturer(),
+            model = DarkbagIdentity.normalizedModel(),
+            uniqueCameraModel = DarkbagIdentity.uniqueCameraModel(targetCharId),
+            software = DarkbagIdentity.softwareString(isHdrPlus),
+            imageDescription = DarkbagIdentity.imageDescription(isHdrPlus)
+        )
     }
 
     private fun getMeteringRectangle(

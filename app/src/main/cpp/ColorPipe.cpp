@@ -165,6 +165,37 @@ static void format_exif_subsec(int64_t millis, char* buffer) {
     sprintf(buffer, "%03d", (int)(millis % 1000));
 }
 
+static void write_tiff_metadata(TIFF* tif, const ImageMetadata* metadata) {
+    if (!metadata) return;
+
+    TIFFSetField(tif, TIFFTAG_MAKE, metadata->make.c_str());
+    TIFFSetField(tif, TIFFTAG_MODEL, metadata->model.c_str());
+    TIFFSetField(tif, TIFFTAG_SOFTWARE, metadata->software.c_str());
+    TIFFSetField(tif, TIFFTAG_IMAGEDESCRIPTION, metadata->imageDescription.c_str());
+    if (!metadata->lensModel.empty()) {
+        TIFFSetField(tif, TIFFTAG_LENSMODEL, metadata->lensModel.c_str());
+    }
+
+    char buffer[20];
+    char subsec_buffer[4];
+
+    format_exif_time(metadata->captureTimeMillis, buffer);
+    TIFFSetField(tif, TIFFTAG_DATETIME, buffer);
+    TIFFSetField(tif, TIFFTAG_DATETIMEORIGINAL, buffer);
+    format_exif_subsec(metadata->captureTimeMillis, subsec_buffer);
+    TIFFSetField(tif, TIFFTAG_SUBSECTIME, subsec_buffer);
+    TIFFSetField(tif, TIFFTAG_SUBSECTIMEORIGINAL, subsec_buffer);
+
+    format_exif_time(metadata->digitizedTimeMillis, buffer);
+    TIFFSetField(tif, TIFFTAG_DATETIMEDIGITIZED, buffer);
+    format_exif_subsec(metadata->digitizedTimeMillis, subsec_buffer);
+    TIFFSetField(tif, TIFFTAG_SUBSECTIMEDIGITIZED, subsec_buffer);
+
+    if (!metadata->offsetTime.empty()) TIFFSetField(tif, TIFFTAG_OFFSETTIME, metadata->offsetTime.c_str());
+    if (!metadata->offsetTimeOriginal.empty()) TIFFSetField(tif, TIFFTAG_OFFSETTIMEORIGINAL, metadata->offsetTimeOriginal.c_str());
+    if (!metadata->offsetTimeDigitized.empty()) TIFFSetField(tif, TIFFTAG_OFFSETTIMEDIGITIZED, metadata->offsetTimeDigitized.c_str());
+}
+
 // --- Matrix Math ---
 Vec3 multiply(const Matrix3x3& mat, const Vec3& v) {
     return {
@@ -795,34 +826,7 @@ bool write_tiff(const char* filename, int width, int height, const std::vector<u
     TIFFSetField(tif, TIFFTAG_COMPRESSION, COMPRESSION_NONE);
     TIFFSetField(tif, TIFFTAG_ORIENTATION, ORIENTATION_TOPLEFT);
 
-    if (metadata) {
-        TIFFSetField(tif, TIFFTAG_MAKE, metadata->make.c_str());
-        TIFFSetField(tif, TIFFTAG_MODEL, metadata->model.c_str());
-        TIFFSetField(tif, TIFFTAG_SOFTWARE, metadata->software.c_str());
-        TIFFSetField(tif, TIFFTAG_IMAGEDESCRIPTION, metadata->imageDescription.c_str());
-        if (!metadata->lensModel.empty()) {
-            TIFFSetField(tif, TIFFTAG_LENSMODEL, metadata->lensModel.c_str());
-        }
-
-        char buffer[20];
-        char subsec_buffer[4];
-
-        format_exif_time(metadata->captureTimeMillis, buffer);
-        TIFFSetField(tif, TIFFTAG_DATETIME, buffer);
-        TIFFSetField(tif, TIFFTAG_DATETIMEORIGINAL, buffer);
-        format_exif_subsec(metadata->captureTimeMillis, subsec_buffer);
-        TIFFSetField(tif, TIFFTAG_SUBSECTIME, subsec_buffer);
-        TIFFSetField(tif, TIFFTAG_SUBSECTIMEORIGINAL, subsec_buffer);
-
-        format_exif_time(metadata->digitizedTimeMillis, buffer);
-        TIFFSetField(tif, TIFFTAG_DATETIMEDIGITIZED, buffer);
-        format_exif_subsec(metadata->digitizedTimeMillis, subsec_buffer);
-        TIFFSetField(tif, TIFFTAG_SUBSECTIMEDIGITIZED, subsec_buffer);
-
-        if (!metadata->offsetTime.empty()) TIFFSetField(tif, TIFFTAG_OFFSETTIME, metadata->offsetTime.c_str());
-        if (!metadata->offsetTimeOriginal.empty()) TIFFSetField(tif, TIFFTAG_OFFSETTIMEORIGINAL, metadata->offsetTimeOriginal.c_str());
-        if (!metadata->offsetTimeDigitized.empty()) TIFFSetField(tif, TIFFTAG_OFFSETTIMEDIGITIZED, metadata->offsetTimeDigitized.c_str());
-    }
+    write_tiff_metadata(tif, metadata);
 
     for (int y = 0; y < height; y++) {
         if (TIFFWriteScanline(tif, (void*)&data[static_cast<size_t>(y) * width * 3], y, 0) < 0) {
@@ -854,34 +858,7 @@ bool write_tiff_rgba8(const char* filename, int width, int height, const unsigne
     TIFFSetField(tif, TIFFTAG_COMPRESSION, COMPRESSION_NONE);
     TIFFSetField(tif, TIFFTAG_ORIENTATION, ORIENTATION_TOPLEFT);
 
-    if (metadata) {
-        TIFFSetField(tif, TIFFTAG_MAKE, metadata->make.c_str());
-        TIFFSetField(tif, TIFFTAG_MODEL, metadata->model.c_str());
-        TIFFSetField(tif, TIFFTAG_SOFTWARE, metadata->software.c_str());
-        TIFFSetField(tif, TIFFTAG_IMAGEDESCRIPTION, metadata->imageDescription.c_str());
-        if (!metadata->lensModel.empty()) {
-            TIFFSetField(tif, TIFFTAG_LENSMODEL, metadata->lensModel.c_str());
-        }
-
-        char buffer[20];
-        char subsec_buffer[4];
-
-        format_exif_time(metadata->captureTimeMillis, buffer);
-        TIFFSetField(tif, TIFFTAG_DATETIME, buffer);
-        TIFFSetField(tif, TIFFTAG_DATETIMEORIGINAL, buffer);
-        format_exif_subsec(metadata->captureTimeMillis, subsec_buffer);
-        TIFFSetField(tif, TIFFTAG_SUBSECTIME, subsec_buffer);
-        TIFFSetField(tif, TIFFTAG_SUBSECTIMEORIGINAL, subsec_buffer);
-
-        format_exif_time(metadata->digitizedTimeMillis, buffer);
-        TIFFSetField(tif, TIFFTAG_DATETIMEDIGITIZED, buffer);
-        format_exif_subsec(metadata->digitizedTimeMillis, subsec_buffer);
-        TIFFSetField(tif, TIFFTAG_SUBSECTIMEDIGITIZED, subsec_buffer);
-
-        if (!metadata->offsetTime.empty()) TIFFSetField(tif, TIFFTAG_OFFSETTIME, metadata->offsetTime.c_str());
-        if (!metadata->offsetTimeOriginal.empty()) TIFFSetField(tif, TIFFTAG_OFFSETTIMEORIGINAL, metadata->offsetTimeOriginal.c_str());
-        if (!metadata->offsetTimeDigitized.empty()) TIFFSetField(tif, TIFFTAG_OFFSETTIMEDIGITIZED, metadata->offsetTimeDigitized.c_str());
-    }
+    write_tiff_metadata(tif, metadata);
 
     std::vector<unsigned char> row(static_cast<size_t>(width) * 3);
     for (int y = 0; y < height; y++) {
@@ -1034,32 +1011,7 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
     TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, height);
     TIFFSetField(tif, TIFFTAG_SUBFILETYPE, 0);
 
-    TIFFSetField(tif, TIFFTAG_MAKE, metadata.make.c_str());
-    TIFFSetField(tif, TIFFTAG_MODEL, metadata.model.c_str());
-    TIFFSetField(tif, TIFFTAG_SOFTWARE, metadata.software.c_str());
-    TIFFSetField(tif, TIFFTAG_IMAGEDESCRIPTION, metadata.imageDescription.c_str());
-    if (!metadata.lensModel.empty()) {
-        TIFFSetField(tif, TIFFTAG_LENSMODEL, metadata.lensModel.c_str());
-    }
-
-    char buffer[20];
-    char subsec_buffer[4];
-
-    format_exif_time(metadata.captureTimeMillis, buffer);
-    TIFFSetField(tif, TIFFTAG_DATETIME, buffer);
-    TIFFSetField(tif, TIFFTAG_DATETIMEORIGINAL, buffer);
-    format_exif_subsec(metadata.captureTimeMillis, subsec_buffer);
-    TIFFSetField(tif, TIFFTAG_SUBSECTIME, subsec_buffer);
-    TIFFSetField(tif, TIFFTAG_SUBSECTIMEORIGINAL, subsec_buffer);
-
-    format_exif_time(metadata.digitizedTimeMillis, buffer);
-    TIFFSetField(tif, TIFFTAG_DATETIMEDIGITIZED, buffer);
-    format_exif_subsec(metadata.digitizedTimeMillis, subsec_buffer);
-    TIFFSetField(tif, TIFFTAG_SUBSECTIMEDIGITIZED, subsec_buffer);
-
-    if (!metadata.offsetTime.empty()) TIFFSetField(tif, TIFFTAG_OFFSETTIME, metadata.offsetTime.c_str());
-    if (!metadata.offsetTimeOriginal.empty()) TIFFSetField(tif, TIFFTAG_OFFSETTIMEORIGINAL, metadata.offsetTimeOriginal.c_str());
-    if (!metadata.offsetTimeDigitized.empty()) TIFFSetField(tif, TIFFTAG_OFFSETTIMEDIGITIZED, metadata.offsetTimeDigitized.c_str());
+    write_tiff_metadata(tif, &metadata);
 
     static const uint8_t dng_version[] = {1, 4, 0, 0};
     TIFFSetField(tif, TIFFTAG_DNGVERSION, dng_version);
