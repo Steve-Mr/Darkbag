@@ -32,7 +32,10 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
         val exposureTime = data.getLong("exposureTime", 10_000_000L)
         val fNumber = data.getFloat("fNumber", 1.8f)
         val focalLength = data.getFloat("focalLength", 0.0f)
+        val focalLengthIn35mmFilm = data.getInt("focalLengthIn35mmFilm", 0)
         val captureTimeMillis = data.getLong("captureTimeMillis", 0L)
+        val dateTimeDigitized = data.getLong("dateTimeDigitized", captureTimeMillis)
+        val offsetTime = data.getString("offsetTime")
 
         val ccm = data.getFloatArray("ccm")
         if (ccm == null || ccm.size != 9) {
@@ -85,14 +88,15 @@ class HdrPlusExportWorker(context: Context, params: WorkerParameters) : Coroutin
         val resolvedFlare = hfMetadata?.flareType ?: if (prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_LIGHT_LEAK, false)) java.util.Random().nextInt(2) + 1 else -1
 
         val isHalfFrame = hfMetadata?.profile != null && hfMetadata.profile != HalfFrameSessionStore.PROFILE_NORMAL
-        val offset = java.text.SimpleDateFormat("XXX", java.util.Locale.US).format(java.util.Date(captureTimeMillis))
+        val offset = offsetTime ?: java.text.SimpleDateFormat("XXX", java.util.Locale.US).format(java.util.Date(captureTimeMillis))
         val captureMetadata = CaptureMetadata(
             iso = iso,
             exposureTime = exposureTime,
             fNumber = fNumber,
             focalLength = focalLength,
+            focalLengthIn35mmFilm = if (focalLengthIn35mmFilm > 0) focalLengthIn35mmFilm else null,
             dateTimeOriginal = captureTimeMillis,
-            dateTimeDigitized = captureTimeMillis,
+            dateTimeDigitized = dateTimeDigitized,
             offsetTime = offset,
             offsetTimeOriginal = offset,
             offsetTimeDigitized = offset,

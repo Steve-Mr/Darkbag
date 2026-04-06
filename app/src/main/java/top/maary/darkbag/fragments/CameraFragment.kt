@@ -1743,7 +1743,6 @@ class CameraFragment : Fragment() {
                 val mirror = shouldMirror
 
                 val offset = SimpleDateFormat("XXX", Locale.US).format(Date(captureTime))
-                val lensModel = chars.get(CameraCharacteristics.LENS_INFO_MODEL_ID)
                 val focalIn35mm = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.let { focalLengths ->
                     val focal = captureResult.get(CaptureResult.LENS_FOCAL_LENGTH) ?: focalLengths.firstOrNull() ?: 0f
                     val sensorWidth = chars.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)?.width ?: 36f
@@ -1764,7 +1763,6 @@ class CameraFragment : Fragment() {
                     make = DarkbagIdentity.normalizedManufacturer(),
                     model = DarkbagIdentity.normalizedModel(),
                     uniqueCameraModel = DarkbagIdentity.uniqueCameraModel(targetCharId),
-                    lensModel = lensModel,
                     software = DarkbagIdentity.softwareString(isHdrPlus = false),
                     imageDescription = DarkbagIdentity.imageDescription(isHdrPlus = false)
                 )
@@ -1937,6 +1935,9 @@ class CameraFragment : Fragment() {
                     .putFloat("fNumber", fNumber)
                     .putFloat("focalLength", focalLength)
                     .putLong("captureTimeMillis", captureTime)
+                    .putLong("dateTimeDigitized", captureTime)
+                    .putString("offsetTime", offset)
+                    .putInt("focalLengthIn35mmFilm", focalIn35mm ?: 0)
                     .putFloatArray("ccm", ccm)
                     .putFloatArray("whiteBalance", wb)
                     .putString("baseName", dngName)
@@ -3563,10 +3564,9 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 val mirror = shouldMirror
 
                 val offset = SimpleDateFormat("XXX", Locale.US).format(Date(captureTime))
-                val lensModel = chars?.get(CameraCharacteristics.LENS_INFO_MODEL_ID)
                 val focalIn35mm = chars?.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.let { focalLengths ->
                     val focal = result?.get(CaptureResult.LENS_FOCAL_LENGTH) ?: focalLengths.firstOrNull() ?: 0f
-                    val sensorWidth = chars.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)?.width ?: 36f
+                    val sensorWidth = chars?.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)?.width ?: 36f
                     (focal * 36f / sensorWidth).toInt()
                 }
 
@@ -3584,7 +3584,6 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     make = DarkbagIdentity.normalizedManufacturer(),
                     model = DarkbagIdentity.normalizedModel(),
                     uniqueCameraModel = DarkbagIdentity.uniqueCameraModel(targetCharId),
-                    lensModel = lensModel,
                     software = DarkbagIdentity.softwareString(isHdrPlus = true),
                     imageDescription = DarkbagIdentity.imageDescription(isHdrPlus = true)
                 )
@@ -3690,6 +3689,9 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         .putFloat("fNumber", fNumber)
                         .putFloat("focalLength", focalLength)
                         .putLong("captureTimeMillis", captureTime)
+                        .putLong("dateTimeDigitized", captureTime)
+                        .putString("offsetTime", offset)
+                        .putInt("focalLengthIn35mmFilm", focalIn35mm ?: 0)
                         .putFloatArray("ccm", ccm)
                         .putFloatArray("whiteBalance", wb)
                         .putString("baseName", dngName)
