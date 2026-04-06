@@ -16,10 +16,16 @@ struct ImageMetadata {
     int64_t exposureTime = 0;
     float fNumber = 0.0f;
     float focalLength = 0.0f;
+    int focalLengthIn35mmFilm = 0;
     int64_t captureTimeMillis = 0;
+    int64_t digitizedTimeMillis = 0;
+    std::string offsetTime;
+    std::string offsetTimeOriginal;
+    std::string offsetTimeDigitized;
     std::string make;
     std::string model;
     std::string uniqueCameraModel;
+    std::string lensModel;
     std::string software;
     std::string imageDescription;
 };

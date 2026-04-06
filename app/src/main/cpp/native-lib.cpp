@@ -23,10 +23,16 @@ struct CaptureMetadataFieldIDs {
     jfieldID exposureTime;
     jfieldID fNumber;
     jfieldID focalLength;
+    jfieldID focalLengthIn35mmFilm;
     jfieldID dateTimeOriginal;
+    jfieldID dateTimeDigitized;
+    jfieldID offsetTime;
+    jfieldID offsetTimeOriginal;
+    jfieldID offsetTimeDigitized;
     jfieldID make;
     jfieldID model;
     jfieldID uniqueCameraModel;
+    jfieldID lensModel;
     jfieldID software;
     jfieldID imageDescription;
 } g_metadataFields;
@@ -94,10 +100,16 @@ void ensureIDsInitialized(JNIEnv* env) {
     g_metadataFields.exposureTime = env->GetFieldID(metadataClazz, "exposureTime", "Ljava/lang/Long;");
     g_metadataFields.fNumber = env->GetFieldID(metadataClazz, "fNumber", "Ljava/lang/Float;");
     g_metadataFields.focalLength = env->GetFieldID(metadataClazz, "focalLength", "Ljava/lang/Float;");
+    g_metadataFields.focalLengthIn35mmFilm = env->GetFieldID(metadataClazz, "focalLengthIn35mmFilm", "Ljava/lang/Integer;");
     g_metadataFields.dateTimeOriginal = env->GetFieldID(metadataClazz, "dateTimeOriginal", "Ljava/lang/Long;");
+    g_metadataFields.dateTimeDigitized = env->GetFieldID(metadataClazz, "dateTimeDigitized", "Ljava/lang/Long;");
+    g_metadataFields.offsetTime = env->GetFieldID(metadataClazz, "offsetTime", "Ljava/lang/String;");
+    g_metadataFields.offsetTimeOriginal = env->GetFieldID(metadataClazz, "offsetTimeOriginal", "Ljava/lang/String;");
+    g_metadataFields.offsetTimeDigitized = env->GetFieldID(metadataClazz, "offsetTimeDigitized", "Ljava/lang/String;");
     g_metadataFields.make = env->GetFieldID(metadataClazz, "make", "Ljava/lang/String;");
     g_metadataFields.model = env->GetFieldID(metadataClazz, "model", "Ljava/lang/String;");
     g_metadataFields.uniqueCameraModel = env->GetFieldID(metadataClazz, "uniqueCameraModel", "Ljava/lang/String;");
+    g_metadataFields.lensModel = env->GetFieldID(metadataClazz, "lensModel", "Ljava/lang/String;");
     g_metadataFields.software = env->GetFieldID(metadataClazz, "software", "Ljava/lang/String;");
     g_metadataFields.imageDescription = env->GetFieldID(metadataClazz, "imageDescription", "Ljava/lang/String;");
 
@@ -114,10 +126,16 @@ ImageMetadata metadataFromJava(JNIEnv* env, jobject metadataObj) {
     meta.exposureTime = getLongField(env, metadataObj, g_metadataFields.exposureTime, 10000000L);
     meta.fNumber = getFloatField(env, metadataObj, g_metadataFields.fNumber, 1.8f);
     meta.focalLength = getFloatField(env, metadataObj, g_metadataFields.focalLength, 0.0f);
+    meta.focalLengthIn35mmFilm = getIntField(env, metadataObj, g_metadataFields.focalLengthIn35mmFilm, 0);
     meta.captureTimeMillis = getLongField(env, metadataObj, g_metadataFields.dateTimeOriginal, 0);
+    meta.digitizedTimeMillis = getLongField(env, metadataObj, g_metadataFields.dateTimeDigitized, meta.captureTimeMillis);
+    meta.offsetTime = getStringField(env, metadataObj, g_metadataFields.offsetTime, "");
+    meta.offsetTimeOriginal = getStringField(env, metadataObj, g_metadataFields.offsetTimeOriginal, meta.offsetTime);
+    meta.offsetTimeDigitized = getStringField(env, metadataObj, g_metadataFields.offsetTimeDigitized, meta.offsetTime);
     meta.make = getStringField(env, metadataObj, g_metadataFields.make, "Unknown");
     meta.model = getStringField(env, metadataObj, g_metadataFields.model, "Unknown");
     meta.uniqueCameraModel = getStringField(env, metadataObj, g_metadataFields.uniqueCameraModel, meta.model);
+    meta.lensModel = getStringField(env, metadataObj, g_metadataFields.lensModel, "");
     meta.software = getStringField(env, metadataObj, g_metadataFields.software, "Darkbag");
     meta.imageDescription = getStringField(env, metadataObj, g_metadataFields.imageDescription, "Processed by Darkbag");
 

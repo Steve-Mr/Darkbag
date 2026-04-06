@@ -384,21 +384,37 @@ class ImageRepository(private val context: Context) {
                 val fNumber = exif.getAttributeDouble(androidx.exifinterface.media.ExifInterface.TAG_F_NUMBER, 0.0).toFloat().takeIf { it > 0 }
                 val focalLength = exif.getAttributeDouble(androidx.exifinterface.media.ExifInterface.TAG_FOCAL_LENGTH, 0.0).toFloat().takeIf { it > 0 }
                 val dateTimeStr = exif.getAttribute(androidx.exifinterface.media.ExifInterface.TAG_DATETIME_ORIGINAL)
+                val dateTimeDigitizedStr = exif.getAttribute(androidx.exifinterface.media.ExifInterface.TAG_DATETIME_DIGITIZED)
+                val sdf = java.text.SimpleDateFormat("yyyy:MM:dd HH:mm:ss", java.util.Locale.US)
                 val dateTime = dateTimeStr?.let {
-                    val sdf = java.text.SimpleDateFormat("yyyy:MM:dd HH:mm:ss", java.util.Locale.US)
                     sdf.parse(it)?.time
                 }
+                val dateTimeDigitized = dateTimeDigitizedStr?.let {
+                    sdf.parse(it)?.time
+                }
+                val offsetTime = exif.getAttribute(androidx.exifinterface.media.ExifInterface.TAG_OFFSET_TIME)
+                val offsetTimeOriginal = exif.getAttribute(androidx.exifinterface.media.ExifInterface.TAG_OFFSET_TIME_ORIGINAL)
+                val offsetTimeDigitized = exif.getAttribute(androidx.exifinterface.media.ExifInterface.TAG_OFFSET_TIME_DIGITIZED)
+
                 val make = exif.getAttribute(androidx.exifinterface.media.ExifInterface.TAG_MAKE)
                 val model = exif.getAttribute(androidx.exifinterface.media.ExifInterface.TAG_MODEL)
+                val lensModel = exif.getAttribute(androidx.exifinterface.media.ExifInterface.TAG_LENS_MODEL)
+                val focalLengthIn35mm = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_FOCAL_LENGTH_IN_35MM_FILM, 0).takeIf { it > 0 }
 
                 top.maary.darkbag.models.CaptureMetadata(
                     iso = iso,
                     exposureTime = exposureTime,
                     fNumber = fNumber,
                     focalLength = focalLength,
+                    focalLengthIn35mmFilm = focalLengthIn35mm,
                     dateTimeOriginal = dateTime,
+                    dateTimeDigitized = dateTimeDigitized,
+                    offsetTime = offsetTime,
+                    offsetTimeOriginal = offsetTimeOriginal,
+                    offsetTimeDigitized = offsetTimeDigitized,
                     make = make,
-                    model = model
+                    model = model,
+                    lensModel = lensModel
                 )
             }
         } catch (e: Exception) {

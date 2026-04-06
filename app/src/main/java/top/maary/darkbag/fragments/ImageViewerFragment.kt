@@ -1550,7 +1550,18 @@ class ImageViewerFragment : Fragment() {
                                 flareType = config.flareType
                             )
                             val primaryUri = currentGroup.dngUri ?: currentGroup.dngUri1 ?: currentGroup.dngUri2 ?: Uri.EMPTY
-                            val meta = repository.getCaptureMetadata(primaryUri) ?: top.maary.darkbag.models.CaptureMetadata()
+                            var meta = repository.getCaptureMetadata(primaryUri) ?: top.maary.darkbag.models.CaptureMetadata()
+                            if (meta.dateTimeOriginal == null) {
+                                val captureTime = System.currentTimeMillis()
+                                val offset = java.text.SimpleDateFormat("XXX", java.util.Locale.US).format(java.util.Date(captureTime))
+                                meta = meta.copy(
+                                    dateTimeOriginal = captureTime,
+                                    dateTimeDigitized = captureTime,
+                                    offsetTime = offset,
+                                    offsetTimeOriginal = offset,
+                                    offsetTimeDigitized = offset
+                                )
+                            }
                             top.maary.darkbag.processor.ColorProcessor.saveBitmapToTiff(finalComposite, tempTiff.absolutePath, meta)
 
                             if (finalComposite != composite) {
