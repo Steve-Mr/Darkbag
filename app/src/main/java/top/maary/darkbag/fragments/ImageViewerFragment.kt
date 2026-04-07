@@ -709,7 +709,7 @@ class ImageViewerFragment : Fragment() {
     private fun updateEffectsButtons() {
         val config = currentEditConfig ?: return
         val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
-        val isTB = currentGroup.hfLayout == "TB"
+        val isTB = currentGroup.hfLayout == "TB" || currentGroup.hfLayout?.contains("top", ignoreCase = true) == true
 
         binding.btnTimestamp.setIconTintResource(if (config.showTimestamp) R.color.vibrant_orange else android.R.color.white)
         binding.btnTimestamp.alpha = if (config.showTimestamp) 1.0f else 0.6f
