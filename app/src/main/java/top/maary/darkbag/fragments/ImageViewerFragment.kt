@@ -521,6 +521,17 @@ class ImageViewerFragment : Fragment() {
             }
         }
 
+        binding.btnSwap.setOnClickListener {
+            lifecycleScope.launch {
+                ensureDngBytesLoaded()
+                val current = currentEditConfig ?: return@launch
+                currentEditConfig = current.copy(isSwapped = !current.isSwapped)
+                markAdjusted()
+                updateEffectsButtons()
+                applyEditPreview()
+            }
+        }
+
         binding.fabAdjust.setOnClickListener {
             showAdjustmentsBottomSheet()
             lifecycleScope.launch {
@@ -597,7 +608,8 @@ class ImageViewerFragment : Fragment() {
 
                 if (currentGroup.isHalfFrame()) {
                     val adjs = config.adjustments?.toMutableList() ?: mutableListOf(top.maary.darkbag.models.BasicAdjustments(), top.maary.darkbag.models.BasicAdjustments())
-                    adjs[selectedDngIndex] = updateConfig(adjs[selectedDngIndex])
+                    val adjIndex = if (config.isSwapped) 1 - selectedDngIndex else selectedDngIndex
+                    adjs[adjIndex] = updateConfig(adjs[adjIndex])
                     currentEditConfig = config.copy(adjustments = adjs)
                 } else {
                     val basic = updateConfig(config.toBasic())
@@ -696,11 +708,18 @@ class ImageViewerFragment : Fragment() {
 
     private fun updateEffectsButtons() {
         val config = currentEditConfig ?: return
+        val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
+        val isTB = currentGroup.hfLayout == "TB"
+
         binding.btnTimestamp.setIconTintResource(if (config.showTimestamp) R.color.vibrant_orange else android.R.color.white)
         binding.btnTimestamp.alpha = if (config.showTimestamp) 1.0f else 0.6f
 
         binding.btnFlare.setIconTintResource(if (config.flareType != -1) R.color.vibrant_pink else android.R.color.white)
         binding.btnFlare.alpha = if (config.flareType != -1) 1.0f else 0.6f
+
+        binding.btnSwap.setIconResource(if (isTB) R.drawable.ic_swap_vert else R.drawable.ic_swap_horiz)
+        binding.btnSwap.setIconTintResource(if (config.isSwapped) R.color.vibrant_cyan else android.R.color.white)
+        binding.btnSwap.alpha = if (config.isSwapped) 1.0f else 0.6f
     }
 
     private fun updateSelectionFeedback() {
@@ -953,7 +972,8 @@ class ImageViewerFragment : Fragment() {
         val tabPos = binding.editTabs.selectedTabPosition
 
         val target = if (currentGroup.isHalfFrame()) {
-            config.adjustments?.getOrNull(selectedDngIndex) ?: top.maary.darkbag.models.BasicAdjustments()
+            val adjIndex = if (config.isSwapped) 1 - selectedDngIndex else selectedDngIndex
+            config.adjustments?.getOrNull(adjIndex) ?: top.maary.darkbag.models.BasicAdjustments()
         } else {
             config.toBasic()
         }
@@ -1177,8 +1197,8 @@ class ImageViewerFragment : Fragment() {
                             cachedBitmap2 = dngUri2?.let { processSingle(sourceDngBytes2, it, 1) }
                         }
 
-                        val b1 = cachedBitmap1
-                        val b2 = cachedBitmap2
+                        val b1 = if (config.isSwapped) cachedBitmap2 else cachedBitmap1
+                        val b2 = if (config.isSwapped) cachedBitmap1 else cachedBitmap2
 
                         if (b1 != null || b2 != null) {
                             val isSBS = currentGroup.hfLayout != "TB"
@@ -1332,8 +1352,11 @@ class ImageViewerFragment : Fragment() {
                         val primaryBytes = if (dngUri1 != null) sourceDngBytes else sourceDngBytes2
                         processFull(primaryBytes, primaryUri, 0)
                     } else {
-                        val b1 = dngUri1?.let { processFull(sourceDngBytes, it, 0) }
-                        val b2 = dngUri2?.let { processFull(sourceDngBytes2, it, 1) }
+                        val f1 = dngUri1?.let { processFull(sourceDngBytes, it, 0) }
+                        val f2 = dngUri2?.let { processFull(sourceDngBytes2, it, 1) }
+
+                        val b1 = if (config.isSwapped) f2 else f1
+                        val b2 = if (config.isSwapped) f1 else f2
 
                         if (b1 != null || b2 != null) {
                             val isSBS = currentGroup.hfLayout != "TB"
@@ -1365,8 +1388,8 @@ class ImageViewerFragment : Fragment() {
                             if (finalComposite != composite) {
                                 composite.recycle()
                             }
-                            b1?.recycle()
-                            b2?.recycle()
+                            f1?.recycle()
+                            f2?.recycle()
                             finalComposite
                         } else null
                     }
@@ -1519,8 +1542,11 @@ class ImageViewerFragment : Fragment() {
                         val primaryBytes = if (dngUri1 != null) sourceDngBytes else sourceDngBytes2
                         processFullToTiff(primaryBytes, primaryUri, 0, tempTiff.absolutePath)?.recycle()
                     } else {
-                        val b1 = dngUri1?.let { processFullToTiff(sourceDngBytes, it, 0, null) }
-                        val b2 = dngUri2?.let { processFullToTiff(sourceDngBytes2, it, 1, null) }
+                        val f1 = dngUri1?.let { processFullToTiff(sourceDngBytes, it, 0, null) }
+                        val f2 = dngUri2?.let { processFullToTiff(sourceDngBytes2, it, 1, null) }
+
+                        val b1 = if (config.isSwapped) f2 else f1
+                        val b2 = if (config.isSwapped) f1 else f2
 
                         if (b1 != null || b2 != null) {
                             val isSBS = currentGroup.hfLayout != "TB"
@@ -1568,8 +1594,8 @@ class ImageViewerFragment : Fragment() {
                                 composite.recycle()
                             }
                             finalComposite.recycle()
-                            b1?.recycle()
-                            b2?.recycle()
+                            f1?.recycle()
+                            f2?.recycle()
                         }
                     }
 
