@@ -424,6 +424,23 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
     int halideCfa = 1;
     switch (cfaPattern) { case 0: halideCfa = 1; break; case 1: halideCfa = 2; break; case 2: halideCfa = 4; break; case 3: halideCfa = 3; break; default: halideCfa = 1; break; }
 
+    // --- DIAGNOSTIC LOGGING START ---
+    LOGD("DIAGNOSTIC: cfaPattern (Kotlin)=%d, halideCfa=%d", cfaPattern, halideCfa);
+    LOGD("DIAGNOSTIC: BlackLevelPattern=[%d, %d, %d, %d]", bl_pattern[0], bl_pattern[1], bl_pattern[2], bl_pattern[3]);
+    if (hasLsc) {
+        LOGD("DIAGNOSTIC: LSC Map Sampling (Center): [0]=%.3f, [1]=%.3f, [2]=%.3f, [3]=%.3f",
+             lensShadingVec[lsc_idx(0, lensShadingRows/2, lensShadingCols/2)],
+             lensShadingVec[lsc_idx(1, lensShadingRows/2, lensShadingCols/2)],
+             lensShadingVec[lsc_idx(2, lensShadingRows/2, lensShadingCols/2)],
+             lensShadingVec[lsc_idx(3, lensShadingRows/2, lensShadingCols/2)]);
+        LOGD("DIAGNOSTIC: LSC Map Sampling (Corner): [0]=%.3f, [1]=%.3f, [2]=%.3f, [3]=%.3f",
+             lensShadingVec[lsc_idx(0, 0, 0)],
+             lensShadingVec[lsc_idx(1, 0, 0)],
+             lensShadingVec[lsc_idx(2, 0, 0)],
+             lensShadingVec[lsc_idx(3, 0, 0)]);
+    }
+    // --- DIAGNOSTIC LOGGING END ---
+
     static bool halideThreadsConfigured = false;
     if (!halideThreadsConfigured) {
         int cpuThreads = (int)std::thread::hardware_concurrency(); if (cpuThreads <= 0) cpuThreads = 4;
@@ -532,6 +549,17 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
 
     if (!jpgPathStr.empty() || !dngPathStr.empty()) {
         ImageMetadata meta = metadataFromJava(env, metadata);
+
+        // --- DIAGNOSTIC LOGGING START ---
+        LOGD("DIAGNOSTIC [%s]: WB=[%.3f, %.3f, %.3f, %.3f]",
+             meta.uniqueCameraModel.c_str(), wbVec[0], wbVec[1], wbVec[2], wbVec[3]);
+        LOGD("DIAGNOSTIC [%s]: CCM=[%.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f]",
+             meta.uniqueCameraModel.c_str(),
+             ccmVec[0], ccmVec[1], ccmVec[2],
+             ccmVec[3], ccmVec[4], ccmVec[5],
+             ccmVec[6], ccmVec[7], ccmVec[8]);
+        // --- DIAGNOSTIC LOGGING END ---
+
         if (!dngPathStr.empty()) {
             float baselineExposure = (digitalGain > 0.0f) ? std::log2(digitalGain) : 0.0f;
             write_dng(dngPathStr.c_str(), width, height, finalImage, kMax16BitValue, ccmVec, meta, orientation, (bool)mirror, baselineExposure);
