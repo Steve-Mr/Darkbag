@@ -259,6 +259,10 @@ class ImageViewerFragment : Fragment() {
             )
             groups[index] = newGroup
             adapter.updateGroups(groups)
+
+            if (index == binding.imagePager.currentItem) {
+                updateControlsVisibility()
+            }
         } else {
             // New image group saved (maybe from background processing of a very recent shot)
             // Trigger a full repository refresh to include the new item
