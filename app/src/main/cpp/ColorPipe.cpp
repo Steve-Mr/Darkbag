@@ -543,7 +543,31 @@ bool process_and_save_image(
     int outW = width / downsampleFactor, outH = height / downsampleFactor;
     bool swapDims = (orientation == 90 || orientation == 270);
     int finalW = swapDims ? outH : outW, finalH = swapDims ? outW : outH;
-    Matrix3x3 effective_CCM = {0}; if (sourceColorSpace == 1 && ccm) std::copy(ccm, ccm + 9, effective_CCM.m);
+
+    // Combine matrices
+    Matrix3x3 combined_matrix = {1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f};
+    if (sourceColorSpace == 1) {
+        if (ccm) {
+            Matrix3x3 effective_CCM = {0};
+            std::copy(ccm, ccm + 9, effective_CCM.m);
+            combined_matrix = multiply(M_sRGB_D65_to_XYZ, effective_CCM);
+        } else {
+            combined_matrix = M_sRGB_D65_to_XYZ;
+        }
+    } else if (sourceColorSpace == 0) {
+        combined_matrix = multiply(M_Bradford_D50_to_D65, M_ProPhoto_D50_to_XYZ);
+    }
+
+    switch (targetLog) {
+        case 1: combined_matrix = multiply(M_XYZ_to_AlexaWideGamut_D65, combined_matrix); break;
+        case 2:
+        case 3: combined_matrix = multiply(M_XYZ_to_Rec2020_D65, combined_matrix); break;
+        case 5:
+        case 6: combined_matrix = multiply(M_XYZ_to_SGamut3Cine_D65, combined_matrix); break;
+        case 7: combined_matrix = multiply(M_XYZ_to_VGamut_D65, combined_matrix); break;
+        default: combined_matrix = multiply(M_XYZ_to_Rec709_D65, combined_matrix); break;
+    }
+
     std::vector<unsigned short> processedImage; std::vector<unsigned char> previewRgb8;
 
     AdaptiveEdgeComp edgeComp = calculate_adaptive_edge_comp(inputImage, width, height);
@@ -561,6 +585,40 @@ bool process_and_save_image(
     std::vector<unsigned char> debugA8;
     std::vector<unsigned char> debugB8;
     std::vector<unsigned char> debugC8;
+
+    // 1D LUT for Log, Contrast, HSWB
+    const int LUT1D_SIZE = 4096;
+    std::vector<float> lut1d(LUT1D_SIZE);
+
+    auto apply_contrast = [&](float v) {
+        return std::clamp((v - 0.5f) * (contrast + 1.0f) + 0.5f, 0.0f, 1.0f);
+    };
+
+    auto apply_hswb = [&](float v) {
+        if (highlights != 0.0f) v += highlights * std::pow(std::clamp(v, 0.0f, 1.0f), 2.0f) * 0.2f;
+        if (shadows != 0.0f) v += shadows * std::pow(1.0f - std::clamp(v, 0.0f, 1.0f), 2.0f) * 0.2f;
+        if (whites != 0.0f) v += whites * std::clamp((v - 0.5f) * 2.0f, 0.0f, 1.0f) * 0.2f;
+        if (blacks != 0.0f) v += blacks * std::clamp((0.5f - v) * 2.0f, 0.0f, 1.0f) * 0.2f;
+        return std::clamp(v, 0.0f, 1.0f);
+    };
+
+    for (int i = 0; i < LUT1D_SIZE; i++) {
+        // Input range is theoretically 0-1, but matrices might push it slightly out.
+        // We handle 0 to max_expected (e.g., 2.0)
+        float v = (float)i / (LUT1D_SIZE - 1) * 2.0f; // Scale to 0..2.0 for HDR headroom
+        v = apply_log(v, targetLog);
+        v = apply_contrast(v);
+        // HSWB is applied later after saturation, but for independent channels, we can precompute log+contrast
+        lut1d[i] = v;
+    }
+
+    auto apply_1d_lut = [&](float v) {
+        float scaled = std::clamp(v * (LUT1D_SIZE - 1) / 2.0f, 0.0f, (float)(LUT1D_SIZE - 1));
+        int idx0 = (int)scaled;
+        int idx1 = std::min(idx0 + 1, LUT1D_SIZE - 1);
+        float frac = scaled - idx0;
+        return lut1d[idx0] * (1.0f - frac) + lut1d[idx1] * frac;
+    };
 
     auto process_pixel = [&](int x, int y, Vec3* stageA, Vec3* stageB, Vec3* stageC) -> Vec3 {
         x = std::max(0, std::min(x, width - 1));
@@ -596,29 +654,12 @@ bool process_and_save_image(
         if (stageA) *stageA = colorA;
 
         Vec3 color = colorA;
-        if (sourceColorSpace == 1) { if (ccm) color = multiply(effective_CCM, color); color = multiply(M_sRGB_D65_to_XYZ, color); }
-        else if (sourceColorSpace == 0) { color = multiply(M_ProPhoto_D50_to_XYZ, color); color = multiply(M_Bradford_D50_to_D65, color); }
-
-        switch (targetLog) {
-            case 1: color = multiply(M_XYZ_to_AlexaWideGamut_D65, color); break;
-            case 2:
-            case 3: color = multiply(M_XYZ_to_Rec2020_D65, color); break;
-            case 5:
-            case 6: color = multiply(M_XYZ_to_SGamut3Cine_D65, color); break;
-            case 7: color = multiply(M_XYZ_to_VGamut_D65, color); break;
-            default: color = multiply(M_XYZ_to_Rec709_D65, color); break;
-        }
+        color = multiply(combined_matrix, color);
         if (stageB) *stageB = color;
 
-        color.r = apply_log(color.r, targetLog); color.g = apply_log(color.g, targetLog); color.b = apply_log(color.b, targetLog);
-
-        // 2. Contrast & Saturation (Log Space)
-        auto apply_contrast = [&](float v) {
-            return std::clamp((v - 0.5f) * (contrast + 1.0f) + 0.5f, 0.0f, 1.0f);
-        };
-        color.r = apply_contrast(color.r);
-        color.g = apply_contrast(color.g);
-        color.b = apply_contrast(color.b);
+        color.r = apply_1d_lut(color.r);
+        color.g = apply_1d_lut(color.g);
+        color.b = apply_1d_lut(color.b);
 
         float luma = 0.2126f * color.r + 0.7152f * color.g + 0.0722f * color.b;
         color.r = std::clamp(luma + (color.r - luma) * (saturation + 1.0f), 0.0f, 1.0f);
@@ -626,29 +667,6 @@ bool process_and_save_image(
         color.b = std::clamp(luma + (color.b - luma) * (saturation + 1.0f), 0.0f, 1.0f);
 
         // 3. Highlights / Shadows / Whites / Blacks (Log Space)
-        auto apply_hswb = [&](float v) {
-            // Highlights: affecting upper range
-            if (highlights != 0.0f) {
-                float weight = std::pow(std::clamp(v, 0.0f, 1.0f), 2.0f);
-                v += highlights * weight * 0.2f;
-            }
-            // Shadows: affecting lower range
-            if (shadows != 0.0f) {
-                float weight = std::pow(1.0f - std::clamp(v, 0.0f, 1.0f), 2.0f);
-                v += shadows * weight * 0.2f;
-            }
-            // Whites: offset upper
-            if (whites != 0.0f) {
-                float weight = std::clamp((v - 0.5f) * 2.0f, 0.0f, 1.0f);
-                v += whites * weight * 0.2f;
-            }
-            // Blacks: offset lower
-            if (blacks != 0.0f) {
-                float weight = std::clamp((0.5f - v) * 2.0f, 0.0f, 1.0f);
-                v += blacks * weight * 0.2f;
-            }
-            return std::clamp(v, 0.0f, 1.0f);
-        };
         color.r = apply_hswb(color.r);
         color.g = apply_hswb(color.g);
         color.b = apply_hswb(color.b);

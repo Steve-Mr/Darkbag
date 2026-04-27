@@ -137,6 +137,25 @@ struct GlobalBuffers {
 GlobalBuffers g_hdrPlusBuffers;
 std::mutex g_hdrPlusMutex;
 
+// Native memory map to avoid writing/reading temporary raw file
+// key: taskId (e.g. tempRawPath), value: raw image buffer
+std::unordered_map<std::string, std::shared_ptr<std::vector<uint16_t>>> g_memoryTasks;
+std::mutex g_memoryTasksMutex;
+
+void cacheTaskBuffer(const std::string& taskId, std::shared_ptr<std::vector<uint16_t>> buffer) {
+    std::lock_guard<std::mutex> lock(g_memoryTasksMutex);
+    g_memoryTasks[taskId] = buffer;
+}
+
+std::shared_ptr<std::vector<uint16_t>> getTaskBuffer(const std::string& taskId) {
+    std::lock_guard<std::mutex> lock(g_memoryTasksMutex);
+    auto it = g_memoryTasks.find(taskId);
+    if (it != g_memoryTasks.end()) {
+        return it->second;
+    }
+    return nullptr;
+}
+
 std::string getStringField(JNIEnv* env, jobject obj, jfieldID fieldID, const std::string& defaultValue) {
     jstring jstr = (jstring)env->GetObjectField(obj, fieldID);
     if (!jstr) return defaultValue;
@@ -274,19 +293,33 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
     const char* temp_path_cstr = env->GetStringUTFChars(tempRawPath, 0);
     if (!temp_path_cstr) return -1;
 
-    std::ifstream in(temp_path_cstr, std::ios::binary);
-    if (!in.is_open()) {
-        LOGE("Failed to open temp raw file: %s", temp_path_cstr);
-        env->ReleaseStringUTFChars(tempRawPath, temp_path_cstr);
-        return -1;
-    }
-
     g_hdrPlusBuffers.ensureCapacity(width, height, 1);
     std::vector<uint16_t>& finalImage = g_hdrPlusBuffers.interleavedPool;
-    size_t dataSize = (size_t)width * height * 3;
-    in.read((char*)finalImage.data(), dataSize * sizeof(uint16_t));
-    bool read_ok = !!in;
-    in.close();
+
+    std::string taskId(temp_path_cstr);
+    std::shared_ptr<std::vector<uint16_t>> cachedBuf = getTaskBuffer(taskId);
+    bool read_ok = false;
+    if (cachedBuf) {
+        LOGD("Memory buffer found for %s, skipping I/O", temp_path_cstr);
+        std::copy(cachedBuf->begin(), cachedBuf->end(), finalImage.begin());
+        read_ok = true;
+        // cleanup cache since we consumed it
+        std::lock_guard<std::mutex> lock(g_memoryTasksMutex);
+        g_memoryTasks.erase(taskId);
+    } else {
+        LOGD("Memory buffer not found for %s, fallback to file", temp_path_cstr);
+        std::ifstream in(temp_path_cstr, std::ios::binary);
+        if (!in.is_open()) {
+            LOGE("Failed to open temp raw file: %s", temp_path_cstr);
+            env->ReleaseStringUTFChars(tempRawPath, temp_path_cstr);
+            return -1;
+        }
+        size_t dataSize = (size_t)width * height * 3;
+        in.read((char*)finalImage.data(), dataSize * sizeof(uint16_t));
+        read_ok = !!in;
+        in.close();
+    }
+
     env->ReleaseStringUTFChars(tempRawPath, temp_path_cstr);
 
     if (!read_ok) { LOGE("Failed to read temp raw data."); return -1; }
@@ -308,10 +341,15 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
 
     ImageMetadata meta = metadataFromJava(env, metadata);
 
+    // Run DNG export and JPG processing in parallel using std::async
+    std::future<bool> dngFuture;
     if (dng_path_cstr) {
-        LOGD("Exporting DNG to %s", dng_path_cstr);
+        LOGD("Exporting DNG to %s (async)", dng_path_cstr);
         float baselineExposure = (digitalGain > 0.0f) ? std::log2(digitalGain) : 0.0f;
-        write_dng(dng_path_cstr, width, height, finalImage, kMax16BitValue, ccmVec, meta, orientation, (bool)mirror, baselineExposure);
+        std::string dngPathStr(dng_path_cstr); // capture by value for thread
+        dngFuture = std::async(std::launch::async, [dngPathStr, width, height, &finalImage, ccmVec, meta, orientation, mirror, baselineExposure]() {
+            return write_dng(dngPathStr.c_str(), width, height, finalImage, kMax16BitValue, ccmVec, meta, orientation, (bool)mirror, baselineExposure);
+        });
     }
 
     bool saveOk = true;
@@ -320,6 +358,11 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
         saveOk = process_and_save_image(finalImage, width, height, digitalGain, targetLog, lut,
                                         exposure, contrast, saturation, highlights, shadows, whites, blacks,
                                         jpg_path_cstr, nullptr, &meta, 1, ccmVec.data(), wbVec.data(), orientation, nullptr, 0, 0, false, 1, zoomFactor, (bool)mirror);
+    }
+
+    if (dngFuture.valid()) {
+        bool dngOk = dngFuture.get();
+        if (!dngOk) LOGE("Background DNG export failed");
     }
     if (jpgPath && jpg_path_cstr) env->ReleaseStringUTFChars(jpgPath, jpg_path_cstr);
     if (dngPath && dng_path_cstr) env->ReleaseStringUTFChars(dngPath, dng_path_cstr);
@@ -375,6 +418,14 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
     }
 
     auto copyStart = std::chrono::high_resolution_clock::now();
+
+    // Instead of fully copying all frames sequentially, we can create an array of pointers
+    // and tell Halide to use an array of buffers, or just allocate Halide buffers that point to the direct buffers.
+    // However, hdrplus_raw_pipeline expects a single 3D buffer (width, height, numFrames).
+    // To avoid copying everything if the direct buffers are contiguous, we would need to check.
+    // Usually they aren't. We'll still copy, but Halide buffer is created.
+    // Memory copy is inevitable since Halide pipeline takes a single 3D buffer.
+
     #pragma omp parallel for
     for (int i = 0; i < numFrames; i++) { std::memcpy(rawDataPtr + (static_cast<size_t>(i) * width * height), framePtrs[i], frameSizeBytes); }
     auto copyDurationMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - copyStart).count();
@@ -526,15 +577,24 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
 
     const char* tr_p_cstr = (tempRawPath) ? env->GetStringUTFChars(tempRawPath, 0) : nullptr;
     if (tr_p_cstr) {
+        // Cache memory instead of strictly relying on writing to disk
+        auto cachedBuf = std::make_shared<std::vector<uint16_t>>(finalImage);
+        cacheTaskBuffer(std::string(tr_p_cstr), cachedBuf);
+
+        // Still write fallback just in case Worker runs in different process or cache evicted
         std::ofstream out(tr_p_cstr, std::ios::binary); if (out.is_open()) { out.write((char*)finalImage.data(), (size_t)width*height*3*2); out.close(); }
         env->ReleaseStringUTFChars(tempRawPath, tr_p_cstr);
     }
 
     if (!jpgPathStr.empty() || !dngPathStr.empty()) {
         ImageMetadata meta = metadataFromJava(env, metadata);
+
+        std::future<bool> dngFuture;
         if (!dngPathStr.empty()) {
             float baselineExposure = (digitalGain > 0.0f) ? std::log2(digitalGain) : 0.0f;
-            write_dng(dngPathStr.c_str(), width, height, finalImage, kMax16BitValue, ccmVec, meta, orientation, (bool)mirror, baselineExposure);
+            dngFuture = std::async(std::launch::async, [dngPathStr, width, height, &finalImage, ccmVec, meta, orientation, mirror, baselineExposure]() {
+                return write_dng(dngPathStr.c_str(), width, height, finalImage, kMax16BitValue, ccmVec, meta, orientation, (bool)mirror, baselineExposure);
+            });
         }
 
         if (!jpgPathStr.empty()) {
@@ -552,6 +612,10 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
                                         0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
                                         altJpgPath.c_str(), nullptr, &meta, 1, ccmAltVec.data(), wbVec.data(), orientation, nullptr, 0, 0, false, 1, zoomFactor, (bool)mirror);
             }
+        }
+
+        if (dngFuture.valid()) {
+            dngFuture.get();
         }
     }
     fillDebugStats(env, debugStats, (jlong)copyDurationMs, (jlong)halideDurationMs, (jlong)postDurationMs, 0, (jlong)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now()-saveStart).count(), 0, (jlong)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now()-nativeStart).count(), (jlong)jniPrepMs, stageStats);
