@@ -1430,6 +1430,7 @@ class ImageViewerFragment : Fragment() {
                     onZoomChanged = { isZoomed -> if (isZoomed) hideUi() else showUi() }
                     onLongPressStarted = { handleLongPressStarted(it) }
                     onLongPressEnded = { handleLongPressEnded(it) }
+                    onCurrentListChanged = { updateControlsVisibility() }
                 }
                 binding.imagePager.adapter = adapter
                 binding.imagePager.setCurrentItem(newPos, false)
