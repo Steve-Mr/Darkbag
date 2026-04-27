@@ -29,6 +29,7 @@ class ImageViewerAdapter(
     var onZoomChanged: ((Boolean) -> Unit)? = null
     var onLongPressStarted: ((top.maary.darkbag.ui.ZoomableImageView) -> Unit)? = null
     var onLongPressEnded: ((top.maary.darkbag.ui.ZoomableImageView) -> Unit)? = null
+    var onCurrentListChanged: (() -> Unit)? = null
     private var recyclerView: RecyclerView? = null
     private val selectedFormats = mutableMapOf<Int, String>()
     private var isUiVisible = true
@@ -58,6 +59,9 @@ class ImageViewerAdapter(
     private val differ = AsyncListDiffer(this, diffCallback)
 
     init {
+        differ.addListListener { _, _ ->
+            onCurrentListChanged?.invoke()
+        }
         differ.submitList(initialGroups)
     }
 

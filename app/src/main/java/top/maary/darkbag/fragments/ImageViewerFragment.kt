@@ -87,9 +87,6 @@ class ImageViewerFragment : Fragment() {
                                     if (continuation.isActive) continuation.resume(Unit)
                                 }
                             }
-                            if (binding.imagePager.currentItem == position) {
-                                updateControlsVisibility()
-                            }
                         }
                     }
                 }
@@ -197,6 +194,7 @@ class ImageViewerFragment : Fragment() {
                         onLongPressStarted = { handleLongPressStarted(it) }
                         onLongPressEnded = { handleLongPressEnded(it) }
                         setFormatSwitcherPersistentHidden(isAdjusted)
+                        onCurrentListChanged = { updateControlsVisibility() }
                     }
                     binding.imagePager.adapter = adapter
 
@@ -220,6 +218,9 @@ class ImageViewerFragment : Fragment() {
                     }
                     binding.imagePager.isUserInputEnabled = !isAdjusted
                     setupActionButtons()
+
+                    // Manually initialize visibility for the first load, as the
+                    // initial synchronous submitList misses the later listener assignment.
                     updateControlsVisibility()
 
                     binding.imagePager.visibility = View.VISIBLE
@@ -247,10 +248,6 @@ class ImageViewerFragment : Fragment() {
             )
             groups[index] = newGroup
             adapter.updateGroups(groups)
-
-            if (index == binding.imagePager.currentItem) {
-                updateControlsVisibility()
-            }
         } else {
             // New image group saved (maybe from background processing of a very recent shot)
             // Trigger a full repository refresh to include the new item
