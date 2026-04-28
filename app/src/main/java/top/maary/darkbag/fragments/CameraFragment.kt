@@ -2401,7 +2401,7 @@ class CameraFragment : Fragment() {
 
                         if (is1x && isAlreadyIn1xPresets) {
                             val presets1x = presets1xForCheck
-                            val currentName = oldLens?.name ?: presets1x.firstOrNull()?.name ?: "24mm"
+                            val currentName = oldLens.name
                             val currentIndex = presets1x.indexOfFirst { it.name == currentName }
                             val nextIndex = if (currentIndex != -1 && currentIndex < presets1x.size - 1) {
                                 currentIndex + 1
