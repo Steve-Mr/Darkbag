@@ -228,7 +228,7 @@ class CameraRepository(private val context: Context) {
             sensorId = "${mainWide.sensorId}-$baseName",
             name = baseName,
             multiplier = mainWide.multiplier,
-            isZoomPreset = true,
+            isZoomPreset = false, // Base 1.0x is not a crop
             targetZoomRatio = 1.0f
         ))
 

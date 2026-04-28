@@ -2485,7 +2485,7 @@ class CameraFragment : Fragment() {
                         btn.text = String.format("%.1fx", currentLens?.multiplier ?: lens.multiplier)
                     }
 
-                    val activeColor = if (currentLens?.isZoomPreset == true) {
+                    val activeColor = if (currentLens?.isZoomPreset == true && (currentLens?.targetZoomRatio ?: 1.0f) > 1.0f) {
                         MaterialColors.getColor(btn, com.google.android.material.R.attr.colorTertiary)
                     } else {
                         colorPrimary
