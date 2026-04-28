@@ -700,7 +700,7 @@ class CameraFragment : Fragment() {
             val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
             val savedLensId = prefs.getString(KEY_SELECTED_LENS_ID, null)
             val defaultLensId = prefs.getString(SettingsFragment.KEY_DEFAULT_LENS_ID, null)
-            val default1xFocal = prefs.getString(SettingsFragment.KEY_DEFAULT_FOCAL_1X, "24mm")
+            val default1xFocal = prefs.getString(SettingsFragment.KEY_DEFAULT_FOCAL_1X, null)
 
             if (savedLensId != null) {
                 var found = newLenses.find { it.sensorId == savedLensId }
@@ -723,7 +723,7 @@ class CameraFragment : Fragment() {
 
                 if (found != null && found.multiplier in 0.95f..1.05f && !found.isZoomPreset) {
                     val presets1x = cameraRepository.get1xPresets(found)
-                    updatedLens = presets1x.find { it.name == default1xFocal } ?: found
+                    updatedLens = presets1x.find { it.name == default1xFocal } ?: presets1x.firstOrNull() ?: found
                 } else {
                     updatedLens = found
                 }
@@ -2392,20 +2392,21 @@ class CameraFragment : Fragment() {
                     setOnClickListener {
                         val oldLens = currentLens
                         val is1x = lens.multiplier in 0.95f..1.05f && !lens.isZoomPreset
+                        val presets1xForCheck = if (is1x) cameraRepository.get1xPresets(lens) else emptyList()
                         val isAlreadyIn1xPresets = oldLens != null && oldLens.id == lens.id &&
-                                (oldLens.name == "24mm" || oldLens.name == "28mm" || oldLens.name == "35mm")
+                                presets1xForCheck.any { it.name == oldLens.name }
 
                         val isLargestTele = largestTele != null && lens.sensorId == largestTele.sensorId
                         val isAlreadyInTelePresets = oldLens != null && (oldLens.sensorId == lens.sensorId || oldLens.sensorId == "${lens.sensorId}${CameraRepository.VIRTUAL_TELE_2X_SUFFIX}")
 
                         if (is1x && isAlreadyIn1xPresets) {
-                            val presets1x = cameraRepository.get1xPresets(lens)
-                            val currentName = oldLens?.name ?: "24mm"
-                            val nextIndex = when (currentName) {
-                                "24mm" -> presets1x.indexOfFirst { it.name == "28mm" }.takeIf { it != -1 } ?: 0
-                                "28mm" -> presets1x.indexOfFirst { it.name == "35mm" }.takeIf { it != -1 } ?: 0
-                                "35mm" -> 0
-                                else -> 0
+                            val presets1x = presets1xForCheck
+                            val currentName = oldLens.name
+                            val currentIndex = presets1x.indexOfFirst { it.name == currentName }
+                            val nextIndex = if (currentIndex != -1 && currentIndex < presets1x.size - 1) {
+                                currentIndex + 1
+                            } else {
+                                0
                             }
                             currentLens = presets1x[nextIndex]
 
@@ -2423,9 +2424,9 @@ class CameraFragment : Fragment() {
                              currentLens = if (isCurrentlyNative) telePresets[1] else telePresets[0]
                         } else if (is1x) {
                             val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-                            val default1xFocal = prefs.getString(SettingsFragment.KEY_DEFAULT_FOCAL_1X, "24mm")
+                            val default1xFocal = prefs.getString(SettingsFragment.KEY_DEFAULT_FOCAL_1X, null)
                             val presets1x = cameraRepository.get1xPresets(lens)
-                            currentLens = presets1x.find { it.name == default1xFocal } ?: lens
+                            currentLens = presets1x.find { it.name == default1xFocal } ?: presets1x.firstOrNull() ?: lens
                         } else {
                             currentLens = lens
                         }
@@ -2484,12 +2485,17 @@ class CameraFragment : Fragment() {
                         btn.text = String.format("%.1fx", currentLens?.multiplier ?: lens.multiplier)
                     }
 
-                    btn.setTextColor(colorPrimary)
+                    val activeColor = if (currentLens?.isZoomPreset == true && (currentLens?.targetZoomRatio ?: 1.0f) > 1.0f) {
+                        MaterialColors.getColor(btn, com.google.android.material.R.attr.colorTertiary)
+                    } else {
+                        colorPrimary
+                    }
+                    btn.setTextColor(activeColor)
                     btn.strokeWidth = resources.getDimensionPixelSize(R.dimen.stroke_small)
-                    btn.strokeColor = android.content.res.ColorStateList.valueOf(colorPrimary)
+                    btn.strokeColor = android.content.res.ColorStateList.valueOf(activeColor)
                     btn.setBackgroundColor(MaterialColors.layer(
                         MaterialColors.getColor(btn, com.google.android.material.R.attr.colorSurface),
-                        colorPrimary,
+                        activeColor,
                         0.1f
                     ))
                 } else {
@@ -2497,9 +2503,9 @@ class CameraFragment : Fragment() {
                     btn.strokeWidth = 0
 
                     if (lens.multiplier in 0.95f..1.05f && !lens.isZoomPreset) {
-                        val default1xFocal = prefs.getString(SettingsFragment.KEY_DEFAULT_FOCAL_1X, "24mm")
+                        val default1xFocal = prefs.getString(SettingsFragment.KEY_DEFAULT_FOCAL_1X, null)
                         val presets1x = cameraRepository.get1xPresets(lens)
-                        val defaultPreset = presets1x.find { it.name == default1xFocal } ?: lens
+                        val defaultPreset = presets1x.find { it.name == default1xFocal } ?: presets1x.firstOrNull() ?: lens
                         btn.text = String.format("%.1fx", defaultPreset.multiplier)
                     } else {
                         btn.text = lens.name
@@ -4925,6 +4931,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
         // Get focal length in 35mm film equivalent
         var focalIn35mm: Int? = null
+        var finalFocalLength = focalLength
         try {
             val chars = targetCharId?.let { camera2Manager.getCameraCharacteristics(it) }
             if (chars != null) {
@@ -4932,6 +4939,18 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     val focal = captureResult?.get(CaptureResult.LENS_FOCAL_LENGTH) ?: focalLengths.firstOrNull() ?: 0f
                     val sensorWidth = chars.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)?.width ?: 36f
                     (focal * 36f / sensorWidth).toInt()
+                }
+
+                if (currentLens?.isZoomPreset == true) {
+                    val zoomRatio = currentLens?.targetZoomRatio ?: 1.0f
+                    if (zoomRatio > 1.0f) {
+                        val baseF35 = focalIn35mm ?: kotlin.math.round(currentLens?.equivalentFocalLength ?: 24f).toInt()
+                        val virtualF35 = kotlin.math.round(baseF35 * zoomRatio).toInt()
+                        focalIn35mm = virtualF35
+
+                        val baseFocal = finalFocalLength ?: chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.firstOrNull() ?: 0f
+                        finalFocalLength = baseFocal * zoomRatio
+                    }
                 }
             }
         } catch (e: Exception) {
@@ -4942,7 +4961,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             iso = iso,
             exposureTime = exposureTime,
             fNumber = fNumber,
-            focalLength = focalLength,
+            focalLength = finalFocalLength,
             focalLengthIn35mmFilm = focalIn35mm,
             dateTimeOriginal = captureTime,
             dateTimeDigitized = captureTime,

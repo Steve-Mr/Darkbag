@@ -202,7 +202,8 @@ class SettingsFragment : Fragment() {
             val adapter1x = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, names1x)
             binding.menuDefaultFocal1x.setAdapter(adapter1x)
 
-            val savedFocal1x = prefs.getString(KEY_DEFAULT_FOCAL_1X, "24mm")
+            val baseFocalName = presets1x.firstOrNull()?.name ?: "24mm"
+            val savedFocal1x = prefs.getString(KEY_DEFAULT_FOCAL_1X, baseFocalName)
             binding.menuDefaultFocal1x.setText(savedFocal1x, false)
             binding.menuDefaultFocal1x.setOnItemClickListener { _, _, position, _ ->
                 prefs.edit().putString(KEY_DEFAULT_FOCAL_1X, names1x[position]).apply()

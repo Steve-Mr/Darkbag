@@ -220,18 +220,20 @@ class CameraRepository(private val context: Context) {
     fun get1xPresets(mainWide: LensInfo): List<LensInfo> {
         val result = mutableListOf<LensInfo>()
         val mainEqFocal = mainWide.equivalentFocalLength
+        val baseFocalInt = kotlin.math.round(mainEqFocal).toInt()
+        val baseName = "${baseFocalInt}mm"
 
-        // 24mm (Base)
+        // Base
         result.add(mainWide.copy(
-            sensorId = "${mainWide.sensorId}-24mm",
-            name = "24mm",
+            sensorId = "${mainWide.sensorId}-$baseName",
+            name = baseName,
             multiplier = mainWide.multiplier,
-            isZoomPreset = true,
+            isZoomPreset = false, // Base 1.0x is not a crop
             targetZoomRatio = 1.0f
         ))
 
         // 28mm
-        if (mainEqFocal <= 26f) {
+        if (baseFocalInt <= 26) {
             val targetEq = 28f
             val zoom = targetEq / mainEqFocal
             result.add(mainWide.copy(
@@ -244,7 +246,7 @@ class CameraRepository(private val context: Context) {
         }
 
         // 35mm
-        if (mainEqFocal <= 33f) {
+        if (baseFocalInt <= 33) {
             val targetEq = 35f
             val zoom = targetEq / mainEqFocal
             result.add(mainWide.copy(
