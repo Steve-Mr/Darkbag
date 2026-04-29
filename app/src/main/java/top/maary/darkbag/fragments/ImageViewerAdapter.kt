@@ -203,6 +203,8 @@ class ImageViewerAdapter(
         val holder = recyclerView?.findViewHolderForAdapterPosition(position) as? ViewHolder
         if (holder != null) {
             setBitmapAndRecyclePrevious(holder, bitmap)
+        } else {
+            bitmap.recycle()
         }
     }
 
