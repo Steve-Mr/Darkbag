@@ -112,11 +112,8 @@ class ImageViewerFragment : Fragment() {
                     }
                 }
 
-                cachedBitmap1?.recycle()
                 cachedBitmap1 = null
-                cachedBitmap2?.recycle()
                 cachedBitmap2 = null
-                lastCompositeBitmap?.recycle()
                 lastCompositeBitmap = null
             }
             updateControlsVisibility()
@@ -307,9 +304,7 @@ class ImageViewerFragment : Fragment() {
         // Reset cached data to prevent cross-contamination between different image groups
         sourceDngBytes = null
         sourceDngBytes2 = null
-        cachedBitmap1?.recycle()
         cachedBitmap1 = null
-        cachedBitmap2?.recycle()
         cachedBitmap2 = null
         lastPreviewConfig = null
         selectedDngIndex = 0
@@ -670,9 +665,7 @@ class ImageViewerFragment : Fragment() {
         adapter.setFormatSwitcherPersistentHidden(false)
         sourceDngBytes = null
         sourceDngBytes2 = null
-        cachedBitmap1?.recycle()
         cachedBitmap1 = null
-        cachedBitmap2?.recycle()
         cachedBitmap2 = null
         lastPreviewConfig = null
         lastCompositeBitmap = null
@@ -1197,11 +1190,9 @@ class ImageViewerFragment : Fragment() {
                                           lastPreviewConfig?.adjustments?.getOrNull(1) != config.adjustments?.getOrNull(1)
 
                         if (forceUpdate1 || cachedBitmap1 == null) {
-                            cachedBitmap1?.recycle()
                             cachedBitmap1 = dngUri1?.let { processSingle(sourceDngBytes, it, 0) }
                         }
                         if (forceUpdate2 || cachedBitmap2 == null) {
-                            cachedBitmap2?.recycle()
                             cachedBitmap2 = dngUri2?.let { processSingle(sourceDngBytes2, it, 1) }
                         }
 
@@ -1264,15 +1255,15 @@ class ImageViewerFragment : Fragment() {
                 if (lastCompositeBitmap != compositeBitmap) {
                     val old = lastCompositeBitmap
                     lastCompositeBitmap = compositeBitmap
-                    old?.recycle()
-                }
+
+                    }
                 if (isLongPressing) return@launch
 
                 val currentIndex = binding.imagePager.currentItem
-                adapter.cancelLoadJob(currentIndex)
+                adapter.cancelLoadJob(currentIndex, clearView = true)
                 val holder = (binding.imagePager.getChildAt(0) as? androidx.recyclerview.widget.RecyclerView)
                     ?.findViewHolderForAdapterPosition(currentIndex) as? ImageViewerAdapter.ViewHolder
-                holder?.binding?.imageView?.setImageBitmap(compositeBitmap)
+                compositeBitmap?.let { adapter.setManualBitmap(currentIndex, it) }
                 holder?.binding?.loadingIndicator?.visibility = View.GONE
             }
 

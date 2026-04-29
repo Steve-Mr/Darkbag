@@ -198,6 +198,14 @@ class ImageViewerAdapter(
         holder.binding.imageView.setImageBitmap(bitmap)
     }
 
+
+    fun setManualBitmap(position: Int, bitmap: android.graphics.Bitmap) {
+        val holder = recyclerView?.findViewHolderForAdapterPosition(position) as? ViewHolder
+        if (holder != null) {
+            setBitmapAndRecyclePrevious(holder, bitmap)
+        }
+    }
+
     private fun clearCurrentBitmap(holder: ViewHolder) {
         Glide.with(holder.binding.imageView).clear(holder.binding.imageView)
         holder.manualBitmap?.let { bitmap ->
