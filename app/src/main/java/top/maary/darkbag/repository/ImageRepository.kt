@@ -64,6 +64,24 @@ class ImageRepository(private val context: Context) {
         val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
         val groups = mutableMapOf<String, ImageGroupBuilder>()
 
+        var targetBaseName: String? = null
+        if (initialUri != null) {
+            try {
+                val uri = Uri.parse(initialUri)
+                context.contentResolver.query(uri, arrayOf(MediaStore.MediaColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        val name = cursor.getString(0)
+                        if (name != null) {
+                            targetBaseName = getBaseName(name)
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("ImageRepository", "Failed to parse initialUri for baseName", e)
+            }
+        }
+
+
         suspend fun emitCurrent() {
             val sorted = groups.values
                 .map { it.build() }
@@ -72,6 +90,110 @@ class ImageRepository(private val context: Context) {
             cachedGroups = sorted
             emit(sorted)
         }
+
+
+        // Step 1.5: Preload the target group if targetBaseName is known
+        if (targetBaseName != null) {
+            val targetName = targetBaseName!!
+            withContext(Dispatchers.IO) {
+                // Preload from MediaStore (JPG)
+                val collection = MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+                val projection = arrayOf(
+                    MediaStore.MediaColumns._ID,
+                    MediaStore.MediaColumns.DISPLAY_NAME,
+                    MediaStore.MediaColumns.DATE_ADDED,
+                    MediaStore.MediaColumns.MIME_TYPE
+                )
+                val selection = "${MediaStore.MediaColumns.DISPLAY_NAME} LIKE ?"
+                val selectionArgs = arrayOf("$targetName%")
+                context.contentResolver.query(collection, projection, selection, selectionArgs, null)?.use { cursor ->
+                    val idColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
+                    val nameColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
+                    val dateColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_ADDED)
+                    val mimeColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.MIME_TYPE)
+
+                    while (cursor.moveToNext()) {
+                        val name = cursor.getString(nameColumn)
+                        val id = cursor.getLong(idColumn)
+                        val date = cursor.getLong(dateColumn) * 1000
+                        val mime = cursor.getString(mimeColumn)
+                        val uri = ContentUris.withAppendedId(collection, id)
+                        val builder = groups.getOrPut(targetName) { ImageGroupBuilder(targetName) }
+
+                        when {
+                            mime == "image/jpeg" -> builder.setJpg(uri, date)
+                            name.contains("_HF2") && (mime == "image/x-adobe-dng" || name.endsWith(".dng", ignoreCase = true)) -> builder.setDng2(uri, date)
+                            name.contains("_HF1") && (mime == "image/x-adobe-dng" || name.endsWith(".dng", ignoreCase = true)) -> builder.setDng1(uri, date)
+                            mime == "image/x-adobe-dng" || name.endsWith(".dng", ignoreCase = true) -> builder.setDng(uri, date)
+                        }
+                    }
+                }
+
+                // Preload from SAF (DNG)
+                val rawFolderUriStr = prefs.getString(SettingsFragment.KEY_RAW_STORAGE_URI, null)
+                if (rawFolderUriStr != null) {
+                    try {
+                        val treeUri = Uri.parse(rawFolderUriStr)
+                        val root = DocumentFile.fromTreeUri(context, treeUri)
+                        if (root != null) {
+                            val possibleNames = listOf(
+                                "$targetName.dng",
+                                "${targetName}_HF1.dng",
+                                "${targetName}_HF2.dng"
+                            )
+                            val builder = groups.getOrPut(targetName) { ImageGroupBuilder(targetName) }
+                            for (name in possibleNames) {
+                                val file = root.findFile(name)
+                                if (file != null && file.exists()) {
+                                    val lastModified = file.lastModified()
+                                    when {
+                                        name.contains("_HF2") -> builder.setDng2(file.uri, lastModified)
+                                        name.contains("_HF1") -> builder.setDng1(file.uri, lastModified)
+                                        else -> builder.setDng(file.uri, lastModified)
+                                    }
+                                }
+                            }
+                        }
+                    } catch (e: Exception) {
+                        android.util.Log.e("ImageRepository", "Failed to preload target SAF", e)
+                    }
+                }
+                // Load metadata for the preloaded target image
+                val targetBuilder = groups[targetName]
+                if (targetBuilder != null) {
+                    val tempGroup = targetBuilder.build()
+                    // Re-use logic from loadMetadata, but apply it back to builder immediately
+                    tempGroup.jpgUri?.let { uri ->
+                        try {
+                            context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                                val exif = androidx.exifinterface.media.ExifInterface(pfd.fileDescriptor)
+                                val comment = exif.getAttribute(androidx.exifinterface.media.ExifInterface.TAG_USER_COMMENT)
+                                parseUserComment(comment, targetBuilder)
+                                val orientation = exif.getAttributeInt(
+                                    androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION,
+                                    androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL
+                                )
+                                val w = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_IMAGE_WIDTH, 0)
+                                val h = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_IMAGE_LENGTH, 0)
+                                if (orientation == androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90 || orientation == androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270) {
+                                    targetBuilder.width = h
+                                    targetBuilder.height = w
+                                } else {
+                                    targetBuilder.width = w
+                                    targetBuilder.height = h
+                                }
+                            }
+                        } catch (e: Exception) {
+                            android.util.Log.w("ImageRepository", "Failed to read EXIF for preloaded target from $uri", e)
+                        }
+                    }
+                    targetBuilder.metadataLoaded = true
+                }
+            }
+            emitCurrent() // Emit immediately to show the initial image with controls right away
+        }
+
+
 
         // Stage 1: Fast scan MediaStore (usually fastest as it's an indexed database)
         withContext(Dispatchers.IO) {
@@ -442,6 +564,7 @@ class ImageRepository(private val context: Context) {
         var height: Int = 0
         var captureTime: Long = 0L
         var editConfig: EditConfig? = null
+        var metadataLoaded: Boolean = false
 
         fun applyFrom(group: ImageGroup): ImageGroupBuilder {
             jpgUri = group.jpgUri
@@ -536,7 +659,7 @@ class ImageRepository(private val context: Context) {
                 captureTime,
                 maxOf(jpgTime, dngTime, dngUri1Time, dngUri2Time),
                 editConfig,
-                metadataLoaded = false,
+                metadataLoaded = metadataLoaded,
                 isInProgress = isInProgress,
                 isPartial = isPartial
             )
