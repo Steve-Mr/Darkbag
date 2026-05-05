@@ -1,0 +1,46 @@
+--- app/src/main/java/top/maary/darkbag/fragments/ImageViewerFragment.kt
++++ app/src/main/java/top/maary/darkbag/fragments/ImageViewerFragment.kt
+@@ -197,6 +197,21 @@
+                         onLongPressStarted = { handleLongPressStarted(it) }
+                         onLongPressEnded = { handleLongPressEnded(it) }
+                         setFormatSwitcherPersistentHidden(isAdjusted)
++                        onCurrentListChanged = { previousList, currentList ->
++                            val currentIndex = binding.imagePager.currentItem
++                            if (currentIndex in currentList.indices) {
++                                val currentGroup = currentList[currentIndex]
++                                val prevGroup = previousList.getOrNull(currentIndex)
++
++                                if (prevGroup != null && !prevGroup.metadataLoaded && currentGroup.metadataLoaded) {
++                                    if (currentGroup.editConfig != null) {
++                                        prepareEditConfig(currentGroup)
++                                    }
++                                }
++
++                                updateControlsVisibility()
++                            }
++                        }
+                     }
+                     binding.imagePager.adapter = adapter
+
+@@ -1433,6 +1448,21 @@
+                     onZoomChanged = { isZoomed -> if (isZoomed) hideUi() else showUi() }
+                     onLongPressStarted = { handleLongPressStarted(it) }
+                     onLongPressEnded = { handleLongPressEnded(it) }
++                    onCurrentListChanged = { previousList, currentList ->
++                        val currentIndex = binding.imagePager.currentItem
++                        if (currentIndex in currentList.indices) {
++                            val currentGroup = currentList[currentIndex]
++                            val prevGroup = previousList.getOrNull(currentIndex)
++
++                            if (prevGroup != null && !prevGroup.metadataLoaded && currentGroup.metadataLoaded) {
++                                if (currentGroup.editConfig != null) {
++                                    prepareEditConfig(currentGroup)
++                                }
++                            }
++
++                            updateControlsVisibility()
++                        }
++                    }
+                 }
+                 binding.imagePager.adapter = adapter
+                 binding.imagePager.setCurrentItem(newPos, false)

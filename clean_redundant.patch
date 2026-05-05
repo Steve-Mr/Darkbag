@@ -1,0 +1,12 @@
+--- app/src/main/java/top/maary/darkbag/fragments/ImageViewerFragment.kt
++++ app/src/main/java/top/maary/darkbag/fragments/ImageViewerFragment.kt
+@@ -87,9 +87,6 @@
+                                     if (continuation.isActive) continuation.resume(Unit)
+                                 }
+                             }
+-                            if (binding.imagePager.currentItem == position) {
+-                                updateControlsVisibility()
+-                            }
+                         }
+                     }
+                 }
