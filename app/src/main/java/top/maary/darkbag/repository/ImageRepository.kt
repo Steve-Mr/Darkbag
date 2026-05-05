@@ -129,33 +129,49 @@ class ImageRepository(private val context: Context) {
                     }
                 }
 
-                // Preload from SAF (DNG)
+                // Preload from SAF (DNG) using direct query to avoid findFile (which is O(N))
                 val rawFolderUriStr = prefs.getString(SettingsFragment.KEY_RAW_STORAGE_URI, null)
                 if (rawFolderUriStr != null) {
                     try {
                         val treeUri = Uri.parse(rawFolderUriStr)
-                        val root = DocumentFile.fromTreeUri(context, treeUri)
-                        if (root != null) {
-                            val possibleNames = listOf(
-                                "$targetName.dng",
-                                "${targetName}_HF1.dng",
-                                "${targetName}_HF2.dng"
-                            )
+                        val treeDocumentId = android.provider.DocumentsContract.getTreeDocumentId(treeUri)
+                        val childrenUri = android.provider.DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, treeDocumentId)
+
+                        val projection = arrayOf(
+                            android.provider.DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                            android.provider.DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                            android.provider.DocumentsContract.Document.COLUMN_LAST_MODIFIED
+                        )
+
+                        // We query the children URI. Note: SAF doesn't always support selection args, but we can try,
+                        // or we just fetch everything briefly? No, fetching everything is slow.
+                        // Actually, if we just want to avoid O(N) listFiles inside DocumentFile, querying with selection might fail on some providers.
+                        // So let's fall back to a fast query loop but only on the Raw folder.
+
+                        // Safest fast way: if it fails, it fails, but we don't use DocumentFile.listFiles
+                        context.contentResolver.query(childrenUri, projection, null, null, null)?.use { cursor ->
+                            val idCol = cursor.getColumnIndexOrThrow(android.provider.DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+                            val nameCol = cursor.getColumnIndexOrThrow(android.provider.DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+                            val dateCol = cursor.getColumnIndexOrThrow(android.provider.DocumentsContract.Document.COLUMN_LAST_MODIFIED)
+
                             val builder = groups.getOrPut(targetName) { ImageGroupBuilder(targetName) }
-                            for (name in possibleNames) {
-                                val file = root.findFile(name)
-                                if (file != null && file.exists()) {
-                                    val lastModified = file.lastModified()
-                                    when {
-                                        name.contains("_HF2") -> builder.setDng2(file.uri, lastModified)
-                                        name.contains("_HF1") -> builder.setDng1(file.uri, lastModified)
-                                        else -> builder.setDng(file.uri, lastModified)
-                                    }
+                            while (cursor.moveToNext()) {
+                                val name = cursor.getString(nameCol) ?: continue
+                                if (!name.startsWith(targetName)) continue // Fast filter for the target only
+
+                                val docId = cursor.getString(idCol)
+                                val date = cursor.getLong(dateCol)
+                                val fileUri = android.provider.DocumentsContract.buildDocumentUriUsingTree(treeUri, docId)
+
+                                when {
+                                    name.contains("_HF2") && name.endsWith(".dng", ignoreCase = true) -> builder.setDng2(fileUri, date)
+                                    name.contains("_HF1") && name.endsWith(".dng", ignoreCase = true) -> builder.setDng1(fileUri, date)
+                                    name.endsWith(".dng", ignoreCase = true) -> builder.setDng(fileUri, date)
                                 }
                             }
                         }
                     } catch (e: Exception) {
-                        android.util.Log.e("ImageRepository", "Failed to preload target SAF", e)
+                        android.util.Log.e("ImageRepository", "Failed to preload target SAF fast query", e)
                     }
                 }
                 // Load metadata for the preloaded target image
