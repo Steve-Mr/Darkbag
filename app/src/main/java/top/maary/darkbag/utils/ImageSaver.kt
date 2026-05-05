@@ -466,6 +466,7 @@ object ImageSaver {
                 put("show_timestamp", editConfig.showTimestamp)
                 put("flare_type", editConfig.flareType)
                 put("hf_layout", editConfig.hfLayout)
+                put("is_swapped", editConfig.isSwapped)
                 put("zoom_factor", cfg.zoomFactor.toDouble())
             }
             }

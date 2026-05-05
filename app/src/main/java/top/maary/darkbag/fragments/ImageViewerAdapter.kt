@@ -29,6 +29,7 @@ class ImageViewerAdapter(
     var onZoomChanged: ((Boolean) -> Unit)? = null
     var onLongPressStarted: ((top.maary.darkbag.ui.ZoomableImageView) -> Unit)? = null
     var onLongPressEnded: ((top.maary.darkbag.ui.ZoomableImageView) -> Unit)? = null
+    var onCurrentListChanged: ((List<ImageGroup>, List<ImageGroup>) -> Unit)? = null
     private var recyclerView: RecyclerView? = null
     private val selectedFormats = mutableMapOf<Int, String>()
     private var isUiVisible = true
@@ -58,6 +59,9 @@ class ImageViewerAdapter(
     private val differ = AsyncListDiffer(this, diffCallback)
 
     init {
+        differ.addListListener { previousList, currentList ->
+            onCurrentListChanged?.invoke(previousList, currentList)
+        }
         differ.submitList(initialGroups)
     }
 
@@ -192,6 +196,16 @@ class ImageViewerAdapter(
         }
         holder.manualBitmap = bitmap
         holder.binding.imageView.setImageBitmap(bitmap)
+    }
+
+
+    fun setManualBitmap(position: Int, bitmap: android.graphics.Bitmap) {
+        val holder = recyclerView?.findViewHolderForAdapterPosition(position) as? ViewHolder
+        if (holder != null) {
+            setBitmapAndRecyclePrevious(holder, bitmap)
+        } else {
+            bitmap.recycle()
+        }
     }
 
     private fun clearCurrentBitmap(holder: ViewHolder) {
