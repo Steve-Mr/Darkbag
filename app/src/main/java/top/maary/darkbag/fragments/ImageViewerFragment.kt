@@ -1399,6 +1399,9 @@ class ImageViewerFragment : Fragment() {
                         val jpgFolderUri = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
                             .getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
 
+                        val primaryUriForMeta = dngUri1 ?: dngUri2
+                        val captureMeta = primaryUriForMeta?.let { repository.getCaptureMetadata(it) }
+
                         top.maary.darkbag.utils.ImageSaver.saveProcessedImage(
                             context = context,
                             inputBitmap = bitmap,
@@ -1411,8 +1414,9 @@ class ImageViewerFragment : Fragment() {
                             saveRaw = false,
                             targetUri = targetUri,
                             jpgFolderUri = if (isReplacement) null else jpgFolderUri,
-                                editConfig = config,
-                                isAlreadyStitched = currentGroup.isHalfFrame()
+                            editConfig = config,
+                            isAlreadyStitched = currentGroup.isHalfFrame(),
+                            captureMetadata = captureMeta
                         )
                         bitmap.recycle()
                     }
