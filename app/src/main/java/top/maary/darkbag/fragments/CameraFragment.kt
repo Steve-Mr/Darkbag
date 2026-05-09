@@ -1480,6 +1480,8 @@ class CameraFragment : Fragment() {
                         try {
                             val intent = Intent(Intent.ACTION_VIEW).apply {
                                 setDataAndType(uri, "image/*")
+                                addCategory(Intent.CATEGORY_DEFAULT)
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                             }
                             startActivity(intent)
