@@ -1399,7 +1399,7 @@ class ImageViewerFragment : Fragment() {
                         val jpgFolderUri = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
                             .getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
 
-                        val captureMetadata = currentGroup.jpgUri?.let { repository.getCaptureMetadata(it) }
+                        val captureMetadata = (currentGroup.jpgUri ?: currentGroup.dngUri ?: currentGroup.dngUri1)?.let { repository.getCaptureMetadata(it) }
 
                         top.maary.darkbag.utils.ImageSaver.saveProcessedImage(
                             context = context,
