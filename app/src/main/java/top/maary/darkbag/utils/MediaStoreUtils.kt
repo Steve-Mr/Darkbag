@@ -50,7 +50,7 @@ class MediaStoreUtils(private val context: Context) {
         var cursor: Cursor?
         withContext(Dispatchers.IO) {
             val projection = arrayOf(imageDataColumnIndex, imageIdColumnIndex)
-            val sortOrder = "DATE_ADDED DESC"
+            val sortOrder = "DATE_MODIFIED DESC"
             cursor = context.contentResolver.query(
                 mediaStoreCollection, projection, null, null, sortOrder
             )
@@ -155,7 +155,7 @@ class MediaStoreUtils(private val context: Context) {
         }
         val pathFilter = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) "Pictures/Darkbag%" else "%Pictures/Darkbag%"
         val selectionArgs = arrayOf(pathFilter, mimeType, "${DarkbagIdentity.FILE_PREFIX}%")
-        val sortOrder = "${MediaStore.MediaColumns.DATE_ADDED} DESC"
+        val sortOrder = "${MediaStore.MediaColumns.DATE_MODIFIED} DESC"
 
         try {
             context.contentResolver.query(collection, projection, selection, selectionArgs, sortOrder)?.use { cursor ->
