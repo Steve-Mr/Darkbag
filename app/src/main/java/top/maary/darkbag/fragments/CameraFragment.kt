@@ -1471,8 +1471,25 @@ class CameraFragment : Fragment() {
             lifecycleScope.launch {
                 val uri = mediaStoreUtils.getLatestAppImage(requireContext())
                 if (uri != null) {
-                    Navigation.findNavController(requireActivity(), R.id.fragment_container)
-                        .navigate(CameraFragmentDirections.actionCameraToImageViewer(uri.toString()))
+                    val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                    val useInternalViewer = prefs.getBoolean(SettingsFragment.KEY_USE_INTERNAL_VIEWER, true)
+                    if (useInternalViewer) {
+                        Navigation.findNavController(requireActivity(), R.id.fragment_container)
+                            .navigate(CameraFragmentDirections.actionCameraToImageViewer(uri.toString()))
+                    } else {
+                        try {
+                            val intent = Intent(Intent.ACTION_VIEW).apply {
+                                setDataAndType(uri, "image/*")
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            }
+                            startActivity(intent)
+                        } catch (e: Exception) {
+                            Toast.makeText(requireContext(), "No app found to view images.", Toast.LENGTH_SHORT).show()
+                            // Fallback to internal viewer if starting activity fails
+                            Navigation.findNavController(requireActivity(), R.id.fragment_container)
+                                .navigate(CameraFragmentDirections.actionCameraToImageViewer(uri.toString()))
+                        }
+                    }
                 }
             }
         }

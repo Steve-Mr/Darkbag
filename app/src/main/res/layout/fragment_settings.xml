@@ -185,6 +185,15 @@
                     android:padding="@dimen/padding_medium">
 
                     <com.google.android.material.materialswitch.MaterialSwitch
+                        android:id="@+id/switch_use_internal_viewer"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/pref_use_internal_viewer"
+                        android:textSize="16sp" />
+
+                    <Space android:layout_width="match_parent" android:layout_height="@dimen/spacing_medium" />
+
+                    <com.google.android.material.materialswitch.MaterialSwitch
                         android:id="@+id/switch_show_hdr_plus_switch"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"

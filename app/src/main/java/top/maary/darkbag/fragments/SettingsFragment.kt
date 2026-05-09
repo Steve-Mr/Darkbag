@@ -288,6 +288,7 @@ class SettingsFragment : Fragment() {
         setupSwitch(binding.switchMirrorFront, KEY_MIRROR_FRONT_CAMERA)
         setupSwitch(binding.switchUseCamerax, KEY_USE_CAMERAX, false)
         setupSwitch(binding.switchHdrPlusOis, KEY_HDR_PLUS_OIS)
+        setupSwitch(binding.switchUseInternalViewer, KEY_USE_INTERNAL_VIEWER, true)
         setupSwitch(binding.switchShowHdrPlusSwitch, KEY_SHOW_HDR_PLUS_SWITCH)
         setupSwitch(binding.switchShowUnderexposureButton, KEY_SHOW_HDR_UNDEREXPOSURE_BUTTON)
         setupSwitch(binding.switchShowSettingsButton, KEY_SHOW_SETTINGS_BUTTON)
@@ -383,6 +384,7 @@ class SettingsFragment : Fragment() {
         const val KEY_HDR_UNDEREXPOSURE_MODE = "hdr_underexposure_mode"
         const val KEY_SHOW_HDR_UNDEREXPOSURE_BUTTON = "show_hdr_underexposure_button"
         const val KEY_SHOW_HDR_PLUS_SWITCH = "show_hdr_plus_switch"
+        const val KEY_USE_INTERNAL_VIEWER = "use_internal_viewer"
         const val KEY_SHOW_SETTINGS_BUTTON = "show_settings_button"
         const val KEY_SHOW_CAMERA_SWITCH_BUTTON = "show_camera_switch_button"
         const val KEY_SHOW_MODE_SWITCH_BUTTON = "show_mode_switch_button"
