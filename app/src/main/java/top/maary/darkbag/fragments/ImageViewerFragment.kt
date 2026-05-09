@@ -1284,6 +1284,9 @@ class ImageViewerFragment : Fragment() {
         val dngUri1 = currentGroup.dngUri ?: currentGroup.dngUri1
         val dngUri2 = currentGroup.dngUri2
 
+        binding.initialLoadingIndicator.visibility = View.VISIBLE
+        binding.interactionBlocker?.visibility = View.VISIBLE
+
         lifecycleScope.launch {
             ensureDngBytesLoaded()
             withContext(Dispatchers.IO) {
@@ -1455,6 +1458,8 @@ class ImageViewerFragment : Fragment() {
                 binding.imagePager.setCurrentItem(newPos, false)
                 updateControlsVisibility()
             }
+            binding.initialLoadingIndicator.visibility = View.GONE
+            binding.interactionBlocker?.visibility = View.GONE
         }
     }
 
