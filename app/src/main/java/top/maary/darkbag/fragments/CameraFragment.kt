@@ -1484,6 +1484,10 @@ class CameraFragment : Fragment() {
                                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                             }
+                            val externalPackage = prefs.getString(SettingsFragment.KEY_EXTERNAL_VIEWER_PACKAGE, "")
+                            if (!externalPackage.isNullOrEmpty()) {
+                                intent.setPackage(externalPackage)
+                            }
                             startActivity(intent)
                         } catch (e: Exception) {
                             Toast.makeText(requireContext(), "No app found to view images.", Toast.LENGTH_SHORT).show()

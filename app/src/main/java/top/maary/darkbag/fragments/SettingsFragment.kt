@@ -227,6 +227,43 @@ class SettingsFragment : Fragment() {
         binding.menuHalfFrameLayout.setOnItemClickListener { _, _, position, _ ->
             prefs.edit().putString(KEY_HALF_FRAME_LAYOUT, HALF_FRAME_LAYOUTS[position]).apply()
         }
+
+        setupExternalViewerMenu()
+
+    }
+
+
+    private fun setupExternalViewerMenu() {
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(Uri.parse("content://dummy/image.jpg"), "image/*")
+        }
+        val resolveInfos = requireContext().packageManager.queryIntentActivities(intent, 0)
+
+        val appNames = mutableListOf("System Default")
+        val packageNames = mutableListOf("")
+
+        for (resolveInfo in resolveInfos) {
+            val appName = resolveInfo.loadLabel(requireContext().packageManager).toString()
+            val packageName = resolveInfo.activityInfo.packageName
+            appNames.add(appName)
+            packageNames.add(packageName)
+        }
+
+        val adapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, appNames)
+        binding.menuExternalViewer.setAdapter(adapter)
+
+        val savedName = prefs.getString(KEY_EXTERNAL_VIEWER_NAME, "System Default")
+        binding.menuExternalViewer.setText(savedName, false)
+
+        binding.menuExternalViewer.setOnItemClickListener { _, _, position, _ ->
+            prefs.edit()
+                .putString(KEY_EXTERNAL_VIEWER_NAME, appNames[position])
+                .putString(KEY_EXTERNAL_VIEWER_PACKAGE, packageNames[position])
+                .apply()
+        }
+
+        // Initial visibility
+        binding.layoutExternalViewerMenu.visibility = if (prefs.getBoolean(KEY_USE_INTERNAL_VIEWER, true)) View.GONE else View.VISIBLE
     }
 
     private fun updateCheckboxStates() {
@@ -288,7 +325,13 @@ class SettingsFragment : Fragment() {
         setupSwitch(binding.switchMirrorFront, KEY_MIRROR_FRONT_CAMERA)
         setupSwitch(binding.switchUseCamerax, KEY_USE_CAMERAX, false)
         setupSwitch(binding.switchHdrPlusOis, KEY_HDR_PLUS_OIS)
-        setupSwitch(binding.switchUseInternalViewer, KEY_USE_INTERNAL_VIEWER, true)
+
+        binding.switchUseInternalViewer.isChecked = prefs.getBoolean(KEY_USE_INTERNAL_VIEWER, true)
+        binding.switchUseInternalViewer.setOnCheckedChangeListener { _, isChecked ->
+            prefs.edit().putBoolean(KEY_USE_INTERNAL_VIEWER, isChecked).apply()
+            binding.layoutExternalViewerMenu.visibility = if (isChecked) View.GONE else View.VISIBLE
+        }
+
         setupSwitch(binding.switchShowHdrPlusSwitch, KEY_SHOW_HDR_PLUS_SWITCH)
         setupSwitch(binding.switchShowUnderexposureButton, KEY_SHOW_HDR_UNDEREXPOSURE_BUTTON)
         setupSwitch(binding.switchShowSettingsButton, KEY_SHOW_SETTINGS_BUTTON)
@@ -385,6 +428,8 @@ class SettingsFragment : Fragment() {
         const val KEY_SHOW_HDR_UNDEREXPOSURE_BUTTON = "show_hdr_underexposure_button"
         const val KEY_SHOW_HDR_PLUS_SWITCH = "show_hdr_plus_switch"
         const val KEY_USE_INTERNAL_VIEWER = "use_internal_viewer"
+        const val KEY_EXTERNAL_VIEWER_PACKAGE = "external_viewer_package"
+        const val KEY_EXTERNAL_VIEWER_NAME = "external_viewer_name"
         const val KEY_SHOW_SETTINGS_BUTTON = "show_settings_button"
         const val KEY_SHOW_CAMERA_SWITCH_BUTTON = "show_camera_switch_button"
         const val KEY_SHOW_MODE_SWITCH_BUTTON = "show_mode_switch_button"
