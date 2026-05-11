@@ -114,7 +114,6 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginEnd="@dimen/margin_medium"
-            android:visibility="gone"
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintTop_toTopOf="parent"
             app:layout_constraintBottom_toBottomOf="parent">
@@ -134,7 +133,8 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:checkable="true"
-                app:icon="@drawable/m3_split_button_chevron_avd" />
+                app:icon="@drawable/m3_split_button_chevron_avd"
+                app:iconTint="?attr/colorOnPrimary"/>
         </com.google.android.material.button.MaterialSplitButton>
 
     </androidx.constraintlayout.widget.ConstraintLayout>
@@ -165,7 +165,7 @@
                 android:layout_width="48dp"
                 android:layout_height="wrap_content"
                 android:padding="0dp"
-                app:icon="@drawable/ic_photo"
+                app:icon="@drawable/ic_time_stamp"
                 app:iconGravity="textStart"
                 app:iconPadding="0dp" />
 
@@ -176,7 +176,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginStart="8dp"
                 android:padding="0dp"
-                app:icon="@drawable/ic_hdr_dynamic"
+                app:icon="@drawable/ic_flare_none"
                 app:iconGravity="textStart"
                 app:iconPadding="0dp" />
 
