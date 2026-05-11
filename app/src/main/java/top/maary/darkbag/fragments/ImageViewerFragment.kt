@@ -709,6 +709,11 @@ class ImageViewerFragment : Fragment() {
 
     private fun updateEffectsButtons() {
         val config = currentEditConfig ?: return
+        val iconRes = when (config.flareType) {
+            1 -> R.drawable.ic_flare_side
+            2 -> R.drawable.ic_flare_corner
+            else -> R.drawable.ic_flare_none
+        }
         val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
         val isTB = currentGroup.hfLayout == "TB" || currentGroup.hfLayout?.contains("top", ignoreCase = true) == true
 
@@ -716,6 +721,7 @@ class ImageViewerFragment : Fragment() {
         binding.btnTimestamp.alpha = if (config.showTimestamp) 1.0f else 0.6f
 
         binding.btnFlare.setIconTintResource(if (config.flareType != -1) R.color.vibrant_pink else android.R.color.white)
+        binding.btnFlare.setIconResource( iconRes )
         binding.btnFlare.alpha = if (config.flareType != -1) 1.0f else 0.6f
 
         binding.btnSwap.setIconResource(if (isTB) R.drawable.ic_swap_vert else R.drawable.ic_swap_horiz)
@@ -1997,8 +2003,8 @@ class ImageViewerFragment : Fragment() {
                 leftMargin = systemBars.left + marginMedium
             }
             binding.bottomRightControls.updateLayoutParams<ViewGroup.MarginLayoutParams> {
-                bottomMargin = systemBars.bottom + marginMedium
-                rightMargin = systemBars.right + marginMedium
+                bottomMargin = systemBars.bottom
+                rightMargin = systemBars.right
             }
 
             val isLandscape = resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE

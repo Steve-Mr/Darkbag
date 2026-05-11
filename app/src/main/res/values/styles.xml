@@ -41,7 +41,7 @@
 
     <!-- Control Container Card -->
     <style name="Widget.App.Card.ControlPanel" parent="Widget.Material3.CardView.Filled">
-        <item name="materialThemeOverlay">@style/ThemeOverlay.Material3.DynamicColors.Dark</item>
+        <item name="materialThemeOverlay">@style/ThemeOverlay.Material3.DynamicColors.DayNight</item>
         <item name="cardCornerRadius">@dimen/radius_xlarge</item>
         <item name="cardBackgroundColor">?attr/colorSurfaceContainer</item>
         <item name="strokeWidth">0dp</item>
