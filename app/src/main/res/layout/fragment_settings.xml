@@ -185,6 +185,31 @@
                     android:padding="@dimen/padding_medium">
 
                     <com.google.android.material.materialswitch.MaterialSwitch
+                        android:id="@+id/switch_use_internal_viewer"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/pref_use_internal_viewer"
+                        android:textSize="16sp" />
+
+                    <com.google.android.material.textfield.TextInputLayout
+                        android:id="@+id/layout_external_viewer_menu"
+                        style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="@dimen/spacing_medium"
+                        android:hint="@string/pref_external_viewer_hint">
+
+                        <AutoCompleteTextView
+                            android:id="@+id/menu_external_viewer"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:inputType="none"
+                            android:text="@string/pref_external_viewer_default" />
+                    </com.google.android.material.textfield.TextInputLayout>
+
+                    <Space android:layout_width="match_parent" android:layout_height="@dimen/spacing_medium" />
+
+                    <com.google.android.material.materialswitch.MaterialSwitch
                         android:id="@+id/switch_show_hdr_plus_switch"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
