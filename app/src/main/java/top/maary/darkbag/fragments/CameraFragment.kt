@@ -1471,12 +1471,12 @@ class CameraFragment : Fragment() {
             lifecycleScope.launch {
                 val uri = mediaStoreUtils.getLatestAppImage(requireContext())
                 if (uri != null) {
-                    val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                    val safeContext = context ?: return@launch
+                    val prefs = safeContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
                     val useInternalViewer = prefs.getBoolean(SettingsFragment.KEY_USE_INTERNAL_VIEWER, true)
-                    if (useInternalViewer) {
-                        Navigation.findNavController(requireActivity(), R.id.fragment_container)
-                            .navigate(CameraFragmentDirections.actionCameraToImageViewer(uri.toString()))
-                    } else {
+                    var externalViewerStarted = false
+
+                    if (!useInternalViewer) {
                         try {
                             val intent = Intent(Intent.ACTION_VIEW).apply {
                                 setDataAndType(uri, "image/*")
@@ -1489,12 +1489,16 @@ class CameraFragment : Fragment() {
                                 intent.setPackage(externalPackage)
                             }
                             startActivity(intent)
+                            externalViewerStarted = true
                         } catch (e: Exception) {
-                            Toast.makeText(requireContext(), "No app found to view images.", Toast.LENGTH_SHORT).show()
-                            // Fallback to internal viewer if starting activity fails
-                            Navigation.findNavController(requireActivity(), R.id.fragment_container)
-                                .navigate(CameraFragmentDirections.actionCameraToImageViewer(uri.toString()))
+                            Toast.makeText(safeContext, R.string.error_no_external_viewer, Toast.LENGTH_SHORT).show()
                         }
+                    }
+
+                    if (useInternalViewer || !externalViewerStarted) {
+                        val safeActivity = activity ?: return@launch
+                        Navigation.findNavController(safeActivity, R.id.fragment_container)
+                            .navigate(CameraFragmentDirections.actionCameraToImageViewer(uri.toString()))
                     }
                 }
             }

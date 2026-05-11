@@ -239,7 +239,8 @@ class SettingsFragment : Fragment() {
         }
         val resolveInfos = requireContext().packageManager.queryIntentActivities(intent, 0)
 
-        val appNames = mutableListOf("System Default")
+        val defaultName = getString(R.string.pref_external_viewer_default)
+        val appNames = mutableListOf(defaultName)
         val packageNames = mutableListOf("")
 
         for (resolveInfo in resolveInfos) {
@@ -252,7 +253,7 @@ class SettingsFragment : Fragment() {
         val adapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, appNames)
         binding.menuExternalViewer.setAdapter(adapter)
 
-        val savedName = prefs.getString(KEY_EXTERNAL_VIEWER_NAME, "System Default")
+        val savedName = prefs.getString(KEY_EXTERNAL_VIEWER_NAME, defaultName)
         binding.menuExternalViewer.setText(savedName, false)
 
         binding.menuExternalViewer.setOnItemClickListener { _, _, position, _ ->
