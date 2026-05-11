@@ -2003,8 +2003,8 @@ class ImageViewerFragment : Fragment() {
                 leftMargin = systemBars.left + marginMedium
             }
             binding.bottomRightControls.updateLayoutParams<ViewGroup.MarginLayoutParams> {
-                bottomMargin = systemBars.bottom + marginMedium
-                rightMargin = systemBars.right + marginMedium
+                bottomMargin = systemBars.bottom
+                rightMargin = systemBars.right
             }
 
             val isLandscape = resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
