@@ -218,6 +218,7 @@ class ImageRepository(private val context: Context) {
             MediaStore.MediaColumns._ID,
             MediaStore.MediaColumns.DISPLAY_NAME,
             MediaStore.MediaColumns.DATE_ADDED,
+            MediaStore.MediaColumns.DATE_MODIFIED,
             MediaStore.MediaColumns.MIME_TYPE
         )
 
@@ -233,6 +234,7 @@ class ImageRepository(private val context: Context) {
             val idColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
             val nameColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
             val dateColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_ADDED)
+            val modifiedColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_MODIFIED)
             val mimeColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.MIME_TYPE)
 
             while (cursor.moveToNext()) {
@@ -240,6 +242,7 @@ class ImageRepository(private val context: Context) {
                 val name = cursor.getString(nameColumn)
                 if (!name.startsWith(DarkbagIdentity.FILE_PREFIX, ignoreCase = true)) continue
                 val date = cursor.getLong(dateColumn) * 1000 // Convert to ms
+                val modified = cursor.getLong(modifiedColumn) * 1000 // Convert to ms
                 val mime = cursor.getString(mimeColumn)
                 val uri = ContentUris.withAppendedId(collection, id)
 
@@ -248,7 +251,7 @@ class ImageRepository(private val context: Context) {
 
                 when {
                     mime == "image/jpeg" -> {
-                        builder.setJpg(uri, date)
+                        builder.setJpg(uri, date, modified)
                         if (!fast) {
                         try {
                             context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
@@ -285,13 +288,13 @@ class ImageRepository(private val context: Context) {
                         }
                     }
                     name.contains("_HF2") && (mime == "image/x-adobe-dng" || name.endsWith(".dng", ignoreCase = true)) -> {
-                        builder.setDng2(uri, date)
+                        builder.setDng2(uri, date, modified)
                     }
                     name.contains("_HF1") && (mime == "image/x-adobe-dng" || name.endsWith(".dng", ignoreCase = true)) -> {
-                        builder.setDng1(uri, date)
+                        builder.setDng1(uri, date, modified)
                     }
                     mime == "image/x-adobe-dng" || name.endsWith(".dng", ignoreCase = true) -> {
-                        builder.setDng(uri, date)
+                        builder.setDng(uri, date, modified)
                     }
                 }
             }
@@ -441,6 +444,7 @@ class ImageRepository(private val context: Context) {
         var width: Int = 0
         var height: Int = 0
         var captureTime: Long = 0L
+        var lastModified: Long = 0L
         var editConfig: EditConfig? = null
 
         fun applyFrom(group: ImageGroup): ImageGroupBuilder {
@@ -452,46 +456,48 @@ class ImageRepository(private val context: Context) {
             width = group.width
             height = group.height
             captureTime = group.captureTime
+            lastModified = group.lastModified
             editConfig = group.editConfig
             return this
         }
 
-        fun setJpg(uri: Uri, time: Long) {
+        fun setJpg(uri: Uri, time: Long, modifiedTime: Long = time) {
             // Avoid flipping URI if we already have one for the same file (within 2s)
             // unless the new one is significantly newer (indicating a true update/edit)
             if (jpgUri == null || (time > jpgTime + 2000)) {
                 jpgUri = uri
                 jpgTime = time
             }
-            updateTime(time)
+            updateTime(time, modifiedTime)
         }
 
-        fun setDng(uri: Uri, time: Long) {
+        fun setDng(uri: Uri, time: Long, modifiedTime: Long = time) {
             if (dngUri == null || (time > dngTime + 2000)) {
                 dngUri = uri
                 dngTime = time
             }
-            updateTime(time)
+            updateTime(time, modifiedTime)
         }
 
-        fun setDng1(uri: Uri, time: Long) {
-            if (dngUri1 == null || (dngUri1Time - time > 2000)) {
+        fun setDng1(uri: Uri, time: Long, modifiedTime: Long = time) {
+            if (dngUri1 == null || (time > dngUri1Time + 2000)) {
                 dngUri1 = uri
                 dngUri1Time = time
             }
-            updateTime(time)
+            updateTime(time, modifiedTime)
         }
 
-        fun setDng2(uri: Uri, time: Long) {
+        fun setDng2(uri: Uri, time: Long, modifiedTime: Long = time) {
             if (dngUri2 == null || (time > dngUri2Time + 2000)) {
                 dngUri2 = uri
                 dngUri2Time = time
             }
-            updateTime(time)
+            updateTime(time, modifiedTime)
         }
 
-        fun updateTime(time: Long) {
+        fun updateTime(time: Long, modifiedTime: Long) {
             if (time > captureTime) captureTime = time
+            if (modifiedTime > lastModified) lastModified = modifiedTime
         }
 
         fun build(): ImageGroup {
@@ -534,7 +540,7 @@ class ImageRepository(private val context: Context) {
                 width,
                 height,
                 captureTime,
-                maxOf(jpgTime, dngTime, dngUri1Time, dngUri2Time),
+                if (lastModified > 0) lastModified else maxOf(jpgTime, dngTime, dngUri1Time, dngUri2Time),
                 editConfig,
                 metadataLoaded = false,
                 isInProgress = isInProgress,

@@ -94,6 +94,30 @@ class MediaStoreUtils(private val context: Context) {
         return latestMediaStore
     }
 
+    suspend fun getFileLastModified(context: Context, uri: Uri): Long {
+        return withContext(Dispatchers.IO) {
+            try {
+                if (uri.scheme == "content") {
+                    val projection = arrayOf(MediaStore.MediaColumns.DATE_MODIFIED)
+                    context.contentResolver.query(uri, projection, null, null, null)?.use { cursor ->
+                        if (cursor.moveToFirst()) {
+                            val modifiedIdx = cursor.getColumnIndex(MediaStore.MediaColumns.DATE_MODIFIED)
+                            if (modifiedIdx != -1) {
+                                return@withContext cursor.getLong(modifiedIdx) * 1000 // Convert to ms
+                            }
+                        }
+                    }
+                    // Fallback to DocumentFile
+                    androidx.documentfile.provider.DocumentFile.fromSingleUri(context, uri)?.lastModified() ?: 0L
+                } else {
+                    File(uri.path ?: return@withContext 0L).lastModified()
+                }
+            } catch (e: Exception) {
+                0L
+            }
+        }
+    }
+
     private fun verifyUriExists(context: Context, uri: Uri): Boolean {
         return try {
             if (uri.scheme == "content") {
