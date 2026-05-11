@@ -1284,11 +1284,16 @@ class ImageViewerFragment : Fragment() {
         val dngUri1 = currentGroup.dngUri ?: currentGroup.dngUri1
         val dngUri2 = currentGroup.dngUri2
 
+        previewJob?.cancel()
+        binding.initialLoadingIndicator.visibility = View.VISIBLE
+        binding.interactionBlocker?.visibility = View.VISIBLE
+
         lifecycleScope.launch {
-            ensureDngBytesLoaded()
-            withContext(Dispatchers.IO) {
-                try {
-                    val context = requireContext()
+            try {
+                ensureDngBytesLoaded()
+                withContext(Dispatchers.IO) {
+                    try {
+                        val context = requireContext()
                     val logIndex = SettingsFragment.LOG_CURVES.indexOf(config.log)
                     val lutPath = if (config.lut != null && config.lut != "None") {
                         java.io.File(lutManager.lutDir, config.lut).absolutePath
@@ -1424,36 +1429,40 @@ class ImageViewerFragment : Fragment() {
                 }
             }
 
-            resetAdjustments()
-            repository.invalidateCache()
-            val updatedGroups = repository.getGroupedImages(forceRefresh = true)
-            if (updatedGroups.isNotEmpty()) {
-                val targetBaseName = currentGroup.baseName
-                val newPos = updatedGroups.indexOfFirst { it.baseName == targetBaseName }.coerceAtLeast(0)
-            adapter = ImageViewerAdapter(updatedGroups, lifecycleScope, requireContext()).apply {
-                    onImageTapped = { toggleUi() }
-                    onZoomChanged = { isZoomed -> if (isZoomed) hideUi() else showUi() }
-                    onLongPressStarted = { handleLongPressStarted(it) }
-                    onLongPressEnded = { handleLongPressEnded(it) }
-                    onCurrentListChanged = { previousList, currentList ->
-                        val currentIndex = binding.imagePager.currentItem
-                        if (currentIndex in currentList.indices) {
-                            val currentGroup = currentList[currentIndex]
-                            val prevGroup = previousList.getOrNull(currentIndex)
+                resetAdjustments()
+                repository.invalidateCache()
+                val updatedGroups = repository.getGroupedImages(forceRefresh = true)
+                if (updatedGroups.isNotEmpty()) {
+                    val targetBaseName = currentGroup.baseName
+                    val newPos = updatedGroups.indexOfFirst { it.baseName == targetBaseName }.coerceAtLeast(0)
+                    adapter = ImageViewerAdapter(updatedGroups, lifecycleScope, requireContext()).apply {
+                        onImageTapped = { toggleUi() }
+                        onZoomChanged = { isZoomed -> if (isZoomed) hideUi() else showUi() }
+                        onLongPressStarted = { handleLongPressStarted(it) }
+                        onLongPressEnded = { handleLongPressEnded(it) }
+                        onCurrentListChanged = { previousList, currentList ->
+                            val currentIndex = binding.imagePager.currentItem
+                            if (currentIndex in currentList.indices) {
+                                val currentGroup = currentList[currentIndex]
+                                val prevGroup = previousList.getOrNull(currentIndex)
 
-                            if (prevGroup != null && !prevGroup.metadataLoaded && currentGroup.metadataLoaded) {
-                                if (currentGroup.editConfig != null) {
-                                    prepareEditConfig(currentGroup)
+                                if (prevGroup != null && !prevGroup.metadataLoaded && currentGroup.metadataLoaded) {
+                                    if (currentGroup.editConfig != null) {
+                                        prepareEditConfig(currentGroup)
+                                    }
                                 }
-                            }
 
-                            updateControlsVisibility()
+                                updateControlsVisibility()
+                            }
                         }
                     }
+                    binding.imagePager.adapter = adapter
+                    binding.imagePager.setCurrentItem(newPos, false)
+                    updateControlsVisibility()
                 }
-                binding.imagePager.adapter = adapter
-                binding.imagePager.setCurrentItem(newPos, false)
-                updateControlsVisibility()
+            } finally {
+                binding.initialLoadingIndicator.visibility = View.GONE
+                binding.interactionBlocker?.visibility = View.GONE
             }
         }
     }

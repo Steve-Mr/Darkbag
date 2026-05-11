@@ -1471,8 +1471,35 @@ class CameraFragment : Fragment() {
             lifecycleScope.launch {
                 val uri = mediaStoreUtils.getLatestAppImage(requireContext())
                 if (uri != null) {
-                    Navigation.findNavController(requireActivity(), R.id.fragment_container)
-                        .navigate(CameraFragmentDirections.actionCameraToImageViewer(uri.toString()))
+                    val safeContext = context ?: return@launch
+                    val prefs = safeContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                    val useInternalViewer = prefs.getBoolean(SettingsFragment.KEY_USE_INTERNAL_VIEWER, true)
+                    var externalViewerStarted = false
+
+                    if (!useInternalViewer) {
+                        try {
+                            val intent = Intent(Intent.ACTION_VIEW).apply {
+                                setDataAndType(uri, "image/*")
+                                addCategory(Intent.CATEGORY_DEFAULT)
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            }
+                            val externalPackage = prefs.getString(SettingsFragment.KEY_EXTERNAL_VIEWER_PACKAGE, "")
+                            if (!externalPackage.isNullOrEmpty()) {
+                                intent.setPackage(externalPackage)
+                            }
+                            startActivity(intent)
+                            externalViewerStarted = true
+                        } catch (e: Exception) {
+                            Toast.makeText(safeContext, R.string.error_no_external_viewer, Toast.LENGTH_SHORT).show()
+                        }
+                    }
+
+                    if (useInternalViewer || !externalViewerStarted) {
+                        val safeActivity = activity ?: return@launch
+                        Navigation.findNavController(safeActivity, R.id.fragment_container)
+                            .navigate(CameraFragmentDirections.actionCameraToImageViewer(uri.toString()))
+                    }
                 }
             }
         }

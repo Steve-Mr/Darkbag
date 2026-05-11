@@ -456,6 +456,7 @@ class ImageRepository(private val context: Context) {
             width = group.width
             height = group.height
             captureTime = group.captureTime
+            lastModified = group.lastModified
             editConfig = group.editConfig
             return this
         }
