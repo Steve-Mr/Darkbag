@@ -483,11 +483,20 @@ class CameraFragment : Fragment() {
             // Remove thumbnail padding
             photoViewButton.setPadding(resources.getDimension(R.dimen.stroke_small).toInt())
 
-            // Load thumbnail into circular button using Glide
-            Glide.with(photoViewButton)
-                .load(filename)
-                .apply(RequestOptions.circleCropTransform())
-                .into(photoViewButton)
+            lifecycleScope.launch(Dispatchers.Main) {
+                val lastModified = try {
+                    mediaStoreUtils.getFileLastModified(requireContext(), Uri.parse(filename))
+                } catch (e: Exception) {
+                    0L
+                }
+
+                // Load thumbnail into circular button using Glide
+                Glide.with(photoViewButton)
+                    .load(filename)
+                    .apply(RequestOptions.circleCropTransform())
+                    .signature(com.bumptech.glide.signature.ObjectKey(lastModified))
+                    .into(photoViewButton)
+            }
         }
     }
 
