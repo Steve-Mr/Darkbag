@@ -420,6 +420,7 @@ class CameraFragment : Fragment() {
 
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
         readScopedHalfFrameState(prefs, requireFileForStep1 = true)
+        updateCameraUi()
         updateHalfFrameUI()
         _fragmentCameraBinding?.modeSwitchButton?.let { updateModeSwitchIcon(it) }
         applyUIVisibility()
