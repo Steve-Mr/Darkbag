@@ -414,10 +414,16 @@ class CameraFragment : Fragment() {
         // Re-initialize camera engine if needed.
         // For Camera2 engine, we need to re-bind use cases (which triggers openCamera2).
         // For CameraX, they are bound to lifecycle but we ensure consistency.
+        // Only bind if the view has already been fully created and the layout passed
         if (cameraProvider != null || currentLens?.useCamera2 == true) {
-            bindCameraUseCases()
+            if (_fragmentCameraBinding?.viewFinderContainer?.isLaidOut == true) {
+                bindCameraUseCases()
+            } else {
+                _fragmentCameraBinding?.viewFinderContainer?.post {
+                    bindCameraUseCases()
+                }
+            }
         }
-
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
         readScopedHalfFrameState(prefs, requireFileForStep1 = true)
         updateCameraUi()
