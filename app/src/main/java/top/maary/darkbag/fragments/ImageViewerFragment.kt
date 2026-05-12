@@ -1,5 +1,6 @@
 package top.maary.darkbag.fragments
 
+import android.util.Log
 import android.os.Build
 import android.provider.MediaStore
 import android.app.Activity
@@ -52,33 +53,21 @@ class ImageViewerFragment : Fragment() {
 
     private suspend fun deleteUriSafe(context: Context, uri: Uri): Boolean {
         return withContext(Dispatchers.IO) {
-            try {
-                if (uri.scheme == "content" && (uri.authority == "com.android.providers.media.documents" || uri.authority == "com.android.externalstorage.documents" || androidx.documentfile.provider.DocumentFile.isDocumentUri(context, uri))) {
-                    return@withContext DocumentsContract.deleteDocument(context.contentResolver, uri)
-                } else {
-                    val deleted = context.contentResolver.delete(uri, null, null) > 0
-                    if (!deleted) return@withContext false
-                }
-                true
-            } catch (e: SecurityException) {
-                // Return false to indicate that a SecurityException occurred and we need to use createDeleteRequest
-                false
-            } catch (e: Exception) {
-                // Other exceptions
-                false
+            if (uri.scheme == "content" && DocumentsContract.isDocumentUri(context, uri)) {
+                DocumentsContract.deleteDocument(context.contentResolver, uri)
+            } else {
+                context.contentResolver.delete(uri, null, null) > 0
             }
         }
     }
     private var pendingDeleteNextTargetUri: String? = null
     private val deleteLauncher = registerForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            lifecycleScope.launch {
-                repository.invalidateCache()
-                loadImages(pendingDeleteNextTargetUri, forceRefresh = true)
-                pendingDeleteNextTargetUri = null
-            }
-        } else {
+        if (result.resultCode != Activity.RESULT_OK) {
             context?.let { Toast.makeText(it, "Failed to delete image", Toast.LENGTH_SHORT).show() }
+        }
+        lifecycleScope.launch {
+            repository.invalidateCache()
+            loadImages(pendingDeleteNextTargetUri, forceRefresh = true)
             pendingDeleteNextTargetUri = null
         }
     }
@@ -187,6 +176,7 @@ class ImageViewerFragment : Fragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+        savedInstanceState?.getString("pendingDeleteNextTargetUri")?.let { pendingDeleteNextTargetUri = it }
 
         repository = ImageRepository(requireContext())
         lutManager = top.maary.darkbag.utils.LutManager(requireContext())
@@ -1946,11 +1936,14 @@ class ImageViewerFragment : Fragment() {
 
             val securityExceptionUris = mutableListOf<Uri>()
             for (uri in urisToDelete) {
-                val success = deleteUriSafe(context, uri)
-                if (!success) {
-                    if (uri.scheme == "content" && uri.authority == "media") {
+                try {
+                    deleteUriSafe(context, uri)
+                } catch (e: SecurityException) {
+                    if (uri.scheme == "content" && uri.authority == MediaStore.AUTHORITY) {
                         securityExceptionUris.add(uri)
                     }
+                } catch (e: Exception) {
+                    Log.e("ImageViewerFragment", "Failed to delete $uri", e)
                 }
             }
 
@@ -2206,5 +2199,10 @@ class ImageViewerFragment : Fragment() {
         private const val EXPOSURE_MAX = 4f
         private const val ADJUSTMENT_MIN = -1f
         private const val ADJUSTMENT_MAX = 1f
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        pendingDeleteNextTargetUri?.let { outState.putString("pendingDeleteNextTargetUri", it) }
     }
 }
