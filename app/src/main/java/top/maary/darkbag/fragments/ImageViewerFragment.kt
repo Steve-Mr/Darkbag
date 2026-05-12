@@ -690,11 +690,19 @@ class ImageViewerFragment : Fragment() {
         if (selectedFormat == "DNG" && currentGroup.isHalfFrame()) {
             showHalfFrameShareSheet(currentGroup)
         } else {
-            val currentUri = when (selectedFormat) {
-                "JPG" -> currentGroup.jpgUri
-                "DNG" -> currentGroup.dngUri ?: currentGroup.dngUri1 ?: currentGroup.dngUri2
-                else -> currentGroup.jpgUri ?: currentGroup.dngUri ?: currentGroup.dngUri1 ?: currentGroup.dngUri2
+            val hasJpg = currentGroup.jpgUri != null
+            val hasDng = currentGroup.dngUri != null || currentGroup.dngUri1 != null || currentGroup.dngUri2 != null
+
+            val currentUri = if (hasJpg && hasDng) {
+                when (selectedFormat) {
+                    "JPG" -> currentGroup.jpgUri
+                    "DNG" -> currentGroup.dngUri ?: currentGroup.dngUri1 ?: currentGroup.dngUri2
+                    else -> currentGroup.jpgUri ?: currentGroup.dngUri ?: currentGroup.dngUri1 ?: currentGroup.dngUri2
+                }
+            } else {
+                currentGroup.jpgUri ?: currentGroup.dngUri ?: currentGroup.dngUri1 ?: currentGroup.dngUri2
             }
+
             currentUri?.let { shareImages(listOf(it)) }
         }
     }
@@ -1700,10 +1708,17 @@ class ImageViewerFragment : Fragment() {
         val currentGroup = adapter.getGroup(currentIndex)
         val selectedFormat = adapter.getSelectedFormat(currentIndex)
 
-        val uri = when (selectedFormat) {
-            "JPG" -> currentGroup.jpgUri
-            "DNG" -> currentGroup.dngUri ?: currentGroup.dngUri1 ?: currentGroup.dngUri2
-            else -> currentGroup.jpgUri ?: currentGroup.dngUri
+        val hasJpg = currentGroup.jpgUri != null
+        val hasDng = currentGroup.dngUri != null || currentGroup.dngUri1 != null || currentGroup.dngUri2 != null
+
+        val uri = if (hasJpg && hasDng) {
+            when (selectedFormat) {
+                "JPG" -> currentGroup.jpgUri
+                "DNG" -> currentGroup.dngUri ?: currentGroup.dngUri1 ?: currentGroup.dngUri2
+                else -> currentGroup.jpgUri ?: currentGroup.dngUri
+            }
+        } else {
+            currentGroup.jpgUri ?: currentGroup.dngUri ?: currentGroup.dngUri1 ?: currentGroup.dngUri2
         } ?: return
 
         val dialog = BottomSheetDialog(requireContext())
@@ -1853,18 +1868,32 @@ class ImageViewerFragment : Fragment() {
     }
 
     private fun showDeleteDialog(group: ImageGroup) {
-        val options = arrayOf("Delete this format only", "Delete entire group")
-        var checkedItem = 1
-        com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
-            .setTitle("Delete Image")
-            .setSingleChoiceItems(options, checkedItem) { _, which ->
-                checkedItem = which
-            }
-            .setPositiveButton("Delete") { _, _ ->
-                deleteImage(group, checkedItem == 1)
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
+        val hasJpg = group.jpgUri != null
+        val hasDng = group.dngUri != null || group.dngUri1 != null || group.dngUri2 != null
+
+        if (hasJpg && hasDng) {
+            val options = arrayOf("Delete this format only", "Delete entire group")
+            var checkedItem = 1
+            com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
+                .setTitle("Delete Image")
+                .setSingleChoiceItems(options, checkedItem) { _, which ->
+                    checkedItem = which
+                }
+                .setPositiveButton("Delete") { _, _ ->
+                    deleteImage(group, checkedItem == 1)
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+        } else {
+            com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
+                .setTitle("Delete Image")
+                .setMessage("Are you sure you want to delete this image?")
+                .setPositiveButton("Delete") { _, _ ->
+                    deleteImage(group, true)
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+        }
     }
 
     private fun deleteImage(group: ImageGroup, deleteGroup: Boolean) {
@@ -1886,14 +1915,23 @@ class ImageViewerFragment : Fragment() {
                 }
             } else {
                 val selectedFormat = adapter.getSelectedFormat(binding.imagePager.currentItem)
-                if (selectedFormat == "DNG" && group.isHalfFrame()) {
+                val hasJpg = group.jpgUri != null
+                val hasDng = group.dngUri != null || group.dngUri1 != null || group.dngUri2 != null
+
+                val formatToDelete = if (hasJpg && hasDng) selectedFormat else if (hasDng) "DNG" else "JPG"
+
+                if (formatToDelete == "DNG" && group.isHalfFrame()) {
                      group.dngUri1?.let { context.contentResolver.delete(it, null, null) }
                      group.dngUri2?.let { context.contentResolver.delete(it, null, null) }
                 } else {
-                    val currentUri = when (selectedFormat) {
-                        "JPG" -> group.jpgUri
-                        "DNG" -> group.dngUri ?: group.dngUri1 ?: group.dngUri2
-                        else -> group.jpgUri ?: group.dngUri ?: group.dngUri1 ?: group.dngUri2
+                    val currentUri = if (hasJpg && hasDng) {
+                        when (selectedFormat) {
+                            "JPG" -> group.jpgUri
+                            "DNG" -> group.dngUri ?: group.dngUri1 ?: group.dngUri2
+                            else -> group.jpgUri ?: group.dngUri ?: group.dngUri1 ?: group.dngUri2
+                        }
+                    } else {
+                        group.jpgUri ?: group.dngUri ?: group.dngUri1 ?: group.dngUri2
                     }
                     currentUri?.let { context.contentResolver.delete(it, null, null) }
                 }

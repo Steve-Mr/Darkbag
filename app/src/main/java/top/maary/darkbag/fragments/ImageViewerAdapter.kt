@@ -139,6 +139,7 @@ class ImageViewerAdapter(
         setupButtons(holder, group, position)
 
         val format = selectedFormats[position] ?: when {
+            group.jpgUri == null && (group.dngUri != null || group.dngUri1 != null || group.dngUri2 != null) -> "DNG"
             group.jpgUri != null -> "JPG"
             group.isHalfFrame() || group.dngUri != null -> "DNG"
             else -> "JPG"
