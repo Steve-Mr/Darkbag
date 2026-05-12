@@ -277,6 +277,8 @@ class ImageViewerFragment : Fragment() {
                     binding.initialLoadingIndicator.visibility = View.GONE
                 } else {
                     adapter.updateGroups(groups)
+                    binding.imagePager.visibility = View.VISIBLE
+                    binding.initialLoadingIndicator.visibility = View.GONE
                 }
             }
         }
