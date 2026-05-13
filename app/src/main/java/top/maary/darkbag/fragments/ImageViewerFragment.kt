@@ -1,5 +1,14 @@
 package top.maary.darkbag.fragments
 
+import android.util.Log
+import android.os.Build
+import android.provider.MediaStore
+import android.app.Activity
+import android.provider.DocumentsContract
+import androidx.activity.result.IntentSenderRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import android.app.RecoverableSecurityException
+import android.widget.Toast
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -40,6 +49,28 @@ import kotlin.math.pow
 import kotlin.math.round
 
 class ImageViewerFragment : Fragment() {
+
+
+    private suspend fun deleteUriSafe(context: Context, uri: Uri): Boolean {
+        return withContext(Dispatchers.IO) {
+            if (uri.scheme == "content" && DocumentsContract.isDocumentUri(context, uri)) {
+                DocumentsContract.deleteDocument(context.contentResolver, uri)
+            } else {
+                context.contentResolver.delete(uri, null, null) > 0
+            }
+        }
+    }
+    private var pendingDeleteNextTargetUri: String? = null
+    private val deleteLauncher = registerForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
+        if (result.resultCode != Activity.RESULT_OK) {
+            context?.let { Toast.makeText(it, "Failed to delete image", Toast.LENGTH_SHORT).show() }
+        }
+        lifecycleScope.launch {
+            repository.invalidateCache()
+            loadImages(pendingDeleteNextTargetUri, forceRefresh = true)
+            pendingDeleteNextTargetUri = null
+        }
+    }
 
     private var _binding: FragmentImageViewerBinding? = null
     private var isUiVisible = true
@@ -145,6 +176,7 @@ class ImageViewerFragment : Fragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+        savedInstanceState?.getString("pendingDeleteNextTargetUri")?.let { pendingDeleteNextTargetUri = it }
 
         repository = ImageRepository(requireContext())
         lutManager = top.maary.darkbag.utils.LutManager(requireContext())
@@ -235,6 +267,8 @@ class ImageViewerFragment : Fragment() {
                     binding.initialLoadingIndicator.visibility = View.GONE
                 } else {
                     adapter.updateGroups(groups)
+                    binding.imagePager.visibility = View.VISIBLE
+                    binding.initialLoadingIndicator.visibility = View.GONE
                 }
             }
         }
@@ -1872,12 +1906,13 @@ class ImageViewerFragment : Fragment() {
         lifecycleScope.launch {
             var nextTargetUri: String? = null
             val currentIndex = binding.imagePager.currentItem
+            val urisToDelete = mutableListOf<Uri>()
 
             if (deleteGroup) {
-                group.jpgUri?.let { context.contentResolver.delete(it, null, null) }
-                group.dngUri?.let { context.contentResolver.delete(it, null, null) }
-                group.dngUri1?.let { context.contentResolver.delete(it, null, null) }
-                group.dngUri2?.let { context.contentResolver.delete(it, null, null) }
+                group.jpgUri?.let { urisToDelete.add(it) }
+                group.dngUri?.let { urisToDelete.add(it) }
+                group.dngUri1?.let { urisToDelete.add(it) }
+                group.dngUri2?.let { urisToDelete.add(it) }
 
                 if (adapter.itemCount > 1) {
                     val nextIndex = if (currentIndex < adapter.itemCount - 1) currentIndex + 1 else currentIndex - 1
@@ -1887,17 +1922,33 @@ class ImageViewerFragment : Fragment() {
             } else {
                 val selectedFormat = adapter.getSelectedFormat(binding.imagePager.currentItem)
                 if (selectedFormat == "DNG" && group.isHalfFrame()) {
-                     group.dngUri1?.let { context.contentResolver.delete(it, null, null) }
-                     group.dngUri2?.let { context.contentResolver.delete(it, null, null) }
+                     group.dngUri1?.let { urisToDelete.add(it) }
+                     group.dngUri2?.let { urisToDelete.add(it) }
                 } else {
                     val currentUri = when (selectedFormat) {
                         "JPG" -> group.jpgUri
                         "DNG" -> group.dngUri ?: group.dngUri1 ?: group.dngUri2
                         else -> group.jpgUri ?: group.dngUri ?: group.dngUri1 ?: group.dngUri2
                     }
-                    currentUri?.let { context.contentResolver.delete(it, null, null) }
+                    currentUri?.let { urisToDelete.add(it) }
                 }
+            }
 
+            val securityExceptionUris = mutableListOf<Uri>()
+            for (uri in urisToDelete) {
+                try {
+                    deleteUriSafe(context, uri)
+                } catch (e: SecurityException) {
+                    if (uri.scheme == "content" && uri.authority == MediaStore.AUTHORITY) {
+                        securityExceptionUris.add(uri)
+                    }
+                } catch (e: Exception) {
+                    Log.e("ImageViewerFragment", "Failed to delete $uri", e)
+                }
+            }
+
+            // Calculate nextTargetUri for single file deletion after successful deletion attempts
+            if (!deleteGroup) {
                 repository.invalidateCache()
                 val remainingGroup = repository.getGroupedImages(forceRefresh = true).find { it.baseName == group.baseName }
                 nextTargetUri = if (remainingGroup != null) {
@@ -1910,9 +1961,25 @@ class ImageViewerFragment : Fragment() {
                     } else null
                 }
             }
-            loadImages(nextTargetUri, forceRefresh = true)
+
+            if (securityExceptionUris.isNotEmpty() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                pendingDeleteNextTargetUri = nextTargetUri
+                try {
+                    val deleteRequest = MediaStore.createDeleteRequest(context.contentResolver, securityExceptionUris)
+                    deleteLauncher.launch(IntentSenderRequest.Builder(deleteRequest.intentSender).build())
+                } catch (e: Exception) {
+                    context.let { Toast.makeText(it, "Failed to launch delete prompt", Toast.LENGTH_SHORT).show() }
+                    repository.invalidateCache()
+                    loadImages(nextTargetUri, forceRefresh = true)
+                }
+            } else {
+                repository.invalidateCache()
+                loadImages(nextTargetUri, forceRefresh = true)
+            }
         }
     }
+
+
 
     private fun setupToolbar() {
         binding.btnNavigation.setOnClickListener {
@@ -2132,5 +2199,10 @@ class ImageViewerFragment : Fragment() {
         private const val EXPOSURE_MAX = 4f
         private const val ADJUSTMENT_MIN = -1f
         private const val ADJUSTMENT_MAX = 1f
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        pendingDeleteNextTargetUri?.let { outState.putString("pendingDeleteNextTargetUri", it) }
     }
 }
