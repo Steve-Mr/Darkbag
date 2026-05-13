@@ -58,7 +58,7 @@ class MediaStoreUtils(private val context: Context) {
         return cursor
     }
 
-    suspend fun getLatestAppImage(context: Context): Uri? {
+    suspend fun getLatestAppImage(): Uri? = withContext(Dispatchers.IO) {
         val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
 
         // 1. Check persisted last captured URI (most accurate and fast)
@@ -66,7 +66,7 @@ class MediaStoreUtils(private val context: Context) {
         if (lastUriStr != null) {
             val lastUri = Uri.parse(lastUriStr)
             if (verifyUriExists(context, lastUri) && isDarkbagAssetUri(context, lastUri)) {
-                return lastUri
+                return@withContext lastUri
             }
         }
 
@@ -81,7 +81,7 @@ class MediaStoreUtils(private val context: Context) {
                 val latest = getLatestFileInSAF(context, folderUri, mimeType)
                 if (latest != null) {
                     prefs.edit().putString(SettingsFragment.KEY_LAST_CAPTURE_URI, latest.toString()).apply()
-                    return latest
+                    return@withContext latest
                 }
             }
         }
@@ -91,7 +91,7 @@ class MediaStoreUtils(private val context: Context) {
         if (latestMediaStore != null) {
             prefs.edit().putString(SettingsFragment.KEY_LAST_CAPTURE_URI, latestMediaStore.toString()).apply()
         }
-        return latestMediaStore
+        return@withContext latestMediaStore
     }
 
     suspend fun getFileLastModified(context: Context, uri: Uri): Long {
