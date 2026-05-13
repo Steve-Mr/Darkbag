@@ -164,11 +164,11 @@ class ImageViewerAdapter(
             if (currentFormat == "DNG") {
                 // Filled / Highlighted state for RAW
                 btnFormatIndicator.backgroundTintList = android.content.res.ColorStateList.valueOf(com.google.android.material.color.MaterialColors.getColor(btnFormatIndicator, android.R.attr.colorPrimary))
-                btnFormatIndicator.setTextColor(android.content.res.ColorStateList.valueOf(com.google.android.material.color.MaterialColors.getColor(btnFormatIndicator, android.R.attr.colorBackground)))
+                btnFormatIndicator.iconTint = android.content.res.ColorStateList.valueOf(com.google.android.material.color.MaterialColors.getColor(btnFormatIndicator, android.R.attr.colorBackground))
             } else {
                 // Tonal / Semi-transparent state for JPG when RAW is available
                 btnFormatIndicator.backgroundTintList = android.content.res.ColorStateList.valueOf(android.graphics.Color.parseColor("#66000000"))
-                btnFormatIndicator.setTextColor(android.content.res.ColorStateList.valueOf(android.graphics.Color.WHITE))
+                btnFormatIndicator.iconTint = android.content.res.ColorStateList.valueOf(android.graphics.Color.WHITE)
             }
 
             // If we have both, it's clickable

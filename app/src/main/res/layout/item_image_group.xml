@@ -37,13 +37,11 @@
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnFormatIndicator"
-            style="@style/Widget.Material3.Button.TonalButton"
+            style="@style/Widget.Material3.Button.IconButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="RAW"
-            android:paddingHorizontal="16dp"
-            android:visibility="gone"
-            app:cornerRadius="@dimen/radius_medium" />
+            app:icon="@drawable/ic_raw"
+            android:visibility="gone" />
 
     </FrameLayout>
 
