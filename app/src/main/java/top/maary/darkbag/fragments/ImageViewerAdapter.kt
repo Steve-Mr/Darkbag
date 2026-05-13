@@ -141,31 +141,48 @@ class ImageViewerAdapter(
         val format = getSelectedFormat(position)
         selectedFormats[position] = format
 
-        val targetId = when (format) {
-            "JPG" -> R.id.btnJpg
-            "DNG" -> R.id.btnDng
-            else -> R.id.btnJpg
-        }
-        selectButton(holder, targetId)
+
         loadSelectedFormat(holder, group, format)
     }
 
     private fun setupButtons(holder: ViewHolder, group: ImageGroup, position: Int) {
         with(holder.binding) {
-            btnJpg.visibility = if (group.jpgUri != null) View.VISIBLE else View.GONE
-            btnDng.visibility = if (group.dngUri != null || group.dngUri1 != null || group.dngUri2 != null) View.VISIBLE else View.GONE
+            val hasJpg = group.jpgUri != null
+            val hasDng = group.dngUri != null || group.dngUri1 != null || group.dngUri2 != null
 
-            btnJpg.setOnClickListener {
-                if (selectedFormats[position] == "JPG") return@setOnClickListener
-                selectedFormats[position] = "JPG"
-                selectButton(holder, R.id.btnJpg)
-                loadSelectedFormat(holder, group, "JPG")
+            if (!hasDng) {
+                // Only JPG exists, hide the indicator completely
+                btnFormatIndicator.visibility = View.GONE
+                return
+            } else {
+                btnFormatIndicator.visibility = View.VISIBLE
             }
-            btnDng.setOnClickListener {
-                if (selectedFormats[position] == "DNG") return@setOnClickListener
-                selectedFormats[position] = "DNG"
-                selectButton(holder, R.id.btnDng)
-                loadSelectedFormat(holder, group, "DNG")
+
+            val currentFormat = selectedFormats[position] ?: getSelectedFormat(position)
+
+            // Update button visual state
+            if (currentFormat == "DNG") {
+                // Filled / Highlighted state for RAW
+                btnFormatIndicator.backgroundTintList = android.content.res.ColorStateList.valueOf(com.google.android.material.color.MaterialColors.getColor(btnFormatIndicator, android.R.attr.colorPrimary))
+                btnFormatIndicator.setTextColor(android.content.res.ColorStateList.valueOf(com.google.android.material.color.MaterialColors.getColor(btnFormatIndicator, android.R.attr.colorBackground)))
+            } else {
+                // Tonal / Semi-transparent state for JPG when RAW is available
+                btnFormatIndicator.backgroundTintList = android.content.res.ColorStateList.valueOf(android.graphics.Color.parseColor("#66000000"))
+                btnFormatIndicator.setTextColor(android.content.res.ColorStateList.valueOf(android.graphics.Color.WHITE))
+            }
+
+            // If we have both, it's clickable
+            if (hasJpg && hasDng) {
+                btnFormatIndicator.isClickable = true
+                btnFormatIndicator.setOnClickListener {
+                    val newFormat = if (selectedFormats[position] == "JPG") "DNG" else "JPG"
+                    selectedFormats[position] = newFormat
+                    setupButtons(holder, group, position) // Re-run to update visual state
+                    loadSelectedFormat(holder, group, newFormat)
+                }
+            } else {
+                // Only RAW exists, show badge but make it unclickable
+                btnFormatIndicator.isClickable = false
             }
         }
     }
@@ -250,26 +267,6 @@ class ImageViewerAdapter(
         }
     }
 
-    private fun selectButton(holder: ViewHolder, selectedId: Int) {
-        val group = holder.binding.formatToggleGroup
-        val colorPrimary = com.google.android.material.color.MaterialColors.getColor(group, android.R.attr.colorPrimary)
-        val colorDimWhite = android.graphics.Color.parseColor("#B3FFFFFF") // 70% white
-        val colorWhite = android.graphics.Color.WHITE
-
-        for (i in 0 until group.childCount) {
-            val child = group.getChildAt(i) as? com.google.android.material.button.MaterialButton
-            if (child != null) {
-                val isSelected = child.id == selectedId
-                if (isSelected) {
-                    child.setIconTint(android.content.res.ColorStateList.valueOf(colorPrimary))
-                    child.icon?.alpha = 255
-                } else {
-                    child.setIconTint(android.content.res.ColorStateList.valueOf(colorWhite))
-                    child.icon?.alpha = 128
-                }
-            }
-        }
-    }
 
     private fun loadImage(holder: ViewHolder, uri: Uri, zoomFactor: Float = 1.0f, version: Long = 0L) {
         if (holder.currentUri == uri && holder.binding.imageView.drawable != null) {
@@ -388,12 +385,7 @@ class ImageViewerAdapter(
 
         val holder = recyclerView?.findViewHolderForAdapterPosition(position) as? ViewHolder
         if (holder != null) {
-            val targetId = when (format) {
-                "JPG" -> R.id.btnJpg
-                "DNG" -> R.id.btnDng
-                else -> R.id.btnJpg
-            }
-            selectButton(holder, targetId)
+            setupButtons(holder, group, position)
             loadSelectedFormat(holder, group, format)
         }
     }
