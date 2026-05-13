@@ -1889,27 +1889,27 @@ class ImageViewerFragment : Fragment() {
     private fun showDeleteDialog(group: ImageGroup) {
         if (group.isSingleFormat()) {
             com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
-                .setTitle("Delete Image")
-                .setMessage("Are you sure you want to delete this image?")
-                .setPositiveButton("Delete") { _, _ ->
+                .setTitle(R.string.delete_image_title)
+                .setMessage(R.string.delete_image_message)
+                .setPositiveButton(R.string.delete_button_alt) { _, _ ->
                     deleteImage(group, true)
                 }
-                .setNegativeButton("Cancel", null)
+                .setNegativeButton(R.string.cancel, null)
                 .show()
             return
         }
 
-        val options = arrayOf("Delete this format only", "Delete entire group")
+        val options = arrayOf(getString(R.string.delete_this_format_only), getString(R.string.delete_entire_group))
         var checkedItem = 1
         com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
-            .setTitle("Delete Image")
+            .setTitle(R.string.delete_image_title)
             .setSingleChoiceItems(options, checkedItem) { _, which ->
                 checkedItem = which
             }
-            .setPositiveButton("Delete") { _, _ ->
+            .setPositiveButton(R.string.delete_button_alt) { _, _ ->
                 deleteImage(group, checkedItem == 1)
             }
-            .setNegativeButton("Cancel", null)
+            .setNegativeButton(R.string.cancel, null)
             .show()
     }
 

@@ -138,11 +138,7 @@ class ImageViewerAdapter(
 
         setupButtons(holder, group, position)
 
-        val format = selectedFormats[position] ?: when {
-            group.jpgUri != null -> "JPG"
-            group.isHalfFrame() || group.dngUri != null || group.dngUri1 != null || group.dngUri2 != null -> "DNG"
-            else -> "JPG"
-        }
+        val format = getSelectedFormat(position)
         selectedFormats[position] = format
 
         val targetId = when (format) {
