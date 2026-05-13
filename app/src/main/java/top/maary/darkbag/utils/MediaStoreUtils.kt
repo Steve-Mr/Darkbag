@@ -58,7 +58,7 @@ class MediaStoreUtils(private val context: Context) {
         return cursor
     }
 
-    suspend fun getLatestAppImage(context: Context): Uri? = withContext(Dispatchers.IO) {
+    suspend fun getLatestAppImage(): Uri? = withContext(Dispatchers.IO) {
         val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
 
         // 1. Check persisted last captured URI (most accurate and fast)

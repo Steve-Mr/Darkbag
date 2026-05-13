@@ -1189,7 +1189,7 @@ class CameraFragment : Fragment() {
         // In the background, load latest photo taken (if any) for gallery thumbnail
         lifecycleScope.launch {
             val context = requireContext()
-            val thumbnailUri = mediaStoreUtils.getLatestAppImage(context)
+            val thumbnailUri = mediaStoreUtils.getLatestAppImage()
             thumbnailUri?.let {
                 setGalleryThumbnail(it.toString())
             }
@@ -1485,7 +1485,7 @@ class CameraFragment : Fragment() {
         cameraUiContainerBinding?.photoViewButton?.setOnClickListener {
             // Only navigate when the gallery has photos
             lifecycleScope.launch {
-                val uri = mediaStoreUtils.getLatestAppImage(requireContext())
+                val uri = mediaStoreUtils.getLatestAppImage()
                 if (uri != null) {
                     val safeContext = context ?: return@launch
                     val prefs = safeContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
