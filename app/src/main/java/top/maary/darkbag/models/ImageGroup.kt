@@ -28,6 +28,12 @@ data class ImageGroup(
     fun isHalfFrame(): Boolean = (dngUri1 != null && dngUri2 != null) ||
                                 (jpgUri != null && (hfLayout == "SBS" || hfLayout == "TB" || hfLayout == "Side-by-side" || hfLayout == "Top-bottom")) ||
                                 (hfLayout == "SBS" || hfLayout == "TB")
+
+    fun isSingleFormat(): Boolean {
+        val hasJpg = jpgUri != null
+        val hasDng = dngUri != null || dngUri1 != null || dngUri2 != null
+        return (hasJpg && !hasDng) || (!hasJpg && hasDng)
+    }
 }
 
 @Parcelize
