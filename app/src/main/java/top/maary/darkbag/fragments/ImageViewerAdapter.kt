@@ -140,7 +140,7 @@ class ImageViewerAdapter(
 
         val format = selectedFormats[position] ?: when {
             group.jpgUri != null -> "JPG"
-            group.isHalfFrame() || group.dngUri != null -> "DNG"
+            group.isHalfFrame() || group.dngUri != null || group.dngUri1 != null || group.dngUri2 != null -> "DNG"
             else -> "JPG"
         }
         selectedFormats[position] = format
@@ -403,7 +403,12 @@ class ImageViewerAdapter(
     }
 
     fun getSelectedFormat(position: Int): String {
-        return selectedFormats[position] ?: "JPG"
+        val group = getGroup(position)
+        return selectedFormats[position] ?: when {
+            group.jpgUri != null -> "JPG"
+            group.isHalfFrame() || group.dngUri != null || group.dngUri1 != null || group.dngUri2 != null -> "DNG"
+            else -> "JPG"
+        }
     }
 
     fun setUiVisibility(isVisible: Boolean) {
