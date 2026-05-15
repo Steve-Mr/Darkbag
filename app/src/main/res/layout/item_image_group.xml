@@ -40,6 +40,9 @@
             style="@style/Widget.Material3.Button.IconButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:contentDescription="@string/format_raw"
+            app:backgroundTint="@color/format_indicator_background_tint"
+            app:iconTint="@color/format_indicator_icon_tint"
             app:icon="@drawable/ic_raw"
             android:visibility="gone" />
 
