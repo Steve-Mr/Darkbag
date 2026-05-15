@@ -136,6 +136,27 @@ class ImageViewerAdapter(
             holder.binding.formatToggleGroup.alpha = if (currentlyShouldShow) 1f else 0f
         }
 
+        holder.binding.imageView.onMatrixChanged = { rect ->
+            // Use measured dimensions if layout hasn't happened yet
+            val viewWidth = holder.binding.root.measuredWidth.takeIf { it > 0 } ?: holder.binding.root.width
+            val viewHeight = holder.binding.root.measuredHeight.takeIf { it > 0 } ?: holder.binding.root.height
+
+            if (viewWidth > 0 && viewHeight > 0) {
+                // Determine actual visual right margin (distance from right edge of screen)
+                val visualRightSpace = viewWidth - rect.right
+                val rightMargin = if (visualRightSpace > 0) visualRightSpace else 0f
+
+                // Determine actual visual top margin
+                val topMargin = if (rect.top > 0) rect.top else 0f
+
+                // Instead of layoutParams (which causes requestLayout and UI jank), use translationX/Y.
+                // The FrameLayout is already aligned to top-end with 16dp margin.
+                // We just translate it by the extra distance.
+                holder.binding.formatToggleGroup.translationX = -rightMargin
+                holder.binding.formatToggleGroup.translationY = topMargin
+            }
+        }
+
         setupButtons(holder, group, position)
 
         val format = getSelectedFormat(position)
