@@ -45,6 +45,7 @@ class ZoomableImageView @JvmOverloads constructor(
     }
 
     private var maintainZoomOnNextImage = false
+    private val matrixRect = android.graphics.RectF()
 
     fun setMaintainZoomOnNextImage(maintain: Boolean) {
         maintainZoomOnNextImage = maintain
@@ -71,6 +72,7 @@ class ZoomableImageView @JvmOverloads constructor(
 
     var onTapped: (() -> Unit)? = null
     var onZoomChanged: ((Boolean) -> Unit)? = null
+    var onMatrixChanged: ((android.graphics.RectF) -> Unit)? = null
     var onLongPressStarted: ((ZoomableImageView) -> Unit)? = null
     var onLongPressEnded: ((ZoomableImageView) -> Unit)? = null
 
@@ -96,6 +98,7 @@ class ZoomableImageView @JvmOverloads constructor(
         mGestureDetector = GestureDetector(context, GestureListener())
         matrixValue = Matrix()
         imageMatrix = Matrix(matrixValue)
+        notifyMatrixChanged()
         scaleType = ScaleType.MATRIX
         clipToOutline = true
         outlineProvider = object : android.view.ViewOutlineProvider() {
@@ -160,6 +163,7 @@ class ZoomableImageView @JvmOverloads constructor(
 
         imageMatrix = Matrix(matrixValue)
         invalidate()
+        notifyMatrixChanged()
 
         // Handle ViewPager2 conflict: Intercept if zoomed in
         if (saveScale > 1f) {
@@ -235,6 +239,7 @@ class ZoomableImageView @JvmOverloads constructor(
             fixTrans()
             imageMatrix = Matrix(matrixValue)
             invalidate()
+            notifyMatrixChanged()
             invalidateOutline()
         }
         animator.addListener(object : android.animation.AnimatorListenerAdapter() {
@@ -277,6 +282,15 @@ class ZoomableImageView @JvmOverloads constructor(
         } else delta
     }
 
+    private fun notifyMatrixChanged() {
+        val drawable = drawable ?: return
+        matrixRect.set(0f, 0f, drawable.intrinsicWidth.toFloat(), drawable.intrinsicHeight.toFloat())
+        matrixValue.mapRect(matrixRect)
+        matrixRect.intersect(0f, 0f, viewWidth.toFloat(), viewHeight.toFloat())
+
+        onMatrixChanged?.invoke(matrixRect)
+    }
+
     fun resetZoom() {
         saveScale = 1f
         origWidth = 0f
@@ -311,6 +325,7 @@ class ZoomableImageView @JvmOverloads constructor(
 
         imageMatrix = Matrix(this.matrixValue)
         invalidate()
+        notifyMatrixChanged()
         invalidateOutline()
         onZoomChanged?.invoke(saveScale > 1f)
     }
@@ -390,6 +405,7 @@ class ZoomableImageView @JvmOverloads constructor(
         fixTrans()
         imageMatrix = Matrix(matrixValue)
         invalidate()
+        notifyMatrixChanged()
         invalidateOutline()
     }
 
@@ -416,5 +432,6 @@ class ZoomableImageView @JvmOverloads constructor(
         origWidth = viewWidth - 2 * redundancyX
         origHeight = viewHeight - 2 * redundancyY
         imageMatrix = Matrix(matrixValue)
+        notifyMatrixChanged()
     }
 }
