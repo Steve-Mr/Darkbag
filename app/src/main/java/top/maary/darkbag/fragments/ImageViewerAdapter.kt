@@ -22,6 +22,11 @@ class ImageViewerAdapter(
     context: android.content.Context
 ) : RecyclerView.Adapter<ImageViewerAdapter.ViewHolder>() {
 
+    companion object {
+        const val FORMAT_JPG = "JPG"
+        const val FORMAT_DNG = "DNG"
+    }
+
     private val margin = context.resources.getDimensionPixelSize(R.dimen.margin_medium).toFloat()
     private val radius = context.resources.getDimension(R.dimen.radius_medium)
 
@@ -31,7 +36,7 @@ class ImageViewerAdapter(
     var onLongPressEnded: ((top.maary.darkbag.ui.ZoomableImageView) -> Unit)? = null
     var onCurrentListChanged: ((List<ImageGroup>, List<ImageGroup>) -> Unit)? = null
     private var recyclerView: RecyclerView? = null
-    private val selectedFormats = mutableMapOf<Int, String>()
+    private val selectedFormats = mutableMapOf<String, String>()
     private var isUiVisible = true
     private var isFormatSwitcherPersistentHidden = false
 
@@ -104,7 +109,7 @@ class ImageViewerAdapter(
                 onBindViewHolder(holder, position)
             } else {
                 // Minor changes (DNG appeared, metadata loaded) - just update buttons
-                setupButtons(holder, group, position)
+                setupButtons(holder, group)
             }
             return
         }
@@ -136,44 +141,82 @@ class ImageViewerAdapter(
             holder.binding.formatToggleGroup.alpha = if (currentlyShouldShow) 1f else 0f
         }
 
-        setupButtons(holder, group, position)
-
-        val format = getSelectedFormat(position)
-        selectedFormats[position] = format
-
-        val targetId = when (format) {
-            "JPG" -> R.id.btnJpg
-            "DNG" -> R.id.btnDng
-            else -> R.id.btnJpg
+        if (!isSameImage) {
+            holder.binding.formatToggleGroup.translationX = 0f
+            holder.binding.formatToggleGroup.translationY = 0f
         }
-        selectButton(holder, targetId)
+
+        holder.binding.imageView.onMatrixChanged = { rect ->
+            // Use measured dimensions if layout hasn't happened yet
+            val viewWidth = holder.binding.imageView.measuredWidth.takeIf { it > 0 } ?: holder.binding.imageView.width
+            val viewHeight = holder.binding.imageView.measuredHeight.takeIf { it > 0 } ?: holder.binding.imageView.height
+
+            if (viewWidth > 0 && viewHeight > 0) {
+                // Determine actual visual right margin (distance from right edge of screen)
+                val visualRightSpace = viewWidth - rect.right
+                val rightMargin = if (visualRightSpace > 0) visualRightSpace else 0f
+
+                // Determine actual visual top margin
+                val topMargin = if (rect.top > 0) rect.top else 0f
+
+                // Instead of layoutParams (which causes requestLayout and UI jank), use translationX/Y.
+                // The FrameLayout is already aligned to top-end with 16dp margin.
+                // We just translate it by the extra distance.
+                holder.binding.formatToggleGroup.translationX = -rightMargin
+                holder.binding.formatToggleGroup.translationY = topMargin
+            }
+        }
+
+        setupButtons(holder, group)
+
+        val format = getSelectedFormat(group)
+        selectedFormats[group.baseName] = format
+
+
         loadSelectedFormat(holder, group, format)
     }
 
-    private fun setupButtons(holder: ViewHolder, group: ImageGroup, position: Int) {
+    private fun setupButtons(holder: ViewHolder, group: ImageGroup) {
         with(holder.binding) {
-            btnJpg.visibility = if (group.jpgUri != null) View.VISIBLE else View.GONE
-            btnDng.visibility = if (group.dngUri != null || group.dngUri1 != null || group.dngUri2 != null) View.VISIBLE else View.GONE
+            val hasJpg = group.jpgUri != null
+            val hasDng = group.dngUri != null || group.dngUri1 != null || group.dngUri2 != null
 
-            btnJpg.setOnClickListener {
-                if (selectedFormats[position] == "JPG") return@setOnClickListener
-                selectedFormats[position] = "JPG"
-                selectButton(holder, R.id.btnJpg)
-                loadSelectedFormat(holder, group, "JPG")
+            if (!hasDng) {
+                // Only JPG exists, hide the indicator completely
+                btnFormatIndicator.visibility = View.GONE
+                return
+            } else {
+                btnFormatIndicator.visibility = View.VISIBLE
             }
-            btnDng.setOnClickListener {
-                if (selectedFormats[position] == "DNG") return@setOnClickListener
-                selectedFormats[position] = "DNG"
-                selectButton(holder, R.id.btnDng)
-                loadSelectedFormat(holder, group, "DNG")
+
+            val currentFormat = selectedFormats[group.baseName] ?: getSelectedFormat(group)
+            btnFormatIndicator.isSelected = currentFormat == FORMAT_DNG
+
+            // If we have both, it's clickable
+            if (hasJpg && hasDng) {
+                btnFormatIndicator.isClickable = true
+                btnFormatIndicator.setOnClickListener {
+                    val currentPos = holder.bindingAdapterPosition
+                    if (currentPos == RecyclerView.NO_POSITION) return@setOnClickListener
+                    val currentGroup = getGroup(currentPos)
+
+                    btnFormatIndicator.isSelected = !btnFormatIndicator.isSelected
+                    val newFormat = if (btnFormatIndicator.isSelected) FORMAT_DNG else FORMAT_JPG
+                    selectedFormats[currentGroup.baseName] = newFormat
+                    loadSelectedFormat(holder, currentGroup, newFormat)
+                }
+            } else {
+                // Only RAW exists, show badge but make it unclickable
+                btnFormatIndicator.isClickable = false
+                btnFormatIndicator.setOnClickListener(null)
             }
         }
     }
 
     private fun loadSelectedFormat(holder: ViewHolder, group: ImageGroup, format: String) {
         when (format) {
-            "JPG" -> group.jpgUri?.let { loadImage(holder, it, version = group.lastModified) }
-            "DNG" -> {
+            FORMAT_JPG -> group.jpgUri?.let { loadImage(holder, it, version = group.lastModified) }
+            FORMAT_DNG -> {
                 if (group.isHalfFrame()) {
                     loadHalfFrameDngs(holder, group, group.editConfig?.zoomFactor ?: 1.0f)
                 } else {
@@ -250,26 +293,6 @@ class ImageViewerAdapter(
         }
     }
 
-    private fun selectButton(holder: ViewHolder, selectedId: Int) {
-        val group = holder.binding.formatToggleGroup
-        val colorPrimary = com.google.android.material.color.MaterialColors.getColor(group, android.R.attr.colorPrimary)
-        val colorDimWhite = android.graphics.Color.parseColor("#B3FFFFFF") // 70% white
-        val colorWhite = android.graphics.Color.WHITE
-
-        for (i in 0 until group.childCount) {
-            val child = group.getChildAt(i) as? com.google.android.material.button.MaterialButton
-            if (child != null) {
-                val isSelected = child.id == selectedId
-                if (isSelected) {
-                    child.setIconTint(android.content.res.ColorStateList.valueOf(colorPrimary))
-                    child.icon?.alpha = 255
-                } else {
-                    child.setIconTint(android.content.res.ColorStateList.valueOf(colorWhite))
-                    child.icon?.alpha = 128
-                }
-            }
-        }
-    }
 
     private fun loadImage(holder: ViewHolder, uri: Uri, zoomFactor: Float = 1.0f, version: Long = 0L) {
         if (holder.currentUri == uri && holder.binding.imageView.drawable != null) {
@@ -383,28 +406,27 @@ class ImageViewerAdapter(
     fun setFormat(position: Int, format: String) {
         if (position >= differ.currentList.size) return
         val group = differ.currentList[position]
-        if (selectedFormats[position] == format) return
-        selectedFormats[position] = format
+        if (selectedFormats[group.baseName] == format) return
+        selectedFormats[group.baseName] = format
 
         val holder = recyclerView?.findViewHolderForAdapterPosition(position) as? ViewHolder
         if (holder != null) {
-            val targetId = when (format) {
-                "JPG" -> R.id.btnJpg
-                "DNG" -> R.id.btnDng
-                else -> R.id.btnJpg
-            }
-            selectButton(holder, targetId)
+            setupButtons(holder, group)
             loadSelectedFormat(holder, group, format)
         }
     }
 
-    fun getSelectedFormat(position: Int): String {
-        val group = getGroup(position)
-        return selectedFormats[position] ?: when {
-            group.jpgUri != null -> "JPG"
-            group.isHalfFrame() || group.dngUri != null || group.dngUri1 != null || group.dngUri2 != null -> "DNG"
-            else -> "JPG"
+    fun getSelectedFormat(group: ImageGroup): String {
+        return selectedFormats[group.baseName] ?: when {
+            group.jpgUri != null -> FORMAT_JPG
+            group.isHalfFrame() || group.dngUri != null || group.dngUri1 != null || group.dngUri2 != null -> FORMAT_DNG
+            else -> FORMAT_JPG
         }
+    }
+
+    fun getSelectedFormat(position: Int): String {
+        if (position >= differ.currentList.size) return FORMAT_JPG
+        return getSelectedFormat(differ.currentList[position])
     }
 
     fun setUiVisibility(isVisible: Boolean) {
