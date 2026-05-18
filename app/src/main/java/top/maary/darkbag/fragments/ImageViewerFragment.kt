@@ -724,7 +724,9 @@ class ImageViewerFragment : Fragment() {
 
     private fun updateEditUi() {
         if (!::adapter.isInitialized || adapter.itemCount == 0) return
-        val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
+        val currentIndex = binding.imagePager.currentItem
+        if (currentIndex !in 0 until adapter.itemCount) return
+        val currentGroup = adapter.getGroup(currentIndex)
 
         if (!currentGroup.metadataLoaded) return
 
