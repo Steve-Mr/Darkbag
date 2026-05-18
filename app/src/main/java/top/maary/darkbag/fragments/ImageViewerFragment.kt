@@ -723,16 +723,21 @@ class ImageViewerFragment : Fragment() {
 
 
     private fun updateEditUi() {
+        if (!::adapter.isInitialized || adapter.itemCount == 0) return
+        val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
         val config = currentEditConfig
         if (config != null) {
             val lutName = if (config.lut == "None" || config.lut == null) null else config.lut.substringBeforeLast(".")
             val logName = if (config.log == "None" || config.log == null) null else config.log
             binding.btnLogLut.text = lutName ?: logName ?: "None"
         } else {
-            binding.btnLogLut.text = "None"
+            if (!currentGroup.metadataLoaded) {
+                // Do nothing while metadata is loading to prevent layout shifts
+            } else {
+                binding.btnLogLut.text = "None"
+            }
         }
     }
-
     private fun updateEffectsButtons() {
         val config = currentEditConfig ?: return
         val iconRes = when (config.flareType) {
