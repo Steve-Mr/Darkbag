@@ -280,6 +280,11 @@ class ImageViewerFragment : Fragment() {
             repository.invalidateCache()
             val newGroups = repository.getGroupedImages(forceRefresh = true)
             adapter.updateGroups(newGroups)
+            // Force update the current edit config from the newly loaded metadata
+            val currentIndex = binding.imagePager.currentItem
+            if (currentIndex in newGroups.indices) {
+                prepareEditConfig(newGroups[currentIndex])
+            }
         }
     }
 
@@ -718,9 +723,13 @@ class ImageViewerFragment : Fragment() {
 
 
     private fun updateEditUi() {
-        currentEditConfig?.let { config ->
-            val lutName = if (config.lut == "None" || config.lut == null) "None" else config.lut.substringBeforeLast(".")
-            binding.btnLogLut.text = lutName
+        val config = currentEditConfig
+        if (config != null) {
+            val lutName = if (config.lut == "None" || config.lut == null) null else config.lut.substringBeforeLast(".")
+            val logName = if (config.log == "None" || config.log == null) null else config.log
+            binding.btnLogLut.text = lutName ?: logName ?: "None"
+        } else {
+            binding.btnLogLut.text = "None"
         }
     }
 
