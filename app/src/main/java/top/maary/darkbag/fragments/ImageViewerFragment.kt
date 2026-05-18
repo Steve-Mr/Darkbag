@@ -723,6 +723,11 @@ class ImageViewerFragment : Fragment() {
 
 
     private fun updateEditUi() {
+        if (!::adapter.isInitialized || adapter.itemCount == 0) return
+        val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
+
+        if (!currentGroup.metadataLoaded) return
+
         val config = currentEditConfig
         if (config != null) {
             val lutName = if (config.lut == "None" || config.lut == null) null else config.lut.substringBeforeLast(".")
