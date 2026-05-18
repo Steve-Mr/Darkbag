@@ -275,28 +275,15 @@ class ImageViewerFragment : Fragment() {
     }
 
     private fun handleBackgroundSaveEvent(event: ColorProcessor.BackgroundSaveEvent) {
-        val groups = adapter.getGroups().toMutableList()
-        val index = adapter.findGroupIndex(event.baseName)
-
-        if (index != -1) {
-            val oldGroup = groups[index]
-            val newJpgUri = event.targetUri?.let { Uri.parse(it) } ?: oldGroup.jpgUri
-            val newDngUri = event.dngPath?.let { Uri.parse(it) } ?: oldGroup.dngUri
-
-            val newGroup = oldGroup.copy(
-                jpgUri = newJpgUri,
-                dngUri = newDngUri,
-                lastModified = System.currentTimeMillis()
-            )
-            groups[index] = newGroup
-            adapter.updateGroups(groups)
-        } else {
-            // New image group saved (maybe from background processing of a very recent shot)
-            // Trigger a full repository refresh to include the new item
-            lifecycleScope.launch {
-                repository.invalidateCache()
-                val newGroups = repository.getGroupedImages(forceRefresh = true)
-                adapter.updateGroups(newGroups)
+        // Trigger a full repository refresh to include the new item
+        lifecycleScope.launch {
+            repository.invalidateCache()
+            val newGroups = repository.getGroupedImages(forceRefresh = true)
+            adapter.updateGroups(newGroups)
+            // Force update the current edit config from the newly loaded metadata
+            val currentIndex = binding.imagePager.currentItem
+            if (currentIndex in newGroups.indices) {
+                prepareEditConfig(newGroups[currentIndex])
             }
         }
     }
@@ -368,6 +355,7 @@ class ImageViewerFragment : Fragment() {
                 config.copy(flareType = resolved)
             } else config
         }
+
         updateEditUi()
         updateEffectsButtons()
         // DNG bytes and deep EXIF will be loaded on-demand when entering edit flow
@@ -735,9 +723,20 @@ class ImageViewerFragment : Fragment() {
 
 
     private fun updateEditUi() {
-        currentEditConfig?.let { config ->
-            val lutName = if (config.lut == "None" || config.lut == null) "None" else config.lut.substringBeforeLast(".")
-            binding.btnLogLut.text = "Log: ${config.log} / LUT: $lutName"
+        if (!::adapter.isInitialized || adapter.itemCount == 0) return
+        val currentIndex = binding.imagePager.currentItem
+        if (currentIndex !in 0 until adapter.itemCount) return
+        val currentGroup = adapter.getGroup(currentIndex)
+
+        if (!currentGroup.metadataLoaded) return
+
+        val config = currentEditConfig
+        if (config != null) {
+            val lutName = if (config.lut == "None" || config.lut == null) null else config.lut.substringBeforeLast(".")
+            val logName = if (config.log == "None" || config.log == null) null else config.log
+            binding.btnLogLut.text = lutName ?: logName ?: "None"
+        } else {
+            binding.btnLogLut.text = "None"
         }
     }
 
