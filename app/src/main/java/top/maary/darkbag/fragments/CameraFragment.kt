@@ -1481,6 +1481,13 @@ class CameraFragment : Fragment() {
              showLutMenu()
         }
 
+        cameraUiContainerBinding?.photoViewButton?.setOnLongClickListener {
+            val safeActivity = activity ?: return@setOnLongClickListener false
+            Navigation.findNavController(safeActivity, R.id.fragment_container)
+                .navigate(R.id.action_camera_to_playground_gallery)
+            true
+        }
+
         // Listener for button used to view the most recent photo
         cameraUiContainerBinding?.photoViewButton?.setOnClickListener {
             // Only navigate when the gallery has photos
