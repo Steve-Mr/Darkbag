@@ -207,6 +207,67 @@ class ImageViewerFragment : Fragment() {
         binding.initialLoadingIndicator.visibility = View.VISIBLE
         binding.imagePager.visibility = View.INVISIBLE
 
+        val playgroundPaths = args.playgroundDngPaths
+        if (playgroundPaths != null && playgroundPaths.isNotEmpty()) {
+            val group = if (playgroundPaths.size == 1) {
+                val path = playgroundPaths[0]
+                val uri = Uri.fromFile(java.io.File(path))
+                ImageGroup(
+                    baseName = java.io.File(path).nameWithoutExtension,
+                    dngUri = uri,
+                    captureTime = System.currentTimeMillis(),
+                    lastModified = System.currentTimeMillis()
+                )
+            } else {
+                val path1 = playgroundPaths[0]
+                val path2 = playgroundPaths[1]
+                ImageGroup(
+                    baseName = java.io.File(path1).nameWithoutExtension + "_merged",
+                    dngUri1 = Uri.fromFile(java.io.File(path1)),
+                    dngUri2 = Uri.fromFile(java.io.File(path2)),
+                    hfLayout = "SBS",
+                    captureTime = System.currentTimeMillis(),
+                    lastModified = System.currentTimeMillis()
+                )
+            }
+            val groups = listOf(group)
+
+            val isFirstLoad = !::adapter.isInitialized
+            if (isFirstLoad) {
+                adapter = ImageViewerAdapter(groups, lifecycleScope, requireContext()).apply {
+                    onImageTapped = { toggleUi() }
+                    onZoomChanged = { isZoomed -> if (isZoomed) hideUi() else showUi() }
+                    onLongPressStarted = { handleLongPressStarted(it) }
+                    onLongPressEnded = { handleLongPressEnded(it) }
+                    setFormatSwitcherPersistentHidden(isAdjusted)
+                    onCurrentListChanged = { previousList, currentList ->
+                        val currentIndex = binding.imagePager.currentItem
+                        if (currentIndex in currentList.indices) {
+                            val currentGroup = currentList[currentIndex]
+                            val prevGroup = previousList.getOrNull(currentIndex)
+
+                            if (prevGroup != null && !prevGroup.metadataLoaded && currentGroup.metadataLoaded) {
+                                if (currentGroup.editConfig != null) {
+                                    prepareEditConfig(currentGroup)
+                                }
+                            }
+
+                            updateControlsVisibility()
+                        }
+                    }
+                }
+                binding.imagePager.adapter = adapter
+                binding.imagePager.registerOnPageChangeCallback(pageChangeCallback)
+            } else {
+                adapter.updateGroups(groups)
+            }
+
+            binding.initialLoadingIndicator.visibility = View.GONE
+            binding.imagePager.visibility = View.VISIBLE
+            binding.imagePager.setCurrentItem(0, false)
+            return
+        }
+
         lifecycleScope.launch {
             repository.getGroupedImagesFlow(targetUri).collect { groups ->
                 if (groups.isEmpty()) {

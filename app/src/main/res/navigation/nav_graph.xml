@@ -52,6 +52,19 @@
             android:id="@+id/action_camera_to_image_viewer"
             app:destination="@id/image_viewer_fragment" />
 
+        <action
+            android:id="@+id/action_camera_to_playground_gallery"
+            app:destination="@id/playground_gallery_fragment" />
+
+    </fragment>
+
+    <fragment
+        android:id="@+id/playground_gallery_fragment"
+        android:name="top.maary.darkbag.fragments.PlaygroundGalleryFragment"
+        android:label="Playground Gallery">
+        <action
+            android:id="@+id/action_playground_to_image_viewer"
+            app:destination="@id/image_viewer_fragment" />
     </fragment>
 
     <fragment
@@ -60,7 +73,14 @@
         android:label="ImageViewerFragment">
         <argument
             android:name="initial_uri"
-            app:argType="string" />
+            app:argType="string"
+            app:nullable="true"
+            android:defaultValue="@null" />
+        <argument
+            android:name="playground_dng_paths"
+            app:argType="string[]"
+            app:nullable="true"
+            android:defaultValue="@null" />
     </fragment>
 
     <fragment
