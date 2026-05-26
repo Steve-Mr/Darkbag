@@ -1483,8 +1483,10 @@ class CameraFragment : Fragment() {
 
         cameraUiContainerBinding?.photoViewButton?.setOnLongClickListener {
             val safeActivity = activity ?: return@setOnLongClickListener false
-            Navigation.findNavController(safeActivity, R.id.fragment_container)
-                .navigate(R.id.action_camera_to_playground_gallery)
+            val navController = Navigation.findNavController(safeActivity, R.id.fragment_container)
+            if (navController.currentDestination?.id == R.id.camera_fragment) {
+                navController.navigate(R.id.action_camera_to_playground_gallery)
+            }
             true
         }
 
