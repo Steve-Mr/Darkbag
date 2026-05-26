@@ -1124,6 +1124,8 @@ open class ImageViewerFragment : Fragment() {
     }
 
     private fun applyEditPreviewInternal(config: top.maary.darkbag.models.EditConfig) {
+        val ctx = context ?: return
+        val appContext = ctx.applicationContext
         val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
         val dngUri1 = currentGroup.dngUri ?: currentGroup.dngUri1
         val dngUri2 = currentGroup.dngUri2
@@ -1149,7 +1151,7 @@ open class ImageViewerFragment : Fragment() {
 
             withContext(Dispatchers.IO) {
                 try {
-                    val context = requireContext()
+                    val context = appContext
                     val logIndex = SettingsFragment.LOG_CURVES.indexOf(config.log)
                     val lutPath = if (config.lut != null && config.lut != "None") {
                         java.io.File(lutManager.lutDir, config.lut).absolutePath
@@ -1318,6 +1320,8 @@ open class ImageViewerFragment : Fragment() {
     )
 
     protected open fun saveEdit(isReplacement: Boolean) {
+        val ctx = context ?: return
+        val appContext = ctx.applicationContext
         val config = currentEditConfig ?: return
         val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
         val dngUri1 = currentGroup.dngUri ?: currentGroup.dngUri1
@@ -1332,7 +1336,7 @@ open class ImageViewerFragment : Fragment() {
                 ensureDngBytesLoaded()
                 withContext(Dispatchers.IO) {
                     try {
-                        val context = requireContext()
+                        val context = appContext
                     val logIndex = SettingsFragment.LOG_CURVES.indexOf(config.log)
                     val lutPath = if (config.lut != null && config.lut != "None") {
                         java.io.File(lutManager.lutDir, config.lut).absolutePath
@@ -1526,6 +1530,8 @@ open class ImageViewerFragment : Fragment() {
     }
 
     protected open fun processAndShareTiff() {
+        val ctx = context ?: return
+        val appContext = ctx.applicationContext
         val config = currentEditConfig ?: return
         val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
         val dngUri1 = currentGroup.dngUri ?: currentGroup.dngUri1
@@ -1537,7 +1543,7 @@ open class ImageViewerFragment : Fragment() {
             ensureDngBytesLoaded()
             val tiffUri = withContext(Dispatchers.IO) {
                 try {
-                    val context = requireContext()
+                    val context = appContext
                     val exportDir = java.io.File(context.filesDir, "shared_exports")
                     if (!exportDir.exists()) exportDir.mkdirs()
 
@@ -1739,6 +1745,8 @@ open class ImageViewerFragment : Fragment() {
             else -> currentGroup.jpgUri ?: currentGroup.dngUri
         } ?: return
 
+        val ctx = context ?: return
+        val appContext = ctx.applicationContext
         val dialog = BottomSheetDialog(requireContext())
         val detailsBinding = BottomSheetImageDetailsBinding.inflate(layoutInflater)
         dialog.setContentView(detailsBinding.root)
@@ -1758,7 +1766,7 @@ open class ImageViewerFragment : Fragment() {
         }
 
         lifecycleScope.launch(Dispatchers.IO) {
-            val context = requireContext()
+            val context = appContext
             val details = mutableListOf<Pair<String, String>>()
             val techDetails = mutableListOf<Pair<String, String>>()
             val configDetails = mutableListOf<Pair<String, String>>()

@@ -150,6 +150,8 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
     }
 
     override fun saveEdit(isReplacement: Boolean) {
+        val ctx = context ?: return
+        val appContext = ctx.applicationContext
         val config = currentEditConfig ?: return
         val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
         val dngUri1 = currentGroup.dngUri ?: currentGroup.dngUri1
@@ -167,7 +169,7 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
 
                 withContext(Dispatchers.IO) {
                     try {
-                        val context = requireContext()
+                        val context = appContext
                         val logIndex = top.maary.darkbag.fragments.SettingsFragment.LOG_CURVES.indexOf(config.log)
                         val lutPath = if (config.lut != null && config.lut != "None") {
                             File(lutManager.lutDir, config.lut).absolutePath
@@ -338,8 +340,8 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
                         currentList[currentIndex] = currentGroup.copy(jpgUri = finalJpgUri, baseName = newBaseName)
                         adapter.updateGroups(currentList.toList())
                     } else {
-                        val newDngUri1 = if (!currentGroup.isHalfFrame()) Uri.fromFile(File(File(requireContext().filesDir, "playground_dngs"), "${newBaseName}.dng")) else Uri.fromFile(File(File(requireContext().filesDir, "playground_dngs"), "${newBaseName}_1.dng"))
-                        val newDngUri2 = if (currentGroup.isHalfFrame()) Uri.fromFile(File(File(requireContext().filesDir, "playground_dngs"), "${newBaseName}_2.dng")) else null
+                        val newDngUri1 = if (!currentGroup.isHalfFrame()) Uri.fromFile(File(File(appContext.filesDir, "playground_dngs"), "${newBaseName}.dng")) else Uri.fromFile(File(File(appContext.filesDir, "playground_dngs"), "${newBaseName}_1.dng"))
+                        val newDngUri2 = if (currentGroup.isHalfFrame()) Uri.fromFile(File(File(appContext.filesDir, "playground_dngs"), "${newBaseName}_2.dng")) else null
 
                         val newGroup = ImageGroup(
                             baseName = newBaseName,
@@ -387,7 +389,7 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
             val currentList = adapter.getGroups().toMutableList()
             currentList.removeAll { it.baseName == group.baseName }
             if (currentList.isEmpty()) {
-                requireActivity().onBackPressedDispatcher.onBackPressed()
+                activity?.onBackPressedDispatcher?.onBackPressed()
             } else {
                 adapter.updateGroups(currentList.toList())
                 updateControlsVisibility()
@@ -417,13 +419,15 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
     }
 
     private fun processAndExportJpg() {
+        val ctx = context ?: return
+        val appContext = ctx.applicationContext
         val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
         binding.initialLoadingIndicator.visibility = View.VISIBLE
 
         lifecycleScope.launch {
             try {
                 withContext(Dispatchers.IO) {
-                    val context = requireContext()
+                    val context = appContext
                     val jpgUri = currentGroup.jpgUri
                     if (jpgUri != null && jpgUri.scheme == "file") {
                         val file = File(jpgUri.path!!)
@@ -446,9 +450,7 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
                         }
                     }
                 }
-                withContext(Dispatchers.Main) {
-                    android.widget.Toast.makeText(requireContext(), "Exported JPG to Pictures", android.widget.Toast.LENGTH_SHORT).show()
-                }
+                android.widget.Toast.makeText(appContext, "Exported JPG to Pictures", android.widget.Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
                 Log.e("PlaygroundViewer", "Failed to export JPG", e)
             } finally {
