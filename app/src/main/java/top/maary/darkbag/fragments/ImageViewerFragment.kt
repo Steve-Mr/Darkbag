@@ -2216,4 +2216,116 @@ open class ImageViewerFragment : Fragment() {
         super.onSaveInstanceState(outState)
         pendingDeleteNextTargetUri?.let { outState.putString("pendingDeleteNextTargetUri", it) }
     }
+
+    protected suspend fun generateProcessedBitmap(config: top.maary.darkbag.models.EditConfig, currentGroup: ImageGroup): android.graphics.Bitmap? {
+        return withContext(Dispatchers.IO) {
+            val context = requireContext()
+            val dngUri1 = currentGroup.dngUri ?: currentGroup.dngUri1
+            val dngUri2 = currentGroup.dngUri2
+            val logIndex = SettingsFragment.LOG_CURVES.indexOf(config.log)
+            val lutPath = if (config.lut != null && config.lut != "None") {
+                java.io.File(lutManager.lutDir, config.lut).absolutePath
+            } else null
+
+            fun processFull(bytes: ByteArray?, uri: Uri, index: Int): android.graphics.Bitmap? {
+                val finalBytes = bytes ?: run {
+                    context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                        java.io.FileInputStream(pfd.fileDescriptor).use { it.readBytes() }
+                    }
+                } ?: return null
+                val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                BitmapFactory.decodeByteArray(finalBytes, 0, finalBytes.size, options)
+                val orientation = try {
+                    context.contentResolver.openInputStream(uri)?.use { input ->
+                        androidx.exifinterface.media.ExifInterface(input).getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION, androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL)
+                    } ?: androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL
+                } catch (e: Exception) { androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL }
+
+                val rotDegrees = when(orientation) {
+                    androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90 -> 90
+                    androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_180 -> 180
+                    androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270 -> 270
+                    else -> 0
+                }
+                val fullW = if (rotDegrees == 90 || rotDegrees == 270) options.outHeight else options.outWidth
+                val fullH = if (rotDegrees == 90 || rotDegrees == 270) options.outWidth else options.outHeight
+                val bmpW = (fullW / config.zoomFactor).toInt()
+                val bmpH = (fullH / config.zoomFactor).toInt()
+                val previewBitmap = android.graphics.Bitmap.createBitmap(bmpW, bmpH, android.graphics.Bitmap.Config.ARGB_8888)
+                val adj = if (currentGroup.isHalfFrame()) config.adjustments?.get(index) ?: top.maary.darkbag.models.BasicAdjustments() else top.maary.darkbag.models.BasicAdjustments(config.exposure, config.contrast, config.saturation, config.highlights, config.shadows, config.whites, config.blacks)
+
+                val meta = repository.getCaptureMetadata(uri)
+                top.maary.darkbag.processor.ColorProcessor.processRaw(
+                    dngData = finalBytes,
+                    targetLog = logIndex,
+                    lutPath = lutPath,
+                    exposure = adj.exposure,
+                    contrast = adj.contrast,
+                    saturation = adj.saturation,
+                    highlights = adj.highlights,
+                    shadows = adj.shadows,
+                    whites = adj.whites,
+                    blacks = adj.blacks,
+                    digitalGain = 1.0f,
+                    outputJpgPath = null,
+                    outputTiffPath = null,
+                    useGpu = false,
+                    orientation = rotDegrees,
+                    mirror = false,
+                    outputBitmap = previewBitmap,
+                    downsampleFactor = 1,
+                    zoomFactor = config.zoomFactor,
+                    metadata = meta
+                )
+                return previewBitmap
+            }
+
+            if (!currentGroup.isHalfFrame()) {
+                val primaryUri = dngUri1 ?: dngUri2 ?: return@withContext null
+                val primaryBytes = if (dngUri1 != null) sourceDngBytes else sourceDngBytes2
+                processFull(primaryBytes, primaryUri, 0)
+            } else {
+                val f1 = dngUri1?.let { processFull(sourceDngBytes, it, 0) }
+                val f2 = dngUri2?.let { processFull(sourceDngBytes2, it, 1) }
+
+                val b1 = if (config.isSwapped) f2 else f1
+                val b2 = if (config.isSwapped) f1 else f2
+
+                if (b1 != null || b2 != null) {
+                    val isSBS = currentGroup.hfLayout != "TB"
+                    val gap = top.maary.darkbag.utils.HalfFrameUtils.calculateGap(maxOf(b1?.width ?: 0, b1?.height ?: 0)).toFloat()
+                    val w1 = b1?.width ?: b2?.width ?: 0
+                    val h1 = b1?.height ?: b2?.height ?: 0
+                    val w2 = b2?.width ?: w1
+                    val h2 = b2?.height ?: h1
+                    val resW = if (isSBS) (w1 + gap + w2).toInt() else maxOf(w1, w2)
+                    val resH = if (isSBS) maxOf(h1, h2) else (h1 + gap + h2).toInt()
+
+                    val composite = android.graphics.Bitmap.createBitmap(resW, resH, android.graphics.Bitmap.Config.ARGB_8888)
+                    val canvas = android.graphics.Canvas(composite)
+                    canvas.drawColor(android.graphics.Color.BLACK)
+                    b1?.let { canvas.drawBitmap(it, 0f, 0f, null) }
+                    b2?.let {
+                        if (isSBS) canvas.drawBitmap(it, w1 + gap, 0f, null)
+                        else canvas.drawBitmap(it, 0f, h1 + gap, null)
+                    }
+                    val finalComposite = top.maary.darkbag.utils.HalfFrameUtils.addEffects(
+                        composite,
+                        config.showTimestamp,
+                        config.flareType >= 0,
+                        currentGroup.hfLayout ?: "SBS",
+                        time1 = currentGroup.captureTime,
+                        time2 = currentGroup.captureTime,
+                        flareType = config.flareType
+                    )
+                    if (finalComposite != composite) {
+                        composite.recycle()
+                    }
+                    f1?.recycle()
+                    f2?.recycle()
+                    finalComposite
+                } else null
+            }
+        }
+    }
 }

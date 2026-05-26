@@ -107,22 +107,17 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
     override fun setupActionButtons() {
         super.setupActionButtons()
 
-        // We override the Save Menu to include an explicit "Export to JPG" option,
-        // while retaining the "Share as TIFF" option which acts as the intermediate output requested.
         binding.btnSaveMenu.setOnClickListener {
             binding.btnSaveMenu.isCheckable = true
             binding.btnSaveMenu.isChecked = true
             val popup = PopupMenu(requireContext(), it)
 
-            // Add native "Save as new file" which saves into sandbox
             popup.menu.add(0, 1001, 0, "Save as new file").apply {
                 setIcon(R.drawable.ic_save_as)
             }
-            // Add original "Share as TIFF" intermediate
             popup.menu.add(0, 1002, 0, getString(R.string.share_as_tiff)).apply {
                 setIcon(R.drawable.ic_photo)
             }
-            // Add custom "Export to JPG"
             popup.menu.add(0, 1003, 0, "Export to JPG (Pictures)").apply {
                 setIcon(R.drawable.ic_save)
             }
@@ -139,8 +134,8 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
             popup.setOnMenuItemClickListener { item ->
                 when (item.itemId) {
                     1001 -> saveEdit(isReplacement = false)
-                    1002 -> performShareAsTiff() // Keeps TIFF capability
-                    1003 -> exportToJpg() // Exports standard JPG to MediaStore
+                    1002 -> performShareAsTiff()
+                    1003 -> exportToJpg()
                 }
                 true
             }
@@ -150,10 +145,11 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
     }
 
     override fun saveEdit(isReplacement: Boolean) {
+        val context = context ?: return
+        val appContext = context.applicationContext
         val config = currentEditConfig ?: return
         val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
         val dngUri1 = currentGroup.dngUri ?: currentGroup.dngUri1
-        val dngUri2 = currentGroup.dngUri2
 
         previewJob?.cancel()
         binding.initialLoadingIndicator.visibility = View.VISIBLE
@@ -167,120 +163,12 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
 
                 withContext(Dispatchers.IO) {
                     try {
-                        val context = requireContext()
-                        val logIndex = top.maary.darkbag.fragments.SettingsFragment.LOG_CURVES.indexOf(config.log)
-                        val lutPath = if (config.lut != null && config.lut != "None") {
-                            File(lutManager.lutDir, config.lut).absolutePath
-                        } else null
-
-                        fun processFull(bytes: ByteArray?, uri: Uri, index: Int): android.graphics.Bitmap? {
-                            val finalBytes = bytes ?: run {
-                                context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
-                                    java.io.FileInputStream(pfd.fileDescriptor).use { it.readBytes() }
-                                }
-                            } ?: return null
-                            val options = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                            android.graphics.BitmapFactory.decodeByteArray(finalBytes, 0, finalBytes.size, options)
-                            val orientation = try {
-                                context.contentResolver.openInputStream(uri)?.use { input ->
-                                    androidx.exifinterface.media.ExifInterface(input).getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION, androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL)
-                                } ?: androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL
-                            } catch (e: Exception) { androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL }
-
-                            val rotDegrees = when(orientation) {
-                                androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90 -> 90
-                                androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_180 -> 180
-                                androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270 -> 270
-                                else -> 0
-                            }
-                            val fullW = if (rotDegrees == 90 || rotDegrees == 270) options.outHeight else options.outWidth
-                            val fullH = if (rotDegrees == 90 || rotDegrees == 270) options.outWidth else options.outHeight
-                            val bmpW = (fullW / config.zoomFactor).toInt()
-                            val bmpH = (fullH / config.zoomFactor).toInt()
-                            val previewBitmap = android.graphics.Bitmap.createBitmap(bmpW, bmpH, android.graphics.Bitmap.Config.ARGB_8888)
-
-                            val basicAdj = top.maary.darkbag.models.BasicAdjustments(
-                                config.exposure, config.contrast, config.saturation, config.highlights, config.shadows, config.whites, config.blacks
-                            )
-                            val adj = if (currentGroup.isHalfFrame()) config.adjustments?.get(index) ?: top.maary.darkbag.models.BasicAdjustments() else basicAdj
-
-                            val meta = repository.getCaptureMetadata(uri)
-                            top.maary.darkbag.processor.ColorProcessor.processRaw(
-                                dngData = finalBytes,
-                                targetLog = logIndex,
-                                lutPath = lutPath,
-                                exposure = adj.exposure,
-                                contrast = adj.contrast,
-                                saturation = adj.saturation,
-                                highlights = adj.highlights,
-                                shadows = adj.shadows,
-                                whites = adj.whites,
-                                blacks = adj.blacks,
-                                digitalGain = 1.0f,
-                                outputJpgPath = null,
-                                outputTiffPath = null,
-                                useGpu = false,
-                                orientation = rotDegrees,
-                                mirror = false,
-                                outputBitmap = previewBitmap,
-                                downsampleFactor = 1,
-                                zoomFactor = config.zoomFactor,
-                                metadata = meta
-                            )
-                            return previewBitmap
-                        }
-
-                        val finalBitmap = if (!currentGroup.isHalfFrame()) {
-                            val primaryUri = dngUri1 ?: dngUri2 ?: return@withContext null
-                            val primaryBytes = if (dngUri1 != null) sourceDngBytes else sourceDngBytes2
-                            processFull(primaryBytes, primaryUri, 0)
-                        } else {
-                            val f1 = dngUri1?.let { processFull(sourceDngBytes, it, 0) }
-                            val f2 = dngUri2?.let { processFull(sourceDngBytes2, it, 1) }
-
-                            val b1 = if (config.isSwapped) f2 else f1
-                            val b2 = if (config.isSwapped) f1 else f2
-
-                            if (b1 != null || b2 != null) {
-                                val isSBS = currentGroup.hfLayout != "TB"
-                                val gap = top.maary.darkbag.utils.HalfFrameUtils.calculateGap(maxOf(b1?.width ?: 0, b1?.height ?: 0)).toFloat()
-                                val w1 = b1?.width ?: b2?.width ?: 0
-                                val h1 = b1?.height ?: b2?.height ?: 0
-                                val w2 = b2?.width ?: w1
-                                val h2 = b2?.height ?: h1
-                                val resW = if (isSBS) (w1 + gap + w2).toInt() else maxOf(w1, w2)
-                                val resH = if (isSBS) maxOf(h1, h2) else (h1 + gap + h2).toInt()
-
-                                val composite = android.graphics.Bitmap.createBitmap(resW, resH, android.graphics.Bitmap.Config.ARGB_8888)
-                                val canvas = android.graphics.Canvas(composite)
-                                canvas.drawColor(android.graphics.Color.BLACK)
-                                b1?.let { canvas.drawBitmap(it, 0f, 0f, null) }
-                                b2?.let {
-                                    if (isSBS) canvas.drawBitmap(it, w1 + gap, 0f, null)
-                                    else canvas.drawBitmap(it, 0f, h1 + gap, null)
-                                }
-                                val finalComposite = top.maary.darkbag.utils.HalfFrameUtils.addEffects(
-                                    composite,
-                                    config.showTimestamp,
-                                    config.flareType >= 0,
-                                    currentGroup.hfLayout ?: "SBS",
-                                    time1 = currentGroup.captureTime,
-                                    time2 = currentGroup.captureTime,
-                                    flareType = config.flareType
-                                )
-                                if (finalComposite != composite) {
-                                    composite.recycle()
-                                }
-                                f1?.recycle()
-                                f2?.recycle()
-                                finalComposite
-                            } else null
-                        }
+                        val finalBitmap = generateProcessedBitmap(config, currentGroup)
 
                         finalBitmap?.let { bitmap ->
                             newBaseName = if (isReplacement) currentGroup.baseName else "${currentGroup.baseName}_edited_${System.currentTimeMillis()}"
 
-                            val playgroundDir = File(context.filesDir, "playground_dngs")
+                            val playgroundDir = File(appContext.filesDir, "playground_dngs")
                             if (!playgroundDir.exists()) playgroundDir.mkdirs()
 
                             val targetFile = File(playgroundDir, "${newBaseName}.jpg")
@@ -293,11 +181,11 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
 
                             val captureMetadata = (currentGroup.jpgUri ?: currentGroup.dngUri ?: currentGroup.dngUri1)?.let { repository.getCaptureMetadata(it) }
 
-                            top.maary.darkbag.utils.ImageSaver.writeMetadataToExif(context, finalJpgUri!!, config, captureMetadata)
+                            top.maary.darkbag.utils.ImageSaver.writeMetadataToExif(appContext, finalJpgUri!!, config, captureMetadata)
 
                             if (!isReplacement && !currentGroup.isHalfFrame() && dngUri1 != null) {
                                 val newDngFile = File(playgroundDir, "${newBaseName}.dng")
-                                context.contentResolver.openInputStream(dngUri1)?.use { input ->
+                                appContext.contentResolver.openInputStream(dngUri1)?.use { input ->
                                     java.io.FileOutputStream(newDngFile).use { output ->
                                         input.copyTo(output)
                                     }
@@ -305,15 +193,15 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
                             } else if (!isReplacement && currentGroup.isHalfFrame()) {
                                 dngUri1?.let { uri ->
                                     val newDngFile1 = File(playgroundDir, "${newBaseName}_1.dng")
-                                    context.contentResolver.openInputStream(uri)?.use { input ->
+                                    appContext.contentResolver.openInputStream(uri)?.use { input ->
                                         java.io.FileOutputStream(newDngFile1).use { output ->
                                             input.copyTo(output)
                                         }
                                     }
                                 }
-                                dngUri2?.let { uri ->
+                                currentGroup.dngUri2?.let { uri ->
                                     val newDngFile2 = File(playgroundDir, "${newBaseName}_2.dng")
-                                    context.contentResolver.openInputStream(uri)?.use { input ->
+                                    appContext.contentResolver.openInputStream(uri)?.use { input ->
                                         java.io.FileOutputStream(newDngFile2).use { output ->
                                             input.copyTo(output)
                                         }
@@ -338,8 +226,8 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
                         currentList[currentIndex] = currentGroup.copy(jpgUri = finalJpgUri, baseName = newBaseName)
                         adapter.updateGroups(currentList.toList())
                     } else {
-                        val newDngUri1 = if (!currentGroup.isHalfFrame()) Uri.fromFile(File(File(requireContext().filesDir, "playground_dngs"), "${newBaseName}.dng")) else Uri.fromFile(File(File(requireContext().filesDir, "playground_dngs"), "${newBaseName}_1.dng"))
-                        val newDngUri2 = if (currentGroup.isHalfFrame()) Uri.fromFile(File(File(requireContext().filesDir, "playground_dngs"), "${newBaseName}_2.dng")) else null
+                        val newDngUri1 = if (!currentGroup.isHalfFrame()) Uri.fromFile(File(File(appContext.filesDir, "playground_dngs"), "${newBaseName}.dng")) else Uri.fromFile(File(File(appContext.filesDir, "playground_dngs"), "${newBaseName}_1.dng"))
+                        val newDngUri2 = if (currentGroup.isHalfFrame()) Uri.fromFile(File(File(appContext.filesDir, "playground_dngs"), "${newBaseName}_2.dng")) else null
 
                         val newGroup = ImageGroup(
                             baseName = newBaseName,
@@ -387,7 +275,7 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
             val currentList = adapter.getGroups().toMutableList()
             currentList.removeAll { it.baseName == group.baseName }
             if (currentList.isEmpty()) {
-                requireActivity().onBackPressedDispatcher.onBackPressed()
+                activity?.onBackPressedDispatcher?.onBackPressed()
             } else {
                 adapter.updateGroups(currentList.toList())
                 updateControlsVisibility()
@@ -396,17 +284,20 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
     }
 
     private fun exportToJpg() {
-        val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
+        val context = context ?: return
 
         if (isEditingAdjustments) {
-            com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
+            com.google.android.material.dialog.MaterialAlertDialogBuilder(context)
                 .setTitle("Export to JPG")
                 .setMessage("Save adjustments and export to JPG?")
                 .setPositiveButton("Save & Export") { _, _ ->
+                    // First save the file locally in Sandbox, then trigger export to gallery
                     saveEdit(isReplacement = true)
                     processAndExportJpg()
                 }
                 .setNegativeButton("Export Without Saving") { _, _ ->
+                    // If they just want to export, decode the preview directly
+                    // avoiding reading the saved jpg which might be stale or null
                     processAndExportJpg()
                 }
                 .setNeutralButton(top.maary.darkbag.R.string.cancel, null)
@@ -417,37 +308,39 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
     }
 
     private fun processAndExportJpg() {
+        val context = context ?: return
+        val appContext = context.applicationContext
+        val config = currentEditConfig ?: return
         val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
         binding.initialLoadingIndicator.visibility = View.VISIBLE
 
         lifecycleScope.launch {
             try {
+                ensureDngBytesLoaded()
                 withContext(Dispatchers.IO) {
-                    val context = requireContext()
-                    val jpgUri = currentGroup.jpgUri
-                    if (jpgUri != null && jpgUri.scheme == "file") {
-                        val file = File(jpgUri.path!!)
-                        if (file.exists()) {
-                            val bitmap = android.graphics.BitmapFactory.decodeFile(file.absolutePath)
-                            if (bitmap != null) {
-                                ImageSaver.saveProcessedImage(
-                                    context = context,
-                                    inputBitmap = bitmap,
-                                    bmpPath = null,
-                                    rotationDegrees = 0,
-                                    zoomFactor = 1.0f,
-                                    baseName = currentGroup.baseName,
-                                    linearDngPath = null,
-                                    saveJpg = true,
-                                    saveRaw = false
-                                )
-                                bitmap.recycle()
-                            }
-                        }
+                    val finalBitmap = generateProcessedBitmap(config, currentGroup)
+                    finalBitmap?.let { bitmap ->
+                        val captureMetadata = (currentGroup.jpgUri ?: currentGroup.dngUri ?: currentGroup.dngUri1)?.let { repository.getCaptureMetadata(it) }
+
+                        ImageSaver.saveProcessedImage(
+                            context = appContext,
+                            inputBitmap = bitmap,
+                            bmpPath = null,
+                            rotationDegrees = 0,
+                            zoomFactor = 1.0f,
+                            baseName = currentGroup.baseName,
+                            linearDngPath = null,
+                            saveJpg = true,
+                            saveRaw = false,
+                            editConfig = config,
+                            isAlreadyStitched = currentGroup.isHalfFrame(),
+                            captureMetadata = captureMetadata
+                        )
+                        bitmap.recycle()
                     }
                 }
                 withContext(Dispatchers.Main) {
-                    android.widget.Toast.makeText(requireContext(), "Exported JPG to Pictures", android.widget.Toast.LENGTH_SHORT).show()
+                    android.widget.Toast.makeText(appContext, "Exported JPG to Pictures", android.widget.Toast.LENGTH_SHORT).show()
                 }
             } catch (e: Exception) {
                 Log.e("PlaygroundViewer", "Failed to export JPG", e)
