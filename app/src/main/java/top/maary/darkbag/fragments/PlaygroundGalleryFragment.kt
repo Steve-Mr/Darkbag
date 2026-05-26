@@ -14,6 +14,7 @@ import androidx.navigation.fragment.findNavController
 import androidx.recyclerview.widget.GridLayoutManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import top.maary.darkbag.R
 import top.maary.darkbag.databinding.FragmentPlaygroundGalleryBinding
@@ -297,6 +298,7 @@ class PlaygroundAdapter(
 
     class ViewHolder(val binding: ItemPlaygroundImageBinding) : RecyclerView.ViewHolder(binding.root) {
         var job: kotlinx.coroutines.Job? = null
+        var bitmap: Bitmap? = null
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
@@ -318,6 +320,8 @@ class PlaygroundAdapter(
         holder.binding.imageViewThumbnail.tag = currentTag
 
         holder.job?.cancel()
+        holder.bitmap?.recycle()
+        holder.bitmap = null
         holder.job = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
             var bitmap: Bitmap? = null
             try {
@@ -344,23 +348,27 @@ class PlaygroundAdapter(
                     }
                     bitmap = BitmapFactory.decodeFile(file.absolutePath, decodeOpts)
                 }
+
+                ensureActive()
+
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    if (holder.binding.imageViewThumbnail.tag == currentTag) {
+                        if (bitmap != null) {
+                            holder.bitmap = bitmap
+                            holder.binding.imageViewThumbnail.setImageBitmap(bitmap)
+                            bitmap = null // Ownership transferred, do not recycle in finally
+                        } else {
+                            // Ultimate fallback
+                            Glide.with(context).load(file).into(holder.binding.imageViewThumbnail)
+                        }
+                    }
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.e("Playground", "Failed to load thumbnail for ${file.name}", e)
-            }
-
-            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
-                if (holder.binding.imageViewThumbnail.tag == currentTag) {
-                    if (bitmap != null) {
-                        Glide.with(context)
-                            .load(bitmap)
-                            .into(holder.binding.imageViewThumbnail)
-                    } else {
-                        // Ultimate fallback
-                        Glide.with(context).load(file).into(holder.binding.imageViewThumbnail)
-                    }
-                } else {
-                    bitmap?.recycle()
-                }
+            } finally {
+                bitmap?.recycle()
             }
         }
 
@@ -377,5 +385,8 @@ class PlaygroundAdapter(
         super.onViewRecycled(holder)
         holder.job?.cancel()
         Glide.with(holder.itemView.context).clear(holder.binding.imageViewThumbnail)
+        holder.binding.imageViewThumbnail.setImageDrawable(null)
+        holder.bitmap?.recycle()
+        holder.bitmap = null
     }
 }
