@@ -14,6 +14,7 @@ import androidx.navigation.fragment.findNavController
 import androidx.recyclerview.widget.GridLayoutManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import top.maary.darkbag.R
 import top.maary.darkbag.databinding.FragmentPlaygroundGalleryBinding
@@ -347,22 +348,27 @@ class PlaygroundAdapter(
                     }
                     bitmap = BitmapFactory.decodeFile(file.absolutePath, decodeOpts)
                 }
+
+                ensureActive()
+
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    if (holder.binding.imageViewThumbnail.tag == currentTag) {
+                        if (bitmap != null) {
+                            holder.bitmap = bitmap
+                            holder.binding.imageViewThumbnail.setImageBitmap(bitmap)
+                            bitmap = null // Ownership transferred, do not recycle in finally
+                        } else {
+                            // Ultimate fallback
+                            Glide.with(context).load(file).into(holder.binding.imageViewThumbnail)
+                        }
+                    }
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.e("Playground", "Failed to load thumbnail for ${file.name}", e)
-            }
-
-            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
-                if (holder.binding.imageViewThumbnail.tag == currentTag) {
-                    if (bitmap != null) {
-                        holder.bitmap = bitmap
-                        holder.binding.imageViewThumbnail.setImageBitmap(bitmap)
-                    } else {
-                        // Ultimate fallback
-                        Glide.with(context).load(file).into(holder.binding.imageViewThumbnail)
-                    }
-                } else {
-                    bitmap?.recycle()
-                }
+            } finally {
+                bitmap?.recycle()
             }
         }
 
