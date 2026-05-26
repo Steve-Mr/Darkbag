@@ -91,8 +91,15 @@ class PlaygroundGalleryFragment : Fragment() {
 
         binding.btnMerge.setOnClickListener {
             if (selectedFiles.size == 2) {
-                openViewer(selectedFiles.map { it.absolutePath })
-                clearSelection()
+                val paths = selectedFiles.map { it.absolutePath }
+                com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
+                    .setTitle("Select Merge Layout")
+                    .setItems(arrayOf("Side-by-side", "Top-bottom")) { _, which ->
+                        val layout = if (which == 0) "SBS" else "TB"
+                        openViewer(paths, layout)
+                        clearSelection()
+                    }
+                    .show()
             } else {
                 Toast.makeText(requireContext(), "Select exactly 2 images to merge", Toast.LENGTH_SHORT).show()
             }
@@ -162,9 +169,12 @@ class PlaygroundGalleryFragment : Fragment() {
         }
     }
 
-    private fun openViewer(paths: List<String>) {
+    private fun openViewer(paths: List<String>, hfLayout: String? = null) {
         val bundle = Bundle().apply {
             putStringArray("playground_dng_paths", paths.toTypedArray())
+            if (hfLayout != null) {
+                putString("playground_hf_layout", hfLayout)
+            }
         }
         findNavController().navigate(R.id.action_playground_to_image_viewer, bundle)
     }
@@ -285,7 +295,9 @@ class PlaygroundAdapter(
     private val onItemLongClick: (File) -> Unit
 ) : RecyclerView.Adapter<PlaygroundAdapter.ViewHolder>() {
 
-    class ViewHolder(val binding: ItemPlaygroundImageBinding) : RecyclerView.ViewHolder(binding.root)
+    class ViewHolder(val binding: ItemPlaygroundImageBinding) : RecyclerView.ViewHolder(binding.root) {
+        var job: kotlinx.coroutines.Job? = null
+    }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
         val binding = ItemPlaygroundImageBinding.inflate(LayoutInflater.from(parent.context), parent, false)
@@ -301,24 +313,55 @@ class PlaygroundAdapter(
 
         // Extract and load EXIF thumbnail for DNG
         holder.binding.imageViewThumbnail.setImageDrawable(null)
-        try {
-            val exifInterface = ExifInterface(file.absolutePath)
-            if (exifInterface.hasThumbnail()) {
-                val thumbnailBytes = exifInterface.thumbnailBytes
-                if (thumbnailBytes != null) {
-                    Glide.with(holder.itemView.context)
-                        .load(thumbnailBytes)
-                        .into(holder.binding.imageViewThumbnail)
+        val context = holder.itemView.context
+        val currentTag = file.absolutePath
+        holder.binding.imageViewThumbnail.tag = currentTag
+
+        holder.job?.cancel()
+        holder.job = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+            var bitmap: Bitmap? = null
+            try {
+                val exifInterface = ExifInterface(file.absolutePath)
+                if (exifInterface.hasThumbnail()) {
+                    val thumbnailBytes = exifInterface.thumbnailBytes
+                    if (thumbnailBytes != null) {
+                        bitmap = BitmapFactory.decodeByteArray(thumbnailBytes, 0, thumbnailBytes.size)
+                    }
                 }
-            } else {
-                // Fallback: Just let Glide try to read it (might be slow)
-                Glide.with(holder.itemView.context)
-                    .load(file)
-                    .override(300, 400)
-                    .into(holder.binding.imageViewThumbnail)
+
+                if (bitmap == null) {
+                    // Fallback: Decode a small version directly from DNG
+                    val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                    BitmapFactory.decodeFile(file.absolutePath, options)
+                    var inSampleSize = 1
+                    val maxDimension = 400
+                    while ((options.outWidth / inSampleSize) > maxDimension || (options.outHeight / inSampleSize) > maxDimension) {
+                        inSampleSize *= 2
+                    }
+                    val decodeOpts = BitmapFactory.Options().apply {
+                        this.inSampleSize = inSampleSize
+                        inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888
+                    }
+                    bitmap = BitmapFactory.decodeFile(file.absolutePath, decodeOpts)
+                }
+            } catch (e: Exception) {
+                Log.e("Playground", "Failed to load thumbnail for ${file.name}", e)
             }
-        } catch (e: Exception) {
-            Glide.with(holder.itemView.context).load(file).into(holder.binding.imageViewThumbnail)
+
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                if (holder.binding.imageViewThumbnail.tag == currentTag) {
+                    if (bitmap != null) {
+                        Glide.with(context)
+                            .load(bitmap)
+                            .into(holder.binding.imageViewThumbnail)
+                    } else {
+                        // Ultimate fallback
+                        Glide.with(context).load(file).into(holder.binding.imageViewThumbnail)
+                    }
+                } else {
+                    bitmap?.recycle()
+                }
+            }
         }
 
         holder.itemView.setOnClickListener { onItemClick(file) }
@@ -329,4 +372,10 @@ class PlaygroundAdapter(
     }
 
     override fun getItemCount() = files.size
+
+    override fun onViewRecycled(holder: ViewHolder) {
+        super.onViewRecycled(holder)
+        holder.job?.cancel()
+        Glide.with(holder.itemView.context).clear(holder.binding.imageViewThumbnail)
+    }
 }

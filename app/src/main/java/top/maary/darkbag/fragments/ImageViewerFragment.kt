@@ -221,11 +221,12 @@ class ImageViewerFragment : Fragment() {
             } else {
                 val path1 = playgroundPaths[0]
                 val path2 = playgroundPaths[1]
+                val layout = arguments?.getString("playground_hf_layout") ?: "SBS"
                 ImageGroup(
                     baseName = java.io.File(path1).nameWithoutExtension + "_merged",
                     dngUri1 = Uri.fromFile(java.io.File(path1)),
                     dngUri2 = Uri.fromFile(java.io.File(path2)),
-                    hfLayout = "SBS",
+                    hfLayout = layout,
                     captureTime = System.currentTimeMillis(),
                     lastModified = System.currentTimeMillis()
                 )
@@ -258,9 +259,24 @@ class ImageViewerFragment : Fragment() {
                 }
                 binding.imagePager.adapter = adapter
                 binding.imagePager.registerOnPageChangeCallback(pageChangeCallback)
+
+                // Trigger metadata loading for playground images
+                val initialGroup = groups[0]
+                if (!initialGroup.metadataLoaded) {
+                    lifecycleScope.launch {
+                        val updatedGroup = repository.loadMetadata(initialGroup)
+                        val updatedGroups = adapter.getGroups().toMutableList()
+                        updatedGroups[0] = updatedGroup
+                        adapter.updateGroups(updatedGroups)
+                    }
+                }
             } else {
                 adapter.updateGroups(groups)
             }
+
+            binding.imagePager.isUserInputEnabled = !isAdjusted
+            setupActionButtons()
+            updateControlsVisibility()
 
             binding.initialLoadingIndicator.visibility = View.GONE
             binding.imagePager.visibility = View.VISIBLE
