@@ -18,9 +18,14 @@ object HalfFrameUtils {
     }
 
     private fun ensureOrientation(bitmap: Bitmap, wantPortrait: Boolean): Bitmap {
-        val isPortrait = bitmap.height >= bitmap.width
-        if (isPortrait == wantPortrait) return bitmap
+        val isPortrait = bitmap.height > bitmap.width
+        val isSquare = bitmap.height == bitmap.width
 
+        // If it's already the desired orientation or square, return as is
+        if (isPortrait == wantPortrait || isSquare) return bitmap
+
+        // Make it robust: if we want portrait and it's landscape, or we want landscape and it's portrait, rotate 90.
+        // It's always a 90 degree rotation to flip orientation.
         val matrix = Matrix().apply { postRotate(90f) }
         return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
     }
