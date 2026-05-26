@@ -231,7 +231,20 @@ class PlaygroundGalleryFragment : Fragment() {
                         }
                     }
                     if (bitmap == null) {
-                        bitmap = BitmapFactory.decodeFile(file.absolutePath)
+                        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                        BitmapFactory.decodeFile(file.absolutePath, bounds)
+
+                        var inSampleSize = 1
+                        val maxDimension = 2048
+                        while ((bounds.outWidth / inSampleSize) > maxDimension || (bounds.outHeight / inSampleSize) > maxDimension) {
+                            inSampleSize *= 2
+                        }
+
+                        val decodeOpts = BitmapFactory.Options().apply {
+                            this.inSampleSize = inSampleSize
+                            inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888
+                        }
+                        bitmap = BitmapFactory.decodeFile(file.absolutePath, decodeOpts)
                     }
                     if (bitmap != null) {
                         val uri = ImageSaver.saveProcessedImage(
