@@ -297,6 +297,7 @@ class PlaygroundAdapter(
 
     class ViewHolder(val binding: ItemPlaygroundImageBinding) : RecyclerView.ViewHolder(binding.root) {
         var job: kotlinx.coroutines.Job? = null
+        var bitmap: Bitmap? = null
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
@@ -318,6 +319,8 @@ class PlaygroundAdapter(
         holder.binding.imageViewThumbnail.tag = currentTag
 
         holder.job?.cancel()
+        holder.bitmap?.recycle()
+        holder.bitmap = null
         holder.job = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
             var bitmap: Bitmap? = null
             try {
@@ -351,9 +354,8 @@ class PlaygroundAdapter(
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
                 if (holder.binding.imageViewThumbnail.tag == currentTag) {
                     if (bitmap != null) {
-                        Glide.with(context)
-                            .load(bitmap)
-                            .into(holder.binding.imageViewThumbnail)
+                        holder.bitmap = bitmap
+                        holder.binding.imageViewThumbnail.setImageBitmap(bitmap)
                     } else {
                         // Ultimate fallback
                         Glide.with(context).load(file).into(holder.binding.imageViewThumbnail)
@@ -377,5 +379,8 @@ class PlaygroundAdapter(
         super.onViewRecycled(holder)
         holder.job?.cancel()
         Glide.with(holder.itemView.context).clear(holder.binding.imageViewThumbnail)
+        holder.binding.imageViewThumbnail.setImageDrawable(null)
+        holder.bitmap?.recycle()
+        holder.bitmap = null
     }
 }

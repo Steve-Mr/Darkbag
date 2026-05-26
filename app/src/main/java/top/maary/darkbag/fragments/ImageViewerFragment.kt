@@ -265,9 +265,7 @@ class ImageViewerFragment : Fragment() {
                 if (!initialGroup.metadataLoaded) {
                     lifecycleScope.launch {
                         val updatedGroup = repository.loadMetadata(initialGroup)
-                        val updatedGroups = adapter.getGroups().toMutableList()
-                        updatedGroups[0] = updatedGroup
-                        adapter.updateGroups(updatedGroups)
+                        adapter.updateGroups(listOf(updatedGroup))
                     }
                 }
             } else {
