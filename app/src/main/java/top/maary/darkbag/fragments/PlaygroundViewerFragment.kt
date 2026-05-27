@@ -368,7 +368,7 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
         // If we are in the special state where we just merged two images in playground and haven't saved
         if (groups.size == 1 && playgroundPaths != null && playgroundPaths.size == 2 && groups[0].jpgUri == null) {
             // Discarding a newly merged playground composite should just exit the viewer
-            activity?.onBackPressedDispatcher?.onBackPressed()
+            androidx.navigation.fragment.NavHostFragment.findNavController(this).navigateUp()
             return
         }
 
