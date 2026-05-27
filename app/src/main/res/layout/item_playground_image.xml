@@ -13,16 +13,16 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content">
 
+        <!-- Main Image -->
         <ImageView
             android:id="@+id/imageViewThumbnail"
             android:layout_width="0dp"
-            android:layout_height="0dp"
-            android:scaleType="centerCrop"
-            app:layout_constraintDimensionRatio="3:4"
+            android:layout_height="wrap_content"
+            android:adjustViewBounds="true"
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintTop_toTopOf="parent"
-            app:layout_constraintBottom_toBottomOf="parent" />
+            app:layout_constraintBottom_toTopOf="@+id/subImagesContainer" />
 
         <View
             android:id="@+id/selectionOverlay"
@@ -30,7 +30,7 @@
             android:layout_height="0dp"
             android:background="#80000000"
             android:visibility="gone"
-            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintBottom_toBottomOf="@+id/imageViewThumbnail"
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintTop_toTopOf="parent" />
@@ -45,6 +45,92 @@
             android:visibility="gone"
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintTop_toTopOf="parent" />
+
+        <!-- Layer/Folder Icon -->
+        <ImageView
+            android:id="@+id/iconLayer"
+            android:layout_width="28dp"
+            android:layout_height="28dp"
+            android:layout_margin="8dp"
+            android:padding="4dp"
+            android:src="@drawable/ic_layers"
+            android:background="@drawable/bg_circle_translucent"
+            app:tint="@android:color/white"
+            android:visibility="gone"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintBottom_toBottomOf="@+id/imageViewThumbnail" />
+
+        <!-- Sub-images container for Half-frames -->
+        <LinearLayout
+            android:id="@+id/subImagesContainer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:visibility="gone"
+            app:layout_constraintTop_toBottomOf="@+id/imageViewThumbnail"
+            app:layout_constraintBottom_toBottomOf="parent"
+            android:padding="4dp"
+            android:baselineAligned="false">
+
+            <!-- Sub Image 1 -->
+            <FrameLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginEnd="2dp">
+                <ImageView
+                    android:id="@+id/subImageView1"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:adjustViewBounds="true"
+                    android:scaleType="centerCrop" />
+                <View
+                    android:id="@+id/subSelectionOverlay1"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:background="#80000000"
+                    android:visibility="gone" />
+                <ImageView
+                    android:id="@+id/subIconSelected1"
+                    android:layout_width="20dp"
+                    android:layout_height="20dp"
+                    android:layout_margin="4dp"
+                    android:layout_gravity="top|end"
+                    android:src="@drawable/ic_check"
+                    app:tint="?attr/colorPrimary"
+                    android:visibility="gone" />
+            </FrameLayout>
+
+            <!-- Sub Image 2 -->
+            <FrameLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="2dp">
+                <ImageView
+                    android:id="@+id/subImageView2"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:adjustViewBounds="true"
+                    android:scaleType="centerCrop" />
+                <View
+                    android:id="@+id/subSelectionOverlay2"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:background="#80000000"
+                    android:visibility="gone" />
+                <ImageView
+                    android:id="@+id/subIconSelected2"
+                    android:layout_width="20dp"
+                    android:layout_height="20dp"
+                    android:layout_margin="4dp"
+                    android:layout_gravity="top|end"
+                    android:src="@drawable/ic_check"
+                    app:tint="?attr/colorPrimary"
+                    android:visibility="gone" />
+            </FrameLayout>
+
+        </LinearLayout>
 
     </androidx.constraintlayout.widget.ConstraintLayout>
 
