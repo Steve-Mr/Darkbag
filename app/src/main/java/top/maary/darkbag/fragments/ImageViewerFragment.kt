@@ -1260,13 +1260,20 @@ open class ImageViewerFragment : Fragment() {
 
                             val composite = top.maary.darkbag.utils.HalfFrameUtils.composeBitmaps(tempB1, tempB2, isSBS)
 
+                            val time1 = dngUri1?.let { repository.getCaptureMetadata(it)?.dateTimeOriginal } ?: currentGroup.captureTime
+                            val time2 = dngUri2?.let { repository.getCaptureMetadata(it)?.dateTimeOriginal } ?: currentGroup.captureTime
+
+                            // Swap timestamps if needed so they match the rendered positions
+                            val t1 = if (config.isSwapped) time2 else time1
+                            val t2 = if (config.isSwapped) time1 else time2
+
                             compositeBitmap = top.maary.darkbag.utils.HalfFrameUtils.addEffects(
                                 composite,
                                 config.showTimestamp,
                                 config.flareType >= 0,
                                 currentGroup.hfLayout ?: "SBS",
-                                time1 = currentGroup.captureTime,
-                                time2 = currentGroup.captureTime,
+                                time1 = t1,
+                                time2 = t2,
                                 flareType = config.flareType
                             )
                             if (compositeBitmap != composite) {
@@ -1433,13 +1440,19 @@ open class ImageViewerFragment : Fragment() {
                             if (tempB1 != oriented1) tempB1.recycle()
                             if (tempB2 != oriented2) tempB2.recycle()
 
+                            val time1 = dngUri1?.let { repository.getCaptureMetadata(it)?.dateTimeOriginal } ?: currentGroup.captureTime
+                            val time2 = dngUri2?.let { repository.getCaptureMetadata(it)?.dateTimeOriginal } ?: currentGroup.captureTime
+
+                            val t1 = if (config.isSwapped) time2 else time1
+                            val t2 = if (config.isSwapped) time1 else time2
+
                             val finalComposite = top.maary.darkbag.utils.HalfFrameUtils.addEffects(
                                 composite,
                                 config.showTimestamp,
                                 config.flareType >= 0,
                                 currentGroup.hfLayout ?: "SBS",
-                                time1 = currentGroup.captureTime,
-                                time2 = currentGroup.captureTime,
+                                time1 = t1,
+                                time2 = t2,
                                 flareType = config.flareType
                             )
                             if (finalComposite != composite) {
@@ -1651,13 +1664,19 @@ open class ImageViewerFragment : Fragment() {
                             if (tempB1 != oriented1) tempB1.recycle()
                             if (tempB2 != oriented2) tempB2.recycle()
 
+                            val time1 = dngUri1?.let { repository.getCaptureMetadata(it)?.dateTimeOriginal } ?: currentGroup.captureTime
+                            val time2 = dngUri2?.let { repository.getCaptureMetadata(it)?.dateTimeOriginal } ?: currentGroup.captureTime
+
+                            val t1 = if (config.isSwapped) time2 else time1
+                            val t2 = if (config.isSwapped) time1 else time2
+
                             val finalComposite = top.maary.darkbag.utils.HalfFrameUtils.addEffects(
                                 composite,
                                 config.showTimestamp,
                                 config.flareType >= 0,
                                 currentGroup.hfLayout ?: "SBS",
-                                time1 = currentGroup.captureTime,
-                                time2 = currentGroup.captureTime,
+                                time1 = t1,
+                                time2 = t2,
                                 flareType = config.flareType
                             )
                             val primaryUri = currentGroup.dngUri ?: currentGroup.dngUri1 ?: currentGroup.dngUri2 ?: Uri.EMPTY
@@ -2335,13 +2354,19 @@ open class ImageViewerFragment : Fragment() {
                     if (tempB1 != oriented1) tempB1.recycle()
                     if (tempB2 != oriented2) tempB2.recycle()
 
+                    val time1 = dngUri1?.let { repository.getCaptureMetadata(it)?.dateTimeOriginal } ?: currentGroup.captureTime
+                    val time2 = dngUri2?.let { repository.getCaptureMetadata(it)?.dateTimeOriginal } ?: currentGroup.captureTime
+
+                    val t1 = if (config.isSwapped) time2 else time1
+                    val t2 = if (config.isSwapped) time1 else time2
+
                     val finalComposite = top.maary.darkbag.utils.HalfFrameUtils.addEffects(
                         composite,
                         config.showTimestamp,
                         config.flareType >= 0,
                         currentGroup.hfLayout ?: "SBS",
-                        time1 = currentGroup.captureTime,
-                        time2 = currentGroup.captureTime,
+                        time1 = t1,
+                        time2 = t2,
                         flareType = config.flareType
                     )
                     if (finalComposite != composite) {
