@@ -23,12 +23,25 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
         val playgroundPaths = arguments?.getStringArray("playground_dng_paths")
         if (playgroundPaths != null && playgroundPaths.isNotEmpty()) {
             val firstPath = playgroundPaths[0]
-            val baseName = File(firstPath).nameWithoutExtension
+            var baseName = File(firstPath).nameWithoutExtension
+
+            // If it's part of a group (e.g. from gallery where DNGs of an existing group are selected)
+            var groupBaseName = baseName
+            if (baseName.endsWith("_1")) {
+                groupBaseName = baseName.removeSuffix("_1")
+            } else if (baseName.endsWith("_2")) {
+                groupBaseName = baseName.removeSuffix("_2")
+            }
+
             val playgroundDir = File(requireContext().filesDir, "playground_dngs")
-            val potentialJpg = File(playgroundDir, "$baseName.jpg")
-            val jpgUri = if (potentialJpg.exists()) Uri.fromFile(potentialJpg) else null
+            val potentialGroupJpg = File(playgroundDir, "$groupBaseName.jpg")
+            val groupJpgUri = if (potentialGroupJpg.exists()) Uri.fromFile(potentialGroupJpg) else null
 
             val group = if (playgroundPaths.size == 1) {
+                // A single file. Could be an edited single image (with a jpg), or a raw dng
+                val potentialJpg = File(playgroundDir, "$baseName.jpg")
+                val jpgUri = if (potentialJpg.exists()) Uri.fromFile(potentialJpg) else null
+
                 val path = playgroundPaths[0]
                 val uri = Uri.fromFile(File(path))
                 ImageGroup(
@@ -38,7 +51,23 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
                     captureTime = System.currentTimeMillis(),
                     lastModified = System.currentTimeMillis()
                 )
+            } else if (groupJpgUri != null && baseName != groupBaseName) {
+                // An existing combined group (because we have a group JPG, and the input was a sub-image or we have >1 inputs from a merged set)
+                val dngFile1 = File(playgroundDir, "${groupBaseName}_1.dng")
+                val dngFile2 = File(playgroundDir, "${groupBaseName}_2.dng")
+                val dngUri1 = if (dngFile1.exists()) Uri.fromFile(dngFile1) else null
+                val dngUri2 = if (dngFile2.exists()) Uri.fromFile(dngFile2) else null
+
+                ImageGroup(
+                    baseName = groupBaseName,
+                    dngUri1 = dngUri1,
+                    dngUri2 = dngUri2,
+                    jpgUri = groupJpgUri,
+                    captureTime = System.currentTimeMillis(),
+                    lastModified = System.currentTimeMillis()
+                )
             } else {
+                // A new merge
                 val path1 = playgroundPaths[0]
                 val path2 = playgroundPaths[1]
                 val layout = arguments?.getString("playground_hf_layout") ?: "SBS"
