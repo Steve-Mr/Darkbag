@@ -1418,8 +1418,13 @@ open class ImageViewerFragment : Fragment() {
                             val oriented1 = b1?.let { top.maary.darkbag.utils.HalfFrameUtils.ensureOrientation(it, isSBS) }
                             val oriented2 = b2?.let { top.maary.darkbag.utils.HalfFrameUtils.ensureOrientation(it, isSBS) }
 
-                            val tempB1 = oriented1 ?: android.graphics.Bitmap.createBitmap(refW, refH, android.graphics.Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.BLACK) }
-                            val tempB2 = oriented2 ?: android.graphics.Bitmap.createBitmap(refW, refH, android.graphics.Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.BLACK) }
+                            val w1 = oriented1?.width ?: refW
+                            val h1 = oriented1?.height ?: refH
+                            val w2 = oriented2?.width ?: refW
+                            val h2 = oriented2?.height ?: refH
+
+                            val tempB1 = oriented1 ?: android.graphics.Bitmap.createBitmap(w2, h2, android.graphics.Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.BLACK) }
+                            val tempB2 = oriented2 ?: android.graphics.Bitmap.createBitmap(w1, h1, android.graphics.Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.BLACK) }
 
                             val composite = top.maary.darkbag.utils.HalfFrameUtils.composeBitmaps(tempB1, tempB2, isSBS)
 
@@ -1631,8 +1636,13 @@ open class ImageViewerFragment : Fragment() {
                             val oriented1 = b1?.let { top.maary.darkbag.utils.HalfFrameUtils.ensureOrientation(it, isSBS) }
                             val oriented2 = b2?.let { top.maary.darkbag.utils.HalfFrameUtils.ensureOrientation(it, isSBS) }
 
-                            val tempB1 = oriented1 ?: android.graphics.Bitmap.createBitmap(refW, refH, android.graphics.Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.BLACK) }
-                            val tempB2 = oriented2 ?: android.graphics.Bitmap.createBitmap(refW, refH, android.graphics.Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.BLACK) }
+                            val w1 = oriented1?.width ?: refW
+                            val h1 = oriented1?.height ?: refH
+                            val w2 = oriented2?.width ?: refW
+                            val h2 = oriented2?.height ?: refH
+
+                            val tempB1 = oriented1 ?: android.graphics.Bitmap.createBitmap(w2, h2, android.graphics.Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.BLACK) }
+                            val tempB2 = oriented2 ?: android.graphics.Bitmap.createBitmap(w1, h1, android.graphics.Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.BLACK) }
 
                             val composite = top.maary.darkbag.utils.HalfFrameUtils.composeBitmaps(tempB1, tempB2, isSBS)
 
@@ -2310,8 +2320,13 @@ open class ImageViewerFragment : Fragment() {
                     val oriented1 = b1?.let { top.maary.darkbag.utils.HalfFrameUtils.ensureOrientation(it, isSBS) }
                     val oriented2 = b2?.let { top.maary.darkbag.utils.HalfFrameUtils.ensureOrientation(it, isSBS) }
 
-                    val tempB1 = oriented1 ?: android.graphics.Bitmap.createBitmap(refW, refH, android.graphics.Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.BLACK) }
-                    val tempB2 = oriented2 ?: android.graphics.Bitmap.createBitmap(refW, refH, android.graphics.Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.BLACK) }
+                    val w1 = oriented1?.width ?: refW
+                    val h1 = oriented1?.height ?: refH
+                    val w2 = oriented2?.width ?: refW
+                    val h2 = oriented2?.height ?: refH
+
+                    val tempB1 = oriented1 ?: android.graphics.Bitmap.createBitmap(w2, h2, android.graphics.Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.BLACK) }
+                    val tempB2 = oriented2 ?: android.graphics.Bitmap.createBitmap(w1, h1, android.graphics.Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.BLACK) }
 
                     val composite = top.maary.darkbag.utils.HalfFrameUtils.composeBitmaps(tempB1, tempB2, isSBS)
 
