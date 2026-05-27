@@ -48,7 +48,7 @@ import kotlin.math.log10
 import kotlin.math.pow
 import kotlin.math.round
 
-class ImageViewerFragment : Fragment() {
+open class ImageViewerFragment : Fragment() {
 
 
     private suspend fun deleteUriSafe(context: Context, uri: Uri): Boolean {
@@ -72,23 +72,23 @@ class ImageViewerFragment : Fragment() {
         }
     }
 
-    private var _binding: FragmentImageViewerBinding? = null
+    protected var _binding: FragmentImageViewerBinding? = null
     private var isUiVisible = true
-    private val binding get() = _binding!!
-    private val args: ImageViewerFragmentArgs by navArgs()
-    private lateinit var repository: ImageRepository
-    private lateinit var adapter: ImageViewerAdapter
+    protected val binding get() = _binding!!
+    protected val args: ImageViewerFragmentArgs by navArgs()
+    protected lateinit var repository: ImageRepository
+    protected lateinit var adapter: ImageViewerAdapter
 
-    private var isAdjusted = false
-    private var isEditingAdjustments = false
+    protected var isAdjusted = false
+    protected var isEditingAdjustments = false
     private var systemTopInset = 0
     private var systemBottomInset = 0
     private var topBarHeight = 0
     private var configBeforeEditing: top.maary.darkbag.models.EditConfig? = null
-    private var currentEditConfig: top.maary.darkbag.models.EditConfig? = null
-    private var selectedDngIndex = 0 // 0 or 1 for half-frame
-    private var sourceDngBytes: ByteArray? = null
-    private var sourceDngBytes2: ByteArray? = null
+    protected var currentEditConfig: top.maary.darkbag.models.EditConfig? = null
+    protected var selectedDngIndex = 0 // 0 or 1 for half-frame
+    protected var sourceDngBytes: ByteArray? = null
+    protected var sourceDngBytes2: ByteArray? = null
     private var cachedBitmap1: android.graphics.Bitmap? = null
     private var cachedBitmap2: android.graphics.Bitmap? = null
     private var lastPreviewConfig: top.maary.darkbag.models.EditConfig? = null
@@ -97,10 +97,10 @@ class ImageViewerFragment : Fragment() {
     private var savedMatrix = android.graphics.Matrix()
     private var savedScale = 1f
 
-    private lateinit var lutManager: top.maary.darkbag.utils.LutManager
-    private var previewJob: Job? = null
+    protected lateinit var lutManager: top.maary.darkbag.utils.LutManager
+    protected var previewJob: Job? = null
     private val adapterUpdateMutex = kotlinx.coroutines.sync.Mutex()
-    private val pageChangeCallback = object : ViewPager2.OnPageChangeCallback() {
+    protected val pageChangeCallback = object : ViewPager2.OnPageChangeCallback() {
         override fun onPageSelected(position: Int) {
             val group = adapter.getGroup(position)
             if (!group.metadataLoaded) {
@@ -203,84 +203,9 @@ class ImageViewerFragment : Fragment() {
         }
     }
 
-    private fun loadImages(targetUri: String? = args.initialUri, forceRefresh: Boolean = false) {
+    protected open fun loadImages(targetUri: String? = args.initialUri, forceRefresh: Boolean = false) {
         binding.initialLoadingIndicator.visibility = View.VISIBLE
         binding.imagePager.visibility = View.INVISIBLE
-
-        val playgroundPaths = args.playgroundDngPaths
-        if (playgroundPaths != null && playgroundPaths.isNotEmpty()) {
-            val group = if (playgroundPaths.size == 1) {
-                val path = playgroundPaths[0]
-                val uri = Uri.fromFile(java.io.File(path))
-                ImageGroup(
-                    baseName = java.io.File(path).nameWithoutExtension,
-                    dngUri = uri,
-                    captureTime = System.currentTimeMillis(),
-                    lastModified = System.currentTimeMillis()
-                )
-            } else {
-                val path1 = playgroundPaths[0]
-                val path2 = playgroundPaths[1]
-                val layout = arguments?.getString("playground_hf_layout") ?: "SBS"
-                ImageGroup(
-                    baseName = java.io.File(path1).nameWithoutExtension + "_merged",
-                    dngUri1 = Uri.fromFile(java.io.File(path1)),
-                    dngUri2 = Uri.fromFile(java.io.File(path2)),
-                    hfLayout = layout,
-                    captureTime = System.currentTimeMillis(),
-                    lastModified = System.currentTimeMillis()
-                )
-            }
-            val groups = listOf(group)
-
-            val isFirstLoad = !::adapter.isInitialized
-            if (isFirstLoad) {
-                adapter = ImageViewerAdapter(groups, lifecycleScope, requireContext()).apply {
-                    onImageTapped = { toggleUi() }
-                    onZoomChanged = { isZoomed -> if (isZoomed) hideUi() else showUi() }
-                    onLongPressStarted = { handleLongPressStarted(it) }
-                    onLongPressEnded = { handleLongPressEnded(it) }
-                    setFormatSwitcherPersistentHidden(isAdjusted)
-                    onCurrentListChanged = { previousList, currentList ->
-                        val currentIndex = binding.imagePager.currentItem
-                        if (currentIndex in currentList.indices) {
-                            val currentGroup = currentList[currentIndex]
-                            val prevGroup = previousList.getOrNull(currentIndex)
-
-                            if (prevGroup != null && !prevGroup.metadataLoaded && currentGroup.metadataLoaded) {
-                                if (currentGroup.editConfig != null) {
-                                    prepareEditConfig(currentGroup)
-                                }
-                            }
-
-                            updateControlsVisibility()
-                        }
-                    }
-                }
-                binding.imagePager.adapter = adapter
-                binding.imagePager.registerOnPageChangeCallback(pageChangeCallback)
-
-                // Trigger metadata loading for playground images
-                val initialGroup = groups[0]
-                if (!initialGroup.metadataLoaded) {
-                    lifecycleScope.launch {
-                        val updatedGroup = repository.loadMetadata(initialGroup)
-                        adapter.updateGroups(listOf(updatedGroup))
-                    }
-                }
-            } else {
-                adapter.updateGroups(groups)
-            }
-
-            binding.imagePager.isUserInputEnabled = !isAdjusted
-            setupActionButtons()
-            updateControlsVisibility()
-
-            binding.initialLoadingIndicator.visibility = View.GONE
-            binding.imagePager.visibility = View.VISIBLE
-            binding.imagePager.setCurrentItem(0, false)
-            return
-        }
 
         lifecycleScope.launch {
             repository.getGroupedImagesFlow(targetUri).collect { groups ->
@@ -363,7 +288,7 @@ class ImageViewerFragment : Fragment() {
         }
     }
 
-    private fun updateControlsVisibility() {
+    protected fun updateControlsVisibility() {
         if (!::adapter.isInitialized || adapter.itemCount == 0) return
         val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
 
@@ -396,7 +321,7 @@ class ImageViewerFragment : Fragment() {
         updateBackPressedCallbackState()
     }
 
-    private fun prepareEditConfig(group: ImageGroup) {
+    protected fun prepareEditConfig(group: ImageGroup) {
         // Reset cached data to prevent cross-contamination between different image groups
         sourceDngBytes = null
         sourceDngBytes2 = null
@@ -436,7 +361,7 @@ class ImageViewerFragment : Fragment() {
         // DNG bytes and deep EXIF will be loaded on-demand when entering edit flow
     }
 
-    private suspend fun ensureDngBytesLoaded() {
+    protected open suspend fun ensureDngBytesLoaded() {
         if (sourceDngBytes != null) return
         val group = adapter.getGroup(binding.imagePager.currentItem)
         val dngUri1 = group.dngUri ?: group.dngUri1
@@ -521,7 +446,7 @@ class ImageViewerFragment : Fragment() {
         }
     }
 
-    private fun setupActionButtons() {
+    protected open fun setupActionButtons() {
         binding.btnShareMain.setOnClickListener {
             performShare()
         }
@@ -755,7 +680,7 @@ class ImageViewerFragment : Fragment() {
         }
     }
 
-    private fun resetAdjustments() {
+    protected fun resetAdjustments() {
         isAdjusted = false
         exitEditMode(apply = false)
         binding.imagePager.isUserInputEnabled = true
@@ -1156,7 +1081,7 @@ class ImageViewerFragment : Fragment() {
         }
     }
 
-    private fun handleLongPressStarted(imageView: top.maary.darkbag.ui.ZoomableImageView) {
+    protected fun handleLongPressStarted(imageView: top.maary.darkbag.ui.ZoomableImageView) {
         if (!isAdjusted) return
         view?.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
         val currentIndex = binding.imagePager.currentItem
@@ -1181,7 +1106,7 @@ class ImageViewerFragment : Fragment() {
             .into(imageView)
     }
 
-    private fun handleLongPressEnded(imageView: top.maary.darkbag.ui.ZoomableImageView) {
+    protected fun handleLongPressEnded(imageView: top.maary.darkbag.ui.ZoomableImageView) {
         if (!isAdjusted) return
         isLongPressing = false
         val currentIndex = binding.imagePager.currentItem
@@ -1392,7 +1317,7 @@ class ImageViewerFragment : Fragment() {
         exposure, contrast, saturation, highlights, shadows, whites, blacks
     )
 
-    private fun saveEdit(isReplacement: Boolean) {
+    protected open fun saveEdit(isReplacement: Boolean) {
         val config = currentEditConfig ?: return
         val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
         val dngUri1 = currentGroup.dngUri ?: currentGroup.dngUri1
@@ -1581,7 +1506,7 @@ class ImageViewerFragment : Fragment() {
         }
     }
 
-    private fun performShareAsTiff() {
+    protected open fun performShareAsTiff() {
         if (isEditingAdjustments) {
             com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
                 .setTitle(R.string.share_as_tiff_dialog_title)
@@ -1600,7 +1525,7 @@ class ImageViewerFragment : Fragment() {
         }
     }
 
-    private fun processAndShareTiff() {
+    protected open fun processAndShareTiff() {
         val config = currentEditConfig ?: return
         val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
         val dngUri1 = currentGroup.dngUri ?: currentGroup.dngUri1
@@ -1987,7 +1912,7 @@ class ImageViewerFragment : Fragment() {
             .show()
     }
 
-    private fun deleteImage(group: ImageGroup, deleteGroup: Boolean) {
+    protected open fun deleteImage(group: ImageGroup, deleteGroup: Boolean) {
         val context = context ?: return
         lifecycleScope.launch {
             var nextTargetUri: String? = null
@@ -2083,12 +2008,12 @@ class ImageViewerFragment : Fragment() {
         }
     }
 
-    private fun toggleUi() {
+    protected fun toggleUi() {
         if (isEditingAdjustments) return
         if (isUiVisible) hideUi() else showUi()
     }
 
-    private fun showUi() {
+    protected fun showUi() {
         if (isUiVisible) return
         isUiVisible = true
 
@@ -2104,7 +2029,7 @@ class ImageViewerFragment : Fragment() {
         updateViewportPadding()
     }
 
-    private fun hideUi() {
+    protected fun hideUi() {
         if (!isUiVisible) return
         isUiVisible = false
 
@@ -2290,5 +2215,117 @@ class ImageViewerFragment : Fragment() {
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         pendingDeleteNextTargetUri?.let { outState.putString("pendingDeleteNextTargetUri", it) }
+    }
+
+    protected suspend fun generateProcessedBitmap(config: top.maary.darkbag.models.EditConfig, currentGroup: ImageGroup): android.graphics.Bitmap? {
+        return withContext(Dispatchers.IO) {
+            val context = requireContext()
+            val dngUri1 = currentGroup.dngUri ?: currentGroup.dngUri1
+            val dngUri2 = currentGroup.dngUri2
+            val logIndex = SettingsFragment.LOG_CURVES.indexOf(config.log)
+            val lutPath = if (config.lut != null && config.lut != "None") {
+                java.io.File(lutManager.lutDir, config.lut).absolutePath
+            } else null
+
+            fun processFull(bytes: ByteArray?, uri: Uri, index: Int): android.graphics.Bitmap? {
+                val finalBytes = bytes ?: run {
+                    context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                        java.io.FileInputStream(pfd.fileDescriptor).use { it.readBytes() }
+                    }
+                } ?: return null
+                val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                BitmapFactory.decodeByteArray(finalBytes, 0, finalBytes.size, options)
+                val orientation = try {
+                    context.contentResolver.openInputStream(uri)?.use { input ->
+                        androidx.exifinterface.media.ExifInterface(input).getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION, androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL)
+                    } ?: androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL
+                } catch (e: Exception) { androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL }
+
+                val rotDegrees = when(orientation) {
+                    androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90 -> 90
+                    androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_180 -> 180
+                    androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270 -> 270
+                    else -> 0
+                }
+                val fullW = if (rotDegrees == 90 || rotDegrees == 270) options.outHeight else options.outWidth
+                val fullH = if (rotDegrees == 90 || rotDegrees == 270) options.outWidth else options.outHeight
+                val bmpW = (fullW / config.zoomFactor).toInt()
+                val bmpH = (fullH / config.zoomFactor).toInt()
+                val previewBitmap = android.graphics.Bitmap.createBitmap(bmpW, bmpH, android.graphics.Bitmap.Config.ARGB_8888)
+                val adj = if (currentGroup.isHalfFrame()) config.adjustments?.get(index) ?: top.maary.darkbag.models.BasicAdjustments() else top.maary.darkbag.models.BasicAdjustments(config.exposure, config.contrast, config.saturation, config.highlights, config.shadows, config.whites, config.blacks)
+
+                val meta = repository.getCaptureMetadata(uri)
+                top.maary.darkbag.processor.ColorProcessor.processRaw(
+                    dngData = finalBytes,
+                    targetLog = logIndex,
+                    lutPath = lutPath,
+                    exposure = adj.exposure,
+                    contrast = adj.contrast,
+                    saturation = adj.saturation,
+                    highlights = adj.highlights,
+                    shadows = adj.shadows,
+                    whites = adj.whites,
+                    blacks = adj.blacks,
+                    digitalGain = 1.0f,
+                    outputJpgPath = null,
+                    outputTiffPath = null,
+                    useGpu = false,
+                    orientation = rotDegrees,
+                    mirror = false,
+                    outputBitmap = previewBitmap,
+                    downsampleFactor = 1,
+                    zoomFactor = config.zoomFactor,
+                    metadata = meta
+                )
+                return previewBitmap
+            }
+
+            if (!currentGroup.isHalfFrame()) {
+                val primaryUri = dngUri1 ?: dngUri2 ?: return@withContext null
+                val primaryBytes = if (dngUri1 != null) sourceDngBytes else sourceDngBytes2
+                processFull(primaryBytes, primaryUri, 0)
+            } else {
+                val f1 = dngUri1?.let { processFull(sourceDngBytes, it, 0) }
+                val f2 = dngUri2?.let { processFull(sourceDngBytes2, it, 1) }
+
+                val b1 = if (config.isSwapped) f2 else f1
+                val b2 = if (config.isSwapped) f1 else f2
+
+                if (b1 != null || b2 != null) {
+                    val isSBS = currentGroup.hfLayout != "TB"
+                    val gap = top.maary.darkbag.utils.HalfFrameUtils.calculateGap(maxOf(b1?.width ?: 0, b1?.height ?: 0)).toFloat()
+                    val w1 = b1?.width ?: b2?.width ?: 0
+                    val h1 = b1?.height ?: b2?.height ?: 0
+                    val w2 = b2?.width ?: w1
+                    val h2 = b2?.height ?: h1
+                    val resW = if (isSBS) (w1 + gap + w2).toInt() else maxOf(w1, w2)
+                    val resH = if (isSBS) maxOf(h1, h2) else (h1 + gap + h2).toInt()
+
+                    val composite = android.graphics.Bitmap.createBitmap(resW, resH, android.graphics.Bitmap.Config.ARGB_8888)
+                    val canvas = android.graphics.Canvas(composite)
+                    canvas.drawColor(android.graphics.Color.BLACK)
+                    b1?.let { canvas.drawBitmap(it, 0f, 0f, null) }
+                    b2?.let {
+                        if (isSBS) canvas.drawBitmap(it, w1 + gap, 0f, null)
+                        else canvas.drawBitmap(it, 0f, h1 + gap, null)
+                    }
+                    val finalComposite = top.maary.darkbag.utils.HalfFrameUtils.addEffects(
+                        composite,
+                        config.showTimestamp,
+                        config.flareType >= 0,
+                        currentGroup.hfLayout ?: "SBS",
+                        time1 = currentGroup.captureTime,
+                        time2 = currentGroup.captureTime,
+                        flareType = config.flareType
+                    )
+                    if (finalComposite != composite) {
+                        composite.recycle()
+                    }
+                    f1?.recycle()
+                    f2?.recycle()
+                    finalComposite
+                } else null
+            }
+        }
     }
 }
