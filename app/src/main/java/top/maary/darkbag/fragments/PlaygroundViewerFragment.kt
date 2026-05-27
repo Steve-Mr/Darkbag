@@ -91,15 +91,17 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
                         val updatedGroup = repository.loadMetadata(initialGroup)
                         adapter.updateGroups(listOf(updatedGroup))
 
-                        // Enter edit mode directly if we are displaying a newly merged playground group
+                        // Mark as adjusted directly if we are displaying a newly merged playground group
                         if (groups.size == 1 && playgroundPaths.size == 2 && updatedGroup.jpgUri == null) {
-                            enterEditMode()
-                            markAdjusted()
+                            isAdjusted = true
+                            adapter.setFormatSwitcherPersistentHidden(true)
+                            updateControlsVisibility()
                         }
                     }
                 } else if (groups.size == 1 && playgroundPaths.size == 2 && initialGroup.jpgUri == null) {
-                     enterEditMode()
-                     markAdjusted()
+                    isAdjusted = true
+                    adapter.setFormatSwitcherPersistentHidden(true)
+                    updateControlsVisibility()
                 }
 
                 binding.initialLoadingIndicator.visibility = View.GONE
