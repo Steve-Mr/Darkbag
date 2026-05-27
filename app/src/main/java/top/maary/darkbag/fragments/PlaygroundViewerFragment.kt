@@ -90,7 +90,18 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
                     lifecycleScope.launch {
                         val updatedGroup = repository.loadMetadata(initialGroup)
                         adapter.updateGroups(listOf(updatedGroup))
+
+                        // Mark as adjusted directly if we are displaying a newly merged playground group
+                        if (groups.size == 1 && playgroundPaths.size == 2 && updatedGroup.jpgUri == null) {
+                            isAdjusted = true
+                            adapter.setFormatSwitcherPersistentHidden(true)
+                            updateControlsVisibility()
+                        }
                     }
+                } else if (groups.size == 1 && playgroundPaths.size == 2 && initialGroup.jpgUri == null) {
+                    isAdjusted = true
+                    adapter.setFormatSwitcherPersistentHidden(true)
+                    updateControlsVisibility()
                 }
 
                 binding.initialLoadingIndicator.visibility = View.GONE
@@ -349,4 +360,19 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
             }
         }
     }
+
+    override fun showDiscardChangesDialog() {
+        val playgroundPaths = arguments?.getStringArray("playground_dng_paths")
+        val groups = adapter.getGroups()
+
+        // If we are in the special state where we just merged two images in playground and haven't saved
+        if (groups.size == 1 && playgroundPaths != null && playgroundPaths.size == 2 && groups[0].jpgUri == null) {
+            // Discarding a newly merged playground composite should just exit the viewer
+            androidx.navigation.fragment.NavHostFragment.findNavController(this).navigateUp()
+            return
+        }
+
+        super.showDiscardChangesDialog()
+    }
+
 }
