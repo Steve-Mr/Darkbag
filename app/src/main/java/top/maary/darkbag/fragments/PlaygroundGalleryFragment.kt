@@ -461,7 +461,13 @@ class PlaygroundAdapter(
     }
 
     override fun onBindViewHolder(holder: ViewHolder, position: Int, payloads: MutableList<Any>) {
+        if (payloads.isEmpty()) {
+            super.onBindViewHolder(holder, position, payloads)
+            return
+        }
+
         val item = items[position]
+        var handled = false
 
         if (payloads.contains("SELECTION_CHANGED")) {
             val isMainSelected = selectedFiles.contains(item.mainFile)
@@ -476,17 +482,19 @@ class PlaygroundAdapter(
                 holder.binding.subSelectionOverlay2.visibility = if (isDng2Selected) View.VISIBLE else View.GONE
                 holder.binding.subIconSelected2.visibility = if (isDng2Selected) View.VISIBLE else View.GONE
             }
-            return
+            handled = true
         }
 
         if (payloads.contains("EXPAND_CHANGED")) {
             if (item is PlaygroundItem.Group) {
                 holder.binding.subImagesContainer.visibility = if (item.isExpanded) View.VISIBLE else View.GONE
             }
-            return
+            handled = true
         }
 
-        super.onBindViewHolder(holder, position, payloads)
+        if (!handled) {
+            super.onBindViewHolder(holder, position, payloads)
+        }
     }
 
     private fun loadThumbnail(context: android.content.Context, file: File, imageView: android.widget.ImageView, holder: ViewHolder) {
