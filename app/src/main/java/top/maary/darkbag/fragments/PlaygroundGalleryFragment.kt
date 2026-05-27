@@ -12,6 +12,12 @@ import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import androidx.navigation.fragment.findNavController
 import androidx.recyclerview.widget.GridLayoutManager
+import androidx.recyclerview.widget.StaggeredGridLayoutManager
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.updatePadding
+import androidx.core.view.updateLayoutParams
+import android.view.ViewGroup.MarginLayoutParams
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.ensureActive
@@ -57,6 +63,19 @@ class PlaygroundGalleryFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
+        ViewCompat.setOnApplyWindowInsetsListener(binding.root) { v, insets ->
+            val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            binding.appBarLayout.updatePadding(top = systemBars.top)
+            binding.recyclerView.updatePadding(bottom = systemBars.bottom)
+
+            binding.fabAdd.updateLayoutParams<MarginLayoutParams> {
+                bottomMargin = systemBars.bottom + (16 * resources.displayMetrics.density).toInt()
+            }
+            binding.bottomAppBar.updatePadding(bottom = systemBars.bottom)
+
+            insets
+        }
+
         binding.toolbar.setNavigationOnClickListener {
             findNavController().navigateUp()
         }
@@ -79,7 +98,7 @@ class PlaygroundGalleryFragment : Fragment() {
             }
         )
 
-        binding.recyclerView.layoutManager = GridLayoutManager(requireContext(), 3)
+        binding.recyclerView.layoutManager = StaggeredGridLayoutManager(2, StaggeredGridLayoutManager.VERTICAL)
         binding.recyclerView.adapter = adapter
 
         binding.fabAdd.setOnClickListener {
@@ -146,14 +165,23 @@ class PlaygroundGalleryFragment : Fragment() {
             isSelectionMode = false
         }
 
-        adapter.notifyDataSetChanged()
+        val index = dngFiles.indexOf(file)
+        if (index != -1) {
+            adapter.notifyItemChanged(index, "SELECTION_CHANGED")
+        }
         updateBottomBar()
     }
 
     private fun clearSelection() {
+        val oldSelections = selectedFiles.toList()
         selectedFiles.clear()
         isSelectionMode = false
-        adapter.notifyDataSetChanged()
+        oldSelections.forEach { file ->
+            val index = dngFiles.indexOf(file)
+            if (index != -1) {
+                adapter.notifyItemChanged(index, "SELECTION_CHANGED")
+            }
+        }
         updateBottomBar()
     }
 
@@ -306,6 +334,17 @@ class PlaygroundAdapter(
         return ViewHolder(binding)
     }
 
+    override fun onBindViewHolder(holder: ViewHolder, position: Int, payloads: MutableList<Any>) {
+        if (payloads.contains("SELECTION_CHANGED")) {
+            val file = files[position]
+            val isSelected = selectedFiles.contains(file)
+            holder.binding.selectionOverlay.visibility = if (isSelected) View.VISIBLE else View.GONE
+            holder.binding.iconSelected.visibility = if (isSelected) View.VISIBLE else View.GONE
+            return
+        }
+        super.onBindViewHolder(holder, position, payloads)
+    }
+
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
         val file = files[position]
         val isSelected = selectedFiles.contains(file)
@@ -322,53 +361,60 @@ class PlaygroundAdapter(
         holder.job?.cancel()
         holder.bitmap?.recycle()
         holder.bitmap = null
-        holder.job = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-            var bitmap: Bitmap? = null
-            try {
-                val exifInterface = ExifInterface(file.absolutePath)
-                if (exifInterface.hasThumbnail()) {
-                    val thumbnailBytes = exifInterface.thumbnailBytes
-                    if (thumbnailBytes != null) {
-                        bitmap = BitmapFactory.decodeByteArray(thumbnailBytes, 0, thumbnailBytes.size)
-                    }
-                }
 
-                if (bitmap == null) {
-                    // Fallback: Decode a small version directly from DNG
-                    val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                    BitmapFactory.decodeFile(file.absolutePath, options)
-                    var inSampleSize = 1
-                    val maxDimension = 400
-                    while ((options.outWidth / inSampleSize) > maxDimension || (options.outHeight / inSampleSize) > maxDimension) {
-                        inSampleSize *= 2
-                    }
-                    val decodeOpts = BitmapFactory.Options().apply {
-                        this.inSampleSize = inSampleSize
-                        inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888
-                    }
-                    bitmap = BitmapFactory.decodeFile(file.absolutePath, decodeOpts)
-                }
+        val jpgFile = File(file.parent, file.nameWithoutExtension + ".jpg")
 
-                ensureActive()
-
-                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
-                    if (holder.binding.imageViewThumbnail.tag == currentTag) {
-                        if (bitmap != null) {
-                            holder.bitmap = bitmap
-                            holder.binding.imageViewThumbnail.setImageBitmap(bitmap)
-                            bitmap = null // Ownership transferred, do not recycle in finally
-                        } else {
-                            // Ultimate fallback
-                            Glide.with(context).load(file).into(holder.binding.imageViewThumbnail)
+        if (jpgFile.exists()) {
+            Glide.with(context).load(jpgFile).into(holder.binding.imageViewThumbnail)
+        } else {
+            holder.job = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                var bitmap: Bitmap? = null
+                try {
+                    val exifInterface = ExifInterface(file.absolutePath)
+                    if (exifInterface.hasThumbnail()) {
+                        val thumbnailBytes = exifInterface.thumbnailBytes
+                        if (thumbnailBytes != null) {
+                            bitmap = BitmapFactory.decodeByteArray(thumbnailBytes, 0, thumbnailBytes.size)
                         }
                     }
+
+                    if (bitmap == null) {
+                        // Fallback: Decode a small version directly from DNG
+                        val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                        BitmapFactory.decodeFile(file.absolutePath, options)
+                        var inSampleSize = 1
+                        val maxDimension = 400
+                        while ((options.outWidth / inSampleSize) > maxDimension || (options.outHeight / inSampleSize) > maxDimension) {
+                            inSampleSize *= 2
+                        }
+                        val decodeOpts = BitmapFactory.Options().apply {
+                            this.inSampleSize = inSampleSize
+                            inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888
+                        }
+                        bitmap = BitmapFactory.decodeFile(file.absolutePath, decodeOpts)
+                    }
+
+                    ensureActive()
+
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                        if (holder.binding.imageViewThumbnail.tag == currentTag) {
+                            if (bitmap != null) {
+                                holder.bitmap = bitmap
+                                holder.binding.imageViewThumbnail.setImageBitmap(bitmap)
+                                bitmap = null // Ownership transferred, do not recycle in finally
+                            } else {
+                                // Ultimate fallback
+                                Glide.with(context).load(file).into(holder.binding.imageViewThumbnail)
+                            }
+                        }
+                    }
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Log.e("Playground", "Failed to load thumbnail for ${file.name}", e)
+                } finally {
+                    bitmap?.recycle()
                 }
-            } catch (e: kotlinx.coroutines.CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                Log.e("Playground", "Failed to load thumbnail for ${file.name}", e)
-            } finally {
-                bitmap?.recycle()
             }
         }
 
