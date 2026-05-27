@@ -2198,7 +2198,7 @@ open class ImageViewerFragment : Fragment() {
         backPressedCallback.isEnabled = isAdjusted || isEditingAdjustments || binding.lutListContainer.visibility == View.VISIBLE
     }
 
-    private fun showDiscardChangesDialog() {
+    protected open fun showDiscardChangesDialog() {
         if (isEditingAdjustments) {
             exitEditMode(apply = false)
             return
