@@ -63,10 +63,11 @@ class PlaygroundGalleryFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
+        val initialPaddingBottom = binding.recyclerView.paddingBottom
         ViewCompat.setOnApplyWindowInsetsListener(binding.root) { v, insets ->
             val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
             binding.appBarLayout.updatePadding(top = systemBars.top)
-            binding.recyclerView.updatePadding(bottom = systemBars.bottom)
+            binding.recyclerView.updatePadding(bottom = systemBars.bottom + initialPaddingBottom)
 
             binding.fabAdd.updateLayoutParams<MarginLayoutParams> {
                 bottomMargin = systemBars.bottom + (16 * resources.displayMetrics.density).toInt()
@@ -81,6 +82,7 @@ class PlaygroundGalleryFragment : Fragment() {
         }
 
         adapter = PlaygroundAdapter(
+            coroutineScope = viewLifecycleOwner.lifecycleScope,
             files = dngFiles,
             selectedFiles = selectedFiles,
             onItemClick = { file ->
@@ -318,6 +320,7 @@ class PlaygroundGalleryFragment : Fragment() {
 }
 
 class PlaygroundAdapter(
+    private val coroutineScope: kotlinx.coroutines.CoroutineScope,
     private val files: List<File>,
     private val selectedFiles: Set<File>,
     private val onItemClick: (File) -> Unit,
@@ -367,7 +370,7 @@ class PlaygroundAdapter(
         if (jpgFile.exists()) {
             Glide.with(context).load(jpgFile).into(holder.binding.imageViewThumbnail)
         } else {
-            holder.job = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+            holder.job = coroutineScope.launch(kotlinx.coroutines.Dispatchers.IO) {
                 var bitmap: Bitmap? = null
                 try {
                     val exifInterface = ExifInterface(file.absolutePath)
