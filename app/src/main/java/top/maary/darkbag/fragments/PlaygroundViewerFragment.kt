@@ -90,7 +90,16 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
                     lifecycleScope.launch {
                         val updatedGroup = repository.loadMetadata(initialGroup)
                         adapter.updateGroups(listOf(updatedGroup))
+
+                        // Enter edit mode directly if we are displaying a newly merged playground group
+                        if (groups.size == 1 && playgroundPaths.size == 2 && updatedGroup.jpgUri == null) {
+                            enterEditMode()
+                            markAdjusted()
+                        }
                     }
+                } else if (groups.size == 1 && playgroundPaths.size == 2 && initialGroup.jpgUri == null) {
+                     enterEditMode()
+                     markAdjusted()
                 }
 
                 binding.initialLoadingIndicator.visibility = View.GONE

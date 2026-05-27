@@ -670,7 +670,7 @@ open class ImageViewerFragment : Fragment() {
         }
     }
 
-    private fun markAdjusted() {
+    protected fun markAdjusted() {
         if (!isAdjusted) {
             isAdjusted = true
             adapter.setFormatSwitcherPersistentHidden(true)
@@ -918,7 +918,7 @@ open class ImageViewerFragment : Fragment() {
         enterEditMode()
     }
 
-    private fun enterEditMode() {
+    protected fun enterEditMode() {
         if (!isUiVisible) showUi()
         if (isEditingAdjustments) return
         isEditingAdjustments = true
