@@ -191,27 +191,70 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
 
                 withContext(Dispatchers.IO) {
                     try {
-                        val finalBitmap = generateProcessedBitmap(config, currentGroup)
+                        newBaseName = if (isReplacement) currentGroup.baseName else "${currentGroup.baseName}_edited_${System.currentTimeMillis()}"
+                        val playgroundDir = File(appContext.filesDir, "playground_dngs")
+                        if (!playgroundDir.exists()) playgroundDir.mkdirs()
+                        val targetFile = File(playgroundDir, "${newBaseName}.jpg")
+                        val captureMetadata = (currentGroup.jpgUri ?: currentGroup.dngUri ?: currentGroup.dngUri1)?.let { repository.getCaptureMetadata(it) }
 
-                        finalBitmap?.let { bitmap ->
-                            newBaseName = if (isReplacement) currentGroup.baseName else "${currentGroup.baseName}_edited_${System.currentTimeMillis()}"
+                        val ccm = floatArrayOf(1.884f, -0.669f, -0.215f, -0.428f, 1.439f, -0.011f, 0.057f, -0.575f, 1.518f)
+                        val wb = floatArrayOf(1f, 1f, 1f, 1f)
 
-                            val playgroundDir = File(appContext.filesDir, "playground_dngs")
-                            if (!playgroundDir.exists()) playgroundDir.mkdirs()
+                        if (currentGroup.isHalfFrame()) {
+                            val t1 = if (config.isSwapped) (currentGroup.dngUri2?.let { repository.getCaptureMetadata(it)?.dateTimeOriginal } ?: currentGroup.captureTime) else (dngUri1?.let { repository.getCaptureMetadata(it)?.dateTimeOriginal } ?: currentGroup.captureTime)
+                            val t2 = if (config.isSwapped) (dngUri1?.let { repository.getCaptureMetadata(it)?.dateTimeOriginal } ?: currentGroup.captureTime) else (currentGroup.dngUri2?.let { repository.getCaptureMetadata(it)?.dateTimeOriginal } ?: currentGroup.captureTime)
+                            val temp1 = File(appContext.cacheDir, "temp1.jpg")
+                            val temp2 = File(appContext.cacheDir, "temp2.jpg")
+                            val dng1 = if (config.isSwapped) currentGroup.dngUri2 else dngUri1
+                            val dng2 = if (config.isSwapped) dngUri1 else currentGroup.dngUri2
+                            val c1 = if (config.isSwapped) 1 else 0
+                            val c2 = if (config.isSwapped) 0 else 1
+                            val logIndex = top.maary.darkbag.fragments.SettingsFragment.LOG_CURVES.indexOf(config.log)
+                            val lutPath = if (config.lut != null && config.lut != "None") java.io.File(lutManager.lutDir, config.lut).absolutePath else null
 
-                            val targetFile = File(playgroundDir, "${newBaseName}.jpg")
-
-                            java.io.FileOutputStream(targetFile).use { out ->
-                                bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 95, out)
+                            if (dng1 != null) {
+                                val p = dngUriToPath(dng1)
+                                top.maary.darkbag.processor.ColorProcessor.exportHdrPlus(p, 0, 0, 0, config.digitalGain, logIndex, lutPath, config.adjustments?.get(c1)?.exposure ?: 0f, config.adjustments?.get(c1)?.contrast ?: 0f, config.adjustments?.get(c1)?.saturation ?: 0f, config.adjustments?.get(c1)?.highlights ?: 0f, config.adjustments?.get(c1)?.shadows ?: 0f, config.adjustments?.get(c1)?.whites ?: 0f, config.adjustments?.get(c1)?.blacks ?: 0f, temp1.absolutePath, null, ccm, wb, config.zoomFactor, false, captureMetadata ?: top.maary.darkbag.models.CaptureMetadata())
+                                if (dng1.scheme != "file") File(p).delete()
                             }
+                            if (dng2 != null) {
+                                val p = dngUriToPath(dng2)
+                                top.maary.darkbag.processor.ColorProcessor.exportHdrPlus(p, 0, 0, 0, config.digitalGain, logIndex, lutPath, config.adjustments?.get(c2)?.exposure ?: 0f, config.adjustments?.get(c2)?.contrast ?: 0f, config.adjustments?.get(c2)?.saturation ?: 0f, config.adjustments?.get(c2)?.highlights ?: 0f, config.adjustments?.get(c2)?.shadows ?: 0f, config.adjustments?.get(c2)?.whites ?: 0f, config.adjustments?.get(c2)?.blacks ?: 0f, temp2.absolutePath, null, ccm, wb, config.zoomFactor, false, captureMetadata ?: top.maary.darkbag.models.CaptureMetadata())
+                                if (dng2.scheme != "file") File(p).delete()
+                            }
+                            val stitchedBitmap = top.maary.darkbag.utils.HalfFrameUtils.stitchImages(temp1.absolutePath, temp2.absolutePath, currentGroup.hfLayout ?: "SBS", false)
+                            temp1.delete()
+                            temp2.delete()
+                            if (stitchedBitmap != null) {
+                                val finalBitmap = top.maary.darkbag.utils.HalfFrameUtils.addEffects(stitchedBitmap, config.showTimestamp, config.flareType >= 0, currentGroup.hfLayout ?: "SBS", t1, t2, config.flareType)
+                                java.io.FileOutputStream(targetFile).use { out ->
+                                    finalBitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 95, out)
+                                }
+                                if (finalBitmap != stitchedBitmap) stitchedBitmap.recycle()
+                                finalBitmap.recycle()
+                            }
+                        } else {
+                            dngUri1?.let { uri ->
+                                val p = dngUriToPath(uri)
+                                top.maary.darkbag.processor.ColorProcessor.exportHdrPlus(
+                                    tempRawPath = p, width = 0, height = 0, orientation = 0,
+                                    digitalGain = config.digitalGain, targetLog = top.maary.darkbag.fragments.SettingsFragment.LOG_CURVES.indexOf(config.log),
+                                    lutPath = if (config.lut != null && config.lut != "None") java.io.File(lutManager.lutDir, config.lut).absolutePath else null,
+                                    exposure = config.exposure, contrast = config.contrast, saturation = config.saturation,
+                                    highlights = config.highlights, shadows = config.shadows, whites = config.whites, blacks = config.blacks,
+                                    jpgPath = targetFile.absolutePath, dngPath = null,
+                                    ccm = ccm, whiteBalance = wb, zoomFactor = config.zoomFactor, mirror = false,
+                                    metadata = captureMetadata ?: top.maary.darkbag.models.CaptureMetadata()
+                                )
+                                if (uri.scheme != "file") File(p).delete()
+                            }
+                        }
 
-                            finalJpgUri = Uri.fromFile(targetFile)
+                        finalJpgUri = Uri.fromFile(targetFile)
 
-                            val captureMetadata = (currentGroup.jpgUri ?: currentGroup.dngUri ?: currentGroup.dngUri1)?.let { repository.getCaptureMetadata(it) }
+                        top.maary.darkbag.utils.ImageSaver.writeMetadataToExif(appContext, finalJpgUri!!, config, captureMetadata)
 
-                            top.maary.darkbag.utils.ImageSaver.writeMetadataToExif(appContext, finalJpgUri!!, config, captureMetadata)
-
-                            if (!isReplacement && !currentGroup.isHalfFrame() && dngUri1 != null) {
+                        if (!isReplacement && !currentGroup.isHalfFrame() && dngUri1 != null) {
                                 val newDngFile = File(playgroundDir, "${newBaseName}.dng")
                                 appContext.contentResolver.openInputStream(dngUri1)?.use { input ->
                                     java.io.FileOutputStream(newDngFile).use { output ->
@@ -276,9 +319,6 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
                                     }
                                 }
                             }
-
-                            bitmap.recycle()
-                        }
                     } catch (e: Exception) {
                         Log.e("PlaygroundViewer", "Failed to save edit", e)
                     }
@@ -358,6 +398,21 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
         }
     }
 
+
+    private fun dngUriToPath(uri: Uri): String {
+        return if (uri.scheme == "file") {
+            uri.path ?: ""
+        } else {
+            val file = java.io.File(requireContext().cacheDir, "temp_dng_${System.currentTimeMillis()}.dng")
+            requireContext().contentResolver.openInputStream(uri)?.use { input ->
+                java.io.FileOutputStream(file).use { output ->
+                    input.copyTo(output)
+                }
+            }
+            file.absolutePath
+        }
+    }
+
     private fun exportToJpg() {
         val context = context ?: return
 
@@ -393,25 +448,58 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
             try {
                 ensureDngBytesLoaded()
                 withContext(Dispatchers.IO) {
-                    val finalBitmap = generateProcessedBitmap(config, currentGroup)
-                    finalBitmap?.let { bitmap ->
-                        val captureMetadata = (currentGroup.jpgUri ?: currentGroup.dngUri ?: currentGroup.dngUri1)?.let { repository.getCaptureMetadata(it) }
+                    val captureMetadata = (currentGroup.jpgUri ?: currentGroup.dngUri ?: currentGroup.dngUri1)?.let { repository.getCaptureMetadata(it) }
+                    val dngUri1 = currentGroup.dngUri ?: currentGroup.dngUri1
+                    val ccm = floatArrayOf(1.884f, -0.669f, -0.215f, -0.428f, 1.439f, -0.011f, 0.057f, -0.575f, 1.518f)
+                    val wb = floatArrayOf(1f, 1f, 1f, 1f)
+                    val logIndex = top.maary.darkbag.fragments.SettingsFragment.LOG_CURVES.indexOf(config.log)
+                    val lutPath = if (config.lut != null && config.lut != "None") java.io.File(lutManager.lutDir, config.lut).absolutePath else null
 
-                        ImageSaver.saveProcessedImage(
-                            context = appContext,
-                            inputBitmap = bitmap,
-                            bmpPath = null,
-                            rotationDegrees = 0,
-                            zoomFactor = 1.0f,
-                            baseName = currentGroup.baseName,
-                            linearDngPath = null,
-                            saveJpg = true,
-                            saveRaw = false,
-                            editConfig = config,
-                            isAlreadyStitched = currentGroup.isHalfFrame(),
-                            captureMetadata = captureMetadata
-                        )
-                        bitmap.recycle()
+                    if (currentGroup.isHalfFrame()) {
+                        val t1 = if (config.isSwapped) (currentGroup.dngUri2?.let { repository.getCaptureMetadata(it)?.dateTimeOriginal } ?: currentGroup.captureTime) else (dngUri1?.let { repository.getCaptureMetadata(it)?.dateTimeOriginal } ?: currentGroup.captureTime)
+                        val t2 = if (config.isSwapped) (dngUri1?.let { repository.getCaptureMetadata(it)?.dateTimeOriginal } ?: currentGroup.captureTime) else (currentGroup.dngUri2?.let { repository.getCaptureMetadata(it)?.dateTimeOriginal } ?: currentGroup.captureTime)
+                        val temp1 = File(appContext.cacheDir, "temp1.jpg")
+                        val temp2 = File(appContext.cacheDir, "temp2.jpg")
+                        val dng1 = if (config.isSwapped) currentGroup.dngUri2 else dngUri1
+                        val dng2 = if (config.isSwapped) dngUri1 else currentGroup.dngUri2
+                        val c1 = if (config.isSwapped) 1 else 0
+                        val c2 = if (config.isSwapped) 0 else 1
+                        if (dng1 != null) {
+                            val p = dngUriToPath(dng1)
+                            top.maary.darkbag.processor.ColorProcessor.exportHdrPlus(p, 0, 0, 0, config.digitalGain, logIndex, lutPath, config.adjustments?.get(c1)?.exposure ?: 0f, config.adjustments?.get(c1)?.contrast ?: 0f, config.adjustments?.get(c1)?.saturation ?: 0f, config.adjustments?.get(c1)?.highlights ?: 0f, config.adjustments?.get(c1)?.shadows ?: 0f, config.adjustments?.get(c1)?.whites ?: 0f, config.adjustments?.get(c1)?.blacks ?: 0f, temp1.absolutePath, null, ccm, wb, config.zoomFactor, false, captureMetadata ?: top.maary.darkbag.models.CaptureMetadata())
+                            if (dng1.scheme != "file") File(p).delete()
+                        }
+                        if (dng2 != null) {
+                            val p = dngUriToPath(dng2)
+                            top.maary.darkbag.processor.ColorProcessor.exportHdrPlus(p, 0, 0, 0, config.digitalGain, logIndex, lutPath, config.adjustments?.get(c2)?.exposure ?: 0f, config.adjustments?.get(c2)?.contrast ?: 0f, config.adjustments?.get(c2)?.saturation ?: 0f, config.adjustments?.get(c2)?.highlights ?: 0f, config.adjustments?.get(c2)?.shadows ?: 0f, config.adjustments?.get(c2)?.whites ?: 0f, config.adjustments?.get(c2)?.blacks ?: 0f, temp2.absolutePath, null, ccm, wb, config.zoomFactor, false, captureMetadata ?: top.maary.darkbag.models.CaptureMetadata())
+                            if (dng2.scheme != "file") File(p).delete()
+                        }
+                        val stitchedBitmap = top.maary.darkbag.utils.HalfFrameUtils.stitchImages(temp1.absolutePath, temp2.absolutePath, currentGroup.hfLayout ?: "SBS", false)
+                        temp1.delete()
+                        temp2.delete()
+                        if (stitchedBitmap != null) {
+                            val finalBitmap = top.maary.darkbag.utils.HalfFrameUtils.addEffects(stitchedBitmap, config.showTimestamp, config.flareType >= 0, currentGroup.hfLayout ?: "SBS", t1, t2, config.flareType)
+                            ImageSaver.saveProcessedImage(context = appContext, inputBitmap = finalBitmap, bmpPath = null, rotationDegrees = 0, zoomFactor = 1.0f, baseName = currentGroup.baseName, linearDngPath = null, saveJpg = true, saveRaw = false, editConfig = config, isAlreadyStitched = currentGroup.isHalfFrame(), captureMetadata = captureMetadata)
+                            if (finalBitmap != stitchedBitmap) stitchedBitmap.recycle()
+                            finalBitmap.recycle()
+                        }
+                    } else {
+                        dngUri1?.let { uri ->
+                            val targetFile = File(appContext.cacheDir, "export_temp.jpg")
+                            val p = dngUriToPath(uri)
+                            top.maary.darkbag.processor.ColorProcessor.exportHdrPlus(
+                                tempRawPath = p, width = 0, height = 0, orientation = 0,
+                                digitalGain = config.digitalGain, targetLog = logIndex,
+                                lutPath = lutPath,
+                                exposure = config.exposure, contrast = config.contrast, saturation = config.saturation,
+                                highlights = config.highlights, shadows = config.shadows, whites = config.whites, blacks = config.blacks,
+                                jpgPath = targetFile.absolutePath, dngPath = null,
+                                ccm = ccm, whiteBalance = wb, zoomFactor = config.zoomFactor, mirror = false,
+                                metadata = captureMetadata ?: top.maary.darkbag.models.CaptureMetadata()
+                            )
+                            if (uri.scheme != "file") File(p).delete()
+                            ImageSaver.saveProcessedImage(context = appContext, inputBitmap = null, bmpPath = targetFile.absolutePath, rotationDegrees = 0, zoomFactor = 1.0f, baseName = currentGroup.baseName, linearDngPath = null, saveJpg = true, saveRaw = false, editConfig = config, isAlreadyStitched = currentGroup.isHalfFrame(), captureMetadata = captureMetadata)
+                        }
                     }
                 }
                 withContext(Dispatchers.Main) {
