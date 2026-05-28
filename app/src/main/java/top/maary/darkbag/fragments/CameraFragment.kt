@@ -1529,6 +1529,9 @@ class CameraFragment : Fragment() {
             }
         }
 
+        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val activeLutName = prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, null)
+        cameraUiContainerBinding?.lutSwitcherButton?.text = activeLutName?.substringBeforeLast(".") ?: getString(R.string.lut_none)
         updateLiveLut()
     }
 
