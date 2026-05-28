@@ -218,6 +218,35 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
                                         }
                                     }
                                 }
+                            } else if (isReplacement && currentGroup.isHalfFrame()) {
+                                // If replacing (normal save) a half-frame composite, ensure the original DNG files
+                                // are renamed to match the merged base name with _1 and _2 suffixes.
+                                // This ensures they are grouped correctly in the playground gallery.
+                                val isFirstSave = currentGroup.jpgUri == null
+                                if (isFirstSave) {
+                                    currentGroup.dngUri1?.let { uri ->
+                                        if (uri.scheme == "file") {
+                                            uri.path?.let { path ->
+                                                val oldFile = File(path)
+                                                val newFile = File(playgroundDir, "${newBaseName}_1.dng")
+                                                if (oldFile.exists() && oldFile.absolutePath != newFile.absolutePath) {
+                                                    oldFile.renameTo(newFile)
+                                                }
+                                            }
+                                        }
+                                    }
+                                    currentGroup.dngUri2?.let { uri ->
+                                        if (uri.scheme == "file") {
+                                            uri.path?.let { path ->
+                                                val oldFile = File(path)
+                                                val newFile = File(playgroundDir, "${newBaseName}_2.dng")
+                                                if (oldFile.exists() && oldFile.absolutePath != newFile.absolutePath) {
+                                                    oldFile.renameTo(newFile)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             }
 
                             bitmap.recycle()
@@ -234,7 +263,9 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
                     val currentIndex = binding.imagePager.currentItem
 
                     if (isReplacement) {
-                        currentList[currentIndex] = currentGroup.copy(jpgUri = finalJpgUri, baseName = newBaseName)
+                        val newDngUri1 = if (currentGroup.isHalfFrame() && currentGroup.jpgUri == null) Uri.fromFile(File(File(appContext.filesDir, "playground_dngs"), "${newBaseName}_1.dng")) else currentGroup.dngUri1
+                        val newDngUri2 = if (currentGroup.isHalfFrame() && currentGroup.jpgUri == null) Uri.fromFile(File(File(appContext.filesDir, "playground_dngs"), "${newBaseName}_2.dng")) else currentGroup.dngUri2
+                        currentList[currentIndex] = currentGroup.copy(jpgUri = finalJpgUri, baseName = newBaseName, dngUri1 = newDngUri1, dngUri2 = newDngUri2)
                         adapter.updateGroups(currentList.toList())
                     } else {
                         val newDngUri1 = if (!currentGroup.isHalfFrame()) Uri.fromFile(File(File(appContext.filesDir, "playground_dngs"), "${newBaseName}.dng")) else Uri.fromFile(File(File(appContext.filesDir, "playground_dngs"), "${newBaseName}_1.dng"))
