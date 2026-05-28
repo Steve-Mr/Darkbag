@@ -50,7 +50,7 @@ class PlaygroundDocumentsProvider : DocumentsProvider() {
         val row = result.newRow()
         row.add(DocumentsContract.Root.COLUMN_ROOT_ID, ROOT_ID)
         row.add(DocumentsContract.Root.COLUMN_SUMMARY, "Playground Storage")
-        row.add(DocumentsContract.Root.COLUMN_FLAGS, DocumentsContract.Root.FLAG_SUPPORTS_CREATE or DocumentsContract.Root.FLAG_LOCAL_ONLY or DocumentsContract.Root.FLAG_SUPPORTS_IS_CHILD)
+        row.add(DocumentsContract.Root.COLUMN_FLAGS, DocumentsContract.Root.FLAG_LOCAL_ONLY or DocumentsContract.Root.FLAG_SUPPORTS_IS_CHILD)
         row.add(DocumentsContract.Root.COLUMN_TITLE, "Darkbag Playground")
         row.add(DocumentsContract.Root.COLUMN_DOCUMENT_ID, getDocIdForFile(playgroundDir))
         row.add(DocumentsContract.Root.COLUMN_MIME_TYPES, "*/*")
@@ -103,7 +103,9 @@ class PlaygroundDocumentsProvider : DocumentsProvider() {
             File(playgroundDir, docId)
         }
 
-        if (!target.canonicalPath.startsWith(playgroundDir.canonicalPath)) {
+        val canonicalTarget = target.canonicalPath
+        val canonicalPlayground = playgroundDir.canonicalPath
+        if (canonicalTarget != canonicalPlayground && !canonicalTarget.startsWith(canonicalPlayground + File.separator)) {
             throw SecurityException("Invalid document ID (path traversal detected): $docId")
         }
 
@@ -143,6 +145,9 @@ class PlaygroundDocumentsProvider : DocumentsProvider() {
     }
 
     override fun deleteDocument(documentId: String) {
+        if (documentId == ROOT_ID) {
+            throw SecurityException("Deletion of the root directory is not allowed.")
+        }
         val file = getFileForDocId(documentId)
         if (file.delete()) {
            // Deleted

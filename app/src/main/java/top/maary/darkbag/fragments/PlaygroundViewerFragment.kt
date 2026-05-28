@@ -23,12 +23,12 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
         val playgroundPaths = arguments?.getStringArray("playground_dng_paths")
         if (playgroundPaths != null && playgroundPaths.isNotEmpty()) {
             val firstPath = playgroundPaths[0]
-            val baseName = File(firstPath).nameWithoutExtension
             val playgroundDir = File(requireContext().filesDir, "playground_dngs")
-            val potentialJpg = File(playgroundDir, "$baseName.jpg")
-            val jpgUri = if (potentialJpg.exists()) Uri.fromFile(potentialJpg) else null
-
             val group = if (playgroundPaths.size == 1) {
+                val baseName = File(firstPath).nameWithoutExtension
+                val potentialJpg = File(playgroundDir, "$baseName.jpg")
+                val jpgUri = if (potentialJpg.exists()) Uri.fromFile(potentialJpg) else null
+
                 val path = playgroundPaths[0]
                 val uri = Uri.fromFile(File(path))
                 ImageGroup(
@@ -41,10 +41,27 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
             } else {
                 val path1 = playgroundPaths[0]
                 val path2 = playgroundPaths[1]
-                val layout = arguments?.getString("playground_hf_layout") ?: "SBS"
-                val mergedBaseName = baseName + "_merged"
+                val name1 = File(path1).nameWithoutExtension
+
+                // If it's an existing group being opened, name1 will likely end in _1.
+                // We should derive the group base name by stripping _1 if present, otherwise
+                // it's a new merge so we append _merged.
+                val mergedBaseName = if (name1.endsWith("_1")) {
+                    name1.removeSuffix("_1")
+                } else {
+                    name1 + "_merged"
+                }
+
                 val potentialMergedJpg = File(playgroundDir, "$mergedBaseName.jpg")
                 val mergedJpgUri = if (potentialMergedJpg.exists()) Uri.fromFile(potentialMergedJpg) else null
+
+                // For an existing composite with a saved JPG, we want to rely on the EXIF for layout.
+                // But for a new merge, we take the layout from arguments.
+                val layout = if (mergedJpgUri == null) {
+                    arguments?.getString("playground_hf_layout") ?: "SBS"
+                } else {
+                    "SBS" // Fallback, will be overridden by loadMetadata
+                }
 
                 ImageGroup(
                     baseName = mergedBaseName,
@@ -230,7 +247,14 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
                                                 val oldFile = File(path)
                                                 val newFile = File(playgroundDir, "${newBaseName}_1.dng")
                                                 if (oldFile.exists() && oldFile.absolutePath != newFile.absolutePath) {
-                                                    oldFile.renameTo(newFile)
+                                                    // If the old file is already part of a different merged group
+                                                    // (i.e. it ends with _1 or _2), we should copy it instead of renaming it
+                                                    // so we don't break the original group.
+                                                    if (oldFile.nameWithoutExtension.endsWith("_1") || oldFile.nameWithoutExtension.endsWith("_2")) {
+                                                        oldFile.copyTo(newFile, overwrite = true)
+                                                    } else {
+                                                        oldFile.renameTo(newFile)
+                                                    }
                                                 }
                                             }
                                         }
@@ -241,7 +265,11 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
                                                 val oldFile = File(path)
                                                 val newFile = File(playgroundDir, "${newBaseName}_2.dng")
                                                 if (oldFile.exists() && oldFile.absolutePath != newFile.absolutePath) {
-                                                    oldFile.renameTo(newFile)
+                                                    if (oldFile.nameWithoutExtension.endsWith("_1") || oldFile.nameWithoutExtension.endsWith("_2")) {
+                                                        oldFile.copyTo(newFile, overwrite = true)
+                                                    } else {
+                                                        oldFile.renameTo(newFile)
+                                                    }
                                                 }
                                             }
                                         }
@@ -263,8 +291,13 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
                     val currentIndex = binding.imagePager.currentItem
 
                     if (isReplacement) {
-                        val newDngUri1 = if (currentGroup.isHalfFrame() && currentGroup.jpgUri == null) Uri.fromFile(File(File(appContext.filesDir, "playground_dngs"), "${newBaseName}_1.dng")) else currentGroup.dngUri1
-                        val newDngUri2 = if (currentGroup.isHalfFrame() && currentGroup.jpgUri == null) Uri.fromFile(File(File(appContext.filesDir, "playground_dngs"), "${newBaseName}_2.dng")) else currentGroup.dngUri2
+                        val playgroundDir = File(appContext.filesDir, "playground_dngs")
+                        val dngFile1 = File(playgroundDir, "${newBaseName}_1.dng")
+                        val dngFile2 = File(playgroundDir, "${newBaseName}_2.dng")
+
+                        val newDngUri1 = if (currentGroup.isHalfFrame() && currentGroup.jpgUri == null && dngFile1.exists()) Uri.fromFile(dngFile1) else currentGroup.dngUri1
+                        val newDngUri2 = if (currentGroup.isHalfFrame() && currentGroup.jpgUri == null && dngFile2.exists()) Uri.fromFile(dngFile2) else currentGroup.dngUri2
+
                         currentList[currentIndex] = currentGroup.copy(jpgUri = finalJpgUri, baseName = newBaseName, dngUri1 = newDngUri1, dngUri2 = newDngUri2)
                         adapter.updateGroups(currentList.toList())
                     } else {
