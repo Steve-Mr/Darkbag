@@ -748,7 +748,7 @@ open class ImageViewerFragment : Fragment() {
             else -> R.drawable.ic_flare_none
         }
         val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
-        val isTB = currentGroup.hfLayout == "TB" || currentGroup.hfLayout?.contains("top", ignoreCase = true) == true
+        val isTB = top.maary.darkbag.utils.LayoutUtils.isTopBottom(currentGroup.hfLayout)
 
         binding.btnTimestamp.setIconTintResource(if (config.showTimestamp) R.color.vibrant_orange else android.R.color.white)
         binding.btnTimestamp.alpha = if (config.showTimestamp) 1.0f else 0.6f
@@ -764,7 +764,7 @@ open class ImageViewerFragment : Fragment() {
 
     private fun updateSelectionFeedback() {
         val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
-        val isTB = currentGroup.hfLayout == "TB"
+        val isTB = top.maary.darkbag.utils.LayoutUtils.isTopBottom(currentGroup.hfLayout)
 
         if (isEditingAdjustments && currentGroup.isHalfFrame()) {
             binding.hfSelection1.visibility = if (selectedDngIndex == 1) View.VISIBLE else View.GONE
@@ -1239,7 +1239,7 @@ open class ImageViewerFragment : Fragment() {
                         val b2 = if (config.isSwapped) cachedBitmap1 else cachedBitmap2
 
                         if (b1 != null || b2 != null) {
-                            val isSBS = currentGroup.hfLayout != "TB"
+                            val isSBS = top.maary.darkbag.utils.LayoutUtils.isSideBySide(currentGroup.hfLayout)
 
                             val refW = b1?.width ?: b2?.width ?: 0
                             val refH = b1?.height ?: b2?.height ?: 0
@@ -1417,7 +1417,7 @@ open class ImageViewerFragment : Fragment() {
                         val b2 = if (config.isSwapped) f1 else f2
 
                         if (b1 != null || b2 != null) {
-                            val isSBS = currentGroup.hfLayout != "TB"
+                            val isSBS = top.maary.darkbag.utils.LayoutUtils.isSideBySide(currentGroup.hfLayout)
 
                             val refW = b1?.width ?: b2?.width ?: 0
                             val refH = b1?.height ?: b2?.height ?: 0
@@ -1641,7 +1641,7 @@ open class ImageViewerFragment : Fragment() {
                         val b2 = if (config.isSwapped) f1 else f2
 
                         if (b1 != null || b2 != null) {
-                            val isSBS = currentGroup.hfLayout != "TB"
+                            val isSBS = top.maary.darkbag.utils.LayoutUtils.isSideBySide(currentGroup.hfLayout)
 
                             val refW = b1?.width ?: b2?.width ?: 0
                             val refH = b1?.height ?: b2?.height ?: 0
@@ -2165,7 +2165,7 @@ open class ImageViewerFragment : Fragment() {
 
         // Ensure half-frame masks match the visible viewport
         val currentGroup = if (::adapter.isInitialized && adapter.itemCount > 0) adapter.getGroup(binding.imagePager.currentItem) else null
-        val isTB = currentGroup?.hfLayout == "TB"
+        val isTB = top.maary.darkbag.utils.LayoutUtils.isTopBottom(currentGroup?.hfLayout)
 
         val lp1 = binding.hfSelection1.layoutParams as ViewGroup.MarginLayoutParams
         val lp2 = binding.hfSelection2.layoutParams as ViewGroup.MarginLayoutParams
@@ -2331,7 +2331,7 @@ open class ImageViewerFragment : Fragment() {
                 val b2 = if (config.isSwapped) f1 else f2
 
                 if (b1 != null || b2 != null) {
-                    val isSBS = currentGroup.hfLayout != "TB"
+                    val isSBS = top.maary.darkbag.utils.LayoutUtils.isSideBySide(currentGroup.hfLayout)
 
                     val refW = b1?.width ?: b2?.width ?: 0
                     val refH = b1?.height ?: b2?.height ?: 0

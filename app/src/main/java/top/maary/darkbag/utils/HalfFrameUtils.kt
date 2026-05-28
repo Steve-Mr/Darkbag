@@ -92,7 +92,7 @@ object HalfFrameUtils {
         val firstRaw = BitmapFactory.decodeFile(firstPath) ?: return null
         val secondRaw = BitmapFactory.decodeFile(secondPath) ?: return null
 
-        val isSideBySide = layout == "Side-by-side" || layout == "左右排列" || layout.contains("side", ignoreCase = true) || layout == "SBS"
+        val isSideBySide = top.maary.darkbag.utils.LayoutUtils.isSideBySide(layout)
 
         // Side-by-side wants Portrait inputs; Top-bottom wants Landscape inputs
         val firstBitmap = ensureOrientation(firstRaw, isSideBySide)
@@ -177,16 +177,9 @@ object HalfFrameUtils {
         val dateText2 = sdf.format(Date(time2))
 
         // More robust detection: if string matches Side-by-side OR if it's a wide image that isn't square
-        val isSideBySide = layout == "Side-by-side" ||
-                          layout == "左右排列" ||
-                          layout.contains("side", ignoreCase = true) ||
-                          layout == "SBS" ||
-                          (layout.isEmpty() && bitmap.width > bitmap.height)
+        val isSideBySide = top.maary.darkbag.utils.LayoutUtils.isSideBySide(layout) || (layout.isEmpty() && bitmap.width > bitmap.height)
 
-        val isTopBottom = layout == "Top-bottom" ||
-                          layout == "上下排列" ||
-                          layout.contains("top", ignoreCase = true) ||
-                          layout == "TB"
+        val isTopBottom = top.maary.darkbag.utils.LayoutUtils.isTopBottom(layout)
 
         val paint = Paint().apply {
             color = Color.parseColor("#FF8C00") // Classic orange

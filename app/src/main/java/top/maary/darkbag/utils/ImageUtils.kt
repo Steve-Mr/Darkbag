@@ -46,7 +46,7 @@ object ImageUtils {
             val w = ref.width
             val h = ref.height
 
-            val isSBS = layout != "TB"
+            val isSBS = top.maary.darkbag.utils.LayoutUtils.isSideBySide(layout)
 
             val final1 = oriented1 ?: createPlaceholderBitmap(context, w, h)
             val final2 = oriented2 ?: createPlaceholderBitmap(context, w, h)
