@@ -22,8 +22,11 @@ import android.os.Bundle
 import android.view.KeyEvent
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
 import androidx.navigation.fragment.NavHostFragment
 import top.maary.darkbag.databinding.ActivityMainBinding
+import top.maary.darkbag.utils.ShareUtils
+import kotlinx.coroutines.launch
 import com.google.android.material.color.DynamicColors
 
 const val KEY_EVENT_ACTION = "key_event_action"
@@ -53,13 +56,32 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun handleIntent(intent: Intent) {
-        if (intent.getStringExtra(SHORTCUT_EXTRA_KEY) == SHORTCUT_VALUE_SETTINGS) {
-            val navHostFragment = supportFragmentManager.findFragmentById(R.id.fragment_container) as? NavHostFragment
-            navHostFragment?.navController?.let { navController ->
-                // Ensure we are not already on settings
+        // PermissionsFragment will handle the initial routing for shortcuts and share intents
+        // if this is the first launch. This handleIntent is primarily for onNewIntent
+        // when the app is already running.
+        val navHostFragment = supportFragmentManager.findFragmentById(R.id.fragment_container) as? NavHostFragment
+        val navController = navHostFragment?.navController ?: return
+
+
+        // Handle Shortcuts
+        when (intent.getStringExtra(SHORTCUT_EXTRA_KEY)) {
+            SHORTCUT_VALUE_SETTINGS -> {
                 if (navController.currentDestination?.id != R.id.settings_fragment) {
                     navController.navigate(R.id.settings_fragment)
                 }
+                return
+            }
+            SHORTCUT_VALUE_PLAYGROUND -> {
+                if (navController.currentDestination?.id != R.id.playground_gallery_fragment) {
+                    navController.navigate(R.id.playground_gallery_fragment)
+                }
+                return
+            }
+            SHORTCUT_VALUE_CAMERA -> {
+                if (navController.currentDestination?.id != R.id.camera_fragment) {
+                    navController.navigate(R.id.camera_fragment)
+                }
+                return
             }
         }
     }
@@ -92,6 +114,8 @@ class MainActivity : AppCompatActivity() {
     companion object {
         const val SHORTCUT_EXTRA_KEY = "shortcut"
         const val SHORTCUT_VALUE_SETTINGS = "settings"
+        const val SHORTCUT_VALUE_PLAYGROUND = "playground"
+        const val SHORTCUT_VALUE_CAMERA = "camera"
     }
 
 }

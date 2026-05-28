@@ -58,6 +58,8 @@
     <string name="half_frame_auto_burst">Auto Burst (Double Shot)</string>
 
     <string name="settings_shortcut_label">Settings</string>
+    <string name="playground_shortcut_label">Playground</string>
+    <string name="camera_shortcut_label">Camera</string>
 
     <string name="discard_changes_title">Discard changes?</string>
     <string name="discard_changes_message">You have unsaved changes. Do you want to discard them?</string>

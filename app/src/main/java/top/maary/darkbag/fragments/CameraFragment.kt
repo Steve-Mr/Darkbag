@@ -20,6 +20,7 @@ import top.maary.darkbag.ui.ExpressiveShutterButton
 import top.maary.darkbag.utils.DebugLogManager
 import top.maary.darkbag.utils.LensInfo
 import top.maary.darkbag.utils.CameraRepository
+import top.maary.darkbag.utils.FloatingToolbarManager
 
 import android.animation.ValueAnimator
 import android.annotation.SuppressLint
@@ -408,6 +409,17 @@ class CameraFragment : Fragment() {
             )
             return
         }
+
+        // Setup Floating Toolbar
+        val navController = Navigation.findNavController(requireActivity(), R.id.fragment_container)
+        FloatingToolbarManager.setup(
+            requireContext(),
+            view?.findViewById(R.id.floating_toolbar),
+            view?.findViewById<com.google.android.material.button.MaterialButton>(R.id.floating_toolbar_button_camera),
+            view?.findViewById<com.google.android.material.button.MaterialButton>(R.id.floating_toolbar_button_playground),
+            navController,
+            navController.currentDestination?.id ?: R.id.camera_fragment
+        )
 
         updateHdrPlusConstraints()
 
@@ -1168,11 +1180,11 @@ class CameraFragment : Fragment() {
     private fun updateCameraUi() {
         val root = _fragmentCameraBinding?.root as? androidx.constraintlayout.widget.ConstraintLayout ?: return
 
-        // Remove all views except viewFinderContainer to avoid duplicates when re-inflating <merge>
+        // Remove all views except viewFinderContainer AND floating_toolbar to avoid duplicates when re-inflating <merge>
         val viewsToRemove = mutableListOf<View>()
         for (i in 0 until root.childCount) {
             val child = root.getChildAt(i)
-            if (child.id != R.id.viewFinderContainer) {
+            if (child.id != R.id.viewFinderContainer && child.id != R.id.floating_toolbar) {
                 viewsToRemove.add(child)
             }
         }

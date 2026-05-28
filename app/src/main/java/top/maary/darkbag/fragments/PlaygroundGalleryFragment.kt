@@ -18,6 +18,9 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.updatePadding
 import androidx.core.view.updateLayoutParams
 import android.view.ViewGroup.MarginLayoutParams
+import androidx.navigation.Navigation
+import com.google.android.material.button.MaterialButton
+import top.maary.darkbag.utils.FloatingToolbarManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.ensureActive
@@ -271,6 +274,7 @@ class PlaygroundGalleryFragment : Fragment() {
     private fun updateBottomBar() {
         if (isSelectionMode) {
             binding.bottomAppBar.visibility = View.VISIBLE
+        view?.findViewById<android.view.View>(R.id.floating_toolbar)?.visibility = View.GONE
             binding.fabAdd.visibility = View.GONE
 
             // Only allow merge if exactly 2 individual DNGs are selected
@@ -280,6 +284,7 @@ class PlaygroundGalleryFragment : Fragment() {
             binding.toolbar.title = "${selectedFiles.size} selected"
         } else {
             binding.bottomAppBar.visibility = View.GONE
+        view?.findViewById<android.view.View>(R.id.floating_toolbar)?.visibility = View.VISIBLE
             binding.fabAdd.visibility = View.VISIBLE
             binding.toolbar.title = "Playground"
         }
@@ -432,6 +437,22 @@ class PlaygroundGalleryFragment : Fragment() {
                 Toast.makeText(requireContext(), "Exported $successCount files", Toast.LENGTH_SHORT).show()
                 clearSelection()
             }
+        }
+    }
+
+
+    override fun onResume() {
+        super.onResume()
+        view?.let {
+            val navController = Navigation.findNavController(it)
+            FloatingToolbarManager.setup(
+                requireContext(),
+                it.findViewById<android.view.View>(R.id.floating_toolbar),
+                it.findViewById<MaterialButton>(R.id.floating_toolbar_button_camera),
+                it.findViewById<MaterialButton>(R.id.floating_toolbar_button_playground),
+                navController,
+                navController.currentDestination?.id ?: R.id.playground_gallery_fragment
+            )
         }
     }
 
