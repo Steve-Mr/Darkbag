@@ -18,6 +18,9 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.updatePadding
 import androidx.core.view.updateLayoutParams
 import android.view.ViewGroup.MarginLayoutParams
+import androidx.navigation.Navigation
+import com.google.android.material.button.MaterialButton
+import top.maary.darkbag.utils.FloatingToolbarManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.ensureActive
@@ -432,6 +435,22 @@ class PlaygroundGalleryFragment : Fragment() {
                 Toast.makeText(requireContext(), "Exported $successCount files", Toast.LENGTH_SHORT).show()
                 clearSelection()
             }
+        }
+    }
+
+
+    override fun onResume() {
+        super.onResume()
+        view?.let {
+            val navController = Navigation.findNavController(it)
+            FloatingToolbarManager.setup(
+                requireContext(),
+                it.findViewById<android.view.View>(R.id.floating_toolbar),
+                it.findViewById<MaterialButton>(R.id.floating_toolbar_button_camera),
+                it.findViewById<MaterialButton>(R.id.floating_toolbar_button_playground),
+                navController,
+                navController.currentDestination?.id ?: R.id.playground_gallery_fragment
+            )
         }
     }
 
