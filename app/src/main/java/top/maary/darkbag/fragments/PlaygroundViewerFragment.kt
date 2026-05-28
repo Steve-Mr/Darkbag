@@ -191,7 +191,8 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
 
                 withContext(Dispatchers.IO) {
                     try {
-                        val finalBitmap = generateProcessedBitmap(config, currentGroup)
+                        val exportConfig = config.copy(zoomFactor = 1.0f)
+                        val finalBitmap = generateProcessedBitmap(exportConfig, currentGroup)
 
                         finalBitmap?.let { bitmap ->
                             newBaseName = if (isReplacement) currentGroup.baseName else "${currentGroup.baseName}_edited_${System.currentTimeMillis()}"
@@ -393,7 +394,8 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
             try {
                 ensureDngBytesLoaded()
                 withContext(Dispatchers.IO) {
-                    val finalBitmap = generateProcessedBitmap(config, currentGroup)
+                    val exportConfig = config.copy(zoomFactor = 1.0f)
+                    val finalBitmap = generateProcessedBitmap(exportConfig, currentGroup)
                     finalBitmap?.let { bitmap ->
                         val captureMetadata = (currentGroup.jpgUri ?: currentGroup.dngUri ?: currentGroup.dngUri1)?.let { repository.getCaptureMetadata(it) }
 
