@@ -1528,6 +1528,11 @@ class CameraFragment : Fragment() {
                 }
             }
         }
+
+        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val activeLutName = prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, null)
+        cameraUiContainerBinding?.lutSwitcherButton?.text = activeLutName?.substringBeforeLast(".") ?: getString(R.string.lut_none)
+        updateLiveLut()
     }
 
     /** Enabled or disabled a button to switch cameras depending on the available cameras */
