@@ -1528,6 +1528,8 @@ class CameraFragment : Fragment() {
                 }
             }
         }
+
+        updateLiveLut()
     }
 
     /** Enabled or disabled a button to switch cameras depending on the available cameras */
