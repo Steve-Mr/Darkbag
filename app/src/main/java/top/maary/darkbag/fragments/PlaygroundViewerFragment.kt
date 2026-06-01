@@ -250,7 +250,10 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
                                                     // If the old file is already part of a different merged group
                                                     // (i.e. it ends with _1 or _2), we should copy it instead of renaming it
                                                     // so we don't break the original group.
-                                                    if (oldFile.nameWithoutExtension.endsWith("_1") || oldFile.nameWithoutExtension.endsWith("_2")) {
+                                                    // Also, if the old file has an associated edited JPG, we must copy it
+                                                    // to avoid breaking the existing edited image.
+                                                    val hasAssociatedJpg = File(oldFile.parent, "${oldFile.nameWithoutExtension}.jpg").exists()
+                                                    if (oldFile.nameWithoutExtension.endsWith("_1") || oldFile.nameWithoutExtension.endsWith("_2") || hasAssociatedJpg) {
                                                         oldFile.copyTo(newFile, overwrite = true)
                                                     } else {
                                                         oldFile.renameTo(newFile)
@@ -265,7 +268,8 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
                                                 val oldFile = File(path)
                                                 val newFile = File(playgroundDir, "${newBaseName}_2.dng")
                                                 if (oldFile.exists() && oldFile.absolutePath != newFile.absolutePath) {
-                                                    if (oldFile.nameWithoutExtension.endsWith("_1") || oldFile.nameWithoutExtension.endsWith("_2")) {
+                                                    val hasAssociatedJpg = File(oldFile.parent, "${oldFile.nameWithoutExtension}.jpg").exists()
+                                                    if (oldFile.nameWithoutExtension.endsWith("_1") || oldFile.nameWithoutExtension.endsWith("_2") || hasAssociatedJpg) {
                                                         oldFile.copyTo(newFile, overwrite = true)
                                                     } else {
                                                         oldFile.renameTo(newFile)
