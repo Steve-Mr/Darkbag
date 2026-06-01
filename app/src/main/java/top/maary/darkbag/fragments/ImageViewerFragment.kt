@@ -1242,7 +1242,8 @@ open class ImageViewerFragment : Fragment() {
 
                         if (b1 != null || b2 != null) {
                             val activeLayout = config.hfLayout ?: currentGroup.hfLayout
-                            val isSBS = activeLayout != "TB" && activeLayout?.contains("top", ignoreCase = true) != true
+                            val isTB = activeLayout == "TB" || activeLayout?.contains("top", ignoreCase = true) == true
+                            val isSBS = !isTB
 
                             val refW = b1?.width ?: b2?.width ?: 0
                             val refH = b1?.height ?: b2?.height ?: 0
@@ -1423,7 +1424,8 @@ open class ImageViewerFragment : Fragment() {
 
                         if (b1 != null || b2 != null) {
                             val activeLayout = config.hfLayout ?: currentGroup.hfLayout
-                            val isSBS = activeLayout != "TB" && activeLayout?.contains("top", ignoreCase = true) != true
+                            val isTB = activeLayout == "TB" || activeLayout?.contains("top", ignoreCase = true) == true
+                            val isSBS = !isTB
 
                             val refW = b1?.width ?: b2?.width ?: 0
                             val refH = b1?.height ?: b2?.height ?: 0
@@ -1449,17 +1451,17 @@ open class ImageViewerFragment : Fragment() {
                             val time1 = dngUri1?.let { repository.getCaptureMetadata(it)?.dateTimeOriginal } ?: currentGroup.captureTime
                             val time2 = dngUri2?.let { repository.getCaptureMetadata(it)?.dateTimeOriginal } ?: currentGroup.captureTime
 
-                            val t1 = if (config.isSwapped) time2 else time1
-                            val t2 = if (config.isSwapped) time1 else time2
+                            val t1 = if (finalConfig.isSwapped) time2 else time1
+                            val t2 = if (finalConfig.isSwapped) time1 else time2
 
                             val finalComposite = top.maary.darkbag.utils.HalfFrameUtils.addEffects(
                                 composite,
-                                config.showTimestamp,
-                                config.flareType >= 0,
+                                finalConfig.showTimestamp,
+                                finalConfig.flareType >= 0,
                                 activeLayout ?: "SBS",
                                 time1 = t1,
                                 time2 = t2,
-                                flareType = config.flareType
+                                flareType = finalConfig.flareType
                             )
                             if (finalComposite != composite) {
                                 composite.recycle()
@@ -1490,7 +1492,7 @@ open class ImageViewerFragment : Fragment() {
                             saveRaw = false,
                             targetUri = targetUri,
                             jpgFolderUri = if (isReplacement) null else jpgFolderUri,
-                            editConfig = config,
+                            editConfig = finalConfig,
                             isAlreadyStitched = currentGroup.isHalfFrame(),
                             captureMetadata = captureMetadata
                         )
@@ -1648,7 +1650,8 @@ open class ImageViewerFragment : Fragment() {
 
                         if (b1 != null || b2 != null) {
                             val activeLayout = config.hfLayout ?: currentGroup.hfLayout
-                            val isSBS = activeLayout != "TB" && activeLayout?.contains("top", ignoreCase = true) != true
+                            val isTB = activeLayout == "TB" || activeLayout?.contains("top", ignoreCase = true) == true
+                            val isSBS = !isTB
 
                             val refW = b1?.width ?: b2?.width ?: 0
                             val refH = b1?.height ?: b2?.height ?: 0
@@ -2340,7 +2343,8 @@ open class ImageViewerFragment : Fragment() {
 
                 if (b1 != null || b2 != null) {
                     val activeLayout = config.hfLayout ?: currentGroup.hfLayout
-                    val isSBS = activeLayout != "TB" && activeLayout?.contains("top", ignoreCase = true) != true
+                    val isTB = activeLayout == "TB" || activeLayout?.contains("top", ignoreCase = true) == true
+                    val isSBS = !isTB
 
                     val refW = b1?.width ?: b2?.width ?: 0
                     val refH = b1?.height ?: b2?.height ?: 0
