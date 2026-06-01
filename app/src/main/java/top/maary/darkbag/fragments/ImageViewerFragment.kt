@@ -1338,6 +1338,8 @@ open class ImageViewerFragment : Fragment() {
     protected open fun saveEdit(isReplacement: Boolean) {
         val config = currentEditConfig ?: return
         val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
+        val finalConfig = config.copy(hfLayout = config.hfLayout ?: currentGroup.hfLayout)
+
         val dngUri1 = currentGroup.dngUri ?: currentGroup.dngUri1
         val dngUri2 = currentGroup.dngUri2
 
@@ -1416,8 +1418,8 @@ open class ImageViewerFragment : Fragment() {
                         val f1 = dngUri1?.let { processFull(sourceDngBytes, it, 0) }
                         val f2 = dngUri2?.let { processFull(sourceDngBytes2, it, 1) }
 
-                        val b1 = if (config.isSwapped) f2 else f1
-                        val b2 = if (config.isSwapped) f1 else f2
+                        val b1 = if (finalConfig.isSwapped) f2 else f1
+                        val b2 = if (finalConfig.isSwapped) f1 else f2
 
                         if (b1 != null || b2 != null) {
                             val activeLayout = config.hfLayout ?: currentGroup.hfLayout
