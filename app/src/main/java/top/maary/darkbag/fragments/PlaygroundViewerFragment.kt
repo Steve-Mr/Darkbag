@@ -412,7 +412,7 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
                             saveJpg = true,
                             saveRaw = false,
                             editConfig = config,
-                            isAlreadyStitched = currentGroup.isHalfFrame(),
+                            isAlreadyStitched = true,
                             captureMetadata = captureMetadata
                         )
                         bitmap.recycle()

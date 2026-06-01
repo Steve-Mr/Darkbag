@@ -366,24 +366,25 @@ class PlaygroundGalleryFragment : Fragment() {
             var successCount = 0
             for (file in filesToExport) {
                 try {
+                    val isJpg = file.extension.lowercase() == "jpg"
                     var bitmap: Bitmap? = null
 
-                    // If it's a JPG (e.g. from a HalfFrameGroup), try decoding it directly first
-                    if (file.extension.lowercase() == "jpg") {
-                         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                         BitmapFactory.decodeFile(file.absolutePath, bounds)
-                         var inSampleSize = 1
-                         val maxDimension = 2048
-                         while ((bounds.outWidth / inSampleSize) > maxDimension || (bounds.outHeight / inSampleSize) > maxDimension) {
-                             inSampleSize *= 2
-                         }
-                         val decodeOpts = BitmapFactory.Options().apply {
-                             this.inSampleSize = inSampleSize
-                             inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888
-                         }
-                         bitmap = BitmapFactory.decodeFile(file.absolutePath, decodeOpts)
+                    if (isJpg) {
+                        val uri = ImageSaver.saveProcessedImage(
+                            context = requireContext(),
+                            inputBitmap = null,
+                            bmpPath = file.absolutePath,
+                            rotationDegrees = 0,
+                            zoomFactor = 1.0f,
+                            baseName = file.nameWithoutExtension,
+                            linearDngPath = null,
+                            saveJpg = true,
+                            saveRaw = false,
+                            isAlreadyStitched = true
+                        )
+                        if (uri != null) successCount++
                     } else {
-                        // Original DNG thumbnail extraction logic
+                        // Original DNG thumbnail extraction logic, avoiding size limits to maintain original size
                         val exifInterface = ExifInterface(file.absolutePath)
                         if (exifInterface.hasThumbnail()) {
                             val thumbnailBytes = exifInterface.thumbnailBytes
@@ -392,37 +393,28 @@ class PlaygroundGalleryFragment : Fragment() {
                             }
                         }
                         if (bitmap == null) {
-                            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                            BitmapFactory.decodeFile(file.absolutePath, bounds)
-
-                            var inSampleSize = 1
-                            val maxDimension = 2048
-                            while ((bounds.outWidth / inSampleSize) > maxDimension || (bounds.outHeight / inSampleSize) > maxDimension) {
-                                inSampleSize *= 2
-                            }
-
                             val decodeOpts = BitmapFactory.Options().apply {
-                                this.inSampleSize = inSampleSize
                                 inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888
                             }
                             bitmap = BitmapFactory.decodeFile(file.absolutePath, decodeOpts)
                         }
-                    }
 
-                    if (bitmap != null) {
-                        val uri = ImageSaver.saveProcessedImage(
-                            context = requireContext(),
-                            inputBitmap = bitmap,
-                            bmpPath = null,
-                            rotationDegrees = 0,
-                            zoomFactor = 1.0f,
-                            baseName = file.nameWithoutExtension,
-                            linearDngPath = null,
-                            saveJpg = true,
-                            saveRaw = false
-                        )
-                        if (uri != null) successCount++
-                        bitmap.recycle()
+                        if (bitmap != null) {
+                            val uri = ImageSaver.saveProcessedImage(
+                                context = requireContext(),
+                                inputBitmap = bitmap,
+                                bmpPath = null,
+                                rotationDegrees = 0,
+                                zoomFactor = 1.0f,
+                                baseName = file.nameWithoutExtension,
+                                linearDngPath = null,
+                                saveJpg = true,
+                                saveRaw = false,
+                                isAlreadyStitched = true
+                            )
+                            if (uri != null) successCount++
+                            bitmap.recycle()
+                        }
                     }
                 } catch (e: Exception) {
                     Log.e("Playground", "Failed to export ${file.name}", e)

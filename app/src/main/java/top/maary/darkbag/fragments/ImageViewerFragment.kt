@@ -1485,7 +1485,7 @@ open class ImageViewerFragment : Fragment() {
                             targetUri = targetUri,
                             jpgFolderUri = if (isReplacement) null else jpgFolderUri,
                             editConfig = config,
-                            isAlreadyStitched = currentGroup.isHalfFrame(),
+                            isAlreadyStitched = true, // Force true to avoid HalfFrameManager intercepting user's explicit save actions
                             captureMetadata = captureMetadata
                         )
                         bitmap.recycle()
