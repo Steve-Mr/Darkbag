@@ -83,6 +83,22 @@ object HalfFrameUtils {
         }
     }
 
+
+    fun applyEconomicalDownsampleIfNeeded(bitmap: Bitmap, downsample: Boolean): Bitmap {
+        if (!downsample) return bitmap
+
+        // Digital "film saving": Downsample so the final area is approx equal to a single frame.
+        // Combined area is ~2x. Scale factor = sqrt(0.5) ~ 0.707
+        val scale = 0.707f
+        val scaledW = (bitmap.width * scale).toInt()
+        val scaledH = (bitmap.height * scale).toInt()
+        val scaled = Bitmap.createScaledBitmap(bitmap, scaledW, scaledH, true)
+        if (scaled != bitmap) {
+            bitmap.recycle()
+        }
+        return scaled
+    }
+
     fun stitchImages(
         firstPath: String,
         secondPath: String,
@@ -101,20 +117,7 @@ object HalfFrameUtils {
         try {
             var resultBitmap = composeBitmaps(firstBitmap, secondBitmap, isSideBySide)
 
-            if (downsample) {
-                // Digital "film saving": Downsample so the final area is approx equal to a single frame.
-                // Combined area is ~2x. Scale factor = sqrt(0.5) ~ 0.707
-                val scale = 0.707f
-                val scaledW = (resultBitmap.width * scale).toInt()
-                val scaledH = (resultBitmap.height * scale).toInt()
-                val scaled = Bitmap.createScaledBitmap(resultBitmap, scaledW, scaledH, true)
-                if (scaled != resultBitmap) {
-                    resultBitmap.recycle()
-                }
-                return scaled
-            }
-
-            return resultBitmap
+            return applyEconomicalDownsampleIfNeeded(resultBitmap, downsample)
         } catch (e: OutOfMemoryError) {
             Log.e(TAG, "OOM during stitching", e)
             return null

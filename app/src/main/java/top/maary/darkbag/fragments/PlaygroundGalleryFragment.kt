@@ -576,16 +576,7 @@ class PlaygroundGalleryFragment : Fragment() {
                                 var composite = top.maary.darkbag.utils.HalfFrameUtils.composeBitmaps(tempB1, tempB2, isSBS)
 
                                 val economical = appContext.getSharedPreferences(top.maary.darkbag.fragments.SettingsFragment.PREFS_NAME, android.content.Context.MODE_PRIVATE).getBoolean(top.maary.darkbag.fragments.SettingsFragment.KEY_HALF_FRAME_DOWNSAMPLE, false)
-                                if (economical) {
-                                    val scale = 0.707f
-                                    val scaledW = (composite.width * scale).toInt()
-                                    val scaledH = (composite.height * scale).toInt()
-                                    val scaled = android.graphics.Bitmap.createScaledBitmap(composite, scaledW, scaledH, true)
-                                    if (scaled != composite) {
-                                        composite.recycle()
-                                        composite = scaled
-                                    }
-                                }
+                                composite = top.maary.darkbag.utils.HalfFrameUtils.applyEconomicalDownsampleIfNeeded(composite, economical)
 
                                 if (oriented1 != b1) oriented1?.recycle()
                                 if (oriented2 != b2) oriented2?.recycle()
