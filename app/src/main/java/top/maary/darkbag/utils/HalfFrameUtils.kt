@@ -2,6 +2,7 @@ package top.maary.darkbag.utils
 
 import android.content.Context
 import android.graphics.*
+import android.net.Uri
 import android.util.Log
 import java.io.File
 import java.io.FileOutputStream
@@ -33,10 +34,132 @@ object HalfFrameUtils {
      */
 
     /**
-     * Composes two bitmaps into a single half-frame layout.
+     * Composes two bitmaps into a single half-frame layout and optionally downsamples it.
      * Assumes the bitmaps have already been correctly oriented (e.g., using ensureOrientation).
      */
-    fun composeBitmaps(firstBitmap: Bitmap, secondBitmap: Bitmap, isSideBySide: Boolean): Bitmap {
+    /**
+     * Composes two raw DNG files into a single stitched and processed half-frame bitmap.
+     * This utility abstracts the process of decoding full-resolution frames safely (saving temporary JPGs)
+     * and handling the optional layout swapping, orientation mapping, scaling, and compositing.
+     *
+     * @param appContext the application context
+     * @param bytes1 raw bytes of the first DNG file
+     * @param uri1 uri of the first DNG file
+     * @param bytes2 raw bytes of the second DNG file
+     * @param uri2 uri of the second DNG file
+     * @param config the current EditConfig defining layout, adjustments, and preferences
+     * @param logIndex the target log curve index
+     * @param lutPath the absolute path to the LUT to be applied, if any
+     * @param repository the ImageRepository instance to load EXIF data
+     * @param downsample boolean indicating whether to scale down the combined image
+     * @return the final composited and formatted Bitmap, or null if processing fails
+     */
+    fun processAndComposeHalfFrame(
+        appContext: Context,
+        bytes1: ByteArray?, uri1: Uri?,
+        bytes2: ByteArray?, uri2: Uri?,
+        config: top.maary.darkbag.models.EditConfig,
+        logIndex: Int,
+        lutPath: String?,
+        repository: top.maary.darkbag.repository.ImageRepository,
+        downsample: Boolean
+    ): Bitmap? {
+        fun processFullSafe(bytes: ByteArray?, uri: Uri?, index: Int): Bitmap? {
+            if (uri == null) return null
+            val finalBytes = bytes ?: run {
+                appContext.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                    java.io.FileInputStream(pfd.fileDescriptor).use { it.readBytes() }
+                }
+            } ?: return null
+
+            val orientation = try {
+                appContext.contentResolver.openInputStream(uri)?.use { input ->
+                    androidx.exifinterface.media.ExifInterface(input).getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION, androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL)
+                } ?: androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL
+            } catch (e: Exception) { androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL }
+
+            val rotDegrees = when(orientation) {
+                androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90 -> 90
+                androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_180 -> 180
+                androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270 -> 270
+                else -> 0
+            }
+
+            val adj = config.adjustments?.get(index) ?: top.maary.darkbag.models.BasicAdjustments(config.exposure, config.contrast, config.saturation, config.highlights, config.shadows, config.whites, config.blacks, config.digitalGain)
+            val meta = repository.getCaptureMetadata(uri)
+
+            val tempJpgFile = File(appContext.cacheDir, "temp_export_${System.currentTimeMillis()}_$index.jpg")
+
+            top.maary.darkbag.processor.ColorProcessor.processRaw(
+                dngData = finalBytes,
+                targetLog = logIndex,
+                lutPath = lutPath,
+                exposure = adj.exposure,
+                contrast = adj.contrast,
+                saturation = adj.saturation,
+                highlights = adj.highlights,
+                shadows = adj.shadows,
+                whites = adj.whites,
+                blacks = adj.blacks,
+                digitalGain = adj.digitalGain,
+                outputJpgPath = tempJpgFile.absolutePath,
+                useGpu = false,
+                orientation = rotDegrees,
+                mirror = false,
+                outputBitmap = null,
+                downsampleFactor = 1,
+                zoomFactor = config.zoomFactor,
+                metadata = meta
+            )
+
+            if (!tempJpgFile.exists()) return null
+
+            val decodeOpts = BitmapFactory.Options().apply {
+                inPreferredConfig = Bitmap.Config.ARGB_8888
+            }
+            val bitmap = BitmapFactory.decodeFile(tempJpgFile.absolutePath, decodeOpts)
+            tempJpgFile.delete()
+            return bitmap
+        }
+
+        val f1 = processFullSafe(bytes1, uri1, 0)
+        val f2 = processFullSafe(bytes2, uri2, 1)
+
+        val b1 = if (config.isSwapped) f2 else f1
+        val b2 = if (config.isSwapped) f1 else f2
+
+        if (b1 == null && b2 == null) return null
+
+        val isSBS = (config.hfLayout ?: "SBS") != "TB"
+
+        val refW = b1?.width ?: b2?.width ?: 0
+        val refH = b1?.height ?: b2?.height ?: 0
+
+        val oriented1 = b1?.let { ensureOrientation(it, isSBS) }
+        val oriented2 = b2?.let { ensureOrientation(it, isSBS) }
+
+        val w1 = oriented1?.width ?: refW
+        val h1 = oriented1?.height ?: refH
+        val w2 = oriented2?.width ?: refW
+        val h2 = oriented2?.height ?: refH
+
+        val tempB1 = oriented1 ?: Bitmap.createBitmap(w2, h2, Bitmap.Config.ARGB_8888).apply { eraseColor(Color.BLACK) }
+        val tempB2 = oriented2 ?: Bitmap.createBitmap(w1, h1, Bitmap.Config.ARGB_8888).apply { eraseColor(Color.BLACK) }
+
+        val composite = composeBitmaps(tempB1, tempB2, isSBS, downsample)
+
+        if (oriented1 != b1) oriented1?.recycle()
+        if (oriented2 != b2) oriented2?.recycle()
+        if (tempB1 != oriented1) tempB1.recycle()
+        if (tempB2 != oriented2) tempB2.recycle()
+
+        f1?.recycle()
+        f2?.recycle()
+
+        return composite
+    }
+
+    fun composeBitmaps(firstBitmap: Bitmap, secondBitmap: Bitmap, isSideBySide: Boolean, downsample: Boolean = false): Bitmap {
         val w1 = firstBitmap.width
         val h1 = firstBitmap.height
         val w2 = secondBitmap.width
@@ -49,7 +172,7 @@ object HalfFrameUtils {
         // Divider width
         val divider = calculateGap(maxOf(targetW, targetH))
 
-        return if (isSideBySide) {
+        val resultBitmap = if (isSideBySide) {
             val combinedW = targetW + divider + targetW
             val combinedH = targetH
 
@@ -81,6 +204,21 @@ object HalfFrameUtils {
             canvas.drawBitmap(secondBitmap, Rect(0, 0, w2, h2), dest2, Paint(Paint.FILTER_BITMAP_FLAG))
             result
         }
+
+        return if (downsample) {
+            // Digital "film saving": Downsample so the final area is approx equal to a single frame.
+            // Combined area is ~2x. Scale factor = sqrt(0.5) ~ 0.707
+            val scale = 0.707f
+            val scaledW = (resultBitmap.width * scale).toInt()
+            val scaledH = (resultBitmap.height * scale).toInt()
+            val scaled = Bitmap.createScaledBitmap(resultBitmap, scaledW, scaledH, true)
+            if (scaled != resultBitmap) {
+                resultBitmap.recycle()
+            }
+            scaled
+        } else {
+            resultBitmap
+        }
     }
 
     fun stitchImages(
@@ -99,22 +237,7 @@ object HalfFrameUtils {
         val secondBitmap = ensureOrientation(secondRaw, isSideBySide)
 
         try {
-            var resultBitmap = composeBitmaps(firstBitmap, secondBitmap, isSideBySide)
-
-            if (downsample) {
-                // Digital "film saving": Downsample so the final area is approx equal to a single frame.
-                // Combined area is ~2x. Scale factor = sqrt(0.5) ~ 0.707
-                val scale = 0.707f
-                val scaledW = (resultBitmap.width * scale).toInt()
-                val scaledH = (resultBitmap.height * scale).toInt()
-                val scaled = Bitmap.createScaledBitmap(resultBitmap, scaledW, scaledH, true)
-                if (scaled != resultBitmap) {
-                    resultBitmap.recycle()
-                }
-                return scaled
-            }
-
-            return resultBitmap
+            return composeBitmaps(firstBitmap, secondBitmap, isSideBySide, downsample)
         } catch (e: OutOfMemoryError) {
             Log.e(TAG, "OOM during stitching", e)
             return null
@@ -123,8 +246,9 @@ object HalfFrameUtils {
             return null
         } finally {
             firstRaw.recycle()
-            secondRaw.recycle()
             if (firstBitmap != firstRaw) firstBitmap.recycle()
+
+            secondRaw.recycle()
             if (secondBitmap != secondRaw) secondBitmap.recycle()
         }
     }

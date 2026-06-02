@@ -496,102 +496,23 @@ class PlaygroundGalleryFragment : Fragment() {
                             val dngUri1 = if (dngFile1.exists()) Uri.fromFile(dngFile1) else null
                             val dngUri2 = if (dngFile2.exists()) Uri.fromFile(dngFile2) else null
 
-                            fun processFullSafe(targetFile: java.io.File?, uri: Uri?, index: Int): android.graphics.Bitmap? {
-                                if (targetFile == null || !targetFile.exists() || uri == null) return null
-                                val finalBytes = java.io.FileInputStream(targetFile).use { it.readBytes() }
+                            val bytes1 = if (dngFile1.exists()) java.io.FileInputStream(dngFile1).use { it.readBytes() } else null
+                            val bytes2 = if (dngFile2.exists()) java.io.FileInputStream(dngFile2).use { it.readBytes() } else null
 
-                                val orientation = try {
-                                    appContext.contentResolver.openInputStream(uri)?.use { input ->
-                                        androidx.exifinterface.media.ExifInterface(input).getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION, androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL)
-                                    } ?: androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL
-                                } catch (e: Exception) { androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL }
+                            val economical = appContext.getSharedPreferences(top.maary.darkbag.fragments.SettingsFragment.PREFS_NAME, android.content.Context.MODE_PRIVATE).getBoolean(top.maary.darkbag.fragments.SettingsFragment.KEY_HALF_FRAME_DOWNSAMPLE, false)
 
-                                val rotDegrees = when(orientation) {
-                                    androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90 -> 90
-                                    androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_180 -> 180
-                                    androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270 -> 270
-                                    else -> 0
-                                }
+                            var composite = top.maary.darkbag.utils.HalfFrameUtils.processAndComposeHalfFrame(
+                                appContext = appContext,
+                                bytes1 = bytes1, uri1 = dngUri1,
+                                bytes2 = bytes2, uri2 = dngUri2,
+                                config = config,
+                                logIndex = logIndex,
+                                lutPath = lutPath,
+                                repository = repository,
+                                downsample = economical
+                            )
 
-                                val adj = config.adjustments?.get(index) ?: top.maary.darkbag.models.BasicAdjustments(config.exposure, config.contrast, config.saturation, config.highlights, config.shadows, config.whites, config.blacks, config.digitalGain)
-                                val meta = repository.getCaptureMetadata(uri)
-
-                                val tempJpgFile = java.io.File(appContext.cacheDir, "temp_export_${System.currentTimeMillis()}_$index.jpg")
-
-                                top.maary.darkbag.processor.ColorProcessor.processRaw(
-                                    dngData = finalBytes,
-                                    targetLog = logIndex,
-                                    lutPath = lutPath,
-                                    exposure = adj.exposure,
-                                    contrast = adj.contrast,
-                                    saturation = adj.saturation,
-                                    highlights = adj.highlights,
-                                    shadows = adj.shadows,
-                                    whites = adj.whites,
-                                    blacks = adj.blacks,
-                                    digitalGain = adj.digitalGain,
-                                    outputJpgPath = tempJpgFile.absolutePath,
-                                    useGpu = false,
-                                    orientation = rotDegrees,
-                                    mirror = false,
-                                    outputBitmap = null,
-                                    downsampleFactor = 1,
-                                    zoomFactor = config.zoomFactor,
-                                    metadata = meta
-                                )
-
-                                if (!tempJpgFile.exists()) return null
-
-                                val decodeOpts = android.graphics.BitmapFactory.Options().apply {
-                                    inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888
-                                }
-                                val bitmap = android.graphics.BitmapFactory.decodeFile(tempJpgFile.absolutePath, decodeOpts)
-                                tempJpgFile.delete()
-                                return bitmap
-                            }
-
-                            val f1 = processFullSafe(dngFile1, dngUri1, 0)
-                            val f2 = processFullSafe(dngFile2, dngUri2, 1)
-
-                            val b1 = if (config.isSwapped) f2 else f1
-                            val b2 = if (config.isSwapped) f1 else f2
-
-                            val finalCompositeBitmap: android.graphics.Bitmap? = if (b1 != null || b2 != null) {
-                                val isSBS = config.hfLayout ?: "SBS" != "TB"
-
-                                val refW = b1?.width ?: b2?.width ?: 0
-                                val refH = b1?.height ?: b2?.height ?: 0
-
-                                val oriented1 = b1?.let { top.maary.darkbag.utils.HalfFrameUtils.ensureOrientation(it, isSBS) }
-                                val oriented2 = b2?.let { top.maary.darkbag.utils.HalfFrameUtils.ensureOrientation(it, isSBS) }
-
-                                val w1 = oriented1?.width ?: refW
-                                val h1 = oriented1?.height ?: refH
-                                val w2 = oriented2?.width ?: refW
-                                val h2 = oriented2?.height ?: refH
-
-                                val tempB1 = oriented1 ?: android.graphics.Bitmap.createBitmap(w2, h2, android.graphics.Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.BLACK) }
-                                val tempB2 = oriented2 ?: android.graphics.Bitmap.createBitmap(w1, h1, android.graphics.Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.BLACK) }
-
-                                var composite = top.maary.darkbag.utils.HalfFrameUtils.composeBitmaps(tempB1, tempB2, isSBS)
-
-                                val economical = appContext.getSharedPreferences(top.maary.darkbag.fragments.SettingsFragment.PREFS_NAME, android.content.Context.MODE_PRIVATE).getBoolean(top.maary.darkbag.fragments.SettingsFragment.KEY_HALF_FRAME_DOWNSAMPLE, false)
-                                if (economical) {
-                                    val scale = 0.707f
-                                    val scaledW = (composite.width * scale).toInt()
-                                    val scaledH = (composite.height * scale).toInt()
-                                    val scaled = android.graphics.Bitmap.createScaledBitmap(composite, scaledW, scaledH, true)
-                                    if (scaled != composite) {
-                                        composite.recycle()
-                                        composite = scaled
-                                    }
-                                }
-
-                                if (oriented1 != b1) oriented1?.recycle()
-                                if (oriented2 != b2) oriented2?.recycle()
-                                if (tempB1 != oriented1) tempB1.recycle()
-                                if (tempB2 != oriented2) tempB2.recycle()
-
+                            val finalCompositeBitmap: android.graphics.Bitmap? = composite?.let {
                                 val time1 = dngUri1?.let { repository.getCaptureMetadata(it)?.dateTimeOriginal } ?: file.lastModified()
                                 val time2 = dngUri2?.let { repository.getCaptureMetadata(it)?.dateTimeOriginal } ?: file.lastModified()
 
@@ -599,7 +520,7 @@ class PlaygroundGalleryFragment : Fragment() {
                                 val t2 = if (config.isSwapped) time1 else time2
 
                                 val finalComposite = top.maary.darkbag.utils.HalfFrameUtils.addEffects(
-                                    composite,
+                                    it,
                                     config.showTimestamp,
                                     config.flareType >= 0,
                                     config.hfLayout ?: "SBS",
@@ -607,13 +528,11 @@ class PlaygroundGalleryFragment : Fragment() {
                                     time2 = t2,
                                     flareType = config.flareType
                                 )
-                                if (finalComposite != composite) {
-                                    composite.recycle()
+                                if (finalComposite != it) {
+                                    it.recycle()
                                 }
-                                f1?.recycle()
-                                f2?.recycle()
                                 finalComposite
-                            } else null
+                            }
 
                             finalCompositeBitmap?.let { bitmap ->
                                 val captureMetadata = (jpgUri ?: dngUri1 ?: dngUri)?.let { repository.getCaptureMetadata(it) }
