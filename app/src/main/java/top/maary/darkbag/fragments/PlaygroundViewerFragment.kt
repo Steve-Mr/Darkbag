@@ -428,7 +428,7 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
                             androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270 -> 270
                             else -> 0
                         }
-                        val adj = top.maary.darkbag.models.BasicAdjustments(config.exposure, config.contrast, config.saturation, config.highlights, config.shadows, config.whites, config.blacks)
+                        val adj = top.maary.darkbag.models.BasicAdjustments(config.exposure, config.contrast, config.saturation, config.highlights, config.shadows, config.whites, config.blacks, config.digitalGain)
                         val meta = repository.getCaptureMetadata(primaryUri)
 
                         val tempJpgFile = java.io.File(appContext.cacheDir, "temp_export_${System.currentTimeMillis()}.jpg")
@@ -444,7 +444,7 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
                             shadows = adj.shadows,
                             whites = adj.whites,
                             blacks = adj.blacks,
-                            digitalGain = 1.0f,
+                            digitalGain = adj.digitalGain,
                             outputJpgPath = tempJpgFile.absolutePath,
                             useGpu = false,
                             orientation = rotDegrees,
@@ -515,7 +515,7 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
                                 shadows = adj.shadows,
                                 whites = adj.whites,
                                 blacks = adj.blacks,
-                                digitalGain = 1.0f,
+                                digitalGain = adj.digitalGain,
                                 outputJpgPath = tempJpgFile.absolutePath,
                                 useGpu = false,
                                 orientation = rotDegrees,

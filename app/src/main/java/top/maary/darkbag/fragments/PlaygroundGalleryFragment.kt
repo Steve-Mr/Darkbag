@@ -406,10 +406,15 @@ class PlaygroundGalleryFragment : Fragment() {
                         } else file.nameWithoutExtension
 
                         val dngUri = Uri.fromFile(file)
+                        // To get the correct EditConfig, we MUST look for the corresponding edited JPG!
+                        val jpgFile = java.io.File(file.parent, "$baseName.jpg")
+                        val jpgUri = if (jpgFile.exists()) Uri.fromFile(jpgFile) else null
+
                         val group = ImageGroup(
                             baseName = baseName,
                             dngUri = dngUri,
                             dngUri1 = dngUri,
+                            jpgUri = jpgUri,
                             captureTime = file.lastModified(),
                             lastModified = file.lastModified()
                         )
@@ -436,7 +441,7 @@ class PlaygroundGalleryFragment : Fragment() {
                             else -> 0
                         }
 
-                        val adj = config.adjustments?.get(0) ?: top.maary.darkbag.models.BasicAdjustments(config.exposure, config.contrast, config.saturation, config.highlights, config.shadows, config.whites, config.blacks)
+                        val adj = config.adjustments?.get(0) ?: top.maary.darkbag.models.BasicAdjustments(config.exposure, config.contrast, config.saturation, config.highlights, config.shadows, config.whites, config.blacks, config.digitalGain)
                         val meta = repository.getCaptureMetadata(dngUri)
 
                         val tempJpgFile = java.io.File(appContext.cacheDir, "temp_export_${System.currentTimeMillis()}.jpg")
@@ -452,7 +457,7 @@ class PlaygroundGalleryFragment : Fragment() {
                             shadows = adj.shadows,
                             whites = adj.whites,
                             blacks = adj.blacks,
-                            digitalGain = 1.0f,
+                            digitalGain = adj.digitalGain,
                             outputJpgPath = tempJpgFile.absolutePath,
                             useGpu = false,
                             orientation = rotDegrees,
