@@ -1669,7 +1669,19 @@ open class ImageViewerFragment : Fragment() {
                             val tempB1 = oriented1 ?: android.graphics.Bitmap.createBitmap(w2, h2, android.graphics.Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.BLACK) }
                             val tempB2 = oriented2 ?: android.graphics.Bitmap.createBitmap(w1, h1, android.graphics.Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.BLACK) }
 
-                            val composite = top.maary.darkbag.utils.HalfFrameUtils.composeBitmaps(tempB1, tempB2, isSBS)
+                            var composite = top.maary.darkbag.utils.HalfFrameUtils.composeBitmaps(tempB1, tempB2, isSBS)
+
+                            val economical = top.maary.darkbag.utils.HalfFrameManager(requireContext()).downsample
+                            if (economical) {
+                                val scale = 0.707f
+                                val scaledW = (composite.width * scale).toInt()
+                                val scaledH = (composite.height * scale).toInt()
+                                val scaled = android.graphics.Bitmap.createScaledBitmap(composite, scaledW, scaledH, true)
+                                if (scaled != composite) {
+                                    composite.recycle()
+                                    composite = scaled
+                                }
+                            }
 
                             if (oriented1 != b1) oriented1?.recycle()
                             if (oriented2 != b2) oriented2?.recycle()
@@ -2359,7 +2371,19 @@ open class ImageViewerFragment : Fragment() {
                     val tempB1 = oriented1 ?: android.graphics.Bitmap.createBitmap(w2, h2, android.graphics.Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.BLACK) }
                     val tempB2 = oriented2 ?: android.graphics.Bitmap.createBitmap(w1, h1, android.graphics.Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.BLACK) }
 
-                    val composite = top.maary.darkbag.utils.HalfFrameUtils.composeBitmaps(tempB1, tempB2, isSBS)
+                    var composite = top.maary.darkbag.utils.HalfFrameUtils.composeBitmaps(tempB1, tempB2, isSBS)
+
+                    val economical = top.maary.darkbag.utils.HalfFrameManager(requireContext()).downsample
+                    if (economical) {
+                        val scale = 0.707f
+                        val scaledW = (composite.width * scale).toInt()
+                        val scaledH = (composite.height * scale).toInt()
+                        val scaled = android.graphics.Bitmap.createScaledBitmap(composite, scaledW, scaledH, true)
+                        if (scaled != composite) {
+                            composite.recycle()
+                            composite = scaled
+                        }
+                    }
 
                     if (oriented1 != b1) oriented1?.recycle()
                     if (oriented2 != b2) oriented2?.recycle()
