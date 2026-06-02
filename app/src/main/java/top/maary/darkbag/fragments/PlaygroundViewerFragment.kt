@@ -483,9 +483,6 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
                                 }
                             } ?: return null
 
-                            val options = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                            android.graphics.BitmapFactory.decodeByteArray(finalBytes, 0, finalBytes.size, options)
-
                             val orientation = try {
                                 appContext.contentResolver.openInputStream(uri)?.use { input ->
                                     androidx.exifinterface.media.ExifInterface(input).getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION, androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL)
@@ -499,7 +496,7 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
                                 else -> 0
                             }
 
-                            val adj = if (currentGroup.isHalfFrame()) config.adjustments?.get(index) ?: top.maary.darkbag.models.BasicAdjustments() else top.maary.darkbag.models.BasicAdjustments(config.exposure, config.contrast, config.saturation, config.highlights, config.shadows, config.whites, config.blacks)
+                            val adj = if (currentGroup.isHalfFrame()) config.adjustments?.get(index) ?: top.maary.darkbag.models.BasicAdjustments() else top.maary.darkbag.models.BasicAdjustments(config.exposure, config.contrast, config.saturation, config.highlights, config.shadows, config.whites, config.blacks, config.digitalGain)
                             val meta = repository.getCaptureMetadata(uri)
 
                             val tempJpgFile = java.io.File(appContext.cacheDir, "temp_export_${System.currentTimeMillis()}_$index.jpg")
@@ -521,23 +518,17 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
                                 orientation = rotDegrees,
                                 mirror = false,
                                 outputBitmap = null,
-                                downsampleFactor = 1, // Output full resolution to temp Jpg
+                                downsampleFactor = 1,
                                 zoomFactor = config.zoomFactor,
                                 metadata = meta
                             )
 
                             if (!tempJpgFile.exists()) return null
 
-                            // Safe decode to prevent OOM
-                            val safeDecodeOpts = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                            android.graphics.BitmapFactory.decodeFile(tempJpgFile.absolutePath, safeDecodeOpts)
-                            val ds = top.maary.darkbag.utils.ImageUtils.calculateInSampleSize(safeDecodeOpts, 3000, 3000)
-
-                            val actualDecodeOpts = android.graphics.BitmapFactory.Options().apply {
+                            val decodeOpts = android.graphics.BitmapFactory.Options().apply {
                                 inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888
-                                inSampleSize = ds
                             }
-                            val bitmap = android.graphics.BitmapFactory.decodeFile(tempJpgFile.absolutePath, actualDecodeOpts)
+                            val bitmap = android.graphics.BitmapFactory.decodeFile(tempJpgFile.absolutePath, decodeOpts)
                             tempJpgFile.delete()
                             return bitmap
                         }
@@ -565,7 +556,19 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
                             val tempB1 = oriented1 ?: android.graphics.Bitmap.createBitmap(w2, h2, android.graphics.Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.BLACK) }
                             val tempB2 = oriented2 ?: android.graphics.Bitmap.createBitmap(w1, h1, android.graphics.Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.BLACK) }
 
-                            val composite = top.maary.darkbag.utils.HalfFrameUtils.composeBitmaps(tempB1, tempB2, isSBS)
+                            var composite = top.maary.darkbag.utils.HalfFrameUtils.composeBitmaps(tempB1, tempB2, isSBS)
+
+                            val economical = appContext.getSharedPreferences(top.maary.darkbag.fragments.SettingsFragment.PREFS_NAME, android.content.Context.MODE_PRIVATE).getBoolean(top.maary.darkbag.fragments.SettingsFragment.KEY_HALF_FRAME_DOWNSAMPLE, false)
+                            if (economical) {
+                                val scale = 0.707f
+                                val scaledW = (composite.width * scale).toInt()
+                                val scaledH = (composite.height * scale).toInt()
+                                val scaled = android.graphics.Bitmap.createScaledBitmap(composite, scaledW, scaledH, true)
+                                if (scaled != composite) {
+                                    composite.recycle()
+                                    composite = scaled
+                                }
+                            }
 
                             if (oriented1 != b1) oriented1?.recycle()
                             if (oriented2 != b2) oriented2?.recycle()
