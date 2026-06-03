@@ -36,7 +36,7 @@ object FloatingToolbarManager {
         ViewCompat.setOnApplyWindowInsetsListener(toolbarLayout) { view, insets ->
             val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
             view.updateLayoutParams<MarginLayoutParams> {
-                val baseMargin = (48 * view.context.resources.displayMetrics.density).toInt()
+                val baseMargin = (16 * view.context.resources.displayMetrics.density).toInt()
                 bottomMargin = baseMargin + systemBars.bottom
             }
             insets
