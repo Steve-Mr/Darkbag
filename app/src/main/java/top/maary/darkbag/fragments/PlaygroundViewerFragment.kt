@@ -179,6 +179,8 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
         val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
         val dngUri1 = currentGroup.dngUri ?: currentGroup.dngUri1
 
+        val finalConfig = config.copy(hfLayout = config.hfLayout ?: currentGroup.hfLayout)
+
         previewJob?.cancel()
         binding.initialLoadingIndicator.visibility = View.VISIBLE
         binding.interactionBlocker?.visibility = View.VISIBLE
@@ -191,7 +193,7 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
 
                 withContext(Dispatchers.IO) {
                     try {
-                        val finalBitmap = generateProcessedBitmap(config, currentGroup)
+                        val finalBitmap = generateProcessedBitmap(finalConfig, currentGroup)
 
                         finalBitmap?.let { bitmap ->
                             newBaseName = if (isReplacement) currentGroup.baseName else "${currentGroup.baseName}_edited_${System.currentTimeMillis()}"
@@ -209,7 +211,7 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
 
                             val captureMetadata = (currentGroup.jpgUri ?: currentGroup.dngUri ?: currentGroup.dngUri1)?.let { repository.getCaptureMetadata(it) }
 
-                            top.maary.darkbag.utils.ImageSaver.writeMetadataToExif(appContext, finalJpgUri!!, config, captureMetadata)
+                            top.maary.darkbag.utils.ImageSaver.writeMetadataToExif(appContext, finalJpgUri!!, finalConfig, captureMetadata)
 
                             if (!isReplacement && !currentGroup.isHalfFrame() && dngUri1 != null) {
                                 val newDngFile = File(playgroundDir, "${newBaseName}.dng")
@@ -302,7 +304,13 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
                         val newDngUri1 = if (currentGroup.isHalfFrame() && currentGroup.jpgUri == null && dngFile1.exists()) Uri.fromFile(dngFile1) else currentGroup.dngUri1
                         val newDngUri2 = if (currentGroup.isHalfFrame() && currentGroup.jpgUri == null && dngFile2.exists()) Uri.fromFile(dngFile2) else currentGroup.dngUri2
 
-                        currentList[currentIndex] = currentGroup.copy(jpgUri = finalJpgUri, baseName = newBaseName, dngUri1 = newDngUri1, dngUri2 = newDngUri2)
+                        currentList[currentIndex] = currentGroup.copy(
+                            jpgUri = finalJpgUri,
+                            baseName = newBaseName,
+                            dngUri1 = newDngUri1,
+                            dngUri2 = newDngUri2,
+                            hfLayout = finalConfig.hfLayout
+                        )
                         adapter.updateGroups(currentList.toList())
                     } else {
                         val newDngUri1 = if (!currentGroup.isHalfFrame()) Uri.fromFile(File(File(appContext.filesDir, "playground_dngs"), "${newBaseName}.dng")) else Uri.fromFile(File(File(appContext.filesDir, "playground_dngs"), "${newBaseName}_1.dng"))
@@ -314,7 +322,7 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
                             dngUri1 = if (currentGroup.isHalfFrame()) newDngUri1 else null,
                             dngUri2 = newDngUri2,
                             jpgUri = finalJpgUri,
-                            hfLayout = currentGroup.hfLayout,
+                            hfLayout = finalConfig.hfLayout,
                             captureTime = currentGroup.captureTime,
                             lastModified = System.currentTimeMillis()
                         )

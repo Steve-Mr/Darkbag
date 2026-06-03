@@ -748,7 +748,8 @@ open class ImageViewerFragment : Fragment() {
             else -> R.drawable.ic_flare_none
         }
         val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
-        val isTB = currentGroup.hfLayout == "TB" || currentGroup.hfLayout?.contains("top", ignoreCase = true) == true
+        val activeLayout = config.hfLayout ?: currentGroup.hfLayout
+        val isTB = activeLayout == "TB" || activeLayout?.contains("top", ignoreCase = true) == true
 
         binding.btnTimestamp.setIconTintResource(if (config.showTimestamp) R.color.vibrant_orange else android.R.color.white)
         binding.btnTimestamp.alpha = if (config.showTimestamp) 1.0f else 0.6f
@@ -764,7 +765,8 @@ open class ImageViewerFragment : Fragment() {
 
     private fun updateSelectionFeedback() {
         val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
-        val isTB = currentGroup.hfLayout == "TB"
+        val activeLayout = currentEditConfig?.hfLayout ?: currentGroup.hfLayout
+        val isTB = activeLayout == "TB" || activeLayout?.contains("top", ignoreCase = true) == true
 
         if (isEditingAdjustments && currentGroup.isHalfFrame()) {
             binding.hfSelection1.visibility = if (selectedDngIndex == 1) View.VISIBLE else View.GONE
@@ -1239,7 +1241,9 @@ open class ImageViewerFragment : Fragment() {
                         val b2 = if (config.isSwapped) cachedBitmap1 else cachedBitmap2
 
                         if (b1 != null || b2 != null) {
-                            val isSBS = currentGroup.hfLayout != "TB"
+                            val activeLayout = config.hfLayout ?: currentGroup.hfLayout
+                            val isTB = activeLayout == "TB" || activeLayout?.contains("top", ignoreCase = true) == true
+                            val isSBS = !isTB
 
                             val refW = b1?.width ?: b2?.width ?: 0
                             val refH = b1?.height ?: b2?.height ?: 0
@@ -1271,7 +1275,7 @@ open class ImageViewerFragment : Fragment() {
                                 composite,
                                 config.showTimestamp,
                                 config.flareType >= 0,
-                                currentGroup.hfLayout ?: "SBS",
+                                activeLayout ?: "SBS",
                                 time1 = t1,
                                 time2 = t2,
                                 flareType = config.flareType
@@ -1335,6 +1339,8 @@ open class ImageViewerFragment : Fragment() {
     protected open fun saveEdit(isReplacement: Boolean) {
         val config = currentEditConfig ?: return
         val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
+        val finalConfig = config.copy(hfLayout = config.hfLayout ?: currentGroup.hfLayout)
+
         val dngUri1 = currentGroup.dngUri ?: currentGroup.dngUri1
         val dngUri2 = currentGroup.dngUri2
 
@@ -1415,11 +1421,13 @@ open class ImageViewerFragment : Fragment() {
                         val f1 = dngUri1?.let { processFull(sourceDngBytes, it, 0) }
                         val f2 = dngUri2?.let { processFull(sourceDngBytes2, it, 1) }
 
-                        val b1 = if (config.isSwapped) f2 else f1
-                        val b2 = if (config.isSwapped) f1 else f2
+                        val b1 = if (finalConfig.isSwapped) f2 else f1
+                        val b2 = if (finalConfig.isSwapped) f1 else f2
 
                         if (b1 != null || b2 != null) {
-                            val isSBS = currentGroup.hfLayout != "TB"
+                            val activeLayout = config.hfLayout ?: currentGroup.hfLayout
+                            val isTB = activeLayout == "TB" || activeLayout?.contains("top", ignoreCase = true) == true
+                            val isSBS = !isTB
 
                             val refW = b1?.width ?: b2?.width ?: 0
                             val refH = b1?.height ?: b2?.height ?: 0
@@ -1457,17 +1465,17 @@ open class ImageViewerFragment : Fragment() {
                             val time1 = dngUri1?.let { repository.getCaptureMetadata(it)?.dateTimeOriginal } ?: currentGroup.captureTime
                             val time2 = dngUri2?.let { repository.getCaptureMetadata(it)?.dateTimeOriginal } ?: currentGroup.captureTime
 
-                            val t1 = if (config.isSwapped) time2 else time1
-                            val t2 = if (config.isSwapped) time1 else time2
+                            val t1 = if (finalConfig.isSwapped) time2 else time1
+                            val t2 = if (finalConfig.isSwapped) time1 else time2
 
                             val finalComposite = top.maary.darkbag.utils.HalfFrameUtils.addEffects(
                                 composite,
-                                config.showTimestamp,
-                                config.flareType >= 0,
-                                currentGroup.hfLayout ?: "SBS",
+                                finalConfig.showTimestamp,
+                                finalConfig.flareType >= 0,
+                                activeLayout ?: "SBS",
                                 time1 = t1,
                                 time2 = t2,
-                                flareType = config.flareType
+                                flareType = finalConfig.flareType
                             )
                             if (finalComposite != composite) {
                                 composite.recycle()
@@ -1498,7 +1506,7 @@ open class ImageViewerFragment : Fragment() {
                             saveRaw = false,
                             targetUri = targetUri,
                             jpgFolderUri = if (isReplacement) null else jpgFolderUri,
-                            editConfig = config,
+                            editConfig = finalConfig,
                             isAlreadyStitched = true, // Force true to avoid HalfFrameManager intercepting user's explicit save actions
                             captureMetadata = captureMetadata
                         )
@@ -1657,7 +1665,9 @@ open class ImageViewerFragment : Fragment() {
                         val b2 = if (config.isSwapped) f1 else f2
 
                         if (b1 != null || b2 != null) {
-                            val isSBS = currentGroup.hfLayout != "TB"
+                            val activeLayout = config.hfLayout ?: currentGroup.hfLayout
+                            val isTB = activeLayout == "TB" || activeLayout?.contains("top", ignoreCase = true) == true
+                            val isSBS = !isTB
 
                             val refW = b1?.width ?: b2?.width ?: 0
                             val refH = b1?.height ?: b2?.height ?: 0
@@ -1702,7 +1712,7 @@ open class ImageViewerFragment : Fragment() {
                                 composite,
                                 config.showTimestamp,
                                 config.flareType >= 0,
-                                currentGroup.hfLayout ?: "SBS",
+                                activeLayout ?: "SBS",
                                 time1 = t1,
                                 time2 = t2,
                                 flareType = config.flareType
@@ -2193,7 +2203,8 @@ open class ImageViewerFragment : Fragment() {
 
         // Ensure half-frame masks match the visible viewport
         val currentGroup = if (::adapter.isInitialized && adapter.itemCount > 0) adapter.getGroup(binding.imagePager.currentItem) else null
-        val isTB = currentGroup?.hfLayout == "TB"
+        val activeLayout = currentEditConfig?.hfLayout ?: currentGroup?.hfLayout
+        val isTB = activeLayout == "TB" || activeLayout?.contains("top", ignoreCase = true) == true
 
         val lp1 = binding.hfSelection1.layoutParams as ViewGroup.MarginLayoutParams
         val lp2 = binding.hfSelection2.layoutParams as ViewGroup.MarginLayoutParams
@@ -2361,7 +2372,9 @@ open class ImageViewerFragment : Fragment() {
                 val b2 = if (config.isSwapped) f1 else f2
 
                 if (b1 != null || b2 != null) {
-                    val isSBS = currentGroup.hfLayout != "TB"
+                    val activeLayout = config.hfLayout ?: currentGroup.hfLayout
+                    val isTB = activeLayout == "TB" || activeLayout?.contains("top", ignoreCase = true) == true
+                    val isSBS = !isTB
 
                     val refW = b1?.width ?: b2?.width ?: 0
                     val refH = b1?.height ?: b2?.height ?: 0
@@ -2406,7 +2419,7 @@ open class ImageViewerFragment : Fragment() {
                         composite,
                         config.showTimestamp,
                         config.flareType >= 0,
-                        currentGroup.hfLayout ?: "SBS",
+                        activeLayout ?: "SBS",
                         time1 = t1,
                         time2 = t2,
                         flareType = config.flareType
