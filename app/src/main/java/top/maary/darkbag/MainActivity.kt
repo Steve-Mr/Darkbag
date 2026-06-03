@@ -63,6 +63,27 @@ class MainActivity : AppCompatActivity() {
         val navController = navHostFragment?.navController ?: return
 
 
+
+        if (intent.action == Intent.ACTION_SEND || intent.action == Intent.ACTION_SEND_MULTIPLE) {
+            lifecycleScope.launch {
+                val paths = top.maary.darkbag.utils.ShareUtils.processShareIntent(this@MainActivity, intent)
+                if (paths.isNotEmpty()) {
+                    if (paths.size == 1) {
+                        val bundle = android.os.Bundle().apply {
+                            putStringArray("playground_dng_paths", paths.toTypedArray())
+                        }
+                        navController.navigate(R.id.playground_viewer_fragment, bundle)
+                    } else {
+                        if (navController.currentDestination?.id != R.id.playground_gallery_fragment) {
+                            navController.navigate(R.id.playground_gallery_fragment)
+                        }
+                    }
+                }
+                intent.action = null // Prevent re-triggering
+            }
+            return
+        }
+
         // Handle Shortcuts
         when (intent.getStringExtra(SHORTCUT_EXTRA_KEY)) {
             SHORTCUT_VALUE_SETTINGS -> {

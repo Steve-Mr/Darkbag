@@ -48,22 +48,7 @@ object FloatingToolbarManager {
 
 
 
-        if (currentDestinationId == R.id.camera_fragment) {
-            val bottomIsland = (context as? android.app.Activity)?.findViewById<View>(R.id.bottom_island_card)
-            if (bottomIsland != null) {
-                 ViewCompat.setOnApplyWindowInsetsListener(bottomIsland) { view, insets ->
-                     val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-                     view.updateLayoutParams<MarginLayoutParams> {
-                         val baseMargin = (16 * view.context.resources.displayMetrics.density).toInt()
-                         val toolbarHeight = if (enableCamera && enablePlayground && showToolbar) {
-                             (64 * view.context.resources.displayMetrics.density).toInt()
-                         } else 0
-                         bottomMargin = baseMargin + systemBars.bottom + toolbarHeight
-                     }
-                     insets
-                 }
-            }
-        }
+
 
         btnCamera.visibility = if (enableCamera) View.VISIBLE else View.GONE
         btnPlayground.visibility = if (enablePlayground) View.VISIBLE else View.GONE
