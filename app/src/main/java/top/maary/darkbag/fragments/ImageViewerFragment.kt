@@ -1342,12 +1342,14 @@ open class ImageViewerFragment : Fragment() {
         binding.initialLoadingIndicator.visibility = View.VISIBLE
         binding.interactionBlocker?.visibility = View.VISIBLE
 
+        val ctx = context ?: return
+        val appContext = ctx.applicationContext
         lifecycleScope.launch {
             try {
                 ensureDngBytesLoaded()
                 withContext(Dispatchers.IO) {
                     try {
-                        val context = requireContext()
+                        val context = appContext
                     val logIndex = SettingsFragment.LOG_CURVES.indexOf(config.log)
                     val lutPath = if (config.lut != null && config.lut != "None") {
                         java.io.File(lutManager.lutDir, config.lut).absolutePath
@@ -1433,7 +1435,19 @@ open class ImageViewerFragment : Fragment() {
                             val tempB1 = oriented1 ?: android.graphics.Bitmap.createBitmap(w2, h2, android.graphics.Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.BLACK) }
                             val tempB2 = oriented2 ?: android.graphics.Bitmap.createBitmap(w1, h1, android.graphics.Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.BLACK) }
 
-                            val composite = top.maary.darkbag.utils.HalfFrameUtils.composeBitmaps(tempB1, tempB2, isSBS)
+                            var composite = top.maary.darkbag.utils.HalfFrameUtils.composeBitmaps(tempB1, tempB2, isSBS)
+
+                            val economical = top.maary.darkbag.utils.HalfFrameManager(context).downsample
+                            if (economical) {
+                                val scale = 0.707f
+                                val scaledW = (composite.width * scale).toInt().coerceAtLeast(1)
+                                val scaledH = (composite.height * scale).toInt().coerceAtLeast(1)
+                                val scaled = android.graphics.Bitmap.createScaledBitmap(composite, scaledW, scaledH, true)
+                                if (scaled != composite) {
+                                    composite.recycle()
+                                    composite = scaled
+                                }
+                            }
 
                             if (oriented1 != b1) oriented1?.recycle()
                             if (oriented2 != b2) oriented2?.recycle()
@@ -1560,11 +1574,13 @@ open class ImageViewerFragment : Fragment() {
 
         binding.initialLoadingIndicator.visibility = View.VISIBLE
 
+        val ctx = context ?: return
+        val appContext = ctx.applicationContext
         lifecycleScope.launch {
             ensureDngBytesLoaded()
             val tiffUri = withContext(Dispatchers.IO) {
                 try {
-                    val context = requireContext()
+                    val context = appContext
                     val exportDir = java.io.File(context.filesDir, "shared_exports")
                     if (!exportDir.exists()) exportDir.mkdirs()
 
@@ -1657,7 +1673,19 @@ open class ImageViewerFragment : Fragment() {
                             val tempB1 = oriented1 ?: android.graphics.Bitmap.createBitmap(w2, h2, android.graphics.Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.BLACK) }
                             val tempB2 = oriented2 ?: android.graphics.Bitmap.createBitmap(w1, h1, android.graphics.Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.BLACK) }
 
-                            val composite = top.maary.darkbag.utils.HalfFrameUtils.composeBitmaps(tempB1, tempB2, isSBS)
+                            var composite = top.maary.darkbag.utils.HalfFrameUtils.composeBitmaps(tempB1, tempB2, isSBS)
+
+                            val economical = top.maary.darkbag.utils.HalfFrameManager(context).downsample
+                            if (economical) {
+                                val scale = 0.707f
+                                val scaledW = (composite.width * scale).toInt().coerceAtLeast(1)
+                                val scaledH = (composite.height * scale).toInt().coerceAtLeast(1)
+                                val scaled = android.graphics.Bitmap.createScaledBitmap(composite, scaledW, scaledH, true)
+                                if (scaled != composite) {
+                                    composite.recycle()
+                                    composite = scaled
+                                }
+                            }
 
                             if (oriented1 != b1) oriented1?.recycle()
                             if (oriented2 != b2) oriented2?.recycle()
@@ -1720,7 +1748,7 @@ open class ImageViewerFragment : Fragment() {
                     top.maary.darkbag.provider.DarkbagDocumentsProvider.AUTHORITY,
                     top.maary.darkbag.provider.DarkbagDocumentsProvider.ROOT_ID_EXPORTS
                 )
-                requireContext().contentResolver.notifyChange(childrenUri, null)
+                appContext.contentResolver.notifyChange(childrenUri, null)
 
                 shareTiff(uri)
             }
@@ -1736,7 +1764,7 @@ open class ImageViewerFragment : Fragment() {
         try {
             startActivity(android.content.Intent.createChooser(intent, "Share TIFF"))
         } catch (e: android.content.ActivityNotFoundException) {
-            android.widget.Toast.makeText(requireContext(), "No app found to share TIFF.", android.widget.Toast.LENGTH_SHORT).show()
+            context?.let { android.widget.Toast.makeText(it, "No app found to share TIFF.", android.widget.Toast.LENGTH_SHORT).show() }
         }
     }
 
@@ -2257,8 +2285,10 @@ open class ImageViewerFragment : Fragment() {
     }
 
     protected suspend fun generateProcessedBitmap(config: top.maary.darkbag.models.EditConfig, currentGroup: ImageGroup): android.graphics.Bitmap? {
+        val ctx = context ?: return null
+        val appContext = ctx.applicationContext
         return withContext(Dispatchers.IO) {
-            val context = requireContext()
+            val context = appContext
             val dngUri1 = currentGroup.dngUri ?: currentGroup.dngUri1
             val dngUri2 = currentGroup.dngUri2
             val logIndex = SettingsFragment.LOG_CURVES.indexOf(config.log)
@@ -2347,7 +2377,19 @@ open class ImageViewerFragment : Fragment() {
                     val tempB1 = oriented1 ?: android.graphics.Bitmap.createBitmap(w2, h2, android.graphics.Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.BLACK) }
                     val tempB2 = oriented2 ?: android.graphics.Bitmap.createBitmap(w1, h1, android.graphics.Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.BLACK) }
 
-                    val composite = top.maary.darkbag.utils.HalfFrameUtils.composeBitmaps(tempB1, tempB2, isSBS)
+                    var composite = top.maary.darkbag.utils.HalfFrameUtils.composeBitmaps(tempB1, tempB2, isSBS)
+
+                    val economical = top.maary.darkbag.utils.HalfFrameManager(context).downsample
+                    if (economical) {
+                        val scale = 0.707f
+                        val scaledW = (composite.width * scale).toInt().coerceAtLeast(1)
+                        val scaledH = (composite.height * scale).toInt().coerceAtLeast(1)
+                        val scaled = android.graphics.Bitmap.createScaledBitmap(composite, scaledW, scaledH, true)
+                        if (scaled != composite) {
+                            composite.recycle()
+                            composite = scaled
+                        }
+                    }
 
                     if (oriented1 != b1) oriented1?.recycle()
                     if (oriented2 != b2) oriented2?.recycle()

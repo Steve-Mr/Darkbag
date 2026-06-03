@@ -318,14 +318,16 @@ class PlaygroundGalleryFragment : Fragment() {
     }
 
     private fun importDngs(uris: List<Uri>) {
+        val ctx = context ?: return
+        val appContext = ctx.applicationContext
         lifecycleScope.launch(Dispatchers.IO) {
             val dir = getPlaygroundDir()
             var importedCount = 0
             for (uri in uris) {
                 try {
-                    val fileName = getFileName(uri) ?: "imported_${UUID.randomUUID()}.dng"
+                    val fileName = getFileName(appContext, uri) ?: "imported_${UUID.randomUUID()}.dng"
                     val destFile = File(dir, fileName)
-                    requireContext().contentResolver.openInputStream(uri)?.use { input ->
+                    appContext.contentResolver.openInputStream(uri)?.use { input ->
                         FileOutputStream(destFile).use { output ->
                             input.copyTo(output)
                         }
@@ -336,16 +338,16 @@ class PlaygroundGalleryFragment : Fragment() {
                 }
             }
             withContext(Dispatchers.Main) {
-                Toast.makeText(requireContext(), "Imported $importedCount files", Toast.LENGTH_SHORT).show()
+                context?.let { Toast.makeText(it, "Imported $importedCount files", Toast.LENGTH_SHORT).show() }
                 loadFiles()
             }
         }
     }
 
-    private fun getFileName(uri: Uri): String? {
+    private fun getFileName(context: android.content.Context, uri: Uri): String? {
         var result: String? = null
         if (uri.scheme == "content") {
-            requireContext().contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+            context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
                 if (cursor.moveToFirst()) {
                     val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
                     if (index != -1) {
@@ -575,11 +577,11 @@ class PlaygroundGalleryFragment : Fragment() {
 
                                 var composite = top.maary.darkbag.utils.HalfFrameUtils.composeBitmaps(tempB1, tempB2, isSBS)
 
-                                val economical = appContext.getSharedPreferences(top.maary.darkbag.fragments.SettingsFragment.PREFS_NAME, android.content.Context.MODE_PRIVATE).getBoolean(top.maary.darkbag.fragments.SettingsFragment.KEY_HALF_FRAME_DOWNSAMPLE, false)
+                                val economical = top.maary.darkbag.utils.HalfFrameManager(appContext).downsample
                                 if (economical) {
                                     val scale = 0.707f
-                                    val scaledW = (composite.width * scale).toInt()
-                                    val scaledH = (composite.height * scale).toInt()
+                                    val scaledW = (composite.width * scale).toInt().coerceAtLeast(1)
+                                    val scaledH = (composite.height * scale).toInt().coerceAtLeast(1)
                                     val scaled = android.graphics.Bitmap.createScaledBitmap(composite, scaledW, scaledH, true)
                                     if (scaled != composite) {
                                         composite.recycle()

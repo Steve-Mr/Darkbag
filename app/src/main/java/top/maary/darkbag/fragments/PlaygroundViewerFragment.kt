@@ -558,11 +558,11 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
 
                             var composite = top.maary.darkbag.utils.HalfFrameUtils.composeBitmaps(tempB1, tempB2, isSBS)
 
-                            val economical = appContext.getSharedPreferences(top.maary.darkbag.fragments.SettingsFragment.PREFS_NAME, android.content.Context.MODE_PRIVATE).getBoolean(top.maary.darkbag.fragments.SettingsFragment.KEY_HALF_FRAME_DOWNSAMPLE, false)
+                            val economical = top.maary.darkbag.utils.HalfFrameManager(appContext).downsample
                             if (economical) {
                                 val scale = 0.707f
-                                val scaledW = (composite.width * scale).toInt()
-                                val scaledH = (composite.height * scale).toInt()
+                                val scaledW = (composite.width * scale).toInt().coerceAtLeast(1)
+                                val scaledH = (composite.height * scale).toInt().coerceAtLeast(1)
                                 val scaled = android.graphics.Bitmap.createScaledBitmap(composite, scaledW, scaledH, true)
                                 if (scaled != composite) {
                                     composite.recycle()
