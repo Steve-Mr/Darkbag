@@ -82,8 +82,7 @@
                     android:id="@+id/subImageView1"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:adjustViewBounds="true"
-                    android:scaleType="centerCrop" />
+                    android:adjustViewBounds="true" />
                 <View
                     android:id="@+id/subSelectionOverlay1"
                     android:layout_width="match_parent"
@@ -111,8 +110,7 @@
                     android:id="@+id/subImageView2"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:adjustViewBounds="true"
-                    android:scaleType="centerCrop" />
+                    android:adjustViewBounds="true" />
                 <View
                     android:id="@+id/subSelectionOverlay2"
                     android:layout_width="match_parent"

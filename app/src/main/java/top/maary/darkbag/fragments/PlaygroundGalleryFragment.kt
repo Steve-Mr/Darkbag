@@ -567,6 +567,10 @@ class PlaygroundGalleryFragment : Fragment() {
                                 val oriented1 = b1?.let { top.maary.darkbag.utils.HalfFrameUtils.ensureOrientation(it, isSBS) }
                                 val oriented2 = b2?.let { top.maary.darkbag.utils.HalfFrameUtils.ensureOrientation(it, isSBS) }
 
+                                // Recycle original un-oriented bitmaps immediately to save memory
+                                if (oriented1 != b1) b1?.recycle()
+                                if (oriented2 != b2) b2?.recycle()
+
                                 val w1 = oriented1?.width ?: refW
                                 val h1 = oriented1?.height ?: refH
                                 val w2 = oriented2?.width ?: refW
@@ -576,6 +580,12 @@ class PlaygroundGalleryFragment : Fragment() {
                                 val tempB2 = oriented2 ?: android.graphics.Bitmap.createBitmap(w1, h1, android.graphics.Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.BLACK) }
 
                                 var composite = top.maary.darkbag.utils.HalfFrameUtils.composeBitmaps(tempB1, tempB2, isSBS)
+
+                                // Recycle oriented/temp bitmaps immediately after compose
+                                if (tempB1 != oriented1) tempB1.recycle()
+                                if (tempB2 != oriented2) tempB2.recycle()
+                                oriented1?.recycle()
+                                oriented2?.recycle()
 
                                 val economical = top.maary.darkbag.utils.HalfFrameManager(appContext).downsample
                                 if (economical) {
@@ -588,11 +598,6 @@ class PlaygroundGalleryFragment : Fragment() {
                                         composite = scaled
                                     }
                                 }
-
-                                if (oriented1 != b1) oriented1?.recycle()
-                                if (oriented2 != b2) oriented2?.recycle()
-                                if (tempB1 != oriented1) tempB1.recycle()
-                                if (tempB2 != oriented2) tempB2.recycle()
 
                                 val time1 = dngUri1?.let { repository.getCaptureMetadata(it)?.dateTimeOriginal } ?: file.lastModified()
                                 val time2 = dngUri2?.let { repository.getCaptureMetadata(it)?.dateTimeOriginal } ?: file.lastModified()
@@ -612,8 +617,6 @@ class PlaygroundGalleryFragment : Fragment() {
                                 if (finalComposite != composite) {
                                     composite.recycle()
                                 }
-                                f1?.recycle()
-                                f2?.recycle()
                                 finalComposite
                             } else null
 
@@ -666,8 +669,12 @@ class PlaygroundAdapter(
 ) : RecyclerView.Adapter<PlaygroundAdapter.ViewHolder>() {
 
     class ViewHolder(val binding: ItemPlaygroundImageBinding) : RecyclerView.ViewHolder(binding.root) {
-        var job: kotlinx.coroutines.Job? = null
-        var bitmap: Bitmap? = null
+        var jobMain: kotlinx.coroutines.Job? = null
+        var bitmapMain: Bitmap? = null
+        var jobSub1: kotlinx.coroutines.Job? = null
+        var bitmapSub1: Bitmap? = null
+        var jobSub2: kotlinx.coroutines.Job? = null
+        var bitmapSub2: Bitmap? = null
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
@@ -712,7 +719,15 @@ class PlaygroundAdapter(
         }
     }
 
-    private fun loadThumbnail(context: android.content.Context, file: File, imageView: android.widget.ImageView, holder: ViewHolder) {
+    private fun loadThumbnail(
+        context: android.content.Context,
+        file: File,
+        imageView: android.widget.ImageView,
+        holder: ViewHolder,
+        isMain: Boolean,
+        isSub1: Boolean = false,
+        isSub2: Boolean = false
+    ) {
         val currentTag = file.absolutePath
         imageView.tag = currentTag
 
@@ -723,18 +738,19 @@ class PlaygroundAdapter(
         }
 
         // Otherwise, it's a DNG, decode it
-        holder.job = coroutineScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            var bitmap: Bitmap? = null
+        val job = coroutineScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            var decodedBitmap: Bitmap? = null
+            var bitmapAssigned = false
             try {
                 val exifInterface = ExifInterface(file.absolutePath)
                 if (exifInterface.hasThumbnail()) {
                     val thumbnailBytes = exifInterface.thumbnailBytes
                     if (thumbnailBytes != null) {
-                        bitmap = BitmapFactory.decodeByteArray(thumbnailBytes, 0, thumbnailBytes.size)
+                        decodedBitmap = BitmapFactory.decodeByteArray(thumbnailBytes, 0, thumbnailBytes.size)
                     }
                 }
 
-                if (bitmap == null) {
+                if (decodedBitmap == null) {
                     val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                     BitmapFactory.decodeFile(file.absolutePath, options)
                     var inSampleSize = 1
@@ -746,17 +762,20 @@ class PlaygroundAdapter(
                         this.inSampleSize = inSampleSize
                         inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888
                     }
-                    bitmap = BitmapFactory.decodeFile(file.absolutePath, decodeOpts)
+                    decodedBitmap = BitmapFactory.decodeFile(file.absolutePath, decodeOpts)
                 }
 
                 ensureActive()
 
                 kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
                     if (imageView.tag == currentTag) {
-                        if (bitmap != null) {
-                            // Can't reliably keep reference for multiple views in one holder,
-                            // so we rely on Glide/ImageView to handle if we overwrite
-                            imageView.setImageBitmap(bitmap)
+                        if (decodedBitmap != null) {
+                            if (isMain) holder.bitmapMain = decodedBitmap
+                            else if (isSub1) holder.bitmapSub1 = decodedBitmap
+                            else if (isSub2) holder.bitmapSub2 = decodedBitmap
+
+                            bitmapAssigned = true
+                            imageView.setImageBitmap(decodedBitmap)
                         } else {
                             Glide.with(context).load(file).into(imageView)
                         }
@@ -767,10 +786,16 @@ class PlaygroundAdapter(
             } catch (e: Exception) {
                 Log.e("Playground", "Failed to load thumbnail for ${file.name}", e)
             } finally {
-                // If we didn't set it to view (handled by imageView internally), we'd recycle, but actually we don't want to break it if it's set.
-                // In a robust implementation, we'd cache these properly.
+                // If the coroutine was cancelled or the tag changed before setting, recycle the bitmap
+                if (decodedBitmap != null && !bitmapAssigned) {
+                    decodedBitmap?.recycle()
+                }
             }
         }
+
+        if (isMain) holder.jobMain = job
+        else if (isSub1) holder.jobSub1 = job
+        else if (isSub2) holder.jobSub2 = job
     }
 
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
@@ -783,9 +808,15 @@ class PlaygroundAdapter(
         holder.binding.imageViewThumbnail.setImageDrawable(null)
         val context = holder.itemView.context
 
-        holder.job?.cancel()
-        holder.bitmap?.recycle()
-        holder.bitmap = null
+        holder.jobMain?.cancel()
+        holder.jobSub1?.cancel()
+        holder.jobSub2?.cancel()
+        holder.bitmapMain?.recycle()
+        holder.bitmapSub1?.recycle()
+        holder.bitmapSub2?.recycle()
+        holder.bitmapMain = null
+        holder.bitmapSub1 = null
+        holder.bitmapSub2 = null
 
         when (item) {
             is PlaygroundItem.Single -> {
@@ -795,22 +826,22 @@ class PlaygroundAdapter(
                 val file = item.file
                 val jpgFile = File(file.parent, file.nameWithoutExtension + ".jpg")
                 if (jpgFile.exists()) {
-                    loadThumbnail(context, jpgFile, holder.binding.imageViewThumbnail, holder)
+                    loadThumbnail(context, jpgFile, holder.binding.imageViewThumbnail, holder, true)
                 } else {
-                    loadThumbnail(context, file, holder.binding.imageViewThumbnail, holder)
+                    loadThumbnail(context, file, holder.binding.imageViewThumbnail, holder, true)
                 }
             }
             is PlaygroundItem.Group -> {
                 holder.binding.iconLayer.visibility = View.VISIBLE
                 holder.binding.subImagesContainer.visibility = if (item.isExpanded) View.VISIBLE else View.GONE
 
-                loadThumbnail(context, item.jpgFile, holder.binding.imageViewThumbnail, holder)
+                loadThumbnail(context, item.jpgFile, holder.binding.imageViewThumbnail, holder, true)
 
                 // Load sub images
                 holder.binding.subImageView1.setImageDrawable(null)
                 holder.binding.subImageView2.setImageDrawable(null)
-                loadThumbnail(context, item.dng1, holder.binding.subImageView1, holder)
-                loadThumbnail(context, item.dng2, holder.binding.subImageView2, holder)
+                loadThumbnail(context, item.dng1, holder.binding.subImageView1, holder, isMain = false, isSub1 = true)
+                loadThumbnail(context, item.dng2, holder.binding.subImageView2, holder, isMain = false, isSub2 = true)
 
                 val isDng1Selected = selectedFiles.contains(item.dng1)
                 val isDng2Selected = selectedFiles.contains(item.dng2)
@@ -847,10 +878,20 @@ class PlaygroundAdapter(
 
     override fun onViewRecycled(holder: ViewHolder) {
         super.onViewRecycled(holder)
-        holder.job?.cancel()
+        holder.jobMain?.cancel()
+        holder.jobSub1?.cancel()
+        holder.jobSub2?.cancel()
         Glide.with(holder.itemView.context).clear(holder.binding.imageViewThumbnail)
+        Glide.with(holder.itemView.context).clear(holder.binding.subImageView1)
+        Glide.with(holder.itemView.context).clear(holder.binding.subImageView2)
         holder.binding.imageViewThumbnail.setImageDrawable(null)
-        holder.bitmap?.recycle()
-        holder.bitmap = null
+        holder.binding.subImageView1.setImageDrawable(null)
+        holder.binding.subImageView2.setImageDrawable(null)
+        holder.bitmapMain?.recycle()
+        holder.bitmapSub1?.recycle()
+        holder.bitmapSub2?.recycle()
+        holder.bitmapMain = null
+        holder.bitmapSub1 = null
+        holder.bitmapSub2 = null
     }
 }
