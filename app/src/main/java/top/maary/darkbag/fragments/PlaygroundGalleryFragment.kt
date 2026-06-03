@@ -274,6 +274,7 @@ class PlaygroundGalleryFragment : Fragment() {
     private fun updateBottomBar() {
         if (isSelectionMode) {
             binding.bottomAppBar.visibility = View.VISIBLE
+        view?.findViewById<android.view.View>(R.id.floating_toolbar)?.visibility = View.GONE
             binding.fabAdd.visibility = View.GONE
 
             // Only allow merge if exactly 2 individual DNGs are selected
@@ -283,6 +284,7 @@ class PlaygroundGalleryFragment : Fragment() {
             binding.toolbar.title = "${selectedFiles.size} selected"
         } else {
             binding.bottomAppBar.visibility = View.GONE
+        view?.findViewById<android.view.View>(R.id.floating_toolbar)?.visibility = View.VISIBLE
             binding.fabAdd.visibility = View.VISIBLE
             binding.toolbar.title = "Playground"
         }

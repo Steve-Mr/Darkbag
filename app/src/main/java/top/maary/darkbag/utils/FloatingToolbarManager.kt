@@ -2,6 +2,10 @@ package top.maary.darkbag.utils
 
 import android.content.Context
 import android.view.View
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.updateLayoutParams
+import android.view.ViewGroup.MarginLayoutParams
 import com.google.android.material.button.MaterialButton
 import androidx.navigation.NavController
 import top.maary.darkbag.R
@@ -28,8 +32,38 @@ object FloatingToolbarManager {
         }
         toolbarLayout.visibility = View.VISIBLE
 
+        // Handle window insets for edge-to-edge
+        ViewCompat.setOnApplyWindowInsetsListener(toolbarLayout) { view, insets ->
+            val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            view.updateLayoutParams<MarginLayoutParams> {
+                val baseMargin = (48 * view.context.resources.displayMetrics.density).toInt()
+                bottomMargin = baseMargin + systemBars.bottom
+            }
+            insets
+        }
+
+
         val enableCamera = prefs.getBoolean(SettingsFragment.KEY_ENABLE_CAMERA, true)
         val enablePlayground = prefs.getBoolean(SettingsFragment.KEY_ENABLE_PLAYGROUND, true)
+
+
+
+        if (currentDestinationId == R.id.camera_fragment) {
+            val bottomIsland = (context as? android.app.Activity)?.findViewById<View>(R.id.bottom_island_card)
+            if (bottomIsland != null) {
+                 ViewCompat.setOnApplyWindowInsetsListener(bottomIsland) { view, insets ->
+                     val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+                     view.updateLayoutParams<MarginLayoutParams> {
+                         val baseMargin = (16 * view.context.resources.displayMetrics.density).toInt()
+                         val toolbarHeight = if (enableCamera && enablePlayground && showToolbar) {
+                             (64 * view.context.resources.displayMetrics.density).toInt()
+                         } else 0
+                         bottomMargin = baseMargin + systemBars.bottom + toolbarHeight
+                     }
+                     insets
+                 }
+            }
+        }
 
         btnCamera.visibility = if (enableCamera) View.VISIBLE else View.GONE
         btnPlayground.visibility = if (enablePlayground) View.VISIBLE else View.GONE
@@ -45,6 +79,7 @@ object FloatingToolbarManager {
         btnPlayground.isChecked = currentDestinationId == R.id.playground_gallery_fragment
 
         btnCamera.setOnClickListener {
+            if (currentDestinationId == R.id.camera_fragment) btnCamera.isChecked = true
             if (currentDestinationId != R.id.camera_fragment) {
                 navController.navigate(R.id.camera_fragment, null, androidx.navigation.NavOptions.Builder()
                     .setPopUpTo(R.id.nav_graph, true)
@@ -53,6 +88,7 @@ object FloatingToolbarManager {
         }
 
         btnPlayground.setOnClickListener {
+            if (currentDestinationId == R.id.playground_gallery_fragment) btnPlayground.isChecked = true
             if (currentDestinationId != R.id.playground_gallery_fragment) {
                 navController.navigate(R.id.playground_gallery_fragment, null, androidx.navigation.NavOptions.Builder()
                     .setPopUpTo(R.id.nav_graph, true)

@@ -1180,11 +1180,11 @@ class CameraFragment : Fragment() {
     private fun updateCameraUi() {
         val root = _fragmentCameraBinding?.root as? androidx.constraintlayout.widget.ConstraintLayout ?: return
 
-        // Remove all views except viewFinderContainer to avoid duplicates when re-inflating <merge>
+        // Remove all views except viewFinderContainer AND floating_toolbar to avoid duplicates when re-inflating <merge>
         val viewsToRemove = mutableListOf<View>()
         for (i in 0 until root.childCount) {
             val child = root.getChildAt(i)
-            if (child.id != R.id.viewFinderContainer) {
+            if (child.id != R.id.viewFinderContainer && child.id != R.id.floating_toolbar) {
                 viewsToRemove.add(child)
             }
         }
