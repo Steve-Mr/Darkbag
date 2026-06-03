@@ -1342,12 +1342,14 @@ open class ImageViewerFragment : Fragment() {
         binding.initialLoadingIndicator.visibility = View.VISIBLE
         binding.interactionBlocker?.visibility = View.VISIBLE
 
+        val ctx = context ?: return
+        val appContext = ctx.applicationContext
         lifecycleScope.launch {
             try {
                 ensureDngBytesLoaded()
                 withContext(Dispatchers.IO) {
                     try {
-                        val context = requireContext()
+                        val context = appContext
                     val logIndex = SettingsFragment.LOG_CURVES.indexOf(config.log)
                     val lutPath = if (config.lut != null && config.lut != "None") {
                         java.io.File(lutManager.lutDir, config.lut).absolutePath
@@ -1746,7 +1748,7 @@ open class ImageViewerFragment : Fragment() {
                     top.maary.darkbag.provider.DarkbagDocumentsProvider.AUTHORITY,
                     top.maary.darkbag.provider.DarkbagDocumentsProvider.ROOT_ID_EXPORTS
                 )
-                requireContext().contentResolver.notifyChange(childrenUri, null)
+                appContext.contentResolver.notifyChange(childrenUri, null)
 
                 shareTiff(uri)
             }
@@ -1762,7 +1764,7 @@ open class ImageViewerFragment : Fragment() {
         try {
             startActivity(android.content.Intent.createChooser(intent, "Share TIFF"))
         } catch (e: android.content.ActivityNotFoundException) {
-            android.widget.Toast.makeText(requireContext(), "No app found to share TIFF.", android.widget.Toast.LENGTH_SHORT).show()
+            context?.let { android.widget.Toast.makeText(it, "No app found to share TIFF.", android.widget.Toast.LENGTH_SHORT).show() }
         }
     }
 
