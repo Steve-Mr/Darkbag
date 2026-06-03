@@ -1438,8 +1438,8 @@ open class ImageViewerFragment : Fragment() {
                             val economical = top.maary.darkbag.utils.HalfFrameManager(context).downsample
                             if (economical) {
                                 val scale = 0.707f
-                                val scaledW = (composite.width * scale).toInt()
-                                val scaledH = (composite.height * scale).toInt()
+                                val scaledW = (composite.width * scale).toInt().coerceAtLeast(1)
+                                val scaledH = (composite.height * scale).toInt().coerceAtLeast(1)
                                 val scaled = android.graphics.Bitmap.createScaledBitmap(composite, scaledW, scaledH, true)
                                 if (scaled != composite) {
                                     composite.recycle()
@@ -1572,11 +1572,13 @@ open class ImageViewerFragment : Fragment() {
 
         binding.initialLoadingIndicator.visibility = View.VISIBLE
 
+        val ctx = context ?: return
+        val appContext = ctx.applicationContext
         lifecycleScope.launch {
             ensureDngBytesLoaded()
             val tiffUri = withContext(Dispatchers.IO) {
                 try {
-                    val context = requireContext()
+                    val context = appContext
                     val exportDir = java.io.File(context.filesDir, "shared_exports")
                     if (!exportDir.exists()) exportDir.mkdirs()
 
@@ -1671,11 +1673,11 @@ open class ImageViewerFragment : Fragment() {
 
                             var composite = top.maary.darkbag.utils.HalfFrameUtils.composeBitmaps(tempB1, tempB2, isSBS)
 
-                            val economical = top.maary.darkbag.utils.HalfFrameManager(requireContext()).downsample
+                            val economical = top.maary.darkbag.utils.HalfFrameManager(context).downsample
                             if (economical) {
                                 val scale = 0.707f
-                                val scaledW = (composite.width * scale).toInt()
-                                val scaledH = (composite.height * scale).toInt()
+                                val scaledW = (composite.width * scale).toInt().coerceAtLeast(1)
+                                val scaledH = (composite.height * scale).toInt().coerceAtLeast(1)
                                 val scaled = android.graphics.Bitmap.createScaledBitmap(composite, scaledW, scaledH, true)
                                 if (scaled != composite) {
                                     composite.recycle()
@@ -2281,8 +2283,10 @@ open class ImageViewerFragment : Fragment() {
     }
 
     protected suspend fun generateProcessedBitmap(config: top.maary.darkbag.models.EditConfig, currentGroup: ImageGroup): android.graphics.Bitmap? {
+        val ctx = context ?: return null
+        val appContext = ctx.applicationContext
         return withContext(Dispatchers.IO) {
-            val context = requireContext()
+            val context = appContext
             val dngUri1 = currentGroup.dngUri ?: currentGroup.dngUri1
             val dngUri2 = currentGroup.dngUri2
             val logIndex = SettingsFragment.LOG_CURVES.indexOf(config.log)
@@ -2373,11 +2377,11 @@ open class ImageViewerFragment : Fragment() {
 
                     var composite = top.maary.darkbag.utils.HalfFrameUtils.composeBitmaps(tempB1, tempB2, isSBS)
 
-                    val economical = top.maary.darkbag.utils.HalfFrameManager(requireContext()).downsample
+                    val economical = top.maary.darkbag.utils.HalfFrameManager(context).downsample
                     if (economical) {
                         val scale = 0.707f
-                        val scaledW = (composite.width * scale).toInt()
-                        val scaledH = (composite.height * scale).toInt()
+                        val scaledW = (composite.width * scale).toInt().coerceAtLeast(1)
+                        val scaledH = (composite.height * scale).toInt().coerceAtLeast(1)
                         val scaled = android.graphics.Bitmap.createScaledBitmap(composite, scaledW, scaledH, true)
                         if (scaled != composite) {
                             composite.recycle()

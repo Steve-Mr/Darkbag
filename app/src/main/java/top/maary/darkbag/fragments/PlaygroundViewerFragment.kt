@@ -561,8 +561,8 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
                             val economical = top.maary.darkbag.utils.HalfFrameManager(appContext).downsample
                             if (economical) {
                                 val scale = 0.707f
-                                val scaledW = (composite.width * scale).toInt()
-                                val scaledH = (composite.height * scale).toInt()
+                                val scaledW = (composite.width * scale).toInt().coerceAtLeast(1)
+                                val scaledH = (composite.height * scale).toInt().coerceAtLeast(1)
                                 val scaled = android.graphics.Bitmap.createScaledBitmap(composite, scaledW, scaledH, true)
                                 if (scaled != composite) {
                                     composite.recycle()
