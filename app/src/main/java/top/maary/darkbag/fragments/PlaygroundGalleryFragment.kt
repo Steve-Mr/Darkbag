@@ -284,7 +284,11 @@ class PlaygroundGalleryFragment : Fragment() {
             binding.toolbar.title = "${selectedFiles.size} selected"
         } else {
             binding.bottomAppBar.visibility = View.GONE
-        view?.findViewById<android.view.View>(R.id.floating_toolbar)?.visibility = View.VISIBLE
+        val prefs = requireContext().getSharedPreferences(top.maary.darkbag.fragments.SettingsFragment.PREFS_NAME, android.content.Context.MODE_PRIVATE)
+        val showToolbar = prefs.getBoolean(top.maary.darkbag.fragments.SettingsFragment.KEY_SHOW_FLOATING_TOOLBAR, true)
+        val enableCamera = prefs.getBoolean(top.maary.darkbag.fragments.SettingsFragment.KEY_ENABLE_CAMERA, true)
+        val enablePlayground = prefs.getBoolean(top.maary.darkbag.fragments.SettingsFragment.KEY_ENABLE_PLAYGROUND, true)
+        view?.findViewById<android.view.View>(R.id.floating_toolbar)?.visibility = if (showToolbar && enableCamera && enablePlayground) View.VISIBLE else View.GONE
             binding.fabAdd.visibility = View.VISIBLE
             binding.toolbar.title = "Playground"
         }
