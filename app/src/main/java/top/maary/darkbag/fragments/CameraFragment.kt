@@ -1205,18 +1205,39 @@ class CameraFragment : Fragment() {
 
         // Apply WindowInsets to UI Container to avoid system bar overlap
         cameraUiContainerBinding?.root?.let { rootView ->
+            var currentBottomInset = 0
+            var currentToolbarHeight = 0
+
+            fun updateContainerPadding() {
+                rootView.updatePadding(
+                    bottom = kotlin.math.max(currentBottomInset, currentToolbarHeight)
+                )
+            }
+
+            val mainActivity = activity as? top.maary.darkbag.MainActivity
+            mainActivity?.let {
+                viewLifecycleOwner.lifecycleScope.launch {
+                    it.toolbarHeightFlow.collect { height ->
+                        currentToolbarHeight = height
+                        updateContainerPadding()
+                    }
+                }
+            }
+
             ViewCompat.setOnApplyWindowInsetsListener(rootView) { view, windowInsets ->
                 val insets = windowInsets.getInsets(
                     WindowInsetsCompat.Type.systemBars() or
                     WindowInsetsCompat.Type.displayCutout() or
                     WindowInsetsCompat.Type.mandatorySystemGestures()
                 )
+
                 view.updatePadding(
                     left = insets.left,
                     top = insets.top,
-                    right = insets.right,
-                    bottom = 0
+                    right = insets.right
                 )
+                currentBottomInset = insets.bottom
+                updateContainerPadding()
 
                 // Update Viewfinder and Lens Group constraints
                 val uiBinding = cameraUiContainerBinding
