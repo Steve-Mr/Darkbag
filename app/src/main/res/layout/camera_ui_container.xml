@@ -230,7 +230,7 @@
         android:layout_height="wrap_content"
         android:layout_margin="@dimen/margin_medium"
         android:alpha="0.9"
-        app:layout_constraintBottom_toTopOf="@id/floating_toolbar"
+        app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent">
 
@@ -346,46 +346,5 @@
             android:clipToPadding="false" />
     </com.google.android.material.card.MaterialCardView>
 
-
-    <!-- Floating Toolbar added below bottom_island_card but constrained to it -->
-    <com.google.android.material.card.MaterialCardView
-        android:id="@+id/floating_toolbar"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        app:cardElevation="4dp"
-        app:cardCornerRadius="24dp"
-        app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"
-        android:layout_marginTop="8dp"
-        android:layout_marginBottom="16dp">
-
-        <LinearLayout
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:padding="4dp">
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/floating_toolbar_button_camera"
-                style="@style/Widget.Material3.Button.IconButton"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:checkable="true"
-                android:contentDescription="Camera"
-                app:icon="@drawable/ic_mode_normal" />
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/floating_toolbar_button_playground"
-                style="@style/Widget.Material3.Button.IconButton"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:checkable="true"
-                android:contentDescription="Playground"
-                app:icon="@drawable/ic_photo" />
-        </LinearLayout>
-
-    </com.google.android.material.card.MaterialCardView>
 
 </merge>

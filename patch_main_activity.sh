@@ -1,3 +1,4 @@
+cat << 'INNER_EOF' > app/src/main/java/top/maary/darkbag/MainActivity.kt
 /*
  * Copyright 2020 The Android Open Source Project
  *
@@ -227,3 +228,4 @@ class MainActivity : AppCompatActivity() {
     }
 
 }
+INNER_EOF
