@@ -28,7 +28,7 @@ import androidx.fragment.app.Fragment
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
-import androidx.navigation.Navigation
+import androidx.navigation.fragment.findNavController
 import top.maary.darkbag.R
 import kotlinx.coroutines.launch
 
@@ -61,7 +61,7 @@ class PermissionsFragment : Fragment() {
     private fun routeStartup() {
         val prefs = requireContext().getSharedPreferences(top.maary.darkbag.fragments.SettingsFragment.PREFS_NAME, android.content.Context.MODE_PRIVATE)
         val defaultStartup = prefs.getString(top.maary.darkbag.fragments.SettingsFragment.KEY_DEFAULT_STARTUP, top.maary.darkbag.fragments.SettingsFragment.STARTUP_CAMERA)
-        val navController = androidx.navigation.Navigation.findNavController(requireActivity(), R.id.fragment_container)
+        val navController = findNavController()
         if (defaultStartup == top.maary.darkbag.fragments.SettingsFragment.STARTUP_PLAYGROUND) {
             navController.navigate(PermissionsFragmentDirections.actionPermissionsToPlaygroundGallery())
         } else {
