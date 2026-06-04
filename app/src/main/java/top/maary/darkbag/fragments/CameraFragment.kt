@@ -1215,7 +1215,7 @@ class CameraFragment : Fragment() {
                     left = insets.left,
                     top = insets.top,
                     right = insets.right,
-                    bottom = insets.bottom
+                    bottom = 0
                 )
 
                 // Update Viewfinder and Lens Group constraints
