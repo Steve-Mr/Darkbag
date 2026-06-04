@@ -43,8 +43,12 @@ import java.util.UUID
 
 sealed class PlaygroundItem {
     abstract val mainFile: File
+    abstract val aspectRatio: String?
 
-    data class Single(val file: File) : PlaygroundItem() {
+    data class Single(
+        val file: File,
+        override val aspectRatio: String? = null
+    ) : PlaygroundItem() {
         override val mainFile: File = file
     }
 
@@ -52,7 +56,8 @@ sealed class PlaygroundItem {
         val jpgFile: File,
         val dng1: File,
         val dng2: File,
-        var isExpanded: Boolean = false
+        var isExpanded: Boolean = false,
+        override val aspectRatio: String? = null
     ) : PlaygroundItem() {
         override val mainFile: File = jpgFile
     }
@@ -177,6 +182,34 @@ class PlaygroundGalleryFragment : Fragment() {
             val newItems = mutableListOf<PlaygroundItem>()
             val processedBases = mutableSetOf<String>()
 
+            fun calculateAspectRatio(f: File): String? {
+                try {
+                    val exifInterface = ExifInterface(f.absolutePath)
+                    var width = exifInterface.getAttributeInt(ExifInterface.TAG_IMAGE_WIDTH, 0)
+                    var height = exifInterface.getAttributeInt(ExifInterface.TAG_IMAGE_LENGTH, 0)
+
+                    if (width == 0 || height == 0) {
+                        val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                        BitmapFactory.decodeFile(f.absolutePath, options)
+                        width = options.outWidth
+                        height = options.outHeight
+                    }
+
+                    if (width > 0 && height > 0) {
+                        val orientation = exifInterface.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
+                        val swapDims = orientation == ExifInterface.ORIENTATION_ROTATE_90 ||
+                                       orientation == ExifInterface.ORIENTATION_ROTATE_270 ||
+                                       orientation == ExifInterface.ORIENTATION_TRANSPOSE ||
+                                       orientation == ExifInterface.ORIENTATION_TRANSVERSE
+
+                        return if (swapDims) "$height:$width" else "$width:$height"
+                    }
+                } catch (e: Exception) {
+                    Log.w("Playground", "Failed to calculate aspect ratio for ${f.name}", e)
+                }
+                return null
+            }
+
             for (file in files) {
                 val baseName = file.nameWithoutExtension
                 if (processedBases.contains(baseName)) continue
@@ -193,14 +226,19 @@ class PlaygroundGalleryFragment : Fragment() {
                 val groupJpg = jpgMap[groupBase]
 
                 if (dng1 != null && dng2 != null && groupJpg != null) {
-                    newItems.add(PlaygroundItem.Group(groupJpg, dng1, dng2))
+                    val ratio = calculateAspectRatio(groupJpg)
+                    newItems.add(PlaygroundItem.Group(groupJpg, dng1, dng2, aspectRatio = ratio))
                     processedBases.add(groupBase)
                     processedBases.add("${groupBase}_1")
                     processedBases.add("${groupBase}_2")
                 } else if (file.extension.lowercase() == "dng") {
                      // Only add as single if it's a DNG and wasn't processed as part of a group
                      if (!processedBases.contains(baseName)) {
-                         newItems.add(PlaygroundItem.Single(file))
+                         // Check if there is an existing JPG to get aspect ratio from to be faster/consistent
+                         val singleJpg = jpgMap[baseName]
+                         val ratioFile = singleJpg ?: file
+                         val ratio = calculateAspectRatio(ratioFile)
+                         newItems.add(PlaygroundItem.Single(file, aspectRatio = ratio))
                          processedBases.add(baseName)
                      }
                 }
@@ -801,6 +839,18 @@ class PlaygroundAdapter(
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
         val item = items[position]
         val isMainSelected = selectedFiles.contains(item.mainFile)
+
+        // Apply aspect ratio to pre-allocate exact height to prevent StaggeredGridLayoutManager jumping
+        val layoutParams = holder.binding.imageViewThumbnail.layoutParams as androidx.constraintlayout.widget.ConstraintLayout.LayoutParams
+        if (item.aspectRatio != null) {
+            layoutParams.dimensionRatio = item.aspectRatio
+            layoutParams.height = 0 // 0dp means match_constraint in ConstraintLayout
+        } else {
+            // Fallback for extremely rare case where we couldn't parse bounds: allow it to wrap
+            layoutParams.dimensionRatio = null
+            layoutParams.height = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.WRAP_CONTENT
+        }
+        holder.binding.imageViewThumbnail.layoutParams = layoutParams
 
         holder.binding.selectionOverlay.visibility = if (isMainSelected) View.VISIBLE else View.GONE
         holder.binding.iconSelected.visibility = if (isMainSelected) View.VISIBLE else View.GONE
