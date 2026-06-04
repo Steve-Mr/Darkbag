@@ -119,6 +119,7 @@
                 app:layout_constraintStart_toStartOf="@id/view_finder" />
 
             <!-- Unified Controls Hub (Zoom & Physical Lenses) moved inside stage -->
+            <!-- Floating Toolbar is managed at Activity level -->
             <LinearLayout
                 android:id="@+id/lensControlRow"
                 android:layout_width="wrap_content"
@@ -180,7 +181,9 @@
                     </HorizontalScrollView>
                 </com.google.android.material.card.MaterialCardView>
             </LinearLayout>
-</androidx.constraintlayout.widget.ConstraintLayout>
+
+        </androidx.constraintlayout.widget.ConstraintLayout>
 
     </com.google.android.material.card.MaterialCardView>
+
 </androidx.constraintlayout.widget.ConstraintLayout>

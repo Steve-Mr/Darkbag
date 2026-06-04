@@ -813,21 +813,7 @@ class CameraFragment : Fragment() {
                 )
             }
         }
-        updateLiveLut()
-
-        view?.let {
-            val navController = androidx.navigation.Navigation.findNavController(requireActivity(), R.id.fragment_container)
-            top.maary.darkbag.utils.FloatingToolbarManager.setup(
-                requireContext(),
-                it.findViewById(R.id.floating_toolbar),
-                it.findViewById(R.id.floating_toolbar_button_camera),
-                it.findViewById(R.id.floating_toolbar_button_playground),
-                navController,
-                navController.currentDestination?.id ?: R.id.camera_fragment
-            )
-        }
-
-        // Ensure LUT is loaded
+        updateLiveLut() // Ensure LUT is loaded
     }
 
     private var bindJob: kotlinx.coroutines.Job? = null

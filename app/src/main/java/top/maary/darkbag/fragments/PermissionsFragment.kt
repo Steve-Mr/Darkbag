@@ -25,14 +25,11 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
-import android.content.Intent
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.navigation.Navigation
-import top.maary.darkbag.MainActivity
 import top.maary.darkbag.R
-import top.maary.darkbag.utils.ShareUtils
 import kotlinx.coroutines.launch
 
 private var PERMISSIONS_REQUIRED = arrayOf(Manifest.permission.CAMERA)
@@ -62,56 +59,13 @@ class PermissionsFragment : Fragment() {
     }
 
     private fun routeStartup() {
-        lifecycleScope.launch {
-            lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-                val intent = requireActivity().intent
-                val navController = Navigation.findNavController(requireActivity(), R.id.fragment_container)
-
-                // Clear the intent action so we don't process it again on recreation
-                val action = intent.action
-
-                if (action == Intent.ACTION_SEND || action == Intent.ACTION_SEND_MULTIPLE) {
-                    val paths = ShareUtils.processShareIntent(requireContext(), intent)
-                    if (paths.isNotEmpty()) {
-                        if (paths.size == 1) {
-                            val bundle = Bundle().apply {
-                                putStringArray("playground_dng_paths", paths.toTypedArray())
-                            }
-                            navController.navigate(R.id.action_permissions_to_playground_viewer, bundle)
-                        } else {
-                            navController.navigate(PermissionsFragmentDirections.actionPermissionsToPlaygroundGallery())
-                        }
-                        intent.action = null
-                        return@repeatOnLifecycle
-                    }
-                }
-
-                intent.action = null
-                when (intent.getStringExtra(MainActivity.SHORTCUT_EXTRA_KEY)) {
-                    MainActivity.SHORTCUT_VALUE_SETTINGS -> {
-                        navController.navigate(PermissionsFragmentDirections.actionPermissionsToSettings())
-                        return@repeatOnLifecycle
-                    }
-                    MainActivity.SHORTCUT_VALUE_PLAYGROUND -> {
-                        navController.navigate(PermissionsFragmentDirections.actionPermissionsToPlaygroundGallery())
-                        return@repeatOnLifecycle
-                    }
-                    MainActivity.SHORTCUT_VALUE_CAMERA -> {
-                        navController.navigate(PermissionsFragmentDirections.actionPermissionsToCamera())
-                        return@repeatOnLifecycle
-                    }
-                }
-
-                // If no specific intent, check default startup page preference
-                val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-                val defaultStartup = prefs.getString(SettingsFragment.KEY_DEFAULT_STARTUP, SettingsFragment.STARTUP_CAMERA)
-
-                if (defaultStartup == SettingsFragment.STARTUP_PLAYGROUND) {
-                    navController.navigate(PermissionsFragmentDirections.actionPermissionsToPlaygroundGallery())
-                } else {
-                    navController.navigate(PermissionsFragmentDirections.actionPermissionsToCamera())
-                }
-            }
+        val prefs = requireContext().getSharedPreferences(top.maary.darkbag.fragments.SettingsFragment.PREFS_NAME, android.content.Context.MODE_PRIVATE)
+        val defaultStartup = prefs.getString(top.maary.darkbag.fragments.SettingsFragment.KEY_DEFAULT_STARTUP, top.maary.darkbag.fragments.SettingsFragment.STARTUP_CAMERA)
+        val navController = androidx.navigation.Navigation.findNavController(requireActivity(), R.id.fragment_container)
+        if (defaultStartup == top.maary.darkbag.fragments.SettingsFragment.STARTUP_PLAYGROUND) {
+            navController.navigate(PermissionsFragmentDirections.actionPermissionsToPlaygroundGallery())
+        } else {
+            navController.navigate(PermissionsFragmentDirections.actionPermissionsToCamera())
         }
     }
 

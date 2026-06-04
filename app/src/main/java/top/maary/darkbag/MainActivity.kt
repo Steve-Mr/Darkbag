@@ -22,11 +22,19 @@ import android.os.Bundle
 import android.view.KeyEvent
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
-import androidx.lifecycle.lifecycleScope
 import androidx.navigation.fragment.NavHostFragment
 import top.maary.darkbag.databinding.ActivityMainBinding
-import top.maary.darkbag.utils.ShareUtils
+import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
+import top.maary.darkbag.utils.ShareUtils
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.updateLayoutParams
+import android.view.ViewGroup.MarginLayoutParams
+import android.view.View
+import android.content.Context
+import com.google.android.material.button.MaterialButton
+import top.maary.darkbag.fragments.SettingsFragment
 import com.google.android.material.color.DynamicColors
 
 const val KEY_EVENT_ACTION = "key_event_action"
@@ -47,65 +55,78 @@ class MainActivity : AppCompatActivity() {
         activityMainBinding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(activityMainBinding.root)
 
-        handleIntent(intent)
+        setupToolbar()
+
+        activityMainBinding.root.post {
+            handleIntent(intent)
+        }
     }
 
-    override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(intent)
-        handleIntent(intent)
-    }
 
-    private fun handleIntent(intent: Intent) {
-        // PermissionsFragment will handle the initial routing for shortcuts and share intents
-        // if this is the first launch. This handleIntent is primarily for onNewIntent
-        // when the app is already running.
+    private fun setupToolbar() {
         val navHostFragment = supportFragmentManager.findFragmentById(R.id.fragment_container) as? NavHostFragment
         val navController = navHostFragment?.navController ?: return
 
+        val toolbarLayout = findViewById<View>(R.id.floating_toolbar)
+        val btnCamera = findViewById<MaterialButton>(R.id.floating_toolbar_button_camera)
+        val btnPlayground = findViewById<MaterialButton>(R.id.floating_toolbar_button_playground)
 
+        navController.addOnDestinationChangedListener { _, destination, _ ->
+            val prefs = getSharedPreferences(top.maary.darkbag.fragments.SettingsFragment.PREFS_NAME, android.content.Context.MODE_PRIVATE)
+            val showToolbar = prefs.getBoolean(top.maary.darkbag.fragments.SettingsFragment.KEY_SHOW_FLOATING_TOOLBAR, true)
+            val enableCamera = prefs.getBoolean(top.maary.darkbag.fragments.SettingsFragment.KEY_ENABLE_CAMERA, true)
+            val enablePlayground = prefs.getBoolean(top.maary.darkbag.fragments.SettingsFragment.KEY_ENABLE_PLAYGROUND, true)
 
-        if (intent.action == Intent.ACTION_SEND || intent.action == Intent.ACTION_SEND_MULTIPLE) {
-            lifecycleScope.launch {
-                val paths = top.maary.darkbag.utils.ShareUtils.processShareIntent(this@MainActivity, intent)
-                if (paths.isNotEmpty()) {
-                    if (paths.size == 1) {
-                        val bundle = android.os.Bundle().apply {
-                            putStringArray("playground_dng_paths", paths.toTypedArray())
-                        }
-                        navController.navigate(R.id.playground_viewer_fragment, bundle)
-                    } else {
-                        if (navController.currentDestination?.id != R.id.playground_gallery_fragment) {
-                            navController.navigate(R.id.playground_gallery_fragment)
-                        }
+            btnCamera?.visibility = if (enableCamera) View.VISIBLE else View.GONE
+            btnPlayground?.visibility = if (enablePlayground) View.VISIBLE else View.GONE
+
+            val isTargetFragment = destination.id == R.id.camera_fragment || destination.id == R.id.playground_gallery_fragment
+
+            if (!showToolbar || (!enableCamera && !enablePlayground) || !isTargetFragment) {
+                toolbarLayout?.visibility = View.GONE
+                return@addOnDestinationChangedListener
+            }
+
+            toolbarLayout?.visibility = View.VISIBLE
+
+            toolbarLayout?.let {
+                ViewCompat.setOnApplyWindowInsetsListener(it) { view, insets ->
+                    val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+                    view.updateLayoutParams<MarginLayoutParams> {
+                        val baseMargin = (16 * view.context.resources.displayMetrics.density).toInt()
+                        bottomMargin = baseMargin + systemBars.bottom
                     }
+                    insets
                 }
-                intent.action = null // Prevent re-triggering
             }
-            return
-        }
 
-        // Handle Shortcuts
-        when (intent.getStringExtra(SHORTCUT_EXTRA_KEY)) {
-            SHORTCUT_VALUE_SETTINGS -> {
-                if (navController.currentDestination?.id != R.id.settings_fragment) {
-                    navController.navigate(R.id.settings_fragment)
+            btnCamera?.isChecked = destination.id == R.id.camera_fragment
+            btnPlayground?.isChecked = destination.id == R.id.playground_gallery_fragment
+
+            btnCamera?.setOnClickListener {
+                if (destination.id == R.id.camera_fragment) {
+                    btnCamera.isChecked = true
+                } else {
+                    navController.navigate(R.id.camera_fragment, null, androidx.navigation.NavOptions.Builder()
+                        .setPopUpTo(R.id.nav_graph, true)
+                        .build())
                 }
-                return
             }
-            SHORTCUT_VALUE_PLAYGROUND -> {
-                if (navController.currentDestination?.id != R.id.playground_gallery_fragment) {
-                    navController.navigate(R.id.playground_gallery_fragment)
+
+            btnPlayground?.setOnClickListener {
+                if (destination.id == R.id.playground_gallery_fragment) {
+                    btnPlayground.isChecked = true
+                } else {
+                    navController.navigate(R.id.playground_gallery_fragment, null, androidx.navigation.NavOptions.Builder()
+                        .setPopUpTo(R.id.nav_graph, true)
+                        .build())
                 }
-                return
-            }
-            SHORTCUT_VALUE_CAMERA -> {
-                if (navController.currentDestination?.id != R.id.camera_fragment) {
-                    navController.navigate(R.id.camera_fragment)
-                }
-                return
             }
         }
     }
+
+
+
 
     override fun onResume() {
         super.onResume()
@@ -129,6 +150,65 @@ class MainActivity : AppCompatActivity() {
             finishAfterTransition()
         } else {
             super.onBackPressed()
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIntent(intent)
+    }
+
+    private fun handleIntent(intent: Intent?) {
+        if (intent == null) return
+        val navHostFragment = supportFragmentManager.findFragmentById(R.id.fragment_container) as? NavHostFragment
+        val navController = navHostFragment?.navController ?: return
+
+        // 1. Share Intents
+        val action = intent.action
+        if (action == Intent.ACTION_SEND || action == Intent.ACTION_SEND_MULTIPLE) {
+            lifecycleScope.launch {
+                val paths = ShareUtils.processShareIntent(this@MainActivity, intent)
+                if (paths.isNotEmpty()) {
+                    if (paths.size == 1) {
+                        val bundle = android.os.Bundle().apply {
+                            putStringArray("playground_dng_paths", paths.toTypedArray())
+                        }
+                        navController.navigate(R.id.playground_viewer_fragment, bundle)
+                    } else {
+                        if (navController.currentDestination?.id != R.id.playground_gallery_fragment) {
+                            navController.navigate(R.id.playground_gallery_fragment)
+                        }
+                    }
+                }
+                // Clear the action AFTER processing
+                intent.action = null
+            }
+            return
+        }
+
+        // 2. Shortcuts
+        val shortcut = intent.getStringExtra(SHORTCUT_EXTRA_KEY)
+        if (shortcut != null) {
+            intent.removeExtra(SHORTCUT_EXTRA_KEY) // Clear immediately
+            when (shortcut) {
+                SHORTCUT_VALUE_SETTINGS -> {
+                    if (navController.currentDestination?.id != R.id.settings_fragment) {
+                        navController.navigate(R.id.settings_fragment)
+                    }
+                }
+                SHORTCUT_VALUE_PLAYGROUND -> {
+                    if (navController.currentDestination?.id != R.id.playground_gallery_fragment) {
+                        navController.navigate(R.id.playground_gallery_fragment)
+                    }
+                }
+                SHORTCUT_VALUE_CAMERA -> {
+                    if (navController.currentDestination?.id != R.id.camera_fragment) {
+                        navController.navigate(R.id.camera_fragment)
+                    }
+                }
+            }
+            return
         }
     }
 
