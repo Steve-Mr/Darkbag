@@ -36,6 +36,8 @@ import top.maary.darkbag.databinding.ActivityMainBinding
 import top.maary.darkbag.fragments.SettingsFragment
 import top.maary.darkbag.utils.ShareUtils
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import com.google.android.material.color.DynamicColors
 
 const val KEY_EVENT_ACTION = "key_event_action"
@@ -48,6 +50,12 @@ const val KEY_EVENT_EXTRA = "key_event_extra"
 class MainActivity : AppCompatActivity() {
 
     private lateinit var activityMainBinding: ActivityMainBinding
+    private var toolbarHeightWithInsets = 0
+    private var currentDestId = -1
+
+    // State flow to broadcast the toolbar's effective height (including bottom margin) to fragments that need it for padding (like PlaygroundGalleryFragment)
+    private val _toolbarHeightFlow = MutableStateFlow(0)
+    val toolbarHeightFlow: StateFlow<Int> = _toolbarHeightFlow
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
@@ -75,12 +83,23 @@ class MainActivity : AppCompatActivity() {
                 val baseMargin = (16 * view.context.resources.displayMetrics.density).toInt()
                 bottomMargin = baseMargin + systemBars.bottom
             }
+
+            // Wait for next layout pass to measure actual height
+            view.post {
+                if (view.visibility == View.VISIBLE) {
+                    val lp = view.layoutParams as MarginLayoutParams
+                    toolbarHeightWithInsets = view.height + lp.topMargin + lp.bottomMargin
+                } else {
+                    toolbarHeightWithInsets = 0
+                }
+                _toolbarHeightFlow.value = toolbarHeightWithInsets
+                applyContainerMargins()
+            }
             insets
         }
 
         btnCamera.setOnClickListener {
-            val currentDestinationId = navController.currentDestination?.id
-            if (currentDestinationId == R.id.camera_fragment) {
+            if (currentDestId == R.id.camera_fragment) {
                 btnCamera.isChecked = true
             } else {
                 navController.navigate(R.id.camera_fragment, null, NavOptions.Builder()
@@ -90,8 +109,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         btnPlayground.setOnClickListener {
-            val currentDestinationId = navController.currentDestination?.id
-            if (currentDestinationId == R.id.playground_gallery_fragment) {
+            if (currentDestId == R.id.playground_gallery_fragment) {
                 btnPlayground.isChecked = true
             } else {
                 navController.navigate(R.id.playground_gallery_fragment, null, NavOptions.Builder()
@@ -101,11 +119,12 @@ class MainActivity : AppCompatActivity() {
         }
 
         navController.addOnDestinationChangedListener { _, destination, _ ->
-            updateFloatingToolbarVisibility(destination.id)
+            currentDestId = destination.id
+            updateFloatingToolbarVisibility()
         }
     }
 
-    private fun updateFloatingToolbarVisibility(currentDestinationId: Int) {
+    private fun updateFloatingToolbarVisibility() {
         val prefs = getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
         val showToolbar = prefs.getBoolean(SettingsFragment.KEY_SHOW_FLOATING_TOOLBAR, true)
         val enableCamera = prefs.getBoolean(SettingsFragment.KEY_ENABLE_CAMERA, true)
@@ -119,17 +138,43 @@ class MainActivity : AppCompatActivity() {
         btnPlayground.visibility = if (enablePlayground) View.VISIBLE else View.GONE
 
         // Only show toolbar on Camera and Playground Gallery fragments
-        val isAllowedDestination = currentDestinationId == R.id.camera_fragment ||
-                                   currentDestinationId == R.id.playground_gallery_fragment
+        val isAllowedDestination = currentDestId == R.id.camera_fragment ||
+                                   currentDestId == R.id.playground_gallery_fragment
 
         if (!showToolbar || !enableCamera || !enablePlayground || !isAllowedDestination) {
             toolbarLayout.visibility = View.GONE
+            toolbarHeightWithInsets = 0
         } else {
             toolbarLayout.visibility = View.VISIBLE
+            // Recalculate if it just became visible
+            toolbarLayout.post {
+                if (toolbarLayout.visibility == View.VISIBLE) {
+                     val lp = toolbarLayout.layoutParams as MarginLayoutParams
+                     toolbarHeightWithInsets = toolbarLayout.height + lp.topMargin + lp.bottomMargin
+                }
+                _toolbarHeightFlow.value = toolbarHeightWithInsets
+                applyContainerMargins()
+            }
         }
 
-        btnCamera.isChecked = currentDestinationId == R.id.camera_fragment
-        btnPlayground.isChecked = currentDestinationId == R.id.playground_gallery_fragment
+        _toolbarHeightFlow.value = toolbarHeightWithInsets
+        applyContainerMargins()
+
+        btnCamera.isChecked = currentDestId == R.id.camera_fragment
+        btnPlayground.isChecked = currentDestId == R.id.playground_gallery_fragment
+    }
+
+    private fun applyContainerMargins() {
+        val fragmentContainer = activityMainBinding.fragmentContainer
+        fragmentContainer.updateLayoutParams<MarginLayoutParams> {
+            if (currentDestId == R.id.camera_fragment) {
+                // Squeeze NavHost for CameraFragment
+                bottomMargin = toolbarHeightWithInsets
+            } else {
+                // Full screen for Playground and others
+                bottomMargin = 0
+            }
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -138,13 +183,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun handleIntent(intent: Intent) {
-        // PermissionsFragment will handle the initial routing for shortcuts and share intents
-        // if this is the first launch. This handleIntent is primarily for onNewIntent
-        // when the app is already running.
         val navHostFragment = supportFragmentManager.findFragmentById(R.id.fragment_container) as? NavHostFragment
         val navController = navHostFragment?.navController ?: return
-
-
 
         if (intent.action == Intent.ACTION_SEND || intent.action == Intent.ACTION_SEND_MULTIPLE) {
             lifecycleScope.launch {
@@ -166,7 +206,6 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        // Handle Shortcuts
         when (intent.getStringExtra(SHORTCUT_EXTRA_KEY)) {
             SHORTCUT_VALUE_SETTINGS -> {
                 if (navController.currentDestination?.id != R.id.settings_fragment) {
@@ -191,14 +230,9 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        // Update visibility in case settings changed
-        val navHostFragment = supportFragmentManager.findFragmentById(R.id.fragment_container) as? NavHostFragment
-        navHostFragment?.navController?.currentDestination?.id?.let {
-            updateFloatingToolbarVisibility(it)
-        }
+        updateFloatingToolbarVisibility()
     }
 
-    /** When key down event is triggered, relay it via local flow so fragments can handle it */
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
         return when (keyCode) {
             KeyEvent.KEYCODE_VOLUME_DOWN -> {
@@ -211,8 +245,6 @@ class MainActivity : AppCompatActivity() {
 
     override fun onBackPressed() {
         if (Build.VERSION.SDK_INT == Build.VERSION_CODES.Q) {
-            // Workaround for Android Q memory leak issue in IRequestFinishCallback$Stub.
-            // (https://issuetracker.google.com/issues/139738913)
             finishAfterTransition()
         } else {
             super.onBackPressed()

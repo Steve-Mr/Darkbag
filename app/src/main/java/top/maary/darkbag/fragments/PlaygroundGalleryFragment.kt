@@ -2,6 +2,8 @@ package top.maary.darkbag.fragments
 
 import android.net.Uri
 import android.os.Bundle
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 import android.provider.OpenableColumns
 import android.view.LayoutInflater
 import android.view.View
@@ -78,6 +80,21 @@ class PlaygroundGalleryFragment : Fragment() {
         savedInstanceState: Bundle?
     ): View {
         _binding = FragmentPlaygroundGalleryBinding.inflate(inflater, container, false)
+
+        // Observe toolbar height for dynamic padding
+        val mainActivity = activity as? top.maary.darkbag.MainActivity
+        mainActivity?.let {
+            viewLifecycleOwner.lifecycleScope.launch {
+                it.toolbarHeightFlow.collect { height ->
+                    binding.recyclerView.setPadding(
+                        binding.recyclerView.paddingLeft,
+                        binding.recyclerView.paddingTop,
+                        binding.recyclerView.paddingRight,
+                        height + 16 // 16px extra clearance
+                    )
+                }
+            }
+        }
         return binding.root
     }
 
@@ -129,6 +146,19 @@ class PlaygroundGalleryFragment : Fragment() {
 
         binding.recyclerView.layoutManager = StaggeredGridLayoutManager(2, StaggeredGridLayoutManager.VERTICAL)
         binding.recyclerView.adapter = adapter
+        val mainActivity = activity as? top.maary.darkbag.MainActivity
+        mainActivity?.let {
+            viewLifecycleOwner.lifecycleScope.launch {
+                it.toolbarHeightFlow.collect { height ->
+                    binding.recyclerView.setPadding(
+                        binding.recyclerView.paddingLeft,
+                        binding.recyclerView.paddingTop,
+                        binding.recyclerView.paddingRight,
+                        height + 16
+                    )
+                }
+            }
+        }
 
         binding.fabAdd.setOnClickListener {
             importDngLauncher.launch("image/x-adobe-dng")
