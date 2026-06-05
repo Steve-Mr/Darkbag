@@ -309,7 +309,8 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
                             baseName = newBaseName,
                             dngUri1 = newDngUri1,
                             dngUri2 = newDngUri2,
-                            hfLayout = finalConfig.hfLayout
+                            hfLayout = finalConfig.hfLayout,
+                            lastModified = System.currentTimeMillis()
                         )
                         adapter.updateGroups(currentList.toList())
                     } else {
@@ -333,6 +334,7 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
                         binding.imagePager.setCurrentItem(currentIndex + 1, false)
                     }
 
+                    adapter.forceFormat(newBaseName, top.maary.darkbag.fragments.ImageViewerAdapter.FORMAT_JPG)
                     updateControlsVisibility()
                 }
 
