@@ -805,6 +805,37 @@ class PlaygroundAdapter(
 
                 ensureActive()
 
+                // Fix orientation issues for extracted thumbnails or downsampled decodes
+                if (decodedBitmap != null) {
+                    val orientation = try {
+                        ExifInterface(file.absolutePath).getAttributeInt(
+                            ExifInterface.TAG_ORIENTATION,
+                            ExifInterface.ORIENTATION_NORMAL
+                        )
+                    } catch (e: Exception) {
+                        ExifInterface.ORIENTATION_NORMAL
+                    }
+
+                    val rotationDegrees = when (orientation) {
+                        ExifInterface.ORIENTATION_ROTATE_90 -> 90f
+                        ExifInterface.ORIENTATION_ROTATE_180 -> 180f
+                        ExifInterface.ORIENTATION_ROTATE_270 -> 270f
+                        else -> 0f
+                    }
+
+                    if (rotationDegrees != 0f) {
+                        val matrix = android.graphics.Matrix()
+                        matrix.postRotate(rotationDegrees)
+                        val rotatedBitmap = android.graphics.Bitmap.createBitmap(
+                            decodedBitmap!!, 0, 0, decodedBitmap!!.width, decodedBitmap!!.height, matrix, true
+                        )
+                        if (rotatedBitmap != decodedBitmap) {
+                            decodedBitmap!!.recycle()
+                            decodedBitmap = rotatedBitmap
+                        }
+                    }
+                }
+
                 kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
                     if (imageView.tag == currentTag) {
                         if (decodedBitmap != null) {
