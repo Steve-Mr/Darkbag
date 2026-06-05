@@ -41,6 +41,7 @@ import android.util.Log
 import androidx.exifinterface.media.ExifInterface
 import androidx.recyclerview.widget.RecyclerView
 import com.bumptech.glide.Glide
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import top.maary.darkbag.databinding.ItemPlaygroundImageBinding
 import top.maary.darkbag.utils.ImageSaver
 import java.util.UUID
@@ -48,8 +49,12 @@ import java.util.UUID
 
 sealed class PlaygroundItem {
     abstract val mainFile: File
+    abstract val aspectRatio: String?
 
-    data class Single(val file: File) : PlaygroundItem() {
+    data class Single(
+        val file: File,
+        override val aspectRatio: String? = null
+    ) : PlaygroundItem() {
         override val mainFile: File = file
     }
 
@@ -57,7 +62,8 @@ sealed class PlaygroundItem {
         val jpgFile: File,
         val dng1: File,
         val dng2: File,
-        var isExpanded: Boolean = false
+        var isExpanded: Boolean = false,
+        override val aspectRatio: String? = null
     ) : PlaygroundItem() {
         override val mainFile: File = jpgFile
     }
@@ -188,6 +194,62 @@ class PlaygroundGalleryFragment : Fragment() {
             }
         }
 
+        binding.btnDisband.setOnClickListener {
+            val targets = selectedFiles.mapNotNull { file ->
+                val item = items.find { it is PlaygroundItem.Group && it.jpgFile == file }
+                if (item is PlaygroundItem.Group) item.jpgFile else null
+            }
+            viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
+                targets.forEach { it.delete() }
+                withContext(Dispatchers.Main) {
+                    clearSelectionAndReload()
+                }
+            }
+        }
+
+        binding.btnDelete.setOnClickListener {
+            MaterialAlertDialogBuilder(requireContext())
+                .setTitle(R.string.playground_delete_title)
+                .setMessage(R.string.playground_delete_message)
+                .setPositiveButton(R.string.playground_btn_delete) { _, _ ->
+                    val filesToDelete = mutableListOf<File>()
+                    selectedFiles.forEach { file ->
+                        val item = items.find {
+                            when (it) {
+                                is PlaygroundItem.Single -> it.file == file
+                                is PlaygroundItem.Group -> it.jpgFile == file || it.dng1 == file || it.dng2 == file
+                            }
+                        }
+
+                        when (item) {
+                            is PlaygroundItem.Single -> {
+                                filesToDelete.add(item.file)
+                            }
+                            is PlaygroundItem.Group -> {
+                                if (file == item.jpgFile) {
+                                    filesToDelete.add(item.jpgFile)
+                                    filesToDelete.add(item.dng1)
+                                    filesToDelete.add(item.dng2)
+                                } else {
+                                    filesToDelete.add(file)
+                                    filesToDelete.add(item.jpgFile)
+                                }
+                            }
+                            else -> {}
+                        }
+                    }
+
+                    viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
+                        filesToDelete.distinct().forEach { it.delete() }
+                        withContext(Dispatchers.Main) {
+                            clearSelectionAndReload()
+                        }
+                    }
+                }
+                .setNegativeButton(R.string.cancel, null)
+                .show()
+        }
+
         loadFiles()
     }
 
@@ -210,6 +272,34 @@ class PlaygroundGalleryFragment : Fragment() {
             val newItems = mutableListOf<PlaygroundItem>()
             val processedBases = mutableSetOf<String>()
 
+            fun calculateAspectRatio(f: File): String? {
+                try {
+                    val exifInterface = ExifInterface(f.absolutePath)
+                    var width = exifInterface.getAttributeInt(ExifInterface.TAG_IMAGE_WIDTH, 0)
+                    var height = exifInterface.getAttributeInt(ExifInterface.TAG_IMAGE_LENGTH, 0)
+
+                    if (width == 0 || height == 0) {
+                        val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                        BitmapFactory.decodeFile(f.absolutePath, options)
+                        width = options.outWidth
+                        height = options.outHeight
+                    }
+
+                    if (width > 0 && height > 0) {
+                        val orientation = exifInterface.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
+                        val swapDims = orientation == ExifInterface.ORIENTATION_ROTATE_90 ||
+                                       orientation == ExifInterface.ORIENTATION_ROTATE_270 ||
+                                       orientation == ExifInterface.ORIENTATION_TRANSPOSE ||
+                                       orientation == ExifInterface.ORIENTATION_TRANSVERSE
+
+                        return if (swapDims) "$height:$width" else "$width:$height"
+                    }
+                } catch (e: Exception) {
+                    Log.w("Playground", "Failed to calculate aspect ratio for ${f.name}", e)
+                }
+                return null
+            }
+
             for (file in files) {
                 val baseName = file.nameWithoutExtension
                 if (processedBases.contains(baseName)) continue
@@ -226,14 +316,19 @@ class PlaygroundGalleryFragment : Fragment() {
                 val groupJpg = jpgMap[groupBase]
 
                 if (dng1 != null && dng2 != null && groupJpg != null) {
-                    newItems.add(PlaygroundItem.Group(groupJpg, dng1, dng2))
+                    val ratio = calculateAspectRatio(groupJpg)
+                    newItems.add(PlaygroundItem.Group(groupJpg, dng1, dng2, aspectRatio = ratio))
                     processedBases.add(groupBase)
                     processedBases.add("${groupBase}_1")
                     processedBases.add("${groupBase}_2")
                 } else if (file.extension.lowercase() == "dng") {
                      // Only add as single if it's a DNG and wasn't processed as part of a group
                      if (!processedBases.contains(baseName)) {
-                         newItems.add(PlaygroundItem.Single(file))
+                         // Check if there is an existing JPG to get aspect ratio from to be faster/consistent
+                         val singleJpg = jpgMap[baseName]
+                         val ratioFile = singleJpg ?: file
+                         val ratio = calculateAspectRatio(ratioFile)
+                         newItems.add(PlaygroundItem.Single(file, aspectRatio = ratio))
                          processedBases.add(baseName)
                      }
                 }
@@ -308,12 +403,21 @@ class PlaygroundGalleryFragment : Fragment() {
     private fun updateBottomBar() {
         if (isSelectionMode) {
             binding.bottomAppBar.visibility = View.VISIBLE
-        view?.findViewById<android.view.View>(R.id.floating_toolbar)?.visibility = View.GONE
+        activity?.findViewById<android.view.View>(R.id.floating_toolbar)?.visibility = View.GONE
             binding.fabAdd.visibility = View.GONE
 
             // Only allow merge if exactly 2 individual DNGs are selected
             val allDngs = selectedFiles.all { it.extension.lowercase() == "dng" }
             binding.btnMerge.visibility = if (selectedFiles.size == 2 && allDngs) View.VISIBLE else View.GONE
+
+            // Delete button logic
+            binding.btnDelete.visibility = if (selectedFiles.isNotEmpty()) View.VISIBLE else View.GONE
+
+            // Disband button logic
+            val allGroups = selectedFiles.isNotEmpty() && selectedFiles.all { selectedFile ->
+                items.any { item -> item is PlaygroundItem.Group && item.jpgFile == selectedFile }
+            }
+            binding.btnDisband.visibility = if (allGroups) View.VISIBLE else View.GONE
 
             binding.toolbar.title = "${selectedFiles.size} selected"
         } else {
@@ -322,10 +426,29 @@ class PlaygroundGalleryFragment : Fragment() {
         val showToolbar = prefs.getBoolean(top.maary.darkbag.fragments.SettingsFragment.KEY_SHOW_FLOATING_TOOLBAR, true)
         val enableCamera = prefs.getBoolean(top.maary.darkbag.fragments.SettingsFragment.KEY_ENABLE_CAMERA, true)
         val enablePlayground = prefs.getBoolean(top.maary.darkbag.fragments.SettingsFragment.KEY_ENABLE_PLAYGROUND, true)
-        view?.findViewById<android.view.View>(R.id.floating_toolbar)?.visibility = if (showToolbar && enableCamera && enablePlayground) View.VISIBLE else View.GONE
+        activity?.findViewById<android.view.View>(R.id.floating_toolbar)?.visibility = if (showToolbar && enableCamera && enablePlayground) View.VISIBLE else View.GONE
             binding.fabAdd.visibility = View.VISIBLE
             binding.toolbar.title = "Playground"
         }
+    }
+
+    private fun clearSelectionAndReload() {
+        val oldSelections = selectedFiles.toList()
+        selectedFiles.clear()
+        isSelectionMode = false
+        oldSelections.forEach { file ->
+            val index = items.indexOfFirst { item ->
+                when (item) {
+                    is PlaygroundItem.Single -> item.file == file
+                    is PlaygroundItem.Group -> item.jpgFile == file || item.dng1 == file || item.dng2 == file
+                }
+            }
+            if (index != -1) {
+                adapter.notifyItemChanged(index, "SELECTION_CHANGED")
+            }
+        }
+        updateBottomBar()
+        loadFiles()
     }
 
     private fun openViewer(paths: List<String>, hfLayout: String? = null) {
@@ -605,6 +728,10 @@ class PlaygroundGalleryFragment : Fragment() {
                                 val oriented1 = b1?.let { top.maary.darkbag.utils.HalfFrameUtils.ensureOrientation(it, isSBS) }
                                 val oriented2 = b2?.let { top.maary.darkbag.utils.HalfFrameUtils.ensureOrientation(it, isSBS) }
 
+                                // Recycle original un-oriented bitmaps immediately to save memory
+                                if (oriented1 != b1) b1?.recycle()
+                                if (oriented2 != b2) b2?.recycle()
+
                                 val w1 = oriented1?.width ?: refW
                                 val h1 = oriented1?.height ?: refH
                                 val w2 = oriented2?.width ?: refW
@@ -614,18 +741,27 @@ class PlaygroundGalleryFragment : Fragment() {
                                 val tempB2 = oriented2 ?: android.graphics.Bitmap.createBitmap(w1, h1, android.graphics.Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.BLACK) }
 
                                 var composite = top.maary.darkbag.utils.HalfFrameUtils.composeBitmaps(tempB1, tempB2, isSBS)
-
-                                // Always perform high-res composite export for gallery selection
-                                // bypassing 'economical' mode to ensure 100% quality output.
-
-                                if (oriented1 != b1) oriented1?.recycle()
-                                if (oriented2 != b2) oriented2?.recycle()
+                                
+                                // Recycle oriented/temp bitmaps immediately after compose
                                 if (tempB1 != oriented1) tempB1.recycle()
                                 if (tempB2 != oriented2) tempB2.recycle()
+                                oriented1?.recycle()
+                                oriented2?.recycle()
+
+                                val economical = top.maary.darkbag.utils.HalfFrameManager(appContext).downsample
+                                if (economical) {
+                                    val scale = 0.707f
+                                    val scaledW = (composite.width * scale).toInt().coerceAtLeast(1)
+                                    val scaledH = (composite.height * scale).toInt().coerceAtLeast(1)
+                                    val scaled = android.graphics.Bitmap.createScaledBitmap(composite, scaledW, scaledH, true)
+                                    if (scaled != composite) {
+                                        composite.recycle()
+                                        composite = scaled
+                                    }
+                                }
 
                                 val time1 = repository.getCaptureMetadata(dngUri1)?.dateTimeOriginal ?: item.dng1.lastModified()
                                 val time2 = repository.getCaptureMetadata(dngUri2)?.dateTimeOriginal ?: item.dng2.lastModified()
-
                                 val t1 = if (config.isSwapped) time2 else time1
                                 val t2 = if (config.isSwapped) time1 else time2
 
@@ -641,8 +777,6 @@ class PlaygroundGalleryFragment : Fragment() {
                                 if (finalComposite != composite) {
                                     composite.recycle()
                                 }
-                                f1?.recycle()
-                                f2?.recycle()
                                 finalComposite
                             } else null
 
@@ -701,8 +835,12 @@ class PlaygroundAdapter(
 ) : RecyclerView.Adapter<PlaygroundAdapter.ViewHolder>() {
 
     class ViewHolder(val binding: ItemPlaygroundImageBinding) : RecyclerView.ViewHolder(binding.root) {
-        var job: kotlinx.coroutines.Job? = null
-        var bitmap: Bitmap? = null
+        var jobMain: kotlinx.coroutines.Job? = null
+        var bitmapMain: Bitmap? = null
+        var jobSub1: kotlinx.coroutines.Job? = null
+        var bitmapSub1: Bitmap? = null
+        var jobSub2: kotlinx.coroutines.Job? = null
+        var bitmapSub2: Bitmap? = null
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
@@ -747,7 +885,15 @@ class PlaygroundAdapter(
         }
     }
 
-    private fun loadThumbnail(context: android.content.Context, file: File, imageView: android.widget.ImageView, holder: ViewHolder) {
+    private fun loadThumbnail(
+        context: android.content.Context,
+        file: File,
+        imageView: android.widget.ImageView,
+        holder: ViewHolder,
+        isMain: Boolean,
+        isSub1: Boolean = false,
+        isSub2: Boolean = false
+    ) {
         val currentTag = file.absolutePath
         imageView.tag = currentTag
 
@@ -758,18 +904,19 @@ class PlaygroundAdapter(
         }
 
         // Otherwise, it's a DNG, decode it
-        holder.job = coroutineScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            var bitmap: Bitmap? = null
+        val job = coroutineScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            var decodedBitmap: Bitmap? = null
+            var bitmapAssigned = false
             try {
                 val exifInterface = ExifInterface(file.absolutePath)
                 if (exifInterface.hasThumbnail()) {
                     val thumbnailBytes = exifInterface.thumbnailBytes
                     if (thumbnailBytes != null) {
-                        bitmap = BitmapFactory.decodeByteArray(thumbnailBytes, 0, thumbnailBytes.size)
+                        decodedBitmap = BitmapFactory.decodeByteArray(thumbnailBytes, 0, thumbnailBytes.size)
                     }
                 }
 
-                if (bitmap == null) {
+                if (decodedBitmap == null) {
                     val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                     BitmapFactory.decodeFile(file.absolutePath, options)
                     var inSampleSize = 1
@@ -781,17 +928,51 @@ class PlaygroundAdapter(
                         this.inSampleSize = inSampleSize
                         inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888
                     }
-                    bitmap = BitmapFactory.decodeFile(file.absolutePath, decodeOpts)
+                    decodedBitmap = BitmapFactory.decodeFile(file.absolutePath, decodeOpts)
                 }
 
                 ensureActive()
 
+                // Fix orientation issues for extracted thumbnails or downsampled decodes
+                if (decodedBitmap != null) {
+                    val orientation = try {
+                        ExifInterface(file.absolutePath).getAttributeInt(
+                            ExifInterface.TAG_ORIENTATION,
+                            ExifInterface.ORIENTATION_NORMAL
+                        )
+                    } catch (e: Exception) {
+                        ExifInterface.ORIENTATION_NORMAL
+                    }
+
+                    val rotationDegrees = when (orientation) {
+                        ExifInterface.ORIENTATION_ROTATE_90 -> 90f
+                        ExifInterface.ORIENTATION_ROTATE_180 -> 180f
+                        ExifInterface.ORIENTATION_ROTATE_270 -> 270f
+                        else -> 0f
+                    }
+
+                    if (rotationDegrees != 0f) {
+                        val matrix = android.graphics.Matrix()
+                        matrix.postRotate(rotationDegrees)
+                        val rotatedBitmap = android.graphics.Bitmap.createBitmap(
+                            decodedBitmap!!, 0, 0, decodedBitmap!!.width, decodedBitmap!!.height, matrix, true
+                        )
+                        if (rotatedBitmap != decodedBitmap) {
+                            decodedBitmap!!.recycle()
+                            decodedBitmap = rotatedBitmap
+                        }
+                    }
+                }
+
                 kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
                     if (imageView.tag == currentTag) {
-                        if (bitmap != null) {
-                            // Can't reliably keep reference for multiple views in one holder,
-                            // so we rely on Glide/ImageView to handle if we overwrite
-                            imageView.setImageBitmap(bitmap)
+                        if (decodedBitmap != null) {
+                            if (isMain) holder.bitmapMain = decodedBitmap
+                            else if (isSub1) holder.bitmapSub1 = decodedBitmap
+                            else if (isSub2) holder.bitmapSub2 = decodedBitmap
+
+                            bitmapAssigned = true
+                            imageView.setImageBitmap(decodedBitmap)
                         } else {
                             Glide.with(context).load(file).into(imageView)
                         }
@@ -802,15 +983,33 @@ class PlaygroundAdapter(
             } catch (e: Exception) {
                 Log.e("Playground", "Failed to load thumbnail for ${file.name}", e)
             } finally {
-                // If we didn't set it to view (handled by imageView internally), we'd recycle, but actually we don't want to break it if it's set.
-                // In a robust implementation, we'd cache these properly.
+                // If the coroutine was cancelled or the tag changed before setting, recycle the bitmap
+                if (decodedBitmap != null && !bitmapAssigned) {
+                    decodedBitmap?.recycle()
+                }
             }
         }
+
+        if (isMain) holder.jobMain = job
+        else if (isSub1) holder.jobSub1 = job
+        else if (isSub2) holder.jobSub2 = job
     }
 
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
         val item = items[position]
         val isMainSelected = selectedFiles.contains(item.mainFile)
+
+        // Apply aspect ratio to pre-allocate exact height to prevent StaggeredGridLayoutManager jumping
+        val layoutParams = holder.binding.imageViewThumbnail.layoutParams as androidx.constraintlayout.widget.ConstraintLayout.LayoutParams
+        if (item.aspectRatio != null) {
+            layoutParams.dimensionRatio = item.aspectRatio
+            layoutParams.height = 0 // 0dp means match_constraint in ConstraintLayout
+        } else {
+            // Fallback for extremely rare case where we couldn't parse bounds: allow it to wrap
+            layoutParams.dimensionRatio = null
+            layoutParams.height = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.WRAP_CONTENT
+        }
+        holder.binding.imageViewThumbnail.layoutParams = layoutParams
 
         holder.binding.selectionOverlay.visibility = if (isMainSelected) View.VISIBLE else View.GONE
         holder.binding.iconSelected.visibility = if (isMainSelected) View.VISIBLE else View.GONE
@@ -818,9 +1017,18 @@ class PlaygroundAdapter(
         holder.binding.imageViewThumbnail.setImageDrawable(null)
         val context = holder.itemView.context
 
-        holder.job?.cancel()
-        holder.bitmap?.recycle()
-        holder.bitmap = null
+        holder.jobMain?.cancel()
+        holder.jobSub1?.cancel()
+        holder.jobSub2?.cancel()
+        holder.jobMain = null
+        holder.jobSub1 = null
+        holder.jobSub2 = null
+        holder.bitmapMain?.recycle()
+        holder.bitmapSub1?.recycle()
+        holder.bitmapSub2?.recycle()
+        holder.bitmapMain = null
+        holder.bitmapSub1 = null
+        holder.bitmapSub2 = null
 
         when (item) {
             is PlaygroundItem.Single -> {
@@ -830,22 +1038,22 @@ class PlaygroundAdapter(
                 val file = item.file
                 val jpgFile = File(file.parent, file.nameWithoutExtension + ".jpg")
                 if (jpgFile.exists()) {
-                    loadThumbnail(context, jpgFile, holder.binding.imageViewThumbnail, holder)
+                    loadThumbnail(context, jpgFile, holder.binding.imageViewThumbnail, holder, true)
                 } else {
-                    loadThumbnail(context, file, holder.binding.imageViewThumbnail, holder)
+                    loadThumbnail(context, file, holder.binding.imageViewThumbnail, holder, true)
                 }
             }
             is PlaygroundItem.Group -> {
                 holder.binding.iconLayer.visibility = View.VISIBLE
                 holder.binding.subImagesContainer.visibility = if (item.isExpanded) View.VISIBLE else View.GONE
 
-                loadThumbnail(context, item.jpgFile, holder.binding.imageViewThumbnail, holder)
+                loadThumbnail(context, item.jpgFile, holder.binding.imageViewThumbnail, holder, true)
 
                 // Load sub images
                 holder.binding.subImageView1.setImageDrawable(null)
                 holder.binding.subImageView2.setImageDrawable(null)
-                loadThumbnail(context, item.dng1, holder.binding.subImageView1, holder)
-                loadThumbnail(context, item.dng2, holder.binding.subImageView2, holder)
+                loadThumbnail(context, item.dng1, holder.binding.subImageView1, holder, isMain = false, isSub1 = true)
+                loadThumbnail(context, item.dng2, holder.binding.subImageView2, holder, isMain = false, isSub2 = true)
 
                 val isDng1Selected = selectedFiles.contains(item.dng1)
                 val isDng2Selected = selectedFiles.contains(item.dng2)
@@ -882,10 +1090,25 @@ class PlaygroundAdapter(
 
     override fun onViewRecycled(holder: ViewHolder) {
         super.onViewRecycled(holder)
-        holder.job?.cancel()
-        Glide.with(holder.itemView.context).clear(holder.binding.imageViewThumbnail)
+        val context = holder.itemView.context
+        Glide.with(context).clear(holder.binding.imageViewThumbnail)
+        Glide.with(context).clear(holder.binding.subImageView1)
+        Glide.with(context).clear(holder.binding.subImageView2)
         holder.binding.imageViewThumbnail.setImageDrawable(null)
-        holder.bitmap?.recycle()
-        holder.bitmap = null
+        holder.binding.subImageView1.setImageDrawable(null)
+        holder.binding.subImageView2.setImageDrawable(null)
+
+        holder.jobMain?.cancel()
+        holder.jobSub1?.cancel()
+        holder.jobSub2?.cancel()
+        holder.jobMain = null
+        holder.jobSub1 = null
+        holder.jobSub2 = null
+        holder.bitmapMain?.recycle()
+        holder.bitmapSub1?.recycle()
+        holder.bitmapSub2?.recycle()
+        holder.bitmapMain = null
+        holder.bitmapSub1 = null
+        holder.bitmapSub2 = null
     }
 }
