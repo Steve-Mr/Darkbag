@@ -926,7 +926,7 @@ class PlaygroundAdapter(
 
         // Use JPG directly if available
         if (file.extension.lowercase() == "jpg") {
-            Glide.with(context).load(file).into(imageView)
+            Glide.with(context).load(file).signature(com.bumptech.glide.signature.ObjectKey(file.lastModified())).into(imageView)
             return
         }
 
@@ -1001,7 +1001,7 @@ class PlaygroundAdapter(
                             bitmapAssigned = true
                             imageView.setImageBitmap(decodedBitmap)
                         } else {
-                            Glide.with(context).load(file).into(imageView)
+                            Glide.with(context).load(file).signature(com.bumptech.glide.signature.ObjectKey(file.lastModified())).into(imageView)
                         }
                     }
                 }

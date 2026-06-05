@@ -494,4 +494,20 @@ class ImageViewerAdapter(
     fun findGroupIndex(baseName: String): Int {
         return differ.currentList.indexOfFirst { it.baseName == baseName }
     }
+
+    fun forceFormat(baseName: String, format: String) {
+        if (selectedFormats[baseName] == format) return
+        selectedFormats[baseName] = format
+        val index = findGroupIndex(baseName)
+        if (index != -1) {
+            val holder = recyclerView?.findViewHolderForAdapterPosition(index) as? ViewHolder
+            if (holder != null) {
+                val group = differ.currentList[index]
+                setupButtons(holder, group)
+                loadSelectedFormat(holder, group, format)
+            } else {
+                notifyItemChanged(index)
+            }
+        }
+    }
 }
