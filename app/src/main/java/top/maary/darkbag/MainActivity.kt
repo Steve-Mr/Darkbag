@@ -120,6 +120,7 @@ class MainActivity : AppCompatActivity() {
 
         navController.addOnDestinationChangedListener { _, destination, _ ->
             currentDestId = destination.id
+            isFloatingToolbarForcedHidden = false // Reset forced hidden state on navigation
             updateFloatingToolbarVisibility()
         }
     }
