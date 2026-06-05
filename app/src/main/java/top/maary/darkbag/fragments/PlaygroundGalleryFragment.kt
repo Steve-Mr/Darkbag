@@ -413,72 +413,41 @@ class PlaygroundGalleryFragment : Fragment() {
             val appContext = ctx.applicationContext
             val repository = top.maary.darkbag.repository.ImageRepository(appContext)
 
+            val processedGroups = mutableSetOf<String>()
+
             for (file in filesToExport) {
                 try {
-                    val isJpg = file.extension.lowercase() == "jpg"
-                    if (isJpg) {
-                        val group = ImageGroup(
-                            baseName = file.nameWithoutExtension,
-                            jpgUri = Uri.fromFile(file),
-                            captureTime = file.lastModified(),
-                            lastModified = file.lastModified()
-                        )
-                        val loadedGroup = repository.loadMetadata(group)
-                        val config = loadedGroup.editConfig ?: top.maary.darkbag.models.EditConfig()
-
-                        val decodeOpts = android.graphics.BitmapFactory.Options().apply {
-                            inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888
+                    // Find which item this file belongs to
+                    val item = items.find {
+                        when (it) {
+                            is PlaygroundItem.Single -> it.file == file
+                            is PlaygroundItem.Group -> it.jpgFile == file || it.dng1 == file || it.dng2 == file
                         }
-                        val inputBitmap = android.graphics.BitmapFactory.decodeFile(file.absolutePath, decodeOpts)
+                    }
 
-                        val uri = ImageSaver.saveProcessedImage(
-                            context = appContext,
-                            inputBitmap = inputBitmap,
-                            bmpPath = null,
-                            rotationDegrees = 0,
-                            zoomFactor = config.zoomFactor,
-                            baseName = file.nameWithoutExtension,
-                            linearDngPath = null,
-                            saveJpg = true,
-                            saveRaw = false,
-                            editConfig = config,
-                            isAlreadyStitched = true,
-                            captureMetadata = repository.getCaptureMetadata(Uri.fromFile(file))
-                        )
-                        if (uri != null) successCount++
-                        inputBitmap?.recycle()
-                    } else {
-                        val baseName = if (file.nameWithoutExtension.endsWith("_1") || file.nameWithoutExtension.endsWith("_2")) {
-                            file.nameWithoutExtension.substringBeforeLast("_")
-                        } else file.nameWithoutExtension
+                    if (item == null) continue
 
-                        val dngUri = Uri.fromFile(file)
-                        // We must load from the edited JPG EXIF
-                        val jpgFile = java.io.File(file.parent, "$baseName.jpg")
-                        val jpgUri = if (jpgFile.exists()) Uri.fromFile(jpgFile) else null
+                    when (item) {
+                        is PlaygroundItem.Single -> {
+                            val baseName = item.file.nameWithoutExtension
+                            val dngUri = Uri.fromFile(item.file)
 
-                        val group = ImageGroup(
-                            baseName = baseName,
-                            dngUri = dngUri,
-                            dngUri1 = dngUri,
-                            jpgUri = jpgUri,
-                            captureTime = file.lastModified(),
-                            lastModified = file.lastModified()
-                        )
+                            val group = ImageGroup(
+                                baseName = baseName,
+                                dngUri = dngUri,
+                                captureTime = item.file.lastModified(),
+                                lastModified = item.file.lastModified()
+                            )
+                            val loadedGroup = repository.loadMetadata(group)
+                            val config = loadedGroup.editConfig ?: top.maary.darkbag.models.EditConfig()
 
-                        val loadedGroup = repository.loadMetadata(group)
-                        val config = loadedGroup.editConfig ?: top.maary.darkbag.models.EditConfig()
+                            val logIndex = top.maary.darkbag.fragments.SettingsFragment.LOG_CURVES.indexOf(config.log)
+                            val lutManager = top.maary.darkbag.utils.LutManager(appContext)
+                            val lutPath = if (config.lut != null && config.lut != "None") {
+                                java.io.File(lutManager.lutDir, config.lut).absolutePath
+                            } else null
 
-                        val logIndex = top.maary.darkbag.fragments.SettingsFragment.LOG_CURVES.indexOf(config.log)
-                        val lutManager = top.maary.darkbag.utils.LutManager(appContext)
-                        val lutPath = if (config.lut != null && config.lut != "None") {
-                            java.io.File(lutManager.lutDir, config.lut).absolutePath
-                        } else null
-
-                        val isHalfFrame = baseName != file.nameWithoutExtension
-
-                        if (!isHalfFrame) {
-                            val finalBytes = java.io.FileInputStream(file).use { it.readBytes() }
+                            val finalBytes = java.io.FileInputStream(item.file).use { it.readBytes() }
                             val orientation = try {
                                 appContext.contentResolver.openInputStream(dngUri)?.use { input ->
                                     androidx.exifinterface.media.ExifInterface(input).getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION, androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL)
@@ -537,11 +506,35 @@ class PlaygroundGalleryFragment : Fragment() {
                                 if (uri != null) successCount++
                                 tempJpgFile.delete()
                             }
-                        } else {
-                            val dngFile1 = java.io.File(file.parent, "${baseName}_1.dng")
-                            val dngFile2 = java.io.File(file.parent, "${baseName}_2.dng")
-                            val dngUri1 = if (dngFile1.exists()) Uri.fromFile(dngFile1) else null
-                            val dngUri2 = if (dngFile2.exists()) Uri.fromFile(dngFile2) else null
+                        }
+                        is PlaygroundItem.Group -> {
+                            val baseName = item.jpgFile.nameWithoutExtension
+
+                            // Prevent exporting the same group multiple times if multiple sub-files are selected
+                            if (processedGroups.contains(baseName)) continue
+                            processedGroups.add(baseName)
+
+                            val dngUri1 = Uri.fromFile(item.dng1)
+                            val dngUri2 = Uri.fromFile(item.dng2)
+                            val jpgUri = Uri.fromFile(item.jpgFile)
+
+                            val group = ImageGroup(
+                                baseName = baseName,
+                                dngUri1 = dngUri1,
+                                dngUri2 = dngUri2,
+                                jpgUri = jpgUri,
+                                captureTime = item.jpgFile.lastModified(),
+                                lastModified = item.jpgFile.lastModified()
+                            )
+
+                            val loadedGroup = repository.loadMetadata(group)
+                            val config = loadedGroup.editConfig ?: top.maary.darkbag.models.EditConfig()
+
+                            val logIndex = top.maary.darkbag.fragments.SettingsFragment.LOG_CURVES.indexOf(config.log)
+                            val lutManager = top.maary.darkbag.utils.LutManager(appContext)
+                            val lutPath = if (config.lut != null && config.lut != "None") {
+                                java.io.File(lutManager.lutDir, config.lut).absolutePath
+                            } else null
 
                             fun processFullSafe(targetFile: java.io.File?, uri: Uri?, index: Int): android.graphics.Bitmap? {
                                 if (targetFile == null || !targetFile.exists() || uri == null) return null
@@ -597,8 +590,8 @@ class PlaygroundGalleryFragment : Fragment() {
                                 return bitmap
                             }
 
-                            val f1 = processFullSafe(dngFile1, dngUri1, 0)
-                            val f2 = processFullSafe(dngFile2, dngUri2, 1)
+                            val f1 = processFullSafe(item.dng1, dngUri1, 0)
+                            val f2 = processFullSafe(item.dng2, dngUri2, 1)
 
                             val b1 = if (config.isSwapped) f2 else f1
                             val b2 = if (config.isSwapped) f1 else f2
@@ -622,25 +615,16 @@ class PlaygroundGalleryFragment : Fragment() {
 
                                 var composite = top.maary.darkbag.utils.HalfFrameUtils.composeBitmaps(tempB1, tempB2, isSBS)
 
-                                val economical = top.maary.darkbag.utils.HalfFrameManager(appContext).downsample
-                                if (economical) {
-                                    val scale = 0.707f
-                                    val scaledW = (composite.width * scale).toInt().coerceAtLeast(1)
-                                    val scaledH = (composite.height * scale).toInt().coerceAtLeast(1)
-                                    val scaled = android.graphics.Bitmap.createScaledBitmap(composite, scaledW, scaledH, true)
-                                    if (scaled != composite) {
-                                        composite.recycle()
-                                        composite = scaled
-                                    }
-                                }
+                                // Always perform high-res composite export for gallery selection
+                                // bypassing 'economical' mode to ensure 100% quality output.
 
                                 if (oriented1 != b1) oriented1?.recycle()
                                 if (oriented2 != b2) oriented2?.recycle()
                                 if (tempB1 != oriented1) tempB1.recycle()
                                 if (tempB2 != oriented2) tempB2.recycle()
 
-                                val time1 = dngUri1?.let { repository.getCaptureMetadata(it)?.dateTimeOriginal } ?: file.lastModified()
-                                val time2 = dngUri2?.let { repository.getCaptureMetadata(it)?.dateTimeOriginal } ?: file.lastModified()
+                                val time1 = repository.getCaptureMetadata(dngUri1)?.dateTimeOriginal ?: item.dng1.lastModified()
+                                val time2 = repository.getCaptureMetadata(dngUri2)?.dateTimeOriginal ?: item.dng2.lastModified()
 
                                 val t1 = if (config.isSwapped) time2 else time1
                                 val t2 = if (config.isSwapped) time1 else time2
@@ -663,7 +647,7 @@ class PlaygroundGalleryFragment : Fragment() {
                             } else null
 
                             finalCompositeBitmap?.let { bitmap ->
-                                val captureMetadata = (jpgUri ?: dngUri1 ?: dngUri)?.let { repository.getCaptureMetadata(it) }
+                                val captureMetadata = repository.getCaptureMetadata(jpgUri) ?: repository.getCaptureMetadata(dngUri1)
 
                                 val uri = ImageSaver.saveProcessedImage(
                                     context = appContext,
