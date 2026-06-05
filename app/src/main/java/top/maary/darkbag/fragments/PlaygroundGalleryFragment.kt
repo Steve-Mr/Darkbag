@@ -195,13 +195,16 @@ class PlaygroundGalleryFragment : Fragment() {
         }
 
         binding.btnDisband.setOnClickListener {
-            selectedFiles.forEach { file ->
+            val targets = selectedFiles.mapNotNull { file ->
                 val item = items.find { it is PlaygroundItem.Group && it.jpgFile == file }
-                if (item is PlaygroundItem.Group) {
-                    item.jpgFile.delete()
+                if (item is PlaygroundItem.Group) item.jpgFile else null
+            }
+            viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
+                targets.forEach { it.delete() }
+                withContext(Dispatchers.Main) {
+                    clearSelectionAndReload()
                 }
             }
-            clearSelectionAndReload()
         }
 
         binding.btnDelete.setOnClickListener {
@@ -209,6 +212,7 @@ class PlaygroundGalleryFragment : Fragment() {
                 .setTitle(R.string.playground_delete_title)
                 .setMessage(R.string.playground_delete_message)
                 .setPositiveButton(R.string.playground_btn_delete) { _, _ ->
+                    val filesToDelete = mutableListOf<File>()
                     selectedFiles.forEach { file ->
                         val item = items.find {
                             when (it) {
@@ -219,24 +223,28 @@ class PlaygroundGalleryFragment : Fragment() {
 
                         when (item) {
                             is PlaygroundItem.Single -> {
-                                item.file.delete()
+                                filesToDelete.add(item.file)
                             }
                             is PlaygroundItem.Group -> {
                                 if (file == item.jpgFile) {
-                                    // Full group deleted
-                                    item.jpgFile.delete()
-                                    item.dng1.delete()
-                                    item.dng2.delete()
+                                    filesToDelete.add(item.jpgFile)
+                                    filesToDelete.add(item.dng1)
+                                    filesToDelete.add(item.dng2)
                                 } else {
-                                    // Individual DNG deleted from group -> Delete DNG and disband (delete JPG)
-                                    file.delete()
-                                    item.jpgFile.delete()
+                                    filesToDelete.add(file)
+                                    filesToDelete.add(item.jpgFile)
                                 }
                             }
                             else -> {}
                         }
                     }
-                    clearSelectionAndReload()
+
+                    viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
+                        filesToDelete.distinct().forEach { it.delete() }
+                        withContext(Dispatchers.Main) {
+                            clearSelectionAndReload()
+                        }
+                    }
                 }
                 .setNegativeButton(R.string.cancel, null)
                 .show()
