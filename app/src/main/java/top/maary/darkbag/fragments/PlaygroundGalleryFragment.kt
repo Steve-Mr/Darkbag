@@ -346,7 +346,7 @@ class PlaygroundGalleryFragment : Fragment() {
     private fun updateBottomBar() {
         if (isSelectionMode) {
             binding.bottomAppBar.visibility = View.VISIBLE
-        view?.findViewById<android.view.View>(R.id.floating_toolbar)?.visibility = View.GONE
+        activity?.findViewById<android.view.View>(R.id.floating_toolbar)?.visibility = View.GONE
             binding.fabAdd.visibility = View.GONE
 
             // Only allow merge if exactly 2 individual DNGs are selected
@@ -360,7 +360,7 @@ class PlaygroundGalleryFragment : Fragment() {
         val showToolbar = prefs.getBoolean(top.maary.darkbag.fragments.SettingsFragment.KEY_SHOW_FLOATING_TOOLBAR, true)
         val enableCamera = prefs.getBoolean(top.maary.darkbag.fragments.SettingsFragment.KEY_ENABLE_CAMERA, true)
         val enablePlayground = prefs.getBoolean(top.maary.darkbag.fragments.SettingsFragment.KEY_ENABLE_PLAYGROUND, true)
-        view?.findViewById<android.view.View>(R.id.floating_toolbar)?.visibility = if (showToolbar && enableCamera && enablePlayground) View.VISIBLE else View.GONE
+        activity?.findViewById<android.view.View>(R.id.floating_toolbar)?.visibility = if (showToolbar && enableCamera && enablePlayground) View.VISIBLE else View.GONE
             binding.fabAdd.visibility = View.VISIBLE
             binding.toolbar.title = "Playground"
         }
