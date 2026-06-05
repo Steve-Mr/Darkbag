@@ -295,7 +295,7 @@ class ImageViewerAdapter(
 
 
     private fun loadImage(holder: ViewHolder, uri: Uri, zoomFactor: Float = 1.0f, version: Long = 0L) {
-        if (holder.currentUri == uri && holder.binding.imageView.drawable != null) {
+        if (holder.currentUri == uri && holder.currentVersion == version && holder.binding.imageView.drawable != null) {
             holder.binding.loadingIndicator.visibility = View.GONE
             return
         }
@@ -496,7 +496,7 @@ class ImageViewerAdapter(
     }
 
     fun forceFormat(baseName: String, format: String) {
-        if (selectedFormats[baseName] == format) return
+
         selectedFormats[baseName] = format
         val index = findGroupIndex(baseName)
         if (index != -1) {

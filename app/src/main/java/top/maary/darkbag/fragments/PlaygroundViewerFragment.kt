@@ -313,7 +313,6 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
                             lastModified = System.currentTimeMillis()
                         )
                         adapter.updateGroups(currentList.toList())
-
                     } else {
                         val newDngUri1 = if (!currentGroup.isHalfFrame()) Uri.fromFile(File(File(appContext.filesDir, "playground_dngs"), "${newBaseName}.dng")) else Uri.fromFile(File(File(appContext.filesDir, "playground_dngs"), "${newBaseName}_1.dng"))
                         val newDngUri2 = if (currentGroup.isHalfFrame()) Uri.fromFile(File(File(appContext.filesDir, "playground_dngs"), "${newBaseName}_2.dng")) else null
@@ -332,7 +331,6 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
                         val updatedNewGroup = repository.loadMetadata(newGroup)
                         currentList.add(currentIndex + 1, updatedNewGroup)
                         adapter.updateGroups(currentList.toList())
-
                         binding.imagePager.setCurrentItem(currentIndex + 1, false)
                     }
 
