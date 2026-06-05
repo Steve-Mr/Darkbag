@@ -52,6 +52,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var activityMainBinding: ActivityMainBinding
     private var toolbarHeightWithInsets = 0
     private var currentDestId = -1
+    private var isFloatingToolbarForcedHidden = false
 
     // State flow to broadcast the toolbar's effective height (including bottom margin) to fragments that need it for padding (like PlaygroundGalleryFragment)
     private val _toolbarHeightFlow = MutableStateFlow(0)
@@ -119,6 +120,14 @@ class MainActivity : AppCompatActivity() {
 
         navController.addOnDestinationChangedListener { _, destination, _ ->
             currentDestId = destination.id
+            isFloatingToolbarForcedHidden = false // Reset forced hidden state on navigation
+            updateFloatingToolbarVisibility()
+        }
+    }
+
+    fun setFloatingToolbarForcedHidden(hidden: Boolean) {
+        if (isFloatingToolbarForcedHidden != hidden) {
+            isFloatingToolbarForcedHidden = hidden
             updateFloatingToolbarVisibility()
         }
     }
@@ -140,7 +149,7 @@ class MainActivity : AppCompatActivity() {
         val isAllowedDestination = currentDestId == R.id.camera_fragment ||
                                    currentDestId == R.id.playground_gallery_fragment
 
-        if (!showToolbar || !enableCamera || !enablePlayground || !isAllowedDestination) {
+        if (!showToolbar || !enableCamera || !enablePlayground || !isAllowedDestination || isFloatingToolbarForcedHidden) {
             toolbarLayout.visibility = View.GONE
             toolbarHeightWithInsets = 0
         } else {
