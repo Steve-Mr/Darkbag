@@ -492,7 +492,6 @@ class CameraFragment : Fragment() {
 
             lifecycleScope.launch(Dispatchers.Main) {
                 val lastModified = try {
-                    mediaStoreUtils.getFileLastModified(requireContext(), Uri.parse(filename))
                 } catch (e: Exception) {
                     0L
                 }
@@ -815,20 +814,9 @@ class CameraFragment : Fragment() {
         }
         updateLiveLut()
 
-        view?.let {
-            val navController = androidx.navigation.Navigation.findNavController(requireActivity(), R.id.fragment_container)
-            top.maary.darkbag.utils.FloatingToolbarManager.setup(
-                requireContext(),
-                it.findViewById(R.id.floating_toolbar),
-                it.findViewById(R.id.floating_toolbar_button_camera),
-                it.findViewById(R.id.floating_toolbar_button_playground),
-                navController,
-                navController.currentDestination?.id ?: R.id.camera_fragment
-            )
-        }
-
         // Ensure LUT is loaded
     }
+
 
     private var bindJob: kotlinx.coroutines.Job? = null
 
@@ -997,7 +985,7 @@ class CameraFragment : Fragment() {
                 info
             } else {
                 Log.e(TAG, "CameraX bind failed and fallback is disabled.")
-                Toast.makeText(context, "Failed to bind to selected lens", Toast.LENGTH_SHORT).show()
+                Toast.makeText(requireContext(), "Failed to bind to selected lens", Toast.LENGTH_SHORT).show()
                 return
             }
         }
@@ -1217,18 +1205,39 @@ class CameraFragment : Fragment() {
 
         // Apply WindowInsets to UI Container to avoid system bar overlap
         cameraUiContainerBinding?.root?.let { rootView ->
+            var currentBottomInset = 0
+            var currentToolbarHeight = 0
+
+            fun updateContainerPadding() {
+                rootView.updatePadding(
+                    bottom = kotlin.math.max(currentBottomInset, currentToolbarHeight)
+                )
+            }
+
+            val mainActivity = activity as? top.maary.darkbag.MainActivity
+            mainActivity?.let {
+                viewLifecycleOwner.lifecycleScope.launch {
+                    it.toolbarHeightFlow.collect { height ->
+                        currentToolbarHeight = height
+                        updateContainerPadding()
+                    }
+                }
+            }
+
             ViewCompat.setOnApplyWindowInsetsListener(rootView) { view, windowInsets ->
                 val insets = windowInsets.getInsets(
                     WindowInsetsCompat.Type.systemBars() or
                     WindowInsetsCompat.Type.displayCutout() or
                     WindowInsetsCompat.Type.mandatorySystemGestures()
                 )
+
                 view.updatePadding(
                     left = insets.left,
                     top = insets.top,
-                    right = insets.right,
-                    bottom = insets.bottom
+                    right = insets.right
                 )
+                currentBottomInset = insets.bottom
+                updateContainerPadding()
 
                 // Update Viewfinder and Lens Group constraints
                 val uiBinding = cameraUiContainerBinding
@@ -1326,7 +1335,6 @@ class CameraFragment : Fragment() {
                 halfFrameSessionStore.clearCurrentSession(deleteTempFile = true)
                 writeScopedHalfFrameStep(prefs, 0)
                 updateHalfFrameUI()
-                Toast.makeText(requireContext(), "Half-frame Reset", Toast.LENGTH_SHORT).show()
                 true
             } else {
                 false
@@ -1343,8 +1351,7 @@ class CameraFragment : Fragment() {
 
             // Check concurrency limit
             if (!processingSemaphore.tryAcquire()) {
-                Toast.makeText(
-                    requireContext(),
+                Toast.makeText(requireContext(),
                     "Processing queue full, please wait...",
                     Toast.LENGTH_SHORT
                 ).show()
@@ -2289,8 +2296,7 @@ class CameraFragment : Fragment() {
                 evRange?.let { range ->
                     currentEvIndex = (range.lower + (range.upper - range.lower) * ratio).toInt()
                     if (isManualExposure) {
-                        Toast.makeText(
-                            requireContext(),
+                        Toast.makeText(requireContext(),
                             "EV disabled in Manual Exposure",
                             Toast.LENGTH_SHORT
                         ).show()
@@ -2903,7 +2909,6 @@ class CameraFragment : Fragment() {
         // Update lastHdrPlusConfig to reflect new mode immediately for the next shot
         lastHdrPlusConfig = null
 
-        Toast.makeText(requireContext(), "HDR+ Mode: $nextMode", Toast.LENGTH_SHORT).show()
     }
 
     private fun updateLiveLut() {
@@ -3183,8 +3188,7 @@ class CameraFragment : Fragment() {
                             image.close()
                             processingSemaphore.release()
                             lifecycleScope.launch(Dispatchers.Main) {
-                                Toast.makeText(
-                                    requireContext(),
+                                Toast.makeText(requireContext(),
                                     "Memory full, photo not saved",
                                     Toast.LENGTH_SHORT
                                 ).show()
@@ -3328,8 +3332,7 @@ class CameraFragment : Fragment() {
 
                 showShutterBlackout()
 
-                Toast.makeText(
-                    requireContext(),
+                Toast.makeText(requireContext(),
                     "Capturing HDR+ Burst ($burstSize frames)...",
                     Toast.LENGTH_SHORT
                 ).show()
@@ -3341,8 +3344,7 @@ class CameraFragment : Fragment() {
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to start HDR+ burst", e)
-                Toast.makeText(
-                    requireContext(),
+                Toast.makeText(requireContext(),
                     "HDR+ setup failed: ${e.message}",
                     Toast.LENGTH_LONG
                 ).show()
@@ -3387,7 +3389,6 @@ class CameraFragment : Fragment() {
                         } catch (e: Throwable) {
                             Log.e(TAG, "Failed to add frame to burst", e)
                             lifecycleScope.launch(Dispatchers.Main) {
-                                Toast.makeText(requireContext(), "Burst failed: ${e.message}", Toast.LENGTH_SHORT).show()
                                 applyCameraControls()
                                 resetBurstUi()
                                 processingSemaphore.release()
@@ -3403,7 +3404,6 @@ class CameraFragment : Fragment() {
                     Log.e(TAG, "Burst frame ${currentFrame + 1} failed: ${exception.message}")
                     lifecycleScope.launch(Dispatchers.Main) {
                         if (isBurstActive) {
-                            Toast.makeText(requireContext(), "Burst failed at frame ${currentFrame + 1}", Toast.LENGTH_SHORT).show()
                             applyCameraControls()
                             resetBurstUi()
                             processingSemaphore.release()
@@ -3705,7 +3705,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         } else if (isHalfFrameModeEnabled && prefs.getInt(scopedHalfFrameStepKey(prefs), 0) == 1) {
                             setGalleryThumbnail(null)
                         }
-                        Toast.makeText(context, "HDR+ Saved!", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(requireContext(), "HDR+ Saved!", Toast.LENGTH_SHORT).show()
                         if (!isHalfFrameModeEnabled) {
                             hideProcessingAnimation()
                         }
@@ -3964,7 +3964,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                             updateLensUI()
                             bindCameraUseCases()
                         } else {
-                            Toast.makeText(context, "Camera hardware error: $error. Please restart the app.", Toast.LENGTH_LONG).show()
+                            Toast.makeText(requireContext(), "Camera hardware error: $error. Please restart the app.", Toast.LENGTH_LONG).show()
                         }
                     }
                 }
@@ -4256,7 +4256,6 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 delay(8000)
                 if (isBurstActive && framesCaptured < burstSize) {
                     Log.e(TAG, "Burst capture timed out! Resetting UI.")
-                    Toast.makeText(requireContext(), "Burst capture timed out", Toast.LENGTH_SHORT).show()
                     isBurstActive = false
                     processingSemaphore.release()
                     resetBurstUi()
