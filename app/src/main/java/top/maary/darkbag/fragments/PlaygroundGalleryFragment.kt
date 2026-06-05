@@ -892,6 +892,9 @@ class PlaygroundAdapter(
         holder.jobMain?.cancel()
         holder.jobSub1?.cancel()
         holder.jobSub2?.cancel()
+        holder.jobMain = null
+        holder.jobSub1 = null
+        holder.jobSub2 = null
         holder.bitmapMain?.recycle()
         holder.bitmapSub1?.recycle()
         holder.bitmapSub2?.recycle()
@@ -959,15 +962,20 @@ class PlaygroundAdapter(
 
     override fun onViewRecycled(holder: ViewHolder) {
         super.onViewRecycled(holder)
-        holder.jobMain?.cancel()
-        holder.jobSub1?.cancel()
-        holder.jobSub2?.cancel()
-        Glide.with(holder.itemView.context).clear(holder.binding.imageViewThumbnail)
-        Glide.with(holder.itemView.context).clear(holder.binding.subImageView1)
-        Glide.with(holder.itemView.context).clear(holder.binding.subImageView2)
+        val context = holder.itemView.context
+        Glide.with(context).clear(holder.binding.imageViewThumbnail)
+        Glide.with(context).clear(holder.binding.subImageView1)
+        Glide.with(context).clear(holder.binding.subImageView2)
         holder.binding.imageViewThumbnail.setImageDrawable(null)
         holder.binding.subImageView1.setImageDrawable(null)
         holder.binding.subImageView2.setImageDrawable(null)
+
+        holder.jobMain?.cancel()
+        holder.jobSub1?.cancel()
+        holder.jobSub2?.cancel()
+        holder.jobMain = null
+        holder.jobSub1 = null
+        holder.jobSub2 = null
         holder.bitmapMain?.recycle()
         holder.bitmapSub1?.recycle()
         holder.bitmapSub2?.recycle()
