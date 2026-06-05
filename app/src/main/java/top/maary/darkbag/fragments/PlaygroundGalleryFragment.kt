@@ -6,6 +6,8 @@ import top.maary.darkbag.processor.ColorProcessor
 import top.maary.darkbag.fragments.SettingsFragment
 
 import android.os.Bundle
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 import android.provider.OpenableColumns
 import android.view.LayoutInflater
 import android.view.View
@@ -22,6 +24,9 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.updatePadding
 import androidx.core.view.updateLayoutParams
 import android.view.ViewGroup.MarginLayoutParams
+import androidx.navigation.Navigation
+import com.google.android.material.button.MaterialButton
+
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.ensureActive
@@ -79,6 +84,21 @@ class PlaygroundGalleryFragment : Fragment() {
         savedInstanceState: Bundle?
     ): View {
         _binding = FragmentPlaygroundGalleryBinding.inflate(inflater, container, false)
+
+        // Observe toolbar height for dynamic padding
+        val mainActivity = activity as? top.maary.darkbag.MainActivity
+        mainActivity?.let {
+            viewLifecycleOwner.lifecycleScope.launch {
+                it.toolbarHeightFlow.collect { height ->
+                    binding.recyclerView.setPadding(
+                        binding.recyclerView.paddingLeft,
+                        binding.recyclerView.paddingTop,
+                        binding.recyclerView.paddingRight,
+                        height + 16 // 16px extra clearance
+                    )
+                }
+            }
+        }
         return binding.root
     }
 
@@ -130,6 +150,19 @@ class PlaygroundGalleryFragment : Fragment() {
 
         binding.recyclerView.layoutManager = StaggeredGridLayoutManager(2, StaggeredGridLayoutManager.VERTICAL)
         binding.recyclerView.adapter = adapter
+        val mainActivity = activity as? top.maary.darkbag.MainActivity
+        mainActivity?.let {
+            viewLifecycleOwner.lifecycleScope.launch {
+                it.toolbarHeightFlow.collect { height ->
+                    binding.recyclerView.setPadding(
+                        binding.recyclerView.paddingLeft,
+                        binding.recyclerView.paddingTop,
+                        binding.recyclerView.paddingRight,
+                        height + 16
+                    )
+                }
+            }
+        }
 
         binding.fabAdd.setOnClickListener {
             importDngLauncher.launch("image/x-adobe-dng")
@@ -275,6 +308,7 @@ class PlaygroundGalleryFragment : Fragment() {
     private fun updateBottomBar() {
         if (isSelectionMode) {
             binding.bottomAppBar.visibility = View.VISIBLE
+        view?.findViewById<android.view.View>(R.id.floating_toolbar)?.visibility = View.GONE
             binding.fabAdd.visibility = View.GONE
 
             // Only allow merge if exactly 2 individual DNGs are selected
@@ -284,6 +318,11 @@ class PlaygroundGalleryFragment : Fragment() {
             binding.toolbar.title = "${selectedFiles.size} selected"
         } else {
             binding.bottomAppBar.visibility = View.GONE
+        val prefs = requireContext().getSharedPreferences(top.maary.darkbag.fragments.SettingsFragment.PREFS_NAME, android.content.Context.MODE_PRIVATE)
+        val showToolbar = prefs.getBoolean(top.maary.darkbag.fragments.SettingsFragment.KEY_SHOW_FLOATING_TOOLBAR, true)
+        val enableCamera = prefs.getBoolean(top.maary.darkbag.fragments.SettingsFragment.KEY_ENABLE_CAMERA, true)
+        val enablePlayground = prefs.getBoolean(top.maary.darkbag.fragments.SettingsFragment.KEY_ENABLE_PLAYGROUND, true)
+        view?.findViewById<android.view.View>(R.id.floating_toolbar)?.visibility = if (showToolbar && enableCamera && enablePlayground) View.VISIBLE else View.GONE
             binding.fabAdd.visibility = View.VISIBLE
             binding.toolbar.title = "Playground"
         }
@@ -648,6 +687,12 @@ class PlaygroundGalleryFragment : Fragment() {
                 clearSelection()
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Trigger a fresh load to catch any changes from PlaygroundViewerFragment
+        loadFiles()
     }
 
     override fun onDestroyView() {
