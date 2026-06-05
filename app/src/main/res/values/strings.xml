@@ -77,4 +77,9 @@
     <string name="delete_entire_group">Delete entire group</string>
     <string name="delete_this_format_only">Delete this format only</string>
     <string name="format_raw">RAW</string>
+
+    <string name="playground_btn_delete">Delete</string>
+    <string name="playground_btn_disband">Disband</string>
+    <string name="playground_delete_title">Confirm Delete</string>
+    <string name="playground_delete_message">Are you sure you want to delete the selected items?\n\nIf a half-frame group is selected, its original DNGs will also be deleted. If a DNG from a group is deleted, the group will be disbanded automatically.</string>
 </resources>

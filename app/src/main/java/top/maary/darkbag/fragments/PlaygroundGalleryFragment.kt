@@ -41,6 +41,7 @@ import android.util.Log
 import androidx.exifinterface.media.ExifInterface
 import androidx.recyclerview.widget.RecyclerView
 import com.bumptech.glide.Glide
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import top.maary.darkbag.databinding.ItemPlaygroundImageBinding
 import top.maary.darkbag.utils.ImageSaver
 import java.util.UUID
@@ -191,6 +192,54 @@ class PlaygroundGalleryFragment : Fragment() {
             } else {
                 Toast.makeText(requireContext(), "Select exactly 2 images to merge", Toast.LENGTH_SHORT).show()
             }
+        }
+
+        binding.btnDisband.setOnClickListener {
+            selectedFiles.forEach { file ->
+                val item = items.find { it is PlaygroundItem.Group && it.jpgFile == file }
+                if (item is PlaygroundItem.Group) {
+                    item.jpgFile.delete()
+                }
+            }
+            clearSelectionAndReload()
+        }
+
+        binding.btnDelete.setOnClickListener {
+            MaterialAlertDialogBuilder(requireContext())
+                .setTitle(R.string.playground_delete_title)
+                .setMessage(R.string.playground_delete_message)
+                .setPositiveButton(R.string.playground_btn_delete) { _, _ ->
+                    selectedFiles.forEach { file ->
+                        val item = items.find {
+                            when (it) {
+                                is PlaygroundItem.Single -> it.file == file
+                                is PlaygroundItem.Group -> it.jpgFile == file || it.dng1 == file || it.dng2 == file
+                            }
+                        }
+
+                        when (item) {
+                            is PlaygroundItem.Single -> {
+                                item.file.delete()
+                            }
+                            is PlaygroundItem.Group -> {
+                                if (file == item.jpgFile) {
+                                    // Full group deleted
+                                    item.jpgFile.delete()
+                                    item.dng1.delete()
+                                    item.dng2.delete()
+                                } else {
+                                    // Individual DNG deleted from group -> Delete DNG and disband (delete JPG)
+                                    file.delete()
+                                    item.jpgFile.delete()
+                                }
+                            }
+                            else -> {}
+                        }
+                    }
+                    clearSelectionAndReload()
+                }
+                .setNegativeButton(R.string.cancel, null)
+                .show()
         }
 
         loadFiles()
@@ -353,6 +402,15 @@ class PlaygroundGalleryFragment : Fragment() {
             val allDngs = selectedFiles.all { it.extension.lowercase() == "dng" }
             binding.btnMerge.visibility = if (selectedFiles.size == 2 && allDngs) View.VISIBLE else View.GONE
 
+            // Delete button logic
+            binding.btnDelete.visibility = if (selectedFiles.isNotEmpty()) View.VISIBLE else View.GONE
+
+            // Disband button logic
+            val allGroups = selectedFiles.isNotEmpty() && selectedFiles.all { selectedFile ->
+                items.any { item -> item is PlaygroundItem.Group && item.jpgFile == selectedFile }
+            }
+            binding.btnDisband.visibility = if (allGroups) View.VISIBLE else View.GONE
+
             binding.toolbar.title = "${selectedFiles.size} selected"
         } else {
             binding.bottomAppBar.visibility = View.GONE
@@ -364,6 +422,25 @@ class PlaygroundGalleryFragment : Fragment() {
             binding.fabAdd.visibility = View.VISIBLE
             binding.toolbar.title = "Playground"
         }
+    }
+
+    private fun clearSelectionAndReload() {
+        val oldSelections = selectedFiles.toList()
+        selectedFiles.clear()
+        isSelectionMode = false
+        oldSelections.forEach { file ->
+            val index = items.indexOfFirst { item ->
+                when (item) {
+                    is PlaygroundItem.Single -> item.file == file
+                    is PlaygroundItem.Group -> item.jpgFile == file || item.dng1 == file || item.dng2 == file
+                }
+            }
+            if (index != -1) {
+                adapter.notifyItemChanged(index, "SELECTION_CHANGED")
+            }
+        }
+        updateBottomBar()
+        loadFiles()
     }
 
     private fun openViewer(paths: List<String>, hfLayout: String? = null) {
