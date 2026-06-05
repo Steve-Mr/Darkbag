@@ -536,12 +536,13 @@ class PlaygroundGalleryFragment : Fragment() {
             val appContext = ctx.applicationContext
             val repository = top.maary.darkbag.repository.ImageRepository(appContext)
 
+            val itemsSnapshot = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { items.toList() }
             val processedGroups = mutableSetOf<String>()
 
             for (file in filesToExport) {
                 try {
                     // Find which item this file belongs to
-                    val item = items.find {
+                    val item = itemsSnapshot.find {
                         when (it) {
                             is PlaygroundItem.Single -> it.file == file
                             is PlaygroundItem.Group -> it.jpgFile == file || it.dng1 == file || it.dng2 == file
@@ -555,9 +556,13 @@ class PlaygroundGalleryFragment : Fragment() {
                             val baseName = item.file.nameWithoutExtension
                             val dngUri = Uri.fromFile(item.file)
 
+                            val jpgFile = java.io.File(item.file.parent, "$baseName.jpg")
+                            val jpgUri = if (jpgFile.exists()) Uri.fromFile(jpgFile) else null
+
                             val group = ImageGroup(
                                 baseName = baseName,
                                 dngUri = dngUri,
+                                jpgUri = jpgUri,
                                 captureTime = item.file.lastModified(),
                                 lastModified = item.file.lastModified()
                             )
@@ -570,64 +575,90 @@ class PlaygroundGalleryFragment : Fragment() {
                                 java.io.File(lutManager.lutDir, config.lut).absolutePath
                             } else null
 
-                            val finalBytes = java.io.FileInputStream(item.file).use { it.readBytes() }
-                            val orientation = try {
-                                appContext.contentResolver.openInputStream(dngUri)?.use { input ->
-                                    androidx.exifinterface.media.ExifInterface(input).getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION, androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL)
-                                } ?: androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL
-                            } catch (e: Exception) { androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL }
+                            if (item.file.extension.lowercase() == "jpg") {
+                                // If the user selected an already processed JPG, we just decode and save it
+                                // rather than trying to process it as a RAW byte array
+                                val decodeOpts = android.graphics.BitmapFactory.Options().apply {
+                                    inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888
+                                }
+                                val inputBitmap = android.graphics.BitmapFactory.decodeFile(item.file.absolutePath, decodeOpts)
 
-                            val rotDegrees = when(orientation) {
-                                androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90 -> 90
-                                androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_180 -> 180
-                                androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270 -> 270
-                                else -> 0
-                            }
-
-                            val adj = config.adjustments?.get(0) ?: top.maary.darkbag.models.BasicAdjustments(config.exposure, config.contrast, config.saturation, config.highlights, config.shadows, config.whites, config.blacks, config.digitalGain)
-                            val meta = repository.getCaptureMetadata(dngUri)
-
-                            val tempJpgFile = java.io.File(appContext.cacheDir, "temp_export_${System.currentTimeMillis()}.jpg")
-
-                            top.maary.darkbag.processor.ColorProcessor.processRaw(
-                                dngData = finalBytes,
-                                targetLog = logIndex,
-                                lutPath = lutPath,
-                                exposure = adj.exposure,
-                                contrast = adj.contrast,
-                                saturation = adj.saturation,
-                                highlights = adj.highlights,
-                                shadows = adj.shadows,
-                                whites = adj.whites,
-                                blacks = adj.blacks,
-                                digitalGain = adj.digitalGain,
-                                outputJpgPath = tempJpgFile.absolutePath,
-                                useGpu = false,
-                                orientation = rotDegrees,
-                                mirror = false,
-                                outputBitmap = null,
-                                downsampleFactor = 1,
-                                zoomFactor = config.zoomFactor,
-                                metadata = meta
-                            )
-
-                            if (tempJpgFile.exists()) {
                                 val uri = ImageSaver.saveProcessedImage(
                                     context = appContext,
-                                    inputBitmap = null,
-                                    bmpPath = tempJpgFile.absolutePath,
+                                    inputBitmap = inputBitmap,
+                                    bmpPath = null,
                                     rotationDegrees = 0,
-                                    zoomFactor = 1.0f,
+                                    zoomFactor = config.zoomFactor,
                                     baseName = baseName,
                                     linearDngPath = null,
                                     saveJpg = true,
                                     saveRaw = false,
                                     editConfig = config,
                                     isAlreadyStitched = true,
-                                    captureMetadata = meta
+                                    captureMetadata = repository.getCaptureMetadata(Uri.fromFile(item.file))
                                 )
                                 if (uri != null) successCount++
-                                tempJpgFile.delete()
+                                inputBitmap?.recycle()
+                            } else {
+                                val finalBytes = java.io.FileInputStream(item.file).use { it.readBytes() }
+                                val orientation = try {
+                                    appContext.contentResolver.openInputStream(dngUri)?.use { input ->
+                                        androidx.exifinterface.media.ExifInterface(input).getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION, androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL)
+                                    } ?: androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL
+                                } catch (e: Exception) { androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL }
+
+                                val rotDegrees = when(orientation) {
+                                    androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90 -> 90
+                                    androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_180 -> 180
+                                    androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270 -> 270
+                                    else -> 0
+                                }
+
+                                val adj = config.adjustments?.get(0) ?: top.maary.darkbag.models.BasicAdjustments(config.exposure, config.contrast, config.saturation, config.highlights, config.shadows, config.whites, config.blacks, config.digitalGain)
+                                val meta = repository.getCaptureMetadata(dngUri)
+
+                                val tempJpgFile = java.io.File(appContext.cacheDir, "temp_export_${System.currentTimeMillis()}.jpg")
+
+                                top.maary.darkbag.processor.ColorProcessor.processRaw(
+                                    dngData = finalBytes,
+                                    targetLog = logIndex,
+                                    lutPath = lutPath,
+                                    exposure = adj.exposure,
+                                    contrast = adj.contrast,
+                                    saturation = adj.saturation,
+                                    highlights = adj.highlights,
+                                    shadows = adj.shadows,
+                                    whites = adj.whites,
+                                    blacks = adj.blacks,
+                                    digitalGain = adj.digitalGain,
+                                    outputJpgPath = tempJpgFile.absolutePath,
+                                    useGpu = false,
+                                    orientation = rotDegrees,
+                                    mirror = false,
+                                    outputBitmap = null,
+                                    downsampleFactor = 1,
+                                    zoomFactor = config.zoomFactor,
+                                    metadata = meta
+                                )
+
+                                if (tempJpgFile.exists()) {
+                                    val uri = ImageSaver.saveProcessedImage(
+                                        context = appContext,
+                                        inputBitmap = null,
+                                        bmpPath = tempJpgFile.absolutePath,
+                                        rotationDegrees = 0,
+                                        zoomFactor = 1.0f,
+                                        baseName = baseName,
+                                        linearDngPath = null,
+                                        saveJpg = true,
+                                        saveRaw = false,
+                                        editConfig = config,
+                                        isAlreadyStitched = true,
+                                        captureMetadata = meta
+                                    )
+                                    if (uri != null) successCount++
+                                    tempJpgFile.delete()
+                                }
                             }
                         }
                         is PlaygroundItem.Group -> {
@@ -741,7 +772,7 @@ class PlaygroundGalleryFragment : Fragment() {
                                 val tempB2 = oriented2 ?: android.graphics.Bitmap.createBitmap(w1, h1, android.graphics.Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.BLACK) }
 
                                 var composite = top.maary.darkbag.utils.HalfFrameUtils.composeBitmaps(tempB1, tempB2, isSBS)
-                                
+
                                 // Recycle oriented/temp bitmaps immediately after compose
                                 if (tempB1 != oriented1) tempB1.recycle()
                                 if (tempB2 != oriented2) tempB2.recycle()
@@ -781,7 +812,7 @@ class PlaygroundGalleryFragment : Fragment() {
                             } else null
 
                             finalCompositeBitmap?.let { bitmap ->
-                                val captureMetadata = repository.getCaptureMetadata(jpgUri) ?: repository.getCaptureMetadata(dngUri1)
+                                val captureMetadata = repository.getCaptureMetadata(dngUri1) ?: repository.getCaptureMetadata(jpgUri)
 
                                 val uri = ImageSaver.saveProcessedImage(
                                     context = appContext,
