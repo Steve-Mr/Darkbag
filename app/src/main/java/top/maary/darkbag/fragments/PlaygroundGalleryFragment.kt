@@ -426,10 +426,15 @@ class PlaygroundGalleryFragment : Fragment() {
                         val loadedGroup = repository.loadMetadata(group)
                         val config = loadedGroup.editConfig ?: top.maary.darkbag.models.EditConfig()
 
+                        val decodeOpts = android.graphics.BitmapFactory.Options().apply {
+                            inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888
+                        }
+                        val inputBitmap = android.graphics.BitmapFactory.decodeFile(file.absolutePath, decodeOpts)
+
                         val uri = ImageSaver.saveProcessedImage(
                             context = appContext,
-                            inputBitmap = null,
-                            bmpPath = file.absolutePath,
+                            inputBitmap = inputBitmap,
+                            bmpPath = null,
                             rotationDegrees = 0,
                             zoomFactor = config.zoomFactor,
                             baseName = file.nameWithoutExtension,
@@ -441,6 +446,7 @@ class PlaygroundGalleryFragment : Fragment() {
                             captureMetadata = repository.getCaptureMetadata(Uri.fromFile(file))
                         )
                         if (uri != null) successCount++
+                        inputBitmap?.recycle()
                     } else {
                         val baseName = if (file.nameWithoutExtension.endsWith("_1") || file.nameWithoutExtension.endsWith("_2")) {
                             file.nameWithoutExtension.substringBeforeLast("_")
