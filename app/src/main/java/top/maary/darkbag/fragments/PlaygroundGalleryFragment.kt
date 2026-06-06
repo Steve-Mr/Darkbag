@@ -75,7 +75,7 @@ class PlaygroundGalleryFragment : Fragment() {
     private val binding get() = _binding!!
 
     private lateinit var adapter: PlaygroundAdapter
-    private val items = mutableListOf<PlaygroundItem>()
+
     private val selectedFiles = mutableSetOf<File>()
     private var isSelectionMode = false
 
@@ -131,7 +131,6 @@ class PlaygroundGalleryFragment : Fragment() {
 
         adapter = PlaygroundAdapter(
             coroutineScope = viewLifecycleOwner.lifecycleScope,
-            items = items,
             selectedFiles = selectedFiles,
             onItemClick = { file ->
                 if (isSelectionMode) {
@@ -149,7 +148,7 @@ class PlaygroundGalleryFragment : Fragment() {
             onExpandClick = { group, position ->
                 if (position != RecyclerView.NO_POSITION) {
                     group.isExpanded = !group.isExpanded
-                    adapter.notifyItemChanged(position, "EXPAND_CHANGED")
+                    adapter.notifyItemChanged(position, "EXPANSION_CHANGED")
                 }
             }
         )
@@ -196,7 +195,7 @@ class PlaygroundGalleryFragment : Fragment() {
 
         binding.btnDisband.setOnClickListener {
             val targets = selectedFiles.mapNotNull { file ->
-                val item = items.find { it is PlaygroundItem.Group && it.jpgFile == file }
+                val item = adapter.currentList.find { it is PlaygroundItem.Group && it.jpgFile == file }
                 if (item is PlaygroundItem.Group) item.jpgFile else null
             }
             viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
@@ -214,7 +213,7 @@ class PlaygroundGalleryFragment : Fragment() {
                 .setPositiveButton(R.string.playground_btn_delete) { _, _ ->
                     val filesToDelete = mutableListOf<File>()
                     selectedFiles.forEach { file ->
-                        val item = items.find {
+                        val item = adapter.currentList.find {
                             when (it) {
                                 is PlaygroundItem.Single -> it.file == file
                                 is PlaygroundItem.Group -> it.jpgFile == file || it.dng1 == file || it.dng2 == file
@@ -337,16 +336,24 @@ class PlaygroundGalleryFragment : Fragment() {
             val sortedItems = newItems.sortedByDescending { it.mainFile.lastModified() }
 
             withContext(Dispatchers.Main) {
-                items.clear()
-                items.addAll(sortedItems)
-                adapter.notifyDataSetChanged()
-                updateEmptyState()
+                val currentList = adapter.currentList
+                sortedItems.forEach { newItem ->
+                    if (newItem is PlaygroundItem.Group) {
+                        val oldItem = currentList.find { it is PlaygroundItem.Group && it.mainFile.absolutePath == newItem.mainFile.absolutePath } as? PlaygroundItem.Group
+                        if (oldItem != null) {
+                            newItem.isExpanded = oldItem.isExpanded
+                        }
+                    }
+                }
+                adapter.submitList(sortedItems) {
+                    updateEmptyState()
+                }
             }
         }
     }
 
     private fun updateEmptyState() {
-        binding.emptyStateText.visibility = if (items.isEmpty()) View.VISIBLE else View.GONE
+        binding.emptyStateText.visibility = if (adapter.currentList.isEmpty()) View.VISIBLE else View.GONE
     }
 
     private fun toggleSelection(file: File) {
@@ -361,7 +368,7 @@ class PlaygroundGalleryFragment : Fragment() {
         }
 
         // Find the index of the item that contains this file
-        val index = items.indexOfFirst { item ->
+        val index = adapter.currentList.indexOfFirst { item ->
             when (item) {
                 is PlaygroundItem.Single -> item.file == file
                 is PlaygroundItem.Group -> item.jpgFile == file || item.dng1 == file || item.dng2 == file
@@ -369,12 +376,12 @@ class PlaygroundGalleryFragment : Fragment() {
         }
 
         if (index != -1) {
-            val item = items[index]
+            val item = adapter.currentList[index]
             if (item is PlaygroundItem.Group && item.jpgFile == file && selectedFiles.contains(file)) {
                 // If the user long clicked the group main image to select it, auto-expand so they see the sub-items too
                 if (!item.isExpanded) {
                     item.isExpanded = true
-                    adapter.notifyItemChanged(index, "EXPAND_CHANGED")
+                    adapter.notifyItemChanged(index, "EXPANSION_CHANGED")
                 }
             }
             adapter.notifyItemChanged(index, "SELECTION_CHANGED")
@@ -387,7 +394,7 @@ class PlaygroundGalleryFragment : Fragment() {
         selectedFiles.clear()
         isSelectionMode = false
         oldSelections.forEach { file ->
-            val index = items.indexOfFirst { item ->
+            val index = adapter.currentList.indexOfFirst { item ->
                 when (item) {
                     is PlaygroundItem.Single -> item.file == file
                     is PlaygroundItem.Group -> item.jpgFile == file || item.dng1 == file || item.dng2 == file
@@ -415,7 +422,7 @@ class PlaygroundGalleryFragment : Fragment() {
 
             // Disband button logic
             val allGroups = selectedFiles.isNotEmpty() && selectedFiles.all { selectedFile ->
-                items.any { item -> item is PlaygroundItem.Group && item.jpgFile == selectedFile }
+                adapter.currentList.any { item -> item is PlaygroundItem.Group && item.jpgFile == selectedFile }
             }
             binding.btnDisband.visibility = if (allGroups) View.VISIBLE else View.GONE
 
@@ -433,7 +440,7 @@ class PlaygroundGalleryFragment : Fragment() {
         selectedFiles.clear()
         isSelectionMode = false
         oldSelections.forEach { file ->
-            val index = items.indexOfFirst { item ->
+            val index = adapter.currentList.indexOfFirst { item ->
                 when (item) {
                     is PlaygroundItem.Single -> item.file == file
                     is PlaygroundItem.Group -> item.jpgFile == file || item.dng1 == file || item.dng2 == file
@@ -452,7 +459,7 @@ class PlaygroundGalleryFragment : Fragment() {
         val finalPaths = mutableListOf<String>()
         for (path in paths) {
             val file = File(path)
-            val item = items.find {
+            val item = adapter.currentList.find {
                 when (it) {
                     is PlaygroundItem.Single -> it.file == file
                     is PlaygroundItem.Group -> it.jpgFile == file
@@ -532,7 +539,7 @@ class PlaygroundGalleryFragment : Fragment() {
             val appContext = ctx.applicationContext
             val repository = top.maary.darkbag.repository.ImageRepository(appContext)
 
-            val itemsSnapshot = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { items.toList() }
+            val itemsSnapshot = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { adapter.currentList.toList() }
             val processedGroups = mutableSetOf<String>()
 
             for (file in filesToExport) {
@@ -854,12 +861,56 @@ class PlaygroundGalleryFragment : Fragment() {
 
 class PlaygroundAdapter(
     private val coroutineScope: kotlinx.coroutines.CoroutineScope,
-    private val items: List<PlaygroundItem>,
     private val selectedFiles: Set<File>,
     private val onItemClick: (File) -> Unit,
     private val onItemLongClick: (File) -> Unit,
     private val onExpandClick: (PlaygroundItem.Group, Int) -> Unit
-) : RecyclerView.Adapter<PlaygroundAdapter.ViewHolder>() {
+) : androidx.recyclerview.widget.ListAdapter<PlaygroundItem, PlaygroundAdapter.ViewHolder>(PlaygroundItemDiffCallback()) {
+
+    class PlaygroundItemDiffCallback : androidx.recyclerview.widget.DiffUtil.ItemCallback<PlaygroundItem>() {
+        override fun areItemsTheSame(oldItem: PlaygroundItem, newItem: PlaygroundItem): Boolean {
+            return oldItem.mainFile.absolutePath == newItem.mainFile.absolutePath
+        }
+
+        override fun areContentsTheSame(oldItem: PlaygroundItem, newItem: PlaygroundItem): Boolean {
+            if (oldItem.javaClass != newItem.javaClass) return false
+            if (oldItem is PlaygroundItem.Group && newItem is PlaygroundItem.Group) {
+                if (oldItem.isExpanded != newItem.isExpanded) return false
+                if (oldItem.dng1.lastModified() != newItem.dng1.lastModified() || oldItem.dng2.lastModified() != newItem.dng2.lastModified()) return false
+            }
+            return oldItem.mainFile.lastModified() == newItem.mainFile.lastModified()
+        }
+
+        override fun getChangePayload(oldItem: PlaygroundItem, newItem: PlaygroundItem): Any? {
+            val payloads = mutableListOf<String>()
+
+            if (oldItem is PlaygroundItem.Group && newItem is PlaygroundItem.Group) {
+                if (oldItem.isExpanded != newItem.isExpanded) {
+                    payloads.add("EXPANSION_CHANGED")
+                }
+            }
+
+            val isModified = oldItem.mainFile.lastModified() != newItem.mainFile.lastModified() ||
+                (oldItem is PlaygroundItem.Group && newItem is PlaygroundItem.Group &&
+                (oldItem.dng1.lastModified() != newItem.dng1.lastModified() || oldItem.dng2.lastModified() != newItem.dng2.lastModified()))
+
+            if (isModified) {
+                payloads.add("MODIFIED")
+            }
+
+            if (payloads.isNotEmpty()) {
+                // Return just the first string if it's one, or we can handle it differently.
+                // The onBindViewHolder expects String payloads, if we pass a list it might get wrapped in another list.
+                // Let's just return the first string because onBindViewHolder currently only looks at payloads list string elements.
+                // Or better, let's return a special string and handle both if needed.
+                // Let's just check the most important or return all and let onBindViewHolder handle List inside payloads.
+                // Actually, if we return multiple strings in a list, we can just return the payloads list.
+                return payloads
+            }
+
+            return super.getChangePayload(oldItem, newItem)
+        }
+    }
 
     class ViewHolder(val binding: ItemPlaygroundImageBinding) : RecyclerView.ViewHolder(binding.root) {
         var jobMain: kotlinx.coroutines.Job? = null
@@ -881,10 +932,13 @@ class PlaygroundAdapter(
             return
         }
 
-        val item = items[position]
+        // Flatten the payloads since getChangePayload might return a List<String>
+        val flattenedPayloads = payloads.flatMap { if (it is List<*>) it else listOf(it) }
+
+        val item = getItem(position)
         var handled = false
 
-        if (payloads.contains("SELECTION_CHANGED")) {
+        if (flattenedPayloads.contains("SELECTION_CHANGED")) {
             val isMainSelected = selectedFiles.contains(item.mainFile)
             holder.binding.selectionOverlay.visibility = if (isMainSelected) View.VISIBLE else View.GONE
             holder.binding.iconSelected.visibility = if (isMainSelected) View.VISIBLE else View.GONE
@@ -900,9 +954,58 @@ class PlaygroundAdapter(
             handled = true
         }
 
-        if (payloads.contains("EXPAND_CHANGED")) {
+        if (flattenedPayloads.contains("EXPANSION_CHANGED")) {
             if (item is PlaygroundItem.Group) {
                 holder.binding.subImagesContainer.visibility = if (item.isExpanded) View.VISIBLE else View.GONE
+            }
+            handled = true
+        }
+
+        if (flattenedPayloads.contains("MODIFIED")) {
+            val context = holder.itemView.context
+            when (item) {
+                is PlaygroundItem.Single -> {
+                    holder.jobMain?.cancel()
+                    holder.jobMain = null
+                    // Do not recycle bitmap to keep it as placeholder! Wait, the review says:
+                    // "without cancelling any active coroutine jobs ... or recycling the existing bitmaps ... old bitmaps are overwritten and never recycled".
+                    // Let's recycle it here before we load the new one, but if we recycle it, we get a blank screen.
+                    // Actually, if we don't recycle it, when we assign a new bitmap, we lose the reference to the old one.
+                    // The old bitmap should be recycled when the new bitmap arrives.
+                    // In loadThumbnail, we have: `if (rotatedBitmap != decodedBitmap) decodedBitmap.recycle()`.
+                    // And in the final UI thread: `holder.bitmapMain = decodedBitmap`.
+                    // So we must recycle the previous `holder.bitmapMain`.
+                    // But if we recycle it right here, the screen turns blank before the new thumbnail is generated.
+                    // Let's just follow the PR review recommendation literally.
+                    holder.bitmapMain?.recycle()
+                    holder.bitmapMain = null
+
+                    val file = item.file
+                    val jpgFile = java.io.File(file.parent, file.nameWithoutExtension + ".jpg")
+                    if (jpgFile.exists()) {
+                        loadThumbnail(context, jpgFile, holder.binding.imageViewThumbnail, holder, true)
+                    } else {
+                        loadThumbnail(context, file, holder.binding.imageViewThumbnail, holder, true)
+                    }
+                }
+                is PlaygroundItem.Group -> {
+                    holder.jobMain?.cancel()
+                    holder.jobSub1?.cancel()
+                    holder.jobSub2?.cancel()
+                    holder.jobMain = null
+                    holder.jobSub1 = null
+                    holder.jobSub2 = null
+                    holder.bitmapMain?.recycle()
+                    holder.bitmapSub1?.recycle()
+                    holder.bitmapSub2?.recycle()
+                    holder.bitmapMain = null
+                    holder.bitmapSub1 = null
+                    holder.bitmapSub2 = null
+
+                    loadThumbnail(context, item.jpgFile, holder.binding.imageViewThumbnail, holder, true)
+                    loadThumbnail(context, item.dng1, holder.binding.subImageView1, holder, isMain = false, isSub1 = true)
+                    loadThumbnail(context, item.dng2, holder.binding.subImageView2, holder, isMain = false, isSub2 = true)
+                }
             }
             handled = true
         }
@@ -921,7 +1024,7 @@ class PlaygroundAdapter(
         isSub1: Boolean = false,
         isSub2: Boolean = false
     ) {
-        val currentTag = file.absolutePath
+        val currentTag = file.absolutePath + "_" + file.lastModified()
         imageView.tag = currentTag
 
         // Use JPG directly if available
@@ -1023,7 +1126,7 @@ class PlaygroundAdapter(
     }
 
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
-        val item = items[position]
+        val item = getItem(position)
         val isMainSelected = selectedFiles.contains(item.mainFile)
 
         // Apply aspect ratio to pre-allocate exact height to prevent StaggeredGridLayoutManager jumping
@@ -1113,7 +1216,7 @@ class PlaygroundAdapter(
         }
     }
 
-    override fun getItemCount() = items.size
+
 
     override fun onViewRecycled(holder: ViewHolder) {
         super.onViewRecycled(holder)
