@@ -96,7 +96,7 @@ class PlaygroundGalleryFragment : Fragment() {
         val mainActivity = activity as? top.maary.darkbag.MainActivity
         mainActivity?.let {
             viewLifecycleOwner.lifecycleScope.launch {
-                viewLifecycleOwner.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.RESUMED) {
+                viewLifecycleOwner.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
                     it.toolbarHeightFlow.collect { height ->
                         binding.recyclerView.setPadding(
                             binding.recyclerView.paddingLeft,
@@ -162,7 +162,7 @@ class PlaygroundGalleryFragment : Fragment() {
         val mainActivity = activity as? top.maary.darkbag.MainActivity
         mainActivity?.let {
             viewLifecycleOwner.lifecycleScope.launch {
-                viewLifecycleOwner.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.RESUMED) {
+                viewLifecycleOwner.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
                     it.toolbarHeightFlow.collect { height ->
                         binding.recyclerView.setPadding(
                             binding.recyclerView.paddingLeft,
