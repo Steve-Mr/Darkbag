@@ -22,7 +22,8 @@
             android:layout_height="?attr/actionBarSize"
             app:title="Playground"
             android:background="@android:color/transparent"
-            app:navigationIcon="@drawable/ic_back" />
+            app:navigationIcon="@drawable/ic_back"
+            app:navigationIconTint="?attr/colorOnSurface"/>
 
     </com.google.android.material.appbar.AppBarLayout>
 
