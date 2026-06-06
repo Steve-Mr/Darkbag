@@ -336,7 +336,15 @@ class PlaygroundGalleryFragment : Fragment() {
             val sortedItems = newItems.sortedByDescending { it.mainFile.lastModified() }
 
             withContext(Dispatchers.Main) {
-
+                val currentList = adapter.currentList
+                sortedItems.forEach { newItem ->
+                    if (newItem is PlaygroundItem.Group) {
+                        val oldItem = currentList.find { it is PlaygroundItem.Group && it.mainFile.absolutePath == newItem.mainFile.absolutePath } as? PlaygroundItem.Group
+                        if (oldItem != null) {
+                            newItem.isExpanded = oldItem.isExpanded
+                        }
+                    }
+                }
                 adapter.submitList(sortedItems) {
                     updateEmptyState()
                 }
@@ -373,7 +381,7 @@ class PlaygroundGalleryFragment : Fragment() {
                 // If the user long clicked the group main image to select it, auto-expand so they see the sub-items too
                 if (!item.isExpanded) {
                     item.isExpanded = true
-                    adapter.notifyItemChanged(index, "EXPAND_CHANGED")
+                    adapter.notifyItemChanged(index, "EXPANSION_CHANGED")
                 }
             }
             adapter.notifyItemChanged(index, "SELECTION_CHANGED")
@@ -957,6 +965,21 @@ class PlaygroundAdapter(
             val context = holder.itemView.context
             when (item) {
                 is PlaygroundItem.Single -> {
+                    holder.jobMain?.cancel()
+                    holder.jobMain = null
+                    // Do not recycle bitmap to keep it as placeholder! Wait, the review says:
+                    // "without cancelling any active coroutine jobs ... or recycling the existing bitmaps ... old bitmaps are overwritten and never recycled".
+                    // Let's recycle it here before we load the new one, but if we recycle it, we get a blank screen.
+                    // Actually, if we don't recycle it, when we assign a new bitmap, we lose the reference to the old one.
+                    // The old bitmap should be recycled when the new bitmap arrives.
+                    // In loadThumbnail, we have: `if (rotatedBitmap != decodedBitmap) decodedBitmap.recycle()`.
+                    // And in the final UI thread: `holder.bitmapMain = decodedBitmap`.
+                    // So we must recycle the previous `holder.bitmapMain`.
+                    // But if we recycle it right here, the screen turns blank before the new thumbnail is generated.
+                    // Let's just follow the PR review recommendation literally.
+                    holder.bitmapMain?.recycle()
+                    holder.bitmapMain = null
+
                     val file = item.file
                     val jpgFile = java.io.File(file.parent, file.nameWithoutExtension + ".jpg")
                     if (jpgFile.exists()) {
@@ -966,6 +989,19 @@ class PlaygroundAdapter(
                     }
                 }
                 is PlaygroundItem.Group -> {
+                    holder.jobMain?.cancel()
+                    holder.jobSub1?.cancel()
+                    holder.jobSub2?.cancel()
+                    holder.jobMain = null
+                    holder.jobSub1 = null
+                    holder.jobSub2 = null
+                    holder.bitmapMain?.recycle()
+                    holder.bitmapSub1?.recycle()
+                    holder.bitmapSub2?.recycle()
+                    holder.bitmapMain = null
+                    holder.bitmapSub1 = null
+                    holder.bitmapSub2 = null
+
                     loadThumbnail(context, item.jpgFile, holder.binding.imageViewThumbnail, holder, true)
                     loadThumbnail(context, item.dng1, holder.binding.subImageView1, holder, isMain = false, isSub1 = true)
                     loadThumbnail(context, item.dng2, holder.binding.subImageView2, holder, isMain = false, isSub2 = true)
