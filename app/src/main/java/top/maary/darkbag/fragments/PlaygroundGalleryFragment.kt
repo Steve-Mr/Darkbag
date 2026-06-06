@@ -7,6 +7,7 @@ import top.maary.darkbag.fragments.SettingsFragment
 
 import android.os.Bundle
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.launch
 import android.provider.OpenableColumns
 import android.view.LayoutInflater
@@ -95,13 +96,15 @@ class PlaygroundGalleryFragment : Fragment() {
         val mainActivity = activity as? top.maary.darkbag.MainActivity
         mainActivity?.let {
             viewLifecycleOwner.lifecycleScope.launch {
-                it.toolbarHeightFlow.collect { height ->
-                    binding.recyclerView.setPadding(
-                        binding.recyclerView.paddingLeft,
-                        binding.recyclerView.paddingTop,
-                        binding.recyclerView.paddingRight,
-                        height + 16 // 16px extra clearance
-                    )
+                viewLifecycleOwner.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
+                    it.toolbarHeightFlow.collect { height ->
+                        binding.recyclerView.setPadding(
+                            binding.recyclerView.paddingLeft,
+                            binding.recyclerView.paddingTop,
+                            binding.recyclerView.paddingRight,
+                            height + 16 // 16px extra clearance
+                        )
+                    }
                 }
             }
         }
@@ -158,13 +161,15 @@ class PlaygroundGalleryFragment : Fragment() {
         val mainActivity = activity as? top.maary.darkbag.MainActivity
         mainActivity?.let {
             viewLifecycleOwner.lifecycleScope.launch {
-                it.toolbarHeightFlow.collect { height ->
-                    binding.recyclerView.setPadding(
-                        binding.recyclerView.paddingLeft,
-                        binding.recyclerView.paddingTop,
-                        binding.recyclerView.paddingRight,
-                        height + 16
-                    )
+                viewLifecycleOwner.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
+                    it.toolbarHeightFlow.collect { height ->
+                        binding.recyclerView.setPadding(
+                            binding.recyclerView.paddingLeft,
+                            binding.recyclerView.paddingTop,
+                            binding.recyclerView.paddingRight,
+                            height + 16
+                        )
+                    }
                 }
             }
         }

@@ -87,6 +87,7 @@ import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.core.view.setPadding
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.navigation.Navigation
 import androidx.window.layout.WindowMetricsCalculator
 import top.maary.darkbag.KEY_EVENT_ACTION
@@ -1217,9 +1218,11 @@ class CameraFragment : Fragment() {
             val mainActivity = activity as? top.maary.darkbag.MainActivity
             mainActivity?.let {
                 viewLifecycleOwner.lifecycleScope.launch {
-                    it.toolbarHeightFlow.collect { height ->
-                        currentToolbarHeight = height
-                        updateContainerPadding()
+                    viewLifecycleOwner.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
+                        it.toolbarHeightFlow.collect { height ->
+                            currentToolbarHeight = height
+                            updateContainerPadding()
+                        }
                     }
                 }
             }
