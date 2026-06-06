@@ -254,11 +254,15 @@ open class ImageViewerFragment : Fragment() {
                         val initialGroup = groups[initialPos]
                         if (!initialGroup.metadataLoaded) {
                             val updatedGroup = repository.loadMetadata(initialGroup)
-                            val updatedGroups = adapter.getGroups().toMutableList()
-                            updatedGroups[initialPos] = updatedGroup
-                            suspendCancellableCoroutine<Unit> { continuation ->
-                                adapter.updateGroups(updatedGroups) {
-                                    if (continuation.isActive) continuation.resume(Unit)
+                            adapterUpdateMutex.withLock {
+                                val updatedGroups = adapter.getGroups().toMutableList()
+                                if (initialPos in updatedGroups.indices) {
+                                    updatedGroups[initialPos] = updatedGroup
+                                    suspendCancellableCoroutine<Unit> { continuation ->
+                                        adapter.updateGroups(updatedGroups) {
+                                            if (continuation.isActive) continuation.resume(Unit)
+                                        }
+                                    }
                                 }
                             }
                         }
