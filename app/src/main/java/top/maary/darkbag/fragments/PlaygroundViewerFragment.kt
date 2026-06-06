@@ -150,14 +150,7 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
                 setIcon(R.drawable.ic_save)
             }
 
-            try {
-                val fieldPopup = PopupMenu::class.java.getDeclaredField("mPopup")
-                fieldPopup.isAccessible = true
-                val mPopup = fieldPopup.get(popup)
-                mPopup.javaClass.getDeclaredMethod("setForceShowIcon", Boolean::class.java).invoke(mPopup, true)
-            } catch (e: Exception) {
-                Log.e("PlaygroundViewer", "Error forcing menu icons", e)
-            }
+            forceShowIcons(popup)
 
             popup.setOnMenuItemClickListener { item ->
                 when (item.itemId) {

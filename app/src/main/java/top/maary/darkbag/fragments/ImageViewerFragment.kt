@@ -2260,7 +2260,7 @@ open class ImageViewerFragment : Fragment() {
             .show()
     }
 
-    private fun forceShowIcons(popup: PopupMenu) {
+    protected fun forceShowIcons(popup: PopupMenu) {
         val colorOnSurface = com.google.android.material.color.MaterialColors.getColor(requireContext(), com.google.android.material.R.attr.colorOnSurface, android.graphics.Color.WHITE)
         for (i in 0 until popup.menu.size()) {
             popup.menu.getItem(i).icon?.setTint(colorOnSurface)
