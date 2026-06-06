@@ -229,7 +229,7 @@ open class ImageViewerFragment : Fragment() {
                                 val currentGroup = currentList[currentIndex]
                                 val prevGroup = previousList.getOrNull(currentIndex)
 
-                                if (prevGroup != null && !prevGroup.metadataLoaded && currentGroup.metadataLoaded) {
+                                if ((prevGroup == null || !prevGroup.metadataLoaded) && currentGroup.metadataLoaded) {
                                     if (currentGroup.editConfig != null) {
                                         prepareEditConfig(currentGroup)
                                     }
@@ -256,7 +256,11 @@ open class ImageViewerFragment : Fragment() {
                             val updatedGroup = repository.loadMetadata(initialGroup)
                             val updatedGroups = adapter.getGroups().toMutableList()
                             updatedGroups[initialPos] = updatedGroup
-                            adapter.updateGroups(updatedGroups)
+                            suspendCancellableCoroutine<Unit> { continuation ->
+                                adapter.updateGroups(updatedGroups) {
+                                    if (continuation.isActive) continuation.resume(Unit)
+                                }
+                            }
                         }
                     }
                     binding.imagePager.isUserInputEnabled = !isAdjusted
@@ -1534,7 +1538,7 @@ open class ImageViewerFragment : Fragment() {
                                 val currentGroup = currentList[currentIndex]
                                 val prevGroup = previousList.getOrNull(currentIndex)
 
-                                if (prevGroup != null && !prevGroup.metadataLoaded && currentGroup.metadataLoaded) {
+                                if ((prevGroup == null || !prevGroup.metadataLoaded) && currentGroup.metadataLoaded) {
                                     if (currentGroup.editConfig != null) {
                                         prepareEditConfig(currentGroup)
                                     }
