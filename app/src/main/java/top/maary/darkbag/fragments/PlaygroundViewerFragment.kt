@@ -22,112 +22,112 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
 
         val playgroundPaths = arguments?.getStringArray("playground_dng_paths")
         if (playgroundPaths != null && playgroundPaths.isNotEmpty()) {
-            val firstPath = playgroundPaths[0]
-            val playgroundDir = File(requireContext().filesDir, "playground_dngs")
-            val group = if (playgroundPaths.size == 1) {
-                val baseName = File(firstPath).nameWithoutExtension
-                val potentialJpg = File(playgroundDir, "$baseName.jpg")
-                val jpgUri = if (potentialJpg.exists()) Uri.fromFile(potentialJpg) else null
 
-                val path = playgroundPaths[0]
-                val uri = Uri.fromFile(File(path))
-                ImageGroup(
-                    baseName = baseName,
-                    dngUri = uri,
-                    jpgUri = jpgUri,
-                    captureTime = System.currentTimeMillis(),
-                    lastModified = System.currentTimeMillis()
-                )
-            } else {
-                val path1 = playgroundPaths[0]
-                val path2 = playgroundPaths[1]
-                val name1 = File(path1).nameWithoutExtension
+            val filesDir = requireContext().filesDir
+            viewLifecycleOwner.lifecycleScope.launch {
+                val group = withContext(Dispatchers.IO) {
+                    val firstPath = playgroundPaths[0]
+                    val playgroundDir = File(filesDir, "playground_dngs")
+                    if (playgroundPaths.size == 1) {
+                        val baseName = File(firstPath).nameWithoutExtension
+                        val potentialJpg = File(playgroundDir, "$baseName.jpg")
+                        val jpgUri = if (potentialJpg.exists()) Uri.fromFile(potentialJpg) else null
 
-                // If it's an existing group being opened, name1 will likely end in _1.
-                // We should derive the group base name by stripping _1 if present, otherwise
-                // it's a new merge so we append _merged.
-                val mergedBaseName = if (name1.endsWith("_1")) {
-                    name1.removeSuffix("_1")
-                } else {
-                    name1 + "_merged"
-                }
+                        val path = playgroundPaths[0]
+                        val uri = Uri.fromFile(File(path))
+                        ImageGroup(
+                            baseName = baseName,
+                            dngUri = uri,
+                            jpgUri = jpgUri,
+                            captureTime = System.currentTimeMillis(),
+                            lastModified = System.currentTimeMillis()
+                        )
+                    } else {
+                        val path1 = playgroundPaths[0]
+                        val path2 = playgroundPaths[1]
+                        val name1 = File(path1).nameWithoutExtension
 
-                val potentialMergedJpg = File(playgroundDir, "$mergedBaseName.jpg")
-                val mergedJpgUri = if (potentialMergedJpg.exists()) Uri.fromFile(potentialMergedJpg) else null
-
-                // For an existing composite with a saved JPG, we want to rely on the EXIF for layout.
-                // But for a new merge, we take the layout from arguments.
-                val layout = if (mergedJpgUri == null) {
-                    arguments?.getString("playground_hf_layout") ?: "SBS"
-                } else {
-                    "SBS" // Fallback, will be overridden by loadMetadata
-                }
-
-                ImageGroup(
-                    baseName = mergedBaseName,
-                    dngUri1 = Uri.fromFile(File(path1)),
-                    dngUri2 = Uri.fromFile(File(path2)),
-                    jpgUri = mergedJpgUri,
-                    hfLayout = layout,
-                    captureTime = System.currentTimeMillis(),
-                    lastModified = System.currentTimeMillis()
-                )
-            }
-            val groups = listOf(group)
-
-            if (binding.imagePager.adapter == null) {
-                adapter = ImageViewerAdapter(groups, lifecycleScope, requireContext()).apply {
-                    onImageTapped = { toggleUi() }
-                    onZoomChanged = { isZoomed -> if (isZoomed) hideUi() else showUi() }
-                    onLongPressStarted = { handleLongPressStarted(it) }
-                    onLongPressEnded = { handleLongPressEnded(it) }
-                    setFormatSwitcherPersistentHidden(isAdjusted)
-                    onCurrentListChanged = { previousList, currentList ->
-                        val currentIndex = binding.imagePager.currentItem
-                        if (currentIndex in currentList.indices) {
-                            val currentGroup = currentList[currentIndex]
-                            val prevGroup = previousList.getOrNull(currentIndex)
-
-                            if (prevGroup != null && !prevGroup.metadataLoaded && currentGroup.metadataLoaded) {
-                                if (currentGroup.editConfig != null) {
-                                    prepareEditConfig(currentGroup)
-                                }
-                            }
-                            updateControlsVisibility()
+                        val mergedBaseName = if (name1.endsWith("_1")) {
+                            name1.removeSuffix("_1")
+                        } else {
+                            name1 + "_merged"
                         }
+
+                        val potentialMergedJpg = File(playgroundDir, "$mergedBaseName.jpg")
+                        val mergedJpgUri = if (potentialMergedJpg.exists()) Uri.fromFile(potentialMergedJpg) else null
+
+                        val layout = if (mergedJpgUri == null) {
+                            arguments?.getString("playground_hf_layout") ?: "SBS"
+                        } else {
+                            "SBS"
+                        }
+
+                        ImageGroup(
+                            baseName = mergedBaseName,
+                            dngUri1 = Uri.fromFile(File(path1)),
+                            dngUri2 = Uri.fromFile(File(path2)),
+                            jpgUri = mergedJpgUri,
+                            hfLayout = layout,
+                            captureTime = System.currentTimeMillis(),
+                            lastModified = System.currentTimeMillis()
+                        )
                     }
                 }
-                binding.imagePager.adapter = adapter
-                binding.imagePager.registerOnPageChangeCallback(pageChangeCallback)
-                binding.imagePager.isUserInputEnabled = !isAdjusted
-                setupActionButtons()
 
-                val initialGroup = groups[0]
-                if (!initialGroup.metadataLoaded) {
-                    lifecycleScope.launch {
+                val groups = listOf(group)
+
+                if (binding.imagePager.adapter == null) {
+                    adapter = ImageViewerAdapter(groups, lifecycleScope, requireContext()).apply {
+                        onImageTapped = { toggleUi() }
+                        onZoomChanged = { isZoomed -> if (isZoomed) hideUi() else showUi() }
+                        onLongPressStarted = { handleLongPressStarted(it) }
+                        onLongPressEnded = { handleLongPressEnded(it) }
+                        setFormatSwitcherPersistentHidden(isAdjusted)
+                        onCurrentListChanged = { previousList, currentList ->
+                            val currentIndex = binding.imagePager.currentItem
+                            if (currentIndex in currentList.indices) {
+                                val currentGroup = currentList[currentIndex]
+                                val prevGroup = previousList.getOrNull(currentIndex)
+
+                                if (prevGroup != null && !prevGroup.metadataLoaded && currentGroup.metadataLoaded) {
+                                    if (currentGroup.editConfig != null) {
+                                        prepareEditConfig(currentGroup)
+                                    }
+                                }
+                                updateControlsVisibility()
+                            }
+                        }
+                    }
+                    binding.imagePager.adapter = adapter
+
+                    binding.imagePager.isUserInputEnabled = !isAdjusted
+                    setupActionButtons()
+
+                    val initialGroup = groups[0]
+                    if (!initialGroup.metadataLoaded) {
+                        // 因为外面已经是协程环境，无需再次 launch，直接顺序挂起即可，避免时序竞争
                         val updatedGroup = repository.loadMetadata(initialGroup)
                         adapter.updateGroups(listOf(updatedGroup))
 
-                        // Mark as adjusted directly if we are displaying a newly merged playground group
                         if (groups.size == 1 && playgroundPaths.size == 2 && updatedGroup.jpgUri == null) {
                             isAdjusted = true
                             adapter.setFormatSwitcherPersistentHidden(true)
                             updateControlsVisibility()
                         }
+                    } else if (groups.size == 1 && playgroundPaths.size == 2 && initialGroup.jpgUri == null) {
+                        isAdjusted = true
+                        adapter.setFormatSwitcherPersistentHidden(true)
+                        updateControlsVisibility()
                     }
-                } else if (groups.size == 1 && playgroundPaths.size == 2 && initialGroup.jpgUri == null) {
-                    isAdjusted = true
-                    adapter.setFormatSwitcherPersistentHidden(true)
-                    updateControlsVisibility()
-                }
 
-                binding.initialLoadingIndicator.visibility = View.GONE
-                binding.imagePager.visibility = View.VISIBLE
-                updateControlsVisibility()
-            } else {
-                adapter.updateGroups(groups)
-                binding.initialLoadingIndicator.visibility = View.GONE
-                binding.imagePager.visibility = View.VISIBLE
+                    binding.initialLoadingIndicator.visibility = View.GONE
+                    binding.imagePager.visibility = View.VISIBLE
+                    updateControlsVisibility()
+                } else {
+                    adapter.updateGroups(groups)
+                    binding.initialLoadingIndicator.visibility = View.GONE
+                    binding.imagePager.visibility = View.VISIBLE
+                }
             }
         }
     }
@@ -150,14 +150,7 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
                 setIcon(R.drawable.ic_save)
             }
 
-            try {
-                val fieldPopup = PopupMenu::class.java.getDeclaredField("mPopup")
-                fieldPopup.isAccessible = true
-                val mPopup = fieldPopup.get(popup)
-                mPopup.javaClass.getDeclaredMethod("setForceShowIcon", Boolean::class.java).invoke(mPopup, true)
-            } catch (e: Exception) {
-                Log.e("PlaygroundViewer", "Error forcing menu icons", e)
-            }
+            forceShowIcons(popup)
 
             popup.setOnMenuItemClickListener { item ->
                 when (item.itemId) {
