@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Outer ring (open ring facing left) -->
+    <path
+        android:strokeWidth="6"
+        android:strokeColor="#E7CFA6"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M 28.54,79.46 A 36,36 0 1 1 28.54,28.54" />
+
+    <!-- Inner raw tile / playground object -->
+    <group
+        android:pivotX="54"
+        android:pivotY="54"
+        android:rotation="-18">
+
+        <!-- rounded rectangle, size 28x28, centered at 54,54 (top-left is 40,40), corner radius 8 -->
+        <path
+            android:fillColor="#F0B06B"
+            android:pathData="M 48,40 L 60,40 A 8,8 0 0 1 68,48 L 68,60 A 8,8 0 0 1 60,68 L 48,68 A 8,8 0 0 1 40,60 L 40,48 A 8,8 0 0 1 48,40 Z" />
+    </group>
+
+</vector>
