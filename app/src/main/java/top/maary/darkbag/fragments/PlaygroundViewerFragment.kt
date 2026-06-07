@@ -135,12 +135,13 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
     override fun setupActionButtons() {
         super.setupActionButtons()
 
-        // Force set the icon tint to ensure it's visible, as AVD tint can sometimes be lost
-        // when overriding button styles or listeners in subclasses.
+        // Force set the icon and its tint to ensure it's visible, as AVD state and tint can
+        // sometimes be lost when overriding button styles or listeners in subclasses.
         val colorOnPrimary = com.google.android.material.color.MaterialColors.getColor(
             binding.btnSaveMenu,
             com.google.android.material.R.attr.colorOnPrimary
         )
+        binding.btnSaveMenu.setIconResource(R.drawable.m3_split_button_chevron_avd)
         binding.btnSaveMenu.iconTint = android.content.res.ColorStateList.valueOf(colorOnPrimary)
 
         binding.btnSaveMenu.setOnClickListener {
