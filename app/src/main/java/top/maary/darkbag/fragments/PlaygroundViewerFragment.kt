@@ -23,10 +23,11 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
         val playgroundPaths = arguments?.getStringArray("playground_dng_paths")
         if (playgroundPaths != null && playgroundPaths.isNotEmpty()) {
 
+            val filesDir = requireContext().filesDir
             viewLifecycleOwner.lifecycleScope.launch {
                 val group = withContext(Dispatchers.IO) {
                     val firstPath = playgroundPaths[0]
-                    val playgroundDir = File(requireContext().filesDir, "playground_dngs")
+                    val playgroundDir = File(filesDir, "playground_dngs")
                     if (playgroundPaths.size == 1) {
                         val baseName = File(firstPath).nameWithoutExtension
                         val potentialJpg = File(playgroundDir, "$baseName.jpg")

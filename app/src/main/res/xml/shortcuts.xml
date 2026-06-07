@@ -3,7 +3,7 @@
     <shortcut
         android:shortcutId="playground"
         android:enabled="true"
-        android:icon="@drawable/ic_photo"
+        android:icon="@drawable/ic_shortcut_style"
         android:shortcutShortLabel="@string/playground_shortcut_label">
         <intent
             android:action="android.intent.action.VIEW"
@@ -16,7 +16,7 @@
     <shortcut
         android:shortcutId="camera"
         android:enabled="true"
-        android:icon="@drawable/ic_mode_normal"
+        android:icon="@drawable/ic_shortcut_cam"
         android:shortcutShortLabel="@string/camera_shortcut_label">
         <intent
             android:action="android.intent.action.VIEW"
