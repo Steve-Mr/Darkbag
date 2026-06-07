@@ -135,18 +135,21 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
     override fun setupActionButtons() {
         super.setupActionButtons()
 
-        // Force set the icon and its tint to ensure it's visible, as AVD state and tint can
-        // sometimes be lost when overriding button styles or listeners in subclasses.
+        // Keep the playground save chevron as explicit static vectors instead of the
+        // animated selector. The selector can lose its visible state/tint after this
+        // subclass replaces the base save-menu click listener, which makes the right
+        // half of the split button look blank even though the button is clickable.
         val colorOnPrimary = com.google.android.material.color.MaterialColors.getColor(
             binding.btnSaveMenu,
             com.google.android.material.R.attr.colorOnPrimary
         )
-        binding.btnSaveMenu.setIconResource(R.drawable.m3_split_button_chevron_avd)
         binding.btnSaveMenu.iconTint = android.content.res.ColorStateList.valueOf(colorOnPrimary)
+        binding.btnSaveMenu.setIconResource(R.drawable.ic_expand_more_22px)
 
         binding.btnSaveMenu.setOnClickListener {
             binding.btnSaveMenu.isCheckable = true
             binding.btnSaveMenu.isChecked = true
+            binding.btnSaveMenu.setIconResource(R.drawable.ic_expand_less_22px)
             val popup = PopupMenu(requireContext(), it)
 
             popup.menu.add(0, 1001, 0, "Save as new file").apply {
@@ -169,7 +172,10 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
                 }
                 true
             }
-            popup.setOnDismissListener { binding.btnSaveMenu.isChecked = false }
+            popup.setOnDismissListener {
+                binding.btnSaveMenu.isChecked = false
+                binding.btnSaveMenu.setIconResource(R.drawable.ic_expand_more_22px)
+            }
             popup.show()
         }
     }

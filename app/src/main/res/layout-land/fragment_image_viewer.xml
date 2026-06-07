@@ -130,7 +130,8 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:checkable="true"
-                app:icon="@drawable/m3_split_button_chevron_avd" />
+                app:icon="@drawable/m3_split_button_chevron_avd"
+                app:iconTint="?attr/colorOnPrimary" />
         </com.google.android.material.button.MaterialSplitButton>
     </androidx.constraintlayout.widget.ConstraintLayout>
 
