@@ -23,7 +23,8 @@
             app:title="Playground"
             android:background="@android:color/transparent"
             app:navigationIcon="@drawable/ic_back"
-            app:navigationIconTint="?attr/colorOnSurface"/>
+            app:navigationIconTint="?attr/colorOnSurface"
+            app:menu="@menu/menu_playground_gallery" />
 
     </com.google.android.material.appbar.AppBarLayout>
 

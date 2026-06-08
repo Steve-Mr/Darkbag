@@ -128,6 +128,16 @@ class PlaygroundGalleryFragment : Fragment() {
             insets
         }
 
+        binding.toolbar.setOnMenuItemClickListener { menuItem ->
+            when (menuItem.itemId) {
+                R.id.action_settings -> {
+                    findNavController().navigate(R.id.action_playground_gallery_to_settings)
+                    true
+                }
+                else -> false
+            }
+        }
+
         binding.toolbar.setNavigationOnClickListener {
             findNavController().navigateUp()
         }

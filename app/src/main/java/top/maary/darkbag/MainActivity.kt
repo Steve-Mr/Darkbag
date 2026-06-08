@@ -91,7 +91,10 @@ class MainActivity : AppCompatActivity() {
                     val lp = view.layoutParams as MarginLayoutParams
                     toolbarHeightWithInsets = view.height + lp.topMargin + lp.bottomMargin
                 } else {
-                    toolbarHeightWithInsets = 0
+                    val isAllowedDestination = currentDestId == R.id.camera_fragment || currentDestId == R.id.playground_gallery_fragment
+                    if (isAllowedDestination || isFloatingToolbarForcedHidden) {
+                        toolbarHeightWithInsets = 0
+                    }
                 }
                 _toolbarHeightFlow.value = toolbarHeightWithInsets
             }
@@ -151,7 +154,10 @@ class MainActivity : AppCompatActivity() {
 
         if (!showToolbar || !enableCamera || !enablePlayground || !isAllowedDestination || isFloatingToolbarForcedHidden) {
             toolbarLayout.visibility = View.GONE
-            toolbarHeightWithInsets = 0
+            // Keep toolbar height for layout stability when navigating away to settings or viewer
+            if (isAllowedDestination || isFloatingToolbarForcedHidden) {
+                toolbarHeightWithInsets = 0
+            }
         } else {
             toolbarLayout.visibility = View.VISIBLE
             // Recalculate if it just became visible

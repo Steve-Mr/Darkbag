@@ -26,6 +26,7 @@
     </fragment>
 
     <fragment android:id="@+id/playground_gallery_fragment" android:name="top.maary.darkbag.fragments.PlaygroundGalleryFragment" android:label="Playground Gallery">
+        <action android:id="@+id/action_playground_gallery_to_settings" app:destination="@id/settings_fragment" />
         <action android:id="@+id/action_playground_to_image_viewer" app:destination="@id/playground_viewer_fragment" />
     </fragment>
 
