@@ -58,6 +58,9 @@ class MainActivity : AppCompatActivity() {
     private val _toolbarHeightFlow = MutableStateFlow(0)
     val toolbarHeightFlow: StateFlow<Int> = _toolbarHeightFlow
 
+    private val isAllowedDestination: Boolean
+        get() = currentDestId == R.id.camera_fragment || currentDestId == R.id.playground_gallery_fragment
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
@@ -91,7 +94,9 @@ class MainActivity : AppCompatActivity() {
                     val lp = view.layoutParams as MarginLayoutParams
                     toolbarHeightWithInsets = view.height + lp.topMargin + lp.bottomMargin
                 } else {
-                    toolbarHeightWithInsets = 0
+                    if (isAllowedDestination || isFloatingToolbarForcedHidden) {
+                        toolbarHeightWithInsets = 0
+                    }
                 }
                 _toolbarHeightFlow.value = toolbarHeightWithInsets
             }
@@ -145,13 +150,12 @@ class MainActivity : AppCompatActivity() {
         btnCamera.visibility = if (enableCamera) View.VISIBLE else View.GONE
         btnPlayground.visibility = if (enablePlayground) View.VISIBLE else View.GONE
 
-        // Only show toolbar on Camera and Playground Gallery fragments
-        val isAllowedDestination = currentDestId == R.id.camera_fragment ||
-                                   currentDestId == R.id.playground_gallery_fragment
-
         if (!showToolbar || !enableCamera || !enablePlayground || !isAllowedDestination || isFloatingToolbarForcedHidden) {
             toolbarLayout.visibility = View.GONE
-            toolbarHeightWithInsets = 0
+            // Keep toolbar height for layout stability when navigating away to settings or viewer
+            if (isAllowedDestination || isFloatingToolbarForcedHidden) {
+                toolbarHeightWithInsets = 0
+            }
         } else {
             toolbarLayout.visibility = View.VISIBLE
             // Recalculate if it just became visible

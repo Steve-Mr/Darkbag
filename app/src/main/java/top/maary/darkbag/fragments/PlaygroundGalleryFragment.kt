@@ -128,6 +128,18 @@ class PlaygroundGalleryFragment : Fragment() {
             insets
         }
 
+        binding.toolbar.setOnMenuItemClickListener { menuItem ->
+            when (menuItem.itemId) {
+                R.id.action_settings -> {
+                    if (findNavController().currentDestination?.id == R.id.playground_gallery_fragment) {
+                        findNavController().navigate(R.id.action_playground_gallery_to_settings)
+                    }
+                    true
+                }
+                else -> false
+            }
+        }
+
         binding.toolbar.setNavigationOnClickListener {
             findNavController().navigateUp()
         }
@@ -856,6 +868,9 @@ class PlaygroundGalleryFragment : Fragment() {
         super.onResume()
         // Trigger a fresh load to catch any changes from PlaygroundViewerFragment
         loadFiles()
+        // Re-synchronize the bottom bar state which updates the forced hidden state
+        // of the floating toolbar based on selection mode.
+        updateBottomBar()
     }
 
     override fun onDestroyView() {
