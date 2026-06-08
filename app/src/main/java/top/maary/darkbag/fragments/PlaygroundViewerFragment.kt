@@ -23,7 +23,7 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
         val playgroundPaths = arguments?.getStringArray("playground_dng_paths")
         if (playgroundPaths != null && playgroundPaths.isNotEmpty()) {
 
-            val filesDir = requireContext().filesDir
+            val filesDir = context?.filesDir ?: return
             viewLifecycleOwner.lifecycleScope.launch {
                 val group = withContext(Dispatchers.IO) {
                     val firstPath = playgroundPaths[0]
