@@ -6,70 +6,72 @@
     android:viewportWidth="512"
     android:viewportHeight="512">
 
-    <!-- Center inner glow circle -->
-    <path
-        android:pathData="M 256,256 m -134,0 a 134,134 0 1,0 268,0 a 134,134 0 1,0 -268,0">
-        <aapt:attr name="android:fillColor">
-            <gradient
-                android:startX="0"
-                android:startY="256"
-                android:endX="512"
-                android:endY="256"
-                android:type="linear">
-                <item android:offset="0" android:color="#111213" />
-                <item android:offset="0.45" android:color="#151413" />
-                <item android:offset="0.75" android:color="#723110" />
-                <item android:offset="1.0" android:color="#d46115" />
-            </gradient>
-        </aapt:attr>
-    </path>
-
-    <!-- Outer ring with mask simulated via path data cutouts -->
-    <group>
-        <clip-path android:pathData="M 0,0 L 512,0 L 512,190 L 0,190 Z
-                                     M 0,208 L 512,208 L 512,228 L 0,228 Z
-                                     M 0,246 L 512,246 L 512,266 L 0,266 Z
-                                     M 0,284 L 512,284 L 512,304 L 0,304 Z
-                                     M 0,322 L 512,322 L 512,512 L 0,512 Z
-                                     M 200,190 L 512,190 L 512,208 L 200,208 Z
-                                     M 200,228 L 512,228 L 512,246 L 200,246 Z
-                                     M 200,266 L 512,266 L 512,284 L 200,284 Z
-                                     M 200,304 L 512,304 L 512,322 L 200,322 Z" />
+    <!-- Scale group to fit safely inside the 66dp maskable area (approx 75% scale down) -->
+    <group android:pivotX="256" android:pivotY="256" android:scaleX="0.75" android:scaleY="0.75">
+        <!-- Center inner glow circle -->
         <path
-            android:pathData="M 256,256 m -150,0 a 150,150 0 1,0 300,0 a 150,150 0 1,0 -300,0"
-            android:strokeWidth="18">
-            <aapt:attr name="android:strokeColor">
-                <gradient
-                    android:startX="51.2"
-                    android:startY="0"
-                    android:endX="460.8"
-                    android:endY="512"
-                    android:type="linear">
-                    <item android:offset="0" android:color="#f5e0c6" />
-                    <item android:offset="0.45" android:color="#e87a25" />
-                    <item android:offset="1.0" android:color="#7a2a0c" />
-                </gradient>
-            </aapt:attr>
-        </path>
-    </group>
-
-    <!-- Inner rotated square -->
-    <group android:pivotX="256" android:pivotY="256" android:rotation="-35">
-        <path
-            android:pathData="M 224,208 h 64 a 16,16 0 0 1 16,16 v 64 a 16,16 0 0 1 -16,16 h -64 a 16,16 0 0 1 -16,-16 v -64 a 16,16 0 0 1 16,-16 z">
+            android:pathData="M 256,256 m -134,0 a 134,134 0 1,0 268,0 a 134,134 0 1,0 -268,0">
             <aapt:attr name="android:fillColor">
                 <gradient
-                    android:startX="256"
-                    android:startY="304"
-                    android:endX="256"
-                    android:endY="208"
+                    android:startX="0"
+                    android:startY="256"
+                    android:endX="512"
+                    android:endY="256"
                     android:type="linear">
-                    <item android:offset="0" android:color="#933b0e" />
-                    <item android:offset="0.5" android:color="#dd7d2b" />
-                    <item android:offset="1.0" android:color="#f7ddaf" />
+                    <item android:offset="0" android:color="#111213" />
+                    <item android:offset="0.45" android:color="#151413" />
+                    <item android:offset="0.75" android:color="#723110" />
+                    <item android:offset="1.0" android:color="#d46115" />
                 </gradient>
             </aapt:attr>
         </path>
-    </group>
 
+        <!-- Outer ring with mask simulated via path data cutouts -->
+        <group>
+            <clip-path android:pathData="M 0,0 L 512,0 L 512,190 L 0,190 Z
+                                         M 0,208 L 512,208 L 512,228 L 0,228 Z
+                                         M 0,246 L 512,246 L 512,266 L 0,266 Z
+                                         M 0,284 L 512,284 L 512,304 L 0,304 Z
+                                         M 0,322 L 512,322 L 512,512 L 0,512 Z
+                                         M 200,190 L 512,190 L 512,208 L 200,208 Z
+                                         M 200,228 L 512,228 L 512,246 L 200,246 Z
+                                         M 200,266 L 512,266 L 512,284 L 200,284 Z
+                                         M 200,304 L 512,304 L 512,322 L 200,322 Z" />
+            <path
+                android:pathData="M 256,256 m -150,0 a 150,150 0 1,0 300,0 a 150,150 0 1,0 -300,0"
+                android:strokeWidth="18">
+                <aapt:attr name="android:strokeColor">
+                    <gradient
+                        android:startX="51.2"
+                        android:startY="0"
+                        android:endX="460.8"
+                        android:endY="512"
+                        android:type="linear">
+                        <item android:offset="0" android:color="#f5e0c6" />
+                        <item android:offset="0.45" android:color="#e87a25" />
+                        <item android:offset="1.0" android:color="#7a2a0c" />
+                    </gradient>
+                </aapt:attr>
+            </path>
+        </group>
+
+        <!-- Inner rotated square -->
+        <group android:pivotX="256" android:pivotY="256" android:rotation="-35">
+            <path
+                android:pathData="M 224,208 h 64 a 16,16 0 0 1 16,16 v 64 a 16,16 0 0 1 -16,16 h -64 a 16,16 0 0 1 -16,-16 v -64 a 16,16 0 0 1 16,-16 z">
+                <aapt:attr name="android:fillColor">
+                    <gradient
+                        android:startX="256"
+                        android:startY="304"
+                        android:endX="256"
+                        android:endY="208"
+                        android:type="linear">
+                        <item android:offset="0" android:color="#933b0e" />
+                        <item android:offset="0.5" android:color="#dd7d2b" />
+                        <item android:offset="1.0" android:color="#f7ddaf" />
+                    </gradient>
+                </aapt:attr>
+            </path>
+        </group>
+    </group>
 </vector>
