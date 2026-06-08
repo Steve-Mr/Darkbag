@@ -150,6 +150,10 @@ class MainActivity : AppCompatActivity() {
         btnCamera.visibility = if (enableCamera) View.VISIBLE else View.GONE
         btnPlayground.visibility = if (enablePlayground) View.VISIBLE else View.GONE
 
+        // Only show toolbar on Camera and Playground Gallery fragments
+        val isAllowedDestination = currentDestId == R.id.camera_fragment ||
+                                   currentDestId == R.id.playground_gallery_fragment
+
         if (!showToolbar || !enableCamera || !enablePlayground || !isAllowedDestination || isFloatingToolbarForcedHidden) {
             toolbarLayout.visibility = View.GONE
             // Keep toolbar height for layout stability when navigating away to settings or viewer
