@@ -522,7 +522,9 @@ class CameraFragment : Fragment() {
         val onBackPressedCallback = object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 if (enablePlayground && defaultStartup == SettingsFragment.STARTUP_PLAYGROUND) {
-                    androidx.navigation.fragment.NavHostFragment.findNavController(this@CameraFragment).navigateUp()
+                    if (!androidx.navigation.fragment.NavHostFragment.findNavController(this@CameraFragment).navigateUp()) {
+                        requireActivity().finishAfterTransition()
+                    }
                 } else {
                     requireActivity().finishAfterTransition()
                 }

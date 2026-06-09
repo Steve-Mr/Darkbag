@@ -138,7 +138,9 @@ class PlaygroundGalleryFragment : Fragment() {
         val onBackPressedCallback = object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 if (enableCamera && defaultStartup == SettingsFragment.STARTUP_CAMERA) {
-                    findNavController().navigateUp()
+                    if (!findNavController().navigateUp()) {
+                        requireActivity().finishAfterTransition()
+                    }
                 } else {
                     requireActivity().finishAfterTransition()
                 }
@@ -157,9 +159,9 @@ class PlaygroundGalleryFragment : Fragment() {
 
         val cameraMenu = binding.toolbar.menu.findItem(R.id.action_camera)
         if (!showToolbar && defaultStartup == SettingsFragment.STARTUP_PLAYGROUND && enableCamera) {
-            cameraMenu.isVisible = true
+            cameraMenu?.isVisible = true
         } else {
-            cameraMenu.isVisible = false
+            cameraMenu?.isVisible = false
         }
 
         binding.toolbar.setOnMenuItemClickListener { menuItem ->
