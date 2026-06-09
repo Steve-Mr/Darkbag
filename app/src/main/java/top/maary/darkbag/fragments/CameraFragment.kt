@@ -84,6 +84,7 @@ import java.io.FileOutputStream
 import android.net.Uri
 import androidx.annotation.OptIn
 import androidx.camera.camera2.interop.ExperimentalCamera2Interop
+import androidx.activity.OnBackPressedCallback
 import androidx.core.view.setPadding
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
@@ -511,6 +512,24 @@ class CameraFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
+        // Initialize Preferences
+        val prefs =
+            requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+
+        val defaultStartup = prefs.getString(SettingsFragment.KEY_DEFAULT_STARTUP, SettingsFragment.STARTUP_CAMERA)
+        val enablePlayground = prefs.getBoolean(SettingsFragment.KEY_ENABLE_PLAYGROUND, true)
+
+        val onBackPressedCallback = object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (enablePlayground && defaultStartup == SettingsFragment.STARTUP_PLAYGROUND) {
+                    androidx.navigation.fragment.NavHostFragment.findNavController(this@CameraFragment).navigateUp()
+                } else {
+                    requireActivity().finishAfterTransition()
+                }
+            }
+        }
+        requireActivity().onBackPressedDispatcher.addCallback(viewLifecycleOwner, onBackPressedCallback)
+
         // Initialize our background executor
         cameraExecutor = Executors.newSingleThreadExecutor()
 
@@ -535,10 +554,6 @@ class CameraFragment : Fragment() {
         lutManager = LutManager(requireContext())
         cameraRepository = CameraRepository(requireContext())
         imageRepository = ImageRepository(requireContext())
-
-        // Initialize Preferences
-        val prefs =
-            requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
         halfFrameSessionStore = HalfFrameSessionStore(requireContext())
 
         // Initialize Flash State

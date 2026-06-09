@@ -14,6 +14,8 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
+import androidx.activity.OnBackPressedCallback
+import android.content.Context
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
@@ -128,6 +130,38 @@ class PlaygroundGalleryFragment : Fragment() {
             insets
         }
 
+        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val showToolbar = prefs.getBoolean(SettingsFragment.KEY_SHOW_FLOATING_TOOLBAR, true)
+        val defaultStartup = prefs.getString(SettingsFragment.KEY_DEFAULT_STARTUP, SettingsFragment.STARTUP_CAMERA)
+        val enableCamera = prefs.getBoolean(SettingsFragment.KEY_ENABLE_CAMERA, true)
+
+        val onBackPressedCallback = object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (enableCamera && defaultStartup == SettingsFragment.STARTUP_CAMERA) {
+                    findNavController().navigateUp()
+                } else {
+                    requireActivity().finishAfterTransition()
+                }
+            }
+        }
+        requireActivity().onBackPressedDispatcher.addCallback(viewLifecycleOwner, onBackPressedCallback)
+
+        if (!showToolbar && defaultStartup == SettingsFragment.STARTUP_CAMERA && enableCamera) {
+            binding.toolbar.setNavigationIcon(R.drawable.ic_back)
+            binding.toolbar.setNavigationOnClickListener {
+                requireActivity().onBackPressedDispatcher.onBackPressed()
+            }
+        } else {
+            binding.toolbar.navigationIcon = null
+        }
+
+        val cameraMenu = binding.toolbar.menu.findItem(R.id.action_camera)
+        if (!showToolbar && defaultStartup == SettingsFragment.STARTUP_PLAYGROUND && enableCamera) {
+            cameraMenu.isVisible = true
+        } else {
+            cameraMenu.isVisible = false
+        }
+
         binding.toolbar.setOnMenuItemClickListener { menuItem ->
             when (menuItem.itemId) {
                 R.id.action_settings -> {
@@ -136,12 +170,14 @@ class PlaygroundGalleryFragment : Fragment() {
                     }
                     true
                 }
+                R.id.action_camera -> {
+                    if (findNavController().currentDestination?.id == R.id.playground_gallery_fragment) {
+                        findNavController().navigate(R.id.action_playground_gallery_to_camera)
+                    }
+                    true
+                }
                 else -> false
             }
-        }
-
-        binding.toolbar.setNavigationOnClickListener {
-            findNavController().navigateUp()
         }
 
         adapter = PlaygroundAdapter(
