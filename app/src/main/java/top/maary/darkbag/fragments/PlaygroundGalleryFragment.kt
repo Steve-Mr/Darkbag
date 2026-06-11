@@ -204,7 +204,7 @@ class PlaygroundGalleryFragment : Fragment() {
 
                 if (!wasSelectionMode && isSelectionMode) {
                     // Transitioned into selection mode, notify all items to show unchecked circles
-                    adapter.notifyItemRangeChanged(0, adapter.currentList.size, "SELECTION_CHANGED")
+                    adapter.notifyItemRangeChanged(0, adapter.itemCount, "SELECTION_CHANGED")
                 }
             },
             onExpandClick = { group, position ->
