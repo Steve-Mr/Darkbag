@@ -3788,6 +3788,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     val totalTime = saveEndTime - startTime
                     val captureTime = captureEndTime - startTime
                     val waitTime = jniStartTime - captureEndTime
+                    val frameArrivals = frames.mapIndexed { idx, f -> "Frame ${idx+1}: +${f.arrivalTimeMs - startTime}ms" }.joinToString("\n                          ")
                     val jniTime = jniEndTime - jniStartTime
                     val halideTime = debugStats[0]
                     val copyTime = debugStats[1]
@@ -3801,6 +3802,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     val logMsg = """
                         [Total: ${totalTime}ms]
                         Capture: ${captureTime}ms
+                          $frameArrivals
                         Wait: ${waitTime}ms
                         JNI (Total): ${jniTime}ms
                           - Native Total: ${nativeTotalTime}ms

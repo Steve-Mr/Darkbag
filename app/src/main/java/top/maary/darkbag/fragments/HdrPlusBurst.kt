@@ -14,7 +14,8 @@ data class HdrFrame(
     val height: Int,
     val timestamp: Long,
     val rotationDegrees: Int,
-    val physicalId: String? = null
+    val physicalId: String? = null,
+    val arrivalTimeMs: Long = 0L // Profiling
 ) {
     /**
      * Explicitly clears the buffer reference to assist GC.
@@ -64,8 +65,9 @@ class HdrPlusBurst(
     fun addFrame(image: ImageProxy, physicalId: String? = null) {
         if (frames.size < frameCount) {
             try {
+                val arrivalTime = System.currentTimeMillis()
                 // Extract frame data immediately to release the ImageProxy buffer
-                val frame = copyFrame(image, physicalId)
+                val frame = copyFrame(image, physicalId).copy(arrivalTimeMs = arrivalTime)
                 frames.add(frame)
 
                 if (frames.size == frameCount) {
@@ -105,10 +107,11 @@ class HdrPlusBurst(
     ) {
         if (frames.size < frameCount) {
             try {
+                val arrivalTime = System.currentTimeMillis()
                 val frame = copyData(
                     buffer, width, height, rowStride, pixelStride,
                     timestamp, rotationDegrees, physicalId
-                )
+                ).copy(arrivalTimeMs = arrivalTime)
                 frames.add(frame)
                 if (frames.size == frameCount) {
                     onBurstComplete(frames.toList())
