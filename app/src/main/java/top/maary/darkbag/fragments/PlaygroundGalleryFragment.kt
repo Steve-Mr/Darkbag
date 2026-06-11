@@ -137,7 +137,9 @@ class PlaygroundGalleryFragment : Fragment() {
 
         val onBackPressedCallback = object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                if (enableCamera && defaultStartup == SettingsFragment.STARTUP_CAMERA) {
+                if (isSelectionMode) {
+                    clearSelection()
+                } else if (enableCamera && defaultStartup == SettingsFragment.STARTUP_CAMERA) {
                     if (!findNavController().navigateUp()) {
                         requireActivity().finishAfterTransition()
                     }
@@ -185,6 +187,7 @@ class PlaygroundGalleryFragment : Fragment() {
         adapter = PlaygroundAdapter(
             coroutineScope = viewLifecycleOwner.lifecycleScope,
             selectedFiles = selectedFiles,
+            isSelectionMode = { isSelectionMode },
             onItemClick = { file ->
                 if (isSelectionMode) {
                     toggleSelection(file)
@@ -193,10 +196,16 @@ class PlaygroundGalleryFragment : Fragment() {
                 }
             },
             onItemLongClick = { file ->
+                val wasSelectionMode = isSelectionMode
                 if (!isSelectionMode) {
                     isSelectionMode = true
                 }
                 toggleSelection(file)
+
+                if (!wasSelectionMode && isSelectionMode) {
+                    // Transitioned into selection mode, notify all items to show unchecked circles
+                    adapter.notifyItemRangeChanged(0, adapter.itemCount, "SELECTION_CHANGED")
+                }
             },
             onExpandClick = { group, position ->
                 if (position != RecyclerView.NO_POSITION) {
@@ -432,14 +441,34 @@ class PlaygroundGalleryFragment : Fragment() {
 
         if (index != -1) {
             val item = adapter.currentList[index]
-            if (item is PlaygroundItem.Group && item.jpgFile == file && selectedFiles.contains(file)) {
-                // If the user long clicked the group main image to select it, auto-expand so they see the sub-items too
-                if (!item.isExpanded) {
-                    item.isExpanded = true
-                    adapter.notifyItemChanged(index, "EXPANSION_CHANGED")
+            if (item is PlaygroundItem.Group) {
+                if (item.jpgFile == file && selectedFiles.contains(file)) {
+                    // If the user long clicked the group main image to select it, auto-expand so they see the sub-items too
+                    if (!item.isExpanded) {
+                        item.isExpanded = true
+                        adapter.notifyItemChanged(index, "EXPANSION_CHANGED")
+                    }
+                } else if (!selectedFiles.contains(item.jpgFile) && !selectedFiles.contains(item.dng1) && !selectedFiles.contains(item.dng2)) {
+                    // If no items in this group are selected anymore, auto-collapse it
+                    if (item.isExpanded) {
+                        item.isExpanded = false
+                        adapter.notifyItemChanged(index, "EXPANSION_CHANGED")
+                    }
                 }
             }
             adapter.notifyItemChanged(index, "SELECTION_CHANGED")
+        }
+
+        if (selectedFiles.isEmpty()) {
+            // Need to notify all items since they might need to hide the unchecked radio button icons
+            adapter.currentList.indices.forEach { i ->
+                val itm = adapter.currentList[i]
+                if (itm is PlaygroundItem.Group && itm.isExpanded) {
+                    itm.isExpanded = false
+                    adapter.notifyItemChanged(i, "EXPANSION_CHANGED")
+                }
+                adapter.notifyItemChanged(i, "SELECTION_CHANGED")
+            }
         }
         updateBottomBar()
     }
@@ -448,17 +477,16 @@ class PlaygroundGalleryFragment : Fragment() {
         val oldSelections = selectedFiles.toList()
         selectedFiles.clear()
         isSelectionMode = false
-        oldSelections.forEach { file ->
-            val index = adapter.currentList.indexOfFirst { item ->
-                when (item) {
-                    is PlaygroundItem.Single -> item.file == file
-                    is PlaygroundItem.Group -> item.jpgFile == file || item.dng1 == file || item.dng2 == file
-                }
+
+        adapter.currentList.indices.forEach { index ->
+            val item = adapter.currentList[index]
+            if (item is PlaygroundItem.Group && item.isExpanded) {
+                item.isExpanded = false
+                adapter.notifyItemChanged(index, "EXPANSION_CHANGED")
             }
-            if (index != -1) {
-                adapter.notifyItemChanged(index, "SELECTION_CHANGED")
-            }
+            adapter.notifyItemChanged(index, "SELECTION_CHANGED")
         }
+
         updateBottomBar()
     }
 
@@ -491,20 +519,18 @@ class PlaygroundGalleryFragment : Fragment() {
     }
 
     private fun clearSelectionAndReload() {
-        val oldSelections = selectedFiles.toList()
         selectedFiles.clear()
         isSelectionMode = false
-        oldSelections.forEach { file ->
-            val index = adapter.currentList.indexOfFirst { item ->
-                when (item) {
-                    is PlaygroundItem.Single -> item.file == file
-                    is PlaygroundItem.Group -> item.jpgFile == file || item.dng1 == file || item.dng2 == file
-                }
+
+        adapter.currentList.indices.forEach { index ->
+            val item = adapter.currentList[index]
+            if (item is PlaygroundItem.Group && item.isExpanded) {
+                item.isExpanded = false
+                adapter.notifyItemChanged(index, "EXPANSION_CHANGED")
             }
-            if (index != -1) {
-                adapter.notifyItemChanged(index, "SELECTION_CHANGED")
-            }
+            adapter.notifyItemChanged(index, "SELECTION_CHANGED")
         }
+
         updateBottomBar()
         loadFiles()
     }
@@ -920,6 +946,7 @@ class PlaygroundGalleryFragment : Fragment() {
 class PlaygroundAdapter(
     private val coroutineScope: kotlinx.coroutines.CoroutineScope,
     private val selectedFiles: Set<File>,
+    private val isSelectionMode: () -> Boolean,
     private val onItemClick: (File) -> Unit,
     private val onItemLongClick: (File) -> Unit,
     private val onExpandClick: (PlaygroundItem.Group, Int) -> Unit
@@ -998,16 +1025,21 @@ class PlaygroundAdapter(
 
         if (flattenedPayloads.contains("SELECTION_CHANGED")) {
             val isMainSelected = selectedFiles.contains(item.mainFile)
+            val selectionMode = isSelectionMode()
             holder.binding.selectionOverlay.visibility = if (isMainSelected) View.VISIBLE else View.GONE
-            holder.binding.iconSelected.visibility = if (isMainSelected) View.VISIBLE else View.GONE
+            holder.binding.iconSelected.visibility = if (selectionMode) View.VISIBLE else View.GONE
+            holder.binding.iconSelected.setImageResource(if (isMainSelected) R.drawable.ic_check_circle else R.drawable.ic_radio_button_unchecked)
 
             if (item is PlaygroundItem.Group) {
                 val isDng1Selected = selectedFiles.contains(item.dng1)
                 val isDng2Selected = selectedFiles.contains(item.dng2)
                 holder.binding.subSelectionOverlay1.visibility = if (isDng1Selected) View.VISIBLE else View.GONE
-                holder.binding.subIconSelected1.visibility = if (isDng1Selected) View.VISIBLE else View.GONE
+                holder.binding.subIconSelected1.visibility = if (selectionMode) View.VISIBLE else View.GONE
+                holder.binding.subIconSelected1.setImageResource(if (isDng1Selected) R.drawable.ic_check_circle else R.drawable.ic_radio_button_unchecked)
+
                 holder.binding.subSelectionOverlay2.visibility = if (isDng2Selected) View.VISIBLE else View.GONE
-                holder.binding.subIconSelected2.visibility = if (isDng2Selected) View.VISIBLE else View.GONE
+                holder.binding.subIconSelected2.visibility = if (selectionMode) View.VISIBLE else View.GONE
+                holder.binding.subIconSelected2.setImageResource(if (isDng2Selected) R.drawable.ic_check_circle else R.drawable.ic_radio_button_unchecked)
             }
             handled = true
         }
@@ -1199,8 +1231,10 @@ class PlaygroundAdapter(
         }
         holder.binding.imageViewThumbnail.layoutParams = layoutParams
 
+        val selectionMode = isSelectionMode()
         holder.binding.selectionOverlay.visibility = if (isMainSelected) View.VISIBLE else View.GONE
-        holder.binding.iconSelected.visibility = if (isMainSelected) View.VISIBLE else View.GONE
+        holder.binding.iconSelected.visibility = if (selectionMode) View.VISIBLE else View.GONE
+        holder.binding.iconSelected.setImageResource(if (isMainSelected) R.drawable.ic_check_circle else R.drawable.ic_radio_button_unchecked)
 
         holder.binding.imageViewThumbnail.setImageDrawable(null)
         val context = holder.itemView.context
@@ -1246,9 +1280,12 @@ class PlaygroundAdapter(
                 val isDng1Selected = selectedFiles.contains(item.dng1)
                 val isDng2Selected = selectedFiles.contains(item.dng2)
                 holder.binding.subSelectionOverlay1.visibility = if (isDng1Selected) View.VISIBLE else View.GONE
-                holder.binding.subIconSelected1.visibility = if (isDng1Selected) View.VISIBLE else View.GONE
+                holder.binding.subIconSelected1.visibility = if (selectionMode) View.VISIBLE else View.GONE
+                holder.binding.subIconSelected1.setImageResource(if (isDng1Selected) R.drawable.ic_check_circle else R.drawable.ic_radio_button_unchecked)
+
                 holder.binding.subSelectionOverlay2.visibility = if (isDng2Selected) View.VISIBLE else View.GONE
-                holder.binding.subIconSelected2.visibility = if (isDng2Selected) View.VISIBLE else View.GONE
+                holder.binding.subIconSelected2.visibility = if (selectionMode) View.VISIBLE else View.GONE
+                holder.binding.subIconSelected2.setImageResource(if (isDng2Selected) R.drawable.ic_check_circle else R.drawable.ic_radio_button_unchecked)
 
                 holder.binding.iconLayer.setOnClickListener {
                     onExpandClick(item, holder.bindingAdapterPosition)

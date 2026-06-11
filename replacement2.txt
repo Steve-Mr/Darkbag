@@ -1,9 +1,0 @@
-            val mainActivity = activity as? top.maary.darkbag.MainActivity
-            mainActivity?.let {
-                viewLifecycleOwner.lifecycleScope.launch {
-                    it.toolbarHeightFlow.collect { height ->
-                        currentToolbarHeight = height
-                        updateContainerPadding()
-                    }
-                }
-            }
