@@ -19,6 +19,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.fragment.app.Fragment
 import androidx.navigation.Navigation
 import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.RecyclerView
 import top.maary.darkbag.R
 import top.maary.darkbag.databinding.FragmentLutManagementBinding
@@ -114,9 +115,29 @@ class LutManagementFragment : Fragment() {
         private var activeLut: String? = null
 
         fun submitList(list: List<File>, active: String?) {
+            val oldLuts = luts
+            val oldActiveLut = activeLut
+
             luts = list
             activeLut = active
-            notifyDataSetChanged()
+
+            val diffResult = DiffUtil.calculateDiff(object : DiffUtil.Callback() {
+                override fun getOldListSize(): Int = oldLuts.size
+                override fun getNewListSize(): Int = list.size
+
+                override fun areItemsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean {
+                    return oldLuts[oldItemPosition].absolutePath == list[newItemPosition].absolutePath
+                }
+
+                override fun areContentsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean {
+                    val oldFile = oldLuts[oldItemPosition]
+                    val newFile = list[newItemPosition]
+                    return oldFile.name == newFile.name &&
+                           (oldFile.name == oldActiveLut) == (newFile.name == active)
+                }
+            })
+
+            diffResult.dispatchUpdatesTo(this)
         }
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
