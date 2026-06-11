@@ -137,7 +137,9 @@ class PlaygroundGalleryFragment : Fragment() {
 
         val onBackPressedCallback = object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                if (enableCamera && defaultStartup == SettingsFragment.STARTUP_CAMERA) {
+                if (isSelectionMode) {
+                    clearSelection()
+                } else if (enableCamera && defaultStartup == SettingsFragment.STARTUP_CAMERA) {
                     if (!findNavController().navigateUp()) {
                         requireActivity().finishAfterTransition()
                     }
@@ -194,10 +196,16 @@ class PlaygroundGalleryFragment : Fragment() {
                 }
             },
             onItemLongClick = { file ->
+                val wasSelectionMode = isSelectionMode
                 if (!isSelectionMode) {
                     isSelectionMode = true
                 }
                 toggleSelection(file)
+
+                if (!wasSelectionMode && isSelectionMode) {
+                    // Transitioned into selection mode, notify all items to show unchecked circles
+                    adapter.notifyItemRangeChanged(0, adapter.currentList.size, "SELECTION_CHANGED")
+                }
             },
             onExpandClick = { group, position ->
                 if (position != RecyclerView.NO_POSITION) {
