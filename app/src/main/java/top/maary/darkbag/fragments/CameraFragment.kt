@@ -1852,6 +1852,8 @@ class CameraFragment : Fragment() {
                 )
 
                 // 3. JNI Halide Processing
+                val useFastPath = prefs.getBoolean(SettingsFragment.KEY_FAST_PATH, true)
+
                 val result = ColorProcessor.processSingleFrameRaw(
                     bayerBuffer = image.data,
                     width = image.width,
@@ -1877,7 +1879,7 @@ class CameraFragment : Fragment() {
                     mirror = mirror,
                     metadata = captureMetadata,
                     fastDenoise = false
-                )
+                , useFastPath = useFastPath)
 
                 timing?.jniDone = System.currentTimeMillis()
 
@@ -1912,7 +1914,7 @@ class CameraFragment : Fragment() {
                                 mirror = mirror,
                                 metadata = captureMetadata,
                                 fastDenoise = false
-                            )
+                            , useFastPath = useFastPath)
                             if (thumbResult >= 0 && tempDngThumbFile.exists() && tempDngThumbFile.length() > 0L) tempDngThumbFile else null
                         } else if (tempJpgFile.exists() && tempJpgFile.length() > 0L) {
                             tempJpgFile

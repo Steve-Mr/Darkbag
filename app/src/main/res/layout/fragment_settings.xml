@@ -777,6 +777,16 @@
 
                         <Space android:layout_width="match_parent" android:layout_height="@dimen/spacing_large" />
 
+
+                        <com.google.android.material.materialswitch.MaterialSwitch
+                            android:id="@+id/switch_fast_path"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="Single Frame Fast Path (MHC Bilinear)"
+                            android:textSize="16sp" />
+
+                        <Space android:layout_width="match_parent" android:layout_height="@dimen/spacing_large" />
+
                         <TextView
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"

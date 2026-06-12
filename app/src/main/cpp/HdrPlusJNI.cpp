@@ -341,7 +341,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
     JNIEnv* env, jobject /* this */, jobjectArray dngBuffers, jint width, jint height, jint orientation, jint whiteLevel, jintArray blackLevelPattern, jfloatArray lensShadingMap, jint lensShadingRows, jint lensShadingCols, jboolean useSensorColorMatrix, jfloatArray whiteBalance, jfloatArray ccm, jfloatArray ccmAlt, jboolean exportMatrixAB, jint cfaPattern,
     jint targetLog, jstring lutPath, jstring outputJpgPath, jstring outputDngPath,
     jfloat digitalGain, jlongArray debugStats, jobject outputBitmap, jstring tempRawPath, jfloat zoomFactor, jboolean mirror,
-    jobject metadata, jboolean fastDenoise
+    jobject metadata, jboolean fastDenoise, jboolean useFastPath
 ) {
     LOGD("Native processHdrPlus started.");
     (void)useSensorColorMatrix;
@@ -544,7 +544,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
     if (bitmapPixels) {
         process_and_save_image(finalImage, width, height, digitalGain, targetLog, lut,
                                 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, // HSWB not used for preview in standard pipe yet
-                                nullptr, nullptr, nullptr, 1, ccmVec.data(), wbVec.data(), orientation, bitmapPixels, out_w, out_h, true, fastPreviewDownsample, zoomFactor, (bool)mirror);
+                                nullptr, nullptr, nullptr, 1, ccmVec.data(), wbVec.data(), orientation, (unsigned char*)bitmapPixels, out_w, out_h, true, fastPreviewDownsample, zoomFactor, (bool)mirror);
         AndroidBitmap_unlockPixels(env, outputBitmap);
     }
 
@@ -587,9 +587,200 @@ Java_top_maary_darkbag_processor_ColorProcessor_processSingleFrameRaw(
     JNIEnv* env, jobject /* this */, jobject bayerBuffer, jint width, jint height, jint orientation, jint whiteLevel, jintArray blackLevelPattern, jfloatArray lensShadingMap, jint lensShadingRows, jint lensShadingCols, jfloatArray whiteBalance, jfloatArray ccm, jint cfaPattern,
     jint targetLog, jstring lutPath, jstring outputJpgPath, jstring outputDngPath,
     jfloat digitalGain, jlongArray debugStats, jobject outputBitmap, jstring tempRawPath, jfloat zoomFactor, jboolean mirror,
-    jobject metadata, jboolean fastDenoise
+    jobject metadata, jboolean fastDenoise, jboolean useFastPath
 ) {
     LOGD("Native processSingleFrameRaw started.");
+
+
+    if (useFastPath) {
+        LOGD("Using Fast Path (MHC Bilinear Demosaic) for single frame RAW.");
+        auto fastStart = std::chrono::high_resolution_clock::now();
+
+        jsize bufCapacity = env->GetDirectBufferCapacity(bayerBuffer);
+        uint16_t* bayerData = static_cast<uint16_t*>(env->GetDirectBufferAddress(bayerBuffer));
+        if (!bayerData) { LOGE("Failed to get direct buffer address"); return -1; }
+
+        std::vector<uint16_t> finalImage(width * height * 3);
+
+        // Extract black level and white balance
+        jint* blData = env->GetIntArrayElements(blackLevelPattern, nullptr);
+        int bl_r = blData[0], bl_g0 = blData[1], bl_g1 = blData[2], bl_b = blData[3];
+        env->ReleaseIntArrayElements(blackLevelPattern, blData, JNI_ABORT);
+
+        jfloat* wbData = env->GetFloatArrayElements(whiteBalance, nullptr);
+        float wb_r = wbData[0], wb_g0 = wbData[1], wb_g1 = wbData[2], wb_b = wbData[3];
+        env->ReleaseFloatArrayElements(whiteBalance, wbData, JNI_ABORT);
+
+        // Map CFA pattern to bayer layout
+        // Assuming cfaPattern mapping: 0=RGGB, 1=GRBG, 2=GBRG, 3=BGGR (typical android mappings)
+        int color_map[2][2]; // [y % 2][x % 2] -> 0:R, 1:G, 2:B
+        if (cfaPattern == 0) { color_map[0][0]=0; color_map[0][1]=1; color_map[1][0]=1; color_map[1][1]=2; }
+        else if (cfaPattern == 1) { color_map[0][0]=1; color_map[0][1]=0; color_map[1][0]=2; color_map[1][1]=1; }
+        else if (cfaPattern == 2) { color_map[0][0]=1; color_map[0][1]=2; color_map[1][0]=0; color_map[1][1]=1; }
+        else { color_map[0][0]=2; color_map[0][1]=1; color_map[1][0]=1; color_map[1][1]=0; }
+
+        // MHC Bilinear Demosaic with WB and Black Level
+        #pragma omp parallel for
+        for (int y = 0; y < height; ++y) {
+            for (int x = 0; x < width; ++x) {
+                int c = color_map[y % 2][x % 2];
+                int idx = y * width + x;
+                int out_idx = idx * 3;
+
+                // Fetch central pixel
+
+                float val = (float)bayerData[idx];
+                float bl = (c == 0) ? bl_r : (c == 2) ? bl_b : (x%2 == y%2) ? bl_g0 : bl_g1;
+                float wb = (c == 0) ? wb_r : (c == 2) ? wb_b : (x%2 == y%2) ? wb_g0 : wb_g1;
+
+                float norm_scale = 65535.0f / std::max(1.0f, (float)whiteLevel - bl);
+                val = std::max(0.0f, val - bl) * norm_scale * wb;
+
+
+                // Simple bilinear for boundaries, MHC for interior
+                if (x < 2 || x >= width - 2 || y < 2 || y >= height - 2) {
+                    finalImage[out_idx + 0] = (c == 0) ? std::min(65535.0f, val) : 0;
+                    finalImage[out_idx + 1] = (c == 1) ? std::min(65535.0f, val) : 0;
+                    finalImage[out_idx + 2] = (c == 2) ? std::min(65535.0f, val) : 0;
+                    continue; // Skip full demosaic for edges to prevent out of bounds
+                }
+
+                float r = 0, g = 0, b = 0;
+
+                // 5x5 Neighborhood access helper
+                auto get_pixel = [&](int dy, int dx) {
+                    int p_c = color_map[(y+dy)%2][(x+dx)%2];
+
+                    float p_val = (float)bayerData[(y + dy) * width + (x + dx)];
+                    float p_bl = (p_c == 0) ? bl_r : (p_c == 2) ? bl_b : ((x+dx)%2 == (y+dy)%2) ? bl_g0 : bl_g1;
+                    float p_wb = (p_c == 0) ? wb_r : (p_c == 2) ? wb_b : ((x+dx)%2 == (y+dy)%2) ? wb_g0 : wb_g1;
+                    float p_norm_scale = 65535.0f / std::max(1.0f, (float)whiteLevel - p_bl);
+                    return std::max(0.0f, p_val - p_bl) * p_norm_scale * p_wb;
+
+                };
+
+                if (c == 1) { // Current pixel is Green
+                    g = val;
+                    // R and B interpolation depends on whether we are on a Green row with R or B
+                    bool r_row = (color_map[y%2][(x+1)%2] == 0);
+                    float p1 = get_pixel(0, -1), p2 = get_pixel(0, 1), p3 = get_pixel(-1, 0), p4 = get_pixel(1, 0);
+                    float hc = get_pixel(0, -2) + get_pixel(0, 2), vc = get_pixel(-2, 0) + get_pixel(2, 0);
+
+                    if (r_row) {
+                        r = (p1 + p2) / 2.0f + (val - (hc / 2.0f)) / 2.0f;
+                        b = (p3 + p4) / 2.0f + (val - (vc / 2.0f)) / 2.0f;
+                    } else {
+                        b = (p1 + p2) / 2.0f + (val - (hc / 2.0f)) / 2.0f;
+                        r = (p3 + p4) / 2.0f + (val - (vc / 2.0f)) / 2.0f;
+                    }
+                } else if (c == 0) { // Current pixel is Red
+                    r = val;
+                    float n1 = get_pixel(-1, 0), n2 = get_pixel(1, 0), n3 = get_pixel(0, -1), n4 = get_pixel(0, 1);
+                    float d1 = get_pixel(-1, -1), d2 = get_pixel(-1, 1), d3 = get_pixel(1, -1), d4 = get_pixel(1, 1);
+                    g = (n1 + n2 + n3 + n4) / 4.0f + (val - (get_pixel(-2, 0) + get_pixel(2, 0) + get_pixel(0, -2) + get_pixel(0, 2)) / 4.0f) / 2.0f;
+                    b = (d1 + d2 + d3 + d4) / 4.0f + (val - (get_pixel(-2, -2) + get_pixel(-2, 2) + get_pixel(2, -2) + get_pixel(2, 2)) / 4.0f) * 3.0f / 4.0f;
+                } else { // Current pixel is Blue
+                    b = val;
+                    float n1 = get_pixel(-1, 0), n2 = get_pixel(1, 0), n3 = get_pixel(0, -1), n4 = get_pixel(0, 1);
+                    float d1 = get_pixel(-1, -1), d2 = get_pixel(-1, 1), d3 = get_pixel(1, -1), d4 = get_pixel(1, 1);
+                    g = (n1 + n2 + n3 + n4) / 4.0f + (val - (get_pixel(-2, 0) + get_pixel(2, 0) + get_pixel(0, -2) + get_pixel(0, 2)) / 4.0f) / 2.0f;
+                    r = (d1 + d2 + d3 + d4) / 4.0f + (val - (get_pixel(-2, -2) + get_pixel(-2, 2) + get_pixel(2, -2) + get_pixel(2, 2)) / 4.0f) * 3.0f / 4.0f;
+                }
+
+                finalImage[out_idx + 0] = std::min(65535.0f, std::max(0.0f, r));
+                finalImage[out_idx + 1] = std::min(65535.0f, std::max(0.0f, g));
+                finalImage[out_idx + 2] = std::min(65535.0f, std::max(0.0f, b));
+            }
+        }
+
+
+        // Edge handling: copy nearest valid interpolated pixel
+        for (int y = 0; y < height; ++y) {
+            for (int x = 0; x < width; ++x) {
+                if (x < 2 || x >= width - 2 || y < 2 || y >= height - 2) {
+                    int nx = std::max(2, std::min(width - 3, x));
+                    int ny = std::max(2, std::min(height - 3, y));
+                    finalImage[(y * width + x) * 3 + 0] = finalImage[(ny * width + nx) * 3 + 0];
+                    finalImage[(y * width + x) * 3 + 1] = finalImage[(ny * width + nx) * 3 + 1];
+                    finalImage[(y * width + x) * 3 + 2] = finalImage[(ny * width + nx) * 3 + 2];
+                }
+            }
+        }
+
+        // Apply CCM, LUT, Gain, and save using existing process_and_save_image logic
+
+        jfloat* ccmData = env->GetFloatArrayElements(ccm, nullptr);
+        std::vector<float> ccmVec(9);
+        for(int i=0; i<9; i++) ccmVec[i] = ccmData[i];
+        env->ReleaseFloatArrayElements(ccm, ccmData, JNI_ABORT);
+
+        std::vector<float> wbVec(4);
+        wbVec[0] = wb_r; wbVec[1] = wb_g0; wbVec[2] = wb_g1; wbVec[3] = wb_b;
+
+        const char* jpg_p_cstr = outputJpgPath ? env->GetStringUTFChars(outputJpgPath, 0) : nullptr;
+        const char* dng_p_cstr = outputDngPath ? env->GetStringUTFChars(outputDngPath, 0) : nullptr;
+        std::string jpgPathStr = jpg_p_cstr ? jpg_p_cstr : "";
+        std::string dngPathStr = dng_p_cstr ? dng_p_cstr : "";
+        if (jpg_p_cstr) env->ReleaseStringUTFChars(outputJpgPath, jpg_p_cstr);
+        if (dng_p_cstr) env->ReleaseStringUTFChars(outputDngPath, dng_p_cstr);
+
+        ImageMetadata meta = metadataFromJava(env, metadata);
+
+        const char* lut_p_cstr = lutPath ? env->GetStringUTFChars(lutPath, 0) : nullptr;
+        // Load LUT using ColorPipe.h
+        LUT3D lut;
+        if (lut_p_cstr) { lut = load_lut(lut_p_cstr); }
+        if (lutPath && lut_p_cstr) env->ReleaseStringUTFChars(lutPath, lut_p_cstr);
+
+        auto saveStart = std::chrono::high_resolution_clock::now();
+        const int fastPreviewDownsample = compute_preview_downsample_factor(width, height, 1280);
+
+        if (!dngPathStr.empty()) {
+            float baselineExposure = (digitalGain > 0.0f) ? std::log2(digitalGain) : 0.0f;
+            write_dng(dngPathStr.c_str(), width, height, finalImage, 65535, ccmVec, meta, orientation, (bool)mirror, baselineExposure);
+        }
+
+        if (!jpgPathStr.empty()) {
+            process_and_save_image(finalImage, width, height, digitalGain, targetLog, lut,
+                                    0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                                    jpgPathStr.c_str(), nullptr, &meta, 1, ccmVec.data(), wbVec.data(), orientation, nullptr, 0, 0, true, fastPreviewDownsample, zoomFactor, (bool)mirror);
+        }
+
+        AndroidBitmapInfo info;
+        int out_w = 0, out_h = 0;
+        void* bitmapPixels = nullptr;
+        if (outputBitmap) {
+            AndroidBitmap_getInfo(env, outputBitmap, &info);
+            out_w = info.width;
+            out_h = info.height;
+            AndroidBitmap_lockPixels(env, outputBitmap, &bitmapPixels);
+        }
+
+        if (bitmapPixels) {
+            process_and_save_image(finalImage, width, height, digitalGain, targetLog, lut,
+                                    0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                                    nullptr, nullptr, nullptr, 1, ccmVec.data(), wbVec.data(), orientation, (unsigned char*)bitmapPixels, out_w, out_h, true, fastPreviewDownsample, zoomFactor, (bool)mirror);
+            AndroidBitmap_unlockPixels(env, outputBitmap);
+        }
+
+        const char* tr_p_cstr = (tempRawPath) ? env->GetStringUTFChars(tempRawPath, 0) : nullptr;
+        if (tr_p_cstr) {
+            std::ofstream out(tr_p_cstr, std::ios::binary);
+            if (out.is_open()) {
+                out.write((char*)finalImage.data(), (size_t)width*height*3*2);
+                out.close();
+            }
+            env->ReleaseStringUTFChars(tempRawPath, tr_p_cstr);
+        }
+
+        auto nativeStart = fastStart;
+        fillDebugStats(env, debugStats, 0, 0, 0, 0,
+            (jlong)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now()-saveStart).count(),
+            0,
+            (jlong)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now()-nativeStart).count(),
+            0, {0,0,0,0,0,0,0});
+        return 0;
+    }
 
     // Repurpose processHdrPlus logic by wrapping the single buffer in an array
     jobjectArray dngBuffers = env->NewObjectArray(1, g_byteBufferClass, nullptr);
@@ -602,6 +793,6 @@ Java_top_maary_darkbag_processor_ColorProcessor_processSingleFrameRaw(
         whiteBalance, ccm, nullptr, // ccmAlt
         false, // exportMatrixAB
         cfaPattern, targetLog, lutPath,
-        outputJpgPath, outputDngPath, digitalGain, debugStats, outputBitmap, tempRawPath, zoomFactor, mirror, metadata, fastDenoise
+        outputJpgPath, outputDngPath, digitalGain, debugStats, outputBitmap, tempRawPath, zoomFactor, mirror, metadata, fastDenoise, false
     );
 }

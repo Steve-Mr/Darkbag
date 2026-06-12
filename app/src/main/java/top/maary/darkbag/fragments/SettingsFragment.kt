@@ -428,9 +428,14 @@ class SettingsFragment : Fragment() {
         setupSwitch(binding.switchShowLutSwitcher, KEY_SHOW_LUT_SWITCHER)
 
         setupSwitch(binding.switchForce60fps, KEY_FORCE_60FPS, false)
+
         binding.switchFastDenoise?.let {
             setupSwitch(it, KEY_FAST_DENOISE, false)
         }
+        binding.switchFastPath?.let {
+            setupSwitch(it, KEY_FAST_PATH, true)
+        }
+
 
         binding.switchCloseDebug.setOnCheckedChangeListener { _, isChecked ->
             if (isChecked) {
@@ -517,6 +522,7 @@ class SettingsFragment : Fragment() {
         const val KEY_HDR_UNDEREXPOSURE_MODE = "hdr_underexposure_mode"
         const val KEY_SHOW_HDR_UNDEREXPOSURE_BUTTON = "show_hdr_underexposure_button"
         const val KEY_SHOW_HDR_PLUS_SWITCH = "show_hdr_plus_switch"
+        const val KEY_FAST_PATH = "single_frame_fast_path"
         const val KEY_USE_INTERNAL_VIEWER = "use_internal_viewer"
         const val KEY_EXTERNAL_VIEWER_PACKAGE = "external_viewer_package"
         const val KEY_EXTERNAL_VIEWER_NAME = "external_viewer_name"
