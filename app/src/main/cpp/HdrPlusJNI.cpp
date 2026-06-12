@@ -22,7 +22,9 @@
 #include <HalideBuffer.h>
 #include <HalideRuntime.h>
 #include "ColorPipe.h"
+#include "LutCache.h"
 #include "hdrplus_raw_pipeline.h" // Generated header
+#include "single_frame_raw_pipeline.h"
 
 #define TAG "HdrPlusJNI"
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, TAG, __VA_ARGS__)
@@ -301,7 +303,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
 
 
     const char* lut_path_cstr = (lutPath) ? env->GetStringUTFChars(lutPath, 0) : nullptr;
-    LUT3D lut; if (lut_path_cstr) { lut = load_lut(lut_path_cstr); env->ReleaseStringUTFChars(lutPath, lut_path_cstr); }
+    LUT3D lut; if (lut_path_cstr) { lut = LutCache::getInstance().getLut(lut_path_cstr); env->ReleaseStringUTFChars(lutPath, lut_path_cstr); } else { lut.size = 0; }
 
     const char* jpg_path_cstr = (jpgPath) ? env->GetStringUTFChars(jpgPath, 0) : nullptr;
     const char* dng_path_cstr = (dngPath) ? env->GetStringUTFChars(dngPath, 0) : nullptr;
@@ -442,13 +444,17 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
     unsigned char* bitmapPixels = nullptr;
     if (outputBitmap) AndroidBitmap_lockPixels(env, outputBitmap, (void**)&bitmapPixels);
 
+    auto lutLoadStart = std::chrono::high_resolution_clock::now();
     const char* lut_path_cstr = (lutPath) ? env->GetStringUTFChars(lutPath, 0) : nullptr;
-    LUT3D lut; if (lut_path_cstr) { lut = load_lut(lut_path_cstr); env->ReleaseStringUTFChars(lutPath, lut_path_cstr); }
+    LUT3D lut; if (lut_path_cstr) { lut = LutCache::getInstance().getLut(lut_path_cstr); env->ReleaseStringUTFChars(lutPath, lut_path_cstr); } else { lut.size = 0; }
+    auto lutLoadMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - lutLoadStart).count();
+    LOGD("LUT Load Time: %lld ms", (long long)lutLoadMs);
 
     std::vector<uint16_t>& finalImage = g_hdrPlusBuffers.interleavedPool;
     int stride_x = outputBuf.dim(0).stride(), stride_y = outputBuf.dim(1).stride(), stride_c = outputBuf.dim(2).stride();
     const uint16_t* raw_ptr = outputBuf.data();
     auto postStart = std::chrono::high_resolution_clock::now();
+    auto lscStart = std::chrono::high_resolution_clock::now();
     const bool hasLsc = !lensShadingVec.empty() && lensShadingRows > 0 && lensShadingCols > 0;
     auto lsc_idx = [&](int ch, int row, int col) -> int {
         return ch * lensShadingRows * lensShadingCols + row * lensShadingCols + col;
@@ -563,21 +569,162 @@ Java_top_maary_darkbag_processor_ColorProcessor_processSingleFrameRaw(
     JNIEnv* env, jobject /* this */, jobject bayerBuffer, jint width, jint height, jint orientation, jint whiteLevel, jintArray blackLevelPattern, jfloatArray lensShadingMap, jint lensShadingRows, jint lensShadingCols, jfloatArray whiteBalance, jfloatArray ccm, jint cfaPattern,
     jint targetLog, jstring lutPath, jstring outputJpgPath, jstring outputDngPath,
     jfloat digitalGain, jlongArray debugStats, jobject outputBitmap, jstring tempRawPath, jfloat zoomFactor, jboolean mirror,
-    jobject metadata
+    jobject metadata, jboolean useNewPipeline
 ) {
-    LOGD("Native processSingleFrameRaw started.");
+    LOGD("Native processSingleFrameRaw started. useNewPipeline=%d", useNewPipeline);
 
-    // Repurpose processHdrPlus logic by wrapping the single buffer in an array
-    jobjectArray dngBuffers = env->NewObjectArray(1, g_byteBufferClass, nullptr);
-    env->SetObjectArrayElement(dngBuffers, 0, bayerBuffer);
+    if (!useNewPipeline) {
+        // Repurpose processHdrPlus logic by wrapping the single buffer in an array
+        jobjectArray dngBuffers = env->NewObjectArray(1, g_byteBufferClass, nullptr);
+        env->SetObjectArrayElement(dngBuffers, 0, bayerBuffer);
 
-    // Call the existing processHdrPlus logic.
-    return Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
-        env, nullptr, dngBuffers, width, height, orientation, whiteLevel, blackLevelPattern, lensShadingMap, lensShadingRows, lensShadingCols,
-        false, // useSensorColorMatrix
-        whiteBalance, ccm, nullptr, // ccmAlt
-        false, // exportMatrixAB
-        cfaPattern, targetLog, lutPath,
-        outputJpgPath, outputDngPath, digitalGain, debugStats, outputBitmap, tempRawPath, zoomFactor, mirror, metadata
-    );
+        // Call the existing processHdrPlus logic.
+        return Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
+            env, nullptr, dngBuffers, width, height, orientation, whiteLevel, blackLevelPattern, lensShadingMap, lensShadingRows, lensShadingCols,
+            false, // useSensorColorMatrix
+            whiteBalance, ccm, nullptr, // ccmAlt
+            false, // exportMatrixAB
+            cfaPattern, targetLog, lutPath,
+            outputJpgPath, outputDngPath, digitalGain, debugStats, outputBitmap, tempRawPath, zoomFactor, mirror, metadata
+        );
+    }
+
+    // --- NEW PIPELINE ---
+    auto nativeStart = std::chrono::high_resolution_clock::now();
+    auto jniPrepStart = std::chrono::high_resolution_clock::now();
+
+    uint16_t* rawDataPtr = (uint16_t*)env->GetDirectBufferAddress(bayerBuffer);
+    if (!rawDataPtr) { LOGE("Failed to get direct buffer address"); return -1; }
+
+    Buffer<uint16_t> inputBuf(rawDataPtr, width, height);
+
+    // outputPool is guaranteed to be big enough if we size it
+    g_hdrPlusBuffers.ensureCapacity(width, height, 1);
+    Buffer<uint16_t> outputBuf(g_hdrPlusBuffers.outputPool.data(), width, height, 3);
+
+    jfloat* wbData = env->GetFloatArrayElements(whiteBalance, nullptr);
+    float wb_r = wbData[0], wb_g0 = wbData[1], wb_g1 = wbData[2], wb_b = wbData[3];
+    std::vector<float> wbVec = {wb_r, wb_g0, wb_g1, wb_b};
+    env->ReleaseFloatArrayElements(whiteBalance, wbData, JNI_ABORT);
+
+    int bl_pattern[4] = {64, 64, 64, 64};
+    if (blackLevelPattern && env->GetArrayLength(blackLevelPattern) >= 4) {
+        env->GetIntArrayRegion(blackLevelPattern, 0, 4, bl_pattern);
+    }
+    uint16_t bl_r = (uint16_t)std::max(0, bl_pattern[0]);
+    uint16_t bl_g0 = (uint16_t)std::max(0, bl_pattern[1]);
+    uint16_t bl_g1 = (uint16_t)std::max(0, bl_pattern[2]);
+    uint16_t bl_b = (uint16_t)std::max(0, bl_pattern[3]);
+
+    std::vector<float> lensShadingVec;
+    if (lensShadingMap && lensShadingRows > 0 && lensShadingCols > 0) {
+        const jsize l = env->GetArrayLength(lensShadingMap);
+        const int expected = 4 * lensShadingRows * lensShadingCols;
+        if (l >= expected) {
+            lensShadingVec.resize(expected);
+            env->GetFloatArrayRegion(lensShadingMap, 0, expected, lensShadingVec.data());
+        }
+    }
+
+    jfloat* ccmData = env->GetFloatArrayElements(ccm, nullptr);
+    std::vector<float> ccmVec(9); for(int i=0; i<9; ++i) ccmVec[i] = ccmData[i];
+    env->ReleaseFloatArrayElements(ccm, ccmData, JNI_ABORT);
+
+    std::vector<float> identityCCM = { 1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f };
+    Buffer<float> ccmHalideBuf(identityCCM.data(), 3, 3);
+    auto jniPrepMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - jniPrepStart).count();
+
+    int halideCfa = 1;
+    switch (cfaPattern) { case 0: halideCfa = 1; break; case 1: halideCfa = 2; break; case 2: halideCfa = 4; break; case 3: halideCfa = 3; break; default: halideCfa = 1; break; }
+
+    static bool halideThreadsConfigured = false;
+    if (!halideThreadsConfigured) {
+        int cpuThreads = (int)std::thread::hardware_concurrency(); if (cpuThreads <= 0) cpuThreads = 4;
+        halide_set_num_threads(cpuThreads); halideThreadsConfigured = true;
+    }
+
+    auto halideStart = std::chrono::high_resolution_clock::now();
+    int halide_res = single_frame_raw_pipeline(inputBuf, bl_r, bl_g0, bl_g1, bl_b, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, ccmHalideBuf, 1.0f, 1.0f, outputBuf);
+    auto halideDurationMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - halideStart).count();
+
+    if (halide_res != 0) { LOGE("Single Frame Halide failed: %d", halide_res); return -1; }
+
+    unsigned char* bitmapPixels = nullptr;
+    if (outputBitmap) AndroidBitmap_lockPixels(env, outputBitmap, (void**)&bitmapPixels);
+
+    auto lutLoadStart = std::chrono::high_resolution_clock::now();
+    const char* lut_path_cstr = (lutPath) ? env->GetStringUTFChars(lutPath, 0) : nullptr;
+    LUT3D lut; if (lut_path_cstr) { lut = LutCache::getInstance().getLut(lut_path_cstr); env->ReleaseStringUTFChars(lutPath, lut_path_cstr); } else { lut.size = 0; }
+    auto lutLoadMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - lutLoadStart).count();
+
+    std::vector<uint16_t>& finalImage = g_hdrPlusBuffers.interleavedPool;
+    int stride_x = outputBuf.dim(0).stride(), stride_y = outputBuf.dim(1).stride(), stride_c = outputBuf.dim(2).stride();
+    const uint16_t* raw_ptr = outputBuf.data();
+    auto postStart = std::chrono::high_resolution_clock::now();
+    auto lscStart = std::chrono::high_resolution_clock::now();
+    const bool hasLsc = !lensShadingVec.empty() && lensShadingRows > 0 && lensShadingCols > 0;
+    auto lsc_idx = [&](int ch, int row, int col) -> int {
+        return ch * lensShadingRows * lensShadingCols + row * lensShadingCols + col;
+    };
+
+    #pragma omp parallel for
+    for (int y = 0; y < height; y++) {
+        for (int x = 0; x < width; x++) {
+             uint16_t r = raw_ptr[x*stride_x + y*stride_y + 0*stride_c];
+             uint16_t g = raw_ptr[x*stride_x + y*stride_y + 1*stride_c];
+             uint16_t b = raw_ptr[x*stride_x + y*stride_y + 2*stride_c];
+             if (hasLsc) {
+                 float nx = (float)x / (width - 1); float ny = (float)y / (height - 1);
+                 float gx = nx * (lensShadingCols - 1); float gy = ny * (lensShadingRows - 1);
+                 int ix = std::clamp((int)gx, 0, lensShadingCols - 2); int iy = std::clamp((int)gy, 0, lensShadingRows - 2);
+                 float fx = gx - ix; float fy = gy - iy;
+                 auto interp = [&](int ch) {
+                     float v00 = lensShadingVec[lsc_idx(ch, iy, ix)];
+                     float v10 = lensShadingVec[lsc_idx(ch, iy, ix+1)];
+                     float v01 = lensShadingVec[lsc_idx(ch, iy+1, ix)];
+                     float v11 = lensShadingVec[lsc_idx(ch, iy+1, ix+1)];
+                     return v00*(1-fx)*(1-fy) + v10*fx*(1-fy) + v01*(1-fx)*fy + v11*fx*fy;
+                 };
+                 r = (uint16_t)std::clamp((float)r * interp(0), 0.0f, 65535.0f);
+                 g = (uint16_t)std::clamp((float)g * ((interp(1)+interp(2))*0.5f), 0.0f, 65535.0f);
+                 b = (uint16_t)std::clamp((float)b * interp(3), 0.0f, 65535.0f);
+             }
+             finalImage[(y*width + x)*3 + 0] = r;
+             finalImage[(y*width + x)*3 + 1] = g;
+             finalImage[(y*width + x)*3 + 2] = b;
+        }
+    }
+
+    auto lscDurationMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - lscStart).count();
+    LOGD("LSC CPU Time: %lld ms", (long long)lscDurationMs);
+    auto postDurationMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - postStart).count();
+
+    auto saveStart = std::chrono::high_resolution_clock::now();
+    const char* jpg_path_cstr = (outputJpgPath) ? env->GetStringUTFChars(outputJpgPath, 0) : nullptr;
+    const char* tiff_path_cstr = (outputDngPath) ? env->GetStringUTFChars(outputDngPath, 0) : nullptr;
+    const char* temp_raw_cstr = (tempRawPath) ? env->GetStringUTFChars(tempRawPath, 0) : nullptr;
+
+    ImageMetadata meta;
+    if (metadata) { meta = metadataFromJava(env, metadata); }
+
+    if (temp_raw_cstr) {
+        FILE* f = fopen(temp_raw_cstr, "wb");
+        if (f) { fwrite(finalImage.data(), sizeof(uint16_t), finalImage.size(), f); fclose(f); }
+    }
+
+    if (jpg_path_cstr || tiff_path_cstr || bitmapPixels) {
+        process_and_save_image(finalImage, width, height, digitalGain, targetLog, lut,
+                                0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                                jpg_path_cstr, tiff_path_cstr, &meta, 1, ccmVec.data(), wbVec.data(), orientation, bitmapPixels, width, height, outputBitmap != nullptr, 1, zoomFactor, (bool)mirror);
+    }
+
+    if (outputJpgPath) env->ReleaseStringUTFChars(outputJpgPath, jpg_path_cstr);
+    if (outputDngPath) env->ReleaseStringUTFChars(outputDngPath, tiff_path_cstr);
+    if (tempRawPath) env->ReleaseStringUTFChars(tempRawPath, temp_raw_cstr);
+    if (outputBitmap) AndroidBitmap_unlockPixels(env, outputBitmap);
+
+    HalideStageStats stageStats; // Empty for now, can extract if we add profiler
+    fillDebugStats(env, debugStats, 0, (jlong)halideDurationMs, (jlong)postDurationMs, 0, (jlong)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now()-saveStart).count(), 0, (jlong)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now()-nativeStart).count(), (jlong)jniPrepMs, stageStats);
+
+    return 0;
 }

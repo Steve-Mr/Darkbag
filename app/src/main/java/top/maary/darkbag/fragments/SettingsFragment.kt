@@ -428,6 +428,7 @@ class SettingsFragment : Fragment() {
         setupSwitch(binding.switchShowLutSwitcher, KEY_SHOW_LUT_SWITCHER)
 
         setupSwitch(binding.switchForce60fps, KEY_FORCE_60FPS, false)
+        setupSwitch(binding.switchUseNewPipeline, KEY_USE_NEW_SINGLE_PIPELINE, false)
 
         binding.switchCloseDebug.setOnCheckedChangeListener { _, isChecked ->
             if (isChecked) {
@@ -527,6 +528,7 @@ class SettingsFragment : Fragment() {
         const val KEY_HDR_PLUS_OIS = "hdr_plus_ois_enabled"
         const val KEY_FORCE_60FPS = "force_60fps"
         const val KEY_DEBUG_ENABLED = "debug_enabled"
+        const val KEY_USE_NEW_SINGLE_PIPELINE = "use_new_single_pipeline"
         const val KEY_SAVE_RAW = "save_raw"
         const val KEY_JPG_STORAGE_URI = "jpg_storage_uri"
         const val KEY_JPG_STORAGE_URI_NAME = "jpg_storage_uri_name"

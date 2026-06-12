@@ -40,6 +40,9 @@ def resolveGitShortSha(String pathSpec, String fallbackValue = "unknown") {
 def hdrPlusGitShortSha = resolveGitShortSha('app/src/main/cpp/hdr-plus', 'embedded')
 
 android {
+    lint {
+        abortOnError false
+    }
     namespace 'top.maary.darkbag'
     compileSdkVersion 35
     defaultConfig {

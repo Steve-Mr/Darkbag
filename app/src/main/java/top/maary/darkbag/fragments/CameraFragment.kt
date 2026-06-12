@@ -1852,6 +1852,7 @@ class CameraFragment : Fragment() {
                 )
 
                 // 3. JNI Halide Processing
+                val useNewPipeline = prefs.getBoolean(SettingsFragment.KEY_USE_NEW_SINGLE_PIPELINE, false)
                 val result = ColorProcessor.processSingleFrameRaw(
                     bayerBuffer = image.data,
                     width = image.width,
@@ -1875,7 +1876,8 @@ class CameraFragment : Fragment() {
                     tempRawPath = tempRawFile.absolutePath,
                     zoomFactor = image.zoomRatio,
                     mirror = mirror,
-                    metadata = captureMetadata
+                    metadata = captureMetadata,
+                    useNewPipeline = useNewPipeline
                 )
 
                 timing?.jniDone = System.currentTimeMillis()
@@ -1909,7 +1911,8 @@ class CameraFragment : Fragment() {
                                 tempRawPath = null,
                                 zoomFactor = image.zoomRatio,
                                 mirror = mirror,
-                                metadata = captureMetadata
+                                metadata = captureMetadata,
+                                useNewPipeline = useNewPipeline
                             )
                             if (thumbResult >= 0 && tempDngThumbFile.exists() && tempDngThumbFile.length() > 0L) tempDngThumbFile else null
                         } else if (tempJpgFile.exists() && tempJpgFile.length() > 0L) {
