@@ -10,15 +10,21 @@
         android:id="@+id/appBarLayout"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:background="@android:color/transparent"
-        app:elevation="0dp">
+        app:liftOnScroll="true"
+        app:liftOnScrollTargetViewId="@+id/recyclerView"
+        app:elevation="4dp"
+        android:outlineProvider="background"
+        android:background="?android:attr/colorBackground">
 
         <com.google.android.material.appbar.MaterialToolbar
             android:id="@+id/toolbar"
             android:layout_width="match_parent"
             android:layout_height="?attr/actionBarSize"
             app:title="Playground"
-            app:navigationIcon="@drawable/ic_back" />
+            android:background="@android:color/transparent"
+            app:navigationIcon="@drawable/ic_back"
+            app:navigationIconTint="?attr/colorOnSurface"
+            app:menu="@menu/menu_playground_gallery" />
 
     </com.google.android.material.appbar.AppBarLayout>
 
@@ -51,6 +57,11 @@
         app:tint="?attr/colorOnPrimaryContainer"
         app:backgroundTint="?attr/colorPrimaryContainer" />
 
+
+
+
+
+
     <com.google.android.material.bottomappbar.BottomAppBar
         android:id="@+id/bottomAppBar"
         android:layout_width="match_parent"
@@ -70,8 +81,27 @@
                 style="@style/Widget.Material3.Button.TonalButton"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginEnd="16dp"
+                android:layout_marginEnd="8dp"
                 android:text="Export" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnDisband"
+                style="@style/Widget.Material3.Button.TonalButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="8dp"
+                android:text="@string/playground_btn_disband"
+                android:visibility="gone" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnDelete"
+                style="@style/Widget.Material3.Button.TonalButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="8dp"
+                android:text="@string/playground_btn_delete"
+                app:icon="@drawable/ic_delete"
+                android:visibility="gone" />
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnMerge"

@@ -47,41 +47,14 @@ object ImageUtils {
             val h = ref.height
 
             val isSBS = layout != "TB"
-            // Ensure gap calculation matches HalfFrameUtils (use long dimension of single frame)
-            val gap = HalfFrameUtils.calculateGap(maxOf(w, h)).toFloat()
 
-            val resultW = if (isSBS) (w * 2 + gap).toInt() else w
-            val resultH = if (isSBS) h else (h * 2 + gap).toInt()
+            val final1 = oriented1 ?: createPlaceholderBitmap(context, w, h)
+            val final2 = oriented2 ?: createPlaceholderBitmap(context, w, h)
 
-            val composite = Bitmap.createBitmap(resultW, resultH, Bitmap.Config.ARGB_8888)
-            val canvas = Canvas(composite)
-            canvas.drawColor(Color.BLACK)
+            val composite = HalfFrameUtils.composeBitmaps(final1, final2, isSBS)
 
-            val paint = Paint(Paint.FILTER_BITMAP_FLAG)
-
-            if (isSBS) {
-                if (oriented1 != null) {
-                    canvas.drawBitmap(oriented1, 0f, 0f, paint)
-                } else {
-                    drawPlaceholder(context, canvas, RectF(0f, 0f, w.toFloat(), h.toFloat()))
-                }
-                if (oriented2 != null) {
-                    canvas.drawBitmap(oriented2, w + gap, 0f, paint)
-                } else {
-                    drawPlaceholder(context, canvas, RectF(w + gap, 0f, w * 2 + gap, h.toFloat()))
-                }
-            } else {
-                if (oriented1 != null) {
-                    canvas.drawBitmap(oriented1, 0f, 0f, paint)
-                } else {
-                    drawPlaceholder(context, canvas, RectF(0f, 0f, w.toFloat(), h.toFloat()))
-                }
-                if (oriented2 != null) {
-                    canvas.drawBitmap(oriented2, 0f, h + gap, paint)
-                } else {
-                    drawPlaceholder(context, canvas, RectF(0f, h + gap, w.toFloat(), h * 2 + gap))
-                }
-            }
+            if (final1 != oriented1) final1.recycle()
+            if (final2 != oriented2) final2.recycle()
 
             return@withContext composite
         } catch (e: Exception) {
@@ -89,9 +62,31 @@ object ImageUtils {
             null
         } finally {
             // Cleanup oriented bitmaps as they are intermediate
-            oriented1?.recycle()
-            oriented2?.recycle()
+            if (oriented1 != bit1) oriented1?.recycle()
+            if (oriented2 != bit2) oriented2?.recycle()
         }
+    }
+
+    private fun createPlaceholderBitmap(context: Context, w: Int, h: Int): Bitmap {
+        val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        val rect = RectF(0f, 0f, w.toFloat(), h.toFloat())
+        val paint = Paint().apply {
+            color = Color.DKGRAY
+            style = Paint.Style.FILL
+        }
+        canvas.drawRect(rect, paint)
+
+        val icon = androidx.core.content.ContextCompat.getDrawable(context, android.R.drawable.ic_menu_gallery)
+        icon?.let {
+            val iconSize = (kotlin.math.min(w, h) * 0.3f).toInt()
+            val left = (w / 2) - (iconSize / 2)
+            val top = (h / 2) - (iconSize / 2)
+            it.setBounds(left, top, left + iconSize, top + iconSize)
+            it.setTint(Color.LTGRAY)
+            it.draw(canvas)
+        }
+        return bitmap
     }
 
     private fun ensureOrientation(bitmap: Bitmap, wantPortrait: Boolean): Bitmap {
@@ -238,23 +233,7 @@ object ImageUtils {
         return rotated
     }
 
-    private fun drawPlaceholder(context: Context, canvas: Canvas, rect: RectF) {
-        val paint = Paint().apply {
-            color = Color.DKGRAY
-            style = Paint.Style.FILL
-        }
-        canvas.drawRect(rect, paint)
 
-        val icon = androidx.core.content.ContextCompat.getDrawable(context, android.R.drawable.ic_menu_gallery)
-        icon?.let {
-            val iconSize = (kotlin.math.min(rect.width(), rect.height()) * 0.3f).toInt()
-            val left = (rect.centerX() - iconSize / 2).toInt()
-            val top = (rect.centerY() - iconSize / 2).toInt()
-            it.setBounds(left, top, left + iconSize, top + iconSize)
-            it.setTint(Color.LTGRAY)
-            it.draw(canvas)
-        }
-    }
 
     fun calculateInSampleSize(options: BitmapFactory.Options, reqWidth: Int, reqHeight: Int): Int {
         val (height: Int, width: Int) = options.run { outHeight to outWidth }

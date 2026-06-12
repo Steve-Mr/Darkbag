@@ -1,6 +1,32 @@
 <?xml version="1.0" encoding="utf-8"?>
 <shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
     <shortcut
+        android:shortcutId="playground"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_style"
+        android:shortcutShortLabel="@string/playground_shortcut_label">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="top.maary.darkbag"
+            android:targetClass="top.maary.darkbag.MainActivity">
+            <extra android:name="shortcut" android:value="playground" />
+        </intent>
+    </shortcut>
+
+    <shortcut
+        android:shortcutId="camera"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_cam"
+        android:shortcutShortLabel="@string/camera_shortcut_label">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="top.maary.darkbag"
+            android:targetClass="top.maary.darkbag.MainActivity">
+            <extra android:name="shortcut" android:value="camera" />
+        </intent>
+    </shortcut>
+
+    <shortcut
         android:shortcutId="settings"
         android:enabled="true"
         android:icon="@drawable/ic_shortcut_settings"

@@ -148,6 +148,7 @@
         android:layout_marginBottom="@dimen/margin_medium"
         android:orientation="vertical"
         android:gravity="start"
+        android:visibility="gone"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toStartOf="parent">
 
@@ -216,6 +217,7 @@
         android:clipToPadding="false"
         android:orientation="vertical"
         android:gravity="end"
+        android:visibility="gone"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent">
 
