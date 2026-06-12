@@ -91,7 +91,8 @@ object ShareUtils {
                 playgroundDir.mkdirs()
             }
 
-            var destFile = File(playgroundDir, originalFileName)
+            val sanitizedFileName = File(originalFileName).name
+            var destFile = File(playgroundDir, sanitizedFileName)
             var counter = 1
             val baseName = destFile.nameWithoutExtension
             while (destFile.exists()) {

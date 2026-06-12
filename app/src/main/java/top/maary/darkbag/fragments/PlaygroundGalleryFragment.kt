@@ -572,7 +572,8 @@ class PlaygroundGalleryFragment : Fragment() {
             for (uri in uris) {
                 try {
                     val fileName = getFileName(appContext, uri) ?: "imported_${UUID.randomUUID()}.dng"
-                    val destFile = File(dir, fileName)
+                    val sanitizedFileName = File(fileName).name
+                    val destFile = File(dir, sanitizedFileName)
                     appContext.contentResolver.openInputStream(uri)?.use { input ->
                         FileOutputStream(destFile).use { output ->
                             input.copyTo(output)
@@ -1057,16 +1058,7 @@ class PlaygroundAdapter(
                 is PlaygroundItem.Single -> {
                     holder.jobMain?.cancel()
                     holder.jobMain = null
-                    // Do not recycle bitmap to keep it as placeholder! Wait, the review says:
-                    // "without cancelling any active coroutine jobs ... or recycling the existing bitmaps ... old bitmaps are overwritten and never recycled".
-                    // Let's recycle it here before we load the new one, but if we recycle it, we get a blank screen.
-                    // Actually, if we don't recycle it, when we assign a new bitmap, we lose the reference to the old one.
-                    // The old bitmap should be recycled when the new bitmap arrives.
-                    // In loadThumbnail, we have: `if (rotatedBitmap != decodedBitmap) decodedBitmap.recycle()`.
-                    // And in the final UI thread: `holder.bitmapMain = decodedBitmap`.
-                    // So we must recycle the previous `holder.bitmapMain`.
-                    // But if we recycle it right here, the screen turns blank before the new thumbnail is generated.
-                    // Let's just follow the PR review recommendation literally.
+                    // Recycle the previous main bitmap to avoid memory leaks before loading the new one.
                     holder.bitmapMain?.recycle()
                     holder.bitmapMain = null
 

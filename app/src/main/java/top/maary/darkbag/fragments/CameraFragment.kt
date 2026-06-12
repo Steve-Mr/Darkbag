@@ -494,6 +494,7 @@ class CameraFragment : Fragment() {
 
             lifecycleScope.launch(Dispatchers.Main) {
                 val lastModified = try {
+                    mediaStoreUtils.getFileLastModified(requireContext(), android.net.Uri.parse(filename))
                 } catch (e: Exception) {
                     0L
                 }
