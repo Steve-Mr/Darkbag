@@ -78,6 +78,7 @@ struct HalideStageStats {
 };
 
 HalideStageStats parseHalideReport(const std::string& report) {
+    LOGD("Raw Halide Profiler Report:\n%s", report.c_str());
     HalideStageStats stats;
     std::regex re("([\\w\\.]+):\\s*([\\d\\.]+)(ms|s)");
     std::smatch match;
@@ -454,28 +455,28 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
         return ch * lensShadingRows * lensShadingCols + row * lensShadingCols + col;
     };
 
-    #pragma omp parallel for
-    for (int y = 0; y < height; y++) {
-        for (int x = 0; x < width; x++) {
-             uint16_t r = raw_ptr[x*stride_x + y*stride_y + 0*stride_c];
-             uint16_t g = raw_ptr[x*stride_x + y*stride_y + 1*stride_c];
-             uint16_t b = raw_ptr[x*stride_x + y*stride_y + 2*stride_c];
+    if (hasLsc) {
+        #pragma omp parallel for
+        for (int y = 0; y < height; y++) {
+            float fy = (height > 1) ? (float)y * (lensShadingRows - 1) / (float)(height - 1) : 0.0f;
+            int y0 = std::clamp((int)std::floor(fy), 0, lensShadingRows - 1);
+            int y1 = std::min(y0 + 1, lensShadingRows - 1);
+            float ty = fy - y0;
 
-             // Clip to 14-bit range to prevent pink highlights
-             r = std::min(r, kMax14BitValue);
-             g = std::min(g, kMax14BitValue);
-             b = std::min(b, kMax14BitValue);
+            for (int x = 0; x < width; x++) {
+                 uint16_t r = raw_ptr[x*stride_x + y*stride_y + 0*stride_c];
+                 uint16_t g = raw_ptr[x*stride_x + y*stride_y + 1*stride_c];
+                 uint16_t b = raw_ptr[x*stride_x + y*stride_y + 2*stride_c];
 
-             float lscR = 1.0f, lscG = 1.0f, lscB = 1.0f;
-             if (hasLsc) {
+                 r = std::min(r, kMax14BitValue);
+                 g = std::min(g, kMax14BitValue);
+                 b = std::min(b, kMax14BitValue);
+
                  float fx = (width > 1) ? (float)x * (lensShadingCols - 1) / (float)(width - 1) : 0.0f;
-                 float fy = (height > 1) ? (float)y * (lensShadingRows - 1) / (float)(height - 1) : 0.0f;
                  int x0 = std::clamp((int)std::floor(fx), 0, lensShadingCols - 1);
-                 int y0 = std::clamp((int)std::floor(fy), 0, lensShadingRows - 1);
                  int x1 = std::min(x0 + 1, lensShadingCols - 1);
-                 int y1 = std::min(y0 + 1, lensShadingRows - 1);
                  float tx = fx - x0;
-                 float ty = fy - y0;
+
                  auto bilerp = [&](int ch) {
                      float v00 = lensShadingVec[lsc_idx(ch, y0, x0)];
                      float v10 = lensShadingVec[lsc_idx(ch, y0, x1)];
@@ -485,17 +486,33 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
                      float v1 = v01 * (1.0f - tx) + v11 * tx;
                      return v0 * (1.0f - ty) + v1 * ty;
                  };
-                 lscR = bilerp(0);
-                 lscG = 0.5f * (bilerp(1) + bilerp(2));
-                 lscB = bilerp(3);
-             }
+                 float lscR = bilerp(0);
+                 float lscG = 0.5f * (bilerp(1) + bilerp(2));
+                 float lscB = bilerp(3);
 
-             int idx = (y * width + x) * 3;
-             // Halide output is scaled by 0.25 (14-bit range).
-             // We shift left by 2 to restore full 16-bit range for final saving.
-             finalImage[idx+0] = (uint16_t)std::min((int)((float)r * lscR) << 2, (int)kMax16BitValue);
-             finalImage[idx+1] = (uint16_t)std::min((int)((float)g * lscG) << 2, (int)kMax16BitValue);
-             finalImage[idx+2] = (uint16_t)std::min((int)((float)b * lscB) << 2, (int)kMax16BitValue);
+                 int idx = (y * width + x) * 3;
+                 finalImage[idx+0] = (uint16_t)std::min((int)((float)r * lscR) << 2, (int)kMax16BitValue);
+                 finalImage[idx+1] = (uint16_t)std::min((int)((float)g * lscG) << 2, (int)kMax16BitValue);
+                 finalImage[idx+2] = (uint16_t)std::min((int)((float)b * lscB) << 2, (int)kMax16BitValue);
+            }
+        }
+    } else {
+        #pragma omp parallel for
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                 uint16_t r = raw_ptr[x*stride_x + y*stride_y + 0*stride_c];
+                 uint16_t g = raw_ptr[x*stride_x + y*stride_y + 1*stride_c];
+                 uint16_t b = raw_ptr[x*stride_x + y*stride_y + 2*stride_c];
+
+                 r = std::min(r, kMax14BitValue);
+                 g = std::min(g, kMax14BitValue);
+                 b = std::min(b, kMax14BitValue);
+
+                 int idx = (y * width + x) * 3;
+                 finalImage[idx+0] = (uint16_t)std::min((int)r << 2, (int)kMax16BitValue);
+                 finalImage[idx+1] = (uint16_t)std::min((int)g << 2, (int)kMax16BitValue);
+                 finalImage[idx+2] = (uint16_t)std::min((int)b << 2, (int)kMax16BitValue);
+            }
         }
     }
     auto postDurationMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - postStart).count();
