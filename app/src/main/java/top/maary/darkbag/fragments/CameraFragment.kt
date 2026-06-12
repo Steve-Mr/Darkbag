@@ -1887,7 +1887,7 @@ class CameraFragment : Fragment() {
 
                 if (saveRaw) {
                     try {
-                        val shouldRenderNeutralDngThumbnail = !saveJpg || targetLogIndex != 0 || !nativeLutPath.isNullOrBlank()
+                        val shouldRenderNeutralDngThumbnail = (!useFastPath) && (!saveJpg || targetLogIndex != 0 || !nativeLutPath.isNullOrBlank())
                         val dngThumbnailSource = if (shouldRenderNeutralDngThumbnail) {
                             val thumbResult = ColorProcessor.processSingleFrameRaw(
                                 bayerBuffer = image.data,
