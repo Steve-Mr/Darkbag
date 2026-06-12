@@ -572,7 +572,7 @@ class PlaygroundGalleryFragment : Fragment() {
             for (uri in uris) {
                 try {
                     val fileName = getFileName(appContext, uri) ?: "imported_${UUID.randomUUID()}.dng"
-                    val sanitizedFileName = File(fileName).name
+                    val sanitizedFileName = File(fileName).name.ifEmpty { "imported_${UUID.randomUUID()}.dng" }
                     val destFile = File(dir, sanitizedFileName)
                     appContext.contentResolver.openInputStream(uri)?.use { input ->
                         FileOutputStream(destFile).use { output ->
@@ -1059,6 +1059,7 @@ class PlaygroundAdapter(
                     holder.jobMain?.cancel()
                     holder.jobMain = null
                     // Recycle the previous main bitmap to avoid memory leaks before loading the new one.
+                    holder.binding.imageViewThumbnail.setImageDrawable(null)
                     holder.bitmapMain?.recycle()
                     holder.bitmapMain = null
 

@@ -91,7 +91,7 @@ object ShareUtils {
                 playgroundDir.mkdirs()
             }
 
-            val sanitizedFileName = File(originalFileName).name
+            val sanitizedFileName = File(originalFileName).name.ifEmpty { "imported_${java.util.UUID.randomUUID()}.dng" }
             var destFile = File(playgroundDir, sanitizedFileName)
             var counter = 1
             val baseName = destFile.nameWithoutExtension

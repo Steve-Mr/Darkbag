@@ -1726,9 +1726,6 @@ open class ImageViewerFragment : Fragment() {
                                 flareType = config.flareType
                             )
 
-                            f1?.recycle()
-                            f2?.recycle()
-
                             val primaryUri = currentGroup.dngUri ?: currentGroup.dngUri1 ?: currentGroup.dngUri2 ?: Uri.EMPTY
                             var meta = repository.getCaptureMetadata(primaryUri) ?: top.maary.darkbag.models.CaptureMetadata()
                             if (meta.dateTimeOriginal == null) {
