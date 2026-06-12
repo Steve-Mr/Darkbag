@@ -59,6 +59,7 @@ include_directories(${tiff_SOURCE_DIR}/libtiff ${tiff_BINARY_DIR}/libtiff)
 set(HDRPLUS_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/hdr-plus/src")
 set(HDRPLUS_GENERATOR_SRC
     "${CMAKE_CURRENT_SOURCE_DIR}/hdrplus_pipeline_generator.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/single_frame_pipeline_generator.cpp"
     "${HDRPLUS_SRC_DIR}/align.cpp"
     "${HDRPLUS_SRC_DIR}/merge.cpp"
     "${HDRPLUS_SRC_DIR}/finish.cpp"
@@ -109,6 +110,20 @@ add_custom_command(
 set(HALIDE_TARGET "arm-64-android-opencl-vulkan-vk_int16-profile")
 set(GENERATED_HEADER "${GENERATOR_OUTPUT_DIR}/hdrplus_raw_pipeline.h")
 set(GENERATED_LIB "${GENERATOR_OUTPUT_DIR}/hdrplus_raw_pipeline.a") # Static lib output
+set(GENERATED_SINGLE_HEADER "${GENERATOR_OUTPUT_DIR}/single_frame_raw_pipeline.h")
+set(GENERATED_SINGLE_LIB "${GENERATOR_OUTPUT_DIR}/single_frame_raw_pipeline.a")
+
+add_custom_command(
+    OUTPUT "${GENERATOR_OUTPUT_DIR}/halide_runtime.a"
+    COMMAND "${GENERATOR_EXEC}"
+            -r halide_runtime
+            -e static_library,h
+            -o "${GENERATOR_OUTPUT_DIR}"
+            target=${HALIDE_TARGET}
+    DEPENDS "${GENERATOR_EXEC}"
+    COMMENT "Running Halide Generator to build runtime"
+)
+add_custom_target(generate_halide_runtime_target DEPENDS "${GENERATOR_OUTPUT_DIR}/halide_runtime.a")
 
 add_custom_command(
     OUTPUT "${GENERATED_HEADER}" "${GENERATED_LIB}"
@@ -117,15 +132,29 @@ add_custom_command(
             -f hdrplus_raw_pipeline
             -e static_library,h
             -o "${GENERATOR_OUTPUT_DIR}"
-            target=${HALIDE_TARGET}
+            target=${HALIDE_TARGET}-no_runtime
             use_optimized_schedule=true
             use_gpu=false
     DEPENDS "${GENERATOR_EXEC}"
-    COMMENT "Running Halide Generator for ${HALIDE_TARGET}"
+    COMMENT "Running Halide Generator for ${HALIDE_TARGET}-no_runtime"
 )
-
 # Update dependency target
 add_custom_target(generate_hdrplus_halide DEPENDS "${GENERATED_LIB}" "${GENERATED_HEADER}")
+
+add_custom_command(
+    OUTPUT "${GENERATED_SINGLE_HEADER}" "${GENERATED_SINGLE_LIB}"
+    COMMAND "${GENERATOR_EXEC}"
+            -g single_frame_raw_pipeline
+            -f single_frame_raw_pipeline
+            -e static_library,h
+            -o "${GENERATOR_OUTPUT_DIR}"
+            target=${HALIDE_TARGET}-no_runtime
+            use_optimized_schedule=true
+            use_gpu=false
+    DEPENDS "${GENERATOR_EXEC}"
+    COMMENT "Running Halide Generator for ${HALIDE_TARGET} (Single Frame)"
+)
+add_custom_target(generate_single_halide_target DEPENDS "${GENERATED_SINGLE_LIB}" "${GENERATED_SINGLE_HEADER}")
 
 # Expose generated files to the build
 include_directories(${GENERATOR_OUTPUT_DIR})
@@ -148,10 +177,12 @@ add_library(
         ColorPipe.cpp
         ${LIBRAW_SOURCES}
         "${GENERATED_LIB}"
+        "${GENERATED_SINGLE_LIB}"
+        "${GENERATOR_OUTPUT_DIR}/halide_runtime.a"
 )
 
 # Ensure the generation happens before native-lib compilation
-add_dependencies(native-lib generate_hdrplus_halide)
+add_dependencies(native-lib generate_hdrplus_halide generate_single_halide_target generate_halide_runtime_target)
 
 find_library(
         log-lib
@@ -168,6 +199,8 @@ find_library(
 target_link_libraries(
         native-lib
         "${GENERATED_LIB}"
+        "${GENERATED_SINGLE_LIB}"
+        "${GENERATOR_OUTPUT_DIR}/halide_runtime.a"
         tiff
         ${log-lib}
         ${jnigraphics-lib}

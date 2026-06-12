@@ -540,13 +540,17 @@ bool process_and_save_image(
 ) {
     LOGD("process_and_save_image: %dx%d, gain=%.2f, log=%d, lut=%d, jpg=%s, tiff=%s, preview=%d, ds=%d, zoom=%.2f, mirror=%d",
          width, height, gain, targetLog, lut.size, jpgPath ? jpgPath : "null", tiffPath ? tiffPath : "null", isPreview, downsampleFactor, zoomFactor, mirror);
+    auto totalStart = std::chrono::high_resolution_clock::now();
     int outW = width / downsampleFactor, outH = height / downsampleFactor;
     bool swapDims = (orientation == 90 || orientation == 270);
     int finalW = swapDims ? outH : outW, finalH = swapDims ? outW : outH;
     Matrix3x3 effective_CCM = {0}; if (sourceColorSpace == 1 && ccm) std::copy(ccm, ccm + 9, effective_CCM.m);
     std::vector<unsigned short> processedImage; std::vector<unsigned char> previewRgb8;
 
+    auto edgeCompStart = std::chrono::high_resolution_clock::now();
     AdaptiveEdgeComp edgeComp = calculate_adaptive_edge_comp(inputImage, width, height);
+    auto edgeCompMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - edgeCompStart).count();
+    LOGD("calculate_adaptive_edge_comp CPU Time: %lld ms", (long long)edgeCompMs);
 
     // Debug stage split output (A/B/C):
     // A: linear RGB input after adaptive edge compensation
@@ -562,6 +566,7 @@ bool process_and_save_image(
     std::vector<unsigned char> debugB8;
     std::vector<unsigned char> debugC8;
 
+    auto postProcessStart = std::chrono::high_resolution_clock::now();
     auto process_pixel = [&](int x, int y, Vec3* stageA, Vec3* stageB, Vec3* stageC) -> Vec3 {
         x = std::max(0, std::min(x, width - 1));
         y = std::max(0, std::min(y, height - 1));
@@ -770,7 +775,11 @@ bool process_and_save_image(
         }
     }
 
+    auto postProcessMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - postProcessStart).count();
+    LOGD("process_pixel loop Time: %lld ms", (long long)postProcessMs);
+
     bool tiffOk = true;
+    auto ioStart = std::chrono::high_resolution_clock::now();
     if (tiffPath && !isPreview) {
         tiffOk = write_tiff(tiffPath, finalW_zoomed, finalH_zoomed, processedImage, metadata);
         if (!tiffOk) LOGE("write_tiff failed for %s", tiffPath);
