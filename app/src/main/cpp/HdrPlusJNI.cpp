@@ -23,6 +23,7 @@
 #include <HalideRuntime.h>
 #include "ColorPipe.h"
 #include "hdrplus_raw_pipeline.h" // Generated header
+#include "hdrplus_raw_pipeline_fast.h" // Generated header (Fast Denoise)
 
 #define TAG "HdrPlusJNI"
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, TAG, __VA_ARGS__)
@@ -340,7 +341,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
     JNIEnv* env, jobject /* this */, jobjectArray dngBuffers, jint width, jint height, jint orientation, jint whiteLevel, jintArray blackLevelPattern, jfloatArray lensShadingMap, jint lensShadingRows, jint lensShadingCols, jboolean useSensorColorMatrix, jfloatArray whiteBalance, jfloatArray ccm, jfloatArray ccmAlt, jboolean exportMatrixAB, jint cfaPattern,
     jint targetLog, jstring lutPath, jstring outputJpgPath, jstring outputDngPath,
     jfloat digitalGain, jlongArray debugStats, jobject outputBitmap, jstring tempRawPath, jfloat zoomFactor, jboolean mirror,
-    jobject metadata
+    jobject metadata, jboolean fastDenoise
 ) {
     LOGD("Native processHdrPlus started.");
     (void)useSensorColorMatrix;
@@ -432,7 +433,13 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
     }
 
     auto halideStart = std::chrono::high_resolution_clock::now();
-    int halide_res = hdrplus_raw_pipeline(inputBuf, bl_r, bl_g0, bl_g1, bl_b, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, ccmHalideBuf, 1.0f, 1.0f, outputBuf);
+    int halide_res = 0;
+    if (fastDenoise) {
+        LOGD("Using FAST Denoise HDR+ Pipeline.");
+        halide_res = hdrplus_raw_pipeline_fast(inputBuf, bl_r, bl_g0, bl_g1, bl_b, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, ccmHalideBuf, 1.0f, 1.0f, outputBuf);
+    } else {
+        halide_res = hdrplus_raw_pipeline(inputBuf, bl_r, bl_g0, bl_g1, bl_b, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, ccmHalideBuf, 1.0f, 1.0f, outputBuf);
+    }
     auto halideDurationMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - halideStart).count();
 
     halide_report_buffer.clear(); halide_profiler_report(nullptr);
@@ -580,7 +587,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processSingleFrameRaw(
     JNIEnv* env, jobject /* this */, jobject bayerBuffer, jint width, jint height, jint orientation, jint whiteLevel, jintArray blackLevelPattern, jfloatArray lensShadingMap, jint lensShadingRows, jint lensShadingCols, jfloatArray whiteBalance, jfloatArray ccm, jint cfaPattern,
     jint targetLog, jstring lutPath, jstring outputJpgPath, jstring outputDngPath,
     jfloat digitalGain, jlongArray debugStats, jobject outputBitmap, jstring tempRawPath, jfloat zoomFactor, jboolean mirror,
-    jobject metadata
+    jobject metadata, jboolean fastDenoise
 ) {
     LOGD("Native processSingleFrameRaw started.");
 
@@ -595,6 +602,6 @@ Java_top_maary_darkbag_processor_ColorProcessor_processSingleFrameRaw(
         whiteBalance, ccm, nullptr, // ccmAlt
         false, // exportMatrixAB
         cfaPattern, targetLog, lutPath,
-        outputJpgPath, outputDngPath, digitalGain, debugStats, outputBitmap, tempRawPath, zoomFactor, mirror, metadata
+        outputJpgPath, outputDngPath, digitalGain, debugStats, outputBitmap, tempRawPath, zoomFactor, mirror, metadata, fastDenoise
     );
 }

@@ -120,12 +120,31 @@ add_custom_command(
             target=${HALIDE_TARGET}
             use_optimized_schedule=true
             use_gpu=false
+            fast_denoise=false
     DEPENDS "${GENERATOR_EXEC}"
     COMMENT "Running Halide Generator for ${HALIDE_TARGET}"
 )
 
+set(GENERATED_FAST_HEADER "${GENERATOR_OUTPUT_DIR}/hdrplus_raw_pipeline_fast.h")
+set(GENERATED_FAST_LIB "${GENERATOR_OUTPUT_DIR}/hdrplus_raw_pipeline_fast.a") # Static lib output
+
+add_custom_command(
+    OUTPUT "${GENERATED_FAST_HEADER}" "${GENERATED_FAST_LIB}"
+    COMMAND "${GENERATOR_EXEC}"
+            -g hdrplus_raw_pipeline
+            -f hdrplus_raw_pipeline_fast
+            -e static_library,h
+            -o "${GENERATOR_OUTPUT_DIR}"
+            target=${HALIDE_TARGET}
+            use_optimized_schedule=true
+            use_gpu=false
+            fast_denoise=true
+    DEPENDS "${GENERATOR_EXEC}"
+    COMMENT "Running Halide Generator (Fast Denoise) for ${HALIDE_TARGET}"
+)
+
 # Update dependency target
-add_custom_target(generate_hdrplus_halide DEPENDS "${GENERATED_LIB}" "${GENERATED_HEADER}")
+add_custom_target(generate_hdrplus_halide DEPENDS "${GENERATED_LIB}" "${GENERATED_HEADER}" "${GENERATED_FAST_LIB}" "${GENERATED_FAST_HEADER}")
 
 # Expose generated files to the build
 include_directories(${GENERATOR_OUTPUT_DIR})
@@ -148,6 +167,7 @@ add_library(
         ColorPipe.cpp
         ${LIBRAW_SOURCES}
         "${GENERATED_LIB}"
+        "${GENERATED_FAST_LIB}"
 )
 
 # Ensure the generation happens before native-lib compilation
@@ -168,6 +188,7 @@ find_library(
 target_link_libraries(
         native-lib
         "${GENERATED_LIB}"
+        "${GENERATED_FAST_LIB}"
         tiff
         ${log-lib}
         ${jnigraphics-lib}

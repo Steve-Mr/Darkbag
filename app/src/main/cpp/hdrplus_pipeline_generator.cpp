@@ -18,6 +18,7 @@ class HdrPlusRawPipeline : public Generator<HdrPlusRawPipeline> {
 public:
   GeneratorParam<bool> use_optimized_schedule{"use_optimized_schedule", true};
   GeneratorParam<bool> use_gpu{"use_gpu", false};
+  GeneratorParam<bool> fast_denoise{"fast_denoise", false};
 
   Input<Buffer<uint16_t>> inputs{"inputs", 3};
   Input<uint16_t> black_point_r{"black_point_r"};
@@ -269,6 +270,12 @@ private:
 
   Func chroma_denoise(Func input, Expr width, Expr height, int num_passes) {
     Func output_denoise = rgb_to_yuv(input);
+
+    // Completely prune denoise stages at generation time if fast_denoise is true
+    if ((bool)fast_denoise) {
+        return yuv_to_rgb(output_denoise);
+    }
+
     int pass = 0;
     if (num_passes > 0) output_denoise = bilateral_filter(output_denoise, width, height);
     pass++;

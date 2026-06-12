@@ -83,7 +83,8 @@ object ColorProcessor {
         tempRawPath: String? = null,
         zoomFactor: Float,
         mirror: Boolean,
-        metadata: CaptureMetadata
+        metadata: CaptureMetadata,
+        fastDenoise: Boolean = false
     ): Int
 
     /**
@@ -172,6 +173,7 @@ object ColorProcessor {
         tempRawPath: String? = null,
         zoomFactor: Float,
         mirror: Boolean,
-        metadata: CaptureMetadata
+        metadata: CaptureMetadata,
+        fastDenoise: Boolean = false
     ): Int
 }
