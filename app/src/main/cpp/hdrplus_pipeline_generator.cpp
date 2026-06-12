@@ -269,12 +269,12 @@ private:
   }
 
   Func chroma_denoise(Func input, Expr width, Expr height, int num_passes) {
-    Func output_denoise = rgb_to_yuv(input);
-
     // Completely prune denoise stages at generation time if fast_denoise is true
     if ((bool)fast_denoise) {
-        return yuv_to_rgb(output_denoise);
+        return input;
     }
+
+    Func output_denoise = rgb_to_yuv(input);
 
     int pass = 0;
     if (num_passes > 0) output_denoise = bilateral_filter(output_denoise, width, height);
