@@ -251,7 +251,10 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
                                                     if (oldFile.nameWithoutExtension.endsWith("_1") || oldFile.nameWithoutExtension.endsWith("_2") || hasAssociatedJpg) {
                                                         oldFile.copyTo(newFile, overwrite = true)
                                                     } else {
-                                                        oldFile.renameTo(newFile)
+                                                        if (!oldFile.renameTo(newFile)) {
+                                                            oldFile.copyTo(newFile, overwrite = true)
+                                                            oldFile.delete()
+                                                        }
                                                     }
                                                 }
                                             }
@@ -267,7 +270,10 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
                                                     if (oldFile.nameWithoutExtension.endsWith("_1") || oldFile.nameWithoutExtension.endsWith("_2") || hasAssociatedJpg) {
                                                         oldFile.copyTo(newFile, overwrite = true)
                                                     } else {
-                                                        oldFile.renameTo(newFile)
+                                                        if (!oldFile.renameTo(newFile)) {
+                                                            oldFile.copyTo(newFile, overwrite = true)
+                                                            oldFile.delete()
+                                                        }
                                                     }
                                                 }
                                             }
@@ -339,28 +345,33 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
     }
 
     override fun deleteImage(group: ImageGroup, deleteGroup: Boolean) {
-        val filesToDelete = mutableListOf<File>()
+        lifecycleScope.launch {
+            val filesToDelete = mutableListOf<File>()
 
-        group.jpgUri?.let { if (it.scheme == "file") it.path?.let { p -> filesToDelete.add(File(p)) } }
-        group.dngUri?.let { if (it.scheme == "file") it.path?.let { p -> filesToDelete.add(File(p)) } }
-        group.dngUri1?.let { if (it.scheme == "file") it.path?.let { p -> filesToDelete.add(File(p)) } }
-        group.dngUri2?.let { if (it.scheme == "file") it.path?.let { p -> filesToDelete.add(File(p)) } }
+            group.jpgUri?.let { if (it.scheme == "file") it.path?.let { p -> filesToDelete.add(File(p)) } }
+            group.dngUri?.let { if (it.scheme == "file") it.path?.let { p -> filesToDelete.add(File(p)) } }
+            group.dngUri1?.let { if (it.scheme == "file") it.path?.let { p -> filesToDelete.add(File(p)) } }
+            group.dngUri2?.let { if (it.scheme == "file") it.path?.let { p -> filesToDelete.add(File(p)) } }
 
-        var deletedCount = 0
-        for (f in filesToDelete) {
-            if (f.exists() && f.delete()) {
-                deletedCount++
+            val deletedCount = withContext(Dispatchers.IO) {
+                var count = 0
+                for (f in filesToDelete) {
+                    if (f.exists() && f.delete()) {
+                        count++
+                    }
+                }
+                count
             }
-        }
 
-        if (deletedCount > 0) {
-            val currentList = adapter.getGroups().toMutableList()
-            currentList.removeAll { it.baseName == group.baseName }
-            if (currentList.isEmpty()) {
-                activity?.onBackPressedDispatcher?.onBackPressed()
-            } else {
-                adapter.updateGroups(currentList.toList())
-                updateControlsVisibility()
+            if (deletedCount > 0) {
+                val currentList = adapter.getGroups().toMutableList()
+                currentList.removeAll { it.baseName == group.baseName }
+                if (currentList.isEmpty()) {
+                    activity?.onBackPressedDispatcher?.onBackPressed()
+                } else {
+                    adapter.updateGroups(currentList.toList())
+                    updateControlsVisibility()
+                }
             }
         }
     }
