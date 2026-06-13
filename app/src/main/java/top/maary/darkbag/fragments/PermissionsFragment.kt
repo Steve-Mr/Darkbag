@@ -66,24 +66,6 @@ class PermissionsFragment : Fragment() {
             val navController = Navigation.findNavController(requireActivity(), R.id.fragment_container)
 
             // Clear the intent action so we don't process it again on recreation
-            val action = intent.action
-
-            if (action == Intent.ACTION_SEND || action == Intent.ACTION_SEND_MULTIPLE) {
-                val paths = ShareUtils.processShareIntent(requireContext(), intent)
-                if (paths.isNotEmpty()) {
-                    if (paths.size == 1) {
-                        val bundle = Bundle().apply {
-                            putStringArray("playground_dng_paths", paths.toTypedArray())
-                        }
-                        navController.navigate(R.id.action_permissions_to_playground_viewer, bundle)
-                    } else {
-                        navController.navigate(PermissionsFragmentDirections.actionPermissionsToPlaygroundGallery())
-                    }
-                    intent.action = null
-                    return@launch
-                }
-            }
-
             intent.action = null
             when (intent.getStringExtra(MainActivity.SHORTCUT_EXTRA_KEY)) {
                 MainActivity.SHORTCUT_VALUE_SETTINGS -> {

@@ -69,7 +69,9 @@ class MainActivity : AppCompatActivity() {
         setContentView(activityMainBinding.root)
 
         setupFloatingToolbar()
-        handleIntent(intent)
+        if (savedInstanceState == null) {
+            handleIntent(intent)
+        }
     }
 
     private fun setupFloatingToolbar() {

@@ -576,8 +576,9 @@ class PlaygroundGalleryFragment : Fragment() {
                     var destFile = File(dir, sanitizedFileName)
                     var counter = 1
                     val baseName = destFile.nameWithoutExtension
+                    val extension = destFile.extension.let { if (it.isNotEmpty()) ".$it" else "" }
                     while (destFile.exists()) {
-                        destFile = File(dir, "${baseName}_$counter.dng")
+                        destFile = File(dir, "${baseName}_$counter$extension")
                         counter++
                     }
                     appContext.contentResolver.openInputStream(uri)?.use { input ->
@@ -1235,10 +1236,13 @@ class PlaygroundAdapter(
         holder.binding.iconSelected.visibility = if (selectionMode) View.VISIBLE else View.GONE
         holder.binding.iconSelected.setImageResource(if (isMainSelected) R.drawable.ic_check_circle else R.drawable.ic_radio_button_unchecked)
 
+        val context = holder.itemView.context
+        Glide.with(context).clear(holder.binding.imageViewThumbnail)
+        Glide.with(context).clear(holder.binding.subImageView1)
+        Glide.with(context).clear(holder.binding.subImageView2)
         holder.binding.imageViewThumbnail.setImageDrawable(null)
         holder.binding.subImageView1.setImageDrawable(null)
         holder.binding.subImageView2.setImageDrawable(null)
-        val context = holder.itemView.context
 
         holder.jobMain?.cancel()
         holder.jobSub1?.cancel()
