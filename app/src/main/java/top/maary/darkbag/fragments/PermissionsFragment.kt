@@ -29,6 +29,7 @@ import android.content.Intent
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.navigation.Navigation
+import androidx.navigation.fragment.findNavController
 import top.maary.darkbag.MainActivity
 import top.maary.darkbag.R
 import top.maary.darkbag.utils.ShareUtils
@@ -63,7 +64,7 @@ class PermissionsFragment : Fragment() {
     private fun routeStartup() {
         lifecycleScope.launch {
             val intent = requireActivity().intent
-            val navController = Navigation.findNavController(requireActivity(), R.id.fragment_container)
+            val navController = findNavController()
 
             // Clear the intent action so we don't process it again on recreation
             intent.action = null
