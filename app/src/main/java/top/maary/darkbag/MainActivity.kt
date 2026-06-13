@@ -69,6 +69,16 @@ class MainActivity : AppCompatActivity() {
         setContentView(activityMainBinding.root)
 
         setupFloatingToolbar()
+
+        // Recover orphaned HDR+ tasks if any
+        this.lifecycleScope.launch {
+            val orphans = top.maary.darkbag.processor.OrphanManager.recoverOrphans(applicationContext)
+            for (orphan in orphans) {
+                android.util.Log.w("MainActivity", "Recovered an orphaned HDR+ task! Enqueueing...")
+                top.maary.darkbag.processor.HdrPlusProcessingService.enqueueProcessing(applicationContext, orphan)
+            }
+        }
+
         handleIntent(intent)
     }
 
@@ -176,6 +186,16 @@ class MainActivity : AppCompatActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+
+        // Recover orphaned HDR+ tasks if any
+        this.lifecycleScope.launch {
+            val orphans = top.maary.darkbag.processor.OrphanManager.recoverOrphans(applicationContext)
+            for (orphan in orphans) {
+                android.util.Log.w("MainActivity", "Recovered an orphaned HDR+ task! Enqueueing...")
+                top.maary.darkbag.processor.HdrPlusProcessingService.enqueueProcessing(applicationContext, orphan)
+            }
+        }
+
         handleIntent(intent)
     }
 

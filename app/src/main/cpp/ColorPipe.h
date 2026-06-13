@@ -102,3 +102,14 @@ bool write_tiff_rgba8(const char* filename, int width, int height, const unsigne
 int compute_preview_downsample_factor(int width, int height, int targetLongEdge);
 
 #endif // COLOR_PIPE_H
+
+std::vector<unsigned char> process_and_encode_image(
+    const std::vector<unsigned short>& inputImage,
+    int width, int height, float gain, int targetLog, const LUT3D& lut,
+    float exposure, float contrast, float saturation,
+    float highlights, float shadows, float whites, float blacks,
+    const char* dummyJpg,
+    const ImageMetadata* metadata, int sourceColorSpace,
+    const float* ccm, const float* wb, int orientation,
+    bool isPreview, int downsampleFactor, float zoomFactor, bool mirror
+);

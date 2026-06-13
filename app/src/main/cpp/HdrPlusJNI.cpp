@@ -22,8 +22,9 @@
 #include <HalideBuffer.h>
 #include <HalideRuntime.h>
 #include "ColorPipe.h"
-#include "hdrplus_raw_pipeline.h" // Generated header
-#include "hdrplus_raw_pipeline_fast.h" // Generated header (Fast Denoise)
+#include "hdrplus_raw_pipeline_normal.h"
+#include "hdrplus_raw_pipeline_light.h"
+#include "hdrplus_raw_pipeline_fast.h"
 
 #define TAG "HdrPlusJNI"
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, TAG, __VA_ARGS__)
@@ -326,19 +327,15 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
     if (jpgPath && jpg_path_cstr) env->ReleaseStringUTFChars(jpgPath, jpg_path_cstr);
     if (dngPath && dng_path_cstr) env->ReleaseStringUTFChars(dngPath, dng_path_cstr);
 
-    const char* temp_path_cstr_del = env->GetStringUTFChars(tempRawPath, 0);
-    if (temp_path_cstr_del) {
-        std::remove(temp_path_cstr_del);
-        env->ReleaseStringUTFChars(tempRawPath, temp_path_cstr_del);
-    }
+
 
     LOGD("Native exportHdrPlus finished. Success=%d", saveOk);
     return saveOk ? 0 : -2;
 }
 
-extern "C" JNIEXPORT jint JNICALL
+extern "C" JNIEXPORT jbyteArray JNICALL
 Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
-    JNIEnv* env, jobject /* this */, jobjectArray dngBuffers, jint width, jint height, jint orientation, jint whiteLevel, jintArray blackLevelPattern, jfloatArray lensShadingMap, jint lensShadingRows, jint lensShadingCols, jboolean useSensorColorMatrix, jfloatArray whiteBalance, jfloatArray ccm, jfloatArray ccmAlt, jboolean exportMatrixAB, jint cfaPattern,
+    JNIEnv* env, jobject /* this */, jobjectArray dngBuffers, jint width, jint height, jint orientation, jint whiteLevel, jint iso, jintArray blackLevelPattern, jfloatArray lensShadingMap, jint lensShadingRows, jint lensShadingCols, jboolean useSensorColorMatrix, jfloatArray whiteBalance, jfloatArray ccm, jfloatArray ccmAlt, jboolean exportMatrixAB, jint cfaPattern,
     jint targetLog, jstring lutPath, jstring outputJpgPath, jstring outputDngPath,
     jfloat digitalGain, jlongArray debugStats, jobject outputBitmap, jstring tempRawPath, jfloat zoomFactor, jboolean mirror,
     jobject metadata, jboolean fastDenoise
@@ -350,7 +347,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
     auto jniPrepStart = std::chrono::high_resolution_clock::now();
 
     int numFrames = env->GetArrayLength(dngBuffers);
-    if (numFrames < 1) { LOGE("Processing requires at least 1 frame."); return -1; }
+    if (numFrames < 1) { LOGE("Processing requires at least 1 frame."); return nullptr; }
 
     g_hdrPlusBuffers.ensureCapacity(width, height, numFrames);
     uint16_t* rawDataPtr = g_hdrPlusBuffers.inputPool.data();
@@ -360,19 +357,19 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
         jobject bufObj = env->GetObjectArrayElement(dngBuffers, i);
         if (!bufObj) {
             LOGE("Direct buffer at index %d is null", i);
-            return -1;
+            return nullptr;
         }
         framePtrs[i] = (uint16_t*)env->GetDirectBufferAddress(bufObj);
         if (!framePtrs[i]) {
             LOGE("Failed to get direct buffer address for frame %d", i);
             env->DeleteLocalRef(bufObj);
-            return -1;
+            return nullptr;
         }
         jlong capacity = env->GetDirectBufferCapacity(bufObj);
         env->DeleteLocalRef(bufObj);
         if (capacity < (jlong)frameSizeBytes) {
             LOGE("Direct buffer %d capacity %lld is smaller than expected %zu", i, (long long)capacity, frameSizeBytes);
-            return -1;
+            return nullptr;
         }
     }
 
@@ -434,18 +431,22 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
 
     auto halideStart = std::chrono::high_resolution_clock::now();
     int halide_res = 0;
-    if (fastDenoise) {
-        LOGD("Using FAST Denoise HDR+ Pipeline.");
+    if (iso < 200 || fastDenoise) {
+        LOGD("Using FAST Denoise HDR+ Pipeline (ISO < 200).");
         halide_res = hdrplus_raw_pipeline_fast(inputBuf, bl_r, bl_g0, bl_g1, bl_b, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, ccmHalideBuf, 1.0f, 1.0f, outputBuf);
+    } else if (iso < 800) {
+        LOGD("Using LIGHT Denoise HDR+ Pipeline (200 <= ISO < 800).");
+        halide_res = hdrplus_raw_pipeline_light(inputBuf, bl_r, bl_g0, bl_g1, bl_b, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, ccmHalideBuf, 1.0f, 1.0f, outputBuf);
     } else {
-        halide_res = hdrplus_raw_pipeline(inputBuf, bl_r, bl_g0, bl_g1, bl_b, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, ccmHalideBuf, 1.0f, 1.0f, outputBuf);
+        LOGD("Using NORMAL Denoise HDR+ Pipeline (ISO >= 800).");
+        halide_res = hdrplus_raw_pipeline_normal(inputBuf, bl_r, bl_g0, bl_g1, bl_b, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, ccmHalideBuf, 1.0f, 1.0f, outputBuf);
     }
     auto halideDurationMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - halideStart).count();
 
     halide_report_buffer.clear(); halide_profiler_report(nullptr);
     HalideStageStats stageStats = parseHalideReport(halide_report_buffer); halide_profiler_reset();
 
-    if (halide_res != 0) { LOGE("Halide failed: %d", halide_res); return -1; }
+    if (halide_res != 0) { LOGE("Halide failed: %d", halide_res); return nullptr; }
 
     unsigned char* bitmapPixels = nullptr;
     if (outputBitmap) AndroidBitmap_lockPixels(env, outputBitmap, (void**)&bitmapPixels);
@@ -550,10 +551,10 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
 
     const char* tr_p_cstr = (tempRawPath) ? env->GetStringUTFChars(tempRawPath, 0) : nullptr;
     if (tr_p_cstr) {
-        std::ofstream out(tr_p_cstr, std::ios::binary); if (out.is_open()) { out.write((char*)finalImage.data(), (size_t)width*height*3*2); out.close(); }
         env->ReleaseStringUTFChars(tempRawPath, tr_p_cstr);
     }
 
+    std::vector<unsigned char> resultJpegBytes;
     if (!jpgPathStr.empty() || !dngPathStr.empty()) {
         ImageMetadata meta = metadataFromJava(env, metadata);
         if (!dngPathStr.empty()) {
@@ -562,9 +563,9 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
         }
 
         if (!jpgPathStr.empty()) {
-            process_and_save_image(finalImage, width, height, digitalGain, targetLog, lut,
+            resultJpegBytes = process_and_encode_image(finalImage, width, height, digitalGain, targetLog, lut,
                                     0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
-                                    jpgPathStr.c_str(), nullptr, &meta, 1, ccmVec.data(), wbVec.data(), orientation, nullptr, 0, 0, true, fastPreviewDownsample, zoomFactor, (bool)mirror);
+                                    nullptr, &meta, 1, ccmVec.data(), wbVec.data(), orientation, false, 1, zoomFactor, (bool)mirror);
 
             if (exportMatrixAB && !jpgPathStr.empty() && ccmAltVec.size() == 9) {
                 std::string suffix = useSensorColorMatrix ? "_AB_CAPTURE_CCM.jpg" : "_AB_SENSOR_CCM.jpg";
@@ -579,7 +580,13 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
         }
     }
     fillDebugStats(env, debugStats, (jlong)copyDurationMs, (jlong)halideDurationMs, (jlong)postDurationMs, 0, (jlong)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now()-saveStart).count(), 0, (jlong)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now()-nativeStart).count(), (jlong)jniPrepMs, stageStats);
-    return 0;
+
+    if (!resultJpegBytes.empty()) {
+        jbyteArray retArray = env->NewByteArray(resultJpegBytes.size());
+        env->SetByteArrayRegion(retArray, 0, resultJpegBytes.size(), (const jbyte*)resultJpegBytes.data());
+        return retArray;
+    }
+    return nullptr;
 }
 
 extern "C" JNIEXPORT jint JNICALL
@@ -596,12 +603,14 @@ Java_top_maary_darkbag_processor_ColorProcessor_processSingleFrameRaw(
     env->SetObjectArrayElement(dngBuffers, 0, bayerBuffer);
 
     // Call the existing processHdrPlus logic.
-    return Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
-        env, nullptr, dngBuffers, width, height, orientation, whiteLevel, blackLevelPattern, lensShadingMap, lensShadingRows, lensShadingCols,
+    jbyteArray res = Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
+        env, nullptr, dngBuffers, width, height, orientation, whiteLevel, 100, blackLevelPattern, lensShadingMap, lensShadingRows, lensShadingCols,
         false, // useSensorColorMatrix
         whiteBalance, ccm, nullptr, // ccmAlt
         false, // exportMatrixAB
         cfaPattern, targetLog, lutPath,
         outputJpgPath, outputDngPath, digitalGain, debugStats, outputBitmap, tempRawPath, zoomFactor, mirror, metadata, fastDenoise
     );
+    if (res != nullptr) env->DeleteLocalRef(res);
+    return 0;
 }

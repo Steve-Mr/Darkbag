@@ -662,4 +662,34 @@ object ImageSaver {
         }
         return null
     }
+
+
+    suspend fun saveDirectJpeg(
+        context: android.content.Context,
+        jpegData: ByteArray,
+        targetUri: android.net.Uri,
+        captureMetadata: top.maary.darkbag.models.CaptureMetadata,
+        orientation: Int,
+        mirror: Boolean,
+        halfFrameMetadata: top.maary.darkbag.utils.HalfFrameManager.Metadata? = null
+    ) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        try {
+            context.contentResolver.openOutputStream(targetUri)?.use { outStream ->
+                outStream.write(jpegData)
+            }
+
+            val pfd = context.contentResolver.openFileDescriptor(targetUri, "rw")
+            if (pfd != null) {
+                val exif = androidx.exifinterface.media.ExifInterface(pfd.fileDescriptor)
+                writeStandardExif(exif, captureMetadata)
+                exif.saveAttributes()
+                pfd.close()
+            }
+
+            android.util.Log.d(TAG, "Successfully saved direct JPEG to $targetUri")
+        } catch (e: Exception) {
+            android.util.Log.e(TAG, "Failed to save direct JPEG", e)
+        }
+    }
+
 }

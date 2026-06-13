@@ -85,7 +85,7 @@ object ColorProcessor {
         mirror: Boolean,
         metadata: CaptureMetadata,
         fastDenoise: Boolean = false
-    ): Int
+    ): ByteArray?
 
     /**
      * Loads a .cube LUT file into a flat float array (RGB interleaved).
@@ -153,6 +153,7 @@ object ColorProcessor {
         height: Int,
         orientation: Int,
         whiteLevel: Int,
+        iso: Int,
         blackLevelPattern: IntArray, // [r, g0, g1, b]
         lensShadingMap: FloatArray?, // [4 * rows * cols], channel-major R,GE,GO,B
         lensShadingRows: Int,
@@ -175,5 +176,5 @@ object ColorProcessor {
         mirror: Boolean,
         metadata: CaptureMetadata,
         fastDenoise: Boolean = false
-    ): Int
+    ): ByteArray?
 }

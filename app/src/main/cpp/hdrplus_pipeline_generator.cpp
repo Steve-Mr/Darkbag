@@ -18,7 +18,7 @@ class HdrPlusRawPipeline : public Generator<HdrPlusRawPipeline> {
 public:
   GeneratorParam<bool> use_optimized_schedule{"use_optimized_schedule", true};
   GeneratorParam<bool> use_gpu{"use_gpu", false};
-  GeneratorParam<bool> fast_denoise{"fast_denoise", false};
+  GeneratorParam<int> denoise_level{"denoise_level", 2}; // 0=fast (no denoise), 1=light, 2=normal
 
   Input<Buffer<uint16_t>> inputs{"inputs", 3};
   Input<uint16_t> black_point_r{"black_point_r"};
@@ -268,13 +268,42 @@ private:
     return output_is;
   }
 
-  Func chroma_denoise(Func input, Expr width, Expr height, int num_passes) {
-    // Completely prune denoise stages at generation time if fast_denoise is true
-    if ((bool)fast_denoise) {
+    Func chroma_denoise(Func input, Expr width, Expr height, int num_passes) {
+    // Completely prune denoise stages at generation time if denoise_level is 0
+    if ((int)denoise_level == 0) {
         return input;
     }
 
     Func output_denoise = rgb_to_yuv(input);
+
+    if ((int)denoise_level == 1) {
+        // Light denoise: sub-sample chroma channels
+        Func downsampled_u("downsampled_u");
+        Func downsampled_v("downsampled_v");
+
+        Var x, y;
+        downsampled_u(x, y) = (output_denoise(x*2, y*2, 1) + output_denoise(x*2+1, y*2, 1) + output_denoise(x*2, y*2+1, 1) + output_denoise(x*2+1, y*2+1, 1)) / 4.0f;
+        downsampled_v(x, y) = (output_denoise(x*2, y*2, 2) + output_denoise(x*2+1, y*2, 2) + output_denoise(x*2, y*2+1, 2) + output_denoise(x*2+1, y*2+1, 2)) / 4.0f;
+
+        // Dummy bilateral or simple box blur on downsampled
+        Func blurred_u("blurred_u");
+        Func blurred_v("blurred_v");
+        blurred_u(x, y) = (downsampled_u(x, y) + downsampled_u(x+1, y) + downsampled_u(x, y+1) + downsampled_u(x+1, y+1)) / 4.0f;
+        blurred_v(x, y) = (downsampled_v(x, y) + downsampled_v(x+1, y) + downsampled_v(x, y+1) + downsampled_v(x+1, y+1)) / 4.0f;
+
+        Func upsampled_u("upsampled_u");
+        Func upsampled_v("upsampled_v");
+        upsampled_u(x, y) = blurred_u(x/2, y/2);
+        upsampled_v(x, y) = blurred_v(x/2, y/2);
+
+        Func merged("light_denoise_merged");
+        Var c;
+        merged(x, y, c) = select(c == 0, output_denoise(x, y, 0),
+                                 c == 1, upsampled_u(x, y),
+                                 upsampled_v(x, y));
+
+        return yuv_to_rgb(merged);
+    }
 
     int pass = 0;
     if (num_passes > 0) output_denoise = bilateral_filter(output_denoise, width, height);
@@ -283,7 +312,9 @@ private:
       output_denoise = desaturate_noise(output_denoise, width, height);
       pass++;
     }
+
     if (num_passes > 2) output_denoise = increase_saturation(output_denoise, 1.1f);
+
     return yuv_to_rgb(output_denoise);
   }
 

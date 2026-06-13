@@ -1154,3 +1154,305 @@ bool write_bmp(const char* filename, int width, int height, const std::vector<un
     file.close();
     return result;
 }
+
+std::vector<unsigned char> process_and_encode_image_internal(
+    const std::vector<unsigned short>& inputImage,
+    int width, int height, float gain, int targetLog, const LUT3D& lut,
+    float exposure, float contrast, float saturation,
+    float highlights, float shadows, float whites, float blacks,
+    const char* jpgPath, const char* tiffPath, const ImageMetadata* metadata, int sourceColorSpace,
+    const float* ccm, const float* wb, int orientation, unsigned char* out_rgb_buffer,
+    int out_width, int out_height,
+    bool isPreview, int downsampleFactor, float zoomFactor, bool mirror
+) {
+    LOGD("process_and_save_image: %dx%d, gain=%.2f, log=%d, lut=%d, jpg=%s, tiff=%s, preview=%d, ds=%d, zoom=%.2f, mirror=%d",
+         width, height, gain, targetLog, lut.size, jpgPath ? jpgPath : "null", tiffPath ? tiffPath : "null", isPreview, downsampleFactor, zoomFactor, mirror);
+    int outW = width / downsampleFactor, outH = height / downsampleFactor;
+    bool swapDims = (orientation == 90 || orientation == 270);
+    int finalW = swapDims ? outH : outW, finalH = swapDims ? outW : outH;
+    Matrix3x3 effective_CCM = {0}; if (sourceColorSpace == 1 && ccm) std::copy(ccm, ccm + 9, effective_CCM.m);
+    std::vector<unsigned short> processedImage; std::vector<unsigned char> previewRgb8;
+
+    AdaptiveEdgeComp edgeComp = calculate_adaptive_edge_comp(inputImage, width, height);
+
+    // Debug stage split output (A/B/C):
+    // A: linear RGB input after adaptive edge compensation
+    // B: after color-space matrix transform (before log/LUT)
+    // C: after log curve (before LUT)
+    const bool enableStageDebug = false;
+    std::string debugBasePath = jpgPath ? std::string(jpgPath) : std::string();
+    std::string debugPathA = enableStageDebug ? build_debug_stage_path(debugBasePath.c_str(), "_debug_A_linear") : std::string();
+    std::string debugPathB = enableStageDebug ? build_debug_stage_path(debugBasePath.c_str(), "_debug_B_matrix") : std::string();
+    std::string debugPathC = enableStageDebug ? build_debug_stage_path(debugBasePath.c_str(), "_debug_C_log") : std::string();
+
+    std::vector<unsigned char> debugA8;
+    std::vector<unsigned char> debugB8;
+    std::vector<unsigned char> debugC8;
+
+    auto process_pixel = [&](int x, int y, Vec3* stageA, Vec3* stageB, Vec3* stageC) -> Vec3 {
+        x = std::max(0, std::min(x, width - 1));
+        y = std::max(0, std::min(y, height - 1));
+        size_t idx = (static_cast<size_t>(y) * width + x) * 3;
+
+        // 1. Exposure (Linear Space)
+        float exp_gain = std::pow(2.0f, exposure);
+        float norm_r = (float)inputImage[idx + 0] / 65535.0f * gain * exp_gain;
+        float norm_g = (float)inputImage[idx + 1] / 65535.0f * gain * exp_gain;
+        float norm_b = (float)inputImage[idx + 2] / 65535.0f * gain * exp_gain;
+
+        if (edgeComp.enabled) {
+            const float nx = (x - edgeComp.centerX) * edgeComp.invMaxRadius;
+            const float ny = (y - edgeComp.centerY) * edgeComp.invMaxRadius;
+            float r = std::sqrt(nx * nx + ny * ny);
+
+            // Smooth radial blend: start near 55% radius and fully applied at edges.
+            float t = std::clamp((r - kBlendStartRadius) / (kBlendEndRadius - kBlendStartRadius), 0.0f, 1.0f);
+            t = t * t * (3.0f - 2.0f * t); // smoothstep
+
+            float lumaGain = 1.0f + (edgeComp.lumaEdgeGain - 1.0f) * t;
+            float rGain = (1.0f + (edgeComp.chromaEdgeGain[0] - 1.0f) * t) * lumaGain;
+            float gGain = (1.0f + (edgeComp.chromaEdgeGain[1] - 1.0f) * t) * lumaGain;
+            float bGain = (1.0f + (edgeComp.chromaEdgeGain[2] - 1.0f) * t) * lumaGain;
+
+            norm_r *= rGain;
+            norm_g *= gGain;
+            norm_b *= bGain;
+        }
+
+        Vec3 colorA = {norm_r, norm_g, norm_b};
+        if (stageA) *stageA = colorA;
+
+        Vec3 color = colorA;
+        if (sourceColorSpace == 1) { if (ccm) color = multiply(effective_CCM, color); color = multiply(M_sRGB_D65_to_XYZ, color); }
+        else if (sourceColorSpace == 0) { color = multiply(M_ProPhoto_D50_to_XYZ, color); color = multiply(M_Bradford_D50_to_D65, color); }
+
+        switch (targetLog) {
+            case 1: color = multiply(M_XYZ_to_AlexaWideGamut_D65, color); break;
+            case 2:
+            case 3: color = multiply(M_XYZ_to_Rec2020_D65, color); break;
+            case 5:
+            case 6: color = multiply(M_XYZ_to_SGamut3Cine_D65, color); break;
+            case 7: color = multiply(M_XYZ_to_VGamut_D65, color); break;
+            default: color = multiply(M_XYZ_to_Rec709_D65, color); break;
+        }
+        if (stageB) *stageB = color;
+
+        color.r = apply_log(color.r, targetLog); color.g = apply_log(color.g, targetLog); color.b = apply_log(color.b, targetLog);
+
+        // 2. Contrast & Saturation (Log Space)
+        auto apply_contrast = [&](float v) {
+            return std::clamp((v - 0.5f) * (contrast + 1.0f) + 0.5f, 0.0f, 1.0f);
+        };
+        color.r = apply_contrast(color.r);
+        color.g = apply_contrast(color.g);
+        color.b = apply_contrast(color.b);
+
+        float luma = 0.2126f * color.r + 0.7152f * color.g + 0.0722f * color.b;
+        color.r = std::clamp(luma + (color.r - luma) * (saturation + 1.0f), 0.0f, 1.0f);
+        color.g = std::clamp(luma + (color.g - luma) * (saturation + 1.0f), 0.0f, 1.0f);
+        color.b = std::clamp(luma + (color.b - luma) * (saturation + 1.0f), 0.0f, 1.0f);
+
+        // 3. Highlights / Shadows / Whites / Blacks (Log Space)
+        auto apply_hswb = [&](float v) {
+            // Highlights: affecting upper range
+            if (highlights != 0.0f) {
+                float weight = std::pow(std::clamp(v, 0.0f, 1.0f), 2.0f);
+                v += highlights * weight * 0.2f;
+            }
+            // Shadows: affecting lower range
+            if (shadows != 0.0f) {
+                float weight = std::pow(1.0f - std::clamp(v, 0.0f, 1.0f), 2.0f);
+                v += shadows * weight * 0.2f;
+            }
+            // Whites: offset upper
+            if (whites != 0.0f) {
+                float weight = std::clamp((v - 0.5f) * 2.0f, 0.0f, 1.0f);
+                v += whites * weight * 0.2f;
+            }
+            // Blacks: offset lower
+            if (blacks != 0.0f) {
+                float weight = std::clamp((0.5f - v) * 2.0f, 0.0f, 1.0f);
+                v += blacks * weight * 0.2f;
+            }
+            return std::clamp(v, 0.0f, 1.0f);
+        };
+        color.r = apply_hswb(color.r);
+        color.g = apply_hswb(color.g);
+        color.b = apply_hswb(color.b);
+
+        if (stageC) *stageC = color;
+
+        if (lut.size > 0) color = apply_lut(lut, color);
+        return color;
+    };
+    int cropW = (int)(width / zoomFactor);
+    int cropH = (int)(height / zoomFactor);
+    int cropX = (width - cropW) / 2;
+    int cropY = (height - cropH) / 2;
+
+    int finalW_zoomed = swapDims ? (cropH / downsampleFactor) : (cropW / downsampleFactor);
+    int finalH_zoomed = swapDims ? (cropW / downsampleFactor) : (cropH / downsampleFactor);
+
+    if (enableStageDebug) {
+        size_t n = static_cast<size_t>(finalW_zoomed) * finalH_zoomed * 3;
+        debugA8.resize(n);
+        debugB8.resize(n);
+        debugC8.resize(n);
+    }
+
+    if (isPreview) {
+        // If a bitmap buffer is provided, prioritize its dimensions.
+        // This ensures no out-of-bounds writes even if Kotlin and JNI have different size expectations.
+        int renderW = (out_rgb_buffer && out_width > 0) ? out_width : finalW_zoomed;
+        int renderH = (out_rgb_buffer && out_height > 0) ? out_height : finalH_zoomed;
+
+        previewRgb8.resize(static_cast<size_t>(renderW) * renderH * 3);
+        #pragma omp parallel for
+        for (int py = 0; py < renderH; py++) {
+            for (int px = 0; px < renderW; px++) {
+                int sx, sy;
+                int opx = mirror ? (renderW - 1 - px) : px;
+
+                // Map back to source pixels using the actual render dimensions
+                // This is safer than using downsampleFactor directly if dimensions mismatch
+                float fx = (float)opx / renderW * (swapDims ? cropH : cropW);
+                float fy = (float)py / renderH * (swapDims ? cropW : cropH);
+
+                if (orientation == 90) { sx = (int)fy; sy = (cropH - 1) - (int)fx; }
+                else if (orientation == 180) { sx = (cropW - 1) - (int)fx; sy = (cropH - 1) - (int)fy; }
+                else if (orientation == 270) { sx = (cropW - 1) - (int)fy; sy = (int)fx; }
+                else { sx = (int)fx; sy = (int)fy; }
+
+                Vec3 color = process_pixel(cropX + sx, cropY + sy, nullptr, nullptr, nullptr);
+                size_t outIdx = (static_cast<size_t>(py) * renderW + px) * 3;
+                unsigned char r8 = (unsigned char)std::max(0.0f, std::min(255.0f, color.r * 255.0f + 0.5f));
+                unsigned char g8 = (unsigned char)std::max(0.0f, std::min(255.0f, color.g * 255.0f + 0.5f));
+                unsigned char b8 = (unsigned char)std::max(0.0f, std::min(255.0f, color.b * 255.0f + 0.5f));
+
+                previewRgb8[outIdx + 0] = r8;
+                previewRgb8[outIdx + 1] = g8;
+                previewRgb8[outIdx + 2] = b8;
+
+                if (out_rgb_buffer) {
+                    size_t bIdx = (static_cast<size_t>(py) * renderW + px) * 4;
+                    out_rgb_buffer[bIdx+0] = r8;
+                    out_rgb_buffer[bIdx+1] = g8;
+                    out_rgb_buffer[bIdx+2] = b8;
+                    out_rgb_buffer[bIdx+3] = 255;
+                }
+            }
+        }
+        // Update dimensions for JPEG writing if we used bitmap dimensions
+        finalW_zoomed = renderW;
+        finalH_zoomed = renderH;
+    } else {
+        processedImage.resize(static_cast<size_t>(finalW_zoomed) * finalH_zoomed * 3);
+        #pragma omp parallel for
+        for (int py = 0; py < finalH_zoomed; py++) {
+            for (int px = 0; px < finalW_zoomed; px++) {
+                int sx, sy;
+                int opx = mirror ? (finalW_zoomed - 1 - px) : px;
+
+                float fx = (float)opx / finalW_zoomed * (swapDims ? cropH : cropW);
+                float fy = (float)py / finalH_zoomed * (swapDims ? cropW : cropH);
+
+                if (orientation == 90) { sx = (int)fy; sy = (cropH - 1) - (int)fx; }
+                else if (orientation == 180) { sx = (cropW - 1) - (int)fx; sy = (cropH - 1) - (int)fy; }
+                else if (orientation == 270) { sx = (cropW - 1) - (int)fy; sy = (int)fx; }
+                else { sx = (int)fx; sy = (int)fy; }
+
+                Vec3 stageA{}, stageB{}, stageC{};
+                Vec3 color = process_pixel(cropX + sx, cropY + sy,
+                                           enableStageDebug ? &stageA : nullptr,
+                                           enableStageDebug ? &stageB : nullptr,
+                                           enableStageDebug ? &stageC : nullptr);
+                size_t outIdx = (static_cast<size_t>(py) * finalW_zoomed + px) * 3;
+                processedImage[outIdx + 0] = (unsigned short)std::max(0.0f, std::min(65535.0f, color.r * 65535.0f));
+                processedImage[outIdx + 1] = (unsigned short)std::max(0.0f, std::min(65535.0f, color.g * 65535.0f));
+                processedImage[outIdx + 2] = (unsigned short)std::max(0.0f, std::min(65535.0f, color.b * 65535.0f));
+
+                if (enableStageDebug) {
+                    debugA8[outIdx + 0] = (unsigned char)(clamp01(stageA.r) * 255.0f);
+                    debugA8[outIdx + 1] = (unsigned char)(clamp01(stageA.g) * 255.0f);
+                    debugA8[outIdx + 2] = (unsigned char)(clamp01(stageA.b) * 255.0f);
+
+                    debugB8[outIdx + 0] = (unsigned char)(clamp01(stageB.r) * 255.0f);
+                    debugB8[outIdx + 1] = (unsigned char)(clamp01(stageB.g) * 255.0f);
+                    debugB8[outIdx + 2] = (unsigned char)(clamp01(stageB.b) * 255.0f);
+
+                    debugC8[outIdx + 0] = (unsigned char)(clamp01(stageC.r) * 255.0f);
+                    debugC8[outIdx + 1] = (unsigned char)(clamp01(stageC.g) * 255.0f);
+                    debugC8[outIdx + 2] = (unsigned char)(clamp01(stageC.b) * 255.0f);
+                }
+
+                // Note: out_rgb_buffer is usually for preview only, but we keep it here if needed.
+                if (out_rgb_buffer) {
+                    size_t bIdx = (static_cast<size_t>(py) * finalW_zoomed + px) * 4;
+                    out_rgb_buffer[bIdx+0] = (unsigned char)std::min(255, (processedImage[outIdx+0] + 128) >> 8);
+                    out_rgb_buffer[bIdx+1] = (unsigned char)std::min(255, (processedImage[outIdx+1] + 128) >> 8);
+                    out_rgb_buffer[bIdx+2] = (unsigned char)std::min(255, (processedImage[outIdx+2] + 128) >> 8);
+                    out_rgb_buffer[bIdx+3] = 255;
+                }
+            }
+        }
+    }
+
+    bool tiffOk = true;
+    if (tiffPath && !isPreview) {
+        tiffOk = write_tiff(tiffPath, finalW_zoomed, finalH_zoomed, processedImage, metadata);
+        if (!tiffOk) LOGE("write_tiff failed for %s", tiffPath);
+        else LOGD("Successfully wrote TIFF: %s", tiffPath);
+    }
+
+    const int jpegQuality = isPreview ? 78 : 95;
+
+    int encodeJpegQuality = 95;
+    if (isPreview && !previewRgb8.empty()) {
+        return encode_rgb8_jpeg(previewRgb8, finalW_zoomed, finalH_zoomed, encodeJpegQuality);
+    } else {
+        std::vector<unsigned char> rgb8;
+        try {
+            rgb8.resize(finalW_zoomed * finalH_zoomed * 3);
+        } catch (const std::bad_alloc& e) {
+            LOGE("Failed to allocate memory for JPEG conversion");
+            return std::vector<unsigned char>();
+        }
+        #pragma omp parallel for
+        for (int i = 0; i < finalW_zoomed * finalH_zoomed * 3; ++i) {
+            rgb8[i] = std::clamp(processedImage[i] / 256, 0, 255);
+        }
+        return encode_rgb8_jpeg(rgb8, finalW_zoomed, finalH_zoomed, encodeJpegQuality);
+    }
+
+    if (enableStageDebug && !debugA8.empty()) {
+        bool aOk = stbi_write_jpg(debugPathA.c_str(), finalW_zoomed, finalH_zoomed, 3, debugA8.data(), 95) != 0;
+        bool bOk = stbi_write_jpg(debugPathB.c_str(), finalW_zoomed, finalH_zoomed, 3, debugB8.data(), 95) != 0;
+        bool cOk = stbi_write_jpg(debugPathC.c_str(), finalW_zoomed, finalH_zoomed, 3, debugC8.data(), 95) != 0;
+        LOGD("Stage debug outputs: A=%s (%d), B=%s (%d), C=%s (%d)",
+             debugPathA.c_str(), (int)aOk,
+             debugPathB.c_str(), (int)bOk,
+             debugPathC.c_str(), (int)cOk);
+    }
+
+
+}
+
+
+std::vector<unsigned char> process_and_encode_image(
+    const std::vector<unsigned short>& inputImage,
+    int width, int height, float gain, int targetLog, const LUT3D& lut,
+    float exposure, float contrast, float saturation,
+    float highlights, float shadows, float whites, float blacks,
+    const char* dummyJpg,
+    const ImageMetadata* metadata, int sourceColorSpace,
+    const float* ccm, const float* wb, int orientation,
+    bool isPreview, int downsampleFactor, float zoomFactor, bool mirror
+) {
+    return process_and_encode_image_internal(
+        inputImage, width, height, gain, targetLog, lut,
+        exposure, contrast, saturation, highlights, shadows, whites, blacks,
+        dummyJpg, nullptr, metadata, sourceColorSpace,
+        ccm, wb, orientation, nullptr, 0, 0,
+        isPreview, downsampleFactor, zoomFactor, mirror
+    );
+}
