@@ -69,7 +69,9 @@ class MainActivity : AppCompatActivity() {
         setContentView(activityMainBinding.root)
 
         setupFloatingToolbar()
-        handleIntent(intent)
+        if (savedInstanceState == null) {
+            handleIntent(intent)
+        }
     }
 
     private fun setupFloatingToolbar() {
@@ -184,8 +186,11 @@ class MainActivity : AppCompatActivity() {
         val navController = navHostFragment?.navController ?: return
 
         if (intent.action == Intent.ACTION_SEND || intent.action == Intent.ACTION_SEND_MULTIPLE) {
+            val action = intent.action
+            intent.action = null // Prevent re-triggering immediately
             lifecycleScope.launch {
-                val paths = top.maary.darkbag.utils.ShareUtils.processShareIntent(this@MainActivity, intent)
+                val intentCopy = Intent(intent).apply { this.action = action }
+                val paths = top.maary.darkbag.utils.ShareUtils.processShareIntent(this@MainActivity, intentCopy)
                 if (paths.isNotEmpty()) {
                     if (paths.size == 1) {
                         val bundle = android.os.Bundle().apply {
@@ -198,7 +203,6 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
                 }
-                intent.action = null // Prevent re-triggering
             }
             return
         }

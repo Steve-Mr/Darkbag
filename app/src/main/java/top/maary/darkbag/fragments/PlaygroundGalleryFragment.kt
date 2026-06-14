@@ -573,7 +573,14 @@ class PlaygroundGalleryFragment : Fragment() {
                 try {
                     val fileName = getFileName(appContext, uri) ?: "imported_${UUID.randomUUID()}.dng"
                     val sanitizedFileName = File(fileName).name.ifEmpty { "imported_${UUID.randomUUID()}.dng" }
-                    val destFile = File(dir, sanitizedFileName)
+                    var destFile = File(dir, sanitizedFileName)
+                    var counter = 1
+                    val baseName = destFile.nameWithoutExtension
+                    val extension = destFile.extension.let { if (it.isNotEmpty()) ".$it" else "" }
+                    while (destFile.exists()) {
+                        destFile = File(dir, "${baseName}_$counter$extension")
+                        counter++
+                    }
                     appContext.contentResolver.openInputStream(uri)?.use { input ->
                         FileOutputStream(destFile).use { output ->
                             input.copyTo(output)
@@ -699,7 +706,7 @@ class PlaygroundGalleryFragment : Fragment() {
                                     else -> 0
                                 }
 
-                                val adj = config.adjustments?.get(0) ?: top.maary.darkbag.models.BasicAdjustments(config.exposure, config.contrast, config.saturation, config.highlights, config.shadows, config.whites, config.blacks, config.digitalGain)
+                                val adj = config.adjustments?.getOrNull(0) ?: top.maary.darkbag.models.BasicAdjustments(config.exposure, config.contrast, config.saturation, config.highlights, config.shadows, config.whites, config.blacks, config.digitalGain)
                                 val meta = repository.getCaptureMetadata(dngUri)
 
                                 val tempJpgFile = java.io.File(appContext.cacheDir, "temp_export_${System.currentTimeMillis()}.jpg")
@@ -792,7 +799,7 @@ class PlaygroundGalleryFragment : Fragment() {
                                     else -> 0
                                 }
 
-                                val adj = config.adjustments?.get(index) ?: top.maary.darkbag.models.BasicAdjustments(config.exposure, config.contrast, config.saturation, config.highlights, config.shadows, config.whites, config.blacks, config.digitalGain)
+                                val adj = config.adjustments?.getOrNull(index) ?: top.maary.darkbag.models.BasicAdjustments(config.exposure, config.contrast, config.saturation, config.highlights, config.shadows, config.whites, config.blacks, config.digitalGain)
                                 val meta = repository.getCaptureMetadata(uri)
 
                                 val tempJpgFile = java.io.File(appContext.cacheDir, "temp_export_${System.currentTimeMillis()}_$index.jpg")
@@ -1229,8 +1236,13 @@ class PlaygroundAdapter(
         holder.binding.iconSelected.visibility = if (selectionMode) View.VISIBLE else View.GONE
         holder.binding.iconSelected.setImageResource(if (isMainSelected) R.drawable.ic_check_circle else R.drawable.ic_radio_button_unchecked)
 
-        holder.binding.imageViewThumbnail.setImageDrawable(null)
         val context = holder.itemView.context
+        Glide.with(context).clear(holder.binding.imageViewThumbnail)
+        Glide.with(context).clear(holder.binding.subImageView1)
+        Glide.with(context).clear(holder.binding.subImageView2)
+        holder.binding.imageViewThumbnail.setImageDrawable(null)
+        holder.binding.subImageView1.setImageDrawable(null)
+        holder.binding.subImageView2.setImageDrawable(null)
 
         holder.jobMain?.cancel()
         holder.jobSub1?.cancel()
