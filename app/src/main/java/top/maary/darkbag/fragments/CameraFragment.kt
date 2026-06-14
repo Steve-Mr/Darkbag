@@ -3721,7 +3721,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 val jniEndTime = System.currentTimeMillis()
                 Log.d(TAG, "JNI processHdrPlus returned $ret in ${jniEndTime - jniStartTime}ms")
 
-                if (ret != null) {
+                if (ret == 0) {
                     isHdrPlusSuccess = true
 
                     val saveStartTime = System.currentTimeMillis()
@@ -3808,7 +3808,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         mirror = shouldMirror,
                         captureMetadata = captureMetadata,
                         fastDenoise = prefs.getBoolean(top.maary.darkbag.fragments.SettingsFragment.KEY_FAST_DENOISE, false),
-                        targetUri = fastJpegUri?.toString() ?: "",
+                        targetUri = fastJpegUri?.toString(),
                         halfFrameMetadata = hfMetadata,
                         onComplete = {
                             lifecycleScope.launch(kotlinx.coroutines.Dispatchers.Main) {

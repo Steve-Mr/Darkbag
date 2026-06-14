@@ -85,7 +85,7 @@ object ColorProcessor {
         mirror: Boolean,
         metadata: CaptureMetadata,
         fastDenoise: Boolean = false
-    ): ByteArray?
+    ): Int
 
     /**
      * Loads a .cube LUT file into a flat float array (RGB interleaved).
@@ -176,5 +176,5 @@ object ColorProcessor {
         mirror: Boolean,
         metadata: CaptureMetadata,
         fastDenoise: Boolean = false
-    ): ByteArray?
+    ): Int
 }

@@ -908,6 +908,9 @@ int compute_preview_downsample_factor(int width, int height, int targetLongEdge)
 
 struct JpegBufferContext {
     std::vector<unsigned char> bytes;
+    JpegBufferContext() {
+        bytes.reserve(1024 * 1024 * 15); // Pre-allocate 15MB to prevent slow reallocations!
+    }
 };
 
 static void write_jpeg_to_memory(void* context, void* data, int size) {

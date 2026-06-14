@@ -81,8 +81,27 @@ class HdrPlusProcessingService : Service() {
                     fastDenoise = request.fastDenoise
                 )
 
-                if (ret != null && request.targetUri != null) {
-                    top.maary.darkbag.utils.ImageSaver.saveDirectJpeg(applicationContext, ret, android.net.Uri.parse(request.targetUri), request.captureMetadata, request.combinedOrientation, request.mirror, request.halfFrameMetadata)
+                if (ret == 0 && request.targetUri != null && request.tempJpgFile != null) {
+                    val tempFile = java.io.File(request.tempJpgFile)
+                    if (tempFile.exists()) {
+                        val uri = android.net.Uri.parse(request.targetUri)
+                        // Copy file to MediaStore URI
+                        applicationContext.contentResolver.openOutputStream(uri)?.use { out ->
+                            java.io.FileInputStream(tempFile).use { input ->
+                                input.copyTo(out)
+                            }
+                        }
+                        // Update EXIF
+                        val pfd = applicationContext.contentResolver.openFileDescriptor(uri, "rw")
+                        if (pfd != null) {
+                            val exif = androidx.exifinterface.media.ExifInterface(pfd.fileDescriptor)
+                            top.maary.darkbag.utils.ImageSaver.writeMetadataToExif(applicationContext, uri, null, request.captureMetadata)
+                            pfd.close()
+                        }
+                        // Delete temp file
+                        tempFile.delete()
+                        android.util.Log.d("HdrPlusService", "Copied temporary JPEG to MediaStore.")
+                    }
                 }
 
             } catch (e: Exception) {
