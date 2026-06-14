@@ -65,6 +65,7 @@ class SettingsFragment : Fragment() {
         setupToolbar()
         setupAboutSection()
         setupMenus()
+        setupStartupSettings()
         setupCheckboxes()
         setupStoragePickers()
         setupNavigation()
@@ -289,6 +290,91 @@ class SettingsFragment : Fragment() {
         }
     }
 
+    private fun setupStartupSettings() {
+        var defaultStartup = prefs.getString(KEY_DEFAULT_STARTUP, STARTUP_CAMERA) ?: STARTUP_CAMERA
+        var enableCamera = prefs.getBoolean(KEY_ENABLE_CAMERA, true)
+        var enablePlayground = prefs.getBoolean(KEY_ENABLE_PLAYGROUND, true)
+
+        fun updateStartupCards() {
+
+            val typedValue = android.util.TypedValue()
+            requireContext().theme.resolveAttribute(com.google.android.material.R.attr.colorTertiaryContainer, typedValue, true)
+            val primaryColor = typedValue.data
+
+            val defaultColor = ContextCompat.getColor(requireContext(), android.R.color.transparent)
+
+            if (defaultStartup == STARTUP_CAMERA) {
+                binding.cardStartupCamera.strokeColor = primaryColor
+                binding.cardStartupPlayground.strokeColor = defaultColor
+            } else {
+                binding.cardStartupCamera.strokeColor = defaultColor
+                binding.cardStartupPlayground.strokeColor = primaryColor
+            }
+        }
+
+        fun updateSwitchStates() {
+            binding.switchEnableCamera.isChecked = enableCamera
+            binding.switchEnablePlayground.isChecked = enablePlayground
+            binding.switchShowFloatingToolbar.isChecked = prefs.getBoolean(KEY_SHOW_FLOATING_TOOLBAR, true)
+
+            // At least one must be enabled
+            if (enableCamera && !enablePlayground) {
+                binding.switchEnableCamera.isEnabled = false
+                binding.switchEnablePlayground.isEnabled = true
+            } else if (!enableCamera && enablePlayground) {
+                binding.switchEnableCamera.isEnabled = true
+                binding.switchEnablePlayground.isEnabled = false
+            } else {
+                binding.switchEnableCamera.isEnabled = true
+                binding.switchEnablePlayground.isEnabled = true
+            }
+
+            updateStartupCards()
+        }
+
+        updateSwitchStates()
+
+        binding.cardStartupCamera.setOnClickListener {
+            if (enableCamera) {
+                defaultStartup = STARTUP_CAMERA
+                prefs.edit().putString(KEY_DEFAULT_STARTUP, defaultStartup).apply()
+                updateStartupCards()
+            }
+        }
+
+        binding.cardStartupPlayground.setOnClickListener {
+            if (enablePlayground) {
+                defaultStartup = STARTUP_PLAYGROUND
+                prefs.edit().putString(KEY_DEFAULT_STARTUP, defaultStartup).apply()
+                updateStartupCards()
+            }
+        }
+
+        binding.switchEnableCamera.setOnCheckedChangeListener { _, isChecked ->
+            enableCamera = isChecked
+            prefs.edit().putBoolean(KEY_ENABLE_CAMERA, isChecked).apply()
+            if (!isChecked && defaultStartup == STARTUP_CAMERA) {
+                defaultStartup = STARTUP_PLAYGROUND
+                prefs.edit().putString(KEY_DEFAULT_STARTUP, defaultStartup).apply()
+            }
+            updateSwitchStates()
+        }
+
+        binding.switchEnablePlayground.setOnCheckedChangeListener { _, isChecked ->
+            enablePlayground = isChecked
+            prefs.edit().putBoolean(KEY_ENABLE_PLAYGROUND, isChecked).apply()
+            if (!isChecked && defaultStartup == STARTUP_PLAYGROUND) {
+                defaultStartup = STARTUP_CAMERA
+                prefs.edit().putString(KEY_DEFAULT_STARTUP, defaultStartup).apply()
+            }
+            updateSwitchStates()
+        }
+
+        binding.switchShowFloatingToolbar.setOnCheckedChangeListener { _, isChecked ->
+            prefs.edit().putBoolean(KEY_SHOW_FLOATING_TOOLBAR, isChecked).apply()
+        }
+    }
+
     private fun setupCheckboxes() {
         setupSwitch(binding.switchLivePreview, KEY_ENABLE_LUT_PREVIEW)
 
@@ -458,6 +544,14 @@ class SettingsFragment : Fragment() {
         const val KEY_HALF_FRAME_SAVE_JPG = "half_frame_save_jpg"
         const val KEY_HALF_FRAME_SAVE_RAW = "half_frame_save_raw"
         const val KEY_HALF_FRAME_BASE_NAME = "half_frame_base_name"
+
+        const val KEY_DEFAULT_STARTUP = "default_startup_page"
+        const val STARTUP_CAMERA = "camera"
+        const val STARTUP_PLAYGROUND = "playground"
+
+        const val KEY_ENABLE_CAMERA = "enable_camera"
+        const val KEY_ENABLE_PLAYGROUND = "enable_playground"
+        const val KEY_SHOW_FLOATING_TOOLBAR = "show_floating_toolbar"
 
         val FOCAL_LENGTHS = listOf("24", "28", "35")
         val ANTIBANDING_MODES = listOf("Auto", "50Hz", "60Hz", "Off")
