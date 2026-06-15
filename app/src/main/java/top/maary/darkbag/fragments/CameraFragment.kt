@@ -166,6 +166,9 @@ class CameraFragment : Fragment() {
     private var isZslCapturePending: Boolean = false
     private var zslTimingTracker: StandardTimingTracker? = null
     private var zslHfMetadata: HalfFrameManager.Metadata? = null
+    private var zslTargetUriTrackerRef: Array<String?>? = null
+    private var zslDigitalGain: Float = 1.0f
+    private var lastZslReport: String? = null
 
     private val camera2Manager by lazy {
         requireContext().getSystemService(Context.CAMERA_SERVICE) as android.hardware.camera2.CameraManager
@@ -369,6 +372,7 @@ class CameraFragment : Fragment() {
         val physicalId: String? = null,
         val timing: StandardTimingTracker? = null,
         val halfFrameMetadata: HalfFrameManager.Metadata? = null,
+        val zslTargetUriStr: String? = null,
         val digitalGain: Float = 1.0f
     )
 
@@ -1449,13 +1453,23 @@ class CameraFragment : Fragment() {
             }
 
             if (currentLens?.useCamera2 == true) {
+                val zslTargetUriTracker = arrayOfNulls<String>(1) // Array reference to pass URI from ZSL callback
+                // Predict digital gain for ZSL logic based on current zoom
+                val predictedZoom = if (currentLens?.isZoomPreset == true && currentLens?.targetZoomRatio != null) {
+                    currentLens!!.targetZoomRatio!!
+                } else {
+                    1.0f
+                }
+                zslDigitalGain = predictedZoom
+
                 isZslCapturePending = true
                 zslTimingTracker = timing
                 zslHfMetadata = hfMetadataForTrigger
+                zslTargetUriTrackerRef = zslTargetUriTracker
                 if (isHdrPlusEnabled && isRawSupported) {
-                    triggerHdrPlusBurstCamera2(isFrame1Trigger, hfMetadataForTrigger)
+                    triggerHdrPlusBurstCamera2(isFrame1Trigger, hfMetadataForTrigger, zslTargetUriTracker)
                 } else {
-                    takeSinglePictureCamera2(timing, isFrame1Trigger, hfMetadataForTrigger)
+                    takeSinglePictureCamera2(timing, isFrame1Trigger, hfMetadataForTrigger, zslTargetUriTracker)
                 }
             } else {
                 // Get a stable reference of the modifiable image capture use case
@@ -1979,25 +1993,11 @@ class CameraFragment : Fragment() {
                 )
 
                 // 4. Fast Output Feedback (Thumbnail)
-                val fastOutputUri = ImageSaver.saveProcessedImage(
-                    context = context,
-                    inputBitmap = null,
-                    bmpPath = if (saveJpg) tempJpgFile.absolutePath else null,
-                    rotationDegrees = 0,
-                    zoomFactor = image.zoomRatio,
-                    baseName = dngName,
-                    linearDngPath = if (dngWritten) bayerDngFile.absolutePath else null,
-                    saveJpg = saveJpg,
-                    saveRaw = saveRaw,
-                    jpgFolderUri = jpgFolderUri,
-                    rawFolderUri = rawFolderUri,
-                    mirror = false,
-                    isFastPath = true,
-                    halfFrameMetadata = image.halfFrameMetadata,
-                    editConfig = editConfig,
-                    digitalGain = image.digitalGain,
-                    captureMetadata = captureMetadata
-                )
+                // ZSL handles the fast preview UI updates now.
+                // We skip fast JPEG generation here and let the background worker handle the high-res save.
+                // However, DNG was written synchronously above, so we pass it to the background worker.
+                // The MediaStore entry will be created/overwritten by the export worker.
+                val fastOutputUri: android.net.Uri? = null
 
                 timing?.firstOutputWritten = System.currentTimeMillis()
 
@@ -2022,7 +2022,7 @@ class CameraFragment : Fragment() {
                     .putInt("targetLog", targetLogIndex)
                     .putString("lutPath", nativeLutPath)
                     .putString("jpgPath", if (saveJpg) fullResJpgFile.absolutePath else null)
-                    .putString("targetUri", fastOutputUri?.toString())
+                    .putString("targetUri", image.zslTargetUriStr) // Provide ZSL URI so it can be overwritten
                     .putFloat("zoomFactor", image.zoomRatio)
                     .putInt("iso", iso)
                     .putLong("exposureTime", exposureTime)
@@ -2061,7 +2061,7 @@ class CameraFragment : Fragment() {
                 // 6. Timing Report
                 timing?.let { t ->
                     val report = """
-                        [Standard Mode Report]
+                        [Standard Mode Report (ZSL + JNI)]
                         Total (to First Output): ${t.firstOutputWritten - t.shutterClick}ms
                         Shutter to Callback: ${t.captureCallback - t.shutterClick}ms
                         Callback to Enqueued: ${t.enqueued - t.captureCallback}ms
@@ -2069,6 +2069,7 @@ class CameraFragment : Fragment() {
                         JNI (Halide + FastJPG): ${t.jniDone - t.processingStart}ms
                         DNG Write (DngCreator): ${t.firstOutputWritten - t.jniDone}ms
                         Native Halide Detail: ${debugStats[0]}ms
+                        ZSL Stats: ${lastZslReport ?: "None"}
                     """.trimIndent()
                     Log.i(TAG, report)
                     DebugLogManager.addLog(report)
@@ -3467,7 +3468,8 @@ class CameraFragment : Fragment() {
     private fun processHdrPlusBurst(
         frames: List<HdrFrame>,
         digitalGain: Float,
-        hfMetadata: HalfFrameManager.Metadata? = null
+        hfMetadata: HalfFrameManager.Metadata? = null,
+        zslTargetUriTracker: Array<String?>? = null
     ) {
         val currentZoom = if (currentLens?.isZoomPreset == true && currentLens?.targetZoomRatio != null) {
             currentLens!!.targetZoomRatio!!
@@ -3719,7 +3721,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         .putInt("targetLog", targetLogIndex)
                         .putString("lutPath", nativeLutPath)
                         .putString("jpgPath", if (saveJpg) fullResJpgFile.absolutePath else null)
-                        .putString("targetUri", fastJpegUri?.toString()) // Replace fast JPEG in place
+                        .putString("targetUri", zslTargetUriTracker?.get(0)) // Provide ZSL URI so it can be overwritten
                         .putFloat("zoomFactor", currentZoom)
                         .putString("dngPath", if (saveRaw) linearDngPath else null)
                         .putInt("iso", (iso).toInt())
@@ -3793,6 +3795,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                           - DNG Wait(get): ${dngWaitTime}ms
                         Save (IO/Compress): ${saveTime}ms
                         HQ Export Mode: ${if (hqBackgroundExport) "Background" else "Inline"}
+                        ZSL Stats: ${lastZslReport ?: "None"}
                     """.trimIndent()
 
                     Log.i(TAG, logMsg)
@@ -4002,6 +4005,10 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
             if (isZslCapturePending) {
                 isZslCapturePending = false
+                val hfMeta = zslHfMetadata
+                val captureTime = image.timestamp
+                val currentZoom = zslDigitalGain // Re-use the predicted zoom stored here
+                val targetUriTracker = zslTargetUriTrackerRef // Grab the tracker reference to pass URI back
                 try {
                     val zslStartTime = System.currentTimeMillis()
                     val bitmap = top.maary.darkbag.utils.YuvUtils.imageToBitmap(requireContext(), image)
@@ -4019,23 +4026,58 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                             top.maary.darkbag.processor.ColorProcessor.processZslBitmapWithLut(bitmap, targetLogIndex, nativeLutPath)
                             val lutEndTime = System.currentTimeMillis()
 
-                            val tempDir = java.io.File(requireContext().cacheDir, "fast_zsl")
-                            if (!tempDir.exists()) tempDir.mkdirs()
-                            val zslFile = java.io.File(tempDir, "zsl_${System.currentTimeMillis()}.jpg")
+                            val layout = if (hfMeta?.profile == HalfFrameSessionStore.PROFILE_HALF_TOP) "TB" else if (hfMeta?.profile == HalfFrameSessionStore.PROFILE_HALF_SIDE) "SBS" else null
+                            val editConfig = top.maary.darkbag.models.EditConfig(
+                                log = targetLogName ?: "None",
+                                lut = activeLutName ?: "None",
+                                digitalGain = zslDigitalGain,
+                                adjustments = if (hfMeta?.profile != null && hfMeta.profile != HalfFrameSessionStore.PROFILE_NORMAL) {
+                                    listOf(
+                                        top.maary.darkbag.models.BasicAdjustments(digitalGain = hfMeta.frame1DigitalGain),
+                                        top.maary.darkbag.models.BasicAdjustments(digitalGain = zslDigitalGain)
+                                    )
+                                } else null,
+                                hfLayout = layout,
+                                showTimestamp = hfMeta?.dateStamp ?: false,
+                                flareType = hfMeta?.flareType ?: -1,
+                                zoomFactor = currentZoom
+                            )
 
-                            java.io.FileOutputStream(zslFile).use { out ->
-                                bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, out)
-                            }
-                            bitmap.recycle()
+                            val baseName = hfMeta?.frame1BaseName ?: java.text.SimpleDateFormat(FILENAME, java.util.Locale.US).format(captureTime)
+                            val jpgFolderUri = prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
+
+                            // Use ImageSaver to save to MediaStore as a placeholder
+                            val zslUri = top.maary.darkbag.utils.ImageSaver.saveProcessedImage(
+                                context = requireContext(),
+                                inputBitmap = bitmap,
+                                bmpPath = null,
+                                rotationDegrees = getCombinedOrientation(), // Since YUV Image doesn't have orientation baked in, we rotate here
+                                zoomFactor = currentZoom,
+                                baseName = baseName,
+                                linearDngPath = null,
+                                saveJpg = true,
+                                jpgFolderUri = jpgFolderUri,
+                                mirror = shouldMirror,
+                                isFastPath = true,
+                                halfFrameMetadata = hfMeta?.copy(digitalGain = zslDigitalGain),
+                                editConfig = editConfig,
+                                digitalGain = zslDigitalGain,
+                                captureMetadata = createCaptureMetadataFromTimestamp(captureTime) // Approximate metadata
+                            )
 
                             withContext(Dispatchers.Main) {
-                                // Add ZSL output as a temporary gallery thumbnail
-                                setGalleryThumbnail(zslFile.absolutePath)
-                                top.maary.darkbag.utils.DebugLogManager.addLog("ZSL Preview Generated: ${lutEndTime - lutStartTime}ms")
-
-                                // Also update the LAST_CAPTURE_URI so clicking the thumbnail opens the preview
-                                prefs.edit().putString(SettingsFragment.KEY_LAST_CAPTURE_URI, android.net.Uri.fromFile(zslFile).toString()).apply()
-                                imageRepository.invalidateCache()
+                                if (zslUri != null) {
+                                    setGalleryThumbnail(zslUri.toString())
+                                    if (targetUriTracker != null && targetUriTracker.isNotEmpty()) {
+                                        targetUriTracker[0] = zslUri.toString()
+                                    }
+                                    // Handled via the callback tracker
+                                    prefs.edit().putString(SettingsFragment.KEY_LAST_CAPTURE_URI, zslUri.toString()).apply()
+                                    imageRepository.invalidateCache()
+                                }
+                                val totalZslTime = System.currentTimeMillis() - zslStartTime
+                                lastZslReport = "LUT: ${lutEndTime - lutStartTime}ms, Total ZSL: ${totalZslTime}ms"
+                                top.maary.darkbag.utils.DebugLogManager.addLog("ZSL Preview Fast Path: $lastZslReport")
                             }
                         }
                     }
@@ -4149,7 +4191,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
     private fun takeSinglePictureCamera2(
         timing: StandardTimingTracker? = null,
         isFrame1Trigger: Boolean = false,
-        hfMetadata: HalfFrameManager.Metadata? = null
+        hfMetadata: HalfFrameManager.Metadata? = null,
+        zslTargetUriTracker: Array<String?>? = null
     ) {
         val device = camera2Device ?: run { processingSemaphore.release(); return }
         val session = camera2Session ?: run { processingSemaphore.release(); return }
@@ -4179,7 +4222,14 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                             timing?.shutterClick
                         )
 
-                        val holder = copyAndroidImageToHolder(image, currentZoom, getCombinedOrientation(), currentLens?.id, hfMetadata?.copy(digitalGain = digitalGain)).copy(timing = timing, digitalGain = digitalGain)
+                        val holder = copyAndroidImageToHolder(
+                            image,
+                            currentZoom,
+                            getCombinedOrientation(),
+                            currentLens?.id,
+                            hfMetadata?.copy(digitalGain = digitalGain)
+                        ).copy(timing = timing, digitalGain = digitalGain, zslTargetUriStr = zslTargetUriTracker?.get(0))
+
                         image.close()
                         if (!isFrame1Trigger) {
                             showProcessingAnimation()
@@ -4236,7 +4286,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
     private fun triggerHdrPlusBurstCamera2(
         isFrame1Trigger: Boolean = false,
-        hfMetadata: HalfFrameManager.Metadata? = null
+        hfMetadata: HalfFrameManager.Metadata? = null,
+        zslTargetUriTracker: Array<String?>? = null
     ) {
         val device = camera2Device ?: run { processingSemaphore.release(); return }
         val session = camera2Session ?: run { processingSemaphore.release(); return }
@@ -4267,7 +4318,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             }
 
             hdrPlusBurstHelper = HdrPlusBurst(frameCount = burstSize, onBurstComplete = { frames ->
-                processHdrPlusBurst(frames, config.digitalGain, hfMetadata?.copy(digitalGain = config.digitalGain))
+                processHdrPlusBurst(frames, config.digitalGain, hfMetadata?.copy(digitalGain = config.digitalGain), zslTargetUriTracker)
             })
 
             lifecycleScope.launch(Dispatchers.Main) {
