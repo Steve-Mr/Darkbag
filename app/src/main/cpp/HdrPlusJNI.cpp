@@ -23,6 +23,8 @@
 #include <HalideRuntime.h>
 #include "ColorPipe.h"
 #include "hdrplus_raw_pipeline.h" // Generated header
+#include "hdrplus_raw_pipeline_fast.h"
+#include "hdrplus_raw_pipeline_light.h"
 
 #define TAG "HdrPlusJNI"
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, TAG, __VA_ARGS__)
@@ -347,6 +349,9 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
     auto nativeStart = std::chrono::high_resolution_clock::now();
     auto jniPrepStart = std::chrono::high_resolution_clock::now();
 
+    ImageMetadata meta = metadataFromJava(env, metadata);
+    int captureIso = meta.iso > 0 ? meta.iso : 400;
+
     int numFrames = env->GetArrayLength(dngBuffers);
     if (numFrames < 1) { LOGE("Processing requires at least 1 frame."); return -1; }
 
@@ -431,7 +436,19 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
     }
 
     auto halideStart = std::chrono::high_resolution_clock::now();
-    int halide_res = hdrplus_raw_pipeline(inputBuf, bl_r, bl_g0, bl_g1, bl_b, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, ccmHalideBuf, 1.0f, 1.0f, outputBuf);
+    int halide_res = 0;
+
+    if (captureIso <= 200) {
+        LOGD("Using fast pipeline for ISO %d", captureIso);
+        halide_res = hdrplus_raw_pipeline_fast(inputBuf, bl_r, bl_g0, bl_g1, bl_b, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, ccmHalideBuf, 1.0f, 1.0f, outputBuf);
+    } else if (captureIso <= 800) {
+        LOGD("Using light pipeline for ISO %d", captureIso);
+        halide_res = hdrplus_raw_pipeline_light(inputBuf, bl_r, bl_g0, bl_g1, bl_b, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, ccmHalideBuf, 1.0f, 1.0f, outputBuf);
+    } else {
+        LOGD("Using normal pipeline for ISO %d", captureIso);
+        halide_res = hdrplus_raw_pipeline(inputBuf, bl_r, bl_g0, bl_g1, bl_b, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, ccmHalideBuf, 1.0f, 1.0f, outputBuf);
+    }
+
     auto halideDurationMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - halideStart).count();
 
     halide_report_buffer.clear(); halide_profiler_report(nullptr);
@@ -531,7 +548,6 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
     }
 
     if (!jpgPathStr.empty() || !dngPathStr.empty()) {
-        ImageMetadata meta = metadataFromJava(env, metadata);
         if (!dngPathStr.empty()) {
             float baselineExposure = (digitalGain > 0.0f) ? std::log2(digitalGain) : 0.0f;
             write_dng(dngPathStr.c_str(), width, height, finalImage, kMax16BitValue, ccmVec, meta, orientation, (bool)mirror, baselineExposure);

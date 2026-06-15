@@ -107,9 +107,10 @@ add_custom_command(
 # Run the generator to produce the target object file
 # We target arm-64-android with OpenCL and Vulkan support, plus profiling.
 set(HALIDE_TARGET "arm-64-android-opencl-vulkan-vk_int16-profile")
+
+# Normal Pipeline
 set(GENERATED_HEADER "${GENERATOR_OUTPUT_DIR}/hdrplus_raw_pipeline.h")
 set(GENERATED_LIB "${GENERATOR_OUTPUT_DIR}/hdrplus_raw_pipeline.a") # Static lib output
-
 add_custom_command(
     OUTPUT "${GENERATED_HEADER}" "${GENERATED_LIB}"
     COMMAND "${GENERATOR_EXEC}"
@@ -117,15 +118,70 @@ add_custom_command(
             -f hdrplus_raw_pipeline
             -e static_library,h
             -o "${GENERATOR_OUTPUT_DIR}"
-            target=${HALIDE_TARGET}
+            target=${HALIDE_TARGET}-no_runtime
             use_optimized_schedule=true
             use_gpu=false
+            denoise_level=2
     DEPENDS "${GENERATOR_EXEC}"
-    COMMENT "Running Halide Generator for ${HALIDE_TARGET}"
+    COMMENT "Running Halide Generator for normal pipeline"
+)
+
+# Fast Pipeline (denoise_level=0)
+set(GENERATED_HEADER_FAST "${GENERATOR_OUTPUT_DIR}/hdrplus_raw_pipeline_fast.h")
+set(GENERATED_LIB_FAST "${GENERATOR_OUTPUT_DIR}/hdrplus_raw_pipeline_fast.a")
+add_custom_command(
+    OUTPUT "${GENERATED_HEADER_FAST}" "${GENERATED_LIB_FAST}"
+    COMMAND "${GENERATOR_EXEC}"
+            -g hdrplus_raw_pipeline
+            -f hdrplus_raw_pipeline_fast
+            -e static_library,h
+            -o "${GENERATOR_OUTPUT_DIR}"
+            target=${HALIDE_TARGET}-no_runtime
+            use_optimized_schedule=true
+            use_gpu=false
+            denoise_level=0
+    DEPENDS "${GENERATOR_EXEC}"
+    COMMENT "Running Halide Generator for fast pipeline"
+)
+
+# Light Pipeline (denoise_level=1)
+set(GENERATED_HEADER_LIGHT "${GENERATOR_OUTPUT_DIR}/hdrplus_raw_pipeline_light.h")
+set(GENERATED_LIB_LIGHT "${GENERATOR_OUTPUT_DIR}/hdrplus_raw_pipeline_light.a")
+add_custom_command(
+    OUTPUT "${GENERATED_HEADER_LIGHT}" "${GENERATED_LIB_LIGHT}"
+    COMMAND "${GENERATOR_EXEC}"
+            -g hdrplus_raw_pipeline
+            -f hdrplus_raw_pipeline_light
+            -e static_library,h
+            -o "${GENERATOR_OUTPUT_DIR}"
+            target=${HALIDE_TARGET}-no_runtime
+            use_optimized_schedule=true
+            use_gpu=false
+            denoise_level=1
+    DEPENDS "${GENERATOR_EXEC}"
+    COMMENT "Running Halide Generator for light pipeline"
+)
+
+# Separate Halide Runtime
+set(GENERATED_RUNTIME "${GENERATOR_OUTPUT_DIR}/halide_runtime.a")
+add_custom_command(
+    OUTPUT "${GENERATED_RUNTIME}"
+    COMMAND "${GENERATOR_EXEC}"
+            -r halide_runtime
+            -e static_library
+            -o "${GENERATOR_OUTPUT_DIR}"
+            target=${HALIDE_TARGET}
+    DEPENDS "${GENERATOR_EXEC}"
+    COMMENT "Generating separate Halide runtime"
 )
 
 # Update dependency target
-add_custom_target(generate_hdrplus_halide DEPENDS "${GENERATED_LIB}" "${GENERATED_HEADER}")
+add_custom_target(generate_hdrplus_halide DEPENDS
+    "${GENERATED_LIB}" "${GENERATED_HEADER}"
+    "${GENERATED_LIB_FAST}" "${GENERATED_HEADER_FAST}"
+    "${GENERATED_LIB_LIGHT}" "${GENERATED_HEADER_LIGHT}"
+    "${GENERATED_RUNTIME}"
+)
 
 # Expose generated files to the build
 include_directories(${GENERATOR_OUTPUT_DIR})
@@ -148,6 +204,9 @@ add_library(
         ColorPipe.cpp
         ${LIBRAW_SOURCES}
         "${GENERATED_LIB}"
+        "${GENERATED_LIB_FAST}"
+        "${GENERATED_LIB_LIGHT}"
+        "${GENERATED_RUNTIME}"
 )
 
 # Ensure the generation happens before native-lib compilation
@@ -168,6 +227,9 @@ find_library(
 target_link_libraries(
         native-lib
         "${GENERATED_LIB}"
+        "${GENERATED_LIB_FAST}"
+        "${GENERATED_LIB_LIGHT}"
+        "${GENERATED_RUNTIME}"
         tiff
         ${log-lib}
         ${jnigraphics-lib}

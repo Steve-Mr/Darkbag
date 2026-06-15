@@ -18,6 +18,7 @@ class HdrPlusRawPipeline : public Generator<HdrPlusRawPipeline> {
 public:
   GeneratorParam<bool> use_optimized_schedule{"use_optimized_schedule", true};
   GeneratorParam<bool> use_gpu{"use_gpu", false};
+  GeneratorParam<int> denoise_level{"denoise_level", 2};
 
   Input<Buffer<uint16_t>> inputs{"inputs", 3};
   Input<uint16_t> black_point_r{"black_point_r"};
@@ -268,7 +269,45 @@ private:
   }
 
   Func chroma_denoise(Func input, Expr width, Expr height, int num_passes) {
+    if (denoise_level == 0) {
+        return input;
+    }
+
     Func output_denoise = rgb_to_yuv(input);
+
+    if (denoise_level == 1) {
+        Func yuv_down("yuv_down");
+        yuv_down(x, y, c) = (output_denoise(x*2, y*2, c) +
+                             output_denoise(x*2+1, y*2, c) +
+                             output_denoise(x*2, y*2+1, c) +
+                             output_denoise(x*2+1, y*2+1, c)) / 4.0f;
+
+        Func bf_down = bilateral_filter(yuv_down, width / 2, height / 2);
+
+        Func combined("combined_yuv");
+        Expr xf = (f32(x) + 0.5f) / 2.0f - 0.5f;
+        Expr yf = (f32(y) + 0.5f) / 2.0f - 0.5f;
+        Expr xi_up = clamp(i32(floor(xf)), 0, width / 2 - 1);
+        Expr yi_up = clamp(i32(floor(yf)), 0, height / 2 - 1);
+        Expr xi1_up = clamp(xi_up + 1, 0, width / 2 - 1);
+        Expr yi1_up = clamp(yi_up + 1, 0, height / 2 - 1);
+        Expr tx = xf - f32(xi_up);
+        Expr ty = yf - f32(yi_up);
+
+        auto bilerp = [&](Expr ch) {
+            Expr v00 = bf_down(xi_up, yi_up, ch);
+            Expr v10 = bf_down(xi1_up, yi_up, ch);
+            Expr v01 = bf_down(xi_up, yi1_up, ch);
+            Expr v11 = bf_down(xi1_up, yi1_up, ch);
+            Expr v0 = v00 * (1.0f - tx) + v10 * tx;
+            Expr v1 = v01 * (1.0f - tx) + v11 * tx;
+            return v0 * (1.0f - ty) + v1 * ty;
+        };
+
+        combined(x, y, c) = select(c == 0, output_denoise(x, y, 0), bilerp(c));
+        return yuv_to_rgb(combined);
+    }
+
     int pass = 0;
     if (num_passes > 0) output_denoise = bilateral_filter(output_denoise, width, height);
     pass++;
