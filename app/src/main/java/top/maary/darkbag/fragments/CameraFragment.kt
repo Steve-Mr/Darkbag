@@ -1875,8 +1875,7 @@ class CameraFragment : Fragment() {
                     tempRawPath = tempRawFile.absolutePath,
                     zoomFactor = image.zoomRatio,
                     mirror = mirror,
-                    metadata = captureMetadata,
-                    fastDenoise = false
+                    metadata = captureMetadata
                 )
 
                 timing?.jniDone = System.currentTimeMillis()
@@ -1910,8 +1909,7 @@ class CameraFragment : Fragment() {
                                 tempRawPath = null,
                                 zoomFactor = image.zoomRatio,
                                 mirror = mirror,
-                                metadata = captureMetadata,
-                                fastDenoise = false
+                                metadata = captureMetadata
                             )
                             if (thumbResult >= 0 && tempDngThumbFile.exists() && tempDngThumbFile.length() > 0L) tempDngThumbFile else null
                         } else if (tempJpgFile.exists() && tempJpgFile.length() > 0L) {
@@ -3672,8 +3670,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     tempRawFile.absolutePath,
                     currentZoom,
                     mirror,
-                    metadata = captureMetadata,
-                    fastDenoise = prefs.getBoolean(SettingsFragment.KEY_FAST_DENOISE, false)
+                    metadata = captureMetadata
                 )
 
                 val jniEndTime = System.currentTimeMillis()

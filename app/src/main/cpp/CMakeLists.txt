@@ -120,9 +120,9 @@ add_custom_command(
             target=${HALIDE_TARGET}
             use_optimized_schedule=true
             use_gpu=false
-            fast_denoise=false
+            denoise_level=2
     DEPENDS "${GENERATOR_EXEC}"
-    COMMENT "Running Halide Generator for ${HALIDE_TARGET}"
+    COMMENT "Running Halide Generator for ${HALIDE_TARGET} (Normal)"
 )
 
 set(GENERATED_FAST_HEADER "${GENERATOR_OUTPUT_DIR}/hdrplus_raw_pipeline_fast.h")
@@ -138,13 +138,31 @@ add_custom_command(
             target=${HALIDE_TARGET}
             use_optimized_schedule=true
             use_gpu=false
-            fast_denoise=true
+            denoise_level=0
     DEPENDS "${GENERATOR_EXEC}"
-    COMMENT "Running Halide Generator (Fast Denoise) for ${HALIDE_TARGET}"
+    COMMENT "Running Halide Generator for ${HALIDE_TARGET} (Fast)"
+)
+
+set(GENERATED_LIGHT_HEADER "${GENERATOR_OUTPUT_DIR}/hdrplus_raw_pipeline_light.h")
+set(GENERATED_LIGHT_LIB "${GENERATOR_OUTPUT_DIR}/hdrplus_raw_pipeline_light.a") # Static lib output
+
+add_custom_command(
+    OUTPUT "${GENERATED_LIGHT_HEADER}" "${GENERATED_LIGHT_LIB}"
+    COMMAND "${GENERATOR_EXEC}"
+            -g hdrplus_raw_pipeline
+            -f hdrplus_raw_pipeline_light
+            -e static_library,h
+            -o "${GENERATOR_OUTPUT_DIR}"
+            target=${HALIDE_TARGET}
+            use_optimized_schedule=true
+            use_gpu=false
+            denoise_level=1
+    DEPENDS "${GENERATOR_EXEC}"
+    COMMENT "Running Halide Generator for ${HALIDE_TARGET} (Light)"
 )
 
 # Update dependency target
-add_custom_target(generate_hdrplus_halide DEPENDS "${GENERATED_LIB}" "${GENERATED_HEADER}" "${GENERATED_FAST_LIB}" "${GENERATED_FAST_HEADER}")
+add_custom_target(generate_hdrplus_halide DEPENDS "${GENERATED_LIB}" "${GENERATED_HEADER}" "${GENERATED_FAST_LIB}" "${GENERATED_FAST_HEADER}" "${GENERATED_LIGHT_LIB}" "${GENERATED_LIGHT_HEADER}")
 
 # Expose generated files to the build
 include_directories(${GENERATOR_OUTPUT_DIR})
@@ -168,6 +186,7 @@ add_library(
         ${LIBRAW_SOURCES}
         "${GENERATED_LIB}"
         "${GENERATED_FAST_LIB}"
+        "${GENERATED_LIGHT_LIB}"
 )
 
 # Ensure the generation happens before native-lib compilation
@@ -189,6 +208,7 @@ target_link_libraries(
         native-lib
         "${GENERATED_LIB}"
         "${GENERATED_FAST_LIB}"
+        "${GENERATED_LIGHT_LIB}"
         tiff
         ${log-lib}
         ${jnigraphics-lib}

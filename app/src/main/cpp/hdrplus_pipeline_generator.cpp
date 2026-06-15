@@ -18,7 +18,7 @@ class HdrPlusRawPipeline : public Generator<HdrPlusRawPipeline> {
 public:
   GeneratorParam<bool> use_optimized_schedule{"use_optimized_schedule", true};
   GeneratorParam<bool> use_gpu{"use_gpu", false};
-  GeneratorParam<bool> fast_denoise{"fast_denoise", false};
+  GeneratorParam<int> denoise_level{"denoise_level", 2};
 
   Input<Buffer<uint16_t>> inputs{"inputs", 3};
   Input<uint16_t> black_point_r{"black_point_r"};
@@ -268,13 +268,72 @@ private:
     return output_is;
   }
 
+  Func bilinear_upsample(Func input, Expr width, Expr height, std::string name) {
+    Func output(name);
+    Var x, y, c;
+    Expr fx = f32(x) / 2.0f;
+    Expr fy = f32(y) / 2.0f;
+    Expr ix = cast<int>(floor(fx));
+    Expr iy = cast<int>(floor(fy));
+    Expr wx = fx - floor(fx);
+    Expr wy = fy - floor(fy);
+
+    Func input_mirror = BoundaryConditions::mirror_interior(input, {Range(0, width), Range(0, height)});
+
+    Expr v00 = input_mirror(ix, iy, c);
+    Expr v10 = input_mirror(ix + 1, iy, c);
+    Expr v01 = input_mirror(ix, iy + 1, c);
+    Expr v11 = input_mirror(ix + 1, iy + 1, c);
+
+    Expr v0 = v00 * (1.0f - wx) + v10 * wx;
+    Expr v1 = v01 * (1.0f - wx) + v11 * wx;
+
+    output(x, y, c) = v0 * (1.0f - wy) + v1 * wy;
+
+    if (use_gpu) {
+        Var tx{"tx"}, ty{"ty"};
+        output.gpu_tile(x, y, tx, ty, xi, yi, 16, 16);
+    } else {
+        output.compute_root().tile(x, y, xo, yo, xi, yi, kTileX, kTileY).parallel(yo).vectorize(xi, kVec);
+    }
+
+    return output;
+  }
+
   Func chroma_denoise(Func input, Expr width, Expr height, int num_passes) {
-    // Completely prune denoise stages at generation time if fast_denoise is true
-    if ((bool)fast_denoise) {
+    if ((int)denoise_level == 0) {
         return input;
     }
 
     Func output_denoise = rgb_to_yuv(input);
+
+    if ((int)denoise_level == 1) {
+        Func y_channel("y_channel");
+        y_channel(x, y) = output_denoise(x, y, 0);
+
+        Func u_channel("u_channel");
+        u_channel(x, y, c) = output_denoise(x, y, 1);
+        Func v_channel("v_channel");
+        v_channel(x, y, c) = output_denoise(x, y, 2);
+
+        Func u_down("u_down");
+        RDom r(0, 2, 0, 2);
+        u_down(x, y, c) = sum(u_channel(2 * x + r.x, 2 * y + r.y, c)) / 4.0f;
+        Func v_down("v_down");
+        v_down(x, y, c) = sum(v_channel(2 * x + r.x, 2 * y + r.y, c)) / 4.0f;
+
+        Func uv_down("uv_down");
+        uv_down(x, y, c) = select(c == 0, 0.0f, c == 1, u_down(x, y, c), v_down(x, y, c));
+
+        Func uv_denoised = bilateral_filter(uv_down, width / 2, height / 2);
+
+        Func uv_up = bilinear_upsample(uv_denoised, width / 2, height / 2, "uv_up");
+
+        Func combined("light_denoise_combined");
+        combined(x, y, c) = select(c == 0, y_channel(x, y), uv_up(x, y, c));
+
+        return yuv_to_rgb(combined);
+    }
 
     int pass = 0;
     if (num_passes > 0) output_denoise = bilateral_filter(output_denoise, width, height);

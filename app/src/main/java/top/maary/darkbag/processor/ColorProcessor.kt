@@ -84,7 +84,7 @@ object ColorProcessor {
         zoomFactor: Float,
         mirror: Boolean,
         metadata: CaptureMetadata,
-        fastDenoise: Boolean = false
+        captureIso: Int = metadata.iso ?: 400
     ): Int
 
     /**
@@ -174,6 +174,6 @@ object ColorProcessor {
         zoomFactor: Float,
         mirror: Boolean,
         metadata: CaptureMetadata,
-        fastDenoise: Boolean = false
+        captureIso: Int = metadata.iso ?: 400
     ): Int
 }
