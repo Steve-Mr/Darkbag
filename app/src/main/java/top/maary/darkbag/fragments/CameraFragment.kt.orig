@@ -3593,7 +3593,7 @@ class CameraFragment : Fragment() {
                     }
                 }
 
-                
+
                 val ccm = if (useSensorColorMatrix) ccmSensor else ccmCapture
                 val ccmAlt = if (useSensorColorMatrix) ccmCapture else ccmSensor
                 val exportMatrixAB = false
@@ -4003,7 +4003,6 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             if (isZslCapturePending) {
                 isZslCapturePending = false
                 try {
-                    val zslStartTime = System.currentTimeMillis()
                     val bitmap = top.maary.darkbag.utils.YuvUtils.imageToBitmap(requireContext(), image)
                     if (bitmap != null) {
                         lifecycleScope.launch(Dispatchers.IO) {
@@ -4015,9 +4014,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                                 java.io.File(top.maary.darkbag.utils.LutManager(requireContext()).lutDir, activeLutName).absolutePath
                             } else null
 
-                            val lutStartTime = System.currentTimeMillis()
                             top.maary.darkbag.processor.ColorProcessor.processZslBitmapWithLut(bitmap, targetLogIndex, nativeLutPath)
-                            val lutEndTime = System.currentTimeMillis()
 
                             val tempDir = java.io.File(requireContext().cacheDir, "fast_zsl")
                             if (!tempDir.exists()) tempDir.mkdirs()
@@ -4029,13 +4026,17 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                             bitmap.recycle()
 
                             withContext(Dispatchers.Main) {
-                                // Add ZSL output as a temporary gallery thumbnail
                                 setGalleryThumbnail(zslFile.absolutePath)
-                                top.maary.darkbag.utils.DebugLogManager.addLog("ZSL Preview Generated: ${lutEndTime - lutStartTime}ms")
-
-                                // Also update the LAST_CAPTURE_URI so clicking the thumbnail opens the preview
-                                prefs.edit().putString(SettingsFragment.KEY_LAST_CAPTURE_URI, android.net.Uri.fromFile(zslFile).toString()).apply()
-                                imageRepository.invalidateCache()
+                                // Optional: We could also update LAST_CAPTURE_URI so it opens in the viewer
+                                // But wait, ImageSaver handles media store insertion.
+                                // For now, we just want it to be a visual placeholder on the thumbnail button.
+                                // If we want to replace `fastjpg` entirely, we should perhaps save it properly via ImageSaver?
+                                // The plan says "将处理后的 Bitmap 利用 ImageSaver.saveProcessedImage 或新写的精简版快速写入 tempJpgFile.absolutePath（或者直接上屏）。更新左下角的缩略图 (setGalleryThumbnail)。"
+                                // To truly replace fastjpg, we can save it to temp dir and we don't need to do anything else.
+                                // The JNI pipeline will eventually write the final JPG to the media store and update the thumbnail.
+                                // However, currently JNI pipeline also creates a fast JPG and inserts it. We should disable the fast JPG insertion in the JNI pipeline if we want to avoid double insertion or just let it overwrite.
+                                // Actually, let's keep it simple: just update the thumbnail immediately.
+                                // The JNI pipeline will still run and insert the final image correctly.
                             }
                         }
                     }
@@ -4194,7 +4195,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         val data = ByteArray(buffer.remaining())
                         buffer.get(data)
                         image.close()
-                       
+
                         if (!isFrame1Trigger) {
                             showProcessingAnimation()
                         }
