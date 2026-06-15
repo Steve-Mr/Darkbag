@@ -1,0 +1,11 @@
+--- app/src/main/cpp/native-lib.cpp
++++ app/src/main/cpp/native-lib.cpp
+@@ -392,7 +392,7 @@
+     if (AndroidBitmap_lockPixels(env, bitmap, &pixels) < 0) return -1;
+
+     const char* lut_path_cstr = (lutPath) ? env->GetStringUTFChars(lutPath, 0) : nullptr;
+-    LUT3D lut;
++    LUT3D lut = {0, std::vector<Vec3>()};
+     if (lut_path_cstr) {
+         lut = load_lut(lut_path_cstr);
+         env->ReleaseStringUTFChars(lutPath, lut_path_cstr);

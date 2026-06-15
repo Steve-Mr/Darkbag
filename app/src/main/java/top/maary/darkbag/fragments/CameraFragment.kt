@@ -161,6 +161,12 @@ class CameraFragment : Fragment() {
     private var camera2PreviewSurface: android.view.Surface? = null
     private var rawImageReader: android.media.ImageReader? = null
     private var analysisImageReader: android.media.ImageReader? = null
+
+    @Volatile
+    private var isZslCapturePending: Boolean = false
+    private var zslTimingTracker: StandardTimingTracker? = null
+    private var zslHfMetadata: HalfFrameManager.Metadata? = null
+
     private val camera2Manager by lazy {
         requireContext().getSystemService(Context.CAMERA_SERVICE) as android.hardware.camera2.CameraManager
     }
@@ -1443,6 +1449,9 @@ class CameraFragment : Fragment() {
             }
 
             if (currentLens?.useCamera2 == true) {
+                isZslCapturePending = true
+                zslTimingTracker = timing
+                zslHfMetadata = hfMetadataForTrigger
                 if (isHdrPlusEnabled && isRawSupported) {
                     triggerHdrPlusBurstCamera2(isFrame1Trigger, hfMetadataForTrigger)
                 } else {
@@ -3663,7 +3672,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     wb, ccm, ccmAlt, exportMatrixAB, cfa,
                     targetLogIndex,
                     nativeLutPath,
-                    if (saveJpg) tempJpgFile.absolutePath else null, // outputJpgPath (fast preview)
+                    null, // outputJpgPath (fast preview disabled)
                     null, // outputDngPath (finalize in background)
                     digitalGain,
                     debugStats,
@@ -3684,44 +3693,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
                     val mirror = shouldMirror
 
-                    val fastJpegUri = if (saveJpg) {
-                        val layout = if (hfMetadata?.profile == HalfFrameSessionStore.PROFILE_HALF_TOP) "TB" else if (hfMetadata?.profile == HalfFrameSessionStore.PROFILE_HALF_SIDE) "SBS" else null
-                        val editConfig = top.maary.darkbag.models.EditConfig(
-                            log = targetLogName ?: "None",
-                            lut = activeLutName ?: "None",
-                            digitalGain = digitalGain,
-                            adjustments = if (hfMetadata?.profile != null && hfMetadata.profile != HalfFrameSessionStore.PROFILE_NORMAL) {
-                                listOf(
-                                    top.maary.darkbag.models.BasicAdjustments(digitalGain = hfMetadata.frame1DigitalGain),
-                                    top.maary.darkbag.models.BasicAdjustments(digitalGain = digitalGain)
-                                )
-                            } else null,
-                            hfLayout = layout,
-                            showTimestamp = hfMetadata?.dateStamp ?: false,
-                            flareType = hfMetadata?.flareType ?: -1,
-                            zoomFactor = currentZoom
-                        )
-
-                        ImageSaver.saveProcessedImage(
-                            context = context,
-                            inputBitmap = null,
-                            bmpPath = tempJpgFile.absolutePath,
-                            rotationDegrees = 0, // Rotation already handled in JNI
-                            zoomFactor = currentZoom,
-                            baseName = dngName,
-                            linearDngPath = null,
-                            saveJpg = true,
-                            jpgFolderUri = jpgFolderUri,
-                            mirror = false, // Mirroring already handled in JNI
-                            isFastPath = true,
-                            halfFrameMetadata = hfMetadata?.copy(digitalGain = digitalGain),
-                            editConfig = editConfig,
-                            digitalGain = digitalGain,
-                            captureMetadata = captureMetadata
-                        )
-                    } else {
-                        null
-                    }
+                    val fastJpegUri: android.net.Uri? = null
 
                     withContext(Dispatchers.Main) {
                         if (fastJpegUri != null) {
@@ -4027,6 +3999,52 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
         analysisImageReader?.setOnImageAvailableListener({ reader ->
             val image = reader.acquireLatestImage() ?: return@setOnImageAvailableListener
+
+            if (isZslCapturePending) {
+                isZslCapturePending = false
+                try {
+                    val bitmap = top.maary.darkbag.utils.YuvUtils.imageToBitmap(requireContext(), image)
+                    if (bitmap != null) {
+                        lifecycleScope.launch(Dispatchers.IO) {
+                            val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                            val targetLogName = prefs.getString(SettingsFragment.KEY_TARGET_LOG, "None")
+                            val targetLogIndex = SettingsFragment.LOG_CURVES.indexOf(targetLogName)
+                            val activeLutName = prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, null)
+                            val nativeLutPath = if (activeLutName != null && activeLutName != "None") {
+                                java.io.File(top.maary.darkbag.utils.LutManager(requireContext()).lutDir, activeLutName).absolutePath
+                            } else null
+
+                            top.maary.darkbag.processor.ColorProcessor.processZslBitmapWithLut(bitmap, targetLogIndex, nativeLutPath)
+
+                            val tempDir = java.io.File(requireContext().cacheDir, "fast_zsl")
+                            if (!tempDir.exists()) tempDir.mkdirs()
+                            val zslFile = java.io.File(tempDir, "zsl_${System.currentTimeMillis()}.jpg")
+
+                            java.io.FileOutputStream(zslFile).use { out ->
+                                bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, out)
+                            }
+                            bitmap.recycle()
+
+                            withContext(Dispatchers.Main) {
+                                setGalleryThumbnail(zslFile.absolutePath)
+                                // Optional: We could also update LAST_CAPTURE_URI so it opens in the viewer
+                                // But wait, ImageSaver handles media store insertion.
+                                // For now, we just want it to be a visual placeholder on the thumbnail button.
+                                // If we want to replace `fastjpg` entirely, we should perhaps save it properly via ImageSaver?
+                                // The plan says "将处理后的 Bitmap 利用 ImageSaver.saveProcessedImage 或新写的精简版快速写入 tempJpgFile.absolutePath（或者直接上屏）。更新左下角的缩略图 (setGalleryThumbnail)。"
+                                // To truly replace fastjpg, we can save it to temp dir and we don't need to do anything else.
+                                // The JNI pipeline will eventually write the final JPG to the media store and update the thumbnail.
+                                // However, currently JNI pipeline also creates a fast JPG and inserts it. We should disable the fast JPG insertion in the JNI pipeline if we want to avoid double insertion or just let it overwrite.
+                                // Actually, let's keep it simple: just update the thumbnail immediately.
+                                // The JNI pipeline will still run and insert the final image correctly.
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error processing ZSL image", e)
+                }
+            }
+
             try {
                 val plane = image.planes[0]
                 val buffer = plane.buffer

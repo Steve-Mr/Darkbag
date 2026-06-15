@@ -107,6 +107,17 @@ object ColorProcessor {
     ): Boolean
 
     /**
+     * Applies LUT and Log curve directly to an Android Bitmap (RGBA_8888).
+     * Used for ZSL fast preview generation.
+     */
+    external fun processZslBitmapWithLut(
+        bitmap: android.graphics.Bitmap,
+        targetLog: Int,
+        lutPath: String?
+    ): Int
+
+
+    /**
      * Callback for background export completion. Called from JNI thread.
      */
     @JvmStatic

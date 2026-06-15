@@ -384,7 +384,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processZslBitmapWithLut(
     if (AndroidBitmap_lockPixels(env, bitmap, &pixels) < 0) return -1;
 
     const char* lut_path_cstr = (lutPath) ? env->GetStringUTFChars(lutPath, 0) : nullptr;
-    LUT3D lut = {0, std::vector<Vec3>()};
+    LUT3D lut;
     if (lut_path_cstr) {
         lut = load_lut(lut_path_cstr);
         env->ReleaseStringUTFChars(lutPath, lut_path_cstr);
