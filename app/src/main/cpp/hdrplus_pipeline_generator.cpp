@@ -281,6 +281,7 @@ private:
                              output_denoise(x*2+1, y*2, c) +
                              output_denoise(x*2, y*2+1, c) +
                              output_denoise(x*2+1, y*2+1, c)) / 4.0f;
+        yuv_down.compute_root().parallel(y).vectorize(x, kVec);
 
         Func bf_down = bilateral_filter(yuv_down, width / 2, height / 2);
 
