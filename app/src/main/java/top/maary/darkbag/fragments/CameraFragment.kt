@@ -4012,91 +4012,94 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 val captureTime = image.timestamp
                 val currentZoom = zslDigitalGain // Re-use the predicted zoom stored here
                 val targetUriTracker = zslTargetUriTrackerRef // Grab the tracker reference to pass URI back
-                try {
-                    val zslStartTime = System.currentTimeMillis()
-                    val bitmap = top.maary.darkbag.utils.YuvUtils.imageToBitmap(requireContext(), image)
-                    if (bitmap != null) {
-                        lifecycleScope.launch(Dispatchers.IO) {
-                            val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-                            val targetLogName = prefs.getString(SettingsFragment.KEY_TARGET_LOG, "None")
-                            val targetLogIndex = SettingsFragment.LOG_CURVES.indexOf(targetLogName)
-                            val activeLutName = prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, null)
-                            val nativeLutPath = if (activeLutName != null && activeLutName != "None") {
-                                java.io.File(top.maary.darkbag.utils.LutManager(requireContext()).lutDir, activeLutName).absolutePath
-                            } else null
+                val safeContext = context
+                if (safeContext != null) {
+                    try {
+                        val zslStartTime = System.currentTimeMillis()
+                        val bitmap = top.maary.darkbag.utils.YuvUtils.imageToBitmap(safeContext, image)
+                        if (bitmap != null) {
+                            lifecycleScope.launch(Dispatchers.IO) {
+                                val prefs = safeContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                                val targetLogName = prefs.getString(SettingsFragment.KEY_TARGET_LOG, "None")
+                                val targetLogIndex = SettingsFragment.LOG_CURVES.indexOf(targetLogName)
+                                val activeLutName = prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, null)
+                                val nativeLutPath = if (activeLutName != null && activeLutName != "None") {
+                                    java.io.File(top.maary.darkbag.utils.LutManager(safeContext).lutDir, activeLutName).absolutePath
+                                } else null
 
-                            val lutStartTime = System.currentTimeMillis()
-                            top.maary.darkbag.processor.ColorProcessor.processZslBitmapWithLut(bitmap, targetLogIndex, nativeLutPath)
-                            val lutEndTime = System.currentTimeMillis()
+                                val lutStartTime = System.currentTimeMillis()
+                                top.maary.darkbag.processor.ColorProcessor.processZslBitmapWithLut(bitmap, targetLogIndex, nativeLutPath)
+                                val lutEndTime = System.currentTimeMillis()
 
-                            val layout = if (hfMeta?.profile == HalfFrameSessionStore.PROFILE_HALF_TOP) "TB" else if (hfMeta?.profile == HalfFrameSessionStore.PROFILE_HALF_SIDE) "SBS" else null
-                            val editConfig = top.maary.darkbag.models.EditConfig(
-                                log = targetLogName ?: "None",
-                                lut = activeLutName ?: "None",
-                                digitalGain = zslDigitalGain,
-                                adjustments = if (hfMeta?.profile != null && hfMeta.profile != HalfFrameSessionStore.PROFILE_NORMAL) {
-                                    listOf(
-                                        top.maary.darkbag.models.BasicAdjustments(digitalGain = hfMeta.frame1DigitalGain),
-                                        top.maary.darkbag.models.BasicAdjustments(digitalGain = zslDigitalGain)
-                                    )
-                                } else null,
-                                hfLayout = layout,
-                                showTimestamp = hfMeta?.dateStamp ?: false,
-                                flareType = hfMeta?.flareType ?: -1,
-                                zoomFactor = currentZoom
-                            )
+                                val layout = if (hfMeta?.profile == HalfFrameSessionStore.PROFILE_HALF_TOP) "TB" else if (hfMeta?.profile == HalfFrameSessionStore.PROFILE_HALF_SIDE) "SBS" else null
+                                val editConfig = top.maary.darkbag.models.EditConfig(
+                                    log = targetLogName ?: "None",
+                                    lut = activeLutName ?: "None",
+                                    digitalGain = zslDigitalGain,
+                                    adjustments = if (hfMeta?.profile != null && hfMeta.profile != HalfFrameSessionStore.PROFILE_NORMAL) {
+                                        listOf(
+                                            top.maary.darkbag.models.BasicAdjustments(digitalGain = hfMeta.frame1DigitalGain),
+                                            top.maary.darkbag.models.BasicAdjustments(digitalGain = zslDigitalGain)
+                                        )
+                                    } else null,
+                                    hfLayout = layout,
+                                    showTimestamp = hfMeta?.dateStamp ?: false,
+                                    flareType = hfMeta?.flareType ?: -1,
+                                    zoomFactor = currentZoom
+                                )
 
-                            val rawBaseName = if (hfMeta != null) {
-                                val suffix = if (hfMeta.frame1BaseName != null) "_HF2" else "_HF1"
-                                val group = hfMeta.frame1BaseName ?: java.text.SimpleDateFormat(FILENAME, java.util.Locale.US).format(hfMeta.captureTimeMillis)
-                                group + suffix
-                            } else {
-                                val timeToUse = zslTimingTracker?.shutterClick ?: System.currentTimeMillis()
-                                java.text.SimpleDateFormat(FILENAME, java.util.Locale.US).format(timeToUse)
-                            }
-                            // Append _HDRPLUS to match the background processing if HDR+ is enabled
-                            val isHdrPlusEn = prefs.getBoolean(SettingsFragment.KEY_HDR_PLUS_OIS, false)
-                            val finalBaseName = DarkbagIdentity.prefixedBaseName(rawBaseName + (if (isHdrPlusEn) "_HDRPLUS" else ""))
-
-                            val jpgFolderUri = prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
-
-                            // Use ImageSaver to save to MediaStore as a placeholder
-                            val zslUri = top.maary.darkbag.utils.ImageSaver.saveProcessedImage(
-                                context = requireContext(),
-                                inputBitmap = bitmap,
-                                bmpPath = null,
-                                rotationDegrees = getCombinedOrientation(), // Since YUV Image doesn't have orientation baked in, we rotate here
-                                zoomFactor = currentZoom,
-                                baseName = finalBaseName,
-                                linearDngPath = null,
-                                saveJpg = true,
-                                jpgFolderUri = jpgFolderUri,
-                                mirror = shouldMirror,
-                                isFastPath = true,
-                                halfFrameMetadata = hfMeta?.copy(digitalGain = zslDigitalGain),
-                                editConfig = editConfig,
-                                digitalGain = zslDigitalGain,
-                                captureMetadata = createCaptureMetadataFromTimestamp(captureTime) // Approximate metadata
-                            )
-
-                            withContext(Dispatchers.Main) {
-                                if (zslUri != null) {
-                                    setGalleryThumbnail(zslUri.toString())
-                                    if (targetUriTracker != null && targetUriTracker.isNotEmpty()) {
-                                        targetUriTracker[0] = zslUri.toString()
-                                    }
-                                    // Handled via the callback tracker
-                                    prefs.edit().putString(SettingsFragment.KEY_LAST_CAPTURE_URI, zslUri.toString()).apply()
-                                    imageRepository.invalidateCache()
+                                val rawBaseName = if (hfMeta != null) {
+                                    val suffix = if (hfMeta.frame1BaseName != null) "_HF2" else "_HF1"
+                                    val group = hfMeta.frame1BaseName ?: java.text.SimpleDateFormat(FILENAME, java.util.Locale.US).format(hfMeta.captureTimeMillis)
+                                    group + suffix
+                                } else {
+                                    val timeToUse = zslTimingTracker?.shutterClick ?: System.currentTimeMillis()
+                                    java.text.SimpleDateFormat(FILENAME, java.util.Locale.US).format(timeToUse)
                                 }
-                                val totalZslTime = System.currentTimeMillis() - zslStartTime
-                                lastZslReport = "LUT: ${lutEndTime - lutStartTime}ms, Total ZSL: ${totalZslTime}ms"
-                                top.maary.darkbag.utils.DebugLogManager.addLog("ZSL Preview Fast Path: $lastZslReport")
+                                // Append _HDRPLUS to match the background processing if HDR+ is enabled
+                                val isHdrPlusEn = prefs.getBoolean(SettingsFragment.KEY_HDR_PLUS_OIS, false)
+                                val finalBaseName = DarkbagIdentity.prefixedBaseName(rawBaseName + (if (isHdrPlusEn) "_HDRPLUS" else ""))
+
+                                val jpgFolderUri = prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
+
+                                // Use ImageSaver to save to MediaStore as a placeholder
+                                val zslUri = top.maary.darkbag.utils.ImageSaver.saveProcessedImage(
+                                    context = safeContext,
+                                    inputBitmap = bitmap,
+                                    bmpPath = null,
+                                    rotationDegrees = getCombinedOrientation(), // Since YUV Image doesn't have orientation baked in, we rotate here
+                                    zoomFactor = currentZoom,
+                                    baseName = finalBaseName,
+                                    linearDngPath = null,
+                                    saveJpg = true,
+                                    jpgFolderUri = jpgFolderUri,
+                                    mirror = shouldMirror,
+                                    isFastPath = true,
+                                    halfFrameMetadata = hfMeta?.copy(digitalGain = zslDigitalGain),
+                                    editConfig = editConfig,
+                                    digitalGain = zslDigitalGain,
+                                    captureMetadata = createCaptureMetadataFromTimestamp(captureTime) // Approximate metadata
+                                )
+
+                                withContext(Dispatchers.Main) {
+                                    if (zslUri != null) {
+                                        setGalleryThumbnail(zslUri.toString())
+                                        if (targetUriTracker != null && targetUriTracker.isNotEmpty()) {
+                                            targetUriTracker[0] = zslUri.toString()
+                                        }
+                                        // Handled via the callback tracker
+                                        prefs.edit().putString(SettingsFragment.KEY_LAST_CAPTURE_URI, zslUri.toString()).apply()
+                                        imageRepository.invalidateCache()
+                                    }
+                                    val totalZslTime = System.currentTimeMillis() - zslStartTime
+                                    lastZslReport = "LUT: ${lutEndTime - lutStartTime}ms, Total ZSL: ${totalZslTime}ms"
+                                    top.maary.darkbag.utils.DebugLogManager.addLog("ZSL Preview Fast Path: $lastZslReport")
+                                }
                             }
                         }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error processing ZSL image", e)
                     }
-                } catch (e: Exception) {
-                    Log.e(TAG, "Error processing ZSL image", e)
                 }
             }
 

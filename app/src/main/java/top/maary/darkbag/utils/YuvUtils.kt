@@ -25,7 +25,10 @@ object YuvUtils {
         val out = ByteArrayOutputStream()
         yuvImage.compressToJpeg(Rect(0, 0, image.width, image.height), 100, out)
         val jpegBytes = out.toByteArray()
-        return BitmapFactory.decodeByteArray(jpegBytes, 0, jpegBytes.size)
+        val options = BitmapFactory.Options().apply {
+            inMutable = true
+        }
+        return BitmapFactory.decodeByteArray(jpegBytes, 0, jpegBytes.size, options)
     }
 
     private fun yuv420888ToNv21(image: Image): ByteArray {
@@ -56,15 +59,16 @@ object YuvUtils {
         val uPixelStride = uPlane.pixelStride
         val vPixelStride = vPlane.pixelStride
 
-        if (vRowStride == uRowStride && vPixelStride == 2 && uPixelStride == 2 && vBuffer.position() == uBuffer.position() - 1) {
+        if (vRowStride == uRowStride && vPixelStride == 2 && uPixelStride == 2 && vBuffer.remaining() >= uBuffer.remaining()) {
             // Highly optimized path: Interleaved VU (NV21) or UV (NV12)
             // It's NV21 if V is before U.
             val chromaWidth = width / 2
             val chromaHeight = height / 2
             for (row in 0 until chromaHeight) {
                 vBuffer.position(row * vRowStride)
-                vBuffer.get(nv21, pos, chromaWidth * 2)
-                pos += chromaWidth * 2
+                val length = kotlin.math.min(chromaWidth * 2, vBuffer.remaining())
+                vBuffer.get(nv21, pos, length)
+                pos += length
             }
         } else {
             // Fallback path: Planar or other weird stride configs
