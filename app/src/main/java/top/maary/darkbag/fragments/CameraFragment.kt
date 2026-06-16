@@ -3999,8 +3999,11 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         }
 
         val yuvSizes = map?.getOutputSizes(android.graphics.ImageFormat.YUV_420_888)
-        val analysisSize = yuvSizes?.filter { it.width.toFloat()/it.height.toFloat() in 1.3f..1.4f }
-            ?.minByOrNull { it.width * it.height } ?: android.util.Size(640, 480)
+        // Pick a 4:3 size closest to 480p/600p for a good balance of fast processing and clear ZSL preview
+        val targetPixels = 640 * 480
+        val analysisSize = yuvSizes?.filter {
+            it.width.toFloat() / it.height.toFloat() in 1.3f..1.4f && it.width * it.height >= targetPixels
+        }?.minByOrNull { it.width * it.height } ?: android.util.Size(640, 480)
         analysisImageReader = ImageReader.newInstance(analysisSize.width, analysisSize.height, android.graphics.ImageFormat.YUV_420_888, 2)
 
         analysisImageReader?.setOnImageAvailableListener({ reader ->
