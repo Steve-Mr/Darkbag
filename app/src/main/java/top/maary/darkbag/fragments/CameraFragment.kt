@@ -214,6 +214,7 @@ class CameraFragment : Fragment() {
     @Volatile private var isBurstActive = false
     private var hdrPlusBurstHelper: HdrPlusBurst? = null
     private var lastHdrPlusConfig: ExposureUtils.ExposureConfig? = null // Cache for instant trigger
+    @Volatile
     private var burstStartTime: Long = 0L // Profiling
 
     private var minFocusDistance = 0.0f
@@ -4051,16 +4052,16 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                                     zoomFactor = currentZoom
                                 )
 
+                                val isHdrPlusEn = prefs.getBoolean(KEY_HDR_PLUS_ENABLED, true)
                                 val rawBaseName = if (hfMeta != null) {
                                     val suffix = if (hfMeta.frame1BaseName != null) "_HF2" else "_HF1"
                                     val group = hfMeta.frame1BaseName ?: java.text.SimpleDateFormat(FILENAME, java.util.Locale.US).format(hfMeta.captureTimeMillis)
                                     group + suffix
                                 } else {
-                                    val timeToUse = zslTimingTracker?.shutterClick ?: System.currentTimeMillis()
+                                    val timeToUse = if (isHdrPlusEn && burstStartTime != 0L) burstStartTime else (zslTimingTracker?.shutterClick ?: System.currentTimeMillis())
                                     java.text.SimpleDateFormat(FILENAME, java.util.Locale.US).format(timeToUse)
                                 }
                                 // Append _HDRPLUS to match the background processing if HDR+ is enabled
-                                val isHdrPlusEn = prefs.getBoolean(SettingsFragment.KEY_HDR_PLUS_OIS, false)
                                 val finalBaseName = DarkbagIdentity.prefixedBaseName(rawBaseName + (if (isHdrPlusEn) "_HDRPLUS" else ""))
 
                                 val jpgFolderUri = prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
