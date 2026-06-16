@@ -80,7 +80,7 @@ object ColorProcessor {
         digitalGain: Float,
         debugStats: LongArray?,
         outputBitmap: android.graphics.Bitmap? = null,
-        tempRawPath: String? = null,
+
         zoomFactor: Float,
         mirror: Boolean,
         metadata: CaptureMetadata
@@ -132,32 +132,7 @@ object ColorProcessor {
     ) {
         backgroundSaveFlow.tryEmit(BackgroundSaveEvent(baseName, dngPath, jpgPath, targetUri, zoomFactor, orientation, saveJpg))
     }
-
-    external fun exportHdrPlus(
-        tempRawPath: String,
-        width: Int,
-        height: Int,
-        orientation: Int,
-        digitalGain: Float,
-        targetLog: Int,
-        lutPath: String?,
-        exposure: Float = 0f,
-        contrast: Float = 0f,
-        saturation: Float = 0f,
-        highlights: Float = 0f,
-        shadows: Float = 0f,
-        whites: Float = 0f,
-        blacks: Float = 0f,
-        jpgPath: String?,
-        dngPath: String?,
-        ccm: FloatArray,
-        whiteBalance: FloatArray,
-        zoomFactor: Float,
-        mirror: Boolean,
-        metadata: CaptureMetadata
-    ): Int
-
-    external fun processHdrPlus(
+external fun processHdrPlus(
         dngBuffers: Array<ByteBuffer>,
         width: Int,
         height: Int,
@@ -180,7 +155,7 @@ object ColorProcessor {
         digitalGain: Float,
         debugStats: LongArray?, // [0] Halide, [1] Copy, [2] Post, [3] DNG Encode, [4] Save, [5] DNG Wait, [6] Total, [7] Align, [8] Merge, [9] Demosaic, [10] Denoise, [11] sRGB, [12] JNI Prep, [13] BlackWhite, [14] WB
         outputBitmap: android.graphics.Bitmap? = null,
-        tempRawPath: String? = null,
+
         zoomFactor: Float,
         mirror: Boolean,
         metadata: CaptureMetadata
