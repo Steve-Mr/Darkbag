@@ -4043,7 +4043,17 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                                 zoomFactor = currentZoom
                             )
 
-                            val baseName = hfMeta?.frame1BaseName ?: java.text.SimpleDateFormat(FILENAME, java.util.Locale.US).format(captureTime)
+                            val rawBaseName = if (hfMeta != null) {
+                                val suffix = if (hfMeta.frame1BaseName != null) "_HF2" else "_HF1"
+                                val group = hfMeta.frame1BaseName ?: java.text.SimpleDateFormat(FILENAME, java.util.Locale.US).format(hfMeta.captureTimeMillis)
+                                group + suffix
+                            } else {
+                                java.text.SimpleDateFormat(FILENAME, java.util.Locale.US).format(System.currentTimeMillis())
+                            }
+                            // Append _HDRPLUS to match the background processing if HDR+ is enabled
+                            val isHdrPlusEn = prefs.getBoolean(SettingsFragment.KEY_HDR_PLUS_OIS, false)
+                            val finalBaseName = DarkbagIdentity.prefixedBaseName(rawBaseName + (if (isHdrPlusEn) "_HDRPLUS" else ""))
+
                             val jpgFolderUri = prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
 
                             // Use ImageSaver to save to MediaStore as a placeholder
@@ -4053,7 +4063,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                                 bmpPath = null,
                                 rotationDegrees = getCombinedOrientation(), // Since YUV Image doesn't have orientation baked in, we rotate here
                                 zoomFactor = currentZoom,
-                                baseName = baseName,
+                                baseName = finalBaseName,
                                 linearDngPath = null,
                                 saveJpg = true,
                                 jpgFolderUri = jpgFolderUri,
