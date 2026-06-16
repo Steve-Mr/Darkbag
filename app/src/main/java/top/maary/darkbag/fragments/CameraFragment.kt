@@ -1752,7 +1752,8 @@ class CameraFragment : Fragment() {
                     val group = image.halfFrameMetadata.frame1BaseName ?: SimpleDateFormat(FILENAME, Locale.US).format(image.halfFrameMetadata.captureTimeMillis)
                     DarkbagIdentity.prefixedBaseName(group + suffix)
                 } else {
-                    DarkbagIdentity.prefixedBaseName(SimpleDateFormat(FILENAME, Locale.US).format(System.currentTimeMillis()))
+                    val timeToUse = image.timing?.shutterClick ?: System.currentTimeMillis()
+                    DarkbagIdentity.prefixedBaseName(SimpleDateFormat(FILENAME, Locale.US).format(timeToUse))
                 }
 
                 Log.d(
@@ -3638,7 +3639,9 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     val group = hfMetadata.frame1BaseName ?: SimpleDateFormat(FILENAME, Locale.US).format(hfMetadata.captureTimeMillis)
                     DarkbagIdentity.prefixedBaseName(group + suffix + "_HDRPLUS")
                 } else {
-                    DarkbagIdentity.prefixedBaseName(SimpleDateFormat(FILENAME, Locale.US).format(System.currentTimeMillis()) + "_HDRPLUS")
+                    // We need a stable base name. burstStartTime was recorded right before capturing.
+                    val timeToUse = burstStartTime
+                    DarkbagIdentity.prefixedBaseName(SimpleDateFormat(FILENAME, Locale.US).format(timeToUse) + "_HDRPLUS")
                 }
                 val saveJpg = prefs.getBoolean(SettingsFragment.KEY_SAVE_JPG, true)
                 val saveRaw = prefs.getBoolean(SettingsFragment.KEY_SAVE_RAW, true)
@@ -4048,7 +4051,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                                 val group = hfMeta.frame1BaseName ?: java.text.SimpleDateFormat(FILENAME, java.util.Locale.US).format(hfMeta.captureTimeMillis)
                                 group + suffix
                             } else {
-                                java.text.SimpleDateFormat(FILENAME, java.util.Locale.US).format(System.currentTimeMillis())
+                                val timeToUse = zslTimingTracker?.shutterClick ?: System.currentTimeMillis()
+                                java.text.SimpleDateFormat(FILENAME, java.util.Locale.US).format(timeToUse)
                             }
                             // Append _HDRPLUS to match the background processing if HDR+ is enabled
                             val isHdrPlusEn = prefs.getBoolean(SettingsFragment.KEY_HDR_PLUS_OIS, false)
@@ -4383,6 +4387,10 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         sensorOrientation,
                         currentLens?.id
                     )
+                    if (framesCaptured == 0 && zslTargetUriTracker != null && zslTargetUriTracker.isNotEmpty() && zslTargetUriTracker[0] == null) {
+                        // If the first frame is captured and ZSL URI hasn't been set yet (maybe because ZSL was slow or failed),
+                        // we can't reliably override it, but this allows ZSL logic to finish. We do nothing special here.
+                    }
                     image.close()
                     framesCaptured++
                     lifecycleScope.launch(Dispatchers.Main) {
