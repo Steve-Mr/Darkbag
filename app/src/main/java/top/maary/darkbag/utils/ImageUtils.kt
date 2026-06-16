@@ -12,13 +12,18 @@ import top.maary.darkbag.processor.ColorProcessor
 object ImageUtils {
 
     fun getBaseName(fileName: String): String {
-        return fileName.substringBeforeLast(".")
+        var name = fileName.substringBeforeLast(".")
+        name = name.replace(Regex("_[0-9]+$"), "") // Handles suffixes like _1, _2
+        return name
+            .replace(Regex("_linear$"), "")
+            .replace(Regex("_bayer$"), "")
             .replace("_linear", "")
             .replace("_bayer", "")
             .replace("_HDRPLUS", "")
             .replace("_full", "")
             .replace("_HF1", "")
             .replace("_HF2", "")
+            .replace("_zsl", "")
             .replace("_stitched", "")
             .replace("stitched_hf_", "")
             .replace(top.maary.darkbag.utils.DarkbagIdentity.FILE_PREFIX, "")

@@ -1753,7 +1753,7 @@ class CameraFragment : Fragment() {
                     DarkbagIdentity.prefixedBaseName(group + suffix)
                 } else {
                     val timeToUse = image.timing?.shutterClick ?: System.currentTimeMillis()
-                    DarkbagIdentity.prefixedBaseName(SimpleDateFormat(FILENAME, Locale.US).format(timeToUse))
+                    SimpleDateFormat(FILENAME, Locale.US).format(timeToUse)
                 }
 
                 Log.d(
