@@ -340,7 +340,7 @@ extern "C" JNIEXPORT jint JNICALL
 Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
     JNIEnv* env, jobject /* this */, jobjectArray dngBuffers, jint width, jint height, jint orientation, jint whiteLevel, jintArray blackLevelPattern, jfloatArray lensShadingMap, jint lensShadingRows, jint lensShadingCols, jboolean useSensorColorMatrix, jfloatArray whiteBalance, jfloatArray ccm, jfloatArray ccmAlt, jboolean exportMatrixAB, jint cfaPattern,
     jint targetLog, jstring lutPath, jstring outputJpgPath, jstring outputDngPath,
-    jfloat digitalGain, jlongArray debugStats, jobject outputBitmap, jstring tempRawPath, jfloat zoomFactor, jboolean mirror,
+    jfloat digitalGain, jlongArray debugStats, jobject outputBitmap, jfloat zoomFactor, jboolean mirror,
     jobject metadata
 ) {
     LOGD("Native processHdrPlus started.");
@@ -541,12 +541,6 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
         AndroidBitmap_unlockPixels(env, outputBitmap);
     }
 
-    const char* tr_p_cstr = (tempRawPath) ? env->GetStringUTFChars(tempRawPath, 0) : nullptr;
-    if (tr_p_cstr) {
-        std::ofstream out(tr_p_cstr, std::ios::binary); if (out.is_open()) { out.write((char*)finalImage.data(), (size_t)width*height*3*2); out.close(); }
-        env->ReleaseStringUTFChars(tempRawPath, tr_p_cstr);
-    }
-
     if (!jpgPathStr.empty() || !dngPathStr.empty()) {
         if (!dngPathStr.empty()) {
             float baselineExposure = (digitalGain > 0.0f) ? std::log2(digitalGain) : 0.0f;
@@ -578,7 +572,7 @@ extern "C" JNIEXPORT jint JNICALL
 Java_top_maary_darkbag_processor_ColorProcessor_processSingleFrameRaw(
     JNIEnv* env, jobject /* this */, jobject bayerBuffer, jint width, jint height, jint orientation, jint whiteLevel, jintArray blackLevelPattern, jfloatArray lensShadingMap, jint lensShadingRows, jint lensShadingCols, jfloatArray whiteBalance, jfloatArray ccm, jint cfaPattern,
     jint targetLog, jstring lutPath, jstring outputJpgPath, jstring outputDngPath,
-    jfloat digitalGain, jlongArray debugStats, jobject outputBitmap, jstring tempRawPath, jfloat zoomFactor, jboolean mirror,
+    jfloat digitalGain, jlongArray debugStats, jobject outputBitmap, jfloat zoomFactor, jboolean mirror,
     jobject metadata
 ) {
     LOGD("Native processSingleFrameRaw started.");
@@ -594,6 +588,6 @@ Java_top_maary_darkbag_processor_ColorProcessor_processSingleFrameRaw(
         whiteBalance, ccm, nullptr, // ccmAlt
         false, // exportMatrixAB
         cfaPattern, targetLog, lutPath,
-        outputJpgPath, outputDngPath, digitalGain, debugStats, outputBitmap, tempRawPath, zoomFactor, mirror, metadata
+        outputJpgPath, outputDngPath, digitalGain, debugStats, outputBitmap, zoomFactor, mirror, metadata
     );
 }
