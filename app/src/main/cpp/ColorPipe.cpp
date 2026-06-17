@@ -569,16 +569,48 @@ bool process_and_save_image(
     // A: linear RGB input after adaptive edge compensation
     // B: after color-space matrix transform (before log/LUT)
     // C: after log curve (before LUT)
+
+    // Extract loop invariants for PixelProc
+    float exp_gain = std::pow(2.0f, exposure);
+    float global_gain_multiplier = (gain * exp_gain) / 65535.0f;
+
+    // Pre-concatenate color matrices
+    Matrix3x3 target_matrix;
+    switch (targetLog) {
+        case 1: target_matrix = M_XYZ_to_AlexaWideGamut_D65; break;
+        case 2:
+        case 3: target_matrix = M_XYZ_to_Rec2020_D65; break;
+        case 5:
+        case 6: target_matrix = M_XYZ_to_SGamut3Cine_D65; break;
+        case 7: target_matrix = M_XYZ_to_VGamut_D65; break;
+        default: target_matrix = M_XYZ_to_Rec709_D65; break;
+    }
+
+    Matrix3x3 combined_color_matrix;
+    if (sourceColorSpace == 1) {
+        if (ccm) {
+            Matrix3x3 temp = multiply(M_sRGB_D65_to_XYZ, effective_CCM);
+            combined_color_matrix = multiply(target_matrix, temp);
+        } else {
+            combined_color_matrix = multiply(target_matrix, M_sRGB_D65_to_XYZ);
+        }
+    } else if (sourceColorSpace == 0) {
+        Matrix3x3 temp = multiply(M_Bradford_D50_to_D65, M_ProPhoto_D50_to_XYZ);
+        combined_color_matrix = multiply(target_matrix, temp);
+    } else {
+        // Fallback (identity-like)
+        combined_color_matrix = target_matrix;
+    }
+
         auto process_pixel = [&](int x, int y, Vec3* stageA, Vec3* stageB, Vec3* stageC) -> Vec3 {
         x = std::max(0, std::min(x, width - 1));
         y = std::max(0, std::min(y, height - 1));
         size_t idx = (static_cast<size_t>(y) * width + x) * 3;
 
         // 1. Exposure (Linear Space)
-        float exp_gain = std::pow(2.0f, exposure);
-        float norm_r = (float)inputImage[idx + 0] / 65535.0f * gain * exp_gain;
-        float norm_g = (float)inputImage[idx + 1] / 65535.0f * gain * exp_gain;
-        float norm_b = (float)inputImage[idx + 2] / 65535.0f * gain * exp_gain;
+        float norm_r = (float)inputImage[idx + 0] * global_gain_multiplier;
+        float norm_g = (float)inputImage[idx + 1] * global_gain_multiplier;
+        float norm_b = (float)inputImage[idx + 2] * global_gain_multiplier;
 
         if (edgeComp.enabled) {
             const float nx = (x - edgeComp.centerX) * edgeComp.invMaxRadius;
@@ -602,19 +634,8 @@ bool process_and_save_image(
         Vec3 colorA = {norm_r, norm_g, norm_b};
         if (stageA) *stageA = colorA;
 
-        Vec3 color = colorA;
-        if (sourceColorSpace == 1) { if (ccm) color = multiply(effective_CCM, color); color = multiply(M_sRGB_D65_to_XYZ, color); }
-        else if (sourceColorSpace == 0) { color = multiply(M_ProPhoto_D50_to_XYZ, color); color = multiply(M_Bradford_D50_to_D65, color); }
+        Vec3 color = multiply(combined_color_matrix, colorA);
 
-        switch (targetLog) {
-            case 1: color = multiply(M_XYZ_to_AlexaWideGamut_D65, color); break;
-            case 2:
-            case 3: color = multiply(M_XYZ_to_Rec2020_D65, color); break;
-            case 5:
-            case 6: color = multiply(M_XYZ_to_SGamut3Cine_D65, color); break;
-            case 7: color = multiply(M_XYZ_to_VGamut_D65, color); break;
-            default: color = multiply(M_XYZ_to_Rec709_D65, color); break;
-        }
         if (stageB) *stageB = color;
 
         color.r = apply_log(color.r, targetLog); color.g = apply_log(color.g, targetLog); color.b = apply_log(color.b, targetLog);
