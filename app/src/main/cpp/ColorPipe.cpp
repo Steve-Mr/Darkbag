@@ -395,6 +395,13 @@ Vec3 apply_lut(const LUT3D& lut, Vec3 color) {
     return { c0.r * (1-db) + c1.r * db, c0.g * (1-db) + c1.g * db, c0.b * (1-db) + c1.b * db };
 }
 
+static std::vector<unsigned char> encode_rgb8_jpeg(
+    const std::vector<unsigned char>& rgb8,
+    int width,
+    int height,
+    int quality
+);
+
 namespace {
 
 struct AdaptiveEdgeComp {
@@ -772,11 +779,14 @@ bool process_and_save_image(
     if (jpgPath) {
 
         if (isPreview && !previewRgb8.empty()) {
-            std::vector<unsigned short> previewShort(previewRgb8.size());
-            for (size_t i = 0; i < previewRgb8.size(); ++i) {
-                previewShort[i] = (unsigned short)(previewRgb8[i]) << 8;
+            std::vector<unsigned char> jpegBytes = encode_rgb8_jpeg(previewRgb8, finalW_zoomed, finalH_zoomed, jpegQuality);
+            std::ofstream outFile(jpgPath, std::ios::binary);
+            if (outFile.is_open()) {
+                outFile.write(reinterpret_cast<const char*>(jpegBytes.data()), jpegBytes.size());
+                jpgOk = outFile.good();
+            } else {
+                jpgOk = false;
             }
-            jpgOk = write_jpeg(jpgPath, finalW_zoomed, finalH_zoomed, previewShort, jpegQuality);
         } else {
 
             jpgOk = write_jpeg(jpgPath, finalW_zoomed, finalH_zoomed, processedImage, jpegQuality);
@@ -877,14 +887,23 @@ bool write_tiff_rgba8(const char* filename, int width, int height, const unsigne
 
 
 #include <android/bitmap.h>
+#include <android/data_space.h>
 #include <stdio.h>
 
 
 static bool write_jpeg_android(const char* filename, int width, int height, const std::vector<unsigned short>& data, int quality) {
+    if (!filename) {
+        LOGE("write_jpeg_android: filename is null");
+        return false;
+    }
     LOGD("write_jpeg_android: %s, %dx%d", filename, width, height);
     auto start_all = std::chrono::high_resolution_clock::now();
 
     size_t total_pixels = static_cast<size_t>(width) * height;
+    if (data.size() < total_pixels * 3) {
+        LOGE("write_jpeg_android: data size %zu is less than expected %zu", data.size(), total_pixels * 3);
+        return false;
+    }
     std::vector<uint32_t> rgba8;
     try {
         rgba8.resize(total_pixels);
@@ -928,7 +947,7 @@ static bool write_jpeg_android(const char* filename, int width, int height, cons
     };
 
 
-    int result = AndroidBitmap_compress(&info, ANDROID_BITMAP_FORMAT_RGBA_8888, rgba8.data(), ANDROID_BITMAP_COMPRESS_FORMAT_JPEG, quality, file, write_func);
+    int result = AndroidBitmap_compress(&info, ADATASPACE_SRGB, rgba8.data(), ANDROID_BITMAP_COMPRESS_FORMAT_JPEG, quality, file, write_func);
 
     auto end_compress = std::chrono::high_resolution_clock::now();
 
@@ -982,6 +1001,10 @@ static std::vector<unsigned char> encode_rgb8_jpeg(
     JpegBufferContext ctx;
     if (!rgb8.empty() && width > 0 && height > 0) {
         size_t total_pixels = static_cast<size_t>(width) * height;
+        if (rgb8.size() < total_pixels * 3) {
+            LOGE("encode_rgb8_jpeg: rgb8 size %zu is less than expected %zu", rgb8.size(), total_pixels * 3);
+            return ctx.bytes;
+        }
         std::vector<uint32_t> rgba8;
         try {
             rgba8.resize(total_pixels);
@@ -1013,7 +1036,7 @@ static std::vector<unsigned char> encode_rgb8_jpeg(
             return true;
         };
 
-        int result = AndroidBitmap_compress(&info, 0 /* ADATASPACE_UNKNOWN */, rgba8.data(), ANDROID_BITMAP_COMPRESS_FORMAT_JPEG, quality, &ctx, write_func);
+        int result = AndroidBitmap_compress(&info, ADATASPACE_SRGB, rgba8.data(), ANDROID_BITMAP_COMPRESS_FORMAT_JPEG, quality, &ctx, write_func);
         if (result != ANDROID_BITMAP_RESULT_SUCCESS) {
             LOGE("AndroidBitmap_compress failed with error code: %d", result);
         }

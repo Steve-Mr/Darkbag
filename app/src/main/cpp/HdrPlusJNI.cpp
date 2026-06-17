@@ -316,7 +316,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
         write_dng(dng_path_cstr, width, height, finalImage, kMax16BitValue, ccmVec, meta, orientation, (bool)mirror, baselineExposure);
     }
 
-bool saveOk = true;
+    bool saveOk = true;
     if (jpg_path_cstr) {
         LOGD("Exporting JPG: JPG=%s", jpg_path_cstr);
         static int save_invocation_count = 0;
@@ -537,7 +537,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
         out_h = info.height;
     }
 
-if (bitmapPixels) {
+    if (bitmapPixels) {
         LOGD("process_and_save_image PREVIEW INVOCATION START");
         process_and_save_image(finalImage, width, height, digitalGain, targetLog, lut,
                                 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
@@ -551,7 +551,7 @@ if (bitmapPixels) {
             write_dng(dngPathStr.c_str(), width, height, finalImage, kMax16BitValue, ccmVec, meta, orientation, (bool)mirror, baselineExposure);
         }
 
-if (!jpgPathStr.empty()) {
+        if (!jpgPathStr.empty()) {
             LOGD("process_and_save_image JPG INVOCATION START");
             process_and_save_image(finalImage, width, height, digitalGain, targetLog, lut,
                                     0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
@@ -562,7 +562,7 @@ if (!jpgPathStr.empty()) {
                 std::string altJpgPath = jpgPathStr;
                 size_t dot = altJpgPath.find_last_of('.');
                 if (dot == std::string::npos) dot = altJpgPath.size();
-altJpgPath = altJpgPath.substr(0, dot) + suffix;
+                altJpgPath = altJpgPath.substr(0, dot) + suffix;
                 LOGD("process_and_save_image ALT_JPG INVOCATION START");
                 process_and_save_image(finalImage, width, height, digitalGain, targetLog, lut,
                                         0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
