@@ -86,14 +86,15 @@ bool process_and_save_image(
     bool isPreview = false,
     int downsampleFactor = 1,
     float zoomFactor = 1.0f,
-    bool mirror = false
+    bool mirror = false,
+    long long* out_timings = nullptr
 );
 
 bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, const std::vector<float>& ccm, const ImageMetadata& metadata, int orientation, bool mirror = false, float baselineExposure = 0.0f);
 
 bool write_bmp(const char* filename, int width, int height, const std::vector<unsigned short>& data);
 
-bool write_jpeg(const char* filename, int width, int height, const std::vector<unsigned short>& data, int quality);
+bool write_jpeg(const char* filename, int width, int height, const std::vector<unsigned short>& data, int quality, long long* out_timings = nullptr);
 
 bool write_tiff(const char* filename, int width, int height, const std::vector<unsigned short>& data, const ImageMetadata* metadata = nullptr);
 

@@ -297,7 +297,8 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRaw(
         outputBitmap != nullptr, // isPreview
         (int)downsampleFactor, // downsampleFactor
         (float)zoomFactor, // zoomFactor
-        (bool)mirror
+        (bool)mirror,
+        nullptr // out_timings
     );
 
     if (bitmapPixels) AndroidBitmap_unlockPixels(env, outputBitmap);

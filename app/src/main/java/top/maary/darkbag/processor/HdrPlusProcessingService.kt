@@ -76,7 +76,7 @@ class HdrPlusProcessingService : Service() {
 
         val outputJpgPath = if (req.saveJpg) req.fullResJpgPath else null
         val outputDngPath = if (req.saveRaw) req.linearDngPath else null
-        val debugStats = LongArray(15)
+        val debugStats = LongArray(25)
 
         val jniStartTime = System.currentTimeMillis()
         val ret = if (req.isSingleFrame) {
@@ -158,6 +158,16 @@ class HdrPlusProcessingService : Service() {
             val nativeTotalTime = debugStats[6]
             val saveTime = saveEndTime - saveStartTime
 
+            val previewMs = debugStats[15]
+            val writeDngMs = debugStats[16]
+            val mainJpgTotalMs = debugStats[17]
+            val altJpgTotalMs = debugStats[18]
+            val edgeCompMs = debugStats[19]
+            val pixelProcMs = debugStats[20]
+            val jpegWriteMs = debugStats[21]
+            val ompConvMs = debugStats[22]
+            val apiCompMs = debugStats[23]
+
             val logMsg = """
                 [Background Process: ${totalTime}ms]
                 JNI (Total): ${jniTime}ms
@@ -175,6 +185,13 @@ class HdrPlusProcessingService : Service() {
                   - Post: ${postTime}ms
                   - DNG Encode: ${dngEncodeTime}ms
                   - Save(Log/BMP): ${nativeSaveTime}ms
+                    * Fast Preview: ${previewMs}ms
+                    * Write DNG: ${writeDngMs}ms
+                    * Main JPG: ${mainJpgTotalMs}ms
+                      -> EdgeComp: ${edgeCompMs}ms
+                      -> PixelProc: ${pixelProcMs}ms
+                      -> JpegWrite: ${jpegWriteMs}ms (OMP: ${ompConvMs}ms, API: ${apiCompMs}ms)
+                    * Alt JPG: ${altJpgTotalMs}ms
                   - DNG Wait(get): ${dngWaitTime}ms
                 Save (IO/Compress): ${saveTime}ms
             """.trimIndent()

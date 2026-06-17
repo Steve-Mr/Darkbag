@@ -543,7 +543,8 @@ bool process_and_save_image(
     const char* jpgPath, const char* tiffPath, const ImageMetadata* metadata, int sourceColorSpace,
     const float* ccm, const float* wb, int orientation, unsigned char* out_rgb_buffer,
     int out_width, int out_height,
-    bool isPreview, int downsampleFactor, float zoomFactor, bool mirror
+    bool isPreview, int downsampleFactor, float zoomFactor, bool mirror,
+    long long* out_timings
 ) {
 
     LOGD("process_and_save_image: %dx%d, gain=%.2f, log=%d, lut=%d, jpg=%s, tiff=%s, preview=%d, ds=%d, zoom=%.2f, mirror=%d",
@@ -776,10 +777,15 @@ bool process_and_save_image(
     const int jpegQuality = isPreview ? 78 : 95;
 
     bool jpgOk = true;
+    long long jpeg_timings[3] = {0, 0, 0}; // total, omp, compress
     if (jpgPath) {
 
         if (isPreview && !previewRgb8.empty()) {
+            auto start_preview_encode = std::chrono::high_resolution_clock::now();
             std::vector<unsigned char> jpegBytes = encode_rgb8_jpeg(previewRgb8, finalW_zoomed, finalH_zoomed, jpegQuality);
+            auto end_preview_encode = std::chrono::high_resolution_clock::now();
+            jpeg_timings[2] = std::chrono::duration_cast<std::chrono::milliseconds>(end_preview_encode - start_preview_encode).count();
+
             std::ofstream outFile(jpgPath, std::ios::binary);
             if (outFile.is_open()) {
                 outFile.write(reinterpret_cast<const char*>(jpegBytes.data()), jpegBytes.size());
@@ -789,7 +795,7 @@ bool process_and_save_image(
             }
         } else {
 
-            jpgOk = write_jpeg(jpgPath, finalW_zoomed, finalH_zoomed, processedImage, jpegQuality);
+            jpgOk = write_jpeg(jpgPath, finalW_zoomed, finalH_zoomed, processedImage, jpegQuality, jpeg_timings);
         }
         if (!jpgOk) LOGE("write_jpeg failed for %s", jpgPath);
         else {
@@ -809,6 +815,14 @@ bool process_and_save_image(
     long long pixel_ms = std::chrono::duration_cast<std::chrono::milliseconds>(time_end_pixel - time_start_pixel).count();
     long long jpeg_ms = std::chrono::duration_cast<std::chrono::milliseconds>(time_end_total - time_start_jpeg).count();
     long long total_ms = std::chrono::duration_cast<std::chrono::milliseconds>(time_end_total - time_start_total).count();
+
+    if (out_timings) {
+        out_timings[0] = edge_ms;
+        out_timings[1] = pixel_ms;
+        out_timings[2] = jpeg_ms;
+        out_timings[3] = jpeg_timings[1]; // omp_ms
+        out_timings[4] = jpeg_timings[2]; // compress_ms
+    }
 
     LOGD("process_and_save_image timing [%s]: Total=%lldms (EdgeComp=%lldms, PixelProc=%lldms, JpegWrite=%lldms)",
          jpgPath ? jpgPath : "null", total_ms, edge_ms, pixel_ms, jpeg_ms);
@@ -891,7 +905,7 @@ bool write_tiff_rgba8(const char* filename, int width, int height, const unsigne
 #include <stdio.h>
 
 
-static bool write_jpeg_android(const char* filename, int width, int height, const std::vector<unsigned short>& data, int quality) {
+static bool write_jpeg_android(const char* filename, int width, int height, const std::vector<unsigned short>& data, int quality, long long* out_timings = nullptr) {
     if (!filename) {
         LOGE("write_jpeg_android: filename is null");
         return false;
@@ -960,6 +974,12 @@ static bool write_jpeg_android(const char* filename, int width, int height, cons
     LOGD("write_jpeg_android timing: Total=%lldms (OMP Conversion=%lldms, API Compress=%lldms)", all_ms, omp_ms, compress_ms);
 
 
+    if (out_timings) {
+        out_timings[0] = all_ms;
+        out_timings[1] = omp_ms;
+        out_timings[2] = compress_ms;
+    }
+
     if (result != ANDROID_BITMAP_RESULT_SUCCESS) {
         LOGE("AndroidBitmap_compress failed with error code: %d", result);
         return false;
@@ -969,8 +989,8 @@ static bool write_jpeg_android(const char* filename, int width, int height, cons
 }
 
 
-bool write_jpeg(const char* filename, int width, int height, const std::vector<unsigned short>& data, int quality) {
-    return write_jpeg_android(filename, width, height, data, quality);
+bool write_jpeg(const char* filename, int width, int height, const std::vector<unsigned short>& data, int quality, long long* out_timings) {
+    return write_jpeg_android(filename, width, height, data, quality, out_timings);
 }
 
 int compute_preview_downsample_factor(int width, int height, int targetLongEdge) {

@@ -111,12 +111,21 @@ HalideStageStats parseHalideReport(const std::string& report) {
     return stats;
 }
 
-void fillDebugStats(JNIEnv* env, jlongArray debugStats, jlong copyMs, jlong halideMs, jlong postProcessMs, jlong dngEncodeMs, jlong saveMs, jlong dngJoinWaitMs, jlong totalMs, jlong jniOverheadMs, const HalideStageStats& stageStats) {
+void fillDebugStats(JNIEnv* env, jlongArray debugStats, jlong copyMs, jlong halideMs, jlong postProcessMs, jlong dngEncodeMs, jlong saveMs, jlong dngJoinWaitMs, jlong totalMs, jlong jniOverheadMs, const HalideStageStats& stageStats,
+                    jlong previewMs = 0, jlong mainJpgTotalMs = 0, jlong altJpgTotalMs = 0,
+                    jlong edgeCompMs = 0, jlong pixelProcMs = 0, jlong jpegWriteMs = 0,
+                    jlong ompConvMs = 0, jlong apiCompMs = 0) {
     if (debugStats == nullptr) return;
     const jsize len = env->GetArrayLength(debugStats);
     if (len <= 0) return;
-    jlong stats[15] = { halideMs, copyMs, postProcessMs, dngEncodeMs, saveMs, dngJoinWaitMs, totalMs, stageStats.align, stageStats.merge, stageStats.demosaic, stageStats.denoise, stageStats.srgb, jniOverheadMs, stageStats.black_white, stageStats.white_balance };
-    env->SetLongArrayRegion(debugStats, 0, std::min<jsize>(len, 15), stats);
+    jlong stats[25] = {
+        halideMs, copyMs, postProcessMs, dngEncodeMs, saveMs, dngJoinWaitMs, totalMs,
+        stageStats.align, stageStats.merge, stageStats.demosaic, stageStats.denoise, stageStats.srgb,
+        jniOverheadMs, stageStats.black_white, stageStats.white_balance,
+        previewMs, dngEncodeMs, mainJpgTotalMs, altJpgTotalMs,
+        edgeCompMs, pixelProcMs, jpegWriteMs, ompConvMs, apiCompMs, 0
+    };
+    env->SetLongArrayRegion(debugStats, 0, std::min<jsize>(len, 25), stats);
 }
 
 struct GlobalBuffers {
@@ -324,7 +333,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
         LOGD("process_and_save_image INVOCATION #%d START", save_invocation_count);
         saveOk = process_and_save_image(finalImage, width, height, digitalGain, targetLog, lut,
                                         exposure, contrast, saturation, highlights, shadows, whites, blacks,
-                                        jpg_path_cstr, nullptr, &meta, 1, ccmVec.data(), wbVec.data(), orientation, nullptr, 0, 0, false, 1, zoomFactor, (bool)mirror);
+                                        jpg_path_cstr, nullptr, &meta, 1, ccmVec.data(), wbVec.data(), orientation, nullptr, 0, 0, false, 1, zoomFactor, (bool)mirror, nullptr);
     }
     if (jpgPath && jpg_path_cstr) env->ReleaseStringUTFChars(jpgPath, jpg_path_cstr);
     if (dngPath && dng_path_cstr) env->ReleaseStringUTFChars(dngPath, dng_path_cstr);
@@ -537,25 +546,43 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
         out_h = info.height;
     }
 
+    long long previewMs = 0;
     if (bitmapPixels) {
         LOGD("process_and_save_image PREVIEW INVOCATION START");
+        auto start_preview = std::chrono::high_resolution_clock::now();
         process_and_save_image(finalImage, width, height, digitalGain, targetLog, lut,
                                 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
                                 nullptr, nullptr, nullptr, 1, ccmVec.data(), wbVec.data(), orientation, bitmapPixels, out_w, out_h, true, fastPreviewDownsample, zoomFactor, (bool)mirror);
+        previewMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start_preview).count();
         AndroidBitmap_unlockPixels(env, outputBitmap);
     }
 
+    long long dngEncodeMs = 0;
+    long long mainJpgTotalMs = 0;
+    long long altJpgTotalMs = 0;
+    long long edgeCompMs = 0, pixelProcMs = 0, jpegWriteMs = 0, ompConvMs = 0, apiCompMs = 0;
+
     if (!jpgPathStr.empty() || !dngPathStr.empty()) {
         if (!dngPathStr.empty()) {
+            auto start_dng = std::chrono::high_resolution_clock::now();
             float baselineExposure = (digitalGain > 0.0f) ? std::log2(digitalGain) : 0.0f;
             write_dng(dngPathStr.c_str(), width, height, finalImage, kMax16BitValue, ccmVec, meta, orientation, (bool)mirror, baselineExposure);
+            dngEncodeMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start_dng).count();
         }
 
         if (!jpgPathStr.empty()) {
             LOGD("process_and_save_image JPG INVOCATION START");
+            long long jpgTimings[5] = {0, 0, 0, 0, 0}; // edge, pixel, jpeg, omp, api
+            auto start_jpg = std::chrono::high_resolution_clock::now();
             process_and_save_image(finalImage, width, height, digitalGain, targetLog, lut,
                                     0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
-                                    jpgPathStr.c_str(), nullptr, &meta, 1, ccmVec.data(), wbVec.data(), orientation, nullptr, 0, 0, true, 1, zoomFactor, (bool)mirror);
+                                    jpgPathStr.c_str(), nullptr, &meta, 1, ccmVec.data(), wbVec.data(), orientation, nullptr, 0, 0, true, 1, zoomFactor, (bool)mirror, jpgTimings);
+            mainJpgTotalMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start_jpg).count();
+            edgeCompMs = jpgTimings[0];
+            pixelProcMs = jpgTimings[1];
+            jpegWriteMs = jpgTimings[2];
+            ompConvMs = jpgTimings[3];
+            apiCompMs = jpgTimings[4];
 
             if (exportMatrixAB && !jpgPathStr.empty() && ccmAltVec.size() == 9) {
                 std::string suffix = useSensorColorMatrix ? "_AB_CAPTURE_CCM.jpg" : "_AB_SENSOR_CCM.jpg";
@@ -564,13 +591,20 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
                 if (dot == std::string::npos) dot = altJpgPath.size();
                 altJpgPath = altJpgPath.substr(0, dot) + suffix;
                 LOGD("process_and_save_image ALT_JPG INVOCATION START");
+                auto start_alt = std::chrono::high_resolution_clock::now();
                 process_and_save_image(finalImage, width, height, digitalGain, targetLog, lut,
                                         0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
                                         altJpgPath.c_str(), nullptr, &meta, 1, ccmAltVec.data(), wbVec.data(), orientation, nullptr, 0, 0, false, 1, zoomFactor, (bool)mirror);
+                altJpgTotalMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start_alt).count();
             }
         }
     }
-    fillDebugStats(env, debugStats, (jlong)copyDurationMs, (jlong)halideDurationMs, (jlong)postDurationMs, 0, (jlong)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now()-saveStart).count(), 0, (jlong)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now()-nativeStart).count(), (jlong)jniPrepMs, stageStats);
+
+    jlong totalSaveMs = (jlong)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - saveStart).count();
+    jlong totalNativeMs = (jlong)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - nativeStart).count();
+
+    fillDebugStats(env, debugStats, (jlong)copyDurationMs, (jlong)halideDurationMs, (jlong)postDurationMs, dngEncodeMs, totalSaveMs, 0, totalNativeMs, (jlong)jniPrepMs, stageStats,
+                   previewMs, mainJpgTotalMs, altJpgTotalMs, edgeCompMs, pixelProcMs, jpegWriteMs, ompConvMs, apiCompMs);
     return 0;
 }
 
