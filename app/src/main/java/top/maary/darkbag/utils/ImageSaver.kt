@@ -91,7 +91,7 @@ object ImageSaver {
                                 ColorProcessor.halfFrameFlow.tryEmit(2)
                                 if (finalPath != null) {
                                     val finalFile = File(finalPath)
-                                    finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri, editConfig = editConfig, zoomFactor = zoomFactor, captureMetadata = captureMetadata, writeExifMetadata = !isFastPath) { out ->
+                                    finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri, editConfig = editConfig, zoomFactor = zoomFactor, captureMetadata = captureMetadata, writeExifMetadata = !isFastPath, allowOverwriteByName = !isFastPath) { out ->
                                         finalFile.inputStream().use { it.copyTo(out) }
                                     }
                                 }
@@ -102,7 +102,7 @@ object ImageSaver {
                                 if (jpgFolderUri != null) {
                                     finalJpgUri = saveFileToFolder(context, finalFile, "$baseName.jpg", "image/jpeg", jpgFolderUri, editConfig = editConfig, zoomFactor = zoomFactor, captureMetadata = captureMetadata, writeExifMetadata = !isFastPath)
                                 } else {
-                                    finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri, editConfig = editConfig, zoomFactor = zoomFactor, captureMetadata = captureMetadata, writeExifMetadata = !isFastPath) { out ->
+                                    finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri, editConfig = editConfig, zoomFactor = zoomFactor, captureMetadata = captureMetadata, writeExifMetadata = !isFastPath, allowOverwriteByName = !isFastPath) { out ->
                                         finalFile.inputStream().use { it.copyTo(out) }
                                     }
                                 }
@@ -116,7 +116,7 @@ object ImageSaver {
                         if (jpgFolderUri != null) {
                             finalJpgUri = saveFileToFolder(context, finalFile, "$baseName.jpg", "image/jpeg", jpgFolderUri, editConfig = editConfig, zoomFactor = zoomFactor, captureMetadata = captureMetadata, writeExifMetadata = !isFastPath)
                         } else {
-                            finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri, editConfig = editConfig, zoomFactor = zoomFactor, captureMetadata = captureMetadata, writeExifMetadata = !isFastPath) { out ->
+                            finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri, editConfig = editConfig, zoomFactor = zoomFactor, captureMetadata = captureMetadata, writeExifMetadata = !isFastPath, allowOverwriteByName = !isFastPath) { out ->
                                 finalFile.inputStream().use { it.copyTo(out) }
                             }
                         }
@@ -215,7 +215,8 @@ object ImageSaver {
                                                 processedBitmap.width,
                                                 processedBitmap.height,
                                                 editConfig = editConfig,
-                                                captureMetadata = captureMetadata
+                                                captureMetadata = captureMetadata,
+                                                allowOverwriteByName = !isFastPath
                                             ) { out ->
                                                 finalFile.inputStream().use { it.copyTo(out) }
                                             }
@@ -247,7 +248,8 @@ object ImageSaver {
                                                 finalH,
                                                 editConfig = editConfig,
                                                 zoomFactor = zoomFactor,
-                                                captureMetadata = captureMetadata
+                                                captureMetadata = captureMetadata,
+                                                allowOverwriteByName = !isFastPath
                                             ) { out ->
                                                 finalFile.inputStream().use { it.copyTo(out) }
                                             }
@@ -275,7 +277,8 @@ object ImageSaver {
                                         processedBitmap.height,
                                         editConfig = editConfig,
                                         zoomFactor = zoomFactor,
-                                        captureMetadata = captureMetadata
+                                        captureMetadata = captureMetadata,
+                                        allowOverwriteByName = !isFastPath
                                     ) { out ->
                                         tempJpg.inputStream().use { it.copyTo(out) }
                                     }
@@ -585,18 +588,19 @@ object ImageSaver {
         zoomFactor: Float = 1.0f,
         captureMetadata: CaptureMetadata? = null,
         writeExifMetadata: Boolean = true,
+        allowOverwriteByName: Boolean = false,
         writeData: (OutputStream) -> Unit
     ): Uri? {
         val contentResolver = context.contentResolver
         val jpgValues = ContentValues()
 
         var uri = targetUri
-        val isReplacement = uri != null
+        var isReplacement = uri != null
 
         val finalEditConfig = createFinalEditConfig(editConfig, zoomFactor)
 
         try {
-            if (uri == null) {
+            if (uri == null && allowOverwriteByName) {
                 // Attempt to find an existing file with the same name to overwrite it (e.g. ZSL preview)
                 val projection = arrayOf(MediaStore.MediaColumns._ID)
                 val selection = "${MediaStore.MediaColumns.DISPLAY_NAME} = ?"
@@ -613,6 +617,7 @@ object ImageSaver {
                         val idColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
                         val id = cursor.getLong(idColumn)
                         uri = android.content.ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id)
+                        isReplacement = true
                     }
                 }
             }
