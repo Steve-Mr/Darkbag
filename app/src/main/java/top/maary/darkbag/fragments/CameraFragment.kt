@@ -3679,20 +3679,6 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
                     val fastJpegUri: android.net.Uri? = null
 
-                    withContext(Dispatchers.Main) {
-                        if (fastJpegUri != null) {
-                            imageRepository.invalidateCache()
-                            prefs.edit().putString(SettingsFragment.KEY_LAST_CAPTURE_URI, fastJpegUri.toString()).apply()
-                            setGalleryThumbnail(fastJpegUri.toString())
-                        } else if (isHalfFrameModeEnabled && prefs.getInt(scopedHalfFrameStepKey(prefs), 0) == 1) {
-                            setGalleryThumbnail(null)
-                        }
-                        Toast.makeText(requireContext(), "HDR+ Saved!", Toast.LENGTH_SHORT).show()
-                        if (!isHalfFrameModeEnabled) {
-                            hideProcessingAnimation()
-                        }
-                    }
-
                     val request = top.maary.darkbag.processor.HdrPlusRequest(
                         requestId = java.util.UUID.randomUUID().toString(),
                         buffers = buffers,
@@ -3735,47 +3721,27 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     } else {
                         context.startService(serviceIntent)
                     }
+
+                    withContext(Dispatchers.Main) {
+                        if (fastJpegUri != null) {
+                            imageRepository.invalidateCache()
+                            prefs.edit().putString(SettingsFragment.KEY_LAST_CAPTURE_URI, fastJpegUri.toString()).apply()
+                            setGalleryThumbnail(fastJpegUri.toString())
+                        } else if (isHalfFrameModeEnabled && prefs.getInt(scopedHalfFrameStepKey(prefs), 0) == 1) {
+                            setGalleryThumbnail(null)
+                        }
+                        Toast.makeText(requireContext(), "Processing in background...", Toast.LENGTH_SHORT).show()
+                        if (!isHalfFrameModeEnabled) {
+                            hideProcessingAnimation()
+                        }
+                    }
+
                     val saveEndTime = System.currentTimeMillis()
 
-                    // Log Statistics
-                    val totalTime = saveEndTime - startTime
+                    // Stats calculation and logging moved to Service.
+                    // Here we only log capture details.
                     val captureTime = captureEndTime - startTime
-                    val waitTime = jniStartTime - captureEndTime
-                    val jniTime = jniEndTime - jniStartTime
-                    val halideTime = debugStats[0]
-                    val copyTime = debugStats[1]
-                    val postTime = debugStats[2]
-                    val dngEncodeTime = debugStats[3]
-                    val nativeSaveTime = debugStats[4]
-                    val dngWaitTime = debugStats[5]
-                    val nativeTotalTime = debugStats[6]
-                    val saveTime = saveEndTime - saveStartTime
-
-                    val logMsg = """
-                        [Total: ${totalTime}ms]
-                        Capture: ${captureTime}ms
-                        Wait: ${waitTime}ms
-                        JNI (Total): ${jniTime}ms
-                          - Native Total: ${nativeTotalTime}ms
-                          - JNI Prep: ${debugStats[12]}ms
-                          - Copy: ${copyTime}ms
-                          - Halide: ${halideTime}ms
-                            * Align: ${debugStats[7]}ms
-                            * Merge: ${debugStats[8]}ms
-                            * BlackWhite: ${debugStats[13]}ms
-                            * WB: ${debugStats[14]}ms
-                            * Demosaic: ${debugStats[9]}ms
-                            * Denoise: ${debugStats[10]}ms
-                            * sRGB: ${debugStats[11]}ms
-                          - Post: ${postTime}ms
-                          - DNG Encode: ${dngEncodeTime}ms
-                          - Save(Log/BMP): ${nativeSaveTime}ms
-                          - DNG Wait(get): ${dngWaitTime}ms
-                        Save (IO/Compress): ${saveTime}ms
-                        HQ Export Mode: ${if (hqBackgroundExport) "Background" else "Inline"}
-                        ZSL Stats: ${lastZslReport ?: "None"}
-                    """.trimIndent()
-
+                    val logMsg = "HDR+ Request Enqueued: $dngName\nCapture Time: ${captureTime}ms\nQueue Time: ${System.currentTimeMillis() - jniStartTime}ms"
                     Log.i(TAG, logMsg)
                     DebugLogManager.addLog(logMsg)
 

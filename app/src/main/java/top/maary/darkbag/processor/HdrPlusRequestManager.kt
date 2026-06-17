@@ -48,7 +48,7 @@ object HdrPlusRequestManager {
     private val queue = java.util.concurrent.LinkedBlockingQueue<HdrPlusRequest>(2)
 
     fun enqueue(request: HdrPlusRequest) {
-        queue.put(request)
+        if (!queue.offer(request)) throw IllegalStateException("HDR+ Queue is full. Please wait before capturing more.")
     }
 
     fun dequeue(): HdrPlusRequest? {

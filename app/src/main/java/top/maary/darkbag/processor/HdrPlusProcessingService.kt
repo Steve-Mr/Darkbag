@@ -76,6 +76,7 @@ class HdrPlusProcessingService : Service() {
         val outputDngPath = if (req.saveRaw) req.linearDngPath else null
         val debugStats = LongArray(15)
 
+        val jniStartTime = System.currentTimeMillis()
         val ret = if (req.isSingleFrame) {
             ColorProcessor.processSingleFrameRaw(
                 req.buffers[0],
@@ -115,9 +116,11 @@ class HdrPlusProcessingService : Service() {
                 req.metadata
             )
         }
+        val jniEndTime = System.currentTimeMillis()
 
         if (ret == 0) {
             Log.d(TAG, "JNI finished successfully for ${req.baseName}")
+            val saveStartTime = System.currentTimeMillis()
             val targetUri = req.zslTargetUriStr?.let { Uri.parse(it) }
 
             val finalUri = ImageSaver.saveProcessedImage(
@@ -140,9 +143,50 @@ class HdrPlusProcessingService : Service() {
                 captureMetadata = req.metadata
             )
 
+            val saveEndTime = System.currentTimeMillis()
+
+            val totalTime = saveEndTime - jniStartTime
+            val jniTime = jniEndTime - jniStartTime
+            val halideTime = debugStats[0]
+            val copyTime = debugStats[1]
+            val postTime = debugStats[2]
+            val dngEncodeTime = debugStats[3]
+            val nativeSaveTime = debugStats[4]
+            val dngWaitTime = debugStats[5]
+            val nativeTotalTime = debugStats[6]
+            val saveTime = saveEndTime - saveStartTime
+
+            val logMsg = """
+                [Background Process: ${totalTime}ms]
+                JNI (Total): ${jniTime}ms
+                  - Native Total: ${nativeTotalTime}ms
+                  - JNI Prep: ${debugStats[12]}ms
+                  - Copy: ${copyTime}ms
+                  - Halide: ${halideTime}ms
+                    * Align: ${debugStats[7]}ms
+                    * Merge: ${debugStats[8]}ms
+                    * BlackWhite: ${debugStats[13]}ms
+                    * WB: ${debugStats[14]}ms
+                    * Demosaic: ${debugStats[9]}ms
+                    * Denoise: ${debugStats[10]}ms
+                    * sRGB: ${debugStats[11]}ms
+                  - Post: ${postTime}ms
+                  - DNG Encode: ${dngEncodeTime}ms
+                  - Save(Log/BMP): ${nativeSaveTime}ms
+                  - DNG Wait(get): ${dngWaitTime}ms
+                Save (IO/Compress): ${saveTime}ms
+            """.trimIndent()
+
+            Log.i(TAG, logMsg)
+            top.maary.darkbag.utils.DebugLogManager.addLog(logMsg)
+
             if (finalUri != null) {
                 val prefs = applicationContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
                 prefs.edit().putString(SettingsFragment.KEY_LAST_CAPTURE_URI, finalUri.toString()).apply()
+            }
+
+            withContext(Dispatchers.Main) {
+                android.widget.Toast.makeText(applicationContext, "HDR+ Background Processed", android.widget.Toast.LENGTH_SHORT).show()
             }
 
             ColorProcessor.onBackgroundSaveComplete(
@@ -153,6 +197,9 @@ class HdrPlusProcessingService : Service() {
             ColorProcessor.onBackgroundSaveComplete(
                 req.baseName, null, null, null, req.zoomFactor, req.orientation, req.saveJpg
             )
+            withContext(Dispatchers.Main) {
+                android.widget.Toast.makeText(applicationContext, "HDR+ failed in background", android.widget.Toast.LENGTH_SHORT).show()
+            }
         }
 
         req.buffers.forEach {
