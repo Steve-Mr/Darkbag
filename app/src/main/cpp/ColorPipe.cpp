@@ -7,7 +7,7 @@
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
-#include "stb_image_write.h"
+
 
 #include <vector>
 #include <ctime>
@@ -552,17 +552,7 @@ bool process_and_save_image(
     // A: linear RGB input after adaptive edge compensation
     // B: after color-space matrix transform (before log/LUT)
     // C: after log curve (before LUT)
-    const bool enableStageDebug = false;
-    std::string debugBasePath = jpgPath ? std::string(jpgPath) : std::string();
-    std::string debugPathA = enableStageDebug ? build_debug_stage_path(debugBasePath.c_str(), "_debug_A_linear") : std::string();
-    std::string debugPathB = enableStageDebug ? build_debug_stage_path(debugBasePath.c_str(), "_debug_B_matrix") : std::string();
-    std::string debugPathC = enableStageDebug ? build_debug_stage_path(debugBasePath.c_str(), "_debug_C_log") : std::string();
-
-    std::vector<unsigned char> debugA8;
-    std::vector<unsigned char> debugB8;
-    std::vector<unsigned char> debugC8;
-
-    auto process_pixel = [&](int x, int y, Vec3* stageA, Vec3* stageB, Vec3* stageC) -> Vec3 {
+        auto process_pixel = [&](int x, int y, Vec3* stageA, Vec3* stageB, Vec3* stageC) -> Vec3 {
         x = std::max(0, std::min(x, width - 1));
         y = std::max(0, std::min(y, height - 1));
         size_t idx = (static_cast<size_t>(y) * width + x) * 3;
@@ -666,12 +656,6 @@ bool process_and_save_image(
     int finalW_zoomed = swapDims ? (cropH / downsampleFactor) : (cropW / downsampleFactor);
     int finalH_zoomed = swapDims ? (cropW / downsampleFactor) : (cropH / downsampleFactor);
 
-    if (enableStageDebug) {
-        size_t n = static_cast<size_t>(finalW_zoomed) * finalH_zoomed * 3;
-        debugA8.resize(n);
-        debugB8.resize(n);
-        debugC8.resize(n);
-    }
 
     if (isPreview) {
         // If a bitmap buffer is provided, prioritize its dimensions.
@@ -736,27 +720,14 @@ bool process_and_save_image(
 
                 Vec3 stageA{}, stageB{}, stageC{};
                 Vec3 color = process_pixel(cropX + sx, cropY + sy,
-                                           enableStageDebug ? &stageA : nullptr,
-                                           enableStageDebug ? &stageB : nullptr,
-                                           enableStageDebug ? &stageC : nullptr);
+                                           nullptr,
+                                           nullptr,
+                                           nullptr);
                 size_t outIdx = (static_cast<size_t>(py) * finalW_zoomed + px) * 3;
                 processedImage[outIdx + 0] = (unsigned short)std::max(0.0f, std::min(65535.0f, color.r * 65535.0f));
                 processedImage[outIdx + 1] = (unsigned short)std::max(0.0f, std::min(65535.0f, color.g * 65535.0f));
                 processedImage[outIdx + 2] = (unsigned short)std::max(0.0f, std::min(65535.0f, color.b * 65535.0f));
 
-                if (enableStageDebug) {
-                    debugA8[outIdx + 0] = (unsigned char)(clamp01(stageA.r) * 255.0f);
-                    debugA8[outIdx + 1] = (unsigned char)(clamp01(stageA.g) * 255.0f);
-                    debugA8[outIdx + 2] = (unsigned char)(clamp01(stageA.b) * 255.0f);
-
-                    debugB8[outIdx + 0] = (unsigned char)(clamp01(stageB.r) * 255.0f);
-                    debugB8[outIdx + 1] = (unsigned char)(clamp01(stageB.g) * 255.0f);
-                    debugB8[outIdx + 2] = (unsigned char)(clamp01(stageB.b) * 255.0f);
-
-                    debugC8[outIdx + 0] = (unsigned char)(clamp01(stageC.r) * 255.0f);
-                    debugC8[outIdx + 1] = (unsigned char)(clamp01(stageC.g) * 255.0f);
-                    debugC8[outIdx + 2] = (unsigned char)(clamp01(stageC.b) * 255.0f);
-                }
 
                 // Note: out_rgb_buffer is usually for preview only, but we keep it here if needed.
                 if (out_rgb_buffer) {
@@ -780,12 +751,18 @@ bool process_and_save_image(
     const int jpegQuality = isPreview ? 78 : 95;
     bool jpgOk = true;
     if (jpgPath) {
+
         if (isPreview && !previewRgb8.empty()) {
-            jpgOk = stbi_write_jpg(jpgPath, finalW_zoomed, finalH_zoomed, 3, previewRgb8.data(), jpegQuality) != 0;
+            std::vector<unsigned short> previewShort(previewRgb8.size());
+            for (size_t i = 0; i < previewRgb8.size(); ++i) {
+                previewShort[i] = (unsigned short)(previewRgb8[i]) << 8;
+            }
+            jpgOk = write_jpeg(jpgPath, finalW_zoomed, finalH_zoomed, previewShort, jpegQuality);
         } else {
+
             jpgOk = write_jpeg(jpgPath, finalW_zoomed, finalH_zoomed, processedImage, jpegQuality);
         }
-        if (!jpgOk) LOGE("write_jpeg/stbi_write_jpg failed for %s", jpgPath);
+        if (!jpgOk) LOGE("write_jpeg failed for %s", jpgPath);
         else {
             std::ifstream f(jpgPath, std::ios::binary | std::ios::ate);
             if (f.is_open()) {
@@ -794,15 +771,6 @@ bool process_and_save_image(
                 LOGE("Wrote JPEG but could not verify existence: %s", jpgPath);
             }
         }
-    }
-    if (enableStageDebug && !debugA8.empty()) {
-        bool aOk = stbi_write_jpg(debugPathA.c_str(), finalW_zoomed, finalH_zoomed, 3, debugA8.data(), 95) != 0;
-        bool bOk = stbi_write_jpg(debugPathB.c_str(), finalW_zoomed, finalH_zoomed, 3, debugB8.data(), 95) != 0;
-        bool cOk = stbi_write_jpg(debugPathC.c_str(), finalW_zoomed, finalH_zoomed, 3, debugC8.data(), 95) != 0;
-        LOGD("Stage debug outputs: A=%s (%d), B=%s (%d), C=%s (%d)",
-             debugPathA.c_str(), (int)aOk,
-             debugPathB.c_str(), (int)bOk,
-             debugPathC.c_str(), (int)cOk);
     }
 
     return jpgOk;
@@ -876,28 +844,65 @@ bool write_tiff_rgba8(const char* filename, int width, int height, const unsigne
     return true;
 }
 
-bool write_jpeg(const char* filename, int width, int height, const std::vector<unsigned short>& data, int quality) {
-    LOGD("write_jpeg: %s, %dx%d", filename, width, height);
+
+#include <android/bitmap.h>
+#include <stdio.h>
+
+static bool write_jpeg_android(const char* filename, int width, int height, const std::vector<unsigned short>& data, int quality) {
+    LOGD("write_jpeg_android: %s, %dx%d", filename, width, height);
     size_t total_pixels = static_cast<size_t>(width) * height;
-    std::vector<unsigned char> rgb8;
+    std::vector<uint32_t> rgba8;
     try {
-        rgb8.resize(total_pixels * 3);
+        rgba8.resize(total_pixels);
     } catch (const std::bad_alloc& e) {
-        LOGE("Failed to allocate memory for JPEG conversion: %zu bytes", total_pixels * 3);
+        LOGE("Failed to allocate memory for JPEG conversion: %zu bytes", total_pixels * 4);
         return false;
     }
 
     #pragma omp parallel for
     for (size_t i = 0; i < total_pixels; i++) {
-        rgb8[i * 3 + 0] = (unsigned char)std::min(255, (data[i * 3 + 0] + 128) >> 8);
-        rgb8[i * 3 + 1] = (unsigned char)std::min(255, (data[i * 3 + 1] + 128) >> 8);
-        rgb8[i * 3 + 2] = (unsigned char)std::min(255, (data[i * 3 + 2] + 128) >> 8);
+        unsigned char r = (unsigned char)std::min(255, (data[i * 3 + 0] + 128) >> 8);
+        unsigned char g = (unsigned char)std::min(255, (data[i * 3 + 1] + 128) >> 8);
+        unsigned char b = (unsigned char)std::min(255, (data[i * 3 + 2] + 128) >> 8);
+        // RGBA format for AndroidBitmap: ABGR in memory usually, but AndroidBitmap compress expects RGBA_8888
+        // which corresponds to r, g, b, a in byte order.
+        rgba8[i] = (255 << 24) | (b << 16) | (g << 8) | r;
     }
-    int res = stbi_write_jpg(filename, width, height, 3, rgb8.data(), quality);
-    if (res == 0) {
-        LOGE("stbi_write_jpg failed for %s", filename);
+
+    FILE* file = fopen(filename, "wb");
+    if (!file) {
+        LOGE("Failed to open file for writing: %s", filename);
+        return false;
     }
-    return res != 0;
+
+    AndroidBitmapInfo info = {
+        .width = (uint32_t)width,
+        .height = (uint32_t)height,
+        .stride = (uint32_t)(width * 4),
+        .format = ANDROID_BITMAP_FORMAT_RGBA_8888,
+        .flags = 0
+    };
+
+    auto write_func = [](void* userContext, const void* data, size_t size) -> bool {
+        FILE* f = static_cast<FILE*>(userContext);
+        return fwrite(data, 1, size, f) == size;
+    };
+
+    int result = AndroidBitmap_compress(&info, ANDROID_BITMAP_FORMAT_RGBA_8888, rgba8.data(), ANDROID_BITMAP_COMPRESS_FORMAT_JPEG, quality, file, write_func);
+
+    fclose(file);
+
+    if (result != ANDROID_BITMAP_RESULT_SUCCESS) {
+        LOGE("AndroidBitmap_compress failed with error code: %d", result);
+        return false;
+    }
+
+    return true;
+}
+
+
+bool write_jpeg(const char* filename, int width, int height, const std::vector<unsigned short>& data, int quality) {
+    return write_jpeg_android(filename, width, height, data, quality);
 }
 
 int compute_preview_downsample_factor(int width, int height, int targetLongEdge) {
@@ -917,6 +922,8 @@ static void write_jpeg_to_memory(void* context, void* data, int size) {
     ctx->bytes.insert(ctx->bytes.end(), src, src + size);
 }
 
+
+
 static std::vector<unsigned char> encode_rgb8_jpeg(
     const std::vector<unsigned char>& rgb8,
     int width,
@@ -925,10 +932,47 @@ static std::vector<unsigned char> encode_rgb8_jpeg(
 ) {
     JpegBufferContext ctx;
     if (!rgb8.empty() && width > 0 && height > 0) {
-        stbi_write_jpg_to_func(write_jpeg_to_memory, &ctx, width, height, 3, rgb8.data(), quality);
+        size_t total_pixels = static_cast<size_t>(width) * height;
+        std::vector<uint32_t> rgba8;
+        try {
+            rgba8.resize(total_pixels);
+        } catch (const std::bad_alloc& e) {
+            LOGE("Failed to allocate memory for JPEG conversion: %zu bytes", total_pixels * 4);
+            return ctx.bytes;
+        }
+
+        #pragma omp parallel for
+        for (size_t i = 0; i < total_pixels; i++) {
+            unsigned char r = rgb8[i * 3 + 0];
+            unsigned char g = rgb8[i * 3 + 1];
+            unsigned char b = rgb8[i * 3 + 2];
+            rgba8[i] = (255 << 24) | (b << 16) | (g << 8) | r;
+        }
+
+        AndroidBitmapInfo info = {
+            .width = (uint32_t)width,
+            .height = (uint32_t)height,
+            .stride = (uint32_t)(width * 4),
+            .format = ANDROID_BITMAP_FORMAT_RGBA_8888,
+            .flags = 0
+        };
+
+        auto write_func = [](void* userContext, const void* data, size_t size) -> bool {
+            auto* context = static_cast<JpegBufferContext*>(userContext);
+            auto* src = static_cast<const unsigned char*>(data);
+            context->bytes.insert(context->bytes.end(), src, src + size);
+            return true;
+        };
+
+        int result = AndroidBitmap_compress(&info, ANDROID_BITMAP_FORMAT_RGBA_8888, rgba8.data(), ANDROID_BITMAP_COMPRESS_FORMAT_JPEG, quality, &ctx, write_func);
+        if (result != ANDROID_BITMAP_RESULT_SUCCESS) {
+            LOGE("AndroidBitmap_compress failed with error code: %d", result);
+        }
     }
     return ctx.bytes;
 }
+
+
 
 static std::vector<unsigned char> make_preview_rgb8(
     const std::vector<unsigned short>& data,
