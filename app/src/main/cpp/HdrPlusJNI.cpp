@@ -316,9 +316,12 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
         write_dng(dng_path_cstr, width, height, finalImage, kMax16BitValue, ccmVec, meta, orientation, (bool)mirror, baselineExposure);
     }
 
-    bool saveOk = true;
+bool saveOk = true;
     if (jpg_path_cstr) {
         LOGD("Exporting JPG: JPG=%s", jpg_path_cstr);
+        static int save_invocation_count = 0;
+        save_invocation_count++;
+        LOGD("process_and_save_image INVOCATION #%d START", save_invocation_count);
         saveOk = process_and_save_image(finalImage, width, height, digitalGain, targetLog, lut,
                                         exposure, contrast, saturation, highlights, shadows, whites, blacks,
                                         jpg_path_cstr, nullptr, &meta, 1, ccmVec.data(), wbVec.data(), orientation, nullptr, 0, 0, false, 1, zoomFactor, (bool)mirror);
@@ -534,9 +537,10 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
         out_h = info.height;
     }
 
-    if (bitmapPixels) {
+if (bitmapPixels) {
+        LOGD("process_and_save_image PREVIEW INVOCATION START");
         process_and_save_image(finalImage, width, height, digitalGain, targetLog, lut,
-                                0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, // HSWB not used for preview in standard pipe yet
+                                0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
                                 nullptr, nullptr, nullptr, 1, ccmVec.data(), wbVec.data(), orientation, bitmapPixels, out_w, out_h, true, fastPreviewDownsample, zoomFactor, (bool)mirror);
         AndroidBitmap_unlockPixels(env, outputBitmap);
     }
@@ -547,7 +551,8 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
             write_dng(dngPathStr.c_str(), width, height, finalImage, kMax16BitValue, ccmVec, meta, orientation, (bool)mirror, baselineExposure);
         }
 
-        if (!jpgPathStr.empty()) {
+if (!jpgPathStr.empty()) {
+            LOGD("process_and_save_image JPG INVOCATION START");
             process_and_save_image(finalImage, width, height, digitalGain, targetLog, lut,
                                     0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
                                     jpgPathStr.c_str(), nullptr, &meta, 1, ccmVec.data(), wbVec.data(), orientation, nullptr, 0, 0, true, 1, zoomFactor, (bool)mirror);
@@ -557,7 +562,8 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
                 std::string altJpgPath = jpgPathStr;
                 size_t dot = altJpgPath.find_last_of('.');
                 if (dot == std::string::npos) dot = altJpgPath.size();
-                altJpgPath = altJpgPath.substr(0, dot) + suffix;
+altJpgPath = altJpgPath.substr(0, dot) + suffix;
+                LOGD("process_and_save_image ALT_JPG INVOCATION START");
                 process_and_save_image(finalImage, width, height, digitalGain, targetLog, lut,
                                         0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
                                         altJpgPath.c_str(), nullptr, &meta, 1, ccmAltVec.data(), wbVec.data(), orientation, nullptr, 0, 0, false, 1, zoomFactor, (bool)mirror);

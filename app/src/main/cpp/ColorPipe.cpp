@@ -538,15 +538,24 @@ bool process_and_save_image(
     int out_width, int out_height,
     bool isPreview, int downsampleFactor, float zoomFactor, bool mirror
 ) {
+
     LOGD("process_and_save_image: %dx%d, gain=%.2f, log=%d, lut=%d, jpg=%s, tiff=%s, preview=%d, ds=%d, zoom=%.2f, mirror=%d",
          width, height, gain, targetLog, lut.size, jpgPath ? jpgPath : "null", tiffPath ? tiffPath : "null", isPreview, downsampleFactor, zoomFactor, mirror);
+
+    auto time_start_total = std::chrono::high_resolution_clock::now();
+
+    auto time_start_edge = std::chrono::high_resolution_clock::now();
+
     int outW = width / downsampleFactor, outH = height / downsampleFactor;
     bool swapDims = (orientation == 90 || orientation == 270);
     int finalW = swapDims ? outH : outW, finalH = swapDims ? outW : outH;
     Matrix3x3 effective_CCM = {0}; if (sourceColorSpace == 1 && ccm) std::copy(ccm, ccm + 9, effective_CCM.m);
     std::vector<unsigned short> processedImage; std::vector<unsigned char> previewRgb8;
 
+
     AdaptiveEdgeComp edgeComp = calculate_adaptive_edge_comp(inputImage, width, height);
+    auto time_end_edge = std::chrono::high_resolution_clock::now();
+
 
     // Debug stage split output (A/B/C):
     // A: linear RGB input after adaptive edge compensation
@@ -657,7 +666,10 @@ bool process_and_save_image(
     int finalH_zoomed = swapDims ? (cropW / downsampleFactor) : (cropH / downsampleFactor);
 
 
+
+    auto time_start_pixel = std::chrono::high_resolution_clock::now();
     if (isPreview) {
+
         // If a bitmap buffer is provided, prioritize its dimensions.
         // This ensures no out-of-bounds writes even if Kotlin and JNI have different size expectations.
         int renderW = (out_rgb_buffer && out_width > 0) ? out_width : finalW_zoomed;
@@ -741,14 +753,21 @@ bool process_and_save_image(
         }
     }
 
+
+    auto time_end_pixel = std::chrono::high_resolution_clock::now();
+
     bool tiffOk = true;
+
     if (tiffPath && !isPreview) {
         tiffOk = write_tiff(tiffPath, finalW_zoomed, finalH_zoomed, processedImage, metadata);
         if (!tiffOk) LOGE("write_tiff failed for %s", tiffPath);
         else LOGD("Successfully wrote TIFF: %s", tiffPath);
     }
 
+
+    auto time_start_jpeg = std::chrono::high_resolution_clock::now();
     const int jpegQuality = isPreview ? 78 : 95;
+
     bool jpgOk = true;
     if (jpgPath) {
 
@@ -773,7 +792,19 @@ bool process_and_save_image(
         }
     }
 
+
+    auto time_end_total = std::chrono::high_resolution_clock::now();
+
+    long long edge_ms = std::chrono::duration_cast<std::chrono::milliseconds>(time_end_edge - time_start_edge).count();
+    long long pixel_ms = std::chrono::duration_cast<std::chrono::milliseconds>(time_end_pixel - time_start_pixel).count();
+    long long jpeg_ms = std::chrono::duration_cast<std::chrono::milliseconds>(time_end_total - time_start_jpeg).count();
+    long long total_ms = std::chrono::duration_cast<std::chrono::milliseconds>(time_end_total - time_start_total).count();
+
+    LOGD("process_and_save_image timing [%s]: Total=%lldms (EdgeComp=%lldms, PixelProc=%lldms, JpegWrite=%lldms)",
+         jpgPath ? jpgPath : "null", total_ms, edge_ms, pixel_ms, jpeg_ms);
+
     return jpgOk;
+
 }
 
 bool write_tiff(const char* filename, int width, int height, const std::vector<unsigned short>& data, const ImageMetadata* metadata) {
@@ -848,8 +879,11 @@ bool write_tiff_rgba8(const char* filename, int width, int height, const unsigne
 #include <android/bitmap.h>
 #include <stdio.h>
 
+
 static bool write_jpeg_android(const char* filename, int width, int height, const std::vector<unsigned short>& data, int quality) {
     LOGD("write_jpeg_android: %s, %dx%d", filename, width, height);
+    auto start_all = std::chrono::high_resolution_clock::now();
+
     size_t total_pixels = static_cast<size_t>(width) * height;
     std::vector<uint32_t> rgba8;
     try {
@@ -859,6 +893,7 @@ static bool write_jpeg_android(const char* filename, int width, int height, cons
         return false;
     }
 
+    auto start_omp = std::chrono::high_resolution_clock::now();
     #pragma omp parallel for
     for (size_t i = 0; i < total_pixels; i++) {
         unsigned char r = (unsigned char)std::min(255, (data[i * 3 + 0] + 128) >> 8);
@@ -869,7 +904,11 @@ static bool write_jpeg_android(const char* filename, int width, int height, cons
         rgba8[i] = (255 << 24) | (b << 16) | (g << 8) | r;
     }
 
+
+    auto end_omp = std::chrono::high_resolution_clock::now();
+
     FILE* file = fopen(filename, "wb");
+
     if (!file) {
         LOGE("Failed to open file for writing: %s", filename);
         return false;
@@ -888,9 +927,19 @@ static bool write_jpeg_android(const char* filename, int width, int height, cons
         return fwrite(data, 1, size, f) == size;
     };
 
+
     int result = AndroidBitmap_compress(&info, ANDROID_BITMAP_FORMAT_RGBA_8888, rgba8.data(), ANDROID_BITMAP_COMPRESS_FORMAT_JPEG, quality, file, write_func);
 
+    auto end_compress = std::chrono::high_resolution_clock::now();
+
     fclose(file);
+
+    long long omp_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end_omp - start_omp).count();
+    long long compress_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end_compress - end_omp).count();
+    long long all_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end_compress - start_all).count();
+
+    LOGD("write_jpeg_android timing: Total=%lldms (OMP Conversion=%lldms, API Compress=%lldms)", all_ms, omp_ms, compress_ms);
+
 
     if (result != ANDROID_BITMAP_RESULT_SUCCESS) {
         LOGE("AndroidBitmap_compress failed with error code: %d", result);
@@ -964,7 +1013,7 @@ static std::vector<unsigned char> encode_rgb8_jpeg(
             return true;
         };
 
-        int result = AndroidBitmap_compress(&info, ANDROID_BITMAP_FORMAT_RGBA_8888, rgba8.data(), ANDROID_BITMAP_COMPRESS_FORMAT_JPEG, quality, &ctx, write_func);
+        int result = AndroidBitmap_compress(&info, 0 /* ADATASPACE_UNKNOWN */, rgba8.data(), ANDROID_BITMAP_COMPRESS_FORMAT_JPEG, quality, &ctx, write_func);
         if (result != ANDROID_BITMAP_RESULT_SUCCESS) {
             LOGE("AndroidBitmap_compress failed with error code: %d", result);
         }
