@@ -597,6 +597,27 @@ object ImageSaver {
 
         try {
             if (uri == null) {
+                // Attempt to find an existing file with the same name to overwrite it (e.g. ZSL preview)
+                val projection = arrayOf(MediaStore.MediaColumns._ID)
+                val selection = "${MediaStore.MediaColumns.DISPLAY_NAME} = ?"
+                val selectionArgs = arrayOf(displayName)
+
+                contentResolver.query(
+                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                    projection,
+                    selection,
+                    selectionArgs,
+                    null
+                )?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        val idColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
+                        val id = cursor.getLong(idColumn)
+                        uri = android.content.ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id)
+                    }
+                }
+            }
+
+            if (uri == null) {
                 jpgValues.apply {
                     put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
                     put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
@@ -617,7 +638,7 @@ object ImageSaver {
                 height?.let { jpgValues.put(MediaStore.MediaColumns.HEIGHT, it) }
 
                 if (jpgValues.size() > 0) {
-                    contentResolver.update(uri, jpgValues, null, null)
+                    contentResolver.update(uri!!, jpgValues, null, null)
                 }
             }
         } catch (e: Exception) {
@@ -627,7 +648,7 @@ object ImageSaver {
 
         if (uri != null) {
             try {
-                contentResolver.openOutputStream(uri, "wt")?.use { out ->
+                contentResolver.openOutputStream(uri!!, "wt")?.use { out ->
                     writeData(out)
                     out.flush()
                 }

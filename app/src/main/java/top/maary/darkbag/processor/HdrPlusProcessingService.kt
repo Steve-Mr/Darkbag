@@ -24,7 +24,7 @@ import top.maary.darkbag.utils.ImageSaver
 class HdrPlusProcessingService : Service() {
 
     private val serviceJob = Job()
-    private val serviceScope = CoroutineScope(Dispatchers.IO + serviceJob)
+    private val serviceScope = CoroutineScope(Dispatchers.Default + serviceJob)
     private var isProcessing = false
 
     override fun onBind(intent: Intent?): IBinder? = null
