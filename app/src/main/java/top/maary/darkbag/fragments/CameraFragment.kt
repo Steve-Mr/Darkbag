@@ -3814,11 +3814,6 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         Log.e(TAG, "Fallback failed", fallbackEx)
                     }
                 }
-            } finally {
-                frames.forEach {
-                    HdrPlusBurst.releaseBuffer(it.buffer)
-                    it.close()
-                }
                 if (!fallbackSent) {
                     processingSemaphore.release()
                     lifecycleScope.launch(Dispatchers.Main) {

@@ -15,7 +15,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import top.maary.darkbag.R
+import top.maary.darkbag.fragments.HdrPlusBurst
 import top.maary.darkbag.fragments.SettingsFragment
 import top.maary.darkbag.utils.ImageSaver
 
@@ -47,7 +49,7 @@ class HdrPlusProcessingService : Service() {
         val request = HdrPlusRequestManager.dequeue()
         if (request == null) {
             // Queue empty, stop service
-            stopForeground(STOP_FOREGROUND_REMOVE)
+            androidx.core.app.ServiceCompat.stopForeground(this, androidx.core.app.ServiceCompat.STOP_FOREGROUND_REMOVE)
             stopSelf()
             return
         }
@@ -59,8 +61,10 @@ class HdrPlusProcessingService : Service() {
             } catch (e: Exception) {
                 Log.e(TAG, "Error processing HDR+ request: ${request.requestId}", e)
             } finally {
-                isProcessing = false
-                processNextInQueue()
+                withContext(Dispatchers.Main) {
+                    isProcessing = false
+                    processNextInQueue()
+                }
             }
         }
     }
@@ -149,6 +153,10 @@ class HdrPlusProcessingService : Service() {
             ColorProcessor.onBackgroundSaveComplete(
                 req.baseName, null, null, null, req.zoomFactor, req.orientation, req.saveJpg
             )
+        }
+
+        req.buffers.forEach {
+            HdrPlusBurst.releaseBuffer(it)
         }
     }
 

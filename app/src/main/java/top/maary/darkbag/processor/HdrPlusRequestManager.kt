@@ -45,7 +45,7 @@ data class HdrPlusRequest(
 )
 
 object HdrPlusRequestManager {
-    private val queue = java.util.concurrent.LinkedBlockingQueue<HdrPlusRequest>()
+    private val queue = java.util.concurrent.LinkedBlockingQueue<HdrPlusRequest>(2)
 
     fun enqueue(request: HdrPlusRequest) {
         queue.put(request)
