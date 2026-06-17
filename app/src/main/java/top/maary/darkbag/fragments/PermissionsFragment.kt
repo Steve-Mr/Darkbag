@@ -53,6 +53,15 @@ class PermissionsFragment : Fragment() {
             PERMISSIONS_REQUIRED = permissionList.toTypedArray()
         }
 
+        // request notification permission for Android 13 and above
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val permissionList = PERMISSIONS_REQUIRED.toMutableList()
+            if (!permissionList.contains(Manifest.permission.POST_NOTIFICATIONS)) {
+                permissionList.add(Manifest.permission.POST_NOTIFICATIONS)
+            }
+            PERMISSIONS_REQUIRED = permissionList.toTypedArray()
+        }
+
         if (!hasPermissions(requireContext())) {
             // Request camera-related permissions
             activityResultLauncher.launch(PERMISSIONS_REQUIRED)

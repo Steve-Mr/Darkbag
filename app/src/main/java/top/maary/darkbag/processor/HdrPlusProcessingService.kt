@@ -55,11 +55,13 @@ class HdrPlusProcessingService : Service() {
         }
 
         isProcessing = true
+        updateNotification("Processing HDR+ image...")
         serviceScope.launch {
             try {
                 processRequest(request)
             } catch (e: Exception) {
                 Log.e(TAG, "Error processing HDR+ request: ${request.requestId}", e)
+                showResultNotification("Failed to process HDR+ image", e.message ?: "Unknown error")
             } finally {
                 withContext(Dispatchers.Main) {
                     isProcessing = false
@@ -189,6 +191,8 @@ class HdrPlusProcessingService : Service() {
                 android.widget.Toast.makeText(applicationContext, "HDR+ Background Processed", android.widget.Toast.LENGTH_SHORT).show()
             }
 
+            showResultNotification("HDR+ Processing Complete", "Image saved successfully")
+
             ColorProcessor.onBackgroundSaveComplete(
                 req.baseName, null, null, finalUri?.toString(), req.zoomFactor, req.orientation, req.saveJpg
             )
@@ -200,11 +204,29 @@ class HdrPlusProcessingService : Service() {
             withContext(Dispatchers.Main) {
                 android.widget.Toast.makeText(applicationContext, "HDR+ failed in background", android.widget.Toast.LENGTH_SHORT).show()
             }
+            showResultNotification("HDR+ Processing Failed", "JNI Error code: $ret")
         }
 
         req.buffers.forEach {
             HdrPlusBurst.releaseBuffer(it)
         }
+    }
+
+    private fun updateNotification(content: String) {
+        val notification = createNotification(content)
+        val notificationManager = getSystemService(NotificationManager::class.java)
+        notificationManager.notify(NOTIFICATION_ID, notification)
+    }
+
+    private fun showResultNotification(title: String, content: String) {
+        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle(title)
+            .setContentText(content)
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setAutoCancel(true)
+            .build()
+        val notificationManager = getSystemService(NotificationManager::class.java)
+        notificationManager.notify(RESULT_NOTIFICATION_ID, notification)
     }
 
     private fun createNotificationChannel() {
@@ -239,5 +261,6 @@ class HdrPlusProcessingService : Service() {
         private const val TAG = "HdrPlusService"
         private const val CHANNEL_ID = "hdr_plus_processing_channel"
         private const val NOTIFICATION_ID = 1001
+        private const val RESULT_NOTIFICATION_ID = 1002
     }
 }
