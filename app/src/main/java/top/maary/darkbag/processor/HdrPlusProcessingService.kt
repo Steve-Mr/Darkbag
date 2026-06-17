@@ -76,51 +76,62 @@ class HdrPlusProcessingService : Service() {
 
         val outputJpgPath = if (req.saveJpg) req.fullResJpgPath else null
         val outputDngPath = if (req.saveRaw) req.linearDngPath else null
-        val debugStats = LongArray(25)
 
-        val jniStartTime = System.currentTimeMillis()
-        val ret = if (req.isSingleFrame) {
-            ColorProcessor.processSingleFrameRaw(
-                req.buffers[0],
-                req.width, req.height,
-                req.orientation,
-                req.whiteLevel, req.blackLevelPattern,
-                req.lensShadingMap, req.lensShadingRows, req.lensShadingCols,
-                req.whiteBalance, req.ccm, req.cfaPattern,
-                req.targetLogIndex,
-                req.lutPath,
-                outputJpgPath,
-                outputDngPath,
-                req.digitalGain,
-                debugStats,
-                null,
-                req.zoomFactor,
-                req.mirror,
-                req.metadata
-            )
-        } else {
-            ColorProcessor.processHdrPlus(
-                req.buffers,
-                req.width, req.height,
-                req.orientation,
-                req.whiteLevel, req.blackLevelPattern,
-                req.lensShadingMap, req.lensShadingRows, req.lensShadingCols, req.useSensorColorMatrix,
-                req.whiteBalance, req.ccm, req.ccmAlt, req.exportMatrixAB, req.cfaPattern,
-                req.targetLogIndex,
-                req.lutPath,
-                outputJpgPath,
-                outputDngPath,
-                req.digitalGain,
-                debugStats,
-                null,
-                req.zoomFactor,
-                req.mirror,
-                req.metadata
-            )
-        }
-        val jniEndTime = System.currentTimeMillis()
+        val masksToRun = if (req.runAblationTest) listOf(0, 1, 2, 4) else listOf(0)
 
-        if (ret == 0) {
+        for (ablationMask in masksToRun) {
+            val currentJpgPath = if (ablationMask != 0 && outputJpgPath != null) {
+                outputJpgPath.substringBeforeLast(".") + "_ablation_$ablationMask.jpg"
+            } else {
+                outputJpgPath
+            }
+            val currentDngPath = if (ablationMask == 0) outputDngPath else null // Only write DNG once
+
+            val debugStats = LongArray(25).apply { this[24] = ablationMask.toLong() }
+
+            val jniStartTime = System.currentTimeMillis()
+            val ret = if (req.isSingleFrame) {
+                ColorProcessor.processSingleFrameRaw(
+                    req.buffers[0],
+                    req.width, req.height,
+                    req.orientation,
+                    req.whiteLevel, req.blackLevelPattern,
+                    req.lensShadingMap, req.lensShadingRows, req.lensShadingCols,
+                    req.whiteBalance, req.ccm, req.cfaPattern,
+                    req.targetLogIndex,
+                    req.lutPath,
+                    currentJpgPath,
+                    currentDngPath,
+                    req.digitalGain,
+                    debugStats,
+                    null,
+                    req.zoomFactor,
+                    req.mirror,
+                    req.metadata
+                )
+            } else {
+                ColorProcessor.processHdrPlus(
+                    req.buffers,
+                    req.width, req.height,
+                    req.orientation,
+                    req.whiteLevel, req.blackLevelPattern,
+                    req.lensShadingMap, req.lensShadingRows, req.lensShadingCols, req.useSensorColorMatrix,
+                    req.whiteBalance, req.ccm, req.ccmAlt, req.exportMatrixAB, req.cfaPattern,
+                    req.targetLogIndex,
+                    req.lutPath,
+                    currentJpgPath,
+                    currentDngPath,
+                    req.digitalGain,
+                    debugStats,
+                    null,
+                    req.zoomFactor,
+                    req.mirror,
+                    req.metadata
+                )
+            }
+            val jniEndTime = System.currentTimeMillis()
+
+            if (ret == 0) {
             Log.d(TAG, "JNI finished successfully for ${req.baseName}")
             val saveStartTime = System.currentTimeMillis()
             val targetUri = req.zslTargetUriStr?.let { Uri.parse(it) }
@@ -168,8 +179,9 @@ class HdrPlusProcessingService : Service() {
             val ompConvMs = debugStats[22]
             val apiCompMs = debugStats[23]
 
+            val label = if (ablationMask == 0) "Normal" else "Ablation Mask $ablationMask"
             val logMsg = """
-                [Background Process: ${totalTime}ms]
+                [Background Process ($label): ${totalTime}ms]
                 JNI (Total): ${jniTime}ms
                   - Native Total: ${nativeTotalTime}ms
                   - JNI Prep: ${debugStats[12]}ms
@@ -199,29 +211,34 @@ class HdrPlusProcessingService : Service() {
             Log.i(TAG, logMsg)
             top.maary.darkbag.utils.DebugLogManager.addLog(logMsg)
 
-            if (finalUri != null) {
-                val prefs = applicationContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-                prefs.edit().putString(SettingsFragment.KEY_LAST_CAPTURE_URI, finalUri.toString()).apply()
+            if (ablationMask == 0) {
+                if (finalUri != null) {
+                    val prefs = applicationContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                    prefs.edit().putString(SettingsFragment.KEY_LAST_CAPTURE_URI, finalUri.toString()).apply()
+                }
+
+                withContext(Dispatchers.Main) {
+                    android.widget.Toast.makeText(applicationContext, "HDR+ Background Processed", android.widget.Toast.LENGTH_SHORT).show()
+                }
+
+                showResultNotification("HDR+ Processing Complete", "Image saved successfully")
+
+                ColorProcessor.onBackgroundSaveComplete(
+                    req.baseName, null, null, finalUri?.toString(), req.zoomFactor, req.orientation, req.saveJpg
+                )
             }
-
-            withContext(Dispatchers.Main) {
-                android.widget.Toast.makeText(applicationContext, "HDR+ Background Processed", android.widget.Toast.LENGTH_SHORT).show()
-            }
-
-            showResultNotification("HDR+ Processing Complete", "Image saved successfully")
-
-            ColorProcessor.onBackgroundSaveComplete(
-                req.baseName, null, null, finalUri?.toString(), req.zoomFactor, req.orientation, req.saveJpg
-            )
         } else {
-            Log.e(TAG, "JNI failed with code $ret for ${req.baseName}")
-            ColorProcessor.onBackgroundSaveComplete(
-                req.baseName, null, null, null, req.zoomFactor, req.orientation, req.saveJpg
-            )
-            withContext(Dispatchers.Main) {
-                android.widget.Toast.makeText(applicationContext, "HDR+ failed in background", android.widget.Toast.LENGTH_SHORT).show()
+            Log.e(TAG, "JNI failed with code $ret for ${req.baseName} (Mask: $ablationMask)")
+            if (ablationMask == 0) {
+                ColorProcessor.onBackgroundSaveComplete(
+                    req.baseName, null, null, null, req.zoomFactor, req.orientation, req.saveJpg
+                )
+                withContext(Dispatchers.Main) {
+                    android.widget.Toast.makeText(applicationContext, "HDR+ failed in background", android.widget.Toast.LENGTH_SHORT).show()
+                }
+                showResultNotification("HDR+ Processing Failed", "JNI Error code: $ret")
             }
-            showResultNotification("HDR+ Processing Failed", "JNI Error code: $ret")
+        }
         }
 
         req.buffers.forEach {

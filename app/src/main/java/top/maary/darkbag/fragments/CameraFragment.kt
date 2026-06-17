@@ -3712,9 +3712,15 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         jpgFolderUri = jpgFolderUri,
                         rawFolderUri = rawFolderUri,
                         hfMetadata = hfMetadata?.copy(digitalGain = digitalGain),
-                        editConfig = null
+                        editConfig = null,
+                        runAblationTest = prefs.getBoolean(SettingsFragment.KEY_RUN_ABLATION, false)
                     )
                     top.maary.darkbag.processor.HdrPlusRequestManager.enqueue(request)
+
+                    // Reset ablation switch so it only runs once per toggle
+                    if (request.runAblationTest) {
+                        prefs.edit().putBoolean(SettingsFragment.KEY_RUN_ABLATION, false).apply()
+                    }
                     val serviceIntent = android.content.Intent(context, top.maary.darkbag.processor.HdrPlusProcessingService::class.java)
                     if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
                         context.startForegroundService(serviceIntent)

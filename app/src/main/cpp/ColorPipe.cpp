@@ -544,11 +544,11 @@ bool process_and_save_image(
     const float* ccm, const float* wb, int orientation, unsigned char* out_rgb_buffer,
     int out_width, int out_height,
     bool isPreview, int downsampleFactor, float zoomFactor, bool mirror,
-    long long* out_timings
+    long long* out_timings, int ablationMask
 ) {
 
-    LOGD("process_and_save_image: %dx%d, gain=%.2f, log=%d, lut=%d, jpg=%s, tiff=%s, preview=%d, ds=%d, zoom=%.2f, mirror=%d",
-         width, height, gain, targetLog, lut.size, jpgPath ? jpgPath : "null", tiffPath ? tiffPath : "null", isPreview, downsampleFactor, zoomFactor, mirror);
+    LOGD("process_and_save_image: %dx%d, gain=%.2f, log=%d, lut=%d, jpg=%s, tiff=%s, preview=%d, ds=%d, zoom=%.2f, mirror=%d, ablationMask=%d",
+         width, height, gain, targetLog, lut.size, jpgPath ? jpgPath : "null", tiffPath ? tiffPath : "null", isPreview, downsampleFactor, zoomFactor, mirror, ablationMask);
 
     auto time_start_total = std::chrono::high_resolution_clock::now();
 
@@ -574,34 +574,6 @@ bool process_and_save_image(
     float exp_gain = std::pow(2.0f, exposure);
     float global_gain_multiplier = (gain * exp_gain) / 65535.0f;
 
-    // Pre-concatenate color matrices
-    Matrix3x3 target_matrix;
-    switch (targetLog) {
-        case 1: target_matrix = M_XYZ_to_AlexaWideGamut_D65; break;
-        case 2:
-        case 3: target_matrix = M_XYZ_to_Rec2020_D65; break;
-        case 5:
-        case 6: target_matrix = M_XYZ_to_SGamut3Cine_D65; break;
-        case 7: target_matrix = M_XYZ_to_VGamut_D65; break;
-        default: target_matrix = M_XYZ_to_Rec709_D65; break;
-    }
-
-    Matrix3x3 combined_color_matrix;
-    if (sourceColorSpace == 1) {
-        if (ccm) {
-            Matrix3x3 temp = multiply(M_sRGB_D65_to_XYZ, effective_CCM);
-            combined_color_matrix = multiply(target_matrix, temp);
-        } else {
-            combined_color_matrix = multiply(target_matrix, M_sRGB_D65_to_XYZ);
-        }
-    } else if (sourceColorSpace == 0) {
-        Matrix3x3 temp = multiply(M_Bradford_D50_to_D65, M_ProPhoto_D50_to_XYZ);
-        combined_color_matrix = multiply(target_matrix, temp);
-    } else {
-        // Fallback (identity-like)
-        combined_color_matrix = target_matrix;
-    }
-
         auto process_pixel = [&](int x, int y, Vec3* stageA, Vec3* stageB, Vec3* stageC) -> Vec3 {
         x = std::max(0, std::min(x, width - 1));
         y = std::max(0, std::min(y, height - 1));
@@ -612,7 +584,7 @@ bool process_and_save_image(
         float norm_g = (float)inputImage[idx + 1] * global_gain_multiplier;
         float norm_b = (float)inputImage[idx + 2] * global_gain_multiplier;
 
-        if (edgeComp.enabled) {
+        if (edgeComp.enabled && !(ablationMask & 4)) {
             const float nx = (x - edgeComp.centerX) * edgeComp.invMaxRadius;
             const float ny = (y - edgeComp.centerY) * edgeComp.invMaxRadius;
             float r = std::sqrt(nx * nx + ny * ny);
@@ -634,56 +606,74 @@ bool process_and_save_image(
         Vec3 colorA = {norm_r, norm_g, norm_b};
         if (stageA) *stageA = colorA;
 
-        Vec3 color = multiply(combined_color_matrix, colorA);
+        Vec3 color = colorA;
+        if (sourceColorSpace == 1) { if (ccm) color = multiply(effective_CCM, color); color = multiply(M_sRGB_D65_to_XYZ, color); }
+        else if (sourceColorSpace == 0) { color = multiply(M_ProPhoto_D50_to_XYZ, color); color = multiply(M_Bradford_D50_to_D65, color); }
 
+        switch (targetLog) {
+            case 1: color = multiply(M_XYZ_to_AlexaWideGamut_D65, color); break;
+            case 2:
+            case 3: color = multiply(M_XYZ_to_Rec2020_D65, color); break;
+            case 5:
+            case 6: color = multiply(M_XYZ_to_SGamut3Cine_D65, color); break;
+            case 7: color = multiply(M_XYZ_to_VGamut_D65, color); break;
+            default: color = multiply(M_XYZ_to_Rec709_D65, color); break;
+        }
         if (stageB) *stageB = color;
 
-        color.r = apply_log(color.r, targetLog); color.g = apply_log(color.g, targetLog); color.b = apply_log(color.b, targetLog);
+        if (!(ablationMask & 2)) {
+            color.r = apply_log(color.r, targetLog); color.g = apply_log(color.g, targetLog); color.b = apply_log(color.b, targetLog);
 
-        // 2. Contrast & Saturation (Log Space)
-        auto apply_contrast = [&](float v) {
-            return std::clamp((v - 0.5f) * (contrast + 1.0f) + 0.5f, 0.0f, 1.0f);
-        };
-        color.r = apply_contrast(color.r);
-        color.g = apply_contrast(color.g);
-        color.b = apply_contrast(color.b);
+            // 2. Contrast & Saturation (Log Space)
+            auto apply_contrast = [&](float v) {
+                return std::clamp((v - 0.5f) * (contrast + 1.0f) + 0.5f, 0.0f, 1.0f);
+            };
+            color.r = apply_contrast(color.r);
+            color.g = apply_contrast(color.g);
+            color.b = apply_contrast(color.b);
 
-        float luma = 0.2126f * color.r + 0.7152f * color.g + 0.0722f * color.b;
-        color.r = std::clamp(luma + (color.r - luma) * (saturation + 1.0f), 0.0f, 1.0f);
-        color.g = std::clamp(luma + (color.g - luma) * (saturation + 1.0f), 0.0f, 1.0f);
-        color.b = std::clamp(luma + (color.b - luma) * (saturation + 1.0f), 0.0f, 1.0f);
+            float luma = 0.2126f * color.r + 0.7152f * color.g + 0.0722f * color.b;
+            color.r = std::clamp(luma + (color.r - luma) * (saturation + 1.0f), 0.0f, 1.0f);
+            color.g = std::clamp(luma + (color.g - luma) * (saturation + 1.0f), 0.0f, 1.0f);
+            color.b = std::clamp(luma + (color.b - luma) * (saturation + 1.0f), 0.0f, 1.0f);
 
-        // 3. Highlights / Shadows / Whites / Blacks (Log Space)
-        auto apply_hswb = [&](float v) {
-            // Highlights: affecting upper range
-            if (highlights != 0.0f) {
-                float weight = std::pow(std::clamp(v, 0.0f, 1.0f), 2.0f);
-                v += highlights * weight * 0.2f;
-            }
-            // Shadows: affecting lower range
-            if (shadows != 0.0f) {
-                float weight = std::pow(1.0f - std::clamp(v, 0.0f, 1.0f), 2.0f);
-                v += shadows * weight * 0.2f;
-            }
-            // Whites: offset upper
-            if (whites != 0.0f) {
-                float weight = std::clamp((v - 0.5f) * 2.0f, 0.0f, 1.0f);
-                v += whites * weight * 0.2f;
-            }
-            // Blacks: offset lower
-            if (blacks != 0.0f) {
-                float weight = std::clamp((0.5f - v) * 2.0f, 0.0f, 1.0f);
-                v += blacks * weight * 0.2f;
-            }
-            return std::clamp(v, 0.0f, 1.0f);
-        };
-        color.r = apply_hswb(color.r);
-        color.g = apply_hswb(color.g);
-        color.b = apply_hswb(color.b);
+            // 3. Highlights / Shadows / Whites / Blacks (Log Space)
+            auto apply_hswb = [&](float v) {
+                // Highlights: affecting upper range
+                if (highlights != 0.0f) {
+                    float weight = std::pow(std::clamp(v, 0.0f, 1.0f), 2.0f);
+                    v += highlights * weight * 0.2f;
+                }
+                // Shadows: affecting lower range
+                if (shadows != 0.0f) {
+                    float weight = std::pow(1.0f - std::clamp(v, 0.0f, 1.0f), 2.0f);
+                    v += shadows * weight * 0.2f;
+                }
+                // Whites: offset upper
+                if (whites != 0.0f) {
+                    float weight = std::clamp((v - 0.5f) * 2.0f, 0.0f, 1.0f);
+                    v += whites * weight * 0.2f;
+                }
+                // Blacks: offset lower
+                if (blacks != 0.0f) {
+                    float weight = std::clamp((0.5f - v) * 2.0f, 0.0f, 1.0f);
+                    v += blacks * weight * 0.2f;
+                }
+                return std::clamp(v, 0.0f, 1.0f);
+            };
+            color.r = apply_hswb(color.r);
+            color.g = apply_hswb(color.g);
+            color.b = apply_hswb(color.b);
+        } else {
+            // Apply simple clip to stay in valid bounds when log and hswb are disabled
+            color.r = std::clamp(color.r, 0.0f, 1.0f);
+            color.g = std::clamp(color.g, 0.0f, 1.0f);
+            color.b = std::clamp(color.b, 0.0f, 1.0f);
+        }
 
         if (stageC) *stageC = color;
 
-        if (lut.size > 0) color = apply_lut(lut, color);
+        if (lut.size > 0 && !(ablationMask & 1)) color = apply_lut(lut, color);
         return color;
     };
     int cropW = (int)(width / zoomFactor);

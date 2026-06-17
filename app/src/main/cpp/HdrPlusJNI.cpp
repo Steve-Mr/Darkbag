@@ -118,12 +118,17 @@ void fillDebugStats(JNIEnv* env, jlongArray debugStats, jlong copyMs, jlong hali
     if (debugStats == nullptr) return;
     const jsize len = env->GetArrayLength(debugStats);
     if (len <= 0) return;
+    jlong existingMask = 0;
+    if (len > 24) {
+        env->GetLongArrayRegion(debugStats, 24, 1, &existingMask);
+    }
+
     jlong stats[25] = {
         halideMs, copyMs, postProcessMs, dngEncodeMs, saveMs, dngJoinWaitMs, totalMs,
         stageStats.align, stageStats.merge, stageStats.demosaic, stageStats.denoise, stageStats.srgb,
         jniOverheadMs, stageStats.black_white, stageStats.white_balance,
         previewMs, dngEncodeMs, mainJpgTotalMs, altJpgTotalMs,
-        edgeCompMs, pixelProcMs, jpegWriteMs, ompConvMs, apiCompMs, 0
+        edgeCompMs, pixelProcMs, jpegWriteMs, ompConvMs, apiCompMs, existingMask
     };
     env->SetLongArrayRegion(debugStats, 0, std::min<jsize>(len, 25), stats);
 }
@@ -558,25 +563,38 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
     }
 
     long long dngEncodeMs = 0;
+    long long dngJoinWaitMs = 0;
     long long mainJpgTotalMs = 0;
     long long altJpgTotalMs = 0;
     long long edgeCompMs = 0, pixelProcMs = 0, jpegWriteMs = 0, ompConvMs = 0, apiCompMs = 0;
 
     if (!jpgPathStr.empty() || !dngPathStr.empty()) {
+        std::future<long long> dngFuture;
         if (!dngPathStr.empty()) {
-            auto start_dng = std::chrono::high_resolution_clock::now();
             float baselineExposure = (digitalGain > 0.0f) ? std::log2(digitalGain) : 0.0f;
-            write_dng(dngPathStr.c_str(), width, height, finalImage, kMax16BitValue, ccmVec, meta, orientation, (bool)mirror, baselineExposure);
-            dngEncodeMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start_dng).count();
+            dngFuture = std::async(std::launch::async, [dngPathStr, width, height, &finalImage, &ccmVec, meta, orientation, mirror, baselineExposure]() -> long long {
+                auto start_dng = std::chrono::high_resolution_clock::now();
+                write_dng(dngPathStr.c_str(), width, height, finalImage, kMax16BitValue, ccmVec, meta, orientation, (bool)mirror, baselineExposure);
+                return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start_dng).count();
+            });
         }
 
         if (!jpgPathStr.empty()) {
             LOGD("process_and_save_image JPG INVOCATION START");
             long long jpgTimings[5] = {0, 0, 0, 0, 0}; // edge, pixel, jpeg, omp, api
             auto start_jpg = std::chrono::high_resolution_clock::now();
+
+        // We can pass an ablationMask if provided via debugStats
+        int ablationMask = 0;
+        if (debugStats && env->GetArrayLength(debugStats) > 24) {
+            jlong statsArray[25];
+            env->GetLongArrayRegion(debugStats, 0, 25, statsArray);
+            ablationMask = (int)statsArray[24];
+        }
+
             process_and_save_image(finalImage, width, height, digitalGain, targetLog, lut,
                                     0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
-                                    jpgPathStr.c_str(), nullptr, &meta, 1, ccmVec.data(), wbVec.data(), orientation, nullptr, 0, 0, true, 1, zoomFactor, (bool)mirror, jpgTimings);
+                                jpgPathStr.c_str(), nullptr, &meta, 1, ccmVec.data(), wbVec.data(), orientation, nullptr, 0, 0, true, 1, zoomFactor, (bool)mirror, jpgTimings, ablationMask);
             mainJpgTotalMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start_jpg).count();
             edgeCompMs = jpgTimings[0];
             pixelProcMs = jpgTimings[1];
@@ -598,12 +616,18 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
                 altJpgTotalMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start_alt).count();
             }
         }
+
+        if (dngFuture.valid()) {
+            auto start_wait = std::chrono::high_resolution_clock::now();
+            dngEncodeMs = dngFuture.get();
+            dngJoinWaitMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start_wait).count();
+        }
     }
 
     jlong totalSaveMs = (jlong)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - saveStart).count();
     jlong totalNativeMs = (jlong)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - nativeStart).count();
 
-    fillDebugStats(env, debugStats, (jlong)copyDurationMs, (jlong)halideDurationMs, (jlong)postDurationMs, dngEncodeMs, totalSaveMs, 0, totalNativeMs, (jlong)jniPrepMs, stageStats,
+    fillDebugStats(env, debugStats, (jlong)copyDurationMs, (jlong)halideDurationMs, (jlong)postDurationMs, dngEncodeMs, totalSaveMs, dngJoinWaitMs, totalNativeMs, (jlong)jniPrepMs, stageStats,
                    previewMs, mainJpgTotalMs, altJpgTotalMs, edgeCompMs, pixelProcMs, jpegWriteMs, ompConvMs, apiCompMs);
     return 0;
 }

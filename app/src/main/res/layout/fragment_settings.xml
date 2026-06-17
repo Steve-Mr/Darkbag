@@ -768,6 +768,15 @@
                             android:text="Use CameraX Engine (Fallback)"
                             android:textSize="16sp" />
 
+                        <Space android:layout_width="match_parent" android:layout_height="@dimen/spacing_medium" />
+
+                        <com.google.android.material.materialswitch.MaterialSwitch
+                            android:id="@+id/switch_run_ablation"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="Run PixelProc Ablation Test (Next Capture)"
+                            android:textSize="16sp" />
+
                         <Space android:layout_width="match_parent" android:layout_height="@dimen/spacing_large" />
 
                         <TextView

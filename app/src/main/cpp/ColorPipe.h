@@ -87,7 +87,8 @@ bool process_and_save_image(
     int downsampleFactor = 1,
     float zoomFactor = 1.0f,
     bool mirror = false,
-    long long* out_timings = nullptr
+    long long* out_timings = nullptr,
+    int ablationMask = 0
 );
 
 bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, const std::vector<float>& ccm, const ImageMetadata& metadata, int orientation, bool mirror = false, float baselineExposure = 0.0f);
