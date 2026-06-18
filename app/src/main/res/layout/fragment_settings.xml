@@ -774,7 +774,7 @@
                             android:id="@+id/switch_run_ablation"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:text="Run PixelProc Ablation Test (Next Capture)"
+                            android:text="Run PixelProc Ablation Test (Persistent)"
                             android:textSize="16sp" />
 
                         <Space android:layout_width="match_parent" android:layout_height="@dimen/spacing_large" />

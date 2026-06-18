@@ -136,25 +136,27 @@ class HdrPlusProcessingService : Service() {
             val saveStartTime = System.currentTimeMillis()
             val targetUri = req.zslTargetUriStr?.let { Uri.parse(it) }
 
-            val finalUri = ImageSaver.saveProcessedImage(
-                context = applicationContext,
-                inputBitmap = null,
-                bmpPath = outputJpgPath,
-                rotationDegrees = 0,
-                zoomFactor = 1.0f,
-                baseName = req.baseName,
-                linearDngPath = outputDngPath,
-                saveJpg = req.saveJpg,
-                saveRaw = req.saveRaw,
-                jpgFolderUri = req.jpgFolderUri,
-                rawFolderUri = req.rawFolderUri,
-                targetUri = targetUri,
-                mirror = false,
-                halfFrameMetadata = req.hfMetadata,
-                editConfig = req.editConfig,
-                digitalGain = req.digitalGain,
-                captureMetadata = req.metadata
-            )
+            val finalUri = if (ablationMask == 0) {
+                ImageSaver.saveProcessedImage(
+                    context = applicationContext,
+                    inputBitmap = null,
+                    bmpPath = currentJpgPath,
+                    rotationDegrees = 0,
+                    zoomFactor = 1.0f,
+                    baseName = req.baseName,
+                    linearDngPath = currentDngPath,
+                    saveJpg = req.saveJpg,
+                    saveRaw = req.saveRaw,
+                    jpgFolderUri = req.jpgFolderUri,
+                    rawFolderUri = req.rawFolderUri,
+                    targetUri = targetUri,
+                    mirror = false,
+                    halfFrameMetadata = req.hfMetadata,
+                    editConfig = req.editConfig,
+                    digitalGain = req.digitalGain,
+                    captureMetadata = req.metadata
+                )
+            } else { null }
 
             val saveEndTime = System.currentTimeMillis()
 

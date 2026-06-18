@@ -428,6 +428,7 @@ class SettingsFragment : Fragment() {
         setupSwitch(binding.switchShowLutSwitcher, KEY_SHOW_LUT_SWITCHER)
 
         setupSwitch(binding.switchForce60fps, KEY_FORCE_60FPS, false)
+        setupSwitch(binding.switchRunAblation, KEY_RUN_ABLATION, false)
 
         binding.switchCloseDebug.setOnCheckedChangeListener { _, isChecked ->
             if (isChecked) {
