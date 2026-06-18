@@ -574,6 +574,52 @@ bool process_and_save_image(
     float exp_gain = std::pow(2.0f, exposure);
     float global_gain_multiplier = (gain * exp_gain) / 65535.0f;
 
+    // Build 1D LUT for log and non-linear tone adjustments
+    // Size = 65536 to map all possible 16-bit intermediate float values that are scaled to [0,1]
+    const int kLut1DSize = 65536;
+    std::vector<float> lut1D_post_matrix(kLut1DSize);
+
+    auto apply_contrast_hswb = [&](float v) -> float {
+        // Log curve
+        v = apply_log(v, targetLog);
+
+        // Contrast
+        v = std::clamp((v - 0.5f) * (contrast + 1.0f) + 0.5f, 0.0f, 1.0f);
+
+        // Highlights
+        if (highlights != 0.0f) {
+            float weight = std::pow(std::clamp(v, 0.0f, 1.0f), 2.0f);
+            v += highlights * weight * 0.2f;
+        }
+        // Shadows
+        if (shadows != 0.0f) {
+            float weight = std::pow(1.0f - std::clamp(v, 0.0f, 1.0f), 2.0f);
+            v += shadows * weight * 0.2f;
+        }
+        // Whites
+        if (whites != 0.0f) {
+            float weight = std::clamp((v - 0.5f) * 2.0f, 0.0f, 1.0f);
+            v += whites * weight * 0.2f;
+        }
+        // Blacks
+        if (blacks != 0.0f) {
+            float weight = std::clamp((0.5f - v) * 2.0f, 0.0f, 1.0f);
+            v += blacks * weight * 0.2f;
+        }
+        return std::clamp(v, 0.0f, 1.0f);
+    };
+
+    // Ensure the 1D LUT covers a wider dynamic range to prevent clipping extreme highlights (e.g. from high digital gain)
+    float max_linear = std::max(4.0f, gain * exp_gain * 2.0f);
+
+    if (!(ablationMask & 2)) {
+        for (int i = 0; i < kLut1DSize; ++i) {
+            // Map the array indices over the [0, max_linear] domain
+            float linear_val = ((float)i / (kLut1DSize - 1)) * max_linear;
+            lut1D_post_matrix[i] = apply_contrast_hswb(linear_val);
+        }
+    }
+
         auto process_pixel = [&](int x, int y, Vec3* stageA, Vec3* stageB, Vec3* stageC) -> Vec3 {
         x = std::max(0, std::min(x, width - 1));
         y = std::max(0, std::min(y, height - 1));
@@ -622,48 +668,21 @@ bool process_and_save_image(
         if (stageB) *stageB = color;
 
         if (!(ablationMask & 2)) {
-            color.r = apply_log(color.r, targetLog); color.g = apply_log(color.g, targetLog); color.b = apply_log(color.b, targetLog);
-
-            // 2. Contrast & Saturation (Log Space)
-            auto apply_contrast = [&](float v) {
-                return std::clamp((v - 0.5f) * (contrast + 1.0f) + 0.5f, 0.0f, 1.0f);
+            // Use 1D LUT for log, contrast, and HSWB
+            auto apply_1d_lut = [&](float v) -> float {
+                int lutIdx = (int)(std::max(0.0f, std::min(max_linear, v)) / max_linear * (kLut1DSize - 1));
+                return lut1D_post_matrix[lutIdx];
             };
-            color.r = apply_contrast(color.r);
-            color.g = apply_contrast(color.g);
-            color.b = apply_contrast(color.b);
 
+            color.r = apply_1d_lut(color.r);
+            color.g = apply_1d_lut(color.g);
+            color.b = apply_1d_lut(color.b);
+
+            // Saturation must be calculated dynamically because it depends on the cross-channel luma
             float luma = 0.2126f * color.r + 0.7152f * color.g + 0.0722f * color.b;
             color.r = std::clamp(luma + (color.r - luma) * (saturation + 1.0f), 0.0f, 1.0f);
             color.g = std::clamp(luma + (color.g - luma) * (saturation + 1.0f), 0.0f, 1.0f);
             color.b = std::clamp(luma + (color.b - luma) * (saturation + 1.0f), 0.0f, 1.0f);
-
-            // 3. Highlights / Shadows / Whites / Blacks (Log Space)
-            auto apply_hswb = [&](float v) {
-                // Highlights: affecting upper range
-                if (highlights != 0.0f) {
-                    float weight = std::pow(std::clamp(v, 0.0f, 1.0f), 2.0f);
-                    v += highlights * weight * 0.2f;
-                }
-                // Shadows: affecting lower range
-                if (shadows != 0.0f) {
-                    float weight = std::pow(1.0f - std::clamp(v, 0.0f, 1.0f), 2.0f);
-                    v += shadows * weight * 0.2f;
-                }
-                // Whites: offset upper
-                if (whites != 0.0f) {
-                    float weight = std::clamp((v - 0.5f) * 2.0f, 0.0f, 1.0f);
-                    v += whites * weight * 0.2f;
-                }
-                // Blacks: offset lower
-                if (blacks != 0.0f) {
-                    float weight = std::clamp((0.5f - v) * 2.0f, 0.0f, 1.0f);
-                    v += blacks * weight * 0.2f;
-                }
-                return std::clamp(v, 0.0f, 1.0f);
-            };
-            color.r = apply_hswb(color.r);
-            color.g = apply_hswb(color.g);
-            color.b = apply_hswb(color.b);
         } else {
             // Apply simple clip to stay in valid bounds when log and hswb are disabled
             color.r = std::clamp(color.r, 0.0f, 1.0f);
