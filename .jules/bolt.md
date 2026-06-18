@@ -10,3 +10,7 @@
 ## 2024-05-14 - [Replace notifyDataSetChanged with DiffUtil in LutManagementAdapter]
 **Learning:** Using `notifyDataSetChanged()` in RecyclerView adapters causes inefficient full-list redraws, which can negatively impact performance even for relatively small lists like imported LUTs.
 **Action:** When updating a RecyclerView adapter's dataset where items can be uniquely identified and compared for content changes, prefer using `DiffUtil` to dispatch granular update events (insertions, removals, changes). In this case, absolute file paths and active LUT status were used as identifying criteria in `LutManagementFragment.kt`.
+
+## 2026-06-18 - [JNI Thread Thrashing with OpenMP and std::async]
+**Learning:** Launching heavy CPU-bound tasks via `std::async(std::launch::async)` (like encoding DNGs) concurrently with highly parallelized OpenMP pixel processing loops inside a single JNI call severely degrades overall performance on Android CPUs due to thread thrashing and cache contention.
+**Action:** Always serialize heavy native tasks or use `std::thread(...).detach()` with deep copied data to completely offload asynchronous work without blocking the primary Kotlin/JNI return path. Memory overhead (e.g., copying a 16-bit pixel array) is often a necessary trade-off to ensure immediate UI responsiveness.
