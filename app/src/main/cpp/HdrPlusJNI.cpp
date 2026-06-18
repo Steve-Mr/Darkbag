@@ -568,21 +568,10 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
     long long altJpgTotalMs = 0;
     long long edgeCompMs = 0, pixelProcMs = 0, jpegWriteMs = 0, ompConvMs = 0, apiCompMs = 0;
 
-    if (!jpgPathStr.empty() || !dngPathStr.empty()) {
-        std::future<long long> dngFuture;
-        if (!dngPathStr.empty()) {
-            float baselineExposure = (digitalGain > 0.0f) ? std::log2(digitalGain) : 0.0f;
-            dngFuture = std::async(std::launch::async, [dngPathStr, width, height, &finalImage, &ccmVec, meta, orientation, mirror, baselineExposure]() -> long long {
-                auto start_dng = std::chrono::high_resolution_clock::now();
-                write_dng(dngPathStr.c_str(), width, height, finalImage, kMax16BitValue, ccmVec, meta, orientation, (bool)mirror, baselineExposure);
-                return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start_dng).count();
-            });
-        }
-
-        if (!jpgPathStr.empty()) {
-            LOGD("process_and_save_image JPG INVOCATION START");
-            long long jpgTimings[5] = {0, 0, 0, 0, 0}; // edge, pixel, jpeg, omp, api
-            auto start_jpg = std::chrono::high_resolution_clock::now();
+    if (!jpgPathStr.empty()) {
+        LOGD("process_and_save_image JPG INVOCATION START");
+        long long jpgTimings[5] = {0, 0, 0, 0, 0}; // edge, pixel, jpeg, omp, api
+        auto start_jpg = std::chrono::high_resolution_clock::now();
 
         // We can pass an ablationMask if provided via debugStats
         int ablationMask = 0;
@@ -592,36 +581,42 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
             ablationMask = (int)statsArray[24];
         }
 
+        process_and_save_image(finalImage, width, height, digitalGain, targetLog, lut,
+                                0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                            jpgPathStr.c_str(), nullptr, &meta, 1, ccmVec.data(), wbVec.data(), orientation, nullptr, 0, 0, true, 1, zoomFactor, (bool)mirror, jpgTimings, ablationMask);
+        mainJpgTotalMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start_jpg).count();
+        edgeCompMs = jpgTimings[0];
+        pixelProcMs = jpgTimings[1];
+        jpegWriteMs = jpgTimings[2];
+        ompConvMs = jpgTimings[3];
+        apiCompMs = jpgTimings[4];
+
+        if (exportMatrixAB && ccmAltVec.size() == 9) {
+            std::string suffix = useSensorColorMatrix ? "_AB_CAPTURE_CCM.jpg" : "_AB_SENSOR_CCM.jpg";
+            std::string altJpgPath = jpgPathStr;
+            size_t dot = altJpgPath.find_last_of('.');
+            if (dot == std::string::npos) dot = altJpgPath.size();
+            altJpgPath = altJpgPath.substr(0, dot) + suffix;
+            LOGD("process_and_save_image ALT_JPG INVOCATION START");
+            auto start_alt = std::chrono::high_resolution_clock::now();
             process_and_save_image(finalImage, width, height, digitalGain, targetLog, lut,
                                     0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
-                                jpgPathStr.c_str(), nullptr, &meta, 1, ccmVec.data(), wbVec.data(), orientation, nullptr, 0, 0, true, 1, zoomFactor, (bool)mirror, jpgTimings, ablationMask);
-            mainJpgTotalMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start_jpg).count();
-            edgeCompMs = jpgTimings[0];
-            pixelProcMs = jpgTimings[1];
-            jpegWriteMs = jpgTimings[2];
-            ompConvMs = jpgTimings[3];
-            apiCompMs = jpgTimings[4];
-
-            if (exportMatrixAB && !jpgPathStr.empty() && ccmAltVec.size() == 9) {
-                std::string suffix = useSensorColorMatrix ? "_AB_CAPTURE_CCM.jpg" : "_AB_SENSOR_CCM.jpg";
-                std::string altJpgPath = jpgPathStr;
-                size_t dot = altJpgPath.find_last_of('.');
-                if (dot == std::string::npos) dot = altJpgPath.size();
-                altJpgPath = altJpgPath.substr(0, dot) + suffix;
-                LOGD("process_and_save_image ALT_JPG INVOCATION START");
-                auto start_alt = std::chrono::high_resolution_clock::now();
-                process_and_save_image(finalImage, width, height, digitalGain, targetLog, lut,
-                                        0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
-                                        altJpgPath.c_str(), nullptr, &meta, 1, ccmAltVec.data(), wbVec.data(), orientation, nullptr, 0, 0, false, 1, zoomFactor, (bool)mirror);
-                altJpgTotalMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start_alt).count();
-            }
+                                    altJpgPath.c_str(), nullptr, &meta, 1, ccmAltVec.data(), wbVec.data(), orientation, nullptr, 0, 0, false, 1, zoomFactor, (bool)mirror);
+            altJpgTotalMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start_alt).count();
         }
+    }
 
-        if (dngFuture.valid()) {
-            auto start_wait = std::chrono::high_resolution_clock::now();
-            dngEncodeMs = dngFuture.get();
-            dngJoinWaitMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start_wait).count();
-        }
+    if (!dngPathStr.empty()) {
+        float baselineExposure = (digitalGain > 0.0f) ? std::log2(digitalGain) : 0.0f;
+        // COPY finalImage into a new shared_ptr so we can detach and process DNG in the background
+        auto finalImageCopy = std::make_shared<std::vector<uint16_t>>(finalImage);
+        std::thread([dngPathStr, width, height, finalImageCopy, ccmVec, meta, orientation, mirror, baselineExposure]() {
+            auto start_dng = std::chrono::high_resolution_clock::now();
+            write_dng(dngPathStr.c_str(), width, height, *finalImageCopy, kMax16BitValue, ccmVec, meta, orientation, (bool)mirror, baselineExposure);
+            long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start_dng).count();
+            LOGD("Native background DNG thread finished in %lld ms.", ms);
+        }).detach();
+        dngEncodeMs = 0; // Return immediately
     }
 
     jlong totalSaveMs = (jlong)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - saveStart).count();
