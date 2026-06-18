@@ -149,9 +149,18 @@ static const TIFFFieldInfo dng_field_info[] = {
     { TIFFTAG_FOCALLENGTHIN35MMFILM, 1, 1, TIFF_SHORT, FIELD_CUSTOM, 1, 0, const_cast<char*>("FocalLengthIn35mmFilm") }
 };
 
+
+#include <mutex>
+static std::mutex tiff_extender_mutex;
+static TIFFExtendProc parent_extender = nullptr;
+
 static void DNGTagExtender(TIFF *tif) {
     TIFFMergeFieldInfo(tif, dng_field_info, sizeof(dng_field_info) / sizeof(dng_field_info[0]));
+    if (parent_extender) {
+        (*parent_extender)(tif);
+    }
 }
+
 
 // --- Metadata Helpers ---
 static void format_exif_time(int64_t millis, char* buffer) {
@@ -1154,7 +1163,10 @@ static std::vector<unsigned char> make_preview_rgb8(
 }
 
 bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, const std::vector<float>& ccm, const ImageMetadata& metadata, int orientation, bool mirror, float baselineExposure) {
-    TIFFSetTagExtender(DNGTagExtender);
+    {
+        std::lock_guard<std::mutex> lock(tiff_extender_mutex);
+        parent_extender = TIFFSetTagExtender(DNGTagExtender);
+    }
     TIFF* tif = TIFFOpen(filename, "w");
     if (!tif) return false;
 

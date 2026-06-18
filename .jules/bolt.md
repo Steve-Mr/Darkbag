@@ -14,3 +14,7 @@
 ## 2026-06-18 - [JNI Thread Thrashing with OpenMP and std::async]
 **Learning:** Launching heavy CPU-bound tasks via `std::async(std::launch::async)` (like encoding DNGs) concurrently with highly parallelized OpenMP pixel processing loops inside a single JNI call severely degrades overall performance on Android CPUs due to thread thrashing and cache contention.
 **Action:** Always serialize heavy native tasks or use `std::thread(...).detach()` with deep copied data to completely offload asynchronous work without blocking the primary Kotlin/JNI return path. Memory overhead (e.g., copying a 16-bit pixel array) is often a necessary trade-off to ensure immediate UI responsiveness.
+
+## 2026-06-18 - [libtiff Data Race via detached threads]
+**Learning:** `TIFFSetTagExtender` modifies global library state (`_TIFFextender`). If called concurrently without a global lock from detached threads, this causes critical data races, leading to undefined behavior or crashes when writing multiple DNG/TIFF files.
+**Action:** When using third-party global-state C-libraries in multithreaded pipelines (like libtiff), ensure modifications to global configuration pointers are strictly synchronized using `std::mutex`.
