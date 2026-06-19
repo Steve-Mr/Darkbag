@@ -350,8 +350,19 @@ public:
         return instance;
     }
 
-    LUT3D getLut(const std::string& path) {
-        if (path.empty()) return LUT3D();
+    const LUT3D& getLut(const std::string& path) {
+        static const LUT3D empty_lut;
+        if (path.empty()) return empty_lut;
+
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            auto it = cache_.find(path);
+            if (it != cache_.end()) {
+                return it->second;
+            }
+        }
+
+        LUT3D lut = load_lut_internal(path.c_str());
 
         std::lock_guard<std::mutex> lock(mutex_);
         auto it = cache_.find(path);
@@ -359,9 +370,8 @@ public:
             return it->second;
         }
 
-        LUT3D lut = load_lut_internal(path.c_str());
-        cache_[path] = lut;
-        return lut;
+        auto inserted = cache_.emplace(path, std::move(lut));
+        return inserted.first->second;
     }
 
 private:
@@ -406,8 +416,9 @@ private:
     }
 };
 
-LUT3D load_lut(const char* path) {
-    if (!path) return LUT3D();
+const LUT3D& load_lut(const char* path) {
+    static const LUT3D empty_lut;
+    if (!path) return empty_lut;
     return LutCache::getInstance().getLut(path);
 }
 
@@ -668,7 +679,13 @@ bool process_and_save_image(
         }
     }
 
-        auto process_pixel = [&](int x, int y, Vec3* stageA, Vec3* stageB, Vec3* stageC) -> Vec3 {
+
+    // Loop invariants for saturation to prevent redundant calculations per pixel
+    float sat_mult = saturation + 1.0f;
+    float luma_mult = 1.0f - sat_mult;
+
+    auto process_pixel = [&](int x, int y, Vec3* stageA, Vec3* stageB, Vec3* stageC) -> Vec3 {
+
         x = std::max(0, std::min(x, width - 1));
         y = std::max(0, std::min(y, height - 1));
         size_t idx = (static_cast<size_t>(y) * width + x) * 3;
@@ -727,9 +744,8 @@ bool process_and_save_image(
             color.b = apply_1d_lut(color.b);
 
             // Saturation must be calculated dynamically because it depends on the cross-channel luma
-            float sat_mult = saturation + 1.0f;
-            float luma_mult = 1.0f - sat_mult;
-            float luma_comp = (0.2126f * color.r + 0.7152f * color.g + 0.0722f * color.b) * luma_mult;
+            // Note: sat_mult and luma_mult are now extracted as loop invariants outside the pixel processing loop
+            float luma_comp = (kRec709LinearLumaR * color.r + kRec709LinearLumaG * color.g + kRec709LinearLumaB * color.b) * luma_mult;
             color.r = std::clamp(luma_comp + color.r * sat_mult, 0.0f, 1.0f);
             color.g = std::clamp(luma_comp + color.g * sat_mult, 0.0f, 1.0f);
             color.b = std::clamp(luma_comp + color.b * sat_mult, 0.0f, 1.0f);

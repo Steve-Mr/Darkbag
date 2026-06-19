@@ -55,7 +55,7 @@ struct LUT3D {
     std::vector<Vec3> data;
 };
 
-LUT3D load_lut(const char* path);
+const LUT3D& load_lut(const char* path);
 Vec3 apply_lut(const LUT3D& lut, Vec3 color);
 
 // --- Shared Pipeline ---

@@ -317,7 +317,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
 
 
     const char* lut_path_cstr = (lutPath) ? env->GetStringUTFChars(lutPath, 0) : nullptr;
-    LUT3D lut; if (lut_path_cstr) { lut = load_lut(lut_path_cstr); env->ReleaseStringUTFChars(lutPath, lut_path_cstr); }
+    const LUT3D& lut = lut_path_cstr ? load_lut(lut_path_cstr) : load_lut(nullptr); if (lut_path_cstr) { env->ReleaseStringUTFChars(lutPath, lut_path_cstr); }
 
     const char* jpg_path_cstr = (jpgPath) ? env->GetStringUTFChars(jpgPath, 0) : nullptr;
     const char* dng_path_cstr = (dngPath) ? env->GetStringUTFChars(dngPath, 0) : nullptr;
@@ -477,7 +477,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
     if (outputBitmap) AndroidBitmap_lockPixels(env, outputBitmap, (void**)&bitmapPixels);
 
     const char* lut_path_cstr = (lutPath) ? env->GetStringUTFChars(lutPath, 0) : nullptr;
-    LUT3D lut; if (lut_path_cstr) { lut = load_lut(lut_path_cstr); env->ReleaseStringUTFChars(lutPath, lut_path_cstr); }
+    const LUT3D& lut = lut_path_cstr ? load_lut(lut_path_cstr) : load_lut(nullptr); if (lut_path_cstr) { env->ReleaseStringUTFChars(lutPath, lut_path_cstr); }
 
     std::vector<uint16_t>& finalImage = g_hdrPlusBuffers.interleavedPool;
     int stride_x = outputBuf.dim(0).stride(), stride_y = outputBuf.dim(1).stride(), stride_c = outputBuf.dim(2).stride();
