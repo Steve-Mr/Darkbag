@@ -678,8 +678,9 @@ bool process_and_save_image(
 
         if (!(ablationMask & 2)) {
             // Use 1D LUT for log, contrast, and HSWB
+            float lut_scale = (kLut1DSize - 1) / max_linear;
             auto apply_1d_lut = [&](float v) -> float {
-                int lutIdx = (int)(std::max(0.0f, std::min(max_linear, v)) / max_linear * (kLut1DSize - 1));
+                int lutIdx = (int)(std::max(0.0f, std::min(max_linear, v)) * lut_scale);
                 return lut1D_post_matrix[lutIdx];
             };
 
@@ -723,21 +724,22 @@ bool process_and_save_image(
         int renderH = (out_rgb_buffer && out_height > 0) ? out_height : finalH_zoomed;
 
         previewRgb8.resize(static_cast<size_t>(renderW) * renderH * 3);
+        float scaleX = (float)(swapDims ? cropH : cropW) / renderW;
+        float scaleY = (float)(swapDims ? cropW : cropH) / renderH;
+
         #pragma omp parallel for
         for (int py = 0; py < renderH; py++) {
             for (int px = 0; px < renderW; px++) {
                 int sx, sy;
                 int opx = mirror ? (renderW - 1 - px) : px;
 
-                // Map back to source pixels using the actual render dimensions
-                // This is safer than using downsampleFactor directly if dimensions mismatch
-                float fx = (float)opx / renderW * (swapDims ? cropH : cropW);
-                float fy = (float)py / renderH * (swapDims ? cropW : cropH);
+                int fx = (int)(opx * scaleX);
+                int fy = (int)(py * scaleY);
 
-                if (orientation == 90) { sx = (int)fy; sy = (cropH - 1) - (int)fx; }
-                else if (orientation == 180) { sx = (cropW - 1) - (int)fx; sy = (cropH - 1) - (int)fy; }
-                else if (orientation == 270) { sx = (cropW - 1) - (int)fy; sy = (int)fx; }
-                else { sx = (int)fx; sy = (int)fy; }
+                if (orientation == 90) { sx = fy; sy = (cropH - 1) - fx; }
+                else if (orientation == 180) { sx = (cropW - 1) - fx; sy = (cropH - 1) - fy; }
+                else if (orientation == 270) { sx = (cropW - 1) - fy; sy = fx; }
+                else { sx = fx; sy = fy; }
 
                 Vec3 color = process_pixel(cropX + sx, cropY + sy, nullptr, nullptr, nullptr);
                 size_t outIdx = (static_cast<size_t>(py) * renderW + px) * 3;
@@ -763,25 +765,24 @@ bool process_and_save_image(
         finalH_zoomed = renderH;
     } else {
         processedImage.resize(static_cast<size_t>(finalW_zoomed) * finalH_zoomed * 3);
+        float scaleX = (float)(swapDims ? cropH : cropW) / finalW_zoomed;
+        float scaleY = (float)(swapDims ? cropW : cropH) / finalH_zoomed;
+
         #pragma omp parallel for
         for (int py = 0; py < finalH_zoomed; py++) {
             for (int px = 0; px < finalW_zoomed; px++) {
                 int sx, sy;
                 int opx = mirror ? (finalW_zoomed - 1 - px) : px;
 
-                float fx = (float)opx / finalW_zoomed * (swapDims ? cropH : cropW);
-                float fy = (float)py / finalH_zoomed * (swapDims ? cropW : cropH);
+                int fx = (int)(opx * scaleX);
+                int fy = (int)(py * scaleY);
 
-                if (orientation == 90) { sx = (int)fy; sy = (cropH - 1) - (int)fx; }
-                else if (orientation == 180) { sx = (cropW - 1) - (int)fx; sy = (cropH - 1) - (int)fy; }
-                else if (orientation == 270) { sx = (cropW - 1) - (int)fy; sy = (int)fx; }
-                else { sx = (int)fx; sy = (int)fy; }
+                if (orientation == 90) { sx = fy; sy = (cropH - 1) - fx; }
+                else if (orientation == 180) { sx = (cropW - 1) - fx; sy = (cropH - 1) - fy; }
+                else if (orientation == 270) { sx = (cropW - 1) - fy; sy = fx; }
+                else { sx = fx; sy = fy; }
 
-                Vec3 stageA{}, stageB{}, stageC{};
-                Vec3 color = process_pixel(cropX + sx, cropY + sy,
-                                           nullptr,
-                                           nullptr,
-                                           nullptr);
+                Vec3 color = process_pixel(cropX + sx, cropY + sy, nullptr, nullptr, nullptr);
                 size_t outIdx = (static_cast<size_t>(py) * finalW_zoomed + px) * 3;
                 processedImage[outIdx + 0] = (unsigned short)std::max(0.0f, std::min(65535.0f, color.r * 65535.0f));
                 processedImage[outIdx + 1] = (unsigned short)std::max(0.0f, std::min(65535.0f, color.g * 65535.0f));

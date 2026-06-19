@@ -18,3 +18,7 @@
 ## 2026-06-18 - [libtiff Data Race via detached threads]
 **Learning:** `TIFFSetTagExtender` modifies global library state (`_TIFFextender`). If called concurrently without a global lock from detached threads, this causes critical data races, leading to undefined behavior or crashes when writing multiple DNG/TIFF files.
 **Action:** When using third-party global-state C-libraries in multithreaded pipelines (like libtiff), ensure modifications to global configuration pointers are strictly synchronized using `std::mutex`.
+
+## 2026-06-19 - [Hot Loop Float Math Optimization]
+**Learning:** Performing floating-point division and conditional ternary operations (`swapDims ? cropH : cropW`) inside a high-resolution OpenMP `#pragma omp parallel for` loop (e.g., 12 million iterations) incurs significant overhead and limits the compiler's auto-vectorization capabilities.
+**Action:** Extract all loop-invariant mathematical calculations (especially division and constant conditional branches) outside of critical per-pixel rendering loops to drastically improve execution time and CPU efficiency.
