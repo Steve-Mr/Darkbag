@@ -340,36 +340,75 @@ float apply_log(float x, int type) {
 }
 
 // --- LUT (CPU) ---
-LUT3D load_lut(const char* path) {
-    LUT3D lut;
-    lut.size = 0;
-    std::ifstream file(path);
-    if (!file.is_open()) return lut;
-    char line[2048];
-    int lineCount = 0;
-    const int maxLines = 1000000;
-    while (file.getline(line, sizeof(line)) && ++lineCount < maxLines) {
-        if (line[0] == '\0' || line[0] == '#') continue;
-        std::string lineStr(line);
-        if (lineStr.find("LUT_3D_SIZE") != std::string::npos) {
-            std::stringstream ss(lineStr); std::string temp; ss >> temp >> lut.size;
-            if (lut.size > 0 && lut.size <= 64) {
-                lut.data.reserve(lut.size * lut.size * lut.size);
-            } else {
-                lut.size = 0;
-                return lut;
-            }
-            continue;
+#include <mutex>
+#include <unordered_map>
+
+class LutCache {
+public:
+    static LutCache& getInstance() {
+        static LutCache instance;
+        return instance;
+    }
+
+    LUT3D getLut(const std::string& path) {
+        if (path.empty()) return LUT3D();
+
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto it = cache_.find(path);
+        if (it != cache_.end()) {
+            return it->second;
         }
-        std::stringstream ss(lineStr); float r, g, b;
-        if (ss >> r >> g >> b) lut.data.push_back({r, g, b});
+
+        LUT3D lut = load_lut_internal(path.c_str());
+        cache_[path] = lut;
+        return lut;
     }
-    if (lut.size > 0 && lut.data.size() != (size_t)(lut.size * lut.size * lut.size)) {
-        LOGE("LUT size mismatch: expected %d^3=%zu, got %zu", lut.size, (size_t)(lut.size * lut.size * lut.size), lut.data.size());
+
+private:
+    LutCache() = default;
+    ~LutCache() = default;
+    LutCache(const LutCache&) = delete;
+    LutCache& operator=(const LutCache&) = delete;
+
+    std::mutex mutex_;
+    std::unordered_map<std::string, LUT3D> cache_;
+
+    LUT3D load_lut_internal(const char* path) {
+        LUT3D lut;
         lut.size = 0;
-        lut.data.clear();
+        std::ifstream file(path);
+        if (!file.is_open()) return lut;
+        char line[2048];
+        int lineCount = 0;
+        const int maxLines = 1000000;
+        while (file.getline(line, sizeof(line)) && ++lineCount < maxLines) {
+            if (line[0] == '\0' || line[0] == '#') continue;
+            std::string lineStr(line);
+            if (lineStr.find("LUT_3D_SIZE") != std::string::npos) {
+                std::stringstream ss(lineStr); std::string temp; ss >> temp >> lut.size;
+                if (lut.size > 0 && lut.size <= 64) {
+                    lut.data.reserve(lut.size * lut.size * lut.size);
+                } else {
+                    lut.size = 0;
+                    return lut;
+                }
+                continue;
+            }
+            std::stringstream ss(lineStr); float r, g, b;
+            if (ss >> r >> g >> b) lut.data.push_back({r, g, b});
+        }
+        if (lut.size > 0 && lut.data.size() != (size_t)(lut.size * lut.size * lut.size)) {
+            LOGE("LUT size mismatch: expected %d^3=%zu, got %zu", lut.size, (size_t)(lut.size * lut.size * lut.size), lut.data.size());
+            lut.size = 0;
+            lut.data.clear();
+        }
+        return lut;
     }
-    return lut;
+};
+
+LUT3D load_lut(const char* path) {
+    if (!path) return LUT3D();
+    return LutCache::getInstance().getLut(path);
 }
 
 Vec3 apply_lut(const LUT3D& lut, Vec3 color) {
@@ -688,10 +727,12 @@ bool process_and_save_image(
             color.b = apply_1d_lut(color.b);
 
             // Saturation must be calculated dynamically because it depends on the cross-channel luma
-            float luma = 0.2126f * color.r + 0.7152f * color.g + 0.0722f * color.b;
-            color.r = std::clamp(luma + (color.r - luma) * (saturation + 1.0f), 0.0f, 1.0f);
-            color.g = std::clamp(luma + (color.g - luma) * (saturation + 1.0f), 0.0f, 1.0f);
-            color.b = std::clamp(luma + (color.b - luma) * (saturation + 1.0f), 0.0f, 1.0f);
+            float sat_mult = saturation + 1.0f;
+            float luma_mult = 1.0f - sat_mult;
+            float luma_comp = (0.2126f * color.r + 0.7152f * color.g + 0.0722f * color.b) * luma_mult;
+            color.r = std::clamp(luma_comp + color.r * sat_mult, 0.0f, 1.0f);
+            color.g = std::clamp(luma_comp + color.g * sat_mult, 0.0f, 1.0f);
+            color.b = std::clamp(luma_comp + color.b * sat_mult, 0.0f, 1.0f);
         } else {
             // Apply simple clip to stay in valid bounds when log and hswb are disabled
             color.r = std::clamp(color.r, 0.0f, 1.0f);
