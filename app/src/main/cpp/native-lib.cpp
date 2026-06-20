@@ -275,8 +275,10 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRaw(
     }
 
     // Use Shared Pipeline
+    std::vector<float> emptyLs;
     bool saveOk = process_and_save_image(
-        rawImage,
+        rawImage.data(),
+        3, image->width * 3, 1, emptyLs, 0, 0,
         image->width,
         image->height,
         digitalGain,
@@ -297,7 +299,9 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRaw(
         (int)downsampleFactor, // downsampleFactor
         (float)zoomFactor, // zoomFactor
         (bool)mirror,
-        nullptr // out_timings
+        nullptr, // out_timings
+        0, // ablationMask
+        false // useTetrahedralLut
     );
 
     if (bitmapPixels) AndroidBitmap_unlockPixels(env, outputBitmap);

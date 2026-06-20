@@ -56,11 +56,14 @@ struct LUT3D {
 };
 
 const LUT3D& load_lut(const char* path);
-Vec3 apply_lut(const LUT3D& lut, Vec3 color);
+Vec3 apply_lut(const LUT3D& lut, Vec3 color, bool useTetrahedral = false);
 
 // --- Shared Pipeline ---
 bool process_and_save_image(
-    const std::vector<unsigned short>& inputImage,
+    const uint16_t* planarData,
+    int stride_x, int stride_y, int stride_c,
+    const std::vector<float>& lensShadingVec,
+    int lensShadingRows, int lensShadingCols,
     int width,
     int height,
     float gain,
@@ -88,10 +91,11 @@ bool process_and_save_image(
     float zoomFactor = 1.0f,
     bool mirror = false,
     long long* out_timings = nullptr,
-    int ablationMask = 0
+    int ablationMask = 0,
+    bool useTetrahedralLut = false
 );
 
-bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, const std::vector<float>& ccm, const ImageMetadata& metadata, int orientation, bool mirror = false, float baselineExposure = 0.0f);
+bool write_dng(const char* filename, int width, int height, const uint16_t* planarData, int stride_x, int stride_y, int stride_c, const std::vector<float>& lensShadingVec, int lensShadingRows, int lensShadingCols, int whiteLevel, const std::vector<float>& ccm, const ImageMetadata& metadata, int orientation, bool mirror = false, float baselineExposure = 0.0f);
 
 bool write_bmp(const char* filename, int width, int height, const std::vector<unsigned short>& data);
 
