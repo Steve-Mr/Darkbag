@@ -103,10 +103,14 @@ object ImageSaver {
                         } else {
                             if (finalPath != null) {
                                 val finalFile = File(finalPath)
-                                if (jpgFolderUri != null) {
+                                if (targetUri != null) {
+                                    finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri, editConfig = editConfig, zoomFactor = zoomFactor, captureMetadata = captureMetadata, writeExifMetadata = !isFastPath) { out ->
+                                        finalFile.inputStream().use { it.copyTo(out) }
+                                    }
+                                } else if (jpgFolderUri != null) {
                                     finalJpgUri = saveFileToFolder(context, finalFile, "$baseName.jpg", "image/jpeg", jpgFolderUri, editConfig = editConfig, zoomFactor = zoomFactor, captureMetadata = captureMetadata, writeExifMetadata = !isFastPath)
                                 } else {
-                                    finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri, editConfig = editConfig, zoomFactor = zoomFactor, captureMetadata = captureMetadata, writeExifMetadata = !isFastPath) { out ->
+                                    finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", null, editConfig = editConfig, zoomFactor = zoomFactor, captureMetadata = captureMetadata, writeExifMetadata = !isFastPath) { out ->
                                         finalFile.inputStream().use { it.copyTo(out) }
                                     }
                                 }
@@ -117,10 +121,14 @@ object ImageSaver {
                         }
                     } else {
                         val finalFile = f
-                        if (jpgFolderUri != null) {
+                        if (targetUri != null) {
+                            finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri, editConfig = editConfig, zoomFactor = zoomFactor, captureMetadata = captureMetadata, writeExifMetadata = !isFastPath) { out ->
+                                finalFile.inputStream().use { it.copyTo(out) }
+                            }
+                        } else if (jpgFolderUri != null) {
                             finalJpgUri = saveFileToFolder(context, finalFile, "$baseName.jpg", "image/jpeg", jpgFolderUri, editConfig = editConfig, zoomFactor = zoomFactor, captureMetadata = captureMetadata, writeExifMetadata = !isFastPath)
                         } else {
-                            finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri, editConfig = editConfig, zoomFactor = zoomFactor, captureMetadata = captureMetadata, writeExifMetadata = !isFastPath) { out ->
+                            finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", null, editConfig = editConfig, zoomFactor = zoomFactor, captureMetadata = captureMetadata, writeExifMetadata = !isFastPath) { out ->
                                 finalFile.inputStream().use { it.copyTo(out) }
                             }
                         }
@@ -235,9 +243,7 @@ object ImageSaver {
                                 } else {
                                     if (finalPath != null) {
                                         val finalFile = File(finalPath)
-                                        if (jpgFolderUri != null) {
-                                        finalJpgUri = saveFileToFolder(context, finalFile, "$baseName.jpg", "image/jpeg", jpgFolderUri, editConfig = editConfig)
-                                        } else {
+                                        if (targetUri != null) {
                                             val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                                             BitmapFactory.decodeFile(finalPath, options)
                                             val finalW = if (options.outWidth > 0) options.outWidth else processedBitmap.width
@@ -247,6 +253,26 @@ object ImageSaver {
                                                 context,
                                                 "$baseName.jpg",
                                                 targetUri,
+                                                finalW,
+                                                finalH,
+                                                editConfig = editConfig,
+                                                zoomFactor = zoomFactor,
+                                                captureMetadata = captureMetadata
+                                            ) { out ->
+                                                finalFile.inputStream().use { it.copyTo(out) }
+                                            }
+                                        } else if (jpgFolderUri != null) {
+                                            finalJpgUri = saveFileToFolder(context, finalFile, "$baseName.jpg", "image/jpeg", jpgFolderUri, editConfig = editConfig)
+                                        } else {
+                                            val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                                            BitmapFactory.decodeFile(finalPath, options)
+                                            val finalW = if (options.outWidth > 0) options.outWidth else processedBitmap.width
+                                            val finalH = if (options.outHeight > 0) options.outHeight else processedBitmap.height
+
+                                            finalJpgUri = saveJpegToMediaStore(
+                                                context,
+                                                "$baseName.jpg",
+                                                null,
                                                 finalW,
                                                 finalH,
                                                 editConfig = editConfig,
@@ -268,9 +294,7 @@ object ImageSaver {
                                 FileOutputStream(tempJpg).use { out ->
                                     processedBitmap.compress(Bitmap.CompressFormat.JPEG, 95, out)
                                 }
-                                if (jpgFolderUri != null) {
-                                    finalJpgUri = saveFileToFolder(context, tempJpg, "$baseName.jpg", "image/jpeg", jpgFolderUri, editConfig = editConfig, zoomFactor = zoomFactor, captureMetadata = captureMetadata)
-                                } else {
+                                if (targetUri != null) {
                                     finalJpgUri = saveJpegToMediaStore(
                                         context,
                                         "$baseName.jpg",
@@ -283,9 +307,24 @@ object ImageSaver {
                                     ) { out ->
                                         tempJpg.inputStream().use { it.copyTo(out) }
                                     }
-                                    if (tiffPath != null) {
-                                        top.maary.darkbag.processor.ColorProcessor.saveBitmapToTiff(processedBitmap, tiffPath, captureMetadata ?: top.maary.darkbag.models.CaptureMetadata())
+                                } else if (jpgFolderUri != null) {
+                                    finalJpgUri = saveFileToFolder(context, tempJpg, "$baseName.jpg", "image/jpeg", jpgFolderUri, editConfig = editConfig, zoomFactor = zoomFactor, captureMetadata = captureMetadata)
+                                } else {
+                                    finalJpgUri = saveJpegToMediaStore(
+                                        context,
+                                        "$baseName.jpg",
+                                        null,
+                                        processedBitmap.width,
+                                        processedBitmap.height,
+                                        editConfig = editConfig,
+                                        zoomFactor = zoomFactor,
+                                        captureMetadata = captureMetadata
+                                    ) { out ->
+                                        tempJpg.inputStream().use { it.copyTo(out) }
                                     }
+                                }
+                                if (tiffPath != null) {
+                                    top.maary.darkbag.processor.ColorProcessor.saveBitmapToTiff(processedBitmap, tiffPath, captureMetadata ?: top.maary.darkbag.models.CaptureMetadata())
                                 }
                                 tempJpg.delete()
                             }
@@ -580,6 +619,38 @@ object ImageSaver {
     }
 
     /**
+     * Creates a placeholder URI for the image synchronously.
+     * This allocates a file via SAF or MediaStore without writing any data.
+     */
+    fun createPlaceholderUri(context: Context, displayName: String, folderUri: String?): Uri? {
+        return if (folderUri != null) {
+            try {
+                val treeUri = Uri.parse(folderUri)
+                val parentFolder = androidx.documentfile.provider.DocumentFile.fromTreeUri(context, treeUri)
+                parentFolder?.createFile("image/jpeg", displayName)?.uri
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to create placeholder in folder $folderUri", e)
+                null
+            }
+        } else {
+            try {
+                val jpgValues = ContentValues().apply {
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
+                    put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/Darkbag")
+                        put(MediaStore.MediaColumns.IS_PENDING, 1)
+                    }
+                }
+                context.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, jpgValues)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to create MediaStore placeholder", e)
+                null
+            }
+        }
+    }
+
+    /**
      * Helper to encapsulate MediaStore JPEG saving/updating.
      */
     private fun saveJpegToMediaStore(
@@ -595,47 +666,12 @@ object ImageSaver {
         writeData: (OutputStream) -> Unit
     ): Uri? {
         val contentResolver = context.contentResolver
-        val jpgValues = ContentValues()
-
         var uri = targetUri
-        val isReplacement = uri != null
-
         val finalEditConfig = createFinalEditConfig(editConfig, zoomFactor)
 
         try {
             if (uri == null) {
-                // Attempt to find an existing file with the same name to overwrite it (e.g. ZSL preview)
-                // Restrict search by RELATIVE_PATH and DATE_ADDED to prevent expensive full table scan
-                val timeThreshold = (System.currentTimeMillis() / 1000) - 600 // within last 10 minutes
-                val projection = arrayOf(MediaStore.MediaColumns._ID)
-                
-                val selection: String
-                val selectionArgs: Array<String>
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    selection = "${MediaStore.MediaColumns.DISPLAY_NAME} = ? AND ${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ? AND ${MediaStore.MediaColumns.DATE_ADDED} >= ?"
-                    selectionArgs = arrayOf(displayName, "%Darkbag%", timeThreshold.toString())
-                } else {
-                    selection = "${MediaStore.MediaColumns.DISPLAY_NAME} = ? AND ${MediaStore.MediaColumns.DATE_ADDED} >= ?"
-                    selectionArgs = arrayOf(displayName, timeThreshold.toString())
-                }
-
-                contentResolver.query(
-                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                    projection,
-                    selection,
-                    selectionArgs,
-                    null
-                )?.use { cursor ->
-                    if (cursor.moveToFirst()) {
-                        val idColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
-                        val id = cursor.getLong(idColumn)
-                        uri = android.content.ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id)
-                    }
-                }
-            }
-
-            if (uri == null) {
-                jpgValues.apply {
+                val jpgValues = ContentValues().apply {
                     put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
                     put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -646,56 +682,44 @@ object ImageSaver {
                     height?.let { put(MediaStore.MediaColumns.HEIGHT, it) }
                 }
                 uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, jpgValues)
-            } else {
-                // Hardened replacement logic: avoid updating DISPLAY_NAME and RELATIVE_PATH
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    jpgValues.put(MediaStore.MediaColumns.IS_PENDING, 1)
+            } else if (uri.scheme == "content" && uri.authority == MediaStore.AUTHORITY) {
+                // If it's a MediaStore URI being replaced, update pending status and dimensions
+                val updateValues = ContentValues().apply {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        put(MediaStore.MediaColumns.IS_PENDING, 1)
+                    }
+                    width?.let { put(MediaStore.MediaColumns.WIDTH, it) }
+                    height?.let { put(MediaStore.MediaColumns.HEIGHT, it) }
                 }
-                width?.let { jpgValues.put(MediaStore.MediaColumns.WIDTH, it) }
-                height?.let { jpgValues.put(MediaStore.MediaColumns.HEIGHT, it) }
-
-                if (jpgValues.size() > 0) {
-                    contentResolver.update(uri!!, jpgValues, null, null)
+                if (updateValues.size() > 0) {
+                    contentResolver.update(uri, updateValues, null, null)
                 }
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to insert/update MediaStore entry", e)
-            return null
-        }
 
-        if (uri != null) {
-            try {
-                contentResolver.openOutputStream(uri!!, "wt")?.use { out ->
+            if (uri != null) {
+                contentResolver.openOutputStream(uri, "wt")?.use { out ->
                     writeData(out)
                     out.flush()
                 }
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    val finalValues = ContentValues().apply {
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && uri.scheme == "content" && uri.authority == MediaStore.AUTHORITY) {
+                    val finishValues = ContentValues().apply {
                         put(MediaStore.MediaColumns.IS_PENDING, 0)
                     }
-                    try {
-                        contentResolver.update(uri, finalValues, null, null)
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Failed to clear IS_PENDING for $uri", e)
-                    }
+                    contentResolver.update(uri, finishValues, null, null)
                 }
+                
                 if (writeExifMetadata) {
                     writeMetadataToExif(context, uri, finalEditConfig, captureMetadata)
                 }
-
-                if (isReplacement) {
-                    Log.i(TAG, "Replaced JPEG at $uri")
-                } else {
-                    Log.i(TAG, "Saved JPEG to $uri")
-                }
-
-                // If this is a final HQ save, notify the UI to update thumbnails and hide progress
-                // Note: We don't emit for fast path here because saveProcessedImage handles it.
-
+                
+                Log.i(TAG, "Saved JPEG to $uri")
                 return uri
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to write JPEG to MediaStore", e)
-                if (!isReplacement) contentResolver.delete(uri, null, null)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to save JPEG to $uri", e)
+            if (targetUri == null && uri != null) {
+                try { contentResolver.delete(uri, null, null) } catch (e2: Exception) {}
             }
         }
         return null
