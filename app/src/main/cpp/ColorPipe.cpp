@@ -1220,10 +1220,10 @@ static std::vector<unsigned char> make_preview_rgb8(
 }
 
 bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, const std::vector<float>& ccm, const ImageMetadata& metadata, int orientation, bool mirror, float baselineExposure) {
-    {
-        std::lock_guard<std::mutex> lock(tiff_extender_mutex);
+    static std::once_flag tiff_extender_flag;
+    std::call_once(tiff_extender_flag, []() {
         parent_extender = TIFFSetTagExtender(DNGTagExtender);
-    }
+    });
     TIFF* tif = TIFFOpen(filename, "w");
     if (!tif) return false;
 
