@@ -42,6 +42,31 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(libtiff)
 include_directories(${tiff_SOURCE_DIR}/libtiff ${tiff_BINARY_DIR}/libtiff)
 
+# --- Libjpeg-turbo (ExternalProject) ---
+include(ExternalProject)
+ExternalProject_Add(
+    libjpeg_turbo
+    GIT_REPOSITORY https://github.com/libjpeg-turbo/libjpeg-turbo.git
+    GIT_TAG 3.0.3
+    CMAKE_ARGS
+        -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}
+        -DANDROID_ABI=${ANDROID_ABI}
+        -DANDROID_PLATFORM=${ANDROID_PLATFORM}
+        -DENABLE_SHARED=OFF
+        -DENABLE_STATIC=ON
+        -DWITH_JPEG8=ON
+        -DWITH_SIMD=ON
+        -DWITH_TURBOJPEG=ON
+        -DCMAKE_INSTALL_PREFIX=${CMAKE_CURRENT_BINARY_DIR}/libjpeg_turbo_install
+    BUILD_BYPRODUCTS ${CMAKE_CURRENT_BINARY_DIR}/libjpeg_turbo_install/lib/libturbojpeg.a
+)
+
+add_library(turbojpeg-static STATIC IMPORTED)
+set_target_properties(turbojpeg-static PROPERTIES IMPORTED_LOCATION ${CMAKE_CURRENT_BINARY_DIR}/libjpeg_turbo_install/lib/libturbojpeg.a)
+add_dependencies(turbojpeg-static libjpeg_turbo)
+
+include_directories(${CMAKE_CURRENT_BINARY_DIR}/libjpeg_turbo_install/include)
+
 # --- HDR+ Generator (Host Tool) ---
 # We need to compile the generator for the HOST machine (x86_64), not the target (Android).
 # However, CMake inside Android Studio is cross-compiling.
@@ -234,6 +259,7 @@ target_link_libraries(
         ${log-lib}
         ${jnigraphics-lib}
         ${android-lib}
+        turbojpeg-static
         -fopenmp
         -static-openmp)
 

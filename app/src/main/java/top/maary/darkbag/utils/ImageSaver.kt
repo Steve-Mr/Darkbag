@@ -20,6 +20,9 @@ import java.io.FileOutputStream
 import java.io.OutputStream
 import kotlin.math.max
 import kotlin.math.min
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.Dispatchers
 
 object ImageSaver {
     private const val TAG = "ImageSaver"
@@ -55,7 +58,7 @@ object ImageSaver {
         captureMetadata: CaptureMetadata? = null,
         tiffPath: String? = null,
         onBitmapReady: ((Bitmap) -> Unit)? = null
-    ): Uri? {
+    ): Uri? = coroutineScope {
         val halfFrameManager = HalfFrameManager(context)
         val isHalfFrameActive = !isAlreadyStitched && (halfFrameMetadata != null || halfFrameManager.isEnabled)
 
@@ -66,8 +69,9 @@ object ImageSaver {
         var finalJpgUri: Uri? = null
         var finalRawUri: Uri? = null
 
-        // 1. Process Input Bitmap or JPEG File from JNI -> Final MediaStore JPG
-        if (inputBitmap != null || bmpPath != null) {
+        val jpgJob = async(Dispatchers.IO) {
+            // 1. Process Input Bitmap or JPEG File from JNI -> Final MediaStore JPG
+            if (inputBitmap != null || bmpPath != null) {
             val isNativeJpeg = bmpPath != null && (bmpPath.endsWith(".jpg") || bmpPath.endsWith(".jpeg"))
             val needsBitmapProcessing = rotationDegrees != 0 || zoomFactor > 1.05f || inputBitmap != null || mirror
 
@@ -301,9 +305,11 @@ object ImageSaver {
                 }
             }
         }
+    }
 
-        // 2. Save DNG (Bayer or Linear)
-        if (actualSaveRaw && linearDngPath != null) {
+        val dngJob = async(Dispatchers.IO) {
+            // 2. Save DNG (Bayer or Linear)
+            if (actualSaveRaw && linearDngPath != null) {
             val dngFile = File(linearDngPath)
             if (dngFile.exists()) {
                 val baseSuffix = if (linearDngPath.contains("_linear")) "_linear" else if (linearDngPath.contains("_bayer")) "_bayer" else ""
@@ -335,8 +341,6 @@ object ImageSaver {
                                 contentResolver.update(dngUri, dngValues, null, null)
                             }
 
-                            writeMetadataToExif(context, dngUri, editConfig, captureMetadata)
-
                             finalRawUri = dngUri
                         } catch (e: Exception) {
                             Log.e(TAG, "Failed to save Linear DNG", e)
@@ -346,7 +350,11 @@ object ImageSaver {
                 }
                 dngFile.delete()
             }
+            }
         }
+
+        jpgJob.await()
+        dngJob.await()
 
         // If this is not a fast path and we have a result, emit a save event for UI updates
         if (!isFastPath && finalJpgUri != null) {
@@ -364,10 +372,9 @@ object ImageSaver {
         }
 
         // Priority for thumbnail: JPEG > DNG
-        // For half-frame mode, we strictly avoid DNG thumbnails to prevent showing single frames
-        if (isHalfFrameActive && finalJpgUri == null) return null
+        if (isHalfFrameActive && finalJpgUri == null) return@coroutineScope null
 
-        return finalJpgUri ?: finalRawUri
+        finalJpgUri ?: finalRawUri
     }
 
     private fun writeStandardExif(exif: ExifInterface, captureMetadata: CaptureMetadata?) {
@@ -550,7 +557,7 @@ object ImageSaver {
 
                 val finalEditConfig = createFinalEditConfig(editConfig, zoomFactor)
 
-                if (writeExifMetadata && (mimeType == "image/jpeg" || mimeType == "image/x-adobe-dng")) {
+                if (writeExifMetadata && mimeType == "image/jpeg") {
                     writeMetadataToExif(context, newFile.uri, finalEditConfig, captureMetadata)
                 }
 
