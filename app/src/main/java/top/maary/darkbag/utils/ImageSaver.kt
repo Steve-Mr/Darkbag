@@ -605,9 +605,19 @@ object ImageSaver {
         try {
             if (uri == null) {
                 // Attempt to find an existing file with the same name to overwrite it (e.g. ZSL preview)
+                // Restrict search by RELATIVE_PATH and DATE_ADDED to prevent expensive full table scan
+                val timeThreshold = (System.currentTimeMillis() / 1000) - 600 // within last 10 minutes
                 val projection = arrayOf(MediaStore.MediaColumns._ID)
-                val selection = "${MediaStore.MediaColumns.DISPLAY_NAME} = ?"
-                val selectionArgs = arrayOf(displayName)
+                
+                val selection: String
+                val selectionArgs: Array<String>
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    selection = "${MediaStore.MediaColumns.DISPLAY_NAME} = ? AND ${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ? AND ${MediaStore.MediaColumns.DATE_ADDED} >= ?"
+                    selectionArgs = arrayOf(displayName, "%Darkbag%", timeThreshold.toString())
+                } else {
+                    selection = "${MediaStore.MediaColumns.DISPLAY_NAME} = ? AND ${MediaStore.MediaColumns.DATE_ADDED} >= ?"
+                    selectionArgs = arrayOf(displayName, timeThreshold.toString())
+                }
 
                 contentResolver.query(
                     MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
