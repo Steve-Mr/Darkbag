@@ -3650,7 +3650,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     captureResult = result
                 )
 
-                val dngName = if (hfMetadata != null) {
+                val dngName = zslTargetUriTracker?.get(1) ?: if (hfMetadata != null) {
                     val suffix = if (hfMetadata.frame1BaseName != null) "_HF2" else "_HF1"
                     val group = hfMetadata.frame1BaseName ?: SimpleDateFormat(FILENAME, Locale.US).format(hfMetadata.captureTimeMillis)
                     DarkbagIdentity.prefixedBaseName(group + suffix + "_HDRPLUS")
@@ -3731,7 +3731,21 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         jpgFolderUri = jpgFolderUri,
                         rawFolderUri = rawFolderUri,
                         hfMetadata = hfMetadata?.copy(digitalGain = digitalGain),
-                        editConfig = null,
+                        editConfig = top.maary.darkbag.models.EditConfig(
+                            log = targetLogName ?: "None",
+                            lut = activeLutName ?: "None",
+                            digitalGain = digitalGain,
+                            adjustments = if (hfMetadata?.profile != null && hfMetadata.profile != top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_NORMAL) {
+                                listOf(
+                                    top.maary.darkbag.models.BasicAdjustments(digitalGain = hfMetadata.frame1DigitalGain),
+                                    top.maary.darkbag.models.BasicAdjustments(digitalGain = digitalGain)
+                                )
+                            } else null,
+                            hfLayout = if (hfMetadata?.profile == top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_HALF_TOP) "TB" else if (hfMetadata?.profile == top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_HALF_SIDE) "SBS" else null,
+                            showTimestamp = hfMetadata?.dateStamp ?: false,
+                            flareType = hfMetadata?.flareType ?: -1,
+                            zoomFactor = currentZoom
+                        ),
                         runAblationTest = prefs.getBoolean(SettingsFragment.KEY_RUN_ABLATION, false)
                     )
                     top.maary.darkbag.processor.HdrPlusRequestManager.enqueue(request)

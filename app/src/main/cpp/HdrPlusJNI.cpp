@@ -572,20 +572,10 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
 
     if (!dngPathStr.empty()) {
         float baselineExposure = (digitalGain > 0.0f) ? std::log2(digitalGain) : 0.0f;
-        // Since we removed interleavedPool, we must either write DNG synchronously
-        // or copy the planar data to background thread.
-        // Copying 25MB (12MP) planar buffer is fast enough.
-        size_t rawSize = static_cast<size_t>(width) * height * 3;
-        auto rawDataCopy = std::make_shared<std::vector<uint16_t>>(rawSize);
-        std::copy(raw_ptr, raw_ptr + rawSize, rawDataCopy->begin());
-
-        std::thread([dngPathStr, width, height, stride_x, stride_y, stride_c, rawDataCopy, lensShadingVec, lensShadingRows, lensShadingCols, ccmVec, meta, orientation, mirror, baselineExposure]() {
-            auto start_dng = std::chrono::high_resolution_clock::now();
-            write_dng(dngPathStr.c_str(), width, height, rawDataCopy->data(), stride_x, stride_y, stride_c, lensShadingVec, lensShadingRows, lensShadingCols, kMax16BitValue, ccmVec, meta, orientation, (bool)mirror, baselineExposure);
-            long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start_dng).count();
-            LOGD("Native background DNG thread finished in %lld ms.", ms);
-        }).detach();
-        dngEncodeMs = 0; // Return immediately
+        auto start_dng = std::chrono::high_resolution_clock::now();
+        write_dng(dngPathStr.c_str(), width, height, raw_ptr, stride_x, stride_y, stride_c, lensShadingVec, lensShadingRows, lensShadingCols, kMax16BitValue, ccmVec, meta, orientation, (bool)mirror, baselineExposure);
+        dngEncodeMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start_dng).count();
+        LOGD("Native DNG encoded in %lld ms.", dngEncodeMs);
     }
 
     jlong totalSaveMs = (jlong)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - saveStart).count();
