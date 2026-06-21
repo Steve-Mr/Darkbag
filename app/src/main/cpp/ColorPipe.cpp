@@ -830,9 +830,9 @@ bool process_and_save_image(
 
         // Halide output is scaled by 0.25 (14-bit range).
         // We shift left by 2 to restore full 16-bit range for final saving.
-        float final_r = (float)std::min((int)((float)r_raw * lscR) << 2, 65535);
-        float final_g = (float)std::min((int)((float)g_raw * lscG) << 2, 65535);
-        float final_b = (float)std::min((int)((float)b_raw * lscB) << 2, 65535);
+        float final_r = std::min((float)r_raw * lscR * 4.0f, 65535.0f);
+        float final_g = std::min((float)g_raw * lscG * 4.0f, 65535.0f);
+        float final_b = std::min((float)b_raw * lscB * 4.0f, 65535.0f);
 
         // 1. Exposure (Linear Space)
         float norm_r = final_r * global_gain_multiplier;
@@ -1177,7 +1177,7 @@ static bool write_jpeg_android(const char* filename, int width, int height, cons
     unsigned long jpegSize = 0;
 
     int result = tjCompress2(_jpegCompressor, rgb8.data(), width, 0, height, TJPF_RGB,
-                             &jpegBuf, &jpegSize, TJSAMP_420, quality, TJFLAG_ACCURATEDCT);
+                             &jpegBuf, &jpegSize, TJSAMP_444, quality, TJFLAG_ACCURATEDCT);
 
     auto end_compress = std::chrono::high_resolution_clock::now();
 
@@ -1254,7 +1254,7 @@ static std::vector<unsigned char> encode_rgb8_jpeg(
         unsigned long jpegSize = 0;
 
         int result = tjCompress2(_jpegCompressor, rgb8.data(), width, 0, height, TJPF_RGB,
-                                 &jpegBuf, &jpegSize, TJSAMP_420, quality, TJFLAG_ACCURATEDCT);
+                                 &jpegBuf, &jpegSize, TJSAMP_444, quality, TJFLAG_ACCURATEDCT);
 
         if (result < 0) {
             LOGE("tjCompress2 failed: %s", tjGetErrorStr());
@@ -1280,6 +1280,9 @@ static std::vector<unsigned char> make_preview_rgb8(
     int orientation,
     bool mirror,
     float gain,
+    const std::vector<float>& lensShadingVec,
+    int lensShadingRows,
+    int lensShadingCols,
     int& outWidth,
     int& outHeight
 ) {
@@ -1290,6 +1293,8 @@ static std::vector<unsigned char> make_preview_rgb8(
     const bool swapDims = (orientation == 90 || orientation == 270);
     outWidth = swapDims ? sampledHeight : sampledWidth;
     outHeight = swapDims ? sampledWidth : sampledHeight;
+
+    const bool hasLsc = !lensShadingVec.empty() && lensShadingRows > 0 && lensShadingCols > 0;
 
     std::vector<unsigned char> preview(static_cast<size_t>(outWidth) * outHeight * 3);
     for (int y = 0; y < outHeight; ++y) {
@@ -1314,15 +1319,43 @@ static std::vector<unsigned char> make_preview_rgb8(
             const int srcY = std::min(height - 1, sy * scale);
             const size_t dstIdx = (static_cast<size_t>(y) * outWidth + x) * 3;
 
-            auto encodePreviewChannel = [&](unsigned short sample) -> unsigned char {
+            float lscR = 1.0f, lscG = 1.0f, lscB = 1.0f;
+            if (hasLsc) {
+                float fx = (width > 1) ? (float)srcX * (lensShadingCols - 1) / (float)(width - 1) : 0.0f;
+                float fy = (height > 1) ? (float)srcY * (lensShadingRows - 1) / (float)(height - 1) : 0.0f;
+                int x0 = std::clamp((int)std::floor(fx), 0, lensShadingCols - 1);
+                int y0 = std::clamp((int)std::floor(fy), 0, lensShadingRows - 1);
+                int x1 = std::min(x0 + 1, lensShadingCols - 1);
+                int y1 = std::min(y0 + 1, lensShadingRows - 1);
+                float tx = fx - x0;
+                float ty = fy - y0;
+                auto lsc_idx = [&](int ch, int r, int c) {
+                    return ch * lensShadingRows * lensShadingCols + r * lensShadingCols + c;
+                };
+                auto bilerp = [&](int ch) {
+                    float v00 = lensShadingVec[lsc_idx(ch, y0, x0)];
+                    float v10 = lensShadingVec[lsc_idx(ch, y0, x1)];
+                    float v01 = lensShadingVec[lsc_idx(ch, y1, x0)];
+                    float v11 = lensShadingVec[lsc_idx(ch, y1, x1)];
+                    float v0 = v00 * (1.0f - tx) + v10 * tx;
+                    float v1 = v01 * (1.0f - tx) + v11 * tx;
+                    return v0 * (1.0f - ty) + v1 * ty;
+                };
+                lscR = bilerp(0);
+                lscG = 0.5f * (bilerp(1) + bilerp(2));
+                lscB = bilerp(3);
+            }
+
+            auto encodePreviewChannel = [&](uint16_t raw_val, float lsc) -> unsigned char {
+                float sample = std::min((float)raw_val * lsc * 4.0f, 65535.0f);
                 const float linear = std::clamp((sample / 65535.0f) * gain, 0.0f, 1.0f);
                 const float gammaEncoded = std::pow(linear, 1.0f / 2.2f);
                 return (unsigned char)std::clamp(gammaEncoded * 255.0f + 0.5f, 0.0f, 255.0f);
             };
 
-            preview[dstIdx + 0] = encodePreviewChannel(planarData[srcX * stride_x + srcY * stride_y + 0 * stride_c]);
-            preview[dstIdx + 1] = encodePreviewChannel(planarData[srcX * stride_x + srcY * stride_y + 1 * stride_c]);
-            preview[dstIdx + 2] = encodePreviewChannel(planarData[srcX * stride_x + srcY * stride_y + 2 * stride_c]);
+            preview[dstIdx + 0] = encodePreviewChannel(planarData[srcX * stride_x + srcY * stride_y + 0 * stride_c], lscR);
+            preview[dstIdx + 1] = encodePreviewChannel(planarData[srcX * stride_x + srcY * stride_y + 1 * stride_c], lscG);
+            preview[dstIdx + 2] = encodePreviewChannel(planarData[srcX * stride_x + srcY * stride_y + 2 * stride_c], lscB);
         }
     }
     return preview;
@@ -1467,6 +1500,9 @@ bool write_dng(const char* filename, int width, int height, const uint16_t* plan
             orientation,
             mirror,
             previewGain,
+            lensShadingVec,
+            lensShadingRows,
+            lensShadingCols,
             previewWidth,
             previewHeight
         );

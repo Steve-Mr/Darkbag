@@ -547,7 +547,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
 
         process_and_save_image(raw_ptr, stride_x, stride_y, stride_c, lensShadingVec, lensShadingRows, lensShadingCols, width, height, digitalGain, targetLog, lut,
                                 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
-                            jpgPathStr.c_str(), nullptr, &meta, 1, ccmVec.data(), wbVec.data(), orientation, nullptr, 0, 0, true, 1, zoomFactor, (bool)mirror, jpgTimings, ablationMask, (bool)useTetrahedralLut);
+                            jpgPathStr.c_str(), nullptr, &meta, 1, ccmVec.data(), wbVec.data(), orientation, nullptr, 0, 0, false, 1, zoomFactor, (bool)mirror, jpgTimings, ablationMask, (bool)useTetrahedralLut);
         mainJpgTotalMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start_jpg).count();
         edgeCompMs = jpgTimings[0];
         pixelProcMs = jpgTimings[1];
