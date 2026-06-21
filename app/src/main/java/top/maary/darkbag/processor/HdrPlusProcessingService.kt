@@ -15,14 +15,16 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import top.maary.darkbag.R
+import top.maary.darkbag.fragments.HdrPlusBurst
 import top.maary.darkbag.fragments.SettingsFragment
 import top.maary.darkbag.utils.ImageSaver
 
 class HdrPlusProcessingService : Service() {
 
     private val serviceJob = Job()
-    private val serviceScope = CoroutineScope(Dispatchers.IO + serviceJob)
+    private val serviceScope = CoroutineScope(Dispatchers.Default + serviceJob)
     private var isProcessing = false
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -47,20 +49,24 @@ class HdrPlusProcessingService : Service() {
         val request = HdrPlusRequestManager.dequeue()
         if (request == null) {
             // Queue empty, stop service
-            stopForeground(STOP_FOREGROUND_REMOVE)
+            androidx.core.app.ServiceCompat.stopForeground(this, androidx.core.app.ServiceCompat.STOP_FOREGROUND_REMOVE)
             stopSelf()
             return
         }
 
         isProcessing = true
+        updateNotification("Processing HDR+ image...")
         serviceScope.launch {
             try {
                 processRequest(request)
             } catch (e: Exception) {
                 Log.e(TAG, "Error processing HDR+ request: ${request.requestId}", e)
+                showResultNotification("Failed to process HDR+ image", e.message ?: "Unknown error")
             } finally {
-                isProcessing = false
-                processNextInQueue()
+                withContext(Dispatchers.Main) {
+                    isProcessing = false
+                    processNextInQueue()
+                }
             }
         }
     }
@@ -68,88 +74,211 @@ class HdrPlusProcessingService : Service() {
     private suspend fun processRequest(req: HdrPlusRequest) {
         Log.d(TAG, "Processing started for ${req.baseName}")
 
+        var buffersReleased = false
+        try {
         val outputJpgPath = if (req.saveJpg) req.fullResJpgPath else null
         val outputDngPath = if (req.saveRaw) req.linearDngPath else null
-        val debugStats = LongArray(15)
 
-        val ret = if (req.isSingleFrame) {
-            ColorProcessor.processSingleFrameRaw(
-                req.buffers[0],
-                req.width, req.height,
-                req.orientation,
-                req.whiteLevel, req.blackLevelPattern,
-                req.lensShadingMap, req.lensShadingRows, req.lensShadingCols,
-                req.whiteBalance, req.ccm, req.cfaPattern,
-                req.targetLogIndex,
-                req.lutPath,
-                outputJpgPath,
-                outputDngPath,
-                req.digitalGain,
-                debugStats,
-                null,
-                req.zoomFactor,
-                req.mirror,
-                req.metadata
-            )
-        } else {
-            ColorProcessor.processHdrPlus(
-                req.buffers,
-                req.width, req.height,
-                req.orientation,
-                req.whiteLevel, req.blackLevelPattern,
-                req.lensShadingMap, req.lensShadingRows, req.lensShadingCols, req.useSensorColorMatrix,
-                req.whiteBalance, req.ccm, req.ccmAlt, req.exportMatrixAB, req.cfaPattern,
-                req.targetLogIndex,
-                req.lutPath,
-                outputJpgPath,
-                outputDngPath,
-                req.digitalGain,
-                debugStats,
-                null,
-                req.zoomFactor,
-                req.mirror,
-                req.metadata
-            )
-        }
+        val masksToRun = if (req.runAblationTest) listOf(0, 1, 2, 4) else listOf(0)
 
-        if (ret == 0) {
-            Log.d(TAG, "JNI finished successfully for ${req.baseName}")
-            val targetUri = req.zslTargetUriStr?.let { Uri.parse(it) }
+        for (ablationMask in masksToRun) {
+            val currentJpgPath = if (ablationMask != 0 && outputJpgPath != null) {
+                outputJpgPath.substringBeforeLast(".") + "_ablation_$ablationMask.jpg"
+            } else {
+                outputJpgPath
+            }
+            val currentDngPath = if (ablationMask == 0) outputDngPath else null // Only write DNG once
 
-            val finalUri = ImageSaver.saveProcessedImage(
-                context = applicationContext,
-                inputBitmap = null,
-                bmpPath = outputJpgPath,
-                rotationDegrees = 0,
-                zoomFactor = 1.0f,
-                baseName = req.baseName,
-                linearDngPath = outputDngPath,
-                saveJpg = req.saveJpg,
-                saveRaw = req.saveRaw,
-                jpgFolderUri = req.jpgFolderUri,
-                rawFolderUri = req.rawFolderUri,
-                targetUri = targetUri,
-                mirror = false,
-                halfFrameMetadata = req.hfMetadata,
-                editConfig = req.editConfig,
-                digitalGain = req.digitalGain,
-                captureMetadata = req.metadata
-            )
+            val debugStats = LongArray(25).apply { this[24] = ablationMask.toLong() }
 
-            if (finalUri != null) {
-                val prefs = applicationContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-                prefs.edit().putString(SettingsFragment.KEY_LAST_CAPTURE_URI, finalUri.toString()).apply()
+            val jniStartTime = System.currentTimeMillis()
+            val useTetrahedralLut = applicationContext.getSharedPreferences(top.maary.darkbag.fragments.SettingsFragment.PREFS_NAME, android.content.Context.MODE_PRIVATE).getBoolean("use_tetrahedral_lut", false)
+
+            val ret = if (req.isSingleFrame) {
+                ColorProcessor.processSingleFrameRaw(
+                    req.buffers[0],
+                    req.width, req.height,
+                    req.orientation,
+                    req.whiteLevel, req.blackLevelPattern,
+                    req.lensShadingMap, req.lensShadingRows, req.lensShadingCols,
+                    req.whiteBalance, req.ccm, req.cfaPattern,
+                    req.targetLogIndex,
+                    req.lutPath,
+                    currentJpgPath,
+                    currentDngPath,
+                    req.digitalGain,
+                    debugStats,
+                    null,
+                    req.zoomFactor,
+                    req.mirror,
+                    req.metadata,
+                    useTetrahedralLut
+                )
+            } else {
+                ColorProcessor.processHdrPlus(
+                    req.buffers,
+                    req.width, req.height,
+                    req.orientation,
+                    req.whiteLevel, req.blackLevelPattern,
+                    req.lensShadingMap, req.lensShadingRows, req.lensShadingCols, req.useSensorColorMatrix,
+                    req.whiteBalance, req.ccm, req.ccmAlt, req.exportMatrixAB, req.cfaPattern,
+                    req.targetLogIndex,
+                    req.lutPath,
+                    currentJpgPath,
+                    currentDngPath,
+                    req.digitalGain,
+                    debugStats,
+                    null,
+                    req.zoomFactor,
+                    req.mirror,
+                    req.metadata,
+                    useTetrahedralLut
+                )
+            }
+            val jniEndTime = System.currentTimeMillis()
+
+            // Release Java-side DirectByteBuffers after the last JNI call completes.
+            // Native side has already copied all frame data via memcpy at the start of
+            // processing, so these buffers are no longer needed. Releasing early frees
+            // ~168MB of native memory during the IO-bound save phase.
+            if (ablationMask == masksToRun.last() && !buffersReleased) {
+                req.buffers.forEach { HdrPlusBurst.releaseBuffer(it) }
+                buffersReleased = true
             }
 
-            ColorProcessor.onBackgroundSaveComplete(
-                req.baseName, null, null, finalUri?.toString(), req.zoomFactor, req.orientation, req.saveJpg
-            )
+            if (ret == 0) {
+            Log.d(TAG, "JNI finished successfully for ${req.baseName}")
+            val saveStartTime = System.currentTimeMillis()
+            val targetUri = req.zslTargetUriStr?.let { Uri.parse(it) }
+
+            val finalUri = if (ablationMask == 0) {
+                ImageSaver.saveProcessedImage(
+                    context = applicationContext,
+                    inputBitmap = null,
+                    bmpPath = currentJpgPath,
+                    rotationDegrees = 0,
+                    zoomFactor = 1.0f,
+                    baseName = req.baseName,
+                    linearDngPath = currentDngPath,
+                    saveJpg = req.saveJpg,
+                    saveRaw = req.saveRaw,
+                    jpgFolderUri = req.jpgFolderUri,
+                    rawFolderUri = req.rawFolderUri,
+                    targetUri = targetUri,
+                    mirror = false,
+                    halfFrameMetadata = req.hfMetadata,
+                    editConfig = req.editConfig,
+                    digitalGain = req.digitalGain,
+                    captureMetadata = req.metadata
+                )
+            } else { null }
+
+            val saveEndTime = System.currentTimeMillis()
+
+            val totalTime = saveEndTime - jniStartTime
+            val jniTime = jniEndTime - jniStartTime
+            val halideTime = debugStats[0]
+            val copyTime = debugStats[1]
+            val postTime = debugStats[2]
+            val dngEncodeTime = debugStats[3]
+            val nativeSaveTime = debugStats[4]
+            val dngWaitTime = debugStats[5]
+            val nativeTotalTime = debugStats[6]
+            val saveTime = saveEndTime - saveStartTime
+
+            val previewMs = debugStats[15]
+            val writeDngMs = debugStats[16]
+            val mainJpgTotalMs = debugStats[17]
+            val altJpgTotalMs = debugStats[18]
+            val edgeCompMs = debugStats[19]
+            val pixelProcMs = debugStats[20]
+            val jpegWriteMs = debugStats[21]
+            val ompConvMs = debugStats[22]
+            val apiCompMs = debugStats[23]
+
+            val label = if (ablationMask == 0) "Normal" else "Ablation Mask $ablationMask"
+            val logMsg = """
+                [Background Process ($label): ${totalTime}ms]
+                JNI (Total): ${jniTime}ms
+                  - Native Total: ${nativeTotalTime}ms
+                  - JNI Prep: ${debugStats[12]}ms
+                  - Copy: ${copyTime}ms
+                  - Halide: ${halideTime}ms
+                    * Align: ${debugStats[7]}ms
+                    * Merge: ${debugStats[8]}ms
+                    * BlackWhite: ${debugStats[13]}ms
+                    * WB: ${debugStats[14]}ms
+                    * Demosaic: ${debugStats[9]}ms
+                    * Denoise: ${debugStats[10]}ms
+                    * sRGB: ${debugStats[11]}ms
+                  - Post: ${postTime}ms
+                  - DNG Encode: ${dngEncodeTime}ms
+                  - Save(Log/BMP): ${nativeSaveTime}ms
+                    * Fast Preview: ${previewMs}ms
+                    * Write DNG: ${writeDngMs}ms
+                    * Main JPG: ${mainJpgTotalMs}ms
+                      -> EdgeComp: ${edgeCompMs}ms
+                      -> PixelProc: ${pixelProcMs}ms
+                      -> JpegWrite: ${jpegWriteMs}ms (OMP: ${ompConvMs}ms, API: ${apiCompMs}ms)
+                    * Alt JPG: ${altJpgTotalMs}ms
+                  - DNG Wait(get): ${dngWaitTime}ms
+                Save (IO/Compress): ${saveTime}ms
+            """.trimIndent()
+
+            Log.i(TAG, logMsg)
+            top.maary.darkbag.utils.DebugLogManager.addLog(logMsg)
+
+            if (ablationMask == 0) {
+                if (finalUri != null) {
+                    val prefs = applicationContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                    prefs.edit().putString(SettingsFragment.KEY_LAST_CAPTURE_URI, finalUri.toString()).apply()
+                }
+
+                withContext(Dispatchers.Main) {
+                    android.widget.Toast.makeText(applicationContext, "HDR+ Background Processed", android.widget.Toast.LENGTH_SHORT).show()
+                }
+
+                showResultNotification("HDR+ Processing Complete", "Image saved successfully")
+
+                ColorProcessor.onBackgroundSaveComplete(
+                    req.baseName, null, null, finalUri?.toString(), req.zoomFactor, req.orientation, req.saveJpg
+                )
+            }
         } else {
-            Log.e(TAG, "JNI failed with code $ret for ${req.baseName}")
-            ColorProcessor.onBackgroundSaveComplete(
-                req.baseName, null, null, null, req.zoomFactor, req.orientation, req.saveJpg
-            )
+            Log.e(TAG, "JNI failed with code $ret for ${req.baseName} (Mask: $ablationMask)")
+            if (ablationMask == 0) {
+                ColorProcessor.onBackgroundSaveComplete(
+                    req.baseName, null, null, null, req.zoomFactor, req.orientation, req.saveJpg
+                )
+                withContext(Dispatchers.Main) {
+                    android.widget.Toast.makeText(applicationContext, "HDR+ failed in background", android.widget.Toast.LENGTH_SHORT).show()
+                }
+                showResultNotification("HDR+ Processing Failed", "JNI Error code: $ret")
+            }
         }
+        }
+        } finally {
+            if (!buffersReleased) {
+                req.buffers.forEach { HdrPlusBurst.releaseBuffer(it) }
+            }
+        }
+    }
+
+    private fun updateNotification(content: String) {
+        val notification = createNotification(content)
+        val notificationManager = getSystemService(NotificationManager::class.java)
+        notificationManager.notify(NOTIFICATION_ID, notification)
+    }
+
+    private fun showResultNotification(title: String, content: String) {
+        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle(title)
+            .setContentText(content)
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setAutoCancel(true)
+            .build()
+        val notificationManager = getSystemService(NotificationManager::class.java)
+        notificationManager.notify(RESULT_NOTIFICATION_ID, notification)
     }
 
     private fun createNotificationChannel() {
@@ -184,5 +313,6 @@ class HdrPlusProcessingService : Service() {
         private const val TAG = "HdrPlusService"
         private const val CHANNEL_ID = "hdr_plus_processing_channel"
         private const val NOTIFICATION_ID = 1001
+        private const val RESULT_NOTIFICATION_ID = 1002
     }
 }

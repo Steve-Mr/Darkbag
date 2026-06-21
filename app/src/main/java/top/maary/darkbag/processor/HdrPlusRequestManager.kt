@@ -41,14 +41,16 @@ data class HdrPlusRequest(
     val jpgFolderUri: String?,
     val rawFolderUri: String?,
     val hfMetadata: HalfFrameManager.Metadata?,
-    val editConfig: top.maary.darkbag.models.EditConfig?
+    val editConfig: top.maary.darkbag.models.EditConfig?,
+
+    val runAblationTest: Boolean = false
 )
 
 object HdrPlusRequestManager {
-    private val queue = java.util.concurrent.LinkedBlockingQueue<HdrPlusRequest>()
+    private val queue = java.util.concurrent.LinkedBlockingQueue<HdrPlusRequest>(2)
 
     fun enqueue(request: HdrPlusRequest) {
-        queue.put(request)
+        if (!queue.offer(request)) throw IllegalStateException("HDR+ Queue is full. Please wait before capturing more.")
     }
 
     fun dequeue(): HdrPlusRequest? {
