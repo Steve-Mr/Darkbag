@@ -377,6 +377,7 @@ class SettingsFragment : Fragment() {
 
     private fun setupCheckboxes() {
         setupSwitch(binding.switchLivePreview, KEY_ENABLE_LUT_PREVIEW)
+        setupSwitch(binding.switchTetrahedralLut, KEY_USE_TETRAHEDRAL, false)
 
         binding.cbSaveJpg.isChecked = prefs.getBoolean(KEY_SAVE_JPG, true)
         binding.cbSaveRaw.isChecked = prefs.getBoolean(KEY_SAVE_RAW, true)
@@ -511,6 +512,8 @@ class SettingsFragment : Fragment() {
         const val KEY_DEFAULT_FOCAL_1X = "default_focal_1x"
         const val KEY_ANTIBANDING = "antibanding_mode"
         const val KEY_FLASH_MODE = "flash_mode"
+        const val KEY_DEBUG_MODE = "debug_mode"
+        const val KEY_USE_TETRAHEDRAL = "use_tetrahedral_lut"
         const val KEY_HDR_BURST_COUNT = "hdr_burst_count"
         const val KEY_HDR_UNDEREXPOSURE_MODE = "hdr_underexposure_mode"
         const val KEY_SHOW_HDR_UNDEREXPOSURE_BUTTON = "show_hdr_underexposure_button"

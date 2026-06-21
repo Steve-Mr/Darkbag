@@ -74,6 +74,8 @@ class HdrPlusProcessingService : Service() {
     private suspend fun processRequest(req: HdrPlusRequest) {
         Log.d(TAG, "Processing started for ${req.baseName}")
 
+        var buffersReleased = false
+        try {
         val outputJpgPath = if (req.saveJpg) req.fullResJpgPath else null
         val outputDngPath = if (req.saveRaw) req.linearDngPath else null
 
@@ -90,6 +92,8 @@ class HdrPlusProcessingService : Service() {
             val debugStats = LongArray(25).apply { this[24] = ablationMask.toLong() }
 
             val jniStartTime = System.currentTimeMillis()
+            val useTetrahedralLut = applicationContext.getSharedPreferences(top.maary.darkbag.fragments.SettingsFragment.PREFS_NAME, android.content.Context.MODE_PRIVATE).getBoolean("use_tetrahedral_lut", false)
+
             val ret = if (req.isSingleFrame) {
                 ColorProcessor.processSingleFrameRaw(
                     req.buffers[0],
@@ -107,7 +111,8 @@ class HdrPlusProcessingService : Service() {
                     null,
                     req.zoomFactor,
                     req.mirror,
-                    req.metadata
+                    req.metadata,
+                    useTetrahedralLut
                 )
             } else {
                 ColorProcessor.processHdrPlus(
@@ -126,10 +131,20 @@ class HdrPlusProcessingService : Service() {
                     null,
                     req.zoomFactor,
                     req.mirror,
-                    req.metadata
+                    req.metadata,
+                    useTetrahedralLut
                 )
             }
             val jniEndTime = System.currentTimeMillis()
+
+            // Release Java-side DirectByteBuffers after the last JNI call completes.
+            // Native side has already copied all frame data via memcpy at the start of
+            // processing, so these buffers are no longer needed. Releasing early frees
+            // ~168MB of native memory during the IO-bound save phase.
+            if (ablationMask == masksToRun.last() && !buffersReleased) {
+                req.buffers.forEach { HdrPlusBurst.releaseBuffer(it) }
+                buffersReleased = true
+            }
 
             if (ret == 0) {
             Log.d(TAG, "JNI finished successfully for ${req.baseName}")
@@ -242,9 +257,10 @@ class HdrPlusProcessingService : Service() {
             }
         }
         }
-
-        req.buffers.forEach {
-            HdrPlusBurst.releaseBuffer(it)
+        } finally {
+            if (!buffersReleased) {
+                req.buffers.forEach { HdrPlusBurst.releaseBuffer(it) }
+            }
         }
     }
 

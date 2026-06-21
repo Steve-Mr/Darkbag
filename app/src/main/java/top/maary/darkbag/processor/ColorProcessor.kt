@@ -83,7 +83,8 @@ object ColorProcessor {
 
         zoomFactor: Float,
         mirror: Boolean,
-        metadata: CaptureMetadata
+        metadata: CaptureMetadata,
+        useTetrahedralLut: Boolean = false
     ): Int
 
     /**
@@ -158,6 +159,7 @@ external fun processHdrPlus(
 
         zoomFactor: Float,
         mirror: Boolean,
-        metadata: CaptureMetadata
+        metadata: CaptureMetadata,
+        useTetrahedralLut: Boolean = false
     ): Int
 }

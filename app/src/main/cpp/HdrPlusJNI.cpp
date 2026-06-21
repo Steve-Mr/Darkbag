@@ -134,16 +134,18 @@ void fillDebugStats(JNIEnv* env, jlongArray debugStats, jlong copyMs, jlong hali
 }
 
 struct GlobalBuffers {
+    std::unique_ptr<uint16_t[]> inputMem;
+    std::unique_ptr<uint16_t[]> outputMem;
     Buffer<uint16_t> inputPool;
     Buffer<uint16_t> outputPool;
-    std::vector<uint16_t> interleavedPool;
     bool isInitialized = false;
 
     void ensureCapacity(int w, int h, int frames) {
         if (!isInitialized || inputPool.width() < w || inputPool.height() < h || inputPool.dim(2).extent() < frames) {
-            inputPool = Buffer<uint16_t>(w, h, frames);
-            outputPool = Buffer<uint16_t>(w, h, 3);
-            interleavedPool.resize(static_cast<size_t>(w) * h * 3);
+            inputMem = std::make_unique<uint16_t[]>(static_cast<size_t>(w) * h * frames);
+            outputMem = std::make_unique<uint16_t[]>(static_cast<size_t>(w) * h * 3);
+            inputPool = Buffer<uint16_t>(inputMem.get(), w, h, frames);
+            outputPool = Buffer<uint16_t>(outputMem.get(), w, h, 3);
             isInitialized = true;
             LOGD("Memory pool (re)allocated: %d x %d x %d", w, h, frames);
         }
@@ -297,8 +299,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
         return -1;
     }
 
-    g_hdrPlusBuffers.ensureCapacity(width, height, 1);
-    std::vector<uint16_t>& finalImage = g_hdrPlusBuffers.interleavedPool;
+    std::vector<uint16_t> finalImage((size_t)width * height * 3);
     size_t dataSize = (size_t)width * height * 3;
     in.read((char*)finalImage.data(), dataSize * sizeof(uint16_t));
     bool read_ok = !!in;
@@ -317,7 +318,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
 
 
     const char* lut_path_cstr = (lutPath) ? env->GetStringUTFChars(lutPath, 0) : nullptr;
-    LUT3D lut; if (lut_path_cstr) { lut = load_lut(lut_path_cstr); env->ReleaseStringUTFChars(lutPath, lut_path_cstr); }
+    const LUT3D& lut = lut_path_cstr ? load_lut(lut_path_cstr) : load_lut(nullptr); if (lut_path_cstr) { env->ReleaseStringUTFChars(lutPath, lut_path_cstr); }
 
     const char* jpg_path_cstr = (jpgPath) ? env->GetStringUTFChars(jpgPath, 0) : nullptr;
     const char* dng_path_cstr = (dngPath) ? env->GetStringUTFChars(dngPath, 0) : nullptr;
@@ -327,7 +328,8 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
     if (dng_path_cstr) {
         LOGD("Exporting DNG to %s", dng_path_cstr);
         float baselineExposure = (digitalGain > 0.0f) ? std::log2(digitalGain) : 0.0f;
-        write_dng(dng_path_cstr, width, height, finalImage, kMax16BitValue, ccmVec, meta, orientation, (bool)mirror, baselineExposure);
+        std::vector<float> emptyLs;
+        write_dng(dng_path_cstr, width, height, finalImage.data(), 3, width * 3, 1, emptyLs, 0, 0, kMax16BitValue, ccmVec, meta, orientation, (bool)mirror, baselineExposure);
     }
 
     bool saveOk = true;
@@ -336,9 +338,10 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
         static int save_invocation_count = 0;
         save_invocation_count++;
         LOGD("process_and_save_image INVOCATION #%d START", save_invocation_count);
-        saveOk = process_and_save_image(finalImage, width, height, digitalGain, targetLog, lut,
+        std::vector<float> emptyLs;
+        saveOk = process_and_save_image(finalImage.data(), 3, width * 3, 1, emptyLs, 0, 0, width, height, digitalGain, targetLog, lut,
                                         exposure, contrast, saturation, highlights, shadows, whites, blacks,
-                                        jpg_path_cstr, nullptr, &meta, 1, ccmVec.data(), wbVec.data(), orientation, nullptr, 0, 0, false, 1, zoomFactor, (bool)mirror, nullptr);
+                                        jpg_path_cstr, nullptr, &meta, 1, ccmVec.data(), wbVec.data(), orientation, nullptr, 0, 0, false, 1, zoomFactor, (bool)mirror, nullptr, 0, false);
     }
     if (jpgPath && jpg_path_cstr) env->ReleaseStringUTFChars(jpgPath, jpg_path_cstr);
     if (dngPath && dng_path_cstr) env->ReleaseStringUTFChars(dngPath, dng_path_cstr);
@@ -358,7 +361,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
     JNIEnv* env, jobject /* this */, jobjectArray dngBuffers, jint width, jint height, jint orientation, jint whiteLevel, jintArray blackLevelPattern, jfloatArray lensShadingMap, jint lensShadingRows, jint lensShadingCols, jboolean useSensorColorMatrix, jfloatArray whiteBalance, jfloatArray ccm, jfloatArray ccmAlt, jboolean exportMatrixAB, jint cfaPattern,
     jint targetLog, jstring lutPath, jstring outputJpgPath, jstring outputDngPath,
     jfloat digitalGain, jlongArray debugStats, jobject outputBitmap, jfloat zoomFactor, jboolean mirror,
-    jobject metadata
+    jobject metadata, jboolean useTetrahedralLut
 ) {
     LOGD("Native processHdrPlus started.");
     (void)useSensorColorMatrix;
@@ -366,16 +369,21 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
     auto nativeStart = std::chrono::high_resolution_clock::now();
     auto jniPrepStart = std::chrono::high_resolution_clock::now();
 
+    auto subStart = std::chrono::high_resolution_clock::now();
     ImageMetadata meta = metadataFromJava(env, metadata);
+    auto metadataMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - subStart).count();
     int captureIso = meta.iso > 0 ? meta.iso : 400;
 
     int numFrames = env->GetArrayLength(dngBuffers);
     if (numFrames < 1) { LOGE("Processing requires at least 1 frame."); return -1; }
 
+    subStart = std::chrono::high_resolution_clock::now();
     g_hdrPlusBuffers.ensureCapacity(width, height, numFrames);
+    auto ensureCapacityMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - subStart).count();
     uint16_t* rawDataPtr = g_hdrPlusBuffers.inputPool.data();
     const size_t frameSizeBytes = static_cast<size_t>(width) * static_cast<size_t>(height) * sizeof(uint16_t);
     std::vector<uint16_t*> framePtrs(numFrames, nullptr);
+    subStart = std::chrono::high_resolution_clock::now();
     for (int i = 0; i < numFrames; i++) {
         jobject bufObj = env->GetObjectArrayElement(dngBuffers, i);
         if (!bufObj) {
@@ -395,6 +403,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
             return -1;
         }
     }
+    auto bufferAddrMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - subStart).count();
 
     auto copyStart = std::chrono::high_resolution_clock::now();
     #pragma omp parallel for
@@ -405,6 +414,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
     Buffer<uint16_t> inputBuf(rawDataPtr, width, height, numFrames);
     Buffer<uint16_t> outputBuf(g_hdrPlusBuffers.outputPool.data(), width, height, 3);
 
+    subStart = std::chrono::high_resolution_clock::now();
     jfloat* wbData = env->GetFloatArrayElements(whiteBalance, nullptr);
     float wb_r = wbData[0], wb_g0 = wbData[1], wb_g1 = wbData[2], wb_b = wbData[3];
     std::vector<float> wbVec = {wb_r, wb_g0, wb_g1, wb_b};
@@ -441,6 +451,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
 
     std::vector<float> identityCCM = { 1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f };
     Buffer<float> ccmHalideBuf(identityCCM.data(), 3, 3);
+    auto paramExtractMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - subStart).count();
     auto jniPrepMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - jniPrepStart).count();
 
     int halideCfa = 1;
@@ -477,61 +488,14 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
     if (outputBitmap) AndroidBitmap_lockPixels(env, outputBitmap, (void**)&bitmapPixels);
 
     const char* lut_path_cstr = (lutPath) ? env->GetStringUTFChars(lutPath, 0) : nullptr;
-    LUT3D lut; if (lut_path_cstr) { lut = load_lut(lut_path_cstr); env->ReleaseStringUTFChars(lutPath, lut_path_cstr); }
+    auto lutLoadStart = std::chrono::high_resolution_clock::now();
+    const LUT3D& lut = lut_path_cstr ? load_lut(lut_path_cstr) : load_lut(nullptr); if (lut_path_cstr) { env->ReleaseStringUTFChars(lutPath, lut_path_cstr); }
+    auto lutLoadMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - lutLoadStart).count();
+    LOGD("JNI Prep breakdown: metadata=%lldms, ensureCapacity=%lldms, bufferAddr=%lldms, paramExtract=%lldms, lutLoad=%lldms", metadataMs, ensureCapacityMs, bufferAddrMs, paramExtractMs, lutLoadMs);
 
-    std::vector<uint16_t>& finalImage = g_hdrPlusBuffers.interleavedPool;
     int stride_x = outputBuf.dim(0).stride(), stride_y = outputBuf.dim(1).stride(), stride_c = outputBuf.dim(2).stride();
     const uint16_t* raw_ptr = outputBuf.data();
     auto postStart = std::chrono::high_resolution_clock::now();
-    const bool hasLsc = !lensShadingVec.empty() && lensShadingRows > 0 && lensShadingCols > 0;
-    auto lsc_idx = [&](int ch, int row, int col) -> int {
-        return ch * lensShadingRows * lensShadingCols + row * lensShadingCols + col;
-    };
-
-    #pragma omp parallel for
-    for (int y = 0; y < height; y++) {
-        for (int x = 0; x < width; x++) {
-             uint16_t r = raw_ptr[x*stride_x + y*stride_y + 0*stride_c];
-             uint16_t g = raw_ptr[x*stride_x + y*stride_y + 1*stride_c];
-             uint16_t b = raw_ptr[x*stride_x + y*stride_y + 2*stride_c];
-
-             // Clip to 14-bit range to prevent pink highlights
-             r = std::min(r, kMax14BitValue);
-             g = std::min(g, kMax14BitValue);
-             b = std::min(b, kMax14BitValue);
-
-             float lscR = 1.0f, lscG = 1.0f, lscB = 1.0f;
-             if (hasLsc) {
-                 float fx = (width > 1) ? (float)x * (lensShadingCols - 1) / (float)(width - 1) : 0.0f;
-                 float fy = (height > 1) ? (float)y * (lensShadingRows - 1) / (float)(height - 1) : 0.0f;
-                 int x0 = std::clamp((int)std::floor(fx), 0, lensShadingCols - 1);
-                 int y0 = std::clamp((int)std::floor(fy), 0, lensShadingRows - 1);
-                 int x1 = std::min(x0 + 1, lensShadingCols - 1);
-                 int y1 = std::min(y0 + 1, lensShadingRows - 1);
-                 float tx = fx - x0;
-                 float ty = fy - y0;
-                 auto bilerp = [&](int ch) {
-                     float v00 = lensShadingVec[lsc_idx(ch, y0, x0)];
-                     float v10 = lensShadingVec[lsc_idx(ch, y0, x1)];
-                     float v01 = lensShadingVec[lsc_idx(ch, y1, x0)];
-                     float v11 = lensShadingVec[lsc_idx(ch, y1, x1)];
-                     float v0 = v00 * (1.0f - tx) + v10 * tx;
-                     float v1 = v01 * (1.0f - tx) + v11 * tx;
-                     return v0 * (1.0f - ty) + v1 * ty;
-                 };
-                 lscR = bilerp(0);
-                 lscG = 0.5f * (bilerp(1) + bilerp(2));
-                 lscB = bilerp(3);
-             }
-
-             int idx = (y * width + x) * 3;
-             // Halide output is scaled by 0.25 (14-bit range).
-             // We shift left by 2 to restore full 16-bit range for final saving.
-             finalImage[idx+0] = (uint16_t)std::min((int)((float)r * lscR) << 2, (int)kMax16BitValue);
-             finalImage[idx+1] = (uint16_t)std::min((int)((float)g * lscG) << 2, (int)kMax16BitValue);
-             finalImage[idx+2] = (uint16_t)std::min((int)((float)b * lscB) << 2, (int)kMax16BitValue);
-        }
-    }
     auto postDurationMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - postStart).count();
 
     const char* jpg_p_cstr = (outputJpgPath) ? env->GetStringUTFChars(outputJpgPath, 0) : nullptr;
@@ -555,9 +519,9 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
     if (bitmapPixels) {
         LOGD("process_and_save_image PREVIEW INVOCATION START");
         auto start_preview = std::chrono::high_resolution_clock::now();
-        process_and_save_image(finalImage, width, height, digitalGain, targetLog, lut,
+        process_and_save_image(raw_ptr, stride_x, stride_y, stride_c, lensShadingVec, lensShadingRows, lensShadingCols, width, height, digitalGain, targetLog, lut,
                                 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
-                                nullptr, nullptr, nullptr, 1, ccmVec.data(), wbVec.data(), orientation, bitmapPixels, out_w, out_h, true, fastPreviewDownsample, zoomFactor, (bool)mirror);
+                                nullptr, nullptr, nullptr, 1, ccmVec.data(), wbVec.data(), orientation, bitmapPixels, out_w, out_h, true, fastPreviewDownsample, zoomFactor, (bool)mirror, nullptr, 0, (bool)useTetrahedralLut);
         previewMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start_preview).count();
         AndroidBitmap_unlockPixels(env, outputBitmap);
     }
@@ -581,9 +545,9 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
             ablationMask = (int)statsArray[24];
         }
 
-        process_and_save_image(finalImage, width, height, digitalGain, targetLog, lut,
+        process_and_save_image(raw_ptr, stride_x, stride_y, stride_c, lensShadingVec, lensShadingRows, lensShadingCols, width, height, digitalGain, targetLog, lut,
                                 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
-                            jpgPathStr.c_str(), nullptr, &meta, 1, ccmVec.data(), wbVec.data(), orientation, nullptr, 0, 0, true, 1, zoomFactor, (bool)mirror, jpgTimings, ablationMask);
+                            jpgPathStr.c_str(), nullptr, &meta, 1, ccmVec.data(), wbVec.data(), orientation, nullptr, 0, 0, true, 1, zoomFactor, (bool)mirror, jpgTimings, ablationMask, (bool)useTetrahedralLut);
         mainJpgTotalMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start_jpg).count();
         edgeCompMs = jpgTimings[0];
         pixelProcMs = jpgTimings[1];
@@ -599,24 +563,19 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
             altJpgPath = altJpgPath.substr(0, dot) + suffix;
             LOGD("process_and_save_image ALT_JPG INVOCATION START");
             auto start_alt = std::chrono::high_resolution_clock::now();
-            process_and_save_image(finalImage, width, height, digitalGain, targetLog, lut,
+            process_and_save_image(raw_ptr, stride_x, stride_y, stride_c, lensShadingVec, lensShadingRows, lensShadingCols, width, height, digitalGain, targetLog, lut,
                                     0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
-                                    altJpgPath.c_str(), nullptr, &meta, 1, ccmAltVec.data(), wbVec.data(), orientation, nullptr, 0, 0, false, 1, zoomFactor, (bool)mirror);
+                                    altJpgPath.c_str(), nullptr, &meta, 1, ccmAltVec.data(), wbVec.data(), orientation, nullptr, 0, 0, false, 1, zoomFactor, (bool)mirror, nullptr, 0, (bool)useTetrahedralLut);
             altJpgTotalMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start_alt).count();
         }
     }
 
     if (!dngPathStr.empty()) {
         float baselineExposure = (digitalGain > 0.0f) ? std::log2(digitalGain) : 0.0f;
-        // COPY finalImage into a new shared_ptr so we can detach and process DNG in the background
-        auto finalImageCopy = std::make_shared<std::vector<uint16_t>>(finalImage);
-        std::thread([dngPathStr, width, height, finalImageCopy, ccmVec, meta, orientation, mirror, baselineExposure]() {
-            auto start_dng = std::chrono::high_resolution_clock::now();
-            write_dng(dngPathStr.c_str(), width, height, *finalImageCopy, kMax16BitValue, ccmVec, meta, orientation, (bool)mirror, baselineExposure);
-            long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start_dng).count();
-            LOGD("Native background DNG thread finished in %lld ms.", ms);
-        }).detach();
-        dngEncodeMs = 0; // Return immediately
+        auto start_dng = std::chrono::high_resolution_clock::now();
+        write_dng(dngPathStr.c_str(), width, height, raw_ptr, stride_x, stride_y, stride_c, lensShadingVec, lensShadingRows, lensShadingCols, kMax16BitValue, ccmVec, meta, orientation, (bool)mirror, baselineExposure);
+        dngEncodeMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start_dng).count();
+        LOGD("Native DNG encoded in %lld ms.", dngEncodeMs);
     }
 
     jlong totalSaveMs = (jlong)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - saveStart).count();
@@ -632,7 +591,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processSingleFrameRaw(
     JNIEnv* env, jobject /* this */, jobject bayerBuffer, jint width, jint height, jint orientation, jint whiteLevel, jintArray blackLevelPattern, jfloatArray lensShadingMap, jint lensShadingRows, jint lensShadingCols, jfloatArray whiteBalance, jfloatArray ccm, jint cfaPattern,
     jint targetLog, jstring lutPath, jstring outputJpgPath, jstring outputDngPath,
     jfloat digitalGain, jlongArray debugStats, jobject outputBitmap, jfloat zoomFactor, jboolean mirror,
-    jobject metadata
+    jobject metadata, jboolean useTetrahedralLut
 ) {
     LOGD("Native processSingleFrameRaw started.");
 
@@ -647,6 +606,6 @@ Java_top_maary_darkbag_processor_ColorProcessor_processSingleFrameRaw(
         whiteBalance, ccm, nullptr, // ccmAlt
         false, // exportMatrixAB
         cfaPattern, targetLog, lutPath,
-        outputJpgPath, outputDngPath, digitalGain, debugStats, outputBitmap, zoomFactor, mirror, metadata
+        outputJpgPath, outputDngPath, digitalGain, debugStats, outputBitmap, zoomFactor, mirror, metadata, useTetrahedralLut
     );
 }
