@@ -332,6 +332,8 @@ class CameraFragment : Fragment() {
     private lateinit var cameraExecutor: ExecutorService
 
     // Cache for CaptureResults to match with ImageProxy timestamps
+    private var lastKnownWb: android.hardware.camera2.params.RggbChannelVector? = null
+    private var lastKnownCcm: android.hardware.camera2.params.ColorSpaceTransform? = null
     private val captureResults = java.util.Collections.synchronizedMap(object :
         LinkedHashMap<Long, TotalCaptureResult>() {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, TotalCaptureResult>?): Boolean {
@@ -1062,6 +1064,8 @@ class CameraFragment : Fragment() {
                     request: android.hardware.camera2.CaptureRequest,
                     result: android.hardware.camera2.TotalCaptureResult
                 ) {
+                    result.get(android.hardware.camera2.CaptureResult.COLOR_CORRECTION_GAINS)?.let { lastKnownWb = it }
+                    result.get(android.hardware.camera2.CaptureResult.COLOR_CORRECTION_TRANSFORM)?.let { lastKnownCcm = it }
                     val timestamp =
                         result.get(android.hardware.camera2.CaptureResult.SENSOR_TIMESTAMP)
                     if (timestamp != null) {
@@ -1821,10 +1825,15 @@ class CameraFragment : Fragment() {
                     intArrayOf(activeArrayRect.top, activeArrayRect.left, activeArrayRect.bottom, activeArrayRect.right)
                 } else null
 
-                captureResult.get(android.hardware.camera2.CaptureResult.COLOR_CORRECTION_GAINS)?.let { wbVec ->
+                val wbVec = captureResult.get(android.hardware.camera2.CaptureResult.COLOR_CORRECTION_GAINS) ?: lastKnownWb
+                if (wbVec != null) {
                     wb = floatArrayOf(wbVec.red, wbVec.greenEven, wbVec.greenOdd, wbVec.blue)
+                } else {
+                    wb = floatArrayOf(1.5f, 1.0f, 1.0f, 1.5f)
                 }
-                captureResult.get(android.hardware.camera2.CaptureResult.COLOR_CORRECTION_TRANSFORM)?.let { ccmMat ->
+
+                val ccmMat = captureResult.get(android.hardware.camera2.CaptureResult.COLOR_CORRECTION_TRANSFORM) ?: lastKnownCcm
+                if (ccmMat != null) {
                     var idx = 0
                     for(row in 0 until 3) for(col in 0 until 3) ccm[idx++] = ccmMat.getElement(col, row).toFloat()
                 }
@@ -1837,12 +1846,16 @@ class CameraFragment : Fragment() {
                     lensShadingCols = lsc.columnCount
                     val out = FloatArray(4 * lensShadingRows * lensShadingCols)
                     fun idx(ch: Int, row: Int, col: Int): Int = ch * lensShadingRows * lensShadingCols + row * lensShadingCols + col
+                    val chR = when(cfa) { 1->1; 2->2; 3->3; else->0 }
+                    val chB = when(cfa) { 1->2; 2->1; 3->0; else->3 }
+                    val chG0 = when(cfa) { 1->0; 2->0; 3->1; else->1 }
+                    val chG1 = when(cfa) { 1->3; 2->3; 3->2; else->2 }
                     for (row in 0 until lensShadingRows) {
                         for (col in 0 until lensShadingCols) {
-                            out[idx(0, row, col)] = lsc.getGainFactor(0, col, row)
-                            out[idx(1, row, col)] = lsc.getGainFactor(1, col, row)
-                            out[idx(2, row, col)] = lsc.getGainFactor(2, col, row)
-                            out[idx(3, row, col)] = lsc.getGainFactor(3, col, row)
+                            out[idx(0, row, col)] = lsc.getGainFactor(chR, col, row)
+                            out[idx(1, row, col)] = lsc.getGainFactor(chG0, col, row)
+                            out[idx(2, row, col)] = lsc.getGainFactor(chG1, col, row)
+                            out[idx(3, row, col)] = lsc.getGainFactor(chB, col, row)
                         }
                     }
                     lensShadingMapData = out
@@ -2709,6 +2722,8 @@ class CameraFragment : Fragment() {
 
             session.setRepeatingRequest(request.build(), object : android.hardware.camera2.CameraCaptureSession.CaptureCallback() {
                 override fun onCaptureCompleted(session: android.hardware.camera2.CameraCaptureSession, request: android.hardware.camera2.CaptureRequest, result: android.hardware.camera2.TotalCaptureResult) {
+                    result.get(android.hardware.camera2.CaptureResult.COLOR_CORRECTION_GAINS)?.let { lastKnownWb = it }
+                    result.get(android.hardware.camera2.CaptureResult.COLOR_CORRECTION_TRANSFORM)?.let { lastKnownCcm = it }
                     val timestamp = result.get(android.hardware.camera2.CaptureResult.SENSOR_TIMESTAMP)
                     if (timestamp != null) {
                         captureResults[timestamp] = result
@@ -2847,6 +2862,8 @@ class CameraFragment : Fragment() {
 
             session.setRepeatingRequest(request.build(), object : android.hardware.camera2.CameraCaptureSession.CaptureCallback() {
                 override fun onCaptureCompleted(session: android.hardware.camera2.CameraCaptureSession, request: android.hardware.camera2.CaptureRequest, result: android.hardware.camera2.TotalCaptureResult) {
+                    result.get(android.hardware.camera2.CaptureResult.COLOR_CORRECTION_GAINS)?.let { lastKnownWb = it }
+                    result.get(android.hardware.camera2.CaptureResult.COLOR_CORRECTION_TRANSFORM)?.let { lastKnownCcm = it }
                     val timestamp = result.get(android.hardware.camera2.CaptureResult.SENSOR_TIMESTAMP)
                     if (timestamp != null) {
                         captureResults[timestamp] = result
@@ -3571,15 +3588,20 @@ class CameraFragment : Fragment() {
                 }
 
                 result?.let { r ->
-                    val wbVec = r.get(android.hardware.camera2.CaptureResult.COLOR_CORRECTION_GAINS)
+                    val wbVec = r.get(android.hardware.camera2.CaptureResult.COLOR_CORRECTION_GAINS) ?: lastKnownWb
                     if (wbVec != null) {
                         wb[0] = wbVec.red
                         wb[1] = wbVec.greenEven
                         wb[2] = wbVec.greenOdd
                         wb[3] = wbVec.blue
+                    } else {
+                        wb[0] = 1.5f
+                        wb[1] = 1.0f
+                        wb[2] = 1.0f
+                        wb[3] = 1.5f
                     }
 
-                    val ccmMat = r.get(android.hardware.camera2.CaptureResult.COLOR_CORRECTION_TRANSFORM)
+                    val ccmMat = r.get(android.hardware.camera2.CaptureResult.COLOR_CORRECTION_TRANSFORM) ?: lastKnownCcm
                     if (ccmMat != null) {
                         var idx = 0
                         for(row in 0 until 3) {
@@ -3609,12 +3631,16 @@ class CameraFragment : Fragment() {
                         lensShadingCols = lsc.columnCount
                         val out = FloatArray(4 * lensShadingRows * lensShadingCols)
                         fun idx(ch: Int, row: Int, col: Int): Int = ch * lensShadingRows * lensShadingCols + row * lensShadingCols + col
+                        val chR = when(cfa) { 1->1; 2->2; 3->3; else->0 }
+                        val chB = when(cfa) { 1->2; 2->1; 3->0; else->3 }
+                        val chG0 = when(cfa) { 1->0; 2->0; 3->1; else->1 }
+                        val chG1 = when(cfa) { 1->3; 2->3; 3->2; else->2 }
                         for (row in 0 until lensShadingRows) {
                             for (col in 0 until lensShadingCols) {
-                                out[idx(0, row, col)] = lsc.getGainFactor(0, col, row)
-                                out[idx(1, row, col)] = lsc.getGainFactor(1, col, row)
-                                out[idx(2, row, col)] = lsc.getGainFactor(2, col, row)
-                                out[idx(3, row, col)] = lsc.getGainFactor(3, col, row)
+                                out[idx(0, row, col)] = lsc.getGainFactor(chR, col, row)
+                                out[idx(1, row, col)] = lsc.getGainFactor(chG0, col, row)
+                                out[idx(2, row, col)] = lsc.getGainFactor(chG1, col, row)
+                                out[idx(3, row, col)] = lsc.getGainFactor(chB, col, row)
                             }
                         }
                         lensShadingMapData = out
@@ -4174,6 +4200,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
                             session.setRepeatingRequest(request.build(), object : android.hardware.camera2.CameraCaptureSession.CaptureCallback() {
                                 override fun onCaptureCompleted(session: android.hardware.camera2.CameraCaptureSession, request: android.hardware.camera2.CaptureRequest, result: android.hardware.camera2.TotalCaptureResult) {
+                                    result.get(android.hardware.camera2.CaptureResult.COLOR_CORRECTION_GAINS)?.let { lastKnownWb = it }
+                                    result.get(android.hardware.camera2.CaptureResult.COLOR_CORRECTION_TRANSFORM)?.let { lastKnownCcm = it }
                                     val timestamp = result.get(android.hardware.camera2.CaptureResult.SENSOR_TIMESTAMP)
                                     if (timestamp != null) {
                                         captureResults[timestamp] = result
