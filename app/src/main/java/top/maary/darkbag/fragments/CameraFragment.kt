@@ -2094,6 +2094,16 @@ class CameraFragment : Fragment() {
 
             } catch (e: Exception) {
                 Log.e(TAG, "Error in background processing", e)
+                withContext(Dispatchers.Main) {
+                    android.widget.Toast.makeText(requireContext(), "Capture error: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
+                }
+            } finally {
+                processingSemaphore.release()
+                withContext(Dispatchers.Main) {
+                    if (processingSemaphore.availablePermits > 0) {
+                        cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
+                    }
+                }
             }
         }
 
@@ -3778,6 +3788,11 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     val logMsg = "HDR+ Request Enqueued: $dngName\nCapture Time: ${captureTime}ms\nQueue Time: ${System.currentTimeMillis() - jniStartTime}ms"
                     Log.i(TAG, logMsg)
                     DebugLogManager.addLog(logMsg)
+
+                    processingSemaphore.release()
+                    withContext(Dispatchers.Main) {
+                        resetBurstUi()
+                    }
 
                 } else {
                     throw RuntimeException("JNI processing returned error code: $ret")

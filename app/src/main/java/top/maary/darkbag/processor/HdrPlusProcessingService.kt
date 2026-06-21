@@ -25,7 +25,7 @@ class HdrPlusProcessingService : Service() {
 
     private val serviceJob = Job()
     private val serviceScope = CoroutineScope(Dispatchers.Default + serviceJob)
-    private var isProcessing = false
+    private val processMutex = kotlinx.coroutines.sync.Mutex()
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -44,29 +44,33 @@ class HdrPlusProcessingService : Service() {
     }
 
     private fun processNextInQueue() {
-        if (isProcessing) return
-
-        val request = HdrPlusRequestManager.dequeue()
-        if (request == null) {
-            // Queue empty, stop service
-            androidx.core.app.ServiceCompat.stopForeground(this, androidx.core.app.ServiceCompat.STOP_FOREGROUND_REMOVE)
-            stopSelf()
-            return
-        }
-
-        isProcessing = true
-        updateNotification("Processing HDR+ image...")
         serviceScope.launch {
+            // Only allow one processing loop at a time
+            if (!processMutex.tryLock()) return@launch
+            
             try {
-                processRequest(request)
-            } catch (e: Exception) {
-                Log.e(TAG, "Error processing HDR+ request: ${request.requestId}", e)
-                showResultNotification("Failed to process HDR+ image", e.message ?: "Unknown error")
-            } finally {
-                withContext(Dispatchers.Main) {
-                    isProcessing = false
-                    processNextInQueue()
+                while (true) {
+                    val request = HdrPlusRequestManager.dequeue()
+                    if (request == null) {
+                        // Queue empty, stop service
+                        androidx.core.app.ServiceCompat.stopForeground(
+                            this@HdrPlusProcessingService, 
+                            androidx.core.app.ServiceCompat.STOP_FOREGROUND_REMOVE
+                        )
+                        stopSelf()
+                        break
+                    }
+
+                    updateNotification("Processing HDR+ image...")
+                    try {
+                        processRequest(request)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error processing HDR+ request: ${request.requestId}", e)
+                        showResultNotification("Failed to process HDR+ image", e.message ?: "Unknown error")
+                    }
                 }
+            } finally {
+                processMutex.unlock()
             }
         }
     }

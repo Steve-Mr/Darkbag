@@ -47,7 +47,8 @@ data class HdrPlusRequest(
 )
 
 object HdrPlusRequestManager {
-    private val queue = java.util.concurrent.LinkedBlockingQueue<HdrPlusRequest>(2)
+    // Increase capacity to 4 to allow a reasonable buffer of shots
+    private val queue = java.util.concurrent.LinkedBlockingQueue<HdrPlusRequest>(4)
 
     fun enqueue(request: HdrPlusRequest) {
         if (!queue.offer(request)) throw IllegalStateException("HDR+ Queue is full. Please wait before capturing more.")
