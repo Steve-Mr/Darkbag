@@ -235,9 +235,8 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRaw(
 
     // Load LUT
     const char* lut_path_cstr = (lutPath) ? env->GetStringUTFChars(lutPath, 0) : nullptr;
-    LUT3D lut;
+    const LUT3D& lut = lut_path_cstr ? load_lut(lut_path_cstr) : load_lut(nullptr);
     if (lut_path_cstr) {
-        lut = load_lut(lut_path_cstr);
         env->ReleaseStringUTFChars(lutPath, lut_path_cstr);
     } else if (lutPath) {
         LOGE("GetStringUTFChars failed for lutPath");
@@ -276,8 +275,10 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRaw(
     }
 
     // Use Shared Pipeline
+    std::vector<float> emptyLs;
     bool saveOk = process_and_save_image(
-        rawImage,
+        rawImage.data(),
+        3, image->width * 3, 1, emptyLs, 0, 0,
         image->width,
         image->height,
         digitalGain,
@@ -297,7 +298,10 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRaw(
         outputBitmap != nullptr, // isPreview
         (int)downsampleFactor, // downsampleFactor
         (float)zoomFactor, // zoomFactor
-        (bool)mirror
+        (bool)mirror,
+        nullptr, // out_timings
+        0, // ablationMask
+        false // useTetrahedralLut
     );
 
     if (bitmapPixels) AndroidBitmap_unlockPixels(env, outputBitmap);
@@ -321,7 +325,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_loadLutData(
         jstring lutPath) {
 
     const char* path = env->GetStringUTFChars(lutPath, 0);
-    LUT3D lut = load_lut(path);
+    const LUT3D& lut = load_lut(path);
     env->ReleaseStringUTFChars(lutPath, path);
 
     if (lut.size == 0) return nullptr;
@@ -384,9 +388,8 @@ Java_top_maary_darkbag_processor_ColorProcessor_processZslBitmapWithLut(
     if (AndroidBitmap_lockPixels(env, bitmap, &pixels) < 0) return -1;
 
     const char* lut_path_cstr = (lutPath) ? env->GetStringUTFChars(lutPath, 0) : nullptr;
-    LUT3D lut = {0, std::vector<Vec3>()};
+    const LUT3D& lut = lut_path_cstr ? load_lut(lut_path_cstr) : load_lut(nullptr);
     if (lut_path_cstr) {
-        lut = load_lut(lut_path_cstr);
         env->ReleaseStringUTFChars(lutPath, lut_path_cstr);
     }
 

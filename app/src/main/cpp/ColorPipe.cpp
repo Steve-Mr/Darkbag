@@ -7,7 +7,7 @@
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
-#include "stb_image_write.h"
+
 
 #include <vector>
 #include <ctime>
@@ -149,9 +149,18 @@ static const TIFFFieldInfo dng_field_info[] = {
     { TIFFTAG_FOCALLENGTHIN35MMFILM, 1, 1, TIFF_SHORT, FIELD_CUSTOM, 1, 0, const_cast<char*>("FocalLengthIn35mmFilm") }
 };
 
+
+#include <mutex>
+static std::mutex tiff_extender_mutex;
+static TIFFExtendProc parent_extender = nullptr;
+
 static void DNGTagExtender(TIFF *tif) {
     TIFFMergeFieldInfo(tif, dng_field_info, sizeof(dng_field_info) / sizeof(dng_field_info[0]));
+    if (parent_extender) {
+        (*parent_extender)(tif);
+    }
 }
+
 
 // --- Metadata Helpers ---
 static void format_exif_time(int64_t millis, char* buffer) {
@@ -331,39 +340,89 @@ float apply_log(float x, int type) {
 }
 
 // --- LUT (CPU) ---
-LUT3D load_lut(const char* path) {
-    LUT3D lut;
-    lut.size = 0;
-    std::ifstream file(path);
-    if (!file.is_open()) return lut;
-    char line[2048];
-    int lineCount = 0;
-    const int maxLines = 1000000;
-    while (file.getline(line, sizeof(line)) && ++lineCount < maxLines) {
-        if (line[0] == '\0' || line[0] == '#') continue;
-        std::string lineStr(line);
-        if (lineStr.find("LUT_3D_SIZE") != std::string::npos) {
-            std::stringstream ss(lineStr); std::string temp; ss >> temp >> lut.size;
-            if (lut.size > 0 && lut.size <= 64) {
-                lut.data.reserve(lut.size * lut.size * lut.size);
-            } else {
-                lut.size = 0;
-                return lut;
+#include <mutex>
+#include <unordered_map>
+
+class LutCache {
+public:
+    static LutCache& getInstance() {
+        static LutCache instance;
+        return instance;
+    }
+
+    const LUT3D& getLut(const std::string& path) {
+        static const LUT3D empty_lut;
+        if (path.empty()) return empty_lut;
+
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            auto it = cache_.find(path);
+            if (it != cache_.end()) {
+                return it->second;
             }
-            continue;
         }
-        std::stringstream ss(lineStr); float r, g, b;
-        if (ss >> r >> g >> b) lut.data.push_back({r, g, b});
+
+        LUT3D lut = load_lut_internal(path.c_str());
+
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto it = cache_.find(path);
+        if (it != cache_.end()) {
+            return it->second;
+        }
+
+        auto inserted = cache_.emplace(path, std::move(lut));
+        return inserted.first->second;
     }
-    if (lut.size > 0 && lut.data.size() != (size_t)(lut.size * lut.size * lut.size)) {
-        LOGE("LUT size mismatch: expected %d^3=%zu, got %zu", lut.size, (size_t)(lut.size * lut.size * lut.size), lut.data.size());
+
+private:
+    LutCache() = default;
+    ~LutCache() = default;
+    LutCache(const LutCache&) = delete;
+    LutCache& operator=(const LutCache&) = delete;
+
+    std::mutex mutex_;
+    std::unordered_map<std::string, LUT3D> cache_;
+
+    LUT3D load_lut_internal(const char* path) {
+        LUT3D lut;
         lut.size = 0;
-        lut.data.clear();
+        std::ifstream file(path);
+        if (!file.is_open()) return lut;
+        char line[2048];
+        int lineCount = 0;
+        const int maxLines = 1000000;
+        while (file.getline(line, sizeof(line)) && ++lineCount < maxLines) {
+            if (line[0] == '\0' || line[0] == '#') continue;
+            std::string lineStr(line);
+            if (lineStr.find("LUT_3D_SIZE") != std::string::npos) {
+                std::stringstream ss(lineStr); std::string temp; ss >> temp >> lut.size;
+                if (lut.size > 0 && lut.size <= 64) {
+                    lut.data.reserve(lut.size * lut.size * lut.size);
+                } else {
+                    lut.size = 0;
+                    return lut;
+                }
+                continue;
+            }
+            std::stringstream ss(lineStr); float r, g, b;
+            if (ss >> r >> g >> b) lut.data.push_back({r, g, b});
+        }
+        if (lut.size > 0 && lut.data.size() != (size_t)(lut.size * lut.size * lut.size)) {
+            LOGE("LUT size mismatch: expected %d^3=%zu, got %zu", lut.size, (size_t)(lut.size * lut.size * lut.size), lut.data.size());
+            lut.size = 0;
+            lut.data.clear();
+        }
+        return lut;
     }
-    return lut;
+};
+
+const LUT3D& load_lut(const char* path) {
+    static const LUT3D empty_lut;
+    if (!path) return empty_lut;
+    return LutCache::getInstance().getLut(path);
 }
 
-Vec3 apply_lut(const LUT3D& lut, Vec3 color) {
+Vec3 apply_lut(const LUT3D& lut, Vec3 color, bool useTetrahedral) {
     if (lut.size <= 0 || lut.data.empty()) return color;
     float scale = static_cast<float>(lut.size - 1);
 
@@ -377,23 +436,99 @@ Vec3 apply_lut(const LUT3D& lut, Vec3 color) {
     float r = clamp01(color.r) * scale;
     float g = clamp01(color.g) * scale;
     float b = clamp01(color.b) * scale;
-    int r0 = (int)r; int r1 = std::min(r0 + 1, lut.size - 1);
-    int g0 = (int)g; int g1 = std::min(g0 + 1, lut.size - 1);
-    int b0 = (int)b; int b1 = std::min(b0 + 1, lut.size - 1);
+    int r0 = (int)r; int r1 = r0 + (r0 < lut.size - 1 ? 1 : 0);
+    int g0 = (int)g; int g1 = g0 + (g0 < lut.size - 1 ? 1 : 0);
+    int b0 = (int)b; int b1 = b0 + (b0 < lut.size - 1 ? 1 : 0);
     float dr = r - r0; float dg = g - g0; float db = b - b0;
-    auto idx = [&](int x, int y, int z) { return x + y * lut.size + z * lut.size * lut.size; };
-    Vec3 c000 = lut.data[idx(r0, g0, b0)], c100 = lut.data[idx(r1, g0, b0)];
-    Vec3 c010 = lut.data[idx(r0, g1, b0)], c110 = lut.data[idx(r1, g1, b0)];
-    Vec3 c001 = lut.data[idx(r0, g0, b1)], c101 = lut.data[idx(r1, g0, b1)];
-    Vec3 c011 = lut.data[idx(r0, g1, b1)], c111 = lut.data[idx(r1, g1, b1)];
-    Vec3 c00 = { c000.r * (1-dr) + c100.r * dr, c000.g * (1-dr) + c100.g * dr, c000.b * (1-dr) + c100.b * dr };
-    Vec3 c10 = { c010.r * (1-dr) + c110.r * dr, c010.g * (1-dr) + c110.g * dr, c010.b * (1-dr) + c110.b * dr };
-    Vec3 c01 = { c001.r * (1-dr) + c101.r * dr, c001.g * (1-dr) + c101.g * dr, c001.b * (1-dr) + c101.b * dr };
-    Vec3 c11 = { c011.r * (1-dr) + c111.r * dr, c011.g * (1-dr) + c111.g * dr, c011.b * (1-dr) + c111.b * dr };
-    Vec3 c0 = { c00.r * (1-dg) + c10.r * dg, c00.g * (1-dg) + c10.g * dg, c00.b * (1-dg) + c10.b * dg };
-    Vec3 c1 = { c01.r * (1-dg) + c11.r * dg, c01.g * (1-dg) + c11.g * dg, c01.b * (1-dg) + c11.b * dg };
-    return { c0.r * (1-db) + c1.r * db, c0.g * (1-db) + c1.g * db, c0.b * (1-db) + c1.b * db };
+    
+    int ls = lut.size;
+    int ls2 = ls * ls;
+    auto idx = [&](int x, int y, int z) { return x + y * ls + z * ls2; };
+
+    if (useTetrahedral) {
+        Vec3 c000 = lut.data[idx(r0, g0, b0)];
+        Vec3 c111 = lut.data[idx(r1, g1, b1)];
+        if (dr > dg) {
+            if (dg > db) {
+                // dr > dg > db
+                Vec3 c100 = lut.data[idx(r1, g0, b0)];
+                Vec3 c110 = lut.data[idx(r1, g1, b0)];
+                return {
+                    (1 - dr) * c000.r + (dr - dg) * c100.r + (dg - db) * c110.r + db * c111.r,
+                    (1 - dr) * c000.g + (dr - dg) * c100.g + (dg - db) * c110.g + db * c111.g,
+                    (1 - dr) * c000.b + (dr - dg) * c100.b + (dg - db) * c110.b + db * c111.b
+                };
+            } else if (dr > db) {
+                // dr > db > dg
+                Vec3 c100 = lut.data[idx(r1, g0, b0)];
+                Vec3 c101 = lut.data[idx(r1, g0, b1)];
+                return {
+                    (1 - dr) * c000.r + (dr - db) * c100.r + (db - dg) * c101.r + dg * c111.r,
+                    (1 - dr) * c000.g + (dr - db) * c100.g + (db - dg) * c101.g + dg * c111.g,
+                    (1 - dr) * c000.b + (dr - db) * c100.b + (db - dg) * c101.b + dg * c111.b
+                };
+            } else {
+                // db > dr > dg
+                Vec3 c001 = lut.data[idx(r0, g0, b1)];
+                Vec3 c101 = lut.data[idx(r1, g0, b1)];
+                return {
+                    (1 - db) * c000.r + (db - dr) * c001.r + (dr - dg) * c101.r + dg * c111.r,
+                    (1 - db) * c000.g + (db - dr) * c001.g + (dr - dg) * c101.g + dg * c111.g,
+                    (1 - db) * c000.b + (db - dr) * c001.b + (dr - dg) * c101.b + dg * c111.b
+                };
+            }
+        } else {
+            if (db > dg) {
+                // db > dg > dr
+                Vec3 c001 = lut.data[idx(r0, g0, b1)];
+                Vec3 c011 = lut.data[idx(r0, g1, b1)];
+                return {
+                    (1 - db) * c000.r + (db - dg) * c001.r + (dg - dr) * c011.r + dr * c111.r,
+                    (1 - db) * c000.g + (db - dg) * c001.g + (dg - dr) * c011.g + dr * c111.g,
+                    (1 - db) * c000.b + (db - dg) * c001.b + (dg - dr) * c011.b + dr * c111.b
+                };
+            } else if (dr > db) {
+                // dg > dr > db
+                Vec3 c010 = lut.data[idx(r0, g1, b0)];
+                Vec3 c110 = lut.data[idx(r1, g1, b0)];
+                return {
+                    (1 - dg) * c000.r + (dg - dr) * c010.r + (dr - db) * c110.r + db * c111.r,
+                    (1 - dg) * c000.g + (dg - dr) * c010.g + (dr - db) * c110.g + db * c111.g,
+                    (1 - dg) * c000.b + (dg - dr) * c010.b + (dr - db) * c110.b + db * c111.b
+                };
+            } else {
+                // dg > db > dr
+                Vec3 c010 = lut.data[idx(r0, g1, b0)];
+                Vec3 c011 = lut.data[idx(r0, g1, b1)];
+                return {
+                    (1 - dg) * c000.r + (dg - db) * c010.r + (db - dr) * c011.r + dr * c111.r,
+                    (1 - dg) * c000.g + (dg - db) * c010.g + (db - dr) * c011.g + dr * c111.g,
+                    (1 - dg) * c000.b + (dg - db) * c010.b + (db - dr) * c011.b + dr * c111.b
+                };
+            }
+        }
+    } else {
+        // Trilinear Interpolation
+        Vec3 c000 = lut.data[idx(r0, g0, b0)], c100 = lut.data[idx(r1, g0, b0)];
+        Vec3 c010 = lut.data[idx(r0, g1, b0)], c110 = lut.data[idx(r1, g1, b0)];
+        Vec3 c001 = lut.data[idx(r0, g0, b1)], c101 = lut.data[idx(r1, g0, b1)];
+        Vec3 c011 = lut.data[idx(r0, g1, b1)], c111 = lut.data[idx(r1, g1, b1)];
+        Vec3 c00 = { c000.r * (1-dr) + c100.r * dr, c000.g * (1-dr) + c100.g * dr, c000.b * (1-dr) + c100.b * dr };
+        Vec3 c10 = { c010.r * (1-dr) + c110.r * dr, c010.g * (1-dr) + c110.g * dr, c010.b * (1-dr) + c110.b * dr };
+        Vec3 c01 = { c001.r * (1-dr) + c101.r * dr, c001.g * (1-dr) + c101.g * dr, c001.b * (1-dr) + c101.b * dr };
+        Vec3 c11 = { c011.r * (1-dr) + c111.r * dr, c011.g * (1-dr) + c111.g * dr, c011.b * (1-dr) + c111.b * dr };
+        Vec3 c0 = { c00.r * (1-dg) + c10.r * dg, c00.g * (1-dg) + c10.g * dg, c00.b * (1-dg) + c10.b * dg };
+        Vec3 c1 = { c01.r * (1-dg) + c11.r * dg, c01.g * (1-dg) + c11.g * dg, c01.b * (1-dg) + c11.b * dg };
+        return { c0.r * (1-db) + c1.r * db, c0.g * (1-db) + c1.g * db, c0.b * (1-db) + c1.b * db };
+    }
 }
+
+static std::vector<unsigned char> encode_rgb8_jpeg(
+    const std::vector<unsigned char>& rgb8,
+    int width,
+    int height,
+    int quality
+);
 
 namespace {
 
@@ -445,7 +580,7 @@ std::string build_debug_stage_path(const char* basePath, const char* stageSuffix
 }
 
 
-AdaptiveEdgeComp calculate_adaptive_edge_comp(const std::vector<unsigned short>& inputImage, int width, int height) {
+AdaptiveEdgeComp calculate_adaptive_edge_comp(const uint16_t* planarData, int stride_x, int stride_y, int stride_c, int width, int height) {
     AdaptiveEdgeComp edgeComp;
     const float cx = 0.5f * (width - 1);
     const float cy = 0.5f * (height - 1);
@@ -466,10 +601,15 @@ AdaptiveEdgeComp calculate_adaptive_edge_comp(const std::vector<unsigned short>&
             const float ny = (y - cy) * edgeComp.invMaxRadius;
             const float r = std::sqrt(nx * nx + ny * ny);
 
-            size_t idx = (static_cast<size_t>(y) * width + x) * 3;
-            float rr = static_cast<float>(inputImage[idx + 0]);
-            float gg = static_cast<float>(inputImage[idx + 1]);
-            float bb = static_cast<float>(inputImage[idx + 2]);
+            size_t idx_r = x * stride_x + y * stride_y + 0 * stride_c;
+            size_t idx_g = x * stride_x + y * stride_y + 1 * stride_c;
+            size_t idx_b = x * stride_x + y * stride_y + 2 * stride_c;
+
+            // Halide output is scaled by 0.25 (14-bit range).
+            // We shift left by 2 to restore full 16-bit range for analysis.
+            float rr = static_cast<float>(planarData[idx_r] << 2);
+            float gg = static_cast<float>(planarData[idx_g] << 2);
+            float bb = static_cast<float>(planarData[idx_b] << 2);
 
             if (r <= kCenterRegionRadius) {
                 centerSum[0] += rr; centerSum[1] += gg; centerSum[2] += bb; centerCount++;
@@ -529,51 +669,177 @@ AdaptiveEdgeComp calculate_adaptive_edge_comp(const std::vector<unsigned short>&
 } // namespace
 
 bool process_and_save_image(
-    const std::vector<unsigned short>& inputImage,
+    const uint16_t* planarData,
+    int stride_x, int stride_y, int stride_c,
+    const std::vector<float>& lensShadingVec,
+    int lensShadingRows, int lensShadingCols,
     int width, int height, float gain, int targetLog, const LUT3D& lut,
     float exposure, float contrast, float saturation,
     float highlights, float shadows, float whites, float blacks,
     const char* jpgPath, const char* tiffPath, const ImageMetadata* metadata, int sourceColorSpace,
     const float* ccm, const float* wb, int orientation, unsigned char* out_rgb_buffer,
     int out_width, int out_height,
-    bool isPreview, int downsampleFactor, float zoomFactor, bool mirror
+    bool isPreview, int downsampleFactor, float zoomFactor, bool mirror,
+    long long* out_timings, int ablationMask, bool useTetrahedralLut
 ) {
-    LOGD("process_and_save_image: %dx%d, gain=%.2f, log=%d, lut=%d, jpg=%s, tiff=%s, preview=%d, ds=%d, zoom=%.2f, mirror=%d",
-         width, height, gain, targetLog, lut.size, jpgPath ? jpgPath : "null", tiffPath ? tiffPath : "null", isPreview, downsampleFactor, zoomFactor, mirror);
+
+    LOGD("process_and_save_image: %dx%d, gain=%.2f, log=%d, lut=%d, jpg=%s, tiff=%s, preview=%d, ds=%d, zoom=%.2f, mirror=%d, ablationMask=%d, useTetrahedralLut=%d",
+         width, height, gain, targetLog, lut.size, jpgPath ? jpgPath : "null", tiffPath ? tiffPath : "null", isPreview, downsampleFactor, zoomFactor, mirror, ablationMask, (int)useTetrahedralLut);
+
+    auto time_start_total = std::chrono::high_resolution_clock::now();
+
+    auto time_start_edge = std::chrono::high_resolution_clock::now();
+
     int outW = width / downsampleFactor, outH = height / downsampleFactor;
     bool swapDims = (orientation == 90 || orientation == 270);
     int finalW = swapDims ? outH : outW, finalH = swapDims ? outW : outH;
     Matrix3x3 effective_CCM = {0}; if (sourceColorSpace == 1 && ccm) std::copy(ccm, ccm + 9, effective_CCM.m);
     std::vector<unsigned short> processedImage; std::vector<unsigned char> previewRgb8;
 
-    AdaptiveEdgeComp edgeComp = calculate_adaptive_edge_comp(inputImage, width, height);
+
+    AdaptiveEdgeComp edgeComp = calculate_adaptive_edge_comp(planarData, stride_x, stride_y, stride_c, width, height);
+    auto time_end_edge = std::chrono::high_resolution_clock::now();
+
 
     // Debug stage split output (A/B/C):
     // A: linear RGB input after adaptive edge compensation
     // B: after color-space matrix transform (before log/LUT)
     // C: after log curve (before LUT)
-    const bool enableStageDebug = false;
-    std::string debugBasePath = jpgPath ? std::string(jpgPath) : std::string();
-    std::string debugPathA = enableStageDebug ? build_debug_stage_path(debugBasePath.c_str(), "_debug_A_linear") : std::string();
-    std::string debugPathB = enableStageDebug ? build_debug_stage_path(debugBasePath.c_str(), "_debug_B_matrix") : std::string();
-    std::string debugPathC = enableStageDebug ? build_debug_stage_path(debugBasePath.c_str(), "_debug_C_log") : std::string();
 
-    std::vector<unsigned char> debugA8;
-    std::vector<unsigned char> debugB8;
-    std::vector<unsigned char> debugC8;
+    // Extract loop invariants for PixelProc
+    float exp_gain = std::pow(2.0f, exposure);
+    float global_gain_multiplier = (gain * exp_gain) / 65535.0f;
+
+    // Build 1D LUT for log and non-linear tone adjustments
+    // Size = 65536 to map all possible 16-bit intermediate float values that are scaled to [0,1]
+    const int kLut1DSize = 65536;
+    std::vector<float> lut1D_post_matrix(kLut1DSize);
+
+    auto apply_contrast_hswb = [&](float v) -> float {
+        // Log curve
+        v = apply_log(v, targetLog);
+
+        // Contrast
+        v = std::clamp((v - 0.5f) * (contrast + 1.0f) + 0.5f, 0.0f, 1.0f);
+
+        // Highlights
+        if (highlights != 0.0f) {
+            float weight = std::pow(std::clamp(v, 0.0f, 1.0f), 2.0f);
+            v += highlights * weight * 0.2f;
+        }
+        // Shadows
+        if (shadows != 0.0f) {
+            float weight = std::pow(1.0f - std::clamp(v, 0.0f, 1.0f), 2.0f);
+            v += shadows * weight * 0.2f;
+        }
+        // Whites
+        if (whites != 0.0f) {
+            float weight = std::clamp((v - 0.5f) * 2.0f, 0.0f, 1.0f);
+            v += whites * weight * 0.2f;
+        }
+        // Blacks
+        if (blacks != 0.0f) {
+            float weight = std::clamp((0.5f - v) * 2.0f, 0.0f, 1.0f);
+            v += blacks * weight * 0.2f;
+        }
+        return std::clamp(v, 0.0f, 1.0f);
+    };
+
+    // Ensure the 1D LUT covers a wider dynamic range to prevent clipping extreme highlights (e.g. from high digital gain)
+    float max_linear = std::max(4.0f, gain * exp_gain * 2.0f);
+
+    if (!(ablationMask & 2)) {
+        for (int i = 0; i < kLut1DSize; ++i) {
+            // Map the array indices over the [0, max_linear] domain
+            float linear_val = ((float)i / (kLut1DSize - 1)) * max_linear;
+            lut1D_post_matrix[i] = apply_contrast_hswb(linear_val);
+        }
+    }
+
+
+    // Loop invariants for saturation to prevent redundant calculations per pixel
+    float sat_mult = saturation + 1.0f;
+    float luma_mult = 1.0f - sat_mult;
+
+    // Precompute combined matrix
+    Matrix3x3 combined_matrix = {1,0,0, 0,1,0, 0,0,1};
+    if (sourceColorSpace == 1) {
+        Matrix3x3 m1 = M_sRGB_D65_to_XYZ;
+        if (ccm) m1 = multiply(m1, effective_CCM);
+        combined_matrix = m1;
+    } else if (sourceColorSpace == 0) {
+        combined_matrix = multiply(M_Bradford_D50_to_D65, M_ProPhoto_D50_to_XYZ);
+    }
+    
+    Matrix3x3 target_matrix;
+    switch (targetLog) {
+        case 1: target_matrix = M_XYZ_to_AlexaWideGamut_D65; break;
+        case 2:
+        case 3: target_matrix = M_XYZ_to_Rec2020_D65; break;
+        case 5:
+        case 6: target_matrix = M_XYZ_to_SGamut3Cine_D65; break;
+        case 7: target_matrix = M_XYZ_to_VGamut_D65; break;
+        default: target_matrix = M_XYZ_to_Rec709_D65; break;
+    }
+    combined_matrix = multiply(target_matrix, combined_matrix);
+
+    float factor_1d_lut = (kLut1DSize - 1) / max_linear;
+
+    const bool hasLsc = !lensShadingVec.empty() && lensShadingRows > 0 && lensShadingCols > 0;
+    auto lsc_idx = [&](int ch, int row, int col) -> int {
+        return ch * lensShadingRows * lensShadingCols + row * lensShadingCols + col;
+    };
 
     auto process_pixel = [&](int x, int y, Vec3* stageA, Vec3* stageB, Vec3* stageC) -> Vec3 {
+
         x = std::max(0, std::min(x, width - 1));
         y = std::max(0, std::min(y, height - 1));
-        size_t idx = (static_cast<size_t>(y) * width + x) * 3;
+        
+        uint16_t r_raw = planarData[x*stride_x + y*stride_y + 0*stride_c];
+        uint16_t g_raw = planarData[x*stride_x + y*stride_y + 1*stride_c];
+        uint16_t b_raw = planarData[x*stride_x + y*stride_y + 2*stride_c];
+        
+        // Clip to 14-bit max
+        r_raw = std::min(r_raw, (uint16_t)16383);
+        g_raw = std::min(g_raw, (uint16_t)16383);
+        b_raw = std::min(b_raw, (uint16_t)16383);
+
+        float lscR = 1.0f, lscG = 1.0f, lscB = 1.0f;
+        if (hasLsc) {
+            float fx = (width > 1) ? (float)x * (lensShadingCols - 1) / (float)(width - 1) : 0.0f;
+            float fy = (height > 1) ? (float)y * (lensShadingRows - 1) / (float)(height - 1) : 0.0f;
+            int x0 = std::clamp((int)std::floor(fx), 0, lensShadingCols - 1);
+            int y0 = std::clamp((int)std::floor(fy), 0, lensShadingRows - 1);
+            int x1 = std::min(x0 + 1, lensShadingCols - 1);
+            int y1 = std::min(y0 + 1, lensShadingRows - 1);
+            float tx = fx - x0;
+            float ty = fy - y0;
+            auto bilerp = [&](int ch) {
+                float v00 = lensShadingVec[lsc_idx(ch, y0, x0)];
+                float v10 = lensShadingVec[lsc_idx(ch, y0, x1)];
+                float v01 = lensShadingVec[lsc_idx(ch, y1, x0)];
+                float v11 = lensShadingVec[lsc_idx(ch, y1, x1)];
+                float v0 = v00 * (1.0f - tx) + v10 * tx;
+                float v1 = v01 * (1.0f - tx) + v11 * tx;
+                return v0 * (1.0f - ty) + v1 * ty;
+            };
+            lscR = bilerp(0);
+            lscG = 0.5f * (bilerp(1) + bilerp(2));
+            lscB = bilerp(3);
+        }
+
+        // Halide output is scaled by 0.25 (14-bit range).
+        // We shift left by 2 to restore full 16-bit range for final saving.
+        float final_r = (float)std::min((int)((float)r_raw * lscR) << 2, 65535);
+        float final_g = (float)std::min((int)((float)g_raw * lscG) << 2, 65535);
+        float final_b = (float)std::min((int)((float)b_raw * lscB) << 2, 65535);
 
         // 1. Exposure (Linear Space)
-        float exp_gain = std::pow(2.0f, exposure);
-        float norm_r = (float)inputImage[idx + 0] / 65535.0f * gain * exp_gain;
-        float norm_g = (float)inputImage[idx + 1] / 65535.0f * gain * exp_gain;
-        float norm_b = (float)inputImage[idx + 2] / 65535.0f * gain * exp_gain;
+        float norm_r = final_r * global_gain_multiplier;
+        float norm_g = final_g * global_gain_multiplier;
+        float norm_b = final_b * global_gain_multiplier;
 
-        if (edgeComp.enabled) {
+        if (edgeComp.enabled && !(ablationMask & 4)) {
             const float nx = (x - edgeComp.centerX) * edgeComp.invMaxRadius;
             const float ny = (y - edgeComp.centerY) * edgeComp.invMaxRadius;
             float r = std::sqrt(nx * nx + ny * ny);
@@ -596,66 +862,36 @@ bool process_and_save_image(
         if (stageA) *stageA = colorA;
 
         Vec3 color = colorA;
-        if (sourceColorSpace == 1) { if (ccm) color = multiply(effective_CCM, color); color = multiply(M_sRGB_D65_to_XYZ, color); }
-        else if (sourceColorSpace == 0) { color = multiply(M_ProPhoto_D50_to_XYZ, color); color = multiply(M_Bradford_D50_to_D65, color); }
-
-        switch (targetLog) {
-            case 1: color = multiply(M_XYZ_to_AlexaWideGamut_D65, color); break;
-            case 2:
-            case 3: color = multiply(M_XYZ_to_Rec2020_D65, color); break;
-            case 5:
-            case 6: color = multiply(M_XYZ_to_SGamut3Cine_D65, color); break;
-            case 7: color = multiply(M_XYZ_to_VGamut_D65, color); break;
-            default: color = multiply(M_XYZ_to_Rec709_D65, color); break;
-        }
+        color = multiply(combined_matrix, color);
         if (stageB) *stageB = color;
 
-        color.r = apply_log(color.r, targetLog); color.g = apply_log(color.g, targetLog); color.b = apply_log(color.b, targetLog);
+        if (!(ablationMask & 2)) {
+            // Use 1D LUT for log, contrast, and HSWB
+            auto apply_1d_lut = [&](float v) -> float {
+                int lutIdx = (int)(std::max(0.0f, std::min(max_linear, v)) * factor_1d_lut);
+                return lut1D_post_matrix[lutIdx];
+            };
 
-        // 2. Contrast & Saturation (Log Space)
-        auto apply_contrast = [&](float v) {
-            return std::clamp((v - 0.5f) * (contrast + 1.0f) + 0.5f, 0.0f, 1.0f);
-        };
-        color.r = apply_contrast(color.r);
-        color.g = apply_contrast(color.g);
-        color.b = apply_contrast(color.b);
+            color.r = apply_1d_lut(color.r);
+            color.g = apply_1d_lut(color.g);
+            color.b = apply_1d_lut(color.b);
 
-        float luma = 0.2126f * color.r + 0.7152f * color.g + 0.0722f * color.b;
-        color.r = std::clamp(luma + (color.r - luma) * (saturation + 1.0f), 0.0f, 1.0f);
-        color.g = std::clamp(luma + (color.g - luma) * (saturation + 1.0f), 0.0f, 1.0f);
-        color.b = std::clamp(luma + (color.b - luma) * (saturation + 1.0f), 0.0f, 1.0f);
-
-        // 3. Highlights / Shadows / Whites / Blacks (Log Space)
-        auto apply_hswb = [&](float v) {
-            // Highlights: affecting upper range
-            if (highlights != 0.0f) {
-                float weight = std::pow(std::clamp(v, 0.0f, 1.0f), 2.0f);
-                v += highlights * weight * 0.2f;
-            }
-            // Shadows: affecting lower range
-            if (shadows != 0.0f) {
-                float weight = std::pow(1.0f - std::clamp(v, 0.0f, 1.0f), 2.0f);
-                v += shadows * weight * 0.2f;
-            }
-            // Whites: offset upper
-            if (whites != 0.0f) {
-                float weight = std::clamp((v - 0.5f) * 2.0f, 0.0f, 1.0f);
-                v += whites * weight * 0.2f;
-            }
-            // Blacks: offset lower
-            if (blacks != 0.0f) {
-                float weight = std::clamp((0.5f - v) * 2.0f, 0.0f, 1.0f);
-                v += blacks * weight * 0.2f;
-            }
-            return std::clamp(v, 0.0f, 1.0f);
-        };
-        color.r = apply_hswb(color.r);
-        color.g = apply_hswb(color.g);
-        color.b = apply_hswb(color.b);
+            // Saturation must be calculated dynamically because it depends on the cross-channel luma
+            // Note: sat_mult and luma_mult are now extracted as loop invariants outside the pixel processing loop
+            float luma_comp = (kRec709LinearLumaR * color.r + kRec709LinearLumaG * color.g + kRec709LinearLumaB * color.b) * luma_mult;
+            color.r = std::clamp(luma_comp + color.r * sat_mult, 0.0f, 1.0f);
+            color.g = std::clamp(luma_comp + color.g * sat_mult, 0.0f, 1.0f);
+            color.b = std::clamp(luma_comp + color.b * sat_mult, 0.0f, 1.0f);
+        } else {
+            // Apply simple clip to stay in valid bounds when log and hswb are disabled
+            color.r = std::clamp(color.r, 0.0f, 1.0f);
+            color.g = std::clamp(color.g, 0.0f, 1.0f);
+            color.b = std::clamp(color.b, 0.0f, 1.0f);
+        }
 
         if (stageC) *stageC = color;
 
-        if (lut.size > 0) color = apply_lut(lut, color);
+        if (lut.size > 0 && !(ablationMask & 1)) color = apply_lut(lut, color, useTetrahedralLut);
         return color;
     };
     int cropW = (int)(width / zoomFactor);
@@ -666,35 +902,39 @@ bool process_and_save_image(
     int finalW_zoomed = swapDims ? (cropH / downsampleFactor) : (cropW / downsampleFactor);
     int finalH_zoomed = swapDims ? (cropW / downsampleFactor) : (cropH / downsampleFactor);
 
-    if (enableStageDebug) {
-        size_t n = static_cast<size_t>(finalW_zoomed) * finalH_zoomed * 3;
-        debugA8.resize(n);
-        debugB8.resize(n);
-        debugC8.resize(n);
-    }
+
+
+    auto time_start_pixel = std::chrono::high_resolution_clock::now();
+    
+    float cropScaleX = (float)(swapDims ? cropH : cropW) / finalW_zoomed;
+    float cropScaleY = (float)(swapDims ? cropW : cropH) / finalH_zoomed;
 
     if (isPreview) {
+
         // If a bitmap buffer is provided, prioritize its dimensions.
         // This ensures no out-of-bounds writes even if Kotlin and JNI have different size expectations.
         int renderW = (out_rgb_buffer && out_width > 0) ? out_width : finalW_zoomed;
         int renderH = (out_rgb_buffer && out_height > 0) ? out_height : finalH_zoomed;
+        float renderScaleX = (float)(swapDims ? cropH : cropW) / renderW;
+        float renderScaleY = (float)(swapDims ? cropW : cropH) / renderH;
 
         previewRgb8.resize(static_cast<size_t>(renderW) * renderH * 3);
+
         #pragma omp parallel for
         for (int py = 0; py < renderH; py++) {
+            int fy = (int)(py * renderScaleY);
             for (int px = 0; px < renderW; px++) {
                 int sx, sy;
                 int opx = mirror ? (renderW - 1 - px) : px;
 
                 // Map back to source pixels using the actual render dimensions
                 // This is safer than using downsampleFactor directly if dimensions mismatch
-                float fx = (float)opx / renderW * (swapDims ? cropH : cropW);
-                float fy = (float)py / renderH * (swapDims ? cropW : cropH);
+                int fx = (int)(opx * renderScaleX);
 
-                if (orientation == 90) { sx = (int)fy; sy = (cropH - 1) - (int)fx; }
-                else if (orientation == 180) { sx = (cropW - 1) - (int)fx; sy = (cropH - 1) - (int)fy; }
-                else if (orientation == 270) { sx = (cropW - 1) - (int)fy; sy = (int)fx; }
-                else { sx = (int)fx; sy = (int)fy; }
+                if (orientation == 90) { sx = fy; sy = (cropH - 1) - fx; }
+                else if (orientation == 180) { sx = (cropW - 1) - fx; sy = (cropH - 1) - fy; }
+                else if (orientation == 270) { sx = (cropW - 1) - fy; sy = fx; }
+                else { sx = fx; sy = fy; }
 
                 Vec3 color = process_pixel(cropX + sx, cropY + sy, nullptr, nullptr, nullptr);
                 size_t outIdx = (static_cast<size_t>(py) * renderW + px) * 3;
@@ -720,43 +960,27 @@ bool process_and_save_image(
         finalH_zoomed = renderH;
     } else {
         processedImage.resize(static_cast<size_t>(finalW_zoomed) * finalH_zoomed * 3);
+
         #pragma omp parallel for
         for (int py = 0; py < finalH_zoomed; py++) {
+            int fy = (int)(py * cropScaleY);
             for (int px = 0; px < finalW_zoomed; px++) {
                 int sx, sy;
                 int opx = mirror ? (finalW_zoomed - 1 - px) : px;
 
-                float fx = (float)opx / finalW_zoomed * (swapDims ? cropH : cropW);
-                float fy = (float)py / finalH_zoomed * (swapDims ? cropW : cropH);
+                int fx = (int)(opx * cropScaleX);
 
-                if (orientation == 90) { sx = (int)fy; sy = (cropH - 1) - (int)fx; }
-                else if (orientation == 180) { sx = (cropW - 1) - (int)fx; sy = (cropH - 1) - (int)fy; }
-                else if (orientation == 270) { sx = (cropW - 1) - (int)fy; sy = (int)fx; }
-                else { sx = (int)fx; sy = (int)fy; }
+                if (orientation == 90) { sx = fy; sy = (cropH - 1) - fx; }
+                else if (orientation == 180) { sx = (cropW - 1) - fx; sy = (cropH - 1) - fy; }
+                else if (orientation == 270) { sx = (cropW - 1) - fy; sy = fx; }
+                else { sx = fx; sy = fy; }
 
-                Vec3 stageA{}, stageB{}, stageC{};
-                Vec3 color = process_pixel(cropX + sx, cropY + sy,
-                                           enableStageDebug ? &stageA : nullptr,
-                                           enableStageDebug ? &stageB : nullptr,
-                                           enableStageDebug ? &stageC : nullptr);
+                Vec3 color = process_pixel(cropX + sx, cropY + sy, nullptr, nullptr, nullptr);
                 size_t outIdx = (static_cast<size_t>(py) * finalW_zoomed + px) * 3;
                 processedImage[outIdx + 0] = (unsigned short)std::max(0.0f, std::min(65535.0f, color.r * 65535.0f));
                 processedImage[outIdx + 1] = (unsigned short)std::max(0.0f, std::min(65535.0f, color.g * 65535.0f));
                 processedImage[outIdx + 2] = (unsigned short)std::max(0.0f, std::min(65535.0f, color.b * 65535.0f));
 
-                if (enableStageDebug) {
-                    debugA8[outIdx + 0] = (unsigned char)(clamp01(stageA.r) * 255.0f);
-                    debugA8[outIdx + 1] = (unsigned char)(clamp01(stageA.g) * 255.0f);
-                    debugA8[outIdx + 2] = (unsigned char)(clamp01(stageA.b) * 255.0f);
-
-                    debugB8[outIdx + 0] = (unsigned char)(clamp01(stageB.r) * 255.0f);
-                    debugB8[outIdx + 1] = (unsigned char)(clamp01(stageB.g) * 255.0f);
-                    debugB8[outIdx + 2] = (unsigned char)(clamp01(stageB.b) * 255.0f);
-
-                    debugC8[outIdx + 0] = (unsigned char)(clamp01(stageC.r) * 255.0f);
-                    debugC8[outIdx + 1] = (unsigned char)(clamp01(stageC.g) * 255.0f);
-                    debugC8[outIdx + 2] = (unsigned char)(clamp01(stageC.b) * 255.0f);
-                }
 
                 // Note: out_rgb_buffer is usually for preview only, but we keep it here if needed.
                 if (out_rgb_buffer) {
@@ -770,22 +994,43 @@ bool process_and_save_image(
         }
     }
 
+
+    auto time_end_pixel = std::chrono::high_resolution_clock::now();
+
     bool tiffOk = true;
+
     if (tiffPath && !isPreview) {
         tiffOk = write_tiff(tiffPath, finalW_zoomed, finalH_zoomed, processedImage, metadata);
         if (!tiffOk) LOGE("write_tiff failed for %s", tiffPath);
         else LOGD("Successfully wrote TIFF: %s", tiffPath);
     }
 
+
+    auto time_start_jpeg = std::chrono::high_resolution_clock::now();
     const int jpegQuality = isPreview ? 78 : 95;
+
     bool jpgOk = true;
+    long long jpeg_timings[3] = {0, 0, 0}; // total, omp, compress
     if (jpgPath) {
+
         if (isPreview && !previewRgb8.empty()) {
-            jpgOk = stbi_write_jpg(jpgPath, finalW_zoomed, finalH_zoomed, 3, previewRgb8.data(), jpegQuality) != 0;
+            auto start_preview_encode = std::chrono::high_resolution_clock::now();
+            std::vector<unsigned char> jpegBytes = encode_rgb8_jpeg(previewRgb8, finalW_zoomed, finalH_zoomed, jpegQuality);
+            auto end_preview_encode = std::chrono::high_resolution_clock::now();
+            jpeg_timings[2] = std::chrono::duration_cast<std::chrono::milliseconds>(end_preview_encode - start_preview_encode).count();
+
+            std::ofstream outFile(jpgPath, std::ios::binary);
+            if (outFile.is_open()) {
+                outFile.write(reinterpret_cast<const char*>(jpegBytes.data()), jpegBytes.size());
+                jpgOk = outFile.good();
+            } else {
+                jpgOk = false;
+            }
         } else {
-            jpgOk = write_jpeg(jpgPath, finalW_zoomed, finalH_zoomed, processedImage, jpegQuality);
+
+            jpgOk = write_jpeg(jpgPath, finalW_zoomed, finalH_zoomed, processedImage, jpegQuality, jpeg_timings);
         }
-        if (!jpgOk) LOGE("write_jpeg/stbi_write_jpg failed for %s", jpgPath);
+        if (!jpgOk) LOGE("write_jpeg failed for %s", jpgPath);
         else {
             std::ifstream f(jpgPath, std::ios::binary | std::ios::ate);
             if (f.is_open()) {
@@ -795,17 +1040,28 @@ bool process_and_save_image(
             }
         }
     }
-    if (enableStageDebug && !debugA8.empty()) {
-        bool aOk = stbi_write_jpg(debugPathA.c_str(), finalW_zoomed, finalH_zoomed, 3, debugA8.data(), 95) != 0;
-        bool bOk = stbi_write_jpg(debugPathB.c_str(), finalW_zoomed, finalH_zoomed, 3, debugB8.data(), 95) != 0;
-        bool cOk = stbi_write_jpg(debugPathC.c_str(), finalW_zoomed, finalH_zoomed, 3, debugC8.data(), 95) != 0;
-        LOGD("Stage debug outputs: A=%s (%d), B=%s (%d), C=%s (%d)",
-             debugPathA.c_str(), (int)aOk,
-             debugPathB.c_str(), (int)bOk,
-             debugPathC.c_str(), (int)cOk);
+
+
+    auto time_end_total = std::chrono::high_resolution_clock::now();
+
+    long long edge_ms = std::chrono::duration_cast<std::chrono::milliseconds>(time_end_edge - time_start_edge).count();
+    long long pixel_ms = std::chrono::duration_cast<std::chrono::milliseconds>(time_end_pixel - time_start_pixel).count();
+    long long jpeg_ms = std::chrono::duration_cast<std::chrono::milliseconds>(time_end_total - time_start_jpeg).count();
+    long long total_ms = std::chrono::duration_cast<std::chrono::milliseconds>(time_end_total - time_start_total).count();
+
+    if (out_timings) {
+        out_timings[0] = edge_ms;
+        out_timings[1] = pixel_ms;
+        out_timings[2] = jpeg_ms;
+        out_timings[3] = jpeg_timings[1]; // omp_ms
+        out_timings[4] = jpeg_timings[2]; // compress_ms
     }
 
+    LOGD("process_and_save_image timing [%s]: Total=%lldms (EdgeComp=%lldms, PixelProc=%lldms, JpegWrite=%lldms)",
+         jpgPath ? jpgPath : "null", total_ms, edge_ms, pixel_ms, jpeg_ms);
+
     return jpgOk;
+
 }
 
 bool write_tiff(const char* filename, int width, int height, const std::vector<unsigned short>& data, const ImageMetadata* metadata) {
@@ -876,9 +1132,25 @@ bool write_tiff_rgba8(const char* filename, int width, int height, const unsigne
     return true;
 }
 
-bool write_jpeg(const char* filename, int width, int height, const std::vector<unsigned short>& data, int quality) {
-    LOGD("write_jpeg: %s, %dx%d", filename, width, height);
+
+#include <turbojpeg.h>
+#include <stdio.h>
+
+
+static bool write_jpeg_android(const char* filename, int width, int height, const std::vector<unsigned short>& data, int quality, long long* out_timings = nullptr) {
+    if (!filename) {
+        LOGE("write_jpeg_android: filename is null");
+        return false;
+    }
+    LOGD("write_jpeg_android: %s, %dx%d", filename, width, height);
+    auto start_all = std::chrono::high_resolution_clock::now();
+
     size_t total_pixels = static_cast<size_t>(width) * height;
+    if (data.size() < total_pixels * 3) {
+        LOGE("write_jpeg_android: data size %zu is less than expected %zu", data.size(), total_pixels * 3);
+        return false;
+    }
+    
     std::vector<unsigned char> rgb8;
     try {
         rgb8.resize(total_pixels * 3);
@@ -887,17 +1159,65 @@ bool write_jpeg(const char* filename, int width, int height, const std::vector<u
         return false;
     }
 
+    auto start_omp = std::chrono::high_resolution_clock::now();
     #pragma omp parallel for
-    for (size_t i = 0; i < total_pixels; i++) {
-        rgb8[i * 3 + 0] = (unsigned char)std::min(255, (data[i * 3 + 0] + 128) >> 8);
-        rgb8[i * 3 + 1] = (unsigned char)std::min(255, (data[i * 3 + 1] + 128) >> 8);
-        rgb8[i * 3 + 2] = (unsigned char)std::min(255, (data[i * 3 + 2] + 128) >> 8);
+    for (size_t i = 0; i < total_pixels * 3; i++) {
+        rgb8[i] = (unsigned char)std::min(255, (data[i] + 128) >> 8);
     }
-    int res = stbi_write_jpg(filename, width, height, 3, rgb8.data(), quality);
-    if (res == 0) {
-        LOGE("stbi_write_jpg failed for %s", filename);
+
+    auto end_omp = std::chrono::high_resolution_clock::now();
+
+    tjhandle _jpegCompressor = tjInitCompress();
+    if (!_jpegCompressor) {
+        LOGE("tjInitCompress failed");
+        return false;
     }
-    return res != 0;
+
+    unsigned char* jpegBuf = nullptr;
+    unsigned long jpegSize = 0;
+
+    int result = tjCompress2(_jpegCompressor, rgb8.data(), width, 0, height, TJPF_RGB,
+                             &jpegBuf, &jpegSize, TJSAMP_420, quality, TJFLAG_ACCURATEDCT);
+
+    auto end_compress = std::chrono::high_resolution_clock::now();
+
+    if (result < 0) {
+        LOGE("tjCompress2 failed: %s", tjGetErrorStr());
+        tjDestroy(_jpegCompressor);
+        return false;
+    }
+
+    FILE* file = fopen(filename, "wb");
+    if (!file) {
+        LOGE("Failed to open file for writing: %s", filename);
+        tjFree(jpegBuf);
+        tjDestroy(_jpegCompressor);
+        return false;
+    }
+    fwrite(jpegBuf, 1, jpegSize, file);
+    fclose(file);
+
+    tjFree(jpegBuf);
+    tjDestroy(_jpegCompressor);
+
+    long long omp_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end_omp - start_omp).count();
+    long long compress_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end_compress - end_omp).count();
+    long long all_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end_compress - start_all).count();
+
+    LOGD("write_jpeg_android timing: Total=%lldms (OMP Conversion=%lldms, API Compress=%lldms)", all_ms, omp_ms, compress_ms);
+
+    if (out_timings) {
+        out_timings[0] = all_ms;
+        out_timings[1] = omp_ms;
+        out_timings[2] = compress_ms;
+    }
+
+    return true;
+}
+
+
+bool write_jpeg(const char* filename, int width, int height, const std::vector<unsigned short>& data, int quality, long long* out_timings) {
+    return write_jpeg_android(filename, width, height, data, quality, out_timings);
 }
 
 int compute_preview_downsample_factor(int width, int height, int targetLongEdge) {
@@ -906,16 +1226,9 @@ int compute_preview_downsample_factor(int width, int height, int targetLongEdge)
     return std::max(1, (longEdge + targetLongEdge - 1) / targetLongEdge);
 }
 
-struct JpegBufferContext {
-    std::vector<unsigned char> bytes;
-};
 
-static void write_jpeg_to_memory(void* context, void* data, int size) {
-    if (!context || !data || size <= 0) return;
-    auto* ctx = static_cast<JpegBufferContext*>(context);
-    auto* src = static_cast<unsigned char*>(data);
-    ctx->bytes.insert(ctx->bytes.end(), src, src + size);
-}
+
+
 
 static std::vector<unsigned char> encode_rgb8_jpeg(
     const std::vector<unsigned char>& rgb8,
@@ -923,15 +1236,44 @@ static std::vector<unsigned char> encode_rgb8_jpeg(
     int height,
     int quality
 ) {
-    JpegBufferContext ctx;
+    std::vector<unsigned char> out_bytes;
     if (!rgb8.empty() && width > 0 && height > 0) {
-        stbi_write_jpg_to_func(write_jpeg_to_memory, &ctx, width, height, 3, rgb8.data(), quality);
+        size_t total_pixels = static_cast<size_t>(width) * height;
+        if (rgb8.size() < total_pixels * 3) {
+            LOGE("encode_rgb8_jpeg: rgb8 size %zu is less than expected %zu", rgb8.size(), total_pixels * 3);
+            return out_bytes;
+        }
+
+        tjhandle _jpegCompressor = tjInitCompress();
+        if (!_jpegCompressor) {
+            LOGE("tjInitCompress failed");
+            return out_bytes;
+        }
+
+        unsigned char* jpegBuf = nullptr;
+        unsigned long jpegSize = 0;
+
+        int result = tjCompress2(_jpegCompressor, rgb8.data(), width, 0, height, TJPF_RGB,
+                                 &jpegBuf, &jpegSize, TJSAMP_420, quality, TJFLAG_ACCURATEDCT);
+
+        if (result < 0) {
+            LOGE("tjCompress2 failed: %s", tjGetErrorStr());
+            tjDestroy(_jpegCompressor);
+            return out_bytes;
+        }
+
+        out_bytes.assign(jpegBuf, jpegBuf + jpegSize);
+
+        tjFree(jpegBuf);
+        tjDestroy(_jpegCompressor);
     }
-    return ctx.bytes;
+    return out_bytes;
 }
 
+
+
 static std::vector<unsigned char> make_preview_rgb8(
-    const std::vector<unsigned short>& data,
+    const uint16_t* planarData, int stride_x, int stride_y, int stride_c,
     int width,
     int height,
     int targetLongEdge,
@@ -970,7 +1312,6 @@ static std::vector<unsigned char> make_preview_rgb8(
 
             const int srcX = std::min(width - 1, sx * scale);
             const int srcY = std::min(height - 1, sy * scale);
-            const size_t srcIdx = (static_cast<size_t>(srcY) * width + srcX) * 3;
             const size_t dstIdx = (static_cast<size_t>(y) * outWidth + x) * 3;
 
             auto encodePreviewChannel = [&](unsigned short sample) -> unsigned char {
@@ -979,16 +1320,19 @@ static std::vector<unsigned char> make_preview_rgb8(
                 return (unsigned char)std::clamp(gammaEncoded * 255.0f + 0.5f, 0.0f, 255.0f);
             };
 
-            preview[dstIdx + 0] = encodePreviewChannel(data[srcIdx + 0]);
-            preview[dstIdx + 1] = encodePreviewChannel(data[srcIdx + 1]);
-            preview[dstIdx + 2] = encodePreviewChannel(data[srcIdx + 2]);
+            preview[dstIdx + 0] = encodePreviewChannel(planarData[srcX * stride_x + srcY * stride_y + 0 * stride_c]);
+            preview[dstIdx + 1] = encodePreviewChannel(planarData[srcX * stride_x + srcY * stride_y + 1 * stride_c]);
+            preview[dstIdx + 2] = encodePreviewChannel(planarData[srcX * stride_x + srcY * stride_y + 2 * stride_c]);
         }
     }
     return preview;
 }
 
-bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, const std::vector<float>& ccm, const ImageMetadata& metadata, int orientation, bool mirror, float baselineExposure) {
-    TIFFSetTagExtender(DNGTagExtender);
+bool write_dng(const char* filename, int width, int height, const uint16_t* planarData, int stride_x, int stride_y, int stride_c, const std::vector<float>& lensShadingVec, int lensShadingRows, int lensShadingCols, int whiteLevel, const std::vector<float>& ccm, const ImageMetadata& metadata, int orientation, bool mirror, float baselineExposure) {
+    static std::once_flag tiff_extender_flag;
+    std::call_once(tiff_extender_flag, []() {
+        parent_extender = TIFFSetTagExtender(DNGTagExtender);
+    });
     TIFF* tif = TIFFOpen(filename, "w");
     if (!tif) return false;
 
@@ -1008,7 +1352,7 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
     TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_LINEAR_RAW);
     TIFFSetField(tif, TIFFTAG_SAMPLESPERPIXEL, 3);
     TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG);
-    TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, height);
+    TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, 1);
     TIFFSetField(tif, TIFFTAG_SUBFILETYPE, 0);
 
     write_tiff_metadata(tif, &metadata);
@@ -1048,9 +1392,54 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
     unsigned short iso_short = (unsigned short)metadata.iso;
     TIFFSetField(tif, TIFFTAG_ISOSPEEDRATINGS, (uint16_t)1, &iso_short);
 
-    if (TIFFWriteEncodedStrip(tif, 0, (void*)data.data(), static_cast<size_t>(width) * height * 3 * sizeof(unsigned short)) < 0) {
-        TIFFClose(tif);
-        return false;
+    const bool hasLsc = !lensShadingVec.empty() && lensShadingRows > 0 && lensShadingCols > 0;
+    auto lsc_idx = [&](int ch, int row, int col) -> int {
+        return ch * lensShadingRows * lensShadingCols + row * lensShadingCols + col;
+    };
+
+    std::vector<uint16_t> rowBuffer(width * 3);
+    for (int y = 0; y < height; y++) {
+        for (int x = 0; x < width; x++) {
+            uint16_t r = planarData[x*stride_x + y*stride_y + 0*stride_c];
+            uint16_t g = planarData[x*stride_x + y*stride_y + 1*stride_c];
+            uint16_t b = planarData[x*stride_x + y*stride_y + 2*stride_c];
+            
+            r = std::min(r, (uint16_t)16383);
+            g = std::min(g, (uint16_t)16383);
+            b = std::min(b, (uint16_t)16383);
+
+            float lscR = 1.0f, lscG = 1.0f, lscB = 1.0f;
+            if (hasLsc) {
+                float fx = (width > 1) ? (float)x * (lensShadingCols - 1) / (float)(width - 1) : 0.0f;
+                float fy = (height > 1) ? (float)y * (lensShadingRows - 1) / (float)(height - 1) : 0.0f;
+                int x0 = std::clamp((int)std::floor(fx), 0, lensShadingCols - 1);
+                int y0 = std::clamp((int)std::floor(fy), 0, lensShadingRows - 1);
+                int x1 = std::min(x0 + 1, lensShadingCols - 1);
+                int y1 = std::min(y0 + 1, lensShadingRows - 1);
+                float tx = fx - x0;
+                float ty = fy - y0;
+                auto bilerp = [&](int ch) {
+                    float v00 = lensShadingVec[lsc_idx(ch, y0, x0)];
+                    float v10 = lensShadingVec[lsc_idx(ch, y0, x1)];
+                    float v01 = lensShadingVec[lsc_idx(ch, y1, x0)];
+                    float v11 = lensShadingVec[lsc_idx(ch, y1, x1)];
+                    float v0 = v00 * (1.0f - tx) + v10 * tx;
+                    float v1 = v01 * (1.0f - tx) + v11 * tx;
+                    return v0 * (1.0f - ty) + v1 * ty;
+                };
+                lscR = bilerp(0);
+                lscG = 0.5f * (bilerp(1) + bilerp(2));
+                lscB = bilerp(3);
+            }
+
+            rowBuffer[x * 3 + 0] = (uint16_t)std::min((int)((float)r * lscR) << 2, 65535);
+            rowBuffer[x * 3 + 1] = (uint16_t)std::min((int)((float)g * lscG) << 2, 65535);
+            rowBuffer[x * 3 + 2] = (uint16_t)std::min((int)((float)b * lscB) << 2, 65535);
+        }
+        if (TIFFWriteScanline(tif, rowBuffer.data(), y, 0) < 0) {
+            TIFFClose(tif);
+            return false;
+        }
     }
 
     if (!TIFFWriteDirectory(tif)) {
@@ -1071,7 +1460,7 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
         int previewHeight = 0;
         const float previewGain = baselineExposure != 0.0f ? std::exp2(baselineExposure) : 1.0f;
         std::vector<unsigned char> previewRgb8 = make_preview_rgb8(
-            data,
+            planarData, stride_x, stride_y, stride_c,
             width,
             height,
             spec.targetLongEdge,

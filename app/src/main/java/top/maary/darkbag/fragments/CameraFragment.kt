@@ -1453,7 +1453,7 @@ class CameraFragment : Fragment() {
             }
 
             if (currentLens?.useCamera2 == true) {
-                val zslTargetUriTracker = arrayOfNulls<String>(1) // Array reference to pass URI from ZSL callback
+                val zslTargetUriTracker = arrayOfNulls<String>(2) // [0] = URI, [1] = finalBaseName
                 // Predict digital gain for ZSL logic based on current zoom
                 val predictedZoom = if (currentLens?.isZoomPreset == true && currentLens?.targetZoomRatio != null) {
                     currentLens!!.targetZoomRatio!!
@@ -1462,10 +1462,29 @@ class CameraFragment : Fragment() {
                 }
                 zslDigitalGain = predictedZoom
 
+                // [Placeholder Architecture] Pre-allocate the URI synchronously
+                val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                val isHdrPlusEn = prefs.getBoolean(KEY_HDR_PLUS_ENABLED, true)
+                val rawBaseName = if (hfMetadataForTrigger != null) {
+                    val suffix = if (hfMetadataForTrigger.frame1BaseName != null) "_HF2" else "_HF1"
+                    val group = hfMetadataForTrigger.frame1BaseName ?: java.text.SimpleDateFormat(FILENAME, java.util.Locale.US).format(hfMetadataForTrigger.captureTimeMillis)
+                    group + suffix
+                } else {
+                    val timeToUse = timing?.shutterClick ?: System.currentTimeMillis()
+                    java.text.SimpleDateFormat(FILENAME, java.util.Locale.US).format(timeToUse)
+                }
+                val finalBaseName = DarkbagIdentity.prefixedBaseName(rawBaseName + (if (isHdrPlusEn) "_HDRPLUS" else ""))
+                val jpgFolderUri = prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
+                val placeholderUri = top.maary.darkbag.utils.ImageSaver.createPlaceholderUri(requireContext(), "$finalBaseName.jpg", jpgFolderUri)
+                
+                zslTargetUriTracker[0] = placeholderUri?.toString()
+                zslTargetUriTracker[1] = finalBaseName
+                zslTargetUriTrackerRef = zslTargetUriTracker
+
                 isZslCapturePending = true
                 zslTimingTracker = timing
                 zslHfMetadata = hfMetadataForTrigger
-                zslTargetUriTrackerRef = zslTargetUriTracker
+                
                 if (isHdrPlusEnabled && isRawSupported) {
                     triggerHdrPlusBurstCamera2(isFrame1Trigger, hfMetadataForTrigger, zslTargetUriTracker)
                 } else {
@@ -3631,7 +3650,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     captureResult = result
                 )
 
-                val dngName = if (hfMetadata != null) {
+                val dngName = zslTargetUriTracker?.get(1) ?: if (hfMetadata != null) {
                     val suffix = if (hfMetadata.frame1BaseName != null) "_HF2" else "_HF1"
                     val group = hfMetadata.frame1BaseName ?: SimpleDateFormat(FILENAME, Locale.US).format(hfMetadata.captureTimeMillis)
                     DarkbagIdentity.prefixedBaseName(group + suffix + "_HDRPLUS")
@@ -3712,7 +3731,22 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         jpgFolderUri = jpgFolderUri,
                         rawFolderUri = rawFolderUri,
                         hfMetadata = hfMetadata?.copy(digitalGain = digitalGain),
-                        editConfig = null
+                        editConfig = top.maary.darkbag.models.EditConfig(
+                            log = targetLogName ?: "None",
+                            lut = activeLutName ?: "None",
+                            digitalGain = digitalGain,
+                            adjustments = if (hfMetadata?.profile != null && hfMetadata.profile != top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_NORMAL) {
+                                listOf(
+                                    top.maary.darkbag.models.BasicAdjustments(digitalGain = hfMetadata.frame1DigitalGain),
+                                    top.maary.darkbag.models.BasicAdjustments(digitalGain = digitalGain)
+                                )
+                            } else null,
+                            hfLayout = if (hfMetadata?.profile == top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_HALF_TOP) "TB" else if (hfMetadata?.profile == top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_HALF_SIDE) "SBS" else null,
+                            showTimestamp = hfMetadata?.dateStamp ?: false,
+                            flareType = hfMetadata?.flareType ?: -1,
+                            zoomFactor = currentZoom
+                        ),
+                        runAblationTest = prefs.getBoolean(SettingsFragment.KEY_RUN_ABLATION, false)
                     )
                     top.maary.darkbag.processor.HdrPlusRequestManager.enqueue(request)
                     val serviceIntent = android.content.Intent(context, top.maary.darkbag.processor.HdrPlusProcessingService::class.java)
@@ -3988,20 +4022,25 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                                 )
 
                                 val isHdrPlusEn = prefs.getBoolean(KEY_HDR_PLUS_ENABLED, true)
-                                val rawBaseName = if (hfMeta != null) {
-                                    val suffix = if (hfMeta.frame1BaseName != null) "_HF2" else "_HF1"
-                                    val group = hfMeta.frame1BaseName ?: java.text.SimpleDateFormat(FILENAME, java.util.Locale.US).format(hfMeta.captureTimeMillis)
-                                    group + suffix
-                                } else {
-                                    val timeToUse = if (isHdrPlusEn && burstStartTime != 0L) burstStartTime else (zslTimingTracker?.shutterClick ?: System.currentTimeMillis())
-                                    java.text.SimpleDateFormat(FILENAME, java.util.Locale.US).format(timeToUse)
+                                // Retrieve the pre-calculated finalBaseName from the trackerRef
+                                val finalBaseName = targetUriTracker?.get(1) ?: run {
+                                    val rawBaseName = if (hfMeta != null) {
+                                        val suffix = if (hfMeta.frame1BaseName != null) "_HF2" else "_HF1"
+                                        val group = hfMeta.frame1BaseName ?: java.text.SimpleDateFormat(FILENAME, java.util.Locale.US).format(hfMeta.captureTimeMillis)
+                                        group + suffix
+                                    } else {
+                                        val timeToUse = if (isHdrPlusEn && burstStartTime != 0L) burstStartTime else (zslTimingTracker?.shutterClick ?: System.currentTimeMillis())
+                                        java.text.SimpleDateFormat(FILENAME, java.util.Locale.US).format(timeToUse)
+                                    }
+                                    DarkbagIdentity.prefixedBaseName(rawBaseName + (if (isHdrPlusEn) "_HDRPLUS" else ""))
                                 }
-                                // Append _HDRPLUS to match the background processing if HDR+ is enabled
-                                val finalBaseName = DarkbagIdentity.prefixedBaseName(rawBaseName + (if (isHdrPlusEn) "_HDRPLUS" else ""))
 
                                 val jpgFolderUri = prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
 
-                                // Use ImageSaver to save to MediaStore as a placeholder
+                                // Use ImageSaver to write into the pre-allocated placeholder
+                                val placeholderUriStr = targetUriTracker?.get(0)
+                                val placeholderUri = if (placeholderUriStr != null) android.net.Uri.parse(placeholderUriStr) else null
+
                                 val zslUri = top.maary.darkbag.utils.ImageSaver.saveProcessedImage(
                                     context = safeContext,
                                     inputBitmap = bitmap,
@@ -4012,6 +4051,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                                     linearDngPath = null,
                                     saveJpg = true,
                                     jpgFolderUri = jpgFolderUri,
+                                    targetUri = placeholderUri,
                                     mirror = shouldMirror,
                                     isFastPath = true,
                                     halfFrameMetadata = hfMeta?.copy(digitalGain = zslDigitalGain),
