@@ -41,7 +41,9 @@ data class HdrPlusRequest(
     val jpgFolderUri: String?,
     val rawFolderUri: String?,
     val hfMetadata: HalfFrameManager.Metadata?,
-    val editConfig: top.maary.darkbag.models.EditConfig?
+    val editConfig: top.maary.darkbag.models.EditConfig?,
+
+    val runAblationTest: Boolean = false
 )
 
 object HdrPlusRequestManager {
