@@ -648,7 +648,6 @@ class CameraFragment : Fragment() {
                     } catch (e: Exception) {
                         Log.e(TAG, "Error processing image from channel", e)
                     } finally {
-                        processingSemaphore.release()
                         withContext(Dispatchers.Main) {
                             cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
                             // If not half-frame, we hide now. If half-frame, wait for final stitched result in backgroundSaveFlow.
@@ -2095,7 +2094,7 @@ class CameraFragment : Fragment() {
             } catch (e: Exception) {
                 Log.e(TAG, "Error in background processing", e)
                 withContext(Dispatchers.Main) {
-                    android.widget.Toast.makeText(requireContext(), "Capture error: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
+                    context?.let { ctx -> android.widget.Toast.makeText(ctx, "Capture error: ${e.message}", android.widget.Toast.LENGTH_SHORT).show() }
                 }
             } finally {
                 processingSemaphore.release()

@@ -52,12 +52,6 @@ class HdrPlusProcessingService : Service() {
                 while (true) {
                     val request = HdrPlusRequestManager.dequeue()
                     if (request == null) {
-                        // Queue empty, stop service
-                        androidx.core.app.ServiceCompat.stopForeground(
-                            this@HdrPlusProcessingService, 
-                            androidx.core.app.ServiceCompat.STOP_FOREGROUND_REMOVE
-                        )
-                        stopSelf()
                         break
                     }
 
@@ -71,6 +65,15 @@ class HdrPlusProcessingService : Service() {
                 }
             } finally {
                 processMutex.unlock()
+                if (HdrPlusRequestManager.peek() != null) {
+                    processNextInQueue()
+                } else {
+                    androidx.core.app.ServiceCompat.stopForeground(
+                        this@HdrPlusProcessingService, 
+                        androidx.core.app.ServiceCompat.STOP_FOREGROUND_REMOVE
+                    )
+                    stopSelf()
+                }
             }
         }
     }
