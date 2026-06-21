@@ -605,10 +605,11 @@ AdaptiveEdgeComp calculate_adaptive_edge_comp(const uint16_t* planarData, int st
             size_t idx_g = x * stride_x + y * stride_y + 1 * stride_c;
             size_t idx_b = x * stride_x + y * stride_y + 2 * stride_c;
 
-            // Halide output is already normalized to 16-bit range.
-            float rr = static_cast<float>(planarData[idx_r]);
-            float gg = static_cast<float>(planarData[idx_g]);
-            float bb = static_cast<float>(planarData[idx_b]);
+            // Halide output is scaled by 0.25 (14-bit range).
+            // We shift left by 2 to restore full 16-bit range for analysis.
+            float rr = static_cast<float>(planarData[idx_r] << 2);
+            float gg = static_cast<float>(planarData[idx_g] << 2);
+            float bb = static_cast<float>(planarData[idx_b] << 2);
 
             if (r <= kCenterRegionRadius) {
                 centerSum[0] += rr; centerSum[1] += gg; centerSum[2] += bb; centerCount++;
@@ -798,6 +799,11 @@ bool process_and_save_image(
         uint16_t g_raw = planarData[x*stride_x + y*stride_y + 1*stride_c];
         uint16_t b_raw = planarData[x*stride_x + y*stride_y + 2*stride_c];
         
+        // Clip to 14-bit max
+        r_raw = std::min(r_raw, (uint16_t)16383);
+        g_raw = std::min(g_raw, (uint16_t)16383);
+        b_raw = std::min(b_raw, (uint16_t)16383);
+
         float lscR = 1.0f, lscG = 1.0f, lscB = 1.0f;
         if (hasLsc) {
             float fx = (width > 1) ? (float)x * (lensShadingCols - 1) / (float)(width - 1) : 0.0f;
@@ -822,10 +828,11 @@ bool process_and_save_image(
             lscB = bilerp(3);
         }
 
-        // Halide output is already normalized to 16-bit range.
-        float final_r = (float)std::min(std::max(0, (int)((float)r_raw * lscR)), 65535);
-        float final_g = (float)std::min(std::max(0, (int)((float)g_raw * lscG)), 65535);
-        float final_b = (float)std::min(std::max(0, (int)((float)b_raw * lscB)), 65535);
+        // Halide output is scaled by 0.25 (14-bit range).
+        // We shift left by 2 to restore full 16-bit range for final saving.
+        float final_r = (float)std::min((int)((float)r_raw * lscR) << 2, 65535);
+        float final_g = (float)std::min((int)((float)g_raw * lscG) << 2, 65535);
+        float final_b = (float)std::min((int)((float)b_raw * lscB) << 2, 65535);
 
         // 1. Exposure (Linear Space)
         float norm_r = final_r * global_gain_multiplier;
@@ -1396,6 +1403,10 @@ bool write_dng(const char* filename, int width, int height, const uint16_t* plan
             uint16_t r = planarData[x*stride_x + y*stride_y + 0*stride_c];
             uint16_t g = planarData[x*stride_x + y*stride_y + 1*stride_c];
             uint16_t b = planarData[x*stride_x + y*stride_y + 2*stride_c];
+            
+            r = std::min(r, (uint16_t)16383);
+            g = std::min(g, (uint16_t)16383);
+            b = std::min(b, (uint16_t)16383);
 
             float lscR = 1.0f, lscG = 1.0f, lscB = 1.0f;
             if (hasLsc) {
@@ -1421,9 +1432,9 @@ bool write_dng(const char* filename, int width, int height, const uint16_t* plan
                 lscB = bilerp(3);
             }
 
-            rowBuffer[x * 3 + 0] = (uint16_t)std::min(std::max(0, (int)((float)r * lscR)), 65535);
-            rowBuffer[x * 3 + 1] = (uint16_t)std::min(std::max(0, (int)((float)g * lscG)), 65535);
-            rowBuffer[x * 3 + 2] = (uint16_t)std::min(std::max(0, (int)((float)b * lscB)), 65535);
+            rowBuffer[x * 3 + 0] = (uint16_t)std::min((int)((float)r * lscR) << 2, 65535);
+            rowBuffer[x * 3 + 1] = (uint16_t)std::min((int)((float)g * lscG) << 2, 65535);
+            rowBuffer[x * 3 + 2] = (uint16_t)std::min((int)((float)b * lscB) << 2, 65535);
         }
         if (TIFFWriteScanline(tif, rowBuffer.data(), y, 0) < 0) {
             TIFFClose(tif);
