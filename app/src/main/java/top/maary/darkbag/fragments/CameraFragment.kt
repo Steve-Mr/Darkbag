@@ -332,7 +332,9 @@ class CameraFragment : Fragment() {
     private lateinit var cameraExecutor: ExecutorService
 
     // Cache for CaptureResults to match with ImageProxy timestamps
+    @Volatile
     private var lastKnownWb: android.hardware.camera2.params.RggbChannelVector? = null
+    @Volatile
     private var lastKnownCcm: android.hardware.camera2.params.ColorSpaceTransform? = null
     private val captureResults = java.util.Collections.synchronizedMap(object :
         LinkedHashMap<Long, TotalCaptureResult>() {
@@ -1848,8 +1850,8 @@ class CameraFragment : Fragment() {
                     fun idx(ch: Int, row: Int, col: Int): Int = ch * lensShadingRows * lensShadingCols + row * lensShadingCols + col
                     val chR = when(cfa) { 1->1; 2->2; 3->3; else->0 }
                     val chB = when(cfa) { 1->2; 2->1; 3->0; else->3 }
-                    val chG0 = when(cfa) { 1->0; 2->0; 3->1; else->1 }
-                    val chG1 = when(cfa) { 1->3; 2->3; 3->2; else->2 }
+                    val chG0 = when(cfa) { 1->0; 2->3; 3->2; else->1 }
+                    val chG1 = when(cfa) { 1->3; 2->0; 3->1; else->2 }
                     for (row in 0 until lensShadingRows) {
                         for (col in 0 until lensShadingCols) {
                             out[idx(0, row, col)] = lsc.getGainFactor(chR, col, row)
@@ -3633,8 +3635,8 @@ class CameraFragment : Fragment() {
                         fun idx(ch: Int, row: Int, col: Int): Int = ch * lensShadingRows * lensShadingCols + row * lensShadingCols + col
                         val chR = when(cfa) { 1->1; 2->2; 3->3; else->0 }
                         val chB = when(cfa) { 1->2; 2->1; 3->0; else->3 }
-                        val chG0 = when(cfa) { 1->0; 2->0; 3->1; else->1 }
-                        val chG1 = when(cfa) { 1->3; 2->3; 3->2; else->2 }
+                        val chG0 = when(cfa) { 1->0; 2->3; 3->2; else->1 }
+                        val chG1 = when(cfa) { 1->3; 2->0; 3->1; else->2 }
                         for (row in 0 until lensShadingRows) {
                             for (col in 0 until lensShadingCols) {
                                 out[idx(0, row, col)] = lsc.getGainFactor(chR, col, row)
