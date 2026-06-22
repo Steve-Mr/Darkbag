@@ -634,6 +634,14 @@ class CameraFragment : Fragment() {
                     } finally {
                         withContext(Dispatchers.Main) {
                             hideProcessingAnimation()
+                            try {
+                                processingSemaphore.release()
+                            } catch (e: IllegalStateException) {
+                                Log.w(TAG, "Semaphore release ignored: ${e.message}")
+                            }
+                            if (processingSemaphore.availablePermits > 0) {
+                                cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
+                            }
                         }
                     }
                 }
@@ -3834,6 +3842,19 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         fallbackSent = true
                     } catch (fallbackEx: Exception) {
                         Log.e(TAG, "Fallback failed", fallbackEx)
+                    }
+                }
+                if (!fallbackSent) {
+                    try {
+                        processingSemaphore.release()
+                    } catch (e: IllegalStateException) {
+                        Log.w(TAG, "Semaphore release ignored: ${e.message}")
+                    }
+                    lifecycleScope.launch(Dispatchers.Main) {
+                        resetBurstUi()
+                        if (!isHdrPlusSuccess) {
+                            hideProcessingAnimation()
+                        }
                     }
                 }
             }
