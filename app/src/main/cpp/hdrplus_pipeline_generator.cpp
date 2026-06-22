@@ -47,7 +47,7 @@ public:
                                white_balance_g1, white_balance_b};
 
     Func bayer_shifted = shift_bayer_to_rggb(merged, cfa_pattern);
-    Func black_white_level_output = black_white_level(bayer_shifted, black_point_r, black_point_g0, black_point_g1, black_point_b, white_point);
+    Func black_white_level_output = black_white_level(bayer_shifted, black_point_r, black_point_g0, black_point_g1, black_point_b, white_point, cfa_pattern);
     Func white_balance_output = white_balance(black_white_level_output, wb);
 
     // Demosaic
@@ -127,11 +127,34 @@ public:
 private:
   Var x{"x"}, y{"y"}, c{"c"}, xo{"xo"}, yo{"yo"}, xi{"xi"}, yi{"yi"};
 
-  Func black_white_level(Func input, const Expr bp_r, const Expr bp_g0, const Expr bp_g1, const Expr bp_b, const Expr wp) {
+  Func black_white_level(Func input, const Expr bp_r, const Expr bp_g0, const Expr bp_g1, const Expr bp_b, const Expr wp, const Expr cfa_pattern) {
     Func output("black_white_level_output");
+
+    // Remap the black points to RGGB order to match the shifted bayer output
+    Expr rggb_bp_r = select(cfa_pattern == int(CfaPattern::CFA_RGGB), bp_r,
+                            cfa_pattern == int(CfaPattern::CFA_GRBG), bp_g0,
+                            cfa_pattern == int(CfaPattern::CFA_GBRG), bp_g1,
+                            cfa_pattern == int(CfaPattern::CFA_BGGR), bp_b, bp_r);
+
+    Expr rggb_bp_g0 = select(cfa_pattern == int(CfaPattern::CFA_RGGB), bp_g0,
+                             cfa_pattern == int(CfaPattern::CFA_GRBG), bp_r,
+                             cfa_pattern == int(CfaPattern::CFA_GBRG), bp_b,
+                             cfa_pattern == int(CfaPattern::CFA_BGGR), bp_g1, bp_g0);
+
+    Expr rggb_bp_g1 = select(cfa_pattern == int(CfaPattern::CFA_RGGB), bp_g1,
+                             cfa_pattern == int(CfaPattern::CFA_GRBG), bp_b,
+                             cfa_pattern == int(CfaPattern::CFA_GBRG), bp_r,
+                             cfa_pattern == int(CfaPattern::CFA_BGGR), bp_g0, bp_g1);
+
+    Expr rggb_bp_b = select(cfa_pattern == int(CfaPattern::CFA_RGGB), bp_b,
+                            cfa_pattern == int(CfaPattern::CFA_GRBG), bp_g1,
+                            cfa_pattern == int(CfaPattern::CFA_GBRG), bp_g0,
+                            cfa_pattern == int(CfaPattern::CFA_BGGR), bp_r, bp_b);
+
     Expr bp = select(y % 2 == 0,
-                     select(x % 2 == 0, bp_r, bp_g0),
-                     select(x % 2 == 0, bp_g1, bp_b));
+                     select(x % 2 == 0, rggb_bp_r, rggb_bp_g0),
+                     select(x % 2 == 0, rggb_bp_g1, rggb_bp_b));
+
     // Reserve headroom (0.25x) for White Balance to prevent clipping
     Expr white_factor = (65535.f / max(1.f, f32(wp) - f32(bp))) * 0.25f;
     output(x, y) = u16_sat((i32(input(x, y)) - bp) * white_factor);
