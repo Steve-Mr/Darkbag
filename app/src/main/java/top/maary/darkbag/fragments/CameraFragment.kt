@@ -1848,16 +1848,12 @@ class CameraFragment : Fragment() {
                     lensShadingCols = lsc.columnCount
                     val out = FloatArray(4 * lensShadingRows * lensShadingCols)
                     fun idx(ch: Int, row: Int, col: Int): Int = ch * lensShadingRows * lensShadingCols + row * lensShadingCols + col
-                    val chR = when(cfa) { 1->1; 2->2; 3->3; else->0 }
-                    val chB = when(cfa) { 1->2; 2->1; 3->0; else->3 }
-                    val chG0 = when(cfa) { 1->0; 2->3; 3->2; else->1 }
-                    val chG1 = when(cfa) { 1->3; 2->0; 3->1; else->2 }
                     for (row in 0 until lensShadingRows) {
                         for (col in 0 until lensShadingCols) {
-                            out[idx(0, row, col)] = lsc.getGainFactor(chR, col, row)
-                            out[idx(1, row, col)] = lsc.getGainFactor(chG0, col, row)
-                            out[idx(2, row, col)] = lsc.getGainFactor(chG1, col, row)
-                            out[idx(3, row, col)] = lsc.getGainFactor(chB, col, row)
+                            out[idx(0, row, col)] = lsc.getGainFactor(0, col, row)
+                            out[idx(1, row, col)] = lsc.getGainFactor(1, col, row)
+                            out[idx(2, row, col)] = lsc.getGainFactor(2, col, row)
+                            out[idx(3, row, col)] = lsc.getGainFactor(3, col, row)
                         }
                     }
                     lensShadingMapData = out
@@ -2110,13 +2106,6 @@ class CameraFragment : Fragment() {
                 Log.e(TAG, "Error in background processing", e)
                 withContext(Dispatchers.Main) {
                     context?.let { ctx -> android.widget.Toast.makeText(ctx, "Capture error: ${e.message}", android.widget.Toast.LENGTH_SHORT).show() }
-                }
-            } finally {
-                processingSemaphore.release()
-                withContext(Dispatchers.Main) {
-                    if (processingSemaphore.availablePermits > 0) {
-                        cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
-                    }
                 }
             }
         }
@@ -3633,16 +3622,12 @@ class CameraFragment : Fragment() {
                         lensShadingCols = lsc.columnCount
                         val out = FloatArray(4 * lensShadingRows * lensShadingCols)
                         fun idx(ch: Int, row: Int, col: Int): Int = ch * lensShadingRows * lensShadingCols + row * lensShadingCols + col
-                        val chR = when(cfa) { 1->1; 2->2; 3->3; else->0 }
-                        val chB = when(cfa) { 1->2; 2->1; 3->0; else->3 }
-                        val chG0 = when(cfa) { 1->0; 2->3; 3->2; else->1 }
-                        val chG1 = when(cfa) { 1->3; 2->0; 3->1; else->2 }
                         for (row in 0 until lensShadingRows) {
                             for (col in 0 until lensShadingCols) {
-                                out[idx(0, row, col)] = lsc.getGainFactor(chR, col, row)
-                                out[idx(1, row, col)] = lsc.getGainFactor(chG0, col, row)
-                                out[idx(2, row, col)] = lsc.getGainFactor(chG1, col, row)
-                                out[idx(3, row, col)] = lsc.getGainFactor(chB, col, row)
+                                out[idx(0, row, col)] = lsc.getGainFactor(0, col, row)
+                                out[idx(1, row, col)] = lsc.getGainFactor(1, col, row)
+                                out[idx(2, row, col)] = lsc.getGainFactor(2, col, row)
+                                out[idx(3, row, col)] = lsc.getGainFactor(3, col, row)
                             }
                         }
                         lensShadingMapData = out
@@ -3816,11 +3801,6 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     Log.i(TAG, logMsg)
                     DebugLogManager.addLog(logMsg)
 
-                    processingSemaphore.release()
-                    withContext(Dispatchers.Main) {
-                        resetBurstUi()
-                    }
-
                 } else {
                     throw RuntimeException("JNI processing returned error code: $ret")
                 }
@@ -3854,15 +3834,6 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         fallbackSent = true
                     } catch (fallbackEx: Exception) {
                         Log.e(TAG, "Fallback failed", fallbackEx)
-                    }
-                }
-                if (!fallbackSent) {
-                    processingSemaphore.release()
-                    lifecycleScope.launch(Dispatchers.Main) {
-                        resetBurstUi()
-                        if (!isHdrPlusSuccess) {
-                            hideProcessingAnimation()
-                        }
                     }
                 }
             }
