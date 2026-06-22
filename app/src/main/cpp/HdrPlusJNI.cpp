@@ -257,6 +257,30 @@ ImageMetadata metadataFromJava(JNIEnv* env, jobject metadataObj) {
     ImageMetadata meta;
     if (!metadataObj) return meta;
 
+    jclass metadataClass = env->GetObjectClass(metadataObj);
+
+    jfieldID blackLevelPatternField = env->GetFieldID(metadataClass, "blackLevelPattern", "[I");
+    if (blackLevelPatternField) {
+        jintArray blackLevelPatternArray = (jintArray)env->GetObjectField(metadataObj, blackLevelPatternField);
+        if (blackLevelPatternArray && env->GetArrayLength(blackLevelPatternArray) >= 4) {
+            int bl_pattern[4];
+            env->GetIntArrayRegion(blackLevelPatternArray, 0, 4, bl_pattern);
+            for (int i = 0; i < 4; i++) meta.blackLevel[i] = std::max(0, bl_pattern[i]);
+        }
+    } else {
+        env->ExceptionClear();
+    }
+
+    jfieldID wbField = env->GetFieldID(metadataClass, "whiteBalance", "[F");
+    if (wbField) {
+        jfloatArray wbArray = (jfloatArray)env->GetObjectField(metadataObj, wbField);
+        if (wbArray && env->GetArrayLength(wbArray) >= 4) {
+            env->GetFloatArrayRegion(wbArray, 0, 4, meta.wb);
+        }
+    } else {
+        env->ExceptionClear();
+    }
+
     meta.iso = getIntField(env, metadataObj, g_metadataFields.iso, 100);
     meta.exposureTime = getLongField(env, metadataObj, g_metadataFields.exposureTime, 10000000L);
     meta.fNumber = getFloatField(env, metadataObj, g_metadataFields.fNumber, 1.8f);
@@ -324,6 +348,8 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
     const char* dng_path_cstr = (dngPath) ? env->GetStringUTFChars(dngPath, 0) : nullptr;
 
     ImageMetadata meta = metadataFromJava(env, metadata);
+
+
 
     if (dng_path_cstr) {
         LOGD("Exporting DNG to %s", dng_path_cstr);
@@ -453,6 +479,8 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
     Buffer<float> ccmHalideBuf(identityCCM.data(), 3, 3);
     auto paramExtractMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - subStart).count();
     auto jniPrepMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - jniPrepStart).count();
+
+
 
     int halideCfa = 1;
     switch (cfaPattern) { case 0: halideCfa = 1; break; case 1: halideCfa = 2; break; case 2: halideCfa = 4; break; case 3: halideCfa = 3; break; default: halideCfa = 1; break; }

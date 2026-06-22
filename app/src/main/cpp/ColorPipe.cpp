@@ -824,8 +824,8 @@ bool process_and_save_image(
                 return v0 * (1.0f - ty) + v1 * ty;
             };
             lscR = bilerp(0);
-            lscG = 0.5f * (bilerp(1) + bilerp(2));
             lscB = bilerp(3);
+            lscG = 0.5f * (bilerp(1) + bilerp(2));
         }
 
         // Halide output is scaled by 0.25 (14-bit range).
@@ -1342,8 +1342,8 @@ static std::vector<unsigned char> make_preview_rgb8(
                     return v0 * (1.0f - ty) + v1 * ty;
                 };
                 lscR = bilerp(0);
-                lscG = 0.5f * (bilerp(1) + bilerp(2));
                 lscB = bilerp(3);
+                lscG = 0.5f * (bilerp(1) + bilerp(2));
             }
 
             auto encodePreviewChannel = [&](uint16_t raw_val, float lsc) -> unsigned char {
@@ -1399,8 +1399,13 @@ bool write_dng(const char* filename, int width, int height, const uint16_t* plan
     uint32_t white_level_val = (uint32_t)whiteLevel;
     if (white_level_val == 0) white_level_val = 65535;
     TIFFSetField(tif, TIFFTAG_WHITELEVEL, 1, &white_level_val);
-    uint32_t black_level_val = 0;
-    TIFFSetField(tif, TIFFTAG_BLACKLEVEL, 1, &black_level_val);
+    float black_level_vals[4] = {
+        (float)metadata.blackLevel[0],
+        (float)metadata.blackLevel[1],
+        (float)metadata.blackLevel[2],
+        (float)metadata.blackLevel[3]
+    };
+    TIFFSetField(tif, TIFFTAG_BLACKLEVEL, 4, black_level_vals);
 
     Matrix3x3 ccmMat;
     std::copy(ccm.begin(), ccm.begin() + 9, ccmMat.m);
@@ -1408,7 +1413,11 @@ bool write_dng(const char* filename, int width, int height, const uint16_t* plan
     Matrix3x3 colorMatrix1 = multiply(invCcm, M_XYZ_to_sRGB_D65);
     TIFFSetField(tif, TIFFTAG_COLORMATRIX1, 9, colorMatrix1.m);
 
-    static const float as_shot_neutral[] = {1.0f, 1.0f, 1.0f};
+    float as_shot_neutral[] = {
+        metadata.wb[0] > 0.0f ? 1.0f / metadata.wb[0] : 1.0f,
+        metadata.wb[1] > 0.0f ? 1.0f / metadata.wb[1] : 1.0f,
+        metadata.wb[3] > 0.0f ? 1.0f / metadata.wb[3] : 1.0f
+    };
     TIFFSetField(tif, TIFFTAG_ASSHOTNEUTRAL, 3, as_shot_neutral);
 
     TIFFSetField(tif, TIFFTAG_CALIBRATIONILLUMINANT1, 21);
@@ -1461,8 +1470,8 @@ bool write_dng(const char* filename, int width, int height, const uint16_t* plan
                     return v0 * (1.0f - ty) + v1 * ty;
                 };
                 lscR = bilerp(0);
-                lscG = 0.5f * (bilerp(1) + bilerp(2));
                 lscB = bilerp(3);
+                lscG = 0.5f * (bilerp(1) + bilerp(2));
             }
 
             rowBuffer[x * 3 + 0] = (uint16_t)std::min((int)((float)r * lscR) << 2, 65535);

@@ -28,6 +28,8 @@ struct ImageMetadata {
     std::string lensModel;
     std::string software;
     std::string imageDescription;
+    float wb[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+    int blackLevel[4] = {0, 0, 0, 0};
 };
 
 struct Vec3 {
