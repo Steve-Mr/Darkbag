@@ -559,15 +559,14 @@ constexpr float kRec709LinearLumaB = 0.0722f;
 constexpr float kBlendStartRadius = 0.55f;
 constexpr float kBlendEndRadius = 1.0f;
 
-// High dynamic range scenes can lift very noisy near-black values after HDR+ merge,
-// lens-shading compensation, and tone mapping.  If green dominates only in those
-// very dark pixels, pull it gently back toward the red/blue average before the
-// color matrix so neutral shadows do not turn green while real midtone colors stay
-// untouched.
-constexpr float kShadowGreenLumaStart = 0.18f;
-constexpr float kShadowGreenLumaEnd = 0.04f;
-constexpr float kShadowGreenRatioThreshold = 1.04f;
-constexpr float kShadowGreenMaxReduction = 0.70f;
+// Experimental HDR shadow chroma rolloff.  Keep this opt-in: the preferred
+// root-cause fixes are RAW-domain black-level, lens/color-shading, and merge
+// noise-model improvements.  This diagnostic guard only reduces chroma in very
+// low-luma output when explicitly enabled with ablationMask bit 8.
+constexpr int kEnableShadowChromaRolloffMask = 8;
+constexpr float kShadowChromaLumaStart = 0.18f;
+constexpr float kShadowChromaLumaEnd = 0.04f;
+constexpr float kShadowChromaMaxReduction = 0.65f;
 
 inline float safe_div(float a, float b) {
     return (b > 1e-6f) ? (a / b) : 1.0f;
@@ -868,23 +867,24 @@ bool process_and_save_image(
             norm_b *= bGain;
         }
 
-        float shadowLuma = kRec709LinearLumaR * norm_r + kRec709LinearLumaG * norm_g + kRec709LinearLumaB * norm_b;
-        float rbMean = 0.5f * (norm_r + norm_b);
-        float greenRatio = safe_div(norm_g, rbMean);
-        if (shadowLuma < kShadowGreenLumaStart && greenRatio > kShadowGreenRatioThreshold && !(ablationMask & 8)) {
-            float shadowT = std::clamp((kShadowGreenLumaStart - shadowLuma) / (kShadowGreenLumaStart - kShadowGreenLumaEnd), 0.0f, 1.0f);
-            shadowT = shadowT * shadowT * (3.0f - 2.0f * shadowT);
-            float castT = std::clamp((greenRatio - kShadowGreenRatioThreshold) / 0.35f, 0.0f, 1.0f);
-            float targetG = rbMean * kShadowGreenRatioThreshold;
-            float reduction = shadowT * castT * kShadowGreenMaxReduction;
-            norm_g = norm_g * (1.0f - reduction) + targetG * reduction;
-        }
-
         Vec3 colorA = {norm_r, norm_g, norm_b};
         if (stageA) *stageA = colorA;
 
         Vec3 color = colorA;
         color = multiply(combined_matrix, color);
+
+        if (ablationMask & kEnableShadowChromaRolloffMask) {
+            float shadowLuma = kRec709LinearLumaR * color.r + kRec709LinearLumaG * color.g + kRec709LinearLumaB * color.b;
+            if (shadowLuma < kShadowChromaLumaStart) {
+                float shadowT = std::clamp((kShadowChromaLumaStart - shadowLuma) / (kShadowChromaLumaStart - kShadowChromaLumaEnd), 0.0f, 1.0f);
+                shadowT = shadowT * shadowT * (3.0f - 2.0f * shadowT);
+                float chromaScale = 1.0f - shadowT * kShadowChromaMaxReduction;
+                color.r = shadowLuma + (color.r - shadowLuma) * chromaScale;
+                color.g = shadowLuma + (color.g - shadowLuma) * chromaScale;
+                color.b = shadowLuma + (color.b - shadowLuma) * chromaScale;
+            }
+        }
+
         if (stageB) *stageB = color;
 
         if (!(ablationMask & 2)) {
