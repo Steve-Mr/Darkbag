@@ -451,6 +451,13 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
 
     std::vector<float> identityCCM = { 1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f };
     Buffer<float> ccmHalideBuf(identityCCM.data(), 3, 3);
+
+    const bool useHalideLensShading = !lensShadingVec.empty() && lensShadingRows > 0 && lensShadingCols > 0;
+    std::vector<float> unitLensShading(4, 1.0f);
+    float* lensShadingData = useHalideLensShading ? lensShadingVec.data() : unitLensShading.data();
+    const int halideLensShadingCols = useHalideLensShading ? lensShadingCols : 1;
+    const int halideLensShadingRows = useHalideLensShading ? lensShadingRows : 1;
+    Buffer<float> lensShadingHalideBuf(lensShadingData, halideLensShadingCols, halideLensShadingRows, 4);
     auto paramExtractMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - subStart).count();
     auto jniPrepMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - jniPrepStart).count();
 
@@ -468,13 +475,13 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
 
     if (captureIso <= 200) {
         LOGD("Using fast pipeline for ISO %d", captureIso);
-        halide_res = hdrplus_raw_pipeline_fast(inputBuf, bl_r, bl_g0, bl_g1, bl_b, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, ccmHalideBuf, 1.0f, 1.0f, outputBuf);
+        halide_res = hdrplus_raw_pipeline_fast(inputBuf, bl_r, bl_g0, bl_g1, bl_b, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, lensShadingHalideBuf, useHalideLensShading ? 1 : 0, ccmHalideBuf, 1.0f, 1.0f, outputBuf);
     } else if (captureIso <= 800) {
         LOGD("Using light pipeline for ISO %d", captureIso);
-        halide_res = hdrplus_raw_pipeline_light(inputBuf, bl_r, bl_g0, bl_g1, bl_b, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, ccmHalideBuf, 1.0f, 1.0f, outputBuf);
+        halide_res = hdrplus_raw_pipeline_light(inputBuf, bl_r, bl_g0, bl_g1, bl_b, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, lensShadingHalideBuf, useHalideLensShading ? 1 : 0, ccmHalideBuf, 1.0f, 1.0f, outputBuf);
     } else {
         LOGD("Using normal pipeline for ISO %d", captureIso);
-        halide_res = hdrplus_raw_pipeline(inputBuf, bl_r, bl_g0, bl_g1, bl_b, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, ccmHalideBuf, 1.0f, 1.0f, outputBuf);
+        halide_res = hdrplus_raw_pipeline(inputBuf, bl_r, bl_g0, bl_g1, bl_b, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, lensShadingHalideBuf, useHalideLensShading ? 1 : 0, ccmHalideBuf, 1.0f, 1.0f, outputBuf);
     }
 
     auto halideDurationMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - halideStart).count();
@@ -519,7 +526,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
     if (bitmapPixels) {
         LOGD("process_and_save_image PREVIEW INVOCATION START");
         auto start_preview = std::chrono::high_resolution_clock::now();
-        process_and_save_image(raw_ptr, stride_x, stride_y, stride_c, lensShadingVec, lensShadingRows, lensShadingCols, width, height, digitalGain, targetLog, lut,
+        process_and_save_image(raw_ptr, stride_x, stride_y, stride_c, std::vector<float>(), 0, 0, width, height, digitalGain, targetLog, lut,
                                 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
                                 nullptr, nullptr, nullptr, 1, ccmVec.data(), wbVec.data(), orientation, bitmapPixels, out_w, out_h, true, fastPreviewDownsample, zoomFactor, (bool)mirror, nullptr, 0, (bool)useTetrahedralLut);
         previewMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start_preview).count();
@@ -545,7 +552,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
             ablationMask = (int)statsArray[24];
         }
 
-        process_and_save_image(raw_ptr, stride_x, stride_y, stride_c, lensShadingVec, lensShadingRows, lensShadingCols, width, height, digitalGain, targetLog, lut,
+        process_and_save_image(raw_ptr, stride_x, stride_y, stride_c, std::vector<float>(), 0, 0, width, height, digitalGain, targetLog, lut,
                                 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
                             jpgPathStr.c_str(), nullptr, &meta, 1, ccmVec.data(), wbVec.data(), orientation, nullptr, 0, 0, false, 1, zoomFactor, (bool)mirror, jpgTimings, ablationMask, (bool)useTetrahedralLut);
         mainJpgTotalMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start_jpg).count();
@@ -563,7 +570,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
             altJpgPath = altJpgPath.substr(0, dot) + suffix;
             LOGD("process_and_save_image ALT_JPG INVOCATION START");
             auto start_alt = std::chrono::high_resolution_clock::now();
-            process_and_save_image(raw_ptr, stride_x, stride_y, stride_c, lensShadingVec, lensShadingRows, lensShadingCols, width, height, digitalGain, targetLog, lut,
+            process_and_save_image(raw_ptr, stride_x, stride_y, stride_c, std::vector<float>(), 0, 0, width, height, digitalGain, targetLog, lut,
                                     0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
                                     altJpgPath.c_str(), nullptr, &meta, 1, ccmAltVec.data(), wbVec.data(), orientation, nullptr, 0, 0, false, 1, zoomFactor, (bool)mirror, nullptr, 0, (bool)useTetrahedralLut);
             altJpgTotalMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start_alt).count();

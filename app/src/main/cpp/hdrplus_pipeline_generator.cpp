@@ -31,6 +31,8 @@ public:
   Input<float> white_balance_g1{"white_balance_g1"};
   Input<float> white_balance_b{"white_balance_b"};
   Input<int> cfa_pattern{"cfa_pattern"};
+  Input<Buffer<float>> lens_shading{"lens_shading", 3};
+  Input<int> enable_lens_shading{"enable_lens_shading"};
   Input<Buffer<float>> ccm{"ccm", 2};
 
   Input<float> compression{"compression"};
@@ -48,7 +50,8 @@ public:
 
     Func bayer_shifted = shift_bayer_to_rggb(merged, cfa_pattern);
     Func black_white_level_output = black_white_level(bayer_shifted, black_point_r, black_point_g0, black_point_g1, black_point_b, white_point, cfa_pattern);
-    Func white_balance_output = white_balance(black_white_level_output, wb);
+    Func lens_shading_output = apply_lens_shading(black_white_level_output, inputs.width(), inputs.height());
+    Func white_balance_output = white_balance(lens_shading_output, wb);
 
     // Demosaic
     DemosaicResult dm = demosaic(white_balance_output, inputs.width(), inputs.height());
@@ -78,6 +81,7 @@ public:
     } else if (!use_optimized_schedule) {
         // Legacy CPU Schedule
         black_white_level_output.compute_root().parallel(y).vectorize(x, kVec);
+        lens_shading_output.compute_root().parallel(y).vectorize(x, kVec);
         white_balance_output.compute_root().parallel(y).vectorize(x, kVec);
 
         demosaic_output.compute_root()
@@ -100,6 +104,7 @@ public:
         // Optimized CPU Schedule (Stage Fusion)
         // Fuse early stages into demosaic
         black_white_level_output.compute_at(demosaic_output, yi).vectorize(x, kVec);
+        lens_shading_output.compute_at(demosaic_output, yi).vectorize(x, kVec);
         white_balance_output.compute_at(demosaic_output, yi).vectorize(x, kVec);
 
         demosaic_output.compute_root()
@@ -158,6 +163,39 @@ private:
     // Reserve headroom (0.25x) for White Balance to prevent clipping
     Expr white_factor = (65535.f / max(1.f, f32(wp) - f32(bp))) * 0.25f;
     output(x, y) = u16_sat((i32(input(x, y)) - bp) * white_factor);
+    return output;
+  }
+
+
+  Func apply_lens_shading(Func input, Expr width, Expr height) {
+    Func output("lens_shading_output");
+
+    Expr cols = lens_shading.dim(0).extent();
+    Expr rows = lens_shading.dim(1).extent();
+    Expr max_col = max(cols - 1, 0);
+    Expr max_row = max(rows - 1, 0);
+
+    Expr fx = select(width > 1 && cols > 1, f32(x) * f32(max_col) / f32(width - 1), 0.0f);
+    Expr fy = select(height > 1 && rows > 1, f32(y) * f32(max_row) / f32(height - 1), 0.0f);
+    Expr x0 = clamp(i32(floor(fx)), 0, max_col);
+    Expr y0 = clamp(i32(floor(fy)), 0, max_row);
+    Expr x1 = min(x0 + 1, max_col);
+    Expr y1 = min(y0 + 1, max_row);
+    Expr tx = fx - f32(x0);
+    Expr ty = fy - f32(y0);
+
+    Expr ch = select(y % 2 == 0,
+                     select(x % 2 == 0, 0, 1),
+                     select(x % 2 == 0, 2, 3));
+    Expr v00 = lens_shading(x0, y0, ch);
+    Expr v10 = lens_shading(x1, y0, ch);
+    Expr v01 = lens_shading(x0, y1, ch);
+    Expr v11 = lens_shading(x1, y1, ch);
+    Expr v0 = v00 * (1.0f - tx) + v10 * tx;
+    Expr v1 = v01 * (1.0f - tx) + v11 * tx;
+    Expr gain = clamp(v0 * (1.0f - ty) + v1 * ty, 0.25f, 8.0f);
+
+    output(x, y) = select(enable_lens_shading != 0, u16_sat(f32(input(x, y)) * gain), input(x, y));
     return output;
   }
 

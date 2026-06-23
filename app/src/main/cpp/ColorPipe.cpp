@@ -564,6 +564,7 @@ constexpr float kBlendEndRadius = 1.0f;
 // noise-model improvements.  This diagnostic guard only reduces chroma in very
 // low-luma output when explicitly enabled with ablationMask bit 8.
 constexpr int kEnableShadowChromaRolloffMask = 8;
+constexpr int kEnableDebugStageOutputMask = 16;
 constexpr float kShadowChromaLumaStart = 0.18f;
 constexpr float kShadowChromaLumaEnd = 0.04f;
 constexpr float kShadowChromaMaxReduction = 0.65f;
@@ -702,8 +703,9 @@ bool process_and_save_image(
     int outW = width / downsampleFactor, outH = height / downsampleFactor;
     bool swapDims = (orientation == 90 || orientation == 270);
     int finalW = swapDims ? outH : outW, finalH = swapDims ? outW : outH;
+    const bool enableDebugStages = !isPreview && jpgPath && (ablationMask & kEnableDebugStageOutputMask);
     Matrix3x3 effective_CCM = {0}; if (sourceColorSpace == 1 && ccm) std::copy(ccm, ccm + 9, effective_CCM.m);
-    std::vector<unsigned short> processedImage; std::vector<unsigned char> previewRgb8;
+    std::vector<unsigned short> processedImage; std::vector<unsigned short> stageAImage; std::vector<unsigned short> stageBImage; std::vector<unsigned short> stageCImage; std::vector<unsigned char> previewRgb8;
 
 
     AdaptiveEdgeComp edgeComp = calculate_adaptive_edge_comp(planarData, stride_x, stride_y, stride_c, width, height);
@@ -982,6 +984,19 @@ bool process_and_save_image(
         finalH_zoomed = renderH;
     } else {
         processedImage.resize(static_cast<size_t>(finalW_zoomed) * finalH_zoomed * 3);
+        if (enableDebugStages) {
+            const size_t debugSize = static_cast<size_t>(finalW_zoomed) * finalH_zoomed * 3;
+            stageAImage.resize(debugSize);
+            stageBImage.resize(debugSize);
+            stageCImage.resize(debugSize);
+        }
+
+        auto store_vec3_16 = [](std::vector<unsigned short>& dst, size_t outIdx, const Vec3& color) {
+            if (dst.empty()) return;
+            dst[outIdx + 0] = (unsigned short)std::max(0.0f, std::min(65535.0f, color.r * 65535.0f));
+            dst[outIdx + 1] = (unsigned short)std::max(0.0f, std::min(65535.0f, color.g * 65535.0f));
+            dst[outIdx + 2] = (unsigned short)std::max(0.0f, std::min(65535.0f, color.b * 65535.0f));
+        };
 
         #pragma omp parallel for
         for (int py = 0; py < finalH_zoomed; py++) {
@@ -997,11 +1012,18 @@ bool process_and_save_image(
                 else if (orientation == 270) { sx = (cropW - 1) - fy; sy = fx; }
                 else { sx = fx; sy = fy; }
 
-                Vec3 color = process_pixel(cropX + sx, cropY + sy, nullptr, nullptr, nullptr);
+                Vec3 stageA{}, stageB{}, stageC{};
+                Vec3* stageAPtr = enableDebugStages ? &stageA : nullptr;
+                Vec3* stageBPtr = enableDebugStages ? &stageB : nullptr;
+                Vec3* stageCPtr = enableDebugStages ? &stageC : nullptr;
+                Vec3 color = process_pixel(cropX + sx, cropY + sy, stageAPtr, stageBPtr, stageCPtr);
                 size_t outIdx = (static_cast<size_t>(py) * finalW_zoomed + px) * 3;
                 processedImage[outIdx + 0] = (unsigned short)std::max(0.0f, std::min(65535.0f, color.r * 65535.0f));
                 processedImage[outIdx + 1] = (unsigned short)std::max(0.0f, std::min(65535.0f, color.g * 65535.0f));
                 processedImage[outIdx + 2] = (unsigned short)std::max(0.0f, std::min(65535.0f, color.b * 65535.0f));
+                store_vec3_16(stageAImage, outIdx, stageA);
+                store_vec3_16(stageBImage, outIdx, stageB);
+                store_vec3_16(stageCImage, outIdx, stageC);
 
 
                 // Note: out_rgb_buffer is usually for preview only, but we keep it here if needed.
@@ -1051,6 +1073,17 @@ bool process_and_save_image(
         } else {
 
             jpgOk = write_jpeg(jpgPath, finalW_zoomed, finalH_zoomed, processedImage, jpegQuality, jpeg_timings);
+        }
+        if (jpgOk && enableDebugStages) {
+            long long debugTimings[3] = {0, 0, 0};
+            std::string stageAPath = build_debug_stage_path(jpgPath, "_stage_A_linear_after_lsc");
+            std::string stageBPath = build_debug_stage_path(jpgPath, "_stage_B_after_ccm");
+            std::string stageCPath = build_debug_stage_path(jpgPath, "_stage_C_after_tone");
+            bool stageAOk = write_jpeg(stageAPath.c_str(), finalW_zoomed, finalH_zoomed, stageAImage, jpegQuality, debugTimings);
+            bool stageBOk = write_jpeg(stageBPath.c_str(), finalW_zoomed, finalH_zoomed, stageBImage, jpegQuality, debugTimings);
+            bool stageCOk = write_jpeg(stageCPath.c_str(), finalW_zoomed, finalH_zoomed, stageCImage, jpegQuality, debugTimings);
+            LOGD("Debug stage output: A=%d (%s), B=%d (%s), C=%d (%s)",
+                 (int)stageAOk, stageAPath.c_str(), (int)stageBOk, stageBPath.c_str(), (int)stageCOk, stageCPath.c_str());
         }
         if (!jpgOk) LOGE("write_jpeg failed for %s", jpgPath);
         else {
