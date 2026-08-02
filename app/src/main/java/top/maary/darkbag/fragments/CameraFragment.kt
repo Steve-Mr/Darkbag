@@ -581,9 +581,9 @@ class CameraFragment : Fragment() {
 
         // Initialize HDR+ Burst Helper
         hdrPlusBurstHelper = HdrPlusBurst(
-            frameCount = 3,
-            onBurstComplete = { frames ->
-                processHdrPlusBurst(frames, 1.0f)
+            frameCount = 1,
+            onBurstComplete = { burstResult ->
+                processHdrPlusBurst(burstResult, 1.0f)
             }
         )
 
@@ -3331,8 +3331,8 @@ class CameraFragment : Fragment() {
 
                 hdrPlusBurstHelper = HdrPlusBurst(
                     frameCount = burstSize,
-                    onBurstComplete = { frames ->
-                        processHdrPlusBurst(frames, config.digitalGain, hfMetadata?.copy(digitalGain = config.digitalGain))
+                    onBurstComplete = { burstResult ->
+                        processHdrPlusBurst(burstResult, config.digitalGain, hfMetadata?.copy(digitalGain = config.digitalGain))
                     }
                 )
 
@@ -3440,7 +3440,7 @@ class CameraFragment : Fragment() {
     }
 
     private fun processHdrPlusBurst(
-        frames: List<HdrFrame>,
+        burstResult: BurstResult,
         digitalGain: Float,
         hfMetadata: HalfFrameManager.Metadata? = null
     ) {
@@ -3459,13 +3459,13 @@ class CameraFragment : Fragment() {
             var isHdrPlusSuccess = false
             try {
                 val context = appContext
+                val frames = burstResult.frames
+                val megaBuffer = burstResult.megaBuffer
                 Log.d(TAG, "processHdrPlusBurst started with ${frames.size} frames. DigitalGain=$digitalGain")
 
                 val width = frames[0].width
                 val height = frames[0].height
                 val rotationDegrees = frames[0].rotationDegrees
-
-                val buffers = frames.map { it.buffer!! }.toTypedArray()
 
                 val timestamp = frames[0].timestamp
                 val result = findCaptureResult(timestamp)
@@ -3629,7 +3629,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     Log.d(TAG, "Output Paths: DNG=$linearDngPath")
 
                 val jniStartTime = System.currentTimeMillis()
-                buffers.forEach { it.rewind() }
+                megaBuffer.rewind()
 
                 val debugStats = LongArray(15)
 
@@ -3639,7 +3639,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 val mirror = shouldMirror
 
                 val ret = ColorProcessor.processHdrPlus(
-                    buffers,
+                    megaBuffer,
+                    frames.size,
                     width, height,
                     combinedOrientation,
                     whiteLevel, blackLevelPattern,
@@ -3820,12 +3821,14 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     Toast.makeText(appContext, "HDR+ failed, saving single frame...", Toast.LENGTH_SHORT).show()
                 }
 
-                if (frames.isNotEmpty()) {
+                if (burstResult.frames.isNotEmpty()) {
                     try {
-                        val firstFrame = frames[0]
-                        val data = ByteBuffer.allocateDirect(firstFrame.buffer!!.remaining())
-                        firstFrame.buffer!!.rewind()
-                        data.put(firstFrame.buffer!!)
+                        val firstFrame = burstResult.frames[0]
+                        val frameSize = firstFrame.width * firstFrame.height * 2
+                        val data = ByteBuffer.allocateDirect(frameSize)
+                        burstResult.megaBuffer.position(0)
+                        burstResult.megaBuffer.limit(frameSize)
+                        data.put(burstResult.megaBuffer)
                         data.rewind()
 
                         val holder = RawImageHolder(
@@ -3846,10 +3849,9 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     }
                 }
             } finally {
-                frames.forEach {
-                    HdrPlusBurst.releaseBuffer(it.buffer)
-                    it.close()
-                }
+                burstResult.frames.forEach { it.close() }
+                HdrPlusBurst.releaseBuffer(burstResult.megaBuffer)
+                
                 if (!fallbackSent) {
                     processingSemaphore.release()
                     lifecycleScope.launch(Dispatchers.Main) {
@@ -4233,8 +4235,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 writeScopedHalfFrameStep(requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE), 1, captureStartTime, digitalGain = config.digitalGain, flareType = hfMetadata?.flareType ?: -1)
             }
 
-            hdrPlusBurstHelper = HdrPlusBurst(frameCount = burstSize, onBurstComplete = { frames ->
-                processHdrPlusBurst(frames, config.digitalGain, hfMetadata?.copy(digitalGain = config.digitalGain))
+            hdrPlusBurstHelper = HdrPlusBurst(frameCount = burstSize, onBurstComplete = { burstResult ->
+                processHdrPlusBurst(burstResult, config.digitalGain, hfMetadata?.copy(digitalGain = config.digitalGain))
             })
 
             lifecycleScope.launch(Dispatchers.Main) {

@@ -147,7 +147,8 @@ object ColorProcessor {
     ): Int
 
     external fun processHdrPlus(
-        dngBuffers: Array<ByteBuffer>,
+        dngBuffer: ByteBuffer,
+        numFrames: Int,
         width: Int,
         height: Int,
         orientation: Int,

@@ -548,23 +548,27 @@ bool process_and_save_image(
     bool swapDims = (orientation == 90 || orientation == 270);
     int finalW = swapDims ? outH : outW, finalH = swapDims ? outW : outH;
     Matrix3x3 effective_CCM = {0}; if (sourceColorSpace == 1 && ccm) std::copy(ccm, ccm + 9, effective_CCM.m);
-    std::vector<unsigned short> processedImage; std::vector<unsigned char> previewRgb8;
+    thread_local std::vector<unsigned short> tls_processedImage; 
+    thread_local std::vector<unsigned char> tls_previewRgb8;
 
     AdaptiveEdgeComp edgeComp = calculate_adaptive_edge_comp(inputImage, width, height);
 
     // Debug stage split output (A/B/C):
-    // A: linear RGB input after adaptive edge compensation
-    // B: after color-space matrix transform (before log/LUT)
-    // C: after log curve (before LUT)
     const bool enableStageDebug = false;
     std::string debugBasePath = jpgPath ? std::string(jpgPath) : std::string();
     std::string debugPathA = enableStageDebug ? build_debug_stage_path(debugBasePath.c_str(), "_debug_A_linear") : std::string();
     std::string debugPathB = enableStageDebug ? build_debug_stage_path(debugBasePath.c_str(), "_debug_B_matrix") : std::string();
     std::string debugPathC = enableStageDebug ? build_debug_stage_path(debugBasePath.c_str(), "_debug_C_log") : std::string();
 
-    std::vector<unsigned char> debugA8;
-    std::vector<unsigned char> debugB8;
-    std::vector<unsigned char> debugC8;
+    thread_local std::vector<unsigned char> tls_debugA8;
+    thread_local std::vector<unsigned char> tls_debugB8;
+    thread_local std::vector<unsigned char> tls_debugC8;
+    
+    std::vector<unsigned short>& processedImage = tls_processedImage;
+    std::vector<unsigned char>& previewRgb8 = tls_previewRgb8;
+    std::vector<unsigned char>& debugA8 = tls_debugA8;
+    std::vector<unsigned char>& debugB8 = tls_debugB8;
+    std::vector<unsigned char>& debugC8 = tls_debugC8;
 
     auto process_pixel = [&](int x, int y, Vec3* stageA, Vec3* stageB, Vec3* stageC) -> Vec3 {
         x = std::max(0, std::min(x, width - 1));
@@ -883,7 +887,8 @@ bool write_tiff_rgba8(const char* filename, int width, int height, const unsigne
 bool write_jpeg(const char* filename, int width, int height, const std::vector<unsigned short>& data, int quality) {
     LOGD("write_jpeg: %s, %dx%d", filename, width, height);
     size_t total_pixels = static_cast<size_t>(width) * height;
-    std::vector<unsigned char> rgb8;
+    thread_local std::vector<unsigned char> tls_rgb8;
+    std::vector<unsigned char>& rgb8 = tls_rgb8;
     try {
         rgb8.resize(total_pixels * 3);
     } catch (const std::bad_alloc& e) {
@@ -910,31 +915,34 @@ int compute_preview_downsample_factor(int width, int height, int targetLongEdge)
     return std::max(1, (longEdge + targetLongEdge - 1) / targetLongEdge);
 }
 
-struct JpegBufferContext {
-    std::vector<unsigned char> bytes;
-};
 
-static void write_jpeg_to_memory(void* context, void* data, int size) {
-    if (!context || !data || size <= 0) return;
-    auto* ctx = static_cast<JpegBufferContext*>(context);
-    auto* src = static_cast<unsigned char*>(data);
-    ctx->bytes.insert(ctx->bytes.end(), src, src + size);
-}
-
-static std::vector<unsigned char> encode_rgb8_jpeg(
+static const std::vector<unsigned char>& encode_rgb8_jpeg(
     const std::vector<unsigned char>& rgb8,
     int width,
     int height,
     int quality
 ) {
-    JpegBufferContext ctx;
-    if (!rgb8.empty() && width > 0 && height > 0) {
+    thread_local std::vector<unsigned char> tls_jpeg_bytes;
+    tls_jpeg_bytes.clear();
+    
+    struct Context {
+        std::vector<unsigned char>* bytes;
+    } ctx;
+    ctx.bytes = &tls_jpeg_bytes;
+
+    auto write_jpeg_to_memory = [](void* context, void* data, int size) {
+        Context* c = static_cast<Context*>(context);
+        const unsigned char* p = static_cast<const unsigned char*>(data);
+        c->bytes->insert(c->bytes->end(), p, p + size);
+    };
+
+    if (!rgb8.empty()) {
         stbi_write_jpg_to_func(write_jpeg_to_memory, &ctx, width, height, 3, rgb8.data(), quality);
     }
-    return ctx.bytes;
+    return tls_jpeg_bytes;
 }
 
-static std::vector<unsigned char> make_preview_rgb8(
+static const std::vector<unsigned char>& make_preview_rgb8(
     const std::vector<unsigned short>& data,
     int width,
     int height,
@@ -953,7 +961,8 @@ static std::vector<unsigned char> make_preview_rgb8(
     outWidth = swapDims ? sampledHeight : sampledWidth;
     outHeight = swapDims ? sampledWidth : sampledHeight;
 
-    std::vector<unsigned char> preview(static_cast<size_t>(outWidth) * outHeight * 3);
+    thread_local std::vector<unsigned char> preview;
+    preview.resize(static_cast<size_t>(outWidth) * outHeight * 3);
     for (int y = 0; y < outHeight; ++y) {
         for (int x = 0; x < outWidth; ++x) {
             int sx = x;
@@ -1071,21 +1080,17 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
     };
 
     for (const auto& spec : previewSpecs) {
-        int previewWidth = 0;
-        int previewHeight = 0;
-        const float previewGain = baselineExposure != 0.0f ? std::exp2(baselineExposure) : 1.0f;
-        std::vector<unsigned char> previewRgb8 = make_preview_rgb8(
-            data,
-            width,
-            height,
-            spec.targetLongEdge,
-            orientation,
-            mirror,
-            previewGain,
-            previewWidth,
-            previewHeight
+        int previewWidth = 0, previewHeight = 0;
+        const std::vector<unsigned char>& previewRgb8 = make_preview_rgb8(
+            data, width, height, spec.targetLongEdge, orientation, mirror, std::pow(2.0f, baselineExposure), previewWidth, previewHeight
         );
-        std::vector<unsigned char> jpegPreview = encode_rgb8_jpeg(previewRgb8, previewWidth, previewHeight, 82);
+
+        if (previewRgb8.empty()) {
+            TIFFClose(tif);
+            return false;
+        }
+
+        const std::vector<unsigned char>& jpegPreview = encode_rgb8_jpeg(previewRgb8, previewWidth, previewHeight, 82);
         if (jpegPreview.empty()) {
             TIFFClose(tif);
             return false;
@@ -1107,7 +1112,7 @@ bool write_dng(const char* filename, int width, int height, const std::vector<un
         TIFFSetField(tif, TIFFTAG_SOFTWARE, metadata.software.c_str());
         TIFFSetField(tif, TIFFTAG_IMAGEDESCRIPTION, spec.description);
 
-        if (TIFFWriteRawStrip(tif, 0, jpegPreview.data(), static_cast<tmsize_t>(jpegPreview.size())) < 0) {
+        if (TIFFWriteRawStrip(tif, 0, const_cast<unsigned char*>(jpegPreview.data()), static_cast<tmsize_t>(jpegPreview.size())) < 0) {
             TIFFClose(tif);
             return false;
         }

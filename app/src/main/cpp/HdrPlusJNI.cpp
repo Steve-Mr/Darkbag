@@ -340,7 +340,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
 
 extern "C" JNIEXPORT jint JNICALL
 Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
-    JNIEnv* env, jobject /* this */, jobjectArray dngBuffers, jint width, jint height, jint orientation, jint whiteLevel, jintArray blackLevelPattern, jfloatArray lensShadingMap, jint lensShadingRows, jint lensShadingCols, jboolean useSensorColorMatrix, jfloatArray whiteBalance, jfloatArray ccm, jfloatArray ccmAlt, jboolean exportMatrixAB, jint cfaPattern,
+    JNIEnv* env, jobject /* this */, jobject dngBuffer, jint numFrames, jint width, jint height, jint orientation, jint whiteLevel, jintArray blackLevelPattern, jfloatArray lensShadingMap, jint lensShadingRows, jint lensShadingCols, jboolean useSensorColorMatrix, jfloatArray whiteBalance, jfloatArray ccm, jfloatArray ccmAlt, jboolean exportMatrixAB, jint cfaPattern,
     jint targetLog, jstring lutPath, jstring outputJpgPath, jstring outputDngPath,
     jfloat digitalGain, jlongArray debugStats, jobject outputBitmap, jstring tempRawPath, jfloat zoomFactor, jboolean mirror,
     jobject metadata
@@ -351,37 +351,22 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
     auto nativeStart = std::chrono::high_resolution_clock::now();
     auto jniPrepStart = std::chrono::high_resolution_clock::now();
 
-    int numFrames = env->GetArrayLength(dngBuffers);
     if (numFrames < 1) { LOGE("Processing requires at least 1 frame."); return -1; }
+    if (!dngBuffer) { LOGE("dngBuffer is null"); return -1; }
 
     g_hdrPlusBuffers.ensureCapacity(width, height, numFrames);
-    uint16_t* rawDataPtr = g_hdrPlusBuffers.inputPool.data();
-    const size_t frameSizeBytes = static_cast<size_t>(width) * static_cast<size_t>(height) * sizeof(uint16_t);
-    std::vector<uint16_t*> framePtrs(numFrames, nullptr);
-    for (int i = 0; i < numFrames; i++) {
-        jobject bufObj = env->GetObjectArrayElement(dngBuffers, i);
-        if (!bufObj) {
-            LOGE("Direct buffer at index %d is null", i);
-            return -1;
-        }
-        framePtrs[i] = (uint16_t*)env->GetDirectBufferAddress(bufObj);
-        if (!framePtrs[i]) {
-            LOGE("Failed to get direct buffer address for frame %d", i);
-            env->DeleteLocalRef(bufObj);
-            return -1;
-        }
-        jlong capacity = env->GetDirectBufferCapacity(bufObj);
-        env->DeleteLocalRef(bufObj);
-        if (capacity < (jlong)frameSizeBytes) {
-            LOGE("Direct buffer %d capacity %lld is smaller than expected %zu", i, (long long)capacity, frameSizeBytes);
-            return -1;
-        }
+    
+    uint16_t* rawDataPtr = (uint16_t*)env->GetDirectBufferAddress(dngBuffer);
+    if (!rawDataPtr) { LOGE("Failed to get direct buffer address"); return -1; }
+    
+    const size_t totalSizeBytes = static_cast<size_t>(width) * static_cast<size_t>(height) * numFrames * sizeof(uint16_t);
+    jlong capacity = env->GetDirectBufferCapacity(dngBuffer);
+    if (capacity < (jlong)totalSizeBytes) {
+        LOGE("Direct buffer capacity %lld is smaller than expected %zu", (long long)capacity, totalSizeBytes);
+        return -1;
     }
-
-    auto copyStart = std::chrono::high_resolution_clock::now();
-    #pragma omp parallel for
-    for (int i = 0; i < numFrames; i++) { std::memcpy(rawDataPtr + (static_cast<size_t>(i) * width * height), framePtrs[i], frameSizeBytes); }
-    auto copyDurationMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - copyStart).count();
+    
+    auto copyDurationMs = 0; // Zero copy!
 
     // Create properly dimensioned Halide buffers wrapping the pool memory
     Buffer<uint16_t> inputBuf(rawDataPtr, width, height, numFrames);
@@ -594,13 +579,9 @@ Java_top_maary_darkbag_processor_ColorProcessor_processSingleFrameRaw(
 ) {
     LOGD("Native processSingleFrameRaw started.");
 
-    // Repurpose processHdrPlus logic by wrapping the single buffer in an array
-    jobjectArray dngBuffers = env->NewObjectArray(1, g_byteBufferClass, nullptr);
-    env->SetObjectArrayElement(dngBuffers, 0, bayerBuffer);
-
-    // Call the existing processHdrPlus logic.
+    // Call the existing processHdrPlus logic directly with the buffer and numFrames=1
     return Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
-        env, nullptr, dngBuffers, width, height, orientation, whiteLevel, blackLevelPattern, lensShadingMap, lensShadingRows, lensShadingCols,
+        env, nullptr, bayerBuffer, 1, width, height, orientation, whiteLevel, blackLevelPattern, lensShadingMap, lensShadingRows, lensShadingCols,
         false, // useSensorColorMatrix
         whiteBalance, ccm, nullptr, // ccmAlt
         false, // exportMatrixAB
