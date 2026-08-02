@@ -47,7 +47,9 @@ public:
         merged = merge(inputs, inputs.width(), inputs.height(),
                             inputs.dim(2).extent(), alignment);
     } else {
-        merged(x, y) = inputs(x, y, 0);
+        Func inputs_mirror = BoundaryConditions::mirror_interior(
+            inputs, {Range(0, inputs.width()), Range(0, inputs.height())});
+        merged(x, y) = inputs_mirror(x, y, 0);
     }
     CompiletimeWhiteBalance wb{white_balance_r, white_balance_g0,
                                white_balance_g1, white_balance_b};
