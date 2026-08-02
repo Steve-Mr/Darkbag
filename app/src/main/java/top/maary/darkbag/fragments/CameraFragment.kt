@@ -338,7 +338,7 @@ class CameraFragment : Fragment() {
     )
 
     // Rate limiting semaphore to prevent OOM
-    private val processingSemaphore = kotlinx.coroutines.sync.Semaphore(2)
+    private val processingSemaphore = kotlinx.coroutines.sync.Semaphore(6)
 
     private var camera2RetryCount = 0
     private val processingChannel = kotlinx.coroutines.channels.Channel<RawImageHolder>(2)

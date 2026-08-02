@@ -136,8 +136,11 @@ struct GlobalBuffers {
     }
 };
 
-GlobalBuffers g_hdrPlusBuffers;
-std::mutex g_hdrPlusMutex;
+GlobalBuffers g_hdrPlusBuffers;std::mutex g_hdrPlusMutex;
+
+#include <unordered_map>
+std::unordered_map<std::string, std::shared_ptr<std::vector<uint16_t>>> g_sharedMemoryMap;
+std::mutex g_sharedMemoryMutex;
 
 std::string getStringField(JNIEnv* env, jobject obj, jfieldID fieldID, const std::string& defaultValue) {
     jstring jstr = (jstring)env->GetObjectField(obj, fieldID);
@@ -275,21 +278,25 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
     const char* temp_path_cstr = env->GetStringUTFChars(tempRawPath, 0);
     if (!temp_path_cstr) return -1;
 
-    std::ifstream in(temp_path_cstr, std::ios::binary);
-    if (!in.is_open()) {
-        LOGE("Failed to open temp raw file: %s", temp_path_cstr);
+    std::shared_ptr<std::vector<uint16_t>> sharedMem;
+    {
+        std::lock_guard<std::mutex> mapLock(g_sharedMemoryMutex);
+        auto it = g_sharedMemoryMap.find(temp_path_cstr);
+        if (it != g_sharedMemoryMap.end()) {
+            sharedMem = it->second;
+            g_sharedMemoryMap.erase(it);
+        }
+    }
+
+    if (!sharedMem) {
+        LOGE("Failed to find shared memory for tempRawPath: %s", temp_path_cstr);
         env->ReleaseStringUTFChars(tempRawPath, temp_path_cstr);
         return -1;
     }
-
-    size_t dataSize = (size_t)width * height * 3;
-    std::vector<uint16_t> finalImage(dataSize);
-    in.read((char*)finalImage.data(), dataSize * sizeof(uint16_t));
-    bool read_ok = !!in;
-    in.close();
+    
+    // We can use a reference to the shared vector
+    const std::vector<uint16_t>& finalImage = *sharedMem;
     env->ReleaseStringUTFChars(tempRawPath, temp_path_cstr);
-
-    if (!read_ok) { LOGE("Failed to read temp raw data."); return -1; }
 
     jfloat* wbData = env->GetFloatArrayElements(whiteBalance, nullptr);
     std::vector<float> wbVec = {wbData[0], wbData[1], wbData[2], wbData[3]};
@@ -324,11 +331,8 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
     if (jpgPath && jpg_path_cstr) env->ReleaseStringUTFChars(jpgPath, jpg_path_cstr);
     if (dngPath && dng_path_cstr) env->ReleaseStringUTFChars(dngPath, dng_path_cstr);
 
-    const char* temp_path_cstr_del = env->GetStringUTFChars(tempRawPath, 0);
-    if (temp_path_cstr_del) {
-        std::remove(temp_path_cstr_del);
-        env->ReleaseStringUTFChars(tempRawPath, temp_path_cstr_del);
-    }
+    // No longer a physical file, so we don't delete anything
+    // (the shared ptr cleans itself up)
 
     LOGD("Native exportHdrPlus finished. Success=%d", saveOk);
     return saveOk ? 0 : -2;
@@ -459,6 +463,26 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
         return ch * lensShadingRows * lensShadingCols + row * lensShadingCols + col;
     };
 
+    struct LscWeight { int idx0, idx1; float w0, w1; };
+    std::vector<LscWeight> lscX, lscY;
+    if (hasLsc) {
+        lscX.resize(width); lscY.resize(height);
+        for(int x=0; x<width; x++) {
+            float fx = (width > 1) ? (float)x * (lensShadingCols - 1) / (float)(width - 1) : 0.0f;
+            lscX[x].idx0 = std::clamp((int)std::floor(fx), 0, lensShadingCols - 1);
+            lscX[x].idx1 = std::min(lscX[x].idx0 + 1, lensShadingCols - 1);
+            lscX[x].w1 = fx - lscX[x].idx0;
+            lscX[x].w0 = 1.0f - lscX[x].w1;
+        }
+        for(int y=0; y<height; y++) {
+            float fy = (height > 1) ? (float)y * (lensShadingRows - 1) / (float)(height - 1) : 0.0f;
+            lscY[y].idx0 = std::clamp((int)std::floor(fy), 0, lensShadingRows - 1);
+            lscY[y].idx1 = std::min(lscY[y].idx0 + 1, lensShadingRows - 1);
+            lscY[y].w1 = fy - lscY[y].idx0;
+            lscY[y].w0 = 1.0f - lscY[y].w1;
+        }
+    }
+
     #pragma omp parallel for
     for (int y = 0; y < height; y++) {
         for (int x = 0; x < width; x++) {
@@ -473,22 +497,16 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
 
              float lscR = 1.0f, lscG = 1.0f, lscB = 1.0f;
              if (hasLsc) {
-                 float fx = (width > 1) ? (float)x * (lensShadingCols - 1) / (float)(width - 1) : 0.0f;
-                 float fy = (height > 1) ? (float)y * (lensShadingRows - 1) / (float)(height - 1) : 0.0f;
-                 int x0 = std::clamp((int)std::floor(fx), 0, lensShadingCols - 1);
-                 int y0 = std::clamp((int)std::floor(fy), 0, lensShadingRows - 1);
-                 int x1 = std::min(x0 + 1, lensShadingCols - 1);
-                 int y1 = std::min(y0 + 1, lensShadingRows - 1);
-                 float tx = fx - x0;
-                 float ty = fy - y0;
+                 const auto& lx = lscX[x];
+                 const auto& ly = lscY[y];
                  auto bilerp = [&](int ch) {
-                     float v00 = lensShadingVec[lsc_idx(ch, y0, x0)];
-                     float v10 = lensShadingVec[lsc_idx(ch, y0, x1)];
-                     float v01 = lensShadingVec[lsc_idx(ch, y1, x0)];
-                     float v11 = lensShadingVec[lsc_idx(ch, y1, x1)];
-                     float v0 = v00 * (1.0f - tx) + v10 * tx;
-                     float v1 = v01 * (1.0f - tx) + v11 * tx;
-                     return v0 * (1.0f - ty) + v1 * ty;
+                     float v00 = lensShadingVec[lsc_idx(ch, ly.idx0, lx.idx0)];
+                     float v10 = lensShadingVec[lsc_idx(ch, ly.idx0, lx.idx1)];
+                     float v01 = lensShadingVec[lsc_idx(ch, ly.idx1, lx.idx0)];
+                     float v11 = lensShadingVec[lsc_idx(ch, ly.idx1, lx.idx1)];
+                     float v0 = v00 * lx.w0 + v10 * lx.w1;
+                     float v1 = v01 * lx.w0 + v11 * lx.w1;
+                     return v0 * ly.w0 + v1 * ly.w1;
                  };
                  lscR = bilerp(0);
                  lscG = 0.5f * (bilerp(1) + bilerp(2));
@@ -531,7 +549,11 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
 
     const char* tr_p_cstr = (tempRawPath) ? env->GetStringUTFChars(tempRawPath, 0) : nullptr;
     if (tr_p_cstr) {
-        std::ofstream out(tr_p_cstr, std::ios::binary); if (out.is_open()) { out.write((char*)finalImage.data(), (size_t)width*height*3*2); out.close(); }
+        auto sharedBuf = std::make_shared<std::vector<uint16_t>>(finalImage);
+        {
+            std::lock_guard<std::mutex> mapLock(g_sharedMemoryMutex);
+            g_sharedMemoryMap[tr_p_cstr] = sharedBuf;
+        }
         env->ReleaseStringUTFChars(tempRawPath, tr_p_cstr);
     }
 
