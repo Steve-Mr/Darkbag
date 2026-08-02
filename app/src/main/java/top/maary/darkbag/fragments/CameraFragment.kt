@@ -1883,74 +1883,7 @@ class CameraFragment : Fragment() {
 
                 if (result < 0) throw RuntimeException("processSingleFrameRaw failed: $result")
 
-                if (saveRaw) {
-                    try {
-                        val shouldRenderNeutralDngThumbnail = !saveJpg || targetLogIndex != 0 || !nativeLutPath.isNullOrBlank()
-                        val dngThumbnailSource = if (shouldRenderNeutralDngThumbnail) {
-                            val thumbResult = ColorProcessor.processSingleFrameRaw(
-                                bayerBuffer = image.data,
-                                width = image.width,
-                                height = image.height,
-                                orientation = image.combinedOrientation,
-                                whiteLevel = whiteLevel,
-                                blackLevelPattern = blackLevelPattern,
-                                lensShadingMap = lensShadingMapData,
-                                lensShadingRows = lensShadingRows,
-                                lensShadingCols = lensShadingCols,
-                                whiteBalance = wb,
-                                ccm = ccm,
-                                cfaPattern = cfa,
-                                targetLog = 0,
-                                lutPath = null,
-                                outputJpgPath = tempDngThumbFile.absolutePath,
-                                outputDngPath = null,
-                                digitalGain = image.digitalGain,
-                                debugStats = null,
-                                outputBitmap = null,
-                                tempRawPath = null,
-                                zoomFactor = image.zoomRatio,
-                                mirror = mirror,
-                                metadata = captureMetadata
-                            )
-                            if (thumbResult >= 0 && tempDngThumbFile.exists() && tempDngThumbFile.length() > 0L) tempDngThumbFile else null
-                        } else if (tempJpgFile.exists() && tempJpgFile.length() > 0L) {
-                            tempJpgFile
-                        } else {
-                            null
-                        }
 
-                        val dngCreator = android.hardware.camera2.DngCreator(chars, captureResult)
-                        dngCreator.setDescription(DarkbagIdentity.imageDescription(isHdrPlus = false))
-
-                        // Map rotation to DngCreator orientation
-                        val dngOrientation = when (image.combinedOrientation) {
-                            90 -> ExifInterface.ORIENTATION_ROTATE_90
-                            180 -> ExifInterface.ORIENTATION_ROTATE_180
-                            270 -> ExifInterface.ORIENTATION_ROTATE_270
-                            else -> ExifInterface.ORIENTATION_NORMAL
-                        }
-                        dngCreator.setOrientation(dngOrientation)
-                        dngThumbnailSource?.let { createDngThumbnailBitmap(it) }?.let { thumb ->
-                            try {
-                                dngCreator.setThumbnail(thumb)
-                            } finally {
-                                thumb.recycle()
-                            }
-                        }
-
-                        val dngBuffer = image.data.duplicate()
-                        dngBuffer.rewind()
-                        FileOutputStream(bayerDngFile).use { out ->
-                            dngCreator.writeByteBuffer(out, Size(image.width, image.height), dngBuffer, 0)
-                        }
-                        dngWritten = true
-                        Log.d(TAG, "DNG saved using DngCreator: ${bayerDngFile.absolutePath}")
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Failed to save DNG using DngCreator", e)
-                    } finally {
-                        tempDngThumbFile.delete()
-                    }
-                }
 
                 val layout = if (image.halfFrameMetadata?.profile == HalfFrameSessionStore.PROFILE_HALF_TOP) "TB" else if (image.halfFrameMetadata?.profile == HalfFrameSessionStore.PROFILE_HALF_SIDE) "SBS" else null
                 val editConfig = top.maary.darkbag.models.EditConfig(
@@ -1977,7 +1910,7 @@ class CameraFragment : Fragment() {
                     rotationDegrees = 0,
                     zoomFactor = image.zoomRatio,
                     baseName = dngName,
-                    linearDngPath = if (dngWritten) bayerDngFile.absolutePath else null,
+                    linearDngPath = null, // DNG saved asynchronously
                     saveJpg = saveJpg,
                     saveRaw = saveRaw,
                     jpgFolderUri = jpgFolderUri,
@@ -2001,6 +1934,57 @@ class CameraFragment : Fragment() {
                         setGalleryThumbnail(null)
                     }
                 }
+
+                if (saveRaw) {
+                    try {
+                        val dngThumbnailSource = if (tempJpgFile.exists() && tempJpgFile.length() > 0L) {
+                            tempJpgFile
+                        } else null
+
+                        val dngCreator = android.hardware.camera2.DngCreator(chars, captureResult)
+                        dngCreator.setDescription(DarkbagIdentity.imageDescription(isHdrPlus = false))
+
+                        val dngOrientation = when (image.combinedOrientation) {
+                            90 -> ExifInterface.ORIENTATION_ROTATE_90
+                            180 -> ExifInterface.ORIENTATION_ROTATE_180
+                            270 -> ExifInterface.ORIENTATION_ROTATE_270
+                            else -> ExifInterface.ORIENTATION_NORMAL
+                        }
+                        dngCreator.setOrientation(dngOrientation)
+                        dngThumbnailSource?.let { createDngThumbnailBitmap(it) }?.let { thumb ->
+                            try {
+                                dngCreator.setThumbnail(thumb)
+                            } finally {
+                                thumb.recycle()
+                            }
+                        }
+
+                        val dngBuffer = image.data.duplicate()
+                        dngBuffer.rewind()
+                        FileOutputStream(bayerDngFile).use { out ->
+                            dngCreator.writeByteBuffer(out, Size(image.width, image.height), dngBuffer, 0)
+                        }
+                        
+                        ImageSaver.saveProcessedImage(
+                            context = context,
+                            inputBitmap = null,
+                            bmpPath = null,
+                            rotationDegrees = 0,
+                            zoomFactor = 1.0f,
+                            baseName = dngName,
+                            linearDngPath = bayerDngFile.absolutePath,
+                            saveJpg = false,
+                            saveRaw = saveRaw,
+                            jpgFolderUri = null,
+                            rawFolderUri = rawFolderUri,
+                            isFastPath = false,
+                            captureMetadata = captureMetadata
+                        )
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to save DNG asynchronously", e)
+                    }
+                }
+
 
                 // 5. Enqueue HQ Processing
                 val workData = androidx.work.Data.Builder()
@@ -4329,18 +4313,16 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 }
             }, handler)
 
-            // Sequential capture instead of captureBurst to comply with requirements
-            for (request in burstRequests) {
-                session.capture(request, object : android.hardware.camera2.CameraCaptureSession.CaptureCallback() {
-                    override fun onCaptureCompleted(session: android.hardware.camera2.CameraCaptureSession, request: android.hardware.camera2.CaptureRequest, result: android.hardware.camera2.TotalCaptureResult) {
-                        val timestamp = result.get(android.hardware.camera2.CaptureResult.SENSOR_TIMESTAMP)
-                        if (timestamp != null) {
-                            captureResults[timestamp] = result
-                        }
-                        captureResultFlow.tryEmit(result)
+            // Use captureBurst instead of sequential capture for better performance
+            session.captureBurst(burstRequests, object : android.hardware.camera2.CameraCaptureSession.CaptureCallback() {
+                override fun onCaptureCompleted(session: android.hardware.camera2.CameraCaptureSession, request: android.hardware.camera2.CaptureRequest, result: android.hardware.camera2.TotalCaptureResult) {
+                    val timestamp = result.get(android.hardware.camera2.CaptureResult.SENSOR_TIMESTAMP)
+                    if (timestamp != null) {
+                        captureResults[timestamp] = result
                     }
-                }, handler)
-            }
+                    captureResultFlow.tryEmit(result)
+                }
+            }, handler)
 
         } catch (e: Exception) {
             Log.e(TAG, "Camera2 burst failed", e)

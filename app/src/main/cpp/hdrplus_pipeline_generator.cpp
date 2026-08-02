@@ -18,6 +18,7 @@ class HdrPlusRawPipeline : public Generator<HdrPlusRawPipeline> {
 public:
   GeneratorParam<bool> use_optimized_schedule{"use_optimized_schedule", true};
   GeneratorParam<bool> use_gpu{"use_gpu", false};
+  GeneratorParam<bool> single_frame_mode{"single_frame_mode", false};
 
   Input<Buffer<uint16_t>> inputs{"inputs", 3};
   Input<uint16_t> black_point_r{"black_point_r"};
@@ -39,9 +40,15 @@ public:
   Output<Buffer<uint16_t>> output{"output", 3};
 
   void generate() {
-    Func alignment = align(inputs, inputs.width(), inputs.height());
-    Func merged = merge(inputs, inputs.width(), inputs.height(),
-                        inputs.dim(2).extent(), alignment);
+    Func alignment;
+    Func merged{"merged"};
+    if (!single_frame_mode) {
+        alignment = align(inputs, inputs.width(), inputs.height());
+        merged = merge(inputs, inputs.width(), inputs.height(),
+                            inputs.dim(2).extent(), alignment);
+    } else {
+        merged(x, y) = inputs(x, y, 0);
+    }
     CompiletimeWhiteBalance wb{white_balance_r, white_balance_g0,
                                white_balance_g1, white_balance_b};
 
@@ -54,8 +61,13 @@ public:
     Func demosaic_output = dm.output;
 
     // Denoise
-    int denoise_passes = 1;
-    Func chroma_denoised_output = chroma_denoise(demosaic_output, inputs.width(), inputs.height(), denoise_passes);
+    Func chroma_denoised_output;
+    if (!single_frame_mode) {
+        int denoise_passes = 1;
+        chroma_denoised_output = chroma_denoise(demosaic_output, inputs.width(), inputs.height(), denoise_passes);
+    } else {
+        chroma_denoised_output = demosaic_output;
+    }
     // Note: chroma_denoise returns yuv_to_rgb(output_denoise).
     // We need to capture the intermediate bilateral filter func if we want to schedule it.
     // For now, bilateral_filter inside chroma_denoise schedules itself.

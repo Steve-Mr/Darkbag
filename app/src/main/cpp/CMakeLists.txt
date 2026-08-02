@@ -4,7 +4,7 @@ project("darkbag")
 
 # LibRaw Configuration
 set(CMAKE_CXX_STANDARD 17)
-add_definitions(-DNO_LCMS -DNO_JASPER -DNO_JPEG)
+add_definitions(-DNO_JASPER -DNO_JPEG)
 
 # Setup Halide (Host)
 include(download_halide.cmake)
@@ -109,6 +109,8 @@ add_custom_command(
 set(HALIDE_TARGET "arm-64-android-opencl-vulkan-vk_int16-profile")
 set(GENERATED_HEADER "${GENERATOR_OUTPUT_DIR}/hdrplus_raw_pipeline.h")
 set(GENERATED_LIB "${GENERATOR_OUTPUT_DIR}/hdrplus_raw_pipeline.a") # Static lib output
+set(SINGLE_GENERATED_HEADER "${GENERATOR_OUTPUT_DIR}/hdrplus_single_pipeline.h")
+set(SINGLE_GENERATED_LIB "${GENERATOR_OUTPUT_DIR}/hdrplus_single_pipeline.a")
 
 add_custom_command(
     OUTPUT "${GENERATED_HEADER}" "${GENERATED_LIB}"
@@ -124,8 +126,23 @@ add_custom_command(
     COMMENT "Running Halide Generator for ${HALIDE_TARGET}"
 )
 
+add_custom_command(
+    OUTPUT "${SINGLE_GENERATED_HEADER}" "${SINGLE_GENERATED_LIB}"
+    COMMAND "${GENERATOR_EXEC}"
+            -g hdrplus_raw_pipeline
+            -f hdrplus_single_pipeline
+            -e static_library,h
+            -o "${GENERATOR_OUTPUT_DIR}"
+            target=${HALIDE_TARGET}
+            use_optimized_schedule=true
+            use_gpu=false
+            single_frame_mode=true
+    DEPENDS "${GENERATOR_EXEC}"
+    COMMENT "Running Halide Generator for Single Frame"
+)
+
 # Update dependency target
-add_custom_target(generate_hdrplus_halide DEPENDS "${GENERATED_LIB}" "${GENERATED_HEADER}")
+add_custom_target(generate_hdrplus_halide DEPENDS "${GENERATED_LIB}" "${GENERATED_HEADER}" "${SINGLE_GENERATED_LIB}" "${SINGLE_GENERATED_HEADER}")
 
 # Expose generated files to the build
 include_directories(${GENERATOR_OUTPUT_DIR})
@@ -148,6 +165,7 @@ add_library(
         ColorPipe.cpp
         ${LIBRAW_SOURCES}
         "${GENERATED_LIB}"
+        "${SINGLE_GENERATED_LIB}"
 )
 
 # Ensure the generation happens before native-lib compilation
@@ -168,6 +186,7 @@ find_library(
 target_link_libraries(
         native-lib
         "${GENERATED_LIB}"
+        "${SINGLE_GENERATED_LIB}"
         tiff
         ${log-lib}
         ${jnigraphics-lib}

@@ -455,11 +455,12 @@ AdaptiveEdgeComp calculate_adaptive_edge_comp(const std::vector<unsigned short>&
     edgeComp.centerY = cy;
     edgeComp.invMaxRadius = (maxRadius > 1e-6f) ? (1.0f / maxRadius) : 1.0f;
 
-    std::array<double, 3> centerSum{0.0, 0.0, 0.0};
-    std::array<double, 3> edgeSum{0.0, 0.0, 0.0};
+    double c_sum0 = 0.0, c_sum1 = 0.0, c_sum2 = 0.0;
+    double e_sum0 = 0.0, e_sum1 = 0.0, e_sum2 = 0.0;
     int centerCount = 0;
     int edgeCount = 0;
 
+    #pragma omp parallel for reduction(+:c_sum0,c_sum1,c_sum2,e_sum0,e_sum1,e_sum2,centerCount,edgeCount)
     for (int y = 0; y < height; y += kAnalysisStep) {
         for (int x = 0; x < width; x += kAnalysisStep) {
             const float nx = (x - cx) * edgeComp.invMaxRadius;
@@ -472,12 +473,15 @@ AdaptiveEdgeComp calculate_adaptive_edge_comp(const std::vector<unsigned short>&
             float bb = static_cast<float>(inputImage[idx + 2]);
 
             if (r <= kCenterRegionRadius) {
-                centerSum[0] += rr; centerSum[1] += gg; centerSum[2] += bb; centerCount++;
+                c_sum0 += rr; c_sum1 += gg; c_sum2 += bb; centerCount++;
             } else if (r >= kEdgeRegionStartRadius) {
-                edgeSum[0] += rr; edgeSum[1] += gg; edgeSum[2] += bb; edgeCount++;
+                e_sum0 += rr; e_sum1 += gg; e_sum2 += bb; edgeCount++;
             }
         }
     }
+
+    std::array<double, 3> centerSum{c_sum0, c_sum1, c_sum2};
+    std::array<double, 3> edgeSum{e_sum0, e_sum1, e_sum2};
 
     if (centerCount <= 0 || edgeCount <= 0) {
         return edgeComp;

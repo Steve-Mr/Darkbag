@@ -23,6 +23,8 @@
 #include <HalideRuntime.h>
 #include "ColorPipe.h"
 #include "hdrplus_raw_pipeline.h" // Generated header
+#include "hdrplus_single_pipeline.h" // Generated header for single frame
+
 
 #define TAG "HdrPlusJNI"
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, TAG, __VA_ARGS__)
@@ -268,7 +270,6 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
     jobject metadata
 ) {
     LOGD("Native exportHdrPlus started.");
-    std::lock_guard<std::mutex> lock(g_hdrPlusMutex);
 
     if (!tempRawPath) return -1;
     const char* temp_path_cstr = env->GetStringUTFChars(tempRawPath, 0);
@@ -281,9 +282,8 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
         return -1;
     }
 
-    g_hdrPlusBuffers.ensureCapacity(width, height, 1);
-    std::vector<uint16_t>& finalImage = g_hdrPlusBuffers.interleavedPool;
     size_t dataSize = (size_t)width * height * 3;
+    std::vector<uint16_t> finalImage(dataSize);
     in.read((char*)finalImage.data(), dataSize * sizeof(uint16_t));
     bool read_ok = !!in;
     in.close();
@@ -431,7 +431,12 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
     }
 
     auto halideStart = std::chrono::high_resolution_clock::now();
-    int halide_res = hdrplus_raw_pipeline(inputBuf, bl_r, bl_g0, bl_g1, bl_b, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, ccmHalideBuf, 1.0f, 1.0f, outputBuf);
+    int halide_res;
+    if (numFrames == 1) {
+        halide_res = hdrplus_single_pipeline(inputBuf, bl_r, bl_g0, bl_g1, bl_b, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, ccmHalideBuf, 1.0f, 1.0f, outputBuf);
+    } else {
+        halide_res = hdrplus_raw_pipeline(inputBuf, bl_r, bl_g0, bl_g1, bl_b, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, ccmHalideBuf, 1.0f, 1.0f, outputBuf);
+    }
     auto halideDurationMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - halideStart).count();
 
     halide_report_buffer.clear(); halide_profiler_report(nullptr);
