@@ -133,12 +133,12 @@ add_custom_command(
             -f hdrplus_single_pipeline
             -e static_library,h
             -o "${GENERATOR_OUTPUT_DIR}"
-            target=${HALIDE_TARGET}
+            target=${HALIDE_TARGET}-no_runtime
             use_optimized_schedule=true
             use_gpu=false
             single_frame_mode=true
     DEPENDS "${GENERATOR_EXEC}"
-    COMMENT "Running Halide Generator for Single Frame"
+    COMMENT "Running Halide Generator for Single Frame (No Runtime)"
 )
 
 # Update dependency target
