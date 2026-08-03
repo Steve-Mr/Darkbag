@@ -19,6 +19,7 @@ public:
   GeneratorParam<bool> use_optimized_schedule{"use_optimized_schedule", true};
   GeneratorParam<bool> use_gpu{"use_gpu", false};
   GeneratorParam<bool> single_frame_mode{"single_frame_mode", false};
+  GeneratorParam<int> denoise_passes{"denoise_passes", 1};
 
   Input<Buffer<uint16_t>> inputs{"inputs", 3};
   Input<uint16_t> black_point_r{"black_point_r"};
@@ -65,7 +66,6 @@ public:
     // Denoise
     Func chroma_denoised_output;
     if (!single_frame_mode) {
-        int denoise_passes = 1;
         chroma_denoised_output = chroma_denoise(demosaic_output, inputs.width(), inputs.height(), denoise_passes);
     } else {
         chroma_denoised_output = demosaic_output;

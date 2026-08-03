@@ -58,9 +58,18 @@ struct LUT3D {
 LUT3D load_lut(const char* path);
 Vec3 apply_lut(const LUT3D& lut, Vec3 color);
 
+// --- Initialization ---
+void init_color_pipe();
+
 // --- Shared Pipeline ---
 bool process_and_save_image(
-    const std::vector<unsigned short>& inputImage,
+    const unsigned short* planarData,
+    int stride_x,
+    int stride_y,
+    int stride_c,
+    const float* lensShadingVec,
+    int lensShadingRows,
+    int lensShadingCols,
     int width,
     int height,
     float gain,
@@ -89,13 +98,13 @@ bool process_and_save_image(
     bool mirror = false
 );
 
-bool write_dng(const char* filename, int width, int height, const std::vector<unsigned short>& data, int whiteLevel, const std::vector<float>& ccm, const ImageMetadata& metadata, int orientation, bool mirror = false, float baselineExposure = 0.0f);
+bool write_dng(const char* filename, int width, int height, const unsigned short* planarData, int stride_x, int stride_y, int stride_c, int whiteLevel, const std::vector<float>& ccm, const ImageMetadata& metadata, int orientation, bool mirror = false, float baselineExposure = 0.0f);
 
-bool write_bmp(const char* filename, int width, int height, const std::vector<unsigned short>& data);
+bool write_bmp(const char* filename, int width, int height, const unsigned short* planarData, int stride_x, int stride_y, int stride_c);
 
-bool write_jpeg(const char* filename, int width, int height, const std::vector<unsigned short>& data, int quality);
+bool write_jpeg(const char* filename, int width, int height, const unsigned short* planarData, int stride_x, int stride_y, int stride_c, int quality);
 
-bool write_tiff(const char* filename, int width, int height, const std::vector<unsigned short>& data, const ImageMetadata* metadata = nullptr);
+bool write_tiff(const char* filename, int width, int height, const unsigned short* planarData, int stride_x, int stride_y, int stride_c, const ImageMetadata* metadata = nullptr);
 
 bool write_tiff_rgba8(const char* filename, int width, int height, const unsigned char* data, const ImageMetadata* metadata = nullptr);
 

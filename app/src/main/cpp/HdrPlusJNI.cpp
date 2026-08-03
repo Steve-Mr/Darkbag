@@ -22,7 +22,9 @@
 #include <HalideBuffer.h>
 #include <HalideRuntime.h>
 #include "ColorPipe.h"
+#include "hdrplus_fast_pipeline.h"
 #include "hdrplus_raw_pipeline.h" // Generated header
+#include "hdrplus_high_pipeline.h"
 #include "hdrplus_single_pipeline.h" // Generated header for single frame
 
 
@@ -182,9 +184,10 @@ float getFloatField(JNIEnv* env, jobject obj, jfieldID fieldID, float defaultVal
 extern "C" jint JNI_OnLoad(JavaVM* vm, void* reserved) {
     g_jvm = vm;
     JNIEnv* env;
-    if (vm->GetEnv((void**)&env, JNI_VERSION_1_6) != JNI_OK) return JNI_ERR;
-
-    jclass colorProcClazz = env->FindClass("top/maary/darkbag/processor/ColorProcessor");
+    if (vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) != JNI_OK) {
+        return JNI_ERR;
+    }
+    init_color_pipe(); jclass colorProcClazz = env->FindClass("top/maary/darkbag/processor/ColorProcessor");
     if (!colorProcClazz) return JNI_ERR;
     g_colorProcessorClass = (jclass)env->NewGlobalRef(colorProcClazz);
 
@@ -318,13 +321,13 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
     if (dng_path_cstr) {
         LOGD("Exporting DNG to %s", dng_path_cstr);
         float baselineExposure = (digitalGain > 0.0f) ? std::log2(digitalGain) : 0.0f;
-        write_dng(dng_path_cstr, width, height, finalImage, kMax16BitValue, ccmVec, meta, orientation, (bool)mirror, baselineExposure);
+        write_dng(dng_path_cstr, width, height, finalImage.data(), 1, width, width*height, kMax16BitValue, ccmVec, meta, orientation, (bool)mirror, baselineExposure);
     }
 
     bool saveOk = true;
     if (jpg_path_cstr) {
         LOGD("Exporting JPG: JPG=%s", jpg_path_cstr);
-        saveOk = process_and_save_image(finalImage, width, height, digitalGain, targetLog, lut,
+        saveOk = process_and_save_image(finalImage.data(), 1, width, width*height, nullptr, 0, 0, width, height, digitalGain, targetLog, lut,
                                         exposure, contrast, saturation, highlights, shadows, whites, blacks,
                                         jpg_path_cstr, nullptr, &meta, 1, ccmVec.data(), wbVec.data(), orientation, nullptr, 0, 0, false, 1, zoomFactor, (bool)mirror);
     }
@@ -419,12 +422,41 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
         halide_set_num_threads(cpuThreads); halideThreadsConfigured = true;
     }
 
+    int iso = 100;
+    if (metadata) {
+        jclass metaClass = env->GetObjectClass(metadata);
+        jmethodID getIso = env->GetMethodID(metaClass, "getIso", "()Ljava/lang/Integer;");
+        if (getIso) {
+            jobject isoObj = env->CallObjectMethod(metadata, getIso);
+            if (isoObj) {
+                jclass intClass = env->GetObjectClass(isoObj);
+                jmethodID intValue = env->GetMethodID(intClass, "intValue", "()I");
+                if (intValue) {
+                    iso = env->CallIntMethod(isoObj, intValue);
+                }
+                env->DeleteLocalRef(intClass);
+            }
+            env->DeleteLocalRef(isoObj);
+        }
+        env->DeleteLocalRef(metaClass);
+    }
+    
+    int denoiseLevel = 1;
+    if (iso < 400) denoiseLevel = 0;
+    else if (iso >= 1600) denoiseLevel = 2;
+
     auto halideStart = std::chrono::high_resolution_clock::now();
     int halide_res;
     if (numFrames == 1) {
         halide_res = hdrplus_single_pipeline(inputBuf, bl_r, bl_g0, bl_g1, bl_b, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, ccmHalideBuf, 1.0f, 1.0f, outputBuf);
     } else {
-        halide_res = hdrplus_raw_pipeline(inputBuf, bl_r, bl_g0, bl_g1, bl_b, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, ccmHalideBuf, 1.0f, 1.0f, outputBuf);
+        if (denoiseLevel == 0) {
+            halide_res = hdrplus_fast_pipeline(inputBuf, bl_r, bl_g0, bl_g1, bl_b, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, ccmHalideBuf, 1.0f, 1.0f, outputBuf);
+        } else if (denoiseLevel == 2) {
+            halide_res = hdrplus_high_pipeline(inputBuf, bl_r, bl_g0, bl_g1, bl_b, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, ccmHalideBuf, 1.0f, 1.0f, outputBuf);
+        } else {
+            halide_res = hdrplus_raw_pipeline(inputBuf, bl_r, bl_g0, bl_g1, bl_b, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, ccmHalideBuf, 1.0f, 1.0f, outputBuf);
+        }
     }
     auto halideDurationMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - halideStart).count();
 
@@ -439,73 +471,9 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
     const char* lut_path_cstr = (lutPath) ? env->GetStringUTFChars(lutPath, 0) : nullptr;
     LUT3D lut; if (lut_path_cstr) { lut = load_lut(lut_path_cstr); env->ReleaseStringUTFChars(lutPath, lut_path_cstr); }
 
-    std::vector<uint16_t>& finalImage = g_hdrPlusBuffers.interleavedPool;
     int stride_x = outputBuf.dim(0).stride(), stride_y = outputBuf.dim(1).stride(), stride_c = outputBuf.dim(2).stride();
     const uint16_t* raw_ptr = outputBuf.data();
     auto postStart = std::chrono::high_resolution_clock::now();
-    const bool hasLsc = !lensShadingVec.empty() && lensShadingRows > 0 && lensShadingCols > 0;
-    auto lsc_idx = [&](int ch, int row, int col) -> int {
-        return ch * lensShadingRows * lensShadingCols + row * lensShadingCols + col;
-    };
-
-    struct LscWeight { int idx0, idx1; float w0, w1; };
-    std::vector<LscWeight> lscX, lscY;
-    if (hasLsc) {
-        lscX.resize(width); lscY.resize(height);
-        for(int x=0; x<width; x++) {
-            float fx = (width > 1) ? (float)x * (lensShadingCols - 1) / (float)(width - 1) : 0.0f;
-            lscX[x].idx0 = std::clamp((int)std::floor(fx), 0, lensShadingCols - 1);
-            lscX[x].idx1 = std::min(lscX[x].idx0 + 1, lensShadingCols - 1);
-            lscX[x].w1 = fx - lscX[x].idx0;
-            lscX[x].w0 = 1.0f - lscX[x].w1;
-        }
-        for(int y=0; y<height; y++) {
-            float fy = (height > 1) ? (float)y * (lensShadingRows - 1) / (float)(height - 1) : 0.0f;
-            lscY[y].idx0 = std::clamp((int)std::floor(fy), 0, lensShadingRows - 1);
-            lscY[y].idx1 = std::min(lscY[y].idx0 + 1, lensShadingRows - 1);
-            lscY[y].w1 = fy - lscY[y].idx0;
-            lscY[y].w0 = 1.0f - lscY[y].w1;
-        }
-    }
-
-    #pragma omp parallel for
-    for (int y = 0; y < height; y++) {
-        for (int x = 0; x < width; x++) {
-             uint16_t r = raw_ptr[x*stride_x + y*stride_y + 0*stride_c];
-             uint16_t g = raw_ptr[x*stride_x + y*stride_y + 1*stride_c];
-             uint16_t b = raw_ptr[x*stride_x + y*stride_y + 2*stride_c];
-
-             // Clip to 14-bit range to prevent pink highlights
-             r = std::min(r, kMax14BitValue);
-             g = std::min(g, kMax14BitValue);
-             b = std::min(b, kMax14BitValue);
-
-             float lscR = 1.0f, lscG = 1.0f, lscB = 1.0f;
-             if (hasLsc) {
-                 const auto& lx = lscX[x];
-                 const auto& ly = lscY[y];
-                 auto bilerp = [&](int ch) {
-                     float v00 = lensShadingVec[lsc_idx(ch, ly.idx0, lx.idx0)];
-                     float v10 = lensShadingVec[lsc_idx(ch, ly.idx0, lx.idx1)];
-                     float v01 = lensShadingVec[lsc_idx(ch, ly.idx1, lx.idx0)];
-                     float v11 = lensShadingVec[lsc_idx(ch, ly.idx1, lx.idx1)];
-                     float v0 = v00 * lx.w0 + v10 * lx.w1;
-                     float v1 = v01 * lx.w0 + v11 * lx.w1;
-                     return v0 * ly.w0 + v1 * ly.w1;
-                 };
-                 lscR = bilerp(0);
-                 lscG = 0.5f * (bilerp(1) + bilerp(2));
-                 lscB = bilerp(3);
-             }
-
-             int idx = (y * width + x) * 3;
-             // Halide output is scaled by 0.25 (14-bit range).
-             // We shift left by 2 to restore full 16-bit range for final saving.
-             finalImage[idx+0] = (uint16_t)std::min((int)((float)r * lscR) << 2, (int)kMax16BitValue);
-             finalImage[idx+1] = (uint16_t)std::min((int)((float)g * lscG) << 2, (int)kMax16BitValue);
-             finalImage[idx+2] = (uint16_t)std::min((int)((float)b * lscB) << 2, (int)kMax16BitValue);
-        }
-    }
     auto postDurationMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - postStart).count();
 
     const char* jpg_p_cstr = (outputJpgPath) ? env->GetStringUTFChars(outputJpgPath, 0) : nullptr;
@@ -526,7 +494,8 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
     }
 
     if (bitmapPixels) {
-        process_and_save_image(finalImage, width, height, digitalGain, targetLog, lut,
+        process_and_save_image(raw_ptr, stride_x, stride_y, stride_c, lensShadingVec.empty() ? nullptr : lensShadingVec.data(), lensShadingRows, lensShadingCols,
+                                width, height, digitalGain, targetLog, lut,
                                 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, // HSWB not used for preview in standard pipe yet
                                 nullptr, nullptr, nullptr, 1, ccmVec.data(), wbVec.data(), orientation, bitmapPixels, out_w, out_h, true, fastPreviewDownsample, zoomFactor, (bool)mirror);
         AndroidBitmap_unlockPixels(env, outputBitmap);
@@ -534,7 +503,8 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
 
     const char* tr_p_cstr = (tempRawPath) ? env->GetStringUTFChars(tempRawPath, 0) : nullptr;
     if (tr_p_cstr) {
-        auto sharedBuf = std::make_shared<std::vector<uint16_t>>(finalImage);
+        // Copy the planar output directly. The reader (e.g. exportHdrPlus) now knows it's planar.
+        auto sharedBuf = std::make_shared<std::vector<uint16_t>>(raw_ptr, raw_ptr + width*height*3);
         {
             std::lock_guard<std::mutex> mapLock(g_sharedMemoryMutex);
             g_sharedMemoryMap[tr_p_cstr] = sharedBuf;
@@ -546,11 +516,12 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
         ImageMetadata meta = metadataFromJava(env, metadata);
         if (!dngPathStr.empty()) {
             float baselineExposure = (digitalGain > 0.0f) ? std::log2(digitalGain) : 0.0f;
-            write_dng(dngPathStr.c_str(), width, height, finalImage, kMax16BitValue, ccmVec, meta, orientation, (bool)mirror, baselineExposure);
+            write_dng(dngPathStr.c_str(), width, height, raw_ptr, stride_x, stride_y, stride_c, kMax16BitValue, ccmVec, meta, orientation, (bool)mirror, baselineExposure);
         }
 
         if (!jpgPathStr.empty()) {
-            process_and_save_image(finalImage, width, height, digitalGain, targetLog, lut,
+            process_and_save_image(raw_ptr, stride_x, stride_y, stride_c, lensShadingVec.empty() ? nullptr : lensShadingVec.data(), lensShadingRows, lensShadingCols,
+                                    width, height, digitalGain, targetLog, lut,
                                     0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
                                     jpgPathStr.c_str(), nullptr, &meta, 1, ccmVec.data(), wbVec.data(), orientation, nullptr, 0, 0, true, fastPreviewDownsample, zoomFactor, (bool)mirror);
 
@@ -560,7 +531,8 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
                 size_t dot = altJpgPath.find_last_of('.');
                 if (dot == std::string::npos) dot = altJpgPath.size();
                 altJpgPath = altJpgPath.substr(0, dot) + suffix;
-                process_and_save_image(finalImage, width, height, digitalGain, targetLog, lut,
+                process_and_save_image(raw_ptr, stride_x, stride_y, stride_c, lensShadingVec.empty() ? nullptr : lensShadingVec.data(), lensShadingRows, lensShadingCols,
+                                        width, height, digitalGain, targetLog, lut,
                                         0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
                                         altJpgPath.c_str(), nullptr, &meta, 1, ccmAltVec.data(), wbVec.data(), orientation, nullptr, 0, 0, false, 1, zoomFactor, (bool)mirror);
             }

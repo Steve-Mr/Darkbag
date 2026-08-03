@@ -42,6 +42,34 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(libtiff)
 include_directories(${tiff_SOURCE_DIR}/libtiff ${tiff_BINARY_DIR}/libtiff)
 
+# --- libjpeg-turbo (ExternalProject) ---
+include(ExternalProject)
+set(LIBJPEG_TURBO_SRC_DIR "${CMAKE_CURRENT_BINARY_DIR}/libjpeg-turbo-src")
+set(LIBJPEG_TURBO_BUILD_DIR "${CMAKE_CURRENT_BINARY_DIR}/libjpeg-turbo-build")
+set(LIBJPEG_TURBO_INSTALL_DIR "${CMAKE_CURRENT_BINARY_DIR}/libjpeg-turbo-install")
+
+ExternalProject_Add(libjpeg-turbo
+    GIT_REPOSITORY https://github.com/libjpeg-turbo/libjpeg-turbo.git
+    GIT_TAG 3.0.3
+    UPDATE_COMMAND ""
+    PREFIX "${CMAKE_CURRENT_BINARY_DIR}/libjpeg-turbo"
+    SOURCE_DIR "${LIBJPEG_TURBO_SRC_DIR}"
+    BINARY_DIR "${LIBJPEG_TURBO_BUILD_DIR}"
+    INSTALL_DIR "${LIBJPEG_TURBO_INSTALL_DIR}"
+    CMAKE_ARGS
+        -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}
+        -DANDROID_ABI=${ANDROID_ABI}
+        -DANDROID_PLATFORM=${ANDROID_PLATFORM}
+        -DANDROID_STL=${ANDROID_STL}
+        -DCMAKE_BUILD_TYPE=Release
+        -DENABLE_SHARED=OFF
+        -DENABLE_STATIC=ON
+        -DWITH_JPEG8=ON
+        -DWITH_TURBOJPEG=ON
+        -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>
+)
+include_directories("${LIBJPEG_TURBO_INSTALL_DIR}/include")
+
 # --- HDR+ Generator (Host Tool) ---
 # We need to compile the generator for the HOST machine (x86_64), not the target (Android).
 # However, CMake inside Android Studio is cross-compiling.
@@ -141,8 +169,44 @@ add_custom_command(
     COMMENT "Running Halide Generator for Single Frame (No Runtime)"
 )
 
+set(FAST_GENERATED_HEADER "${GENERATOR_OUTPUT_DIR}/hdrplus_fast_pipeline.h")
+set(FAST_GENERATED_LIB "${GENERATOR_OUTPUT_DIR}/hdrplus_fast_pipeline.a")
+
+add_custom_command(
+    OUTPUT "${FAST_GENERATED_HEADER}" "${FAST_GENERATED_LIB}"
+    COMMAND "${GENERATOR_EXEC}"
+            -g hdrplus_raw_pipeline
+            -f hdrplus_fast_pipeline
+            -e static_library,h
+            -o "${GENERATOR_OUTPUT_DIR}"
+            target=${HALIDE_TARGET}-no_runtime
+            use_optimized_schedule=true
+            use_gpu=false
+            denoise_passes=0
+    DEPENDS "${GENERATOR_EXEC}"
+    COMMENT "Running Halide Generator for Fast Pipeline (No Runtime)"
+)
+
+set(HIGH_GENERATED_HEADER "${GENERATOR_OUTPUT_DIR}/hdrplus_high_pipeline.h")
+set(HIGH_GENERATED_LIB "${GENERATOR_OUTPUT_DIR}/hdrplus_high_pipeline.a")
+
+add_custom_command(
+    OUTPUT "${HIGH_GENERATED_HEADER}" "${HIGH_GENERATED_LIB}"
+    COMMAND "${GENERATOR_EXEC}"
+            -g hdrplus_raw_pipeline
+            -f hdrplus_high_pipeline
+            -e static_library,h
+            -o "${GENERATOR_OUTPUT_DIR}"
+            target=${HALIDE_TARGET}-no_runtime
+            use_optimized_schedule=true
+            use_gpu=false
+            denoise_passes=2
+    DEPENDS "${GENERATOR_EXEC}"
+    COMMENT "Running Halide Generator for High Pipeline (No Runtime)"
+)
+
 # Update dependency target
-add_custom_target(generate_hdrplus_halide DEPENDS "${GENERATED_LIB}" "${GENERATED_HEADER}" "${SINGLE_GENERATED_LIB}" "${SINGLE_GENERATED_HEADER}")
+add_custom_target(generate_hdrplus_halide DEPENDS "${GENERATED_LIB}" "${GENERATED_HEADER}" "${SINGLE_GENERATED_LIB}" "${SINGLE_GENERATED_HEADER}" "${FAST_GENERATED_LIB}" "${FAST_GENERATED_HEADER}" "${HIGH_GENERATED_LIB}" "${HIGH_GENERATED_HEADER}")
 
 # Expose generated files to the build
 include_directories(${GENERATOR_OUTPUT_DIR})
@@ -166,10 +230,12 @@ add_library(
         ${LIBRAW_SOURCES}
         "${GENERATED_LIB}"
         "${SINGLE_GENERATED_LIB}"
+        "${FAST_GENERATED_LIB}"
+        "${HIGH_GENERATED_LIB}"
 )
 
 # Ensure the generation happens before native-lib compilation
-add_dependencies(native-lib generate_hdrplus_halide)
+add_dependencies(native-lib generate_hdrplus_halide libjpeg-turbo)
 
 find_library(
         log-lib
@@ -187,7 +253,11 @@ target_link_libraries(
         native-lib
         "${GENERATED_LIB}"
         "${SINGLE_GENERATED_LIB}"
+        "${FAST_GENERATED_LIB}"
+        "${HIGH_GENERATED_LIB}"
         tiff
+        "-L${LIBJPEG_TURBO_INSTALL_DIR}/lib"
+        -lturbojpeg
         ${log-lib}
         ${jnigraphics-lib}
         ${android-lib}
@@ -195,5 +265,5 @@ target_link_libraries(
         -static-openmp)
 
 
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fopenmp")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fopenmp")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fopenmp -O3 -ffast-math")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fopenmp -O3 -ffast-math")

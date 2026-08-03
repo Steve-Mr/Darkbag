@@ -277,7 +277,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRaw(
 
     // Use Shared Pipeline
     bool saveOk = process_and_save_image(
-        rawImage,
+        rawImage.data(), 3, image->width * 3, 1, nullptr, 0, 0,
         image->width,
         image->height,
         digitalGain,

@@ -76,7 +76,7 @@ import androidx.concurrent.futures.await
 import top.maary.darkbag.MainApplication
 import top.maary.darkbag.processor.ColorProcessor
 import top.maary.darkbag.models.CaptureMetadata
-import top.maary.darkbag.processor.HdrPlusExportWorker
+
 import top.maary.darkbag.repository.ImageRepository
 import top.maary.darkbag.utils.ImageSaver
 import java.io.File
@@ -1987,51 +1987,50 @@ class CameraFragment : Fragment() {
 
 
                 // 5. Enqueue HQ Processing
-                val workData = androidx.work.Data.Builder()
-                    .putString("tempRawPath", tempRawFile.absolutePath)
-                if (activeArray != null) workData.putIntArray("activeArray", activeArray)
-                workData.putInt("width", image.width)
-                    .putInt("height", image.height)
-                    .putInt("orientation", image.combinedOrientation)
-                    .putFloat("digitalGain", image.digitalGain)
-                    .putInt("targetLog", targetLogIndex)
-                    .putString("lutPath", nativeLutPath)
-                    .putString("jpgPath", if (saveJpg) fullResJpgFile.absolutePath else null)
-                    .putString("targetUri", fastOutputUri?.toString())
-                    .putFloat("zoomFactor", image.zoomRatio)
-                    .putInt("iso", iso)
-                    .putLong("exposureTime", exposureTime)
-                    .putFloat("fNumber", fNumber)
-                    .putFloat("focalLength", focalLength)
-                    .putLong("captureTimeMillis", captureTime)
-                    .putLong("dateTimeDigitized", captureTime)
-                    .putString("offsetTime", captureMetadata.offsetTime)
-                    .putInt("focalLengthIn35mmFilm", captureMetadata.focalLengthIn35mmFilm ?: 0)
-                    .putFloatArray("ccm", ccm)
-                    .putFloatArray("whiteBalance", wb)
-                    .putString("baseName", dngName)
-                    .putBoolean("saveJpg", saveJpg)
-                    .putBoolean("saveRaw", saveRaw)
-                    .putString("jpgFolderUri", jpgFolderUri)
-                    .putString("rawFolderUri", rawFolderUri)
-                    .putBoolean("mirror", mirror)
-
-                image.halfFrameMetadata?.let { hf ->
-                    workData.putString("hfProfile", hf.profile)
-                    workData.putBoolean("hfDateStamp", hf.dateStamp)
-                    workData.putLong("hfCaptureTime", hf.captureTimeMillis)
-                    hf.frame1BaseName?.let { workData.putString("hfF1Base", it) }
-                    hf.frame1TempPath?.let { workData.putString("hfF1Path", it) }
-                    workData.putLong("hfF1Time", hf.frame1CaptureTime)
-                    workData.putFloat("hfGain", hf.digitalGain)
-                    workData.putFloat("hfF1Gain", hf.frame1DigitalGain)
-                    workData.putInt("hfFlareType", hf.flareType)
+                val request = top.maary.darkbag.processor.HdrPlusRequest(
+                    requestId = java.util.UUID.randomUUID().toString(),
+                    megaBuffer = image.data!!,
+                    numFrames = 1,
+                    width = image.width,
+                    height = image.height,
+                    orientation = image.combinedOrientation,
+                    whiteLevel = whiteLevel,
+                    blackLevelPattern = blackLevelPattern ?: intArrayOf(64,64,64,64),
+                    lensShadingMap = lensShadingMapData,
+                    lensShadingRows = lensShadingRows,
+                    lensShadingCols = lensShadingCols,
+                    useSensorColorMatrix = false,
+                    whiteBalance = wb,
+                    ccm = ccm,
+                    ccmAlt = null,
+                    exportMatrixAB = false,
+                    cfaPattern = cfa,
+                    targetLogIndex = targetLogIndex,
+                    lutPath = nativeLutPath,
+                    digitalGain = image.digitalGain,
+                    zoomFactor = image.zoomRatio,
+                    mirror = mirror,
+                    metadata = captureMetadata,
+                    isSingleFrame = true,
+                    saveJpg = saveJpg,
+                    saveRaw = saveRaw,
+                    baseName = dngName,
+                    fullResJpgPath = fullResJpgFile.absolutePath,
+                    linearDngPath = linearDngFile.absolutePath,
+                    zslTargetUriStr = fastOutputUri?.toString(),
+                    jpgFolderUri = jpgFolderUri,
+                    rawFolderUri = rawFolderUri,
+                    hfMetadata = image.halfFrameMetadata,
+                    editConfig = null,
+                    runAblationTest = false
+                )
+                top.maary.darkbag.processor.HdrPlusRequestManager.enqueue(request)
+                val serviceIntent = android.content.Intent(context, top.maary.darkbag.processor.HdrPlusProcessingService::class.java)
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                    context.startForegroundService(serviceIntent)
+                } else {
+                    context.startService(serviceIntent)
                 }
-
-                val workRequest = androidx.work.OneTimeWorkRequestBuilder<HdrPlusExportWorker>()
-                    .setInputData(workData.build())
-                    .build()
-                androidx.work.WorkManager.getInstance(context).enqueue(workRequest)
 
                 // 6. Timing Report
                 timing?.let { t ->
@@ -3722,52 +3721,64 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         }
                     }
 
-                    val workData = androidx.work.Data.Builder()
-                        .putString("tempRawPath", tempRawFile.absolutePath)
-                    if (activeArray != null) workData.putIntArray("activeArray", activeArray)
-                    workData.putInt("width", width)
-                        .putInt("height", height)
-                        .putInt("orientation", combinedOrientation)
-                        .putFloat("digitalGain", digitalGain)
-                        .putInt("targetLog", targetLogIndex)
-                        .putString("lutPath", nativeLutPath)
-                        .putString("jpgPath", if (saveJpg) fullResJpgFile.absolutePath else null)
-                        .putString("targetUri", fastJpegUri?.toString()) // Replace fast JPEG in place
-                        .putFloat("zoomFactor", currentZoom)
-                        .putString("dngPath", if (saveRaw) linearDngPath else null)
-                        .putInt("iso", (iso).toInt())
-                        .putLong("exposureTime", exposureTime)
-                        .putFloat("fNumber", fNumber)
-                        .putFloat("focalLength", focalLength)
-                        .putLong("captureTimeMillis", captureTime)
-                        .putLong("dateTimeDigitized", captureTime)
-                        .putString("offsetTime", captureMetadata.offsetTime)
-                        .putInt("focalLengthIn35mmFilm", captureMetadata.focalLengthIn35mmFilm ?: 0)
-                        .putFloatArray("ccm", ccm)
-                        .putFloatArray("whiteBalance", wb)
-                        .putString("baseName", dngName)
-                        .putBoolean("saveJpg", saveJpg)
-                        .putBoolean("saveRaw", saveRaw)
-                        .putString("jpgFolderUri", jpgFolderUri)
-                        .putString("rawFolderUri", rawFolderUri)
-                        .putBoolean("mirror", mirror)
-
-                    hfMetadata?.copy(digitalGain = digitalGain)?.let { hf ->
-                        workData.putString("hfProfile", hf.profile)
-                        workData.putBoolean("hfDateStamp", hf.dateStamp)
-                        workData.putLong("hfCaptureTime", hf.captureTimeMillis)
-                        hf.frame1BaseName?.let { workData.putString("hfF1Base", it) }
-                        hf.frame1TempPath?.let { workData.putString("hfF1Path", it) }
-                        workData.putLong("hfF1Time", hf.frame1CaptureTime)
-                        workData.putFloat("hfGain", hf.digitalGain)
-                        workData.putFloat("hfF1Gain", hf.frame1DigitalGain)
-                        workData.putInt("hfFlareType", hf.flareType)
+                    val request = top.maary.darkbag.processor.HdrPlusRequest(
+                        requestId = java.util.UUID.randomUUID().toString(),
+                        megaBuffer = megaBuffer,
+                        numFrames = burstResult.frames.size,
+                        width = width,
+                        height = height,
+                        orientation = combinedOrientation,
+                        whiteLevel = whiteLevel,
+                        blackLevelPattern = blackLevelPattern ?: intArrayOf(64,64,64,64),
+                        lensShadingMap = lensShadingMapData,
+                        lensShadingRows = lensShadingRows,
+                        lensShadingCols = lensShadingCols,
+                        useSensorColorMatrix = useSensorColorMatrix,
+                        whiteBalance = wb,
+                        ccm = ccm,
+                        ccmAlt = ccmAlt,
+                        exportMatrixAB = exportMatrixAB,
+                        cfaPattern = cfa,
+                        targetLogIndex = targetLogIndex,
+                        lutPath = nativeLutPath,
+                        digitalGain = digitalGain,
+                        zoomFactor = currentZoom,
+                        mirror = mirror,
+                        metadata = captureMetadata,
+                        isSingleFrame = false,
+                        saveJpg = saveJpg,
+                        saveRaw = saveRaw,
+                        baseName = dngName,
+                        fullResJpgPath = fullResJpgFile.absolutePath,
+                        linearDngPath = linearDngFile.absolutePath,
+                        zslTargetUriStr = fastJpegUri?.toString(),
+                        jpgFolderUri = jpgFolderUri,
+                        rawFolderUri = rawFolderUri,
+                        hfMetadata = hfMetadata?.copy(digitalGain = digitalGain),
+                        editConfig = top.maary.darkbag.models.EditConfig(
+                            log = targetLogName ?: "None",
+                            lut = activeLutName ?: "None",
+                            digitalGain = digitalGain,
+                            adjustments = if (hfMetadata?.profile != null && hfMetadata.profile != top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_NORMAL) {
+                                listOf(
+                                    top.maary.darkbag.models.BasicAdjustments(digitalGain = hfMetadata.frame1DigitalGain),
+                                    top.maary.darkbag.models.BasicAdjustments(digitalGain = digitalGain)
+                                )
+                            } else null,
+                            hfLayout = if (hfMetadata?.profile == top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_HALF_TOP) "TB" else if (hfMetadata?.profile == top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_HALF_SIDE) "SBS" else null,
+                            showTimestamp = hfMetadata?.dateStamp ?: false,
+                            flareType = hfMetadata?.flareType ?: -1,
+                            zoomFactor = currentZoom
+                        ),
+                        runAblationTest = false
+                    )
+                    top.maary.darkbag.processor.HdrPlusRequestManager.enqueue(request)
+                    val serviceIntent = android.content.Intent(context, top.maary.darkbag.processor.HdrPlusProcessingService::class.java)
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                        context.startForegroundService(serviceIntent)
+                    } else {
+                        context.startService(serviceIntent)
                     }
-
-                    val workRequest = androidx.work.OneTimeWorkRequestBuilder<HdrPlusExportWorker>()
-                        .setInputData(workData.build())
-                        .build()
-                    androidx.work.WorkManager.getInstance(context).enqueue(workRequest)
                     val saveEndTime = System.currentTimeMillis()
 
                     // Log Statistics
