@@ -138,7 +138,7 @@ struct GlobalBuffers {
     }
 };
 
-GlobalBuffers g_hdrPlusBuffers;std::mutex g_hdrPlusMutex;
+GlobalBuffers g_hdrPlusBuffers;
 
 #include <unordered_map>
 std::unordered_map<std::string, std::shared_ptr<std::vector<uint16_t>>> g_sharedMemoryMap;
@@ -263,7 +263,7 @@ ImageMetadata metadataFromJava(JNIEnv* env, jobject metadataObj) {
 
 extern "C" JNIEXPORT void JNICALL
 Java_top_maary_darkbag_processor_ColorProcessor_initMemoryPool(JNIEnv* env, jobject /* this */, jint width, jint height, jint frames) {
-    std::lock_guard<std::mutex> lock(g_hdrPlusMutex);
+
     g_hdrPlusBuffers.ensureCapacity(width, height, frames);
 }
 
@@ -350,7 +350,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
 ) {
     LOGD("Native processHdrPlus started.");
     (void)useSensorColorMatrix;
-    std::lock_guard<std::mutex> lock(g_hdrPlusMutex);
+
     auto nativeStart = std::chrono::high_resolution_clock::now();
     auto jniPrepStart = std::chrono::high_resolution_clock::now();
 

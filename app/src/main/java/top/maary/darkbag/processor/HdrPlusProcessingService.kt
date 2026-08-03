@@ -50,6 +50,7 @@ class HdrPlusProcessingService : LifecycleService() {
         var buffersReleased = false
         try {
             val start = System.currentTimeMillis()
+            val debugStats = LongArray(15)
             
             // Just one mask for normal processing (unlike ablation which did multiple passes)
             val ret = if (req.isSingleFrame) {
@@ -65,7 +66,7 @@ class HdrPlusProcessingService : LifecycleService() {
                     if (req.saveJpg) req.fullResJpgPath else null,
                     if (req.saveRaw) req.linearDngPath else null,
                     req.digitalGain,
-                    null, // debugStats
+                    debugStats,
                     null, // outputBitmap
                     null, // tempRawPath
                     req.zoomFactor,
@@ -86,7 +87,7 @@ class HdrPlusProcessingService : LifecycleService() {
                     if (req.saveJpg) req.fullResJpgPath else null,
                     if (req.saveRaw) req.linearDngPath else null,
                     req.digitalGain,
-                    null, // debugStats
+                    debugStats,
                     null, // outputBitmap
                     null, // tempRawPath
                     req.zoomFactor,
@@ -100,13 +101,61 @@ class HdrPlusProcessingService : LifecycleService() {
             buffersReleased = true
 
             if (ret == 0) {
+                val totalTime = System.currentTimeMillis() - start
+                val mode = if (req.isSingleFrame) "Single RAW" else "HDR+ Burst"
+                val report = """
+                    [$mode Report]
+                    Total Background Time: ${totalTime}ms
+                    - Halide JNI Prep: ${debugStats[12]}ms
+                    - Halide Pipeline: ${debugStats[0]}ms
+                        * Align: ${debugStats[7]}ms
+                        * Merge: ${debugStats[8]}ms
+                        * Demosaic: ${debugStats[9]}ms
+                        * Denoise: ${debugStats[10]}ms
+                        * sRGB: ${debugStats[11]}ms
+                        * BlackWhite: ${debugStats[13]}ms
+                        * WB: ${debugStats[14]}ms
+                    - C++ Post/ColorPipe: ${debugStats[2]}ms
+                    - DNG Encode: ${debugStats[3]}ms
+                    - JPEG Native Save: ${debugStats[4]}ms
+                """.trimIndent()
+                Log.i(TAG, report)
+                top.maary.darkbag.utils.DebugLogManager.addLog(report)
+
                 if (req.saveJpg || req.saveRaw) {
                     updateNotification("Saving files...")
+                    
+                    var savedUri: android.net.Uri? = null
+                    val shouldSaveJpg = req.saveJpg
+                    val shouldSaveRaw = req.saveRaw && !req.isSingleFrame // Single Bayer RAW was already saved in front-end
+                    
+                    if (shouldSaveJpg || shouldSaveRaw) {
+                        savedUri = top.maary.darkbag.utils.ImageSaver.saveProcessedImage(
+                            context = this@HdrPlusProcessingService,
+                            inputBitmap = null,
+                            bmpPath = if (shouldSaveJpg) req.fullResJpgPath else null,
+                            rotationDegrees = 0,
+                            zoomFactor = req.zoomFactor,
+                            baseName = req.baseName,
+                            linearDngPath = if (shouldSaveRaw) req.linearDngPath else null,
+                            saveJpg = shouldSaveJpg,
+                            saveRaw = shouldSaveRaw,
+                            jpgFolderUri = null,
+                            rawFolderUri = null,
+                            mirror = req.mirror,
+                            isFastPath = false,
+                            halfFrameMetadata = null,
+                            editConfig = null,
+                            digitalGain = req.digitalGain,
+                            captureMetadata = req.metadata
+                        )
+                    }
+
                     ColorProcessor.onBackgroundSaveComplete(
                         req.baseName,
                         if (req.saveRaw) req.linearDngPath else null,
                         if (req.saveJpg) req.fullResJpgPath else null,
-                        req.zslTargetUriStr,
+                        savedUri?.toString() ?: req.zslTargetUriStr,
                         req.zoomFactor,
                         req.orientation,
                         req.saveJpg
