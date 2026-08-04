@@ -63,12 +63,12 @@ class HdrPlusProcessingService : LifecycleService() {
                     req.whiteBalance, req.ccm, req.cfaPattern,
                     req.targetLogIndex,
                     req.lutPath,
-                    if (req.saveJpg) req.fullResJpgPath else null,
-                    if (req.saveRaw) req.linearDngPath else null,
+                    null, // outputJpgPath - prevent low-res fast thumbnail
+                    null, // outputDngPath
                     req.digitalGain,
                     debugStats,
                     null, // outputBitmap
-                    null, // tempRawPath
+                    req.requestId, // tempRawPath - shared memory key!
                     req.zoomFactor,
                     req.mirror,
                     req.metadata
@@ -84,15 +84,44 @@ class HdrPlusProcessingService : LifecycleService() {
                     req.whiteBalance, req.ccm, req.ccmAlt, req.exportMatrixAB, req.cfaPattern,
                     req.targetLogIndex,
                     req.lutPath,
-                    if (req.saveJpg) req.fullResJpgPath else null,
-                    if (req.saveRaw) req.linearDngPath else null,
+                    null, // outputJpgPath
+                    null, // outputDngPath
                     req.digitalGain,
                     debugStats,
                     null, // outputBitmap
-                    null, // tempRawPath
+                    req.requestId, // tempRawPath - shared memory key!
                     req.zoomFactor,
                     req.mirror,
                     req.metadata
+                )
+            }
+
+            var exportRet = ret
+            if (ret >= 0) {
+                // Export full resolution image from shared memory using C++
+                val edit = req.editConfig
+                exportRet = ColorProcessor.exportHdrPlus(
+                    tempRawPath = req.requestId,
+                    width = req.width,
+                    height = req.height,
+                    orientation = req.orientation,
+                    digitalGain = req.digitalGain,
+                    targetLog = req.targetLogIndex,
+                    lutPath = req.lutPath,
+                    exposure = edit?.exposure ?: 0f,
+                    contrast = edit?.contrast ?: 0f,
+                    saturation = edit?.saturation ?: 0f,
+                    highlights = edit?.highlights ?: 0f,
+                    shadows = edit?.shadows ?: 0f,
+                    whites = edit?.whites ?: 0f,
+                    blacks = edit?.blacks ?: 0f,
+                    jpgPath = if (req.saveJpg) req.fullResJpgPath else null,
+                    dngPath = if (req.saveRaw && !req.isSingleFrame) req.linearDngPath else null,
+                    ccm = req.ccm,
+                    whiteBalance = req.whiteBalance,
+                    zoomFactor = req.zoomFactor,
+                    mirror = req.mirror,
+                    metadata = req.metadata
                 )
             }
 
@@ -100,7 +129,7 @@ class HdrPlusProcessingService : LifecycleService() {
             HdrPlusBurst.releaseBuffer(req.megaBuffer)
             buffersReleased = true
 
-            if (ret == 0) {
+            if (exportRet == 0) {
                 val totalTime = System.currentTimeMillis() - start
                 val mode = if (req.isSingleFrame) "Single RAW" else "HDR+ Burst"
                 val report = """
@@ -140,14 +169,15 @@ class HdrPlusProcessingService : LifecycleService() {
                             linearDngPath = if (shouldSaveRaw) req.linearDngPath else null,
                             saveJpg = shouldSaveJpg,
                             saveRaw = shouldSaveRaw,
-                            jpgFolderUri = null,
-                            rawFolderUri = null,
+                            jpgFolderUri = req.jpgFolderUri,
+                            rawFolderUri = req.rawFolderUri,
                             mirror = req.mirror,
                             isFastPath = false,
-                            halfFrameMetadata = null,
-                            editConfig = null,
+                            halfFrameMetadata = req.hfMetadata,
+                            editConfig = req.editConfig,
                             digitalGain = req.digitalGain,
-                            captureMetadata = req.metadata
+                            captureMetadata = req.metadata,
+                            isAlreadyCropped = true
                         )
                     }
 

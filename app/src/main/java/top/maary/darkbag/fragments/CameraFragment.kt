@@ -641,10 +641,7 @@ class CameraFragment : Fragment() {
                         processingSemaphore.release()
                         withContext(Dispatchers.Main) {
                             cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
-                            // If not half-frame, we hide now. If half-frame, wait for final stitched result in backgroundSaveFlow.
-                            if (!isHalfFrameModeEnabled) {
-                                hideProcessingAnimation()
-                            }
+                            // Wait for final stitched result in backgroundSaveFlow to hide animation for ALL pipelines.
                         }
                     }
                 }
@@ -1858,6 +1855,9 @@ class CameraFragment : Fragment() {
                 
                 withContext(Dispatchers.Main) {
                     Toast.makeText(requireContext(), "Processing Queued", Toast.LENGTH_SHORT).show()
+                    if (isHalfFrameModeEnabled && prefs.getInt(scopedHalfFrameStepKey(prefs), 0) == 1) {
+                        setGalleryThumbnail(null)
+                    }
                     // 保持加载动画，直到服务处理完毕
                 }
 
@@ -1945,7 +1945,20 @@ class CameraFragment : Fragment() {
                     jpgFolderUri = jpgFolderUri,
                     rawFolderUri = rawFolderUri,
                     hfMetadata = image.halfFrameMetadata,
-                    editConfig = null,
+                    editConfig = top.maary.darkbag.models.EditConfig(
+                        log = targetLogName ?: "None",
+                        lut = activeLutName ?: "None",
+                        digitalGain = image.digitalGain,
+                        adjustments = if (image.halfFrameMetadata?.profile != null && image.halfFrameMetadata.profile != top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_NORMAL) {
+                            listOf(
+                                top.maary.darkbag.models.BasicAdjustments(digitalGain = image.halfFrameMetadata.frame1DigitalGain),
+                                top.maary.darkbag.models.BasicAdjustments(digitalGain = image.digitalGain)
+                            )
+                        } else null,
+                        hfLayout = if (image.halfFrameMetadata?.profile == top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_HALF_TOP) "TB" else if (image.halfFrameMetadata?.profile == top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_HALF_SIDE) "SBS" else null,
+                        showTimestamp = image.halfFrameMetadata?.dateStamp ?: false,
+                        zoomFactor = image.zoomRatio
+                    ),
                     runAblationTest = false
                 )
                 top.maary.darkbag.processor.HdrPlusRequestManager.enqueue(request)
@@ -3566,6 +3579,9 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 
                 withContext(Dispatchers.Main) {
                     Toast.makeText(requireContext(), "HDR+ Queued for processing", Toast.LENGTH_SHORT).show()
+                    if (isHalfFrameModeEnabled && prefs.getInt(scopedHalfFrameStepKey(prefs), 0) == 1) {
+                        setGalleryThumbnail(null)
+                    }
                     // 保持加载动画，不调用 hideProcessingAnimation()
                 }
 
