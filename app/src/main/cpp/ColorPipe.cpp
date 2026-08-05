@@ -378,6 +378,11 @@ float f_log(float x) {
     if (x >= cut) return c * log10(a * x + b) + d;
     else return 8.52f * x + 0.0929f;
 }
+float f_log2(float x) {
+    const float a = 5.555556f, b = 0.064829f, c = 0.245281f, d = 0.384316f, e = 8.799461f, f = 0.092864f, cut = 0.000889f;
+    if (x >= cut) return c * log10(a * x + b) + d;
+    else return e * x + f;
+}
 float vlog(float x) {
     const float cut = 0.01f, c = 0.241514f, b = 0.008730f, d = 0.598206f;
     if (x >= cut) return c * log10(x + b) + d;
@@ -391,8 +396,9 @@ float apply_log(float x, int type) {
 
     switch (type) {
         case 1: return arri_logc3(x);
-        case 2:
-        case 3: return f_log(x);
+        case 2: return f_log(x);
+        case 3:
+        case 4: return f_log2(x);
         case 5:
         case 6: return s_log3(x);
         case 7: return vlog(x);
@@ -702,14 +708,14 @@ bool process_and_save_image(
             lscB = bilerp(3);
         }
         
-        r = std::min(r * lscR, 16383.0f);
-        g = std::min(g * lscG, 16383.0f);
-        b = std::min(b * lscB, 16383.0f);
+        r = std::min(r * lscR, 65535.0f);
+        g = std::min(g * lscG, 65535.0f);
+        b = std::min(b * lscB, 65535.0f);
         
         float exp_gain = std::pow(2.0f, exposure);
-        float norm_r = (r / 16383.0f) * gain * exp_gain;
-        float norm_g = (g / 16383.0f) * gain * exp_gain;
-        float norm_b = (b / 16383.0f) * gain * exp_gain;
+        float norm_r = (r / 65535.0f) * gain * exp_gain;
+        float norm_g = (g / 65535.0f) * gain * exp_gain;
+        float norm_b = (b / 65535.0f) * gain * exp_gain;
 
         if (edgeComp.enabled) {
             const float nx = (x - edgeComp.centerX) * edgeComp.invMaxRadius;
@@ -752,16 +758,16 @@ bool process_and_save_image(
 
         // 2. Contrast & Saturation (Log Space)
         auto apply_contrast = [&](float v) {
-            return std::clamp((v - 0.5f) * (contrast + 1.0f) + 0.5f, 0.0f, 1.0f);
+            return std::max(0.0f, (v - 0.5f) * (contrast + 1.0f) + 0.5f);
         };
         color.r = apply_contrast(color.r);
         color.g = apply_contrast(color.g);
         color.b = apply_contrast(color.b);
 
         float luma = 0.2126f * color.r + 0.7152f * color.g + 0.0722f * color.b;
-        color.r = std::clamp(luma + (color.r - luma) * (saturation + 1.0f), 0.0f, 1.0f);
-        color.g = std::clamp(luma + (color.g - luma) * (saturation + 1.0f), 0.0f, 1.0f);
-        color.b = std::clamp(luma + (color.b - luma) * (saturation + 1.0f), 0.0f, 1.0f);
+        color.r = std::max(0.0f, luma + (color.r - luma) * (saturation + 1.0f));
+        color.g = std::max(0.0f, luma + (color.g - luma) * (saturation + 1.0f));
+        color.b = std::max(0.0f, luma + (color.b - luma) * (saturation + 1.0f));
 
         // 3. Highlights / Shadows / Whites / Blacks (Log Space)
         auto apply_hswb = [&](float v) {
@@ -785,7 +791,7 @@ bool process_and_save_image(
                 float weight = std::clamp((0.5f - v) * 2.0f, 0.0f, 1.0f);
                 v += blacks * weight * 0.2f;
             }
-            return std::clamp(v, 0.0f, 1.0f);
+            return std::max(0.0f, v);
         };
         color.r = apply_hswb(color.r);
         color.g = apply_hswb(color.g);
