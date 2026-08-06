@@ -329,7 +329,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
         LOGD("Exporting JPG: JPG=%s", jpg_path_cstr);
         saveOk = process_and_save_image(finalImage.data(), 1, width, width*height, nullptr, 0, 0, width, height, digitalGain, targetLog, lut,
                                         exposure, contrast, saturation, highlights, shadows, whites, blacks,
-                                        jpg_path_cstr, nullptr, &meta, 1, ccmVec.data(), wbVec.data(), orientation, nullptr, 0, 0, false, 1, zoomFactor, (bool)mirror);
+                                        jpg_path_cstr, nullptr, &meta, 2, ccmVec.data(), wbVec.data(), orientation, nullptr, 0, 0, false, 1, zoomFactor, (bool)mirror);
     }
     if (jpgPath && jpg_path_cstr) env->ReleaseStringUTFChars(jpgPath, jpg_path_cstr);
     if (dngPath && dng_path_cstr) env->ReleaseStringUTFChars(dngPath, dng_path_cstr);
@@ -409,8 +409,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
         env->ReleaseFloatArrayElements(ccmAlt, ccmAltData, JNI_ABORT);
     }
 
-    std::vector<float> identityCCM = { 1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f };
-    Buffer<float> ccmHalideBuf(identityCCM.data(), 3, 3);
+    Buffer<float> ccmHalideBuf(ccmVec.data(), 3, 3);
     auto jniPrepMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - jniPrepStart).count();
 
     int halideCfa = 1;
@@ -445,17 +444,50 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
     if (iso < 400) denoiseLevel = 0;
     else if (iso >= 1600) denoiseLevel = 2;
 
+    Buffer<float> lscMapBuf;
+    std::vector<float> dummyLsc = {1.0f, 1.0f, 1.0f, 1.0f};
+    if (lensShadingVec.empty()) {
+        lscMapBuf = Buffer<float>(dummyLsc.data(), 4, 1, 1);
+    } else {
+        if (cfaPattern == 1) { // CFA_GRBG
+            // Physical: Gr(0), R(1), B(2), Gb(3) -> Target: R, Gr, Gb, B
+            for (size_t i = 0; i < lensShadingVec.size(); i += 4) {
+                float gr = lensShadingVec[i + 0]; float r  = lensShadingVec[i + 1];
+                float b  = lensShadingVec[i + 2]; float gb = lensShadingVec[i + 3];
+                lensShadingVec[i + 0] = r; lensShadingVec[i + 1] = gr;
+                lensShadingVec[i + 2] = gb; lensShadingVec[i + 3] = b;
+            }
+        } else if (cfaPattern == 2) { // CFA_GBRG
+            // Physical: Gb(0), B(1), R(2), Gr(3) -> Target: R, Gr, Gb, B
+            for (size_t i = 0; i < lensShadingVec.size(); i += 4) {
+                float gb = lensShadingVec[i + 0]; float b  = lensShadingVec[i + 1];
+                float r  = lensShadingVec[i + 2]; float gr = lensShadingVec[i + 3];
+                lensShadingVec[i + 0] = r; lensShadingVec[i + 1] = gr;
+                lensShadingVec[i + 2] = gb; lensShadingVec[i + 3] = b;
+            }
+        } else if (cfaPattern == 3) { // CFA_BGGR
+            // Physical: B(0), Gb(1), Gr(2), R(3) -> Target: R, Gr, Gb, B
+            for (size_t i = 0; i < lensShadingVec.size(); i += 4) {
+                float b  = lensShadingVec[i + 0]; float gb = lensShadingVec[i + 1];
+                float gr = lensShadingVec[i + 2]; float r  = lensShadingVec[i + 3];
+                lensShadingVec[i + 0] = r; lensShadingVec[i + 1] = gr;
+                lensShadingVec[i + 2] = gb; lensShadingVec[i + 3] = b;
+            }
+        }
+        lscMapBuf = Buffer<float>(lensShadingVec.data(), 4, lensShadingCols, lensShadingRows);
+    }
+
     auto halideStart = std::chrono::high_resolution_clock::now();
     int halide_res;
     if (numFrames == 1) {
-        halide_res = hdrplus_single_pipeline(inputBuf, bl_r, bl_g0, bl_g1, bl_b, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, ccmHalideBuf, 1.0f, 1.0f, outputBuf);
+        halide_res = hdrplus_single_pipeline(inputBuf, bl_r, bl_g0, bl_g1, bl_b, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, ccmHalideBuf, lscMapBuf, 1.0f, 1.0f, outputBuf);
     } else {
         if (denoiseLevel == 0) {
-            halide_res = hdrplus_fast_pipeline(inputBuf, bl_r, bl_g0, bl_g1, bl_b, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, ccmHalideBuf, 1.0f, 1.0f, outputBuf);
+            halide_res = hdrplus_fast_pipeline(inputBuf, bl_r, bl_g0, bl_g1, bl_b, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, ccmHalideBuf, lscMapBuf, 1.0f, 1.0f, outputBuf);
         } else if (denoiseLevel == 2) {
-            halide_res = hdrplus_high_pipeline(inputBuf, bl_r, bl_g0, bl_g1, bl_b, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, ccmHalideBuf, 1.0f, 1.0f, outputBuf);
+            halide_res = hdrplus_high_pipeline(inputBuf, bl_r, bl_g0, bl_g1, bl_b, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, ccmHalideBuf, lscMapBuf, 1.0f, 1.0f, outputBuf);
         } else {
-            halide_res = hdrplus_raw_pipeline(inputBuf, bl_r, bl_g0, bl_g1, bl_b, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, ccmHalideBuf, 1.0f, 1.0f, outputBuf);
+            halide_res = hdrplus_raw_pipeline(inputBuf, bl_r, bl_g0, bl_g1, bl_b, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, ccmHalideBuf, lscMapBuf, 1.0f, 1.0f, outputBuf);
         }
     }
     auto halideDurationMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - halideStart).count();
@@ -497,7 +529,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
         process_and_save_image(raw_ptr, stride_x, stride_y, stride_c, lensShadingVec.empty() ? nullptr : lensShadingVec.data(), lensShadingRows, lensShadingCols,
                                 width, height, digitalGain, targetLog, lut,
                                 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, // HSWB not used for preview in standard pipe yet
-                                nullptr, nullptr, nullptr, 1, ccmVec.data(), wbVec.data(), orientation, bitmapPixels, out_w, out_h, true, fastPreviewDownsample, zoomFactor, (bool)mirror);
+                                nullptr, nullptr, nullptr, 2, ccmVec.data(), wbVec.data(), orientation, bitmapPixels, out_w, out_h, true, fastPreviewDownsample, zoomFactor, (bool)mirror);
         AndroidBitmap_unlockPixels(env, outputBitmap);
     }
 
@@ -523,7 +555,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
             process_and_save_image(raw_ptr, stride_x, stride_y, stride_c, lensShadingVec.empty() ? nullptr : lensShadingVec.data(), lensShadingRows, lensShadingCols,
                                     width, height, digitalGain, targetLog, lut,
                                     0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
-                                    jpgPathStr.c_str(), nullptr, &meta, 1, ccmVec.data(), wbVec.data(), orientation, nullptr, 0, 0, true, fastPreviewDownsample, zoomFactor, (bool)mirror);
+                                    jpgPathStr.c_str(), nullptr, &meta, 2, ccmVec.data(), wbVec.data(), orientation, nullptr, 0, 0, true, fastPreviewDownsample, zoomFactor, (bool)mirror);
 
             if (exportMatrixAB && !jpgPathStr.empty() && ccmAltVec.size() == 9) {
                 std::string suffix = useSensorColorMatrix ? "_AB_CAPTURE_CCM.jpg" : "_AB_SENSOR_CCM.jpg";
@@ -534,7 +566,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
                 process_and_save_image(raw_ptr, stride_x, stride_y, stride_c, lensShadingVec.empty() ? nullptr : lensShadingVec.data(), lensShadingRows, lensShadingCols,
                                         width, height, digitalGain, targetLog, lut,
                                         0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
-                                        altJpgPath.c_str(), nullptr, &meta, 1, ccmAltVec.data(), wbVec.data(), orientation, nullptr, 0, 0, false, 1, zoomFactor, (bool)mirror);
+                                        altJpgPath.c_str(), nullptr, &meta, 2, ccmAltVec.data(), wbVec.data(), orientation, nullptr, 0, 0, false, 1, zoomFactor, (bool)mirror);
             }
         }
     }

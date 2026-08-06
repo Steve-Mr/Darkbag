@@ -33,6 +33,7 @@ public:
   Input<float> white_balance_b{"white_balance_b"};
   Input<int> cfa_pattern{"cfa_pattern"};
   Input<Buffer<float>> ccm{"ccm", 2};
+  Input<Buffer<float>> lens_shading_map{"lens_shading_map", 3};
 
   Input<float> compression{"compression"};
   Input<float> gain{"gain"};
@@ -57,25 +58,24 @@ public:
 
     Func bayer_shifted = shift_bayer_to_rggb(merged, cfa_pattern);
     Func black_white_level_output = black_white_level(bayer_shifted, black_point_r, black_point_g0, black_point_g1, black_point_b, white_point);
-    Func white_balance_output = white_balance(black_white_level_output, wb);
+    Func lsc_output = apply_lsc(black_white_level_output, inputs.width(), inputs.height());
+    Func white_balance_output = white_balance(lsc_output, wb);
 
     // Demosaic
     DemosaicResult dm = demosaic(white_balance_output, inputs.width(), inputs.height());
     Func demosaic_output = dm.output;
 
-    // Denoise
+    // Denoise (applies on sRGB linear data)
+    Func linear_rgb_output = srgb(demosaic_output, ccm);
+    
     Func chroma_denoised_output;
     if (!single_frame_mode) {
-        chroma_denoised_output = chroma_denoise(demosaic_output, inputs.width(), inputs.height(), denoise_passes);
+        chroma_denoised_output = chroma_denoise(linear_rgb_output, inputs.width(), inputs.height(), denoise_passes);
     } else {
-        chroma_denoised_output = demosaic_output;
+        chroma_denoised_output = linear_rgb_output;
     }
-    // Note: chroma_denoise returns yuv_to_rgb(output_denoise).
-    // We need to capture the intermediate bilateral filter func if we want to schedule it.
-    // For now, bilateral_filter inside chroma_denoise schedules itself.
 
-    Func linear_rgb_output = srgb(chroma_denoised_output, ccm);
-    output(x, y, c) = linear_rgb_output(x, y, c);
+    output(x, y, c) = chroma_denoised_output(x, y, c);
 
     // --- Scheduling ---
     if (use_gpu) {
@@ -91,6 +91,7 @@ public:
     } else if (!use_optimized_schedule) {
         // Legacy CPU Schedule
         black_white_level_output.compute_root().parallel(y).vectorize(x, kVec);
+        lsc_output.compute_root().parallel(y).vectorize(x, kVec);
         white_balance_output.compute_root().parallel(y).vectorize(x, kVec);
 
         demosaic_output.compute_root()
@@ -105,7 +106,7 @@ public:
         dm.d2.compute_at(demosaic_output, yi).vectorize(x, kVec);
         dm.d3.compute_at(demosaic_output, yi).vectorize(x, kVec);
 
-        linear_rgb_output.compute_root()
+        output.compute_root()
             .tile(x, y, xo, yo, xi, yi, kTileX, kTileY)
             .parallel(yo)
             .vectorize(xi, kVec);
@@ -113,6 +114,7 @@ public:
         // Optimized CPU Schedule (Stage Fusion)
         // Fuse early stages into demosaic
         black_white_level_output.compute_at(demosaic_output, yi).vectorize(x, kVec);
+        lsc_output.compute_at(demosaic_output, yi).vectorize(x, kVec);
         white_balance_output.compute_at(demosaic_output, yi).vectorize(x, kVec);
 
         demosaic_output.compute_root()
@@ -128,8 +130,7 @@ public:
         dm.d2.compute_at(demosaic_output, yi).vectorize(x, kVec);
         dm.d3.compute_at(demosaic_output, yi).vectorize(x, kVec);
 
-        // Fuse sRGB into output
-        linear_rgb_output.compute_at(output, yi).vectorize(x, kVec);
+        // Fuse sRGB and YUV conversions into output
         output.compute_root()
             .tile(x, y, xo, yo, xi, yi, kTileX, kTileY)
             .parallel(yo)
@@ -140,13 +141,50 @@ public:
 private:
   Var x{"x"}, y{"y"}, c{"c"}, xo{"xo"}, yo{"yo"}, xi{"xi"}, yi{"yi"};
 
+  Func apply_lsc(Func input, Expr width, Expr height) {
+    Func output("lsc_output");
+    
+    Expr num_cols = lens_shading_map.dim(1).extent();
+    Expr num_rows = lens_shading_map.dim(2).extent();
+
+    Expr nx = (cast<float>(x) + 0.5f) / cast<float>(width);
+    Expr ny = (cast<float>(y) + 0.5f) / cast<float>(height);
+
+    Expr map_xf = nx * cast<float>(num_cols) - 0.5f;
+    Expr map_yf = ny * cast<float>(num_rows) - 0.5f;
+
+    Expr map_x = clamp(cast<int>(floor(map_xf)), 0, num_cols - 2);
+    Expr map_y = clamp(cast<int>(floor(map_yf)), 0, num_rows - 2);
+    
+    Expr tx = clamp(map_xf - floor(map_xf), 0.0f, 1.0f);
+    Expr ty = clamp(map_yf - floor(map_yf), 0.0f, 1.0f);
+
+    Expr c_idx = select(y % 2 == 0,
+                    select(x % 2 == 0, 0, 1),
+                    select(x % 2 == 0, 2, 3));
+
+    Expr v00 = lens_shading_map(c_idx, map_x, map_y);
+    Expr v10 = lens_shading_map(c_idx, map_x + 1, map_y);
+    Expr v01 = lens_shading_map(c_idx, map_x, map_y + 1);
+    Expr v11 = lens_shading_map(c_idx, map_x + 1, map_y + 1);
+
+    Expr g0 = v00 * (1.0f - tx) + v10 * tx;
+    Expr g1 = v01 * (1.0f - tx) + v11 * tx;
+    Expr gain = g0 * (1.0f - ty) + g1 * ty;
+    
+    Expr final_gain = select(num_cols > 0, gain, 1.0f);
+    
+    output(x, y) = u16_sat(cast<float>(input(x, y)) * final_gain);
+    return output;
+  }
+
   Func black_white_level(Func input, const Expr bp_r, const Expr bp_g0, const Expr bp_g1, const Expr bp_b, const Expr wp) {
     Func output("black_white_level_output");
     Expr bp = select(y % 2 == 0,
                      select(x % 2 == 0, bp_r, bp_g0),
                      select(x % 2 == 0, bp_g1, bp_b));
-    // Reserve headroom (0.25x) for White Balance to prevent clipping
-    Expr white_factor = (65535.f / max(1.f, f32(wp) - f32(bp))) * 0.25f;
+    // Reserve headroom (0.5x) for White Balance to prevent clipping
+    Expr white_factor = (65535.f / max(1.f, f32(wp) - f32(bp))) * 0.5f;
     output(x, y) = u16_sat((i32(input(x, y)) - bp) * white_factor);
     return output;
   }
@@ -154,8 +192,8 @@ private:
   Func white_balance(Func input, const CompiletimeWhiteBalance &wb) {
     Func output("white_balance_output");
     // Highlight Dampening logic
-    float saturation_point = 16383.0f;
-    float knee_point = 15000.0f;
+    float saturation_point = 32767.0f;
+    float knee_point = 30000.0f;
     auto apply_wb_safe = [&](Expr val, Expr gain) {
         Expr f_val = f32(val);
         Expr alpha = 1.0f - clamp((f_val - knee_point) / (saturation_point - knee_point), 0.0f, 1.0f);

@@ -1791,7 +1791,7 @@ class CameraFragment : Fragment() {
                     lensShadingRows = lsc.rowCount
                     lensShadingCols = lsc.columnCount
                     val out = FloatArray(4 * lensShadingRows * lensShadingCols)
-                    fun idx(ch: Int, row: Int, col: Int): Int = ch * lensShadingRows * lensShadingCols + row * lensShadingCols + col
+                    fun idx(ch: Int, row: Int, col: Int): Int = (row * lensShadingCols + col) * 4 + ch
                     for (row in 0 until lensShadingRows) {
                         for (col in 0 until lensShadingCols) {
                             out[idx(0, row, col)] = lsc.getGainFactor(0, col, row)

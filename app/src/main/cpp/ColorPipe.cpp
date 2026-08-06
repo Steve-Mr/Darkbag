@@ -690,27 +690,10 @@ bool process_and_save_image(
         float g = static_cast<float>(planarData[g_idx]);
         float b = static_cast<float>(planarData[b_idx]);
         
-        float lscR = 1.0f, lscG = 1.0f, lscB = 1.0f;
-        if (hasLsc) {
-            const auto& lx = lscX[x];
-            const auto& ly = lscY[y];
-            auto bilerp = [&](int ch) {
-                float v00 = lensShadingVec[lsc_idx(ch, ly.idx0, lx.idx0)];
-                float v10 = lensShadingVec[lsc_idx(ch, ly.idx0, lx.idx1)];
-                float v01 = lensShadingVec[lsc_idx(ch, ly.idx1, lx.idx0)];
-                float v11 = lensShadingVec[lsc_idx(ch, ly.idx1, lx.idx1)];
-                float v0 = v00 * lx.w0 + v10 * lx.w1;
-                float v1 = v01 * lx.w0 + v11 * lx.w1;
-                return v0 * ly.w0 + v1 * ly.w1;
-            };
-            lscR = bilerp(0);
-            lscG = 0.5f * (bilerp(1) + bilerp(2));
-            lscB = bilerp(3);
-        }
-        
-        r = std::min(r * lscR, 65535.0f);
-        g = std::min(g * lscG, 65535.0f);
-        b = std::min(b * lscB, 65535.0f);
+        // LSC is now handled in the Halide Bayer domain, so we bypass it here.
+        r = std::min(r, 65535.0f);
+        g = std::min(g, 65535.0f);
+        b = std::min(b, 65535.0f);
         
         float exp_gain = std::pow(2.0f, exposure);
         float norm_r = (r / 65535.0f) * gain * exp_gain;
@@ -741,6 +724,7 @@ bool process_and_save_image(
 
         Vec3 color = colorA;
         if (sourceColorSpace == 1) { if (ccm) color = multiply(effective_CCM, color); color = multiply(M_sRGB_D65_to_XYZ, color); }
+        else if (sourceColorSpace == 2) { color = multiply(M_sRGB_D65_to_XYZ, color); }
         else if (sourceColorSpace == 0) { color = multiply(M_ProPhoto_D50_to_XYZ, color); color = multiply(M_Bradford_D50_to_D65, color); }
 
         switch (targetLog) {
@@ -1162,10 +1146,8 @@ bool write_dng(const char* filename, int width, int height, const unsigned short
     uint32_t black_level_val = 0;
     TIFFSetField(tif, TIFFTAG_BLACKLEVEL, 1, &black_level_val);
 
-    Matrix3x3 ccmMat;
-    std::copy(ccm.begin(), ccm.begin() + 9, ccmMat.m);
-    Matrix3x3 invCcm = invert(ccmMat);
-    Matrix3x3 colorMatrix1 = multiply(invCcm, M_XYZ_to_sRGB_D65);
+    // Since data is now in sRGB linear space, ColorMatrix1 should map XYZ to sRGB
+    Matrix3x3 colorMatrix1 = M_XYZ_to_sRGB_D65;
     TIFFSetField(tif, TIFFTAG_COLORMATRIX1, 9, colorMatrix1.m);
 
     static const float as_shot_neutral[] = {1.0f, 1.0f, 1.0f};
