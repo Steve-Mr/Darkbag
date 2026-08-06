@@ -15,7 +15,7 @@ object ExposureUtils {
     private const val ISO_THRESHOLD_MID = 400
     private const val ISO_THRESHOLD_HIGH = 800
 
-    private const val FACTOR_EV_MINUS_4 = 0.0625f   // -4 EV
+    private const val FACTOR_EV_MINUS_4 = 0.125f    // Adjusted from 0.0625f (-4 EV) to 0.125f (-3 EV) to preserve shadow signal
     private const val FACTOR_EV_MINUS_3 = 0.125f    // -3 EV
     private const val FACTOR_EV_MINUS_1_5 = 0.3535f // -1.5 EV
     private const val FACTOR_EV_0 = 1.0f            // 0 EV

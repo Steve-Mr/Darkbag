@@ -1125,7 +1125,7 @@ static const std::vector<unsigned char>& make_preview_rgb8(
     return preview;
 }
 
-bool write_dng(const char* filename, int width, int height, const unsigned short* planarData, int stride_x, int stride_y, int stride_c, int whiteLevel, const std::vector<float>& ccm, const ImageMetadata& metadata, int orientation, bool mirror, float baselineExposure) {
+bool write_dng(const char* filename, int width, int height, const unsigned short* planarData, int stride_x, int stride_y, int stride_c, int whiteLevel, const std::vector<float>& ccm, const std::vector<float>& wb, const ImageMetadata& metadata, int orientation, bool mirror, float baselineExposure) {
     TIFFSetTagExtender(DNGTagExtender);
     TIFF* tif = TIFFOpen(filename, "w");
     if (!tif) return false;
@@ -1163,14 +1163,28 @@ bool write_dng(const char* filename, int width, int height, const unsigned short
     uint32_t black_level_val = 0;
     TIFFSetField(tif, TIFFTAG_BLACKLEVEL, 1, &black_level_val);
 
+    // DNG ColorMatrix1 should be the transform from XYZ to Sensor space.
+    // Our CCM is from Sensor to sRGB. So (XYZ -> sRGB) -> (sRGB -> Sensor) = M_XYZ_to_sRGB_D65 * inv(CCM)
+    // Wait, CCM transforms sensor to sRGB. ColorMatrix1 is XYZ to Sensor.
+    // So ColorMatrix1 = inv(CCM) * M_XYZ_to_sRGB_D65
     Matrix3x3 ccmMat;
-    std::copy(ccm.begin(), ccm.begin() + 9, ccmMat.m);
+    if (ccm.size() >= 9) {
+        std::copy(ccm.begin(), ccm.begin() + 9, ccmMat.m);
+    } else {
+        ccmMat = {1,0,0, 0,1,0, 0,0,1};
+    }
     Matrix3x3 invCcm = invert(ccmMat);
     Matrix3x3 colorMatrix1 = multiply(invCcm, M_XYZ_to_sRGB_D65);
     TIFFSetField(tif, TIFFTAG_COLORMATRIX1, 9, colorMatrix1.m);
 
-    static const float as_shot_neutral[] = {1.0f, 1.0f, 1.0f};
+    float as_shot_neutral[3] = {1.0f, 1.0f, 1.0f};
+    if (wb.size() >= 4) {
+        as_shot_neutral[0] = 1.0f / std::max(1e-6f, wb[0]);
+        as_shot_neutral[1] = 1.0f / std::max(1e-6f, 0.5f * (wb[1] + wb[2]));
+        as_shot_neutral[2] = 1.0f / std::max(1e-6f, wb[3]);
+    }
     TIFFSetField(tif, TIFFTAG_ASSHOTNEUTRAL, 3, as_shot_neutral);
+
 
     TIFFSetField(tif, TIFFTAG_CALIBRATIONILLUMINANT1, 21);
     float exposureTimeSec = (float)metadata.exposureTime / 1000000000.0f;

@@ -321,7 +321,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
     if (dng_path_cstr) {
         LOGD("Exporting DNG to %s", dng_path_cstr);
         float baselineExposure = (digitalGain > 0.0f) ? std::log2(digitalGain) : 0.0f;
-        write_dng(dng_path_cstr, width, height, finalImage.data(), 1, width, width*height, kMax16BitValue, ccmVec, meta, orientation, (bool)mirror, baselineExposure);
+        write_dng(dng_path_cstr, width, height, finalImage.data(), 1, width, width*height, kMax16BitValue, ccmVec, wbVec, meta, orientation, (bool)mirror, baselineExposure);
     }
 
     bool saveOk = true;
@@ -520,7 +520,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
         ImageMetadata meta = metadataFromJava(env, metadata);
         if (!dngPathStr.empty()) {
             float baselineExposure = (digitalGain > 0.0f) ? std::log2(digitalGain) : 0.0f;
-            write_dng(dngPathStr.c_str(), width, height, raw_ptr, stride_x, stride_y, stride_c, kMax16BitValue, ccmVec, meta, orientation, (bool)mirror, baselineExposure);
+            write_dng(dngPathStr.c_str(), width, height, raw_ptr, stride_x, stride_y, stride_c, kMax16BitValue, ccmVec, wbVec, meta, orientation, (bool)mirror, baselineExposure);
         }
 
         if (!jpgPathStr.empty()) {
