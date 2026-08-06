@@ -145,8 +145,8 @@ private:
     Expr bp = select(y % 2 == 0,
                      select(x % 2 == 0, bp_r, bp_g0),
                      select(x % 2 == 0, bp_g1, bp_b));
-    // Reserve headroom (0.25x) for White Balance to prevent clipping
-    Expr white_factor = (65535.f / max(1.f, f32(wp) - f32(bp))) * 0.25f;
+    // Reserve headroom (0.5x) for White Balance to prevent clipping
+    Expr white_factor = (65535.f / max(1.f, f32(wp) - f32(bp))) * 0.5f;
     output(x, y) = u16_sat((i32(input(x, y)) - bp) * white_factor);
     return output;
   }

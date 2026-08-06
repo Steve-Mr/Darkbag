@@ -742,6 +742,7 @@ bool process_and_save_image(
         Vec3 color = colorA;
         if (sourceColorSpace == 1) { if (ccm) color = multiply(effective_CCM, color); color = multiply(M_sRGB_D65_to_XYZ, color); }
         else if (sourceColorSpace == 0) { color = multiply(M_ProPhoto_D50_to_XYZ, color); color = multiply(M_Bradford_D50_to_D65, color); }
+        else if (sourceColorSpace == 2) { color = multiply(M_sRGB_D65_to_XYZ, color); }
 
         switch (targetLog) {
             case 1: color = multiply(M_XYZ_to_AlexaWideGamut_D65, color); break;
