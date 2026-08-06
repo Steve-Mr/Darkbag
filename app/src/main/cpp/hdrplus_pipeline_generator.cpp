@@ -36,6 +36,8 @@ public:
 
   Input<float> compression{"compression"};
   Input<float> gain{"gain"};
+  Input<Buffer<float>> lens_shading_map{"lens_shading_map", 3};
+  Input<bool> has_lens_shading{"has_lens_shading"};
 
   // 16-bit Linear RGB output
   Output<Buffer<uint16_t>> output{"output", 3};
@@ -56,7 +58,7 @@ public:
                                white_balance_g1, white_balance_b};
 
     Func bayer_shifted = shift_bayer_to_rggb(merged, cfa_pattern);
-    Func black_white_level_output = black_white_level(bayer_shifted, black_point_r, black_point_g0, black_point_g1, black_point_b, white_point);
+    Func black_white_level_output = black_white_level(bayer_shifted, inputs.width(), inputs.height(), black_point_r, black_point_g0, black_point_g1, black_point_b, white_point, lens_shading_map, has_lens_shading);
     Func white_balance_output = white_balance(black_white_level_output, wb);
 
     // Demosaic
@@ -140,14 +142,45 @@ public:
 private:
   Var x{"x"}, y{"y"}, c{"c"}, xo{"xo"}, yo{"yo"}, xi{"xi"}, yi{"yi"};
 
-  Func black_white_level(Func input, const Expr bp_r, const Expr bp_g0, const Expr bp_g1, const Expr bp_b, const Expr wp) {
+  Func black_white_level(Func input, Expr width, Expr height, const Expr bp_r, const Expr bp_g0, const Expr bp_g1, const Expr bp_b, const Expr wp, Func lsc_map, Expr has_lsc) {
     Func output("black_white_level_output");
     Expr bp = select(y % 2 == 0,
                      select(x % 2 == 0, bp_r, bp_g0),
                      select(x % 2 == 0, bp_g1, bp_b));
+                     
+    Expr ch = select(y % 2 == 0,
+                     select(x % 2 == 0, 0, 1),
+                     select(x % 2 == 0, 2, 3));                     
+
+    Expr fx = cast<float>(x) * cast<float>(lsc_map.width() - 1) / cast<float>(max(1, width - 1));
+    Expr fy = cast<float>(y) * cast<float>(lsc_map.height() - 1) / cast<float>(max(1, height - 1));
+    
+    Expr ix0 = clamp(cast<int>(floor(fx)), 0, lsc_map.width() - 1);
+    Expr ix1 = min(ix0 + 1, lsc_map.width() - 1);
+    Expr iy0 = clamp(cast<int>(floor(fy)), 0, lsc_map.height() - 1);
+    Expr iy1 = min(iy0 + 1, lsc_map.height() - 1);
+    
+    Expr w_x1 = fx - cast<float>(ix0);
+    Expr w_x0 = 1.0f - w_x1;
+    Expr w_y1 = fy - cast<float>(iy0);
+    Expr w_y0 = 1.0f - w_y1;
+    
+    Expr v00 = lsc_map(ix0, iy0, ch);
+    Expr v10 = lsc_map(ix1, iy0, ch);
+    Expr v01 = lsc_map(ix0, iy1, ch);
+    Expr v11 = lsc_map(ix1, iy1, ch);
+    
+    Expr v0 = v00 * w_x0 + v10 * w_x1;
+    Expr v1 = v01 * w_x0 + v11 * w_x1;
+    Expr lsc_gain = v0 * w_y0 + v1 * w_y1;
+    
+    lsc_gain = select(has_lsc, lsc_gain, 1.0f);
+
     // Reserve headroom (0.5x) for White Balance to prevent clipping
     Expr white_factor = (65535.f / max(1.f, f32(wp) - f32(bp))) * 0.5f;
-    output(x, y) = u16_sat((i32(input(x, y)) - bp) * white_factor);
+    
+    Expr val = (f32(i32(input(x, y)) - bp) * white_factor) * lsc_gain;
+    output(x, y) = u16_sat(val);
     return output;
   }
 
