@@ -622,7 +622,7 @@ class PlaygroundGalleryFragment : Fragment() {
 
         android.widget.Toast.makeText(requireContext(), "Exporting ${filesToExport.size} files...", android.widget.Toast.LENGTH_SHORT).show()
 
-        lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+        lifecycleScope.launch(top.maary.darkbag.processor.ColorProcessor.imageProcessingDispatcher) {
             var successCount = 0
             val ctx = context ?: return@launch
             val appContext = ctx.applicationContext
