@@ -142,7 +142,7 @@ public:
 private:
   Var x{"x"}, y{"y"}, c{"c"}, xo{"xo"}, yo{"yo"}, xi{"xi"}, yi{"yi"};
 
-  Func black_white_level(Func input, Expr width, Expr height, const Expr bp_r, const Expr bp_g0, const Expr bp_g1, const Expr bp_b, const Expr wp, Func lsc_map, Expr has_lsc) {
+  Func black_white_level(Func input, Expr width, Expr height, const Expr bp_r, const Expr bp_g0, const Expr bp_g1, const Expr bp_b, const Expr wp, Input<Buffer<float>>& lsc_map, Expr has_lsc) {
     Func output("black_white_level_output");
     Expr bp = select(y % 2 == 0,
                      select(x % 2 == 0, bp_r, bp_g0),
@@ -152,13 +152,13 @@ private:
                      select(x % 2 == 0, 0, 1),
                      select(x % 2 == 0, 2, 3));                     
 
-    Expr fx = cast<float>(x) * cast<float>(lsc_map.width() - 1) / cast<float>(max(1, width - 1));
-    Expr fy = cast<float>(y) * cast<float>(lsc_map.height() - 1) / cast<float>(max(1, height - 1));
+    Expr fx = cast<float>(x) * cast<float>(lsc_map.dim(0).extent() - 1) / cast<float>(max(1, width - 1));
+    Expr fy = cast<float>(y) * cast<float>(lsc_map.dim(1).extent() - 1) / cast<float>(max(1, height - 1));
     
-    Expr ix0 = clamp(cast<int>(floor(fx)), 0, lsc_map.width() - 1);
-    Expr ix1 = min(ix0 + 1, lsc_map.width() - 1);
-    Expr iy0 = clamp(cast<int>(floor(fy)), 0, lsc_map.height() - 1);
-    Expr iy1 = min(iy0 + 1, lsc_map.height() - 1);
+    Expr ix0 = clamp(cast<int>(floor(fx)), 0, lsc_map.dim(0).extent() - 1);
+    Expr ix1 = min(ix0 + 1, lsc_map.dim(0).extent() - 1);
+    Expr iy0 = clamp(cast<int>(floor(fy)), 0, lsc_map.dim(1).extent() - 1);
+    Expr iy1 = min(iy0 + 1, lsc_map.dim(1).extent() - 1);
     
     Expr w_x1 = fx - cast<float>(ix0);
     Expr w_x0 = 1.0f - w_x1;
