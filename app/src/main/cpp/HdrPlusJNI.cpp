@@ -447,34 +447,9 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
     Buffer<float> lscMapBuf;
     std::vector<float> dummyLsc = {1.0f, 1.0f, 1.0f, 1.0f};
     if (lensShadingVec.empty()) {
-        lscMapBuf = Buffer<float>(dummyLsc.data(), 4, 1, 1);
+        lscMapBuf = Buffer<float>(dummyLsc.data(), 1, 1, 4);
     } else {
-        if (cfaPattern == 1) { // CFA_GRBG
-            // Physical: Gr(0), R(1), B(2), Gb(3) -> Target: R, Gr, Gb, B
-            for (size_t i = 0; i < lensShadingVec.size(); i += 4) {
-                float gr = lensShadingVec[i + 0]; float r  = lensShadingVec[i + 1];
-                float b  = lensShadingVec[i + 2]; float gb = lensShadingVec[i + 3];
-                lensShadingVec[i + 0] = r; lensShadingVec[i + 1] = gr;
-                lensShadingVec[i + 2] = gb; lensShadingVec[i + 3] = b;
-            }
-        } else if (cfaPattern == 2) { // CFA_GBRG
-            // Physical: Gb(0), B(1), R(2), Gr(3) -> Target: R, Gr, Gb, B
-            for (size_t i = 0; i < lensShadingVec.size(); i += 4) {
-                float gb = lensShadingVec[i + 0]; float b  = lensShadingVec[i + 1];
-                float r  = lensShadingVec[i + 2]; float gr = lensShadingVec[i + 3];
-                lensShadingVec[i + 0] = r; lensShadingVec[i + 1] = gr;
-                lensShadingVec[i + 2] = gb; lensShadingVec[i + 3] = b;
-            }
-        } else if (cfaPattern == 3) { // CFA_BGGR
-            // Physical: B(0), Gb(1), Gr(2), R(3) -> Target: R, Gr, Gb, B
-            for (size_t i = 0; i < lensShadingVec.size(); i += 4) {
-                float b  = lensShadingVec[i + 0]; float gb = lensShadingVec[i + 1];
-                float gr = lensShadingVec[i + 2]; float r  = lensShadingVec[i + 3];
-                lensShadingVec[i + 0] = r; lensShadingVec[i + 1] = gr;
-                lensShadingVec[i + 2] = gb; lensShadingVec[i + 3] = b;
-            }
-        }
-        lscMapBuf = Buffer<float>(lensShadingVec.data(), 4, lensShadingCols, lensShadingRows);
+        lscMapBuf = Buffer<float>(lensShadingVec.data(), lensShadingCols, lensShadingRows, 4);
     }
 
     auto halideStart = std::chrono::high_resolution_clock::now();

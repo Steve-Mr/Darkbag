@@ -144,33 +144,34 @@ private:
   Func apply_lsc(Func input, Expr width, Expr height) {
     Func output("lsc_output");
     
-    Expr num_cols = lens_shading_map.dim(1).extent();
-    Expr num_rows = lens_shading_map.dim(2).extent();
+    Expr num_cols = lens_shading_map.dim(0).extent();
+    Expr num_rows = lens_shading_map.dim(1).extent();
 
-    Expr nx = (cast<float>(x) + 0.5f) / cast<float>(width);
-    Expr ny = (cast<float>(y) + 0.5f) / cast<float>(height);
+    Expr fx = cast<float>(x) * cast<float>(num_cols - 1) / cast<float>(max(1, width - 1));
+    Expr fy = cast<float>(y) * cast<float>(num_rows - 1) / cast<float>(max(1, height - 1));
 
-    Expr map_xf = nx * cast<float>(num_cols) - 0.5f;
-    Expr map_yf = ny * cast<float>(num_rows) - 0.5f;
-
-    Expr map_x = clamp(cast<int>(floor(map_xf)), 0, num_cols - 2);
-    Expr map_y = clamp(cast<int>(floor(map_yf)), 0, num_rows - 2);
+    Expr ix0 = clamp(cast<int>(floor(fx)), 0, num_cols - 1);
+    Expr ix1 = min(ix0 + 1, num_cols - 1);
+    Expr iy0 = clamp(cast<int>(floor(fy)), 0, num_rows - 1);
+    Expr iy1 = min(iy0 + 1, num_rows - 1);
     
-    Expr tx = clamp(map_xf - floor(map_xf), 0.0f, 1.0f);
-    Expr ty = clamp(map_yf - floor(map_yf), 0.0f, 1.0f);
+    Expr w_x1 = fx - cast<float>(ix0);
+    Expr w_x0 = 1.0f - w_x1;
+    Expr w_y1 = fy - cast<float>(iy0);
+    Expr w_y0 = 1.0f - w_y1;
 
     Expr c_idx = select(y % 2 == 0,
                     select(x % 2 == 0, 0, 1),
                     select(x % 2 == 0, 2, 3));
 
-    Expr v00 = lens_shading_map(c_idx, map_x, map_y);
-    Expr v10 = lens_shading_map(c_idx, map_x + 1, map_y);
-    Expr v01 = lens_shading_map(c_idx, map_x, map_y + 1);
-    Expr v11 = lens_shading_map(c_idx, map_x + 1, map_y + 1);
+    Expr v00 = lens_shading_map(ix0, iy0, c_idx);
+    Expr v10 = lens_shading_map(ix1, iy0, c_idx);
+    Expr v01 = lens_shading_map(ix0, iy1, c_idx);
+    Expr v11 = lens_shading_map(ix1, iy1, c_idx);
 
-    Expr g0 = v00 * (1.0f - tx) + v10 * tx;
-    Expr g1 = v01 * (1.0f - tx) + v11 * tx;
-    Expr gain = g0 * (1.0f - ty) + g1 * ty;
+    Expr v0 = v00 * w_x0 + v10 * w_x1;
+    Expr v1 = v01 * w_x0 + v11 * w_x1;
+    Expr gain = v0 * w_y0 + v1 * w_y1;
     
     Expr final_gain = select(num_cols > 0, gain, 1.0f);
     
