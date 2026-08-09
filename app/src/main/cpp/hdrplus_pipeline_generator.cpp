@@ -65,8 +65,8 @@ public:
     DemosaicResult dm = demosaic(white_balance_output, inputs.width(), inputs.height());
     Func demosaic_output = dm.output;
 
-    // Denoise (applies on sRGB linear data)
-    Func linear_rgb_output = srgb(demosaic_output, ccm);
+    // Denoise (applies on Sensor Linear data now)
+    Func linear_rgb_output = demosaic_output;
     
     Func chroma_denoised_output;
     if (!single_frame_mode) {
@@ -184,27 +184,14 @@ private:
     Expr bp = select(y % 2 == 0,
                      select(x % 2 == 0, bp_r, bp_g0),
                      select(x % 2 == 0, bp_g1, bp_b));
-    // Reserve headroom (0.5x) for White Balance to prevent clipping
-    Expr white_factor = (65535.f / max(1.f, f32(wp) - f32(bp))) * 0.5f;
+    Expr white_factor = 65535.f / max(1.f, f32(wp) - f32(bp));
     output(x, y) = u16_sat((i32(input(x, y)) - bp) * white_factor);
     return output;
   }
 
   Func white_balance(Func input, const CompiletimeWhiteBalance &wb) {
     Func output("white_balance_output");
-    // Highlight Dampening logic
-    float saturation_point = 32767.0f;
-    float knee_point = 30000.0f;
-    auto apply_wb_safe = [&](Expr val, Expr gain) {
-        Expr f_val = f32(val);
-        Expr alpha = 1.0f - clamp((f_val - knee_point) / (saturation_point - knee_point), 0.0f, 1.0f);
-        Expr final_gain = gain * alpha + 1.0f * (1.0f - alpha);
-        return u16_sat(final_gain * f_val);
-    };
-    Expr gain = select(y % 2 == 0,
-                       select(x % 2 == 0, wb.r, wb.g0),
-                       select(x % 2 == 0, wb.g1, wb.b));
-    output(x, y) = apply_wb_safe(input(x, y), gain);
+    output(x, y) = input(x, y);
     return output;
   }
 

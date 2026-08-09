@@ -197,7 +197,7 @@ static const TIFFFieldInfo dng_field_info[] = {
     { TIFFTAG_UNIQUECAMERAMODEL, -1, -1, TIFF_ASCII, FIELD_CUSTOM, 1, 0, const_cast<char*>("UniqueCameraModel") },
     { TIFFTAG_BLACKLEVEL, -1, -1, TIFF_LONG, FIELD_CUSTOM, 1, 1, const_cast<char*>("BlackLevel") },
     { TIFFTAG_WHITELEVEL, -1, -1, TIFF_LONG, FIELD_CUSTOM, 1, 1, const_cast<char*>("WhiteLevel") },
-    { TIFFTAG_COLORMATRIX1, -1, -1, TIFF_RATIONAL, FIELD_CUSTOM, 1, 1, const_cast<char*>("ColorMatrix1") },
+    { TIFFTAG_COLORMATRIX1, -1, -1, TIFF_SRATIONAL, FIELD_CUSTOM, 1, 1, const_cast<char*>("ColorMatrix1") },
     { TIFFTAG_ASSHOTNEUTRAL, -1, -1, TIFF_RATIONAL, FIELD_CUSTOM, 1, 1, const_cast<char*>("AsShotNeutral") },
     { TIFFTAG_CALIBRATIONILLUMINANT1, 1, 1, TIFF_SHORT, FIELD_CUSTOM, 1, 0, const_cast<char*>("CalibrationIlluminant1") },
     { TIFFTAG_BASELINEEXPOSURE, 1, 1, TIFF_SRATIONAL, FIELD_CUSTOM, 1, 0, const_cast<char*>("BaselineExposure") },
@@ -690,15 +690,34 @@ bool process_and_save_image(
         float g = static_cast<float>(planarData[g_idx]);
         float b = static_cast<float>(planarData[b_idx]);
         
-        // LSC is now handled in the Halide Bayer domain, so we bypass it here.
+        // 1. Apply White Balance
+        if (wb) {
+            r *= wb[0];
+            g *= wb[1];
+            b *= wb[3];
+        }
+
+        // 2. Highlight Desaturation
+        float max_rgb = std::max({r, g, b});
+        float theoretical_max = 65535.0f * (wb ? std::max({wb[0], wb[1], wb[3]}) : 1.0f);
+        float threshold = 65535.0f * 0.8f;
+        if (max_rgb > threshold) {
+            float desat = std::clamp((max_rgb - threshold) / (theoretical_max - threshold), 0.0f, 1.0f);
+            desat = desat * desat * (3.0f - 2.0f * desat); // Smoothstep
+            float y_lum = 0.299f * r + 0.587f * g + 0.114f * b;
+            r = r * (1.0f - desat) + y_lum * desat;
+            g = g * (1.0f - desat) + y_lum * desat;
+            b = b * (1.0f - desat) + y_lum * desat;
+        }
+
         r = std::min(r, 65535.0f);
         g = std::min(g, 65535.0f);
         b = std::min(b, 65535.0f);
         
         float exp_gain = std::pow(2.0f, exposure);
-        float norm_r = (r / 65535.0f) * gain * exp_gain;
-        float norm_g = (g / 65535.0f) * gain * exp_gain;
-        float norm_b = (b / 65535.0f) * gain * exp_gain;
+        float norm_r = std::min(1.0f, (r / 65535.0f) * gain * exp_gain);
+        float norm_g = std::min(1.0f, (g / 65535.0f) * gain * exp_gain);
+        float norm_b = std::min(1.0f, (b / 65535.0f) * gain * exp_gain);
 
         if (edgeComp.enabled) {
             const float nx = (x - edgeComp.centerX) * edgeComp.invMaxRadius;
@@ -737,6 +756,17 @@ bool process_and_save_image(
             default: color = multiply(M_XYZ_to_Rec709_D65, color); break;
         }
         if (stageB) *stageB = color;
+
+        // Apply ACES Filmic Tone Mapping ONLY for standard sRGB output
+        if (targetLog == 0) {
+            auto aces_fit = [](float v) {
+                float a = 2.51f, b = 0.03f, c = 2.43f, d = 0.59f, e = 0.14f;
+                return std::clamp((v * (a * v + b)) / (v * (c * v + d) + e), 0.0f, 1.0f);
+            };
+            color.r = aces_fit(color.r);
+            color.g = aces_fit(color.g);
+            color.b = aces_fit(color.b);
+        }
 
         color.r = apply_log(color.r, targetLog); color.g = apply_log(color.g, targetLog); color.b = apply_log(color.b, targetLog);
 
@@ -1057,7 +1087,8 @@ static const std::vector<unsigned char>& make_preview_rgb8(
     bool mirror,
     float gain,
     int& outWidth,
-    int& outHeight
+    int& outHeight,
+    const float* wbVec = nullptr
 ) {
     const int longEdge = std::max(width, height);
     const int scale = std::max(1, (longEdge + targetLongEdge - 1) / targetLongEdge);
@@ -1094,21 +1125,43 @@ static const std::vector<unsigned char>& make_preview_rgb8(
             const size_t b_idx = (size_t)srcY*stride_y + (size_t)srcX*stride_x + 2*stride_c;
             const size_t dstIdx = (static_cast<size_t>(y) * outWidth + x) * 3;
 
-            auto encodePreviewChannel = [&](unsigned short sample) -> unsigned char {
-                const float linear = std::clamp((sample / 16383.0f) * gain, 0.0f, 1.0f); // 14-bit max from Halide
+            auto encodePreviewChannel = [&](unsigned short sample, float wbGain) -> unsigned char {
+                const float linear = std::clamp((sample * wbGain / 65535.0f) * gain, 0.0f, 1.0f); // 16-bit max from Halide
                 const float gammaEncoded = std::pow(linear, 1.0f / 2.2f);
                 return (unsigned char)std::clamp(gammaEncoded * 255.0f + 0.5f, 0.0f, 255.0f);
             };
 
-            preview[dstIdx + 0] = encodePreviewChannel(planarData[r_idx]);
-            preview[dstIdx + 1] = encodePreviewChannel(planarData[g_idx]);
-            preview[dstIdx + 2] = encodePreviewChannel(planarData[b_idx]);
+            float wb_r = wbVec ? wbVec[0] : 1.0f;
+            float wb_g = wbVec ? wbVec[1] : 1.0f;
+            float wb_b = wbVec ? wbVec[3] : 1.0f;
+
+            preview[dstIdx + 0] = encodePreviewChannel(planarData[r_idx], wb_r);
+            preview[dstIdx + 1] = encodePreviewChannel(planarData[g_idx], wb_g);
+            preview[dstIdx + 2] = encodePreviewChannel(planarData[b_idx], wb_b);
         }
     }
     return preview;
 }
 
-bool write_dng(const char* filename, int width, int height, const unsigned short* planarData, int stride_x, int stride_y, int stride_c, int whiteLevel, const std::vector<float>& ccm, const ImageMetadata& metadata, int orientation, bool mirror, float baselineExposure) {
+Matrix3x3 inverse_matrix(const Matrix3x3& m) {
+    Matrix3x3 inv;
+    float det = m.m[0]*(m.m[4]*m.m[8] - m.m[5]*m.m[7]) -
+                m.m[1]*(m.m[3]*m.m[8] - m.m[5]*m.m[6]) +
+                m.m[2]*(m.m[3]*m.m[7] - m.m[4]*m.m[6]);
+    float invdet = (det != 0.0f) ? (1.0f / det) : 1.0f;
+    inv.m[0] = (m.m[4]*m.m[8] - m.m[5]*m.m[7]) * invdet;
+    inv.m[1] = (m.m[2]*m.m[7] - m.m[1]*m.m[8]) * invdet;
+    inv.m[2] = (m.m[1]*m.m[5] - m.m[2]*m.m[4]) * invdet;
+    inv.m[3] = (m.m[5]*m.m[6] - m.m[3]*m.m[8]) * invdet;
+    inv.m[4] = (m.m[0]*m.m[8] - m.m[2]*m.m[6]) * invdet;
+    inv.m[5] = (m.m[2]*m.m[3] - m.m[0]*m.m[5]) * invdet;
+    inv.m[6] = (m.m[3]*m.m[7] - m.m[4]*m.m[6]) * invdet;
+    inv.m[7] = (m.m[1]*m.m[6] - m.m[0]*m.m[7]) * invdet;
+    inv.m[8] = (m.m[0]*m.m[4] - m.m[1]*m.m[3]) * invdet;
+    return inv;
+}
+
+bool write_dng(const char* filename, int width, int height, const unsigned short* planarData, int stride_x, int stride_y, int stride_c, int whiteLevel, const std::vector<float>& ccm, const ImageMetadata& metadata, int orientation, bool mirror, float baselineExposure, const float* wbVec) {
     TIFFSetTagExtender(DNGTagExtender);
     TIFF* tif = TIFFOpen(filename, "w");
     if (!tif) return false;
@@ -1146,11 +1199,25 @@ bool write_dng(const char* filename, int width, int height, const unsigned short
     uint32_t black_level_val = 0;
     TIFFSetField(tif, TIFFTAG_BLACKLEVEL, 1, &black_level_val);
 
-    // Since data is now in sRGB linear space, ColorMatrix1 should map XYZ to sRGB
-    Matrix3x3 colorMatrix1 = M_XYZ_to_sRGB_D65;
+    // Halide now outputs pure Sensor Linear data.
+    // The Android CCM maps Sensor Space -> sRGB Linear Space.
+    // DNG's ColorMatrix1 expects XYZ -> Sensor Space.
+    // ColorMatrix1 = Inverse(CCM) * XYZ_to_sRGB
+    Matrix3x3 colorMatrix1 = M_XYZ_to_sRGB_D65; // Fallback
+    if (ccm.size() >= 9) {
+        Matrix3x3 sensor_to_srgb = {
+            ccm[0], ccm[1], ccm[2],
+            ccm[3], ccm[4], ccm[5],
+            ccm[6], ccm[7], ccm[8]
+        };
+        Matrix3x3 srgb_to_sensor = inverse_matrix(sensor_to_srgb);
+        colorMatrix1 = multiply(srgb_to_sensor, M_XYZ_to_sRGB_D65);
+    }
     TIFFSetField(tif, TIFFTAG_COLORMATRIX1, 9, colorMatrix1.m);
 
-    static const float as_shot_neutral[] = {1.0f, 1.0f, 1.0f};
+    float as_shot_neutral[3] = {1.0f, 1.0f, 1.0f};
+    // Force AsShotNeutral to 1,1,1 since we are baking White Balance into the LinearRaw data directly
+    // This is a diagnostic test to see if Lightroom ignores AsShotNeutral for LinearRaw DNGs.
     TIFFSetField(tif, TIFFTAG_ASSHOTNEUTRAL, 3, as_shot_neutral);
 
     TIFFSetField(tif, TIFFTAG_CALIBRATIONILLUMINANT1, 21);
@@ -1168,14 +1235,22 @@ bool write_dng(const char* filename, int width, int height, const unsigned short
     TIFFSetField(tif, TIFFTAG_ISOSPEEDRATINGS, (uint16_t)1, &iso_short);
 
     std::vector<unsigned short> rowBuffer(width * 3);
+    
+    // Extract White Balance multipliers to bake into the DNG data
+    float wb_r = wbVec ? wbVec[0] : 1.0f;
+    float wb_g = wbVec ? wbVec[1] : 1.0f;
+    float wb_b = wbVec ? wbVec[3] : 1.0f;
+
     for (int y = 0; y < height; y++) {
         for (int x = 0; x < width; x++) {
              size_t r_idx = (size_t)y*stride_y + (size_t)x*stride_x + 0*stride_c;
              size_t g_idx = (size_t)y*stride_y + (size_t)x*stride_x + 1*stride_c;
              size_t b_idx = (size_t)y*stride_y + (size_t)x*stride_x + 2*stride_c;
-             rowBuffer[x*3+0] = planarData[r_idx];
-             rowBuffer[x*3+1] = planarData[g_idx];
-             rowBuffer[x*3+2] = planarData[b_idx];
+             
+             // Bake White Balance multipliers directly into the raw data
+             rowBuffer[x*3+0] = (unsigned short)std::min(65535.0f, planarData[r_idx] * wb_r);
+             rowBuffer[x*3+1] = (unsigned short)std::min(65535.0f, planarData[g_idx] * wb_g);
+             rowBuffer[x*3+2] = (unsigned short)std::min(65535.0f, planarData[b_idx] * wb_b);
         }
         if (TIFFWriteScanline(tif, rowBuffer.data(), y, 0) < 0) {
             TIFFClose(tif);
@@ -1199,7 +1274,7 @@ bool write_dng(const char* filename, int width, int height, const unsigned short
     for (const auto& spec : previewSpecs) {
         int previewWidth = 0, previewHeight = 0;
         const std::vector<unsigned char>& previewRgb8 = make_preview_rgb8(
-            planarData, stride_x, stride_y, stride_c, width, height, spec.targetLongEdge, orientation, mirror, std::pow(2.0f, baselineExposure), previewWidth, previewHeight
+            planarData, stride_x, stride_y, stride_c, width, height, spec.targetLongEdge, orientation, mirror, std::pow(2.0f, baselineExposure), previewWidth, previewHeight, wbVec
         );
 
         if (previewRgb8.empty()) {
