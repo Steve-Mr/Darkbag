@@ -9,7 +9,7 @@ import java.util.concurrent.ConcurrentLinkedQueue
  * Uses a Direct ByteBuffer to store pixel data off-heap to prevent OOM.
  */
 data class HdrFrame(
-    var buffer: ByteBuffer?,
+    // We no longer keep a separate buffer per frame, it is now all in megaBuffer
     val width: Int,
     val height: Int,
     val timestamp: Long,
@@ -20,9 +20,13 @@ data class HdrFrame(
      * Explicitly clears the buffer reference to assist GC.
      */
     fun close() {
-        buffer = null
     }
 }
+
+data class BurstResult(
+    val megaBuffer: ByteBuffer,
+    val frames: List<HdrFrame>
+)
 
 /**
  * Helper class to manage HDR+ burst capture.
@@ -30,7 +34,7 @@ data class HdrFrame(
  */
 class HdrPlusBurst(
     private val frameCount: Int,
-    private val onBurstComplete: (List<HdrFrame>) -> Unit
+    private val onBurstComplete: (BurstResult) -> Unit
 ) {
     companion object {
         private const val MAX_POOL_SIZE = 10
@@ -60,29 +64,26 @@ class HdrPlusBurst(
     }
 
     private val frames = mutableListOf<HdrFrame>()
+    private var megaBuffer: ByteBuffer? = null
 
     fun addFrame(image: ImageProxy, physicalId: String? = null) {
         if (frames.size < frameCount) {
             try {
-                // Extract frame data immediately to release the ImageProxy buffer
                 val frame = copyFrame(image, physicalId)
                 frames.add(frame)
 
                 if (frames.size == frameCount) {
-                    onBurstComplete(frames.toList())
-                    frames.clear() // Ownership transferred to consumer
+                    val resultBuffer = megaBuffer!!
+                    megaBuffer = null // Transfer ownership
+                    onBurstComplete(BurstResult(resultBuffer, frames.toList()))
+                    frames.clear()
                 }
             } catch (e: Exception) {
-                // If allocation fails (OOM), we clear and abort.
-                // Do NOT call image.close() here, as it's handled in finally block.
-                frames.forEach {
-                    releaseBuffer(it.buffer)
-                    it.close()
-                }
+                megaBuffer?.let { releaseBuffer(it) }
+                megaBuffer = null
                 frames.clear()
                 throw e
             } finally {
-                // Always close the original image to free the camera pipeline buffer
                 image.close()
             }
         } else {
@@ -111,14 +112,14 @@ class HdrPlusBurst(
                 )
                 frames.add(frame)
                 if (frames.size == frameCount) {
-                    onBurstComplete(frames.toList())
+                    val resultBuffer = megaBuffer!!
+                    megaBuffer = null // Transfer ownership
+                    onBurstComplete(BurstResult(resultBuffer, frames.toList()))
                     frames.clear()
                 }
             } catch (e: Exception) {
-                frames.forEach {
-                    releaseBuffer(it.buffer)
-                    it.close()
-                }
+                megaBuffer?.let { releaseBuffer(it) }
+                megaBuffer = null
                 frames.clear()
                 throw e
             }
@@ -126,10 +127,8 @@ class HdrPlusBurst(
     }
 
     fun reset() {
-        frames.forEach {
-            releaseBuffer(it.buffer)
-            it.close()
-        }
+        megaBuffer?.let { releaseBuffer(it) }
+        megaBuffer = null
         frames.clear()
     }
 
@@ -157,36 +156,32 @@ class HdrPlusBurst(
         rotationDegrees: Int,
         physicalId: String? = null
     ): HdrFrame {
-        // Calculate tight-packed size
         val rowLength = width * pixelStride
         val dataLength = rowLength * height
 
-        // Use pooled Direct ByteBuffer
-        val cleanData = acquireBuffer(dataLength)
+        if (megaBuffer == null) {
+            megaBuffer = acquireBuffer(dataLength * frameCount)
+        }
+        val cleanData = megaBuffer!!
+        cleanData.position(frames.size * dataLength)
+        cleanData.limit(cleanData.position() + dataLength)
 
-        // Copy logic (handling stride padding)
         val oldPos = buffer.position()
         buffer.rewind()
         if (rowStride == rowLength) {
-            // Fast path: Data is already tightly packed
             if (buffer.remaining() == dataLength) {
                 cleanData.put(buffer)
             } else {
-                // Buffer might be larger due to alignment, limit it
                 val oldLimit = buffer.limit()
                 buffer.limit(buffer.position() + dataLength)
                 cleanData.put(buffer)
                 buffer.limit(oldLimit)
             }
         } else {
-            // Slow path: Remove padding bytes from each row
-            // Optimization: Use buffer limits and cleanData.put(buffer) to copy directly
-            // between ByteBuffers, avoiding the temporary rowData ByteArray allocation.
             val oldLimit = buffer.limit()
             for (y in 0 until height) {
                 val rowStart = y * rowStride
                 if (rowStart + rowLength > buffer.capacity()) break
-
                 buffer.position(rowStart)
                 buffer.limit(rowStart + rowLength)
                 cleanData.put(buffer)
@@ -194,10 +189,11 @@ class HdrPlusBurst(
             buffer.limit(oldLimit)
         }
         buffer.position(oldPos)
-        cleanData.flip() // Prepare for reading
+        
+        // Reset limit and position of megaBuffer for future ops, though we rely on position management
+        cleanData.limit(cleanData.capacity())
 
         return HdrFrame(
-            buffer = cleanData,
             width = width,
             height = height,
             timestamp = timestamp,

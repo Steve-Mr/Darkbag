@@ -76,7 +76,7 @@ import androidx.concurrent.futures.await
 import top.maary.darkbag.MainApplication
 import top.maary.darkbag.processor.ColorProcessor
 import top.maary.darkbag.models.CaptureMetadata
-import top.maary.darkbag.processor.HdrPlusExportWorker
+
 import top.maary.darkbag.repository.ImageRepository
 import top.maary.darkbag.utils.ImageSaver
 import java.io.File
@@ -338,7 +338,7 @@ class CameraFragment : Fragment() {
     )
 
     // Rate limiting semaphore to prevent OOM
-    private val processingSemaphore = kotlinx.coroutines.sync.Semaphore(2)
+    private val processingSemaphore = kotlinx.coroutines.sync.Semaphore(6)
 
     private var camera2RetryCount = 0
     private val processingChannel = kotlinx.coroutines.channels.Channel<RawImageHolder>(2)
@@ -581,9 +581,9 @@ class CameraFragment : Fragment() {
 
         // Initialize HDR+ Burst Helper
         hdrPlusBurstHelper = HdrPlusBurst(
-            frameCount = 3,
-            onBurstComplete = { frames ->
-                processHdrPlusBurst(frames, 1.0f)
+            frameCount = 1,
+            onBurstComplete = { burstResult ->
+                processHdrPlusBurst(burstResult, 1.0f)
             }
         )
 
@@ -641,10 +641,7 @@ class CameraFragment : Fragment() {
                         processingSemaphore.release()
                         withContext(Dispatchers.Main) {
                             cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
-                            // If not half-frame, we hide now. If half-frame, wait for final stitched result in backgroundSaveFlow.
-                            if (!isHalfFrameModeEnabled) {
-                                hideProcessingAnimation()
-                            }
+                            // Wait for final stitched result in backgroundSaveFlow to hide animation for ALL pipelines.
                         }
                     }
                 }
@@ -1852,77 +1849,25 @@ class CameraFragment : Fragment() {
                     captureResult = captureResult
                 )
 
-                // 3. JNI Halide Processing
-                val result = ColorProcessor.processSingleFrameRaw(
-                    bayerBuffer = image.data,
-                    width = image.width,
-                    height = image.height,
-                    orientation = image.combinedOrientation,
-                    whiteLevel = whiteLevel,
-                    blackLevelPattern = blackLevelPattern,
-                    lensShadingMap = lensShadingMapData,
-                    lensShadingRows = lensShadingRows,
-                    lensShadingCols = lensShadingCols,
-                    whiteBalance = wb,
-                    ccm = ccm,
-                    cfaPattern = cfa,
-                    targetLog = targetLogIndex,
-                    lutPath = nativeLutPath,
-                    outputJpgPath = if (saveJpg) tempJpgFile.absolutePath else null, // Fast JPG
-                    outputDngPath = null,
-                    digitalGain = image.digitalGain,
-                    debugStats = debugStats,
-                    outputBitmap = null,
-                    tempRawPath = tempRawFile.absolutePath,
-                    zoomFactor = image.zoomRatio,
-                    mirror = mirror,
-                    metadata = captureMetadata
-                )
-
-                timing?.jniDone = System.currentTimeMillis()
-
-                if (result < 0) throw RuntimeException("processSingleFrameRaw failed: $result")
+                // 3. JNI Halide Processing (REMOVED)
+                // 前台 JNI 调用与 fastjpg 生成已移除，直接交由 HdrPlusProcessingService 处理
+                val fastOutputUri: android.net.Uri? = null
+                
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(requireContext(), "Processing Queued", Toast.LENGTH_SHORT).show()
+                    if (isHalfFrameModeEnabled && prefs.getInt(scopedHalfFrameStepKey(prefs), 0) == 1) {
+                        setGalleryThumbnail(null)
+                    }
+                    // 保持加载动画，直到服务处理完毕
+                }
 
                 if (saveRaw) {
                     try {
-                        val shouldRenderNeutralDngThumbnail = !saveJpg || targetLogIndex != 0 || !nativeLutPath.isNullOrBlank()
-                        val dngThumbnailSource = if (shouldRenderNeutralDngThumbnail) {
-                            val thumbResult = ColorProcessor.processSingleFrameRaw(
-                                bayerBuffer = image.data,
-                                width = image.width,
-                                height = image.height,
-                                orientation = image.combinedOrientation,
-                                whiteLevel = whiteLevel,
-                                blackLevelPattern = blackLevelPattern,
-                                lensShadingMap = lensShadingMapData,
-                                lensShadingRows = lensShadingRows,
-                                lensShadingCols = lensShadingCols,
-                                whiteBalance = wb,
-                                ccm = ccm,
-                                cfaPattern = cfa,
-                                targetLog = 0,
-                                lutPath = null,
-                                outputJpgPath = tempDngThumbFile.absolutePath,
-                                outputDngPath = null,
-                                digitalGain = image.digitalGain,
-                                debugStats = null,
-                                outputBitmap = null,
-                                tempRawPath = null,
-                                zoomFactor = image.zoomRatio,
-                                mirror = mirror,
-                                metadata = captureMetadata
-                            )
-                            if (thumbResult >= 0 && tempDngThumbFile.exists() && tempDngThumbFile.length() > 0L) tempDngThumbFile else null
-                        } else if (tempJpgFile.exists() && tempJpgFile.length() > 0L) {
-                            tempJpgFile
-                        } else {
-                            null
-                        }
+                        val dngThumbnailSource: java.io.File? = null
 
                         val dngCreator = android.hardware.camera2.DngCreator(chars, captureResult)
                         dngCreator.setDescription(DarkbagIdentity.imageDescription(isHdrPlus = false))
 
-                        // Map rotation to DngCreator orientation
                         val dngOrientation = when (image.combinedOrientation) {
                             90 -> ExifInterface.ORIENTATION_ROTATE_90
                             180 -> ExifInterface.ORIENTATION_ROTATE_180
@@ -1943,111 +1888,86 @@ class CameraFragment : Fragment() {
                         FileOutputStream(bayerDngFile).use { out ->
                             dngCreator.writeByteBuffer(out, Size(image.width, image.height), dngBuffer, 0)
                         }
-                        dngWritten = true
-                        Log.d(TAG, "DNG saved using DngCreator: ${bayerDngFile.absolutePath}")
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Failed to save DNG using DngCreator", e)
-                    } finally {
-                        tempDngThumbFile.delete()
-                    }
-                }
-
-                val layout = if (image.halfFrameMetadata?.profile == HalfFrameSessionStore.PROFILE_HALF_TOP) "TB" else if (image.halfFrameMetadata?.profile == HalfFrameSessionStore.PROFILE_HALF_SIDE) "SBS" else null
-                val editConfig = top.maary.darkbag.models.EditConfig(
-                    log = targetLogName ?: "None",
-                    lut = activeLutName ?: "None",
-                    digitalGain = image.digitalGain,
-                    adjustments = if (image.halfFrameMetadata?.profile != null && image.halfFrameMetadata.profile != HalfFrameSessionStore.PROFILE_NORMAL) {
-                        listOf(
-                            top.maary.darkbag.models.BasicAdjustments(digitalGain = image.halfFrameMetadata.frame1DigitalGain),
-                            top.maary.darkbag.models.BasicAdjustments(digitalGain = image.digitalGain)
+                        
+                        ImageSaver.saveProcessedImage(
+                            context = context,
+                            inputBitmap = null,
+                            bmpPath = null,
+                            rotationDegrees = 0,
+                            zoomFactor = 1.0f,
+                            baseName = dngName,
+                            linearDngPath = bayerDngFile.absolutePath,
+                            saveJpg = false,
+                            saveRaw = saveRaw,
+                            jpgFolderUri = null,
+                            rawFolderUri = rawFolderUri,
+                            isFastPath = false,
+                            captureMetadata = captureMetadata
                         )
-                    } else null,
-                    hfLayout = layout,
-                    showTimestamp = image.halfFrameMetadata?.dateStamp ?: false,
-                    flareType = image.halfFrameMetadata?.flareType ?: -1,
-                    zoomFactor = image.zoomRatio
-                )
-
-                // 4. Fast Output Feedback (Thumbnail)
-                val fastOutputUri = ImageSaver.saveProcessedImage(
-                    context = context,
-                    inputBitmap = null,
-                    bmpPath = if (saveJpg) tempJpgFile.absolutePath else null,
-                    rotationDegrees = 0,
-                    zoomFactor = image.zoomRatio,
-                    baseName = dngName,
-                    linearDngPath = if (dngWritten) bayerDngFile.absolutePath else null,
-                    saveJpg = saveJpg,
-                    saveRaw = saveRaw,
-                    jpgFolderUri = jpgFolderUri,
-                    rawFolderUri = rawFolderUri,
-                    mirror = false,
-                    isFastPath = true,
-                    halfFrameMetadata = image.halfFrameMetadata,
-                    editConfig = editConfig,
-                    digitalGain = image.digitalGain,
-                    captureMetadata = captureMetadata
-                )
-
-                timing?.firstOutputWritten = System.currentTimeMillis()
-
-                withContext(Dispatchers.Main) {
-                    if (fastOutputUri != null) {
-                        imageRepository.invalidateCache()
-                        prefs.edit().putString(SettingsFragment.KEY_LAST_CAPTURE_URI, fastOutputUri.toString()).apply()
-                        setGalleryThumbnail(fastOutputUri.toString())
-                    } else if (isHalfFrameModeEnabled && prefs.getInt(scopedHalfFrameStepKey(prefs), 0) == 1) {
-                        setGalleryThumbnail(null)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to save DNG asynchronously", e)
                     }
                 }
+
 
                 // 5. Enqueue HQ Processing
-                val workData = androidx.work.Data.Builder()
-                    .putString("tempRawPath", tempRawFile.absolutePath)
-                if (activeArray != null) workData.putIntArray("activeArray", activeArray)
-                workData.putInt("width", image.width)
-                    .putInt("height", image.height)
-                    .putInt("orientation", image.combinedOrientation)
-                    .putFloat("digitalGain", image.digitalGain)
-                    .putInt("targetLog", targetLogIndex)
-                    .putString("lutPath", nativeLutPath)
-                    .putString("jpgPath", if (saveJpg) fullResJpgFile.absolutePath else null)
-                    .putString("targetUri", fastOutputUri?.toString())
-                    .putFloat("zoomFactor", image.zoomRatio)
-                    .putInt("iso", iso)
-                    .putLong("exposureTime", exposureTime)
-                    .putFloat("fNumber", fNumber)
-                    .putFloat("focalLength", focalLength)
-                    .putLong("captureTimeMillis", captureTime)
-                    .putLong("dateTimeDigitized", captureTime)
-                    .putString("offsetTime", captureMetadata.offsetTime)
-                    .putInt("focalLengthIn35mmFilm", captureMetadata.focalLengthIn35mmFilm ?: 0)
-                    .putFloatArray("ccm", ccm)
-                    .putFloatArray("whiteBalance", wb)
-                    .putString("baseName", dngName)
-                    .putBoolean("saveJpg", saveJpg)
-                    .putBoolean("saveRaw", saveRaw)
-                    .putString("jpgFolderUri", jpgFolderUri)
-                    .putString("rawFolderUri", rawFolderUri)
-                    .putBoolean("mirror", mirror)
-
-                image.halfFrameMetadata?.let { hf ->
-                    workData.putString("hfProfile", hf.profile)
-                    workData.putBoolean("hfDateStamp", hf.dateStamp)
-                    workData.putLong("hfCaptureTime", hf.captureTimeMillis)
-                    hf.frame1BaseName?.let { workData.putString("hfF1Base", it) }
-                    hf.frame1TempPath?.let { workData.putString("hfF1Path", it) }
-                    workData.putLong("hfF1Time", hf.frame1CaptureTime)
-                    workData.putFloat("hfGain", hf.digitalGain)
-                    workData.putFloat("hfF1Gain", hf.frame1DigitalGain)
-                    workData.putInt("hfFlareType", hf.flareType)
+                val request = top.maary.darkbag.processor.HdrPlusRequest(
+                    requestId = java.util.UUID.randomUUID().toString(),
+                    megaBuffer = image.data!!,
+                    numFrames = 1,
+                    width = image.width,
+                    height = image.height,
+                    orientation = image.combinedOrientation,
+                    whiteLevel = whiteLevel,
+                    blackLevelPattern = blackLevelPattern ?: intArrayOf(64,64,64,64),
+                    lensShadingMap = lensShadingMapData,
+                    lensShadingRows = lensShadingRows,
+                    lensShadingCols = lensShadingCols,
+                    useSensorColorMatrix = false,
+                    whiteBalance = wb,
+                    ccm = ccm,
+                    ccmAlt = null,
+                    exportMatrixAB = false,
+                    cfaPattern = cfa,
+                    targetLogIndex = targetLogIndex,
+                    lutPath = nativeLutPath,
+                    digitalGain = image.digitalGain,
+                    zoomFactor = image.zoomRatio,
+                    mirror = mirror,
+                    metadata = captureMetadata,
+                    isSingleFrame = true,
+                    saveJpg = saveJpg,
+                    saveRaw = saveRaw,
+                    baseName = dngName,
+                    fullResJpgPath = fullResJpgFile.absolutePath,
+                    linearDngPath = linearDngFile.absolutePath,
+                    zslTargetUriStr = fastOutputUri?.toString(),
+                    jpgFolderUri = jpgFolderUri,
+                    rawFolderUri = rawFolderUri,
+                    hfMetadata = image.halfFrameMetadata,
+                    editConfig = top.maary.darkbag.models.EditConfig(
+                        log = targetLogName ?: "None",
+                        lut = activeLutName ?: "None",
+                        digitalGain = image.digitalGain,
+                        adjustments = if (image.halfFrameMetadata?.profile != null && image.halfFrameMetadata.profile != top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_NORMAL) {
+                            listOf(
+                                top.maary.darkbag.models.BasicAdjustments(digitalGain = image.halfFrameMetadata.frame1DigitalGain),
+                                top.maary.darkbag.models.BasicAdjustments(digitalGain = image.digitalGain)
+                            )
+                        } else null,
+                        hfLayout = if (image.halfFrameMetadata?.profile == top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_HALF_TOP) "TB" else if (image.halfFrameMetadata?.profile == top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_HALF_SIDE) "SBS" else null,
+                        showTimestamp = image.halfFrameMetadata?.dateStamp ?: false,
+                        zoomFactor = image.zoomRatio
+                    ),
+                    runAblationTest = false
+                )
+                top.maary.darkbag.processor.HdrPlusRequestManager.enqueue(request)
+                val serviceIntent = android.content.Intent(context, top.maary.darkbag.processor.HdrPlusProcessingService::class.java)
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                    context.startForegroundService(serviceIntent)
+                } else {
+                    context.startService(serviceIntent)
                 }
-
-                val workRequest = androidx.work.OneTimeWorkRequestBuilder<HdrPlusExportWorker>()
-                    .setInputData(workData.build())
-                    .build()
-                androidx.work.WorkManager.getInstance(context).enqueue(workRequest)
 
                 // 6. Timing Report
                 timing?.let { t ->
@@ -3347,8 +3267,8 @@ class CameraFragment : Fragment() {
 
                 hdrPlusBurstHelper = HdrPlusBurst(
                     frameCount = burstSize,
-                    onBurstComplete = { frames ->
-                        processHdrPlusBurst(frames, config.digitalGain, hfMetadata?.copy(digitalGain = config.digitalGain))
+                    onBurstComplete = { burstResult ->
+                        processHdrPlusBurst(burstResult, config.digitalGain, hfMetadata?.copy(digitalGain = config.digitalGain))
                     }
                 )
 
@@ -3456,7 +3376,7 @@ class CameraFragment : Fragment() {
     }
 
     private fun processHdrPlusBurst(
-        frames: List<HdrFrame>,
+        burstResult: BurstResult,
         digitalGain: Float,
         hfMetadata: HalfFrameManager.Metadata? = null
     ) {
@@ -3475,13 +3395,13 @@ class CameraFragment : Fragment() {
             var isHdrPlusSuccess = false
             try {
                 val context = appContext
+                val frames = burstResult.frames
+                val megaBuffer = burstResult.megaBuffer
                 Log.d(TAG, "processHdrPlusBurst started with ${frames.size} frames. DigitalGain=$digitalGain")
 
                 val width = frames[0].width
                 val height = frames[0].height
                 val rotationDegrees = frames[0].rotationDegrees
-
-                val buffers = frames.map { it.buffer!! }.toTypedArray()
 
                 val timestamp = frames[0].timestamp
                 val result = findCaptureResult(timestamp)
@@ -3645,190 +3565,85 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     Log.d(TAG, "Output Paths: DNG=$linearDngPath")
 
                 val jniStartTime = System.currentTimeMillis()
-                buffers.forEach { it.rewind() }
+                megaBuffer.rewind()
 
                 val debugStats = LongArray(15)
 
                 // Initial JNI call produces:
                 // 1) intermediate linear RAW buffer (tempRawPath) for the ExportWorker,
                 // 2) optional fast downsampled JPEG (tempJpgPath) for immediate gallery update.
+                // REFACTORED: REMOVED synchronous front-end JNI.
                 val mirror = shouldMirror
+                isHdrPlusSuccess = true
+                val fastJpegUri: android.net.Uri? = null
+                
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(requireContext(), "HDR+ Queued for processing", Toast.LENGTH_SHORT).show()
+                    if (isHalfFrameModeEnabled && prefs.getInt(scopedHalfFrameStepKey(prefs), 0) == 1) {
+                        setGalleryThumbnail(null)
+                    }
+                    // 保持加载动画，不调用 hideProcessingAnimation()
+                }
 
-                val ret = ColorProcessor.processHdrPlus(
-                    buffers,
-                    width, height,
-                    combinedOrientation,
-                    whiteLevel, blackLevelPattern,
-                    lensShadingMapData, lensShadingRows, lensShadingCols, useSensorColorMatrix,
-                    wb, ccm, ccmAlt, exportMatrixAB, cfa,
-                    targetLogIndex,
-                    nativeLutPath,
-                    if (saveJpg) tempJpgFile.absolutePath else null, // outputJpgPath (fast preview)
-                    null, // outputDngPath (finalize in background)
-                    digitalGain,
-                    debugStats,
-                    null, // outputBitmap
-                    tempRawFile.absolutePath,
-                    currentZoom,
-                    mirror,
-                    metadata = captureMetadata
-                )
-
-                val jniEndTime = System.currentTimeMillis()
-                Log.d(TAG, "JNI processHdrPlus returned $ret in ${jniEndTime - jniStartTime}ms")
-
-                if (ret == 0) {
-                    isHdrPlusSuccess = true
-
-                    val saveStartTime = System.currentTimeMillis()
-
-                    val mirror = shouldMirror
-
-                    val fastJpegUri = if (saveJpg) {
-                        val layout = if (hfMetadata?.profile == HalfFrameSessionStore.PROFILE_HALF_TOP) "TB" else if (hfMetadata?.profile == HalfFrameSessionStore.PROFILE_HALF_SIDE) "SBS" else null
-                        val editConfig = top.maary.darkbag.models.EditConfig(
+                    val request = top.maary.darkbag.processor.HdrPlusRequest(
+                        requestId = java.util.UUID.randomUUID().toString(),
+                        megaBuffer = megaBuffer,
+                        numFrames = burstResult.frames.size,
+                        width = width,
+                        height = height,
+                        orientation = combinedOrientation,
+                        whiteLevel = whiteLevel,
+                        blackLevelPattern = blackLevelPattern ?: intArrayOf(64,64,64,64),
+                        lensShadingMap = lensShadingMapData,
+                        lensShadingRows = lensShadingRows,
+                        lensShadingCols = lensShadingCols,
+                        useSensorColorMatrix = useSensorColorMatrix,
+                        whiteBalance = wb,
+                        ccm = ccm,
+                        ccmAlt = ccmAlt,
+                        exportMatrixAB = exportMatrixAB,
+                        cfaPattern = cfa,
+                        targetLogIndex = targetLogIndex,
+                        lutPath = nativeLutPath,
+                        digitalGain = digitalGain,
+                        zoomFactor = currentZoom,
+                        mirror = mirror,
+                        metadata = captureMetadata,
+                        isSingleFrame = false,
+                        saveJpg = saveJpg,
+                        saveRaw = saveRaw,
+                        baseName = dngName,
+                        fullResJpgPath = fullResJpgFile.absolutePath,
+                        linearDngPath = linearDngFile.absolutePath,
+                        zslTargetUriStr = fastJpegUri?.toString(),
+                        jpgFolderUri = jpgFolderUri,
+                        rawFolderUri = rawFolderUri,
+                        hfMetadata = hfMetadata?.copy(digitalGain = digitalGain),
+                        editConfig = top.maary.darkbag.models.EditConfig(
                             log = targetLogName ?: "None",
                             lut = activeLutName ?: "None",
                             digitalGain = digitalGain,
-                            adjustments = if (hfMetadata?.profile != null && hfMetadata.profile != HalfFrameSessionStore.PROFILE_NORMAL) {
+                            adjustments = if (hfMetadata?.profile != null && hfMetadata.profile != top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_NORMAL) {
                                 listOf(
                                     top.maary.darkbag.models.BasicAdjustments(digitalGain = hfMetadata.frame1DigitalGain),
                                     top.maary.darkbag.models.BasicAdjustments(digitalGain = digitalGain)
                                 )
                             } else null,
-                            hfLayout = layout,
+                            hfLayout = if (hfMetadata?.profile == top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_HALF_TOP) "TB" else if (hfMetadata?.profile == top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_HALF_SIDE) "SBS" else null,
                             showTimestamp = hfMetadata?.dateStamp ?: false,
                             flareType = hfMetadata?.flareType ?: -1,
                             zoomFactor = currentZoom
-                        )
-
-                        ImageSaver.saveProcessedImage(
-                            context = context,
-                            inputBitmap = null,
-                            bmpPath = tempJpgFile.absolutePath,
-                            rotationDegrees = 0, // Rotation already handled in JNI
-                            zoomFactor = currentZoom,
-                            baseName = dngName,
-                            linearDngPath = null,
-                            saveJpg = true,
-                            jpgFolderUri = jpgFolderUri,
-                            mirror = false, // Mirroring already handled in JNI
-                            isFastPath = true,
-                            halfFrameMetadata = hfMetadata?.copy(digitalGain = digitalGain),
-                            editConfig = editConfig,
-                            digitalGain = digitalGain,
-                            captureMetadata = captureMetadata
-                        )
+                        ),
+                        runAblationTest = false
+                    )
+                    top.maary.darkbag.processor.HdrPlusRequestManager.enqueue(request)
+                    val serviceIntent = android.content.Intent(context, top.maary.darkbag.processor.HdrPlusProcessingService::class.java)
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                        context.startForegroundService(serviceIntent)
                     } else {
-                        null
+                        context.startService(serviceIntent)
                     }
-
-                    withContext(Dispatchers.Main) {
-                        if (fastJpegUri != null) {
-                            imageRepository.invalidateCache()
-                            prefs.edit().putString(SettingsFragment.KEY_LAST_CAPTURE_URI, fastJpegUri.toString()).apply()
-                            setGalleryThumbnail(fastJpegUri.toString())
-                        } else if (isHalfFrameModeEnabled && prefs.getInt(scopedHalfFrameStepKey(prefs), 0) == 1) {
-                            setGalleryThumbnail(null)
-                        }
-                        Toast.makeText(requireContext(), "HDR+ Saved!", Toast.LENGTH_SHORT).show()
-                        if (!isHalfFrameModeEnabled) {
-                            hideProcessingAnimation()
-                        }
-                    }
-
-                    val workData = androidx.work.Data.Builder()
-                        .putString("tempRawPath", tempRawFile.absolutePath)
-                    if (activeArray != null) workData.putIntArray("activeArray", activeArray)
-                    workData.putInt("width", width)
-                        .putInt("height", height)
-                        .putInt("orientation", combinedOrientation)
-                        .putFloat("digitalGain", digitalGain)
-                        .putInt("targetLog", targetLogIndex)
-                        .putString("lutPath", nativeLutPath)
-                        .putString("jpgPath", if (saveJpg) fullResJpgFile.absolutePath else null)
-                        .putString("targetUri", fastJpegUri?.toString()) // Replace fast JPEG in place
-                        .putFloat("zoomFactor", currentZoom)
-                        .putString("dngPath", if (saveRaw) linearDngPath else null)
-                        .putInt("iso", (iso).toInt())
-                        .putLong("exposureTime", exposureTime)
-                        .putFloat("fNumber", fNumber)
-                        .putFloat("focalLength", focalLength)
-                        .putLong("captureTimeMillis", captureTime)
-                        .putLong("dateTimeDigitized", captureTime)
-                        .putString("offsetTime", captureMetadata.offsetTime)
-                        .putInt("focalLengthIn35mmFilm", captureMetadata.focalLengthIn35mmFilm ?: 0)
-                        .putFloatArray("ccm", ccm)
-                        .putFloatArray("whiteBalance", wb)
-                        .putString("baseName", dngName)
-                        .putBoolean("saveJpg", saveJpg)
-                        .putBoolean("saveRaw", saveRaw)
-                        .putString("jpgFolderUri", jpgFolderUri)
-                        .putString("rawFolderUri", rawFolderUri)
-                        .putBoolean("mirror", mirror)
-
-                    hfMetadata?.copy(digitalGain = digitalGain)?.let { hf ->
-                        workData.putString("hfProfile", hf.profile)
-                        workData.putBoolean("hfDateStamp", hf.dateStamp)
-                        workData.putLong("hfCaptureTime", hf.captureTimeMillis)
-                        hf.frame1BaseName?.let { workData.putString("hfF1Base", it) }
-                        hf.frame1TempPath?.let { workData.putString("hfF1Path", it) }
-                        workData.putLong("hfF1Time", hf.frame1CaptureTime)
-                        workData.putFloat("hfGain", hf.digitalGain)
-                        workData.putFloat("hfF1Gain", hf.frame1DigitalGain)
-                        workData.putInt("hfFlareType", hf.flareType)
-                    }
-
-                    val workRequest = androidx.work.OneTimeWorkRequestBuilder<HdrPlusExportWorker>()
-                        .setInputData(workData.build())
-                        .build()
-                    androidx.work.WorkManager.getInstance(context).enqueue(workRequest)
-                    val saveEndTime = System.currentTimeMillis()
-
-                    // Log Statistics
-                    val totalTime = saveEndTime - startTime
-                    val captureTime = captureEndTime - startTime
-                    val waitTime = jniStartTime - captureEndTime
-                    val jniTime = jniEndTime - jniStartTime
-                    val halideTime = debugStats[0]
-                    val copyTime = debugStats[1]
-                    val postTime = debugStats[2]
-                    val dngEncodeTime = debugStats[3]
-                    val nativeSaveTime = debugStats[4]
-                    val dngWaitTime = debugStats[5]
-                    val nativeTotalTime = debugStats[6]
-                    val saveTime = saveEndTime - saveStartTime
-
-                    val logMsg = """
-                        [Total: ${totalTime}ms]
-                        Capture: ${captureTime}ms
-                        Wait: ${waitTime}ms
-                        JNI (Total): ${jniTime}ms
-                          - Native Total: ${nativeTotalTime}ms
-                          - JNI Prep: ${debugStats[12]}ms
-                          - Copy: ${copyTime}ms
-                          - Halide: ${halideTime}ms
-                            * Align: ${debugStats[7]}ms
-                            * Merge: ${debugStats[8]}ms
-                            * BlackWhite: ${debugStats[13]}ms
-                            * WB: ${debugStats[14]}ms
-                            * Demosaic: ${debugStats[9]}ms
-                            * Denoise: ${debugStats[10]}ms
-                            * sRGB: ${debugStats[11]}ms
-                          - Post: ${postTime}ms
-                          - DNG Encode: ${dngEncodeTime}ms
-                          - Save(Log/BMP): ${nativeSaveTime}ms
-                          - DNG Wait(get): ${dngWaitTime}ms
-                        Save (IO/Compress): ${saveTime}ms
-                        HQ Export Mode: ${if (hqBackgroundExport) "Background" else "Inline"}
-                    """.trimIndent()
-
-                    Log.i(TAG, logMsg)
-                    DebugLogManager.addLog(logMsg)
-
-                } else {
-                    throw RuntimeException("JNI processing returned error code: $ret")
-                }
+                    // Native timing stats are now recorded in HdrPlusProcessingService
 
             } catch (e: Exception) {
                 Log.e(TAG, "HDR+ processing failed, falling back to single shot", e)
@@ -3836,12 +3651,14 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     Toast.makeText(appContext, "HDR+ failed, saving single frame...", Toast.LENGTH_SHORT).show()
                 }
 
-                if (frames.isNotEmpty()) {
+                if (burstResult.frames.isNotEmpty()) {
                     try {
-                        val firstFrame = frames[0]
-                        val data = ByteBuffer.allocateDirect(firstFrame.buffer!!.remaining())
-                        firstFrame.buffer!!.rewind()
-                        data.put(firstFrame.buffer!!)
+                        val firstFrame = burstResult.frames[0]
+                        val frameSize = firstFrame.width * firstFrame.height * 2
+                        val data = ByteBuffer.allocateDirect(frameSize)
+                        burstResult.megaBuffer.position(0)
+                        burstResult.megaBuffer.limit(frameSize)
+                        data.put(burstResult.megaBuffer)
                         data.rewind()
 
                         val holder = RawImageHolder(
@@ -3862,10 +3679,9 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     }
                 }
             } finally {
-                frames.forEach {
-                    HdrPlusBurst.releaseBuffer(it.buffer)
-                    it.close()
-                }
+                burstResult.frames.forEach { it.close() }
+                HdrPlusBurst.releaseBuffer(burstResult.megaBuffer)
+                
                 if (!fallbackSent) {
                     processingSemaphore.release()
                     lifecycleScope.launch(Dispatchers.Main) {
@@ -4249,8 +4065,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 writeScopedHalfFrameStep(requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE), 1, captureStartTime, digitalGain = config.digitalGain, flareType = hfMetadata?.flareType ?: -1)
             }
 
-            hdrPlusBurstHelper = HdrPlusBurst(frameCount = burstSize, onBurstComplete = { frames ->
-                processHdrPlusBurst(frames, config.digitalGain, hfMetadata?.copy(digitalGain = config.digitalGain))
+            hdrPlusBurstHelper = HdrPlusBurst(frameCount = burstSize, onBurstComplete = { burstResult ->
+                processHdrPlusBurst(burstResult, config.digitalGain, hfMetadata?.copy(digitalGain = config.digitalGain))
             })
 
             lifecycleScope.launch(Dispatchers.Main) {
@@ -4329,18 +4145,16 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 }
             }, handler)
 
-            // Sequential capture instead of captureBurst to comply with requirements
-            for (request in burstRequests) {
-                session.capture(request, object : android.hardware.camera2.CameraCaptureSession.CaptureCallback() {
-                    override fun onCaptureCompleted(session: android.hardware.camera2.CameraCaptureSession, request: android.hardware.camera2.CaptureRequest, result: android.hardware.camera2.TotalCaptureResult) {
-                        val timestamp = result.get(android.hardware.camera2.CaptureResult.SENSOR_TIMESTAMP)
-                        if (timestamp != null) {
-                            captureResults[timestamp] = result
-                        }
-                        captureResultFlow.tryEmit(result)
+            // Use captureBurst instead of sequential capture for better performance
+            session.captureBurst(burstRequests, object : android.hardware.camera2.CameraCaptureSession.CaptureCallback() {
+                override fun onCaptureCompleted(session: android.hardware.camera2.CameraCaptureSession, request: android.hardware.camera2.CaptureRequest, result: android.hardware.camera2.TotalCaptureResult) {
+                    val timestamp = result.get(android.hardware.camera2.CaptureResult.SENSOR_TIMESTAMP)
+                    if (timestamp != null) {
+                        captureResults[timestamp] = result
                     }
-                }, handler)
-            }
+                    captureResultFlow.tryEmit(result)
+                }
+            }, handler)
 
         } catch (e: Exception) {
             Log.e(TAG, "Camera2 burst failed", e)

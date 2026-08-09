@@ -54,6 +54,7 @@ object ImageSaver {
         isAlreadyStitched: Boolean = false,
         captureMetadata: CaptureMetadata? = null,
         tiffPath: String? = null,
+        isAlreadyCropped: Boolean = false,
         onBitmapReady: ((Bitmap) -> Unit)? = null
     ): Uri? {
         val halfFrameManager = HalfFrameManager(context)
@@ -159,7 +160,7 @@ object ImageSaver {
                     }
 
                     // Crop if needed (Digital Zoom)
-                    if (processedBitmap != null && zoomFactor > 1.05f) {
+                    if (processedBitmap != null && zoomFactor > 1.05f && !isAlreadyCropped) {
                         val newWidth = (processedBitmap.width / zoomFactor).toInt()
                         val newHeight = (processedBitmap.height / zoomFactor).toInt()
                         val x = (processedBitmap.width - newWidth) / 2

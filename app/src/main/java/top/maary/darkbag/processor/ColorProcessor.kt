@@ -12,6 +12,9 @@ object ColorProcessor {
     val backgroundSaveFlow = MutableSharedFlow<BackgroundSaveEvent>(extraBufferCapacity = 10)
     val halfFrameFlow = MutableSharedFlow<Int>(extraBufferCapacity = 5)
 
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val imageProcessingDispatcher = kotlinx.coroutines.newSingleThreadContext("HdrPlusProcessor")
+
     external fun initMemoryPool(width: Int, height: Int, frames: Int)
 
     data class BackgroundSaveEvent(
@@ -147,7 +150,8 @@ object ColorProcessor {
     ): Int
 
     external fun processHdrPlus(
-        dngBuffers: Array<ByteBuffer>,
+        dngBuffer: ByteBuffer,
+        numFrames: Int,
         width: Int,
         height: Int,
         orientation: Int,

@@ -247,9 +247,13 @@ class LutSurfaceProcessor : SurfaceProcessor {
                     if (x_linear > 0.010591f) 0.247190f * (Math.log10(5.555556 * x_linear + 0.052272).toFloat()) + 0.385537f
                     else 5.367655f * x_linear + 0.092809f
                 }
-                2, 3 -> { // F-Log
+                2 -> { // F-Log
                     if (x_linear >= 0.00089f) 0.344676f * (Math.log10(0.555556 * x_linear + 0.009468).toFloat()) + 0.790453f
                     else 8.52f * x_linear + 0.0929f
+                }
+                3, 4 -> { // F-Log2 / F-Log2 C
+                    if (x_linear >= 0.000889f) 0.245281f * (Math.log10(5.555556 * x_linear + 0.064829).toFloat()) + 0.384316f
+                    else 8.799461f * x_linear + 0.092864f
                 }
                 5, 6 -> { // S-Log3
                     if (x_linear >= 0.01125f) (420.0f + Math.log10((x_linear + 0.01) / 0.19).toFloat() * 261.5f) / 1023.0f

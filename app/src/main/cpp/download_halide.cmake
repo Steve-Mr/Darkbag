@@ -28,7 +28,7 @@ if(NOT EXISTS "${HALIDE_ROOT}/lib/libHalide.so")
     # Rename extracted directory to 'halide_distrib' if needed, or find where it extracted
     # The tarball typically extracts to a folder named like 'Halide-21.0.0-...'
     # We will simply glob to find it and move/symlink to HALIDE_ROOT
-    file(GLOB EXTRACTED_DIR "${CMAKE_BINARY_DIR}/Halide-21.0.0-x86-64-linux")
+    file(GLOB EXTRACTED_DIR "${CMAKE_BINARY_DIR}/Halide-21.0.0-x86-64-linux*")
     if(IS_DIRECTORY "${EXTRACTED_DIR}")
         file(RENAME "${EXTRACTED_DIR}" "${HALIDE_ROOT}")
     else()
