@@ -66,6 +66,12 @@ class PermissionsFragment : Fragment() {
             val intent = requireActivity().intent
             val navController = findNavController()
 
+            // If intent action is a Share Intent, do not perform default startup navigation;
+            // MainActivity's handleIntent will perform the appropriate navigation once processing finishes.
+            if (intent.action == Intent.ACTION_SEND || intent.action == Intent.ACTION_SEND_MULTIPLE) {
+                return@launch
+            }
+
             // Clear the intent action so we don't process it again on recreation
             intent.action = null
             when (intent.getStringExtra(MainActivity.SHORTCUT_EXTRA_KEY)) {

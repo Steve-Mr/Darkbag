@@ -178,6 +178,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        setIntent(intent)
         handleIntent(intent)
     }
 
@@ -200,6 +201,17 @@ class MainActivity : AppCompatActivity() {
                     } else {
                         if (navController.currentDestination?.id != R.id.playground_gallery_fragment) {
                             navController.navigate(R.id.playground_gallery_fragment)
+                        }
+                    }
+                } else {
+                    // Fallback to default destination if no valid DNG file was imported
+                    if (navController.currentDestination?.id == R.id.permissions_fragment) {
+                        val prefs = getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                        val defaultStartup = prefs.getString(SettingsFragment.KEY_DEFAULT_STARTUP, SettingsFragment.STARTUP_CAMERA)
+                        if (defaultStartup == SettingsFragment.STARTUP_PLAYGROUND) {
+                            navController.navigate(R.id.playground_gallery_fragment)
+                        } else {
+                            navController.navigate(R.id.camera_fragment)
                         }
                     }
                 }
