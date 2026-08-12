@@ -49,6 +49,7 @@
 
         <activity
             android:name=".MainActivity"
+            android:launchMode="singleTop"
             android:clearTaskOnLaunch="true"
             android:theme="@style/AppTheme"
             android:icon="@mipmap/ic_launcher"
@@ -78,6 +79,10 @@
                 <action android:name="android.intent.action.SEND_MULTIPLE" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="image/*" />
+                <data android:mimeType="image/x-adobe-dng" />
+                <data android:mimeType="image/dng" />
+                <data android:mimeType="image/x-raw" />
+                <data android:mimeType="application/octet-stream" />
             </intent-filter>
 
             <!-- Declare notch support -->

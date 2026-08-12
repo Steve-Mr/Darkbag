@@ -178,6 +178,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        setIntent(intent)
         handleIntent(intent)
     }
 
@@ -192,14 +193,28 @@ class MainActivity : AppCompatActivity() {
                 val intentCopy = Intent(intent).apply { this.action = action }
                 val paths = top.maary.darkbag.utils.ShareUtils.processShareIntent(this@MainActivity, intentCopy)
                 if (paths.isNotEmpty()) {
+                    val navOptions = NavOptions.Builder()
+                        .setPopUpTo(R.id.permissions_fragment, true)
+                        .build()
                     if (paths.size == 1) {
                         val bundle = android.os.Bundle().apply {
                             putStringArray("playground_dng_paths", paths.toTypedArray())
                         }
-                        navController.navigate(R.id.playground_viewer_fragment, bundle)
+                        navController.navigate(R.id.playground_viewer_fragment, bundle, navOptions)
                     } else {
                         if (navController.currentDestination?.id != R.id.playground_gallery_fragment) {
+                            navController.navigate(R.id.playground_gallery_fragment, null, navOptions)
+                        }
+                    }
+                } else {
+                    // Fallback to default destination if no valid DNG file was imported
+                    if (navController.currentDestination?.id == R.id.permissions_fragment) {
+                        val prefs = getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                        val defaultStartup = prefs.getString(SettingsFragment.KEY_DEFAULT_STARTUP, SettingsFragment.STARTUP_CAMERA)
+                        if (defaultStartup == SettingsFragment.STARTUP_PLAYGROUND) {
                             navController.navigate(R.id.playground_gallery_fragment)
+                        } else {
+                            navController.navigate(R.id.camera_fragment)
                         }
                     }
                 }
