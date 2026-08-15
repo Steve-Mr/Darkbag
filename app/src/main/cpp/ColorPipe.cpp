@@ -1180,10 +1180,18 @@ bool write_dng(const char* filename, int width, int height, const unsigned short
     uint32_t black_level_val = 0;
     TIFFSetField(tif, TIFFTAG_BLACKLEVEL, 1, &black_level_val);
 
-    // Halide now outputs pure Sensor Linear data.
-    // The Android CCM maps Sensor Space -> sRGB Linear Space.
-    // DNG's ColorMatrix1 expects XYZ -> Sensor Space.
-    // ColorMatrix1 = Inverse(CCM) * XYZ_to_sRGB
+    float as_shot_neutral[3] = {
+        wbVec ? (1.0f / std::max(1e-4f, wbVec[0])) : 1.0f,
+        wbVec ? (1.0f / std::max(1e-4f, wbVec[1])) : 1.0f,
+        wbVec ? (1.0f / std::max(1e-4f, wbVec[3])) : 1.0f
+    };
+    TIFFSetField(tif, TIFFTAG_ASSHOTNEUTRAL, 3, as_shot_neutral);
+
+    // In Android Camera2 API, CCM maps White-Balanced Sensor RGB -> sRGB Linear.
+    // In Adobe DNG Specification, ColorMatrix1 maps XYZ -> Un-white-balanced Raw Sensor Space.
+    // Therefore:
+    // RawSensorRGB = diag(AsShotNeutral) * CCM^-1 * sRGB
+    // ColorMatrix1 = diag(AsShotNeutral) * Inverse(CCM) * M_XYZ_to_sRGB_D65
     Matrix3x3 colorMatrix1 = M_XYZ_to_sRGB_D65; // Fallback
     if (ccm.size() >= 9) {
         Matrix3x3 sensor_to_srgb = {
@@ -1194,14 +1202,14 @@ bool write_dng(const char* filename, int width, int height, const unsigned short
         Matrix3x3 srgb_to_sensor = inverse_matrix(sensor_to_srgb);
         colorMatrix1 = multiply(srgb_to_sensor, M_XYZ_to_sRGB_D65);
     }
+    
+    // Scale each row by AsShotNeutral to map XYZ into Raw Sensor space
+    for (int r = 0; r < 3; r++) {
+        colorMatrix1.m[r * 3 + 0] *= as_shot_neutral[r];
+        colorMatrix1.m[r * 3 + 1] *= as_shot_neutral[r];
+        colorMatrix1.m[r * 3 + 2] *= as_shot_neutral[r];
+    }
     TIFFSetField(tif, TIFFTAG_COLORMATRIX1, 9, colorMatrix1.m);
-
-    float as_shot_neutral[3] = {
-        wbVec ? (1.0f / std::max(1e-4f, wbVec[0])) : 1.0f,
-        wbVec ? (1.0f / std::max(1e-4f, wbVec[1])) : 1.0f,
-        wbVec ? (1.0f / std::max(1e-4f, wbVec[3])) : 1.0f
-    };
-    TIFFSetField(tif, TIFFTAG_ASSHOTNEUTRAL, 3, as_shot_neutral);
 
     TIFFSetField(tif, TIFFTAG_CALIBRATIONILLUMINANT1, 21);
     float exposureTimeSec = (float)metadata.exposureTime / 1000000000.0f;
