@@ -582,29 +582,10 @@ AdaptiveEdgeComp calculate_adaptive_edge_comp(const unsigned short* planarData, 
     float centerGvsRB = safe_div(centerMean[1], 0.5f * (centerMean[0] + centerMean[2]));
     float edgeGvsRB = safe_div(edgeMean[1], 0.5f * (edgeMean[0] + edgeMean[2]));
 
-    // Conditionally enable compensation when edge luma drop and green shift are detected.
-    // Gains are derived from center/edge statistics and clamped to safe bounds.
-    bool needsComp = (edgeLuma < centerLuma * kLumaDropThreshold) && (edgeGvsRB > centerGvsRB * kGreenShiftThreshold);
-    edgeComp.lumaEdgeGain = std::clamp(1.0f + (safe_div(centerLuma, edgeLuma) - 1.0f) * kCompStrength, kMinLumaEdgeGain, kMaxLumaEdgeGain);
-
-    for (int ch = 0; ch < 3; ch++) {
-        float target = safe_div(centerMean[ch], edgeMean[ch]);
-        float mixed = 1.0f + (target - 1.0f) * kCompStrength;
-        edgeComp.chromaEdgeGain[ch] = std::clamp(mixed, kMinChromaGain, kMaxChromaGain);
-    }
-
-    edgeComp.enabled = needsComp;
-    if (!edgeComp.enabled) {
-        edgeComp.lumaEdgeGain = 1.0f;
-        edgeComp.chromaEdgeGain = {1.0f, 1.0f, 1.0f};
-    }
-
-    LOGD("Adaptive edge compensation active=%d. LumaEdgeGain=%.3f, ChromaEdgeGain=[%.3f, %.3f, %.3f], centerLuma=%.1f, edgeLuma=%.1f, centerGvsRB=%.4f, edgeGvsRB=%.4f",
-         (int)edgeComp.enabled,
-         edgeComp.lumaEdgeGain,
-         edgeComp.chromaEdgeGain[0], edgeComp.chromaEdgeGain[1], edgeComp.chromaEdgeGain[2],
-         centerLuma, edgeLuma, centerGvsRB, edgeGvsRB);
-
+    // Adaptive edge compensation is disabled in favor of sensor-calibrated hardware LensShadingCorrection.
+    edgeComp.enabled = false;
+    edgeComp.lumaEdgeGain = 1.0f;
+    edgeComp.chromaEdgeGain = {1.0f, 1.0f, 1.0f};
     return edgeComp;
 }
 
@@ -715,9 +696,9 @@ bool process_and_save_image(
         b = std::min(b, 65535.0f);
         
         float exp_gain = std::pow(2.0f, exposure);
-        float norm_r = std::min(1.0f, (r / 65535.0f) * gain * exp_gain);
-        float norm_g = std::min(1.0f, (g / 65535.0f) * gain * exp_gain);
-        float norm_b = std::min(1.0f, (b / 65535.0f) * gain * exp_gain);
+        float norm_r = (r / 65535.0f) * gain * exp_gain;
+        float norm_g = (g / 65535.0f) * gain * exp_gain;
+        float norm_b = (b / 65535.0f) * gain * exp_gain;
 
         if (edgeComp.enabled) {
             const float nx = (x - edgeComp.centerX) * edgeComp.invMaxRadius;
@@ -1215,9 +1196,11 @@ bool write_dng(const char* filename, int width, int height, const unsigned short
     }
     TIFFSetField(tif, TIFFTAG_COLORMATRIX1, 9, colorMatrix1.m);
 
-    float as_shot_neutral[3] = {1.0f, 1.0f, 1.0f};
-    // Force AsShotNeutral to 1,1,1 since we are baking White Balance into the LinearRaw data directly
-    // This is a diagnostic test to see if Lightroom ignores AsShotNeutral for LinearRaw DNGs.
+    float as_shot_neutral[3] = {
+        wbVec ? (1.0f / std::max(1e-4f, wbVec[0])) : 1.0f,
+        wbVec ? (1.0f / std::max(1e-4f, wbVec[1])) : 1.0f,
+        wbVec ? (1.0f / std::max(1e-4f, wbVec[3])) : 1.0f
+    };
     TIFFSetField(tif, TIFFTAG_ASSHOTNEUTRAL, 3, as_shot_neutral);
 
     TIFFSetField(tif, TIFFTAG_CALIBRATIONILLUMINANT1, 21);
@@ -1229,17 +1212,13 @@ bool write_dng(const char* filename, int width, int height, const unsigned short
         TIFFSetField(tif, TIFFTAG_FOCALLENGTHIN35MMFILM, (uint16_t)metadata.focalLengthIn35mmFilm);
     }
 
-    TIFFSetField(tif, TIFFTAG_BASELINEEXPOSURE, baselineExposure);
+    float safeBaselineExposure = std::clamp(baselineExposure, 0.0f, 0.5f);
+    TIFFSetField(tif, TIFFTAG_BASELINEEXPOSURE, safeBaselineExposure);
 
     unsigned short iso_short = (unsigned short)metadata.iso;
     TIFFSetField(tif, TIFFTAG_ISOSPEEDRATINGS, (uint16_t)1, &iso_short);
 
     std::vector<unsigned short> rowBuffer(width * 3);
-    
-    // Extract White Balance multipliers to bake into the DNG data
-    float wb_r = wbVec ? wbVec[0] : 1.0f;
-    float wb_g = wbVec ? wbVec[1] : 1.0f;
-    float wb_b = wbVec ? wbVec[3] : 1.0f;
 
     for (int y = 0; y < height; y++) {
         for (int x = 0; x < width; x++) {
@@ -1247,10 +1226,10 @@ bool write_dng(const char* filename, int width, int height, const unsigned short
              size_t g_idx = (size_t)y*stride_y + (size_t)x*stride_x + 1*stride_c;
              size_t b_idx = (size_t)y*stride_y + (size_t)x*stride_x + 2*stride_c;
              
-             // Bake White Balance multipliers directly into the raw data
-             rowBuffer[x*3+0] = (unsigned short)std::min(65535.0f, planarData[r_idx] * wb_r);
-             rowBuffer[x*3+1] = (unsigned short)std::min(65535.0f, planarData[g_idx] * wb_g);
-             rowBuffer[x*3+2] = (unsigned short)std::min(65535.0f, planarData[b_idx] * wb_b);
+             // Keep pure Sensor Linear data in DNG without destructive pre-multiplied WB clamping
+             rowBuffer[x*3+0] = planarData[r_idx];
+             rowBuffer[x*3+1] = planarData[g_idx];
+             rowBuffer[x*3+2] = planarData[b_idx];
         }
         if (TIFFWriteScanline(tif, rowBuffer.data(), y, 0) < 0) {
             TIFFClose(tif);
