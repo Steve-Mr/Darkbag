@@ -175,7 +175,16 @@ private:
     
     Expr final_gain = select(num_cols > 0, gain, 1.0f);
     
-    output(x, y) = u16_sat(cast<float>(input(x, y)) * final_gain);
+    Expr raw_val = cast<float>(input(x, y)) * final_gain;
+    // Smooth shoulder compression for values above knee (50000.0f) to prevent hard clipping and rainbow halo rings
+    float knee = 50000.0f;
+    float max_val = 65535.0f;
+    float range = max_val - knee;
+    Expr excess = raw_val - knee;
+    Expr compressed = knee + range * (excess / (excess + range));
+    Expr soft_val = select(raw_val <= knee, raw_val, compressed);
+
+    output(x, y) = u16_sat(soft_val);
     return output;
   }
 
