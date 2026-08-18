@@ -35,6 +35,9 @@ class ImageViewerAdapter(
     var onLongPressStarted: ((top.maary.darkbag.ui.ZoomableImageView) -> Unit)? = null
     var onLongPressEnded: ((top.maary.darkbag.ui.ZoomableImageView) -> Unit)? = null
     var onCurrentListChanged: ((List<ImageGroup>, List<ImageGroup>) -> Unit)? = null
+    var onMotionPhotoIndicatorTapped: ((Int) -> Unit)? = null
+    var isMotionPhotoAutoPlay: Boolean = true
+
     private var recyclerView: RecyclerView? = null
     private val selectedFormats = mutableMapOf<String, String>()
     private var isUiVisible = true
@@ -46,7 +49,7 @@ class ImageViewerAdapter(
         }
 
         override fun areContentsTheSame(oldItem: ImageGroup, newItem: ImageGroup): Boolean {
-            return oldItem == newItem && oldItem.metadataLoaded == newItem.metadataLoaded
+            return oldItem == newItem && oldItem.metadataLoaded == newItem.metadataLoaded && oldItem.isMotionPhoto == newItem.isMotionPhoto
         }
 
         override fun getChangePayload(oldItem: ImageGroup, newItem: ImageGroup): Any? {
@@ -56,6 +59,7 @@ class ImageViewerAdapter(
             if (oldItem.metadataLoaded != newItem.metadataLoaded) payloads.add("METADATA_LOADED")
             if (oldItem.lastModified != newItem.lastModified) payloads.add("LAST_MODIFIED_CHANGED")
             if (oldItem.editConfig != newItem.editConfig) payloads.add("EDIT_CONFIG_CHANGED")
+            if (oldItem.isMotionPhoto != newItem.isMotionPhoto) payloads.add("MOTION_PHOTO_CHANGED")
 
             return if (payloads.isEmpty()) null else payloads
         }
@@ -72,6 +76,10 @@ class ImageViewerAdapter(
 
     class ViewHolder(val binding: ItemImageGroupBinding) : RecyclerView.ViewHolder(binding.root) {
         var loadJob: Job? = null
+        var extractJob: Job? = null
+        var player: androidx.media3.exoplayer.ExoPlayer? = null
+        var isPlayingVideo: Boolean = false
+        var playCompletionCallback: (() -> Unit)? = null
         var manualBitmap: android.graphics.Bitmap? = null
         var currentUri: Uri? = null
         var currentBaseName: String? = null
@@ -81,11 +89,6 @@ class ImageViewerAdapter(
     override fun onAttachedToRecyclerView(recyclerView: RecyclerView) {
         super.onAttachedToRecyclerView(recyclerView)
         this.recyclerView = recyclerView
-    }
-
-    override fun onDetachedFromRecyclerView(recyclerView: RecyclerView) {
-        super.onDetachedFromRecyclerView(recyclerView)
-        this.recyclerView = null
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
@@ -133,17 +136,24 @@ class ImageViewerAdapter(
         val shouldShow = isUiVisible && !isFormatSwitcherPersistentHidden
         holder.binding.formatToggleGroup.visibility = if (shouldShow) View.VISIBLE else View.GONE
         holder.binding.formatToggleGroup.alpha = if (shouldShow) 1f else 0f
+        holder.binding.motionPhotoToggleGroup.visibility = if (shouldShow) View.VISIBLE else View.GONE
+        holder.binding.motionPhotoToggleGroup.alpha = if (shouldShow) 1f else 0f
 
         holder.binding.imageView.onZoomChanged = { isZoomed ->
             onZoomChanged?.invoke(isZoomed)
             val currentlyShouldShow = isUiVisible && !isZoomed && !isFormatSwitcherPersistentHidden
             holder.binding.formatToggleGroup.visibility = if (currentlyShouldShow) View.VISIBLE else View.GONE
             holder.binding.formatToggleGroup.alpha = if (currentlyShouldShow) 1f else 0f
+            holder.binding.motionPhotoToggleGroup.visibility = if (currentlyShouldShow) View.VISIBLE else View.GONE
+            holder.binding.motionPhotoToggleGroup.alpha = if (currentlyShouldShow) 1f else 0f
         }
 
         if (!isSameImage) {
             holder.binding.formatToggleGroup.translationX = 0f
             holder.binding.formatToggleGroup.translationY = 0f
+            holder.binding.motionPhotoToggleGroup.translationX = 0f
+            holder.binding.motionPhotoToggleGroup.translationY = 0f
+            stopMotionVideo(holder)
         }
 
         holder.binding.imageView.onMatrixChanged = { rect ->
@@ -155,15 +165,17 @@ class ImageViewerAdapter(
                 // Determine actual visual right margin (distance from right edge of screen)
                 val visualRightSpace = viewWidth - rect.right
                 val rightMargin = if (visualRightSpace > 0) visualRightSpace else 0f
+                val visualLeftSpace = rect.left
+                val leftMargin = if (visualLeftSpace > 0) visualLeftSpace else 0f
 
                 // Determine actual visual top margin
                 val topMargin = if (rect.top > 0) rect.top else 0f
 
                 // Instead of layoutParams (which causes requestLayout and UI jank), use translationX/Y.
-                // The FrameLayout is already aligned to top-end with 16dp margin.
-                // We just translate it by the extra distance.
                 holder.binding.formatToggleGroup.translationX = -rightMargin
                 holder.binding.formatToggleGroup.translationY = topMargin
+                holder.binding.motionPhotoToggleGroup.translationX = leftMargin
+                holder.binding.motionPhotoToggleGroup.translationY = topMargin
             }
         }
 
@@ -172,12 +184,34 @@ class ImageViewerAdapter(
         val format = getSelectedFormat(group)
         selectedFormats[group.baseName] = format
 
-
         loadSelectedFormat(holder, group, format)
     }
 
     private fun setupButtons(holder: ViewHolder, group: ImageGroup) {
         with(holder.binding) {
+            // 1. Motion Photo button setup
+            val isMotion = group.isMotionPhoto && group.jpgUri != null && !isFormatSwitcherPersistentHidden
+            if (isMotion) {
+                btnMotionPhotoIndicator.visibility = View.VISIBLE
+                if (isMotionPhotoAutoPlay) {
+                    btnMotionPhotoIndicator.setIconResource(R.drawable.ic_play_arrow)
+                    btnMotionPhotoIndicator.contentDescription = "Motion Photo Auto-play On"
+                } else {
+                    btnMotionPhotoIndicator.setIconResource(R.drawable.ic_pause)
+                    btnMotionPhotoIndicator.contentDescription = "Motion Photo Auto-play Off"
+                }
+                btnMotionPhotoIndicator.setOnClickListener {
+                    val currentPos = holder.bindingAdapterPosition
+                    if (currentPos != RecyclerView.NO_POSITION) {
+                        onMotionPhotoIndicatorTapped?.invoke(currentPos)
+                    }
+                }
+            } else {
+                btnMotionPhotoIndicator.visibility = View.GONE
+                btnMotionPhotoIndicator.setOnClickListener(null)
+            }
+
+            // 2. RAW Format indicator setup
             val hasJpg = group.jpgUri != null
             val hasDng = group.dngUri != null || group.dngUri1 != null || group.dngUri2 != null
 
@@ -391,12 +425,138 @@ class ImageViewerAdapter(
 
     override fun onViewRecycled(holder: ViewHolder) {
         holder.loadJob?.cancel()
+        stopMotionVideo(holder)
+        holder.player?.release()
+        holder.player = null
         clearCurrentBitmap(holder)
         holder.currentUri = null
         holder.currentBaseName = null
         holder.currentVersion = 0L
         holder.binding.loadingIndicator.visibility = View.GONE
         super.onViewRecycled(holder)
+    }
+
+    override fun onDetachedFromRecyclerView(recyclerView: RecyclerView) {
+        stopAllMotionVideos()
+        for (i in 0 until itemCount) {
+            (recyclerView.findViewHolderForAdapterPosition(i) as? ViewHolder)?.let { holder ->
+                holder.player?.release()
+                holder.player = null
+            }
+        }
+        super.onDetachedFromRecyclerView(recyclerView)
+        this.recyclerView = null
+    }
+
+    fun playMotionVideo(holder: ViewHolder, group: ImageGroup, onComplete: (() -> Unit)? = null) {
+        if (!group.isMotionPhoto || group.jpgUri == null) {
+            onComplete?.invoke()
+            return
+        }
+        val context = holder.binding.root.context
+        holder.extractJob?.cancel()
+        holder.playCompletionCallback = onComplete
+
+        holder.extractJob = scope.launch {
+            val videoFile = withContext(Dispatchers.IO) {
+                top.maary.darkbag.motionphoto.MotionPhotoReader.extractVideoToCache(
+                    context,
+                    group.jpgUri,
+                    group.baseName
+                )
+            }
+            ensureActive()
+            if (videoFile == null || !videoFile.exists()) {
+                val cb = holder.playCompletionCallback
+                holder.playCompletionCallback = null
+                cb?.invoke()
+                return@launch
+            }
+
+            val player = holder.player ?: androidx.media3.exoplayer.ExoPlayer.Builder(context).build().also { p ->
+                holder.player = p
+                p.setVideoTextureView(holder.binding.videoView)
+                p.addListener(object : androidx.media3.common.Player.Listener {
+                    override fun onPlaybackStateChanged(playbackState: Int) {
+                        if (playbackState == androidx.media3.common.Player.STATE_ENDED) {
+                            stopMotionVideo(holder)
+                            val cb = holder.playCompletionCallback
+                            holder.playCompletionCallback = null
+                            cb?.invoke()
+                        }
+                    }
+
+                    override fun onRenderedFirstFrame() {
+                        holder.binding.videoView.visibility = View.VISIBLE
+                        holder.binding.videoView.alpha = 1f
+                    }
+
+                    override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                        android.util.Log.e("ImageViewerAdapter", "Motion photo playback error", error)
+                        stopMotionVideo(holder)
+                        val cb = holder.playCompletionCallback
+                        holder.playCompletionCallback = null
+                        cb?.invoke()
+                    }
+                })
+            }
+
+            val mediaItem = androidx.media3.common.MediaItem.fromUri(Uri.fromFile(videoFile))
+            player.setMediaItem(mediaItem)
+            player.repeatMode = androidx.media3.common.Player.REPEAT_MODE_OFF
+            player.prepare()
+            player.play()
+            holder.isPlayingVideo = true
+        }
+    }
+
+    fun stopMotionVideo(holder: ViewHolder) {
+        holder.extractJob?.cancel()
+        holder.extractJob = null
+        holder.player?.stop()
+        holder.binding.videoView.visibility = View.GONE
+        holder.isPlayingVideo = false
+    }
+
+    fun playMotionVideoForPosition(position: Int, onComplete: (() -> Unit)? = null) {
+        val holder = recyclerView?.findViewHolderForAdapterPosition(position) as? ViewHolder
+        if (holder != null && position in differ.currentList.indices) {
+            playMotionVideo(holder, differ.currentList[position], onComplete)
+        } else {
+            onComplete?.invoke()
+        }
+    }
+
+    fun stopMotionVideoForPosition(position: Int) {
+        val holder = recyclerView?.findViewHolderForAdapterPosition(position) as? ViewHolder
+        if (holder != null) {
+            stopMotionVideo(holder)
+        }
+    }
+
+    fun stopAllMotionVideos() {
+        recyclerView?.let { rv ->
+            for (i in 0 until itemCount) {
+                (rv.findViewHolderForAdapterPosition(i) as? ViewHolder)?.let { holder ->
+                    stopMotionVideo(holder)
+                }
+            }
+        }
+    }
+
+    fun setMotionPhotoAutoPlayEnabled(enabled: Boolean) {
+        if (this.isMotionPhotoAutoPlay == enabled) return
+        this.isMotionPhotoAutoPlay = enabled
+        recyclerView?.let { rv ->
+            for (i in 0 until itemCount) {
+                (rv.findViewHolderForAdapterPosition(i) as? ViewHolder)?.let { holder ->
+                    val pos = holder.bindingAdapterPosition
+                    if (pos != RecyclerView.NO_POSITION && pos in differ.currentList.indices) {
+                        setupButtons(holder, differ.currentList[pos])
+                    }
+                }
+            }
+        }
     }
 
     fun getGroup(position: Int): ImageGroup = differ.currentList[position]
@@ -434,16 +594,25 @@ class ImageViewerAdapter(
         recyclerView?.let { rv ->
             for (i in 0 until itemCount) {
                 (rv.findViewHolderForAdapterPosition(i) as? ViewHolder)?.let { holder ->
-                    val group = holder.binding.formatToggleGroup
+                    val formatGroup = holder.binding.formatToggleGroup
+                    val motionGroup = holder.binding.motionPhotoToggleGroup
                     val shouldBeVisible = isVisible && !isFormatSwitcherPersistentHidden
                     if (shouldBeVisible) {
-                        group.visibility = View.VISIBLE
-                        group.animate().alpha(1f).setDuration(200).setListener(null).start()
+                        formatGroup.visibility = View.VISIBLE
+                        formatGroup.animate().alpha(1f).setDuration(200).setListener(null).start()
+                        motionGroup.visibility = View.VISIBLE
+                        motionGroup.animate().alpha(1f).setDuration(200).setListener(null).start()
                     } else {
-                        group.animate().alpha(0f).setDuration(200)
+                        formatGroup.animate().alpha(0f).setDuration(200)
                             .setListener(object : android.animation.AnimatorListenerAdapter() {
                                 override fun onAnimationEnd(animation: android.animation.Animator) {
-                                    if (!isUiVisible || isFormatSwitcherPersistentHidden) group.visibility = View.GONE
+                                    if (!isUiVisible || isFormatSwitcherPersistentHidden) formatGroup.visibility = View.GONE
+                                }
+                            }).start()
+                        motionGroup.animate().alpha(0f).setDuration(200)
+                            .setListener(object : android.animation.AnimatorListenerAdapter() {
+                                override fun onAnimationEnd(animation: android.animation.Animator) {
+                                    if (!isUiVisible || isFormatSwitcherPersistentHidden) motionGroup.visibility = View.GONE
                                 }
                             }).start()
                     }
@@ -455,19 +624,31 @@ class ImageViewerAdapter(
     fun setFormatSwitcherPersistentHidden(hidden: Boolean) {
         if (this.isFormatSwitcherPersistentHidden == hidden) return
         this.isFormatSwitcherPersistentHidden = hidden
+        if (hidden) {
+            stopAllMotionVideos()
+        }
         recyclerView?.let { rv ->
             for (i in 0 until itemCount) {
                 (rv.findViewHolderForAdapterPosition(i) as? ViewHolder)?.let { holder ->
-                    val group = holder.binding.formatToggleGroup
+                    val formatGroup = holder.binding.formatToggleGroup
+                    val motionGroup = holder.binding.motionPhotoToggleGroup
                     val shouldBeVisible = isUiVisible && !isFormatSwitcherPersistentHidden
                     if (shouldBeVisible) {
-                        group.visibility = View.VISIBLE
-                        group.animate().alpha(1f).setDuration(200).setListener(null).start()
+                        formatGroup.visibility = View.VISIBLE
+                        formatGroup.animate().alpha(1f).setDuration(200).setListener(null).start()
+                        motionGroup.visibility = View.VISIBLE
+                        motionGroup.animate().alpha(1f).setDuration(200).setListener(null).start()
                     } else {
-                        group.animate().alpha(0f).setDuration(200)
+                        formatGroup.animate().alpha(0f).setDuration(200)
                             .setListener(object : android.animation.AnimatorListenerAdapter() {
                                 override fun onAnimationEnd(animation: android.animation.Animator) {
-                                    if (isFormatSwitcherPersistentHidden) group.visibility = View.GONE
+                                    if (isFormatSwitcherPersistentHidden) formatGroup.visibility = View.GONE
+                                }
+                            }).start()
+                        motionGroup.animate().alpha(0f).setDuration(200)
+                            .setListener(object : android.animation.AnimatorListenerAdapter() {
+                                override fun onAnimationEnd(animation: android.animation.Animator) {
+                                    if (isFormatSwitcherPersistentHidden) motionGroup.visibility = View.GONE
                                 }
                             }).start()
                     }
