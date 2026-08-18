@@ -55,10 +55,20 @@ object ImageSaver {
         captureMetadata: CaptureMetadata? = null,
         tiffPath: String? = null,
         isAlreadyCropped: Boolean = false,
+        motionPhotoMp4Path: String? = null,
+        motionPhotoStillPtsUs: Long = 0L,
         onBitmapReady: ((Bitmap) -> Unit)? = null
     ): Uri? {
         val halfFrameManager = HalfFrameManager(context)
         val isHalfFrameActive = !isAlreadyStitched && (halfFrameMetadata != null || halfFrameManager.isEnabled)
+
+        // Motion photos are strictly disabled in half-frame mode
+        val effectiveMotionMp4Path = if (isHalfFrameActive) {
+            motionPhotoMp4Path?.let { File(it).delete() }
+            null
+        } else {
+            motionPhotoMp4Path
+        }
 
         val actualSaveJpg = if (isHalfFrameActive) halfFrameManager.saveJpg else saveJpg
         val actualSaveRaw = if (isHalfFrameActive) halfFrameManager.saveRaw else saveRaw
@@ -115,9 +125,9 @@ object ImageSaver {
                     } else {
                         val finalFile = f
                         if (jpgFolderUri != null) {
-                            finalJpgUri = saveFileToFolder(context, finalFile, "$baseName.jpg", "image/jpeg", jpgFolderUri, editConfig = editConfig, zoomFactor = zoomFactor, captureMetadata = captureMetadata, writeExifMetadata = !isFastPath)
+                            finalJpgUri = saveFileToFolder(context, finalFile, "$baseName.jpg", "image/jpeg", jpgFolderUri, editConfig = editConfig, zoomFactor = zoomFactor, captureMetadata = captureMetadata, writeExifMetadata = !isFastPath, motionPhotoMp4Path = effectiveMotionMp4Path, motionPhotoStillPtsUs = motionPhotoStillPtsUs)
                         } else {
-                            finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri, editConfig = editConfig, zoomFactor = zoomFactor, captureMetadata = captureMetadata, writeExifMetadata = !isFastPath) { out ->
+                            finalJpgUri = saveJpegToMediaStore(context, "$baseName.jpg", targetUri, editConfig = editConfig, zoomFactor = zoomFactor, captureMetadata = captureMetadata, writeExifMetadata = !isFastPath, motionPhotoMp4Path = effectiveMotionMp4Path, motionPhotoStillPtsUs = motionPhotoStillPtsUs) { out ->
                                 finalFile.inputStream().use { it.copyTo(out) }
                             }
                         }
@@ -266,7 +276,7 @@ object ImageSaver {
                                     processedBitmap.compress(Bitmap.CompressFormat.JPEG, 95, out)
                                 }
                                 if (jpgFolderUri != null) {
-                                    finalJpgUri = saveFileToFolder(context, tempJpg, "$baseName.jpg", "image/jpeg", jpgFolderUri, editConfig = editConfig, zoomFactor = zoomFactor, captureMetadata = captureMetadata)
+                                    finalJpgUri = saveFileToFolder(context, tempJpg, "$baseName.jpg", "image/jpeg", jpgFolderUri, editConfig = editConfig, zoomFactor = zoomFactor, captureMetadata = captureMetadata, motionPhotoMp4Path = effectiveMotionMp4Path, motionPhotoStillPtsUs = motionPhotoStillPtsUs)
                                 } else {
                                     finalJpgUri = saveJpegToMediaStore(
                                         context,
@@ -276,7 +286,9 @@ object ImageSaver {
                                         processedBitmap.height,
                                         editConfig = editConfig,
                                         zoomFactor = zoomFactor,
-                                        captureMetadata = captureMetadata
+                                        captureMetadata = captureMetadata,
+                                        motionPhotoMp4Path = effectiveMotionMp4Path,
+                                        motionPhotoStillPtsUs = motionPhotoStillPtsUs
                                     ) { out ->
                                         tempJpg.inputStream().use { it.copyTo(out) }
                                     }
@@ -539,14 +551,39 @@ object ImageSaver {
         }
     }
 
-    private fun saveFileToFolder(context: Context, sourceFile: File, displayName: String, mimeType: String, folderUri: String, editConfig: EditConfig? = null, zoomFactor: Float = 1.0f, captureMetadata: CaptureMetadata? = null, writeExifMetadata: Boolean = true): Uri? {
+    private fun saveFileToFolder(
+        context: Context,
+        sourceFile: File,
+        displayName: String,
+        mimeType: String,
+        folderUri: String,
+        editConfig: EditConfig? = null,
+        zoomFactor: Float = 1.0f,
+        captureMetadata: CaptureMetadata? = null,
+        writeExifMetadata: Boolean = true,
+        motionPhotoMp4Path: String? = null,
+        motionPhotoStillPtsUs: Long = 0L
+    ): Uri? {
         try {
             val treeUri = Uri.parse(folderUri)
             val parentFolder = androidx.documentfile.provider.DocumentFile.fromTreeUri(context, treeUri)
             val newFile = parentFolder?.createFile(mimeType, displayName)
             if (newFile != null) {
                 context.contentResolver.openOutputStream(newFile.uri)?.use { out ->
-                    FileInputStream(sourceFile).copyTo(out)
+                    if (motionPhotoMp4Path != null && File(motionPhotoMp4Path).exists() && File(motionPhotoMp4Path).length() > 0) {
+                        val mp4File = File(motionPhotoMp4Path)
+                        val jpegBuffer = java.io.ByteArrayOutputStream()
+                        FileInputStream(sourceFile).use { it.copyTo(jpegBuffer) }
+                        top.maary.darkbag.motionphoto.MotionPhotoXmpWriter.writeMotionPhoto(
+                            jpegBytes = jpegBuffer.toByteArray(),
+                            mp4File = mp4File,
+                            presentationTimestampUs = motionPhotoStillPtsUs,
+                            outputStream = out
+                        )
+                        mp4File.delete()
+                    } else {
+                        FileInputStream(sourceFile).copyTo(out)
+                    }
                 }
 
                 val finalEditConfig = createFinalEditConfig(editConfig, zoomFactor)
@@ -586,6 +623,8 @@ object ImageSaver {
         zoomFactor: Float = 1.0f,
         captureMetadata: CaptureMetadata? = null,
         writeExifMetadata: Boolean = true,
+        motionPhotoMp4Path: String? = null,
+        motionPhotoStillPtsUs: Long = 0L,
         writeData: (OutputStream) -> Unit
     ): Uri? {
         val contentResolver = context.contentResolver
@@ -629,7 +668,20 @@ object ImageSaver {
         if (uri != null) {
             try {
                 contentResolver.openOutputStream(uri, "wt")?.use { out ->
-                    writeData(out)
+                    if (motionPhotoMp4Path != null && File(motionPhotoMp4Path).exists() && File(motionPhotoMp4Path).length() > 0) {
+                        val mp4File = File(motionPhotoMp4Path)
+                        val jpegBuffer = java.io.ByteArrayOutputStream()
+                        writeData(jpegBuffer)
+                        top.maary.darkbag.motionphoto.MotionPhotoXmpWriter.writeMotionPhoto(
+                            jpegBytes = jpegBuffer.toByteArray(),
+                            mp4File = mp4File,
+                            presentationTimestampUs = motionPhotoStillPtsUs,
+                            outputStream = out
+                        )
+                        mp4File.delete()
+                    } else {
+                        writeData(out)
+                    }
                     out.flush()
                 }
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {

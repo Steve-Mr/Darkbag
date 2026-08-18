@@ -20,6 +20,9 @@ import top.maary.darkbag.ui.ExpressiveShutterButton
 import top.maary.darkbag.utils.DebugLogManager
 import top.maary.darkbag.utils.LensInfo
 import top.maary.darkbag.utils.CameraRepository
+import top.maary.darkbag.motionphoto.MotionPhotoEncoder
+import kotlinx.coroutines.CompletableDeferred
+import android.content.res.ColorStateList
 
 import android.animation.ValueAnimator
 import android.annotation.SuppressLint
@@ -363,8 +366,61 @@ class CameraFragment : Fragment() {
         val physicalId: String? = null,
         val timing: StandardTimingTracker? = null,
         val halfFrameMetadata: HalfFrameManager.Metadata? = null,
-        val digitalGain: Float = 1.0f
+        val digitalGain: Float = 1.0f,
+        val motionPhotoMp4Path: String? = null,
+        val motionPhotoStillPtsUs: Long = 0L
     )
+
+    private var motionPhotoEncoder: MotionPhotoEncoder? = null
+    private var isMotionPhotoEnabled = false
+    private var pendingMotionPhotoTask: CompletableDeferred<Pair<String?, Long>>? = null
+
+    private fun updateMotionPhotoEncoder() {
+        if (!isAdded) return
+        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        isMotionPhotoEnabled = prefs.getBoolean(SettingsFragment.KEY_MOTION_PHOTO, false)
+
+        if (isMotionPhotoEnabled && !isHalfFrameModeEnabled) {
+            if (motionPhotoEncoder == null) {
+                motionPhotoEncoder = MotionPhotoEncoder(
+                    width = 1080,
+                    height = 1440,
+                    frameRate = 30,
+                    bitRate = 10_000_000
+                ).apply {
+                    start()
+                }
+                lutProcessor?.setEncoderSurface(motionPhotoEncoder?.surface, 1080, 1440)
+            }
+        } else {
+            lutProcessor?.setEncoderSurface(null, 0, 0)
+            motionPhotoEncoder?.stop()
+            motionPhotoEncoder = null
+        }
+        updateMotionPhotoButton()
+    }
+
+    private fun updateMotionPhotoButton() {
+        val btn = cameraUiContainerBinding?.motionPhotoButton ?: return
+        if (isHalfFrameModeEnabled) {
+            btn.visibility = View.GONE
+            return
+        }
+        btn.visibility = View.VISIBLE
+        if (isMotionPhotoEnabled) {
+            btn.setIconResource(R.drawable.ic_motion_photo_on)
+            val onPrimary = MaterialColors.getColor(btn, com.google.android.material.R.attr.colorOnPrimaryContainer)
+            val primaryContainer = MaterialColors.getColor(btn, com.google.android.material.R.attr.colorPrimaryContainer)
+            btn.iconTint = ColorStateList.valueOf(onPrimary)
+            btn.backgroundTintList = ColorStateList.valueOf(primaryContainer)
+        } else {
+            btn.setIconResource(R.drawable.ic_motion_photo_off)
+            val onSecondary = MaterialColors.getColor(btn, com.google.android.material.R.attr.colorOnSecondaryContainer)
+            val secondaryContainer = MaterialColors.getColor(btn, com.google.android.material.R.attr.colorSecondaryContainer)
+            btn.iconTint = ColorStateList.valueOf(onSecondary)
+            btn.backgroundTintList = ColorStateList.valueOf(secondaryContainer)
+        }
+    }
 
 
     /**
@@ -394,6 +450,9 @@ class CameraFragment : Fragment() {
     override fun onStop() {
         super.onStop()
         orientationEventListener.disable()
+        lutProcessor?.setEncoderSurface(null, 0, 0)
+        motionPhotoEncoder?.stop()
+        motionPhotoEncoder = null
         // Ensure Camera2 is closed when stopping to release hardware resources
         lifecycleScope.launch {
             releaseCamera2Resources()
@@ -432,6 +491,7 @@ class CameraFragment : Fragment() {
         updateHalfFrameUI()
         _fragmentCameraBinding?.modeSwitchButton?.let { updateModeSwitchIcon(it) }
         applyUIVisibility()
+        updateMotionPhotoEncoder()
     }
 
     override fun onDestroyView() {
@@ -449,6 +509,9 @@ class CameraFragment : Fragment() {
         // Shut down our background executor
         cameraExecutor.shutdown()
 
+        lutProcessor?.setEncoderSurface(null, 0, 0)
+        motionPhotoEncoder?.stop()
+        motionPhotoEncoder = null
         lutProcessor?.release()
         lutProcessor = null
 
@@ -1345,6 +1408,18 @@ class CameraFragment : Fragment() {
             }
         }
 
+        // Motion Photo Toggle Button
+        cameraUiContainerBinding?.motionPhotoButton?.let { btn ->
+            updateMotionPhotoButton()
+            btn.setOnClickListener {
+                if (isHalfFrameModeEnabled) return@setOnClickListener
+                isMotionPhotoEnabled = !isMotionPhotoEnabled
+                requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                    .edit().putBoolean(SettingsFragment.KEY_MOTION_PHOTO, isMotionPhotoEnabled).apply()
+                updateMotionPhotoEncoder()
+            }
+        }
+
         // Listener for button used to capture photo
         cameraUiContainerBinding?.cameraCaptureButton?.setOnLongClickListener {
             if (isHalfFrameModeEnabled && halfFrameStep == 1) {
@@ -1382,6 +1457,25 @@ class CameraFragment : Fragment() {
             val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
             val isFrame1Trigger = isHalfFrameModeEnabled && halfFrameStep == 0
             val isFrame2Trigger = isHalfFrameModeEnabled && halfFrameStep == 1
+
+            // Trigger Motion Photo snapshot if enabled and not in half-frame mode
+            val motionEnabled = prefs.getBoolean(SettingsFragment.KEY_MOTION_PHOTO, false) && !isHalfFrameModeEnabled
+            if (motionEnabled && motionPhotoEncoder?.isEncoding == true) {
+                val deferred = CompletableDeferred<Pair<String?, Long>>()
+                pendingMotionPhotoTask = deferred
+                val tempMp4 = File(requireContext().cacheDir, "motion_${timing.shutterClick}.mp4")
+                val shutterNano = System.nanoTime()
+                motionPhotoEncoder?.captureSnapshot(
+                    captureTimestampNs = shutterNano,
+                    preDurationMs = 1500L,
+                    postDurationMs = 750L,
+                    outputFile = tempMp4
+                ) { file, stillPtsUs ->
+                    deferred.complete(Pair(file?.absolutePath, stillPtsUs))
+                }
+            } else {
+                pendingMotionPhotoTask = null
+            }
 
             val hfGroupId = if (isFrame2Trigger) {
                 halfFrameSessionStore.readSession().baseName
@@ -1911,6 +2005,16 @@ class CameraFragment : Fragment() {
 
 
                 // 5. Enqueue HQ Processing
+                var motionMp4Path = image.motionPhotoMp4Path
+                var motionStillPtsUs = image.motionPhotoStillPtsUs
+                if (motionMp4Path == null && pendingMotionPhotoTask != null) {
+                    val task = pendingMotionPhotoTask
+                    pendingMotionPhotoTask = null
+                    val result = withTimeoutOrNull(2500L) { task?.await() }
+                    motionMp4Path = result?.first
+                    motionStillPtsUs = result?.second ?: 0L
+                }
+
                 val request = top.maary.darkbag.processor.HdrPlusRequest(
                     requestId = java.util.UUID.randomUUID().toString(),
                     megaBuffer = image.data!!,
@@ -1959,7 +2063,9 @@ class CameraFragment : Fragment() {
                         showTimestamp = image.halfFrameMetadata?.dateStamp ?: false,
                         zoomFactor = image.zoomRatio
                     ),
-                    runAblationTest = false
+                    runAblationTest = false,
+                    motionPhotoMp4Path = motionMp4Path,
+                    motionPhotoStillPtsUs = motionStillPtsUs
                 )
                 top.maary.darkbag.processor.HdrPlusRequestManager.enqueue(request)
                 val serviceIntent = android.content.Intent(context, top.maary.darkbag.processor.HdrPlusProcessingService::class.java)
@@ -3037,6 +3143,16 @@ class CameraFragment : Fragment() {
                 val jpgFolderUri = appContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
                     .getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
 
+                var motionMp4Path: String? = null
+                var motionStillPtsUs: Long = 0L
+                if (pendingMotionPhotoTask != null) {
+                    val task = pendingMotionPhotoTask
+                    pendingMotionPhotoTask = null
+                    val result = withTimeoutOrNull(2500L) { task?.await() }
+                    motionMp4Path = result?.first
+                    motionStillPtsUs = result?.second ?: 0L
+                }
+
                 val uri = ImageSaver.saveProcessedImage(
                     context = appContext,
                     inputBitmap = null,
@@ -3049,7 +3165,9 @@ class CameraFragment : Fragment() {
                     jpgFolderUri = jpgFolderUri,
                     mirror = mirror,
                     halfFrameMetadata = halfFrameMetadata,
-                    captureMetadata = captureMetadata
+                    captureMetadata = captureMetadata,
+                    motionPhotoMp4Path = motionMp4Path,
+                    motionPhotoStillPtsUs = motionStillPtsUs
                 )
                 withContext(Dispatchers.Main) {
                     val uiPrefs = appContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
@@ -3585,6 +3703,16 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     // 保持加载动画，不调用 hideProcessingAnimation()
                 }
 
+                    var motionMp4Path: String? = null
+                    var motionStillPtsUs: Long = 0L
+                    if (pendingMotionPhotoTask != null) {
+                        val task = pendingMotionPhotoTask
+                        pendingMotionPhotoTask = null
+                        val result = withTimeoutOrNull(2500L) { task?.await() }
+                        motionMp4Path = result?.first
+                        motionStillPtsUs = result?.second ?: 0L
+                    }
+
                     val request = top.maary.darkbag.processor.HdrPlusRequest(
                         requestId = java.util.UUID.randomUUID().toString(),
                         megaBuffer = megaBuffer,
@@ -3634,7 +3762,9 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                             flareType = hfMetadata?.flareType ?: -1,
                             zoomFactor = currentZoom
                         ),
-                        runAblationTest = false
+                        runAblationTest = false,
+                        motionPhotoMp4Path = motionMp4Path,
+                        motionPhotoStillPtsUs = motionStillPtsUs
                     )
                     top.maary.darkbag.processor.HdrPlusRequestManager.enqueue(request)
                     val serviceIntent = android.content.Intent(context, top.maary.darkbag.processor.HdrPlusProcessingService::class.java)
@@ -4673,6 +4803,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         readScopedHalfFrameState(prefs, requireFileForStep1 = true)
         updateHalfFrameUI()
         updateShutterOrientation()
+        updateMotionPhotoEncoder()
 
         // Re-bind use cases if needed?
         // Actually Half-frame doesn't change use cases, just UI and post-processing.
@@ -4742,7 +4873,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
         uiBinding.lutSwitcherButton?.visibility = if (showLutSwitcher) View.VISIBLE else View.GONE
 
-        // Update Flash/Underexposure button as well
+        // Update Motion Photo Button & Flash/Underexposure button as well
+        updateMotionPhotoButton()
         updateHdrPlusConstraints()
     }
 

@@ -44,6 +44,9 @@
     <string name="zoom_1x">1x</string>
     <string name="zoom_2x">2x</string>
     <string name="toggle_flash">Toggle Flash</string>
+    <string name="toggle_motion_photo">Toggle Motion Photo</string>
+    <string name="motion_photo_title">Motion Photo (Live Photo)</string>
+    <string name="enable_motion_photo">Enable Motion Photo</string>
     <string name="lut_menu_log">Log</string>
     <string name="lut_menu_lut">LUT</string>
     <string name="lut_menu_select_log_first">LUT: (Select Log First)</string>

@@ -398,6 +398,7 @@ class SettingsFragment : Fragment() {
 
         setupSwitch(binding.switchHqBackgroundExport, KEY_HQ_BACKGROUND_EXPORT, false)
         setupSwitch(binding.switchManualControls, KEY_MANUAL_CONTROLS, false)
+        setupSwitch(binding.switchMotionPhoto, KEY_MOTION_PHOTO, false)
         setupSwitch(binding.switchHalfFrameMode, KEY_HALF_FRAME_MODE, false)
         setupSwitch(binding.switchHalfFrameDownsample, KEY_HALF_FRAME_DOWNSAMPLE)
         setupSwitch(binding.switchHalfFrameDateStamp, KEY_HALF_FRAME_DATE_STAMP, false)
@@ -527,6 +528,7 @@ class SettingsFragment : Fragment() {
         const val KEY_HDR_PLUS_OIS = "hdr_plus_ois_enabled"
         const val KEY_FORCE_60FPS = "force_60fps"
         const val KEY_DEBUG_ENABLED = "debug_enabled"
+        const val KEY_MOTION_PHOTO = "motion_photo_enabled"
         const val KEY_SAVE_RAW = "save_raw"
         const val KEY_JPG_STORAGE_URI = "jpg_storage_uri"
         const val KEY_JPG_STORAGE_URI_NAME = "jpg_storage_uri_name"
