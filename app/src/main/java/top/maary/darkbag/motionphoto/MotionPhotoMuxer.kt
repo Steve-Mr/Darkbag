@@ -24,7 +24,8 @@ object MotionPhotoMuxer {
     fun muxSliceToMp4(
         outputFile: File,
         mediaFormat: MediaFormat,
-        slice: MotionPhotoSlice
+        slice: MotionPhotoSlice,
+        orientationDegrees: Int = 0
     ): Long? {
         if (slice.samples.isEmpty()) {
             Log.e(TAG, "Cannot mux empty slice")
@@ -39,6 +40,9 @@ object MotionPhotoMuxer {
             outputFile.parentFile?.mkdirs()
 
             muxer = MediaMuxer(outputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+            if (orientationDegrees in listOf(0, 90, 180, 270)) {
+                muxer.setOrientationHint(orientationDegrees)
+            }
             val trackIndex = muxer.addTrack(mediaFormat)
             muxer.start()
 

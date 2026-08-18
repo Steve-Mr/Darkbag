@@ -390,8 +390,8 @@ class CameraFragment : Fragment() {
                 ).apply {
                     start()
                 }
-                lutProcessor?.setEncoderSurface(motionPhotoEncoder?.surface, 1080, 1440)
             }
+            lutProcessor?.setEncoderSurface(motionPhotoEncoder?.surface, 1080, 1440)
         } else {
             lutProcessor?.setEncoderSurface(null, 0, 0)
             motionPhotoEncoder?.stop()
@@ -725,6 +725,7 @@ class CameraFragment : Fragment() {
             // Initialize LUT Processor early to be ready for any engine
             if (lutProcessor == null) {
                 lutProcessor = LutSurfaceProcessor()
+                updateMotionPhotoEncoder()
             }
 
             // Setup ViewFinder early
@@ -1465,11 +1466,13 @@ class CameraFragment : Fragment() {
                 pendingMotionPhotoTask = deferred
                 val tempMp4 = File(requireContext().cacheDir, "motion_${timing.shutterClick}.mp4")
                 val shutterNano = System.nanoTime()
+                val currentOrientation = deviceOrientationDegrees
                 motionPhotoEncoder?.captureSnapshot(
                     captureTimestampNs = shutterNano,
                     preDurationMs = 1500L,
                     postDurationMs = 750L,
-                    outputFile = tempMp4
+                    outputFile = tempMp4,
+                    orientationDegrees = currentOrientation
                 ) { file, stillPtsUs ->
                     deferred.complete(Pair(file?.absolutePath, stillPtsUs))
                 }

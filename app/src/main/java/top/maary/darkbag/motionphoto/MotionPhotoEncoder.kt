@@ -143,6 +143,7 @@ class MotionPhotoEncoder(
         preDurationMs: Long = 1500L,
         postDurationMs: Long = 750L,
         outputFile: File,
+        orientationDegrees: Int = 0,
         onComplete: (file: File?, stillPtsUs: Long) -> Unit
     ) {
         if (!isRunning.get()) {
@@ -178,7 +179,8 @@ class MotionPhotoEncoder(
             val stillPtsUs = MotionPhotoMuxer.muxSliceToMp4(
                 outputFile = outputFile,
                 mediaFormat = currentFormat,
-                slice = slice
+                slice = slice,
+                orientationDegrees = orientationDegrees
             )
 
             if (stillPtsUs != null && outputFile.exists() && outputFile.length() > 0) {
