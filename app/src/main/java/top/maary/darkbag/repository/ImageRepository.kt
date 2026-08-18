@@ -103,6 +103,12 @@ class ImageRepository(private val context: Context) {
         group.jpgUri?.let { uri ->
             try {
                 context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                    val motionInfo = top.maary.darkbag.motionphoto.MotionPhotoReader.parseMotionPhotoInfo(pfd)
+                    if (motionInfo != null) {
+                        builder.isMotionPhoto = true
+                        builder.motionPhotoPtsUs = motionInfo.presentationTimestampUs
+                    }
+
                     val exif = androidx.exifinterface.media.ExifInterface(pfd.fileDescriptor)
                     val comment =
                         exif.getAttribute(androidx.exifinterface.media.ExifInterface.TAG_USER_COMMENT)
@@ -446,6 +452,8 @@ class ImageRepository(private val context: Context) {
         var captureTime: Long = 0L
         var lastModified: Long = 0L
         var editConfig: EditConfig? = null
+        var isMotionPhoto: Boolean = false
+        var motionPhotoPtsUs: Long = 0L
 
         fun applyFrom(group: ImageGroup): ImageGroupBuilder {
             jpgUri = group.jpgUri
@@ -458,6 +466,8 @@ class ImageRepository(private val context: Context) {
             captureTime = group.captureTime
             lastModified = group.lastModified
             editConfig = group.editConfig
+            isMotionPhoto = group.isMotionPhoto
+            motionPhotoPtsUs = group.motionPhotoPtsUs
             return this
         }
 
@@ -544,7 +554,9 @@ class ImageRepository(private val context: Context) {
                 editConfig,
                 metadataLoaded = false,
                 isInProgress = isInProgress,
-                isPartial = isPartial
+                isPartial = isPartial,
+                isMotionPhoto = isMotionPhoto,
+                motionPhotoPtsUs = motionPhotoPtsUs
             )
         }
     }
