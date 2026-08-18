@@ -22,6 +22,7 @@ object MotionPhotoXmpWriter {
         videoLengthBytes: Long
     ): String {
         return """
+            <?xpacket begin="﻿" id="W5M0MpCehiHzreSzNTczkc9d"?>
             <x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="Adobe XMP Core 5.1.0-jc003">
               <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
                 <rdf:Description rdf:about=""
@@ -38,22 +39,25 @@ object MotionPhotoXmpWriter {
                   <Container:Directory>
                     <rdf:Seq>
                       <rdf:li rdf:parseType="Resource">
-                        <Item:Mime>image/jpeg</Item:Mime>
-                        <Item:Semantic>Primary</Item:Semantic>
-                        <Item:Length>0</Item:Length>
-                        <Item:Padding>0</Item:Padding>
+                        <Container:Item
+                            Item:Mime="image/jpeg"
+                            Item:Semantic="Primary"
+                            Item:Length="0"
+                            Item:Padding="0"/>
                       </rdf:li>
                       <rdf:li rdf:parseType="Resource">
-                        <Item:Mime>video/mp4</Item:Mime>
-                        <Item:Semantic>MotionPhoto</Item:Semantic>
-                        <Item:Length>$videoLengthBytes</Item:Length>
-                        <Item:Padding>0</Item:Padding>
+                        <Container:Item
+                            Item:Mime="video/mp4"
+                            Item:Semantic="MotionPhoto"
+                            Item:Length="$videoLengthBytes"
+                            Item:Padding="0"/>
                       </rdf:li>
                     </rdf:Seq>
                   </Container:Directory>
                 </rdf:Description>
               </rdf:RDF>
             </x:xmpmeta>
+            <?xpacket end="w"?>
         """.trimIndent()
     }
 

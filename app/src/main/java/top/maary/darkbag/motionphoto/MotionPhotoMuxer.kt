@@ -48,11 +48,16 @@ object MotionPhotoMuxer {
 
             val basePts = slice.samples.first().presentationTimeUs
             val bufferInfo = MediaCodec.BufferInfo()
+            var lastPtsUs = -1L
 
             for (sample in slice.samples) {
                 val byteBuffer = ByteBuffer.wrap(sample.data)
-                // Normalize PTS so that the first sample starts at 0us
-                val relativePtsUs = (sample.presentationTimeUs - basePts).coerceAtLeast(0L)
+                // Normalize PTS so that the first sample starts at 0us and timestamps are strictly non-decreasing
+                var relativePtsUs = (sample.presentationTimeUs - basePts).coerceAtLeast(0L)
+                if (relativePtsUs <= lastPtsUs) {
+                    relativePtsUs = lastPtsUs + 1000L
+                }
+                lastPtsUs = relativePtsUs
 
                 bufferInfo.set(
                     0,

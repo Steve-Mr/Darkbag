@@ -16,8 +16,9 @@ class MotionPhotoXmpWriterTest {
         assertTrue(xmp.contains("GCamera:MotionPhoto=\"1\""))
         assertTrue(xmp.contains("GCamera:MotionPhotoPresentationTimestampUs=\"1250000\""))
         assertTrue(xmp.contains("GCamera:MicroVideoOffset=\"2048100\""))
-        assertTrue(xmp.contains("<Item:Semantic>MotionPhoto</Item:Semantic>"))
-        assertTrue(xmp.contains("<Item:Length>2048100</Item:Length>"))
+        assertTrue(xmp.contains("Item:Semantic=\"MotionPhoto\""))
+        assertTrue(xmp.contains("Item:Length=\"2048100\""))
+        assertTrue(xmp.contains("<Container:Item"))
     }
 
     @Test
