@@ -110,18 +110,18 @@ class CircularVideoRingBuffer(
                 return null
             }
 
-            val targetStartTimeUs = triggerTimestampUs - preDurationUs
-            val targetEndTimeUs = triggerTimestampUs + postDurationUs
-
             val allSamples = bufferQueue.toList()
             if (allSamples.isEmpty()) return null
 
+            val earliestSampleUs = allSamples.first().presentationTimeUs
+            val latestSampleUs = allSamples.last().presentationTimeUs
+            val effectiveTriggerUs = triggerTimestampUs.coerceIn(earliestSampleUs, latestSampleUs)
+
+            val targetStartTimeUs = effectiveTriggerUs - preDurationUs
+            val targetEndTimeUs = effectiveTriggerUs + postDurationUs
+
             // Find all samples up to targetEndTimeUs
-            val validWindowSamples = allSamples.filter { it.presentationTimeUs <= targetEndTimeUs }
-            if (validWindowSamples.isEmpty()) {
-                Log.w(TAG, "No samples before targetEndTimeUs=$targetEndTimeUs")
-                return null
-            }
+            val validWindowSamples = allSamples.filter { it.presentationTimeUs <= targetEndTimeUs }.ifEmpty { allSamples }
 
             // Find the best keyframe before or closest to targetStartTimeUs
             var keyFrameIndex = -1
@@ -131,7 +131,7 @@ class CircularVideoRingBuffer(
                     if (sample.presentationTimeUs <= targetStartTimeUs || keyFrameIndex == -1) {
                         keyFrameIndex = i
                     } else if (keyFrameIndex != -1 && validWindowSamples[keyFrameIndex].presentationTimeUs < targetStartTimeUs) {
-                        if (sample.presentationTimeUs <= triggerTimestampUs) {
+                        if (sample.presentationTimeUs <= effectiveTriggerUs) {
                             keyFrameIndex = i
                         }
                     }
@@ -154,7 +154,7 @@ class CircularVideoRingBuffer(
             val firstPts = slicedSamples.first().presentationTimeUs
             val lastPts = slicedSamples.last().presentationTimeUs
             val durationUs = (lastPts - firstPts).coerceAtLeast(0L)
-            val stillPtsOffsetUs = (triggerTimestampUs - firstPts).coerceAtLeast(0L)
+            val stillPtsOffsetUs = (effectiveTriggerUs - firstPts).coerceIn(0L, durationUs)
 
             return MotionPhotoSlice(
                 spsPpsBuffers = spsPpsBuffers.toList(),

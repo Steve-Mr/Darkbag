@@ -54,4 +54,36 @@ class MotionPhotoXmpWriterTest {
 
         tempMp4.delete()
     }
+
+    @Test
+    fun testExifPreservingXmpInjection() {
+        // Fake JPEG with existing Exif APP1: SOI (FF D8) + APP1 Exif (FF E1 00 06 45 78 69 66) + SOS + EOI (FF D9)
+        val exifPayload = "Exif".toByteArray(Charsets.US_ASCII)
+        val exifLen = exifPayload.size + 2
+        val fakeJpegWithExif = byteArrayOf(
+            0xFF.toByte(), 0xD8.toByte(),
+            0xFF.toByte(), 0xE1.toByte(), ((exifLen shr 8) and 0xFF).toByte(), (exifLen and 0xFF).toByte(),
+            0x45, 0x78, 0x69, 0x66,
+            0xFF.toByte(), 0xDA.toByte(), 0x00, 0x02, 0x12, 0x34,
+            0xFF.toByte(), 0xD9.toByte()
+        )
+
+        val xmpBytes = "http://ns.adobe.com/xap/1.0/\u0000<test/>".toByteArray(Charsets.UTF_8)
+        val injected = MotionPhotoXmpWriter.injectXmpIntoJpeg(fakeJpegWithExif, xmpBytes)
+
+        // Must start with SOI
+        assertEquals(0xFF.toByte(), injected[0])
+        assertEquals(0xD8.toByte(), injected[1])
+
+        // First APP1 is Exif
+        assertEquals(0xFF.toByte(), injected[2])
+        assertEquals(0xE1.toByte(), injected[3])
+        assertEquals(0x45.toByte(), injected[6]) // 'E'
+        assertEquals(0x78.toByte(), injected[7]) // 'x'
+
+        // Second APP1 is XMP
+        val secondApp1Pos = 2 + 2 + exifLen
+        assertEquals(0xFF.toByte(), injected[secondApp1Pos])
+        assertEquals(0xE1.toByte(), injected[secondApp1Pos + 1])
+    }
 }

@@ -445,22 +445,21 @@ object ImageSaver {
         )
     }
 
-    fun writeMetadataToExif(context: Context, uri: Uri, editConfig: EditConfig?, captureMetadata: CaptureMetadata?) {
-        try {
-            val json = editConfig?.let { cfg ->
-                JSONObject().apply {
-                put("log", editConfig.log)
-                put("lut", editConfig.lut)
-                put("exposure", editConfig.exposure.toDouble())
-                put("contrast", editConfig.contrast.toDouble())
-                put("saturation", editConfig.saturation.toDouble())
-                put("highlights", editConfig.highlights.toDouble())
-                put("shadows", editConfig.shadows.toDouble())
-                put("whites", editConfig.whites.toDouble())
-                put("blacks", editConfig.blacks.toDouble())
-                put("digital_gain", editConfig.digitalGain.toDouble())
+    private fun buildEditConfigJson(editConfig: EditConfig?): JSONObject? {
+        return editConfig?.let { cfg ->
+            JSONObject().apply {
+                put("log", cfg.log)
+                put("lut", cfg.lut)
+                put("exposure", cfg.exposure.toDouble())
+                put("contrast", cfg.contrast.toDouble())
+                put("saturation", cfg.saturation.toDouble())
+                put("highlights", cfg.highlights.toDouble())
+                put("shadows", cfg.shadows.toDouble())
+                put("whites", cfg.whites.toDouble())
+                put("blacks", cfg.blacks.toDouble())
+                put("digital_gain", cfg.digitalGain.toDouble())
 
-                editConfig.adjustments?.let { adjs ->
+                cfg.adjustments?.let { adjs ->
                     val array = org.json.JSONArray()
                     adjs.forEach { adj ->
                         array.put(JSONObject().apply {
@@ -476,13 +475,37 @@ object ImageSaver {
                     }
                     put("adjustments", array)
                 }
-                put("show_timestamp", editConfig.showTimestamp)
-                put("flare_type", editConfig.flareType)
-                put("hf_layout", editConfig.hfLayout)
-                put("is_swapped", editConfig.isSwapped)
+                put("show_timestamp", cfg.showTimestamp)
+                put("flare_type", cfg.flareType)
+                put("hf_layout", cfg.hfLayout)
+                put("is_swapped", cfg.isSwapped)
                 put("zoom_factor", cfg.zoomFactor.toDouble())
             }
+        }
+    }
+
+    fun writeMetadataToExifFile(file: File, editConfig: EditConfig?, captureMetadata: CaptureMetadata?) {
+        try {
+            val json = buildEditConfigJson(editConfig)
+            val exif = ExifInterface(file.absolutePath)
+            if (json != null) {
+                exif.setAttribute(ExifInterface.TAG_USER_COMMENT, json.toString())
             }
+
+            writeStandardExif(exif, captureMetadata)
+            val isHdrPlus = (editConfig?.log ?: "").contains("HDR+", ignoreCase = true) ||
+                file.name.contains("_HDRPLUS", ignoreCase = true)
+            applyDarkbagIdentity(exif, isHdrPlus = isHdrPlus, captureMetadata = captureMetadata)
+
+            exif.saveAttributes()
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to write EditConfig to EXIF file ${file.absolutePath}", e)
+        }
+    }
+
+    fun writeMetadataToExif(context: Context, uri: Uri, editConfig: EditConfig?, captureMetadata: CaptureMetadata?) {
+        try {
+            val json = buildEditConfigJson(editConfig)
             context.contentResolver.openFileDescriptor(uri, "rw")?.use { pfd ->
                 val exif = ExifInterface(pfd.fileDescriptor)
                 if (json != null) {
@@ -519,7 +542,17 @@ object ImageSaver {
             if (!debugFile.exists() || debugFile.length() <= 0L) continue
 
             try {
-                saveJpegToMediaStore(context, displayName, null) { out ->
+                saveJpegToMediaStore(
+                    context = context,
+                    displayName = displayName,
+                    targetUri = null,
+                    width = null,
+                    height = null,
+                    editConfig = null,
+                    zoomFactor = 1.0f,
+                    captureMetadata = null,
+                    writeExifMetadata = false
+                ) { out ->
                     FileInputStream(debugFile).use { it.copyTo(out) }
                 }
             } catch (e: Exception) {
@@ -569,13 +602,18 @@ object ImageSaver {
             val parentFolder = androidx.documentfile.provider.DocumentFile.fromTreeUri(context, treeUri)
             val newFile = parentFolder?.createFile(mimeType, displayName)
             if (newFile != null) {
+                val isMotionPhoto = motionPhotoMp4Path != null && File(motionPhotoMp4Path).exists() && File(motionPhotoMp4Path).length() > 0
+                val finalEditConfig = createFinalEditConfig(editConfig, zoomFactor)
+
                 context.contentResolver.openOutputStream(newFile.uri)?.use { out ->
-                    if (motionPhotoMp4Path != null && File(motionPhotoMp4Path).exists() && File(motionPhotoMp4Path).length() > 0) {
-                        val mp4File = File(motionPhotoMp4Path)
-                        val jpegBuffer = java.io.ByteArrayOutputStream()
-                        FileInputStream(sourceFile).use { it.copyTo(jpegBuffer) }
+                    if (isMotionPhoto) {
+                        val mp4File = File(motionPhotoMp4Path!!)
+                        if (writeExifMetadata) {
+                            writeMetadataToExifFile(sourceFile, finalEditConfig, captureMetadata)
+                        }
+                        val jpegBytes = sourceFile.readBytes()
                         top.maary.darkbag.motionphoto.MotionPhotoXmpWriter.writeMotionPhoto(
-                            jpegBytes = jpegBuffer.toByteArray(),
+                            jpegBytes = jpegBytes,
                             mp4File = mp4File,
                             presentationTimestampUs = motionPhotoStillPtsUs,
                             outputStream = out
@@ -586,9 +624,7 @@ object ImageSaver {
                     }
                 }
 
-                val finalEditConfig = createFinalEditConfig(editConfig, zoomFactor)
-
-                if (writeExifMetadata && (mimeType == "image/jpeg" || mimeType == "image/x-adobe-dng")) {
+                if (!isMotionPhoto && writeExifMetadata && (mimeType == "image/jpeg" || mimeType == "image/x-adobe-dng")) {
                     writeMetadataToExif(context, newFile.uri, finalEditConfig, captureMetadata)
                 }
 
@@ -604,15 +640,11 @@ object ImageSaver {
     }
 
     private fun createFinalEditConfig(editConfig: EditConfig?, zoomFactor: Float): EditConfig? {
-        // Use 1.05f threshold to match project conventions for meaningful zoom
         return editConfig?.let {
             if (it.zoomFactor <= 1.05f && zoomFactor > 1.05f) it.copy(zoomFactor = zoomFactor) else it
         } ?: if (zoomFactor > 1.05f) EditConfig(zoomFactor = zoomFactor) else null
     }
 
-    /**
-     * Helper to encapsulate MediaStore JPEG saving/updating.
-     */
     private fun saveJpegToMediaStore(
         context: Context,
         displayName: String,
@@ -634,6 +666,7 @@ object ImageSaver {
         val isReplacement = uri != null
 
         val finalEditConfig = createFinalEditConfig(editConfig, zoomFactor)
+        val isMotionPhoto = motionPhotoMp4Path != null && File(motionPhotoMp4Path).exists() && File(motionPhotoMp4Path).length() > 0
 
         try {
             if (uri == null) {
@@ -649,7 +682,6 @@ object ImageSaver {
                 }
                 uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, jpgValues)
             } else {
-                // Hardened replacement logic: avoid updating DISPLAY_NAME and RELATIVE_PATH
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     jpgValues.put(MediaStore.MediaColumns.IS_PENDING, 1)
                 }
@@ -668,12 +700,18 @@ object ImageSaver {
         if (uri != null) {
             try {
                 contentResolver.openOutputStream(uri, "wt")?.use { out ->
-                    if (motionPhotoMp4Path != null && File(motionPhotoMp4Path).exists() && File(motionPhotoMp4Path).length() > 0) {
-                        val mp4File = File(motionPhotoMp4Path)
-                        val jpegBuffer = java.io.ByteArrayOutputStream()
-                        writeData(jpegBuffer)
+                    if (isMotionPhoto) {
+                        val mp4File = File(motionPhotoMp4Path!!)
+                        val tempJpeg = File(context.cacheDir, "temp_motion_exif_${System.currentTimeMillis()}.jpg")
+                        FileOutputStream(tempJpeg).use { writeData(it) }
+                        if (writeExifMetadata) {
+                            writeMetadataToExifFile(tempJpeg, finalEditConfig, captureMetadata)
+                        }
+                        val jpegBytes = tempJpeg.readBytes()
+                        tempJpeg.delete()
+
                         top.maary.darkbag.motionphoto.MotionPhotoXmpWriter.writeMotionPhoto(
-                            jpegBytes = jpegBuffer.toByteArray(),
+                            jpegBytes = jpegBytes,
                             mp4File = mp4File,
                             presentationTimestampUs = motionPhotoStillPtsUs,
                             outputStream = out
@@ -694,7 +732,7 @@ object ImageSaver {
                         Log.e(TAG, "Failed to clear IS_PENDING for $uri", e)
                     }
                 }
-                if (writeExifMetadata) {
+                if (!isMotionPhoto && writeExifMetadata) {
                     writeMetadataToExif(context, uri, finalEditConfig, captureMetadata)
                 }
 
@@ -703,9 +741,6 @@ object ImageSaver {
                 } else {
                     Log.i(TAG, "Saved JPEG to $uri")
                 }
-
-                // If this is a final HQ save, notify the UI to update thumbnails and hide progress
-                // Note: We don't emit for fast path here because saveProcessedImage handles it.
 
                 return uri
             } catch (e: Exception) {

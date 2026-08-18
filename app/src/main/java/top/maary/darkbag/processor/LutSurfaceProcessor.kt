@@ -525,7 +525,7 @@ class LutSurfaceProcessor : SurfaceProcessor {
             GLES30.glDisableVertexAttribArray(posHandle)
             GLES30.glDisableVertexAttribArray(texHandle)
 
-            val frameTimestampNs = inputSurfaceTexture?.timestamp ?: 0L
+            val frameTimestampNs = System.nanoTime()
             EGLExt.eglPresentationTimeANDROID(eglDisplay, encoderEglSurface, frameTimestampNs)
             EGL14.eglSwapBuffers(eglDisplay, encoderEglSurface)
 
