@@ -64,6 +64,11 @@ class ImageRepository(private val context: Context) {
         val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
         val groups = mutableMapOf<String, ImageGroupBuilder>()
 
+        // Pre-populate with cached metadata if available
+        cachedGroups?.forEach { cached ->
+            groups[cached.baseName] = ImageGroupBuilder(cached.baseName).applyFrom(cached)
+        }
+
         suspend fun emitCurrent() {
             val sorted = groups.values
                 .map { it.build() }
@@ -103,38 +108,51 @@ class ImageRepository(private val context: Context) {
         group.jpgUri?.let { uri ->
             try {
                 context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
-                    val motionInfo = top.maary.darkbag.motionphoto.MotionPhotoReader.parseMotionPhotoInfo(pfd)
-                    if (motionInfo != null) {
-                        builder.isMotionPhoto = true
-                        builder.motionPhotoPtsUs = motionInfo.presentationTimestampUs
+                    try {
+                        val exif = androidx.exifinterface.media.ExifInterface(pfd.fileDescriptor)
+                        val comment =
+                            exif.getAttribute(androidx.exifinterface.media.ExifInterface.TAG_USER_COMMENT)
+                        parseUserComment(comment, builder)
+
+                        val orientation = exif.getAttributeInt(
+                            androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION,
+                            androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL
+                        )
+                        val w = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_IMAGE_WIDTH, 0)
+                        val h = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_IMAGE_LENGTH, 0)
+
+                        if (orientation == androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90 || orientation == androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270) {
+                            builder.width = h
+                            builder.height = w
+                        } else {
+                            builder.width = w
+                            builder.height = h
+                        }
+                    } catch (e: Exception) {
+                        android.util.Log.w("ImageRepository", "Failed to read EXIF from $uri", e)
                     }
 
-                    val exif = androidx.exifinterface.media.ExifInterface(pfd.fileDescriptor)
-                    val comment =
-                        exif.getAttribute(androidx.exifinterface.media.ExifInterface.TAG_USER_COMMENT)
-                    parseUserComment(comment, builder)
-
-                    val orientation = exif.getAttributeInt(
-                        androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION,
-                        androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL
-                    )
-                    val w = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_IMAGE_WIDTH, 0)
-                    val h = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_IMAGE_LENGTH, 0)
-
-                    if (orientation == androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90 || orientation == androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270) {
-                        builder.width = h
-                        builder.height = w
-                    } else {
-                        builder.width = w
-                        builder.height = h
+                    try {
+                        android.system.Os.lseek(pfd.fileDescriptor, 0L, android.system.OsConstants.SEEK_SET)
+                        val motionInfo = top.maary.darkbag.motionphoto.MotionPhotoReader.parseMotionPhotoInfo(pfd)
+                        if (motionInfo != null) {
+                            builder.isMotionPhoto = true
+                            builder.motionPhotoPtsUs = motionInfo.presentationTimestampUs
+                        }
+                    } catch (e: Exception) {
+                        android.util.Log.w("ImageRepository", "Failed to read Motion Photo from $uri", e)
                     }
                 }
             } catch (e: Exception) {
-                android.util.Log.w("ImageRepository", "Failed to read EXIF from $uri", e)
+                android.util.Log.w("ImageRepository", "Failed to open $uri", e)
             }
         }
 
-        builder.build().copy(metadataLoaded = true)
+        val updated = builder.build().copy(metadataLoaded = true)
+        cachedGroups = cachedGroups?.map {
+            if (it.baseName == updated.baseName) updated else it
+        }
+        updated
     }
 
     fun invalidateCache() {

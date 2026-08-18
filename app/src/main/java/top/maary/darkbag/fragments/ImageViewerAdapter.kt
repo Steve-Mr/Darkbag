@@ -129,6 +129,10 @@ class ImageViewerAdapter(
 
         holder.binding.imageView.setVisualParams(margin, radius)
 
+        holder.binding.videoView.isClickable = false
+        holder.binding.videoView.isFocusable = false
+        holder.binding.videoView.isLongClickable = false
+
         holder.binding.imageView.onTapped = { onImageTapped?.invoke() }
         holder.binding.imageView.onLongPressStarted = { onLongPressStarted?.invoke(it) }
         holder.binding.imageView.onLongPressEnded = { onLongPressEnded?.invoke(it) }
@@ -457,6 +461,10 @@ class ImageViewerAdapter(
         holder.extractJob?.cancel()
         holder.playCompletionCallback = onComplete
 
+        // Make TextureView part of layout hierarchy with alpha 0 so its SurfaceTexture is allocated immediately
+        holder.binding.videoView.alpha = 0f
+        holder.binding.videoView.visibility = View.VISIBLE
+
         holder.extractJob = scope.launch {
             val videoFile = withContext(Dispatchers.IO) {
                 top.maary.darkbag.motionphoto.MotionPhotoReader.extractVideoToCache(
@@ -467,6 +475,7 @@ class ImageViewerAdapter(
             }
             ensureActive()
             if (videoFile == null || !videoFile.exists()) {
+                stopMotionVideo(holder)
                 val cb = holder.playCompletionCallback
                 holder.playCompletionCallback = null
                 cb?.invoke()
@@ -487,7 +496,6 @@ class ImageViewerAdapter(
                     }
 
                     override fun onRenderedFirstFrame() {
-                        holder.binding.videoView.visibility = View.VISIBLE
                         holder.binding.videoView.alpha = 1f
                     }
 
@@ -504,6 +512,7 @@ class ImageViewerAdapter(
             val mediaItem = androidx.media3.common.MediaItem.fromUri(Uri.fromFile(videoFile))
             player.setMediaItem(mediaItem)
             player.repeatMode = androidx.media3.common.Player.REPEAT_MODE_OFF
+            player.seekTo(0)
             player.prepare()
             player.play()
             holder.isPlayingVideo = true
@@ -514,7 +523,8 @@ class ImageViewerAdapter(
         holder.extractJob?.cancel()
         holder.extractJob = null
         holder.player?.stop()
-        holder.binding.videoView.visibility = View.GONE
+        holder.binding.videoView.visibility = View.INVISIBLE
+        holder.binding.videoView.alpha = 0f
         holder.isPlayingVideo = false
     }
 

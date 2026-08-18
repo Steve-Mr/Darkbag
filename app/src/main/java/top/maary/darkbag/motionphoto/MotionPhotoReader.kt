@@ -64,9 +64,20 @@ object MotionPhotoReader {
         if (totalSize <= 0) return null
 
         return try {
-            FileInputStream(pfd.fileDescriptor).use { fis ->
-                parseMotionPhotoInfo(fis, totalSize)
+            try {
+                android.system.Os.lseek(pfd.fileDescriptor, 0L, android.system.OsConstants.SEEK_SET)
+            } catch (_: Exception) {}
+            val fis = FileInputStream(pfd.fileDescriptor)
+            val nonClosingStream = object : java.io.FilterInputStream(fis) {
+                override fun close() {
+                    // Do not close underlying file descriptor
+                }
             }
+            val info = parseMotionPhotoInfo(nonClosingStream, totalSize)
+            try {
+                android.system.Os.lseek(pfd.fileDescriptor, 0L, android.system.OsConstants.SEEK_SET)
+            } catch (_: Exception) {}
+            info
         } catch (e: Exception) {
             Log.w(TAG, "Failed to read motion photo info", e)
             null
@@ -225,19 +236,22 @@ object MotionPhotoReader {
                 val offset = totalSize - videoLength
                 val tempFile = File(cacheDir, "${baseName}_${System.currentTimeMillis()}.tmp")
 
-                FileInputStream(pfd.fileDescriptor).use { fis ->
-                    val channel = fis.channel
-                    channel.position(offset)
+                try {
+                    android.system.Os.lseek(pfd.fileDescriptor, offset, android.system.OsConstants.SEEK_SET)
+                } catch (_: Exception) {}
 
-                    FileOutputStream(tempFile).use { fos ->
-                        val outChannel = fos.channel
-                        var transferred = 0L
-                        while (transferred < videoLength) {
-                            val count = channel.transferTo(offset + transferred, videoLength - transferred, outChannel)
-                            if (count <= 0) break
-                            transferred += count
-                        }
+                val fis = FileInputStream(pfd.fileDescriptor)
+                FileOutputStream(tempFile).use { fos ->
+                    val buffer = ByteArray(64 * 1024)
+                    var remaining = videoLength
+                    while (remaining > 0) {
+                        val toRead = minOf(buffer.size.toLong(), remaining).toInt()
+                        val read = fis.read(buffer, 0, toRead)
+                        if (read <= 0) break
+                        fos.write(buffer, 0, read)
+                        remaining -= read
                     }
+                    fos.flush()
                 }
 
                 if (tempFile.exists() && tempFile.length() == videoLength) {

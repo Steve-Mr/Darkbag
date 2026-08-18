@@ -309,6 +309,32 @@ open class ImageViewerFragment : Fragment() {
                     adapter.updateGroups(groups)
                     binding.imagePager.visibility = View.VISIBLE
                     binding.initialLoadingIndicator.visibility = View.GONE
+
+                    val currentIndex = binding.imagePager.currentItem
+                    if (currentIndex in groups.indices) {
+                        val currentGroup = groups[currentIndex]
+                        if (!currentGroup.metadataLoaded) {
+                            lifecycleScope.launch {
+                                val updatedGroup = repository.loadMetadata(currentGroup)
+                                adapterUpdateMutex.withLock {
+                                    val currentGroups = adapter.getGroups().toMutableList()
+                                    val index = currentGroups.indexOfFirst { it.baseName == updatedGroup.baseName }
+                                    if (index != -1) {
+                                        currentGroups[index] = updatedGroup
+                                        suspendCancellableCoroutine<Unit> { continuation ->
+                                            adapter.updateGroups(currentGroups) {
+                                                if (continuation.isActive) continuation.resume(Unit)
+                                            }
+                                        }
+                                        if (!isAdjusted && isMotionPhotoAutoPlay && hasAutoPlayedPosition != index && updatedGroup.isMotionPhoto && binding.imagePager.currentItem == index) {
+                                            hasAutoPlayedPosition = index
+                                            adapter.playMotionVideoForPosition(index)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
