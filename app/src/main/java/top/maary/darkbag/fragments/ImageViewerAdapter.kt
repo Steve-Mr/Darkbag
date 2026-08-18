@@ -1,5 +1,7 @@
 package top.maary.darkbag.fragments
 
+import android.graphics.Matrix
+import android.graphics.RectF
 import android.net.Uri
 import android.view.LayoutInflater
 import android.view.View
@@ -180,21 +182,26 @@ class ImageViewerAdapter(
                 holder.binding.formatToggleGroup.translationY = topMargin
                 holder.binding.motionPhotoToggleGroup.translationX = leftMargin
                 holder.binding.motionPhotoToggleGroup.translationY = topMargin
+
+                updateVideoViewBounds(holder, rect)
             }
         }
 
-        setupButtons(holder, group)
-
         val format = getSelectedFormat(group)
         selectedFormats[group.baseName] = format
+
+        setupButtons(holder, group)
 
         loadSelectedFormat(holder, group, format)
     }
 
     private fun setupButtons(holder: ViewHolder, group: ImageGroup) {
         with(holder.binding) {
-            // 1. Motion Photo button setup
-            val isMotion = group.isMotionPhoto && group.jpgUri != null && !isFormatSwitcherPersistentHidden
+            val currentFormat = selectedFormats[group.baseName] ?: getSelectedFormat(group)
+            val isRawSelected = currentFormat == FORMAT_DNG
+
+            // 1. Motion Photo button setup (disabled/hidden in RAW state)
+            val isMotion = group.isMotionPhoto && group.jpgUri != null && !isFormatSwitcherPersistentHidden && !isRawSelected
             if (isMotion) {
                 btnMotionPhotoIndicator.visibility = View.VISIBLE
                 if (isMotionPhotoAutoPlay) {
@@ -227,8 +234,7 @@ class ImageViewerAdapter(
                 btnFormatIndicator.visibility = View.VISIBLE
             }
 
-            val currentFormat = selectedFormats[group.baseName] ?: getSelectedFormat(group)
-            btnFormatIndicator.isSelected = currentFormat == FORMAT_DNG
+            btnFormatIndicator.isSelected = isRawSelected
 
             // If we have both, it's clickable
             if (hasJpg && hasDng) {
@@ -241,6 +247,8 @@ class ImageViewerAdapter(
                     btnFormatIndicator.isSelected = !btnFormatIndicator.isSelected
                     val newFormat = if (btnFormatIndicator.isSelected) FORMAT_DNG else FORMAT_JPG
                     selectedFormats[currentGroup.baseName] = newFormat
+                    stopMotionVideo(holder)
+                    setupButtons(holder, currentGroup)
                     loadSelectedFormat(holder, currentGroup, newFormat)
                 }
             } else {
@@ -453,13 +461,24 @@ class ImageViewerAdapter(
     }
 
     fun playMotionVideo(holder: ViewHolder, group: ImageGroup, onComplete: (() -> Unit)? = null) {
-        if (!group.isMotionPhoto || group.jpgUri == null) {
+        val currentFormat = selectedFormats[group.baseName] ?: getSelectedFormat(group)
+        if (!group.isMotionPhoto || group.jpgUri == null || currentFormat == FORMAT_DNG) {
             onComplete?.invoke()
             return
         }
         val context = holder.binding.root.context
         holder.extractJob?.cancel()
         holder.playCompletionCallback = onComplete
+
+        // Align videoView bounds immediately to match current imageView rect
+        val iv = holder.binding.imageView
+        val d = iv.drawable
+        if (d != null && iv.width > 0 && iv.height > 0) {
+            val rect = RectF(0f, 0f, d.intrinsicWidth.toFloat(), d.intrinsicHeight.toFloat())
+            iv.imageMatrix.mapRect(rect)
+            rect.intersect(0f, 0f, iv.width.toFloat(), iv.height.toFloat())
+            updateVideoViewBounds(holder, rect)
+        }
 
         // Make TextureView part of layout hierarchy with alpha 0 so its SurfaceTexture is allocated immediately
         holder.binding.videoView.alpha = 0f
@@ -526,6 +545,39 @@ class ImageViewerAdapter(
         holder.binding.videoView.visibility = View.INVISIBLE
         holder.binding.videoView.alpha = 0f
         holder.isPlayingVideo = false
+    }
+
+    private fun updateVideoViewBounds(holder: ViewHolder, rect: RectF) {
+        val videoView = holder.binding.videoView
+        val viewWidth = videoView.width.toFloat().takeIf { it > 0 }
+            ?: holder.binding.imageView.measuredWidth.toFloat().takeIf { it > 0 }
+            ?: return
+        val viewHeight = videoView.height.toFloat().takeIf { it > 0 }
+            ?: holder.binding.imageView.measuredHeight.toFloat().takeIf { it > 0 }
+            ?: return
+
+        if (rect.width() <= 0 || rect.height() <= 0) return
+
+        val matrix = Matrix()
+        val scaleX = rect.width() / viewWidth
+        val scaleY = rect.height() / viewHeight
+        matrix.setScale(scaleX, scaleY)
+        matrix.postTranslate(rect.left, rect.top)
+        videoView.setTransform(matrix)
+
+        videoView.clipToOutline = true
+        videoView.outlineProvider = object : android.view.ViewOutlineProvider() {
+            override fun getOutline(view: View, outline: android.graphics.Outline) {
+                outline.setRoundRect(
+                    rect.left.toInt(),
+                    rect.top.toInt(),
+                    rect.right.toInt(),
+                    rect.bottom.toInt(),
+                    radius
+                )
+            }
+        }
+        videoView.invalidateOutline()
     }
 
     fun playMotionVideoForPosition(position: Int, onComplete: (() -> Unit)? = null) {

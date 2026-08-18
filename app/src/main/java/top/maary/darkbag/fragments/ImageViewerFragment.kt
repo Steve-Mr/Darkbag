@@ -125,14 +125,15 @@ open class ImageViewerFragment : Fragment() {
                                 }
                             }
 
-                            if (!isAdjusted && isMotionPhotoAutoPlay && hasAutoPlayedPosition != position && updatedGroup.isMotionPhoto && binding.imagePager.currentItem == position) {
+                            val format = adapter.getSelectedFormat(position)
+                            if (!isAdjusted && isMotionPhotoAutoPlay && hasAutoPlayedPosition != position && updatedGroup.isMotionPhoto && binding.imagePager.currentItem == position && format != ImageViewerAdapter.FORMAT_DNG) {
                                 hasAutoPlayedPosition = position
                                 adapter.playMotionVideoForPosition(position)
                             }
                         }
                     }
                 }
-            } else if (!isAdjusted && isMotionPhotoAutoPlay && hasAutoPlayedPosition != position && group.isMotionPhoto) {
+            } else if (!isAdjusted && isMotionPhotoAutoPlay && hasAutoPlayedPosition != position && group.isMotionPhoto && adapter.getSelectedFormat(position) != ImageViewerAdapter.FORMAT_DNG) {
                 hasAutoPlayedPosition = position
                 adapter.playMotionVideoForPosition(position)
             }
@@ -1175,13 +1176,16 @@ open class ImageViewerFragment : Fragment() {
             return
         }
 
-        // Browse mode: Temporary motion photo video playback
+        // Browse mode: Temporary motion photo video playback (only in JPG mode)
         val currentIndex = binding.imagePager.currentItem
         if (::adapter.isInitialized && currentIndex in adapter.getGroups().indices) {
-            val currentGroup = adapter.getGroup(currentIndex)
-            if (currentGroup.isMotionPhoto && currentGroup.jpgUri != null) {
-                view?.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
-                adapter.playMotionVideoForPosition(currentIndex)
+            val selectedFormat = adapter.getSelectedFormat(currentIndex)
+            if (selectedFormat != ImageViewerAdapter.FORMAT_DNG) {
+                val currentGroup = adapter.getGroup(currentIndex)
+                if (currentGroup.isMotionPhoto && currentGroup.jpgUri != null) {
+                    view?.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+                    adapter.playMotionVideoForPosition(currentIndex)
+                }
             }
         }
     }
