@@ -37,6 +37,11 @@ class LutSurfaceProcessor : SurfaceProcessor {
     private var width = 0
     private var height = 0
 
+    private var encoderEglSurface = EGL14.EGL_NO_SURFACE
+    private var encoderWidth = 0
+    private var encoderHeight = 0
+    @Volatile private var isEncoderActive = false
+
     private var currentLutSize = 0
     private var currentLogType = -1
 
@@ -184,6 +189,41 @@ class LutSurfaceProcessor : SurfaceProcessor {
         width = w
         height = h
         createEglSurface(surface)
+    }
+
+    fun setEncoderSurface(surface: Surface?, w: Int, h: Int) {
+        handler.post {
+            if (surface == null) {
+                isEncoderActive = false
+                releaseEncoderEglSurface()
+            } else {
+                encoderWidth = w
+                encoderHeight = h
+                createEncoderEglSurface(surface)
+                isEncoderActive = true
+            }
+        }
+    }
+
+    private fun createEncoderEglSurface(surface: Surface) {
+        if (eglDisplay == EGL14.EGL_NO_DISPLAY) return
+        if (encoderEglSurface != EGL14.EGL_NO_SURFACE) {
+            EGL14.eglDestroySurface(eglDisplay, encoderEglSurface)
+            encoderEglSurface = EGL14.EGL_NO_SURFACE
+        }
+        val surfaceAttribs = intArrayOf(EGL14.EGL_NONE)
+        encoderEglSurface = EGL14.eglCreateWindowSurface(eglDisplay, eglConfig, surface, surfaceAttribs, 0)
+        if (encoderEglSurface == null || encoderEglSurface == EGL14.EGL_NO_SURFACE) {
+            val error = EGL14.eglGetError()
+            Log.e("LutProcessor", "createEncoderEglSurface failed: $error")
+        }
+    }
+
+    private fun releaseEncoderEglSurface() {
+        if (encoderEglSurface != EGL14.EGL_NO_SURFACE) {
+            EGL14.eglDestroySurface(eglDisplay, encoderEglSurface)
+            encoderEglSurface = EGL14.EGL_NO_SURFACE
+        }
     }
 
     fun updateLut(lutData: FloatArray?, size: Int, logType: Int) {
@@ -426,6 +466,72 @@ class LutSurfaceProcessor : SurfaceProcessor {
         GLES30.glDisableVertexAttribArray(texHandle)
 
         EGL14.eglSwapBuffers(eglDisplay, eglSurface)
+
+        // Branch 2: Render to MediaCodec Encoder Surface for Motion Photo
+        if (isEncoderActive && encoderEglSurface != EGL14.EGL_NO_SURFACE && encoderWidth > 0 && encoderHeight > 0) {
+            EGL14.eglMakeCurrent(eglDisplay, encoderEglSurface, encoderEglSurface, eglContext)
+
+            GLES30.glViewport(0, 0, encoderWidth, encoderHeight)
+            GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
+            GLES30.glUseProgram(program)
+
+            var encScaleX = 1f
+            var encScaleY = 1f
+            if (inputWidth > 0 && inputHeight > 0) {
+                val rotated = kotlin.math.abs(transformMatrix[1]) > kotlin.math.abs(transformMatrix[0])
+                val inW = if (rotated) inputHeight.toFloat() else inputWidth.toFloat()
+                val inH = if (rotated) inputWidth.toFloat() else inputHeight.toFloat()
+                val inAspect = inW / inH
+                val outAspect = encoderWidth.toFloat() / encoderHeight.toFloat()
+                if (inAspect > outAspect) {
+                    encScaleX = inAspect / outAspect
+                } else {
+                    encScaleY = outAspect / inAspect
+                }
+            }
+
+            GLES30.glUniform2f(GLES30.glGetUniformLocation(program, "uScale"), encScaleX, encScaleY)
+
+            GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
+            GLES30.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, inputTextureId)
+            GLES30.glUniform1i(GLES30.glGetUniformLocation(program, "uTexture"), 0)
+            GLES30.glUniformMatrix4fv(GLES30.glGetUniformLocation(program, "uTextureMatrix"), 1, false, transformMatrix, 0)
+
+            if (currentLutSize > 0 && lutTextureId != 0) {
+                GLES30.glActiveTexture(GLES30.GL_TEXTURE1)
+                GLES30.glBindTexture(GLES30.GL_TEXTURE_3D, lutTextureId)
+                GLES30.glUniform1i(GLES30.glGetUniformLocation(program, "uLut"), 1)
+            } else {
+                GLES30.glActiveTexture(GLES30.GL_TEXTURE1)
+                GLES30.glBindTexture(GLES30.GL_TEXTURE_3D, dummyLutTextureId)
+                GLES30.glUniform1i(GLES30.glGetUniformLocation(program, "uLut"), 1)
+            }
+
+            GLES30.glActiveTexture(GLES30.GL_TEXTURE2)
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, if (logLutTextureId != 0) logLutTextureId else 0)
+            GLES30.glUniform1i(GLES30.glGetUniformLocation(program, "uLogLut"), 2)
+            GLES30.glUniform1i(GLES30.glGetUniformLocation(program, "uLutSize"), currentLutSize)
+
+            vertexBuffer.position(0)
+            GLES30.glVertexAttribPointer(posHandle, 2, GLES30.GL_FLOAT, false, 4 * 4, vertexBuffer)
+            GLES30.glEnableVertexAttribArray(posHandle)
+
+            vertexBuffer.position(2)
+            GLES30.glVertexAttribPointer(texHandle, 2, GLES30.GL_FLOAT, false, 4 * 4, vertexBuffer)
+            GLES30.glEnableVertexAttribArray(texHandle)
+
+            GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
+
+            GLES30.glDisableVertexAttribArray(posHandle)
+            GLES30.glDisableVertexAttribArray(texHandle)
+
+            val frameTimestampNs = System.nanoTime()
+            EGLExt.eglPresentationTimeANDROID(eglDisplay, encoderEglSurface, frameTimestampNs)
+            EGL14.eglSwapBuffers(eglDisplay, encoderEglSurface)
+
+            // Rebind Viewfinder display surface
+            EGL14.eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext)
+        }
     }
 
     private fun createProgram() {
@@ -515,6 +621,10 @@ class LutSurfaceProcessor : SurfaceProcessor {
 
         if (eglDisplay != EGL14.EGL_NO_DISPLAY) {
              EGL14.eglMakeCurrent(eglDisplay, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT)
+             if (encoderEglSurface != EGL14.EGL_NO_SURFACE) {
+                 EGL14.eglDestroySurface(eglDisplay, encoderEglSurface)
+                 encoderEglSurface = EGL14.EGL_NO_SURFACE
+             }
              if (eglSurface != EGL14.EGL_NO_SURFACE) EGL14.eglDestroySurface(eglDisplay, eglSurface)
              if (eglContext != EGL14.EGL_NO_CONTEXT) EGL14.eglDestroyContext(eglDisplay, eglContext)
              EGL14.eglTerminate(eglDisplay)
@@ -522,5 +632,7 @@ class LutSurfaceProcessor : SurfaceProcessor {
         eglDisplay = EGL14.EGL_NO_DISPLAY
         eglContext = EGL14.EGL_NO_CONTEXT
         eglSurface = EGL14.EGL_NO_SURFACE
+        encoderEglSurface = EGL14.EGL_NO_SURFACE
+        isEncoderActive = false
     }
 }

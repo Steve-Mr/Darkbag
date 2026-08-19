@@ -79,6 +79,9 @@ open class ImageViewerFragment : Fragment() {
     protected lateinit var repository: ImageRepository
     protected lateinit var adapter: ImageViewerAdapter
 
+    var isMotionPhotoAutoPlay = true
+    protected var hasAutoPlayedPosition = -1
+
     protected var isAdjusted = false
     protected var isEditingAdjustments = false
     private var systemTopInset = 0
@@ -102,6 +105,9 @@ open class ImageViewerFragment : Fragment() {
     private val adapterUpdateMutex = kotlinx.coroutines.sync.Mutex()
     protected val pageChangeCallback = object : ViewPager2.OnPageChangeCallback() {
         override fun onPageSelected(position: Int) {
+            if (::adapter.isInitialized) {
+                adapter.stopAllMotionVideos()
+            }
             val group = adapter.getGroup(position)
             if (!group.metadataLoaded) {
                 lifecycleScope.launch {
@@ -118,9 +124,18 @@ open class ImageViewerFragment : Fragment() {
                                     if (continuation.isActive) continuation.resume(Unit)
                                 }
                             }
+
+                            val format = adapter.getSelectedFormat(position)
+                            if (!isAdjusted && isMotionPhotoAutoPlay && hasAutoPlayedPosition != position && updatedGroup.isMotionPhoto && binding.imagePager.currentItem == position && format != ImageViewerAdapter.FORMAT_DNG) {
+                                hasAutoPlayedPosition = position
+                                adapter.playMotionVideoForPosition(position)
+                            }
                         }
                     }
                 }
+            } else if (!isAdjusted && isMotionPhotoAutoPlay && hasAutoPlayedPosition != position && group.isMotionPhoto && adapter.getSelectedFormat(position) != ImageViewerAdapter.FORMAT_DNG) {
+                hasAutoPlayedPosition = position
+                adapter.playMotionVideoForPosition(position)
             }
 
             if (isAdjusted) {
@@ -178,6 +193,9 @@ open class ImageViewerFragment : Fragment() {
         super.onViewCreated(view, savedInstanceState)
         savedInstanceState?.getString("pendingDeleteNextTargetUri")?.let { pendingDeleteNextTargetUri = it }
 
+        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        isMotionPhotoAutoPlay = prefs.getBoolean(KEY_VIEWER_MOTION_PHOTO_AUTO_PLAY, true)
+
         repository = ImageRepository(requireContext())
         lutManager = top.maary.darkbag.utils.LutManager(requireContext())
         setupEdgeToEdge()
@@ -218,10 +236,12 @@ open class ImageViewerFragment : Fragment() {
 
                 if (isFirstLoad) {
                     adapter = ImageViewerAdapter(groups, lifecycleScope, requireContext()).apply {
+                        isMotionPhotoAutoPlay = this@ImageViewerFragment.isMotionPhotoAutoPlay
                         onImageTapped = { toggleUi() }
                         onZoomChanged = { isZoomed -> if (isZoomed) hideUi() else showUi() }
                         onLongPressStarted = { handleLongPressStarted(it) }
                         onLongPressEnded = { handleLongPressEnded(it) }
+                        onMotionPhotoIndicatorTapped = { pos -> handleMotionPhotoIndicatorTapped(pos) }
                         setFormatSwitcherPersistentHidden(isAdjusted)
                         onCurrentListChanged = { previousList, currentList ->
                             val currentIndex = binding.imagePager.currentItem
@@ -263,8 +283,21 @@ open class ImageViewerFragment : Fragment() {
                                             if (continuation.isActive) continuation.resume(Unit)
                                         }
                                     }
+                                    if (!isAdjusted && isMotionPhotoAutoPlay && updatedGroup.isMotionPhoto && hasAutoPlayedPosition != initialPos && binding.imagePager.currentItem == initialPos) {
+                                        hasAutoPlayedPosition = initialPos
+                                        adapter.playMotionVideoForPosition(initialPos)
+                                    }
                                 }
                             }
+                        } else if (!isAdjusted && isMotionPhotoAutoPlay && initialGroup.isMotionPhoto && hasAutoPlayedPosition != initialPos) {
+                            hasAutoPlayedPosition = initialPos
+                            adapter.playMotionVideoForPosition(initialPos)
+                        }
+                    } else {
+                        val firstGroup = groups.firstOrNull()
+                        if (!isAdjusted && isMotionPhotoAutoPlay && firstGroup != null && firstGroup.isMotionPhoto && hasAutoPlayedPosition != 0) {
+                            hasAutoPlayedPosition = 0
+                            adapter.playMotionVideoForPosition(0)
                         }
                     }
                     binding.imagePager.isUserInputEnabled = !isAdjusted
@@ -277,6 +310,32 @@ open class ImageViewerFragment : Fragment() {
                     adapter.updateGroups(groups)
                     binding.imagePager.visibility = View.VISIBLE
                     binding.initialLoadingIndicator.visibility = View.GONE
+
+                    val currentIndex = binding.imagePager.currentItem
+                    if (currentIndex in groups.indices) {
+                        val currentGroup = groups[currentIndex]
+                        if (!currentGroup.metadataLoaded) {
+                            lifecycleScope.launch {
+                                val updatedGroup = repository.loadMetadata(currentGroup)
+                                adapterUpdateMutex.withLock {
+                                    val currentGroups = adapter.getGroups().toMutableList()
+                                    val index = currentGroups.indexOfFirst { it.baseName == updatedGroup.baseName }
+                                    if (index != -1) {
+                                        currentGroups[index] = updatedGroup
+                                        suspendCancellableCoroutine<Unit> { continuation ->
+                                            adapter.updateGroups(currentGroups) {
+                                                if (continuation.isActive) continuation.resume(Unit)
+                                            }
+                                        }
+                                        if (!isAdjusted && isMotionPhotoAutoPlay && hasAutoPlayedPosition != index && updatedGroup.isMotionPhoto && binding.imagePager.currentItem == index) {
+                                            hasAutoPlayedPosition = index
+                                            adapter.playMotionVideoForPosition(index)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1092,45 +1151,83 @@ open class ImageViewerFragment : Fragment() {
     }
 
     protected fun handleLongPressStarted(imageView: top.maary.darkbag.ui.ZoomableImageView) {
-        if (!isAdjusted) return
-        view?.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+        if (isAdjusted) {
+            view?.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+            val currentIndex = binding.imagePager.currentItem
+            val currentGroup = adapter.getGroup(currentIndex)
+            val jpgUri = currentGroup.jpgUri ?: return
+
+            isLongPressing = true
+
+            // Save current zoom state
+            savedMatrix.set(imageView.imageMatrix)
+            savedScale = imageView.saveScale
+
+            imageView.resetZoom()
+            adapter.cancelLoadJob(currentIndex, clearView = false)
+            com.bumptech.glide.Glide.with(imageView)
+                .asBitmap()
+                .load(jpgUri)
+                .placeholder(imageView.drawable)
+                .dontAnimate()
+                .diskCacheStrategy(com.bumptech.glide.load.engine.DiskCacheStrategy.NONE)
+                .skipMemoryCache(true)
+                .into(imageView)
+            return
+        }
+
+        // Browse mode: Temporary motion photo video playback (only in JPG mode)
         val currentIndex = binding.imagePager.currentItem
-        val currentGroup = adapter.getGroup(currentIndex)
-        val jpgUri = currentGroup.jpgUri ?: return
-
-        isLongPressing = true
-
-        // Save current zoom state
-        savedMatrix.set(imageView.imageMatrix)
-        savedScale = imageView.saveScale
-
-        imageView.resetZoom()
-        adapter.cancelLoadJob(currentIndex, clearView = false)
-        com.bumptech.glide.Glide.with(imageView)
-            .asBitmap()
-            .load(jpgUri)
-            .placeholder(imageView.drawable)
-            .dontAnimate()
-            .diskCacheStrategy(com.bumptech.glide.load.engine.DiskCacheStrategy.NONE)
-            .skipMemoryCache(true)
-            .into(imageView)
+        if (::adapter.isInitialized && currentIndex in adapter.getGroups().indices) {
+            val selectedFormat = adapter.getSelectedFormat(currentIndex)
+            if (selectedFormat != ImageViewerAdapter.FORMAT_DNG) {
+                val currentGroup = adapter.getGroup(currentIndex)
+                if (currentGroup.isMotionPhoto && currentGroup.jpgUri != null) {
+                    view?.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+                    adapter.playMotionVideoForPosition(currentIndex)
+                }
+            }
+        }
     }
 
     protected fun handleLongPressEnded(imageView: top.maary.darkbag.ui.ZoomableImageView) {
-        if (!isAdjusted) return
-        isLongPressing = false
-        val currentIndex = binding.imagePager.currentItem
+        if (isAdjusted) {
+            isLongPressing = false
+            val currentIndex = binding.imagePager.currentItem
 
-        com.bumptech.glide.Glide.with(imageView).clear(imageView)
-        if (lastCompositeBitmap != null) {
-            imageView.setImageBitmap(lastCompositeBitmap)
-        } else {
-            val format = adapter.getSelectedFormat(currentIndex)
-            adapter.setFormat(currentIndex, format)
+            com.bumptech.glide.Glide.with(imageView).clear(imageView)
+            if (lastCompositeBitmap != null) {
+                imageView.setImageBitmap(lastCompositeBitmap)
+            } else {
+                val format = adapter.getSelectedFormat(currentIndex)
+                adapter.setFormat(currentIndex, format)
+            }
+
+            // Restore zoom state
+            imageView.restoreZoomState(savedMatrix, savedScale)
+            return
         }
 
-        // Restore zoom state
-        imageView.restoreZoomState(savedMatrix, savedScale)
+        // Browse mode: Stop temporary motion photo playback
+        val currentIndex = binding.imagePager.currentItem
+        if (::adapter.isInitialized) {
+            adapter.stopMotionVideoForPosition(currentIndex)
+        }
+    }
+
+    protected fun handleMotionPhotoIndicatorTapped(position: Int) {
+        isMotionPhotoAutoPlay = !isMotionPhotoAutoPlay
+        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putBoolean(KEY_VIEWER_MOTION_PHOTO_AUTO_PLAY, isMotionPhotoAutoPlay).apply()
+        adapter.setMotionPhotoAutoPlayEnabled(isMotionPhotoAutoPlay)
+
+        if (isMotionPhotoAutoPlay) {
+            val currentPos = binding.imagePager.currentItem
+            hasAutoPlayedPosition = currentPos
+            adapter.playMotionVideoForPosition(currentPos)
+        } else {
+            adapter.stopAllMotionVideos()
+        }
     }
 
     private fun applyEditPreviewInternal(config: top.maary.darkbag.models.EditConfig) {
@@ -1532,10 +1629,13 @@ open class ImageViewerFragment : Fragment() {
                     val targetBaseName = currentGroup.baseName
                     val newPos = updatedGroups.indexOfFirst { it.baseName == targetBaseName }.coerceAtLeast(0)
                     adapter = ImageViewerAdapter(updatedGroups, lifecycleScope, requireContext()).apply {
+                        isMotionPhotoAutoPlay = this@ImageViewerFragment.isMotionPhotoAutoPlay
                         onImageTapped = { toggleUi() }
                         onZoomChanged = { isZoomed -> if (isZoomed) hideUi() else showUi() }
                         onLongPressStarted = { handleLongPressStarted(it) }
                         onLongPressEnded = { handleLongPressEnded(it) }
+                        onMotionPhotoIndicatorTapped = { pos -> handleMotionPhotoIndicatorTapped(pos) }
+                        setFormatSwitcherPersistentHidden(isAdjusted)
                         onCurrentListChanged = { previousList, currentList ->
                             val currentIndex = binding.imagePager.currentItem
                             if (currentIndex in currentList.indices) {
@@ -2281,13 +2381,25 @@ open class ImageViewerFragment : Fragment() {
         }
     }
 
+    override fun onPause() {
+        super.onPause()
+        if (::adapter.isInitialized) {
+            adapter.stopAllMotionVideos()
+        }
+    }
+
     override fun onDestroyView() {
+        if (::adapter.isInitialized) {
+            adapter.stopAllMotionVideos()
+        }
         binding.imagePager.unregisterOnPageChangeCallback(pageChangeCallback)
         super.onDestroyView()
         _binding = null
     }
 
     companion object {
+        const val KEY_VIEWER_MOTION_PHOTO_AUTO_PLAY = "viewer_motion_photo_auto_play"
+
         private const val MENU_DETAILS = 1
         private const val MENU_DELETE = 2
         private const val MENU_SAVE_AS = 3

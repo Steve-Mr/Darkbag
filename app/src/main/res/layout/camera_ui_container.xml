@@ -80,6 +80,18 @@
             android:visibility="gone" />
 
         <com.google.android.material.button.MaterialButton
+            android:id="@+id/motion_photo_button"
+            style="@style/Widget.App.Button.IconButton.Large"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="@dimen/spacing_medium"
+            app:icon="@drawable/ic_motion_photo_off"
+            app:iconTint="?attr/colorOnSecondaryContainer"
+            android:backgroundTint="?attr/colorSecondaryContainer"
+            android:contentDescription="@string/toggle_motion_photo"
+            android:visibility="visible" />
+
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/settings_button"
             style="@style/Widget.App.Button.IconButton.Large"
             android:layout_width="wrap_content"

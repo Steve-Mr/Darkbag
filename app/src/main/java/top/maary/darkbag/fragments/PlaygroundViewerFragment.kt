@@ -78,10 +78,12 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
 
                 if (binding.imagePager.adapter == null) {
                     adapter = ImageViewerAdapter(groups, lifecycleScope, requireContext()).apply {
+                        isMotionPhotoAutoPlay = this@PlaygroundViewerFragment.isMotionPhotoAutoPlay
                         onImageTapped = { toggleUi() }
                         onZoomChanged = { isZoomed -> if (isZoomed) hideUi() else showUi() }
                         onLongPressStarted = { handleLongPressStarted(it) }
                         onLongPressEnded = { handleLongPressEnded(it) }
+                        onMotionPhotoIndicatorTapped = { pos -> handleMotionPhotoIndicatorTapped(pos) }
                         setFormatSwitcherPersistentHidden(isAdjusted)
                         onCurrentListChanged = { previousList, currentList ->
                             val currentIndex = binding.imagePager.currentItem

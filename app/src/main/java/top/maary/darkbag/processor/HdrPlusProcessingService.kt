@@ -177,7 +177,9 @@ class HdrPlusProcessingService : LifecycleService() {
                             editConfig = req.editConfig,
                             digitalGain = req.digitalGain,
                             captureMetadata = req.metadata,
-                            isAlreadyCropped = true
+                            isAlreadyCropped = true,
+                            motionPhotoMp4Path = req.motionPhotoMp4Path,
+                            motionPhotoStillPtsUs = req.motionPhotoStillPtsUs
                         )
                     }
 

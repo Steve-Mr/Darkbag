@@ -43,7 +43,9 @@ data class HdrPlusRequest(
     val rawFolderUri: String?,
     val hfMetadata: HalfFrameManager.Metadata?,
     val editConfig: EditConfig?,
-    val runAblationTest: Boolean
+    val runAblationTest: Boolean,
+    val motionPhotoMp4Path: String? = null,
+    val motionPhotoStillPtsUs: Long = 0L
 )
 
 object HdrPlusRequestManager {

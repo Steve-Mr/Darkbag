@@ -19,7 +19,9 @@ data class ImageGroup(
     val editConfig: EditConfig? = null,
     val metadataLoaded: Boolean = false,
     val isInProgress: Boolean = false,
-    val isPartial: Boolean = false
+    val isPartial: Boolean = false,
+    val isMotionPhoto: Boolean = false,
+    val motionPhotoPtsUs: Long = 0L
 ) : Parcelable {
     fun hasAny(): Boolean = jpgUri != null || dngUri != null || dngUri1 != null || dngUri2 != null
 
