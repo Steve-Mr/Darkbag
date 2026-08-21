@@ -425,6 +425,14 @@ object ImageSaver {
             meta.make?.let { exif.setAttribute(ExifInterface.TAG_MAKE, it) }
             meta.model?.let { exif.setAttribute(ExifInterface.TAG_MODEL, it) }
             meta.lensModel?.let { exif.setAttribute(ExifInterface.TAG_LENS_MODEL, it) }
+
+            meta.location?.let { loc ->
+                try {
+                    exif.setGpsInfo(loc)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to write GPS info to EXIF", e)
+                }
+            }
         }
     }
 

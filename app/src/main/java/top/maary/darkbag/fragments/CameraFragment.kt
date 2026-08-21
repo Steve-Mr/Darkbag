@@ -200,6 +200,8 @@ class CameraFragment : Fragment() {
     // HDR+ State
     private var isHdrPlusEnabled = false
 
+    private val locationHelper by lazy { top.maary.darkbag.utils.LocationHelper(requireContext()) }
+
     private val shouldMirror: Boolean
         get() = lensFacing == CameraSelector.LENS_FACING_FRONT &&
                 requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
@@ -449,6 +451,7 @@ class CameraFragment : Fragment() {
 
     override fun onStop() {
         super.onStop()
+        locationHelper.stopListening()
         orientationEventListener.disable()
         lutProcessor?.setEncoderSurface(null, 0, 0)
         motionPhotoEncoder?.stop()
@@ -486,6 +489,11 @@ class CameraFragment : Fragment() {
             }
         }
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        if (prefs.getBoolean(SettingsFragment.KEY_SAVE_LOCATION, false)) {
+            locationHelper.startListening()
+        } else {
+            locationHelper.stopListening()
+        }
         readScopedHalfFrameState(prefs, requireFileForStep1 = true)
         updateCameraUi()
         updateHalfFrameUI()
@@ -1964,6 +1972,7 @@ class CameraFragment : Fragment() {
 
                         val dngCreator = android.hardware.camera2.DngCreator(chars, captureResult)
                         dngCreator.setDescription(DarkbagIdentity.imageDescription(isHdrPlus = false))
+                        captureMetadata.location?.let { dngCreator.setLocation(it) }
 
                         val dngOrientation = when (image.combinedOrientation) {
                             90 -> ExifInterface.ORIENTATION_ROTATE_90
@@ -4997,6 +5006,13 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             Log.w(TAG, "Failed to calculate focalLengthIn35mmFilm", e)
         }
 
+        val saveLoc = try {
+            val p = context?.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+            p?.getBoolean(SettingsFragment.KEY_SAVE_LOCATION, false) == true
+        } catch (e: Exception) { false }
+
+        val locationSnapshot = if (saveLoc) locationHelper.getCurrentLocation() else null
+
         return CaptureMetadata(
             iso = iso,
             exposureTime = exposureTime,
@@ -5012,7 +5028,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             model = DarkbagIdentity.normalizedModel(),
             uniqueCameraModel = DarkbagIdentity.uniqueCameraModel(targetCharId),
             software = DarkbagIdentity.softwareString(isHdrPlus),
-            imageDescription = DarkbagIdentity.imageDescription(isHdrPlus)
+            imageDescription = DarkbagIdentity.imageDescription(isHdrPlus),
+            location = locationSnapshot
         )
     }
 
