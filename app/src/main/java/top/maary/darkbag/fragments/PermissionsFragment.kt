@@ -46,15 +46,19 @@ class PermissionsFragment : Fragment() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        val permissionList = mutableListOf(Manifest.permission.CAMERA)
         // add the storage access permission request for Android 9 and below.
         if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
-            val permissionList = PERMISSIONS_REQUIRED.toMutableList()
             permissionList.add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
-            PERMISSIONS_REQUIRED = permissionList.toTypedArray()
         }
+        // add notification permission request for Android 13 and above.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            permissionList.add(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        PERMISSIONS_REQUIRED = permissionList.toTypedArray()
 
         if (!hasPermissions(requireContext())) {
-            // Request camera-related permissions
+            // Request permissions
             activityResultLauncher.launch(PERMISSIONS_REQUIRED)
         } else {
             routeStartup()
@@ -104,23 +108,26 @@ class PermissionsFragment : Fragment() {
     private val activityResultLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions())
         { permissions ->
-            // Handle Permission granted/rejected
-            var permissionGranted = true
-            permissions.entries.forEach {
-                if (it.key in PERMISSIONS_REQUIRED && it.value == false)
-                    permissionGranted = false
-            }
-            if (!permissionGranted) {
-                Toast.makeText(context, "Permission request denied", Toast.LENGTH_LONG).show()
+            val cameraGranted = permissions[Manifest.permission.CAMERA] ?: (
+                ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+            )
+            if (!cameraGranted) {
+                Toast.makeText(context, "Camera permission request denied", Toast.LENGTH_LONG).show()
             } else {
                 routeStartup()
             }
         }
 
     companion object {
-        /** Convenience method used to check if all permissions required by this app are granted */
-        fun hasPermissions(context: Context) = PERMISSIONS_REQUIRED.all {
-            ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
+        /** Convenience method used to check if critical permissions required by this app are granted */
+        fun hasPermissions(context: Context): Boolean {
+            val criticalPermissions = mutableListOf(Manifest.permission.CAMERA)
+            if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
+                criticalPermissions.add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+            }
+            return criticalPermissions.all {
+                ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
+            }
         }
     }
 }

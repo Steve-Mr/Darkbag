@@ -29,9 +29,22 @@ class HdrPlusProcessingService : LifecycleService() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
-        startForeground(NOTIFICATION_ID, createNotification("Starting engine..."),
+        startForeground(NOTIFICATION_ID, createNotification("Starting processing..."),
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0
         )
+
+        lifecycleScope.launch(Dispatchers.Main) {
+            HdrPlusRequestManager.pendingTasksCount.collect { count ->
+                if (count > 0) {
+                    val text = if (count == 1) {
+                        "Processing 1 photo..."
+                    } else {
+                        "Processing photos ($count remaining in queue)..."
+                    }
+                    updateNotification(text)
+                }
+            }
+        }
 
         lifecycleScope.launch(top.maary.darkbag.processor.ColorProcessor.imageProcessingDispatcher) {
             HdrPlusRequestManager.requestFlow.collect { req ->
@@ -46,7 +59,6 @@ class HdrPlusProcessingService : LifecycleService() {
     }
 
     private suspend fun processRequest(req: HdrPlusRequest) {
-        updateNotification("Processing image...")
         var buffersReleased = false
         try {
             val start = System.currentTimeMillis()
@@ -152,8 +164,6 @@ class HdrPlusProcessingService : LifecycleService() {
                 top.maary.darkbag.utils.DebugLogManager.addLog(report)
 
                 if (req.saveJpg || req.saveRaw) {
-                    updateNotification("Saving files...")
-                    
                     var savedUri: android.net.Uri? = null
                     val shouldSaveJpg = req.saveJpg
                     val shouldSaveRaw = req.saveRaw && !req.isSingleFrame // Single Bayer RAW was already saved in front-end
@@ -182,16 +192,6 @@ class HdrPlusProcessingService : LifecycleService() {
                             motionPhotoStillPtsUs = req.motionPhotoStillPtsUs
                         )
                     }
-
-                    ColorProcessor.onBackgroundSaveComplete(
-                        req.baseName,
-                        if (req.saveRaw) req.linearDngPath else null,
-                        if (req.saveJpg) req.fullResJpgPath else null,
-                        savedUri?.toString() ?: req.zslTargetUriStr,
-                        req.zoomFactor,
-                        req.orientation,
-                        req.saveJpg
-                    )
                 }
             } else {
                 Log.e(TAG, "Processing failed for ${req.requestId}")
@@ -203,13 +203,23 @@ class HdrPlusProcessingService : LifecycleService() {
             if (!buffersReleased) {
                 HdrPlusBurst.releaseBuffer(req.megaBuffer)
             }
-            updateNotification("Idle")
+            HdrPlusRequestManager.onTaskFinished()
+            val remaining = HdrPlusRequestManager.pendingTasksCount.value
+            if (remaining == 0) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                } else {
+                    @Suppress("DEPRECATION")
+                    stopForeground(true)
+                }
+                stopSelf()
+            }
         }
     }
 
     private fun createNotificationChannel() {
-        val name = "HDR+ Processing"
-        val descriptionText = "Background processing for HDR+ images"
+        val name = "Image Processing"
+        val descriptionText = "Background processing for photos"
         val importance = NotificationManager.IMPORTANCE_LOW
         val channel = NotificationChannel(CHANNEL_ID, name, importance).apply {
             description = descriptionText
@@ -220,10 +230,24 @@ class HdrPlusProcessingService : LifecycleService() {
     }
 
     private fun createNotification(contentText: String): Notification {
+        val intent = Intent(this, top.maary.darkbag.MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val pendingIntent = android.app.PendingIntent.getActivity(
+            this, 0, intent,
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT
+            } else {
+                android.app.PendingIntent.FLAG_UPDATE_CURRENT
+            }
+        )
+
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Darkbag Processing")
             .setContentText(contentText)
-            .setSmallIcon(R.drawable.ic_launcher_foreground) // Ensure you have a valid icon
+            .setSmallIcon(R.drawable.ic_photo)
+            .setContentIntent(pendingIntent)
+            .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
     }
