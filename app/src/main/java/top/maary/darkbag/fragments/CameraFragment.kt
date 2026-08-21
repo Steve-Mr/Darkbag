@@ -4393,6 +4393,11 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         // Apply Stabilization
         applyStabilizationToRequest(request, isHdrBurst)
 
+        // Ensure predictable ISP baseline for preview color processing
+        request.set(android.hardware.camera2.CaptureRequest.CONTROL_SCENE_MODE, android.hardware.camera2.CaptureRequest.CONTROL_SCENE_MODE_DISABLED)
+        request.set(android.hardware.camera2.CaptureRequest.TONEMAP_MODE, android.hardware.camera2.CaptureRequest.TONEMAP_MODE_FAST)
+        request.set(android.hardware.camera2.CaptureRequest.COLOR_CORRECTION_MODE, android.hardware.camera2.CaptureRequest.COLOR_CORRECTION_MODE_FAST)
+
         if (isManualExposure) {
             request.set(android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE, android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE_OFF)
             request.set(android.hardware.camera2.CaptureRequest.SENSOR_SENSITIVITY, currentIso)
