@@ -46,7 +46,9 @@ class HdrPlusProcessingService : LifecycleService() {
     }
 
     private suspend fun processRequest(req: HdrPlusRequest) {
-        updateNotification("Processing image...")
+        val initialPending = HdrPlusRequestManager.pendingTasksCount.value
+        val processingText = if (initialPending > 1) "Processing image ($initialPending in queue)..." else "Processing image..."
+        updateNotification(processingText)
         var buffersReleased = false
         try {
             val start = System.currentTimeMillis()
@@ -152,7 +154,9 @@ class HdrPlusProcessingService : LifecycleService() {
                 top.maary.darkbag.utils.DebugLogManager.addLog(report)
 
                 if (req.saveJpg || req.saveRaw) {
-                    updateNotification("Saving files...")
+                    val pendingSaving = HdrPlusRequestManager.pendingTasksCount.value
+                    val savingText = if (pendingSaving > 1) "Saving files ($pendingSaving in queue)..." else "Saving files..."
+                    updateNotification(savingText)
                     
                     var savedUri: android.net.Uri? = null
                     val shouldSaveJpg = req.saveJpg
@@ -194,13 +198,24 @@ class HdrPlusProcessingService : LifecycleService() {
                 HdrPlusBurst.releaseBuffer(req.megaBuffer)
             }
             HdrPlusRequestManager.onTaskFinished()
-            updateNotification("Idle")
+            val remaining = HdrPlusRequestManager.pendingTasksCount.value
+            if (remaining == 0) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                } else {
+                    @Suppress("DEPRECATION")
+                    stopForeground(true)
+                }
+                stopSelf()
+            } else {
+                updateNotification("Processing image ($remaining in queue)...")
+            }
         }
     }
 
     private fun createNotificationChannel() {
-        val name = "HDR+ Processing"
-        val descriptionText = "Background processing for HDR+ images"
+        val name = "Image Processing"
+        val descriptionText = "Background processing for photos"
         val importance = NotificationManager.IMPORTANCE_LOW
         val channel = NotificationChannel(CHANNEL_ID, name, importance).apply {
             description = descriptionText
@@ -211,10 +226,24 @@ class HdrPlusProcessingService : LifecycleService() {
     }
 
     private fun createNotification(contentText: String): Notification {
+        val intent = Intent(this, top.maary.darkbag.MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val pendingIntent = android.app.PendingIntent.getActivity(
+            this, 0, intent,
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT
+            } else {
+                android.app.PendingIntent.FLAG_UPDATE_CURRENT
+            }
+        )
+
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Darkbag Processing")
             .setContentText(contentText)
-            .setSmallIcon(R.drawable.ic_launcher_foreground) // Ensure you have a valid icon
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setContentIntent(pendingIntent)
+            .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
     }
