@@ -8,7 +8,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-import androidx.appcompat.app.AlertDialog
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
@@ -549,17 +549,19 @@ class SettingsFragment : Fragment() {
 
     private fun setupCacheManagement() {
         binding.btnClearCache.setOnClickListener {
-            AlertDialog.Builder(requireContext())
+            MaterialAlertDialogBuilder(requireContext())
                 .setTitle(R.string.clear_cache_dialog_title)
                 .setMessage(R.string.clear_cache_dialog_message)
                 .setNegativeButton(R.string.cancel, null)
                 .setPositiveButton(R.string.btn_clear_cache) { _, _ ->
                     val appContext = requireContext().applicationContext
+                    binding.btnClearCache.isEnabled = false
                     binding.tvCacheSize.text = getString(R.string.pref_cache_calculating)
                     lifecycleScope.launch(Dispatchers.IO) {
                         val freedBytes = CacheManager.clearCache(appContext)
                         val freedFormatted = CacheManager.formatSize(freedBytes)
                         withContext(Dispatchers.Main) {
+                            _binding?.btnClearCache?.isEnabled = true
                             _binding?.tvCacheSize?.text = CacheManager.formatSize(0L)
                             if (freedBytes > 0) {
                                 Toast.makeText(
@@ -583,11 +585,13 @@ class SettingsFragment : Fragment() {
 
     private fun updateCacheSize() {
         val appContext = context?.applicationContext ?: return
+        binding.btnClearCache.isEnabled = false
         binding.tvCacheSize.text = getString(R.string.pref_cache_calculating)
         lifecycleScope.launch(Dispatchers.IO) {
             val size = CacheManager.calculateCacheSize(appContext)
             val formatted = CacheManager.formatSize(size)
             withContext(Dispatchers.Main) {
+                _binding?.btnClearCache?.isEnabled = true
                 _binding?.tvCacheSize?.text = formatted
             }
         }
