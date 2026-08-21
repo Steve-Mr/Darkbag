@@ -1926,9 +1926,6 @@ class CameraFragment : Fragment() {
                 val jpgFolderUri = prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
                 val rawFolderUri = prefs.getString(SettingsFragment.KEY_RAW_STORAGE_URI, null)
 
-                val tempRawFile = File(context.cacheDir, "$dngName.tmp.raw")
-                val tempJpgFile = File(context.cacheDir, "$dngName.tmp.jpg")
-                val tempDngThumbFile = File(context.cacheDir, "$dngName.tmp.dngthumb.jpg")
                 val fullResJpgFile = File(context.cacheDir, "${dngName}_full.jpg")
                 val linearDngFile = File(context.cacheDir, "${dngName}_linear.dng")
                 val bayerDngFile = File(context.cacheDir, "${dngName}_bayer.dng")
@@ -3683,10 +3680,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 val saveRaw = prefs.getBoolean(SettingsFragment.KEY_SAVE_RAW, true)
                 val jpgFolderUri = prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
                 val rawFolderUri = prefs.getString(SettingsFragment.KEY_RAW_STORAGE_URI, null)
-                val hqBackgroundExport = prefs.getBoolean(SettingsFragment.KEY_HQ_BACKGROUND_EXPORT, false)
 
-                val tempRawFile = File(context.cacheDir, "$dngName.tmp.raw")
-                val tempJpgFile = File(context.cacheDir, "$dngName.tmp.jpg")
                 val fullResJpgFile = File(context.cacheDir, "${dngName}_full.jpg")
 
                 val linearDngFile = File(context.cacheDir, "${dngName}_linear.dng")

@@ -731,14 +731,6 @@
                         <Space android:layout_width="match_parent" android:layout_height="@dimen/spacing_small" />
                     </LinearLayout>
 
-                    <com.google.android.material.materialswitch.MaterialSwitch
-                        android:id="@+id/switch_hq_background_export"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="@dimen/spacing_small"
-                        android:text="High-quality export in background (DNG)"
-                        android:textSize="14sp" />
-
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 

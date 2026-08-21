@@ -424,7 +424,6 @@ class SettingsFragment : Fragment() {
         updateCheckboxStates()
         updateStorageVisibility()
 
-        setupSwitch(binding.switchHqBackgroundExport, KEY_HQ_BACKGROUND_EXPORT, false)
         setupSwitch(binding.switchManualControls, KEY_MANUAL_CONTROLS, false)
         setupSwitch(binding.switchMotionPhoto, KEY_MOTION_PHOTO, false)
 
@@ -552,7 +551,6 @@ class SettingsFragment : Fragment() {
         const val KEY_LUT_URI = "lut_uri"
         const val KEY_ACTIVE_LUT = "active_lut_filename"
         const val KEY_SAVE_JPG = "save_jpg"
-        const val KEY_HQ_BACKGROUND_EXPORT = "hq_background_export"
         const val KEY_USE_GPU = "use_gpu"
         const val KEY_MANUAL_CONTROLS = "enable_manual_controls"
         const val KEY_ENABLE_LUT_PREVIEW = "enable_lut_preview"
