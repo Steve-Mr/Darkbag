@@ -29,9 +29,22 @@ class HdrPlusProcessingService : LifecycleService() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
-        startForeground(NOTIFICATION_ID, createNotification("Starting engine..."),
+        startForeground(NOTIFICATION_ID, createNotification("Starting processing..."),
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0
         )
+
+        lifecycleScope.launch(Dispatchers.Main) {
+            HdrPlusRequestManager.pendingTasksCount.collect { count ->
+                if (count > 0) {
+                    val text = if (count == 1) {
+                        "Processing 1 photo..."
+                    } else {
+                        "Processing photos ($count remaining in queue)..."
+                    }
+                    updateNotification(text)
+                }
+            }
+        }
 
         lifecycleScope.launch(top.maary.darkbag.processor.ColorProcessor.imageProcessingDispatcher) {
             HdrPlusRequestManager.requestFlow.collect { req ->
@@ -46,9 +59,6 @@ class HdrPlusProcessingService : LifecycleService() {
     }
 
     private suspend fun processRequest(req: HdrPlusRequest) {
-        val initialPending = HdrPlusRequestManager.pendingTasksCount.value
-        val processingText = if (initialPending > 1) "Processing image ($initialPending in queue)..." else "Processing image..."
-        updateNotification(processingText)
         var buffersReleased = false
         try {
             val start = System.currentTimeMillis()
@@ -154,10 +164,6 @@ class HdrPlusProcessingService : LifecycleService() {
                 top.maary.darkbag.utils.DebugLogManager.addLog(report)
 
                 if (req.saveJpg || req.saveRaw) {
-                    val pendingSaving = HdrPlusRequestManager.pendingTasksCount.value
-                    val savingText = if (pendingSaving > 1) "Saving files ($pendingSaving in queue)..." else "Saving files..."
-                    updateNotification(savingText)
-                    
                     var savedUri: android.net.Uri? = null
                     val shouldSaveJpg = req.saveJpg
                     val shouldSaveRaw = req.saveRaw && !req.isSingleFrame // Single Bayer RAW was already saved in front-end
@@ -207,8 +213,6 @@ class HdrPlusProcessingService : LifecycleService() {
                     stopForeground(true)
                 }
                 stopSelf()
-            } else {
-                updateNotification("Processing image ($remaining in queue)...")
             }
         }
     }
@@ -241,7 +245,7 @@ class HdrPlusProcessingService : LifecycleService() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Darkbag Processing")
             .setContentText(contentText)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(R.drawable.ic_photo)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
