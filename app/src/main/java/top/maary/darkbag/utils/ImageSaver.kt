@@ -348,8 +348,6 @@ object ImageSaver {
                                 contentResolver.update(dngUri, dngValues, null, null)
                             }
 
-                            writeMetadataToExif(context, dngUri, editConfig, captureMetadata)
-
                             finalRawUri = dngUri
                         } catch (e: Exception) {
                             Log.e(TAG, "Failed to save Linear DNG", e)
@@ -596,7 +594,7 @@ object ImageSaver {
                     mp4File?.delete()
                 }
 
-                if (!isMotionPhoto && writeExifMetadata && (mimeType == "image/jpeg" || mimeType == "image/x-adobe-dng")) {
+                if (!isMotionPhoto && writeExifMetadata && mimeType == "image/jpeg") {
                     writeMetadataToExif(context, newFile.uri, finalEditConfig, captureMetadata)
                 }
 
