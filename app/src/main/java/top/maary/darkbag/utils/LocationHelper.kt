@@ -41,19 +41,12 @@ class LocationHelper(private val context: Context) {
     /**
      * Checks if either fine or coarse location permission is granted.
      */
-    fun hasPermission(): Boolean {
-        val fine = ContextCompat.checkSelfPermission(
-            appContext,
-            Manifest.permission.ACCESS_FINE_LOCATION
-        ) == PackageManager.PERMISSION_GRANTED
+    fun hasPermission(): Boolean = hasPermission(appContext)
 
-        val coarse = ContextCompat.checkSelfPermission(
-            appContext,
-            Manifest.permission.ACCESS_COARSE_LOCATION
-        ) == PackageManager.PERMISSION_GRANTED
-
-        return fine || coarse
-    }
+    /**
+     * Checks if fine location permission is granted.
+     */
+    fun hasFinePermission(): Boolean = hasFineLocationPermission(appContext)
 
     /**
      * Starts listening for location updates if permissions are granted and provider is enabled.
@@ -74,27 +67,43 @@ class LocationHelper(private val context: Context) {
 
             val minTimeMs = 5000L
             val minDistanceM = 5f
+            val hasFine = hasFinePermission()
+            var registeredAny = false
 
-            // Register GPS provider
-            if (locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
-                locationManager.requestLocationUpdates(
-                    LocationManager.GPS_PROVIDER,
-                    minTimeMs,
-                    minDistanceM,
-                    locationListener,
-                    Looper.getMainLooper()
-                )
+            // Register GPS provider (requires FINE_LOCATION)
+            if (hasFine && locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
+                try {
+                    locationManager.requestLocationUpdates(
+                        LocationManager.GPS_PROVIDER,
+                        minTimeMs,
+                        minDistanceM,
+                        locationListener,
+                        Looper.getMainLooper()
+                    )
+                    registeredAny = true
+                } catch (e: SecurityException) {
+                    Log.w(TAG, "SecurityException while requesting GPS updates", e)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to register GPS updates", e)
+                }
             }
 
-            // Register Network provider
+            // Register Network provider (works with COARSE or FINE)
             if (locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
-                locationManager.requestLocationUpdates(
-                    LocationManager.NETWORK_PROVIDER,
-                    minTimeMs,
-                    minDistanceM,
-                    locationListener,
-                    Looper.getMainLooper()
-                )
+                try {
+                    locationManager.requestLocationUpdates(
+                        LocationManager.NETWORK_PROVIDER,
+                        minTimeMs,
+                        minDistanceM,
+                        locationListener,
+                        Looper.getMainLooper()
+                    )
+                    registeredAny = true
+                } catch (e: SecurityException) {
+                    Log.w(TAG, "SecurityException while requesting Network updates", e)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to register Network updates", e)
+                }
             }
 
             // Register Fused provider if available (Android 12+ / API 31+)
@@ -108,16 +117,17 @@ class LocationHelper(private val context: Context) {
                             locationListener,
                             Looper.getMainLooper()
                         )
+                        registeredAny = true
                     }
                 } catch (e: Throwable) {
                     // Ignore if FUSED_PROVIDER is not supported by device hardware
                 }
             }
 
-            isListening = true
-            Log.d(TAG, "Started location updates")
-        } catch (e: SecurityException) {
-            Log.e(TAG, "SecurityException while requesting location updates", e)
+            isListening = registeredAny
+            if (registeredAny) {
+                Log.d(TAG, "Started location updates")
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start location listening", e)
         }
@@ -179,6 +189,12 @@ class LocationHelper(private val context: Context) {
     }
 
     private fun updateIfBetterLocation(newLocation: Location) {
+        // Filter out ancient location fixes (older than MAX_STALE_AGE_MS)
+        val age = System.currentTimeMillis() - newLocation.time
+        if (age > MAX_STALE_AGE_MS || age < -TWO_MINUTES) {
+            return
+        }
+
         val current = cachedLocation
         if (current == null) {
             cachedLocation = newLocation
@@ -212,5 +228,36 @@ class LocationHelper(private val context: Context) {
     companion object {
         private const val TAG = "LocationHelper"
         private const val TWO_MINUTES = 1000 * 60 * 2
+        private const val MAX_STALE_AGE_MS = 1000 * 60 * 30 // 30 minutes
+
+        fun hasPermission(context: Context): Boolean {
+            val fine = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.ACCESS_FINE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+
+            val coarse = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.ACCESS_COARSE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+
+            return fine || coarse
+        }
+
+        fun hasFineLocationPermission(context: Context): Boolean {
+            return ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.ACCESS_FINE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+        }
+
+        fun hasMediaLocationPermission(context: Context): Boolean {
+            return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.ACCESS_MEDIA_LOCATION
+                ) == PackageManager.PERMISSION_GRANTED
+            } else true
+        }
     }
 }

@@ -45,10 +45,10 @@ class SettingsFragment : Fragment() {
         val coarseGranted = permissions[android.Manifest.permission.ACCESS_COARSE_LOCATION] == true
         if (fineGranted || coarseGranted) {
             prefs.edit().putBoolean(KEY_SAVE_LOCATION, true).apply()
-            binding.switchSaveLocation.isChecked = true
+            syncLocationSettingState()
         } else {
             prefs.edit().putBoolean(KEY_SAVE_LOCATION, false).apply()
-            binding.switchSaveLocation.isChecked = false
+            syncLocationSettingState()
             Toast.makeText(context, R.string.location_permission_denied, Toast.LENGTH_LONG).show()
         }
     }
@@ -95,6 +95,7 @@ class SettingsFragment : Fragment() {
         // Re-apply adapters to fix dropdown disappearance bug
         setupMenus()
         updateCheckboxStates()
+        syncLocationSettingState()
         updateStorageVisibility()
     }
 
@@ -303,12 +304,17 @@ class SettingsFragment : Fragment() {
             binding.cbSaveJpg.isEnabled = !(isJpg && count == 1)
             binding.cbSaveRaw.isEnabled = !(isRaw && count == 1)
         }
+    }
 
-        val hasLocPerm = top.maary.darkbag.utils.LocationHelper(requireContext()).hasPermission()
+    private fun syncLocationSettingState() {
+        val hasLocPerm = top.maary.darkbag.utils.LocationHelper.hasPermission(requireContext())
         if (!hasLocPerm && prefs.getBoolean(KEY_SAVE_LOCATION, false)) {
             prefs.edit().putBoolean(KEY_SAVE_LOCATION, false).apply()
         }
-        binding.switchSaveLocation.isChecked = prefs.getBoolean(KEY_SAVE_LOCATION, false) && hasLocPerm
+        val isEnabled = prefs.getBoolean(KEY_SAVE_LOCATION, false) && hasLocPerm
+        if (binding.switchSaveLocation.isChecked != isEnabled) {
+            binding.switchSaveLocation.isChecked = isEnabled
+        }
     }
 
     private fun setupStartupSettings() {
@@ -421,20 +427,20 @@ class SettingsFragment : Fragment() {
         setupSwitch(binding.switchManualControls, KEY_MANUAL_CONTROLS, false)
         setupSwitch(binding.switchMotionPhoto, KEY_MOTION_PHOTO, false)
 
-        val isLocEnabled = prefs.getBoolean(KEY_SAVE_LOCATION, false) && top.maary.darkbag.utils.LocationHelper(requireContext()).hasPermission()
-        binding.switchSaveLocation.isChecked = isLocEnabled
+        syncLocationSettingState()
         binding.switchSaveLocation.setOnCheckedChangeListener { _, isChecked ->
             if (isChecked) {
-                val locationHelper = top.maary.darkbag.utils.LocationHelper(requireContext())
-                if (locationHelper.hasPermission()) {
+                if (top.maary.darkbag.utils.LocationHelper.hasPermission(requireContext())) {
                     prefs.edit().putBoolean(KEY_SAVE_LOCATION, true).apply()
                 } else {
-                    locationPermissionLauncher.launch(
-                        arrayOf(
-                            android.Manifest.permission.ACCESS_FINE_LOCATION,
-                            android.Manifest.permission.ACCESS_COARSE_LOCATION
-                        )
+                    val perms = mutableListOf(
+                        android.Manifest.permission.ACCESS_FINE_LOCATION,
+                        android.Manifest.permission.ACCESS_COARSE_LOCATION
                     )
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        perms.add(android.Manifest.permission.ACCESS_MEDIA_LOCATION)
+                    }
+                    locationPermissionLauncher.launch(perms.toTypedArray())
                 }
             } else {
                 prefs.edit().putBoolean(KEY_SAVE_LOCATION, false).apply()

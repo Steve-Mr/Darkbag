@@ -405,7 +405,8 @@ class ImageRepository(private val context: Context) {
     fun getCaptureMetadata(uri: Uri): top.maary.darkbag.models.CaptureMetadata? {
         if (uri == Uri.EMPTY) return null
         return try {
-            val targetUri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && uri.scheme == "content" && uri.authority == "media") {
+            val hasMediaLocPerm = top.maary.darkbag.utils.LocationHelper.hasMediaLocationPermission(context)
+            val targetUri = if (hasMediaLocPerm && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && uri.scheme == "content" && uri.authority == "media") {
                 try {
                     MediaStore.setRequireOriginal(uri)
                 } catch (e: Exception) {
@@ -415,8 +416,19 @@ class ImageRepository(private val context: Context) {
                 uri
             }
 
-            context.contentResolver.openFileDescriptor(targetUri, "r")?.use { pfd ->
-                val exif = androidx.exifinterface.media.ExifInterface(pfd.fileDescriptor)
+            val pfd = try {
+                context.contentResolver.openFileDescriptor(targetUri, "r")
+            } catch (e: SecurityException) {
+                if (targetUri != uri) {
+                    // Fallback to standard Uri if setRequireOriginal failed due to missing permission
+                    context.contentResolver.openFileDescriptor(uri, "r")
+                } else {
+                    throw e
+                }
+            }
+
+            pfd?.use { fd ->
+                val exif = androidx.exifinterface.media.ExifInterface(fd.fileDescriptor)
                 val iso = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_ISO_SPEED_RATINGS, 0).takeIf { it > 0 }
                 val exposureTime = (exif.getAttributeDouble(androidx.exifinterface.media.ExifInterface.TAG_EXPOSURE_TIME, 0.0) * 1_000_000_000).toLong().takeIf { it > 0 }
                 val fNumber = exif.getAttributeDouble(androidx.exifinterface.media.ExifInterface.TAG_F_NUMBER, 0.0).toFloat().takeIf { it > 0 }
