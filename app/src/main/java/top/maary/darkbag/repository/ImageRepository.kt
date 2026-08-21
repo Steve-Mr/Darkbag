@@ -405,8 +405,30 @@ class ImageRepository(private val context: Context) {
     fun getCaptureMetadata(uri: Uri): top.maary.darkbag.models.CaptureMetadata? {
         if (uri == Uri.EMPTY) return null
         return try {
-            context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
-                val exif = androidx.exifinterface.media.ExifInterface(pfd.fileDescriptor)
+            val hasMediaLocPerm = top.maary.darkbag.utils.LocationHelper.hasMediaLocationPermission(context)
+            val targetUri = if (hasMediaLocPerm && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && uri.scheme == "content" && uri.authority == "media") {
+                try {
+                    MediaStore.setRequireOriginal(uri)
+                } catch (e: Exception) {
+                    uri
+                }
+            } else {
+                uri
+            }
+
+            val pfd = try {
+                context.contentResolver.openFileDescriptor(targetUri, "r")
+            } catch (e: SecurityException) {
+                if (targetUri != uri) {
+                    // Fallback to standard Uri if setRequireOriginal failed due to missing permission
+                    context.contentResolver.openFileDescriptor(uri, "r")
+                } else {
+                    throw e
+                }
+            }
+
+            pfd?.use { fd ->
+                val exif = androidx.exifinterface.media.ExifInterface(fd.fileDescriptor)
                 val iso = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_ISO_SPEED_RATINGS, 0).takeIf { it > 0 }
                 val exposureTime = (exif.getAttributeDouble(androidx.exifinterface.media.ExifInterface.TAG_EXPOSURE_TIME, 0.0) * 1_000_000_000).toLong().takeIf { it > 0 }
                 val fNumber = exif.getAttributeDouble(androidx.exifinterface.media.ExifInterface.TAG_F_NUMBER, 0.0).toFloat().takeIf { it > 0 }
@@ -429,6 +451,18 @@ class ImageRepository(private val context: Context) {
                 val lensModel = exif.getAttribute(androidx.exifinterface.media.ExifInterface.TAG_LENS_MODEL)
                 val focalLengthIn35mm = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_FOCAL_LENGTH_IN_35MM_FILM, 0).takeIf { it > 0 }
 
+                val latLong = exif.latLong
+                val location = if (latLong != null) {
+                    android.location.Location("exif").apply {
+                        latitude = latLong[0]
+                        longitude = latLong[1]
+                        val alt = exif.getAltitude(Double.NaN)
+                        if (!alt.isNaN()) {
+                            altitude = alt
+                        }
+                    }
+                } else null
+
                 top.maary.darkbag.models.CaptureMetadata(
                     iso = iso,
                     exposureTime = exposureTime,
@@ -442,7 +476,8 @@ class ImageRepository(private val context: Context) {
                     offsetTimeDigitized = offsetTimeDigitized,
                     make = make,
                     model = model,
-                    lensModel = lensModel
+                    lensModel = lensModel,
+                    location = location
                 )
             }
         } catch (e: Exception) {

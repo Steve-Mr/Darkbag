@@ -85,4 +85,8 @@
     <string name="playground_btn_disband">Disband</string>
     <string name="playground_delete_title">Confirm Delete</string>
     <string name="playground_delete_message">Are you sure you want to delete the selected items?\n\nIf a half-frame group is selected, its original DNGs will also be deleted. If a DNG from a group is deleted, the group will be disbanded automatically.</string>
+
+    <string name="save_location_title">Save Location</string>
+    <string name="save_location_summary">Attach GPS coordinates to photo EXIF metadata</string>
+    <string name="location_permission_denied">Location permission is required to save photo location.</string>
 </resources>

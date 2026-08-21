@@ -20,5 +20,6 @@ data class CaptureMetadata(
     val uniqueCameraModel: String? = null,
     val lensModel: String? = null,
     val software: String? = null,
-    val imageDescription: String? = null
+    val imageDescription: String? = null,
+    val location: android.location.Location? = null
 ) : Parcelable

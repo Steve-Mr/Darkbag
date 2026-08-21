@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -37,6 +38,21 @@ class SettingsFragment : Fragment() {
     private val binding get() = _binding!!
     private lateinit var prefs: SharedPreferences
     private lateinit var cameraRepository: CameraRepository
+
+    private val locationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val fineGranted = permissions[android.Manifest.permission.ACCESS_FINE_LOCATION] == true
+        val coarseGranted = permissions[android.Manifest.permission.ACCESS_COARSE_LOCATION] == true
+        if (fineGranted || coarseGranted) {
+            prefs.edit().putBoolean(KEY_SAVE_LOCATION, true).apply()
+            syncLocationSettingState()
+        } else {
+            prefs.edit().putBoolean(KEY_SAVE_LOCATION, false).apply()
+            syncLocationSettingState()
+            Toast.makeText(context, R.string.location_permission_denied, Toast.LENGTH_LONG).show()
+        }
+    }
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
         _binding = FragmentSettingsBinding.inflate(inflater, container, false)
@@ -80,6 +96,7 @@ class SettingsFragment : Fragment() {
         // Re-apply adapters to fix dropdown disappearance bug
         setupMenus()
         updateCheckboxStates()
+        syncLocationSettingState()
         updateStorageVisibility()
     }
 
@@ -290,6 +307,17 @@ class SettingsFragment : Fragment() {
         }
     }
 
+    private fun syncLocationSettingState() {
+        val hasLocPerm = top.maary.darkbag.utils.LocationHelper.hasPermission(requireContext())
+        if (!hasLocPerm && prefs.getBoolean(KEY_SAVE_LOCATION, false)) {
+            prefs.edit().putBoolean(KEY_SAVE_LOCATION, false).apply()
+        }
+        val isEnabled = prefs.getBoolean(KEY_SAVE_LOCATION, false) && hasLocPerm
+        if (binding.switchSaveLocation.isChecked != isEnabled) {
+            binding.switchSaveLocation.isChecked = isEnabled
+        }
+    }
+
     private fun setupStartupSettings() {
         var defaultStartup = prefs.getString(KEY_DEFAULT_STARTUP, STARTUP_CAMERA) ?: STARTUP_CAMERA
         var enableCamera = prefs.getBoolean(KEY_ENABLE_CAMERA, true)
@@ -399,6 +427,27 @@ class SettingsFragment : Fragment() {
         setupSwitch(binding.switchHqBackgroundExport, KEY_HQ_BACKGROUND_EXPORT, false)
         setupSwitch(binding.switchManualControls, KEY_MANUAL_CONTROLS, false)
         setupSwitch(binding.switchMotionPhoto, KEY_MOTION_PHOTO, false)
+
+        syncLocationSettingState()
+        binding.switchSaveLocation.setOnCheckedChangeListener { _, isChecked ->
+            if (isChecked) {
+                if (top.maary.darkbag.utils.LocationHelper.hasPermission(requireContext())) {
+                    prefs.edit().putBoolean(KEY_SAVE_LOCATION, true).apply()
+                } else {
+                    val perms = mutableListOf(
+                        android.Manifest.permission.ACCESS_FINE_LOCATION,
+                        android.Manifest.permission.ACCESS_COARSE_LOCATION
+                    )
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        perms.add(android.Manifest.permission.ACCESS_MEDIA_LOCATION)
+                    }
+                    locationPermissionLauncher.launch(perms.toTypedArray())
+                }
+            } else {
+                prefs.edit().putBoolean(KEY_SAVE_LOCATION, false).apply()
+            }
+        }
+
         setupSwitch(binding.switchHalfFrameMode, KEY_HALF_FRAME_MODE, false)
         setupSwitch(binding.switchHalfFrameDownsample, KEY_HALF_FRAME_DOWNSAMPLE)
         setupSwitch(binding.switchHalfFrameDateStamp, KEY_HALF_FRAME_DATE_STAMP, false)
@@ -529,6 +578,7 @@ class SettingsFragment : Fragment() {
         const val KEY_FORCE_60FPS = "force_60fps"
         const val KEY_DEBUG_ENABLED = "debug_enabled"
         const val KEY_MOTION_PHOTO = "motion_photo_enabled"
+        const val KEY_SAVE_LOCATION = "save_location_enabled"
         const val KEY_SAVE_RAW = "save_raw"
         const val KEY_JPG_STORAGE_URI = "jpg_storage_uri"
         const val KEY_JPG_STORAGE_URI_NAME = "jpg_storage_uri_name"
