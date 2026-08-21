@@ -182,16 +182,6 @@ class HdrPlusProcessingService : LifecycleService() {
                             motionPhotoStillPtsUs = req.motionPhotoStillPtsUs
                         )
                     }
-
-                    ColorProcessor.onBackgroundSaveComplete(
-                        req.baseName,
-                        if (req.saveRaw) req.linearDngPath else null,
-                        if (req.saveJpg) req.fullResJpgPath else null,
-                        savedUri?.toString() ?: req.zslTargetUriStr,
-                        req.zoomFactor,
-                        req.orientation,
-                        req.saveJpg
-                    )
                 }
             } else {
                 Log.e(TAG, "Processing failed for ${req.requestId}")
@@ -203,6 +193,7 @@ class HdrPlusProcessingService : LifecycleService() {
             if (!buffersReleased) {
                 HdrPlusBurst.releaseBuffer(req.megaBuffer)
             }
+            HdrPlusRequestManager.onTaskFinished()
             updateNotification("Idle")
         }
     }

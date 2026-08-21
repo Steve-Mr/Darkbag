@@ -253,15 +253,29 @@ class CameraFragment : Fragment() {
         }
     }
 
-    private fun showProcessingAnimation() {
-        lifecycleScope.launch(Dispatchers.Main) {
-            processingCount++
+    private fun updateProcessingAnimationUi() {
+        val isProcessing = processingCount > 0 || top.maary.darkbag.processor.HdrPlusRequestManager.pendingTasksCount.value > 0
+        if (isProcessing) {
             cameraUiContainerBinding?.processingProgress?.visibility = View.VISIBLE
             cameraUiContainerBinding?.photoViewContainer?.visibility = View.VISIBLE
             // Hide thumbnail image while processing if in half-frame mode
             if (isHalfFrameModeEnabled) {
                 cameraUiContainerBinding?.photoViewButton?.visibility = View.INVISIBLE
             }
+        } else {
+            cameraUiContainerBinding?.processingProgress?.visibility = View.GONE
+            // Restore thumbnail visibility if not in the middle of a half-frame pair
+            if (!isHalfFrameModeEnabled || halfFrameStep == 0) {
+                cameraUiContainerBinding?.photoViewButton?.visibility = View.VISIBLE
+                cameraUiContainerBinding?.photoViewButton?.alpha = 1f
+            }
+        }
+    }
+
+    private fun showProcessingAnimation() {
+        lifecycleScope.launch(Dispatchers.Main) {
+            processingCount++
+            updateProcessingAnimationUi()
             Log.d(TAG, "showProcessingAnimation: count=$processingCount")
         }
     }
@@ -269,14 +283,7 @@ class CameraFragment : Fragment() {
     private fun hideProcessingAnimation() {
         lifecycleScope.launch(Dispatchers.Main) {
             processingCount = (processingCount - 1).coerceAtLeast(0)
-            if (processingCount == 0) {
-                cameraUiContainerBinding?.processingProgress?.visibility = View.GONE
-                // Restore thumbnail visibility if not in the middle of a half-frame pair
-                if (!isHalfFrameModeEnabled || halfFrameStep == 0) {
-                    cameraUiContainerBinding?.photoViewButton?.visibility = View.VISIBLE
-                    cameraUiContainerBinding?.photoViewButton?.alpha = 1f
-                }
-            }
+            updateProcessingAnimationUi()
             Log.d(TAG, "hideProcessingAnimation: count=$processingCount")
         }
     }
@@ -658,15 +665,6 @@ class CameraFragment : Fragment() {
             }
         )
 
-        // Listen for Half-frame events
-        viewLifecycleOwner.lifecycleScope.launch {
-            ColorProcessor.halfFrameFlow.collect {
-                withContext(Dispatchers.Main) {
-                    hideProcessingAnimation()
-                }
-            }
-        }
-
         // Listen for background save completions from JNI or WorkManager
         viewLifecycleOwner.lifecycleScope.launch {
             ColorProcessor.backgroundSaveFlow.collect { event ->
@@ -688,11 +686,16 @@ class CameraFragment : Fragment() {
                         }
                     } catch (e: Exception) {
                         Log.e(TAG, "Background UI update failed for ${event.baseName}", e)
-                    } finally {
-                        withContext(Dispatchers.Main) {
-                            hideProcessingAnimation()
-                        }
                     }
+                }
+            }
+        }
+
+        // Listen for HDR+/RAW processing queue changes to drive loading animation
+        viewLifecycleOwner.lifecycleScope.launch {
+            top.maary.darkbag.processor.HdrPlusRequestManager.pendingTasksCount.collect {
+                withContext(Dispatchers.Main) {
+                    updateProcessingAnimationUi()
                 }
             }
         }
