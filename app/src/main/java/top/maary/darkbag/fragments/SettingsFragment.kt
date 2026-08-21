@@ -38,6 +38,21 @@ class SettingsFragment : Fragment() {
     private lateinit var prefs: SharedPreferences
     private lateinit var cameraRepository: CameraRepository
 
+    private val locationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val fineGranted = permissions[android.Manifest.permission.ACCESS_FINE_LOCATION] == true
+        val coarseGranted = permissions[android.Manifest.permission.ACCESS_COARSE_LOCATION] == true
+        if (fineGranted || coarseGranted) {
+            prefs.edit().putBoolean(KEY_SAVE_LOCATION, true).apply()
+            binding.switchSaveLocation.isChecked = true
+        } else {
+            prefs.edit().putBoolean(KEY_SAVE_LOCATION, false).apply()
+            binding.switchSaveLocation.isChecked = false
+            Toast.makeText(context, R.string.location_permission_denied, Toast.LENGTH_LONG).show()
+        }
+    }
+
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
         _binding = FragmentSettingsBinding.inflate(inflater, container, false)
         return binding.root
@@ -288,6 +303,12 @@ class SettingsFragment : Fragment() {
             binding.cbSaveJpg.isEnabled = !(isJpg && count == 1)
             binding.cbSaveRaw.isEnabled = !(isRaw && count == 1)
         }
+
+        val hasLocPerm = top.maary.darkbag.utils.LocationHelper(requireContext()).hasPermission()
+        if (!hasLocPerm && prefs.getBoolean(KEY_SAVE_LOCATION, false)) {
+            prefs.edit().putBoolean(KEY_SAVE_LOCATION, false).apply()
+        }
+        binding.switchSaveLocation.isChecked = prefs.getBoolean(KEY_SAVE_LOCATION, false) && hasLocPerm
     }
 
     private fun setupStartupSettings() {
@@ -399,6 +420,27 @@ class SettingsFragment : Fragment() {
         setupSwitch(binding.switchHqBackgroundExport, KEY_HQ_BACKGROUND_EXPORT, false)
         setupSwitch(binding.switchManualControls, KEY_MANUAL_CONTROLS, false)
         setupSwitch(binding.switchMotionPhoto, KEY_MOTION_PHOTO, false)
+
+        val isLocEnabled = prefs.getBoolean(KEY_SAVE_LOCATION, false) && top.maary.darkbag.utils.LocationHelper(requireContext()).hasPermission()
+        binding.switchSaveLocation.isChecked = isLocEnabled
+        binding.switchSaveLocation.setOnCheckedChangeListener { _, isChecked ->
+            if (isChecked) {
+                val locationHelper = top.maary.darkbag.utils.LocationHelper(requireContext())
+                if (locationHelper.hasPermission()) {
+                    prefs.edit().putBoolean(KEY_SAVE_LOCATION, true).apply()
+                } else {
+                    locationPermissionLauncher.launch(
+                        arrayOf(
+                            android.Manifest.permission.ACCESS_FINE_LOCATION,
+                            android.Manifest.permission.ACCESS_COARSE_LOCATION
+                        )
+                    )
+                }
+            } else {
+                prefs.edit().putBoolean(KEY_SAVE_LOCATION, false).apply()
+            }
+        }
+
         setupSwitch(binding.switchHalfFrameMode, KEY_HALF_FRAME_MODE, false)
         setupSwitch(binding.switchHalfFrameDownsample, KEY_HALF_FRAME_DOWNSAMPLE)
         setupSwitch(binding.switchHalfFrameDateStamp, KEY_HALF_FRAME_DATE_STAMP, false)
@@ -529,6 +571,7 @@ class SettingsFragment : Fragment() {
         const val KEY_FORCE_60FPS = "force_60fps"
         const val KEY_DEBUG_ENABLED = "debug_enabled"
         const val KEY_MOTION_PHOTO = "motion_photo_enabled"
+        const val KEY_SAVE_LOCATION = "save_location_enabled"
         const val KEY_SAVE_RAW = "save_raw"
         const val KEY_JPG_STORAGE_URI = "jpg_storage_uri"
         const val KEY_JPG_STORAGE_URI_NAME = "jpg_storage_uri_name"
