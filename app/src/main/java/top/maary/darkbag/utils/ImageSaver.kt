@@ -532,45 +532,6 @@ object ImageSaver {
         }
     }
 
-    private fun saveDebugStageImagesToMediaStore(context: Context, baseName: String, sourcePath: String) {
-        val source = File(sourcePath)
-        val parent = source.parentFile ?: return
-        val stem = source.nameWithoutExtension
-
-        val debugSuffixes = listOf(
-            "_debug_A_linear" to "${baseName}_debug_A_linear.jpg",
-            "_debug_B_matrix" to "${baseName}_debug_B_matrix.jpg",
-            "_debug_C_log" to "${baseName}_debug_C_log.jpg",
-            "_AB_SENSOR_CCM" to "${baseName}_AB_SENSOR_CCM.jpg",
-            "_AB_CAPTURE_CCM" to "${baseName}_AB_CAPTURE_CCM.jpg"
-        )
-
-        for ((suffix, displayName) in debugSuffixes) {
-            val debugFile = File(parent, "$stem${suffix}.jpg")
-            if (!debugFile.exists() || debugFile.length() <= 0L) continue
-
-            try {
-                saveJpegToMediaStore(
-                    context = context,
-                    displayName = displayName,
-                    targetUri = null,
-                    width = null,
-                    height = null,
-                    editConfig = null,
-                    zoomFactor = 1.0f,
-                    captureMetadata = null,
-                    writeExifMetadata = false
-                ) { out ->
-                    FileInputStream(debugFile).use { it.copyTo(out) }
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to export debug stage image: ${debugFile.absolutePath}", e)
-            } finally {
-                debugFile.delete()
-            }
-        }
-    }
-
     fun getExifOrientation(rotationDegrees: Int, mirror: Boolean): Int {
         return when (rotationDegrees) {
             90 -> if (mirror) ExifInterface.ORIENTATION_TRANSPOSE else ExifInterface.ORIENTATION_ROTATE_90
@@ -613,23 +574,26 @@ object ImageSaver {
                 val isMotionPhoto = motionPhotoMp4Path != null && File(motionPhotoMp4Path).exists() && File(motionPhotoMp4Path).length() > 0
                 val finalEditConfig = createFinalEditConfig(editConfig, zoomFactor)
 
-                context.contentResolver.openOutputStream(newFile.uri)?.use { out ->
-                    if (isMotionPhoto) {
-                        val mp4File = File(motionPhotoMp4Path!!)
-                        if (writeExifMetadata) {
-                            writeMetadataToExifFile(sourceFile, finalEditConfig, captureMetadata)
+                val mp4File = if (isMotionPhoto) File(motionPhotoMp4Path!!) else null
+                try {
+                    context.contentResolver.openOutputStream(newFile.uri)?.use { out ->
+                        if (isMotionPhoto && mp4File != null) {
+                            if (writeExifMetadata) {
+                                writeMetadataToExifFile(sourceFile, finalEditConfig, captureMetadata)
+                            }
+                            val jpegBytes = sourceFile.readBytes()
+                            top.maary.darkbag.motionphoto.MotionPhotoXmpWriter.writeMotionPhoto(
+                                jpegBytes = jpegBytes,
+                                mp4File = mp4File,
+                                presentationTimestampUs = motionPhotoStillPtsUs,
+                                outputStream = out
+                            )
+                        } else {
+                            FileInputStream(sourceFile).copyTo(out)
                         }
-                        val jpegBytes = sourceFile.readBytes()
-                        top.maary.darkbag.motionphoto.MotionPhotoXmpWriter.writeMotionPhoto(
-                            jpegBytes = jpegBytes,
-                            mp4File = mp4File,
-                            presentationTimestampUs = motionPhotoStillPtsUs,
-                            outputStream = out
-                        )
-                        mp4File.delete()
-                    } else {
-                        FileInputStream(sourceFile).copyTo(out)
                     }
+                } finally {
+                    mp4File?.delete()
                 }
 
                 if (!isMotionPhoto && writeExifMetadata && (mimeType == "image/jpeg" || mimeType == "image/x-adobe-dng")) {
@@ -711,20 +675,22 @@ object ImageSaver {
                     if (isMotionPhoto) {
                         val mp4File = File(motionPhotoMp4Path!!)
                         val tempJpeg = File(context.cacheDir, "temp_motion_exif_${System.currentTimeMillis()}.jpg")
-                        FileOutputStream(tempJpeg).use { writeData(it) }
-                        if (writeExifMetadata) {
-                            writeMetadataToExifFile(tempJpeg, finalEditConfig, captureMetadata)
+                        try {
+                            FileOutputStream(tempJpeg).use { writeData(it) }
+                            if (writeExifMetadata) {
+                                writeMetadataToExifFile(tempJpeg, finalEditConfig, captureMetadata)
+                            }
+                            val jpegBytes = tempJpeg.readBytes()
+                            top.maary.darkbag.motionphoto.MotionPhotoXmpWriter.writeMotionPhoto(
+                                jpegBytes = jpegBytes,
+                                mp4File = mp4File,
+                                presentationTimestampUs = motionPhotoStillPtsUs,
+                                outputStream = out
+                            )
+                        } finally {
+                            tempJpeg.delete()
+                            mp4File.delete()
                         }
-                        val jpegBytes = tempJpeg.readBytes()
-                        tempJpeg.delete()
-
-                        top.maary.darkbag.motionphoto.MotionPhotoXmpWriter.writeMotionPhoto(
-                            jpegBytes = jpegBytes,
-                            mp4File = mp4File,
-                            presentationTimestampUs = motionPhotoStillPtsUs,
-                            outputStream = out
-                        )
-                        mp4File.delete()
                     } else {
                         writeData(out)
                     }

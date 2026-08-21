@@ -2,8 +2,13 @@ package top.maary.darkbag.fragments
 import top.maary.darkbag.utils.MediaStoreUtils
 import top.maary.darkbag.utils.DebugLogManager
 import top.maary.darkbag.utils.CameraRepository
+import top.maary.darkbag.utils.CacheManager
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
-import androidx.appcompat.app.AlertDialog
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
@@ -84,6 +89,7 @@ class SettingsFragment : Fragment() {
         setupStartupSettings()
         setupCheckboxes()
         setupStoragePickers()
+        setupCacheManagement()
         setupNavigation()
         updateDebugStats()
         updateDebugVisibility()
@@ -98,6 +104,7 @@ class SettingsFragment : Fragment() {
         updateCheckboxStates()
         syncLocationSettingState()
         updateStorageVisibility()
+        updateCacheSize()
     }
 
     private var aboutClickCount = 0
@@ -424,7 +431,6 @@ class SettingsFragment : Fragment() {
         updateCheckboxStates()
         updateStorageVisibility()
 
-        setupSwitch(binding.switchHqBackgroundExport, KEY_HQ_BACKGROUND_EXPORT, false)
         setupSwitch(binding.switchManualControls, KEY_MANUAL_CONTROLS, false)
         setupSwitch(binding.switchMotionPhoto, KEY_MOTION_PHOTO, false)
 
@@ -541,6 +547,56 @@ class SettingsFragment : Fragment() {
         }
     }
 
+    private fun setupCacheManagement() {
+        binding.btnClearCache.setOnClickListener {
+            MaterialAlertDialogBuilder(requireContext())
+                .setTitle(R.string.clear_cache_dialog_title)
+                .setMessage(R.string.clear_cache_dialog_message)
+                .setNegativeButton(R.string.cancel, null)
+                .setPositiveButton(R.string.btn_clear_cache) { _, _ ->
+                    val appContext = requireContext().applicationContext
+                    binding.btnClearCache.isEnabled = false
+                    binding.tvCacheSize.text = getString(R.string.pref_cache_calculating)
+                    lifecycleScope.launch(Dispatchers.IO) {
+                        val freedBytes = CacheManager.clearCache(appContext)
+                        val freedFormatted = CacheManager.formatSize(freedBytes)
+                        withContext(Dispatchers.Main) {
+                            _binding?.btnClearCache?.isEnabled = true
+                            _binding?.tvCacheSize?.text = CacheManager.formatSize(0L)
+                            if (freedBytes > 0) {
+                                Toast.makeText(
+                                    appContext,
+                                    getString(R.string.clear_cache_success_toast, freedFormatted),
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            } else {
+                                Toast.makeText(
+                                    appContext,
+                                    R.string.clear_cache_empty_toast,
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        }
+                    }
+                }
+                .show()
+        }
+    }
+
+    private fun updateCacheSize() {
+        val appContext = context?.applicationContext ?: return
+        binding.btnClearCache.isEnabled = false
+        binding.tvCacheSize.text = getString(R.string.pref_cache_calculating)
+        lifecycleScope.launch(Dispatchers.IO) {
+            val size = CacheManager.calculateCacheSize(appContext)
+            val formatted = CacheManager.formatSize(size)
+            withContext(Dispatchers.Main) {
+                _binding?.btnClearCache?.isEnabled = true
+                _binding?.tvCacheSize?.text = formatted
+            }
+        }
+    }
+
     override fun onDestroyView() {
         super.onDestroyView()
         _binding = null
@@ -552,7 +608,6 @@ class SettingsFragment : Fragment() {
         const val KEY_LUT_URI = "lut_uri"
         const val KEY_ACTIVE_LUT = "active_lut_filename"
         const val KEY_SAVE_JPG = "save_jpg"
-        const val KEY_HQ_BACKGROUND_EXPORT = "hq_background_export"
         const val KEY_USE_GPU = "use_gpu"
         const val KEY_MANUAL_CONTROLS = "enable_manual_controls"
         const val KEY_ENABLE_LUT_PREVIEW = "enable_lut_preview"

@@ -37,8 +37,15 @@ class HdrPlusBurst(
     private val onBurstComplete: (BurstResult) -> Unit
 ) {
     companion object {
-        private const val MAX_POOL_SIZE = 10
+        private const val MAX_POOL_SIZE = 3
         private val bufferPool = ConcurrentLinkedQueue<ByteBuffer>()
+
+        /**
+         * Clears all pooled ByteBuffers to free native memory.
+         */
+        fun clearPool() {
+            bufferPool.clear()
+        }
 
         /**
          * Returns a Direct ByteBuffer of at least [capacity] from the pool,
