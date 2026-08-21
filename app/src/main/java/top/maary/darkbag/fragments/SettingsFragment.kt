@@ -2,6 +2,11 @@ package top.maary.darkbag.fragments
 import top.maary.darkbag.utils.MediaStoreUtils
 import top.maary.darkbag.utils.DebugLogManager
 import top.maary.darkbag.utils.CameraRepository
+import top.maary.darkbag.utils.CacheManager
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 import androidx.appcompat.app.AlertDialog
 import android.content.Context
@@ -84,6 +89,7 @@ class SettingsFragment : Fragment() {
         setupStartupSettings()
         setupCheckboxes()
         setupStoragePickers()
+        setupCacheManagement()
         setupNavigation()
         updateDebugStats()
         updateDebugVisibility()
@@ -98,6 +104,7 @@ class SettingsFragment : Fragment() {
         updateCheckboxStates()
         syncLocationSettingState()
         updateStorageVisibility()
+        updateCacheSize()
     }
 
     private var aboutClickCount = 0
@@ -537,6 +544,52 @@ class SettingsFragment : Fragment() {
         }
         binding.layoutRawStorage.setOnClickListener {
             rawPicker.launch(null)
+        }
+    }
+
+    private fun setupCacheManagement() {
+        binding.btnClearCache.setOnClickListener {
+            AlertDialog.Builder(requireContext())
+                .setTitle(R.string.clear_cache_dialog_title)
+                .setMessage(R.string.clear_cache_dialog_message)
+                .setNegativeButton(R.string.cancel, null)
+                .setPositiveButton(R.string.btn_clear_cache) { _, _ ->
+                    val appContext = requireContext().applicationContext
+                    binding.tvCacheSize.text = getString(R.string.pref_cache_calculating)
+                    lifecycleScope.launch(Dispatchers.IO) {
+                        val freedBytes = CacheManager.clearCache(appContext)
+                        val freedFormatted = CacheManager.formatSize(freedBytes)
+                        withContext(Dispatchers.Main) {
+                            _binding?.tvCacheSize?.text = CacheManager.formatSize(0L)
+                            if (freedBytes > 0) {
+                                Toast.makeText(
+                                    appContext,
+                                    getString(R.string.clear_cache_success_toast, freedFormatted),
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            } else {
+                                Toast.makeText(
+                                    appContext,
+                                    R.string.clear_cache_empty_toast,
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        }
+                    }
+                }
+                .show()
+        }
+    }
+
+    private fun updateCacheSize() {
+        val appContext = context?.applicationContext ?: return
+        binding.tvCacheSize.text = getString(R.string.pref_cache_calculating)
+        lifecycleScope.launch(Dispatchers.IO) {
+            val size = CacheManager.calculateCacheSize(appContext)
+            val formatted = CacheManager.formatSize(size)
+            withContext(Dispatchers.Main) {
+                _binding?.tvCacheSize?.text = formatted
+            }
         }
     }
 
