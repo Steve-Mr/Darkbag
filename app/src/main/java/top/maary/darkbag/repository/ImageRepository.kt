@@ -138,6 +138,7 @@ class ImageRepository(private val context: Context) {
                         if (motionInfo != null) {
                             builder.isMotionPhoto = true
                             builder.motionPhotoPtsUs = motionInfo.presentationTimestampUs
+                            builder.motionPhotoVideoLength = motionInfo.videoLength
                         }
                     } catch (e: Exception) {
                         android.util.Log.w("ImageRepository", "Failed to read Motion Photo from $uri", e)
@@ -512,6 +513,7 @@ class ImageRepository(private val context: Context) {
         var editConfig: EditConfig? = null
         var isMotionPhoto: Boolean = false
         var motionPhotoPtsUs: Long = 0L
+        var motionPhotoVideoLength: Long = 0L
         var metadataLoaded: Boolean = false
 
         fun applyFrom(group: ImageGroup): ImageGroupBuilder {
@@ -527,6 +529,7 @@ class ImageRepository(private val context: Context) {
             editConfig = group.editConfig
             isMotionPhoto = group.isMotionPhoto
             motionPhotoPtsUs = group.motionPhotoPtsUs
+            motionPhotoVideoLength = group.motionPhotoVideoLength
             metadataLoaded = group.metadataLoaded
             return this
         }
@@ -616,7 +619,8 @@ class ImageRepository(private val context: Context) {
                 isInProgress = isInProgress,
                 isPartial = isPartial,
                 isMotionPhoto = isMotionPhoto,
-                motionPhotoPtsUs = motionPhotoPtsUs
+                motionPhotoPtsUs = motionPhotoPtsUs,
+                motionPhotoVideoLength = motionPhotoVideoLength
             )
         }
     }

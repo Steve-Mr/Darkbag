@@ -113,23 +113,16 @@ open class ImageViewerFragment : Fragment() {
                 lifecycleScope.launch {
                     val updatedGroup = repository.loadMetadata(group)
                     adapterUpdateMutex.withLock {
-                        val currentGroups = adapter.getGroups().toMutableList()
-                        val index = currentGroups.indexOfFirst { it.baseName == updatedGroup.baseName }
-                        if (index != -1) {
-                            currentGroups[index] = updatedGroup
-                            // Use a callback to ensure the differ has actually finished updating
-                            // before we allow the next lock holder to read getGroups()
-                            suspendCancellableCoroutine<Unit> { continuation ->
-                                adapter.updateGroups(currentGroups) {
-                                    if (continuation.isActive) continuation.resume(Unit)
-                                }
+                        suspendCancellableCoroutine<Unit> { continuation ->
+                            adapter.updateSingleGroup(updatedGroup) {
+                                if (continuation.isActive) continuation.resume(Unit)
                             }
+                        }
 
-                            val format = adapter.getSelectedFormat(position)
-                            if (!isAdjusted && isMotionPhotoAutoPlay && hasAutoPlayedPosition != position && updatedGroup.isMotionPhoto && binding.imagePager.currentItem == position && format != ImageViewerAdapter.FORMAT_DNG) {
-                                hasAutoPlayedPosition = position
-                                adapter.playMotionVideoForPosition(position)
-                            }
+                        val format = adapter.getSelectedFormat(position)
+                        if (!isAdjusted && isMotionPhotoAutoPlay && hasAutoPlayedPosition != position && updatedGroup.isMotionPhoto && binding.imagePager.currentItem == position && format != ImageViewerAdapter.FORMAT_DNG) {
+                            hasAutoPlayedPosition = position
+                            adapter.playMotionVideoForPosition(position)
                         }
                     }
                 }
@@ -276,18 +269,14 @@ open class ImageViewerFragment : Fragment() {
                             val updatedGroup = repository.loadMetadata(initialGroup)
                             prepareEditConfig(updatedGroup)
                             adapterUpdateMutex.withLock {
-                                val updatedGroups = adapter.getGroups().toMutableList()
-                                if (initialPos in updatedGroups.indices) {
-                                    updatedGroups[initialPos] = updatedGroup
-                                    suspendCancellableCoroutine<Unit> { continuation ->
-                                        adapter.updateGroups(updatedGroups) {
-                                            if (continuation.isActive) continuation.resume(Unit)
-                                        }
+                                suspendCancellableCoroutine<Unit> { continuation ->
+                                    adapter.updateSingleGroup(updatedGroup) {
+                                        if (continuation.isActive) continuation.resume(Unit)
                                     }
-                                    if (!isAdjusted && isMotionPhotoAutoPlay && updatedGroup.isMotionPhoto && hasAutoPlayedPosition != initialPos && binding.imagePager.currentItem == initialPos) {
-                                        hasAutoPlayedPosition = initialPos
-                                        adapter.playMotionVideoForPosition(initialPos)
-                                    }
+                                }
+                                if (!isAdjusted && isMotionPhotoAutoPlay && updatedGroup.isMotionPhoto && hasAutoPlayedPosition != initialPos && binding.imagePager.currentItem == initialPos) {
+                                    hasAutoPlayedPosition = initialPos
+                                    adapter.playMotionVideoForPosition(initialPos)
                                 }
                             }
                         } else {
@@ -322,19 +311,15 @@ open class ImageViewerFragment : Fragment() {
                             lifecycleScope.launch {
                                 val updatedGroup = repository.loadMetadata(currentGroup)
                                 adapterUpdateMutex.withLock {
-                                    val currentGroups = adapter.getGroups().toMutableList()
-                                    val index = currentGroups.indexOfFirst { it.baseName == updatedGroup.baseName }
-                                    if (index != -1) {
-                                        currentGroups[index] = updatedGroup
-                                        suspendCancellableCoroutine<Unit> { continuation ->
-                                            adapter.updateGroups(currentGroups) {
-                                                if (continuation.isActive) continuation.resume(Unit)
-                                            }
+                                    suspendCancellableCoroutine<Unit> { continuation ->
+                                        adapter.updateSingleGroup(updatedGroup) {
+                                            if (continuation.isActive) continuation.resume(Unit)
                                         }
-                                        if (!isAdjusted && isMotionPhotoAutoPlay && hasAutoPlayedPosition != index && updatedGroup.isMotionPhoto && binding.imagePager.currentItem == index) {
-                                            hasAutoPlayedPosition = index
-                                            adapter.playMotionVideoForPosition(index)
-                                        }
+                                    }
+                                    val index = adapter.getGroups().indexOfFirst { it.baseName == updatedGroup.baseName }
+                                    if (!isAdjusted && isMotionPhotoAutoPlay && hasAutoPlayedPosition != index && updatedGroup.isMotionPhoto && binding.imagePager.currentItem == index) {
+                                        hasAutoPlayedPosition = index
+                                        adapter.playMotionVideoForPosition(index)
                                     }
                                 }
                             }
