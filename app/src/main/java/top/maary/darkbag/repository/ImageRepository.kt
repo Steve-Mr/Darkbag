@@ -109,6 +109,7 @@ class ImageRepository(private val context: Context) {
         group.jpgUri?.let { uri ->
             try {
                 context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                    var motionInfoParsed = false
                     try {
                         val exif = androidx.exifinterface.media.ExifInterface(pfd.fileDescriptor)
                         val comment =
@@ -125,24 +126,39 @@ class ImageRepository(private val context: Context) {
                         if (orientation == androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90 || orientation == androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270) {
                             builder.width = h
                             builder.height = w
-                        } else {
+                        } else if (w > 0 && h > 0) {
                             builder.width = w
                             builder.height = h
+                        }
+
+                        // Try reading XMP payload directly from ExifInterface to avoid re-scanning APP segments
+                        val xmpBytes = exif.getAttributeBytes(androidx.exifinterface.media.ExifInterface.TAG_XMP)
+                        if (xmpBytes != null && xmpBytes.isNotEmpty()) {
+                            val xmpStr = String(xmpBytes, java.nio.charset.StandardCharsets.UTF_8)
+                            val motionInfo = top.maary.darkbag.motionphoto.MotionPhotoReader.parseXmpPayload(xmpStr, pfd.statSize)
+                            if (motionInfo != null) {
+                                builder.isMotionPhoto = true
+                                builder.motionPhotoPtsUs = motionInfo.presentationTimestampUs
+                                builder.motionPhotoVideoLength = motionInfo.videoLength
+                                motionInfoParsed = true
+                            }
                         }
                     } catch (e: Exception) {
                         android.util.Log.w("ImageRepository", "Failed to read EXIF from $uri", e)
                     }
 
-                    try {
-                        android.system.Os.lseek(pfd.fileDescriptor, 0L, android.system.OsConstants.SEEK_SET)
-                        val motionInfo = top.maary.darkbag.motionphoto.MotionPhotoReader.parseMotionPhotoInfo(pfd)
-                        if (motionInfo != null) {
-                            builder.isMotionPhoto = true
-                            builder.motionPhotoPtsUs = motionInfo.presentationTimestampUs
-                            builder.motionPhotoVideoLength = motionInfo.videoLength
+                    if (!motionInfoParsed) {
+                        try {
+                            android.system.Os.lseek(pfd.fileDescriptor, 0L, android.system.OsConstants.SEEK_SET)
+                            val motionInfo = top.maary.darkbag.motionphoto.MotionPhotoReader.parseMotionPhotoInfo(pfd)
+                            if (motionInfo != null) {
+                                builder.isMotionPhoto = true
+                                builder.motionPhotoPtsUs = motionInfo.presentationTimestampUs
+                                builder.motionPhotoVideoLength = motionInfo.videoLength
+                            }
+                        } catch (e: Exception) {
+                            android.util.Log.w("ImageRepository", "Failed to read Motion Photo from $uri", e)
                         }
-                    } catch (e: Exception) {
-                        android.util.Log.w("ImageRepository", "Failed to read Motion Photo from $uri", e)
                     }
                 }
             } catch (e: Exception) {
@@ -297,7 +313,9 @@ class ImageRepository(private val context: Context) {
             MediaStore.MediaColumns.DISPLAY_NAME,
             MediaStore.MediaColumns.DATE_ADDED,
             MediaStore.MediaColumns.DATE_MODIFIED,
-            MediaStore.MediaColumns.MIME_TYPE
+            MediaStore.MediaColumns.MIME_TYPE,
+            MediaStore.MediaColumns.WIDTH,
+            MediaStore.MediaColumns.HEIGHT
         )
 
         val selection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -314,6 +332,8 @@ class ImageRepository(private val context: Context) {
             val dateColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_ADDED)
             val modifiedColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_MODIFIED)
             val mimeColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.MIME_TYPE)
+            val widthColumn = cursor.getColumnIndex(MediaStore.MediaColumns.WIDTH)
+            val heightColumn = cursor.getColumnIndex(MediaStore.MediaColumns.HEIGHT)
 
             while (cursor.moveToNext()) {
                 val id = cursor.getLong(idColumn)
@@ -326,6 +346,15 @@ class ImageRepository(private val context: Context) {
 
                 val baseName = getBaseName(name)
                 val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
+
+                if (widthColumn != -1 && heightColumn != -1 && builder.width == 0 && builder.height == 0) {
+                    val w = cursor.getInt(widthColumn)
+                    val h = cursor.getInt(heightColumn)
+                    if (w > 0 && h > 0) {
+                        builder.width = w
+                        builder.height = h
+                    }
+                }
 
                 when {
                     mime == "image/jpeg" -> {
