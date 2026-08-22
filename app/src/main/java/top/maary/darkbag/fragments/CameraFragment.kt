@@ -556,14 +556,14 @@ class CameraFragment : Fragment() {
                 return@post
             }
 
-            // In half-frame mode, only show the thumbnail if we are at step 0 (idle) and not processing
+            // In half-frame mode, control visibility based on idle state, but do not block loading
             if (isHalfFrameModeEnabled && (halfFrameStep != 0 || isProcessing)) {
                 photoViewButton.visibility = View.INVISIBLE
-                return@post
+            } else {
+                photoViewButton.visibility = View.VISIBLE
+                photoViewButton.alpha = 1f
             }
 
-            photoViewButton.visibility = View.VISIBLE
-            photoViewButton.alpha = 1f
             // Remove thumbnail padding
             photoViewButton.setPadding(resources.getDimension(R.dimen.stroke_small).toInt())
 
