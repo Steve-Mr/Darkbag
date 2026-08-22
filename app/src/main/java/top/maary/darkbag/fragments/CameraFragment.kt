@@ -1299,9 +1299,12 @@ class CameraFragment : Fragment() {
         lifecycleScope.launch {
             val context = requireContext()
             val thumbnailUri = mediaStoreUtils.getLatestAppImage()
-            thumbnailUri?.let {
-                updateCurrentThumbnail(it)
-                setGalleryThumbnail(it.toString())
+            if (thumbnailUri != null) {
+                updateCurrentThumbnail(thumbnailUri)
+                setGalleryThumbnail(thumbnailUri.toString())
+            } else {
+                updateCurrentThumbnail(null)
+                setGalleryThumbnail(null)
             }
             // Warm ImageViewer data cache so first entry is faster.
             kotlin.runCatching {

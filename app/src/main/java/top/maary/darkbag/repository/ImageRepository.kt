@@ -152,8 +152,10 @@ class ImageRepository(private val context: Context) {
         val updated = builder.build().copy(metadataLoaded = true)
         val currentCache = cachedGroups
         cachedGroups = if (currentCache != null) {
-            currentCache.map {
-                if (it.baseName == updated.baseName) updated else it
+            if (currentCache.any { it.baseName == updated.baseName }) {
+                currentCache.map { if (it.baseName == updated.baseName) updated else it }
+            } else {
+                currentCache + updated
             }
         } else {
             listOf(updated)
