@@ -82,6 +82,19 @@ class ImageRepository(private val context: Context) {
         // Stage 1: Fast scan MediaStore (usually fastest as it's an indexed database)
         withContext(Dispatchers.IO) {
             scanMediaStore(groups, fast = true)
+
+            // Preload metadata for target initial URI in Stage 1 if available
+            if (initialUri != null) {
+                val targetBuilder = groups.values.firstOrNull { builder ->
+                    builder.jpgUri?.toString() == initialUri ||
+                            builder.dngUri?.toString() == initialUri ||
+                            builder.dngUri1?.toString() == initialUri ||
+                            builder.dngUri2?.toString() == initialUri
+                }
+                if (targetBuilder != null && !targetBuilder.metadataLoaded) {
+                    populateMetadata(targetBuilder)
+                }
+            }
         }
         emitCurrent()
 
@@ -95,78 +108,96 @@ class ImageRepository(private val context: Context) {
             if (folderUri != null) {
                 withContext(Dispatchers.IO) {
                     scanSafFolder(folderUri, groups, fast = true)
+
+                    // If initial target was in SAF and not found in MediaStore, preload here
+                    if (initialUri != null) {
+                        val targetBuilder = groups.values.firstOrNull { builder ->
+                            builder.jpgUri?.toString() == initialUri ||
+                                    builder.dngUri?.toString() == initialUri ||
+                                    builder.dngUri1?.toString() == initialUri ||
+                                    builder.dngUri2?.toString() == initialUri
+                        }
+                        if (targetBuilder != null && !targetBuilder.metadataLoaded) {
+                            populateMetadata(targetBuilder)
+                        }
+                    }
                 }
                 emitCurrent()
             }
         }
     }
 
+    private fun populateMetadata(builder: ImageGroupBuilder) {
+        if (builder.metadataLoaded) return
+        val jpgUri = builder.jpgUri ?: return
+
+        try {
+            context.contentResolver.openFileDescriptor(jpgUri, "r")?.use { pfd ->
+                var motionInfoParsed = false
+                try {
+                    val exif = androidx.exifinterface.media.ExifInterface(pfd.fileDescriptor)
+                    val comment =
+                        exif.getAttribute(androidx.exifinterface.media.ExifInterface.TAG_USER_COMMENT)
+                    parseUserComment(comment, builder)
+
+                    val orientation = exif.getAttributeInt(
+                        androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION,
+                        androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL
+                    )
+                    val w = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_IMAGE_WIDTH, 0)
+                    val h = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_IMAGE_LENGTH, 0)
+
+                    if (orientation == androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90 || orientation == androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270) {
+                        builder.width = h
+                        builder.height = w
+                    } else if (w > 0 && h > 0) {
+                        builder.width = w
+                        builder.height = h
+                    }
+
+                    // Try reading XMP payload directly from ExifInterface to avoid re-scanning APP segments
+                    val xmpBytes = exif.getAttributeBytes(androidx.exifinterface.media.ExifInterface.TAG_XMP)
+                    if (xmpBytes != null && xmpBytes.isNotEmpty()) {
+                        val xmpStr = String(xmpBytes, java.nio.charset.StandardCharsets.UTF_8)
+                        val motionInfo = top.maary.darkbag.motionphoto.MotionPhotoReader.parseXmpPayload(xmpStr, pfd.statSize)
+                        if (motionInfo != null) {
+                            builder.isMotionPhoto = true
+                            builder.motionPhotoPtsUs = motionInfo.presentationTimestampUs
+                            builder.motionPhotoVideoLength = motionInfo.videoLength
+                            motionInfoParsed = true
+                        }
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.w("ImageRepository", "Failed to read EXIF from $jpgUri", e)
+                }
+
+                if (!motionInfoParsed) {
+                    try {
+                        android.system.Os.lseek(pfd.fileDescriptor, 0L, android.system.OsConstants.SEEK_SET)
+                        val motionInfo = top.maary.darkbag.motionphoto.MotionPhotoReader.parseMotionPhotoInfo(pfd)
+                        if (motionInfo != null) {
+                            builder.isMotionPhoto = true
+                            builder.motionPhotoPtsUs = motionInfo.presentationTimestampUs
+                            builder.motionPhotoVideoLength = motionInfo.videoLength
+                        }
+                    } catch (e: Exception) {
+                        android.util.Log.w("ImageRepository", "Failed to read Motion Photo from $jpgUri", e)
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("ImageRepository", "Failed to open $jpgUri", e)
+        }
+        builder.metadataLoaded = true
+    }
+
     suspend fun loadMetadata(group: ImageGroup): ImageGroup = withContext(Dispatchers.IO) {
         if (group.metadataLoaded) return@withContext group
 
         val builder = ImageGroupBuilder(group.baseName).applyFrom(group)
+        populateMetadata(builder)
 
-        group.jpgUri?.let { uri ->
-            try {
-                context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
-                    var motionInfoParsed = false
-                    try {
-                        val exif = androidx.exifinterface.media.ExifInterface(pfd.fileDescriptor)
-                        val comment =
-                            exif.getAttribute(androidx.exifinterface.media.ExifInterface.TAG_USER_COMMENT)
-                        parseUserComment(comment, builder)
-
-                        val orientation = exif.getAttributeInt(
-                            androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION,
-                            androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL
-                        )
-                        val w = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_IMAGE_WIDTH, 0)
-                        val h = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_IMAGE_LENGTH, 0)
-
-                        if (orientation == androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90 || orientation == androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270) {
-                            builder.width = h
-                            builder.height = w
-                        } else if (w > 0 && h > 0) {
-                            builder.width = w
-                            builder.height = h
-                        }
-
-                        // Try reading XMP payload directly from ExifInterface to avoid re-scanning APP segments
-                        val xmpBytes = exif.getAttributeBytes(androidx.exifinterface.media.ExifInterface.TAG_XMP)
-                        if (xmpBytes != null && xmpBytes.isNotEmpty()) {
-                            val xmpStr = String(xmpBytes, java.nio.charset.StandardCharsets.UTF_8)
-                            val motionInfo = top.maary.darkbag.motionphoto.MotionPhotoReader.parseXmpPayload(xmpStr, pfd.statSize)
-                            if (motionInfo != null) {
-                                builder.isMotionPhoto = true
-                                builder.motionPhotoPtsUs = motionInfo.presentationTimestampUs
-                                builder.motionPhotoVideoLength = motionInfo.videoLength
-                                motionInfoParsed = true
-                            }
-                        }
-                    } catch (e: Exception) {
-                        android.util.Log.w("ImageRepository", "Failed to read EXIF from $uri", e)
-                    }
-
-                    if (!motionInfoParsed) {
-                        try {
-                            android.system.Os.lseek(pfd.fileDescriptor, 0L, android.system.OsConstants.SEEK_SET)
-                            val motionInfo = top.maary.darkbag.motionphoto.MotionPhotoReader.parseMotionPhotoInfo(pfd)
-                            if (motionInfo != null) {
-                                builder.isMotionPhoto = true
-                                builder.motionPhotoPtsUs = motionInfo.presentationTimestampUs
-                                builder.motionPhotoVideoLength = motionInfo.videoLength
-                            }
-                        } catch (e: Exception) {
-                            android.util.Log.w("ImageRepository", "Failed to read Motion Photo from $uri", e)
-                        }
-                    }
-                }
-            } catch (e: Exception) {
-                android.util.Log.w("ImageRepository", "Failed to open $uri", e)
-            }
-        }
-
-        val updated = builder.build().copy(metadataLoaded = true)
+        val updated = builder.build()
         val currentCache = cachedGroups
         cachedGroups = if (currentCache != null) {
             if (currentCache.any { it.baseName == updated.baseName }) {
