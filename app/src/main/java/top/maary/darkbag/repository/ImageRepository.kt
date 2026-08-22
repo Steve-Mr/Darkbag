@@ -82,19 +82,7 @@ class ImageRepository(private val context: Context) {
         // Stage 1: Fast scan MediaStore (usually fastest as it's an indexed database)
         withContext(Dispatchers.IO) {
             scanMediaStore(groups, fast = true)
-
-            // Preload metadata for target initial URI in Stage 1 if available
-            if (initialUri != null) {
-                val targetBuilder = groups.values.firstOrNull { builder ->
-                    builder.jpgUri?.toString() == initialUri ||
-                            builder.dngUri?.toString() == initialUri ||
-                            builder.dngUri1?.toString() == initialUri ||
-                            builder.dngUri2?.toString() == initialUri
-                }
-                if (targetBuilder != null && !targetBuilder.metadataLoaded) {
-                    populateMetadata(targetBuilder)
-                }
-            }
+            preloadInitialMetadata(groups, initialUri)
         }
         emitCurrent()
 
@@ -108,28 +96,33 @@ class ImageRepository(private val context: Context) {
             if (folderUri != null) {
                 withContext(Dispatchers.IO) {
                     scanSafFolder(folderUri, groups, fast = true)
-
-                    // If initial target was in SAF and not found in MediaStore, preload here
-                    if (initialUri != null) {
-                        val targetBuilder = groups.values.firstOrNull { builder ->
-                            builder.jpgUri?.toString() == initialUri ||
-                                    builder.dngUri?.toString() == initialUri ||
-                                    builder.dngUri1?.toString() == initialUri ||
-                                    builder.dngUri2?.toString() == initialUri
-                        }
-                        if (targetBuilder != null && !targetBuilder.metadataLoaded) {
-                            populateMetadata(targetBuilder)
-                        }
-                    }
+                    preloadInitialMetadata(groups, initialUri)
                 }
                 emitCurrent()
             }
         }
     }
 
+    private fun preloadInitialMetadata(groups: Map<String, ImageGroupBuilder>, initialUri: String?) {
+        if (initialUri == null) return
+        val targetBuilder = groups.values.firstOrNull { builder ->
+            builder.jpgUri?.toString() == initialUri ||
+                    builder.dngUri?.toString() == initialUri ||
+                    builder.dngUri1?.toString() == initialUri ||
+                    builder.dngUri2?.toString() == initialUri
+        }
+        if (targetBuilder != null && !targetBuilder.metadataLoaded) {
+            populateMetadata(targetBuilder)
+        }
+    }
+
     private fun populateMetadata(builder: ImageGroupBuilder) {
         if (builder.metadataLoaded) return
-        val jpgUri = builder.jpgUri ?: return
+        val jpgUri = builder.jpgUri
+        if (jpgUri == null) {
+            builder.metadataLoaded = true
+            return
+        }
 
         try {
             context.contentResolver.openFileDescriptor(jpgUri, "r")?.use { pfd ->
@@ -147,12 +140,14 @@ class ImageRepository(private val context: Context) {
                     val w = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_IMAGE_WIDTH, 0)
                     val h = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_IMAGE_LENGTH, 0)
 
-                    if (orientation == androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90 || orientation == androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270) {
-                        builder.width = h
-                        builder.height = w
-                    } else if (w > 0 && h > 0) {
-                        builder.width = w
-                        builder.height = h
+                    if (w > 0 && h > 0) {
+                        if (orientation == androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90 || orientation == androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270) {
+                            builder.width = h
+                            builder.height = w
+                        } else {
+                            builder.width = w
+                            builder.height = h
+                        }
                     }
 
                     // Try reading XMP payload directly from ExifInterface to avoid re-scanning APP segments
@@ -324,12 +319,14 @@ class ImageRepository(private val context: Context) {
                 val w = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_IMAGE_WIDTH, 0)
                 val h = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_IMAGE_LENGTH, 0)
 
-                if (orientation == androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90 || orientation == androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270) {
-                    builder.width = h
-                    builder.height = w
-                } else {
-                    builder.width = w
-                    builder.height = h
+                if (w > 0 && h > 0) {
+                    if (orientation == androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90 || orientation == androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270) {
+                        builder.width = h
+                        builder.height = w
+                    } else {
+                        builder.width = w
+                        builder.height = h
+                    }
                 }
             }
         } catch (e: Exception) {
