@@ -54,6 +54,17 @@ class LutSurfaceProcessor : SurfaceProcessor {
 
     private val transformMatrix = FloatArray(16)
 
+    // Cached GL uniform and attribute locations
+    private var scaleLoc = -1
+    private var textureLoc = -1
+    private var textureMatrixLoc = -1
+    private var lutLoc = -1
+    private var gamutMatrixLoc = -1
+    private var logTypeLoc = -1
+    private var lutSizeLoc = -1
+    private var posHandle = -1
+    private var texHandle = -1
+
     companion object {
         // --- Standard CIE XYZ and Gamut Matrices (Row-Major definitions matching ColorPipe.cpp) ---
         private val M_sRGB_D65_to_XYZ = floatArrayOf(
@@ -447,44 +458,45 @@ class LutSurfaceProcessor : SurfaceProcessor {
             }
         }
 
-        GLES30.glUniform2f(GLES30.glGetUniformLocation(program, "uScale"), scaleX, scaleY)
+        if (scaleLoc >= 0) GLES30.glUniform2f(scaleLoc, scaleX, scaleY)
 
         GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
         GLES30.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, inputTextureId)
-        GLES30.glUniform1i(GLES30.glGetUniformLocation(program, "uTexture"), 0)
+        if (textureLoc >= 0) GLES30.glUniform1i(textureLoc, 0)
 
-        GLES30.glUniformMatrix4fv(GLES30.glGetUniformLocation(program, "uTextureMatrix"), 1, false, transformMatrix, 0)
+        if (textureMatrixLoc >= 0) GLES30.glUniformMatrix4fv(textureMatrixLoc, 1, false, transformMatrix, 0)
 
         if (currentLutSize > 0 && lutTextureId != 0) {
             GLES30.glActiveTexture(GLES30.GL_TEXTURE1)
             GLES30.glBindTexture(GLES30.GL_TEXTURE_3D, lutTextureId)
-            GLES30.glUniform1i(GLES30.glGetUniformLocation(program, "uLut"), 1)
+            if (lutLoc >= 0) GLES30.glUniform1i(lutLoc, 1)
         } else {
              // Bind dummy to avoid warnings
              GLES30.glActiveTexture(GLES30.GL_TEXTURE1)
              GLES30.glBindTexture(GLES30.GL_TEXTURE_3D, dummyLutTextureId)
-             GLES30.glUniform1i(GLES30.glGetUniformLocation(program, "uLut"), 1)
+             if (lutLoc >= 0) GLES30.glUniform1i(lutLoc, 1)
         }
 
-        GLES30.glUniformMatrix3fv(GLES30.glGetUniformLocation(program, "uGamutMatrix"), 1, false, currentGamutMatrix, 0)
-        GLES30.glUniform1i(GLES30.glGetUniformLocation(program, "uLogType"), currentLogType)
-        GLES30.glUniform1i(GLES30.glGetUniformLocation(program, "uLutSize"), currentLutSize)
+        if (gamutMatrixLoc >= 0) GLES30.glUniformMatrix3fv(gamutMatrixLoc, 1, false, currentGamutMatrix, 0)
+        if (logTypeLoc >= 0) GLES30.glUniform1i(logTypeLoc, currentLogType)
+        if (lutSizeLoc >= 0) GLES30.glUniform1i(lutSizeLoc, currentLutSize)
 
-        val posHandle = GLES30.glGetAttribLocation(program, "aPosition")
-        val texHandle = GLES30.glGetAttribLocation(program, "aTexCoord")
+        if (posHandle >= 0) {
+            vertexBuffer.position(0)
+            GLES30.glVertexAttribPointer(posHandle, 2, GLES30.GL_FLOAT, false, 4 * 4, vertexBuffer)
+            GLES30.glEnableVertexAttribArray(posHandle)
+        }
 
-        vertexBuffer.position(0)
-        GLES30.glVertexAttribPointer(posHandle, 2, GLES30.GL_FLOAT, false, 4 * 4, vertexBuffer)
-        GLES30.glEnableVertexAttribArray(posHandle)
-
-        vertexBuffer.position(2)
-        GLES30.glVertexAttribPointer(texHandle, 2, GLES30.GL_FLOAT, false, 4 * 4, vertexBuffer)
-        GLES30.glEnableVertexAttribArray(texHandle)
+        if (texHandle >= 0) {
+            vertexBuffer.position(2)
+            GLES30.glVertexAttribPointer(texHandle, 2, GLES30.GL_FLOAT, false, 4 * 4, vertexBuffer)
+            GLES30.glEnableVertexAttribArray(texHandle)
+        }
 
         GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
 
-        GLES30.glDisableVertexAttribArray(posHandle)
-        GLES30.glDisableVertexAttribArray(texHandle)
+        if (posHandle >= 0) GLES30.glDisableVertexAttribArray(posHandle)
+        if (texHandle >= 0) GLES30.glDisableVertexAttribArray(texHandle)
 
         EGL14.eglSwapBuffers(eglDisplay, eglSurface)
 
@@ -511,39 +523,43 @@ class LutSurfaceProcessor : SurfaceProcessor {
                 }
             }
 
-            GLES30.glUniform2f(GLES30.glGetUniformLocation(program, "uScale"), encScaleX, encScaleY)
+            if (scaleLoc >= 0) GLES30.glUniform2f(scaleLoc, encScaleX, encScaleY)
 
             GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
             GLES30.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, inputTextureId)
-            GLES30.glUniform1i(GLES30.glGetUniformLocation(program, "uTexture"), 0)
-            GLES30.glUniformMatrix4fv(GLES30.glGetUniformLocation(program, "uTextureMatrix"), 1, false, transformMatrix, 0)
+            if (textureLoc >= 0) GLES30.glUniform1i(textureLoc, 0)
+            if (textureMatrixLoc >= 0) GLES30.glUniformMatrix4fv(textureMatrixLoc, 1, false, transformMatrix, 0)
 
             if (currentLutSize > 0 && lutTextureId != 0) {
                 GLES30.glActiveTexture(GLES30.GL_TEXTURE1)
                 GLES30.glBindTexture(GLES30.GL_TEXTURE_3D, lutTextureId)
-                GLES30.glUniform1i(GLES30.glGetUniformLocation(program, "uLut"), 1)
+                if (lutLoc >= 0) GLES30.glUniform1i(lutLoc, 1)
             } else {
                 GLES30.glActiveTexture(GLES30.GL_TEXTURE1)
                 GLES30.glBindTexture(GLES30.GL_TEXTURE_3D, dummyLutTextureId)
-                GLES30.glUniform1i(GLES30.glGetUniformLocation(program, "uLut"), 1)
+                if (lutLoc >= 0) GLES30.glUniform1i(lutLoc, 1)
             }
 
-            GLES30.glUniformMatrix3fv(GLES30.glGetUniformLocation(program, "uGamutMatrix"), 1, false, currentGamutMatrix, 0)
-            GLES30.glUniform1i(GLES30.glGetUniformLocation(program, "uLogType"), currentLogType)
-            GLES30.glUniform1i(GLES30.glGetUniformLocation(program, "uLutSize"), currentLutSize)
+            if (gamutMatrixLoc >= 0) GLES30.glUniformMatrix3fv(gamutMatrixLoc, 1, false, currentGamutMatrix, 0)
+            if (logTypeLoc >= 0) GLES30.glUniform1i(logTypeLoc, currentLogType)
+            if (lutSizeLoc >= 0) GLES30.glUniform1i(lutSizeLoc, currentLutSize)
 
-            vertexBuffer.position(0)
-            GLES30.glVertexAttribPointer(posHandle, 2, GLES30.GL_FLOAT, false, 4 * 4, vertexBuffer)
-            GLES30.glEnableVertexAttribArray(posHandle)
+            if (posHandle >= 0) {
+                vertexBuffer.position(0)
+                GLES30.glVertexAttribPointer(posHandle, 2, GLES30.GL_FLOAT, false, 4 * 4, vertexBuffer)
+                GLES30.glEnableVertexAttribArray(posHandle)
+            }
 
-            vertexBuffer.position(2)
-            GLES30.glVertexAttribPointer(texHandle, 2, GLES30.GL_FLOAT, false, 4 * 4, vertexBuffer)
-            GLES30.glEnableVertexAttribArray(texHandle)
+            if (texHandle >= 0) {
+                vertexBuffer.position(2)
+                GLES30.glVertexAttribPointer(texHandle, 2, GLES30.GL_FLOAT, false, 4 * 4, vertexBuffer)
+                GLES30.glEnableVertexAttribArray(texHandle)
+            }
 
             GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
 
-            GLES30.glDisableVertexAttribArray(posHandle)
-            GLES30.glDisableVertexAttribArray(texHandle)
+            if (posHandle >= 0) GLES30.glDisableVertexAttribArray(posHandle)
+            if (texHandle >= 0) GLES30.glDisableVertexAttribArray(texHandle)
 
             val frameTimestampNs = System.nanoTime()
             EGLExt.eglPresentationTimeANDROID(eglDisplay, encoderEglSurface, frameTimestampNs)
@@ -622,12 +638,19 @@ class LutSurfaceProcessor : SurfaceProcessor {
                 }
             }
 
-            // 4. Fast triangular PDF dithering (1 LSB amplitude for 8-bit output)
+            // 4. True Triangular PDF (TPDF) dithering (+-1.0 LSB amplitude) to eliminate 8-bit quantization banding
             vec3 triangularDither(vec3 color, vec2 coord) {
-                float r = fract(sin(dot(coord, vec2(12.9898, 78.233))) * 43758.5453);
-                float g = fract(sin(dot(coord, vec2(93.9898, 67.345))) * 43758.5453);
-                float b = fract(sin(dot(coord, vec2(41.1234, 39.876))) * 43758.5453);
-                vec3 dither = (vec3(r, g, b) - vec3(0.5)) / 255.0;
+                vec3 n1 = fract(sin(vec3(
+                    dot(coord, vec2(12.9898, 78.233)),
+                    dot(coord, vec2(63.7264, 10.873)),
+                    dot(coord, vec2(78.2330, 12.989))
+                )) * 43758.5453);
+                vec3 n2 = fract(sin(vec3(
+                    dot(coord, vec2(93.9898, 67.345)),
+                    dot(coord, vec2(41.1234, 39.876)),
+                    dot(coord, vec2(27.8192, 84.192))
+                )) * 24634.6345);
+                vec3 dither = (n1 - n2) / 255.0;
                 return clamp(color + dither, 0.0, 1.0);
             }
 
@@ -648,10 +671,15 @@ class LutSurfaceProcessor : SurfaceProcessor {
                         applyLogCurve(wideGamutRgb.b, uLogType)
                     );
 
-                    // Step D: Sample 3D LUT in target wide-gamut log space
-                    vec3 graded = texture(uLut, logRgb).rgb;
+                    // Step D: Half-texel correction for exact alignment with 3D LUT voxel centers:
+                    // coord = logRgb * ((N - 1.0) / N) + (0.5 / N)
+                    float lutSizeFloat = float(uLutSize);
+                    vec3 lutCoord = logRgb * ((lutSizeFloat - 1.0) / lutSizeFloat) + vec3(0.5 / lutSizeFloat);
 
-                    // Step E: Apply high-frequency dithering to eliminate 8-bit quantization banding
+                    // Step E: Sample 3D LUT in target wide-gamut log space
+                    vec3 graded = texture(uLut, lutCoord).rgb;
+
+                    // Step F: Apply high-frequency TPDF dithering to eliminate 8-bit quantization banding
                     outColor = vec4(triangularDither(graded, gl_FragCoord.xy), 1.0);
                 } else {
                     outColor = src;
@@ -666,6 +694,18 @@ class LutSurfaceProcessor : SurfaceProcessor {
         GLES30.glAttachShader(program, vShader)
         GLES30.glAttachShader(program, fShader)
         GLES30.glLinkProgram(program)
+
+        // Cache uniform and attribute locations to avoid per-frame lookups
+        scaleLoc = GLES30.glGetUniformLocation(program, "uScale")
+        textureLoc = GLES30.glGetUniformLocation(program, "uTexture")
+        textureMatrixLoc = GLES30.glGetUniformLocation(program, "uTextureMatrix")
+        lutLoc = GLES30.glGetUniformLocation(program, "uLut")
+        gamutMatrixLoc = GLES30.glGetUniformLocation(program, "uGamutMatrix")
+        logTypeLoc = GLES30.glGetUniformLocation(program, "uLogType")
+        lutSizeLoc = GLES30.glGetUniformLocation(program, "uLutSize")
+
+        posHandle = GLES30.glGetAttribLocation(program, "aPosition")
+        texHandle = GLES30.glGetAttribLocation(program, "aTexCoord")
     }
 
     private fun loadShader(type: Int, src: String): Int {
