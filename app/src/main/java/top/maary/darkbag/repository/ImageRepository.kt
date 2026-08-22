@@ -149,8 +149,13 @@ class ImageRepository(private val context: Context) {
         }
 
         val updated = builder.build().copy(metadataLoaded = true)
-        cachedGroups = cachedGroups?.map {
-            if (it.baseName == updated.baseName) updated else it
+        val currentCache = cachedGroups
+        cachedGroups = if (currentCache != null) {
+            currentCache.map {
+                if (it.baseName == updated.baseName) updated else it
+            }
+        } else {
+            listOf(updated)
         }
         updated
     }
@@ -507,6 +512,7 @@ class ImageRepository(private val context: Context) {
         var editConfig: EditConfig? = null
         var isMotionPhoto: Boolean = false
         var motionPhotoPtsUs: Long = 0L
+        var metadataLoaded: Boolean = false
 
         fun applyFrom(group: ImageGroup): ImageGroupBuilder {
             jpgUri = group.jpgUri
@@ -521,6 +527,7 @@ class ImageRepository(private val context: Context) {
             editConfig = group.editConfig
             isMotionPhoto = group.isMotionPhoto
             motionPhotoPtsUs = group.motionPhotoPtsUs
+            metadataLoaded = group.metadataLoaded
             return this
         }
 
@@ -605,7 +612,7 @@ class ImageRepository(private val context: Context) {
                 captureTime,
                 if (lastModified > 0) lastModified else maxOf(jpgTime, dngTime, dngUri1Time, dngUri2Time),
                 editConfig,
-                metadataLoaded = false,
+                metadataLoaded = metadataLoaded,
                 isInProgress = isInProgress,
                 isPartial = isPartial,
                 isMotionPhoto = isMotionPhoto,

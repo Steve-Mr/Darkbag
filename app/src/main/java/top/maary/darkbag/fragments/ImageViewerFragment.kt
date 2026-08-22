@@ -274,6 +274,7 @@ open class ImageViewerFragment : Fragment() {
                         val initialGroup = groups[initialPos]
                         if (!initialGroup.metadataLoaded) {
                             val updatedGroup = repository.loadMetadata(initialGroup)
+                            prepareEditConfig(updatedGroup)
                             adapterUpdateMutex.withLock {
                                 val updatedGroups = adapter.getGroups().toMutableList()
                                 if (initialPos in updatedGroups.indices) {
@@ -289,9 +290,12 @@ open class ImageViewerFragment : Fragment() {
                                     }
                                 }
                             }
-                        } else if (!isAdjusted && isMotionPhotoAutoPlay && initialGroup.isMotionPhoto && hasAutoPlayedPosition != initialPos) {
-                            hasAutoPlayedPosition = initialPos
-                            adapter.playMotionVideoForPosition(initialPos)
+                        } else {
+                            prepareEditConfig(initialGroup)
+                            if (!isAdjusted && isMotionPhotoAutoPlay && initialGroup.isMotionPhoto && hasAutoPlayedPosition != initialPos) {
+                                hasAutoPlayedPosition = initialPos
+                                adapter.playMotionVideoForPosition(initialPos)
+                            }
                         }
                     } else {
                         val firstGroup = groups.firstOrNull()
