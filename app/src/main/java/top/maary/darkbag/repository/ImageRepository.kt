@@ -4,6 +4,7 @@ import android.content.ContentUris
 import android.content.Context
 import android.net.Uri
 import android.os.Build
+import android.provider.DocumentsContract
 import android.provider.MediaStore
 import androidx.documentfile.provider.DocumentFile
 import kotlinx.coroutines.Dispatchers
@@ -174,73 +175,118 @@ class ImageRepository(private val context: Context) {
     ) {
         try {
             val treeUri = Uri.parse(folderUri)
-            val root = DocumentFile.fromTreeUri(context, treeUri)
-            root?.listFiles()?.forEach { file ->
-                val name = file.name ?: return@forEach
-                if (!name.startsWith(DarkbagIdentity.FILE_PREFIX, ignoreCase = true)) return@forEach
-                val baseName = getBaseName(name)
-                val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
-                val lastModified = file.lastModified()
+            val docId = if (DocumentsContract.isTreeUri(treeUri)) {
+                DocumentsContract.getTreeDocumentId(treeUri)
+            } else {
+                DocumentsContract.getDocumentId(treeUri)
+            }
+            val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, docId)
+            val projection = arrayOf(
+                DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                DocumentsContract.Document.COLUMN_MIME_TYPE,
+                DocumentsContract.Document.COLUMN_LAST_MODIFIED
+            )
 
-                when {
-                    name.endsWith(".jpg", ignoreCase = true) || name.endsWith(
-                        ".jpeg",
-                        ignoreCase = true
-                    ) -> {
-                        builder.setJpg(file.uri, lastModified)
-                        if (!fast) {
-                        // Try reading EXIF for layout and dimensions
-                        try {
-                            context.contentResolver.openFileDescriptor(file.uri, "r")?.use { pfd ->
-                                val exif =
-                                    androidx.exifinterface.media.ExifInterface(pfd.fileDescriptor)
-                                val comment =
-                                    exif.getAttribute(androidx.exifinterface.media.ExifInterface.TAG_USER_COMMENT)
-                                parseUserComment(comment, builder)
+            var scannedWithDirectQuery = false
+            try {
+                context.contentResolver.query(childrenUri, projection, null, null, null)?.use { cursor ->
+                    scannedWithDirectQuery = true
+                    val idColumn = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+                    val nameColumn = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+                    val modifiedColumn = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_LAST_MODIFIED)
 
-                                val orientation = exif.getAttributeInt(
-                                    androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION,
-                                    androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL
-                                )
-                                val w = exif.getAttributeInt(
-                                    androidx.exifinterface.media.ExifInterface.TAG_IMAGE_WIDTH,
-                                    0
-                                )
-                                val h = exif.getAttributeInt(
-                                    androidx.exifinterface.media.ExifInterface.TAG_IMAGE_LENGTH,
-                                    0
-                                )
+                    while (cursor.moveToNext()) {
+                        if (idColumn == -1 || nameColumn == -1) continue
+                        val childDocId = cursor.getString(idColumn) ?: continue
+                        val name = cursor.getString(nameColumn) ?: continue
+                        if (!name.startsWith(DarkbagIdentity.FILE_PREFIX, ignoreCase = true)) continue
+                        val baseName = getBaseName(name)
+                        val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
+                        val lastModified = if (modifiedColumn != -1) cursor.getLong(modifiedColumn) else 0L
+                        val docUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, childDocId)
 
-                                if (orientation == androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90 || orientation == androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270) {
-                                    builder.width = h
-                                    builder.height = w
-                                } else {
-                                    builder.width = w
-                                    builder.height = h
+                        when {
+                            name.endsWith(".jpg", ignoreCase = true) || name.endsWith(".jpeg", ignoreCase = true) -> {
+                                builder.setJpg(docUri, lastModified)
+                                if (!fast) {
+                                    readExifForScanning(docUri, builder)
                                 }
                             }
-                        } catch (e: Exception) {
-                            android.util.Log.w(
-                                "ImageRepository",
-                                "Failed to read EXIF from ${file.uri}",
-                                e
-                            )
+                            name.contains("_HF2") && name.endsWith(".dng", ignoreCase = true) -> {
+                                builder.setDng2(docUri, lastModified)
+                            }
+                            name.contains("_HF1") && name.endsWith(".dng", ignoreCase = true) -> {
+                                builder.setDng1(docUri, lastModified)
+                            }
+                            name.endsWith(".dng", ignoreCase = true) -> {
+                                builder.setDng(docUri, lastModified)
+                            }
                         }
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("ImageRepository", "Direct SAF children query failed for $folderUri, falling back", e)
+            }
+
+            // Fallback for providers that don't support buildChildDocumentsUriUsingTree
+            if (!scannedWithDirectQuery) {
+                val root = DocumentFile.fromTreeUri(context, treeUri)
+                root?.listFiles()?.forEach { file ->
+                    val name = file.name ?: return@forEach
+                    if (!name.startsWith(DarkbagIdentity.FILE_PREFIX, ignoreCase = true)) return@forEach
+                    val baseName = getBaseName(name)
+                    val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
+                    val lastModified = file.lastModified()
+
+                    when {
+                        name.endsWith(".jpg", ignoreCase = true) || name.endsWith(".jpeg", ignoreCase = true) -> {
+                            builder.setJpg(file.uri, lastModified)
+                            if (!fast) {
+                                readExifForScanning(file.uri, builder)
+                            }
                         }
-                    }
-                    name.contains("_HF2") && name.endsWith(".dng", ignoreCase = true) -> {
-                        builder.setDng2(file.uri, lastModified)
-                    }
-                    name.contains("_HF1") && name.endsWith(".dng", ignoreCase = true) -> {
-                        builder.setDng1(file.uri, lastModified)
-                    }
-                    name.endsWith(".dng", ignoreCase = true) -> {
-                        builder.setDng(file.uri, lastModified)
+                        name.contains("_HF2") && name.endsWith(".dng", ignoreCase = true) -> {
+                            builder.setDng2(file.uri, lastModified)
+                        }
+                        name.contains("_HF1") && name.endsWith(".dng", ignoreCase = true) -> {
+                            builder.setDng1(file.uri, lastModified)
+                        }
+                        name.endsWith(".dng", ignoreCase = true) -> {
+                            builder.setDng(file.uri, lastModified)
+                        }
                     }
                 }
             }
         } catch (e: Exception) {
             android.util.Log.e("ImageRepository", "Failed to scan SAF folder: $folderUri", e)
+        }
+    }
+
+    private fun readExifForScanning(uri: Uri, builder: ImageGroupBuilder) {
+        try {
+            context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                val exif = androidx.exifinterface.media.ExifInterface(pfd.fileDescriptor)
+                val comment = exif.getAttribute(androidx.exifinterface.media.ExifInterface.TAG_USER_COMMENT)
+                parseUserComment(comment, builder)
+
+                val orientation = exif.getAttributeInt(
+                    androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION,
+                    androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL
+                )
+                val w = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_IMAGE_WIDTH, 0)
+                val h = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_IMAGE_LENGTH, 0)
+
+                if (orientation == androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90 || orientation == androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270) {
+                    builder.width = h
+                    builder.height = w
+                } else {
+                    builder.width = w
+                    builder.height = h
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("ImageRepository", "Failed to read EXIF from $uri", e)
         }
     }
 
@@ -285,38 +331,7 @@ class ImageRepository(private val context: Context) {
                     mime == "image/jpeg" -> {
                         builder.setJpg(uri, date, modified)
                         if (!fast) {
-                        try {
-                            context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
-                                val exif =
-                                    androidx.exifinterface.media.ExifInterface(pfd.fileDescriptor)
-                                val comment =
-                                    exif.getAttribute(androidx.exifinterface.media.ExifInterface.TAG_USER_COMMENT)
-                                parseUserComment(comment, builder)
-
-                                val orientation = exif.getAttributeInt(
-                                    androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION,
-                                    androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL
-                                )
-                                val w = exif.getAttributeInt(
-                                    androidx.exifinterface.media.ExifInterface.TAG_IMAGE_WIDTH,
-                                    0
-                                )
-                                val h = exif.getAttributeInt(
-                                    androidx.exifinterface.media.ExifInterface.TAG_IMAGE_LENGTH,
-                                    0
-                                )
-
-                                if (orientation == androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90 || orientation == androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270) {
-                                    builder.width = h
-                                    builder.height = w
-                                } else {
-                                    builder.width = w
-                                    builder.height = h
-                                }
-                            }
-                        } catch (e: Exception) {
-                            android.util.Log.w("ImageRepository", "Failed to read EXIF from $uri", e)
-                        }
+                            readExifForScanning(uri, builder)
                         }
                     }
                     name.contains("_HF2") && (mime == "image/x-adobe-dng" || name.endsWith(".dng", ignoreCase = true)) -> {
