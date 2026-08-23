@@ -337,18 +337,31 @@ class ImageViewerAdapter(
 
                 for (i in lenses.indices) {
                     val lens = lenses[i]
+                    val context = holder.itemView.context
                     val button = com.google.android.material.button.MaterialButton(
-                        holder.itemView.context,
+                        context,
                         null,
-                        com.google.android.material.R.attr.materialButtonOutlinedStyle
+                        com.google.android.material.R.attr.materialButtonStyle
                     ).apply {
                         id = View.generateViewId()
                         text = lens.lensTag
                         isCheckable = true
                         minWidth = 0
                         minimumWidth = 0
-                        val padH = holder.itemView.context.resources.getDimensionPixelSize(R.dimen.margin_medium)
-                        setPadding(padH, 0, padH, 0)
+                        minHeight = 0
+                        minimumHeight = 0
+                        insetTop = 0
+                        insetBottom = 0
+                        strokeWidth = 0
+                        cornerRadius = (16 * context.resources.displayMetrics.density).toInt()
+                        textSize = 12.5f
+                        typeface = android.graphics.Typeface.DEFAULT_BOLD
+                        backgroundTintList = androidx.core.content.ContextCompat.getColorStateList(context, R.color.multi_camera_lens_bg_tint)
+                        setTextColor(androidx.core.content.ContextCompat.getColorStateList(context, R.color.multi_camera_lens_text_color))
+                        rippleColor = androidx.core.content.ContextCompat.getColorStateList(context, R.color.multi_camera_lens_ripple_color)
+                        val padH = (12 * context.resources.displayMetrics.density).toInt()
+                        val padV = (5 * context.resources.displayMetrics.density).toInt()
+                        setPadding(padH, padV, padH, padV)
                     }
                     multiCamGroup.addView(button)
                     if (i == activeIndex) {

@@ -83,27 +83,20 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginBottom="16dp"
+        android:background="@drawable/bg_multi_camera_capsule"
+        android:elevation="3dp"
+        android:padding="3dp"
         android:visibility="gone"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent">
 
-        <com.google.android.material.card.MaterialCardView
+        <com.google.android.material.button.MaterialButtonToggleGroup
+            android:id="@+id/multiCameraToggleGroup"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            app:cardCornerRadius="20dp"
-            app:cardElevation="4dp"
-            app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
-            app:strokeWidth="0dp">
-
-            <com.google.android.material.button.MaterialButtonToggleGroup
-                android:id="@+id/multiCameraToggleGroup"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:padding="2dp"
-                app:singleSelection="true"
-                app:selectionRequired="true" />
-        </com.google.android.material.card.MaterialCardView>
+            app:singleSelection="true"
+            app:selectionRequired="true" />
     </FrameLayout>
 
 </androidx.constraintlayout.widget.ConstraintLayout>
