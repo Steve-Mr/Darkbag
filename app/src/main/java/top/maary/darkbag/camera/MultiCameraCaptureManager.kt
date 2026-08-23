@@ -558,7 +558,7 @@ class MultiCameraCaptureManager(
                 captureConcurrentStandalone(orientationDegrees, onResult, onError)
             }
             MultiCameraHardwareType.FAST_RELAY_BURST, MultiCameraHardwareType.NONE -> {
-                captureFastRelayBurst(orientationDegrees, onResult, onError)
+                captureFastRelayBurst(orientationDegrees, isHdrPlusActive, onResult, onError)
             }
         }
     }
@@ -603,18 +603,17 @@ class MultiCameraCaptureManager(
             isCapturing = false
 
             if (collectedFrames.isNotEmpty()) {
-                val sortedFrames = expectedLenses.mapNotNull { collectedFrames[it.physicalId] }
                 val result = MultiCameraCaptureResult(
                     baseName = baseName,
                     captureTimestampMillis = captureTimestamp,
-                    frames = sortedFrames
+                    frames = collectedFrames.values.toList().sortedBy { it.lens.multiplier }
                 )
                 withContext(Dispatchers.Main) {
                     onResult(result)
                 }
             } else {
                 withContext(Dispatchers.Main) {
-                    onError("Multi-camera capture timed out with no frames")
+                    onError("Capture timed out without receiving frames")
                 }
             }
         }
@@ -670,7 +669,8 @@ class MultiCameraCaptureManager(
                             val chars = lens.characteristics ?: cameraManager.getCameraCharacteristics(lens.physicalId)
                             val captureRes = withTimeoutOrNull(2500L) { resultDeferredMap[lens.physicalId]?.await() }
                             if (captureRes != null) {
-                                val tempPath = writeDngToFile(image, chars, captureRes, orientationDegrees, lens.physicalId)
+                                val isPrimary = lens.physicalId == (currentPrimaryLens?.physicalId ?: expectedLenses.first().physicalId)
+                                val tempPath = writeDngToFile(image, chars, captureRes, orientationDegrees, lens.physicalId, isHdrPlus = isHdrPlusActive && isPrimary)
                                 if (tempPath != null) {
                                     collectedDngPaths[lens.physicalId] = tempPath
                                 }
@@ -709,15 +709,15 @@ class MultiCameraCaptureManager(
                     Log.e(TAG, "Multi-camera capture request failed: reason=${failure.reason}")
                     completionJob.cancel()
                     isCapturing = false
-                    onError("Capture request failed: reason=${failure.reason}")
+                    onError("Multi-camera capture request failed: reason=${failure.reason}")
                 }
             }, cameraHandler)
 
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to dispatch native multi-camera capture", e)
+            Log.e(TAG, "Failed to initiate native logical multi-camera capture", e)
             completionJob.cancel()
             isCapturing = false
-            onError(e.message ?: "Failed to dispatch capture")
+            onError(e.message ?: "Failed to initiate capture")
         }
     }
 
@@ -735,7 +735,6 @@ class MultiCameraCaptureManager(
         val totalExpected = expectedLenses.size
 
         val collectedFrames = ConcurrentHashMap<String, PhysicalCapturedFrame>()
-        val resultsMap = ConcurrentHashMap<String, TotalCaptureResult>()
         val resultDeferredMap = ConcurrentHashMap<String, CompletableDeferred<TotalCaptureResult>>()
         for (lens in expectedLenses) {
             resultDeferredMap[lens.physicalId] = CompletableDeferred()
@@ -750,48 +749,48 @@ class MultiCameraCaptureManager(
                     delay(50)
                 }
             }
+
             isCapturing = false
 
             if (collectedFrames.isNotEmpty()) {
-                val sortedFrames = expectedLenses.mapNotNull { collectedFrames[it.physicalId] }
                 val result = MultiCameraCaptureResult(
                     baseName = baseName,
                     captureTimestampMillis = captureTimestamp,
-                    frames = sortedFrames
+                    frames = collectedFrames.values.toList().sortedBy { it.lens.multiplier }
                 )
                 withContext(Dispatchers.Main) { onResult(result) }
             } else {
-                withContext(Dispatchers.Main) { onError("Concurrent capture timed out") }
+                withContext(Dispatchers.Main) { onError("Concurrent standalone capture timed out") }
             }
         }
 
         try {
-            fun tryAssembleFrame(lens: PhysicalLensInfo) {
-                val jpegPair = collectedJpegs[lens.physicalId]
-                val dngPath = collectedDngPaths[lens.physicalId]
-                if (jpegPair == null && dngPath == null) return
-
-                val metadata = createMetadataFromCaptureResult(resultsMap[lens.physicalId], lens)
-                val frame = PhysicalCapturedFrame(
-                    lens = lens,
-                    jpegData = jpegPair?.first,
-                    tempDngPath = dngPath,
-                    width = jpegPair?.second?.width ?: 4000,
-                    height = jpegPair?.second?.height ?: 3000,
-                    orientation = orientationDegrees,
-                    captureMetadata = metadata,
-                    timestamp = captureTimestamp
-                )
-                collectedFrames[lens.physicalId] = frame
-            }
-
             for (lens in expectedLenses) {
                 val dev = openDevices[lens.physicalId] ?: continue
                 val sess = openSessions[lens.physicalId] ?: continue
-                val jpegReader = jpegImageReaders[lens.physicalId] ?: continue
+                val jpegReader = jpegImageReaders[lens.physicalId]
                 val rawReader = rawImageReaders[lens.physicalId]
 
-                jpegReader.setOnImageAvailableListener({ r ->
+                fun tryAssembleFrame(lens: PhysicalLensInfo) {
+                    val jpegPair = collectedJpegs[lens.physicalId]
+                    val dngPath = collectedDngPaths[lens.physicalId]
+                    if (jpegPair == null && dngPath == null) return
+
+                    val metadata = createMetadataFromCaptureResult(resultDeferredMap[lens.physicalId]?.getCompleted(), lens)
+                    val frame = PhysicalCapturedFrame(
+                        lens = lens,
+                        jpegData = jpegPair?.first,
+                        tempDngPath = dngPath,
+                        width = jpegPair?.second?.width ?: 4000,
+                        height = jpegPair?.second?.height ?: 3000,
+                        orientation = orientationDegrees,
+                        captureMetadata = metadata,
+                        timestamp = captureTimestamp
+                    )
+                    collectedFrames[lens.physicalId] = frame
+                }
+
+                jpegReader?.setOnImageAvailableListener({ r ->
                     val image = r.acquireLatestImage() ?: return@setOnImageAvailableListener
                     try {
                         val buffer = image.planes[0].buffer
@@ -824,7 +823,7 @@ class MultiCameraCaptureManager(
                 }, cameraHandler)
 
                 val req = dev.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE).apply {
-                    addTarget(jpegReader.surface)
+                    jpegReader?.surface?.let { addTarget(it) }
                     rawReader?.surface?.let { addTarget(it) }
                     set(CaptureRequest.JPEG_ORIENTATION, orientationDegrees)
                     set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
@@ -832,15 +831,18 @@ class MultiCameraCaptureManager(
                 }
 
                 sess.capture(req.build(), object : CameraCaptureSession.CaptureCallback() {
-                    override fun onCaptureCompleted(s: CameraCaptureSession, r: CaptureRequest, res: TotalCaptureResult) {
-                        resultsMap[lens.physicalId] = res
-                        resultDeferredMap[lens.physicalId]?.complete(res)
+                    override fun onCaptureCompleted(session: CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {
+                        resultDeferredMap[lens.physicalId]?.complete(result)
                         tryAssembleFrame(lens)
+                    }
+
+                    override fun onCaptureFailed(session: CameraCaptureSession, request: CaptureRequest, failure: CaptureFailure) {
+                        Log.w(TAG, "Concurrent capture failed on ${lens.physicalId}")
                     }
                 }, cameraHandler)
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Concurrent standalone capture dispatch error", e)
+            Log.e(TAG, "Error initiating concurrent standalone capture", e)
             completionJob.cancel()
             isCapturing = false
             onError(e.message ?: "Concurrent capture failed")
@@ -849,6 +851,7 @@ class MultiCameraCaptureManager(
 
     private fun captureFastRelayBurst(
         orientationDegrees: Int,
+        isHdrPlusActive: Boolean = false,
         onResult: (MultiCameraCaptureResult) -> Unit,
         onError: (String) -> Unit
     ) {
@@ -863,8 +866,8 @@ class MultiCameraCaptureManager(
             val collectedFrames = mutableListOf<PhysicalCapturedFrame>()
 
             try {
-                // 1. Capture primary frame first (on currently open preview session)
-                val primaryLens = expectedLenses.find { it.type == LensType.WIDE } ?: expectedLenses.first()
+                // 1. Determine currently active primary preview lens
+                val primaryLens = currentPrimaryLens ?: expectedLenses.find { it.physicalId == cameraDevice?.id } ?: expectedLenses.find { it.type == LensType.WIDE } ?: expectedLenses.first()
                 val primaryDev = cameraDevice
                 val primarySess = captureSession
                 val primaryJpegReader = jpegImageReaders[primaryLens.physicalId]
@@ -895,7 +898,7 @@ class MultiCameraCaptureManager(
                                     val chars = primaryLens.characteristics ?: cameraManager.getCameraCharacteristics(primaryLens.physicalId)
                                     val captureRes = withTimeoutOrNull(2500L) { resultDeferred.await() }
                                     if (captureRes != null) {
-                                        val tempPath = writeDngToFile(image, chars, captureRes, orientationDegrees, primaryLens.physicalId)
+                                        val tempPath = writeDngToFile(image, chars, captureRes, orientationDegrees, primaryLens.physicalId, isHdrPlus = isHdrPlusActive)
                                         dngDeferred.complete(tempPath)
                                     } else {
                                         Log.e(TAG, "Primary captureResult timed out")
@@ -961,11 +964,11 @@ class MultiCameraCaptureManager(
                         }
                     }
 
-                    // Re-open primary preview session after burst relay finishes
+                    // Re-open primary preview session after burst relay finishes on the selected lens
                     val pSurface = previewSurface
                     val info = currentLogicalInfo
                     if (pSurface != null && info != null) {
-                        openRelayPrimarySession(info, pSurface)
+                        openRelayPrimarySession(info, pSurface, targetLens = primaryLens)
                     }
                 }
 
@@ -979,13 +982,13 @@ class MultiCameraCaptureManager(
                     )
                     withContext(Dispatchers.Main) { onResult(result) }
                 } else {
-                    withContext(Dispatchers.Main) { onError("Relay capture produced no frames") }
+                    withContext(Dispatchers.Main) { onError("No frames captured in fast relay burst") }
                 }
 
             } catch (e: Exception) {
                 Log.e(TAG, "Error in captureFastRelayBurst", e)
                 isCapturing = false
-                withContext(Dispatchers.Main) { onError(e.message ?: "Relay capture error") }
+                withContext(Dispatchers.Main) { onError(e.message ?: "Relay capture failed") }
             }
         }
     }
@@ -1137,7 +1140,8 @@ class MultiCameraCaptureManager(
         chars: CameraCharacteristics,
         captureResult: TotalCaptureResult?,
         orientationDegrees: Int,
-        lensId: String
+        lensId: String,
+        isHdrPlus: Boolean = false
     ): String? {
         return try {
             if (captureResult == null) {
@@ -1154,7 +1158,7 @@ class MultiCameraCaptureManager(
             val tempFile = File(context.cacheDir, "dng_${lensId}_${System.currentTimeMillis()}.dng")
             val dngCreator = DngCreator(chars, captureResult)
             dngCreator.setOrientation(dngOrientation)
-            dngCreator.setDescription(DarkbagIdentity.imageDescription(isHdrPlus = false))
+            dngCreator.setDescription(DarkbagIdentity.imageDescription(isHdrPlus = isHdrPlus))
             FileOutputStream(tempFile).use { out ->
                 dngCreator.writeImage(out, rawImage)
             }
