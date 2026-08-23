@@ -260,7 +260,7 @@ class MultiCameraCaptureManager(
         isCapturing = true
 
         val captureTimestamp = System.currentTimeMillis()
-        val baseName = "Darkbag_" + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(captureTimestamp)
+        val baseName = DarkbagIdentity.FILE_PREFIX + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(captureTimestamp)
         val expectedLenses = activeLenses.toList()
         val totalExpected = expectedLenses.size
 

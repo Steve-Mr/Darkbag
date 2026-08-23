@@ -22,6 +22,7 @@ object ImageUtils {
             .replace("_stitched", "")
             .replace("stitched_hf_", "")
             .replace(top.maary.darkbag.utils.DarkbagIdentity.FILE_PREFIX, "")
+            .replace("Darkbag_", "")
         if (base.contains("_MULTI_")) {
             base = base.substringBefore("_MULTI_")
         }

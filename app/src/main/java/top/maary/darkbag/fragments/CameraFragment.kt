@@ -4202,6 +4202,14 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
         var primarySavedUri: Uri? = null
 
+        val currentLog = prefs.getString(SettingsFragment.KEY_TARGET_LOG, "None") ?: "None"
+        val currentLut = prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, "None")?.substringBeforeLast(".") ?: "None"
+
+        val currentEditConfig = top.maary.darkbag.models.EditConfig(
+            log = currentLog,
+            lut = currentLut
+        )
+
         try {
             for (frame in result.frames) {
                 val frameBaseName = "${result.baseName}_MULTI_${frame.lens.name}"
@@ -4222,6 +4230,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         saveJpg = true,
                         saveRaw = false,
                         jpgFolderUri = jpgFolderUri,
+                        editConfig = currentEditConfig,
                         captureMetadata = frame.captureMetadata
                     )
                     if (primarySavedUri == null && savedUri != null) {
@@ -4245,6 +4254,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         saveJpg = false,
                         saveRaw = true,
                         rawFolderUri = rawFolderUri,
+                        editConfig = currentEditConfig,
                         captureMetadata = frame.captureMetadata
                     )
                 }
