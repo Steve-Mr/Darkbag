@@ -305,10 +305,11 @@ object MultiCameraCollageHelper {
         val botW2 = availableBotWidth - botW1
 
         val exifTextSize = if (showExif) (contentWidth * 0.015f).coerceIn(22f * density, 52f * density) else 0f
-        val exifFooterHeight = if (showExif) (exifTextSize * 2.4f).toInt() else 0
+        val topHeaderHeight = if (showExif) (exifTextSize * 2.2f).toInt() else 0
+        val bottomFooterHeight = if (showExif) (exifTextSize * 2.2f).toInt() else 0
 
         val totalWidth = borderPx * 2 + contentWidth
-        val totalHeight = borderPx * 2 + topHeight + dividerPx + botHeight + exifFooterHeight
+        val totalHeight = borderPx * 2 + topHeaderHeight + topHeight + dividerPx + botHeight + bottomFooterHeight
 
         val result = Bitmap.createBitmap(totalWidth, totalHeight, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(result)
@@ -322,16 +323,23 @@ object MultiCameraCollageHelper {
             textAlign = Paint.Align.CENTER
         }
 
+        // Top Header: Hero Image EXIF
+        if (showExif && metadata.isNotEmpty()) {
+            val topText = metadata[0].toDisplayString()
+            val textY = borderPx + (exifTextSize * 1.35f)
+            canvas.drawText(topText, borderPx + contentWidth / 2f, textY, textPaint)
+        }
+
         // 1. Draw Top Image
         val topRect = RectF(
             borderPx.toFloat(),
-            borderPx.toFloat(),
+            (borderPx + topHeaderHeight).toFloat(),
             (borderPx + contentWidth).toFloat(),
-            (borderPx + topHeight).toFloat()
+            (borderPx + topHeaderHeight + topHeight).toFloat()
         )
         drawBitmapWithRoundedCorners(canvas, topBmp, topRect, cornerPx, paint)
 
-        val botStartY = borderPx + topHeight + dividerPx
+        val botStartY = borderPx + topHeaderHeight + topHeight + dividerPx
 
         // 2. Draw Bottom Left Image
         val bot1Rect = RectF(
@@ -341,6 +349,13 @@ object MultiCameraCollageHelper {
             (botStartY + botHeight).toFloat()
         )
         drawBitmapWithRoundedCorners(canvas, botBmp1, bot1Rect, cornerPx, paint)
+
+        // Bottom Footer: Sub-Image 1 EXIF
+        if (showExif && metadata.size > 1) {
+            val bot1Text = metadata[1].toDisplayString()
+            val textY = botStartY + botHeight + (exifTextSize * 1.45f)
+            canvas.drawText(bot1Text, borderPx + botW1 / 2f, textY, textPaint)
+        }
 
         // 3. Draw Bottom Right Image
         val bot2StartX = borderPx + botW1 + dividerPx
@@ -352,15 +367,11 @@ object MultiCameraCollageHelper {
         )
         drawBitmapWithRoundedCorners(canvas, botBmp2, bot2Rect, cornerPx, paint)
 
-        // 4. Draw Unified Bottom Gallery Footer (3 balanced columns)
-        if (showExif && metadata.isNotEmpty()) {
-            val textY = botStartY + botHeight + (exifTextSize * 1.55f)
-            val colWidth = contentWidth / 3f
-
-            for (i in 0 until minOf(3, metadata.size)) {
-                val colCenterX = borderPx + (i * colWidth) + (colWidth / 2f)
-                canvas.drawText(metadata[i].toDisplayString(), colCenterX, textY, textPaint)
-            }
+        // Bottom Footer: Sub-Image 2 EXIF
+        if (showExif && metadata.size > 2) {
+            val bot2Text = metadata[2].toDisplayString()
+            val textY = botStartY + botHeight + (exifTextSize * 1.45f)
+            canvas.drawText(bot2Text, bot2StartX + botW2 / 2f, textY, textPaint)
         }
 
         return result
@@ -394,10 +405,11 @@ object MultiCameraCollageHelper {
 
         val totalContentWidth = leftWidth + dividerPx + rightWidth
         val exifTextSize = if (showExif) (totalContentWidth * 0.015f).coerceIn(22f * density, 52f * density) else 0f
-        val exifFooterHeight = if (showExif) (exifTextSize * 2.4f).toInt() else 0
+        val topHeaderHeight = if (showExif) (exifTextSize * 2.2f).toInt() else 0
+        val bottomFooterHeight = if (showExif) (exifTextSize * 2.2f).toInt() else 0
 
         val totalWidth = borderPx * 2 + totalContentWidth
-        val totalHeight = borderPx * 2 + contentHeight + exifFooterHeight
+        val totalHeight = borderPx * 2 + topHeaderHeight + contentHeight + bottomFooterHeight
 
         val result = Bitmap.createBitmap(totalWidth, totalHeight, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(result)
@@ -411,45 +423,55 @@ object MultiCameraCollageHelper {
             textAlign = Paint.Align.CENTER
         }
 
+        // Top Header: Left Hero EXIF
+        if (showExif && metadata.isNotEmpty()) {
+            val leftText = metadata[0].toDisplayString()
+            val textY = borderPx + (exifTextSize * 1.35f)
+            canvas.drawText(leftText, borderPx + leftWidth / 2f, textY, textPaint)
+        }
+
         // 1. Draw Left Image
         val leftRect = RectF(
             borderPx.toFloat(),
-            borderPx.toFloat(),
+            (borderPx + topHeaderHeight).toFloat(),
             (borderPx + leftWidth).toFloat(),
-            (borderPx + contentHeight).toFloat()
+            (borderPx + topHeaderHeight + contentHeight).toFloat()
         )
         drawBitmapWithRoundedCorners(canvas, leftBmp, leftRect, cornerPx, paint)
 
         val rightStartX = borderPx + leftWidth + dividerPx
 
+        // Top Header: Right Top Image EXIF
+        if (showExif && metadata.size > 1) {
+            val r1Text = metadata[1].toDisplayString()
+            val textY = borderPx + (exifTextSize * 1.35f)
+            canvas.drawText(r1Text, rightStartX + rightWidth / 2f, textY, textPaint)
+        }
+
         // 2. Draw Right Top Image
         val right1Rect = RectF(
             rightStartX.toFloat(),
-            borderPx.toFloat(),
+            (borderPx + topHeaderHeight).toFloat(),
             (rightStartX + rightWidth).toFloat(),
-            (borderPx + rightH1).toFloat()
+            (borderPx + topHeaderHeight + rightH1).toFloat()
         )
         drawBitmapWithRoundedCorners(canvas, rightBmp1, right1Rect, cornerPx, paint)
 
         // 3. Draw Right Bottom Image
-        val right2StartY = borderPx + rightH1 + dividerPx
+        val right2StartY = borderPx + topHeaderHeight + rightH1 + dividerPx
         val right2Rect = RectF(
             rightStartX.toFloat(),
             right2StartY.toFloat(),
             (rightStartX + rightWidth).toFloat(),
-            (borderPx + contentHeight).toFloat()
+            (borderPx + topHeaderHeight + contentHeight).toFloat()
         )
         drawBitmapWithRoundedCorners(canvas, rightBmp2, right2Rect, cornerPx, paint)
 
-        // 4. Draw Unified Bottom Gallery Footer (3 balanced columns)
-        if (showExif && metadata.isNotEmpty()) {
-            val textY = borderPx + contentHeight + (exifTextSize * 1.55f)
-            val colWidth = totalContentWidth / 3f
-
-            for (i in 0 until minOf(3, metadata.size)) {
-                val colCenterX = borderPx + (i * colWidth) + (colWidth / 2f)
-                canvas.drawText(metadata[i].toDisplayString(), colCenterX, textY, textPaint)
-            }
+        // Bottom Footer: Right Bottom Image EXIF
+        if (showExif && metadata.size > 2) {
+            val r2Text = metadata[2].toDisplayString()
+            val textY = borderPx + topHeaderHeight + contentHeight + (exifTextSize * 1.45f)
+            canvas.drawText(r2Text, rightStartX + rightWidth / 2f, textY, textPaint)
         }
 
         return result
