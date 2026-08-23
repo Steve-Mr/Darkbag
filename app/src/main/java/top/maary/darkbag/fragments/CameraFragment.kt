@@ -2612,6 +2612,13 @@ class CameraFragment : Fragment() {
                     cornerRadius = resources.getDimensionPixelSize(R.dimen.radius_full)
 
                     setOnClickListener {
+                        if (isMultiCameraModeActive) {
+                            currentLens = lens
+                            updateLensUI()
+                            multiCameraManager?.switchPrimaryPreviewLensByMultiplier(lens.multiplier)
+                            return@setOnClickListener
+                        }
+
                         val oldLens = currentLens
                         val is1x = lens.multiplier in 0.95f..1.05f && !lens.isZoomPreset
                         val presets1xForCheck = if (is1x) cameraRepository.get1xPresets(lens) else emptyList()
@@ -4187,9 +4194,11 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         val orientation = getCombinedOrientation()
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
         val saveRaw = prefs.getBoolean(SettingsFragment.KEY_MULTI_CAMERA_SAVE_RAW, false)
+        val isHdrPlusActive = isHdrPlusEnabled && isRawSupported
 
         manager.captureMultiCamera(
             orientationDegrees = orientation,
+            isHdrPlusActive = isHdrPlusActive,
             onResult = { result ->
                 lifecycleScope.launch(Dispatchers.IO) {
                     processAndSaveMultiCameraResult(result, saveRaw)

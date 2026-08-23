@@ -431,12 +431,49 @@ class MultiCameraCaptureManager(
         }
     }
 
+    var currentPrimaryLens: PhysicalLensInfo? = null
+        private set
+
+    fun switchPrimaryPreviewLensByMultiplier(multiplier: Float) {
+        val matchingLens = activeLenses.minByOrNull { kotlin.math.abs(it.multiplier - multiplier) } ?: return
+        setPrimaryPreviewLens(matchingLens)
+    }
+
+    fun setPrimaryPreviewLens(lens: PhysicalLensInfo) {
+        currentPrimaryLens = lens
+        val dev = cameraDevice ?: return
+        val session = captureSession ?: return
+        val surface = previewSurface ?: return
+
+        try {
+            val requestBuilder = dev.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
+                addTarget(surface)
+                set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
+                set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    set(CaptureRequest.CONTROL_ZOOM_RATIO, lens.multiplier)
+                }
+            }
+            session.setRepeatingRequest(requestBuilder.build(), null, cameraHandler)
+            Log.i(TAG, "Switched primary preview lens to: ${lens.name} (${lens.multiplier}x)")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to switch primary preview lens", e)
+        }
+    }
+
     private fun startRepeatingPreview(device: CameraDevice, session: CameraCaptureSession, targetPreviewSurface: Surface) {
         try {
+            if (currentPrimaryLens == null) {
+                currentPrimaryLens = activeLenses.find { it.type == LensType.WIDE } ?: activeLenses.firstOrNull()
+            }
             val requestBuilder = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
                 addTarget(targetPreviewSurface)
                 set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
                 set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+                val prim = currentPrimaryLens
+                if (prim != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    set(CaptureRequest.CONTROL_ZOOM_RATIO, prim.multiplier)
+                }
             }
             session.setRepeatingRequest(requestBuilder.build(), null, cameraHandler)
         } catch (e: Exception) {
@@ -446,13 +483,14 @@ class MultiCameraCaptureManager(
 
     fun captureMultiCamera(
         orientationDegrees: Int,
+        isHdrPlusActive: Boolean = false,
         onResult: (MultiCameraCaptureResult) -> Unit,
         onError: (String) -> Unit
     ) {
         val hwType = currentLogicalInfo?.hardwareType ?: MultiCameraHardwareType.NATIVE_LOGICAL
         when (hwType) {
             MultiCameraHardwareType.NATIVE_LOGICAL -> {
-                captureNativeLogical(orientationDegrees, onResult, onError)
+                captureNativeLogical(orientationDegrees, isHdrPlusActive, onResult, onError)
             }
             MultiCameraHardwareType.CONCURRENT_STANDALONE -> {
                 captureConcurrentStandalone(orientationDegrees, onResult, onError)
@@ -465,6 +503,7 @@ class MultiCameraCaptureManager(
 
     private fun captureNativeLogical(
         orientationDegrees: Int,
+        isHdrPlusActive: Boolean = false,
         onResult: (MultiCameraCaptureResult) -> Unit,
         onError: (String) -> Unit
     ) {
