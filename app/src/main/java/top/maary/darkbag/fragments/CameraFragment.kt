@@ -229,6 +229,7 @@ class CameraFragment : Fragment() {
     // Half-frame State
     private var pendingVfSnapshot: android.graphics.Bitmap? = null
     private var isHalfFrameModeEnabled = false
+    private var isMultiCameraModeActive = false
     private var halfFrameStep = 0
     private var halfFrameTempPath: String? = null
     private lateinit var halfFrameSessionStore: HalfFrameSessionStore
@@ -4821,11 +4822,33 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
         val currentMode = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_MODE, false)
         val currentLayout = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUT_SBS)
+        val isMultiCamPrefEnabled = prefs.getBoolean(SettingsFragment.KEY_MULTI_CAMERA_MODE, false)
+        val isMultiCamSupported = top.maary.darkbag.utils.MultiCameraHelper.isMultiCameraSupported(requireContext())
+        val canUseMultiCam = isMultiCamPrefEnabled && isMultiCamSupported
 
-        val (newMode, newLayout) = when {
-            !currentMode -> true to SettingsFragment.HALF_FRAME_LAYOUT_SBS // Normal -> Side-by-side
-            currentLayout == SettingsFragment.HALF_FRAME_LAYOUT_SBS -> true to SettingsFragment.HALF_FRAME_LAYOUT_TB // Side-by-side -> Top-bottom
-            else -> false to SettingsFragment.HALF_FRAME_LAYOUT_SBS // Top-bottom -> Normal
+        val (newMode, newLayout, newMultiCam) = when {
+            !currentMode && !isMultiCameraModeActive -> {
+                // Normal -> Side-by-side
+                Triple(true, SettingsFragment.HALF_FRAME_LAYOUT_SBS, false)
+            }
+            currentMode && currentLayout == SettingsFragment.HALF_FRAME_LAYOUT_SBS -> {
+                // Side-by-side -> Top-bottom
+                Triple(true, SettingsFragment.HALF_FRAME_LAYOUT_TB, false)
+            }
+            currentMode && currentLayout == SettingsFragment.HALF_FRAME_LAYOUT_TB -> {
+                if (canUseMultiCam) {
+                    // Top-bottom -> Multi-Camera
+                    Triple(false, SettingsFragment.HALF_FRAME_LAYOUT_SBS, true)
+                } else {
+                    // Top-bottom -> Normal
+                    Triple(false, SettingsFragment.HALF_FRAME_LAYOUT_SBS, false)
+                }
+            }
+            isMultiCameraModeActive -> {
+                // Multi-Camera -> Normal
+                Triple(false, SettingsFragment.HALF_FRAME_LAYOUT_SBS, false)
+            }
+            else -> Triple(false, SettingsFragment.HALF_FRAME_LAYOUT_SBS, false)
         }
 
         prefs.edit()
@@ -4834,13 +4857,13 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             .apply()
 
         isHalfFrameModeEnabled = newMode
+        isMultiCameraModeActive = newMultiCam
+
         readScopedHalfFrameState(prefs, requireFileForStep1 = true)
         updateHalfFrameUI()
         updateShutterOrientation()
         updateMotionPhotoEncoder()
-
-        // Re-bind use cases if needed?
-        // Actually Half-frame doesn't change use cases, just UI and post-processing.
+        _fragmentCameraBinding?.modeSwitchButton?.let { updateModeSwitchIcon(it) }
     }
 
     private fun updateModeSwitchIcon(btn: MaterialButton) {
@@ -4849,6 +4872,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         val layout = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUTS[0])
 
         val iconRes = when {
+            isMultiCameraModeActive -> R.drawable.ic_mode_multi_camera
             !mode -> R.drawable.ic_mode_normal
             layout == SettingsFragment.HALF_FRAME_LAYOUTS[0] -> R.drawable.ic_mode_half_side
             else -> R.drawable.ic_mode_half_top

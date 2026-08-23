@@ -3,6 +3,9 @@ import top.maary.darkbag.utils.MediaStoreUtils
 import top.maary.darkbag.utils.DebugLogManager
 import top.maary.darkbag.utils.CameraRepository
 import top.maary.darkbag.utils.CacheManager
+import top.maary.darkbag.utils.MultiCameraHelper
+import top.maary.darkbag.utils.MultiCameraCountPreference
+import top.maary.darkbag.utils.DualLensPairPreference
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -465,6 +468,8 @@ class SettingsFragment : Fragment() {
             prefs.edit().putBoolean(KEY_HALF_FRAME_SAVE_RAW, isChecked).apply()
         }
 
+        setupMultiCameraSettings()
+
         setupSwitch(binding.switchMirrorFront, KEY_MIRROR_FRONT_CAMERA)
         setupSwitch(binding.switchUseCamerax, KEY_USE_CAMERAX, false)
         setupSwitch(binding.switchHdrPlusOis, KEY_HDR_PLUS_OIS)
@@ -529,6 +534,86 @@ class SettingsFragment : Fragment() {
                 .apply()
             updateStorageVisibility()
         }
+    }
+
+    private fun setupMultiCameraSettings() {
+        val isSupported = MultiCameraHelper.isMultiCameraSupported(requireContext())
+        val multiCamInfo = MultiCameraHelper.getLogicalMultiCameraInfo(requireContext())
+
+        if (!isSupported || multiCamInfo == null) {
+            binding.tvMultiCameraStatus.text = getString(R.string.multi_camera_status_unsupported)
+            binding.switchMultiCameraMode.isEnabled = false
+            binding.switchMultiCameraMode.isChecked = false
+            binding.layoutMultiCameraCount.isEnabled = false
+            binding.layoutMultiCameraDualPair.isEnabled = false
+            binding.cbMultiCameraSaveRaw.isEnabled = false
+            return
+        }
+
+        val physLenses = multiCamInfo.physicalLenses.joinToString { "${it.name} (${it.type})" }
+        binding.tvMultiCameraStatus.text = "${getString(R.string.multi_camera_status_supported)}: $physLenses"
+
+        setupSwitch(binding.switchMultiCameraMode, KEY_MULTI_CAMERA_MODE, false)
+        binding.switchMultiCameraMode.setOnCheckedChangeListener { _, isChecked ->
+            prefs.edit().putBoolean(KEY_MULTI_CAMERA_MODE, isChecked).apply()
+            updateMultiCameraVisibility()
+        }
+
+        val countOptions = listOf(
+            MultiCameraCountPreference.AUTO_MAX.title,
+            MultiCameraCountPreference.DUAL.title,
+            MultiCameraCountPreference.TRIPLE.title
+        )
+        val countKeys = listOf(
+            MultiCameraCountPreference.AUTO_MAX.key,
+            MultiCameraCountPreference.DUAL.key,
+            MultiCameraCountPreference.TRIPLE.key
+        )
+        val savedCountKey = prefs.getString(KEY_MULTI_CAMERA_COUNT_PREF, MultiCameraCountPreference.AUTO_MAX.key)
+        val currentCountIndex = countKeys.indexOf(savedCountKey).coerceAtLeast(0)
+        binding.menuMultiCameraCount.setText(countOptions[currentCountIndex], false)
+
+        val countAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, countOptions)
+        binding.menuMultiCameraCount.setAdapter(countAdapter)
+        binding.menuMultiCameraCount.setOnItemClickListener { _, _, position, _ ->
+            prefs.edit().putString(KEY_MULTI_CAMERA_COUNT_PREF, countKeys[position]).apply()
+            updateMultiCameraVisibility()
+        }
+
+        val pairOptions = listOf(
+            DualLensPairPreference.WIDE_ULTRAWIDE.title,
+            DualLensPairPreference.WIDE_TELE.title,
+            DualLensPairPreference.ULTRAWIDE_TELE.title
+        )
+        val pairKeys = listOf(
+            DualLensPairPreference.WIDE_ULTRAWIDE.key,
+            DualLensPairPreference.WIDE_TELE.key,
+            DualLensPairPreference.ULTRAWIDE_TELE.key
+        )
+        val savedPairKey = prefs.getString(KEY_MULTI_CAMERA_DUAL_PAIR, DualLensPairPreference.WIDE_ULTRAWIDE.key)
+        val currentPairIndex = pairKeys.indexOf(savedPairKey).coerceAtLeast(0)
+        binding.menuMultiCameraDualPair.setText(pairOptions[currentPairIndex], false)
+
+        val pairAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, pairOptions)
+        binding.menuMultiCameraDualPair.setAdapter(pairAdapter)
+        binding.menuMultiCameraDualPair.setOnItemClickListener { _, _, position, _ ->
+            prefs.edit().putString(KEY_MULTI_CAMERA_DUAL_PAIR, pairKeys[position]).apply()
+        }
+
+        binding.cbMultiCameraSaveRaw.isChecked = prefs.getBoolean(KEY_MULTI_CAMERA_SAVE_RAW, false)
+        binding.cbMultiCameraSaveRaw.setOnCheckedChangeListener { _, isChecked ->
+            prefs.edit().putBoolean(KEY_MULTI_CAMERA_SAVE_RAW, isChecked).apply()
+        }
+
+        updateMultiCameraVisibility()
+    }
+
+    private fun updateMultiCameraVisibility() {
+        val isEnabled = prefs.getBoolean(KEY_MULTI_CAMERA_MODE, false)
+        val countKey = prefs.getString(KEY_MULTI_CAMERA_COUNT_PREF, MultiCameraCountPreference.AUTO_MAX.key)
+        binding.layoutMultiCameraCount.visibility = if (isEnabled) View.VISIBLE else View.GONE
+        binding.layoutMultiCameraDualPair.visibility = if (isEnabled && countKey == MultiCameraCountPreference.DUAL.key) View.VISIBLE else View.GONE
+        binding.cbMultiCameraSaveRaw.visibility = if (isEnabled) View.VISIBLE else View.GONE
     }
 
     private fun setupSwitch(switch: com.google.android.material.materialswitch.MaterialSwitch, key: String, defaultValue: Boolean = true) {
@@ -651,6 +736,11 @@ class SettingsFragment : Fragment() {
         const val KEY_HALF_FRAME_SAVE_JPG = "half_frame_save_jpg"
         const val KEY_HALF_FRAME_SAVE_RAW = "half_frame_save_raw"
         const val KEY_HALF_FRAME_BASE_NAME = "half_frame_base_name"
+
+        const val KEY_MULTI_CAMERA_MODE = "multi_camera_mode_enabled"
+        const val KEY_MULTI_CAMERA_COUNT_PREF = "multi_camera_count_pref"
+        const val KEY_MULTI_CAMERA_DUAL_PAIR = "multi_camera_dual_pair"
+        const val KEY_MULTI_CAMERA_SAVE_RAW = "multi_camera_save_raw"
 
         const val KEY_DEFAULT_STARTUP = "default_startup_page"
         const val STARTUP_CAMERA = "camera"

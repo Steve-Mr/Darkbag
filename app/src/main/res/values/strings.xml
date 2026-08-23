@@ -60,6 +60,14 @@
     <string name="half_frame_light_leak">Random Light Leak</string>
     <string name="half_frame_auto_burst">Auto Burst (Double Shot)</string>
 
+    <string name="multi_camera_mode_title">Multi-Camera Simultaneous Capture</string>
+    <string name="enable_multi_camera_mode">Enable Multi-Camera Mode</string>
+    <string name="multi_camera_count_pref_title">Lens Count Preference</string>
+    <string name="multi_camera_dual_pair_title">Dual-Lens Preference</string>
+    <string name="multi_camera_save_raw">Save Individual RAW (DNG) for All Lenses</string>
+    <string name="multi_camera_status_supported">Hardware supports multi-camera logical streaming</string>
+    <string name="multi_camera_status_unsupported">Device does not support logical multi-camera</string>
+
     <string name="settings_shortcut_label">Settings</string>
     <string name="playground_shortcut_label">Playground</string>
     <string name="camera_shortcut_label">Camera</string>
