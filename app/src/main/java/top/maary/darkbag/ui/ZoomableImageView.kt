@@ -75,9 +75,11 @@ class ZoomableImageView @JvmOverloads constructor(
     var onMatrixChanged: ((android.graphics.RectF) -> Unit)? = null
     var onLongPressStarted: ((ZoomableImageView) -> Unit)? = null
     var onLongPressEnded: ((ZoomableImageView) -> Unit)? = null
+    var onPinchToOverview: (() -> Unit)? = null
 
     private var isLongPressing = false
     private var isLongPressConsumed = false
+    private var isPinchToOverviewTriggered = false
 
     private var visualMargin = 0f
     private var visualCornerRadius = 0f
@@ -176,12 +178,19 @@ class ZoomableImageView @JvmOverloads constructor(
     private inner class ScaleListener : ScaleGestureDetector.SimpleOnScaleGestureListener() {
         override fun onScaleBegin(detector: ScaleGestureDetector): Boolean {
             mode = ZOOM
+            isPinchToOverviewTriggered = false
             return true
         }
 
         override fun onScale(detector: ScaleGestureDetector): Boolean {
             var mScaleFactor = detector.scaleFactor
             val origScale = saveScale
+
+            if (!isPinchToOverviewTriggered && origScale <= 1.05f && detector.scaleFactor < 0.88f) {
+                isPinchToOverviewTriggered = true
+                onPinchToOverview?.invoke()
+            }
+
             saveScale *= mScaleFactor
             if (saveScale > maxScale) {
                 saveScale = maxScale
@@ -201,8 +210,8 @@ class ZoomableImageView @JvmOverloads constructor(
             invalidateOutline()
             onZoomChanged?.invoke(saveScale > 1f)
             return true
-            }
         }
+    }
 
     private inner class GestureListener : GestureDetector.SimpleOnGestureListener() {
         override fun onSingleTapConfirmed(e: MotionEvent): Boolean {

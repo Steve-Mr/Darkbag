@@ -38,6 +38,7 @@ class ImageViewerAdapter(
     var onLongPressEnded: ((top.maary.darkbag.ui.ZoomableImageView) -> Unit)? = null
     var onCurrentListChanged: ((List<ImageGroup>, List<ImageGroup>) -> Unit)? = null
     var onMotionPhotoIndicatorTapped: ((Int) -> Unit)? = null
+    var onPinchToOverview: (() -> Unit)? = null
     var isMotionPhotoAutoPlay: Boolean = true
 
     private var recyclerView: RecyclerView? = null
@@ -160,6 +161,7 @@ class ImageViewerAdapter(
         holder.binding.imageView.onTapped = { onImageTapped?.invoke() }
         holder.binding.imageView.onLongPressStarted = { onLongPressStarted?.invoke(it) }
         holder.binding.imageView.onLongPressEnded = { onLongPressEnded?.invoke(it) }
+        holder.binding.imageView.onPinchToOverview = { onPinchToOverview?.invoke() }
 
         val shouldShow = isUiVisible && !isFormatSwitcherPersistentHidden
         holder.binding.formatToggleGroup.visibility = if (shouldShow) View.VISIBLE else View.GONE
