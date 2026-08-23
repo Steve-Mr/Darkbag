@@ -16,6 +16,8 @@ import android.view.ViewGroup
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.updateLayoutParams
+import androidx.core.content.ContextCompat
+import androidx.recyclerview.widget.GridLayoutManager
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import android.content.Context
@@ -78,6 +80,8 @@ open class ImageViewerFragment : Fragment() {
     protected val args: ImageViewerFragmentArgs by navArgs()
     protected lateinit var repository: ImageRepository
     protected lateinit var adapter: ImageViewerAdapter
+    protected lateinit var galleryAdapter: DarkbagGalleryGridAdapter
+    protected var isGalleryMode = false
 
     var isMotionPhotoAutoPlay = true
     protected var hasAutoPlayedPosition = -1
@@ -105,6 +109,7 @@ open class ImageViewerFragment : Fragment() {
     private val adapterUpdateMutex = kotlinx.coroutines.sync.Mutex()
     protected val pageChangeCallback = object : ViewPager2.OnPageChangeCallback() {
         override fun onPageSelected(position: Int) {
+            updateGalleryPill(position, if (::adapter.isInitialized) adapter.itemCount else 0)
             if (::adapter.isInitialized) {
                 adapter.stopAllMotionVideos()
             }
@@ -161,7 +166,14 @@ open class ImageViewerFragment : Fragment() {
 
     private val backPressedCallback = object : OnBackPressedCallback(false) {
         override fun handleOnBackPressed() {
-            if (binding.lutListContainer.visibility == View.VISIBLE) {
+            if (isGalleryMode) {
+                if (::galleryAdapter.isInitialized && galleryAdapter.isSelectionMode) {
+                    galleryAdapter.setSelectionMode(false)
+                    updateGallerySelectionUI(0)
+                } else {
+                    exitGalleryMode()
+                }
+            } else if (binding.lutListContainer.visibility == View.VISIBLE) {
                 binding.lutListContainer.visibility = View.GONE
                 binding.touchOverlay.visibility = View.GONE
                 updateBackPressedCallbackState()
@@ -193,6 +205,7 @@ open class ImageViewerFragment : Fragment() {
         lutManager = top.maary.darkbag.utils.LutManager(requireContext())
         setupEdgeToEdge()
         setupToolbar()
+        setupGalleryView()
 
         requireActivity().onBackPressedDispatcher.addCallback(viewLifecycleOwner, backPressedCallback)
 
@@ -221,8 +234,18 @@ open class ImageViewerFragment : Fragment() {
         lifecycleScope.launch {
             repository.getGroupedImagesFlow(targetUri).collect { groups ->
                 if (groups.isEmpty()) {
+                    if (isGalleryMode) {
+                        exitGalleryMode()
+                    }
                     findNavController().navigateUp()
                     return@collect
+                }
+
+                if (::galleryAdapter.isInitialized) {
+                    galleryAdapter.submitList(groups)
+                    if (isGalleryMode && !galleryAdapter.isSelectionMode) {
+                        binding.galleryToolbar.title = "${getString(R.string.gallery_title)} (${groups.size})"
+                    }
                 }
 
                 val isFirstLoad = !::adapter.isInitialized
@@ -235,9 +258,11 @@ open class ImageViewerFragment : Fragment() {
                         onLongPressStarted = { handleLongPressStarted(it) }
                         onLongPressEnded = { handleLongPressEnded(it) }
                         onMotionPhotoIndicatorTapped = { pos -> handleMotionPhotoIndicatorTapped(pos) }
+                        onPinchToOverview = { enterGalleryMode() }
                         setFormatSwitcherPersistentHidden(isAdjusted)
                         onCurrentListChanged = { previousList, currentList ->
                             val currentIndex = binding.imagePager.currentItem
+                            updateGalleryPill(currentIndex, currentList.size)
                             if (currentIndex in currentList.indices) {
                                 val currentGroup = currentList[currentIndex]
                                 val prevGroup = previousList.getOrNull(currentIndex)
@@ -301,6 +326,7 @@ open class ImageViewerFragment : Fragment() {
                     binding.initialLoadingIndicator.visibility = View.GONE
                 } else {
                     adapter.updateGroups(groups)
+                    updateGalleryPill(binding.imagePager.currentItem, groups.size)
                     binding.imagePager.visibility = View.VISIBLE
                     binding.initialLoadingIndicator.visibility = View.GONE
 
@@ -2169,7 +2195,14 @@ open class ImageViewerFragment : Fragment() {
 
     private fun setupToolbar() {
         binding.btnNavigation.setOnClickListener {
-            if (binding.lutListContainer.visibility == View.VISIBLE) {
+            if (isGalleryMode) {
+                if (::galleryAdapter.isInitialized && galleryAdapter.isSelectionMode) {
+                    galleryAdapter.setSelectionMode(false)
+                    updateGallerySelectionUI(0)
+                } else {
+                    exitGalleryMode()
+                }
+            } else if (binding.lutListContainer.visibility == View.VISIBLE) {
                 binding.lutListContainer.visibility = View.GONE
                 binding.touchOverlay.visibility = View.GONE
                 updateBackPressedCallbackState()
@@ -2183,12 +2216,225 @@ open class ImageViewerFragment : Fragment() {
         }
     }
 
+    protected fun setupGalleryView() {
+        val isLandscape = resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+        val spanCount = if (isLandscape) 5 else 3
+
+        galleryAdapter = DarkbagGalleryGridAdapter(requireContext()).apply {
+            onItemClick = { _, pos ->
+                exitGalleryMode(pos)
+            }
+            onItemLongClick = { _, _ ->
+                updateGallerySelectionUI(getSelectedCount())
+            }
+            onSelectionChanged = { count ->
+                updateGallerySelectionUI(count)
+            }
+        }
+
+        binding.galleryRecyclerView.layoutManager = GridLayoutManager(requireContext(), spanCount)
+        binding.galleryRecyclerView.adapter = galleryAdapter
+
+        binding.btnGalleryPill.setOnClickListener {
+            enterGalleryMode()
+        }
+
+        binding.galleryToolbar.setNavigationOnClickListener {
+            if (galleryAdapter.isSelectionMode) {
+                galleryAdapter.setSelectionMode(false)
+                updateGallerySelectionUI(0)
+            } else {
+                exitGalleryMode()
+            }
+        }
+
+        binding.btnGalleryDelete.setOnClickListener {
+            val selected = galleryAdapter.getSelectedGroups()
+            if (selected.isNotEmpty()) {
+                showBatchDeleteDialog(selected)
+            }
+        }
+    }
+
+    protected fun updateGalleryPill(position: Int, totalCount: Int) {
+        if (totalCount <= 0) {
+            binding.btnGalleryPill.visibility = View.GONE
+        } else {
+            val currentPos = (position + 1).coerceIn(1, totalCount)
+            binding.btnGalleryPill.text = getString(R.string.gallery_pill_format, currentPos, totalCount)
+            binding.btnGalleryPill.visibility = if (isUiVisible && !isEditingAdjustments && !isGalleryMode) View.VISIBLE else View.GONE
+        }
+    }
+
+    fun enterGalleryMode(targetPosition: Int = binding.imagePager.currentItem) {
+        if (isEditingAdjustments || isAdjusted) return
+        if (isGalleryMode) return
+        isGalleryMode = true
+
+        if (::adapter.isInitialized) {
+            adapter.stopAllMotionVideos()
+        }
+
+        binding.galleryContainer.visibility = View.VISIBLE
+        binding.galleryContainer.alpha = 0f
+        binding.galleryContainer.animate().alpha(1f).setDuration(200).start()
+
+        binding.topBarContainer.visibility = View.GONE
+        binding.bottomLeftControls.visibility = View.GONE
+        binding.bottomRightControls.visibility = View.GONE
+        binding.imagePager.visibility = View.INVISIBLE
+
+        val currentCount = if (::galleryAdapter.isInitialized) galleryAdapter.itemCount else 0
+        binding.galleryToolbar.title = "${getString(R.string.gallery_title)} ($currentCount)"
+        updateGallerySelectionUI(0)
+
+        if (targetPosition in 0 until (if (::galleryAdapter.isInitialized) galleryAdapter.itemCount else 0)) {
+            binding.galleryRecyclerView.scrollToPosition(targetPosition)
+        }
+
+        updateBackPressedCallbackState()
+    }
+
+    fun exitGalleryMode(targetPosition: Int = -1) {
+        if (!isGalleryMode) return
+        isGalleryMode = false
+
+        if (::galleryAdapter.isInitialized) {
+            galleryAdapter.setSelectionMode(false)
+        }
+
+        binding.galleryContainer.animate().alpha(0f).setDuration(150).withEndAction {
+            binding.galleryContainer.visibility = View.GONE
+        }.start()
+
+        binding.imagePager.visibility = View.VISIBLE
+        showUi()
+
+        if (targetPosition in 0 until (if (::adapter.isInitialized) adapter.itemCount else 0)) {
+            binding.imagePager.setCurrentItem(targetPosition, false)
+        }
+
+        updateBackPressedCallbackState()
+    }
+
+    private fun updateGallerySelectionUI(selectedCount: Int) {
+        if (!::galleryAdapter.isInitialized) return
+        if (galleryAdapter.isSelectionMode) {
+            binding.galleryToolbar.navigationIcon = ContextCompat.getDrawable(requireContext(), R.drawable.ic_close)
+            binding.galleryToolbar.title = getString(R.string.gallery_selected_count, selectedCount)
+            binding.galleryBottomBar.visibility = if (selectedCount > 0) View.VISIBLE else View.GONE
+
+            binding.galleryToolbar.menu.clear()
+            val selectAllItem = binding.galleryToolbar.menu.add(0, 1001, 0, R.string.gallery_select_all)
+            val allSelected = galleryAdapter.getSelectedCount() == galleryAdapter.itemCount && galleryAdapter.itemCount > 0
+            selectAllItem.setIcon(if (allSelected) R.drawable.ic_deselect else R.drawable.ic_select_all)
+            selectAllItem.setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
+
+            binding.galleryToolbar.setOnMenuItemClickListener { item ->
+                if (item.itemId == 1001) {
+                    if (galleryAdapter.getSelectedCount() == galleryAdapter.itemCount && galleryAdapter.itemCount > 0) {
+                        galleryAdapter.deselectAll()
+                    } else {
+                        galleryAdapter.selectAll()
+                    }
+                    true
+                } else false
+            }
+        } else {
+            binding.galleryToolbar.navigationIcon = ContextCompat.getDrawable(requireContext(), R.drawable.ic_back)
+            val count = galleryAdapter.itemCount
+            binding.galleryToolbar.title = "${getString(R.string.gallery_title)} ($count)"
+            binding.galleryBottomBar.visibility = View.GONE
+            binding.galleryToolbar.menu.clear()
+        }
+    }
+
+    private fun showBatchDeleteDialog(selectedGroups: List<ImageGroup>) {
+        if (selectedGroups.isEmpty()) return
+
+        val options = arrayOf(
+            getString(R.string.gallery_delete_option_group),
+            getString(R.string.gallery_delete_option_raw_only),
+            getString(R.string.gallery_delete_option_jpg_only)
+        )
+        var checkedItem = 0
+
+        com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
+            .setTitle(R.string.gallery_delete_dialog_title)
+            .setMessage(getString(R.string.gallery_delete_summary, selectedGroups.size))
+            .setSingleChoiceItems(options, checkedItem) { _, which ->
+                checkedItem = which
+            }
+            .setPositiveButton(R.string.delete_button_alt) { _, _ ->
+                deleteBatchImages(selectedGroups, checkedItem)
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
+    }
+
+    private fun deleteBatchImages(selectedGroups: List<ImageGroup>, deleteMode: Int) {
+        val context = context ?: return
+        lifecycleScope.launch {
+            val urisToDelete = mutableListOf<Uri>()
+
+            for (group in selectedGroups) {
+                when (deleteMode) {
+                    0 -> { // Entire group
+                        group.jpgUri?.let { urisToDelete.add(it) }
+                        group.dngUri?.let { urisToDelete.add(it) }
+                        group.dngUri1?.let { urisToDelete.add(it) }
+                        group.dngUri2?.let { urisToDelete.add(it) }
+                    }
+                    1 -> { // RAW only
+                        group.dngUri?.let { urisToDelete.add(it) }
+                        group.dngUri1?.let { urisToDelete.add(it) }
+                        group.dngUri2?.let { urisToDelete.add(it) }
+                    }
+                    2 -> { // JPG only
+                        group.jpgUri?.let { urisToDelete.add(it) }
+                    }
+                }
+            }
+
+            val securityExceptionUris = mutableListOf<Uri>()
+            for (uri in urisToDelete) {
+                try {
+                    deleteUriSafe(context, uri)
+                } catch (e: SecurityException) {
+                    if (uri.scheme == "content" && uri.authority == MediaStore.AUTHORITY) {
+                        securityExceptionUris.add(uri)
+                    }
+                } catch (e: Exception) {
+                    Log.e("ImageViewerFragment", "Failed to delete $uri", e)
+                }
+            }
+
+            galleryAdapter.setSelectionMode(false)
+            updateGallerySelectionUI(0)
+
+            if (securityExceptionUris.isNotEmpty() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                try {
+                    val deleteRequest = MediaStore.createDeleteRequest(context.contentResolver, securityExceptionUris)
+                    deleteLauncher.launch(IntentSenderRequest.Builder(deleteRequest.intentSender).build())
+                } catch (e: Exception) {
+                    context.let { Toast.makeText(it, "Failed to launch delete prompt", Toast.LENGTH_SHORT).show() }
+                    repository.invalidateCache()
+                    loadImages(forceRefresh = true)
+                }
+            } else {
+                repository.invalidateCache()
+                loadImages(forceRefresh = true)
+            }
+        }
+    }
+
     protected fun toggleUi() {
-        if (isEditingAdjustments) return
+        if (isEditingAdjustments || isGalleryMode) return
         if (isUiVisible) hideUi() else showUi()
     }
 
     protected fun showUi() {
+        if (isGalleryMode) return
         if (isUiVisible) return
         isUiVisible = true
 
@@ -2205,6 +2451,7 @@ open class ImageViewerFragment : Fragment() {
     }
 
     protected fun hideUi() {
+        if (isGalleryMode) return
         if (!isUiVisible) return
         isUiVisible = false
 
@@ -2257,6 +2504,17 @@ open class ImageViewerFragment : Fragment() {
             }
             binding.bottomRightControls.updateLayoutParams<ViewGroup.MarginLayoutParams> {
                 bottomMargin = systemBars.bottom
+                rightMargin = systemBars.right
+            }
+
+            binding.galleryToolbar.updateLayoutParams<ViewGroup.MarginLayoutParams> {
+                topMargin = systemBars.top
+                leftMargin = systemBars.left
+                rightMargin = systemBars.right
+            }
+            binding.galleryBottomBar.updateLayoutParams<ViewGroup.MarginLayoutParams> {
+                bottomMargin = systemBars.bottom
+                leftMargin = systemBars.left
                 rightMargin = systemBars.right
             }
 
@@ -2332,7 +2590,7 @@ open class ImageViewerFragment : Fragment() {
     }
 
     private fun updateBackPressedCallbackState() {
-        backPressedCallback.isEnabled = isAdjusted || isEditingAdjustments || binding.lutListContainer.visibility == View.VISIBLE
+        backPressedCallback.isEnabled = isGalleryMode || isAdjusted || isEditingAdjustments || binding.lutListContainer.visibility == View.VISIBLE
     }
 
     protected open fun showDiscardChangesDialog() {

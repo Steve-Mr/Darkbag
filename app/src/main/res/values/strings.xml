@@ -101,6 +101,7 @@
     <string name="clear_cache_empty_toast">Cache is already clean</string>
 
     <string name="gallery_title">Gallery</string>
+    <string name="gallery_pill_format">%1$d / %2$d</string>
     <string name="gallery_selected_count">%1$d selected</string>
     <string name="gallery_select_all">Select All</string>
     <string name="gallery_deselect_all">Deselect All</string>
