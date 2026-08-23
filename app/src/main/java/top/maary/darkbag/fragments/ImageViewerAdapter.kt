@@ -368,8 +368,8 @@ class ImageViewerAdapter(
                         insetBottom = 0
                         strokeWidth = 0
                         shapeAppearanceModel = shapeAppearance
-                        textSize = 13.5f
-                        typeface = android.graphics.Typeface.DEFAULT_BOLD
+                        textSize = 12f
+                        typeface = android.graphics.Typeface.DEFAULT
                         backgroundTintList = androidx.core.content.ContextCompat.getColorStateList(context, R.color.multi_camera_lens_bg_tint)
                         setTextColor(androidx.core.content.ContextCompat.getColorStateList(context, R.color.multi_camera_lens_text_color))
                         rippleColor = androidx.core.content.ContextCompat.getColorStateList(context, R.color.multi_camera_lens_ripple_color)

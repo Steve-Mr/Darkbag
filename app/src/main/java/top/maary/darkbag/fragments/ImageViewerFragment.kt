@@ -2270,83 +2270,8 @@ open class ImageViewerFragment : Fragment() {
     }
 
     private fun showMultiCamCollageDialog(group: ImageGroup) {
-        val uris = if (group.multiJpgUris.isNotEmpty()) group.multiJpgUris else group.multiDngUris
-        if (uris.size < 2) return
-
-        val items = if (uris.size == 2) {
-            arrayOf(
-                getString(R.string.collage_layout_sbs),
-                getString(R.string.collage_layout_tb)
-            )
-        } else {
-            arrayOf(
-                getString(R.string.collage_layout_triptych),
-                getString(R.string.collage_layout_sbs),
-                getString(R.string.collage_layout_tb)
-            )
-        }
-
-        com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
-            .setTitle(R.string.create_multi_cam_collage)
-            .setItems(items) { _, which ->
-                val layout = when (items[which]) {
-                    getString(R.string.collage_layout_sbs) -> top.maary.darkbag.utils.MultiCameraCollageHelper.CollageLayout.SIDE_BY_SIDE
-                    getString(R.string.collage_layout_tb) -> top.maary.darkbag.utils.MultiCameraCollageHelper.CollageLayout.TOP_BOTTOM
-                    else -> top.maary.darkbag.utils.MultiCameraCollageHelper.CollageLayout.TRIPTYCH_ROW
-                }
-                generateAndSaveCollage(group, layout)
-            }
-            .setNegativeButton(R.string.cancel, null)
-            .show()
-    }
-
-    private fun generateAndSaveCollage(group: ImageGroup, layout: top.maary.darkbag.utils.MultiCameraCollageHelper.CollageLayout) {
-        binding.initialLoadingIndicator?.visibility = View.VISIBLE
-        binding.interactionBlocker?.visibility = View.VISIBLE
-
-        lifecycleScope.launch(Dispatchers.IO) {
-            val uris = if (group.multiJpgUris.isNotEmpty()) group.multiJpgUris else group.multiDngUris
-            val collageBitmap = top.maary.darkbag.utils.MultiCameraCollageHelper.createCollage(
-                context = requireContext(),
-                imageUris = uris,
-                layout = layout,
-                borderWidthDp = 16f,
-                dividerWidthDp = 8f,
-                backgroundColor = android.graphics.Color.WHITE
-            )
-
-            if (collageBitmap != null) {
-                val baseName = "${group.baseName}_COLLAGE"
-                val savedUri = top.maary.darkbag.utils.ImageSaver.saveProcessedImage(
-                    context = requireContext().applicationContext,
-                    inputBitmap = collageBitmap,
-                    bmpPath = null,
-                    rotationDegrees = 0,
-                    zoomFactor = 1.0f,
-                    baseName = baseName,
-                    linearDngPath = null,
-                    saveJpg = true,
-                    saveRaw = false,
-                    jpgFolderUri = null,
-                    editConfig = group.editConfig,
-                    captureMetadata = null
-                )
-
-                withContext(Dispatchers.Main) {
-                    binding.initialLoadingIndicator?.visibility = View.GONE
-                    binding.interactionBlocker?.visibility = View.GONE
-                    if (savedUri != null) {
-                        repository.invalidateCache()
-                        android.widget.Toast.makeText(requireContext(), R.string.collage_saved_toast, android.widget.Toast.LENGTH_SHORT).show()
-                    }
-                }
-            } else {
-                withContext(Dispatchers.Main) {
-                    binding.initialLoadingIndicator?.visibility = View.GONE
-                    binding.interactionBlocker?.visibility = View.GONE
-                }
-            }
-        }
+        val sheet = MultiCameraCollageSheet.newInstance(group)
+        sheet.show(childFragmentManager, MultiCameraCollageSheet.TAG)
     }
 
     private fun setupEdgeToEdge() {

@@ -53,11 +53,17 @@ class ImageGroupMultiCameraTest {
     fun testMultiCameraCollageLayouts() {
         val sbs = top.maary.darkbag.utils.MultiCameraCollageHelper.CollageLayout.SIDE_BY_SIDE
         val tb = top.maary.darkbag.utils.MultiCameraCollageHelper.CollageLayout.TOP_BOTTOM
-        val triptych = top.maary.darkbag.utils.MultiCameraCollageHelper.CollageLayout.TRIPTYCH_ROW
+        val triptychRow = top.maary.darkbag.utils.MultiCameraCollageHelper.CollageLayout.TRIPTYCH_ROW
+        val triptychCol = top.maary.darkbag.utils.MultiCameraCollageHelper.CollageLayout.TRIPTYCH_COLUMN
+        val featTop = top.maary.darkbag.utils.MultiCameraCollageHelper.CollageLayout.FEATURED_TOP
+        val featLeft = top.maary.darkbag.utils.MultiCameraCollageHelper.CollageLayout.FEATURED_LEFT
 
         assertEquals("SIDE_BY_SIDE", sbs.name)
         assertEquals("TOP_BOTTOM", tb.name)
-        assertEquals("TRIPTYCH_ROW", triptych.name)
+        assertEquals("TRIPTYCH_ROW", triptychRow.name)
+        assertEquals("TRIPTYCH_COLUMN", triptychCol.name)
+        assertEquals("FEATURED_TOP", featTop.name)
+        assertEquals("FEATURED_LEFT", featLeft.name)
     }
 
     @Test

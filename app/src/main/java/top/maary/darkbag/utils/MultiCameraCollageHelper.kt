@@ -5,14 +5,18 @@ import android.graphics.*
 import android.net.Uri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlin.math.max
 import kotlin.math.min
 
 object MultiCameraCollageHelper {
 
-    enum class CollageLayout {
-        SIDE_BY_SIDE, // 2 frames horizontal
-        TOP_BOTTOM,   // 2 frames vertical
-        TRIPTYCH_ROW  // 3 frames horizontal
+    enum class CollageLayout(val minImages: Int, val maxImages: Int) {
+        SIDE_BY_SIDE(2, 6),    // Horizontal row
+        TOP_BOTTOM(2, 6),      // Vertical column
+        TRIPTYCH_ROW(3, 3),    // 3-Row panoramic
+        TRIPTYCH_COLUMN(3, 3), // 3-Column vertical
+        FEATURED_TOP(3, 3),    // 1 Large Top + 2 Small Bottom
+        FEATURED_LEFT(3, 3)    // 1 Large Left + 2 Small Right
     }
 
     suspend fun createCollage(
@@ -22,7 +26,8 @@ object MultiCameraCollageHelper {
         borderWidthDp: Float = 16f,
         dividerWidthDp: Float = 8f,
         backgroundColor: Int = Color.WHITE,
-        cornerRadiusDp: Float = 0f
+        cornerRadiusDp: Float = 0f,
+        maxDimension: Int = 3000
     ): Bitmap? = withContext(Dispatchers.IO) {
         if (imageUris.isEmpty()) return@withContext null
 
@@ -34,7 +39,7 @@ object MultiCameraCollageHelper {
         val loadedBitmaps = mutableListOf<Bitmap>()
         try {
             for (uri in imageUris) {
-                val bmp = decodeSampledBitmapFromUri(context, uri, 2048, 2048)
+                val bmp = decodeSampledBitmapFromUri(context, uri, maxDimension, maxDimension)
                 if (bmp != null) {
                     loadedBitmaps.add(bmp)
                 }
@@ -42,19 +47,26 @@ object MultiCameraCollageHelper {
 
             if (loadedBitmaps.isEmpty()) return@withContext null
 
-            when {
-                loadedBitmaps.size == 2 && layout == CollageLayout.SIDE_BY_SIDE -> {
-                    composeSideBySide(loadedBitmaps[0], loadedBitmaps[1], borderPx, dividerPx, backgroundColor, cornerPx)
+            when (layout) {
+                CollageLayout.SIDE_BY_SIDE, CollageLayout.TRIPTYCH_ROW -> {
+                    composeHorizontalRow(loadedBitmaps, borderPx, dividerPx, backgroundColor, cornerPx)
                 }
-                loadedBitmaps.size == 2 && layout == CollageLayout.TOP_BOTTOM -> {
-                    composeTopBottom(loadedBitmaps[0], loadedBitmaps[1], borderPx, dividerPx, backgroundColor, cornerPx)
+                CollageLayout.TOP_BOTTOM, CollageLayout.TRIPTYCH_COLUMN -> {
+                    composeVerticalColumn(loadedBitmaps, borderPx, dividerPx, backgroundColor, cornerPx)
                 }
-                loadedBitmaps.size >= 3 || layout == CollageLayout.TRIPTYCH_ROW -> {
-                    val frames = loadedBitmaps.take(3)
-                    composeTriptychRow(frames, borderPx, dividerPx, backgroundColor, cornerPx)
+                CollageLayout.FEATURED_TOP -> {
+                    if (loadedBitmaps.size >= 3) {
+                        composeFeaturedTop(loadedBitmaps.take(3), borderPx, dividerPx, backgroundColor, cornerPx)
+                    } else {
+                        composeHorizontalRow(loadedBitmaps, borderPx, dividerPx, backgroundColor, cornerPx)
+                    }
                 }
-                else -> {
-                    loadedBitmaps.firstOrNull()?.let { Bitmap.createBitmap(it) }
+                CollageLayout.FEATURED_LEFT -> {
+                    if (loadedBitmaps.size >= 3) {
+                        composeFeaturedLeft(loadedBitmaps.take(3), borderPx, dividerPx, backgroundColor, cornerPx)
+                    } else {
+                        composeVerticalColumn(loadedBitmaps, borderPx, dividerPx, backgroundColor, cornerPx)
+                    }
                 }
             }
         } finally {
@@ -64,98 +76,14 @@ object MultiCameraCollageHelper {
         }
     }
 
-    private fun composeSideBySide(
-        bmp1: Bitmap,
-        bmp2: Bitmap,
-        borderPx: Int,
-        dividerPx: Int,
-        bgColor: Int,
-        cornerPx: Float
-    ): Bitmap {
-        val targetHeight = min(bmp1.height, bmp2.height).coerceAtMost(2400)
-        val w1 = (bmp1.width * (targetHeight.toFloat() / bmp1.height)).toInt()
-        val w2 = (bmp2.width * (targetHeight.toFloat() / bmp2.height)).toInt()
-
-        val totalWidth = borderPx * 2 + w1 + dividerPx + w2
-        val totalHeight = borderPx * 2 + targetHeight
-
-        val result = Bitmap.createBitmap(totalWidth, totalHeight, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(result)
-        canvas.drawColor(bgColor)
-
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
-
-        // Draw Frame 1
-        val dstRect1 = RectF(
-            borderPx.toFloat(),
-            borderPx.toFloat(),
-            (borderPx + w1).toFloat(),
-            (borderPx + targetHeight).toFloat()
-        )
-        drawBitmapWithRoundedCorners(canvas, bmp1, dstRect1, cornerPx, paint)
-
-        // Draw Frame 2
-        val dstRect2 = RectF(
-            (borderPx + w1 + dividerPx).toFloat(),
-            borderPx.toFloat(),
-            (borderPx + w1 + dividerPx + w2).toFloat(),
-            (borderPx + targetHeight).toFloat()
-        )
-        drawBitmapWithRoundedCorners(canvas, bmp2, dstRect2, cornerPx, paint)
-
-        return result
-    }
-
-    private fun composeTopBottom(
-        bmp1: Bitmap,
-        bmp2: Bitmap,
-        borderPx: Int,
-        dividerPx: Int,
-        bgColor: Int,
-        cornerPx: Float
-    ): Bitmap {
-        val targetWidth = min(bmp1.width, bmp2.width).coerceAtMost(2400)
-        val h1 = (bmp1.height * (targetWidth.toFloat() / bmp1.width)).toInt()
-        val h2 = (bmp2.height * (targetWidth.toFloat() / bmp2.height)).toInt()
-
-        val totalWidth = borderPx * 2 + targetWidth
-        val totalHeight = borderPx * 2 + h1 + dividerPx + h2
-
-        val result = Bitmap.createBitmap(totalWidth, totalHeight, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(result)
-        canvas.drawColor(bgColor)
-
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
-
-        // Draw Frame 1
-        val dstRect1 = RectF(
-            borderPx.toFloat(),
-            borderPx.toFloat(),
-            (borderPx + targetWidth).toFloat(),
-            (borderPx + h1).toFloat()
-        )
-        drawBitmapWithRoundedCorners(canvas, bmp1, dstRect1, cornerPx, paint)
-
-        // Draw Frame 2
-        val dstRect2 = RectF(
-            borderPx.toFloat(),
-            (borderPx + h1 + dividerPx).toFloat(),
-            (borderPx + targetWidth).toFloat(),
-            (borderPx + h1 + dividerPx + h2).toFloat()
-        )
-        drawBitmapWithRoundedCorners(canvas, bmp2, dstRect2, cornerPx, paint)
-
-        return result
-    }
-
-    private fun composeTriptychRow(
+    private fun composeHorizontalRow(
         frames: List<Bitmap>,
         borderPx: Int,
         dividerPx: Int,
         bgColor: Int,
         cornerPx: Float
     ): Bitmap {
-        val targetHeight = frames.minOf { it.height }.coerceAtMost(1800)
+        val targetHeight = frames.minOf { it.height }.coerceAtMost(2400)
         val scaledWidths = frames.map { (it.width * (targetHeight.toFloat() / it.height)).toInt() }
 
         val totalWidth = borderPx * 2 + scaledWidths.sum() + (frames.size - 1) * dividerPx
@@ -175,6 +103,161 @@ object MultiCameraCollageHelper {
             drawBitmapWithRoundedCorners(canvas, bmp, dstRect, cornerPx, paint)
             currentX += w + dividerPx
         }
+
+        return result
+    }
+
+    private fun composeVerticalColumn(
+        frames: List<Bitmap>,
+        borderPx: Int,
+        dividerPx: Int,
+        bgColor: Int,
+        cornerPx: Float
+    ): Bitmap {
+        val targetWidth = frames.minOf { it.width }.coerceAtMost(2400)
+        val scaledHeights = frames.map { (it.height * (targetWidth.toFloat() / it.width)).toInt() }
+
+        val totalWidth = borderPx * 2 + targetWidth
+        val totalHeight = borderPx * 2 + scaledHeights.sum() + (frames.size - 1) * dividerPx
+
+        val result = Bitmap.createBitmap(totalWidth, totalHeight, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(result)
+        canvas.drawColor(bgColor)
+
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+
+        var currentY = borderPx.toFloat()
+        for (i in frames.indices) {
+            val bmp = frames[i]
+            val h = scaledHeights[i]
+            val dstRect = RectF(borderPx.toFloat(), currentY, (borderPx + targetWidth).toFloat(), currentY + h)
+            drawBitmapWithRoundedCorners(canvas, bmp, dstRect, cornerPx, paint)
+            currentY += h + dividerPx
+        }
+
+        return result
+    }
+
+    private fun composeFeaturedTop(
+        frames: List<Bitmap>,
+        borderPx: Int,
+        dividerPx: Int,
+        bgColor: Int,
+        cornerPx: Float
+    ): Bitmap {
+        val topBmp = frames[0]
+        val botBmp1 = frames[1]
+        val botBmp2 = frames[2]
+
+        val rTop = topBmp.width.toFloat() / topBmp.height.toFloat()
+        val rBot1 = botBmp1.width.toFloat() / botBmp1.height.toFloat()
+        val rBot2 = botBmp2.width.toFloat() / botBmp2.height.toFloat()
+
+        val contentWidth = 2400
+        val topHeight = (contentWidth / rTop).toInt()
+
+        val availableBotWidth = contentWidth - dividerPx
+        val botHeight = (availableBotWidth / (rBot1 + rBot2)).toInt()
+        val botW1 = (botHeight * rBot1).toInt()
+        val botW2 = availableBotWidth - botW1
+
+        val totalWidth = borderPx * 2 + contentWidth
+        val totalHeight = borderPx * 2 + topHeight + dividerPx + botHeight
+
+        val result = Bitmap.createBitmap(totalWidth, totalHeight, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(result)
+        canvas.drawColor(bgColor)
+
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+
+        // Draw Top Image
+        val topRect = RectF(
+            borderPx.toFloat(),
+            borderPx.toFloat(),
+            (borderPx + contentWidth).toFloat(),
+            (borderPx + topHeight).toFloat()
+        )
+        drawBitmapWithRoundedCorners(canvas, topBmp, topRect, cornerPx, paint)
+
+        // Draw Bottom Left Image
+        val bot1Rect = RectF(
+            borderPx.toFloat(),
+            (borderPx + topHeight + dividerPx).toFloat(),
+            (borderPx + botW1).toFloat(),
+            (borderPx + topHeight + dividerPx + botHeight).toFloat()
+        )
+        drawBitmapWithRoundedCorners(canvas, botBmp1, bot1Rect, cornerPx, paint)
+
+        // Draw Bottom Right Image
+        val bot2Rect = RectF(
+            (borderPx + botW1 + dividerPx).toFloat(),
+            (borderPx + topHeight + dividerPx).toFloat(),
+            (borderPx + contentWidth).toFloat(),
+            (borderPx + topHeight + dividerPx + botHeight).toFloat()
+        )
+        drawBitmapWithRoundedCorners(canvas, botBmp2, bot2Rect, cornerPx, paint)
+
+        return result
+    }
+
+    private fun composeFeaturedLeft(
+        frames: List<Bitmap>,
+        borderPx: Int,
+        dividerPx: Int,
+        bgColor: Int,
+        cornerPx: Float
+    ): Bitmap {
+        val leftBmp = frames[0]
+        val rightBmp1 = frames[1]
+        val rightBmp2 = frames[2]
+
+        val rLeft = leftBmp.width.toFloat() / leftBmp.height.toFloat()
+        val invR1 = rightBmp1.height.toFloat() / rightBmp1.width.toFloat()
+        val invR2 = rightBmp2.height.toFloat() / rightBmp2.width.toFloat()
+
+        val contentHeight = 2400
+        val leftWidth = (contentHeight * rLeft).toInt()
+
+        val availableRightHeight = contentHeight - dividerPx
+        val rightWidth = (availableRightHeight / (invR1 + invR2)).toInt()
+        val rightH1 = (rightWidth * invR1).toInt()
+        val rightH2 = availableRightHeight - rightH1
+
+        val totalWidth = borderPx * 2 + leftWidth + dividerPx + rightWidth
+        val totalHeight = borderPx * 2 + contentHeight
+
+        val result = Bitmap.createBitmap(totalWidth, totalHeight, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(result)
+        canvas.drawColor(bgColor)
+
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+
+        // Draw Left Image
+        val leftRect = RectF(
+            borderPx.toFloat(),
+            borderPx.toFloat(),
+            (borderPx + leftWidth).toFloat(),
+            (borderPx + contentHeight).toFloat()
+        )
+        drawBitmapWithRoundedCorners(canvas, leftBmp, leftRect, cornerPx, paint)
+
+        // Draw Right Top Image
+        val right1Rect = RectF(
+            (borderPx + leftWidth + dividerPx).toFloat(),
+            borderPx.toFloat(),
+            (borderPx + leftWidth + dividerPx + rightWidth).toFloat(),
+            (borderPx + rightH1).toFloat()
+        )
+        drawBitmapWithRoundedCorners(canvas, rightBmp1, right1Rect, cornerPx, paint)
+
+        // Draw Right Bottom Image
+        val right2Rect = RectF(
+            (borderPx + leftWidth + dividerPx).toFloat(),
+            (borderPx + rightH1 + dividerPx).toFloat(),
+            (borderPx + leftWidth + dividerPx + rightWidth).toFloat(),
+            (borderPx + contentHeight).toFloat()
+        )
+        drawBitmapWithRoundedCorners(canvas, rightBmp2, right2Rect, cornerPx, paint)
 
         return result
     }
