@@ -98,4 +98,25 @@ class MultiCameraHelperTest {
         assertEquals("0.6x", resolved[0].name)
         assertEquals("1.0x", resolved[1].name)
     }
+
+    @Test
+    fun testHardwareTypeEnumAndDescription() {
+        val nativeInfo = LogicalMultiCameraInfo(
+            logicalCameraId = "0",
+            isLogicalMultiCamera = true,
+            syncType = 1,
+            physicalLenses = emptyList(),
+            hardwareType = MultiCameraHardwareType.NATIVE_LOGICAL
+        )
+        assertEquals(MultiCameraHardwareType.NATIVE_LOGICAL, nativeInfo.hardwareType)
+
+        val relayInfo = LogicalMultiCameraInfo(
+            logicalCameraId = "0",
+            isLogicalMultiCamera = false,
+            syncType = 0,
+            physicalLenses = emptyList(),
+            hardwareType = MultiCameraHardwareType.FAST_RELAY_BURST
+        )
+        assertEquals(MultiCameraHardwareType.FAST_RELAY_BURST, relayInfo.hardwareType)
+    }
 }

@@ -5000,8 +5000,9 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         val currentMode = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_MODE, false)
         val currentLayout = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUT_SBS)
         val isMultiCamPrefEnabled = prefs.getBoolean(SettingsFragment.KEY_MULTI_CAMERA_MODE, false)
-        val isMultiCamSupported = top.maary.darkbag.utils.MultiCameraHelper.isMultiCameraSupported(requireContext())
-        val canUseMultiCam = isMultiCamPrefEnabled && isMultiCamSupported
+        val forceEnable = prefs.getBoolean(SettingsFragment.KEY_MULTI_CAMERA_FORCE_ENABLE, false)
+        val isMultiCamSupported = top.maary.darkbag.utils.MultiCameraHelper.isMultiCameraSupported(requireContext(), forceEnable)
+        val canUseMultiCam = (isMultiCamPrefEnabled || forceEnable) && isMultiCamSupported
 
         val (newMode, newLayout, newMultiCam) = when {
             !currentMode && !isMultiCameraModeActive -> {

@@ -31,6 +31,13 @@ enum class DualLensPairPreference(val key: String, val title: String) {
     }
 }
 
+enum class MultiCameraHardwareType {
+    NATIVE_LOGICAL,          // API 28+ Logical Multi-Camera with physicalCameraIds on single session
+    CONCURRENT_STANDALONE,   // Android 11+ Concurrent Camera IDs (separate CameraDevice instances in parallel)
+    FAST_RELAY_BURST,        // Near-instantaneous fast sequential relay across standalone cameras
+    NONE
+}
+
 data class PhysicalLensInfo(
     val physicalId: String,
     val name: String,
@@ -45,19 +52,25 @@ data class LogicalMultiCameraInfo(
     val logicalCameraId: String,
     val isLogicalMultiCamera: Boolean,
     val syncType: Int, // SYNC_TYPE_CALIBRATED, SYNC_TYPE_APPROXIMATE
-    val physicalLenses: List<PhysicalLensInfo>
+    val physicalLenses: List<PhysicalLensInfo>,
+    val hardwareType: MultiCameraHardwareType = MultiCameraHardwareType.NATIVE_LOGICAL
 )
 
 object MultiCameraHelper {
     private const val TAG = "MultiCameraHelper"
 
-    fun getLogicalMultiCameraInfo(context: Context, facing: Int = CameraCharacteristics.LENS_FACING_BACK): LogicalMultiCameraInfo? {
+    fun getLogicalMultiCameraInfo(
+        context: Context,
+        facing: Int = CameraCharacteristics.LENS_FACING_BACK
+    ): LogicalMultiCameraInfo? {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
             return null
         }
 
         val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as? CameraManager ?: return null
-        return try {
+
+        // 1. First probe for native Logical Multi-Camera (API 28+)
+        try {
             val cameraIds = cameraManager.cameraIdList
             for (id in cameraIds) {
                 val chars = cameraManager.getCameraCharacteristics(id)
@@ -72,11 +85,9 @@ object MultiCameraHelper {
                     val syncType = chars.get(CameraCharacteristics.LOGICAL_MULTI_CAMERA_SENSOR_SYNC_TYPE)
                         ?: CameraCharacteristics.LOGICAL_MULTI_CAMERA_SENSOR_SYNC_TYPE_APPROXIMATE
 
-                    // Calculate baseline focal length (e.g. from main wide)
                     var mainWideEqFocal = 24f
                     val physicalList = mutableListOf<PhysicalLensInfo>()
 
-                    // First pass: extract equivalent focal length of all physical cameras
                     val tempInfos = mutableListOf<Pair<String, CameraCharacteristics>>()
                     for (physId in physicalIds) {
                         try {
@@ -87,7 +98,6 @@ object MultiCameraHelper {
                         }
                     }
 
-                    // Find 1.0x baseline lens (approx ~22-30mm eq focal length or closest)
                     val focalMap = tempInfos.map { (pid, pchars) ->
                         pid to calculateEquivalentFocalLength(pchars)
                     }
@@ -127,19 +137,86 @@ object MultiCameraHelper {
                         logicalCameraId = id,
                         isLogicalMultiCamera = true,
                         syncType = syncType,
-                        physicalLenses = physicalList
+                        physicalLenses = physicalList,
+                        hardwareType = MultiCameraHardwareType.NATIVE_LOGICAL
                     )
                 }
             }
-            null
         } catch (e: Exception) {
-            Log.e(TAG, "Error checking logical multi camera info", e)
-            null
+            Log.w(TAG, "Native logical multi camera probe exception", e)
         }
+
+        // 2. Fallback: Synthesize MultiCamera from standalone physical cameras probed on the device
+        try {
+            val repository = CameraRepository(context)
+            val allLenses = repository.enumerateCameras(emptySet(), facing)
+            val standalonePhysicalLenses = allLenses.filter { !it.isLogicalAuto && !it.isZoomPreset }
+
+            if (standalonePhysicalLenses.size >= 2) {
+                var isConcurrentSupported = false
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    try {
+                        val concurrentCombinations = cameraManager.concurrentCameraIds
+                        val ids = standalonePhysicalLenses.map { it.id }.toSet()
+                        isConcurrentSupported = concurrentCombinations.any { set ->
+                            set.count { ids.contains(it) } >= 2
+                        }
+                    } catch (e: Exception) {
+                        Log.d(TAG, "concurrentCameraIds query not supported or failed", e)
+                    }
+                }
+
+                val physicalList = standalonePhysicalLenses.map { lens ->
+                    val chars = try { cameraManager.getCameraCharacteristics(lens.id) } catch (e: Exception) { null }
+                    PhysicalLensInfo(
+                        physicalId = lens.id,
+                        name = lens.name,
+                        focalLength = lens.focalLength,
+                        equivalentFocalLength = lens.equivalentFocalLength,
+                        multiplier = lens.multiplier,
+                        type = lens.type,
+                        characteristics = chars
+                    )
+                }.sortedBy { it.multiplier }
+
+                val hwType = if (isConcurrentSupported) {
+                    MultiCameraHardwareType.CONCURRENT_STANDALONE
+                } else {
+                    MultiCameraHardwareType.FAST_RELAY_BURST
+                }
+
+                val mainId = physicalList.find { it.type == LensType.WIDE }?.physicalId ?: physicalList.first().physicalId
+
+                Log.i(TAG, "Synthesized standalone multi-camera info (hardwareType=$hwType, count=${physicalList.size})")
+
+                return LogicalMultiCameraInfo(
+                    logicalCameraId = mainId,
+                    isLogicalMultiCamera = false,
+                    syncType = CameraCharacteristics.LOGICAL_MULTI_CAMERA_SENSOR_SYNC_TYPE_APPROXIMATE,
+                    physicalLenses = physicalList,
+                    hardwareType = hwType
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to probe standalone multi-camera fallback", e)
+        }
+
+        return null
     }
 
-    fun isMultiCameraSupported(context: Context): Boolean {
-        return getLogicalMultiCameraInfo(context) != null
+    fun isMultiCameraSupported(context: Context, forceEnable: Boolean = false): Boolean {
+        val info = getLogicalMultiCameraInfo(context) ?: return forceEnable
+        return info.physicalLenses.size >= 2 || forceEnable
+    }
+
+    fun getHardwareTypeDescription(context: Context): String {
+        val info = getLogicalMultiCameraInfo(context) ?: return "未检测到多物理镜头 (Single Camera Only)"
+        return when (info.hardwareType) {
+            MultiCameraHardwareType.NATIVE_LOGICAL -> "硬件原生逻辑多摄 (Native Logical Multi-Camera)"
+            MultiCameraHardwareType.CONCURRENT_STANDALONE -> "独立多摄并发模式 (Concurrent Multi-Camera)"
+            MultiCameraHardwareType.FAST_RELAY_BURST -> "极速接力快拍模式 (Fast Relay Burst Mode)"
+            MultiCameraHardwareType.NONE -> "未检测到多物理镜头 (Single Camera Only)"
+        }
     }
 
     fun resolveActivePhysicalLenses(

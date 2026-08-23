@@ -537,10 +537,18 @@ class SettingsFragment : Fragment() {
     }
 
     private fun setupMultiCameraSettings() {
-        val isSupported = MultiCameraHelper.isMultiCameraSupported(requireContext())
+        val forceEnable = prefs.getBoolean(KEY_MULTI_CAMERA_FORCE_ENABLE, false)
+        val isSupported = MultiCameraHelper.isMultiCameraSupported(requireContext(), forceEnable)
         val multiCamInfo = MultiCameraHelper.getLogicalMultiCameraInfo(requireContext())
+        val hwDesc = MultiCameraHelper.getHardwareTypeDescription(requireContext())
 
-        if (!isSupported || multiCamInfo == null) {
+        setupSwitch(binding.switchMultiCameraForceEnable, KEY_MULTI_CAMERA_FORCE_ENABLE, false)
+        binding.switchMultiCameraForceEnable.setOnCheckedChangeListener { _, isChecked ->
+            prefs.edit().putBoolean(KEY_MULTI_CAMERA_FORCE_ENABLE, isChecked).apply()
+            setupMultiCameraSettings()
+        }
+
+        if (!isSupported && multiCamInfo == null) {
             binding.tvMultiCameraStatus.text = getString(R.string.multi_camera_status_unsupported)
             binding.switchMultiCameraMode.isEnabled = false
             binding.switchMultiCameraMode.isChecked = false
@@ -550,8 +558,9 @@ class SettingsFragment : Fragment() {
             return
         }
 
-        val physLenses = multiCamInfo.physicalLenses.joinToString { "${it.name} (${it.type})" }
-        binding.tvMultiCameraStatus.text = "${getString(R.string.multi_camera_status_supported)}: $physLenses"
+        val physLenses = multiCamInfo?.physicalLenses?.joinToString { "${it.name} (${it.type})" } ?: "None"
+        binding.tvMultiCameraStatus.text = "$hwDesc\n检测到镜头: $physLenses"
+        binding.switchMultiCameraMode.isEnabled = true
 
         setupSwitch(binding.switchMultiCameraMode, KEY_MULTI_CAMERA_MODE, false)
         binding.switchMultiCameraMode.setOnCheckedChangeListener { _, isChecked ->
@@ -738,6 +747,7 @@ class SettingsFragment : Fragment() {
         const val KEY_HALF_FRAME_BASE_NAME = "half_frame_base_name"
 
         const val KEY_MULTI_CAMERA_MODE = "multi_camera_mode_enabled"
+        const val KEY_MULTI_CAMERA_FORCE_ENABLE = "multi_camera_force_enable"
         const val KEY_MULTI_CAMERA_COUNT_PREF = "multi_camera_count_pref"
         const val KEY_MULTI_CAMERA_DUAL_PAIR = "multi_camera_dual_pair"
         const val KEY_MULTI_CAMERA_SAVE_RAW = "multi_camera_save_raw"

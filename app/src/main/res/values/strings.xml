@@ -62,6 +62,8 @@
 
     <string name="multi_camera_mode_title">Multi-Camera Simultaneous Capture</string>
     <string name="enable_multi_camera_mode">Enable Multi-Camera Mode</string>
+    <string name="multi_camera_force_enable">Force Enable Multi-Camera Mode</string>
+    <string name="multi_camera_force_enable_summary">Use standalone camera aggregation or fast relay if native multi-camera is not declared by OEM</string>
     <string name="multi_camera_count_pref_title">Lens Count Preference</string>
     <string name="multi_camera_dual_pair_title">Dual-Lens Preference</string>
     <string name="multi_camera_save_raw">Save Individual RAW (DNG) for All Lenses</string>

@@ -587,6 +587,15 @@
                         android:text="@string/enable_multi_camera_mode"
                         android:textSize="16sp" />
 
+                    <Space android:layout_width="match_parent" android:layout_height="@dimen/spacing_small" />
+
+                    <com.google.android.material.materialswitch.MaterialSwitch
+                        android:id="@+id/switch_multi_camera_force_enable"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/multi_camera_force_enable"
+                        android:textSize="14sp" />
+
                     <Space android:layout_width="match_parent" android:layout_height="@dimen/spacing_medium" />
 
                     <com.google.android.material.textfield.TextInputLayout
