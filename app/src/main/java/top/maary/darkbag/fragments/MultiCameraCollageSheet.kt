@@ -1,6 +1,7 @@
 package top.maary.darkbag.fragments
 
 import android.content.Intent
+import android.content.res.ColorStateList
 import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
@@ -11,6 +12,7 @@ import android.widget.Toast
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
 import com.google.android.material.chip.Chip
+import com.google.android.material.color.MaterialColors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -36,7 +38,6 @@ class MultiCameraCollageSheet : BottomSheetDialogFragment() {
     private val selectedLenses = mutableListOf<MultiCameraLensItem>()
     private var currentLayout: CollageLayout = CollageLayout.SIDE_BY_SIDE
     private var currentFraming: FramingStrategy = FramingStrategy.AUTO_BALANCE
-    private var currentRotationAngle: Int = 0
     private var currentShowExif: Boolean = false
     private var currentBgColor: Int = Color.WHITE
     private var currentBorderDp: Float = 16f
@@ -96,18 +97,36 @@ class MultiCameraCollageSheet : BottomSheetDialogFragment() {
 
     private fun setupQuickActions() {
         binding.btnSwapOrder.setOnClickListener {
-            selectedLenses.reverse()
-            renderPreview()
+            if (selectedLenses.size > 1) {
+                val last = selectedLenses.removeAt(selectedLenses.size - 1)
+                selectedLenses.add(0, last)
+                renderPreview()
+            }
         }
 
-        binding.btnRotate.setOnClickListener {
-            currentRotationAngle = (currentRotationAngle + 90) % 360
-            renderPreview()
-        }
-
+        updateExifButtonState(currentShowExif)
         binding.btnToggleExif.setOnClickListener {
-            currentShowExif = binding.btnToggleExif.isChecked
+            currentShowExif = !currentShowExif
+            updateExifButtonState(currentShowExif)
             renderPreview()
+        }
+    }
+
+    private fun updateExifButtonState(isChecked: Boolean) {
+        binding.btnToggleExif.isChecked = isChecked
+        val primaryContainer = MaterialColors.getColor(binding.btnToggleExif, com.google.android.material.R.attr.colorPrimaryContainer)
+        val onPrimaryContainer = MaterialColors.getColor(binding.btnToggleExif, com.google.android.material.R.attr.colorOnPrimaryContainer)
+        val surfaceColor = MaterialColors.getColor(binding.btnToggleExif, com.google.android.material.R.attr.colorSurfaceContainerHigh)
+        val onSurfaceColor = MaterialColors.getColor(binding.btnToggleExif, com.google.android.material.R.attr.colorOnSurface)
+
+        if (isChecked) {
+            binding.btnToggleExif.backgroundTintList = ColorStateList.valueOf(primaryContainer)
+            binding.btnToggleExif.setTextColor(onPrimaryContainer)
+            binding.btnToggleExif.iconTint = ColorStateList.valueOf(onPrimaryContainer)
+        } else {
+            binding.btnToggleExif.backgroundTintList = ColorStateList.valueOf(surfaceColor)
+            binding.btnToggleExif.setTextColor(onSurfaceColor)
+            binding.btnToggleExif.iconTint = ColorStateList.valueOf(onSurfaceColor)
         }
     }
 
@@ -244,7 +263,6 @@ class MultiCameraCollageSheet : BottomSheetDialogFragment() {
 
         val layout = currentLayout
         val framing = currentFraming
-        val rotation = currentRotationAngle
         val showExif = currentShowExif
         val bgColor = currentBgColor
         val borderDp = currentBorderDp
@@ -257,7 +275,6 @@ class MultiCameraCollageSheet : BottomSheetDialogFragment() {
                 imageUris = uris,
                 layout = layout,
                 framingStrategy = framing,
-                rotationAngle = rotation,
                 showExif = showExif,
                 borderWidthDp = borderDp,
                 dividerWidthDp = dividerDp,
@@ -291,7 +308,6 @@ class MultiCameraCollageSheet : BottomSheetDialogFragment() {
 
         val layout = currentLayout
         val framing = currentFraming
-        val rotation = currentRotationAngle
         val showExif = currentShowExif
         val bgColor = currentBgColor
         val borderDp = currentBorderDp
@@ -304,7 +320,6 @@ class MultiCameraCollageSheet : BottomSheetDialogFragment() {
                 imageUris = uris,
                 layout = layout,
                 framingStrategy = framing,
-                rotationAngle = rotation,
                 showExif = showExif,
                 borderWidthDp = borderDp,
                 dividerWidthDp = dividerDp,

@@ -100,7 +100,7 @@
             </FrameLayout>
         </com.google.android.material.card.MaterialCardView>
 
-        <!-- Quick Action Toolbar (Swap, Rotate, EXIF) -->
+        <!-- Quick Action Toolbar (Cycle Swap, EXIF) -->
         <LinearLayout
             android:id="@+id/quick_action_bar"
             android:layout_width="wrap_content"
@@ -118,23 +118,10 @@
                 android:layout_width="wrap_content"
                 android:layout_height="36dp"
                 android:textSize="12sp"
-                android:paddingStart="12dp"
-                android:paddingEnd="12dp"
+                android:paddingStart="14dp"
+                android:paddingEnd="14dp"
                 android:text="@string/collage_btn_swap"
                 app:icon="@drawable/ic_swap_horiz"
-                app:iconSize="16dp" />
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btn_rotate"
-                style="@style/Widget.Material3.Button.TonalButton"
-                android:layout_width="wrap_content"
-                android:layout_height="36dp"
-                android:layout_marginStart="8dp"
-                android:textSize="12sp"
-                android:paddingStart="12dp"
-                android:paddingEnd="12dp"
-                android:text="@string/collage_btn_rotate"
-                app:icon="@drawable/ic_rotate"
                 app:iconSize="16dp" />
 
             <com.google.android.material.button.MaterialButton
@@ -142,10 +129,10 @@
                 style="@style/Widget.Material3.Button.TonalButton"
                 android:layout_width="wrap_content"
                 android:layout_height="36dp"
-                android:layout_marginStart="8dp"
+                android:layout_marginStart="12dp"
                 android:textSize="12sp"
-                android:paddingStart="12dp"
-                android:paddingEnd="12dp"
+                android:paddingStart="14dp"
+                android:paddingEnd="14dp"
                 android:text="@string/collage_btn_exif"
                 android:checkable="true"
                 app:icon="@drawable/ic_info"

@@ -49,7 +49,6 @@ object MultiCameraCollageHelper {
         imageUris: List<Uri>,
         layout: CollageLayout,
         framingStrategy: FramingStrategy = FramingStrategy.AUTO_BALANCE,
-        rotationAngle: Int = 0,
         showExif: Boolean = false,
         borderWidthDp: Float = 16f,
         dividerWidthDp: Float = 8f,
@@ -69,15 +68,8 @@ object MultiCameraCollageHelper {
 
         try {
             for (uri in imageUris) {
-                var bmp = decodeSampledBitmapFromUri(context, uri, maxDimension, maxDimension)
+                val bmp = decodeSampledBitmapFromUri(context, uri, maxDimension, maxDimension)
                 if (bmp != null) {
-                    if (rotationAngle != 0) {
-                        val rotated = rotateBitmap(bmp, rotationAngle)
-                        if (rotated != bmp) {
-                            bmp.recycle()
-                            bmp = rotated
-                        }
-                    }
                     loadedBitmaps.add(bmp)
                     if (showExif) {
                         metadataList.add(readExifFromUri(context, uri))
@@ -200,7 +192,8 @@ object MultiCameraCollageHelper {
         val targetHeight = frames.minOf { it.height }.coerceAtMost(2400)
         val scaledWidths = frames.map { (it.width * (targetHeight.toFloat() / it.height)).toInt() }
 
-        val exifHeightPx = if (showExif) (32 * density).toInt() else 0
+        val exifTextSize = if (showExif) (targetHeight * 0.026f).coerceIn(24f * density, 64f * density) else 0f
+        val exifHeightPx = if (showExif) (exifTextSize * 2.2f).toInt() else 0
         val totalWidth = borderPx * 2 + scaledWidths.sum() + (frames.size - 1) * dividerPx
         val totalHeight = borderPx * 2 + targetHeight + exifHeightPx
 
@@ -210,9 +203,9 @@ object MultiCameraCollageHelper {
 
         val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
         val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            textSize = 12f * density
+            textSize = exifTextSize
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
-            color = if (isDarkColor(bgColor)) Color.parseColor("#CCCCCC") else Color.parseColor("#555555")
+            color = if (isDarkColor(bgColor)) Color.parseColor("#D0D0D0") else Color.parseColor("#444444")
             textAlign = Paint.Align.CENTER
         }
 
@@ -225,7 +218,7 @@ object MultiCameraCollageHelper {
 
             if (showExif && i < metadata.size) {
                 val text = metadata[i].toDisplayString()
-                val textY = borderPx + targetHeight + (20 * density)
+                val textY = borderPx + targetHeight + (exifTextSize * 1.45f)
                 canvas.drawText(text, currentX + w / 2f, textY, textPaint)
             }
 
@@ -248,7 +241,8 @@ object MultiCameraCollageHelper {
         val targetWidth = frames.minOf { it.width }.coerceAtMost(2400)
         val scaledHeights = frames.map { (it.height * (targetWidth.toFloat() / it.width)).toInt() }
 
-        val exifHeightPerFrame = if (showExif) (26 * density).toInt() else 0
+        val exifTextSize = if (showExif) (targetWidth * 0.025f).coerceIn(22f * density, 60f * density) else 0f
+        val exifHeightPerFrame = if (showExif) (exifTextSize * 2.0f).toInt() else 0
         val totalWidth = borderPx * 2 + targetWidth
         val totalHeight = borderPx * 2 + scaledHeights.sum() + (frames.size - 1) * dividerPx + (frames.size * exifHeightPerFrame)
 
@@ -258,8 +252,9 @@ object MultiCameraCollageHelper {
 
         val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
         val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            textSize = 11.5f * density
-            color = if (isDarkColor(bgColor)) Color.parseColor("#CCCCCC") else Color.parseColor("#555555")
+            textSize = exifTextSize
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+            color = if (isDarkColor(bgColor)) Color.parseColor("#D0D0D0") else Color.parseColor("#444444")
             textAlign = Paint.Align.CENTER
         }
 
@@ -273,7 +268,7 @@ object MultiCameraCollageHelper {
             currentY += h
             if (showExif && i < metadata.size) {
                 val text = metadata[i].toDisplayString()
-                val textY = currentY + (17 * density)
+                val textY = currentY + (exifTextSize * 1.35f)
                 canvas.drawText(text, totalWidth / 2f, textY, textPaint)
                 currentY += exifHeightPerFrame
             }
