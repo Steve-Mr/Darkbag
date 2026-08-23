@@ -4218,7 +4218,12 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         var primarySavedUri: Uri? = null
 
         val currentLog = prefs.getString(SettingsFragment.KEY_TARGET_LOG, "None") ?: "None"
-        val currentLut = prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, "None")?.substringBeforeLast(".") ?: "None"
+        val currentLut = prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, "None") ?: "None"
+        val logIndex = SettingsFragment.LOG_CURVES.indexOf(currentLog)
+        val lutPath = if (currentLut != "None" && currentLut.isNotBlank()) {
+            val f = File(lutManager.lutDir, currentLut)
+            if (f.exists()) f.absolutePath else null
+        } else null
 
         val currentEditConfig = top.maary.darkbag.models.EditConfig(
             log = currentLog,
@@ -4228,17 +4233,59 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         try {
             for (frame in result.frames) {
                 val frameBaseName = "${result.baseName}_MULTI_${frame.lens.name}"
+                var jpgPathToSave: String? = null
 
-                // 1. Process and save JPEG
-                if (frame.jpegData != null) {
-                    val bmpFile = File(appContext.cacheDir, "temp_${frameBaseName}.jpg")
-                    FileOutputStream(bmpFile).use { it.write(frame.jpegData) }
+                // 1. If we have a valid DNG, render it through ColorProcessor (LibRaw + LOG + 3D LUT)
+                if (frame.tempDngPath != null) {
+                    val dngFile = File(frame.tempDngPath)
+                    if (dngFile.exists() && dngFile.length() > 0) {
+                        val dngBytes = dngFile.readBytes()
+                        val renderedFile = File(appContext.cacheDir, "rendered_${frameBaseName}.jpg")
+                        val ret = top.maary.darkbag.processor.ColorProcessor.processRaw(
+                            dngData = dngBytes,
+                            targetLog = logIndex,
+                            lutPath = lutPath,
+                            exposure = 0f,
+                            contrast = 0f,
+                            saturation = 0f,
+                            highlights = 0f,
+                            shadows = 0f,
+                            whites = 0f,
+                            blacks = 0f,
+                            digitalGain = 1.0f,
+                            outputJpgPath = renderedFile.absolutePath,
+                            outputTiffPath = null,
+                            useGpu = true,
+                            orientation = frame.orientation,
+                            mirror = false,
+                            outputBitmap = null,
+                            downsampleFactor = 1,
+                            zoomFactor = 1.0f,
+                            metadata = frame.captureMetadata
+                        )
+                        if (ret >= 0 && renderedFile.exists() && renderedFile.length() > 0) {
+                            jpgPathToSave = renderedFile.absolutePath
+                            Log.i(TAG, "ColorProcessor successfully rendered LOG/LUT JPEG for ${frame.lens.name}")
+                        } else {
+                            Log.w(TAG, "ColorProcessor failed with code $ret for ${frame.lens.name}, falling back to camera JPEG")
+                        }
+                    }
+                }
 
+                // 2. Fallback to native JPEG if ColorProcessor wasn't used or failed
+                if (jpgPathToSave == null && frame.jpegData != null) {
+                    val fallbackFile = File(appContext.cacheDir, "temp_${frameBaseName}.jpg")
+                    FileOutputStream(fallbackFile).use { it.write(frame.jpegData) }
+                    jpgPathToSave = fallbackFile.absolutePath
+                }
+
+                // 3. Save the final JPEG to MediaStore / storage folder
+                if (jpgPathToSave != null) {
                     val savedUri = ImageSaver.saveProcessedImage(
                         context = appContext,
                         inputBitmap = null,
-                        bmpPath = bmpFile.absolutePath,
-                        rotationDegrees = 0, // already oriented by JPEG_ORIENTATION
+                        bmpPath = jpgPathToSave,
+                        rotationDegrees = 0,
                         zoomFactor = 1.0f,
                         baseName = frameBaseName,
                         linearDngPath = null,
@@ -4253,7 +4300,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     }
                 }
 
-                // 2. Process and save RAW if present and enabled
+                // 4. Save RAW (DNG) if enabled by user
                 if (saveRaw && frame.tempDngPath != null) {
                     ImageSaver.saveProcessedImage(
                         context = appContext,
@@ -4269,6 +4316,9 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         editConfig = currentEditConfig,
                         captureMetadata = frame.captureMetadata
                     )
+                } else if (!saveRaw && frame.tempDngPath != null) {
+                    // Clean up temporary DNG file if user didn't request saving RAW
+                    try { File(frame.tempDngPath).delete() } catch (e: Exception) {}
                 }
             }
 

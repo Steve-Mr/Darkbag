@@ -53,7 +53,7 @@ class MultiCameraCaptureManager(
 ) {
     companion object {
         private const val TAG = "MultiCameraCaptureMgr"
-        private const val CAPTURE_TIMEOUT_MS = 7000L
+        private const val CAPTURE_TIMEOUT_MS = 8000L
     }
 
     private val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
@@ -227,7 +227,6 @@ class MultiCameraCaptureManager(
         outputConfigs.add(previewConfig)
 
         for (lens in lenses) {
-            // 1. Always configure JPEG ImageReader
             val jpegSize = getOptimalOutputSize(lens, ImageFormat.JPEG)
             val jpegReader = ImageReader.newInstance(jpegSize.width, jpegSize.height, ImageFormat.JPEG, 2)
             jpegImageReaders[lens.physicalId] = jpegReader
@@ -237,8 +236,7 @@ class MultiCameraCaptureManager(
             }
             outputConfigs.add(jpegConfig)
 
-            // 2. Configure RAW ImageReader if requested and supported
-            if (saveRaw && isRawSupportedForLens(lens)) {
+            if (isRawSupportedForLens(lens)) {
                 val rawSize = getOptimalOutputSize(lens, ImageFormat.RAW_SENSOR)
                 val rawReader = ImageReader.newInstance(rawSize.width, rawSize.height, ImageFormat.RAW_SENSOR, 2)
                 rawImageReaders[lens.physicalId] = rawReader
@@ -312,7 +310,7 @@ class MultiCameraCaptureManager(
                     surfaces.add(targetPreviewSurface)
                 }
 
-                if (saveRaw && isRawSupportedForLens(lens)) {
+                if (isRawSupportedForLens(lens)) {
                     val rawSize = getOptimalOutputSize(lens, ImageFormat.RAW_SENSOR)
                     val rawReader = ImageReader.newInstance(rawSize.width, rawSize.height, ImageFormat.RAW_SENSOR, 2)
                     rawImageReaders[lens.physicalId] = rawReader
@@ -400,7 +398,7 @@ class MultiCameraCaptureManager(
                 OutputConfiguration(jpegReader.surface)
             )
 
-            if (currentSaveRaw && primaryLens != null && isRawSupportedForLens(primaryLens)) {
+            if (primaryLens != null && isRawSupportedForLens(primaryLens)) {
                 val rawSize = getOptimalOutputSize(primaryLens, ImageFormat.RAW_SENSOR)
                 val rawReader = ImageReader.newInstance(rawSize.width, rawSize.height, ImageFormat.RAW_SENSOR, 2)
                 rawImageReaders[primaryId] = rawReader
@@ -485,7 +483,12 @@ class MultiCameraCaptureManager(
         val totalExpected = expectedLenses.size
 
         val collectedFrames = ConcurrentHashMap<String, PhysicalCapturedFrame>()
-        val physicalCaptureResults = ConcurrentHashMap<String, CaptureResult>()
+        val physicalCaptureResults = ConcurrentHashMap<String, TotalCaptureResult>()
+        val resultDeferredMap = ConcurrentHashMap<String, CompletableDeferred<TotalCaptureResult>>()
+        for (lens in expectedLenses) {
+            resultDeferredMap[lens.physicalId] = CompletableDeferred()
+        }
+
         val collectedJpegs = ConcurrentHashMap<String, Pair<ByteArray, Size>>()
         val collectedDngPaths = ConcurrentHashMap<String, String>()
 
@@ -527,15 +530,17 @@ class MultiCameraCaptureManager(
             }
 
             fun tryAssembleFrame(lens: PhysicalLensInfo) {
-                val jpegPair = collectedJpegs[lens.physicalId] ?: return
-                val metadata = createMetadataFromCaptureResult(physicalCaptureResults[lens.physicalId], lens)
+                val jpegPair = collectedJpegs[lens.physicalId]
                 val dngPath = collectedDngPaths[lens.physicalId]
+                if (jpegPair == null && dngPath == null) return
+
+                val metadata = createMetadataFromCaptureResult(physicalCaptureResults[lens.physicalId], lens)
                 val frame = PhysicalCapturedFrame(
                     lens = lens,
-                    jpegData = jpegPair.first,
+                    jpegData = jpegPair?.first,
                     tempDngPath = dngPath,
-                    width = jpegPair.second.width,
-                    height = jpegPair.second.height,
+                    width = jpegPair?.second?.width ?: 4000,
+                    height = jpegPair?.second?.height ?: 3000,
                     orientation = orientationDegrees,
                     captureMetadata = metadata,
                     timestamp = captureTimestamp
@@ -559,16 +564,20 @@ class MultiCameraCaptureManager(
 
                 rawImageReaders[lens.physicalId]?.setOnImageAvailableListener({ r ->
                     val image = r.acquireLatestImage() ?: return@setOnImageAvailableListener
-                    try {
-                        val chars = lens.characteristics ?: cameraManager.getCameraCharacteristics(lens.physicalId)
-                        val captureRes = physicalCaptureResults[lens.physicalId]
-                        val tempPath = writeDngToFile(image, chars, captureRes, orientationDegrees, lens.physicalId)
-                        if (tempPath != null) {
-                            collectedDngPaths[lens.physicalId] = tempPath
+                    scope.launch(Dispatchers.IO) {
+                        try {
+                            val chars = lens.characteristics ?: cameraManager.getCameraCharacteristics(lens.physicalId)
+                            val captureRes = withTimeoutOrNull(2500L) { resultDeferredMap[lens.physicalId]?.await() }
+                            if (captureRes != null) {
+                                val tempPath = writeDngToFile(image, chars, captureRes, orientationDegrees, lens.physicalId)
+                                if (tempPath != null) {
+                                    collectedDngPaths[lens.physicalId] = tempPath
+                                }
+                            }
+                            tryAssembleFrame(lens)
+                        } finally {
+                            image.close()
                         }
-                        tryAssembleFrame(lens)
-                    } finally {
-                        image.close()
                     }
                 }, cameraHandler)
             }
@@ -581,9 +590,16 @@ class MultiCameraCaptureManager(
                 ) {
                     val physResults = result.physicalCameraResults
                     for ((pid, presult) in physResults) {
-                        physicalCaptureResults[pid] = presult
+                        if (presult is TotalCaptureResult) {
+                            physicalCaptureResults[pid] = presult
+                            resultDeferredMap[pid]?.complete(presult)
+                        }
                     }
                     for (lens in expectedLenses) {
+                        if (!resultDeferredMap[lens.physicalId]!!.isCompleted) {
+                            physicalCaptureResults[lens.physicalId] = result
+                            resultDeferredMap[lens.physicalId]?.complete(result)
+                        }
                         tryAssembleFrame(lens)
                     }
                 }
@@ -618,7 +634,12 @@ class MultiCameraCaptureManager(
         val totalExpected = expectedLenses.size
 
         val collectedFrames = ConcurrentHashMap<String, PhysicalCapturedFrame>()
-        val resultsMap = ConcurrentHashMap<String, CaptureResult>()
+        val resultsMap = ConcurrentHashMap<String, TotalCaptureResult>()
+        val resultDeferredMap = ConcurrentHashMap<String, CompletableDeferred<TotalCaptureResult>>()
+        for (lens in expectedLenses) {
+            resultDeferredMap[lens.physicalId] = CompletableDeferred()
+        }
+
         val collectedJpegs = ConcurrentHashMap<String, Pair<ByteArray, Size>>()
         val collectedDngPaths = ConcurrentHashMap<String, String>()
 
@@ -645,15 +666,17 @@ class MultiCameraCaptureManager(
 
         try {
             fun tryAssembleFrame(lens: PhysicalLensInfo) {
-                val jpegPair = collectedJpegs[lens.physicalId] ?: return
-                val metadata = createMetadataFromCaptureResult(resultsMap[lens.physicalId], lens)
+                val jpegPair = collectedJpegs[lens.physicalId]
                 val dngPath = collectedDngPaths[lens.physicalId]
+                if (jpegPair == null && dngPath == null) return
+
+                val metadata = createMetadataFromCaptureResult(resultsMap[lens.physicalId], lens)
                 val frame = PhysicalCapturedFrame(
                     lens = lens,
-                    jpegData = jpegPair.first,
+                    jpegData = jpegPair?.first,
                     tempDngPath = dngPath,
-                    width = jpegPair.second.width,
-                    height = jpegPair.second.height,
+                    width = jpegPair?.second?.width ?: 4000,
+                    height = jpegPair?.second?.height ?: 3000,
                     orientation = orientationDegrees,
                     captureMetadata = metadata,
                     timestamp = captureTimestamp
@@ -682,16 +705,20 @@ class MultiCameraCaptureManager(
 
                 rawReader?.setOnImageAvailableListener({ r ->
                     val image = r.acquireLatestImage() ?: return@setOnImageAvailableListener
-                    try {
-                        val chars = lens.characteristics ?: cameraManager.getCameraCharacteristics(lens.physicalId)
-                        val captureRes = resultsMap[lens.physicalId]
-                        val tempPath = writeDngToFile(image, chars, captureRes, orientationDegrees, lens.physicalId)
-                        if (tempPath != null) {
-                            collectedDngPaths[lens.physicalId] = tempPath
+                    scope.launch(Dispatchers.IO) {
+                        try {
+                            val chars = lens.characteristics ?: cameraManager.getCameraCharacteristics(lens.physicalId)
+                            val captureRes = withTimeoutOrNull(2500L) { resultDeferredMap[lens.physicalId]?.await() }
+                            if (captureRes != null) {
+                                val tempPath = writeDngToFile(image, chars, captureRes, orientationDegrees, lens.physicalId)
+                                if (tempPath != null) {
+                                    collectedDngPaths[lens.physicalId] = tempPath
+                                }
+                            }
+                            tryAssembleFrame(lens)
+                        } finally {
+                            image.close()
                         }
-                        tryAssembleFrame(lens)
-                    } finally {
-                        image.close()
                     }
                 }, cameraHandler)
 
@@ -706,6 +733,7 @@ class MultiCameraCaptureManager(
                 sess.capture(req.build(), object : CameraCaptureSession.CaptureCallback() {
                     override fun onCaptureCompleted(s: CameraCaptureSession, r: CaptureRequest, res: TotalCaptureResult) {
                         resultsMap[lens.physicalId] = res
+                        resultDeferredMap[lens.physicalId]?.complete(res)
                         tryAssembleFrame(lens)
                     }
                 }, cameraHandler)
@@ -742,9 +770,9 @@ class MultiCameraCaptureManager(
                 val primaryRawReader = rawImageReaders[primaryLens.physicalId]
 
                 if (primaryDev != null && primarySess != null && primaryJpegReader != null) {
+                    val resultDeferred = CompletableDeferred<TotalCaptureResult?>()
                     val jpegDeferred = CompletableDeferred<Pair<ByteArray, Size>?>()
                     val dngDeferred = CompletableDeferred<String?>()
-                    var primaryResult: TotalCaptureResult? = null
 
                     primaryJpegReader.setOnImageAvailableListener({ r ->
                         val image = r.acquireLatestImage() ?: return@setOnImageAvailableListener
@@ -761,12 +789,20 @@ class MultiCameraCaptureManager(
                     if (primaryRawReader != null) {
                         primaryRawReader.setOnImageAvailableListener({ r ->
                             val image = r.acquireLatestImage() ?: return@setOnImageAvailableListener
-                            try {
-                                val chars = primaryLens.characteristics ?: cameraManager.getCameraCharacteristics(primaryLens.physicalId)
-                                val tempPath = writeDngToFile(image, chars, primaryResult, orientationDegrees, primaryLens.physicalId)
-                                dngDeferred.complete(tempPath)
-                            } finally {
-                                image.close()
+                            scope.launch(Dispatchers.IO) {
+                                try {
+                                    val chars = primaryLens.characteristics ?: cameraManager.getCameraCharacteristics(primaryLens.physicalId)
+                                    val captureRes = withTimeoutOrNull(2500L) { resultDeferred.await() }
+                                    if (captureRes != null) {
+                                        val tempPath = writeDngToFile(image, chars, captureRes, orientationDegrees, primaryLens.physicalId)
+                                        dngDeferred.complete(tempPath)
+                                    } else {
+                                        Log.e(TAG, "Primary captureResult timed out")
+                                        dngDeferred.complete(null)
+                                    }
+                                } finally {
+                                    image.close()
+                                }
                             }
                         }, cameraHandler)
                     } else {
@@ -783,22 +819,26 @@ class MultiCameraCaptureManager(
 
                     primarySess.capture(req.build(), object : CameraCaptureSession.CaptureCallback() {
                         override fun onCaptureCompleted(s: CameraCaptureSession, r: CaptureRequest, res: TotalCaptureResult) {
-                            primaryResult = res
+                            resultDeferred.complete(res)
+                        }
+                        override fun onCaptureFailed(s: CameraCaptureSession, r: CaptureRequest, failure: CaptureFailure) {
+                            resultDeferred.complete(null)
                         }
                     }, cameraHandler)
 
-                    val jpegDataPair = withTimeoutOrNull(2500L) { jpegDeferred.await() }
-                    val dngPath = if (primaryRawReader != null) withTimeoutOrNull(2500L) { dngDeferred.await() } else null
+                    val captureRes = withTimeoutOrNull(3000L) { resultDeferred.await() }
+                    val jpegDataPair = withTimeoutOrNull(3000L) { jpegDeferred.await() }
+                    val dngPath = if (primaryRawReader != null) withTimeoutOrNull(3000L) { dngDeferred.await() } else null
 
-                    if (jpegDataPair != null) {
-                        val metadata = createMetadataFromCaptureResult(primaryResult, primaryLens)
+                    if (jpegDataPair != null || dngPath != null) {
+                        val metadata = createMetadataFromCaptureResult(captureRes, primaryLens)
                         collectedFrames.add(
                             PhysicalCapturedFrame(
                                 lens = primaryLens,
-                                jpegData = jpegDataPair.first,
+                                jpegData = jpegDataPair?.first,
                                 tempDngPath = dngPath,
-                                width = jpegDataPair.second.width,
-                                height = jpegDataPair.second.height,
+                                width = jpegDataPair?.second?.width ?: 4000,
+                                height = jpegDataPair?.second?.height ?: 3000,
                                 orientation = orientationDegrees,
                                 captureMetadata = metadata,
                                 timestamp = captureTimestamp
@@ -877,11 +917,10 @@ class MultiCameraCaptureManager(
             // 1. Always create JPEG ImageReader
             val jpegSize = getOptimalOutputSize(lens, ImageFormat.JPEG)
             jpegReader = ImageReader.newInstance(jpegSize.width, jpegSize.height, ImageFormat.JPEG, 2)
-
             val outputConfigs = mutableListOf(OutputConfiguration(jpegReader.surface))
 
-            // 2. Create RAW ImageReader if requested and supported
-            if (currentSaveRaw && isRawSupportedForLens(lens)) {
+            // 2. Create RAW ImageReader if supported
+            if (isRawSupportedForLens(lens)) {
                 val rawSize = getOptimalOutputSize(lens, ImageFormat.RAW_SENSOR)
                 rawReader = ImageReader.newInstance(rawSize.width, rawSize.height, ImageFormat.RAW_SENSOR, 2)
                 outputConfigs.add(OutputConfiguration(rawReader.surface))
@@ -905,9 +944,9 @@ class MultiCameraCaptureManager(
             device.createCaptureSession(sessionConfig)
             val session = withTimeoutOrNull(1500L) { sessionDeferred.await() } ?: return null
 
+            val resultDeferred = CompletableDeferred<TotalCaptureResult?>()
             val jpegDeferred = CompletableDeferred<Pair<ByteArray, Size>?>()
             val dngDeferred = CompletableDeferred<String?>()
-            var captureRes: TotalCaptureResult? = null
 
             jpegReader.setOnImageAvailableListener({ r ->
                 val image = r.acquireLatestImage() ?: return@setOnImageAvailableListener
@@ -924,12 +963,20 @@ class MultiCameraCaptureManager(
             if (rawReader != null) {
                 rawReader.setOnImageAvailableListener({ r ->
                     val image = r.acquireLatestImage() ?: return@setOnImageAvailableListener
-                    try {
-                        val chars = lens.characteristics ?: cameraManager.getCameraCharacteristics(lens.physicalId)
-                        val tempPath = writeDngToFile(image, chars, captureRes, orientationDegrees, lens.physicalId)
-                        dngDeferred.complete(tempPath)
-                    } finally {
-                        image.close()
+                    scope.launch(Dispatchers.IO) {
+                        try {
+                            val chars = lens.characteristics ?: cameraManager.getCameraCharacteristics(lens.physicalId)
+                            val captureRes = withTimeoutOrNull(2500L) { resultDeferred.await() }
+                            if (captureRes != null) {
+                                val tempPath = writeDngToFile(image, chars, captureRes, orientationDegrees, lens.physicalId)
+                                dngDeferred.complete(tempPath)
+                            } else {
+                                Log.e(TAG, "CaptureResult timed out for relay lens ${lens.name}")
+                                dngDeferred.complete(null)
+                            }
+                        } finally {
+                            image.close()
+                        }
                     }
                 }, cameraHandler)
             } else {
@@ -946,21 +993,25 @@ class MultiCameraCaptureManager(
 
             session.capture(req.build(), object : CameraCaptureSession.CaptureCallback() {
                 override fun onCaptureCompleted(s: CameraCaptureSession, r: CaptureRequest, result: TotalCaptureResult) {
-                    captureRes = result
+                    resultDeferred.complete(result)
+                }
+                override fun onCaptureFailed(s: CameraCaptureSession, r: CaptureRequest, failure: CaptureFailure) {
+                    resultDeferred.complete(null)
                 }
             }, cameraHandler)
 
-            val jpegDataPair = withTimeoutOrNull(2500L) { jpegDeferred.await() }
-            val dngPath = if (rawReader != null) withTimeoutOrNull(2500L) { dngDeferred.await() } else null
+            val captureRes = withTimeoutOrNull(3000L) { resultDeferred.await() }
+            val jpegDataPair = withTimeoutOrNull(3000L) { jpegDeferred.await() }
+            val dngPath = if (rawReader != null) withTimeoutOrNull(3000L) { dngDeferred.await() } else null
 
-            if (jpegDataPair != null) {
+            if (jpegDataPair != null || dngPath != null) {
                 val metadata = createMetadataFromCaptureResult(captureRes, lens)
                 PhysicalCapturedFrame(
                     lens = lens,
-                    jpegData = jpegDataPair.first,
+                    jpegData = jpegDataPair?.first,
                     tempDngPath = dngPath,
-                    width = jpegDataPair.second.width,
-                    height = jpegDataPair.second.height,
+                    width = jpegDataPair?.second?.width ?: 4000,
+                    height = jpegDataPair?.second?.height ?: 3000,
                     orientation = orientationDegrees,
                     captureMetadata = metadata,
                     timestamp = System.currentTimeMillis()
@@ -983,11 +1034,15 @@ class MultiCameraCaptureManager(
     private fun writeDngToFile(
         rawImage: Image,
         chars: CameraCharacteristics,
-        captureResult: CaptureResult?,
+        captureResult: TotalCaptureResult?,
         orientationDegrees: Int,
         lensId: String
     ): String? {
         return try {
+            if (captureResult == null) {
+                Log.e(TAG, "Cannot create DNG: captureResult is null for lens $lensId")
+                return null
+            }
             val dngOrientation = when (orientationDegrees) {
                 90 -> ExifInterface.ORIENTATION_ROTATE_90
                 180 -> ExifInterface.ORIENTATION_ROTATE_180
@@ -995,14 +1050,8 @@ class MultiCameraCaptureManager(
                 else -> ExifInterface.ORIENTATION_NORMAL
             }
 
-            val tempFile = File(context.cacheDir, "temp_raw_${lensId}_${System.currentTimeMillis()}.dng")
-            val dngCreator = if (captureResult != null) {
-                DngCreator(chars, captureResult)
-            } else {
-                val dummyResult = cameraDevice?.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE)?.build()
-                DngCreator(chars, captureResult ?: dummyResult as? TotalCaptureResult ?: return null)
-            }
-
+            val tempFile = File(context.cacheDir, "dng_${lensId}_${System.currentTimeMillis()}.dng")
+            val dngCreator = DngCreator(chars, captureResult)
             dngCreator.setOrientation(dngOrientation)
             dngCreator.setDescription(DarkbagIdentity.imageDescription(isHdrPlus = false))
             FileOutputStream(tempFile).use { out ->
