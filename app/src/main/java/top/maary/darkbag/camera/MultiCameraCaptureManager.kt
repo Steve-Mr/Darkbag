@@ -930,6 +930,8 @@ class MultiCameraCaptureManager(
                 val primaryJpegReader = jpegImageReaders[primaryLens.physicalId]
                 val primaryRawReader = rawImageReaders[primaryLens.physicalId]
 
+                var primaryCaptureResult: TotalCaptureResult? = null
+
                 if (primaryDev != null && primarySess != null && primaryJpegReader != null) {
                     val resultDeferred = CompletableDeferred<TotalCaptureResult?>()
                     val jpegDeferred = CompletableDeferred<Pair<ByteArray, Size>?>()
@@ -988,6 +990,7 @@ class MultiCameraCaptureManager(
                     }, cameraHandler)
 
                     val captureRes = withTimeoutOrNull(3000L) { resultDeferred.await() }
+                    primaryCaptureResult = captureRes
                     val jpegDataPair = withTimeoutOrNull(3000L) { jpegDeferred.await() }
                     val dngPath = if (primaryRawReader != null) withTimeoutOrNull(3000L) { dngDeferred.await() } else null
 
@@ -1015,7 +1018,12 @@ class MultiCameraCaptureManager(
                     closeInternal()
 
                     for (relayLens in remainingLenses) {
-                        val relayFrame = captureSingleRelayLens(relayLens, orientationDegrees)
+                        val relayFrame = captureSingleRelayLens(
+                            lens = relayLens,
+                            orientationDegrees = orientationDegrees,
+                            primaryCaptureResult = primaryCaptureResult,
+                            primaryLens = primaryLens
+                        )
                         if (relayFrame != null) {
                             collectedFrames.add(relayFrame)
                         }
@@ -1053,7 +1061,9 @@ class MultiCameraCaptureManager(
     @SuppressLint("MissingPermission")
     private suspend fun captureSingleRelayLens(
         lens: PhysicalLensInfo,
-        orientationDegrees: Int
+        orientationDegrees: Int,
+        primaryCaptureResult: TotalCaptureResult? = null,
+        primaryLens: PhysicalLensInfo? = null
     ): PhysicalCapturedFrame? {
         var dev: CameraDevice? = null
         var sess: CameraCaptureSession? = null
@@ -1144,12 +1154,58 @@ class MultiCameraCaptureManager(
                 dngDeferred.complete(null)
             }
 
+            val chars = lens.characteristics ?: cameraManager.getCameraCharacteristics(lens.physicalId)
             val req = device.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE).apply {
                 addTarget(jpegReader.surface)
                 rawReader?.surface?.let { addTarget(it) }
                 set(CaptureRequest.JPEG_ORIENTATION, orientationDegrees)
-                set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
-                set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+
+                // Photometric Exposure Transfer from converged primary preview
+                val primExpTime = primaryCaptureResult?.get(CaptureResult.SENSOR_EXPOSURE_TIME)
+                val primIso = primaryCaptureResult?.get(CaptureResult.SENSOR_SENSITIVITY)
+                val primAperture = primaryCaptureResult?.get(CaptureResult.LENS_APERTURE) ?: 1.8f
+                val relayApertures = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_APERTURES)
+                val relayAperture = relayApertures?.firstOrNull() ?: primAperture
+
+                if (primExpTime != null && primIso != null && primExpTime > 0 && primIso > 0) {
+                    val apertureRatio = relayAperture / primAperture
+                    val targetExposure = (primExpTime.toDouble() * primIso.toDouble()) * (apertureRatio * apertureRatio)
+
+                    val isoRange = chars.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
+                    val expTimeRange = chars.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
+
+                    val targetIso = primIso.coerceIn(isoRange?.lower ?: 100, isoRange?.upper ?: 3200)
+                    val calculatedTime = (targetExposure / targetIso).toLong()
+                    val targetExpTime = calculatedTime.coerceIn(expTimeRange?.lower ?: 100_000L, expTimeRange?.upper ?: 1_000_000_000L)
+
+                    set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
+                    set(CaptureRequest.SENSOR_EXPOSURE_TIME, targetExpTime)
+                    set(CaptureRequest.SENSOR_SENSITIVITY, targetIso)
+                    Log.i(TAG, "Transferred photometric exposure to ${lens.name}: time=${targetExpTime / 1_000_000.0}ms, ISO=$targetIso (from prim: ${primExpTime / 1_000_000.0}ms, ISO=$primIso)")
+                } else {
+                    set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+                    set(CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER, CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER_START)
+                }
+
+                // Focus & AWB Transfer
+                val focusDist = primaryCaptureResult?.get(CaptureResult.LENS_FOCUS_DISTANCE)
+                if (focusDist != null && focusDist > 0f) {
+                    set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF)
+                    set(CaptureRequest.LENS_FOCUS_DISTANCE, focusDist)
+                } else {
+                    set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
+                    set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_START)
+                }
+
+                val awbGains = primaryCaptureResult?.get(CaptureResult.COLOR_CORRECTION_GAINS)
+                val awbTransform = primaryCaptureResult?.get(CaptureResult.COLOR_CORRECTION_TRANSFORM)
+                if (awbGains != null && awbTransform != null) {
+                    set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_OFF)
+                    set(CaptureRequest.COLOR_CORRECTION_GAINS, awbGains)
+                    set(CaptureRequest.COLOR_CORRECTION_TRANSFORM, awbTransform)
+                } else {
+                    set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO)
+                }
             }
 
             session.capture(req.build(), object : CameraCaptureSession.CaptureCallback() {
