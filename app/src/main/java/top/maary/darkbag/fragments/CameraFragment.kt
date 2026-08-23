@@ -1051,6 +1051,10 @@ class CameraFragment : Fragment() {
                 )
                 val saveRaw = prefs.getBoolean(SettingsFragment.KEY_MULTI_CAMERA_SAVE_RAW, false)
 
+                lifecycleScope.launch(Dispatchers.Main) {
+                    initLensControls()
+                }
+
                 lutProcessor?.getInputSurface(1440, 1080) { previewSurface ->
                     lifecycleScope.launch(Dispatchers.Main) {
                         if (!isAdded) return@launch
@@ -2587,10 +2591,15 @@ class CameraFragment : Fragment() {
         else
             android.hardware.camera2.CameraCharacteristics.LENS_FACING_FRONT
 
-        val filteredLenses = availableLenses.filter { it.facing == repoFacing }.filter {
-            !it.isZoomPreset || it.sensorId.contains("virtual-2x")
-        }.filter {
-            !it.sensorId.contains(CameraRepository.VIRTUAL_TELE_2X_SUFFIX)
+        val filteredLenses = if (isMultiCameraModeActive) {
+            val physical = availableLenses.filter { it.facing == repoFacing && !it.isLogicalAuto && !it.isZoomPreset }
+            if (physical.isNotEmpty()) physical else availableLenses.filter { it.facing == repoFacing && !it.isZoomPreset }
+        } else {
+            availableLenses.filter { it.facing == repoFacing }.filter {
+                !it.isZoomPreset || it.sensorId.contains("virtual-2x")
+            }.filter {
+                !it.sensorId.contains(CameraRepository.VIRTUAL_TELE_2X_SUFFIX)
+            }
         }
 
         // Populate lens controls if any are available
@@ -2682,6 +2691,7 @@ class CameraFragment : Fragment() {
             }
         }
         updateLensUI()
+        applyUIVisibility()
     }
 
     private fun updateLensUI() {
