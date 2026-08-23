@@ -99,7 +99,8 @@ class MultiCameraCaptureManager(
         countPref: MultiCameraCountPreference,
         pairPref: DualLensPairPreference,
         targetPreviewSurface: Surface,
-        saveRaw: Boolean = false
+        saveRaw: Boolean = false,
+        initialLensMultiplier: Float? = null
     ) = lock.withLock {
         ensureThread()
         closeInternal()
@@ -118,7 +119,13 @@ class MultiCameraCaptureManager(
             maxHardwareSupported = 3
         )
         activeLenses = initialCandidates
-        Log.i(TAG, "Configuring MultiCamera with hardwareType=${logicalInfo.hardwareType}, lenses=${activeLenses.map { it.name }}, saveRaw=$saveRaw")
+        if (initialLensMultiplier != null) {
+            currentPrimaryLens = activeLenses.minByOrNull { kotlin.math.abs(it.multiplier - initialLensMultiplier) }
+        }
+        if (currentPrimaryLens == null) {
+            currentPrimaryLens = activeLenses.find { it.type == LensType.WIDE } ?: activeLenses.firstOrNull()
+        }
+        Log.i(TAG, "Configuring MultiCamera with hardwareType=${logicalInfo.hardwareType}, lenses=${activeLenses.map { it.name }}, primary=${currentPrimaryLens?.name}, saveRaw=$saveRaw")
 
         when (logicalInfo.hardwareType) {
             MultiCameraHardwareType.NATIVE_LOGICAL -> {
@@ -128,7 +135,7 @@ class MultiCameraCaptureManager(
                 openConcurrentStandaloneSessions(activeLenses, targetPreviewSurface, saveRaw)
             }
             MultiCameraHardwareType.FAST_RELAY_BURST, MultiCameraHardwareType.NONE -> {
-                openRelayPrimarySession(logicalInfo, targetPreviewSurface, isInitialConfig = true)
+                openRelayPrimarySession(logicalInfo, targetPreviewSurface, targetLens = currentPrimaryLens, isInitialConfig = true)
             }
         }
     }
@@ -517,6 +524,7 @@ class MultiCameraCaptureManager(
                 }
             }
             session.setRepeatingRequest(requestBuilder.build(), null, cameraHandler)
+            triggerFast3AWarmup(dev, session, surface, lens)
             Log.i(TAG, "Switched primary preview lens to: ${lens.name} (${lens.multiplier}x)")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to switch primary preview lens", e)
@@ -528,18 +536,67 @@ class MultiCameraCaptureManager(
             if (currentPrimaryLens == null) {
                 currentPrimaryLens = activeLenses.find { it.type == LensType.WIDE } ?: activeLenses.firstOrNull()
             }
+            val prim = currentPrimaryLens
+            val chars = cameraManager.getCameraCharacteristics(device.id)
             val requestBuilder = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
                 addTarget(targetPreviewSurface)
                 set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
                 set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
-                val prim = currentPrimaryLens
-                if (prim != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    set(CaptureRequest.CONTROL_ZOOM_RATIO, prim.multiplier)
+                if (prim != null) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        val zoomRange = chars.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
+                        if (zoomRange != null) {
+                            val clampedRatio = prim.multiplier.coerceIn(zoomRange.lower, zoomRange.upper)
+                            set(CaptureRequest.CONTROL_ZOOM_RATIO, clampedRatio)
+                        }
+                    }
+                    val activeArray = chars.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
+                    if (activeArray != null && prim.multiplier >= 1.0f) {
+                        val cropW = (activeArray.width() / prim.multiplier).toInt()
+                        val cropH = (activeArray.height() / prim.multiplier).toInt()
+                        val cropRect = android.graphics.Rect(
+                            activeArray.centerX() - cropW / 2,
+                            activeArray.centerY() - cropH / 2,
+                            activeArray.centerX() + cropW / 2,
+                            activeArray.centerY() + cropH / 2
+                        )
+                        set(CaptureRequest.SCALER_CROP_REGION, cropRect)
+                    }
                 }
             }
             session.setRepeatingRequest(requestBuilder.build(), null, cameraHandler)
+            triggerFast3AWarmup(device, session, targetPreviewSurface, prim)
+            Log.i(TAG, "Started repeating preview with lens: ${prim?.name}")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start repeating preview", e)
+        }
+    }
+
+    private fun triggerFast3AWarmup(
+        device: CameraDevice,
+        session: CameraCaptureSession,
+        targetPreviewSurface: Surface,
+        lens: PhysicalLensInfo?
+    ) {
+        try {
+            val chars = cameraManager.getCameraCharacteristics(device.id)
+            val triggerReq = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
+                addTarget(targetPreviewSurface)
+                set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
+                set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+                set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_START)
+                set(CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER, CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER_START)
+                if (lens != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    val zoomRange = chars.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
+                    if (zoomRange != null) {
+                        set(CaptureRequest.CONTROL_ZOOM_RATIO, lens.multiplier.coerceIn(zoomRange.lower, zoomRange.upper))
+                    }
+                }
+            }
+            session.capture(triggerReq.build(), null, cameraHandler)
+            Log.i(TAG, "Fast 3A (AF/AE) warmup triggered on camera ${device.id} for lens ${lens?.name}")
+        } catch (e: Exception) {
+            Log.w(TAG, "Fast 3A warmup skipped: ${e.message}")
         }
     }
 

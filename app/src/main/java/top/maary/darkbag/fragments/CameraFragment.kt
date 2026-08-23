@@ -1074,7 +1074,8 @@ class CameraFragment : Fragment() {
                             countPref = countPref,
                             pairPref = pairPref,
                             targetPreviewSurface = previewSurface,
-                            saveRaw = saveRaw
+                            saveRaw = saveRaw,
+                            initialLensMultiplier = currentLens?.multiplier
                         )
                     }
                 }
