@@ -128,7 +128,7 @@ class MultiCameraCaptureManager(
                 openConcurrentStandaloneSessions(activeLenses, targetPreviewSurface, saveRaw)
             }
             MultiCameraHardwareType.FAST_RELAY_BURST, MultiCameraHardwareType.NONE -> {
-                openRelayPrimarySession(logicalInfo, targetPreviewSurface)
+                openRelayPrimarySession(logicalInfo, targetPreviewSurface, isInitialConfig = true)
             }
         }
     }
@@ -216,7 +216,7 @@ class MultiCameraCaptureManager(
             currentLogicalInfo = fallbackInfo
             scope.launch {
                 closeInternal()
-                openRelayPrimarySession(fallbackInfo, targetPreviewSurface)
+                openRelayPrimarySession(fallbackInfo, targetPreviewSurface, isInitialConfig = true)
             }
         }
     }
@@ -273,7 +273,7 @@ class MultiCameraCaptureManager(
                     currentLogicalInfo = fallbackInfo
                     scope.launch {
                         closeInternal()
-                        openRelayPrimarySession(fallbackInfo, targetPreviewSurface)
+                        openRelayPrimarySession(fallbackInfo, targetPreviewSurface, isInitialConfig = true)
                     }
                 }
             }
@@ -375,11 +375,23 @@ class MultiCameraCaptureManager(
     private suspend fun openRelayPrimarySession(
         logicalInfo: LogicalMultiCameraInfo,
         targetPreviewSurface: Surface,
-        targetLens: PhysicalLensInfo? = null
+        targetLens: PhysicalLensInfo? = null,
+        isInitialConfig: Boolean = false
     ) {
         val primaryLens = targetLens ?: currentPrimaryLens ?: activeLenses.find { it.type == LensType.WIDE } ?: activeLenses.firstOrNull()
         currentPrimaryLens = primaryLens
         val primaryId = primaryLens?.physicalId ?: logicalInfo.logicalCameraId
+
+        // Close previous session and device cleanly before switching
+        try {
+            captureSession?.close()
+            captureSession = null
+            cameraDevice?.close()
+            cameraDevice = null
+        } catch (e: Exception) {
+            Log.w(TAG, "Error closing previous session during relay switch", e)
+        }
+
         val openDeferred = CompletableDeferred<CameraDevice>()
 
         try {
@@ -398,7 +410,9 @@ class MultiCameraCaptureManager(
                     if (!openDeferred.isCompleted) {
                         openDeferred.completeExceptionally(RuntimeException("Camera open error: $error"))
                     }
-                    onSessionFailedListener?.invoke("Camera open error: $error")
+                    if (isInitialConfig) {
+                        onSessionFailedListener?.invoke("Camera open error: $error")
+                    }
                 }
             })
 
@@ -432,7 +446,10 @@ class MultiCameraCaptureManager(
                     }
 
                     override fun onConfigureFailed(session: CameraCaptureSession) {
-                        onSessionFailedListener?.invoke("Relay preview configuration failed")
+                        Log.w(TAG, "Relay preview configuration failed on $primaryId")
+                        if (isInitialConfig) {
+                            onSessionFailedListener?.invoke("Relay preview configuration failed")
+                        }
                     }
                 }
             )
@@ -441,7 +458,9 @@ class MultiCameraCaptureManager(
         } catch (e: Exception) {
             Log.e(TAG, "Failed to open relay primary session", e)
             closeInternal()
-            onSessionFailedListener?.invoke(e.message ?: "Failed to open relay session")
+            if (isInitialConfig) {
+                onSessionFailedListener?.invoke(e.message ?: "Failed to open relay session")
+            }
         }
     }
 
