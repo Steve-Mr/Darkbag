@@ -86,6 +86,28 @@ class ImageViewerAdapter(
         var currentUri: Uri? = null
         var currentBaseName: String? = null
         var currentVersion: Long = 0L
+        val videoOutlineRect = android.graphics.Rect()
+        var videoOutlineRadius = 0f
+
+        init {
+            binding.videoView.clipToOutline = true
+            binding.videoView.outlineProvider = object : android.view.ViewOutlineProvider() {
+                override fun getOutline(view: View, outline: android.graphics.Outline) {
+                    outline.setRoundRect(videoOutlineRect, videoOutlineRadius)
+                }
+            }
+        }
+    }
+
+    fun updateSingleGroup(updatedGroup: ImageGroup, onComplete: (() -> Unit)? = null) {
+        val currentList = differ.currentList.toMutableList()
+        val index = currentList.indexOfFirst { it.baseName == updatedGroup.baseName }
+        if (index != -1) {
+            currentList[index] = updatedGroup
+            differ.submitList(currentList, onComplete)
+        } else {
+            onComplete?.invoke()
+        }
     }
 
     override fun onAttachedToRecyclerView(recyclerView: RecyclerView) {
@@ -486,10 +508,17 @@ class ImageViewerAdapter(
 
         holder.extractJob = scope.launch {
             val videoFile = withContext(Dispatchers.IO) {
+                val info = if (group.motionPhotoVideoLength > 0) {
+                    top.maary.darkbag.motionphoto.MotionPhotoInfo(
+                        videoLength = group.motionPhotoVideoLength,
+                        presentationTimestampUs = group.motionPhotoPtsUs
+                    )
+                } else null
                 top.maary.darkbag.motionphoto.MotionPhotoReader.extractVideoToCache(
                     context,
                     group.jpgUri,
-                    group.baseName
+                    group.baseName,
+                    info
                 )
             }
             ensureActive()
@@ -565,18 +594,13 @@ class ImageViewerAdapter(
         matrix.postTranslate(rect.left, rect.top)
         videoView.setTransform(matrix)
 
-        videoView.clipToOutline = true
-        videoView.outlineProvider = object : android.view.ViewOutlineProvider() {
-            override fun getOutline(view: View, outline: android.graphics.Outline) {
-                outline.setRoundRect(
-                    rect.left.toInt(),
-                    rect.top.toInt(),
-                    rect.right.toInt(),
-                    rect.bottom.toInt(),
-                    radius
-                )
-            }
-        }
+        holder.videoOutlineRect.set(
+            rect.left.toInt(),
+            rect.top.toInt(),
+            rect.right.toInt(),
+            rect.bottom.toInt()
+        )
+        holder.videoOutlineRadius = radius
         videoView.invalidateOutline()
     }
 

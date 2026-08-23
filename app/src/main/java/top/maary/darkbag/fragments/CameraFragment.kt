@@ -236,6 +236,20 @@ class CameraFragment : Fragment() {
 
     private var isOisSupported = false
     private var isHdrOisEnabledPref = true
+    private var currentThumbnailUri: android.net.Uri? = null
+    private var currentThumbnailTimestamp: Long = 0L
+
+    private fun updateCurrentThumbnail(uri: android.net.Uri?, timestamp: Long = System.currentTimeMillis()) {
+        if (uri == null) {
+            currentThumbnailUri = null
+            currentThumbnailTimestamp = timestamp
+            return
+        }
+        if (timestamp >= currentThumbnailTimestamp) {
+            currentThumbnailUri = uri
+            currentThumbnailTimestamp = timestamp
+        }
+    }
 
     private fun scopedHalfFrameStepKey(prefs: SharedPreferences): String =
         halfFrameSessionStore.scopedStepKeyForCurrentProfile()
@@ -546,6 +560,7 @@ class CameraFragment : Fragment() {
 
         photoViewButton.post {
             if (filename == null) {
+                updateCurrentThumbnail(null)
                 photoViewButton.setImageDrawable(null)
                 // In half-frame mode or during processing, we keep the container visible but hide the button
                 if (isHalfFrameModeEnabled || isProcessing) {
@@ -556,14 +571,18 @@ class CameraFragment : Fragment() {
                 return@post
             }
 
-            // In half-frame mode, only show the thumbnail if we are at step 0 (idle) and not processing
+            try {
+                updateCurrentThumbnail(android.net.Uri.parse(filename))
+            } catch (_: Exception) {}
+
+            // In half-frame mode, control visibility based on idle state, but do not block loading
             if (isHalfFrameModeEnabled && (halfFrameStep != 0 || isProcessing)) {
                 photoViewButton.visibility = View.INVISIBLE
-                return@post
+            } else {
+                photoViewButton.visibility = View.VISIBLE
+                photoViewButton.alpha = 1f
             }
 
-            photoViewButton.visibility = View.VISIBLE
-            photoViewButton.alpha = 1f
             // Remove thumbnail padding
             photoViewButton.setPadding(resources.getDimension(R.dimen.stroke_small).toInt())
 
@@ -1280,8 +1299,12 @@ class CameraFragment : Fragment() {
         lifecycleScope.launch {
             val context = requireContext()
             val thumbnailUri = mediaStoreUtils.getLatestAppImage()
-            thumbnailUri?.let {
-                setGalleryThumbnail(it.toString())
+            if (thumbnailUri != null) {
+                updateCurrentThumbnail(thumbnailUri)
+                setGalleryThumbnail(thumbnailUri.toString())
+            } else {
+                updateCurrentThumbnail(null)
+                setGalleryThumbnail(null)
             }
             // Warm ImageViewer data cache so first entry is faster.
             kotlin.runCatching {
@@ -1638,7 +1661,7 @@ class CameraFragment : Fragment() {
         cameraUiContainerBinding?.photoViewButton?.setOnClickListener {
             // Only navigate when the gallery has photos
             lifecycleScope.launch {
-                val uri = mediaStoreUtils.getLatestAppImage()
+                val uri = currentThumbnailUri ?: mediaStoreUtils.getLatestAppImage()
                 if (uri != null) {
                     val safeContext = context ?: return@launch
                     val prefs = safeContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)

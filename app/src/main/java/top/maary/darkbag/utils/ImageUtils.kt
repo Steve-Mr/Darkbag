@@ -126,8 +126,9 @@ object ImageUtils {
                     options.inJustDecodeBounds = false
                     bitmap = BitmapFactory.decodeFileDescriptor(pfd.fileDescriptor, null, options)
                 }
-                bitmap = bitmap?.let { rotateBitmap(it, orientation) }
             }
+
+            bitmap = bitmap?.let { rotateBitmap(it, orientation) }
 
             return@withContext if (bitmap != null && zoomFactor > 1.05f) {
                 val newWidth = (bitmap.width / zoomFactor).toInt()
