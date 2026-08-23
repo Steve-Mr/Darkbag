@@ -231,6 +231,8 @@ class CameraFragment : Fragment() {
     private var isHalfFrameModeEnabled = false
     private var isMultiCameraModeActive = false
     private var multiCameraManager: top.maary.darkbag.camera.MultiCameraCaptureManager? = null
+    private var concurrentFrontCameraManager: top.maary.darkbag.camera.ConcurrentFrontCameraManager? = null
+    private var isFrontPipActive = false
     private var halfFrameStep = 0
     private var halfFrameTempPath: String? = null
     private lateinit var halfFrameSessionStore: HalfFrameSessionStore
@@ -1663,6 +1665,11 @@ class CameraFragment : Fragment() {
 
             // Listener for button used to switch cameras. Only called if the button is enabled
             it.setOnClickListener {
+                if (isMultiCameraModeActive) {
+                    toggleFrontPipInMultiCameraMode()
+                    return@setOnClickListener
+                }
+
                 lensFacing = if (CameraSelector.LENS_FACING_FRONT == lensFacing) {
                     CameraSelector.LENS_FACING_BACK
                 } else {
@@ -4177,6 +4184,61 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         }
     }
 
+    private fun toggleFrontPipInMultiCameraMode() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R || !top.maary.darkbag.utils.MultiCameraHelper.isConcurrentFrontBackSupported(requireContext())) {
+            Toast.makeText(requireContext(), R.string.concurrent_front_camera_unsupported, Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val binding = _fragmentCameraBinding ?: return
+        val pipContainer = binding.pipContainer ?: return
+        val pipViewFinder = binding.pipViewFinder ?: return
+        val switchBtn = binding.cameraSwitchButtonAlt ?: return
+
+        isFrontPipActive = !isFrontPipActive
+        if (isFrontPipActive) {
+            pipContainer.visibility = View.VISIBLE
+            val onPrimary = MaterialColors.getColor(switchBtn, com.google.android.material.R.attr.colorOnPrimaryContainer)
+            val primaryContainer = MaterialColors.getColor(switchBtn, com.google.android.material.R.attr.colorPrimaryContainer)
+            switchBtn.iconTint = ColorStateList.valueOf(onPrimary)
+            switchBtn.backgroundTintList = ColorStateList.valueOf(primaryContainer)
+
+            if (concurrentFrontCameraManager == null) {
+                concurrentFrontCameraManager = top.maary.darkbag.camera.ConcurrentFrontCameraManager(
+                    requireContext(),
+                    viewLifecycleOwner.lifecycleScope
+                )
+            }
+
+            if (pipViewFinder.isAvailable) {
+                viewLifecycleOwner.lifecycleScope.launch {
+                    concurrentFrontCameraManager?.startFrontPreview(pipViewFinder)
+                }
+            } else {
+                pipViewFinder.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
+                    override fun onSurfaceTextureAvailable(st: SurfaceTexture, w: Int, h: Int) {
+                        viewLifecycleOwner.lifecycleScope.launch {
+                            concurrentFrontCameraManager?.startFrontPreview(pipViewFinder)
+                        }
+                    }
+                    override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, w: Int, h: Int) {}
+                    override fun onSurfaceTextureDestroyed(st: SurfaceTexture): Boolean = true
+                    override fun onSurfaceTextureUpdated(st: SurfaceTexture) {}
+                }
+            }
+        } else {
+            pipContainer.visibility = View.GONE
+            val onSurface = MaterialColors.getColor(switchBtn, com.google.android.material.R.attr.colorOnSurface)
+            val surfaceContainer = MaterialColors.getColor(switchBtn, com.google.android.material.R.attr.colorSurfaceContainerHighest)
+            switchBtn.iconTint = ColorStateList.valueOf(onSurface)
+            switchBtn.backgroundTintList = ColorStateList.valueOf(surfaceContainer)
+
+            viewLifecycleOwner.lifecycleScope.launch {
+                concurrentFrontCameraManager?.stop()
+            }
+        }
+    }
+
     private fun takeMultiCameraPicture(timing: StandardTimingTracker? = null) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
             processingSemaphore.release()
@@ -4196,12 +4258,22 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         val saveRaw = prefs.getBoolean(SettingsFragment.KEY_MULTI_CAMERA_SAVE_RAW, false)
         val isHdrPlusActive = isHdrPlusEnabled && isRawSupported
 
+        val frontJpegDeferred = CompletableDeferred<ByteArray?>()
+        if (isFrontPipActive && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            concurrentFrontCameraManager?.captureFrontJpeg(orientation) { data ->
+                frontJpegDeferred.complete(data)
+            }
+        } else {
+            frontJpegDeferred.complete(null)
+        }
+
         manager.captureMultiCamera(
             orientationDegrees = orientation,
             isHdrPlusActive = isHdrPlusActive,
             onResult = { result ->
                 lifecycleScope.launch(Dispatchers.IO) {
-                    processAndSaveMultiCameraResult(result, saveRaw)
+                    val frontJpeg = withTimeoutOrNull(2000L) { frontJpegDeferred.await() }
+                    processAndSaveMultiCameraResult(result, saveRaw, frontJpeg)
                 }
             },
             onError = { errorMsg ->
@@ -4217,7 +4289,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
     private suspend fun processAndSaveMultiCameraResult(
         result: top.maary.darkbag.camera.MultiCameraCaptureResult,
-        saveRaw: Boolean
+        saveRaw: Boolean,
+        frontJpegData: ByteArray? = null
     ) {
         val appContext = requireContext().applicationContext
         val prefs = appContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
@@ -4328,6 +4401,30 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 } else if (!saveRaw && frame.tempDngPath != null) {
                     // Clean up temporary DNG file if user didn't request saving RAW
                     try { File(frame.tempDngPath).delete() } catch (e: Exception) {}
+                }
+            }
+
+            // 5. Save Front PiP JPEG if captured
+            if (frontJpegData != null) {
+                val frontBaseName = "${result.baseName}_MULTI_Front"
+                val frontFile = File(appContext.cacheDir, "temp_${frontBaseName}.jpg")
+                FileOutputStream(frontFile).use { it.write(frontJpegData) }
+                val frontUri = ImageSaver.saveProcessedImage(
+                    context = appContext,
+                    inputBitmap = null,
+                    bmpPath = frontFile.absolutePath,
+                    rotationDegrees = 0,
+                    zoomFactor = 1.0f,
+                    baseName = frontBaseName,
+                    linearDngPath = null,
+                    saveJpg = true,
+                    saveRaw = false,
+                    jpgFolderUri = jpgFolderUri,
+                    editConfig = currentEditConfig,
+                    captureMetadata = null
+                )
+                if (primarySavedUri == null && frontUri != null) {
+                    primarySavedUri = frontUri
                 }
             }
 
@@ -4736,6 +4833,11 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 multiCameraManager?.close()
                 multiCameraManager = null
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                concurrentFrontCameraManager?.stop()
+                concurrentFrontCameraManager = null
+                isFrontPipActive = false
             }
             camera2Session?.close()
             camera2Session = null

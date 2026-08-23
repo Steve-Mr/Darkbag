@@ -59,6 +59,27 @@ data class LogicalMultiCameraInfo(
 object MultiCameraHelper {
     private const val TAG = "MultiCameraHelper"
 
+    fun isConcurrentFrontBackSupported(context: Context): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return false
+        val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as? CameraManager ?: return false
+        return try {
+            val concurrentSets = cameraManager.concurrentCameraIds
+            concurrentSets.any { set ->
+                var hasBack = false
+                var hasFront = false
+                for (id in set) {
+                    val facing = cameraManager.getCameraCharacteristics(id).get(CameraCharacteristics.LENS_FACING)
+                    if (facing == CameraCharacteristics.LENS_FACING_BACK) hasBack = true
+                    if (facing == CameraCharacteristics.LENS_FACING_FRONT) hasFront = true
+                }
+                hasBack && hasFront
+            }
+        } catch (e: Throwable) {
+            Log.w(TAG, "Failed to query concurrentCameraIds", e)
+            false
+        }
+    }
+
     fun getLogicalMultiCameraInfo(
         context: Context,
         facing: Int = CameraCharacteristics.LENS_FACING_BACK
