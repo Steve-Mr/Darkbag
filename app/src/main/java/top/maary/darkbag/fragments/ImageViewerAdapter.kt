@@ -6,6 +6,7 @@ import android.net.Uri
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.LinearLayout
 import androidx.core.view.updateLayoutParams
 import androidx.recyclerview.widget.AsyncListDiffer
 import androidx.recyclerview.widget.DiffUtil
@@ -325,19 +326,31 @@ class ImageViewerAdapter(
                 }
             }
 
-            // 3. Multi-Camera Lens Switcher setup
+            // 3. Multi-Camera Lens Switcher setup (MD3 Connected Button Group)
             val multiCamContainer = multiCameraToggleContainer
             val multiCamGroup = multiCameraToggleGroup
             if (group.isMultiCamera && lenses.size >= 2 && !isFormatSwitcherPersistentHidden) {
                 multiCamContainer.visibility = if (isUiVisible) View.VISIBLE else View.GONE
-                multiCamGroup.clearOnButtonCheckedListeners()
                 multiCamGroup.removeAllViews()
 
                 val activeIndex = (selectedLensIndices[group.baseName] ?: 0).coerceIn(0, lenses.size - 1)
+                val density = holder.itemView.context.resources.displayMetrics.density
+                val outerRadius = 17f * density
+                val innerRadius = 6f * density
+                val n = lenses.size
 
                 for (i in lenses.indices) {
                     val lens = lenses[i]
                     val context = holder.itemView.context
+                    val isChecked = (i == activeIndex)
+
+                    val shapeAppearance = com.google.android.material.shape.ShapeAppearanceModel.builder()
+                        .setTopLeftCorner(com.google.android.material.shape.CornerFamily.ROUNDED, if (i == 0) outerRadius else innerRadius)
+                        .setBottomLeftCorner(com.google.android.material.shape.CornerFamily.ROUNDED, if (i == 0) outerRadius else innerRadius)
+                        .setTopRightCorner(com.google.android.material.shape.CornerFamily.ROUNDED, if (i == n - 1) outerRadius else innerRadius)
+                        .setBottomRightCorner(com.google.android.material.shape.CornerFamily.ROUNDED, if (i == n - 1) outerRadius else innerRadius)
+                        .build()
+
                     val button = com.google.android.material.button.MaterialButton(
                         context,
                         null,
@@ -346,6 +359,7 @@ class ImageViewerAdapter(
                         id = View.generateViewId()
                         text = lens.lensTag
                         isCheckable = true
+                        this.isChecked = isChecked
                         minWidth = 0
                         minimumWidth = 0
                         minHeight = 0
@@ -353,37 +367,40 @@ class ImageViewerAdapter(
                         insetTop = 0
                         insetBottom = 0
                         strokeWidth = 0
-                        cornerRadius = (16 * context.resources.displayMetrics.density).toInt()
-                        textSize = 12.5f
+                        shapeAppearanceModel = shapeAppearance
+                        textSize = 13f
                         typeface = android.graphics.Typeface.DEFAULT_BOLD
                         backgroundTintList = androidx.core.content.ContextCompat.getColorStateList(context, R.color.multi_camera_lens_bg_tint)
                         setTextColor(androidx.core.content.ContextCompat.getColorStateList(context, R.color.multi_camera_lens_text_color))
                         rippleColor = androidx.core.content.ContextCompat.getColorStateList(context, R.color.multi_camera_lens_ripple_color)
-                        val padH = (12 * context.resources.displayMetrics.density).toInt()
-                        val padV = (5 * context.resources.displayMetrics.density).toInt()
+                        val padH = (16 * density).toInt()
+                        val padV = (6 * density).toInt()
                         setPadding(padH, padV, padH, padV)
-                    }
-                    multiCamGroup.addView(button)
-                    if (i == activeIndex) {
-                        multiCamGroup.check(button.id)
-                    }
-                }
 
-                multiCamGroup.addOnButtonCheckedListener { _, checkedId, isChecked ->
-                    if (isChecked) {
-                        val newIndex = (0 until multiCamGroup.childCount)
-                            .indexOfFirst { multiCamGroup.getChildAt(it).id == checkedId }
-                        if (newIndex != -1 && newIndex != (selectedLensIndices[group.baseName] ?: 0)) {
-                            selectedLensIndices[group.baseName] = newIndex
-                            val currentPos = holder.bindingAdapterPosition
-                            if (currentPos != RecyclerView.NO_POSITION) {
-                                onMultiCameraLensChanged?.invoke(currentPos, newIndex)
+                        val lp = LinearLayout.LayoutParams(
+                            ViewGroup.LayoutParams.WRAP_CONTENT,
+                            ViewGroup.LayoutParams.WRAP_CONTENT
+                        ).apply {
+                            if (i < n - 1) {
+                                marginEnd = (2 * density).toInt()
                             }
-                            setupButtons(holder, group)
-                            val currentFmt = selectedFormats[group.baseName] ?: getSelectedFormat(group)
-                            loadSelectedFormat(holder, group, currentFmt)
+                        }
+                        layoutParams = lp
+
+                        setOnClickListener {
+                            if (selectedLensIndices[group.baseName] != i) {
+                                selectedLensIndices[group.baseName] = i
+                                val currentPos = holder.bindingAdapterPosition
+                                if (currentPos != RecyclerView.NO_POSITION) {
+                                    onMultiCameraLensChanged?.invoke(currentPos, i)
+                                }
+                                setupButtons(holder, group)
+                                val currentFmt = selectedFormats[group.baseName] ?: getSelectedFormat(group)
+                                loadSelectedFormat(holder, group, currentFmt)
+                            }
                         }
                     }
+                    multiCamGroup.addView(button)
                 }
             } else {
                 multiCamContainer.visibility = View.GONE

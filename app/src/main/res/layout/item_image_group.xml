@@ -91,12 +91,12 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent">
 
-        <com.google.android.material.button.MaterialButtonToggleGroup
+        <LinearLayout
             android:id="@+id/multiCameraToggleGroup"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            app:singleSelection="true"
-            app:selectionRequired="true" />
+            android:orientation="horizontal"
+            android:gravity="center" />
     </FrameLayout>
 
 </androidx.constraintlayout.widget.ConstraintLayout>
