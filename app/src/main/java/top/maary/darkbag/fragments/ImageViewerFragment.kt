@@ -1521,12 +1521,14 @@ open class ImageViewerFragment : Fragment() {
                     }
 
                     val finalBitmap: android.graphics.Bitmap? = if (currentGroup.isMultiCamera) {
-                        for (i in currentGroup.multiDngUris.indices) {
-                            val dngUri = currentGroup.multiDngUris[i]
+                        val lenses = if (currentGroup.multiCameraLenses.isNotEmpty()) currentGroup.multiCameraLenses else adapter.getMultiCameraLenses(currentGroup)
+                        for (i in lenses.indices) {
+                            val lens = lenses[i]
+                            val dngUri = lens.dngUri ?: continue
                             val bmp = processFull(null, dngUri, i)
                             if (bmp != null) {
-                                val jpgUri = currentGroup.multiJpgUris.getOrNull(i)
-                                val fileName = if (jpgUri != null) getFileName(context, jpgUri).substringBeforeLast(".") else "${currentGroup.baseName}_MULTI_${i}"
+                                val jpgUri = lens.jpgUri
+                                val fileName = if (jpgUri != null) getFileName(context, jpgUri).substringBeforeLast(".") else "${currentGroup.baseName}_MULTI_${lens.lensTag}"
                                 val baseName = if (isReplacement) fileName else "${fileName}_edited_${System.currentTimeMillis()}"
                                 val targetUri = if (isReplacement) jpgUri else null
                                 val jpgFolderUri = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
@@ -1543,10 +1545,9 @@ open class ImageViewerFragment : Fragment() {
                                     linearDngPath = null,
                                     saveJpg = true,
                                     saveRaw = false,
+                                    jpgFolderUri = jpgFolderUri,
                                     targetUri = targetUri,
-                                    jpgFolderUri = if (isReplacement) null else jpgFolderUri,
-                                    editConfig = finalConfig,
-                                    isAlreadyStitched = true,
+                                    editConfig = config,
                                     captureMetadata = captureMetadata
                                 )
                                 bmp.recycle()

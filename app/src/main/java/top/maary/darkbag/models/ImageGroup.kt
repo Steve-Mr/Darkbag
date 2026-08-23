@@ -25,9 +25,10 @@ data class ImageGroup(
     val motionPhotoVideoLength: Long = 0L,
     val isMultiCamera: Boolean = false,
     val multiJpgUris: List<Uri> = emptyList(),
-    val multiDngUris: List<Uri> = emptyList()
+    val multiDngUris: List<Uri> = emptyList(),
+    val multiCameraLenses: List<MultiCameraLensItem> = emptyList()
 ) : Parcelable {
-    fun hasAny(): Boolean = jpgUri != null || dngUri != null || dngUri1 != null || dngUri2 != null || multiJpgUris.isNotEmpty() || multiDngUris.isNotEmpty()
+    fun hasAny(): Boolean = jpgUri != null || dngUri != null || dngUri1 != null || dngUri2 != null || multiJpgUris.isNotEmpty() || multiDngUris.isNotEmpty() || multiCameraLenses.isNotEmpty()
 
     // 2.5: Only true if it has both DNGs, a stitched JPG, or an explicit layout.
     // If only dngUri1 exists and no jpg, it's NOT a half-frame group (shows as single image).
@@ -74,4 +75,12 @@ data class BasicAdjustments(
     val whites: Float = 0f,
     val blacks: Float = 0f,
     val digitalGain: Float = 1.0f
+) : Parcelable
+
+@Parcelize
+data class MultiCameraLensItem(
+    val lensTag: String,
+    val multiplier: Float,
+    val jpgUri: Uri? = null,
+    val dngUri: Uri? = null
 ) : Parcelable

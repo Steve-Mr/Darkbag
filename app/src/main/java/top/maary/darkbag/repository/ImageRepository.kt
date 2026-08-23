@@ -250,13 +250,13 @@ class ImageRepository(private val context: Context) {
 
                         when {
                             name.contains("_MULTI_") && (name.endsWith(".jpg", ignoreCase = true) || name.endsWith(".jpeg", ignoreCase = true)) -> {
-                                builder.addMultiJpg(docUri, lastModified)
+                                builder.addMultiJpg(docUri, name, lastModified)
                                 if (!fast) {
                                     readExifForScanning(docUri, builder)
                                 }
                             }
                             name.contains("_MULTI_") && name.endsWith(".dng", ignoreCase = true) -> {
-                                builder.addMultiDng(docUri, lastModified)
+                                builder.addMultiDng(docUri, name, lastModified)
                             }
                             name.endsWith(".jpg", ignoreCase = true) || name.endsWith(".jpeg", ignoreCase = true) -> {
                                 builder.setJpg(docUri, lastModified)
@@ -292,13 +292,13 @@ class ImageRepository(private val context: Context) {
 
                     when {
                         name.contains("_MULTI_") && (name.endsWith(".jpg", ignoreCase = true) || name.endsWith(".jpeg", ignoreCase = true)) -> {
-                            builder.addMultiJpg(file.uri, lastModified)
+                            builder.addMultiJpg(file.uri, name, lastModified)
                             if (!fast) {
                                 readExifForScanning(file.uri, builder)
                             }
                         }
                         name.contains("_MULTI_") && name.endsWith(".dng", ignoreCase = true) -> {
-                            builder.addMultiDng(file.uri, lastModified)
+                            builder.addMultiDng(file.uri, name, lastModified)
                         }
                         name.endsWith(".jpg", ignoreCase = true) || name.endsWith(".jpeg", ignoreCase = true) -> {
                             builder.setJpg(file.uri, lastModified)
@@ -404,13 +404,13 @@ class ImageRepository(private val context: Context) {
 
                 when {
                     name.contains("_MULTI_") && mime == "image/jpeg" -> {
-                        builder.addMultiJpg(uri, date, modified)
+                        builder.addMultiJpg(uri, name, date, modified)
                         if (!fast) {
                             readExifForScanning(uri, builder)
                         }
                     }
                     name.contains("_MULTI_") && (mime == "image/x-adobe-dng" || name.endsWith(".dng", ignoreCase = true)) -> {
-                        builder.addMultiDng(uri, date, modified)
+                        builder.addMultiDng(uri, name, date, modified)
                     }
                     mime == "image/jpeg" -> {
                         builder.setJpg(uri, date, modified)
@@ -597,6 +597,20 @@ class ImageRepository(private val context: Context) {
         return top.maary.darkbag.utils.ImageUtils.getBaseName(fileName)
     }
 
+    private class MultiLensItemBuilder(
+        val lensTag: String,
+        val multiplier: Float,
+        var jpgUri: Uri? = null,
+        var dngUri: Uri? = null
+    ) {
+        fun build(): top.maary.darkbag.models.MultiCameraLensItem = top.maary.darkbag.models.MultiCameraLensItem(
+            lensTag = lensTag,
+            multiplier = multiplier,
+            jpgUri = jpgUri,
+            dngUri = dngUri
+        )
+    }
+
     private inner class ImageGroupBuilder(val baseName: String) {
         var jpgUri: Uri? = null
         var jpgTime: Long = 0L
@@ -606,8 +620,7 @@ class ImageRepository(private val context: Context) {
         var dngUri1Time: Long = 0L
         var dngUri2: Uri? = null
         var dngUri2Time: Long = 0L
-        val multiJpgUris = mutableListOf<Uri>()
-        val multiDngUris = mutableListOf<Uri>()
+        val multiLensBuilders = mutableMapOf<String, MultiLensItemBuilder>()
         var isMultiCamera: Boolean = false
         var hfLayout: String? = null
         var width: Int = 0
@@ -626,10 +639,15 @@ class ImageRepository(private val context: Context) {
             dngUri1 = group.dngUri1
             dngUri2 = group.dngUri2
             isMultiCamera = group.isMultiCamera
-            multiJpgUris.clear()
-            multiJpgUris.addAll(group.multiJpgUris)
-            multiDngUris.clear()
-            multiDngUris.addAll(group.multiDngUris)
+            multiLensBuilders.clear()
+            for (lens in group.multiCameraLenses) {
+                multiLensBuilders[lens.lensTag] = MultiLensItemBuilder(
+                    lensTag = lens.lensTag,
+                    multiplier = lens.multiplier,
+                    jpgUri = lens.jpgUri,
+                    dngUri = lens.dngUri
+                )
+            }
             hfLayout = group.hfLayout
             width = group.width
             height = group.height
@@ -643,27 +661,23 @@ class ImageRepository(private val context: Context) {
             return this
         }
 
-        fun addMultiJpg(uri: Uri, time: Long, modifiedTime: Long = time) {
+        fun addMultiJpg(uri: Uri, fileName: String, time: Long, modifiedTime: Long = time) {
             isMultiCamera = true
-            if (!multiJpgUris.contains(uri)) {
-                multiJpgUris.add(uri)
-            }
-            if (jpgUri == null) {
-                jpgUri = uri
-                jpgTime = time
-            }
+            val tag = top.maary.darkbag.utils.ImageUtils.extractMultiCameraLensTag(fileName)
+            val mult = top.maary.darkbag.utils.ImageUtils.extractMultiCameraMultiplier(fileName)
+            val effectiveTag = if (tag.isNotEmpty()) tag else String.format(java.util.Locale.US, "%.1fx", mult)
+            val item = multiLensBuilders.getOrPut(effectiveTag) { MultiLensItemBuilder(effectiveTag, mult) }
+            item.jpgUri = uri
             updateTime(time, modifiedTime)
         }
 
-        fun addMultiDng(uri: Uri, time: Long, modifiedTime: Long = time) {
+        fun addMultiDng(uri: Uri, fileName: String, time: Long, modifiedTime: Long = time) {
             isMultiCamera = true
-            if (!multiDngUris.contains(uri)) {
-                multiDngUris.add(uri)
-            }
-            if (dngUri == null) {
-                dngUri = uri
-                dngTime = time
-            }
+            val tag = top.maary.darkbag.utils.ImageUtils.extractMultiCameraLensTag(fileName)
+            val mult = top.maary.darkbag.utils.ImageUtils.extractMultiCameraMultiplier(fileName)
+            val effectiveTag = if (tag.isNotEmpty()) tag else String.format(java.util.Locale.US, "%.1fx", mult)
+            val item = multiLensBuilders.getOrPut(effectiveTag) { MultiLensItemBuilder(effectiveTag, mult) }
+            item.dngUri = uri
             updateTime(time, modifiedTime)
         }
 
@@ -736,19 +750,17 @@ class ImageRepository(private val context: Context) {
                 finalLayout = "SBS"
             }
 
-            val sortedJpgs = multiJpgUris.sortedWith(compareBy<Uri> {
-                top.maary.darkbag.utils.ImageUtils.extractMultiCameraMultiplier(it.toString())
-            }.thenBy { it.toString() })
+            val lenses = multiLensBuilders.values
+                .map { it.build() }
+                .sortedWith(compareBy<top.maary.darkbag.models.MultiCameraLensItem> { it.multiplier }.thenBy { it.lensTag })
 
-            val sortedDngs = multiDngUris.sortedWith(compareBy<Uri> {
-                top.maary.darkbag.utils.ImageUtils.extractMultiCameraMultiplier(it.toString())
-            }.thenBy { it.toString() })
+            val sortedJpgs = lenses.mapNotNull { it.jpgUri }
+            val sortedDngs = lenses.mapNotNull { it.dngUri }
 
             val finalJpgUri = if (isMultiCamera && sortedJpgs.isNotEmpty()) {
-                sortedJpgs.find {
-                    val tag = top.maary.darkbag.utils.ImageUtils.extractMultiCameraLensTag(it.toString())
-                    tag == "1.0x" || tag == "1x"
-                } ?: sortedJpgs.first()
+                lenses.find { it.lensTag == "1.0x" || it.lensTag == "1x" }?.jpgUri
+                    ?: sortedJpgs.firstOrNull()
+                    ?: jpgUri
             } else jpgUri
 
             return ImageGroup(
@@ -769,9 +781,10 @@ class ImageRepository(private val context: Context) {
                 isMotionPhoto = isMotionPhoto,
                 motionPhotoPtsUs = motionPhotoPtsUs,
                 motionPhotoVideoLength = motionPhotoVideoLength,
-                isMultiCamera = isMultiCamera || sortedJpgs.isNotEmpty() || sortedDngs.isNotEmpty(),
+                isMultiCamera = isMultiCamera || lenses.isNotEmpty(),
                 multiJpgUris = sortedJpgs,
-                multiDngUris = sortedDngs
+                multiDngUris = sortedDngs,
+                multiCameraLenses = lenses
             )
         }
     }

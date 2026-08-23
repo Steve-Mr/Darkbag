@@ -224,51 +224,30 @@ class ImageViewerAdapter(
         loadSelectedFormat(holder, group, format)
     }
 
-    data class MultiCamLensSlot(
-        val key: String,
-        val label: String,
-        val multiplier: Float,
-        val jpgUri: Uri?,
-        val dngUri: Uri?
-    )
-
-    fun getMultiCamSlots(group: ImageGroup): List<MultiCamLensSlot> {
+    fun getMultiCameraLenses(group: ImageGroup): List<top.maary.darkbag.models.MultiCameraLensItem> {
         if (!group.isMultiCamera) return emptyList()
-
-        val slotMap = linkedMapOf<String, Pair<Uri?, Uri?>>()
-
-        for (uri in group.multiJpgUris) {
-            val tag = top.maary.darkbag.utils.ImageUtils.extractMultiCameraLensTag(uri.toString())
-            val key = if (tag.isNotEmpty()) tag else uri.toString()
-            val current = slotMap[key] ?: Pair(null, null)
-            slotMap[key] = current.copy(first = uri)
+        if (group.multiCameraLenses.isNotEmpty()) {
+            return group.multiCameraLenses
         }
 
-        for (uri in group.multiDngUris) {
-            val tag = top.maary.darkbag.utils.ImageUtils.extractMultiCameraLensTag(uri.toString())
-            val key = if (tag.isNotEmpty()) tag else uri.toString()
-            val current = slotMap[key] ?: Pair(null, null)
-            slotMap[key] = current.copy(second = uri)
-        }
-
-        return slotMap.map { (key, uris) ->
-            val sampleUri = uris.first ?: uris.second!!
-            val mult = top.maary.darkbag.utils.ImageUtils.extractMultiCameraMultiplier(sampleUri.toString())
-
-            val label = if (key.endsWith("x", ignoreCase = true) || key.endsWith("mm", ignoreCase = true)) {
-                key
-            } else {
-                String.format(java.util.Locale.US, "%.1fx", mult)
-            }
-
-            MultiCamLensSlot(
-                key = key,
-                label = label,
+        // Fallback for tests or legacy ImageGroups without multiCameraLenses pre-populated
+        val lenses = mutableListOf<top.maary.darkbag.models.MultiCameraLensItem>()
+        val maxLen = maxOf(group.multiJpgUris.size, group.multiDngUris.size)
+        for (i in 0 until maxLen) {
+            val jpg = group.multiJpgUris.getOrNull(i)
+            val dng = group.multiDngUris.getOrNull(i)
+            val sample = jpg ?: dng
+            val tag = if (sample != null) top.maary.darkbag.utils.ImageUtils.extractMultiCameraLensTag(sample.toString()) else ""
+            val mult = if (sample != null) top.maary.darkbag.utils.ImageUtils.extractMultiCameraMultiplier(sample.toString()) else 1.0f
+            val effectiveTag = if (tag.isNotEmpty()) tag else String.format(java.util.Locale.US, "%.1fx", mult)
+            lenses.add(top.maary.darkbag.models.MultiCameraLensItem(
+                lensTag = effectiveTag,
                 multiplier = mult,
-                jpgUri = uris.first,
-                dngUri = uris.second
-            )
-        }.sortedWith(compareBy<MultiCamLensSlot> { it.multiplier }.thenBy { it.key })
+                jpgUri = jpg,
+                dngUri = dng
+            ))
+        }
+        return lenses.sortedWith(compareBy<top.maary.darkbag.models.MultiCameraLensItem> { it.multiplier }.thenBy { it.lensTag })
     }
 
     private fun setupButtons(holder: ViewHolder, group: ImageGroup) {
@@ -299,20 +278,20 @@ class ImageViewerAdapter(
             }
 
             // 2. RAW Format indicator setup
-            val slots = if (group.isMultiCamera) getMultiCamSlots(group) else emptyList()
-            val activeSlot = if (group.isMultiCamera && slots.isNotEmpty()) {
-                val idx = (selectedLensIndices[group.baseName] ?: 0).coerceIn(0, slots.size - 1)
-                slots[idx]
+            val lenses = if (group.isMultiCamera) getMultiCameraLenses(group) else emptyList()
+            val activeLens = if (group.isMultiCamera && lenses.isNotEmpty()) {
+                val idx = (selectedLensIndices[group.baseName] ?: 0).coerceIn(0, lenses.size - 1)
+                lenses[idx]
             } else null
 
             val hasJpg = if (group.isMultiCamera) {
-                activeSlot?.jpgUri != null
+                activeLens?.jpgUri != null
             } else {
                 group.jpgUri != null
             }
 
             val hasDng = if (group.isMultiCamera) {
-                activeSlot?.dngUri != null
+                activeLens?.dngUri != null
             } else {
                 group.dngUri != null || group.dngUri1 != null || group.dngUri2 != null
             }
@@ -349,22 +328,22 @@ class ImageViewerAdapter(
             // 3. Multi-Camera Lens Switcher setup
             val multiCamContainer = multiCameraToggleContainer
             val multiCamGroup = multiCameraToggleGroup
-            if (group.isMultiCamera && slots.size >= 2 && !isFormatSwitcherPersistentHidden) {
+            if (group.isMultiCamera && lenses.size >= 2 && !isFormatSwitcherPersistentHidden) {
                 multiCamContainer.visibility = if (isUiVisible) View.VISIBLE else View.GONE
                 multiCamGroup.clearOnButtonCheckedListeners()
                 multiCamGroup.removeAllViews()
 
-                val activeIndex = (selectedLensIndices[group.baseName] ?: 0).coerceIn(0, slots.size - 1)
+                val activeIndex = (selectedLensIndices[group.baseName] ?: 0).coerceIn(0, lenses.size - 1)
 
-                for (i in slots.indices) {
-                    val slot = slots[i]
+                for (i in lenses.indices) {
+                    val lens = lenses[i]
                     val button = com.google.android.material.button.MaterialButton(
                         holder.itemView.context,
                         null,
                         com.google.android.material.R.attr.materialButtonOutlinedStyle
                     ).apply {
                         id = View.generateViewId()
-                        text = slot.label
+                        text = lens.lensTag
                         isCheckable = true
                         minWidth = 0
                         minimumWidth = 0
@@ -402,16 +381,16 @@ class ImageViewerAdapter(
 
     private fun loadSelectedFormat(holder: ViewHolder, group: ImageGroup, format: String) {
         if (group.isMultiCamera) {
-            val slots = getMultiCamSlots(group)
-            val idx = (selectedLensIndices[group.baseName] ?: 0).coerceIn(0, (slots.size - 1).coerceAtLeast(0))
-            val slot = slots.getOrNull(idx)
+            val lenses = getMultiCameraLenses(group)
+            val idx = (selectedLensIndices[group.baseName] ?: 0).coerceIn(0, (lenses.size - 1).coerceAtLeast(0))
+            val lens = lenses.getOrNull(idx)
             when (format) {
                 FORMAT_JPG -> {
-                    val uri = slot?.jpgUri ?: slot?.dngUri
+                    val uri = lens?.jpgUri ?: lens?.dngUri
                     uri?.let { loadImage(holder, it, version = group.lastModified) }
                 }
                 FORMAT_DNG -> {
-                    val uri = slot?.dngUri ?: slot?.jpgUri
+                    val uri = lens?.dngUri ?: lens?.jpgUri
                     uri?.let { loadImage(holder, it) }
                 }
             }
@@ -801,11 +780,11 @@ class ImageViewerAdapter(
     fun getSelectedFormat(group: ImageGroup): String {
         return selectedFormats[group.baseName] ?: when {
             group.isMultiCamera -> {
-                val slots = getMultiCamSlots(group)
-                val idx = (selectedLensIndices[group.baseName] ?: 0).coerceIn(0, (slots.size - 1).coerceAtLeast(0))
-                val slot = slots.getOrNull(idx)
-                if (slot?.jpgUri != null) FORMAT_JPG
-                else if (slot?.dngUri != null) FORMAT_DNG
+                val lenses = getMultiCameraLenses(group)
+                val idx = (selectedLensIndices[group.baseName] ?: 0).coerceIn(0, (lenses.size - 1).coerceAtLeast(0))
+                val lens = lenses.getOrNull(idx)
+                if (lens?.jpgUri != null) FORMAT_JPG
+                else if (lens?.dngUri != null) FORMAT_DNG
                 else FORMAT_JPG
             }
             group.jpgUri != null -> FORMAT_JPG
@@ -843,13 +822,13 @@ class ImageViewerAdapter(
         val group = differ.currentList[position]
         val format = getSelectedFormat(group)
         return if (group.isMultiCamera) {
-            val slots = getMultiCamSlots(group)
-            val idx = (selectedLensIndices[group.baseName] ?: 0).coerceIn(0, (slots.size - 1).coerceAtLeast(0))
-            val slot = slots.getOrNull(idx)
+            val lenses = getMultiCameraLenses(group)
+            val idx = (selectedLensIndices[group.baseName] ?: 0).coerceIn(0, (lenses.size - 1).coerceAtLeast(0))
+            val lens = lenses.getOrNull(idx)
             if (format == FORMAT_DNG) {
-                slot?.dngUri ?: slot?.jpgUri
+                lens?.dngUri ?: lens?.jpgUri
             } else {
-                slot?.jpgUri ?: slot?.dngUri
+                lens?.jpgUri ?: lens?.dngUri
             }
         } else {
             if (format == FORMAT_DNG) {
@@ -869,7 +848,7 @@ class ImageViewerAdapter(
                     val motionGroup = holder.binding.motionPhotoToggleGroup
                     val multiCamContainer = holder.binding.multiCameraToggleContainer
                     val group = getGroup(i)
-                    val hasMultiCam = group.isMultiCamera && getMultiCamSlots(group).size >= 2
+                    val hasMultiCam = group.isMultiCamera && getMultiCameraLenses(group).size >= 2
                     val shouldBeVisible = isVisible && !isFormatSwitcherPersistentHidden
                     if (shouldBeVisible) {
                         formatGroup.visibility = View.VISIBLE
@@ -918,7 +897,7 @@ class ImageViewerAdapter(
                     val motionGroup = holder.binding.motionPhotoToggleGroup
                     val multiCamContainer = holder.binding.multiCameraToggleContainer
                     val group = getGroup(i)
-                    val hasMultiCam = group.isMultiCamera && getMultiCamSlots(group).size >= 2
+                    val hasMultiCam = group.isMultiCamera && getMultiCameraLenses(group).size >= 2
                     val shouldBeVisible = isUiVisible && !isFormatSwitcherPersistentHidden
                     if (shouldBeVisible) {
                         formatGroup.visibility = View.VISIBLE

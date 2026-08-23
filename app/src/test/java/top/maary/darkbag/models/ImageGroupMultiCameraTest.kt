@@ -90,4 +90,40 @@ class ImageGroupMultiCameraTest {
         assertEquals(uriWide, sortedList[1])
         assertEquals(uriTele, sortedList[2])
     }
+
+    @Test
+    fun testMultiCameraLensItemPairing() {
+        val ultraJpg = Uri.parse("content://media/external/images/media/101")
+        val ultraDng = Uri.parse("content://saf/DBAG_20260823_120000_MULTI_0.7x.dng")
+        val wideJpg = Uri.parse("content://media/external/images/media/102")
+        val wideDng = Uri.parse("content://saf/DBAG_20260823_120000_MULTI_1.0x.dng")
+        val teleJpg = Uri.parse("content://media/external/images/media/103")
+        val teleDng = Uri.parse("content://saf/DBAG_20260823_120000_MULTI_3.0x.dng")
+
+        val lens0 = MultiCameraLensItem(lensTag = "0.7x", multiplier = 0.7f, jpgUri = ultraJpg, dngUri = ultraDng)
+        val lens1 = MultiCameraLensItem(lensTag = "1.0x", multiplier = 1.0f, jpgUri = wideJpg, dngUri = wideDng)
+        val lens2 = MultiCameraLensItem(lensTag = "3.0x", multiplier = 3.0f, jpgUri = teleJpg, dngUri = teleDng)
+
+        val group = ImageGroup(
+            baseName = "20260823_120000",
+            jpgUri = wideJpg,
+            isMultiCamera = true,
+            multiCameraLenses = listOf(lens0, lens1, lens2),
+            multiJpgUris = listOf(ultraJpg, wideJpg, teleJpg),
+            multiDngUris = listOf(ultraDng, wideDng, teleDng)
+        )
+
+        assertEquals(3, group.multiCameraLenses.size)
+        assertEquals("0.7x", group.multiCameraLenses[0].lensTag)
+        assertEquals(ultraJpg, group.multiCameraLenses[0].jpgUri)
+        assertEquals(ultraDng, group.multiCameraLenses[0].dngUri)
+
+        assertEquals("1.0x", group.multiCameraLenses[1].lensTag)
+        assertEquals(wideJpg, group.multiCameraLenses[1].jpgUri)
+        assertEquals(wideDng, group.multiCameraLenses[1].dngUri)
+
+        assertEquals("3.0x", group.multiCameraLenses[2].lensTag)
+        assertEquals(teleJpg, group.multiCameraLenses[2].jpgUri)
+        assertEquals(teleDng, group.multiCameraLenses[2].dngUri)
+    }
 }
