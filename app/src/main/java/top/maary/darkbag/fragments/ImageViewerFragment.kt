@@ -235,6 +235,10 @@ open class ImageViewerFragment : Fragment() {
                         onLongPressStarted = { handleLongPressStarted(it) }
                         onLongPressEnded = { handleLongPressEnded(it) }
                         onMotionPhotoIndicatorTapped = { pos -> handleMotionPhotoIndicatorTapped(pos) }
+                        onMultiCameraLensChanged = { _, _ ->
+                            updateSplitButtons()
+                            updateToolbarIcon()
+                        }
                         setFormatSwitcherPersistentHidden(isAdjusted)
                         onCurrentListChanged = { previousList, currentList ->
                             val currentIndex = binding.imagePager.currentItem
@@ -354,12 +358,6 @@ open class ImageViewerFragment : Fragment() {
         binding.bottomLeftControls.visibility = visibility
         binding.bottomRightControls.visibility = visibility
         binding.fabAdjust.visibility = visibility
-
-        if (currentGroup.isMultiCamera && !isEditingAdjustments) {
-            updateMultiCameraLensUI(currentGroup, binding.imagePager.currentItem)
-        } else {
-            binding.layoutMultiCameraLensSelector?.visibility = View.GONE
-        }
 
         if (canEdit && currentEditConfig == null) {
             prepareEditConfig(currentGroup)
@@ -1672,6 +1670,10 @@ open class ImageViewerFragment : Fragment() {
                         onLongPressStarted = { handleLongPressStarted(it) }
                         onLongPressEnded = { handleLongPressEnded(it) }
                         onMotionPhotoIndicatorTapped = { pos -> handleMotionPhotoIndicatorTapped(pos) }
+                        onMultiCameraLensChanged = { _, _ ->
+                            updateSplitButtons()
+                            updateToolbarIcon()
+                        }
                         setFormatSwitcherPersistentHidden(isAdjusted)
                         onCurrentListChanged = { previousList, currentList ->
                             val currentIndex = binding.imagePager.currentItem
@@ -2245,13 +2247,6 @@ open class ImageViewerFragment : Fragment() {
         binding.topBarContainer.animate().translationY(0f).alpha(1f).setDuration(200).setListener(null).start()
         binding.bottomLeftControls.animate().translationY(0f).alpha(1f).setDuration(200).setListener(null).start()
         binding.bottomRightControls.animate().translationY(0f).alpha(1f).setDuration(200).setListener(null).start()
-        if (::adapter.isInitialized && adapter.itemCount > 0) {
-            val group = adapter.getGroup(binding.imagePager.currentItem)
-            if (group.isMultiCamera && !isEditingAdjustments) {
-                binding.layoutMultiCameraLensSelector?.visibility = View.VISIBLE
-                binding.layoutMultiCameraLensSelector?.animate()?.translationY(0f)?.alpha(1f)?.setDuration(200)?.setListener(null)?.start()
-            }
-        }
         updateViewportPadding()
     }
 
@@ -2270,64 +2265,7 @@ open class ImageViewerFragment : Fragment() {
             .withEndAction { binding.bottomLeftControls.visibility = View.GONE }.start()
         binding.bottomRightControls.animate().translationY(bottomShift).alpha(0f).setDuration(200)
             .withEndAction { binding.bottomRightControls.visibility = View.GONE }.start()
-        binding.layoutMultiCameraLensSelector?.animate()?.translationY(bottomShift)?.alpha(0f)?.setDuration(200)
-            ?.withEndAction { binding.layoutMultiCameraLensSelector?.visibility = View.GONE }?.start()
         updateViewportPadding()
-    }
-
-    private fun updateMultiCameraLensUI(group: ImageGroup, position: Int) {
-        val viewerBinding = _binding ?: return
-        if (!group.isMultiCamera) {
-            viewerBinding.layoutMultiCameraLensSelector?.visibility = View.GONE
-            return
-        }
-
-        viewerBinding.layoutMultiCameraLensSelector?.visibility = View.VISIBLE
-        val groupToggle = viewerBinding.groupMultiCameraLenses ?: return
-        groupToggle.clearOnButtonCheckedListeners()
-        groupToggle.removeAllViews()
-
-        val uris = if (group.multiJpgUris.isNotEmpty()) group.multiJpgUris else group.multiDngUris
-        val currentIndex = adapter.getSelectedLensIndex(position)
-
-        for (i in uris.indices) {
-            val uri = uris[i]
-            val fileName = getFileName(requireContext(), uri)
-            val lensLabel = if (fileName.contains("_MULTI_")) {
-                fileName.substringAfter("_MULTI_").substringBefore(".").substringBefore("_")
-            } else {
-                "Lens ${i + 1}"
-            }
-
-            val button = com.google.android.material.button.MaterialButton(
-                requireContext(),
-                null,
-                com.google.android.material.R.attr.materialButtonOutlinedStyle
-            ).apply {
-                id = View.generateViewId()
-                text = lensLabel
-                isCheckable = true
-                minWidth = 0
-                minimumWidth = 0
-                val padH = resources.getDimensionPixelSize(R.dimen.margin_medium)
-                setPadding(padH, 0, padH, 0)
-            }
-            groupToggle.addView(button)
-
-            if (i == currentIndex) {
-                groupToggle.check(button.id)
-            }
-        }
-
-        groupToggle.addOnButtonCheckedListener { _, checkedId, isChecked ->
-            if (isChecked) {
-                val index = (0 until groupToggle.childCount).indexOfFirst { groupToggle.getChildAt(it).id == checkedId }
-                if (index != -1 && index != adapter.getSelectedLensIndex(position)) {
-                    adapter.setSelectedLensIndex(position, index)
-                    updateSplitButtons()
-                }
-            }
-        }
     }
 
     private fun showMultiCamCollageDialog(group: ImageGroup) {

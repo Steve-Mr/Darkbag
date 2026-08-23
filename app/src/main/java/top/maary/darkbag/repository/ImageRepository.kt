@@ -736,9 +736,24 @@ class ImageRepository(private val context: Context) {
                 finalLayout = "SBS"
             }
 
+            val sortedJpgs = multiJpgUris.sortedWith(compareBy<Uri> {
+                top.maary.darkbag.utils.ImageUtils.extractMultiCameraMultiplier(it.toString())
+            }.thenBy { it.toString() })
+
+            val sortedDngs = multiDngUris.sortedWith(compareBy<Uri> {
+                top.maary.darkbag.utils.ImageUtils.extractMultiCameraMultiplier(it.toString())
+            }.thenBy { it.toString() })
+
+            val finalJpgUri = if (isMultiCamera && sortedJpgs.isNotEmpty()) {
+                sortedJpgs.find {
+                    val tag = top.maary.darkbag.utils.ImageUtils.extractMultiCameraLensTag(it.toString())
+                    tag == "1.0x" || tag == "1x"
+                } ?: sortedJpgs.first()
+            } else jpgUri
+
             return ImageGroup(
                 baseName = baseName,
-                jpgUri = jpgUri,
+                jpgUri = finalJpgUri,
                 dngUri = dngUri,
                 dngUri1 = dngUri1,
                 dngUri2 = dngUri2,
@@ -754,9 +769,9 @@ class ImageRepository(private val context: Context) {
                 isMotionPhoto = isMotionPhoto,
                 motionPhotoPtsUs = motionPhotoPtsUs,
                 motionPhotoVideoLength = motionPhotoVideoLength,
-                isMultiCamera = isMultiCamera || multiJpgUris.isNotEmpty(),
-                multiJpgUris = multiJpgUris.toList(),
-                multiDngUris = multiDngUris.toList()
+                isMultiCamera = isMultiCamera || sortedJpgs.isNotEmpty() || sortedDngs.isNotEmpty(),
+                multiJpgUris = sortedJpgs,
+                multiDngUris = sortedDngs
             )
         }
     }

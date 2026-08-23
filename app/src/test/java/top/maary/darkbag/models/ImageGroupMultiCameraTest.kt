@@ -59,4 +59,35 @@ class ImageGroupMultiCameraTest {
         assertEquals("TOP_BOTTOM", tb.name)
         assertEquals("TRIPTYCH_ROW", triptych.name)
     }
+
+    @Test
+    fun testLensTagAndMultiplierExtraction() {
+        val uri1 = "content://media/external/images/media/DBAG_20260823_133214_MULTI_0.6x.jpg"
+        val uri2 = "content://media/external/images/media/DBAG_20260823_133214_MULTI_1.0x.jpg"
+        val uri3 = "tree/primary%3APictures%2FRaw/document/primary%3APictures%2FRaw%2FDBAG_20260823_133214_MULTI_3.0x.dng"
+
+        assertEquals("0.6x", ImageUtils.extractMultiCameraLensTag(uri1))
+        assertEquals("1.0x", ImageUtils.extractMultiCameraLensTag(uri2))
+        assertEquals("3.0x", ImageUtils.extractMultiCameraLensTag(uri3))
+
+        assertEquals(0.6f, ImageUtils.extractMultiCameraMultiplier(uri1), 0.01f)
+        assertEquals(1.0f, ImageUtils.extractMultiCameraMultiplier(uri2), 0.01f)
+        assertEquals(3.0f, ImageUtils.extractMultiCameraMultiplier(uri3), 0.01f)
+    }
+
+    @Test
+    fun testMultiCameraUriSorting() {
+        val uriTele = Uri.parse("file:///Pictures/DBAG_20260823_133214_MULTI_3.0x.jpg")
+        val uriWide = Uri.parse("file:///Pictures/DBAG_20260823_133214_MULTI_1.0x.jpg")
+        val uriUltra = Uri.parse("file:///Pictures/DBAG_20260823_133214_MULTI_0.6x.jpg")
+
+        val rawList = listOf(uriTele, uriUltra, uriWide)
+        val sortedList = rawList.sortedWith(compareBy<Uri> {
+            ImageUtils.extractMultiCameraMultiplier(it.toString())
+        }.thenBy { it.toString() })
+
+        assertEquals(uriUltra, sortedList[0])
+        assertEquals(uriWide, sortedList[1])
+        assertEquals(uriTele, sortedList[2])
+    }
 }

@@ -168,9 +168,14 @@ object MultiCameraHelper {
 
                 val physicalList = standalonePhysicalLenses.map { lens ->
                     val chars = try { cameraManager.getCameraCharacteristics(lens.id) } catch (e: Exception) { null }
+                    val lensName = if (lens.name.endsWith("x") || lens.name.endsWith("mm")) {
+                        lens.name
+                    } else {
+                        String.format(java.util.Locale.US, "%.1fx", lens.multiplier)
+                    }
                     PhysicalLensInfo(
                         physicalId = lens.id,
-                        name = lens.name,
+                        name = lensName,
                         focalLength = lens.focalLength,
                         equivalentFocalLength = lens.equivalentFocalLength,
                         multiplier = lens.multiplier,
