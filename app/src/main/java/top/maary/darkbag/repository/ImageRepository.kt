@@ -249,6 +249,15 @@ class ImageRepository(private val context: Context) {
                         val docUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, childDocId)
 
                         when {
+                            name.contains("_MULTI_") && (name.endsWith(".jpg", ignoreCase = true) || name.endsWith(".jpeg", ignoreCase = true)) -> {
+                                builder.addMultiJpg(docUri, lastModified)
+                                if (!fast) {
+                                    readExifForScanning(docUri, builder)
+                                }
+                            }
+                            name.contains("_MULTI_") && name.endsWith(".dng", ignoreCase = true) -> {
+                                builder.addMultiDng(docUri, lastModified)
+                            }
                             name.endsWith(".jpg", ignoreCase = true) || name.endsWith(".jpeg", ignoreCase = true) -> {
                                 builder.setJpg(docUri, lastModified)
                                 if (!fast) {
@@ -282,6 +291,15 @@ class ImageRepository(private val context: Context) {
                     val lastModified = file.lastModified()
 
                     when {
+                        name.contains("_MULTI_") && (name.endsWith(".jpg", ignoreCase = true) || name.endsWith(".jpeg", ignoreCase = true)) -> {
+                            builder.addMultiJpg(file.uri, lastModified)
+                            if (!fast) {
+                                readExifForScanning(file.uri, builder)
+                            }
+                        }
+                        name.contains("_MULTI_") && name.endsWith(".dng", ignoreCase = true) -> {
+                            builder.addMultiDng(file.uri, lastModified)
+                        }
                         name.endsWith(".jpg", ignoreCase = true) || name.endsWith(".jpeg", ignoreCase = true) -> {
                             builder.setJpg(file.uri, lastModified)
                             if (!fast) {
@@ -385,6 +403,15 @@ class ImageRepository(private val context: Context) {
                 }
 
                 when {
+                    name.contains("_MULTI_") && mime == "image/jpeg" -> {
+                        builder.addMultiJpg(uri, date, modified)
+                        if (!fast) {
+                            readExifForScanning(uri, builder)
+                        }
+                    }
+                    name.contains("_MULTI_") && (mime == "image/x-adobe-dng" || name.endsWith(".dng", ignoreCase = true)) -> {
+                        builder.addMultiDng(uri, date, modified)
+                    }
                     mime == "image/jpeg" -> {
                         builder.setJpg(uri, date, modified)
                         if (!fast) {
@@ -579,6 +606,9 @@ class ImageRepository(private val context: Context) {
         var dngUri1Time: Long = 0L
         var dngUri2: Uri? = null
         var dngUri2Time: Long = 0L
+        val multiJpgUris = mutableListOf<Uri>()
+        val multiDngUris = mutableListOf<Uri>()
+        var isMultiCamera: Boolean = false
         var hfLayout: String? = null
         var width: Int = 0
         var height: Int = 0
@@ -595,6 +625,11 @@ class ImageRepository(private val context: Context) {
             dngUri = group.dngUri
             dngUri1 = group.dngUri1
             dngUri2 = group.dngUri2
+            isMultiCamera = group.isMultiCamera
+            multiJpgUris.clear()
+            multiJpgUris.addAll(group.multiJpgUris)
+            multiDngUris.clear()
+            multiDngUris.addAll(group.multiDngUris)
             hfLayout = group.hfLayout
             width = group.width
             height = group.height
@@ -606,6 +641,30 @@ class ImageRepository(private val context: Context) {
             motionPhotoVideoLength = group.motionPhotoVideoLength
             metadataLoaded = group.metadataLoaded
             return this
+        }
+
+        fun addMultiJpg(uri: Uri, time: Long, modifiedTime: Long = time) {
+            isMultiCamera = true
+            if (!multiJpgUris.contains(uri)) {
+                multiJpgUris.add(uri)
+            }
+            if (jpgUri == null) {
+                jpgUri = uri
+                jpgTime = time
+            }
+            updateTime(time, modifiedTime)
+        }
+
+        fun addMultiDng(uri: Uri, time: Long, modifiedTime: Long = time) {
+            isMultiCamera = true
+            if (!multiDngUris.contains(uri)) {
+                multiDngUris.add(uri)
+            }
+            if (dngUri == null) {
+                dngUri = uri
+                dngTime = time
+            }
+            updateTime(time, modifiedTime)
         }
 
         fun setJpg(uri: Uri, time: Long, modifiedTime: Long = time) {
@@ -678,23 +737,26 @@ class ImageRepository(private val context: Context) {
             }
 
             return ImageGroup(
-                baseName,
-                jpgUri,
-                dngUri,
-                dngUri1,
-                dngUri2,
-                finalLayout,
-                width,
-                height,
-                captureTime,
-                if (lastModified > 0) lastModified else maxOf(jpgTime, dngTime, dngUri1Time, dngUri2Time),
-                editConfig,
+                baseName = baseName,
+                jpgUri = jpgUri,
+                dngUri = dngUri,
+                dngUri1 = dngUri1,
+                dngUri2 = dngUri2,
+                hfLayout = finalLayout,
+                width = width,
+                height = height,
+                captureTime = captureTime,
+                lastModified = if (lastModified > 0) lastModified else maxOf(jpgTime, dngTime, dngUri1Time, dngUri2Time),
+                editConfig = editConfig,
                 metadataLoaded = metadataLoaded,
                 isInProgress = isInProgress,
                 isPartial = isPartial,
                 isMotionPhoto = isMotionPhoto,
                 motionPhotoPtsUs = motionPhotoPtsUs,
-                motionPhotoVideoLength = motionPhotoVideoLength
+                motionPhotoVideoLength = motionPhotoVideoLength,
+                isMultiCamera = isMultiCamera || multiJpgUris.isNotEmpty(),
+                multiJpgUris = multiJpgUris.toList(),
+                multiDngUris = multiDngUris.toList()
             )
         }
     }

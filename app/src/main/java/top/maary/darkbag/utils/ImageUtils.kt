@@ -12,7 +12,7 @@ import top.maary.darkbag.processor.ColorProcessor
 object ImageUtils {
 
     fun getBaseName(fileName: String): String {
-        return fileName.substringBeforeLast(".")
+        var base = fileName.substringBeforeLast(".")
             .replace("_linear", "")
             .replace("_bayer", "")
             .replace("_HDRPLUS", "")
@@ -22,6 +22,10 @@ object ImageUtils {
             .replace("_stitched", "")
             .replace("stitched_hf_", "")
             .replace(top.maary.darkbag.utils.DarkbagIdentity.FILE_PREFIX, "")
+        if (base.contains("_MULTI_")) {
+            base = base.substringBefore("_MULTI_")
+        }
+        return base
     }
 
     suspend fun generateHalfFrameComposite(

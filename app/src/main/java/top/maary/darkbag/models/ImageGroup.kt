@@ -22,9 +22,12 @@ data class ImageGroup(
     val isPartial: Boolean = false,
     val isMotionPhoto: Boolean = false,
     val motionPhotoPtsUs: Long = 0L,
-    val motionPhotoVideoLength: Long = 0L
+    val motionPhotoVideoLength: Long = 0L,
+    val isMultiCamera: Boolean = false,
+    val multiJpgUris: List<Uri> = emptyList(),
+    val multiDngUris: List<Uri> = emptyList()
 ) : Parcelable {
-    fun hasAny(): Boolean = jpgUri != null || dngUri != null || dngUri1 != null || dngUri2 != null
+    fun hasAny(): Boolean = jpgUri != null || dngUri != null || dngUri1 != null || dngUri2 != null || multiJpgUris.isNotEmpty() || multiDngUris.isNotEmpty()
 
     // 2.5: Only true if it has both DNGs, a stitched JPG, or an explicit layout.
     // If only dngUri1 exists and no jpg, it's NOT a half-frame group (shows as single image).
