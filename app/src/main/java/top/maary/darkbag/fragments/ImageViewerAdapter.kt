@@ -335,8 +335,8 @@ class ImageViewerAdapter(
 
                 val activeIndex = (selectedLensIndices[group.baseName] ?: 0).coerceIn(0, lenses.size - 1)
                 val density = holder.itemView.context.resources.displayMetrics.density
-                val outerRadius = 17f * density
-                val innerRadius = 6f * density
+                val outerCorner = com.google.android.material.shape.RelativeCornerSize(0.5f)
+                val innerCorner = com.google.android.material.shape.AbsoluteCornerSize(7f * density)
                 val n = lenses.size
 
                 for (i in lenses.indices) {
@@ -345,10 +345,10 @@ class ImageViewerAdapter(
                     val isChecked = (i == activeIndex)
 
                     val shapeAppearance = com.google.android.material.shape.ShapeAppearanceModel.builder()
-                        .setTopLeftCorner(com.google.android.material.shape.CornerFamily.ROUNDED, if (i == 0) outerRadius else innerRadius)
-                        .setBottomLeftCorner(com.google.android.material.shape.CornerFamily.ROUNDED, if (i == 0) outerRadius else innerRadius)
-                        .setTopRightCorner(com.google.android.material.shape.CornerFamily.ROUNDED, if (i == n - 1) outerRadius else innerRadius)
-                        .setBottomRightCorner(com.google.android.material.shape.CornerFamily.ROUNDED, if (i == n - 1) outerRadius else innerRadius)
+                        .setTopLeftCorner(com.google.android.material.shape.CornerFamily.ROUNDED, if (i == 0) outerCorner else innerCorner)
+                        .setBottomLeftCorner(com.google.android.material.shape.CornerFamily.ROUNDED, if (i == 0) outerCorner else innerCorner)
+                        .setTopRightCorner(com.google.android.material.shape.CornerFamily.ROUNDED, if (i == n - 1) outerCorner else innerCorner)
+                        .setBottomRightCorner(com.google.android.material.shape.CornerFamily.ROUNDED, if (i == n - 1) outerCorner else innerCorner)
                         .build()
 
                     val button = com.google.android.material.button.MaterialButton(
@@ -368,13 +368,13 @@ class ImageViewerAdapter(
                         insetBottom = 0
                         strokeWidth = 0
                         shapeAppearanceModel = shapeAppearance
-                        textSize = 13f
+                        textSize = 13.5f
                         typeface = android.graphics.Typeface.DEFAULT_BOLD
                         backgroundTintList = androidx.core.content.ContextCompat.getColorStateList(context, R.color.multi_camera_lens_bg_tint)
                         setTextColor(androidx.core.content.ContextCompat.getColorStateList(context, R.color.multi_camera_lens_text_color))
                         rippleColor = androidx.core.content.ContextCompat.getColorStateList(context, R.color.multi_camera_lens_ripple_color)
-                        val padH = (16 * density).toInt()
-                        val padV = (6 * density).toInt()
+                        val padH = (18 * density).toInt()
+                        val padV = (8 * density).toInt()
                         setPadding(padH, padV, padH, padV)
 
                         val lp = LinearLayout.LayoutParams(
@@ -382,7 +382,7 @@ class ImageViewerAdapter(
                             ViewGroup.LayoutParams.WRAP_CONTENT
                         ).apply {
                             if (i < n - 1) {
-                                marginEnd = (2 * density).toInt()
+                                marginEnd = (3 * density).toInt()
                             }
                         }
                         layoutParams = lp
