@@ -4254,10 +4254,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 }
 
                 // 2. Process and save RAW if present and enabled
-                if (saveRaw && frame.rawBytes != null) {
-                    val rawFile = File(appContext.cacheDir, "temp_${frameBaseName}.dng")
-                    FileOutputStream(rawFile).use { it.write(frame.rawBytes) }
-
+                if (saveRaw && frame.tempDngPath != null) {
                     ImageSaver.saveProcessedImage(
                         context = appContext,
                         inputBitmap = null,
@@ -4265,7 +4262,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         rotationDegrees = 0,
                         zoomFactor = 1.0f,
                         baseName = frameBaseName,
-                        linearDngPath = rawFile.absolutePath,
+                        linearDngPath = frame.tempDngPath,
                         saveJpg = false,
                         saveRaw = true,
                         rawFolderUri = rawFolderUri,
