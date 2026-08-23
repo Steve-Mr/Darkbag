@@ -208,6 +208,37 @@
             style="@style/Widget.Material3.FloatingActionButton.Primary" />
     </LinearLayout>
 
+    <!-- Multi-Camera Physical Lens Switcher (Bottom Center) -->
+    <LinearLayout
+        android:id="@+id/layout_multi_camera_lens_selector"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="16dp"
+        android:orientation="horizontal"
+        android:gravity="center"
+        android:visibility="gone"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent">
+
+        <com.google.android.material.card.MaterialCardView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            app:cardCornerRadius="20dp"
+            app:cardElevation="4dp"
+            app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+            app:strokeWidth="0dp">
+
+            <com.google.android.material.button.MaterialButtonToggleGroup
+                android:id="@+id/group_multi_camera_lenses"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:padding="2dp"
+                app:singleSelection="true"
+                app:selectionRequired="true" />
+        </com.google.android.material.card.MaterialCardView>
+    </LinearLayout>
+
     <!-- Integrated Adjustment Panel (Landscape: Right side) -->
     <androidx.constraintlayout.widget.ConstraintLayout
         android:id="@+id/edit_adjustment_panel"

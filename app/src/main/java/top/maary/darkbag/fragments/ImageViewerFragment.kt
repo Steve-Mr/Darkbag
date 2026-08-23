@@ -348,15 +348,18 @@ open class ImageViewerFragment : Fragment() {
         if (!::adapter.isInitialized || adapter.itemCount == 0) return
         val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
 
-        // 2.2: If partial (JPG exists but one DNG missing), no editing.
-        // 2.4: If dual DNGs exist but no JPG, editing is allowed.
-        // 2.5: If lone DNG (HF1 or HF2) exists and not in-progress, it is not a half-frame group, so that DNG is the source.
-        val canEdit = (currentGroup.dngUri != null || currentGroup.dngUri1 != null || currentGroup.dngUri2 != null) && !currentGroup.isPartial
+        val canEdit = (currentGroup.dngUri != null || currentGroup.dngUri1 != null || currentGroup.dngUri2 != null || currentGroup.multiDngUris.isNotEmpty()) && !currentGroup.isPartial
 
         val visibility = if (canEdit && !isEditingAdjustments) View.VISIBLE else View.GONE
         binding.bottomLeftControls.visibility = visibility
         binding.bottomRightControls.visibility = visibility
         binding.fabAdjust.visibility = visibility
+
+        if (currentGroup.isMultiCamera && !isEditingAdjustments) {
+            updateMultiCameraLensUI(currentGroup, binding.imagePager.currentItem)
+        } else {
+            binding.layoutMultiCameraLensSelector?.visibility = View.GONE
+        }
 
         if (canEdit && currentEditConfig == null) {
             prepareEditConfig(currentGroup)
@@ -420,7 +423,12 @@ open class ImageViewerFragment : Fragment() {
     protected open suspend fun ensureDngBytesLoaded() {
         if (sourceDngBytes != null) return
         val group = adapter.getGroup(binding.imagePager.currentItem)
-        val dngUri1 = group.dngUri ?: group.dngUri1
+        val dngUri1 = if (group.isMultiCamera) {
+            val idx = adapter.getSelectedLensIndex(binding.imagePager.currentItem)
+            group.multiDngUris.getOrNull(idx) ?: group.multiDngUris.firstOrNull()
+        } else {
+            group.dngUri ?: group.dngUri1
+        }
         val dngUri2 = group.dngUri2
         val context = context ?: return
 
@@ -509,9 +517,15 @@ open class ImageViewerFragment : Fragment() {
         binding.btnShareMenu.setOnClickListener {
             binding.btnShareMenu.isCheckable = true
             binding.btnShareMenu.isChecked = true
+            val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
             val popup = PopupMenu(requireContext(), it)
             popup.menu.add(0, MENU_SHARE_TIFF, 0, getString(R.string.share_as_tiff)).apply {
                 setIcon(R.drawable.ic_photo)
+            }
+            if (currentGroup.isMultiCamera) {
+                popup.menu.add(0, MENU_COLLAGE, 0, getString(R.string.create_multi_cam_collage)).apply {
+                    setIcon(R.drawable.ic_photo)
+                }
             }
             popup.menu.add(0, MENU_DETAILS, 0, "Details").apply {
                 setIcon(R.drawable.ic_info)
@@ -525,10 +539,11 @@ open class ImageViewerFragment : Fragment() {
             popup.setOnMenuItemClickListener { item ->
                 when (item.itemId) {
                     MENU_SHARE_TIFF -> performShareAsTiff()
+                    MENU_COLLAGE -> showMultiCamCollageDialog(adapter.getGroup(binding.imagePager.currentItem))
                     MENU_DETAILS -> showImageDetails()
                     MENU_DELETE -> {
-                        val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
-                        showDeleteDialog(currentGroup)
+                        val groupToDelete = adapter.getGroup(binding.imagePager.currentItem)
+                        showDeleteDialog(groupToDelete)
                     }
                 }
                 true
@@ -1507,7 +1522,40 @@ open class ImageViewerFragment : Fragment() {
                         return previewBitmap
                     }
 
-                    val finalBitmap: android.graphics.Bitmap? = if (!currentGroup.isHalfFrame()) {
+                    val finalBitmap: android.graphics.Bitmap? = if (currentGroup.isMultiCamera) {
+                        for (i in currentGroup.multiDngUris.indices) {
+                            val dngUri = currentGroup.multiDngUris[i]
+                            val bmp = processFull(null, dngUri, i)
+                            if (bmp != null) {
+                                val jpgUri = currentGroup.multiJpgUris.getOrNull(i)
+                                val fileName = if (jpgUri != null) getFileName(context, jpgUri).substringBeforeLast(".") else "${currentGroup.baseName}_MULTI_${i}"
+                                val baseName = if (isReplacement) fileName else "${fileName}_edited_${System.currentTimeMillis()}"
+                                val targetUri = if (isReplacement) jpgUri else null
+                                val jpgFolderUri = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                                    .getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
+                                val captureMetadata = repository.getCaptureMetadata(dngUri)
+
+                                top.maary.darkbag.utils.ImageSaver.saveProcessedImage(
+                                    context = context,
+                                    inputBitmap = bmp,
+                                    bmpPath = null,
+                                    rotationDegrees = 0,
+                                    zoomFactor = 1.0f,
+                                    baseName = baseName,
+                                    linearDngPath = null,
+                                    saveJpg = true,
+                                    saveRaw = false,
+                                    targetUri = targetUri,
+                                    jpgFolderUri = if (isReplacement) null else jpgFolderUri,
+                                    editConfig = finalConfig,
+                                    isAlreadyStitched = true,
+                                    captureMetadata = captureMetadata
+                                )
+                                bmp.recycle()
+                            }
+                        }
+                        null
+                    } else if (!currentGroup.isHalfFrame()) {
                         val primaryUri = dngUri1 ?: dngUri2 ?: return@withContext null
                         val primaryBytes = if (dngUri1 != null) sourceDngBytes else sourceDngBytes2
                         processFull(primaryBytes, primaryUri, 0)
@@ -1908,11 +1956,7 @@ open class ImageViewerFragment : Fragment() {
         val currentGroup = adapter.getGroup(currentIndex)
         val selectedFormat = adapter.getSelectedFormat(currentIndex)
 
-        val uri = when (selectedFormat) {
-            "JPG" -> currentGroup.jpgUri
-            "DNG" -> currentGroup.dngUri ?: currentGroup.dngUri1 ?: currentGroup.dngUri2
-            else -> currentGroup.jpgUri ?: currentGroup.dngUri
-        } ?: return
+        val uri = adapter.getCurrentUri(currentIndex) ?: return
 
         val dialog = BottomSheetDialog(requireContext())
         val detailsBinding = BottomSheetImageDetailsBinding.inflate(layoutInflater)
@@ -2201,6 +2245,13 @@ open class ImageViewerFragment : Fragment() {
         binding.topBarContainer.animate().translationY(0f).alpha(1f).setDuration(200).setListener(null).start()
         binding.bottomLeftControls.animate().translationY(0f).alpha(1f).setDuration(200).setListener(null).start()
         binding.bottomRightControls.animate().translationY(0f).alpha(1f).setDuration(200).setListener(null).start()
+        if (::adapter.isInitialized && adapter.itemCount > 0) {
+            val group = adapter.getGroup(binding.imagePager.currentItem)
+            if (group.isMultiCamera && !isEditingAdjustments) {
+                binding.layoutMultiCameraLensSelector?.visibility = View.VISIBLE
+                binding.layoutMultiCameraLensSelector?.animate()?.translationY(0f)?.alpha(1f)?.setDuration(200)?.setListener(null)?.start()
+            }
+        }
         updateViewportPadding()
     }
 
@@ -2219,7 +2270,144 @@ open class ImageViewerFragment : Fragment() {
             .withEndAction { binding.bottomLeftControls.visibility = View.GONE }.start()
         binding.bottomRightControls.animate().translationY(bottomShift).alpha(0f).setDuration(200)
             .withEndAction { binding.bottomRightControls.visibility = View.GONE }.start()
+        binding.layoutMultiCameraLensSelector?.animate()?.translationY(bottomShift)?.alpha(0f)?.setDuration(200)
+            ?.withEndAction { binding.layoutMultiCameraLensSelector?.visibility = View.GONE }?.start()
         updateViewportPadding()
+    }
+
+    private fun updateMultiCameraLensUI(group: ImageGroup, position: Int) {
+        val viewerBinding = _binding ?: return
+        if (!group.isMultiCamera) {
+            viewerBinding.layoutMultiCameraLensSelector?.visibility = View.GONE
+            return
+        }
+
+        viewerBinding.layoutMultiCameraLensSelector?.visibility = View.VISIBLE
+        val groupToggle = viewerBinding.groupMultiCameraLenses ?: return
+        groupToggle.clearOnButtonCheckedListeners()
+        groupToggle.removeAllViews()
+
+        val uris = if (group.multiJpgUris.isNotEmpty()) group.multiJpgUris else group.multiDngUris
+        val currentIndex = adapter.getSelectedLensIndex(position)
+
+        for (i in uris.indices) {
+            val uri = uris[i]
+            val fileName = getFileName(requireContext(), uri)
+            val lensLabel = if (fileName.contains("_MULTI_")) {
+                fileName.substringAfter("_MULTI_").substringBefore(".").substringBefore("_")
+            } else {
+                "Lens ${i + 1}"
+            }
+
+            val button = com.google.android.material.button.MaterialButton(
+                requireContext(),
+                null,
+                com.google.android.material.R.attr.materialButtonOutlinedStyle
+            ).apply {
+                id = View.generateViewId()
+                text = lensLabel
+                isCheckable = true
+                minWidth = 0
+                minimumWidth = 0
+                val padH = resources.getDimensionPixelSize(R.dimen.margin_medium)
+                setPadding(padH, 0, padH, 0)
+            }
+            groupToggle.addView(button)
+
+            if (i == currentIndex) {
+                groupToggle.check(button.id)
+            }
+        }
+
+        groupToggle.addOnButtonCheckedListener { _, checkedId, isChecked ->
+            if (isChecked) {
+                val index = (0 until groupToggle.childCount).indexOfFirst { groupToggle.getChildAt(it).id == checkedId }
+                if (index != -1 && index != adapter.getSelectedLensIndex(position)) {
+                    adapter.setSelectedLensIndex(position, index)
+                    updateSplitButtons()
+                }
+            }
+        }
+    }
+
+    private fun showMultiCamCollageDialog(group: ImageGroup) {
+        val uris = if (group.multiJpgUris.isNotEmpty()) group.multiJpgUris else group.multiDngUris
+        if (uris.size < 2) return
+
+        val items = if (uris.size == 2) {
+            arrayOf(
+                getString(R.string.collage_layout_sbs),
+                getString(R.string.collage_layout_tb)
+            )
+        } else {
+            arrayOf(
+                getString(R.string.collage_layout_triptych),
+                getString(R.string.collage_layout_sbs),
+                getString(R.string.collage_layout_tb)
+            )
+        }
+
+        com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
+            .setTitle(R.string.create_multi_cam_collage)
+            .setItems(items) { _, which ->
+                val layout = when (items[which]) {
+                    getString(R.string.collage_layout_sbs) -> top.maary.darkbag.utils.MultiCameraCollageHelper.CollageLayout.SIDE_BY_SIDE
+                    getString(R.string.collage_layout_tb) -> top.maary.darkbag.utils.MultiCameraCollageHelper.CollageLayout.TOP_BOTTOM
+                    else -> top.maary.darkbag.utils.MultiCameraCollageHelper.CollageLayout.TRIPTYCH_ROW
+                }
+                generateAndSaveCollage(group, layout)
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
+    }
+
+    private fun generateAndSaveCollage(group: ImageGroup, layout: top.maary.darkbag.utils.MultiCameraCollageHelper.CollageLayout) {
+        binding.initialLoadingIndicator?.visibility = View.VISIBLE
+        binding.interactionBlocker?.visibility = View.VISIBLE
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            val uris = if (group.multiJpgUris.isNotEmpty()) group.multiJpgUris else group.multiDngUris
+            val collageBitmap = top.maary.darkbag.utils.MultiCameraCollageHelper.createCollage(
+                context = requireContext(),
+                imageUris = uris,
+                layout = layout,
+                borderWidthDp = 16f,
+                dividerWidthDp = 8f,
+                backgroundColor = android.graphics.Color.WHITE
+            )
+
+            if (collageBitmap != null) {
+                val baseName = "${group.baseName}_COLLAGE"
+                val savedUri = top.maary.darkbag.utils.ImageSaver.saveProcessedImage(
+                    context = requireContext().applicationContext,
+                    inputBitmap = collageBitmap,
+                    bmpPath = null,
+                    rotationDegrees = 0,
+                    zoomFactor = 1.0f,
+                    baseName = baseName,
+                    linearDngPath = null,
+                    saveJpg = true,
+                    saveRaw = false,
+                    jpgFolderUri = null,
+                    editConfig = group.editConfig,
+                    captureMetadata = null
+                )
+
+                withContext(Dispatchers.Main) {
+                    binding.initialLoadingIndicator?.visibility = View.GONE
+                    binding.interactionBlocker?.visibility = View.GONE
+                    if (savedUri != null) {
+                        repository.invalidateCache()
+                        android.widget.Toast.makeText(requireContext(), R.string.collage_saved_toast, android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                }
+            } else {
+                withContext(Dispatchers.Main) {
+                    binding.initialLoadingIndicator?.visibility = View.GONE
+                    binding.interactionBlocker?.visibility = View.GONE
+                }
+            }
+        }
     }
 
     private fun setupEdgeToEdge() {
@@ -2393,6 +2581,7 @@ open class ImageViewerFragment : Fragment() {
         private const val MENU_DELETE = 2
         private const val MENU_SAVE_AS = 3
         private const val MENU_SHARE_TIFF = 4
+        private const val MENU_COLLAGE = 5
 
         private const val EXPOSURE_MIN = -4f
         private const val EXPOSURE_MAX = 4f

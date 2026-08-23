@@ -109,4 +109,14 @@
     <string name="clear_cache_dialog_message">This will clear temporary playback videos, sharing exports, and pipeline buffers. Your saved photos, Playground files, and imported LUTs will not be affected.</string>
     <string name="clear_cache_success_toast">Cache cleared (%1$s freed)</string>
     <string name="clear_cache_empty_toast">Cache is already clean</string>
+
+    <string name="create_multi_cam_collage">Create Multi-Cam Collage</string>
+    <string name="collage_layout_sbs">Side by Side</string>
+    <string name="collage_layout_tb">Top &amp; Bottom</string>
+    <string name="collage_layout_triptych">Triptych (Panoramic)</string>
+    <string name="apply_to_all_lenses">Apply to All Lenses</string>
+    <string name="apply_to_current_only">Current Lens Only</string>
+    <string name="re_render_group_title">Apply Color to All Lenses?</string>
+    <string name="re_render_group_message">Would you like to re-render all physical camera angles (0.6x, 1.0x, 3.0x) with this color profile?</string>
+    <string name="collage_saved_toast">Multi-camera collage saved to gallery</string>
 </resources>

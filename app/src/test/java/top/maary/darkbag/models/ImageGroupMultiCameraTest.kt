@@ -48,4 +48,15 @@ class ImageGroupMultiCameraTest {
         assertEquals(uri2, group.jpgUri)
         assertFalse(group.isHalfFrame())
     }
+
+    @Test
+    fun testMultiCameraCollageLayouts() {
+        val sbs = top.maary.darkbag.utils.MultiCameraCollageHelper.CollageLayout.SIDE_BY_SIDE
+        val tb = top.maary.darkbag.utils.MultiCameraCollageHelper.CollageLayout.TOP_BOTTOM
+        val triptych = top.maary.darkbag.utils.MultiCameraCollageHelper.CollageLayout.TRIPTYCH_ROW
+
+        assertEquals("SIDE_BY_SIDE", sbs.name)
+        assertEquals("TOP_BOTTOM", tb.name)
+        assertEquals("TRIPTYCH_ROW", triptych.name)
+    }
 }

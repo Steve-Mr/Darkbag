@@ -42,6 +42,8 @@ class ImageViewerAdapter(
 
     private var recyclerView: RecyclerView? = null
     private val selectedFormats = mutableMapOf<String, String>()
+    private val selectedLensIndices = mutableMapOf<String, Int>()
+    var onMultiCameraLensChanged: ((position: Int, lensIndex: Int) -> Unit)? = null
     private var isUiVisible = true
     private var isFormatSwitcherPersistentHidden = false
 
@@ -245,8 +247,19 @@ class ImageViewerAdapter(
             }
 
             // 2. RAW Format indicator setup
-            val hasJpg = group.jpgUri != null
-            val hasDng = group.dngUri != null || group.dngUri1 != null || group.dngUri2 != null
+            val hasJpg = if (group.isMultiCamera) {
+                val idx = selectedLensIndices[group.baseName] ?: 0
+                group.multiJpgUris.getOrNull(idx) != null
+            } else {
+                group.jpgUri != null
+            }
+
+            val hasDng = if (group.isMultiCamera) {
+                val idx = selectedLensIndices[group.baseName] ?: 0
+                group.multiDngUris.getOrNull(idx) != null
+            } else {
+                group.dngUri != null || group.dngUri1 != null || group.dngUri2 != null
+            }
 
             if (!hasDng) {
                 // Only JPG exists, hide the indicator completely
@@ -282,6 +295,21 @@ class ImageViewerAdapter(
     }
 
     private fun loadSelectedFormat(holder: ViewHolder, group: ImageGroup, format: String) {
+        if (group.isMultiCamera) {
+            val idx = selectedLensIndices[group.baseName] ?: 0
+            when (format) {
+                FORMAT_JPG -> {
+                    val uri = group.multiJpgUris.getOrNull(idx) ?: group.multiDngUris.getOrNull(idx)
+                    uri?.let { loadImage(holder, it, version = group.lastModified) }
+                }
+                FORMAT_DNG -> {
+                    val uri = group.multiDngUris.getOrNull(idx) ?: group.multiJpgUris.getOrNull(idx)
+                    uri?.let { loadImage(holder, it) }
+                }
+            }
+            return
+        }
+
         when (format) {
             FORMAT_JPG -> group.jpgUri?.let { loadImage(holder, it, version = group.lastModified) }
             FORMAT_DNG -> {
@@ -664,6 +692,12 @@ class ImageViewerAdapter(
 
     fun getSelectedFormat(group: ImageGroup): String {
         return selectedFormats[group.baseName] ?: when {
+            group.isMultiCamera -> {
+                val idx = selectedLensIndices[group.baseName] ?: 0
+                if (group.multiJpgUris.getOrNull(idx) != null) FORMAT_JPG
+                else if (group.multiDngUris.getOrNull(idx) != null) FORMAT_DNG
+                else FORMAT_JPG
+            }
             group.jpgUri != null -> FORMAT_JPG
             group.isHalfFrame() || group.dngUri != null || group.dngUri1 != null || group.dngUri2 != null -> FORMAT_DNG
             else -> FORMAT_JPG
@@ -673,6 +707,45 @@ class ImageViewerAdapter(
     fun getSelectedFormat(position: Int): String {
         if (position >= differ.currentList.size) return FORMAT_JPG
         return getSelectedFormat(differ.currentList[position])
+    }
+
+    fun getSelectedLensIndex(position: Int): Int {
+        if (position >= differ.currentList.size) return 0
+        val group = differ.currentList[position]
+        return selectedLensIndices[group.baseName] ?: 0
+    }
+
+    fun setSelectedLensIndex(position: Int, lensIndex: Int) {
+        if (position >= differ.currentList.size) return
+        val group = differ.currentList[position]
+        selectedLensIndices[group.baseName] = lensIndex
+        val holder = recyclerView?.findViewHolderForAdapterPosition(position) as? ViewHolder
+        if (holder != null) {
+            setupButtons(holder, group)
+            val format = selectedFormats[group.baseName] ?: getSelectedFormat(group)
+            loadSelectedFormat(holder, group, format)
+        }
+        onMultiCameraLensChanged?.invoke(position, lensIndex)
+    }
+
+    fun getCurrentUri(position: Int): Uri? {
+        if (position >= differ.currentList.size) return null
+        val group = differ.currentList[position]
+        val format = getSelectedFormat(group)
+        return if (group.isMultiCamera) {
+            val idx = selectedLensIndices[group.baseName] ?: 0
+            if (format == FORMAT_DNG) {
+                group.multiDngUris.getOrNull(idx) ?: group.multiJpgUris.getOrNull(idx)
+            } else {
+                group.multiJpgUris.getOrNull(idx) ?: group.multiDngUris.getOrNull(idx)
+            }
+        } else {
+            if (format == FORMAT_DNG) {
+                group.dngUri ?: group.dngUri1 ?: group.dngUri2
+            } else {
+                group.jpgUri
+            }
+        }
     }
 
     fun setUiVisibility(isVisible: Boolean) {
