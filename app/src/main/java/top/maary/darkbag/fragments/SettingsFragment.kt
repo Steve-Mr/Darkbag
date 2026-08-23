@@ -458,6 +458,13 @@ class SettingsFragment : Fragment() {
         }
 
         setupSwitch(binding.switchHalfFrameMode, KEY_HALF_FRAME_MODE, false)
+        binding.switchHalfFrameMode.setOnCheckedChangeListener { _, isChecked ->
+            prefs.edit().putBoolean(KEY_HALF_FRAME_MODE, isChecked).apply()
+            if (isChecked) {
+                prefs.edit().putBoolean(KEY_MULTI_CAMERA_MODE, false).apply()
+                binding.switchMultiCameraMode.isChecked = false
+            }
+        }
         setupSwitch(binding.switchHalfFrameDownsample, KEY_HALF_FRAME_DOWNSAMPLE)
         setupSwitch(binding.switchHalfFrameDateStamp, KEY_HALF_FRAME_DATE_STAMP, false)
         setupSwitch(binding.switchHalfFrameLightLeak, KEY_HALF_FRAME_LIGHT_LEAK, false)
@@ -545,6 +552,10 @@ class SettingsFragment : Fragment() {
         setupSwitch(binding.switchMultiCameraForceEnable, KEY_MULTI_CAMERA_FORCE_ENABLE, false)
         binding.switchMultiCameraForceEnable.setOnCheckedChangeListener { _, isChecked ->
             prefs.edit().putBoolean(KEY_MULTI_CAMERA_FORCE_ENABLE, isChecked).apply()
+            if (isChecked) {
+                prefs.edit().putBoolean(KEY_MULTI_CAMERA_MODE, true).putBoolean(KEY_HALF_FRAME_MODE, false).apply()
+                binding.switchHalfFrameMode?.isChecked = false
+            }
             setupMultiCameraSettings()
         }
 
@@ -565,6 +576,10 @@ class SettingsFragment : Fragment() {
         setupSwitch(binding.switchMultiCameraMode, KEY_MULTI_CAMERA_MODE, false)
         binding.switchMultiCameraMode.setOnCheckedChangeListener { _, isChecked ->
             prefs.edit().putBoolean(KEY_MULTI_CAMERA_MODE, isChecked).apply()
+            if (isChecked) {
+                prefs.edit().putBoolean(KEY_HALF_FRAME_MODE, false).apply()
+                binding.switchHalfFrameMode?.isChecked = false
+            }
             updateMultiCameraVisibility()
         }
 

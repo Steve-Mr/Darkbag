@@ -495,11 +495,23 @@ class CameraFragment : Fragment() {
 
         updateHdrPlusConstraints()
 
+        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val isMultiCamPref = prefs.getBoolean(SettingsFragment.KEY_MULTI_CAMERA_MODE, false)
+        val forceEnable = prefs.getBoolean(SettingsFragment.KEY_MULTI_CAMERA_FORCE_ENABLE, false)
+        val isMultiCamSupported = top.maary.darkbag.utils.MultiCameraHelper.isMultiCameraSupported(requireContext(), forceEnable)
+        val isHalfFrame = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_MODE, false)
+
+        val previousMultiCam = isMultiCameraModeActive
+        val previousHalfFrame = isHalfFrameModeEnabled
+
+        isHalfFrameModeEnabled = isHalfFrame
+        isMultiCameraModeActive = (isMultiCamPref || forceEnable) && isMultiCamSupported && !isHalfFrame
+
+        val modeChanged = (previousMultiCam != isMultiCameraModeActive) || (previousHalfFrame != isHalfFrameModeEnabled)
+
         // Re-initialize camera engine if needed.
-        // For Camera2 engine, we need to re-bind use cases (which triggers openCamera2).
-        // For CameraX, they are bound to lifecycle but we ensure consistency.
-        // Only bind if the view has already been fully created and the layout passed
-        if (cameraProvider != null || currentLens?.useCamera2 == true) {
+        // For MultiCamera, Camera2 engine, or CameraX
+        if (modeChanged || cameraProvider != null || currentLens?.useCamera2 == true || isMultiCameraModeActive) {
             if (_fragmentCameraBinding?.viewFinderContainer?.isLaidOut == true) {
                 bindCameraUseCases()
             } else {
@@ -508,7 +520,6 @@ class CameraFragment : Fragment() {
                 }
             }
         }
-        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
         if (prefs.getBoolean(SettingsFragment.KEY_SAVE_LOCATION, false)) {
             locationHelper.startListening()
         } else {
@@ -663,8 +674,12 @@ class CameraFragment : Fragment() {
         updateHdrPlusUi()
         updateHdrPlusConstraints()
 
-        // Initialize Half-frame State (isolated by mode/layout profile)
+        // Initialize Half-frame & Multi-camera State (isolated by mode/layout profile)
         isHalfFrameModeEnabled = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_MODE, false)
+        val isMultiCamPref = prefs.getBoolean(SettingsFragment.KEY_MULTI_CAMERA_MODE, false)
+        val forceEnable = prefs.getBoolean(SettingsFragment.KEY_MULTI_CAMERA_FORCE_ENABLE, false)
+        val isMultiCamSupported = top.maary.darkbag.utils.MultiCameraHelper.isMultiCameraSupported(requireContext(), forceEnable)
+        isMultiCameraModeActive = (isMultiCamPref || forceEnable) && isMultiCamSupported && !isHalfFrameModeEnabled
         readScopedHalfFrameState(prefs, requireFileForStep1 = true)
 
         updateHalfFrameUI()
@@ -5032,6 +5047,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         prefs.edit()
             .putBoolean(SettingsFragment.KEY_HALF_FRAME_MODE, newMode)
             .putString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, newLayout)
+            .putBoolean(SettingsFragment.KEY_MULTI_CAMERA_MODE, newMultiCam)
             .apply()
 
         val modeChanged = (currentMode != newMode) || (isMultiCameraModeActive != newMultiCam)
