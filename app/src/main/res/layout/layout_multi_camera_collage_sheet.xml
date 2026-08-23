@@ -40,8 +40,15 @@
             android:layout_width="40dp"
             android:layout_height="40dp"
             android:layout_marginEnd="8dp"
+            android:padding="0dp"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:insetLeft="0dp"
+            android:insetRight="0dp"
             app:icon="@drawable/ic_share"
             app:iconSize="20dp"
+            app:iconPadding="0dp"
+            app:iconGravity="textStart"
             app:layout_constraintEnd_toStartOf="@id/btn_save"
             app:layout_constraintTop_toBottomOf="@id/drag_handle" />
 
@@ -78,7 +85,7 @@
                     android:id="@+id/iv_collage_preview"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:maxHeight="280dp"
+                    android:maxHeight="260dp"
                     android:adjustViewBounds="true"
                     android:layout_gravity="center"
                     android:contentDescription="@string/create_multi_cam_collage" />
@@ -93,23 +100,75 @@
             </FrameLayout>
         </com.google.android.material.card.MaterialCardView>
 
+        <!-- Quick Action Toolbar (Swap, Rotate, EXIF) -->
+        <LinearLayout
+            android:id="@+id/quick_action_bar"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:orientation="horizontal"
+            android:gravity="center"
+            app:layout_constraintTop_toBottomOf="@id/card_preview"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_swap_order"
+                style="@style/Widget.Material3.Button.TonalButton"
+                android:layout_width="wrap_content"
+                android:layout_height="36dp"
+                android:textSize="12sp"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:text="@string/collage_btn_swap"
+                app:icon="@drawable/ic_swap_horiz"
+                app:iconSize="16dp" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_rotate"
+                style="@style/Widget.Material3.Button.TonalButton"
+                android:layout_width="wrap_content"
+                android:layout_height="36dp"
+                android:layout_marginStart="8dp"
+                android:textSize="12sp"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:text="@string/collage_btn_rotate"
+                app:icon="@drawable/ic_rotate"
+                app:iconSize="16dp" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_toggle_exif"
+                style="@style/Widget.Material3.Button.TonalButton"
+                android:layout_width="wrap_content"
+                android:layout_height="36dp"
+                android:layout_marginStart="8dp"
+                android:textSize="12sp"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:text="@string/collage_btn_exif"
+                android:checkable="true"
+                app:icon="@drawable/ic_info"
+                app:iconSize="16dp" />
+        </LinearLayout>
+
         <!-- Lens Selector Section -->
         <TextView
             android:id="@+id/tv_lenses_label"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
+            android:layout_marginTop="14dp"
             android:text="@string/collage_select_lenses"
             android:textAppearance="?attr/textAppearanceLabelMedium"
             android:textColor="?attr/colorOnSurfaceVariant"
             app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintTop_toBottomOf="@id/card_preview" />
+            app:layout_constraintTop_toBottomOf="@id/quick_action_bar" />
 
         <HorizontalScrollView
             android:id="@+id/scroll_lenses"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
+            android:layout_marginTop="4dp"
             android:scrollbars="none"
             app:layout_constraintTop_toBottomOf="@id/tv_lenses_label"
             app:layout_constraintStart_toStartOf="parent"
@@ -127,7 +186,7 @@
             android:id="@+id/tv_layout_label"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
+            android:layout_marginTop="10dp"
             android:text="Layout"
             android:textAppearance="?attr/textAppearanceLabelMedium"
             android:textColor="?attr/colorOnSurfaceVariant"
@@ -138,7 +197,7 @@
             android:id="@+id/scroll_layouts"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
+            android:layout_marginTop="4dp"
             android:scrollbars="none"
             app:layout_constraintTop_toBottomOf="@id/tv_layout_label"
             app:layout_constraintStart_toStartOf="parent"
@@ -153,23 +212,54 @@
                 app:selectionRequired="true" />
         </HorizontalScrollView>
 
-        <!-- Style / Background Section -->
+        <!-- Framing Strategy Section -->
         <TextView
-            android:id="@+id/tv_style_label"
+            android:id="@+id/tv_framing_label"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:text="Frame Style"
+            android:layout_marginTop="10dp"
+            android:text="Ratio &amp; Framing"
             android:textAppearance="?attr/textAppearanceLabelMedium"
             android:textColor="?attr/colorOnSurfaceVariant"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintTop_toBottomOf="@id/scroll_layouts" />
 
         <HorizontalScrollView
+            android:id="@+id/scroll_framing"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:scrollbars="none"
+            app:layout_constraintTop_toBottomOf="@id/tv_framing_label"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent">
+
+            <com.google.android.material.chip.ChipGroup
+                android:id="@+id/chip_group_framing"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                app:singleLine="true"
+                app:singleSelection="true"
+                app:selectionRequired="true" />
+        </HorizontalScrollView>
+
+        <!-- Style / Background Section -->
+        <TextView
+            android:id="@+id/tv_style_label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:text="Frame Style"
+            android:textAppearance="?attr/textAppearanceLabelMedium"
+            android:textColor="?attr/colorOnSurfaceVariant"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/scroll_framing" />
+
+        <HorizontalScrollView
             android:id="@+id/scroll_styles"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
+            android:layout_marginTop="4dp"
             android:scrollbars="none"
             app:layout_constraintTop_toBottomOf="@id/tv_style_label"
             app:layout_constraintStart_toStartOf="parent"

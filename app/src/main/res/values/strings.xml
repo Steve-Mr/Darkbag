@@ -127,7 +127,12 @@
     <string name="collage_select_lenses">Select Lenses</string>
     <string name="collage_min_lenses_warning">Please select at least 2 lenses</string>
     <string name="collage_save_action">Save</string>
-    <string name="collage_share_action">Share</string>
+    <string name="collage_framing_auto">Auto Balance</string>
+    <string name="collage_framing_crop">Crop Fit</string>
+    <string name="collage_framing_direct">Direct Stitch</string>
+    <string name="collage_btn_swap">Swap</string>
+    <string name="collage_btn_rotate">Rotate</string>
+    <string name="collage_btn_exif">EXIF</string>
     <string name="apply_to_all_lenses">Apply to All Lenses</string>
     <string name="apply_to_current_only">Current Lens Only</string>
     <string name="re_render_group_title">Apply Color to All Lenses?</string>

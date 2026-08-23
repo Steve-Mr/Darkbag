@@ -1,7 +1,6 @@
 package top.maary.darkbag.fragments
 
 import android.content.Intent
-import android.graphics.Bitmap
 import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
@@ -25,6 +24,7 @@ import top.maary.darkbag.utils.DarkbagIdentity
 import top.maary.darkbag.utils.ImageSaver
 import top.maary.darkbag.utils.MultiCameraCollageHelper
 import top.maary.darkbag.utils.MultiCameraCollageHelper.CollageLayout
+import top.maary.darkbag.utils.MultiCameraCollageHelper.FramingStrategy
 
 class MultiCameraCollageSheet : BottomSheetDialogFragment() {
 
@@ -35,6 +35,9 @@ class MultiCameraCollageSheet : BottomSheetDialogFragment() {
     private val allLenses = mutableListOf<MultiCameraLensItem>()
     private val selectedLenses = mutableListOf<MultiCameraLensItem>()
     private var currentLayout: CollageLayout = CollageLayout.SIDE_BY_SIDE
+    private var currentFraming: FramingStrategy = FramingStrategy.AUTO_BALANCE
+    private var currentRotationAngle: Int = 0
+    private var currentShowExif: Boolean = false
     private var currentBgColor: Int = Color.WHITE
     private var currentBorderDp: Float = 16f
     private var currentDividerDp: Float = 8f
@@ -74,7 +77,9 @@ class MultiCameraCollageSheet : BottomSheetDialogFragment() {
         selectedLenses.clear()
         selectedLenses.addAll(allLenses)
 
+        setupQuickActions()
         setupLensChips()
+        setupFramingChips()
         setupStyleChips()
         updateLayoutChips()
 
@@ -89,6 +94,23 @@ class MultiCameraCollageSheet : BottomSheetDialogFragment() {
         renderPreview()
     }
 
+    private fun setupQuickActions() {
+        binding.btnSwapOrder.setOnClickListener {
+            selectedLenses.reverse()
+            renderPreview()
+        }
+
+        binding.btnRotate.setOnClickListener {
+            currentRotationAngle = (currentRotationAngle + 90) % 360
+            renderPreview()
+        }
+
+        binding.btnToggleExif.setOnClickListener {
+            currentShowExif = binding.btnToggleExif.isChecked
+            renderPreview()
+        }
+    }
+
     private fun setupLensChips() {
         binding.chipGroupLenses.removeAllViews()
         for (lens in allLenses) {
@@ -100,12 +122,9 @@ class MultiCameraCollageSheet : BottomSheetDialogFragment() {
                     if (isChecked) {
                         if (!selectedLenses.contains(lens)) {
                             selectedLenses.add(lens)
-                            // Keep sorted by multiplier
-                            selectedLenses.sortBy { it.multiplier }
                         }
                     } else {
                         if (selectedLenses.size <= 2) {
-                            // Don't allow unchecking if only 2 left
                             this.isChecked = true
                             Toast.makeText(requireContext(), R.string.collage_min_lenses_warning, Toast.LENGTH_SHORT).show()
                             return@setOnCheckedChangeListener
@@ -161,6 +180,31 @@ class MultiCameraCollageSheet : BottomSheetDialogFragment() {
         }
     }
 
+    private fun setupFramingChips() {
+        binding.chipGroupFraming.removeAllViews()
+
+        val framings = listOf(
+            FramingStrategy.AUTO_BALANCE to getString(R.string.collage_framing_auto),
+            FramingStrategy.CROP_FILL to getString(R.string.collage_framing_crop),
+            FramingStrategy.DIRECT_STITCH to getString(R.string.collage_framing_direct)
+        )
+
+        for ((strategy, title) in framings) {
+            val chip = Chip(requireContext()).apply {
+                text = title
+                isCheckable = true
+                isChecked = (strategy == currentFraming)
+                setOnClickListener {
+                    if (currentFraming != strategy) {
+                        currentFraming = strategy
+                        renderPreview()
+                    }
+                }
+            }
+            binding.chipGroupFraming.addView(chip)
+        }
+    }
+
     private fun setupStyleChips() {
         binding.chipGroupStyles.removeAllViews()
 
@@ -199,6 +243,9 @@ class MultiCameraCollageSheet : BottomSheetDialogFragment() {
         binding.progressPreview.visibility = View.VISIBLE
 
         val layout = currentLayout
+        val framing = currentFraming
+        val rotation = currentRotationAngle
+        val showExif = currentShowExif
         val bgColor = currentBgColor
         val borderDp = currentBorderDp
         val dividerDp = currentDividerDp
@@ -209,6 +256,9 @@ class MultiCameraCollageSheet : BottomSheetDialogFragment() {
                 context = requireContext().applicationContext,
                 imageUris = uris,
                 layout = layout,
+                framingStrategy = framing,
+                rotationAngle = rotation,
+                showExif = showExif,
                 borderWidthDp = borderDp,
                 dividerWidthDp = dividerDp,
                 backgroundColor = bgColor,
@@ -240,6 +290,9 @@ class MultiCameraCollageSheet : BottomSheetDialogFragment() {
         binding.progressPreview.visibility = View.VISIBLE
 
         val layout = currentLayout
+        val framing = currentFraming
+        val rotation = currentRotationAngle
+        val showExif = currentShowExif
         val bgColor = currentBgColor
         val borderDp = currentBorderDp
         val dividerDp = currentDividerDp
@@ -250,6 +303,9 @@ class MultiCameraCollageSheet : BottomSheetDialogFragment() {
                 context = requireContext().applicationContext,
                 imageUris = uris,
                 layout = layout,
+                framingStrategy = framing,
+                rotationAngle = rotation,
+                showExif = showExif,
                 borderWidthDp = borderDp,
                 dividerWidthDp = dividerDp,
                 backgroundColor = bgColor,

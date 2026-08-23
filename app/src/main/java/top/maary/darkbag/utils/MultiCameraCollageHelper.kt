@@ -3,6 +3,7 @@ package top.maary.darkbag.utils
 import android.content.Context
 import android.graphics.*
 import android.net.Uri
+import androidx.exifinterface.media.ExifInterface
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlin.math.max
@@ -19,10 +20,37 @@ object MultiCameraCollageHelper {
         FEATURED_LEFT(3, 3)    // 1 Large Left + 2 Small Right
     }
 
+    enum class FramingStrategy {
+        AUTO_BALANCE,  // Automatically rotate sub-frames when extreme ratio would occur
+        CROP_FILL,     // Center crop sub-frames to standard aspect ratio
+        DIRECT_STITCH  // Raw uncropped, unrotated direct stitch
+    }
+
+    data class FrameMetadata(
+        val lensTag: String = "",
+        val focalLengthMm: String = "",
+        val aperture: String = "",
+        val shutter: String = "",
+        val iso: String = ""
+    ) {
+        fun toDisplayString(): String {
+            val parts = mutableListOf<String>()
+            if (lensTag.isNotBlank()) parts.add(lensTag)
+            if (focalLengthMm.isNotBlank()) parts.add(focalLengthMm)
+            if (aperture.isNotBlank()) parts.add(aperture)
+            if (shutter.isNotBlank()) parts.add(shutter)
+            if (iso.isNotBlank()) parts.add("ISO $iso")
+            return parts.joinToString(" · ")
+        }
+    }
+
     suspend fun createCollage(
         context: Context,
         imageUris: List<Uri>,
         layout: CollageLayout,
+        framingStrategy: FramingStrategy = FramingStrategy.AUTO_BALANCE,
+        rotationAngle: Int = 0,
+        showExif: Boolean = false,
         borderWidthDp: Float = 16f,
         dividerWidthDp: Float = 8f,
         backgroundColor: Int = Color.WHITE,
@@ -37,35 +65,50 @@ object MultiCameraCollageHelper {
         val cornerPx = cornerRadiusDp * density
 
         val loadedBitmaps = mutableListOf<Bitmap>()
+        val metadataList = mutableListOf<FrameMetadata>()
+
         try {
             for (uri in imageUris) {
-                val bmp = decodeSampledBitmapFromUri(context, uri, maxDimension, maxDimension)
+                var bmp = decodeSampledBitmapFromUri(context, uri, maxDimension, maxDimension)
                 if (bmp != null) {
+                    if (rotationAngle != 0) {
+                        val rotated = rotateBitmap(bmp, rotationAngle)
+                        if (rotated != bmp) {
+                            bmp.recycle()
+                            bmp = rotated
+                        }
+                    }
                     loadedBitmaps.add(bmp)
+                    if (showExif) {
+                        metadataList.add(readExifFromUri(context, uri))
+                    }
                 }
             }
 
             if (loadedBitmaps.isEmpty()) return@withContext null
 
+            // Apply Framing Strategy (Auto-Balance or Crop-Fill)
+            val preparedBitmaps = prepareBitmapsWithStrategy(loadedBitmaps, layout, framingStrategy)
+
             when (layout) {
                 CollageLayout.SIDE_BY_SIDE, CollageLayout.TRIPTYCH_ROW -> {
-                    composeHorizontalRow(loadedBitmaps, borderPx, dividerPx, backgroundColor, cornerPx)
+                    composeHorizontalRow(preparedBitmaps, metadataList, showExif, borderPx, dividerPx, backgroundColor, cornerPx, density)
                 }
                 CollageLayout.TOP_BOTTOM, CollageLayout.TRIPTYCH_COLUMN -> {
-                    composeVerticalColumn(loadedBitmaps, borderPx, dividerPx, backgroundColor, cornerPx)
+                    composeVerticalColumn(preparedBitmaps, metadataList, showExif, borderPx, dividerPx, backgroundColor, cornerPx, density)
                 }
                 CollageLayout.FEATURED_TOP -> {
-                    if (loadedBitmaps.size >= 3) {
-                        composeFeaturedTop(loadedBitmaps.take(3), borderPx, dividerPx, backgroundColor, cornerPx)
+                    if (preparedBitmaps.size >= 3) {
+                        composeFeaturedTop(preparedBitmaps.take(3), borderPx, dividerPx, backgroundColor, cornerPx)
                     } else {
-                        composeHorizontalRow(loadedBitmaps, borderPx, dividerPx, backgroundColor, cornerPx)
+                        composeHorizontalRow(preparedBitmaps, metadataList, showExif, borderPx, dividerPx, backgroundColor, cornerPx, density)
                     }
                 }
                 CollageLayout.FEATURED_LEFT -> {
-                    if (loadedBitmaps.size >= 3) {
-                        composeFeaturedLeft(loadedBitmaps.take(3), borderPx, dividerPx, backgroundColor, cornerPx)
+                    if (preparedBitmaps.size >= 3) {
+                        composeFeaturedLeft(preparedBitmaps.take(3), borderPx, dividerPx, backgroundColor, cornerPx)
                     } else {
-                        composeVerticalColumn(loadedBitmaps, borderPx, dividerPx, backgroundColor, cornerPx)
+                        composeVerticalColumn(preparedBitmaps, metadataList, showExif, borderPx, dividerPx, backgroundColor, cornerPx, density)
                     }
                 }
             }
@@ -76,24 +119,102 @@ object MultiCameraCollageHelper {
         }
     }
 
+    private fun prepareBitmapsWithStrategy(
+        bitmaps: List<Bitmap>,
+        layout: CollageLayout,
+        strategy: FramingStrategy
+    ): List<Bitmap> {
+        if (bitmaps.isEmpty()) return bitmaps
+        val first = bitmaps[0]
+        val isFirstPortrait = first.height > first.width
+
+        return when (strategy) {
+            FramingStrategy.AUTO_BALANCE -> {
+                when (layout) {
+                    CollageLayout.TOP_BOTTOM, CollageLayout.TRIPTYCH_COLUMN -> {
+                        // Stacking portrait vertically yields an extreme tall aspect ratio. Rotate 90 to balance!
+                        if (isFirstPortrait) {
+                            bitmaps.map { rotateBitmap(it, 90) }
+                        } else bitmaps
+                    }
+                    CollageLayout.SIDE_BY_SIDE, CollageLayout.TRIPTYCH_ROW -> {
+                        // Placing landscape horizontally yields an extreme wide aspect ratio. Rotate 90 to balance!
+                        if (!isFirstPortrait) {
+                            bitmaps.map { rotateBitmap(it, 90) }
+                        } else bitmaps
+                    }
+                    else -> bitmaps
+                }
+            }
+            FramingStrategy.CROP_FILL -> {
+                when (layout) {
+                    CollageLayout.TOP_BOTTOM, CollageLayout.TRIPTYCH_COLUMN -> {
+                        // Center crop to 3:2 landscape window so vertical stack is balanced 3:4
+                        bitmaps.map { cropToAspectRatio(it, 3f / 2f) }
+                    }
+                    CollageLayout.SIDE_BY_SIDE, CollageLayout.TRIPTYCH_ROW -> {
+                        // Center crop to 2:3 portrait window so horizontal row is balanced 4:3
+                        bitmaps.map { cropToAspectRatio(it, 2f / 3f) }
+                    }
+                    else -> bitmaps
+                }
+            }
+            FramingStrategy.DIRECT_STITCH -> bitmaps
+        }
+    }
+
+    private fun cropToAspectRatio(src: Bitmap, targetRatio: Float): Bitmap {
+        val srcRatio = src.width.toFloat() / src.height.toFloat()
+        val cropW: Int
+        val cropH: Int
+
+        if (srcRatio > targetRatio) {
+            cropH = src.height
+            cropW = (cropH * targetRatio).toInt()
+        } else {
+            cropW = src.width
+            cropH = (cropW / targetRatio).toInt()
+        }
+
+        val startX = (src.width - cropW) / 2
+        val startY = (src.height - cropH) / 2
+        return Bitmap.createBitmap(src, startX, startY, cropW, cropH)
+    }
+
+    private fun rotateBitmap(source: Bitmap, angle: Int): Bitmap {
+        if (angle == 0) return source
+        val matrix = Matrix().apply { postRotate(angle.toFloat()) }
+        return Bitmap.createBitmap(source, 0, 0, source.width, source.height, matrix, true)
+    }
+
     private fun composeHorizontalRow(
         frames: List<Bitmap>,
+        metadata: List<FrameMetadata>,
+        showExif: Boolean,
         borderPx: Int,
         dividerPx: Int,
         bgColor: Int,
-        cornerPx: Float
+        cornerPx: Float,
+        density: Float
     ): Bitmap {
         val targetHeight = frames.minOf { it.height }.coerceAtMost(2400)
         val scaledWidths = frames.map { (it.width * (targetHeight.toFloat() / it.height)).toInt() }
 
+        val exifHeightPx = if (showExif) (32 * density).toInt() else 0
         val totalWidth = borderPx * 2 + scaledWidths.sum() + (frames.size - 1) * dividerPx
-        val totalHeight = borderPx * 2 + targetHeight
+        val totalHeight = borderPx * 2 + targetHeight + exifHeightPx
 
         val result = Bitmap.createBitmap(totalWidth, totalHeight, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(result)
         canvas.drawColor(bgColor)
 
         val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+        val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            textSize = 12f * density
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+            color = if (isDarkColor(bgColor)) Color.parseColor("#CCCCCC") else Color.parseColor("#555555")
+            textAlign = Paint.Align.CENTER
+        }
 
         var currentX = borderPx.toFloat()
         for (i in frames.indices) {
@@ -101,6 +222,13 @@ object MultiCameraCollageHelper {
             val w = scaledWidths[i]
             val dstRect = RectF(currentX, borderPx.toFloat(), currentX + w, (borderPx + targetHeight).toFloat())
             drawBitmapWithRoundedCorners(canvas, bmp, dstRect, cornerPx, paint)
+
+            if (showExif && i < metadata.size) {
+                val text = metadata[i].toDisplayString()
+                val textY = borderPx + targetHeight + (20 * density)
+                canvas.drawText(text, currentX + w / 2f, textY, textPaint)
+            }
+
             currentX += w + dividerPx
         }
 
@@ -109,22 +237,31 @@ object MultiCameraCollageHelper {
 
     private fun composeVerticalColumn(
         frames: List<Bitmap>,
+        metadata: List<FrameMetadata>,
+        showExif: Boolean,
         borderPx: Int,
         dividerPx: Int,
         bgColor: Int,
-        cornerPx: Float
+        cornerPx: Float,
+        density: Float
     ): Bitmap {
         val targetWidth = frames.minOf { it.width }.coerceAtMost(2400)
         val scaledHeights = frames.map { (it.height * (targetWidth.toFloat() / it.width)).toInt() }
 
+        val exifHeightPerFrame = if (showExif) (26 * density).toInt() else 0
         val totalWidth = borderPx * 2 + targetWidth
-        val totalHeight = borderPx * 2 + scaledHeights.sum() + (frames.size - 1) * dividerPx
+        val totalHeight = borderPx * 2 + scaledHeights.sum() + (frames.size - 1) * dividerPx + (frames.size * exifHeightPerFrame)
 
         val result = Bitmap.createBitmap(totalWidth, totalHeight, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(result)
         canvas.drawColor(bgColor)
 
         val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+        val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            textSize = 11.5f * density
+            color = if (isDarkColor(bgColor)) Color.parseColor("#CCCCCC") else Color.parseColor("#555555")
+            textAlign = Paint.Align.CENTER
+        }
 
         var currentY = borderPx.toFloat()
         for (i in frames.indices) {
@@ -132,7 +269,15 @@ object MultiCameraCollageHelper {
             val h = scaledHeights[i]
             val dstRect = RectF(borderPx.toFloat(), currentY, (borderPx + targetWidth).toFloat(), currentY + h)
             drawBitmapWithRoundedCorners(canvas, bmp, dstRect, cornerPx, paint)
-            currentY += h + dividerPx
+
+            currentY += h
+            if (showExif && i < metadata.size) {
+                val text = metadata[i].toDisplayString()
+                val textY = currentY + (17 * density)
+                canvas.drawText(text, totalWidth / 2f, textY, textPaint)
+                currentY += exifHeightPerFrame
+            }
+            currentY += dividerPx
         }
 
         return result
@@ -280,6 +425,46 @@ object MultiCameraCollageHelper {
         } else {
             canvas.drawBitmap(bitmap, null, dstRect, paint)
         }
+    }
+
+    private fun readExifFromUri(context: Context, uri: Uri): FrameMetadata {
+        return try {
+            val tag = ImageUtils.extractMultiCameraLensTag(uri.toString())
+            context.contentResolver.openInputStream(uri)?.use { stream ->
+                val exif = ExifInterface(stream)
+                val focalLength = exif.getAttribute(ExifInterface.TAG_FOCAL_LENGTH_IN_35MM_FILM)
+                    ?: exif.getAttribute(ExifInterface.TAG_FOCAL_LENGTH)
+                val focalStr = focalLength?.let { "${it}mm" } ?: ""
+
+                val fNumber = exif.getAttribute(ExifInterface.TAG_F_NUMBER)
+                val fStr = fNumber?.let { "f/$it" } ?: ""
+
+                val expTime = exif.getAttribute(ExifInterface.TAG_EXPOSURE_TIME)
+                val shutterStr = expTime?.let {
+                    val d = it.toDoubleOrNull()
+                    if (d != null && d > 0 && d < 1.0) "1/${(1.0 / d).toInt()}s" else "${it}s"
+                } ?: ""
+
+                val iso = exif.getAttribute(ExifInterface.TAG_PHOTOGRAPHIC_SENSITIVITY)
+                    ?: exif.getAttribute(ExifInterface.TAG_ISO_SPEED_RATINGS)
+                    ?: ""
+
+                FrameMetadata(
+                    lensTag = tag,
+                    focalLengthMm = focalStr,
+                    aperture = fStr,
+                    shutter = shutterStr,
+                    iso = iso
+                )
+            } ?: FrameMetadata(lensTag = tag)
+        } catch (e: Exception) {
+            FrameMetadata(lensTag = ImageUtils.extractMultiCameraLensTag(uri.toString()))
+        }
+    }
+
+    private fun isDarkColor(color: Int): Boolean {
+        val darkness = 1 - (0.299 * Color.red(color) + 0.587 * Color.green(color) + 0.114 * Color.blue(color)) / 255
+        return darkness >= 0.5
     }
 
     private fun decodeSampledBitmapFromUri(
