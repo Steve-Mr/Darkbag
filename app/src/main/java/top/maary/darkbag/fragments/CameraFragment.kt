@@ -4207,7 +4207,20 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 concurrentFrontCameraManager = top.maary.darkbag.camera.ConcurrentFrontCameraManager(
                     requireContext(),
                     viewLifecycleOwner.lifecycleScope
-                )
+                ).apply {
+                    onFailedListener = { error ->
+                        lifecycleScope.launch(Dispatchers.Main) {
+                            Log.e("CameraFragment", "Front PiP camera failed: $error")
+                            isFrontPipActive = false
+                            pipContainer.visibility = View.GONE
+                            val onSurface = MaterialColors.getColor(switchBtn, com.google.android.material.R.attr.colorOnSurface)
+                            val surfaceContainer = MaterialColors.getColor(switchBtn, com.google.android.material.R.attr.colorSurfaceContainerHighest)
+                            switchBtn.iconTint = ColorStateList.valueOf(onSurface)
+                            switchBtn.backgroundTintList = ColorStateList.valueOf(surfaceContainer)
+                            Toast.makeText(requireContext(), R.string.concurrent_front_camera_unsupported, Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }
             }
 
             if (pipViewFinder.isAvailable) {
@@ -5174,8 +5187,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         val currentLayout = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUT_SBS)
         val isMultiCamPrefEnabled = prefs.getBoolean(SettingsFragment.KEY_MULTI_CAMERA_MODE, false)
         val forceEnable = prefs.getBoolean(SettingsFragment.KEY_MULTI_CAMERA_FORCE_ENABLE, false)
-        val isMultiCamSupported = top.maary.darkbag.utils.MultiCameraHelper.isMultiCameraSupported(requireContext(), forceEnable)
-        val canUseMultiCam = (isMultiCamPrefEnabled || forceEnable) && isMultiCamSupported
+        val isMultiCamSupported = top.maary.darkbag.utils.MultiCameraHelper.isMultiCameraSupported(requireContext(), forceEnable = true)
+        val canUseMultiCam = isMultiCamSupported
 
         val (newMode, newLayout, newMultiCam) = when {
             !currentMode && !isMultiCameraModeActive -> {

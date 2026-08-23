@@ -210,8 +210,14 @@ class MultiCameraCaptureManager(
         try {
             device.createCaptureSession(sessionConfig)
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to create native logical capture session", e)
-            onSessionFailedListener?.invoke(e.message ?: "Failed to create session")
+            Log.w(TAG, "Failed to create native logical capture session, falling back to Fast Relay Burst", e)
+            val fallbackInfo = currentLogicalInfo?.copy(hardwareType = MultiCameraHardwareType.FAST_RELAY_BURST)
+                ?: LogicalMultiCameraInfo(device.id, false, 0, activeLenses, MultiCameraHardwareType.FAST_RELAY_BURST)
+            currentLogicalInfo = fallbackInfo
+            scope.launch {
+                closeInternal()
+                openRelayPrimarySession(fallbackInfo, targetPreviewSurface)
+            }
         }
     }
 
@@ -261,8 +267,14 @@ class MultiCameraCaptureManager(
                 }
 
                 override fun onConfigureFailed(session: CameraCaptureSession) {
-                    Log.e(TAG, "Native multi-camera capture session configuration failed!")
-                    onSessionFailedListener?.invoke("Session configuration failed")
+                    Log.w(TAG, "Native multi-camera capture session configuration failed, falling back to Fast Relay Burst")
+                    val fallbackInfo = currentLogicalInfo?.copy(hardwareType = MultiCameraHardwareType.FAST_RELAY_BURST)
+                        ?: LogicalMultiCameraInfo(device.id, false, 0, activeLenses, MultiCameraHardwareType.FAST_RELAY_BURST)
+                    currentLogicalInfo = fallbackInfo
+                    scope.launch {
+                        closeInternal()
+                        openRelayPrimarySession(fallbackInfo, targetPreviewSurface)
+                    }
                 }
             }
         )
@@ -362,9 +374,11 @@ class MultiCameraCaptureManager(
     @SuppressLint("MissingPermission")
     private suspend fun openRelayPrimarySession(
         logicalInfo: LogicalMultiCameraInfo,
-        targetPreviewSurface: Surface
+        targetPreviewSurface: Surface,
+        targetLens: PhysicalLensInfo? = null
     ) {
-        val primaryLens = activeLenses.find { it.type == LensType.WIDE } ?: activeLenses.firstOrNull()
+        val primaryLens = targetLens ?: currentPrimaryLens ?: activeLenses.find { it.type == LensType.WIDE } ?: activeLenses.firstOrNull()
+        currentPrimaryLens = primaryLens
         val primaryId = primaryLens?.physicalId ?: logicalInfo.logicalCameraId
         val openDeferred = CompletableDeferred<CameraDevice>()
 
@@ -441,17 +455,46 @@ class MultiCameraCaptureManager(
 
     fun setPrimaryPreviewLens(lens: PhysicalLensInfo) {
         currentPrimaryLens = lens
+        val surface = previewSurface ?: return
+        val hwType = currentLogicalInfo?.hardwareType ?: MultiCameraHardwareType.NATIVE_LOGICAL
+
+        if (hwType == MultiCameraHardwareType.FAST_RELAY_BURST || cameraDevice?.id != currentLogicalInfo?.logicalCameraId) {
+            scope.launch {
+                val info = currentLogicalInfo ?: return@launch
+                openRelayPrimarySession(info, surface, targetLens = lens)
+            }
+            return
+        }
+
         val dev = cameraDevice ?: return
         val session = captureSession ?: return
-        val surface = previewSurface ?: return
 
         try {
+            val chars = cameraManager.getCameraCharacteristics(dev.id)
             val requestBuilder = dev.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
                 addTarget(surface)
                 set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
                 set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    set(CaptureRequest.CONTROL_ZOOM_RATIO, lens.multiplier)
+                    val zoomRange = chars.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
+                    if (zoomRange != null) {
+                        val clampedRatio = lens.multiplier.coerceIn(zoomRange.lower, zoomRange.upper)
+                        set(CaptureRequest.CONTROL_ZOOM_RATIO, clampedRatio)
+                    }
+                }
+
+                val activeArray = chars.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
+                if (activeArray != null && lens.multiplier >= 1.0f) {
+                    val cropW = (activeArray.width() / lens.multiplier).toInt()
+                    val cropH = (activeArray.height() / lens.multiplier).toInt()
+                    val cropRect = android.graphics.Rect(
+                        activeArray.centerX() - cropW / 2,
+                        activeArray.centerY() - cropH / 2,
+                        activeArray.centerX() + cropW / 2,
+                        activeArray.centerY() + cropH / 2
+                    )
+                    set(CaptureRequest.SCALER_CROP_REGION, cropRect)
                 }
             }
             session.setRepeatingRequest(requestBuilder.build(), null, cameraHandler)

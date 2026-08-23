@@ -62,13 +62,21 @@ class ConcurrentFrontCameraManager(
         }
     }
 
+    var onFailedListener: ((String) -> Unit)? = null
+
     @SuppressLint("MissingPermission")
     suspend fun startFrontPreview(textureView: TextureView) = lock.withLock {
         stopFrontInternal()
-        val frontId = getFrontCameraId() ?: return@withLock
+        val frontId = getFrontCameraId() ?: run {
+            onFailedListener?.invoke("No front camera ID found")
+            return@withLock
+        }
         ensureThread()
 
-        val surfaceTexture = textureView.surfaceTexture ?: return@withLock
+        val surfaceTexture = textureView.surfaceTexture ?: run {
+            onFailedListener?.invoke("SurfaceTexture is null")
+            return@withLock
+        }
         surfaceTexture.setDefaultBufferSize(640, 480)
         val previewSurface = Surface(surfaceTexture)
         this.frontSurface = previewSurface
@@ -94,6 +102,7 @@ class ConcurrentFrontCameraManager(
                         openDeferred.completeExceptionally(RuntimeException("Open error: $error"))
                     }
                     scope.launch { stop() }
+                    onFailedListener?.invoke("Front camera error: $error")
                 }
             })
 
@@ -135,6 +144,7 @@ class ConcurrentFrontCameraManager(
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start front PiP camera", e)
             stopFrontInternal()
+            onFailedListener?.invoke(e.message ?: "Failed to start front camera")
         }
     }
 
