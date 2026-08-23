@@ -402,7 +402,7 @@ class CameraFragment : Fragment() {
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
         isMotionPhotoEnabled = prefs.getBoolean(SettingsFragment.KEY_MOTION_PHOTO, false)
 
-        if (isMotionPhotoEnabled && !isHalfFrameModeEnabled) {
+        if (isMotionPhotoEnabled && !isHalfFrameModeEnabled && !isMultiCameraModeActive) {
             if (motionPhotoEncoder == null) {
                 motionPhotoEncoder = MotionPhotoEncoder(
                     width = 1080,
@@ -424,7 +424,7 @@ class CameraFragment : Fragment() {
 
     private fun updateMotionPhotoButton() {
         val btn = cameraUiContainerBinding?.motionPhotoButton ?: return
-        if (isHalfFrameModeEnabled) {
+        if (isHalfFrameModeEnabled || isMultiCameraModeActive) {
             btn.visibility = View.GONE
             return
         }
@@ -1554,8 +1554,8 @@ class CameraFragment : Fragment() {
             val isFrame1Trigger = isHalfFrameModeEnabled && halfFrameStep == 0
             val isFrame2Trigger = isHalfFrameModeEnabled && halfFrameStep == 1
 
-            // Trigger Motion Photo snapshot if enabled and not in half-frame mode
-            val motionEnabled = prefs.getBoolean(SettingsFragment.KEY_MOTION_PHOTO, false) && !isHalfFrameModeEnabled
+            // Trigger Motion Photo snapshot if enabled and not in half-frame or multi-camera mode
+            val motionEnabled = prefs.getBoolean(SettingsFragment.KEY_MOTION_PHOTO, false) && !isHalfFrameModeEnabled && !isMultiCameraModeActive
             if (motionEnabled && motionPhotoEncoder?.isEncoding == true) {
                 val deferred = CompletableDeferred<Pair<String?, Long>>()
                 pendingMotionPhotoTask = deferred
@@ -5108,6 +5108,9 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         _fragmentCameraBinding?.modeSwitchButton?.let { updateModeSwitchIcon(it) }
 
         if (modeChanged) {
+            if (newMultiCam && isAdded) {
+                Toast.makeText(requireContext(), R.string.multi_camera_mode_enabled_toast, Toast.LENGTH_SHORT).show()
+            }
             bindCameraUseCases()
         }
     }

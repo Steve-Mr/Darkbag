@@ -69,6 +69,8 @@
     <string name="multi_camera_save_raw">Save Individual RAW (DNG) for All Lenses</string>
     <string name="multi_camera_status_supported">Hardware supports multi-camera logical streaming</string>
     <string name="multi_camera_status_unsupported">Device does not support logical multi-camera</string>
+    <string name="multi_camera_mode_enabled_toast">Multi-Camera Simultaneous Mode</string>
+    <string name="concurrent_front_camera_unsupported">Concurrent front camera is not supported on this device</string>
 
     <string name="settings_shortcut_label">Settings</string>
     <string name="playground_shortcut_label">Playground</string>
