@@ -229,6 +229,10 @@ class CameraFragment : Fragment() {
     // Half-frame State
     private var pendingVfSnapshot: android.graphics.Bitmap? = null
     private var isHalfFrameModeEnabled = false
+    private var isMultiCameraModeActive = false
+    private var multiCameraManager: top.maary.darkbag.camera.MultiCameraCaptureManager? = null
+    private var concurrentFrontCameraManager: top.maary.darkbag.camera.ConcurrentFrontCameraManager? = null
+    private var isFrontPipActive = false
     private var halfFrameStep = 0
     private var halfFrameTempPath: String? = null
     private lateinit var halfFrameSessionStore: HalfFrameSessionStore
@@ -400,7 +404,7 @@ class CameraFragment : Fragment() {
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
         isMotionPhotoEnabled = prefs.getBoolean(SettingsFragment.KEY_MOTION_PHOTO, false)
 
-        if (isMotionPhotoEnabled && !isHalfFrameModeEnabled) {
+        if (isMotionPhotoEnabled && !isHalfFrameModeEnabled && !isMultiCameraModeActive) {
             if (motionPhotoEncoder == null) {
                 motionPhotoEncoder = MotionPhotoEncoder(
                     width = 1080,
@@ -422,7 +426,7 @@ class CameraFragment : Fragment() {
 
     private fun updateMotionPhotoButton() {
         val btn = cameraUiContainerBinding?.motionPhotoButton ?: return
-        if (isHalfFrameModeEnabled) {
+        if (isHalfFrameModeEnabled || isMultiCameraModeActive) {
             btn.visibility = View.GONE
             return
         }
@@ -493,11 +497,23 @@ class CameraFragment : Fragment() {
 
         updateHdrPlusConstraints()
 
+        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val isMultiCamPref = prefs.getBoolean(SettingsFragment.KEY_MULTI_CAMERA_MODE, false)
+        val forceEnable = prefs.getBoolean(SettingsFragment.KEY_MULTI_CAMERA_FORCE_ENABLE, false)
+        val isMultiCamSupported = top.maary.darkbag.utils.MultiCameraHelper.isMultiCameraSupported(requireContext(), forceEnable)
+        val isHalfFrame = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_MODE, false)
+
+        val previousMultiCam = isMultiCameraModeActive
+        val previousHalfFrame = isHalfFrameModeEnabled
+
+        isHalfFrameModeEnabled = isHalfFrame
+        isMultiCameraModeActive = (isMultiCamPref || forceEnable) && isMultiCamSupported && !isHalfFrame
+
+        val modeChanged = (previousMultiCam != isMultiCameraModeActive) || (previousHalfFrame != isHalfFrameModeEnabled)
+
         // Re-initialize camera engine if needed.
-        // For Camera2 engine, we need to re-bind use cases (which triggers openCamera2).
-        // For CameraX, they are bound to lifecycle but we ensure consistency.
-        // Only bind if the view has already been fully created and the layout passed
-        if (cameraProvider != null || currentLens?.useCamera2 == true) {
+        // For MultiCamera, Camera2 engine, or CameraX
+        if (modeChanged || cameraProvider != null || currentLens?.useCamera2 == true || isMultiCameraModeActive) {
             if (_fragmentCameraBinding?.viewFinderContainer?.isLaidOut == true) {
                 bindCameraUseCases()
             } else {
@@ -506,7 +522,6 @@ class CameraFragment : Fragment() {
                 }
             }
         }
-        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
         if (prefs.getBoolean(SettingsFragment.KEY_SAVE_LOCATION, false)) {
             locationHelper.startListening()
         } else {
@@ -661,8 +676,12 @@ class CameraFragment : Fragment() {
         updateHdrPlusUi()
         updateHdrPlusConstraints()
 
-        // Initialize Half-frame State (isolated by mode/layout profile)
+        // Initialize Half-frame & Multi-camera State (isolated by mode/layout profile)
         isHalfFrameModeEnabled = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_MODE, false)
+        val isMultiCamPref = prefs.getBoolean(SettingsFragment.KEY_MULTI_CAMERA_MODE, false)
+        val forceEnable = prefs.getBoolean(SettingsFragment.KEY_MULTI_CAMERA_FORCE_ENABLE, false)
+        val isMultiCamSupported = top.maary.darkbag.utils.MultiCameraHelper.isMultiCameraSupported(requireContext(), forceEnable)
+        isMultiCameraModeActive = (isMultiCamPref || forceEnable) && isMultiCamSupported && !isHalfFrameModeEnabled
         readScopedHalfFrameState(prefs, requireFileForStep1 = true)
 
         updateHalfFrameUI()
@@ -1012,9 +1031,61 @@ class CameraFragment : Fragment() {
             viewFinder?.setAspectRatio(4, 3)
         }
 
-        // Decide Engine: Camera2 (Hard Switch) or CameraX
+        // Decide Engine: MultiCamera, Camera2 (Hard Switch), or CameraX
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
         val useCameraxFallback = prefs.getBoolean(SettingsFragment.KEY_USE_CAMERAX, false)
+
+        if (isMultiCameraModeActive && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            val logicalInfo = top.maary.darkbag.utils.MultiCameraHelper.getLogicalMultiCameraInfo(requireContext())
+            if (logicalInfo != null) {
+                Log.d(TAG, "Binding Multi-Camera Session with logical camera: ${logicalInfo.logicalCameraId}")
+                cameraProvider?.unbindAll()
+                camera = null
+                closeCamera2()
+
+                val countPref = top.maary.darkbag.utils.MultiCameraCountPreference.fromKey(
+                    prefs.getString(SettingsFragment.KEY_MULTI_CAMERA_COUNT_PREF, null)
+                )
+                val pairPref = top.maary.darkbag.utils.DualLensPairPreference.fromKey(
+                    prefs.getString(SettingsFragment.KEY_MULTI_CAMERA_DUAL_PAIR, null)
+                )
+                val saveRaw = prefs.getBoolean(SettingsFragment.KEY_MULTI_CAMERA_SAVE_RAW, false)
+
+                lifecycleScope.launch(Dispatchers.Main) {
+                    initLensControls()
+                }
+
+                lutProcessor?.getInputSurface(1440, 1080) { previewSurface ->
+                    lifecycleScope.launch(Dispatchers.Main) {
+                        if (!isAdded) return@launch
+                        if (multiCameraManager == null) {
+                            multiCameraManager = top.maary.darkbag.camera.MultiCameraCaptureManager(requireContext(), lifecycleScope)
+                        }
+                        multiCameraManager?.onSessionFailedListener = { error ->
+                            Log.e(TAG, "Multi-camera session failed: $error, falling back to standard mode")
+                            lifecycleScope.launch(Dispatchers.Main) {
+                                isMultiCameraModeActive = false
+                                _fragmentCameraBinding?.modeSwitchButton?.let { updateModeSwitchIcon(it) }
+                                bindCameraUseCases()
+                            }
+                        }
+                        multiCameraManager?.openAndConfigure(
+                            logicalInfo = logicalInfo,
+                            countPref = countPref,
+                            pairPref = pairPref,
+                            targetPreviewSurface = previewSurface,
+                            saveRaw = saveRaw,
+                            initialLensMultiplier = currentLens?.multiplier
+                        )
+                    }
+                }
+                return
+            } else {
+                Log.w(TAG, "Multi-camera requested but not supported on device, disabling multi-camera mode")
+                isMultiCameraModeActive = false
+                _fragmentCameraBinding?.modeSwitchButton?.let { updateModeSwitchIcon(it) }
+            }
+        }
 
         if (currentLens?.useCamera2 == true && !useCameraxFallback) {
             Log.d(TAG, "Switching to Camera2 Engine for lens: ${currentLens?.name}")
@@ -1490,8 +1561,8 @@ class CameraFragment : Fragment() {
             val isFrame1Trigger = isHalfFrameModeEnabled && halfFrameStep == 0
             val isFrame2Trigger = isHalfFrameModeEnabled && halfFrameStep == 1
 
-            // Trigger Motion Photo snapshot if enabled and not in half-frame mode
-            val motionEnabled = prefs.getBoolean(SettingsFragment.KEY_MOTION_PHOTO, false) && !isHalfFrameModeEnabled
+            // Trigger Motion Photo snapshot if enabled and not in half-frame or multi-camera mode
+            val motionEnabled = prefs.getBoolean(SettingsFragment.KEY_MOTION_PHOTO, false) && !isHalfFrameModeEnabled && !isMultiCameraModeActive
             if (motionEnabled && motionPhotoEncoder?.isEncoding == true) {
                 val deferred = CompletableDeferred<Pair<String?, Long>>()
                 pendingMotionPhotoTask = deferred
@@ -1567,7 +1638,9 @@ class CameraFragment : Fragment() {
                 setGalleryThumbnail(null) // Clear previous thumbnail and show placeholder/indicator
             }
 
-            if (currentLens?.useCamera2 == true) {
+            if (isMultiCameraModeActive && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                takeMultiCameraPicture(timing)
+            } else if (currentLens?.useCamera2 == true) {
                 if (isHdrPlusEnabled && isRawSupported) {
                     triggerHdrPlusBurstCamera2(isFrame1Trigger, hfMetadataForTrigger)
                 } else {
@@ -1597,6 +1670,11 @@ class CameraFragment : Fragment() {
 
             // Listener for button used to switch cameras. Only called if the button is enabled
             it.setOnClickListener {
+                if (isMultiCameraModeActive) {
+                    toggleFrontPipInMultiCameraMode()
+                    return@setOnClickListener
+                }
+
                 lensFacing = if (CameraSelector.LENS_FACING_FRONT == lensFacing) {
                     CameraSelector.LENS_FACING_BACK
                 } else {
@@ -2514,10 +2592,15 @@ class CameraFragment : Fragment() {
         else
             android.hardware.camera2.CameraCharacteristics.LENS_FACING_FRONT
 
-        val filteredLenses = availableLenses.filter { it.facing == repoFacing }.filter {
-            !it.isZoomPreset || it.sensorId.contains("virtual-2x")
-        }.filter {
-            !it.sensorId.contains(CameraRepository.VIRTUAL_TELE_2X_SUFFIX)
+        val filteredLenses = if (isMultiCameraModeActive) {
+            val physical = availableLenses.filter { it.facing == repoFacing && !it.isLogicalAuto && !it.isZoomPreset }
+            if (physical.isNotEmpty()) physical else availableLenses.filter { it.facing == repoFacing && !it.isZoomPreset }
+        } else {
+            availableLenses.filter { it.facing == repoFacing }.filter {
+                !it.isZoomPreset || it.sensorId.contains("virtual-2x")
+            }.filter {
+                !it.sensorId.contains(CameraRepository.VIRTUAL_TELE_2X_SUFFIX)
+            }
         }
 
         // Populate lens controls if any are available
@@ -2546,6 +2629,13 @@ class CameraFragment : Fragment() {
                     cornerRadius = resources.getDimensionPixelSize(R.dimen.radius_full)
 
                     setOnClickListener {
+                        if (isMultiCameraModeActive) {
+                            currentLens = lens
+                            updateLensUI()
+                            multiCameraManager?.switchPrimaryPreviewLensByMultiplier(lens.multiplier)
+                            return@setOnClickListener
+                        }
+
                         val oldLens = currentLens
                         val is1x = lens.multiplier in 0.95f..1.05f && !lens.isZoomPreset
                         val presets1xForCheck = if (is1x) cameraRepository.get1xPresets(lens) else emptyList()
@@ -2602,6 +2692,7 @@ class CameraFragment : Fragment() {
             }
         }
         updateLensUI()
+        applyUIVisibility()
     }
 
     private fun updateLensUI() {
@@ -4104,6 +4195,281 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         }
     }
 
+    private fun toggleFrontPipInMultiCameraMode() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R || !top.maary.darkbag.utils.MultiCameraHelper.isConcurrentFrontBackSupported(requireContext())) {
+            Toast.makeText(requireContext(), R.string.concurrent_front_camera_unsupported, Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val binding = _fragmentCameraBinding ?: return
+        val pipContainer = binding.pipContainer ?: return
+        val pipViewFinder = binding.pipViewFinder ?: return
+        val switchBtn = binding.cameraSwitchButtonAlt ?: return
+
+        isFrontPipActive = !isFrontPipActive
+        if (isFrontPipActive) {
+            pipContainer.visibility = View.VISIBLE
+            val onPrimary = MaterialColors.getColor(switchBtn, com.google.android.material.R.attr.colorOnPrimaryContainer)
+            val primaryContainer = MaterialColors.getColor(switchBtn, com.google.android.material.R.attr.colorPrimaryContainer)
+            switchBtn.iconTint = ColorStateList.valueOf(onPrimary)
+            switchBtn.backgroundTintList = ColorStateList.valueOf(primaryContainer)
+
+            if (concurrentFrontCameraManager == null) {
+                concurrentFrontCameraManager = top.maary.darkbag.camera.ConcurrentFrontCameraManager(
+                    requireContext(),
+                    viewLifecycleOwner.lifecycleScope
+                ).apply {
+                    onFailedListener = { error ->
+                        lifecycleScope.launch(Dispatchers.Main) {
+                            Log.e("CameraFragment", "Front PiP camera failed: $error")
+                            isFrontPipActive = false
+                            pipContainer.visibility = View.GONE
+                            val onSurface = MaterialColors.getColor(switchBtn, com.google.android.material.R.attr.colorOnSurface)
+                            val surfaceContainer = MaterialColors.getColor(switchBtn, com.google.android.material.R.attr.colorSurfaceContainerHighest)
+                            switchBtn.iconTint = ColorStateList.valueOf(onSurface)
+                            switchBtn.backgroundTintList = ColorStateList.valueOf(surfaceContainer)
+                            Toast.makeText(requireContext(), R.string.concurrent_front_camera_unsupported, Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }
+            }
+
+            if (pipViewFinder.isAvailable) {
+                viewLifecycleOwner.lifecycleScope.launch {
+                    concurrentFrontCameraManager?.startFrontPreview(pipViewFinder)
+                }
+            } else {
+                pipViewFinder.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
+                    override fun onSurfaceTextureAvailable(st: SurfaceTexture, w: Int, h: Int) {
+                        viewLifecycleOwner.lifecycleScope.launch {
+                            concurrentFrontCameraManager?.startFrontPreview(pipViewFinder)
+                        }
+                    }
+                    override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, w: Int, h: Int) {}
+                    override fun onSurfaceTextureDestroyed(st: SurfaceTexture): Boolean = true
+                    override fun onSurfaceTextureUpdated(st: SurfaceTexture) {}
+                }
+            }
+        } else {
+            pipContainer.visibility = View.GONE
+            val onSurface = MaterialColors.getColor(switchBtn, com.google.android.material.R.attr.colorOnSurface)
+            val surfaceContainer = MaterialColors.getColor(switchBtn, com.google.android.material.R.attr.colorSurfaceContainerHighest)
+            switchBtn.iconTint = ColorStateList.valueOf(onSurface)
+            switchBtn.backgroundTintList = ColorStateList.valueOf(surfaceContainer)
+
+            viewLifecycleOwner.lifecycleScope.launch {
+                concurrentFrontCameraManager?.stop()
+            }
+        }
+    }
+
+    private fun takeMultiCameraPicture(timing: StandardTimingTracker? = null) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
+            processingSemaphore.release()
+            return
+        }
+
+        val manager = multiCameraManager ?: run {
+            processingSemaphore.release()
+            return
+        }
+
+        showShutterBlackout()
+        showProcessingAnimation()
+
+        val orientation = getCombinedOrientation()
+        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val saveRaw = prefs.getBoolean(SettingsFragment.KEY_MULTI_CAMERA_SAVE_RAW, false)
+        val isHdrPlusActive = isHdrPlusEnabled && isRawSupported
+
+        val frontJpegDeferred = CompletableDeferred<ByteArray?>()
+        if (isFrontPipActive && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            concurrentFrontCameraManager?.captureFrontJpeg(orientation) { data ->
+                frontJpegDeferred.complete(data)
+            }
+        } else {
+            frontJpegDeferred.complete(null)
+        }
+
+        manager.captureMultiCamera(
+            orientationDegrees = orientation,
+            isHdrPlusActive = isHdrPlusActive,
+            onResult = { result ->
+                lifecycleScope.launch(Dispatchers.IO) {
+                    val frontJpeg = withTimeoutOrNull(2000L) { frontJpegDeferred.await() }
+                    processAndSaveMultiCameraResult(result, saveRaw, frontJpeg)
+                }
+            },
+            onError = { errorMsg ->
+                Log.e(TAG, "Multi-camera capture error: $errorMsg")
+                lifecycleScope.launch(Dispatchers.Main) {
+                    processingSemaphore.release()
+                    hideProcessingAnimation()
+                    Toast.makeText(requireContext(), "Multi-camera capture failed: $errorMsg", Toast.LENGTH_SHORT).show()
+                }
+            }
+        )
+    }
+
+    private suspend fun processAndSaveMultiCameraResult(
+        result: top.maary.darkbag.camera.MultiCameraCaptureResult,
+        saveRaw: Boolean,
+        frontJpegData: ByteArray? = null
+    ) {
+        val appContext = requireContext().applicationContext
+        val prefs = appContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val jpgFolderUri = prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
+        val rawFolderUri = prefs.getString(SettingsFragment.KEY_RAW_STORAGE_URI, null)
+
+        var primarySavedUri: Uri? = null
+
+        val currentLog = prefs.getString(SettingsFragment.KEY_TARGET_LOG, "None") ?: "None"
+        val currentLut = prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, "None") ?: "None"
+        val logIndex = SettingsFragment.LOG_CURVES.indexOf(currentLog)
+        val lutPath = if (currentLut != "None" && currentLut.isNotBlank()) {
+            val f = File(lutManager.lutDir, currentLut)
+            if (f.exists()) f.absolutePath else null
+        } else null
+
+        val currentEditConfig = top.maary.darkbag.models.EditConfig(
+            log = currentLog,
+            lut = currentLut
+        )
+
+        try {
+            for (frame in result.frames) {
+                val frameBaseName = "${result.baseName}_MULTI_${frame.lens.name}"
+                var jpgPathToSave: String? = null
+
+                // 1. If we have a valid DNG, render it through ColorProcessor (LibRaw + LOG + 3D LUT)
+                if (frame.tempDngPath != null) {
+                    val dngFile = File(frame.tempDngPath)
+                    if (dngFile.exists() && dngFile.length() > 0) {
+                        val dngBytes = dngFile.readBytes()
+                        val renderedFile = File(appContext.cacheDir, "rendered_${frameBaseName}.jpg")
+                        val ret = top.maary.darkbag.processor.ColorProcessor.processRaw(
+                            dngData = dngBytes,
+                            targetLog = logIndex,
+                            lutPath = lutPath,
+                            exposure = 0f,
+                            contrast = 0f,
+                            saturation = 0f,
+                            highlights = 0f,
+                            shadows = 0f,
+                            whites = 0f,
+                            blacks = 0f,
+                            digitalGain = 1.0f,
+                            outputJpgPath = renderedFile.absolutePath,
+                            outputTiffPath = null,
+                            useGpu = true,
+                            orientation = frame.orientation,
+                            mirror = false,
+                            outputBitmap = null,
+                            downsampleFactor = 1,
+                            zoomFactor = 1.0f,
+                            metadata = frame.captureMetadata
+                        )
+                        if (ret >= 0 && renderedFile.exists() && renderedFile.length() > 0) {
+                            jpgPathToSave = renderedFile.absolutePath
+                            Log.i(TAG, "ColorProcessor successfully rendered LOG/LUT JPEG for ${frame.lens.name}")
+                        } else {
+                            Log.w(TAG, "ColorProcessor failed with code $ret for ${frame.lens.name}, falling back to camera JPEG")
+                        }
+                    }
+                }
+
+                // 2. Fallback to native JPEG if ColorProcessor wasn't used or failed
+                if (jpgPathToSave == null && frame.jpegData != null) {
+                    val fallbackFile = File(appContext.cacheDir, "temp_${frameBaseName}.jpg")
+                    FileOutputStream(fallbackFile).use { it.write(frame.jpegData) }
+                    jpgPathToSave = fallbackFile.absolutePath
+                }
+
+                // 3. Save the final JPEG to MediaStore / storage folder
+                if (jpgPathToSave != null) {
+                    val savedUri = ImageSaver.saveProcessedImage(
+                        context = appContext,
+                        inputBitmap = null,
+                        bmpPath = jpgPathToSave,
+                        rotationDegrees = 0,
+                        zoomFactor = 1.0f,
+                        baseName = frameBaseName,
+                        linearDngPath = null,
+                        saveJpg = true,
+                        saveRaw = false,
+                        jpgFolderUri = jpgFolderUri,
+                        editConfig = currentEditConfig,
+                        captureMetadata = frame.captureMetadata
+                    )
+                    if (primarySavedUri == null && savedUri != null) {
+                        primarySavedUri = savedUri
+                    }
+                }
+
+                // 4. Save RAW (DNG) if enabled by user
+                if (saveRaw && frame.tempDngPath != null) {
+                    ImageSaver.saveProcessedImage(
+                        context = appContext,
+                        inputBitmap = null,
+                        bmpPath = null,
+                        rotationDegrees = 0,
+                        zoomFactor = 1.0f,
+                        baseName = frameBaseName,
+                        linearDngPath = frame.tempDngPath,
+                        saveJpg = false,
+                        saveRaw = true,
+                        rawFolderUri = rawFolderUri,
+                        editConfig = currentEditConfig,
+                        captureMetadata = frame.captureMetadata
+                    )
+                } else if (!saveRaw && frame.tempDngPath != null) {
+                    // Clean up temporary DNG file if user didn't request saving RAW
+                    try { File(frame.tempDngPath).delete() } catch (e: Exception) {}
+                }
+            }
+
+            // 5. Save Front PiP JPEG if captured
+            if (frontJpegData != null) {
+                val frontBaseName = "${result.baseName}_MULTI_Front"
+                val frontFile = File(appContext.cacheDir, "temp_${frontBaseName}.jpg")
+                FileOutputStream(frontFile).use { it.write(frontJpegData) }
+                val frontUri = ImageSaver.saveProcessedImage(
+                    context = appContext,
+                    inputBitmap = null,
+                    bmpPath = frontFile.absolutePath,
+                    rotationDegrees = 0,
+                    zoomFactor = 1.0f,
+                    baseName = frontBaseName,
+                    linearDngPath = null,
+                    saveJpg = true,
+                    saveRaw = false,
+                    jpgFolderUri = jpgFolderUri,
+                    editConfig = currentEditConfig,
+                    captureMetadata = null
+                )
+                if (primarySavedUri == null && frontUri != null) {
+                    primarySavedUri = frontUri
+                }
+            }
+
+            withContext(Dispatchers.Main) {
+                if (primarySavedUri != null) {
+                    imageRepository.invalidateCache()
+                    prefs.edit().putString(SettingsFragment.KEY_LAST_CAPTURE_URI, primarySavedUri.toString()).apply()
+                    setGalleryThumbnail(primarySavedUri.toString())
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error saving multi-camera result", e)
+        } finally {
+            processingSemaphore.release()
+            withContext(Dispatchers.Main) {
+                cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
+                hideProcessingAnimation()
+            }
+        }
+    }
+
     private fun takeSinglePictureCamera2(
         timing: StandardTimingTracker? = null,
         isFrame1Trigger: Boolean = false,
@@ -4488,6 +4854,15 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
     private suspend fun closeCamera2() {
         camera2Lock.withLock {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                multiCameraManager?.close()
+                multiCameraManager = null
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                concurrentFrontCameraManager?.stop()
+                concurrentFrontCameraManager = null
+                isFrontPipActive = false
+            }
             camera2Session?.close()
             camera2Session = null
             camera2Device?.close()
@@ -4821,26 +5196,58 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
         val currentMode = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_MODE, false)
         val currentLayout = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUT_SBS)
+        val isMultiCamPrefEnabled = prefs.getBoolean(SettingsFragment.KEY_MULTI_CAMERA_MODE, false)
+        val forceEnable = prefs.getBoolean(SettingsFragment.KEY_MULTI_CAMERA_FORCE_ENABLE, false)
+        val isMultiCamSupported = top.maary.darkbag.utils.MultiCameraHelper.isMultiCameraSupported(requireContext(), forceEnable = true)
+        val canUseMultiCam = isMultiCamSupported
 
-        val (newMode, newLayout) = when {
-            !currentMode -> true to SettingsFragment.HALF_FRAME_LAYOUT_SBS // Normal -> Side-by-side
-            currentLayout == SettingsFragment.HALF_FRAME_LAYOUT_SBS -> true to SettingsFragment.HALF_FRAME_LAYOUT_TB // Side-by-side -> Top-bottom
-            else -> false to SettingsFragment.HALF_FRAME_LAYOUT_SBS // Top-bottom -> Normal
+        val (newMode, newLayout, newMultiCam) = when {
+            !currentMode && !isMultiCameraModeActive -> {
+                // Normal -> Side-by-side
+                Triple(true, SettingsFragment.HALF_FRAME_LAYOUT_SBS, false)
+            }
+            currentMode && currentLayout == SettingsFragment.HALF_FRAME_LAYOUT_SBS -> {
+                // Side-by-side -> Top-bottom
+                Triple(true, SettingsFragment.HALF_FRAME_LAYOUT_TB, false)
+            }
+            currentMode && currentLayout == SettingsFragment.HALF_FRAME_LAYOUT_TB -> {
+                if (canUseMultiCam) {
+                    // Top-bottom -> Multi-Camera
+                    Triple(false, SettingsFragment.HALF_FRAME_LAYOUT_SBS, true)
+                } else {
+                    // Top-bottom -> Normal
+                    Triple(false, SettingsFragment.HALF_FRAME_LAYOUT_SBS, false)
+                }
+            }
+            isMultiCameraModeActive -> {
+                // Multi-Camera -> Normal
+                Triple(false, SettingsFragment.HALF_FRAME_LAYOUT_SBS, false)
+            }
+            else -> Triple(false, SettingsFragment.HALF_FRAME_LAYOUT_SBS, false)
         }
 
         prefs.edit()
             .putBoolean(SettingsFragment.KEY_HALF_FRAME_MODE, newMode)
             .putString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, newLayout)
+            .putBoolean(SettingsFragment.KEY_MULTI_CAMERA_MODE, newMultiCam)
             .apply()
 
+        val modeChanged = (currentMode != newMode) || (isMultiCameraModeActive != newMultiCam)
         isHalfFrameModeEnabled = newMode
+        isMultiCameraModeActive = newMultiCam
+
         readScopedHalfFrameState(prefs, requireFileForStep1 = true)
         updateHalfFrameUI()
         updateShutterOrientation()
         updateMotionPhotoEncoder()
+        _fragmentCameraBinding?.modeSwitchButton?.let { updateModeSwitchIcon(it) }
 
-        // Re-bind use cases if needed?
-        // Actually Half-frame doesn't change use cases, just UI and post-processing.
+        if (modeChanged) {
+            if (newMultiCam && isAdded) {
+                Toast.makeText(requireContext(), R.string.multi_camera_mode_enabled_toast, Toast.LENGTH_SHORT).show()
+            }
+            bindCameraUseCases()
+        }
     }
 
     private fun updateModeSwitchIcon(btn: MaterialButton) {
@@ -4849,6 +5256,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         val layout = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUTS[0])
 
         val iconRes = when {
+            isMultiCameraModeActive -> R.drawable.ic_mode_multi_camera
             !mode -> R.drawable.ic_mode_normal
             layout == SettingsFragment.HALF_FRAME_LAYOUTS[0] -> R.drawable.ic_mode_half_side
             else -> R.drawable.ic_mode_half_top

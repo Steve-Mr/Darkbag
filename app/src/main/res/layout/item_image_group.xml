@@ -77,4 +77,26 @@
 
     </FrameLayout>
 
+    <!-- Multi-Camera Lens Switcher Container (Dynamically positioned below image) -->
+    <FrameLayout
+        android:id="@+id/multiCameraToggleContainer"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="16dp"
+        android:background="@drawable/bg_multi_camera_capsule"
+        android:elevation="3dp"
+        android:padding="4dp"
+        android:visibility="gone"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <LinearLayout
+            android:id="@+id/multiCameraToggleGroup"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center" />
+    </FrameLayout>
+
 </androidx.constraintlayout.widget.ConstraintLayout>

@@ -60,6 +60,18 @@
     <string name="half_frame_light_leak">Random Light Leak</string>
     <string name="half_frame_auto_burst">Auto Burst (Double Shot)</string>
 
+    <string name="multi_camera_mode_title">Multi-Camera Simultaneous Capture</string>
+    <string name="enable_multi_camera_mode">Enable Multi-Camera Mode</string>
+    <string name="multi_camera_force_enable">Force Enable Multi-Camera Mode</string>
+    <string name="multi_camera_force_enable_summary">Use standalone camera aggregation or fast relay if native multi-camera is not declared by OEM</string>
+    <string name="multi_camera_count_pref_title">Lens Count Preference</string>
+    <string name="multi_camera_dual_pair_title">Dual-Lens Preference</string>
+    <string name="multi_camera_save_raw">Save Individual RAW (DNG) for All Lenses</string>
+    <string name="multi_camera_status_supported">Hardware supports multi-camera logical streaming</string>
+    <string name="multi_camera_status_unsupported">Device does not support logical multi-camera</string>
+    <string name="multi_camera_mode_enabled_toast">Multi-Camera Simultaneous Mode</string>
+    <string name="concurrent_front_camera_unsupported">Concurrent front camera is not supported on this device</string>
+
     <string name="settings_shortcut_label">Settings</string>
     <string name="playground_shortcut_label">Playground</string>
     <string name="camera_shortcut_label">Camera</string>
@@ -99,4 +111,33 @@
     <string name="clear_cache_dialog_message">This will clear temporary playback videos, sharing exports, and pipeline buffers. Your saved photos, Playground files, and imported LUTs will not be affected.</string>
     <string name="clear_cache_success_toast">Cache cleared (%1$s freed)</string>
     <string name="clear_cache_empty_toast">Cache is already clean</string>
+
+    <string name="create_multi_cam_collage">Create Multi-Cam Collage</string>
+    <string name="collage_layout_sbs">Side by Side</string>
+    <string name="collage_layout_tb">Top &amp; Bottom</string>
+    <string name="collage_layout_triptych">Triptych (Panoramic)</string>
+    <string name="collage_layout_triptych_row">3-Row</string>
+    <string name="collage_layout_triptych_col">3-Column</string>
+    <string name="collage_layout_featured_top">1 Top + 2 Bottom</string>
+    <string name="collage_layout_featured_left">1 Left + 2 Right</string>
+    <string name="collage_style_white">White</string>
+    <string name="collage_style_black">Black</string>
+    <string name="collage_style_transparent">Transparent</string>
+    <string name="collage_border_standard">Standard</string>
+    <string name="collage_border_thin">Thin</string>
+    <string name="collage_border_none">Seamless</string>
+    <string name="collage_select_lenses">Select Lenses</string>
+    <string name="collage_min_lenses_warning">Please select at least 2 lenses</string>
+    <string name="collage_save_action">Save</string>
+    <string name="collage_framing_auto">Auto Balance</string>
+    <string name="collage_framing_crop">Crop Fit</string>
+    <string name="collage_framing_direct">Direct Stitch</string>
+    <string name="collage_btn_swap">Swap</string>
+    <string name="collage_btn_rotate">Rotate</string>
+    <string name="collage_btn_exif">EXIF</string>
+    <string name="apply_to_all_lenses">Apply to All Lenses</string>
+    <string name="apply_to_current_only">Current Lens Only</string>
+    <string name="re_render_group_title">Apply Color to All Lenses?</string>
+    <string name="re_render_group_message">Would you like to re-render all physical camera angles (0.6x, 1.0x, 3.0x) with this color profile?</string>
+    <string name="collage_saved_toast">Multi-camera collage saved to gallery</string>
 </resources>

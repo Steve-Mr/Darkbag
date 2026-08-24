@@ -235,6 +235,10 @@ open class ImageViewerFragment : Fragment() {
                         onLongPressStarted = { handleLongPressStarted(it) }
                         onLongPressEnded = { handleLongPressEnded(it) }
                         onMotionPhotoIndicatorTapped = { pos -> handleMotionPhotoIndicatorTapped(pos) }
+                        onMultiCameraLensChanged = { _, _ ->
+                            updateSplitButtons()
+                            updateToolbarIcon()
+                        }
                         setFormatSwitcherPersistentHidden(isAdjusted)
                         onCurrentListChanged = { previousList, currentList ->
                             val currentIndex = binding.imagePager.currentItem
@@ -348,10 +352,7 @@ open class ImageViewerFragment : Fragment() {
         if (!::adapter.isInitialized || adapter.itemCount == 0) return
         val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
 
-        // 2.2: If partial (JPG exists but one DNG missing), no editing.
-        // 2.4: If dual DNGs exist but no JPG, editing is allowed.
-        // 2.5: If lone DNG (HF1 or HF2) exists and not in-progress, it is not a half-frame group, so that DNG is the source.
-        val canEdit = (currentGroup.dngUri != null || currentGroup.dngUri1 != null || currentGroup.dngUri2 != null) && !currentGroup.isPartial
+        val canEdit = (currentGroup.dngUri != null || currentGroup.dngUri1 != null || currentGroup.dngUri2 != null || currentGroup.multiDngUris.isNotEmpty()) && !currentGroup.isPartial
 
         val visibility = if (canEdit && !isEditingAdjustments) View.VISIBLE else View.GONE
         binding.bottomLeftControls.visibility = visibility
@@ -420,7 +421,12 @@ open class ImageViewerFragment : Fragment() {
     protected open suspend fun ensureDngBytesLoaded() {
         if (sourceDngBytes != null) return
         val group = adapter.getGroup(binding.imagePager.currentItem)
-        val dngUri1 = group.dngUri ?: group.dngUri1
+        val dngUri1 = if (group.isMultiCamera) {
+            val idx = adapter.getSelectedLensIndex(binding.imagePager.currentItem)
+            group.multiDngUris.getOrNull(idx) ?: group.multiDngUris.firstOrNull()
+        } else {
+            group.dngUri ?: group.dngUri1
+        }
         val dngUri2 = group.dngUri2
         val context = context ?: return
 
@@ -509,9 +515,15 @@ open class ImageViewerFragment : Fragment() {
         binding.btnShareMenu.setOnClickListener {
             binding.btnShareMenu.isCheckable = true
             binding.btnShareMenu.isChecked = true
+            val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
             val popup = PopupMenu(requireContext(), it)
             popup.menu.add(0, MENU_SHARE_TIFF, 0, getString(R.string.share_as_tiff)).apply {
                 setIcon(R.drawable.ic_photo)
+            }
+            if (currentGroup.isMultiCamera) {
+                popup.menu.add(0, MENU_COLLAGE, 0, getString(R.string.create_multi_cam_collage)).apply {
+                    setIcon(R.drawable.ic_photo)
+                }
             }
             popup.menu.add(0, MENU_DETAILS, 0, "Details").apply {
                 setIcon(R.drawable.ic_info)
@@ -525,10 +537,11 @@ open class ImageViewerFragment : Fragment() {
             popup.setOnMenuItemClickListener { item ->
                 when (item.itemId) {
                     MENU_SHARE_TIFF -> performShareAsTiff()
+                    MENU_COLLAGE -> showMultiCamCollageDialog(adapter.getGroup(binding.imagePager.currentItem))
                     MENU_DETAILS -> showImageDetails()
                     MENU_DELETE -> {
-                        val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
-                        showDeleteDialog(currentGroup)
+                        val groupToDelete = adapter.getGroup(binding.imagePager.currentItem)
+                        showDeleteDialog(groupToDelete)
                     }
                 }
                 true
@@ -1507,7 +1520,41 @@ open class ImageViewerFragment : Fragment() {
                         return previewBitmap
                     }
 
-                    val finalBitmap: android.graphics.Bitmap? = if (!currentGroup.isHalfFrame()) {
+                    val finalBitmap: android.graphics.Bitmap? = if (currentGroup.isMultiCamera) {
+                        val lenses = if (currentGroup.multiCameraLenses.isNotEmpty()) currentGroup.multiCameraLenses else adapter.getMultiCameraLenses(currentGroup)
+                        for (i in lenses.indices) {
+                            val lens = lenses[i]
+                            val dngUri = lens.dngUri ?: continue
+                            val bmp = processFull(null, dngUri, i)
+                            if (bmp != null) {
+                                val jpgUri = lens.jpgUri
+                                val fileName = if (jpgUri != null) getFileName(context, jpgUri).substringBeforeLast(".") else "${currentGroup.baseName}_MULTI_${lens.lensTag}"
+                                val baseName = if (isReplacement) fileName else "${fileName}_edited_${System.currentTimeMillis()}"
+                                val targetUri = if (isReplacement) jpgUri else null
+                                val jpgFolderUri = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                                    .getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
+                                val captureMetadata = repository.getCaptureMetadata(dngUri)
+
+                                top.maary.darkbag.utils.ImageSaver.saveProcessedImage(
+                                    context = context,
+                                    inputBitmap = bmp,
+                                    bmpPath = null,
+                                    rotationDegrees = 0,
+                                    zoomFactor = 1.0f,
+                                    baseName = baseName,
+                                    linearDngPath = null,
+                                    saveJpg = true,
+                                    saveRaw = false,
+                                    jpgFolderUri = jpgFolderUri,
+                                    targetUri = targetUri,
+                                    editConfig = config,
+                                    captureMetadata = captureMetadata
+                                )
+                                bmp.recycle()
+                            }
+                        }
+                        null
+                    } else if (!currentGroup.isHalfFrame()) {
                         val primaryUri = dngUri1 ?: dngUri2 ?: return@withContext null
                         val primaryBytes = if (dngUri1 != null) sourceDngBytes else sourceDngBytes2
                         processFull(primaryBytes, primaryUri, 0)
@@ -1624,6 +1671,10 @@ open class ImageViewerFragment : Fragment() {
                         onLongPressStarted = { handleLongPressStarted(it) }
                         onLongPressEnded = { handleLongPressEnded(it) }
                         onMotionPhotoIndicatorTapped = { pos -> handleMotionPhotoIndicatorTapped(pos) }
+                        onMultiCameraLensChanged = { _, _ ->
+                            updateSplitButtons()
+                            updateToolbarIcon()
+                        }
                         setFormatSwitcherPersistentHidden(isAdjusted)
                         onCurrentListChanged = { previousList, currentList ->
                             val currentIndex = binding.imagePager.currentItem
@@ -1908,11 +1959,7 @@ open class ImageViewerFragment : Fragment() {
         val currentGroup = adapter.getGroup(currentIndex)
         val selectedFormat = adapter.getSelectedFormat(currentIndex)
 
-        val uri = when (selectedFormat) {
-            "JPG" -> currentGroup.jpgUri
-            "DNG" -> currentGroup.dngUri ?: currentGroup.dngUri1 ?: currentGroup.dngUri2
-            else -> currentGroup.jpgUri ?: currentGroup.dngUri
-        } ?: return
+        val uri = adapter.getCurrentUri(currentIndex) ?: return
 
         val dialog = BottomSheetDialog(requireContext())
         val detailsBinding = BottomSheetImageDetailsBinding.inflate(layoutInflater)
@@ -2222,6 +2269,11 @@ open class ImageViewerFragment : Fragment() {
         updateViewportPadding()
     }
 
+    private fun showMultiCamCollageDialog(group: ImageGroup) {
+        val sheet = MultiCameraCollageSheet.newInstance(group)
+        sheet.show(childFragmentManager, MultiCameraCollageSheet.TAG)
+    }
+
     private fun setupEdgeToEdge() {
         val marginMedium = resources.getDimensionPixelSize(R.dimen.margin_medium)
 
@@ -2393,6 +2445,7 @@ open class ImageViewerFragment : Fragment() {
         private const val MENU_DELETE = 2
         private const val MENU_SAVE_AS = 3
         private const val MENU_SHARE_TIFF = 4
+        private const val MENU_COLLAGE = 5
 
         private const val EXPOSURE_MIN = -4f
         private const val EXPOSURE_MAX = 4f
