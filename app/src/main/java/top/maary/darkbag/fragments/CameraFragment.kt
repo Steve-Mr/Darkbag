@@ -57,6 +57,7 @@ import android.graphics.RectF
 import android.hardware.camera2.CaptureResult
 import android.hardware.camera2.params.MeteringRectangle
 import android.hardware.camera2.params.RggbChannelVector
+import android.view.HapticFeedbackConstants
 import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.TotalCaptureResult
@@ -239,6 +240,7 @@ class CameraFragment : Fragment() {
     private var pendingVfSnapshot: android.graphics.Bitmap? = null
     private var isHalfFrameModeEnabled = false
     private var isMultiCameraModeActive = false
+    private var isMultiCameraManualLinked = true
     private var multiCameraManager: top.maary.darkbag.camera.MultiCameraCaptureManager? = null
     private var concurrentFrontCameraManager: top.maary.darkbag.camera.ConcurrentFrontCameraManager? = null
     private var isFrontPipActive = false
@@ -2452,11 +2454,28 @@ class CameraFragment : Fragment() {
             }
         }
 
+        isMultiCameraManualLinked = prefs.getBoolean("pref_multi_camera_manual_linked", true)
+
         // Level 2: Pill Click Listeners (Toggles Level 3 Dial Panel)
         binding.pillFocus?.setOnClickListener { toggleManualTab("Focus") }
         binding.pillIso?.setOnClickListener { toggleManualTab("ISO") }
         binding.pillShutter?.setOnClickListener { toggleManualTab("Shutter") }
         binding.pillEv?.setOnClickListener { toggleManualTab("EV") }
+
+        // Multi-Camera Sync Link Button
+        binding.btnProLink?.setOnClickListener { v ->
+            isMultiCameraManualLinked = !isMultiCameraManualLinked
+            val p = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+            p.edit().putBoolean("pref_multi_camera_manual_linked", isMultiCameraManualLinked).apply()
+            v.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK, HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING)
+            val msg = if (isMultiCameraManualLinked) {
+                getString(R.string.multi_camera_link_synced)
+            } else {
+                getString(R.string.multi_camera_link_primary_only)
+            }
+            Toast.makeText(requireContext(), msg, Toast.LENGTH_SHORT).show()
+            updateProInfoBar()
+        }
 
         // Dial Wheel Item Selection
         binding.dialWheelView?.setOnItemSelectedListener { item, _, fromUser ->
@@ -2755,6 +2774,17 @@ class CameraFragment : Fragment() {
         binding.pillShutter?.strokeColor = ColorStateList.valueOf(activeColor)
         binding.pillEv?.strokeWidth = if (activeManualTab == "EV") 2 else 0
         binding.pillEv?.strokeColor = ColorStateList.valueOf(activeColor)
+
+        // Multi-Camera Link Button (Only visible if multi-camera mode or front PiP is active)
+        val isMultiCamActive = isMultiCameraModeActive || isFrontPipActive || (availableLenses.size > 1 && multiCameraManager != null)
+        binding.btnProLink?.visibility = if (isMultiCamActive) View.VISIBLE else View.GONE
+        if (isMultiCameraManualLinked) {
+            binding.btnProLink?.setIconResource(R.drawable.ic_link)
+            binding.btnProLink?.iconTint = ColorStateList.valueOf(activeColor)
+        } else {
+            binding.btnProLink?.setIconResource(R.drawable.ic_link_off)
+            binding.btnProLink?.iconTint = ColorStateList.valueOf(normalColor)
+        }
 
         // Update Level 1 Trigger Button State Indicator
         val isAnyManual = isManualFocus || isManualIso || isManualShutter || currentEvIndex != 0
@@ -4646,6 +4676,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 concurrentFrontCameraManager?.stop()
             }
         }
+        updateProInfoBar()
     }
 
     private fun takeMultiCameraPicture(timing: StandardTimingTracker? = null) {
@@ -4667,9 +4698,20 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         val saveRaw = prefs.getBoolean(SettingsFragment.KEY_MULTI_CAMERA_SAVE_RAW, false)
         val isHdrPlusActive = isHdrPlusEnabled && isRawSupported
 
+        val manualConfig = top.maary.darkbag.camera.MultiCameraManualConfig(
+            isLinked = isMultiCameraManualLinked,
+            isManualFocus = isManualFocus,
+            focusDistance = currentFocusDistance,
+            isManualIso = isManualIso,
+            iso = currentIso,
+            isManualShutter = isManualShutter,
+            exposureTimeNanos = currentExposureTime,
+            evIndex = currentEvIndex
+        )
+
         val frontJpegDeferred = CompletableDeferred<ByteArray?>()
         if (isFrontPipActive && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            concurrentFrontCameraManager?.captureFrontJpeg(orientation) { data ->
+            concurrentFrontCameraManager?.captureFrontJpeg(orientation, manualConfig) { data ->
                 frontJpegDeferred.complete(data)
             }
         } else {
@@ -4679,6 +4721,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         manager.captureMultiCamera(
             orientationDegrees = orientation,
             isHdrPlusActive = isHdrPlusActive,
+            manualConfig = manualConfig,
             onResult = { result ->
                 lifecycleScope.launch(Dispatchers.IO) {
                     val frontJpeg = withTimeoutOrNull(2000L) { frontJpegDeferred.await() }
@@ -5628,6 +5671,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         updateHalfFrameUI()
         updateShutterOrientation()
         updateMotionPhotoEncoder()
+        updateProInfoBar()
         _fragmentCameraBinding?.modeSwitchButton?.let { updateModeSwitchIcon(it) }
 
         if (modeChanged) {

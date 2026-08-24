@@ -148,7 +148,11 @@ class ConcurrentFrontCameraManager(
         }
     }
 
-    fun captureFrontJpeg(orientationDegrees: Int, onCaptured: (ByteArray) -> Unit) {
+    fun captureFrontJpeg(
+        orientationDegrees: Int,
+        manualConfig: MultiCameraManualConfig? = null,
+        onCaptured: (ByteArray) -> Unit
+    ) {
         val dev = frontDevice ?: return
         val session = frontSession ?: return
         val reader = frontImageReader ?: return
@@ -169,8 +173,33 @@ class ConcurrentFrontCameraManager(
             val req = dev.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE).apply {
                 addTarget(reader.surface)
                 set(CaptureRequest.JPEG_ORIENTATION, orientationDegrees)
-                set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
-                set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+
+                if (manualConfig != null && manualConfig.isLinked) {
+                    if (manualConfig.isManualIso || manualConfig.isManualShutter) {
+                        set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
+                        if (manualConfig.isManualIso) {
+                            set(CaptureRequest.SENSOR_SENSITIVITY, manualConfig.iso)
+                        }
+                        if (manualConfig.isManualShutter) {
+                            set(CaptureRequest.SENSOR_EXPOSURE_TIME, manualConfig.exposureTimeNanos)
+                        }
+                    } else {
+                        set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+                        if (manualConfig.evIndex != 0) {
+                            set(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION, manualConfig.evIndex)
+                        }
+                    }
+
+                    if (manualConfig.isManualFocus) {
+                        set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF)
+                        set(CaptureRequest.LENS_FOCUS_DISTANCE, manualConfig.focusDistance)
+                    } else {
+                        set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
+                    }
+                } else {
+                    set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
+                    set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+                }
             }
             session.capture(req.build(), null, frontHandler)
         } catch (e: Exception) {
