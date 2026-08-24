@@ -119,8 +119,12 @@
     <string name="gallery_deselect_all">Deselect All</string>
     <string name="gallery_delete_dialog_title">Delete Selected Items</string>
     <string name="gallery_delete_option_group">Delete entire group (JPG + RAW)</string>
+    <string name="gallery_delete_desc_group">Removes both JPG preview and original RAW/DNG files</string>
     <string name="gallery_delete_option_raw_only">Delete RAW (DNG) only</string>
+    <string name="gallery_delete_desc_raw_only">Frees storage space while keeping JPG previews</string>
     <string name="gallery_delete_option_jpg_only">Delete JPG only</string>
+    <string name="gallery_delete_desc_jpg_only">Removes JPG previews while keeping original RAW files</string>
+    <string name="gallery_delete_confirm_format">Delete (%1$d items)</string>
     <string name="gallery_delete_summary">Selected %1$d item(s). Choose deletion scope:</string>
     <string name="format_raw_jpg">RAW+JPG</string>
     <string name="format_jpg">JPG</string>

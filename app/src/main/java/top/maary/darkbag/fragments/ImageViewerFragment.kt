@@ -216,6 +216,14 @@ open class ImageViewerFragment : Fragment() {
             }
         }
 
+        childFragmentManager.setFragmentResultListener(DarkbagBatchDeleteSheet.REQUEST_KEY, viewLifecycleOwner) { _, bundle ->
+            val mode = bundle.getInt(DarkbagBatchDeleteSheet.BUNDLE_KEY_DELETE_MODE, 0)
+            val selectedItems = if (::galleryAdapter.isInitialized) galleryAdapter.getSelectedItems() else emptyList()
+            if (selectedItems.isNotEmpty()) {
+                deleteBatchImages(selectedItems, mode)
+            }
+        }
+
         binding.imagePager.registerOnPageChangeCallback(pageChangeCallback)
         loadImages(forceRefresh = true)
 
@@ -2422,25 +2430,8 @@ open class ImageViewerFragment : Fragment() {
 
     private fun showBatchDeleteDialog(selectedItems: List<GallerySelectedItem>) {
         if (selectedItems.isEmpty()) return
-
-        val options = arrayOf(
-            getString(R.string.gallery_delete_option_group),
-            getString(R.string.gallery_delete_option_raw_only),
-            getString(R.string.gallery_delete_option_jpg_only)
-        )
-        var checkedItem = 0
-
-        com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
-            .setTitle(R.string.gallery_delete_dialog_title)
-            .setMessage(getString(R.string.gallery_delete_summary, selectedItems.size))
-            .setSingleChoiceItems(options, checkedItem) { _, which ->
-                checkedItem = which
-            }
-            .setPositiveButton(R.string.delete_button_alt) { _, _ ->
-                deleteBatchImages(selectedItems, checkedItem)
-            }
-            .setNegativeButton(R.string.cancel, null)
-            .show()
+        DarkbagBatchDeleteSheet.newInstance(selectedItems.size)
+            .show(childFragmentManager, DarkbagBatchDeleteSheet.TAG)
     }
 
     private fun deleteBatchImages(selectedItems: List<GallerySelectedItem>, deleteMode: Int) {
@@ -2611,10 +2602,23 @@ open class ImageViewerFragment : Fragment() {
                 rightMargin = systemBars.right
             }
             binding.galleryBottomBar.updateLayoutParams<ViewGroup.MarginLayoutParams> {
-                bottomMargin = systemBars.bottom
+                bottomMargin = 0
                 leftMargin = systemBars.left
                 rightMargin = systemBars.right
             }
+            val padVertical = resources.getDimensionPixelSize(R.dimen.margin_small)
+            binding.galleryBottomBar.setPadding(
+                marginMedium,
+                padVertical,
+                marginMedium,
+                systemBars.bottom + padVertical
+            )
+            binding.galleryRecyclerView.setPadding(
+                systemBars.left,
+                0,
+                systemBars.right,
+                systemBars.bottom + resources.getDimensionPixelSize(R.dimen.margin_large) * 3
+            )
 
             val isLandscape = resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
             binding.editAdjustmentPanel.setPadding(
