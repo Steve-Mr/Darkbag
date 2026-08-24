@@ -502,26 +502,7 @@ class MultiCameraCaptureManager(
                 set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
                 set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
 
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    val zoomRange = chars.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
-                    if (zoomRange != null) {
-                        val clampedRatio = lens.multiplier.coerceIn(zoomRange.lower, zoomRange.upper)
-                        set(CaptureRequest.CONTROL_ZOOM_RATIO, clampedRatio)
-                    }
-                }
-
-                val activeArray = chars.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
-                if (activeArray != null && lens.multiplier >= 1.0f) {
-                    val cropW = (activeArray.width() / lens.multiplier).toInt()
-                    val cropH = (activeArray.height() / lens.multiplier).toInt()
-                    val cropRect = android.graphics.Rect(
-                        activeArray.centerX() - cropW / 2,
-                        activeArray.centerY() - cropH / 2,
-                        activeArray.centerX() + cropW / 2,
-                        activeArray.centerY() + cropH / 2
-                    )
-                    set(CaptureRequest.SCALER_CROP_REGION, cropRect)
-                }
+                applyPreviewZoomAndCrop(this, chars, dev.id, lens)
             }
             session.setRepeatingRequest(requestBuilder.build(), null, cameraHandler)
             triggerFast3AWarmup(dev, session, surface, lens)
@@ -542,33 +523,59 @@ class MultiCameraCaptureManager(
                 addTarget(targetPreviewSurface)
                 set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
                 set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
-                if (prim != null) {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                        val zoomRange = chars.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
-                        if (zoomRange != null) {
-                            val clampedRatio = prim.multiplier.coerceIn(zoomRange.lower, zoomRange.upper)
-                            set(CaptureRequest.CONTROL_ZOOM_RATIO, clampedRatio)
-                        }
-                    }
-                    val activeArray = chars.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
-                    if (activeArray != null && prim.multiplier >= 1.0f) {
-                        val cropW = (activeArray.width() / prim.multiplier).toInt()
-                        val cropH = (activeArray.height() / prim.multiplier).toInt()
-                        val cropRect = android.graphics.Rect(
-                            activeArray.centerX() - cropW / 2,
-                            activeArray.centerY() - cropH / 2,
-                            activeArray.centerX() + cropW / 2,
-                            activeArray.centerY() + cropH / 2
-                        )
-                        set(CaptureRequest.SCALER_CROP_REGION, cropRect)
-                    }
-                }
+                applyPreviewZoomAndCrop(this, chars, device.id, prim)
             }
             session.setRepeatingRequest(requestBuilder.build(), null, cameraHandler)
             triggerFast3AWarmup(device, session, targetPreviewSurface, prim)
             Log.i(TAG, "Started repeating preview with lens: ${prim?.name}")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start repeating preview", e)
+        }
+    }
+
+    /**
+     * Configure preview zoom and crop depending on whether the camera device is a logical multi-camera or physical camera.
+     * - Physical camera: Hardware already provides optical focal magnification (e.g. 2.7x telephoto). Keep 1.0x digital zoom & full active array.
+     * - Logical multi-camera: Set CONTROL_ZOOM_RATIO on Android R+ (or SCALER_CROP_REGION on older OS) to switch physical sensor without double-cropping.
+     */
+    private fun applyPreviewZoomAndCrop(
+        builder: CaptureRequest.Builder,
+        chars: CameraCharacteristics,
+        deviceId: String,
+        lens: PhysicalLensInfo?
+    ) {
+        val isNativeLogical = currentLogicalInfo?.isLogicalMultiCamera == true &&
+                deviceId == currentLogicalInfo?.logicalCameraId
+        val activeArray = chars.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
+
+        if (isNativeLogical && lens != null) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                val zoomRange = chars.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
+                if (zoomRange != null) {
+                    builder.set(CaptureRequest.CONTROL_ZOOM_RATIO, lens.multiplier.coerceIn(zoomRange.lower, zoomRange.upper))
+                }
+            } else if (activeArray != null && lens.multiplier >= 1.0f) {
+                val cropW = (activeArray.width() / lens.multiplier).toInt()
+                val cropH = (activeArray.height() / lens.multiplier).toInt()
+                val cropRect = android.graphics.Rect(
+                    activeArray.centerX() - cropW / 2,
+                    activeArray.centerY() - cropH / 2,
+                    activeArray.centerX() + cropW / 2,
+                    activeArray.centerY() + cropH / 2
+                )
+                builder.set(CaptureRequest.SCALER_CROP_REGION, cropRect)
+            }
+        } else {
+            // Standalone physical camera device
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                val zoomRange = chars.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
+                if (zoomRange != null) {
+                    builder.set(CaptureRequest.CONTROL_ZOOM_RATIO, 1.0f.coerceIn(zoomRange.lower, zoomRange.upper))
+                }
+            }
+            if (activeArray != null) {
+                builder.set(CaptureRequest.SCALER_CROP_REGION, activeArray)
+            }
         }
     }
 
@@ -586,7 +593,9 @@ class MultiCameraCaptureManager(
                 set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
                 set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_START)
                 set(CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER, CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER_START)
-                if (lens != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                val isNativeLogical = currentLogicalInfo?.isLogicalMultiCamera == true &&
+                        device.id == currentLogicalInfo?.logicalCameraId
+                if (isNativeLogical && lens != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                     val zoomRange = chars.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
                     if (zoomRange != null) {
                         set(CaptureRequest.CONTROL_ZOOM_RATIO, lens.multiplier.coerceIn(zoomRange.lower, zoomRange.upper))
