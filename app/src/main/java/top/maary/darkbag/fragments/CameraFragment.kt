@@ -1543,7 +1543,9 @@ class CameraFragment : Fragment() {
                 cameraUiContainerBinding?.dialPanel?.visibility = View.GONE
                 activeManualTab = null
                 it.visibility = View.GONE
+                updateFocusPeakingState()
                 updateProInfoBar()
+                updateLensControlRowPosition(animate = true)
             }
         }
 
@@ -2463,7 +2465,66 @@ class CameraFragment : Fragment() {
             updateProInfoBar()
         }
 
+        setupManualControlsLayoutSync()
+        updateLensControlRowPosition(animate = false)
         updateProInfoBar()
+    }
+
+    private fun setupManualControlsLayoutSync() {
+        val uiBinding = cameraUiContainerBinding ?: return
+        val vfBinding = _fragmentCameraBinding ?: return
+        val manualRoot = uiBinding.manualControlsRoot ?: return
+        val vfContainer = vfBinding.viewFinderContainer
+
+        manualRoot.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            updateLensControlRowPosition(animate = true)
+        }
+
+        vfContainer.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            updateLensControlRowPosition(animate = false)
+        }
+    }
+
+    private fun updateLensControlRowPosition(animate: Boolean = true) {
+        val vfBinding = _fragmentCameraBinding ?: return
+        val uiBinding = cameraUiContainerBinding ?: return
+        val lensRow = vfBinding.lensControlRow ?: return
+        val manualRoot = uiBinding.manualControlsRoot ?: return
+
+        if (resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) {
+            lensRow.translationY = 0f
+            return
+        }
+
+        if (manualRoot.visibility != View.VISIBLE) {
+            if (animate) {
+                lensRow.animate().translationY(0f).setDuration(200).start()
+            } else {
+                lensRow.translationY = 0f
+            }
+            return
+        }
+
+        manualRoot.post {
+            if (!isAdded) return@post
+            val margin = resources.getDimensionPixelSize(R.dimen.margin_small)
+            val vfContainer = vfBinding.viewFinderContainer
+            val vfBottom = vfContainer.bottom
+            val manualTop = manualRoot.top
+
+            val overlap = if (manualTop in 1..<vfBottom && vfBottom > 0) {
+                (vfBottom - manualTop) + margin
+            } else {
+                0
+            }
+            val targetTranslation = -overlap.toFloat()
+
+            if (animate) {
+                lensRow.animate().translationY(targetTranslation).setDuration(200).start()
+            } else {
+                lensRow.translationY = targetTranslation
+            }
+        }
     }
 
     private fun toggleManualTab(tab: String) {
@@ -2475,6 +2536,7 @@ class CameraFragment : Fragment() {
             binding.touchOverlay?.visibility = View.GONE
             updateFocusPeakingState()
             updateProInfoBar()
+            updateLensControlRowPosition(animate = true)
         } else {
             activeManualTab = tab
             binding.dialPanel?.visibility = View.VISIBLE
@@ -2482,6 +2544,7 @@ class CameraFragment : Fragment() {
             updateDialPanel()
             updateFocusPeakingState()
             updateProInfoBar()
+            updateLensControlRowPosition(animate = true)
         }
     }
 
@@ -2545,6 +2608,7 @@ class CameraFragment : Fragment() {
         applyCameraControls()
         updateDialPanel()
         updateProInfoBar()
+        updateLensControlRowPosition(animate = true)
     }
 
     private fun updateDialPanel() {
@@ -4244,6 +4308,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             val manualEnabled = prefs.getBoolean(SettingsFragment.KEY_MANUAL_CONTROLS, false)
             binding.manualControlsRoot?.visibility = if (manualEnabled) View.VISIBLE else View.GONE
             updateProInfoBar()
+            updateLensControlRowPosition(animate = true)
         } else {
             // Restore flash visibility if supported
             val hasFlash = try {
@@ -4265,6 +4330,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             val manualEnabled = prefs.getBoolean(SettingsFragment.KEY_MANUAL_CONTROLS, false)
             binding.manualControlsRoot?.visibility = if (manualEnabled) View.VISIBLE else View.GONE
             updateProInfoBar()
+            updateLensControlRowPosition(animate = true)
         }
     }
 
