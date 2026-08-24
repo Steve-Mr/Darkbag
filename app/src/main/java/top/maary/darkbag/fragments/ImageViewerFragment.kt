@@ -2269,10 +2269,10 @@ open class ImageViewerFragment : Fragment() {
         val spanCount = if (isLandscape) 5 else 3
 
         galleryAdapter = DarkbagGalleryGridAdapter(requireContext()).apply {
-            onItemClick = { _, pos ->
-                exitGalleryMode(pos)
+            onItemClick = { group, pos, lensTag ->
+                exitGalleryMode(pos, lensTag)
             }
-            onItemLongClick = { _, _ ->
+            onItemLongClick = { _, _, _ ->
                 updateGallerySelectionUI(getSelectedCount())
             }
             onSelectionChanged = { count ->
@@ -2280,7 +2280,20 @@ open class ImageViewerFragment : Fragment() {
             }
         }
 
-        binding.galleryRecyclerView.layoutManager = GridLayoutManager(requireContext(), spanCount)
+        val layoutManager = GridLayoutManager(requireContext(), spanCount)
+        layoutManager.spanSizeLookup = object : GridLayoutManager.SpanSizeLookup() {
+            override fun getSpanSize(position: Int): Int {
+                if (position in 0 until galleryAdapter.itemCount) {
+                    val item = galleryAdapter.getItem(position)
+                    if (item.isMultiCamera && item.multiCameraLenses.isNotEmpty()) {
+                        return spanCount
+                    }
+                }
+                return 1
+            }
+        }
+
+        binding.galleryRecyclerView.layoutManager = layoutManager
         binding.galleryRecyclerView.adapter = galleryAdapter
 
         binding.btnGalleryPill.setOnClickListener {
@@ -2297,7 +2310,7 @@ open class ImageViewerFragment : Fragment() {
         }
 
         binding.btnGalleryDelete.setOnClickListener {
-            val selected = galleryAdapter.getSelectedGroups()
+            val selected = galleryAdapter.getSelectedItems()
             if (selected.isNotEmpty()) {
                 showBatchDeleteDialog(selected)
             }
@@ -2343,7 +2356,7 @@ open class ImageViewerFragment : Fragment() {
         updateBackPressedCallbackState()
     }
 
-    fun exitGalleryMode(targetPosition: Int = -1) {
+    fun exitGalleryMode(targetPosition: Int = -1, targetLensTag: String? = null) {
         if (!isGalleryMode) return
         isGalleryMode = false
 
@@ -2360,6 +2373,14 @@ open class ImageViewerFragment : Fragment() {
 
         if (targetPosition in 0 until (if (::adapter.isInitialized) adapter.itemCount else 0)) {
             binding.imagePager.setCurrentItem(targetPosition, false)
+            if (targetLensTag != null) {
+                val group = adapter.getGroup(targetPosition)
+                val lenses = adapter.getMultiCameraLenses(group)
+                val lensIndex = lenses.indexOfFirst { it.lensTag == targetLensTag }
+                if (lensIndex != -1) {
+                    adapter.setSelectedLensIndex(targetPosition, lensIndex)
+                }
+            }
         }
 
         updateBackPressedCallbackState()
@@ -2374,13 +2395,15 @@ open class ImageViewerFragment : Fragment() {
 
             binding.galleryToolbar.menu.clear()
             val selectAllItem = binding.galleryToolbar.menu.add(0, 1001, 0, R.string.gallery_select_all)
-            val allSelected = galleryAdapter.getSelectedCount() == galleryAdapter.itemCount && galleryAdapter.itemCount > 0
+            val totalSelectable = galleryAdapter.currentList.sumOf { if (it.isMultiCamera && it.multiCameraLenses.isNotEmpty()) it.multiCameraLenses.size else 1 }
+            val allSelected = galleryAdapter.getSelectedCount() > 0 && galleryAdapter.getSelectedCount() >= totalSelectable
             selectAllItem.setIcon(if (allSelected) R.drawable.ic_deselect else R.drawable.ic_select_all)
             selectAllItem.setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
 
             binding.galleryToolbar.setOnMenuItemClickListener { item ->
                 if (item.itemId == 1001) {
-                    if (galleryAdapter.getSelectedCount() == galleryAdapter.itemCount && galleryAdapter.itemCount > 0) {
+                    val currentTotal = galleryAdapter.currentList.sumOf { if (it.isMultiCamera && it.multiCameraLenses.isNotEmpty()) it.multiCameraLenses.size else 1 }
+                    if (galleryAdapter.getSelectedCount() >= currentTotal && currentTotal > 0) {
                         galleryAdapter.deselectAll()
                     } else {
                         galleryAdapter.selectAll()
@@ -2397,8 +2420,8 @@ open class ImageViewerFragment : Fragment() {
         }
     }
 
-    private fun showBatchDeleteDialog(selectedGroups: List<ImageGroup>) {
-        if (selectedGroups.isEmpty()) return
+    private fun showBatchDeleteDialog(selectedItems: List<GallerySelectedItem>) {
+        if (selectedItems.isEmpty()) return
 
         val options = arrayOf(
             getString(R.string.gallery_delete_option_group),
@@ -2409,43 +2432,64 @@ open class ImageViewerFragment : Fragment() {
 
         com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
             .setTitle(R.string.gallery_delete_dialog_title)
-            .setMessage(getString(R.string.gallery_delete_summary, selectedGroups.size))
+            .setMessage(getString(R.string.gallery_delete_summary, selectedItems.size))
             .setSingleChoiceItems(options, checkedItem) { _, which ->
                 checkedItem = which
             }
             .setPositiveButton(R.string.delete_button_alt) { _, _ ->
-                deleteBatchImages(selectedGroups, checkedItem)
+                deleteBatchImages(selectedItems, checkedItem)
             }
             .setNegativeButton(R.string.cancel, null)
             .show()
     }
 
-    private fun deleteBatchImages(selectedGroups: List<ImageGroup>, deleteMode: Int) {
+    private fun deleteBatchImages(selectedItems: List<GallerySelectedItem>, deleteMode: Int) {
         val context = context ?: return
         lifecycleScope.launch {
             val urisToDelete = mutableListOf<Uri>()
 
-            for (group in selectedGroups) {
-                when (deleteMode) {
-                    0 -> { // Entire group
-                        group.jpgUri?.let { urisToDelete.add(it) }
-                        group.dngUri?.let { urisToDelete.add(it) }
-                        group.dngUri1?.let { urisToDelete.add(it) }
-                        group.dngUri2?.let { urisToDelete.add(it) }
+            for (item in selectedItems) {
+                val group = item.group
+                val lens = item.specificLens
+                if (lens != null) {
+                    when (deleteMode) {
+                        0 -> { // Entire group / lens
+                            lens.jpgUri?.let { urisToDelete.add(it) }
+                            lens.dngUri?.let { urisToDelete.add(it) }
+                        }
+                        1 -> { // RAW only
+                            lens.dngUri?.let { urisToDelete.add(it) }
+                        }
+                        2 -> { // JPG only
+                            lens.jpgUri?.let { urisToDelete.add(it) }
+                        }
                     }
-                    1 -> { // RAW only
-                        group.dngUri?.let { urisToDelete.add(it) }
-                        group.dngUri1?.let { urisToDelete.add(it) }
-                        group.dngUri2?.let { urisToDelete.add(it) }
-                    }
-                    2 -> { // JPG only
-                        group.jpgUri?.let { urisToDelete.add(it) }
+                } else {
+                    when (deleteMode) {
+                        0 -> { // Entire group
+                            group.jpgUri?.let { urisToDelete.add(it) }
+                            group.dngUri?.let { urisToDelete.add(it) }
+                            group.dngUri1?.let { urisToDelete.add(it) }
+                            group.dngUri2?.let { urisToDelete.add(it) }
+                            group.multiJpgUris.forEach { urisToDelete.add(it) }
+                            group.multiDngUris.forEach { urisToDelete.add(it) }
+                        }
+                        1 -> { // RAW only
+                            group.dngUri?.let { urisToDelete.add(it) }
+                            group.dngUri1?.let { urisToDelete.add(it) }
+                            group.dngUri2?.let { urisToDelete.add(it) }
+                            group.multiDngUris.forEach { urisToDelete.add(it) }
+                        }
+                        2 -> { // JPG only
+                            group.jpgUri?.let { urisToDelete.add(it) }
+                            group.multiJpgUris.forEach { urisToDelete.add(it) }
+                        }
                     }
                 }
             }
 
             val securityExceptionUris = mutableListOf<Uri>()
-            for (uri in urisToDelete) {
+            for (uri in urisToDelete.distinct()) {
                 try {
                     deleteUriSafe(context, uri)
                 } catch (e: SecurityException) {
