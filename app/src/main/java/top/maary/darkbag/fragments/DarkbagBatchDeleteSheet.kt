@@ -17,6 +17,8 @@ class DarkbagBatchDeleteSheet : BottomSheetDialogFragment() {
 
     private var selectedMode = 0 // 0: Entire Group, 1: RAW only, 2: JPG only
     private var selectedCount = 1
+    private var hasDng = true
+    private var hasJpg = true
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -30,9 +32,29 @@ class DarkbagBatchDeleteSheet : BottomSheetDialogFragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         selectedCount = arguments?.getInt(ARG_SELECTED_COUNT, 1) ?: 1
+        hasDng = arguments?.getBoolean(ARG_HAS_DNG, true) ?: true
+        hasJpg = arguments?.getBoolean(ARG_HAS_JPG, true) ?: true
 
         binding.tvSubtitle.text = getString(R.string.gallery_delete_summary, selectedCount)
         binding.btnConfirmDelete.text = getString(R.string.gallery_delete_confirm_format, selectedCount)
+
+        // Adjust visibility according to format availability
+        if (hasDng && hasJpg) {
+            binding.cardOptionGroup.visibility = View.VISIBLE
+            binding.cardOptionRaw.visibility = View.VISIBLE
+            binding.cardOptionJpg.visibility = View.VISIBLE
+            selectedMode = 0
+        } else if (hasDng && !hasJpg) {
+            binding.cardOptionGroup.visibility = View.GONE
+            binding.cardOptionRaw.visibility = View.VISIBLE
+            binding.cardOptionJpg.visibility = View.GONE
+            selectedMode = 1
+        } else { // only JPG
+            binding.cardOptionGroup.visibility = View.GONE
+            binding.cardOptionRaw.visibility = View.GONE
+            binding.cardOptionJpg.visibility = View.VISIBLE
+            selectedMode = 2
+        }
 
         updateSelectionState(selectedMode)
 
@@ -112,11 +134,15 @@ class DarkbagBatchDeleteSheet : BottomSheetDialogFragment() {
         const val REQUEST_KEY = "darkbagBatchDeleteRequest"
         const val BUNDLE_KEY_DELETE_MODE = "delete_mode"
         private const val ARG_SELECTED_COUNT = "selected_count"
+        private const val ARG_HAS_DNG = "has_dng"
+        private const val ARG_HAS_JPG = "has_jpg"
 
-        fun newInstance(selectedCount: Int): DarkbagBatchDeleteSheet {
+        fun newInstance(selectedCount: Int, hasDng: Boolean = true, hasJpg: Boolean = true): DarkbagBatchDeleteSheet {
             return DarkbagBatchDeleteSheet().apply {
                 arguments = Bundle().apply {
                     putInt(ARG_SELECTED_COUNT, selectedCount)
+                    putBoolean(ARG_HAS_DNG, hasDng)
+                    putBoolean(ARG_HAS_JPG, hasJpg)
                 }
             }
         }

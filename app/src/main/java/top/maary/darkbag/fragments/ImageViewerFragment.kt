@@ -236,8 +236,10 @@ open class ImageViewerFragment : Fragment() {
     }
 
     protected open fun loadImages(targetUri: String? = args.initialUri, forceRefresh: Boolean = false) {
-        binding.initialLoadingIndicator.visibility = View.VISIBLE
-        binding.imagePager.visibility = View.INVISIBLE
+        if (!isGalleryMode) {
+            binding.initialLoadingIndicator.visibility = View.VISIBLE
+            binding.imagePager.visibility = View.INVISIBLE
+        }
 
         lifecycleScope.launch {
             repository.getGroupedImagesFlow(targetUri).collect { groups ->
@@ -335,12 +337,16 @@ open class ImageViewerFragment : Fragment() {
                     updateControlsVisibility()
                     updateGalleryPill(binding.imagePager.currentItem, groups.size)
 
-                    binding.imagePager.visibility = View.VISIBLE
+                    if (!isGalleryMode) {
+                        binding.imagePager.visibility = View.VISIBLE
+                    }
                     binding.initialLoadingIndicator.visibility = View.GONE
                 } else {
                     adapter.updateGroups(groups)
                     updateGalleryPill(binding.imagePager.currentItem, groups.size)
-                    binding.imagePager.visibility = View.VISIBLE
+                    if (!isGalleryMode) {
+                        binding.imagePager.visibility = View.VISIBLE
+                    }
                     binding.initialLoadingIndicator.visibility = View.GONE
 
                     val currentIndex = binding.imagePager.currentItem
@@ -389,16 +395,21 @@ open class ImageViewerFragment : Fragment() {
 
         val canEdit = (currentGroup.dngUri != null || currentGroup.dngUri1 != null || currentGroup.dngUri2 != null || currentGroup.multiDngUris.isNotEmpty()) && !currentGroup.isPartial
 
-        val visibility = if (canEdit && !isEditingAdjustments) View.VISIBLE else View.GONE
-        binding.bottomLeftControls.visibility = visibility
-        binding.bottomRightControls.visibility = visibility
-        binding.fabAdjust.visibility = visibility
+        val showBottomLeft = isUiVisible && !isEditingAdjustments && !isGalleryMode
+        binding.bottomLeftControls.visibility = if (showBottomLeft) View.VISIBLE else View.GONE
+        binding.btnLogLut.isEnabled = canEdit
+        binding.btnLogLut.isClickable = canEdit
+        binding.btnLogLut.alpha = if (canEdit) 1.0f else 0.65f
+
+        val editVisibility = if (canEdit && isUiVisible && !isEditingAdjustments && !isGalleryMode) View.VISIBLE else View.GONE
+        binding.bottomRightControls.visibility = editVisibility
+        binding.fabAdjust.visibility = editVisibility
 
         if (canEdit && currentEditConfig == null) {
             prepareEditConfig(currentGroup)
         }
 
-        if (currentGroup.isHalfFrame() && !currentGroup.isPartial) {
+        if (canEdit && currentGroup.isHalfFrame() && !currentGroup.isPartial) {
             binding.hfExtraControls.visibility = View.VISIBLE
             updateEffectsButtons()
         } else {
@@ -832,9 +843,7 @@ open class ImageViewerFragment : Fragment() {
         if (currentIndex !in 0 until adapter.itemCount) return
         val currentGroup = adapter.getGroup(currentIndex)
 
-        if (!currentGroup.metadataLoaded) return
-
-        val config = currentEditConfig
+        val config = currentEditConfig ?: currentGroup.editConfig
         if (config != null) {
             val lutName = if (config.lut == "None" || config.lut == null) null else config.lut.substringBeforeLast(".")
             val logName = if (config.log == "None" || config.log == null) null else config.log
@@ -2339,6 +2348,7 @@ open class ImageViewerFragment : Fragment() {
         if (isEditingAdjustments || isAdjusted) return
         if (isGalleryMode) return
         isGalleryMode = true
+        isUiVisible = false
 
         if (::adapter.isInitialized) {
             adapter.stopAllMotionVideos()
@@ -2377,6 +2387,7 @@ open class ImageViewerFragment : Fragment() {
         }.start()
 
         binding.imagePager.visibility = View.VISIBLE
+        isUiVisible = false
         showUi()
 
         if (targetPosition in 0 until (if (::adapter.isInitialized) adapter.itemCount else 0)) {
@@ -2430,7 +2441,22 @@ open class ImageViewerFragment : Fragment() {
 
     private fun showBatchDeleteDialog(selectedItems: List<GallerySelectedItem>) {
         if (selectedItems.isEmpty()) return
-        DarkbagBatchDeleteSheet.newInstance(selectedItems.size)
+        val hasAnyDng = selectedItems.any { item ->
+            if (item.specificLens != null) {
+                item.specificLens.dngUri != null
+            } else {
+                item.group.dngUri != null || item.group.dngUri1 != null || item.group.dngUri2 != null || item.group.multiDngUris.isNotEmpty()
+            }
+        }
+        val hasAnyJpg = selectedItems.any { item ->
+            if (item.specificLens != null) {
+                item.specificLens.jpgUri != null
+            } else {
+                item.group.jpgUri != null || item.group.multiJpgUris.isNotEmpty()
+            }
+        }
+
+        DarkbagBatchDeleteSheet.newInstance(selectedItems.size, hasAnyDng, hasAnyJpg)
             .show(childFragmentManager, DarkbagBatchDeleteSheet.TAG)
     }
 
