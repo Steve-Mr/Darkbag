@@ -19,6 +19,14 @@ class HalfFrameSessionStore(private val context: Context) {
     )
 
     fun currentProfile(): String {
+        val activeMode = prefs.getString(SettingsFragment.KEY_ACTIVE_CAPTURE_MODE, null)
+        if (activeMode != null) {
+            return when (activeMode) {
+                SettingsFragment.MODE_HALF_FRAME_SBS -> PROFILE_HALF_SIDE
+                SettingsFragment.MODE_HALF_FRAME_TB -> PROFILE_HALF_TOP
+                else -> PROFILE_NORMAL
+            }
+        }
         val mode = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_MODE, false)
         if (!mode) return PROFILE_NORMAL
         val layout = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUT_SBS)

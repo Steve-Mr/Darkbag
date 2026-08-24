@@ -41,7 +41,7 @@ class HalfFrameManager(private val context: Context) {
         set(value) = sessionStore.setBaseName(value)
 
     val isEnabled: Boolean
-        get() = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_MODE, false)
+        get() = sessionStore.currentProfile() != HalfFrameSessionStore.PROFILE_NORMAL
 
     val layout: String
         get() = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUT_SBS) ?: SettingsFragment.HALF_FRAME_LAYOUT_SBS

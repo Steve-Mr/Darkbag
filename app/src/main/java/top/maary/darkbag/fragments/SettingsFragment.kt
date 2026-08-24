@@ -460,10 +460,6 @@ class SettingsFragment : Fragment() {
         setupSwitch(binding.switchHalfFrameMode, KEY_HALF_FRAME_MODE, false)
         binding.switchHalfFrameMode.setOnCheckedChangeListener { _, isChecked ->
             prefs.edit().putBoolean(KEY_HALF_FRAME_MODE, isChecked).apply()
-            if (isChecked) {
-                prefs.edit().putBoolean(KEY_MULTI_CAMERA_MODE, false).apply()
-                binding.switchMultiCameraMode.isChecked = false
-            }
         }
         setupSwitch(binding.switchHalfFrameDownsample, KEY_HALF_FRAME_DOWNSAMPLE)
         setupSwitch(binding.switchHalfFrameDateStamp, KEY_HALF_FRAME_DATE_STAMP, false)
@@ -552,10 +548,6 @@ class SettingsFragment : Fragment() {
         setupSwitch(binding.switchMultiCameraForceEnable, KEY_MULTI_CAMERA_FORCE_ENABLE, false)
         binding.switchMultiCameraForceEnable.setOnCheckedChangeListener { _, isChecked ->
             prefs.edit().putBoolean(KEY_MULTI_CAMERA_FORCE_ENABLE, isChecked).apply()
-            if (isChecked) {
-                prefs.edit().putBoolean(KEY_MULTI_CAMERA_MODE, true).putBoolean(KEY_HALF_FRAME_MODE, false).apply()
-                binding.switchHalfFrameMode?.isChecked = false
-            }
             setupMultiCameraSettings()
         }
 
@@ -576,10 +568,6 @@ class SettingsFragment : Fragment() {
         setupSwitch(binding.switchMultiCameraMode, KEY_MULTI_CAMERA_MODE, false)
         binding.switchMultiCameraMode.setOnCheckedChangeListener { _, isChecked ->
             prefs.edit().putBoolean(KEY_MULTI_CAMERA_MODE, isChecked).apply()
-            if (isChecked) {
-                prefs.edit().putBoolean(KEY_HALF_FRAME_MODE, false).apply()
-                binding.switchHalfFrameMode?.isChecked = false
-            }
             updateMultiCameraVisibility()
         }
 
@@ -760,6 +748,11 @@ class SettingsFragment : Fragment() {
         const val KEY_HALF_FRAME_SAVE_JPG = "half_frame_save_jpg"
         const val KEY_HALF_FRAME_SAVE_RAW = "half_frame_save_raw"
         const val KEY_HALF_FRAME_BASE_NAME = "half_frame_base_name"
+        const val KEY_ACTIVE_CAPTURE_MODE = "active_capture_mode"
+        const val MODE_NORMAL = "normal"
+        const val MODE_HALF_FRAME_SBS = "half_frame_sbs"
+        const val MODE_HALF_FRAME_TB = "half_frame_tb"
+        const val MODE_MULTI_CAMERA = "multi_camera"
 
         const val KEY_MULTI_CAMERA_MODE = "multi_camera_mode_enabled"
         const val KEY_MULTI_CAMERA_FORCE_ENABLE = "multi_camera_force_enable"

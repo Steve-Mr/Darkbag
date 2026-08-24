@@ -238,6 +238,52 @@ class CameraFragment : Fragment() {
     private lateinit var halfFrameSessionStore: HalfFrameSessionStore
     private var isHalfFrameUiAnimating = false
 
+    enum class CaptureMode(val key: String) {
+        NORMAL(SettingsFragment.MODE_NORMAL),
+        HALF_FRAME_SBS(SettingsFragment.MODE_HALF_FRAME_SBS),
+        HALF_FRAME_TB(SettingsFragment.MODE_HALF_FRAME_TB),
+        MULTI_CAMERA(SettingsFragment.MODE_MULTI_CAMERA);
+
+        companion object {
+            fun fromKey(key: String?): CaptureMode? = entries.find { it.key == key }
+        }
+    }
+
+    private fun resolveActiveCaptureMode(prefs: SharedPreferences): CaptureMode {
+        val isHalfFramePref = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_MODE, false)
+        val isMultiCamPref = prefs.getBoolean(SettingsFragment.KEY_MULTI_CAMERA_MODE, false)
+        val forceEnable = prefs.getBoolean(SettingsFragment.KEY_MULTI_CAMERA_FORCE_ENABLE, false)
+        val isMultiCamSupported = top.maary.darkbag.utils.MultiCameraHelper.isMultiCameraSupported(requireContext(), forceEnable)
+        val canUseMultiCam = (isMultiCamPref || forceEnable) && isMultiCamSupported
+
+        val savedModeKey = prefs.getString(SettingsFragment.KEY_ACTIVE_CAPTURE_MODE, null)
+        val requestedMode = if (savedModeKey != null) {
+            CaptureMode.fromKey(savedModeKey) ?: CaptureMode.NORMAL
+        } else {
+            // Legacy fallback if active_capture_mode key is not yet initialized
+            when {
+                (isMultiCamPref || forceEnable) && isMultiCamSupported && !isHalfFramePref -> CaptureMode.MULTI_CAMERA
+                isHalfFramePref -> {
+                    val layout = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUT_SBS)
+                    if (layout == SettingsFragment.HALF_FRAME_LAYOUT_TB) CaptureMode.HALF_FRAME_TB else CaptureMode.HALF_FRAME_SBS
+                }
+                else -> CaptureMode.NORMAL
+            }
+        }
+
+        val validatedMode = when (requestedMode) {
+            CaptureMode.MULTI_CAMERA -> if (canUseMultiCam) CaptureMode.MULTI_CAMERA else CaptureMode.NORMAL
+            CaptureMode.HALF_FRAME_SBS, CaptureMode.HALF_FRAME_TB -> if (isHalfFramePref) requestedMode else CaptureMode.NORMAL
+            CaptureMode.NORMAL -> CaptureMode.NORMAL
+        }
+
+        if (savedModeKey != validatedMode.key) {
+            prefs.edit().putString(SettingsFragment.KEY_ACTIVE_CAPTURE_MODE, validatedMode.key).apply()
+        }
+
+        return validatedMode
+    }
+
     private var isOisSupported = false
     private var isHdrOisEnabledPref = true
     private var currentThumbnailUri: android.net.Uri? = null
@@ -498,16 +544,16 @@ class CameraFragment : Fragment() {
         updateHdrPlusConstraints()
 
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        val isMultiCamPref = prefs.getBoolean(SettingsFragment.KEY_MULTI_CAMERA_MODE, false)
-        val forceEnable = prefs.getBoolean(SettingsFragment.KEY_MULTI_CAMERA_FORCE_ENABLE, false)
-        val isMultiCamSupported = top.maary.darkbag.utils.MultiCameraHelper.isMultiCameraSupported(requireContext(), forceEnable)
-        val isHalfFrame = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_MODE, false)
-
         val previousMultiCam = isMultiCameraModeActive
         val previousHalfFrame = isHalfFrameModeEnabled
 
-        isHalfFrameModeEnabled = isHalfFrame
-        isMultiCameraModeActive = (isMultiCamPref || forceEnable) && isMultiCamSupported && !isHalfFrame
+        val activeMode = resolveActiveCaptureMode(prefs)
+        isHalfFrameModeEnabled = (activeMode == CaptureMode.HALF_FRAME_SBS || activeMode == CaptureMode.HALF_FRAME_TB)
+        isMultiCameraModeActive = (activeMode == CaptureMode.MULTI_CAMERA)
+        if (isHalfFrameModeEnabled) {
+            val layout = if (activeMode == CaptureMode.HALF_FRAME_TB) SettingsFragment.HALF_FRAME_LAYOUT_TB else SettingsFragment.HALF_FRAME_LAYOUT_SBS
+            prefs.edit().putString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, layout).apply()
+        }
 
         val modeChanged = (previousMultiCam != isMultiCameraModeActive) || (previousHalfFrame != isHalfFrameModeEnabled)
 
@@ -677,11 +723,13 @@ class CameraFragment : Fragment() {
         updateHdrPlusConstraints()
 
         // Initialize Half-frame & Multi-camera State (isolated by mode/layout profile)
-        isHalfFrameModeEnabled = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_MODE, false)
-        val isMultiCamPref = prefs.getBoolean(SettingsFragment.KEY_MULTI_CAMERA_MODE, false)
-        val forceEnable = prefs.getBoolean(SettingsFragment.KEY_MULTI_CAMERA_FORCE_ENABLE, false)
-        val isMultiCamSupported = top.maary.darkbag.utils.MultiCameraHelper.isMultiCameraSupported(requireContext(), forceEnable)
-        isMultiCameraModeActive = (isMultiCamPref || forceEnable) && isMultiCamSupported && !isHalfFrameModeEnabled
+        val activeMode = resolveActiveCaptureMode(prefs)
+        isHalfFrameModeEnabled = (activeMode == CaptureMode.HALF_FRAME_SBS || activeMode == CaptureMode.HALF_FRAME_TB)
+        isMultiCameraModeActive = (activeMode == CaptureMode.MULTI_CAMERA)
+        if (isHalfFrameModeEnabled) {
+            val layout = if (activeMode == CaptureMode.HALF_FRAME_TB) SettingsFragment.HALF_FRAME_LAYOUT_TB else SettingsFragment.HALF_FRAME_LAYOUT_SBS
+            prefs.edit().putString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, layout).apply()
+        }
         readScopedHalfFrameState(prefs, requireFileForStep1 = true)
 
         updateHalfFrameUI()
@@ -4962,9 +5010,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         // Post all updates to the viewfinder to avoid requestLayout() during layout pass
         // and ensure consistent ordering of state changes.
         vfBinding.viewFinder.post {
-            // Re-read enabled state inside the post to ensure we use the latest value
-            val isEnabled = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_MODE, false)
-            isHalfFrameModeEnabled = isEnabled
+            val isEnabled = isHalfFrameModeEnabled
             readScopedHalfFrameState(prefs)
 
             val gapView = vfBinding.halfFrameGapIndicator ?: return@post
@@ -5194,47 +5240,42 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
     private fun cycleCaptureMode() {
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        val currentMode = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_MODE, false)
-        val currentLayout = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUT_SBS)
-        val isMultiCamPrefEnabled = prefs.getBoolean(SettingsFragment.KEY_MULTI_CAMERA_MODE, false)
+        val isHalfFramePref = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_MODE, false)
+        val isMultiCamPref = prefs.getBoolean(SettingsFragment.KEY_MULTI_CAMERA_MODE, false)
         val forceEnable = prefs.getBoolean(SettingsFragment.KEY_MULTI_CAMERA_FORCE_ENABLE, false)
-        val isMultiCamSupported = top.maary.darkbag.utils.MultiCameraHelper.isMultiCameraSupported(requireContext(), forceEnable = true)
-        val canUseMultiCam = isMultiCamSupported
+        val isMultiCamSupported = top.maary.darkbag.utils.MultiCameraHelper.isMultiCameraSupported(requireContext(), forceEnable)
+        val canUseMultiCam = (isMultiCamPref || forceEnable) && isMultiCamSupported
 
-        val (newMode, newLayout, newMultiCam) = when {
-            !currentMode && !isMultiCameraModeActive -> {
-                // Normal -> Side-by-side
-                Triple(true, SettingsFragment.HALF_FRAME_LAYOUT_SBS, false)
-            }
-            currentMode && currentLayout == SettingsFragment.HALF_FRAME_LAYOUT_SBS -> {
-                // Side-by-side -> Top-bottom
-                Triple(true, SettingsFragment.HALF_FRAME_LAYOUT_TB, false)
-            }
-            currentMode && currentLayout == SettingsFragment.HALF_FRAME_LAYOUT_TB -> {
-                if (canUseMultiCam) {
-                    // Top-bottom -> Multi-Camera
-                    Triple(false, SettingsFragment.HALF_FRAME_LAYOUT_SBS, true)
-                } else {
-                    // Top-bottom -> Normal
-                    Triple(false, SettingsFragment.HALF_FRAME_LAYOUT_SBS, false)
-                }
-            }
-            isMultiCameraModeActive -> {
-                // Multi-Camera -> Normal
-                Triple(false, SettingsFragment.HALF_FRAME_LAYOUT_SBS, false)
-            }
-            else -> Triple(false, SettingsFragment.HALF_FRAME_LAYOUT_SBS, false)
+        val currentActiveMode = resolveActiveCaptureMode(prefs)
+
+        val availableModes = mutableListOf(CaptureMode.NORMAL)
+        if (isHalfFramePref) {
+            availableModes.add(CaptureMode.HALF_FRAME_SBS)
+            availableModes.add(CaptureMode.HALF_FRAME_TB)
+        }
+        if (canUseMultiCam) {
+            availableModes.add(CaptureMode.MULTI_CAMERA)
         }
 
-        prefs.edit()
-            .putBoolean(SettingsFragment.KEY_HALF_FRAME_MODE, newMode)
-            .putString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, newLayout)
-            .putBoolean(SettingsFragment.KEY_MULTI_CAMERA_MODE, newMultiCam)
-            .apply()
+        val currentIndex = availableModes.indexOf(currentActiveMode)
+        val nextIndex = if (currentIndex != -1 && currentIndex < availableModes.size - 1) {
+            currentIndex + 1
+        } else {
+            0
+        }
+        val nextMode = availableModes[nextIndex]
 
-        val modeChanged = (currentMode != newMode) || (isMultiCameraModeActive != newMultiCam)
-        isHalfFrameModeEnabled = newMode
-        isMultiCameraModeActive = newMultiCam
+        val editor = prefs.edit().putString(SettingsFragment.KEY_ACTIVE_CAPTURE_MODE, nextMode.key)
+        if (nextMode == CaptureMode.HALF_FRAME_SBS) {
+            editor.putString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUT_SBS)
+        } else if (nextMode == CaptureMode.HALF_FRAME_TB) {
+            editor.putString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUT_TB)
+        }
+        editor.apply()
+
+        val modeChanged = (currentActiveMode != nextMode)
+        isHalfFrameModeEnabled = (nextMode == CaptureMode.HALF_FRAME_SBS || nextMode == CaptureMode.HALF_FRAME_TB)
+        isMultiCameraModeActive = (nextMode == CaptureMode.MULTI_CAMERA)
 
         readScopedHalfFrameState(prefs, requireFileForStep1 = true)
         updateHalfFrameUI()
@@ -5243,7 +5284,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         _fragmentCameraBinding?.modeSwitchButton?.let { updateModeSwitchIcon(it) }
 
         if (modeChanged) {
-            if (newMultiCam && isAdded) {
+            if (isMultiCameraModeActive && isAdded) {
                 Toast.makeText(requireContext(), R.string.multi_camera_mode_enabled_toast, Toast.LENGTH_SHORT).show()
             }
             bindCameraUseCases()
@@ -5252,14 +5293,13 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
     private fun updateModeSwitchIcon(btn: MaterialButton) {
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        val mode = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_MODE, false)
-        val layout = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUTS[0])
+        val activeMode = resolveActiveCaptureMode(prefs)
 
-        val iconRes = when {
-            isMultiCameraModeActive -> R.drawable.ic_mode_multi_camera
-            !mode -> R.drawable.ic_mode_normal
-            layout == SettingsFragment.HALF_FRAME_LAYOUTS[0] -> R.drawable.ic_mode_half_side
-            else -> R.drawable.ic_mode_half_top
+        val iconRes = when (activeMode) {
+            CaptureMode.MULTI_CAMERA -> R.drawable.ic_mode_multi_camera
+            CaptureMode.HALF_FRAME_SBS -> R.drawable.ic_mode_half_side
+            CaptureMode.HALF_FRAME_TB -> R.drawable.ic_mode_half_top
+            CaptureMode.NORMAL -> R.drawable.ic_mode_normal
         }
         btn.setIconResource(iconRes)
     }
