@@ -103,7 +103,7 @@
     </LinearLayout>
 
 
-    <!-- Manual Controls Panel -->
+    <!-- Manual Controls Panel (Pro HUD & Dial Wheel) -->
     <com.google.android.material.card.MaterialCardView
         android:id="@+id/manual_controls_root"
         style="@style/Widget.App.Card.ControlPanel"
@@ -112,6 +112,9 @@
         android:layout_marginHorizontal="@dimen/margin_medium"
         android:layout_marginBottom="@dimen/spacing_medium"
         android:visibility="gone"
+        app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+        app:cardCornerRadius="@dimen/radius_medium"
+        app:strokeWidth="0dp"
         app:layout_constraintBottom_toTopOf="@id/bottom_island_card"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent">
@@ -120,90 +123,131 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:padding="@dimen/padding_medium">
+            android:padding="@dimen/padding_small">
 
-            <!-- Tabs -->
-            <com.google.android.material.button.MaterialButtonToggleGroup
-                android:id="@+id/manual_tabs"
+            <!-- Pro Info Bar (4 Parameter Pills: Focus, ISO, Shutter, EV) -->
+            <LinearLayout
+                android:id="@+id/pro_info_bar"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:gravity="center"
-                app:selectionRequired="false"
-                app:singleSelection="true">
+                android:orientation="horizontal"
+                android:gravity="center">
 
+                <!-- Focus Pill -->
                 <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btn_tab_focus"
-                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:id="@+id/pill_focus"
+                    style="@style/Widget.Material3.Button.TonalButton"
                     android:layout_width="0dp"
-                    android:layout_height="wrap_content"
+                    android:layout_height="40dp"
                     android:layout_weight="1"
-                    android:text="Focus" />
+                    android:layout_marginHorizontal="2dp"
+                    android:insetTop="0dp"
+                    android:insetBottom="0dp"
+                    android:paddingHorizontal="2dp"
+                    android:textSize="11sp"
+                    android:text="AF"
+                    app:cornerRadius="20dp" />
 
+                <!-- ISO Pill -->
                 <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btn_tab_iso"
-                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:id="@+id/pill_iso"
+                    style="@style/Widget.Material3.Button.TonalButton"
                     android:layout_width="0dp"
-                    android:layout_height="wrap_content"
+                    android:layout_height="40dp"
                     android:layout_weight="1"
-                    android:text="ISO" />
+                    android:layout_marginHorizontal="2dp"
+                    android:insetTop="0dp"
+                    android:insetBottom="0dp"
+                    android:paddingHorizontal="2dp"
+                    android:textSize="11sp"
+                    android:text="ISO AUTO"
+                    app:cornerRadius="20dp" />
 
+                <!-- Shutter Pill -->
                 <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btn_tab_shutter"
-                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:id="@+id/pill_shutter"
+                    style="@style/Widget.Material3.Button.TonalButton"
                     android:layout_width="0dp"
-                    android:layout_height="wrap_content"
+                    android:layout_height="40dp"
                     android:layout_weight="1"
-                    android:text="Sec" />
+                    android:layout_marginHorizontal="2dp"
+                    android:insetTop="0dp"
+                    android:insetBottom="0dp"
+                    android:paddingHorizontal="2dp"
+                    android:textSize="11sp"
+                    android:text="SEC AUTO"
+                    app:cornerRadius="20dp" />
 
+                <!-- EV Pill -->
                 <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btn_tab_ev"
-                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:id="@+id/pill_ev"
+                    style="@style/Widget.Material3.Button.TonalButton"
                     android:layout_width="0dp"
-                    android:layout_height="wrap_content"
+                    android:layout_height="40dp"
                     android:layout_weight="1"
-                    android:text="EV" />
-            </com.google.android.material.button.MaterialButtonToggleGroup>
+                    android:layout_marginHorizontal="2dp"
+                    android:insetTop="0dp"
+                    android:insetBottom="0dp"
+                    android:paddingHorizontal="2dp"
+                    android:textSize="11sp"
+                    android:text="EV 0.0"
+                    app:cornerRadius="20dp" />
+            </LinearLayout>
 
-            <!-- Control Panel -->
+            <!-- Dial Control Container (Appears when a pill is selected) -->
             <LinearLayout
-                android:id="@+id/manual_panel"
+                android:id="@+id/dial_panel"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
                 android:visibility="gone"
-                android:paddingTop="@dimen/spacing_medium">
+                android:paddingTop="6dp">
 
+                <!-- Dial Top Control Bar: Active Target Name, Value, Auto Button -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="horizontal"
-                    android:gravity="center_vertical">
+                    android:gravity="center_vertical"
+                    android:paddingHorizontal="8dp">
 
                     <TextView
-                        android:id="@+id/tv_manual_value"
-                        android:layout_width="64dp"
+                        android:id="@+id/tv_dial_target_label"
+                        android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:textColor="?attr/colorOnSurface"
-                        android:text="Auto"
-                        android:textAppearance="@style/TextAppearance.Material3.LabelLarge"
-                        android:gravity="center" />
+                        android:text="SHUTTER"
+                        android:textStyle="bold"
+                        android:textSize="12sp"
+                        android:textColor="?attr/colorTertiary" />
 
-                    <com.google.android.material.slider.Slider
-                        android:id="@+id/seekbar_manual"
+                    <TextView
+                        android:id="@+id/tv_dial_target_value"
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:valueFrom="0.0"
-                        android:valueTo="1000.0"
-                        android:value="0.0" />
+                        android:gravity="start|center_vertical"
+                        android:layout_marginStart="8dp"
+                        android:text="1/125s"
+                        android:textStyle="bold"
+                        android:textSize="13sp"
+                        android:textColor="?attr/colorOnSurface" />
 
                     <com.google.android.material.button.MaterialButton
-                        android:id="@+id/btn_manual_auto"
+                        android:id="@+id/btn_dial_auto"
                         style="@style/Widget.Material3.Button.TextButton"
                         android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="Auto" />
+                        android:layout_height="36dp"
+                        android:paddingHorizontal="8dp"
+                        android:textSize="12sp"
+                        android:text="AUTO" />
                 </LinearLayout>
+
+                <!-- Professional Dial Wheel -->
+                <top.maary.darkbag.ui.ProDialWheelView
+                    android:id="@+id/dial_wheel_view"
+                    android:layout_width="match_parent"
+                    android:layout_height="52dp"
+                    android:layout_marginVertical="2dp" />
 
                 <!-- Focus Specific Shortcuts -->
                 <LinearLayout
@@ -212,21 +256,24 @@
                     android:layout_height="wrap_content"
                     android:orientation="horizontal"
                     android:gravity="center"
-                    android:visibility="gone">
+                    android:visibility="gone"
+                    android:paddingTop="2dp">
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btn_focus_near"
                         style="@style/Widget.Material3.Button.TonalButton"
                         android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
+                        android:layout_height="36dp"
                         android:layout_marginEnd="@dimen/spacing_medium"
+                        android:textSize="12sp"
                         android:text="Macro" />
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btn_focus_far"
                         style="@style/Widget.Material3.Button.TonalButton"
                         android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
+                        android:layout_height="36dp"
+                        android:textSize="12sp"
                         android:text="Infinity" />
                 </LinearLayout>
 

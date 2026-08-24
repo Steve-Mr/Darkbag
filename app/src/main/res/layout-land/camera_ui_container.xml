@@ -57,26 +57,172 @@
         </com.google.android.material.card.MaterialCardView>
     </LinearLayout>
 
+    <!-- Manual Controls Panel in Landscape -->
     <com.google.android.material.card.MaterialCardView
         android:id="@+id/manual_controls_root"
-        android:layout_width="0dp"
-        android:layout_height="0dp"
+        style="@style/Widget.App.Card.ControlPanel"
+        android:layout_width="300dp"
+        android:layout_height="wrap_content"
+        android:layout_marginEnd="@dimen/margin_medium"
+        android:layout_marginBottom="@dimen/margin_medium"
         android:visibility="gone"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent">
-        <com.google.android.material.button.MaterialButtonToggleGroup android:id="@+id/manual_tabs" android:layout_width="wrap_content" android:layout_height="wrap_content">
-             <com.google.android.material.button.MaterialButton android:id="@+id/btn_tab_focus" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
-             <com.google.android.material.button.MaterialButton android:id="@+id/btn_tab_iso" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
-             <com.google.android.material.button.MaterialButton android:id="@+id/btn_tab_shutter" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
-             <com.google.android.material.button.MaterialButton android:id="@+id/btn_tab_ev" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
-        </com.google.android.material.button.MaterialButtonToggleGroup>
-        <LinearLayout android:id="@+id/manual_panel" android:layout_width="wrap_content" android:layout_height="wrap_content">
-            <TextView android:id="@+id/tv_manual_value" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
-            <com.google.android.material.slider.Slider android:id="@+id/seekbar_manual" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
-            <com.google.android.material.button.MaterialButton android:id="@+id/btn_manual_auto" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
-            <LinearLayout android:id="@+id/focus_extras" android:layout_width="wrap_content" android:layout_height="wrap_content">
-                <com.google.android.material.button.MaterialButton android:id="@+id/btn_focus_near" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
-                <com.google.android.material.button.MaterialButton android:id="@+id/btn_focus_far" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+        app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+        app:cardCornerRadius="@dimen/radius_medium"
+        app:strokeWidth="0dp"
+        app:layout_constraintEnd_toStartOf="@id/bottom_island_card"
+        app:layout_constraintBottom_toBottomOf="parent">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="@dimen/padding_small">
+
+            <!-- Pro Info Bar -->
+            <LinearLayout
+                android:id="@+id/pro_info_bar"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center">
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/pill_focus"
+                    style="@style/Widget.Material3.Button.TonalButton"
+                    android:layout_width="0dp"
+                    android:layout_height="36dp"
+                    android:layout_weight="1"
+                    android:layout_marginHorizontal="2dp"
+                    android:insetTop="0dp"
+                    android:insetBottom="0dp"
+                    android:paddingHorizontal="2dp"
+                    android:textSize="10sp"
+                    android:text="AF"
+                    app:cornerRadius="18dp" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/pill_iso"
+                    style="@style/Widget.Material3.Button.TonalButton"
+                    android:layout_width="0dp"
+                    android:layout_height="36dp"
+                    android:layout_weight="1"
+                    android:layout_marginHorizontal="2dp"
+                    android:insetTop="0dp"
+                    android:insetBottom="0dp"
+                    android:paddingHorizontal="2dp"
+                    android:textSize="10sp"
+                    android:text="ISO AUTO"
+                    app:cornerRadius="18dp" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/pill_shutter"
+                    style="@style/Widget.Material3.Button.TonalButton"
+                    android:layout_width="0dp"
+                    android:layout_height="36dp"
+                    android:layout_weight="1"
+                    android:layout_marginHorizontal="2dp"
+                    android:insetTop="0dp"
+                    android:insetBottom="0dp"
+                    android:paddingHorizontal="2dp"
+                    android:textSize="10sp"
+                    android:text="SEC AUTO"
+                    app:cornerRadius="18dp" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/pill_ev"
+                    style="@style/Widget.Material3.Button.TonalButton"
+                    android:layout_width="0dp"
+                    android:layout_height="36dp"
+                    android:layout_weight="1"
+                    android:layout_marginHorizontal="2dp"
+                    android:insetTop="0dp"
+                    android:insetBottom="0dp"
+                    android:paddingHorizontal="2dp"
+                    android:textSize="10sp"
+                    android:text="EV 0.0"
+                    app:cornerRadius="18dp" />
+            </LinearLayout>
+
+            <!-- Dial Control Container -->
+            <LinearLayout
+                android:id="@+id/dial_panel"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:visibility="gone"
+                android:paddingTop="4dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:paddingHorizontal="6dp">
+
+                    <TextView
+                        android:id="@+id/tv_dial_target_label"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="SHUTTER"
+                        android:textStyle="bold"
+                        android:textSize="11sp"
+                        android:textColor="?attr/colorTertiary" />
+
+                    <TextView
+                        android:id="@+id/tv_dial_target_value"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:gravity="start|center_vertical"
+                        android:layout_marginStart="6dp"
+                        android:text="1/125s"
+                        android:textStyle="bold"
+                        android:textSize="12sp"
+                        android:textColor="?attr/colorOnSurface" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btn_dial_auto"
+                        style="@style/Widget.Material3.Button.TextButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="32dp"
+                        android:paddingHorizontal="6dp"
+                        android:textSize="11sp"
+                        android:text="AUTO" />
+                </LinearLayout>
+
+                <top.maary.darkbag.ui.ProDialWheelView
+                    android:id="@+id/dial_wheel_view"
+                    android:layout_width="match_parent"
+                    android:layout_height="48dp"
+                    android:layout_marginVertical="2dp" />
+
+                <LinearLayout
+                    android:id="@+id/focus_extras"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center"
+                    android:visibility="gone"
+                    android:paddingTop="2dp">
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btn_focus_near"
+                        style="@style/Widget.Material3.Button.TonalButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="32dp"
+                        android:layout_marginEnd="@dimen/spacing_small"
+                        android:textSize="11sp"
+                        android:text="Macro" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btn_focus_far"
+                        style="@style/Widget.Material3.Button.TonalButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="32dp"
+                        android:textSize="11sp"
+                        android:text="Infinity" />
+                </LinearLayout>
+
             </LinearLayout>
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>

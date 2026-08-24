@@ -88,6 +88,7 @@ import android.net.Uri
 import androidx.annotation.OptIn
 import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.activity.OnBackPressedCallback
+import kotlin.math.*
 import androidx.core.view.setPadding
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
@@ -188,11 +189,19 @@ class CameraFragment : Fragment() {
 
     // Manual Control State
     private var isManualFocus = false
-    private var isManualExposure = false
+    private var isManualIso = false
+    private var isManualShutter = false
+    private val isManualExposure: Boolean
+        get() = isManualIso || isManualShutter
     @Volatile private var lastClippingRatio: Double = 0.0
-    private var activeManualTab: String? = null
+    private var activeManualTab: String? = null // "Focus", "ISO", "Shutter", "EV"
     private var focusMeteringRegion: MeteringRectangle? = null
     private var exposureMeteringRegion: MeteringRectangle? = null
+
+    // Live AE / AF telemetry readings
+    @Volatile private var liveIso: Int = 100
+    @Volatile private var liveExposureTime: Long = 10_000_000L
+    @Volatile private var liveFocusDistance: Float = 0.0f
 
     // Flash State
     private var isFlashEnabled = false
@@ -1045,8 +1054,10 @@ class CameraFragment : Fragment() {
 
             // Update UI if manual panel is visible
             lifecycleScope.launch(Dispatchers.Main) {
-                updateManualPanel()
-                updateTabColors()
+                if (activeManualTab != null) {
+                    updateDialPanel()
+                }
+                updateProInfoBar()
 
                 if (isRawSupported) {
                     cameraUiContainerBinding?.hdrPlusSwitch?.visibility = View.VISIBLE
@@ -1267,11 +1278,18 @@ class CameraFragment : Fragment() {
                     }
                     captureResultFlow.tryEmit(result)
 
+                    val resIso = result.get(android.hardware.camera2.CaptureResult.SENSOR_SENSITIVITY)
+                    val resTime = result.get(android.hardware.camera2.CaptureResult.SENSOR_EXPOSURE_TIME)
+                    val resFocus = result.get(android.hardware.camera2.CaptureResult.LENS_FOCUS_DISTANCE)
+                    if (resIso != null) liveIso = resIso
+                    if (resTime != null) liveExposureTime = resTime
+                    if (resFocus != null) liveFocusDistance = resFocus
+
                     // Background Calculation for HDR+ Latency Optimization
                     if (isHdrPlusEnabled && !isBurstActive && !isManualExposure && isAdded) {
                         lifecycleScope.launch(Dispatchers.Default) {
-                            val iso = result.get(android.hardware.camera2.CaptureResult.SENSOR_SENSITIVITY) ?: 100
-                            val time = result.get(android.hardware.camera2.CaptureResult.SENSOR_EXPOSURE_TIME) ?: 10_000_000L
+                            val iso = resIso ?: 100
+                            val time = resTime ?: 10_000_000L
 
                             val validIsoRange = isoRange ?: android.util.Range(100, 3200)
                             val validTimeRange = exposureTimeRange ?: android.util.Range(1000L, 1_000_000_000L)
@@ -1485,13 +1503,9 @@ class CameraFragment : Fragment() {
                     val manualId = uiBinding.manualControlsRoot?.id
 
                     if (topId != null && bottomId != null) {
-                        // Center Viewfinder Container between top bar and manual controls (or bottom island if manual is GONE)
-                        val bottomAnchorId = if (manualId != null) {
+                        if (manualId != null) {
                             // Ensure Manual Controls are constrained to the Bottom Island
                             constraintSet.connect(manualId, androidx.constraintlayout.widget.ConstraintSet.BOTTOM, bottomId, androidx.constraintlayout.widget.ConstraintSet.TOP)
-                            manualId
-                        } else {
-                            bottomId
                         }
 
                         val marginMedium = resources.getDimensionPixelSize(R.dimen.margin_medium)
@@ -1500,7 +1514,7 @@ class CameraFragment : Fragment() {
 
                         constraintSet.constrainHeight(containerId, androidx.constraintlayout.widget.ConstraintSet.MATCH_CONSTRAINT)
                         constraintSet.connect(containerId, androidx.constraintlayout.widget.ConstraintSet.TOP, topId, androidx.constraintlayout.widget.ConstraintSet.BOTTOM)
-                        constraintSet.connect(containerId, androidx.constraintlayout.widget.ConstraintSet.BOTTOM, bottomAnchorId, androidx.constraintlayout.widget.ConstraintSet.TOP)
+                        constraintSet.connect(containerId, androidx.constraintlayout.widget.ConstraintSet.BOTTOM, bottomId, androidx.constraintlayout.widget.ConstraintSet.TOP)
                         constraintSet.setVerticalBias(containerId, 0.5f)
                     }
 
@@ -1525,11 +1539,11 @@ class CameraFragment : Fragment() {
                 it.visibility = View.GONE
             }
 
-            if (cameraUiContainerBinding?.manualPanel?.visibility == View.VISIBLE) {
-                 cameraUiContainerBinding?.manualPanel?.visibility = View.GONE
-                 cameraUiContainerBinding?.manualTabs?.clearChecked()
-                 activeManualTab = null
-                 it.visibility = View.GONE
+            if (cameraUiContainerBinding?.dialPanel?.visibility == View.VISIBLE) {
+                cameraUiContainerBinding?.dialPanel?.visibility = View.GONE
+                activeManualTab = null
+                it.visibility = View.GONE
+                updateProInfoBar()
             }
         }
 
@@ -2290,10 +2304,10 @@ class CameraFragment : Fragment() {
                     applyCameraControls() // Apply change
 
                     if (activeManualTab == "Focus") {
-                        updateManualPanel()
+                        updateDialPanel()
                     }
 
-                    updateTabColors()
+                    updateProInfoBar()
 
                     camera?.cameraControl?.startFocusAndMetering(action)
                 }
@@ -2414,35 +2428,21 @@ class CameraFragment : Fragment() {
         val binding = cameraUiContainerBinding ?: return
         binding.manualControlsRoot?.visibility = View.VISIBLE
 
-        // Tab Listeners
-        binding.manualTabs?.addOnButtonCheckedListener { group, checkedId, isChecked ->
-            if (isChecked) {
-                when (checkedId) {
-                    R.id.btn_tab_focus -> activeManualTab = "Focus"
-                    R.id.btn_tab_iso -> activeManualTab = "ISO"
-                    R.id.btn_tab_shutter -> activeManualTab = "Shutter"
-                    R.id.btn_tab_ev -> activeManualTab = "EV"
-                }
-                binding.manualPanel?.visibility = View.VISIBLE
-                binding.touchOverlay?.visibility = View.VISIBLE
-                updateManualPanel()
-            } else {
-                if (group.checkedButtonId == View.NO_ID) {
-                    activeManualTab = null
-                    binding.manualPanel?.visibility = View.GONE
-                    binding.touchOverlay?.visibility = View.GONE
-                }
-            }
-        }
+        // Pill Click Listeners
+        binding.pillFocus?.setOnClickListener { toggleManualTab("Focus") }
+        binding.pillIso?.setOnClickListener { toggleManualTab("ISO") }
+        binding.pillShutter?.setOnClickListener { toggleManualTab("Shutter") }
+        binding.pillEv?.setOnClickListener { toggleManualTab("EV") }
 
-        // Manual Panel Listeners
-        binding.seekbarManual?.addOnChangeListener { slider, value, fromUser ->
+        // Dial Wheel Item Selection
+        binding.dialWheelView?.setOnItemSelectedListener { item, _, fromUser ->
             if (fromUser) {
-                handleManualProgress(value)
+                handleDialSelection(item)
             }
         }
 
-        binding.btnManualAuto?.setOnClickListener {
+        // Auto Button
+        binding.btnDialAuto?.setOnClickListener {
             resetCurrentManualParameter()
         }
 
@@ -2451,73 +2451,74 @@ class CameraFragment : Fragment() {
             currentFocusDistance = minFocusDistance
             isManualFocus = true
             applyCameraControls()
-            updateManualPanel()
-            updateTabColors()
+            updateDialPanel()
+            updateProInfoBar()
         }
 
         binding.btnFocusFar?.setOnClickListener {
             currentFocusDistance = 0.0f
             isManualFocus = true
             applyCameraControls()
-            updateManualPanel()
-            updateTabColors()
+            updateDialPanel()
+            updateProInfoBar()
         }
 
+        updateProInfoBar()
     }
 
-    private fun handleManualProgress(value: Float) {
+    private fun toggleManualTab(tab: String) {
         val binding = cameraUiContainerBinding ?: return
-        val max = binding.seekbarManual?.valueTo ?: 1000.0f
-        val ratio = value / max
+        if (activeManualTab == tab) {
+            // Collapse
+            activeManualTab = null
+            binding.dialPanel?.visibility = View.GONE
+            binding.touchOverlay?.visibility = View.GONE
+            updateFocusPeakingState()
+            updateProInfoBar()
+        } else {
+            activeManualTab = tab
+            binding.dialPanel?.visibility = View.VISIBLE
+            binding.touchOverlay?.visibility = View.VISIBLE
+            updateDialPanel()
+            updateFocusPeakingState()
+            updateProInfoBar()
+        }
+    }
 
+    private fun updateFocusPeakingState() {
+        val context = context ?: return
+        val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val peakingPref = prefs.getBoolean(SettingsFragment.KEY_EXP_FOCUS_PEAKING, false)
+        val enabled = peakingPref && (activeManualTab == "Focus" || isManualFocus)
+        lutProcessor?.setFocusPeakingEnabled(enabled)
+    }
+
+    private fun handleDialSelection(item: top.maary.darkbag.ui.ProDialWheelView.DialItem) {
+        val binding = cameraUiContainerBinding ?: return
         when (activeManualTab) {
             "Focus" -> {
-                currentFocusDistance = ratio * minFocusDistance
+                currentFocusDistance = item.rawValue.toFloat()
                 isManualFocus = true
-                binding.tvManualValue?.text = String.format("%.2f", currentFocusDistance)
+                binding.tvDialTargetValue?.text = formatFocusDist(currentFocusDistance)
+                updateFocusPeakingState()
             }
-
             "ISO" -> {
-                isoRange?.let { range ->
-                    currentIso = (range.lower + (range.upper - range.lower) * ratio).toInt()
-                    isManualExposure = true
-                    binding.tvManualValue?.text = "$currentIso"
-                }
+                currentIso = item.rawValue.toInt()
+                isManualIso = true
+                binding.tvDialTargetValue?.text = "$currentIso"
             }
-
             "Shutter" -> {
-                exposureTimeRange?.let { range ->
-                    val minVal = range.lower.toDouble()
-                    val maxVal = range.upper.toDouble()
-                    val res = minVal * Math.pow(maxVal / minVal, ratio.toDouble())
-                    currentExposureTime = res.toLong()
-                    isManualExposure = true
-
-                    val ms = currentExposureTime / 1_000_000.0
-                    if (ms < 1000) {
-                        binding.tvManualValue?.text = String.format("1/%.0fs", 1000.0 / ms)
-                    } else {
-                        binding.tvManualValue?.text = String.format("%.1fs", ms / 1000.0)
-                    }
-                }
+                currentExposureTime = item.rawValue.toLong()
+                isManualShutter = true
+                binding.tvDialTargetValue?.text = formatShutterTime(currentExposureTime)
             }
-
             "EV" -> {
-                evRange?.let { range ->
-                    currentEvIndex = (range.lower + (range.upper - range.lower) * ratio).toInt()
-                    if (isManualExposure) {
-                        Toast.makeText(requireContext(),
-                            "EV disabled in Manual Exposure",
-                            Toast.LENGTH_SHORT
-                        ).show()
-                    } else {
-                        binding.tvManualValue?.text = "$currentEvIndex"
-                    }
-                }
+                currentEvIndex = item.rawValue.toInt()
+                binding.tvDialTargetValue?.text = formatEvVal(currentEvIndex)
             }
         }
         applyCameraControls()
-        updateTabColors()
+        updateProInfoBar()
     }
 
     private fun resetCurrentManualParameter() {
@@ -2526,98 +2527,290 @@ class CameraFragment : Fragment() {
                 isManualFocus = false
                 focusMeteringRegion = null
                 camera?.cameraControl?.cancelFocusAndMetering()
+                updateFocusPeakingState()
             }
-
-            "ISO", "Shutter" -> {
-                isManualExposure = false
+            "ISO" -> {
+                isManualIso = false
                 exposureMeteringRegion = null
             }
-
+            "Shutter" -> {
+                isManualShutter = false
+                exposureMeteringRegion = null
+            }
             "EV" -> {
                 currentEvIndex = 0
                 exposureMeteringRegion = null
             }
         }
         applyCameraControls()
-        updateManualPanel()
-        updateTabColors()
+        updateDialPanel()
+        updateProInfoBar()
     }
 
-    private fun updateTabColors() {
+    private fun updateDialPanel() {
         val binding = cameraUiContainerBinding ?: return
-        val activeColor = Color.YELLOW
-        val inactiveColor = Color.WHITE
-
-        binding.btnTabFocus?.setTextColor(if (isManualFocus) activeColor else inactiveColor)
-        binding.btnTabIso?.setTextColor(if (isManualExposure) activeColor else inactiveColor)
-        binding.btnTabShutter?.setTextColor(if (isManualExposure) activeColor else inactiveColor)
-        binding.btnTabEv?.setTextColor(if (!isManualExposure && currentEvIndex != 0) activeColor else inactiveColor)
-    }
-
-    private fun updateManualPanel() {
-        val binding = cameraUiContainerBinding ?: return
-        binding.focusExtras?.visibility =
-            if (activeManualTab == "Focus") View.VISIBLE else View.GONE
-
-        val max = binding.seekbarManual?.valueTo ?: 1000.0f
+        val wheel = binding.dialWheelView ?: return
+        binding.focusExtras?.visibility = if (activeManualTab == "Focus") View.VISIBLE else View.GONE
 
         when (activeManualTab) {
             "Focus" -> {
-                if (isManualFocus) {
-                    val ratio =
-                        if (minFocusDistance > 0) currentFocusDistance / minFocusDistance else 0f
-                    binding.seekbarManual?.value = (ratio * max).coerceIn(0f, max)
-                    binding.tvManualValue?.text = String.format("%.2f", currentFocusDistance)
-                } else {
-                    binding.tvManualValue?.text = "Auto"
-                    binding.seekbarManual?.value = 0.0f
+                binding.tvDialTargetLabel?.text = "FOCUS"
+                val items = buildFocusDialItems(minFocusDistance)
+                val targetVal = if (isManualFocus) currentFocusDistance else 0.0f
+                var closestIndex = 0
+                var minDiff = Double.MAX_VALUE
+                items.forEachIndexed { i, it ->
+                    val diff = abs(it.rawValue - targetVal)
+                    if (diff < minDiff) {
+                        minDiff = diff
+                        closestIndex = i
+                    }
                 }
+                wheel.setItems(items, closestIndex)
+                binding.tvDialTargetValue?.text = if (isManualFocus) formatFocusDist(currentFocusDistance) else "AUTO (${formatFocusDist(liveFocusDistance)})"
             }
-
             "ISO" -> {
-                isoRange?.let { range ->
-                    if (isManualExposure) {
-                        val ratio =
-                            (currentIso - range.lower).toFloat() / (range.upper - range.lower)
-                        binding.seekbarManual?.value = (ratio * max).coerceIn(0f, max)
-                        binding.tvManualValue?.text = "$currentIso"
-                    } else {
-                        binding.tvManualValue?.text = "Auto"
-                        binding.seekbarManual?.value = 0.0f
+                binding.tvDialTargetLabel?.text = "ISO"
+                val items = buildIsoDialItems(isoRange)
+                val targetVal = if (isManualIso) currentIso else liveIso
+                var closestIndex = 0
+                var minDiff = Double.MAX_VALUE
+                items.forEachIndexed { i, it ->
+                    val diff = abs(it.rawValue - targetVal)
+                    if (diff < minDiff) {
+                        minDiff = diff
+                        closestIndex = i
                     }
                 }
+                wheel.setItems(items, closestIndex)
+                binding.tvDialTargetValue?.text = if (isManualIso) "$currentIso" else "AUTO ($liveIso)"
             }
-
             "Shutter" -> {
-                exposureTimeRange?.let { range ->
-                    if (isManualExposure) {
-                        val minVal = range.lower.toDouble()
-                        val maxVal = range.upper.toDouble()
-                        val ratio =
-                            Math.log(currentExposureTime.toDouble() / minVal) / Math.log(maxVal / minVal)
-                        binding.seekbarManual?.value = (ratio * max).toFloat().coerceIn(0f, max)
-                        val ms = currentExposureTime / 1_000_000.0
-                        if (ms < 1000) {
-                            binding.tvManualValue?.text = String.format("1/%.0fs", 1000.0 / ms)
-                        } else {
-                            binding.tvManualValue?.text = String.format("%.1fs", ms / 1000.0)
-                        }
-                    } else {
-                        binding.tvManualValue?.text = "Auto"
-                        binding.seekbarManual?.value = 0.0f
+                binding.tvDialTargetLabel?.text = "SHUTTER"
+                val items = buildShutterDialItems(exposureTimeRange)
+                val targetVal = if (isManualShutter) currentExposureTime else liveExposureTime
+                var closestIndex = 0
+                var minDiff = Double.MAX_VALUE
+                items.forEachIndexed { i, it ->
+                    val diff = abs(it.rawValue - targetVal)
+                    if (diff < minDiff) {
+                        minDiff = diff
+                        closestIndex = i
                     }
                 }
+                wheel.setItems(items, closestIndex)
+                binding.tvDialTargetValue?.text = if (isManualShutter) formatShutterTime(currentExposureTime) else "AUTO (${formatShutterTime(liveExposureTime)})"
             }
-
             "EV" -> {
-                evRange?.let { range ->
-                    val ratio =
-                        (currentEvIndex - range.lower).toFloat() / (range.upper - range.lower)
-                    binding.seekbarManual?.value = (ratio * max).coerceIn(0f, max)
-                    binding.tvManualValue?.text = "$currentEvIndex"
+                binding.tvDialTargetLabel?.text = "EV"
+                val items = buildEvDialItems(evRange)
+                var closestIndex = 0
+                var minDiff = Double.MAX_VALUE
+                items.forEachIndexed { i, it ->
+                    val diff = abs(it.rawValue - currentEvIndex)
+                    if (diff < minDiff) {
+                        minDiff = diff
+                        closestIndex = i
+                    }
                 }
+                wheel.setItems(items, closestIndex)
+                binding.tvDialTargetValue?.text = formatEvVal(currentEvIndex)
             }
         }
+    }
+
+    private fun updateProInfoBar() {
+        val binding = cameraUiContainerBinding ?: return
+        val activeColor = Color.parseColor("#FFD54F") // Amber-Gold
+        val normalColor = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnSurface, Color.WHITE)
+
+        // Focus
+        if (isManualFocus) {
+            binding.pillFocus?.text = "MF " + formatFocusDist(currentFocusDistance)
+            binding.pillFocus?.setTextColor(activeColor)
+        } else {
+            binding.pillFocus?.text = "AF"
+            binding.pillFocus?.setTextColor(normalColor)
+        }
+
+        // ISO
+        if (isManualIso) {
+            binding.pillIso?.text = "ISO $currentIso"
+            binding.pillIso?.setTextColor(activeColor)
+        } else {
+            binding.pillIso?.text = "ISO AUTO"
+            binding.pillIso?.setTextColor(normalColor)
+        }
+
+        // Shutter
+        if (isManualShutter) {
+            binding.pillShutter?.text = "SEC " + formatShutterTime(currentExposureTime)
+            binding.pillShutter?.setTextColor(activeColor)
+        } else {
+            binding.pillShutter?.text = "SEC AUTO"
+            binding.pillShutter?.setTextColor(normalColor)
+        }
+
+        // EV
+        if (currentEvIndex != 0) {
+            binding.pillEv?.text = formatEvVal(currentEvIndex)
+            binding.pillEv?.setTextColor(activeColor)
+        } else {
+            binding.pillEv?.text = "EV 0.0"
+            binding.pillEv?.setTextColor(normalColor)
+        }
+    }
+
+    private fun formatShutterTime(nanos: Long): String {
+        val ms = nanos / 1_000_000.0
+        return if (ms < 950.0) {
+            val fraction = 1000.0 / ms
+            if (fraction >= 10.0) String.format(Locale.US, "1/%.0fs", fraction)
+            else String.format(Locale.US, "1/%.1fs", fraction)
+        } else {
+            String.format(Locale.US, "%.1fs", ms / 1000.0)
+        }
+    }
+
+    private fun formatFocusDist(dist: Float): String {
+        return if (dist <= 0.001f) "∞"
+        else if (minFocusDistance > 0 && dist >= minFocusDistance * 0.95f) "Macro"
+        else {
+            val meters = 1.0f / dist
+            if (meters < 1.0f) String.format(Locale.US, "%.0fcm", meters * 100f)
+            else String.format(Locale.US, "%.1fm", meters)
+        }
+    }
+
+    private fun formatEvVal(evIndex: Int): String {
+        return if (evIndex == 0) "EV 0.0"
+        else String.format(Locale.US, "EV %+d", evIndex)
+    }
+
+    private fun buildShutterDialItems(range: android.util.Range<Long>?): List<top.maary.darkbag.ui.ProDialWheelView.DialItem> {
+        val standardNanos = listOf(
+            125_000L to "1/8000",
+            250_000L to "1/4000",
+            500_000L to "1/2000",
+            1_000_000L to "1/1000",
+            2_000_000L to "1/500",
+            3_000_000L to "1/320",
+            4_000_000L to "1/250",
+            6_000_000L to "1/160",
+            8_000_000L to "1/125",
+            12_500_000L to "1/80",
+            16_666_667L to "1/60",
+            25_000_000L to "1/40",
+            33_333_333L to "1/30",
+            50_000_000L to "1/20",
+            66_666_667L to "1/15",
+            100_000_000L to "1/10",
+            125_000_000L to "1/8",
+            250_000_000L to "1/4",
+            500_000_000L to "1/2",
+            1_000_000_000L to "1s",
+            2_000_000_000L to "2s",
+            4_000_000_000L to "4s",
+            8_000_000_000L to "8s",
+            15_000_000_000L to "15s",
+            30_000_000_000L to "30s"
+        )
+        val lower = range?.lower ?: 100_000L
+        val upper = range?.upper ?: 30_000_000_000L
+        return standardNanos.filter { it.first in lower..upper }.map { (nanos, label) ->
+            val isMajor = nanos in listOf(
+                125_000L, 250_000L, 500_000L, 1_000_000L, 2_000_000L, 4_000_000L,
+                8_000_000L, 16_666_667L, 33_333_333L, 66_666_667L, 125_000_000L,
+                250_000_000L, 500_000_000L, 1_000_000_000L, 2_000_000_000L,
+                4_000_000_000L, 8_000_000_000L, 15_000_000_000L, 30_000_000_000L
+            )
+            top.maary.darkbag.ui.ProDialWheelView.DialItem(
+                id = nanos.toString(),
+                label = label,
+                rawValue = nanos.toDouble(),
+                isMajor = isMajor
+            )
+        }
+    }
+
+    private fun buildIsoDialItems(range: android.util.Range<Int>?): List<top.maary.darkbag.ui.ProDialWheelView.DialItem> {
+        val standardIsos = listOf(
+            50, 64, 80, 100, 125, 160, 200, 250, 320, 400, 500, 640,
+            800, 1000, 1250, 1600, 2000, 2500, 3200, 4000, 5000, 6400, 12800
+        )
+        val lower = range?.lower ?: 50
+        val upper = range?.upper ?: 6400
+        return standardIsos.filter { it in lower..upper }.map { iso ->
+            val isMajor = iso in listOf(50, 100, 200, 400, 800, 1600, 3200, 6400)
+            top.maary.darkbag.ui.ProDialWheelView.DialItem(
+                id = iso.toString(),
+                label = iso.toString(),
+                rawValue = iso.toDouble(),
+                isMajor = isMajor
+            )
+        }
+    }
+
+    private fun buildFocusDialItems(maxDiopter: Float): List<top.maary.darkbag.ui.ProDialWheelView.DialItem> {
+        if (maxDiopter <= 0f) {
+            return listOf(
+                top.maary.darkbag.ui.ProDialWheelView.DialItem("inf", "∞", 0.0, isMajor = true)
+            )
+        }
+        val items = mutableListOf<top.maary.darkbag.ui.ProDialWheelView.DialItem>()
+        items.add(top.maary.darkbag.ui.ProDialWheelView.DialItem("inf", "∞", 0.0, isMajor = true))
+
+        val stops = listOf(
+            0.5f to "2.0m",
+            1.0f to "1.0m",
+            1.5f to "0.7m",
+            2.0f to "0.5m",
+            3.0f to "0.33m",
+            4.0f to "0.25m",
+            5.0f to "0.2m",
+            7.0f to "0.14m",
+            10.0f to "0.1m"
+        )
+        for ((d, label) in stops) {
+            if (d <= maxDiopter * 0.95f) {
+                val isMajor = (d in listOf(0.5f, 1.0f, 2.0f, 5.0f, 10.0f))
+                items.add(
+                    top.maary.darkbag.ui.ProDialWheelView.DialItem(
+                        id = d.toString(),
+                        label = label,
+                        rawValue = d.toDouble(),
+                        isMajor = isMajor
+                    )
+                )
+            }
+        }
+        items.add(
+            top.maary.darkbag.ui.ProDialWheelView.DialItem(
+                id = "macro",
+                label = "Macro",
+                rawValue = maxDiopter.toDouble(),
+                isMajor = true
+            )
+        )
+        return items
+    }
+
+    private fun buildEvDialItems(range: android.util.Range<Int>?): List<top.maary.darkbag.ui.ProDialWheelView.DialItem> {
+        val lower = range?.lower ?: -6
+        val upper = range?.upper ?: 6
+        val items = mutableListOf<top.maary.darkbag.ui.ProDialWheelView.DialItem>()
+        for (i in lower..upper) {
+            val label = if (i == 0) "0" else if (i > 0) "+$i" else "$i"
+            items.add(
+                top.maary.darkbag.ui.ProDialWheelView.DialItem(
+                    id = i.toString(),
+                    label = label,
+                    rawValue = i.toDouble(),
+                    isMajor = (i % 3 == 0 || i == 0)
+                )
+            )
+        }
+        return items
     }
 
     private fun initLensControls() {
@@ -2978,10 +3171,17 @@ class CameraFragment : Fragment() {
                 android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE,
                 android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE_OFF
             )
-            builder.setCaptureRequestOption(android.hardware.camera2.CaptureRequest.SENSOR_SENSITIVITY, currentIso)
+            val isoToUse = if (isManualIso) currentIso else liveIso
+            val shutterToUse = if (isManualShutter) currentExposureTime else liveExposureTime
+            builder.setCaptureRequestOption(android.hardware.camera2.CaptureRequest.SENSOR_SENSITIVITY, isoToUse)
             builder.setCaptureRequestOption(
                 android.hardware.camera2.CaptureRequest.SENSOR_EXPOSURE_TIME,
-                currentExposureTime
+                shutterToUse
+            )
+        } else {
+            builder.setCaptureRequestOption(
+                android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE,
+                android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE_ON
             )
         }
 
@@ -3527,6 +3727,14 @@ class CameraFragment : Fragment() {
                     "HDR+ Exposure: TargetISO=${config.iso}, TargetTime=${config.exposureTime}, DigitalGain=${config.digitalGain}"
                 )
 
+                val burstIso = if (isManualIso) currentIso else config.iso
+                val burstTime = if (isManualShutter) currentExposureTime else config.exposureTime
+                val burstGain = if (isManualExposure) {
+                    if (currentEvIndex != 0) (2.0).pow(currentEvIndex.toDouble() / 3.0).toFloat() else 1.0f
+                } else {
+                    config.digitalGain
+                }
+
                 val cameraControl = camera?.cameraControl
                 if (cameraControl != null) {
                     val camera2Control = Camera2CameraControl.from(cameraControl)
@@ -3535,11 +3743,21 @@ class CameraFragment : Fragment() {
                         android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE,
                         android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE_OFF
                     )
-                    builder.setCaptureRequestOption(android.hardware.camera2.CaptureRequest.SENSOR_SENSITIVITY, config.iso)
+                    builder.setCaptureRequestOption(android.hardware.camera2.CaptureRequest.SENSOR_SENSITIVITY, burstIso)
                     builder.setCaptureRequestOption(
                         android.hardware.camera2.CaptureRequest.SENSOR_EXPOSURE_TIME,
-                        config.exposureTime
+                        burstTime
                     )
+                    if (isManualFocus) {
+                        builder.setCaptureRequestOption(
+                            android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE,
+                            android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE_OFF
+                        )
+                        builder.setCaptureRequestOption(
+                            android.hardware.camera2.CaptureRequest.LENS_FOCUS_DISTANCE,
+                            currentFocusDistance
+                        )
+                    }
                     // Apply OIS for HDR+ Burst
                     applyStabilizationOptions(builder, true)
                     camera2Control.setCaptureRequestOptions(builder.build()).await()
@@ -3551,13 +3769,13 @@ class CameraFragment : Fragment() {
                 val burstSize = burstSizeStr.toIntOrNull() ?: 5
 
                 if (isFrame1Trigger) {
-                    writeScopedHalfFrameStep(prefs, 1, captureStartTime, digitalGain = config.digitalGain, flareType = hfMetadata?.flareType ?: -1)
+                    writeScopedHalfFrameStep(prefs, 1, captureStartTime, digitalGain = burstGain, flareType = hfMetadata?.flareType ?: -1)
                 }
 
                 hdrPlusBurstHelper = HdrPlusBurst(
                     frameCount = burstSize,
                     onBurstComplete = { burstResult ->
-                        processHdrPlusBurst(burstResult, config.digitalGain, hfMetadata?.copy(digitalGain = config.digitalGain))
+                        processHdrPlusBurst(burstResult, burstGain, hfMetadata?.copy(digitalGain = burstGain))
                     }
                 )
 
@@ -4021,15 +4239,11 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 // If using Camera2, the repeating request will be updated via applyCameraControls or similar
                 applyCameraControls()
             }
-            // Hide manual controls
-            binding.manualControlsRoot?.visibility = View.GONE
-            // Close manual panel if open
-            if (binding.manualPanel?.visibility == View.VISIBLE) {
-                binding.manualPanel?.visibility = View.GONE
-                binding.touchOverlay?.visibility = View.GONE
-                binding.manualTabs?.clearChecked()
-                activeManualTab = null
-            }
+
+            // Retain manual controls if enabled in settings
+            val manualEnabled = prefs.getBoolean(SettingsFragment.KEY_MANUAL_CONTROLS, false)
+            binding.manualControlsRoot?.visibility = if (manualEnabled) View.VISIBLE else View.GONE
+            updateProInfoBar()
         } else {
             // Restore flash visibility if supported
             val hasFlash = try {
@@ -4050,6 +4264,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
             val manualEnabled = prefs.getBoolean(SettingsFragment.KEY_MANUAL_CONTROLS, false)
             binding.manualControlsRoot?.visibility = if (manualEnabled) View.VISIBLE else View.GONE
+            updateProInfoBar()
         }
     }
 
@@ -4632,14 +4847,22 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 curIso, curTime, validIsoRange, validTimeRange, underexposureMode, lastClippingRatio
             )
 
+            val burstIso = if (isManualIso) currentIso else config.iso
+            val burstTime = if (isManualShutter) currentExposureTime else config.exposureTime
+            val burstGain = if (isManualExposure) {
+                if (currentEvIndex != 0) (2.0).pow(currentEvIndex.toDouble() / 3.0).toFloat() else 1.0f
+            } else {
+                config.digitalGain
+            }
+
             val burstSize = (prefs.getString(SettingsFragment.KEY_HDR_BURST_COUNT, "5") ?: "5").toIntOrNull() ?: 5
 
             if (isFrame1Trigger) {
-                writeScopedHalfFrameStep(requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE), 1, captureStartTime, digitalGain = config.digitalGain, flareType = hfMetadata?.flareType ?: -1)
+                writeScopedHalfFrameStep(requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE), 1, captureStartTime, digitalGain = burstGain, flareType = hfMetadata?.flareType ?: -1)
             }
 
             hdrPlusBurstHelper = HdrPlusBurst(frameCount = burstSize, onBurstComplete = { burstResult ->
-                processHdrPlusBurst(burstResult, config.digitalGain, hfMetadata?.copy(digitalGain = config.digitalGain))
+                processHdrPlusBurst(burstResult, burstGain, hfMetadata?.copy(digitalGain = burstGain))
             })
 
             lifecycleScope.launch(Dispatchers.Main) {
@@ -4659,8 +4882,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 applyManualSettingsToRequest(request, true)
 
                 request.set(android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE, android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE_OFF)
-                request.set(android.hardware.camera2.CaptureRequest.SENSOR_SENSITIVITY, config.iso)
-                request.set(android.hardware.camera2.CaptureRequest.SENSOR_EXPOSURE_TIME, config.exposureTime)
+                request.set(android.hardware.camera2.CaptureRequest.SENSOR_SENSITIVITY, burstIso)
+                request.set(android.hardware.camera2.CaptureRequest.SENSOR_EXPOSURE_TIME, burstTime)
 
                 burstRequests.add(request.build())
             }
@@ -4837,8 +5060,10 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
         if (isManualExposure) {
             request.set(android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE, android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE_OFF)
-            request.set(android.hardware.camera2.CaptureRequest.SENSOR_SENSITIVITY, currentIso)
-            request.set(android.hardware.camera2.CaptureRequest.SENSOR_EXPOSURE_TIME, currentExposureTime)
+            val isoToUse = if (isManualIso) currentIso else liveIso
+            val shutterToUse = if (isManualShutter) currentExposureTime else liveExposureTime
+            request.set(android.hardware.camera2.CaptureRequest.SENSOR_SENSITIVITY, isoToUse)
+            request.set(android.hardware.camera2.CaptureRequest.SENSOR_EXPOSURE_TIME, shutterToUse)
 
             if (isFlashEnabled) {
                 request.set(android.hardware.camera2.CaptureRequest.FLASH_MODE, android.hardware.camera2.CaptureRequest.FLASH_MODE_TORCH)
@@ -4975,8 +5200,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     withContext(Dispatchers.Main) {
                         isManualFocus = true
                         applyCameraControls()
-                        updateManualPanel()
-                        updateTabColors()
+                        updateDialPanel()
+                        updateProInfoBar()
                     }
                 }
             }
