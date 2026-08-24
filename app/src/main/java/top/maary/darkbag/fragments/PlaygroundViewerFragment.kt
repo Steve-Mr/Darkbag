@@ -16,9 +16,15 @@ import androidx.appcompat.widget.PopupMenu
 
 class PlaygroundViewerFragment : ImageViewerFragment() {
 
+    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+        super.onViewCreated(view, savedInstanceState)
+        binding.btnGalleryPill.visibility = View.GONE
+    }
+
     override fun loadImages(targetUri: String?, forceRefresh: Boolean) {
         binding.initialLoadingIndicator.visibility = View.VISIBLE
         binding.imagePager.visibility = View.INVISIBLE
+        binding.btnGalleryPill.visibility = View.GONE
 
         val playgroundPaths = arguments?.getStringArray("playground_dng_paths")
         if (playgroundPaths != null && playgroundPaths.isNotEmpty()) {
