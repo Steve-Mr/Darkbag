@@ -113,6 +113,8 @@ open class ImageViewerFragment : Fragment() {
             if (::adapter.isInitialized) {
                 adapter.stopAllMotionVideos()
             }
+            preloadAdjacentMetadata(position)
+
             val group = adapter.getGroup(position)
             if (!group.metadataLoaded) {
                 lifecycleScope.launch {
@@ -336,6 +338,7 @@ open class ImageViewerFragment : Fragment() {
                     setupActionButtons()
                     updateControlsVisibility()
                     updateGalleryPill(binding.imagePager.currentItem, groups.size)
+                    preloadAdjacentMetadata(binding.imagePager.currentItem)
 
                     if (!isGalleryMode) {
                         binding.imagePager.visibility = View.VISIBLE
@@ -344,6 +347,7 @@ open class ImageViewerFragment : Fragment() {
                 } else {
                     adapter.updateGroups(groups)
                     updateGalleryPill(binding.imagePager.currentItem, groups.size)
+                    preloadAdjacentMetadata(binding.imagePager.currentItem)
                     if (!isGalleryMode) {
                         binding.imagePager.visibility = View.VISIBLE
                     }
@@ -837,11 +841,49 @@ open class ImageViewerFragment : Fragment() {
     }
 
 
+    private var preloadJob: kotlinx.coroutines.Job? = null
+
+    private fun preloadAdjacentMetadata(position: Int) {
+        if (!::adapter.isInitialized) return
+        val currentGroups = adapter.getGroups()
+        if (currentGroups.isEmpty()) return
+
+        val indicesToPreload = listOf(
+            position,
+            position + 1,
+            position - 1,
+            position + 2,
+            position - 2
+        ).filter { it in currentGroups.indices }
+
+        preloadJob?.cancel()
+        preloadJob = lifecycleScope.launch(Dispatchers.IO) {
+            for (index in indicesToPreload) {
+                if (!currentCoroutineContext().isActive) break
+                val groups = adapter.getGroups()
+                if (index !in groups.indices) continue
+                val g = groups[index]
+                if (!g.metadataLoaded) {
+                    val updated = repository.loadMetadata(g)
+                    adapterUpdateMutex.withLock {
+                        suspendCancellableCoroutine<Unit> { cont ->
+                            adapter.updateSingleGroup(updated) {
+                                if (cont.isActive) cont.resume(Unit)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     private fun updateEditUi() {
         if (!::adapter.isInitialized || adapter.itemCount == 0) return
         val currentIndex = binding.imagePager.currentItem
         if (currentIndex !in 0 until adapter.itemCount) return
         val currentGroup = adapter.getGroup(currentIndex)
+
+        if (!currentGroup.metadataLoaded) return
 
         val config = currentEditConfig ?: currentGroup.editConfig
         if (config != null) {
