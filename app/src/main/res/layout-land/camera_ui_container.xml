@@ -57,7 +57,118 @@
         </com.google.android.material.card.MaterialCardView>
     </LinearLayout>
 
-    <!-- Manual Controls Panel in Landscape -->
+    <!-- Level 1: Pro Mode Trigger Button in Landscape (Top-Left of Viewfinder) -->
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btn_pro_mode"
+        android:layout_width="48dp"
+        android:layout_height="36dp"
+        android:layout_margin="10dp"
+        android:insetTop="0dp"
+        android:insetBottom="0dp"
+        android:insetLeft="0dp"
+        android:insetRight="0dp"
+        android:padding="0dp"
+        android:text="PRO"
+        android:textSize="11sp"
+        android:textStyle="bold"
+        android:textColor="?attr/colorOnSurface"
+        app:cornerRadius="18dp"
+        app:strokeWidth="1dp"
+        app:strokeColor="#40FFFFFF"
+        android:backgroundTint="#66000000"
+        android:visibility="gone"
+        app:layout_constraintTop_toTopOf="@id/viewFinderContainer"
+        app:layout_constraintStart_toStartOf="@id/viewFinderContainer" />
+
+    <!-- Level 2: Pro Parameter Capsules Bar in Landscape -->
+    <com.google.android.material.card.MaterialCardView
+        android:id="@+id/pro_info_bar_card"
+        android:layout_width="0dp"
+        android:layout_height="36dp"
+        android:layout_marginStart="6dp"
+        android:layout_marginEnd="10dp"
+        android:visibility="gone"
+        app:cardBackgroundColor="#80000000"
+        app:cardCornerRadius="18dp"
+        app:strokeWidth="1dp"
+        app:strokeColor="#33FFFFFF"
+        app:cardElevation="0dp"
+        app:layout_constraintTop_toTopOf="@id/btn_pro_mode"
+        app:layout_constraintBottom_toBottomOf="@id/btn_pro_mode"
+        app:layout_constraintStart_toEndOf="@id/btn_pro_mode"
+        app:layout_constraintEnd_toEndOf="@id/viewFinderContainer">
+
+        <LinearLayout
+            android:id="@+id/pro_info_bar"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="horizontal"
+            android:gravity="center"
+            android:paddingHorizontal="2dp">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/pill_focus"
+                style="@style/Widget.Material3.Button.TextButton"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:layout_marginHorizontal="1dp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:paddingHorizontal="1dp"
+                android:textSize="10sp"
+                android:text="AF"
+                android:textColor="?attr/colorOnSurface"
+                app:cornerRadius="16dp" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/pill_iso"
+                style="@style/Widget.Material3.Button.TextButton"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:layout_marginHorizontal="1dp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:paddingHorizontal="1dp"
+                android:textSize="10sp"
+                android:text="ISO"
+                android:textColor="?attr/colorOnSurface"
+                app:cornerRadius="16dp" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/pill_shutter"
+                style="@style/Widget.Material3.Button.TextButton"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:layout_marginHorizontal="1dp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:paddingHorizontal="1dp"
+                android:textSize="10sp"
+                android:text="SEC"
+                android:textColor="?attr/colorOnSurface"
+                app:cornerRadius="16dp" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/pill_ev"
+                style="@style/Widget.Material3.Button.TextButton"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:layout_marginHorizontal="1dp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:paddingHorizontal="1dp"
+                android:textSize="10sp"
+                android:text="EV"
+                android:textColor="?attr/colorOnSurface"
+                app:cornerRadius="16dp" />
+        </LinearLayout>
+    </com.google.android.material.card.MaterialCardView>
+
+    <!-- Level 3: Pro Dial Wheel Floating Panel in Landscape -->
     <com.google.android.material.card.MaterialCardView
         android:id="@+id/manual_controls_root"
         style="@style/Widget.App.Card.ControlPanel"
@@ -66,9 +177,10 @@
         android:layout_marginEnd="@dimen/margin_medium"
         android:layout_marginBottom="@dimen/margin_medium"
         android:visibility="gone"
-        app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+        app:cardBackgroundColor="#CC1C1B1F"
         app:cardCornerRadius="@dimen/radius_medium"
-        app:strokeWidth="0dp"
+        app:strokeWidth="1dp"
+        app:strokeColor="#33FFFFFF"
         app:layout_constraintEnd_toStartOf="@id/bottom_island_card"
         app:layout_constraintBottom_toBottomOf="parent">
 
@@ -78,79 +190,13 @@
             android:orientation="vertical"
             android:padding="@dimen/padding_small">
 
-            <!-- Pro Info Bar -->
-            <LinearLayout
-                android:id="@+id/pro_info_bar"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center">
-
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/pill_focus"
-                    style="@style/Widget.Material3.Button.TonalButton"
-                    android:layout_width="0dp"
-                    android:layout_height="36dp"
-                    android:layout_weight="1"
-                    android:layout_marginHorizontal="2dp"
-                    android:insetTop="0dp"
-                    android:insetBottom="0dp"
-                    android:paddingHorizontal="2dp"
-                    android:textSize="10sp"
-                    android:text="AF"
-                    app:cornerRadius="18dp" />
-
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/pill_iso"
-                    style="@style/Widget.Material3.Button.TonalButton"
-                    android:layout_width="0dp"
-                    android:layout_height="36dp"
-                    android:layout_weight="1"
-                    android:layout_marginHorizontal="2dp"
-                    android:insetTop="0dp"
-                    android:insetBottom="0dp"
-                    android:paddingHorizontal="2dp"
-                    android:textSize="10sp"
-                    android:text="ISO AUTO"
-                    app:cornerRadius="18dp" />
-
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/pill_shutter"
-                    style="@style/Widget.Material3.Button.TonalButton"
-                    android:layout_width="0dp"
-                    android:layout_height="36dp"
-                    android:layout_weight="1"
-                    android:layout_marginHorizontal="2dp"
-                    android:insetTop="0dp"
-                    android:insetBottom="0dp"
-                    android:paddingHorizontal="2dp"
-                    android:textSize="10sp"
-                    android:text="SEC AUTO"
-                    app:cornerRadius="18dp" />
-
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/pill_ev"
-                    style="@style/Widget.Material3.Button.TonalButton"
-                    android:layout_width="0dp"
-                    android:layout_height="36dp"
-                    android:layout_weight="1"
-                    android:layout_marginHorizontal="2dp"
-                    android:insetTop="0dp"
-                    android:insetBottom="0dp"
-                    android:paddingHorizontal="2dp"
-                    android:textSize="10sp"
-                    android:text="EV 0.0"
-                    app:cornerRadius="18dp" />
-            </LinearLayout>
-
             <!-- Dial Control Container -->
             <LinearLayout
                 android:id="@+id/dial_panel"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
-                android:visibility="gone"
-                android:paddingTop="4dp">
+                android:visibility="visible">
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -210,7 +256,7 @@
                         style="@style/Widget.Material3.Button.TonalButton"
                         android:layout_width="wrap_content"
                         android:layout_height="32dp"
-                        android:layout_marginEnd="@dimen/spacing_small"
+                        android:layout_marginEnd="@dimen/spacing_medium"
                         android:textSize="11sp"
                         android:text="Macro" />
 
@@ -222,7 +268,6 @@
                         android:textSize="11sp"
                         android:text="Infinity" />
                 </LinearLayout>
-
             </LinearLayout>
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>

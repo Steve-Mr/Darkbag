@@ -1539,8 +1539,10 @@ class CameraFragment : Fragment() {
                 it.visibility = View.GONE
             }
 
-            if (cameraUiContainerBinding?.dialPanel?.visibility == View.VISIBLE) {
-                cameraUiContainerBinding?.dialPanel?.visibility = View.GONE
+            if (cameraUiContainerBinding?.proInfoBarCard?.visibility == View.VISIBLE ||
+                cameraUiContainerBinding?.manualControlsRoot?.visibility == View.VISIBLE) {
+                cameraUiContainerBinding?.proInfoBarCard?.visibility = View.GONE
+                cameraUiContainerBinding?.manualControlsRoot?.visibility = View.GONE
                 activeManualTab = null
                 it.visibility = View.GONE
                 updateFocusPeakingState()
@@ -2425,12 +2427,32 @@ class CameraFragment : Fragment() {
         val prefs =
             requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
         val enabled = prefs.getBoolean(SettingsFragment.KEY_MANUAL_CONTROLS, false)
-        if (!enabled) return
-
         val binding = cameraUiContainerBinding ?: return
-        binding.manualControlsRoot?.visibility = View.VISIBLE
+        binding.btnProMode?.visibility = if (enabled) View.VISIBLE else View.GONE
+        if (!enabled) {
+            binding.proInfoBarCard?.visibility = View.GONE
+            binding.manualControlsRoot?.visibility = View.GONE
+            return
+        }
 
-        // Pill Click Listeners
+        // Level 1: Pro Trigger Button (Toggles Level 2 Pills Bar)
+        binding.btnProMode?.setOnClickListener {
+            val isBarOpen = binding.proInfoBarCard?.visibility == View.VISIBLE
+            if (isBarOpen) {
+                binding.proInfoBarCard?.visibility = View.GONE
+                binding.manualControlsRoot?.visibility = View.GONE
+                binding.touchOverlay?.visibility = View.GONE
+                activeManualTab = null
+                updateFocusPeakingState()
+                updateLensControlRowPosition(animate = true)
+            } else {
+                binding.proInfoBarCard?.visibility = View.VISIBLE
+                binding.touchOverlay?.visibility = View.VISIBLE
+                updateProInfoBar()
+            }
+        }
+
+        // Level 2: Pill Click Listeners (Toggles Level 3 Dial Panel)
         binding.pillFocus?.setOnClickListener { toggleManualTab("Focus") }
         binding.pillIso?.setOnClickListener { toggleManualTab("ISO") }
         binding.pillShutter?.setOnClickListener { toggleManualTab("Shutter") }
@@ -2530,16 +2552,16 @@ class CameraFragment : Fragment() {
     private fun toggleManualTab(tab: String) {
         val binding = cameraUiContainerBinding ?: return
         if (activeManualTab == tab) {
-            // Collapse
+            // Collapse dial
             activeManualTab = null
-            binding.dialPanel?.visibility = View.GONE
-            binding.touchOverlay?.visibility = View.GONE
+            binding.manualControlsRoot?.visibility = View.GONE
             updateFocusPeakingState()
             updateProInfoBar()
             updateLensControlRowPosition(animate = true)
         } else {
+            // Open dial
             activeManualTab = tab
-            binding.dialPanel?.visibility = View.VISIBLE
+            binding.manualControlsRoot?.visibility = View.VISIBLE
             binding.touchOverlay?.visibility = View.VISIBLE
             updateDialPanel()
             updateFocusPeakingState()
@@ -2702,7 +2724,7 @@ class CameraFragment : Fragment() {
             binding.pillIso?.text = "ISO $currentIso"
             binding.pillIso?.setTextColor(activeColor)
         } else {
-            binding.pillIso?.text = "ISO AUTO"
+            binding.pillIso?.text = "ISO"
             binding.pillIso?.setTextColor(normalColor)
         }
 
@@ -2711,7 +2733,7 @@ class CameraFragment : Fragment() {
             binding.pillShutter?.text = "SEC " + formatShutterTime(currentExposureTime)
             binding.pillShutter?.setTextColor(activeColor)
         } else {
-            binding.pillShutter?.text = "SEC AUTO"
+            binding.pillShutter?.text = "SEC"
             binding.pillShutter?.setTextColor(normalColor)
         }
 
@@ -2720,8 +2742,34 @@ class CameraFragment : Fragment() {
             binding.pillEv?.text = formatEvVal(currentEvIndex)
             binding.pillEv?.setTextColor(activeColor)
         } else {
-            binding.pillEv?.text = "EV 0.0"
+            binding.pillEv?.text = "EV"
             binding.pillEv?.setTextColor(normalColor)
+        }
+
+        // Highlight active pill border
+        binding.pillFocus?.strokeWidth = if (activeManualTab == "Focus") 2 else 0
+        binding.pillFocus?.strokeColor = ColorStateList.valueOf(activeColor)
+        binding.pillIso?.strokeWidth = if (activeManualTab == "ISO") 2 else 0
+        binding.pillIso?.strokeColor = ColorStateList.valueOf(activeColor)
+        binding.pillShutter?.strokeWidth = if (activeManualTab == "Shutter") 2 else 0
+        binding.pillShutter?.strokeColor = ColorStateList.valueOf(activeColor)
+        binding.pillEv?.strokeWidth = if (activeManualTab == "EV") 2 else 0
+        binding.pillEv?.strokeColor = ColorStateList.valueOf(activeColor)
+
+        // Update Level 1 Trigger Button State Indicator
+        val isAnyManual = isManualFocus || isManualIso || isManualShutter || currentEvIndex != 0
+        binding.btnProMode?.let { btn ->
+            if (isAnyManual) {
+                btn.text = "M"
+                btn.setTextColor(activeColor)
+                btn.strokeColor = ColorStateList.valueOf(activeColor)
+                btn.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#4DFFD54F"))
+            } else {
+                btn.text = "PRO"
+                btn.setTextColor(normalColor)
+                btn.strokeColor = ColorStateList.valueOf(Color.parseColor("#40FFFFFF"))
+                btn.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#66000000"))
+            }
         }
     }
 
@@ -4306,7 +4354,11 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
             // Retain manual controls if enabled in settings
             val manualEnabled = prefs.getBoolean(SettingsFragment.KEY_MANUAL_CONTROLS, false)
-            binding.manualControlsRoot?.visibility = if (manualEnabled) View.VISIBLE else View.GONE
+            binding.btnProMode?.visibility = if (manualEnabled) View.VISIBLE else View.GONE
+            if (!manualEnabled) {
+                binding.proInfoBarCard?.visibility = View.GONE
+                binding.manualControlsRoot?.visibility = View.GONE
+            }
             updateProInfoBar()
             updateLensControlRowPosition(animate = true)
         } else {
@@ -4328,7 +4380,11 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             // Restore manual controls if enabled in settings
             val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
             val manualEnabled = prefs.getBoolean(SettingsFragment.KEY_MANUAL_CONTROLS, false)
-            binding.manualControlsRoot?.visibility = if (manualEnabled) View.VISIBLE else View.GONE
+            binding.btnProMode?.visibility = if (manualEnabled) View.VISIBLE else View.GONE
+            if (!manualEnabled) {
+                binding.proInfoBarCard?.visibility = View.GONE
+                binding.manualControlsRoot?.visibility = View.GONE
+            }
             updateProInfoBar()
             updateLensControlRowPosition(animate = true)
         }
