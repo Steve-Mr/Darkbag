@@ -12,7 +12,7 @@ import top.maary.darkbag.processor.ColorProcessor
 object ImageUtils {
 
     fun getBaseName(fileName: String): String {
-        return fileName.substringBeforeLast(".")
+        var base = fileName.substringBeforeLast(".")
             .replace("_linear", "")
             .replace("_bayer", "")
             .replace("_HDRPLUS", "")
@@ -22,6 +22,43 @@ object ImageUtils {
             .replace("_stitched", "")
             .replace("stitched_hf_", "")
             .replace(top.maary.darkbag.utils.DarkbagIdentity.FILE_PREFIX, "")
+            .replace("Darkbag_", "")
+        if (base.contains("_MULTI_")) {
+            base = base.substringBefore("_MULTI_")
+        }
+        return base
+    }
+
+    fun extractMultiCameraLensTag(uriStringOrFileName: String): String {
+        return try {
+            val decoded = java.net.URLDecoder.decode(uriStringOrFileName, "UTF-8")
+            val cleanName = decoded.substringAfterLast("/").substringAfterLast(":")
+            if (cleanName.contains("_MULTI_")) {
+                val afterMulti = cleanName.substringAfter("_MULTI_")
+                // Handle edited suffix like _MULTI_0.6x_edited_123.jpg or standard _MULTI_0.6x.jpg
+                val tagWithExt = afterMulti.substringBefore("_")
+                if (tagWithExt.contains(".")) {
+                    tagWithExt.substringBeforeLast(".")
+                } else {
+                    tagWithExt
+                }
+            } else ""
+        } catch (e: Exception) {
+            ""
+        }
+    }
+
+    fun extractMultiCameraMultiplier(uriStringOrFileName: String): Float {
+        val tag = extractMultiCameraLensTag(uriStringOrFileName)
+        if (tag.isEmpty()) return 1.0f
+        if (tag.endsWith("x", ignoreCase = true)) {
+            tag.dropLast(1).toFloatOrNull()?.let { return it }
+        }
+        if (tag.endsWith("mm", ignoreCase = true)) {
+            tag.dropLast(2).toFloatOrNull()?.let { return it / 24f }
+        }
+        tag.toFloatOrNull()?.let { return it }
+        return 1.0f
     }
 
     suspend fun generateHalfFrameComposite(

@@ -550,6 +550,97 @@
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
+            <!-- Multi-Camera Mode Section -->
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/multi_camera_mode_title"
+                android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+                android:textColor="?attr/colorPrimary"
+                android:layout_marginBottom="@dimen/spacing_medium" />
+
+            <com.google.android.material.card.MaterialCardView
+                style="@style/Widget.Material3.CardView.Filled"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="@dimen/margin_medium">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="@dimen/padding_medium">
+
+                    <TextView
+                        android:id="@+id/tv_multi_camera_status"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:textAppearance="?attr/textAppearanceBodySmall"
+                        android:textColor="?attr/colorOnSurfaceVariant"
+                        android:text="@string/multi_camera_status_supported"
+                        android:layout_marginBottom="@dimen/spacing_small" />
+
+                    <com.google.android.material.materialswitch.MaterialSwitch
+                        android:id="@+id/switch_multi_camera_mode"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/enable_multi_camera_mode"
+                        android:textSize="16sp" />
+
+                    <Space android:layout_width="match_parent" android:layout_height="@dimen/spacing_small" />
+
+                    <com.google.android.material.materialswitch.MaterialSwitch
+                        android:id="@+id/switch_multi_camera_force_enable"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/multi_camera_force_enable"
+                        android:textSize="14sp" />
+
+                    <Space android:layout_width="match_parent" android:layout_height="@dimen/spacing_medium" />
+
+                    <com.google.android.material.textfield.TextInputLayout
+                        android:id="@+id/layout_multi_camera_count"
+                        style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:hint="@string/multi_camera_count_pref_title">
+
+                        <AutoCompleteTextView
+                            android:id="@+id/menu_multi_camera_count"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:inputType="none"
+                            android:text="Auto (Max Available)" />
+                    </com.google.android.material.textfield.TextInputLayout>
+
+                    <Space android:layout_width="match_parent" android:layout_height="@dimen/spacing_medium" />
+
+                    <com.google.android.material.textfield.TextInputLayout
+                        android:id="@+id/layout_multi_camera_dual_pair"
+                        style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:hint="@string/multi_camera_dual_pair_title">
+
+                        <AutoCompleteTextView
+                            android:id="@+id/menu_multi_camera_dual_pair"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:inputType="none"
+                            android:text="Ultra-Wide + Wide" />
+                    </com.google.android.material.textfield.TextInputLayout>
+
+                    <Space android:layout_width="match_parent" android:layout_height="@dimen/spacing_medium" />
+
+                    <com.google.android.material.checkbox.MaterialCheckBox
+                        android:id="@+id/cb_multi_camera_save_raw"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/multi_camera_save_raw" />
+
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
             <!-- Camera Settings Section -->
             <TextView
                 android:layout_width="match_parent"

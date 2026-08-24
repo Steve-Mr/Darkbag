@@ -6,6 +6,7 @@ import android.net.Uri
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.LinearLayout
 import androidx.core.view.updateLayoutParams
 import androidx.recyclerview.widget.AsyncListDiffer
 import androidx.recyclerview.widget.DiffUtil
@@ -43,6 +44,8 @@ class ImageViewerAdapter(
 
     private var recyclerView: RecyclerView? = null
     private val selectedFormats = mutableMapOf<String, String>()
+    private val selectedLensIndices = mutableMapOf<String, Int>()
+    var onMultiCameraLensChanged: ((position: Int, lensIndex: Int) -> Unit)? = null
     private var isUiVisible = true
     private var isFormatSwitcherPersistentHidden = false
 
@@ -183,6 +186,8 @@ class ImageViewerAdapter(
             holder.binding.formatToggleGroup.translationY = 0f
             holder.binding.motionPhotoToggleGroup.translationX = 0f
             holder.binding.motionPhotoToggleGroup.translationY = 0f
+            holder.binding.multiCameraToggleContainer.translationX = 0f
+            holder.binding.multiCameraToggleContainer.translationY = 0f
             stopMotionVideo(holder)
         }
 
@@ -198,14 +203,17 @@ class ImageViewerAdapter(
                 val visualLeftSpace = rect.left
                 val leftMargin = if (visualLeftSpace > 0) visualLeftSpace else 0f
 
-                // Determine actual visual top margin
+                // Determine actual visual top and bottom margins
                 val topMargin = if (rect.top > 0) rect.top else 0f
+                val visualBottomSpace = viewHeight - rect.bottom
+                val bottomMargin = if (visualBottomSpace > 0) visualBottomSpace else 0f
 
                 // Instead of layoutParams (which causes requestLayout and UI jank), use translationX/Y.
                 holder.binding.formatToggleGroup.translationX = -rightMargin
                 holder.binding.formatToggleGroup.translationY = topMargin
                 holder.binding.motionPhotoToggleGroup.translationX = leftMargin
                 holder.binding.motionPhotoToggleGroup.translationY = topMargin
+                holder.binding.multiCameraToggleContainer.translationY = -bottomMargin
 
                 updateVideoViewBounds(holder, rect)
             }
@@ -217,6 +225,32 @@ class ImageViewerAdapter(
         setupButtons(holder, group)
 
         loadSelectedFormat(holder, group, format)
+    }
+
+    fun getMultiCameraLenses(group: ImageGroup): List<top.maary.darkbag.models.MultiCameraLensItem> {
+        if (!group.isMultiCamera) return emptyList()
+        if (group.multiCameraLenses.isNotEmpty()) {
+            return group.multiCameraLenses
+        }
+
+        // Fallback for tests or legacy ImageGroups without multiCameraLenses pre-populated
+        val lenses = mutableListOf<top.maary.darkbag.models.MultiCameraLensItem>()
+        val maxLen = maxOf(group.multiJpgUris.size, group.multiDngUris.size)
+        for (i in 0 until maxLen) {
+            val jpg = group.multiJpgUris.getOrNull(i)
+            val dng = group.multiDngUris.getOrNull(i)
+            val sample = jpg ?: dng
+            val tag = if (sample != null) top.maary.darkbag.utils.ImageUtils.extractMultiCameraLensTag(sample.toString()) else ""
+            val mult = if (sample != null) top.maary.darkbag.utils.ImageUtils.extractMultiCameraMultiplier(sample.toString()) else 1.0f
+            val effectiveTag = if (tag.isNotEmpty()) tag else String.format(java.util.Locale.US, "%.1fx", mult)
+            lenses.add(top.maary.darkbag.models.MultiCameraLensItem(
+                lensTag = effectiveTag,
+                multiplier = mult,
+                jpgUri = jpg,
+                dngUri = dng
+            ))
+        }
+        return lenses.sortedWith(compareBy<top.maary.darkbag.models.MultiCameraLensItem> { it.multiplier }.thenBy { it.lensTag })
     }
 
     private fun setupButtons(holder: ViewHolder, group: ImageGroup) {
@@ -247,43 +281,154 @@ class ImageViewerAdapter(
             }
 
             // 2. RAW Format indicator setup
-            val hasJpg = group.jpgUri != null
-            val hasDng = group.dngUri != null || group.dngUri1 != null || group.dngUri2 != null
+            val lenses = if (group.isMultiCamera) getMultiCameraLenses(group) else emptyList()
+            val activeLens = if (group.isMultiCamera && lenses.isNotEmpty()) {
+                val idx = (selectedLensIndices[group.baseName] ?: 0).coerceIn(0, lenses.size - 1)
+                lenses[idx]
+            } else null
+
+            val hasJpg = if (group.isMultiCamera) {
+                activeLens?.jpgUri != null
+            } else {
+                group.jpgUri != null
+            }
+
+            val hasDng = if (group.isMultiCamera) {
+                activeLens?.dngUri != null
+            } else {
+                group.dngUri != null || group.dngUri1 != null || group.dngUri2 != null
+            }
 
             if (!hasDng) {
                 // Only JPG exists, hide the indicator completely
                 btnFormatIndicator.visibility = View.GONE
-                return
             } else {
                 btnFormatIndicator.visibility = View.VISIBLE
+                btnFormatIndicator.isSelected = isRawSelected
+
+                // If we have both, it's clickable
+                if (hasJpg && hasDng) {
+                    btnFormatIndicator.isClickable = true
+                    btnFormatIndicator.setOnClickListener {
+                        val currentPos = holder.bindingAdapterPosition
+                        if (currentPos == RecyclerView.NO_POSITION) return@setOnClickListener
+                        val currentGroup = getGroup(currentPos)
+
+                        btnFormatIndicator.isSelected = !btnFormatIndicator.isSelected
+                        val newFormat = if (btnFormatIndicator.isSelected) FORMAT_DNG else FORMAT_JPG
+                        selectedFormats[currentGroup.baseName] = newFormat
+                        stopMotionVideo(holder)
+                        setupButtons(holder, currentGroup)
+                        loadSelectedFormat(holder, currentGroup, newFormat)
+                    }
+                } else {
+                    // Only RAW exists, show badge but make it unclickable
+                    btnFormatIndicator.isClickable = false
+                    btnFormatIndicator.setOnClickListener(null)
+                }
             }
 
-            btnFormatIndicator.isSelected = isRawSelected
+            // 3. Multi-Camera Lens Switcher setup (MD3 Connected Button Group)
+            val multiCamContainer = multiCameraToggleContainer
+            val multiCamGroup = multiCameraToggleGroup
+            if (group.isMultiCamera && lenses.size >= 2 && !isFormatSwitcherPersistentHidden) {
+                multiCamContainer.visibility = if (isUiVisible) View.VISIBLE else View.GONE
+                multiCamGroup.removeAllViews()
 
-            // If we have both, it's clickable
-            if (hasJpg && hasDng) {
-                btnFormatIndicator.isClickable = true
-                btnFormatIndicator.setOnClickListener {
-                    val currentPos = holder.bindingAdapterPosition
-                    if (currentPos == RecyclerView.NO_POSITION) return@setOnClickListener
-                    val currentGroup = getGroup(currentPos)
+                val activeIndex = (selectedLensIndices[group.baseName] ?: 0).coerceIn(0, lenses.size - 1)
+                val density = holder.itemView.context.resources.displayMetrics.density
+                val outerCorner = com.google.android.material.shape.RelativeCornerSize(0.5f)
+                val innerCorner = com.google.android.material.shape.AbsoluteCornerSize(7f * density)
+                val n = lenses.size
 
-                    btnFormatIndicator.isSelected = !btnFormatIndicator.isSelected
-                    val newFormat = if (btnFormatIndicator.isSelected) FORMAT_DNG else FORMAT_JPG
-                    selectedFormats[currentGroup.baseName] = newFormat
-                    stopMotionVideo(holder)
-                    setupButtons(holder, currentGroup)
-                    loadSelectedFormat(holder, currentGroup, newFormat)
+                for (i in lenses.indices) {
+                    val lens = lenses[i]
+                    val context = holder.itemView.context
+                    val isChecked = (i == activeIndex)
+
+                    val shapeAppearance = com.google.android.material.shape.ShapeAppearanceModel.builder()
+                        .setTopLeftCorner(com.google.android.material.shape.CornerFamily.ROUNDED, if (i == 0) outerCorner else innerCorner)
+                        .setBottomLeftCorner(com.google.android.material.shape.CornerFamily.ROUNDED, if (i == 0) outerCorner else innerCorner)
+                        .setTopRightCorner(com.google.android.material.shape.CornerFamily.ROUNDED, if (i == n - 1) outerCorner else innerCorner)
+                        .setBottomRightCorner(com.google.android.material.shape.CornerFamily.ROUNDED, if (i == n - 1) outerCorner else innerCorner)
+                        .build()
+
+                    val button = com.google.android.material.button.MaterialButton(
+                        context,
+                        null,
+                        com.google.android.material.R.attr.materialButtonStyle
+                    ).apply {
+                        id = View.generateViewId()
+                        text = lens.lensTag
+                        isCheckable = true
+                        this.isChecked = isChecked
+                        minWidth = 0
+                        minimumWidth = 0
+                        minHeight = 0
+                        minimumHeight = 0
+                        insetTop = 0
+                        insetBottom = 0
+                        strokeWidth = 0
+                        shapeAppearanceModel = shapeAppearance
+                        textSize = 12f
+                        typeface = android.graphics.Typeface.DEFAULT
+                        backgroundTintList = androidx.core.content.ContextCompat.getColorStateList(context, R.color.multi_camera_lens_bg_tint)
+                        setTextColor(androidx.core.content.ContextCompat.getColorStateList(context, R.color.multi_camera_lens_text_color))
+                        rippleColor = androidx.core.content.ContextCompat.getColorStateList(context, R.color.multi_camera_lens_ripple_color)
+                        val padH = (18 * density).toInt()
+                        val padV = (8 * density).toInt()
+                        setPadding(padH, padV, padH, padV)
+
+                        val lp = LinearLayout.LayoutParams(
+                            ViewGroup.LayoutParams.WRAP_CONTENT,
+                            ViewGroup.LayoutParams.WRAP_CONTENT
+                        ).apply {
+                            if (i < n - 1) {
+                                marginEnd = (3 * density).toInt()
+                            }
+                        }
+                        layoutParams = lp
+
+                        setOnClickListener {
+                            if (selectedLensIndices[group.baseName] != i) {
+                                selectedLensIndices[group.baseName] = i
+                                val currentPos = holder.bindingAdapterPosition
+                                if (currentPos != RecyclerView.NO_POSITION) {
+                                    onMultiCameraLensChanged?.invoke(currentPos, i)
+                                }
+                                setupButtons(holder, group)
+                                val currentFmt = selectedFormats[group.baseName] ?: getSelectedFormat(group)
+                                loadSelectedFormat(holder, group, currentFmt)
+                            }
+                        }
+                    }
+                    multiCamGroup.addView(button)
                 }
             } else {
-                // Only RAW exists, show badge but make it unclickable
-                btnFormatIndicator.isClickable = false
-                btnFormatIndicator.setOnClickListener(null)
+                multiCamContainer.visibility = View.GONE
+                multiCamGroup.removeAllViews()
             }
         }
     }
 
     private fun loadSelectedFormat(holder: ViewHolder, group: ImageGroup, format: String) {
+        if (group.isMultiCamera) {
+            val lenses = getMultiCameraLenses(group)
+            val idx = (selectedLensIndices[group.baseName] ?: 0).coerceIn(0, (lenses.size - 1).coerceAtLeast(0))
+            val lens = lenses.getOrNull(idx)
+            when (format) {
+                FORMAT_JPG -> {
+                    val uri = lens?.jpgUri ?: lens?.dngUri
+                    uri?.let { loadImage(holder, it, version = group.lastModified) }
+                }
+                FORMAT_DNG -> {
+                    val uri = lens?.dngUri ?: lens?.jpgUri
+                    uri?.let { loadImage(holder, it) }
+                }
+            }
+            return
+        }
+
         when (format) {
             FORMAT_JPG -> group.jpgUri?.let { loadImage(holder, it, version = group.lastModified) }
             FORMAT_DNG -> {
@@ -666,6 +811,14 @@ class ImageViewerAdapter(
 
     fun getSelectedFormat(group: ImageGroup): String {
         return selectedFormats[group.baseName] ?: when {
+            group.isMultiCamera -> {
+                val lenses = getMultiCameraLenses(group)
+                val idx = (selectedLensIndices[group.baseName] ?: 0).coerceIn(0, (lenses.size - 1).coerceAtLeast(0))
+                val lens = lenses.getOrNull(idx)
+                if (lens?.jpgUri != null) FORMAT_JPG
+                else if (lens?.dngUri != null) FORMAT_DNG
+                else FORMAT_JPG
+            }
             group.jpgUri != null -> FORMAT_JPG
             group.isHalfFrame() || group.dngUri != null || group.dngUri1 != null || group.dngUri2 != null -> FORMAT_DNG
             else -> FORMAT_JPG
@@ -677,6 +830,47 @@ class ImageViewerAdapter(
         return getSelectedFormat(differ.currentList[position])
     }
 
+    fun getSelectedLensIndex(position: Int): Int {
+        if (position >= differ.currentList.size) return 0
+        val group = differ.currentList[position]
+        return selectedLensIndices[group.baseName] ?: 0
+    }
+
+    fun setSelectedLensIndex(position: Int, lensIndex: Int) {
+        if (position >= differ.currentList.size) return
+        val group = differ.currentList[position]
+        selectedLensIndices[group.baseName] = lensIndex
+        val holder = recyclerView?.findViewHolderForAdapterPosition(position) as? ViewHolder
+        if (holder != null) {
+            setupButtons(holder, group)
+            val format = selectedFormats[group.baseName] ?: getSelectedFormat(group)
+            loadSelectedFormat(holder, group, format)
+        }
+        onMultiCameraLensChanged?.invoke(position, lensIndex)
+    }
+
+    fun getCurrentUri(position: Int): Uri? {
+        if (position >= differ.currentList.size) return null
+        val group = differ.currentList[position]
+        val format = getSelectedFormat(group)
+        return if (group.isMultiCamera) {
+            val lenses = getMultiCameraLenses(group)
+            val idx = (selectedLensIndices[group.baseName] ?: 0).coerceIn(0, (lenses.size - 1).coerceAtLeast(0))
+            val lens = lenses.getOrNull(idx)
+            if (format == FORMAT_DNG) {
+                lens?.dngUri ?: lens?.jpgUri
+            } else {
+                lens?.jpgUri ?: lens?.dngUri
+            }
+        } else {
+            if (format == FORMAT_DNG) {
+                group.dngUri ?: group.dngUri1 ?: group.dngUri2
+            } else {
+                group.jpgUri
+            }
+        }
+    }
+
     fun setUiVisibility(isVisible: Boolean) {
         this.isUiVisible = isVisible
         recyclerView?.let { rv ->
@@ -684,12 +878,19 @@ class ImageViewerAdapter(
                 (rv.findViewHolderForAdapterPosition(i) as? ViewHolder)?.let { holder ->
                     val formatGroup = holder.binding.formatToggleGroup
                     val motionGroup = holder.binding.motionPhotoToggleGroup
+                    val multiCamContainer = holder.binding.multiCameraToggleContainer
+                    val group = getGroup(i)
+                    val hasMultiCam = group.isMultiCamera && getMultiCameraLenses(group).size >= 2
                     val shouldBeVisible = isVisible && !isFormatSwitcherPersistentHidden
                     if (shouldBeVisible) {
                         formatGroup.visibility = View.VISIBLE
                         formatGroup.animate().alpha(1f).setDuration(200).setListener(null).start()
                         motionGroup.visibility = View.VISIBLE
                         motionGroup.animate().alpha(1f).setDuration(200).setListener(null).start()
+                        if (hasMultiCam) {
+                            multiCamContainer.visibility = View.VISIBLE
+                            multiCamContainer.animate().alpha(1f).setDuration(200).setListener(null).start()
+                        }
                     } else {
                         formatGroup.animate().alpha(0f).setDuration(200)
                             .setListener(object : android.animation.AnimatorListenerAdapter() {
@@ -701,6 +902,12 @@ class ImageViewerAdapter(
                             .setListener(object : android.animation.AnimatorListenerAdapter() {
                                 override fun onAnimationEnd(animation: android.animation.Animator) {
                                     if (!isUiVisible || isFormatSwitcherPersistentHidden) motionGroup.visibility = View.GONE
+                                }
+                            }).start()
+                        multiCamContainer.animate().alpha(0f).setDuration(200)
+                            .setListener(object : android.animation.AnimatorListenerAdapter() {
+                                override fun onAnimationEnd(animation: android.animation.Animator) {
+                                    if (!isUiVisible || isFormatSwitcherPersistentHidden) multiCamContainer.visibility = View.GONE
                                 }
                             }).start()
                     }
@@ -720,12 +927,19 @@ class ImageViewerAdapter(
                 (rv.findViewHolderForAdapterPosition(i) as? ViewHolder)?.let { holder ->
                     val formatGroup = holder.binding.formatToggleGroup
                     val motionGroup = holder.binding.motionPhotoToggleGroup
+                    val multiCamContainer = holder.binding.multiCameraToggleContainer
+                    val group = getGroup(i)
+                    val hasMultiCam = group.isMultiCamera && getMultiCameraLenses(group).size >= 2
                     val shouldBeVisible = isUiVisible && !isFormatSwitcherPersistentHidden
                     if (shouldBeVisible) {
                         formatGroup.visibility = View.VISIBLE
                         formatGroup.animate().alpha(1f).setDuration(200).setListener(null).start()
                         motionGroup.visibility = View.VISIBLE
                         motionGroup.animate().alpha(1f).setDuration(200).setListener(null).start()
+                        if (hasMultiCam) {
+                            multiCamContainer.visibility = View.VISIBLE
+                            multiCamContainer.animate().alpha(1f).setDuration(200).setListener(null).start()
+                        }
                     } else {
                         formatGroup.animate().alpha(0f).setDuration(200)
                             .setListener(object : android.animation.AnimatorListenerAdapter() {
@@ -737,6 +951,12 @@ class ImageViewerAdapter(
                             .setListener(object : android.animation.AnimatorListenerAdapter() {
                                 override fun onAnimationEnd(animation: android.animation.Animator) {
                                     if (isFormatSwitcherPersistentHidden) motionGroup.visibility = View.GONE
+                                }
+                            }).start()
+                        multiCamContainer.animate().alpha(0f).setDuration(200)
+                            .setListener(object : android.animation.AnimatorListenerAdapter() {
+                                override fun onAnimationEnd(animation: android.animation.Animator) {
+                                    if (isFormatSwitcherPersistentHidden) multiCamContainer.visibility = View.GONE
                                 }
                             }).start()
                     }
