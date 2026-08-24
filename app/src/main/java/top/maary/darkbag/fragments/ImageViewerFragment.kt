@@ -325,6 +325,7 @@ open class ImageViewerFragment : Fragment() {
                     binding.imagePager.isUserInputEnabled = !isAdjusted
                     setupActionButtons()
                     updateControlsVisibility()
+                    updateGalleryPill(binding.imagePager.currentItem, groups.size)
 
                     binding.imagePager.visibility = View.VISIBLE
                     binding.initialLoadingIndicator.visibility = View.GONE
@@ -2488,6 +2489,7 @@ open class ImageViewerFragment : Fragment() {
         binding.topBarContainer.visibility = View.VISIBLE
         updateSplitButtons()
         updateControlsVisibility()
+        updateGalleryPill(binding.imagePager.currentItem, if (::adapter.isInitialized) adapter.itemCount else 0)
 
         adapter.setUiVisibility(true)
 

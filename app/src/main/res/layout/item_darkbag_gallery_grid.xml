@@ -79,9 +79,9 @@
                 android:id="@+id/tv_format_badge"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:background="@drawable/bg_circle_translucent"
-                android:paddingStart="6dp"
-                android:paddingEnd="6dp"
+                android:background="@drawable/bg_badge_capsule"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
                 android:paddingTop="2dp"
                 android:paddingBottom="2dp"
                 android:text="RAW+JPG"
@@ -93,11 +93,11 @@
             <!-- Motion Photo Badge -->
             <ImageView
                 android:id="@+id/icon_motion_badge"
-                android:layout_width="18dp"
-                android:layout_height="18dp"
+                android:layout_width="20dp"
+                android:layout_height="20dp"
                 android:layout_marginStart="4dp"
-                android:background="@drawable/bg_circle_translucent"
-                android:padding="2dp"
+                android:background="@drawable/bg_badge_capsule"
+                android:padding="3dp"
                 android:src="@drawable/ic_play_arrow"
                 app:tint="@android:color/white"
                 android:visibility="gone" />
