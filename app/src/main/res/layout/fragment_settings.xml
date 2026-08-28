@@ -456,6 +456,14 @@
                         android:text="Enable Manual Controls"
                         android:textSize="16sp" />
 
+                    <com.google.android.material.materialswitch.MaterialSwitch
+                        android:id="@+id/switch_exp_focus_peaking"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="@dimen/margin_small"
+                        android:text="Focus Peaking (Experimental)"
+                        android:textSize="16sp" />
+
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 

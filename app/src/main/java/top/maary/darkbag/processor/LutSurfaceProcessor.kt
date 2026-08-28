@@ -54,7 +54,6 @@ class LutSurfaceProcessor : SurfaceProcessor {
 
     private val transformMatrix = FloatArray(16)
 
-    // Cached GL uniform and attribute locations
     private var scaleLoc = -1
     private var textureLoc = -1
     private var textureMatrixLoc = -1
@@ -62,8 +61,18 @@ class LutSurfaceProcessor : SurfaceProcessor {
     private var gamutMatrixLoc = -1
     private var logTypeLoc = -1
     private var lutSizeLoc = -1
+    private var focusPeakingLoc = -1
+    private var texelSizeLoc = -1
     private var posHandle = -1
     private var texHandle = -1
+
+    @Volatile private var isFocusPeakingEnabled = false
+
+    fun setFocusPeakingEnabled(enabled: Boolean) {
+        handler.post {
+            isFocusPeakingEnabled = enabled
+        }
+    }
 
     companion object {
         // --- Standard CIE XYZ and Gamut Matrices (Row-Major definitions matching ColorPipe.cpp) ---
@@ -480,6 +489,12 @@ class LutSurfaceProcessor : SurfaceProcessor {
         if (gamutMatrixLoc >= 0) GLES30.glUniformMatrix3fv(gamutMatrixLoc, 1, false, currentGamutMatrix, 0)
         if (logTypeLoc >= 0) GLES30.glUniform1i(logTypeLoc, currentLogType)
         if (lutSizeLoc >= 0) GLES30.glUniform1i(lutSizeLoc, currentLutSize)
+        if (focusPeakingLoc >= 0) GLES30.glUniform1i(focusPeakingLoc, if (isFocusPeakingEnabled) 1 else 0)
+        if (texelSizeLoc >= 0) {
+            val tw = if (inputWidth > 0) 1.0f / inputWidth.toFloat() else 1.0f / 1080f
+            val th = if (inputHeight > 0) 1.0f / inputHeight.toFloat() else 1.0f / 1920f
+            GLES30.glUniform2f(texelSizeLoc, tw, th)
+        }
 
         if (posHandle >= 0) {
             vertexBuffer.position(0)
@@ -596,6 +611,8 @@ class LutSurfaceProcessor : SurfaceProcessor {
             uniform mat3 uGamutMatrix;
             uniform int uLogType;
             uniform int uLutSize;
+            uniform int uFocusPeakingEnabled;
+            uniform vec2 uTexelSize;
 
             in vec2 vTexCoord;
             out vec4 outColor;
@@ -656,6 +673,7 @@ class LutSurfaceProcessor : SurfaceProcessor {
 
             void main() {
                 vec4 src = texture(uTexture, vTexCoord);
+                vec3 finalRgb;
 
                 if (uLutSize > 0) {
                     // Step A: Inverse sRGB EOTF -> Scene Linear RGB
@@ -672,7 +690,6 @@ class LutSurfaceProcessor : SurfaceProcessor {
                     );
 
                     // Step D: Half-texel correction for exact alignment with 3D LUT voxel centers:
-                    // coord = logRgb * ((N - 1.0) / N) + (0.5 / N)
                     float lutSizeFloat = float(uLutSize);
                     vec3 lutCoord = logRgb * ((lutSizeFloat - 1.0) / lutSizeFloat) + vec3(0.5 / lutSizeFloat);
 
@@ -680,10 +697,25 @@ class LutSurfaceProcessor : SurfaceProcessor {
                     vec3 graded = texture(uLut, lutCoord).rgb;
 
                     // Step F: Apply high-frequency TPDF dithering to eliminate 8-bit quantization banding
-                    outColor = vec4(triangularDither(graded, gl_FragCoord.xy), 1.0);
+                    finalRgb = triangularDither(graded, gl_FragCoord.xy);
                 } else {
-                    outColor = src;
+                    finalRgb = src.rgb;
                 }
+
+                // Focus Peaking (High-pass Sobel / edge detection in OES texture coordinates)
+                if (uFocusPeakingEnabled == 1) {
+                    float lumC = dot(src.rgb, vec3(0.299, 0.587, 0.114));
+                    float lumN = dot(texture(uTexture, vTexCoord + vec2(0.0, uTexelSize.y)).rgb, vec3(0.299, 0.587, 0.114));
+                    float lumS = dot(texture(uTexture, vTexCoord - vec2(0.0, uTexelSize.y)).rgb, vec3(0.299, 0.587, 0.114));
+                    float lumE = dot(texture(uTexture, vTexCoord + vec2(uTexelSize.x, 0.0)).rgb, vec3(0.299, 0.587, 0.114));
+                    float lumW = dot(texture(uTexture, vTexCoord - vec2(uTexelSize.x, 0.0)).rgb, vec3(0.299, 0.587, 0.114));
+                    float edge = abs(lumN - lumS) + abs(lumE - lumW);
+                    if (edge > 0.16) {
+                        finalRgb = mix(finalRgb, vec3(0.0, 1.0, 0.3), 0.85); // Peaking highlight
+                    }
+                }
+
+                outColor = vec4(finalRgb, 1.0);
             }
         """.trimIndent()
 
@@ -703,6 +735,8 @@ class LutSurfaceProcessor : SurfaceProcessor {
         gamutMatrixLoc = GLES30.glGetUniformLocation(program, "uGamutMatrix")
         logTypeLoc = GLES30.glGetUniformLocation(program, "uLogType")
         lutSizeLoc = GLES30.glGetUniformLocation(program, "uLutSize")
+        focusPeakingLoc = GLES30.glGetUniformLocation(program, "uFocusPeakingEnabled")
+        texelSizeLoc = GLES30.glGetUniformLocation(program, "uTexelSize")
 
         posHandle = GLES30.glGetAttribLocation(program, "aPosition")
         texHandle = GLES30.glGetAttribLocation(program, "aTexCoord")

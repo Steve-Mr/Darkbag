@@ -9,9 +9,13 @@
         android:id="@+id/touch_overlay"
         android:layout_width="0dp"
         android:layout_height="0dp"
+        android:clickable="true"
+        android:focusable="true"
         android:visibility="gone"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent" />
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent" />
 
     <com.google.android.material.card.MaterialCardView
         android:id="@+id/hdr_plus_pill"
@@ -57,26 +61,288 @@
         </com.google.android.material.card.MaterialCardView>
     </LinearLayout>
 
+    <!-- Level 1: Pro Mode Trigger Button in Landscape (Top-Left of Viewfinder) -->
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btn_pro_mode"
+        style="@style/Widget.Material3.Button.TonalButton"
+        android:layout_width="wrap_content"
+        android:minWidth="44dp"
+        android:layout_height="36dp"
+        android:layout_marginStart="10dp"
+        android:layout_marginTop="10dp"
+        android:insetTop="0dp"
+        android:insetBottom="0dp"
+        android:insetLeft="0dp"
+        android:insetRight="0dp"
+        android:paddingHorizontal="10dp"
+        android:paddingVertical="0dp"
+        android:minHeight="0dp"
+        android:text="PRO"
+        android:textSize="11sp"
+        android:textStyle="bold"
+        android:textColor="@android:color/white"
+        app:cornerRadius="18dp"
+        app:strokeWidth="1dp"
+        app:strokeColor="#4DFFFFFF"
+        android:backgroundTint="#731C1B1F"
+        app:elevation="2dp"
+        android:visibility="gone"
+        app:layout_constraintTop_toTopOf="@id/viewFinderContainer"
+        app:layout_constraintStart_toStartOf="@id/viewFinderContainer" />
+
+    <!-- Level 2: Pro Parameter Connected Button Group in Landscape (M3 Expressive Connected Capsule) -->
+    <com.google.android.material.button.MaterialButtonToggleGroup
+        android:id="@+id/pro_info_bar_card"
+        android:layout_width="0dp"
+        android:layout_height="36dp"
+        android:layout_marginStart="6dp"
+        android:layout_marginEnd="10dp"
+        android:visibility="gone"
+        app:singleSelection="true"
+        app:selectionRequired="false"
+        app:cornerRadius="18dp"
+        app:elevation="2dp"
+        android:background="@drawable/bg_pro_connected_group"
+        app:layout_constraintTop_toTopOf="@id/btn_pro_mode"
+        app:layout_constraintBottom_toBottomOf="@id/btn_pro_mode"
+        app:layout_constraintStart_toEndOf="@id/btn_pro_mode"
+        app:layout_constraintEnd_toEndOf="@id/viewFinderContainer">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/pill_focus"
+            style="@style/Widget.Material3.Button.OutlinedButton"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:insetLeft="0dp"
+            android:insetRight="0dp"
+            android:paddingHorizontal="2dp"
+            android:minWidth="0dp"
+            android:minHeight="0dp"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:text="AF"
+            android:textColor="?attr/colorOnSurface"
+            app:strokeWidth="0.5dp"
+            app:strokeColor="?attr/colorOutlineVariant" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/pill_iso"
+            style="@style/Widget.Material3.Button.OutlinedButton"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:insetLeft="0dp"
+            android:insetRight="0dp"
+            android:paddingHorizontal="2dp"
+            android:minWidth="0dp"
+            android:minHeight="0dp"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:text="ISO"
+            android:textColor="?attr/colorOnSurface"
+            app:strokeWidth="0.5dp"
+            app:strokeColor="?attr/colorOutlineVariant" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/pill_shutter"
+            style="@style/Widget.Material3.Button.OutlinedButton"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:insetLeft="0dp"
+            android:insetRight="0dp"
+            android:paddingHorizontal="2dp"
+            android:minWidth="0dp"
+            android:minHeight="0dp"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:text="SEC"
+            android:textColor="?attr/colorOnSurface"
+            app:strokeWidth="0.5dp"
+            app:strokeColor="?attr/colorOutlineVariant" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/pill_ev"
+            style="@style/Widget.Material3.Button.OutlinedButton"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:insetLeft="0dp"
+            android:insetRight="0dp"
+            android:paddingHorizontal="2dp"
+            android:minWidth="0dp"
+            android:minHeight="0dp"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:text="EV"
+            android:textColor="?attr/colorOnSurface"
+            app:strokeWidth="0.5dp"
+            app:strokeColor="?attr/colorOutlineVariant" />
+
+        <!-- Multi-Camera Sync Link Button in Landscape -->
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_pro_link"
+            style="@style/Widget.Material3.Button.OutlinedButton"
+            android:layout_width="34dp"
+            android:layout_height="match_parent"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:insetLeft="0dp"
+            android:insetRight="0dp"
+            android:padding="0dp"
+            android:minWidth="0dp"
+            android:minHeight="0dp"
+            app:icon="@drawable/ic_link"
+            app:iconSize="18dp"
+            app:iconTint="?attr/colorOnSurface"
+            app:strokeWidth="0.5dp"
+            app:strokeColor="?attr/colorOutlineVariant"
+            android:visibility="gone"
+            android:contentDescription="Toggle Multi-Camera Sync Link" />
+    </com.google.android.material.button.MaterialButtonToggleGroup>
+
+    <!-- Level 3: Pro Dial Wheel Top Panel in Landscape (Integrated directly below Level 2 bar) -->
     <com.google.android.material.card.MaterialCardView
         android:id="@+id/manual_controls_root"
         android:layout_width="0dp"
-        android:layout_height="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:layout_marginStart="10dp"
+        android:layout_marginEnd="10dp"
         android:visibility="gone"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent">
-        <com.google.android.material.button.MaterialButtonToggleGroup android:id="@+id/manual_tabs" android:layout_width="wrap_content" android:layout_height="wrap_content">
-             <com.google.android.material.button.MaterialButton android:id="@+id/btn_tab_focus" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
-             <com.google.android.material.button.MaterialButton android:id="@+id/btn_tab_iso" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
-             <com.google.android.material.button.MaterialButton android:id="@+id/btn_tab_shutter" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
-             <com.google.android.material.button.MaterialButton android:id="@+id/btn_tab_ev" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
-        </com.google.android.material.button.MaterialButtonToggleGroup>
-        <LinearLayout android:id="@+id/manual_panel" android:layout_width="wrap_content" android:layout_height="wrap_content">
-            <TextView android:id="@+id/tv_manual_value" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
-            <com.google.android.material.slider.Slider android:id="@+id/seekbar_manual" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
-            <com.google.android.material.button.MaterialButton android:id="@+id/btn_manual_auto" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
-            <LinearLayout android:id="@+id/focus_extras" android:layout_width="wrap_content" android:layout_height="wrap_content">
-                <com.google.android.material.button.MaterialButton android:id="@+id/btn_focus_near" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
-                <com.google.android.material.button.MaterialButton android:id="@+id/btn_focus_far" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+        app:cardBackgroundColor="#8C1C1B1F"
+        app:cardCornerRadius="16dp"
+        app:strokeWidth="1dp"
+        app:strokeColor="#33FFFFFF"
+        app:cardElevation="0dp"
+        app:cardMaxElevation="0dp"
+        app:cardPreventCornerOverlap="false"
+        app:cardUseCompatPadding="false"
+        app:layout_constraintTop_toBottomOf="@id/btn_pro_mode"
+        app:layout_constraintStart_toStartOf="@id/viewFinderContainer"
+        app:layout_constraintEnd_toEndOf="@id/viewFinderContainer">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingHorizontal="12dp"
+            android:paddingVertical="8dp">
+
+            <!-- Dial Control Container -->
+            <LinearLayout
+                android:id="@+id/dial_panel"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:visibility="visible">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+
+                    <TextView
+                        android:id="@+id/tv_dial_target_label"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="SHUTTER"
+                        android:textStyle="bold"
+                        android:textSize="12sp"
+                        android:textColor="#FFD54F" />
+
+                    <TextView
+                        android:id="@+id/tv_dial_target_value"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:gravity="start|center_vertical"
+                        android:layout_marginStart="8dp"
+                        android:text="1/125s"
+                        android:textStyle="bold"
+                        android:textSize="14sp"
+                        android:textColor="@android:color/white" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btn_dial_auto"
+                        style="@style/Widget.Material3.Button.TonalButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="32dp"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        android:insetLeft="0dp"
+                        android:insetRight="0dp"
+                        android:paddingHorizontal="10dp"
+                        android:paddingVertical="0dp"
+                        android:minWidth="0dp"
+                        android:minHeight="0dp"
+                        android:textSize="11sp"
+                        android:textStyle="bold"
+                        android:text="AUTO"
+                        android:textColor="@android:color/white"
+                        app:cornerRadius="16dp"
+                        app:strokeWidth="1dp"
+                        app:strokeColor="#33FFFFFF"
+                        android:backgroundTint="#40FFFFFF" />
+                </LinearLayout>
+
+                <top.maary.darkbag.ui.ProDialWheelView
+                    android:id="@+id/dial_wheel_view"
+                    android:layout_width="match_parent"
+                    android:layout_height="48dp"
+                    android:layout_marginTop="4dp"
+                    android:layout_marginBottom="2dp" />
+
+                <LinearLayout
+                    android:id="@+id/focus_extras"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center"
+                    android:visibility="gone"
+                    android:paddingTop="4dp">
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btn_focus_near"
+                        style="@style/Widget.Material3.Button.TonalButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="30dp"
+                        android:layout_marginEnd="8dp"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        android:paddingHorizontal="10dp"
+                        android:minWidth="0dp"
+                        android:minHeight="0dp"
+                        android:textSize="11sp"
+                        android:textColor="@android:color/white"
+                        android:text="Macro"
+                        app:cornerRadius="15dp" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btn_focus_far"
+                        style="@style/Widget.Material3.Button.TonalButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="30dp"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        android:paddingHorizontal="10dp"
+                        android:minWidth="0dp"
+                        android:minHeight="0dp"
+                        android:textSize="11sp"
+                        android:textColor="@android:color/white"
+                        android:text="Infinity"
+                        app:cornerRadius="15dp" />
+                </LinearLayout>
             </LinearLayout>
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>

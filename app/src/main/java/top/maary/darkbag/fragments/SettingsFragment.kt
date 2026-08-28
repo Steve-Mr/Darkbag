@@ -435,6 +435,7 @@ class SettingsFragment : Fragment() {
         updateStorageVisibility()
 
         setupSwitch(binding.switchManualControls, KEY_MANUAL_CONTROLS, false)
+        setupSwitch(binding.switchExpFocusPeaking, KEY_EXP_FOCUS_PEAKING, false)
         setupSwitch(binding.switchMotionPhoto, KEY_MOTION_PHOTO, false)
 
         syncLocationSettingState()
@@ -767,6 +768,7 @@ class SettingsFragment : Fragment() {
         const val KEY_ENABLE_CAMERA = "enable_camera"
         const val KEY_ENABLE_PLAYGROUND = "enable_playground"
         const val KEY_SHOW_FLOATING_TOOLBAR = "show_floating_toolbar"
+        const val KEY_EXP_FOCUS_PEAKING = "exp_focus_peaking"
 
         val FOCAL_LENGTHS = listOf("24", "28", "35")
         val ANTIBANDING_MODES = listOf("Auto", "50Hz", "60Hz", "Off")
