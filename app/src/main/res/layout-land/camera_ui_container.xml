@@ -213,7 +213,6 @@
     <!-- Level 3: Pro Dial Wheel Top Panel in Landscape (Integrated directly below Level 2 bar) -->
     <com.google.android.material.card.MaterialCardView
         android:id="@+id/manual_controls_root"
-        style="@style/Widget.App.Card.ControlPanel"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_marginTop="8dp"
@@ -224,7 +223,10 @@
         app:cardCornerRadius="16dp"
         app:strokeWidth="1dp"
         app:strokeColor="#33FFFFFF"
-        app:cardElevation="4dp"
+        app:cardElevation="0dp"
+        app:cardMaxElevation="0dp"
+        app:cardPreventCornerOverlap="false"
+        app:cardUseCompatPadding="false"
         app:layout_constraintTop_toBottomOf="@id/btn_pro_mode"
         app:layout_constraintStart_toStartOf="@id/viewFinderContainer"
         app:layout_constraintEnd_toEndOf="@id/viewFinderContainer">
