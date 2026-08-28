@@ -58,16 +58,18 @@ struct LUT3D {
 LUT3D load_lut(const char* path);
 Vec3 apply_lut(const LUT3D& lut, Vec3 color);
 
-// --- OKLab & Natural Filmic Engine ---
-struct OKLab {
-    float L, a, b;
+// --- Color Rendering Engines ---
+enum ColorEngineMode {
+    COLOR_ENGINE_PBR_NEUTRAL = 0,   // Khronos PBR Neutral (Industry standard neutral 1:1 fidelity)
+    COLOR_ENGINE_PURE_LUMA = 1,     // Natural Filmic / Luma Preserving (Hasselblad/Leica micro-contrast)
+    COLOR_ENGINE_SONY_UCHIMURA = 2, // Sony Polyphony Digital (Gran Turismo 7)
+    COLOR_ENGINE_ACES_FIT = 3       // Classic ACES RRT+ODT fit
 };
 
-OKLab linear_srgb_to_oklab(Vec3 c);
-Vec3 oklab_to_linear_srgb(OKLab lab);
-float natural_filmic_l_curve(float L);
-void apply_highlight_bleach(float L_mapped, float& a, float& b);
-void apply_memory_color_harmonization(float L, float& a, float& b);
+Vec3 apply_khronos_pbr_neutral(Vec3 color);
+Vec3 apply_pure_luma_filmic(Vec3 c);
+Vec3 apply_sony_uchimura(Vec3 c);
+Vec3 apply_aces_fit(Vec3 c);
 
 // --- Initialization ---
 void init_color_pipe();
@@ -107,7 +109,8 @@ bool process_and_save_image(
     int downsampleFactor = 1,
     float zoomFactor = 1.0f,
     bool mirror = false,
-    bool enableMemoryColor = false
+    bool enableMemoryColor = false,
+    int colorEngineMode = 0
 );
 
 bool write_dng(const char* filename, int width, int height, const unsigned short* planarData, int stride_x, int stride_y, int stride_c, int whiteLevel, const std::vector<float>& ccm, const ImageMetadata& metadata, int orientation, bool mirror = false, float baselineExposure = 0.0f, const float* wbVec = nullptr);
