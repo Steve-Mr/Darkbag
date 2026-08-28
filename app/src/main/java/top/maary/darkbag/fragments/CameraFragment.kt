@@ -2674,14 +2674,12 @@ class CameraFragment : Fragment() {
     private fun updateProInfoBar() {
         val binding = cameraUiContainerBinding ?: return
         val primaryColor = MaterialColors.getColor(binding.root, android.R.attr.colorPrimary, Color.parseColor("#FFD54F"))
-        val primaryContainerColor = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorPrimaryContainer, Color.parseColor("#4DFFD54F"))
-        val onPrimaryContainerColor = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnPrimaryContainer, Color.WHITE)
         val onPrimaryColor = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnPrimary, Color.BLACK)
-        val secondaryContainerColor = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorSecondaryContainer, Color.parseColor("#33FFFFFF"))
-        val onSecondaryContainerColor = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnSecondaryContainer, Color.WHITE)
-        val surfaceContainerColor = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorSurfaceContainerHigh, Color.parseColor("#801C1B1F"))
-        val onSurfaceColor = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnSurface, Color.WHITE)
-        val outlineColor = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOutlineVariant, Color.parseColor("#4DFFFFFF"))
+        val onSurfaceColor = Color.WHITE
+        val outlineColor = Color.parseColor("#4DFFFFFF")
+        val frostedSurfaceColor = Color.parseColor("#731C1B1F")
+        val activeContainerColor = androidx.core.graphics.ColorUtils.setAlphaComponent(primaryColor, 90)
+        val lockedContainerColor = androidx.core.graphics.ColorUtils.setAlphaComponent(primaryColor, 45)
         val density = resources.displayMetrics.density
 
         fun applyPillState(
@@ -2695,12 +2693,12 @@ class CameraFragment : Fragment() {
             if (isTabActive) {
                 btn.strokeWidth = (1.5f * density).roundToInt()
                 btn.strokeColor = ColorStateList.valueOf(primaryColor)
-                btn.backgroundTintList = ColorStateList.valueOf(primaryContainerColor)
-                btn.setTextColor(onPrimaryContainerColor)
+                btn.backgroundTintList = ColorStateList.valueOf(activeContainerColor)
+                btn.setTextColor(primaryColor)
             } else if (isValueManual) {
                 btn.strokeWidth = (1f * density).roundToInt()
-                btn.strokeColor = ColorStateList.valueOf(primaryColor)
-                btn.backgroundTintList = ColorStateList.valueOf(secondaryContainerColor)
+                btn.strokeColor = ColorStateList.valueOf(androidx.core.graphics.ColorUtils.setAlphaComponent(primaryColor, 140))
+                btn.backgroundTintList = ColorStateList.valueOf(lockedContainerColor)
                 btn.setTextColor(primaryColor)
             } else {
                 btn.strokeWidth = (0.5f * density).roundToInt()
@@ -2733,8 +2731,8 @@ class CameraFragment : Fragment() {
             binding.btnProLink?.setIconResource(R.drawable.ic_link)
             binding.btnProLink?.iconTint = ColorStateList.valueOf(primaryColor)
             binding.btnProLink?.strokeWidth = (1f * density).roundToInt()
-            binding.btnProLink?.strokeColor = ColorStateList.valueOf(primaryColor)
-            binding.btnProLink?.backgroundTintList = ColorStateList.valueOf(secondaryContainerColor)
+            binding.btnProLink?.strokeColor = ColorStateList.valueOf(androidx.core.graphics.ColorUtils.setAlphaComponent(primaryColor, 140))
+            binding.btnProLink?.backgroundTintList = ColorStateList.valueOf(lockedContainerColor)
         } else {
             binding.btnProLink?.setIconResource(R.drawable.ic_link_off)
             binding.btnProLink?.iconTint = ColorStateList.valueOf(onSurfaceColor)
@@ -2757,12 +2755,12 @@ class CameraFragment : Fragment() {
                 btn.setTextColor(onSurfaceColor)
                 btn.strokeWidth = (1f * density).roundToInt()
                 btn.strokeColor = ColorStateList.valueOf(outlineColor)
-                btn.backgroundTintList = ColorStateList.valueOf(surfaceContainerColor)
+                btn.backgroundTintList = ColorStateList.valueOf(frostedSurfaceColor)
             }
         }
 
         // Update Level 3 Dial Theme Colors
-        binding.dialWheelView?.setThemeColors(primaryColor, onSurfaceColor, outlineColor)
+        binding.dialWheelView?.setThemeColors(primaryColor, onSurfaceColor, Color.parseColor("#B0BEC5"))
         binding.tvDialTargetLabel?.setTextColor(primaryColor)
         binding.tvDialTargetValue?.setTextColor(onSurfaceColor)
     }
