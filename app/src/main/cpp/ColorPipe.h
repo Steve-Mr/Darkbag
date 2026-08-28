@@ -63,7 +63,7 @@ enum ColorEngineMode {
     COLOR_ENGINE_PBR_NEUTRAL = 0,   // Khronos PBR Neutral (Industry standard neutral 1:1 fidelity)
     COLOR_ENGINE_PURE_LUMA = 1,     // Natural Filmic / Luma Preserving (Hasselblad/Leica micro-contrast)
     COLOR_ENGINE_SONY_UCHIMURA = 2, // Sony Polyphony Digital (Gran Turismo 7)
-    COLOR_ENGINE_ACES_FIT = 3       // Classic ACES RRT+ODT fit
+    COLOR_ENGINE_ACES_FIT = 3       // Legacy ACES Filmic Fit (Original Darkbag default)
 };
 
 Vec3 apply_khronos_pbr_neutral(Vec3 color);

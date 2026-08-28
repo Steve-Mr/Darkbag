@@ -785,7 +785,7 @@ class SettingsFragment : Fragment() {
             "Khronos PBR Neutral (Default)",
             "Natural Filmic (Leica/Hasselblad)",
             "Sony Uchimura (GT7)",
-            "ACES RRT+ODT"
+            "Legacy ACES Filmic (Original)"
         )
 
         val FOCAL_LENGTHS = listOf("24", "28", "35")
