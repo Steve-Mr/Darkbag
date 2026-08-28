@@ -229,7 +229,7 @@ object ImageUtils {
             val bitmap = Bitmap.createBitmap(bmpW, bmpH, Bitmap.Config.ARGB_8888)
 
             val prefs = context.getSharedPreferences(top.maary.darkbag.fragments.SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-            val memColor = prefs.getBoolean(top.maary.darkbag.fragments.SettingsFragment.KEY_MEMORY_COLOR_OPTIMIZATION, false)
+            val engineMode = prefs.getInt(top.maary.darkbag.fragments.SettingsFragment.KEY_COLOR_ENGINE_MODE, 0)
 
             coroutineContext.ensureActive()
             val result = ColorProcessor.processRaw(
@@ -244,7 +244,8 @@ object ImageUtils {
                 outputBitmap = bitmap,
                 downsampleFactor = downsample,
                 zoomFactor = zoomFactor,
-                enableMemoryColor = memColor
+                enableMemoryColor = false,
+                colorEngineMode = engineMode
             )
 
             if (result < 0) {

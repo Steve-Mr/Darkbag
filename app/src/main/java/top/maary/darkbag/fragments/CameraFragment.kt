@@ -2236,7 +2236,8 @@ class CameraFragment : Fragment() {
                     runAblationTest = false,
                     motionPhotoMp4Path = motionMp4Path,
                     motionPhotoStillPtsUs = motionStillPtsUs,
-                    enableMemoryColor = prefs.getBoolean(SettingsFragment.KEY_MEMORY_COLOR_OPTIMIZATION, false)
+                    enableMemoryColor = false,
+                    colorEngineMode = prefs.getInt(SettingsFragment.KEY_COLOR_ENGINE_MODE, 0)
                 )
                 top.maary.darkbag.processor.HdrPlusRequestManager.enqueue(request)
                 val serviceIntent = android.content.Intent(context, top.maary.darkbag.processor.HdrPlusProcessingService::class.java)
@@ -4256,7 +4257,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         runAblationTest = false,
                         motionPhotoMp4Path = motionMp4Path,
                         motionPhotoStillPtsUs = motionStillPtsUs,
-                        enableMemoryColor = prefs.getBoolean(SettingsFragment.KEY_MEMORY_COLOR_OPTIMIZATION, false)
+                        enableMemoryColor = false,
+                        colorEngineMode = prefs.getInt(SettingsFragment.KEY_COLOR_ENGINE_MODE, 0)
                     )
                     top.maary.darkbag.processor.HdrPlusRequestManager.enqueue(request)
                     val serviceIntent = android.content.Intent(context, top.maary.darkbag.processor.HdrPlusProcessingService::class.java)
@@ -4759,7 +4761,9 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                             outputBitmap = null,
                             downsampleFactor = 1,
                             zoomFactor = 1.0f,
-                            metadata = frame.captureMetadata
+                            metadata = frame.captureMetadata,
+                            enableMemoryColor = false,
+                            colorEngineMode = prefs.getInt(SettingsFragment.KEY_COLOR_ENGINE_MODE, 0)
                         )
                         if (ret >= 0 && renderedFile.exists() && renderedFile.length() > 0) {
                             jpgPathToSave = renderedFile.absolutePath
