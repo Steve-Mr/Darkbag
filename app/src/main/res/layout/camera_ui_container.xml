@@ -13,7 +13,7 @@
         android:focusable="true"
         android:visibility="gone"
         app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintBottom_toTopOf="@id/manual_controls_root"
+        app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
 
@@ -106,22 +106,28 @@
     <!-- Level 1: Pro Mode Trigger Button (Top-Left of Viewfinder) -->
     <com.google.android.material.button.MaterialButton
         android:id="@+id/btn_pro_mode"
-        android:layout_width="48dp"
+        style="@style/Widget.Material3.Button.TonalButton"
+        android:layout_width="wrap_content"
+        android:minWidth="44dp"
         android:layout_height="36dp"
-        android:layout_margin="10dp"
+        android:layout_marginStart="10dp"
+        android:layout_marginTop="10dp"
         android:insetTop="0dp"
         android:insetBottom="0dp"
         android:insetLeft="0dp"
         android:insetRight="0dp"
-        android:padding="0dp"
+        android:paddingHorizontal="10dp"
+        android:paddingVertical="0dp"
+        android:minHeight="0dp"
         android:text="PRO"
         android:textSize="11sp"
         android:textStyle="bold"
-        android:textColor="?attr/colorOnSurface"
+        android:textColor="@android:color/white"
         app:cornerRadius="18dp"
         app:strokeWidth="1dp"
-        app:strokeColor="#40FFFFFF"
-        android:backgroundTint="#66000000"
+        app:strokeColor="#4DFFFFFF"
+        android:backgroundTint="#801C1B1F"
+        app:elevation="2dp"
         android:visibility="gone"
         app:layout_constraintTop_toTopOf="@id/viewFinderContainer"
         app:layout_constraintStart_toStartOf="@id/viewFinderContainer" />
@@ -134,11 +140,11 @@
         android:layout_marginStart="6dp"
         android:layout_marginEnd="10dp"
         android:visibility="gone"
-        app:cardBackgroundColor="#80000000"
+        app:cardBackgroundColor="#801C1B1F"
         app:cardCornerRadius="18dp"
         app:strokeWidth="1dp"
-        app:strokeColor="#33FFFFFF"
-        app:cardElevation="0dp"
+        app:strokeColor="#4DFFFFFF"
+        app:cardElevation="2dp"
         app:layout_constraintTop_toTopOf="@id/btn_pro_mode"
         app:layout_constraintBottom_toBottomOf="@id/btn_pro_mode"
         app:layout_constraintStart_toEndOf="@id/btn_pro_mode"
@@ -162,10 +168,15 @@
                 android:layout_marginHorizontal="1dp"
                 android:insetTop="0dp"
                 android:insetBottom="0dp"
+                android:insetLeft="0dp"
+                android:insetRight="0dp"
                 android:paddingHorizontal="1dp"
+                android:minWidth="0dp"
+                android:minHeight="0dp"
                 android:textSize="10sp"
+                android:textStyle="bold"
                 android:text="AF"
-                android:textColor="?attr/colorOnSurface"
+                android:textColor="@android:color/white"
                 app:cornerRadius="16dp" />
 
             <!-- ISO Pill -->
@@ -178,10 +189,15 @@
                 android:layout_marginHorizontal="1dp"
                 android:insetTop="0dp"
                 android:insetBottom="0dp"
+                android:insetLeft="0dp"
+                android:insetRight="0dp"
                 android:paddingHorizontal="1dp"
+                android:minWidth="0dp"
+                android:minHeight="0dp"
                 android:textSize="10sp"
+                android:textStyle="bold"
                 android:text="ISO"
-                android:textColor="?attr/colorOnSurface"
+                android:textColor="@android:color/white"
                 app:cornerRadius="16dp" />
 
             <!-- Shutter Pill -->
@@ -194,10 +210,15 @@
                 android:layout_marginHorizontal="1dp"
                 android:insetTop="0dp"
                 android:insetBottom="0dp"
+                android:insetLeft="0dp"
+                android:insetRight="0dp"
                 android:paddingHorizontal="1dp"
+                android:minWidth="0dp"
+                android:minHeight="0dp"
                 android:textSize="10sp"
+                android:textStyle="bold"
                 android:text="SEC"
-                android:textColor="?attr/colorOnSurface"
+                android:textColor="@android:color/white"
                 app:cornerRadius="16dp" />
 
             <!-- EV Pill -->
@@ -210,10 +231,15 @@
                 android:layout_marginHorizontal="1dp"
                 android:insetTop="0dp"
                 android:insetBottom="0dp"
+                android:insetLeft="0dp"
+                android:insetRight="0dp"
                 android:paddingHorizontal="1dp"
+                android:minWidth="0dp"
+                android:minHeight="0dp"
                 android:textSize="10sp"
+                android:textStyle="bold"
                 android:text="EV"
-                android:textColor="?attr/colorOnSurface"
+                android:textColor="@android:color/white"
                 app:cornerRadius="16dp" />
 
             <!-- Multi-Camera Sync Link Button (Visible in Multi-Camera / Dual-Lens mode) -->
@@ -230,34 +256,37 @@
                 android:padding="0dp"
                 app:icon="@drawable/ic_link"
                 app:iconSize="18dp"
-                app:iconTint="?attr/colorOnSurface"
+                app:iconTint="@android:color/white"
                 android:visibility="gone"
                 android:contentDescription="Toggle Multi-Camera Sync Link" />
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
 
-    <!-- Level 3: Pro Dial Wheel Floating Panel (Sliding up from bottom when adjusting) -->
+    <!-- Level 3: Pro Dial Wheel Top Panel (Integrated directly below Level 2 bar) -->
     <com.google.android.material.card.MaterialCardView
         android:id="@+id/manual_controls_root"
         style="@style/Widget.App.Card.ControlPanel"
-        android:layout_width="match_parent"
+        android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:layout_marginHorizontal="@dimen/margin_medium"
-        android:layout_marginBottom="@dimen/spacing_medium"
+        android:layout_marginTop="8dp"
+        android:layout_marginStart="10dp"
+        android:layout_marginEnd="10dp"
         android:visibility="gone"
-        app:cardBackgroundColor="#CC1C1B1F"
-        app:cardCornerRadius="@dimen/radius_medium"
+        app:cardBackgroundColor="#E61C1B1F"
+        app:cardCornerRadius="16dp"
         app:strokeWidth="1dp"
         app:strokeColor="#33FFFFFF"
-        app:layout_constraintBottom_toTopOf="@id/bottom_island_card"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent">
+        app:cardElevation="4dp"
+        app:layout_constraintTop_toBottomOf="@id/btn_pro_mode"
+        app:layout_constraintStart_toStartOf="@id/viewFinderContainer"
+        app:layout_constraintEnd_toEndOf="@id/viewFinderContainer">
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:padding="@dimen/padding_small">
+            android:paddingHorizontal="12dp"
+            android:paddingVertical="8dp">
 
             <!-- Dial Control Container -->
             <LinearLayout
@@ -272,8 +301,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="horizontal"
-                    android:gravity="center_vertical"
-                    android:paddingHorizontal="8dp">
+                    android:gravity="center_vertical">
 
                     <TextView
                         android:id="@+id/tv_dial_target_label"
@@ -282,7 +310,7 @@
                         android:text="SHUTTER"
                         android:textStyle="bold"
                         android:textSize="12sp"
-                        android:textColor="?attr/colorTertiary" />
+                        android:textColor="#FFD54F" />
 
                     <TextView
                         android:id="@+id/tv_dial_target_value"
@@ -293,17 +321,30 @@
                         android:layout_marginStart="8dp"
                         android:text="1/125s"
                         android:textStyle="bold"
-                        android:textSize="13sp"
-                        android:textColor="?attr/colorOnSurface" />
+                        android:textSize="14sp"
+                        android:textColor="@android:color/white" />
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btn_dial_auto"
-                        style="@style/Widget.Material3.Button.TextButton"
+                        style="@style/Widget.Material3.Button.TonalButton"
                         android:layout_width="wrap_content"
-                        android:layout_height="36dp"
-                        android:paddingHorizontal="8dp"
-                        android:textSize="12sp"
-                        android:text="AUTO" />
+                        android:layout_height="32dp"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        android:insetLeft="0dp"
+                        android:insetRight="0dp"
+                        android:paddingHorizontal="10dp"
+                        android:paddingVertical="0dp"
+                        android:minWidth="0dp"
+                        android:minHeight="0dp"
+                        android:textSize="11sp"
+                        android:textStyle="bold"
+                        android:text="AUTO"
+                        android:textColor="@android:color/white"
+                        app:cornerRadius="16dp"
+                        app:strokeWidth="1dp"
+                        app:strokeColor="#33FFFFFF"
+                        android:backgroundTint="#40FFFFFF" />
                 </LinearLayout>
 
                 <!-- Professional Dial Wheel -->
@@ -311,7 +352,8 @@
                     android:id="@+id/dial_wheel_view"
                     android:layout_width="match_parent"
                     android:layout_height="52dp"
-                    android:layout_marginVertical="2dp" />
+                    android:layout_marginTop="4dp"
+                    android:layout_marginBottom="2dp" />
 
                 <!-- Focus Specific Shortcuts -->
                 <LinearLayout
@@ -321,24 +363,38 @@
                     android:orientation="horizontal"
                     android:gravity="center"
                     android:visibility="gone"
-                    android:paddingTop="2dp">
+                    android:paddingTop="4dp">
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btn_focus_near"
                         style="@style/Widget.Material3.Button.TonalButton"
                         android:layout_width="wrap_content"
-                        android:layout_height="36dp"
-                        android:layout_marginEnd="@dimen/spacing_medium"
-                        android:textSize="12sp"
-                        android:text="Macro" />
+                        android:layout_height="30dp"
+                        android:layout_marginEnd="8dp"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        android:paddingHorizontal="10dp"
+                        android:minWidth="0dp"
+                        android:minHeight="0dp"
+                        android:textSize="11sp"
+                        android:textColor="@android:color/white"
+                        android:text="Macro"
+                        app:cornerRadius="15dp" />
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btn_focus_far"
                         style="@style/Widget.Material3.Button.TonalButton"
                         android:layout_width="wrap_content"
-                        android:layout_height="36dp"
-                        android:textSize="12sp"
-                        android:text="Infinity" />
+                        android:layout_height="30dp"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        android:paddingHorizontal="10dp"
+                        android:minWidth="0dp"
+                        android:minHeight="0dp"
+                        android:textSize="11sp"
+                        android:textColor="@android:color/white"
+                        android:text="Infinity"
+                        app:cornerRadius="15dp" />
                 </LinearLayout>
 
             </LinearLayout>

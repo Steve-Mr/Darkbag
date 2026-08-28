@@ -1502,14 +1502,7 @@ class CameraFragment : Fragment() {
                     val containerId = vfBinding.viewFinderContainer.id
                     val topId = uiBinding.topRightControls?.id
                     val bottomId = uiBinding.bottomIslandCard?.id
-                    val manualId = uiBinding.manualControlsRoot?.id
-
                     if (topId != null && bottomId != null) {
-                        if (manualId != null) {
-                            // Ensure Manual Controls are constrained to the Bottom Island
-                            constraintSet.connect(manualId, androidx.constraintlayout.widget.ConstraintSet.BOTTOM, bottomId, androidx.constraintlayout.widget.ConstraintSet.TOP)
-                        }
-
                         val marginMedium = resources.getDimensionPixelSize(R.dimen.margin_medium)
                         constraintSet.connect(containerId, androidx.constraintlayout.widget.ConstraintSet.START, androidx.constraintlayout.widget.ConstraintSet.PARENT_ID, androidx.constraintlayout.widget.ConstraintSet.START, marginMedium)
                         constraintSet.connect(containerId, androidx.constraintlayout.widget.ConstraintSet.END, androidx.constraintlayout.widget.ConstraintSet.PARENT_ID, androidx.constraintlayout.widget.ConstraintSet.END, marginMedium)
@@ -1549,7 +1542,6 @@ class CameraFragment : Fragment() {
                 it.visibility = View.GONE
                 updateFocusPeakingState()
                 updateProInfoBar()
-                updateLensControlRowPosition(animate = true)
             }
         }
 
@@ -2446,12 +2438,21 @@ class CameraFragment : Fragment() {
                 binding.touchOverlay?.visibility = View.GONE
                 activeManualTab = null
                 updateFocusPeakingState()
-                updateLensControlRowPosition(animate = true)
             } else {
                 binding.proInfoBarCard?.visibility = View.VISIBLE
                 binding.touchOverlay?.visibility = View.VISIBLE
                 updateProInfoBar()
             }
+        }
+
+        // Dismiss touch overlay
+        binding.touchOverlay?.setOnClickListener {
+            binding.proInfoBarCard?.visibility = View.GONE
+            binding.manualControlsRoot?.visibility = View.GONE
+            binding.touchOverlay?.visibility = View.GONE
+            activeManualTab = null
+            updateFocusPeakingState()
+            updateProInfoBar()
         }
 
         isMultiCameraManualLinked = prefs.getBoolean("pref_multi_camera_manual_linked", true)
@@ -2506,66 +2507,14 @@ class CameraFragment : Fragment() {
             updateProInfoBar()
         }
 
-        setupManualControlsLayoutSync()
         updateLensControlRowPosition(animate = false)
         updateProInfoBar()
     }
 
-    private fun setupManualControlsLayoutSync() {
-        val uiBinding = cameraUiContainerBinding ?: return
-        val vfBinding = _fragmentCameraBinding ?: return
-        val manualRoot = uiBinding.manualControlsRoot ?: return
-        val vfContainer = vfBinding.viewFinderContainer
-
-        manualRoot.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
-            updateLensControlRowPosition(animate = true)
-        }
-
-        vfContainer.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
-            updateLensControlRowPosition(animate = false)
-        }
-    }
-
     private fun updateLensControlRowPosition(animate: Boolean = true) {
         val vfBinding = _fragmentCameraBinding ?: return
-        val uiBinding = cameraUiContainerBinding ?: return
         val lensRow = vfBinding.lensControlRow ?: return
-        val manualRoot = uiBinding.manualControlsRoot ?: return
-
-        if (resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) {
-            lensRow.translationY = 0f
-            return
-        }
-
-        if (manualRoot.visibility != View.VISIBLE) {
-            if (animate) {
-                lensRow.animate().translationY(0f).setDuration(200).start()
-            } else {
-                lensRow.translationY = 0f
-            }
-            return
-        }
-
-        manualRoot.post {
-            if (!isAdded) return@post
-            val margin = resources.getDimensionPixelSize(R.dimen.margin_small)
-            val vfContainer = vfBinding.viewFinderContainer
-            val vfBottom = vfContainer.bottom
-            val manualTop = manualRoot.top
-
-            val overlap = if (manualTop in 1..<vfBottom && vfBottom > 0) {
-                (vfBottom - manualTop) + margin
-            } else {
-                0
-            }
-            val targetTranslation = -overlap.toFloat()
-
-            if (animate) {
-                lensRow.animate().translationY(targetTranslation).setDuration(200).start()
-            } else {
-                lensRow.translationY = targetTranslation
-            }
-        }
+        lensRow.translationY = 0f
     }
 
     private fun toggleManualTab(tab: String) {
@@ -2576,7 +2525,6 @@ class CameraFragment : Fragment() {
             binding.manualControlsRoot?.visibility = View.GONE
             updateFocusPeakingState()
             updateProInfoBar()
-            updateLensControlRowPosition(animate = true)
         } else {
             // Open dial
             activeManualTab = tab
@@ -2585,7 +2533,6 @@ class CameraFragment : Fragment() {
             updateDialPanel()
             updateFocusPeakingState()
             updateProInfoBar()
-            updateLensControlRowPosition(animate = true)
         }
     }
 
@@ -2727,53 +2674,50 @@ class CameraFragment : Fragment() {
     private fun updateProInfoBar() {
         val binding = cameraUiContainerBinding ?: return
         val activeColor = Color.parseColor("#FFD54F") // Amber-Gold
-        val normalColor = MaterialColors.getColor(binding.root, com.google.android.material.R.attr.colorOnSurface, Color.WHITE)
+        val normalTextColor = Color.WHITE
+        val density = resources.displayMetrics.density
+
+        fun applyPillState(
+            btn: com.google.android.material.button.MaterialButton?,
+            isTabActive: Boolean,
+            isValueManual: Boolean,
+            textValue: String
+        ) {
+            if (btn == null) return
+            btn.text = textValue
+            if (isTabActive) {
+                btn.strokeWidth = (1.5f * density).roundToInt()
+                btn.strokeColor = ColorStateList.valueOf(activeColor)
+                btn.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#4DFFD54F"))
+                btn.setTextColor(activeColor)
+            } else if (isValueManual) {
+                btn.strokeWidth = (1f * density).roundToInt()
+                btn.strokeColor = ColorStateList.valueOf(Color.parseColor("#80FFD54F"))
+                btn.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#26FFD54F"))
+                btn.setTextColor(activeColor)
+            } else {
+                btn.strokeWidth = 0
+                btn.strokeColor = ColorStateList.valueOf(Color.TRANSPARENT)
+                btn.backgroundTintList = ColorStateList.valueOf(Color.TRANSPARENT)
+                btn.setTextColor(normalTextColor)
+            }
+        }
 
         // Focus
-        if (isManualFocus) {
-            binding.pillFocus?.text = "MF " + formatFocusDist(currentFocusDistance)
-            binding.pillFocus?.setTextColor(activeColor)
-        } else {
-            binding.pillFocus?.text = "AF"
-            binding.pillFocus?.setTextColor(normalColor)
-        }
+        val focusText = if (isManualFocus) "MF " + formatFocusDist(currentFocusDistance) else "AF"
+        applyPillState(binding.pillFocus, activeManualTab == "Focus", isManualFocus, focusText)
 
         // ISO
-        if (isManualIso) {
-            binding.pillIso?.text = "ISO $currentIso"
-            binding.pillIso?.setTextColor(activeColor)
-        } else {
-            binding.pillIso?.text = "ISO"
-            binding.pillIso?.setTextColor(normalColor)
-        }
+        val isoText = if (isManualIso) "ISO $currentIso" else "ISO"
+        applyPillState(binding.pillIso, activeManualTab == "ISO", isManualIso, isoText)
 
         // Shutter
-        if (isManualShutter) {
-            binding.pillShutter?.text = "SEC " + formatShutterTime(currentExposureTime)
-            binding.pillShutter?.setTextColor(activeColor)
-        } else {
-            binding.pillShutter?.text = "SEC"
-            binding.pillShutter?.setTextColor(normalColor)
-        }
+        val shutterText = if (isManualShutter) formatShutterTime(currentExposureTime) else "SEC"
+        applyPillState(binding.pillShutter, activeManualTab == "Shutter", isManualShutter, shutterText)
 
         // EV
-        if (currentEvIndex != 0) {
-            binding.pillEv?.text = formatEvVal(currentEvIndex)
-            binding.pillEv?.setTextColor(activeColor)
-        } else {
-            binding.pillEv?.text = "EV"
-            binding.pillEv?.setTextColor(normalColor)
-        }
-
-        // Highlight active pill border
-        binding.pillFocus?.strokeWidth = if (activeManualTab == "Focus") 2 else 0
-        binding.pillFocus?.strokeColor = ColorStateList.valueOf(activeColor)
-        binding.pillIso?.strokeWidth = if (activeManualTab == "ISO") 2 else 0
-        binding.pillIso?.strokeColor = ColorStateList.valueOf(activeColor)
-        binding.pillShutter?.strokeWidth = if (activeManualTab == "Shutter") 2 else 0
-        binding.pillShutter?.strokeColor = ColorStateList.valueOf(activeColor)
-        binding.pillEv?.strokeWidth = if (activeManualTab == "EV") 2 else 0
-        binding.pillEv?.strokeColor = ColorStateList.valueOf(activeColor)
+        val evText = if (currentEvIndex != 0) formatEvVal(currentEvIndex) else "EV"
+        applyPillState(binding.pillEv, activeManualTab == "EV", currentEvIndex != 0, evText)
 
         // Multi-Camera Link Button (Only visible if multi-camera mode or front PiP is active)
         val isMultiCamActive = isMultiCameraModeActive || isFrontPipActive || (availableLenses.size > 1 && multiCameraManager != null)
@@ -2781,24 +2725,32 @@ class CameraFragment : Fragment() {
         if (isMultiCameraManualLinked) {
             binding.btnProLink?.setIconResource(R.drawable.ic_link)
             binding.btnProLink?.iconTint = ColorStateList.valueOf(activeColor)
+            binding.btnProLink?.strokeWidth = (1f * density).roundToInt()
+            binding.btnProLink?.strokeColor = ColorStateList.valueOf(Color.parseColor("#80FFD54F"))
+            binding.btnProLink?.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#26FFD54F"))
         } else {
             binding.btnProLink?.setIconResource(R.drawable.ic_link_off)
-            binding.btnProLink?.iconTint = ColorStateList.valueOf(normalColor)
+            binding.btnProLink?.iconTint = ColorStateList.valueOf(normalTextColor)
+            binding.btnProLink?.strokeWidth = 0
+            binding.btnProLink?.strokeColor = ColorStateList.valueOf(Color.TRANSPARENT)
+            binding.btnProLink?.backgroundTintList = ColorStateList.valueOf(Color.TRANSPARENT)
         }
 
-        // Update Level 1 Trigger Button State Indicator
+        // Update Level 1 Trigger Button State Indicator (PRO / M)
         val isAnyManual = isManualFocus || isManualIso || isManualShutter || currentEvIndex != 0
         binding.btnProMode?.let { btn ->
             if (isAnyManual) {
                 btn.text = "M"
-                btn.setTextColor(activeColor)
+                btn.setTextColor(Color.BLACK)
+                btn.strokeWidth = 0
                 btn.strokeColor = ColorStateList.valueOf(activeColor)
-                btn.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#4DFFD54F"))
+                btn.backgroundTintList = ColorStateList.valueOf(activeColor)
             } else {
                 btn.text = "PRO"
-                btn.setTextColor(normalColor)
-                btn.strokeColor = ColorStateList.valueOf(Color.parseColor("#40FFFFFF"))
-                btn.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#66000000"))
+                btn.setTextColor(normalTextColor)
+                btn.strokeWidth = (1f * density).roundToInt()
+                btn.strokeColor = ColorStateList.valueOf(Color.parseColor("#4DFFFFFF"))
+                btn.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#801C1B1F"))
             }
         }
     }

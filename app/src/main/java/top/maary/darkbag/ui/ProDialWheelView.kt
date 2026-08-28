@@ -155,9 +155,10 @@ class ProDialWheelView @JvmOverloads constructor(
     }
 
     private fun resolveColors() {
-        colorOnSurface = MaterialColors.getColor(this, com.google.android.material.R.attr.colorOnSurface, Color.WHITE)
-        colorOnSurfaceVariant = MaterialColors.getColor(this, com.google.android.material.R.attr.colorOnSurfaceVariant, Color.LTGRAY)
-        colorAccent = MaterialColors.getColor(this, com.google.android.material.R.attr.colorTertiary, Color.YELLOW)
+        // High-contrast, clean colors for camera overlay
+        colorOnSurface = Color.WHITE
+        colorOnSurfaceVariant = Color.parseColor("#B0BEC5") // Light blue-gray for minor ticks
+        colorAccent = Color.parseColor("#FFD54F") // Luminous Amber-Gold for selected item
         colorIndicator = colorAccent
     }
 
