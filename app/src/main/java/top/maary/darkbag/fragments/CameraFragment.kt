@@ -529,7 +529,7 @@ class CameraFragment : Fragment() {
         val modeChanged = (previousMultiCam != isMultiCameraModeActive) || (previousHalfFrame != isHalfFrameModeEnabled)
 
         // Re-initialize camera engine if needed.
-        if (modeChanged || camera2Device != null || isMultiCameraModeActive) {
+        if (modeChanged || camera2Device == null || isMultiCameraModeActive) {
             if (_fragmentCameraBinding?.viewFinderContainer?.isLaidOut == true) {
                 bindCameraUseCases()
             } else {
@@ -607,17 +607,12 @@ class CameraFragment : Fragment() {
                 photoViewButton.alpha = 1f
             }
 
-            // High performance direct bitmap load
             val file = java.io.File(filename)
-            if (file.exists()) {
-                val bitmap = android.graphics.BitmapFactory.decodeFile(file.absolutePath)
-                photoViewButton.setImageBitmap(bitmap)
-            } else {
-                Glide.with(photoViewButton)
-                    .load(filename)
-                    .apply(RequestOptions.circleCropTransform())
-                    .into(photoViewButton)
-            }
+            val loadTarget = if (file.exists()) file else filename
+            Glide.with(photoViewButton)
+                .load(loadTarget)
+                .apply(RequestOptions.circleCropTransform())
+                .into(photoViewButton)
         }
     }
 
@@ -2674,6 +2669,20 @@ class CameraFragment : Fragment() {
         updateLensUI()
     }
 
+    private fun handleCaptureResult(result: android.hardware.camera2.TotalCaptureResult) {
+        val timestamp = result.get(android.hardware.camera2.CaptureResult.SENSOR_TIMESTAMP)
+        if (timestamp != null) {
+            captureResults[timestamp] = result
+        }
+        val resIso = result.get(android.hardware.camera2.CaptureResult.SENSOR_SENSITIVITY)
+        val resTime = result.get(android.hardware.camera2.CaptureResult.SENSOR_EXPOSURE_TIME)
+        val resFocus = result.get(android.hardware.camera2.CaptureResult.LENS_FOCUS_DISTANCE)
+        if (resIso != null) liveIso = resIso
+        if (resTime != null) liveExposureTime = resTime
+        if (resFocus != null) liveFocusDistance = resFocus
+        captureResultFlow.tryEmit(result)
+    }
+
     private fun updateZoomCamera2() {
         val session = camera2Session ?: return
         val device = camera2Device ?: return
@@ -2706,11 +2715,7 @@ class CameraFragment : Fragment() {
 
             session.setRepeatingRequest(request.build(), object : android.hardware.camera2.CameraCaptureSession.CaptureCallback() {
                 override fun onCaptureCompleted(session: android.hardware.camera2.CameraCaptureSession, request: android.hardware.camera2.CaptureRequest, result: android.hardware.camera2.TotalCaptureResult) {
-                    val timestamp = result.get(android.hardware.camera2.CaptureResult.SENSOR_TIMESTAMP)
-                    if (timestamp != null) {
-                        captureResults[timestamp] = result
-                    }
-                    captureResultFlow.tryEmit(result)
+                    handleCaptureResult(result)
                 }
             }, camera2Handler)
         } catch (e: Exception) {
@@ -2794,11 +2799,7 @@ class CameraFragment : Fragment() {
 
             session.setRepeatingRequest(request.build(), object : android.hardware.camera2.CameraCaptureSession.CaptureCallback() {
                 override fun onCaptureCompleted(session: android.hardware.camera2.CameraCaptureSession, request: android.hardware.camera2.CaptureRequest, result: android.hardware.camera2.TotalCaptureResult) {
-                    val timestamp = result.get(android.hardware.camera2.CaptureResult.SENSOR_TIMESTAMP)
-                    if (timestamp != null) {
-                        captureResults[timestamp] = result
-                    }
-                    captureResultFlow.tryEmit(result)
+                    handleCaptureResult(result)
                 }
             }, handler)
         } catch (e: Exception) {
@@ -3068,12 +3069,8 @@ class CameraFragment : Fragment() {
     companion object {
         private const val TAG = "Darkbag"
         private const val FILENAME = "yyyy-MM-dd-HH-mm-ss-SSS"
-        private const val PHOTO_TYPE = "image/jpeg"
-        private const val RATIO_4_3_VALUE = 4.0 / 3.0
-        private const val RATIO_16_9_VALUE = 16.0 / 9.0
         private const val FOCUS_RING_DISPLAY_TIME_MS = 500L
         private const val FOCUS_RING_FADE_OUT_DURATION_MS = 300L
-        private const val AE_SETTLE_DELAY_MS = 50L
         private const val ANALYSIS_HIGHLIGHT_THRESHOLD = 240
         private const val ANALYSIS_SAMPLING_STEP = 4
 
@@ -3231,21 +3228,19 @@ class CameraFragment : Fragment() {
                 var lensShadingCols = 0
                 val useSensorColorMatrix = false
 
-                if (chars != null) {
-                    whiteLevel = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_WHITE_LEVEL) ?: 1023
-                    val bl = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_BLACK_LEVEL_PATTERN)
-                    if (bl != null) {
-                        blackLevelPattern = intArrayOf(
-                            bl.getOffsetForIndex(0, 0),
-                            bl.getOffsetForIndex(1, 0),
-                            bl.getOffsetForIndex(0, 1),
-                            bl.getOffsetForIndex(1, 1)
-                        )
-                    }
-
-                    val cfaEnum = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_COLOR_FILTER_ARRANGEMENT)
-                    if (cfaEnum != null) cfa = cfaEnum
+                whiteLevel = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_WHITE_LEVEL) ?: 1023
+                val bl = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_BLACK_LEVEL_PATTERN)
+                if (bl != null) {
+                    blackLevelPattern = intArrayOf(
+                        bl.getOffsetForIndex(0, 0),
+                        bl.getOffsetForIndex(1, 0),
+                        bl.getOffsetForIndex(0, 1),
+                        bl.getOffsetForIndex(1, 1)
+                    )
                 }
+
+                val cfaEnum = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_COLOR_FILTER_ARRANGEMENT)
+                if (cfaEnum != null) cfa = cfaEnum
 
                 result?.let { r ->
                     val wbVec = r.get(android.hardware.camera2.CaptureResult.COLOR_CORRECTION_GAINS)
@@ -3267,7 +3262,7 @@ class CameraFragment : Fragment() {
                         }
                     }
 
-                    if (useSensorColorMatrix && chars != null) {
+                    if (useSensorColorMatrix) {
                         val sensorMat = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_COLOR_TRANSFORM1)
                         if (sensorMat != null) {
                             var idx = 0
@@ -3545,8 +3540,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             } catch (e: Exception) { false }
 
             binding.flashButton?.visibility = if (hasFlash && showFlashButton) View.VISIBLE else View.GONE
-            if (hasFlash && binding.flashButton != null) {
-                updateFlashIcon(binding.flashButton!!)
+            if (hasFlash) {
+                binding.flashButton?.let { updateFlashIcon(it) }
             }
 
             // Restore manual controls if enabled in settings
@@ -3718,11 +3713,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
                             session.setRepeatingRequest(request.build(), object : android.hardware.camera2.CameraCaptureSession.CaptureCallback() {
                                 override fun onCaptureCompleted(session: android.hardware.camera2.CameraCaptureSession, request: android.hardware.camera2.CaptureRequest, result: android.hardware.camera2.TotalCaptureResult) {
-                                    val timestamp = result.get(android.hardware.camera2.CaptureResult.SENSOR_TIMESTAMP)
-                                    if (timestamp != null) {
-                                        captureResults[timestamp] = result
-                                    }
-                                    captureResultFlow.tryEmit(result)
+                                    handleCaptureResult(result)
                                 }
                             }, handler)
                         } catch (e: Exception) {
@@ -4355,6 +4346,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             } else {
                 request.set(android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE, android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE_ON)
             }
+            request.set(android.hardware.camera2.CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION, currentEvIndex)
         }
 
         if (isManualFocus) {

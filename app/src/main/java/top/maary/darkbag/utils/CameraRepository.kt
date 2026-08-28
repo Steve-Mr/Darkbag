@@ -98,7 +98,7 @@ class CameraRepository(private val context: Context) {
                 chars = chars,
                 mainFocal35mm = mainWideEqFocal,
                 facing = facing,
-                isAuto = isAnchor,
+                isAuto = false,
                 zoomRange = if (isAnchor) zoomRange else null,
                 useCamera2 = true
             )
@@ -111,7 +111,7 @@ class CameraRepository(private val context: Context) {
 
         // B. Ensure we have at least the anchor camera
         if (availableLenses.none { it.id == anchorId && it.physicalId == null }) {
-            availableLenses.add(createLensInfo(anchorId, null, anchorChars, mainWideEqFocal, facing, isAuto = true, zoomRange = zoomRange, useCamera2 = true))
+            availableLenses.add(createLensInfo(anchorId, null, anchorChars, mainWideEqFocal, facing, isAuto = false, zoomRange = zoomRange, useCamera2 = true))
         }
 
         // Sort by focal length multiplier
@@ -183,8 +183,7 @@ class CameraRepository(private val context: Context) {
      */
     fun getMainWideLens(facing: Int = CameraCharacteristics.LENS_FACING_BACK): LensInfo? {
         val lenses = enumerateCameras(facing)
-        return lenses.find { it.multiplier in 0.95f..1.05f && !it.isLogicalAuto }
-            ?: lenses.find { it.isLogicalAuto }
+        return lenses.find { it.multiplier in 0.95f..1.05f }
             ?: lenses.firstOrNull()
     }
 

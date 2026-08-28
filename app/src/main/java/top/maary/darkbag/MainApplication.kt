@@ -15,10 +15,10 @@ class MainApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         // Clear session-based camera settings on app startup
-        val prefs = getSharedPreferences("camera_settings", android.content.Context.MODE_PRIVATE)
+        val prefs = getSharedPreferences(top.maary.darkbag.fragments.SettingsFragment.PREFS_NAME, android.content.Context.MODE_PRIVATE)
         prefs.edit()
-            .remove("selected_lens_sensor_id")
-            .remove("lens_facing")
+            .remove(top.maary.darkbag.fragments.CameraFragment.KEY_SELECTED_LENS_ID)
+            .remove(top.maary.darkbag.fragments.CameraFragment.KEY_LENS_FACING)
             .apply()
     }
 }
