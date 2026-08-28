@@ -1528,21 +1528,7 @@ class CameraFragment : Fragment() {
 
         // Touch overlay to dismiss menus
         cameraUiContainerBinding?.touchOverlay?.setOnClickListener {
-            // Close LUT list
-            if (cameraUiContainerBinding?.lutListContainer?.visibility == View.VISIBLE) {
-                cameraUiContainerBinding?.lutListContainer?.visibility = View.GONE
-                it.visibility = View.GONE
-            }
-
-            if (cameraUiContainerBinding?.proInfoBarCard?.visibility == View.VISIBLE ||
-                cameraUiContainerBinding?.manualControlsRoot?.visibility == View.VISIBLE) {
-                cameraUiContainerBinding?.proInfoBarCard?.visibility = View.GONE
-                cameraUiContainerBinding?.manualControlsRoot?.visibility = View.GONE
-                activeManualTab = null
-                it.visibility = View.GONE
-                updateFocusPeakingState()
-                updateProInfoBar()
-            }
+            dismissFloatingOverlays()
         }
 
         // Listener for settings button
@@ -1783,7 +1769,18 @@ class CameraFragment : Fragment() {
 
         // LUT Switcher (Strip)
         cameraUiContainerBinding?.lutSwitcherButton?.setOnClickListener {
-             showLutMenu()
+            val binding = cameraUiContainerBinding
+            if (binding?.proInfoBarCard?.visibility == View.VISIBLE ||
+                binding?.manualControlsRoot?.visibility == View.VISIBLE) {
+                binding.proInfoBarCard?.visibility = View.GONE
+                binding.manualControlsRoot?.visibility = View.GONE
+                binding.dialPanel?.visibility = View.GONE
+                activeManualTab = null
+                updateFocusPeakingState()
+                updateProInfoBar()
+                updateLensControlRowPosition(animate = true)
+            }
+            showLutMenu()
         }
 
         cameraUiContainerBinding?.photoViewButton?.setOnLongClickListener {
@@ -2271,6 +2268,15 @@ class CameraFragment : Fragment() {
     private fun setupTapToFocus() {
         _fragmentCameraBinding?.viewFinderStage?.setOnTouchListener { view, event ->
             if (event.action == android.view.MotionEvent.ACTION_UP) {
+                val uiBinding = cameraUiContainerBinding
+                if (uiBinding?.lutListContainer?.visibility == View.VISIBLE ||
+                    uiBinding?.manualControlsRoot?.visibility == View.VISIBLE ||
+                    uiBinding?.proInfoBarCard?.visibility == View.VISIBLE
+                ) {
+                    dismissFloatingOverlays()
+                    return@setOnTouchListener true
+                }
+
                 if (currentLens?.useCamera2 == true) {
                      triggerTapToFocusCamera2(event.x, event.y)
                 } else {
@@ -2419,6 +2425,30 @@ class CameraFragment : Fragment() {
             .start()
     }
 
+    private fun dismissFloatingOverlays() {
+        val binding = cameraUiContainerBinding ?: return
+
+        if (binding.lutListContainer?.visibility == View.VISIBLE) {
+            binding.lutListContainer?.visibility = View.GONE
+        }
+
+        if (binding.proInfoBarCard?.visibility == View.VISIBLE ||
+            binding.manualControlsRoot?.visibility == View.VISIBLE ||
+            binding.dialPanel?.visibility == View.VISIBLE ||
+            activeManualTab != null
+        ) {
+            binding.proInfoBarCard?.visibility = View.GONE
+            binding.manualControlsRoot?.visibility = View.GONE
+            binding.dialPanel?.visibility = View.GONE
+            activeManualTab = null
+            updateFocusPeakingState()
+            updateProInfoBar()
+            updateLensControlRowPosition(animate = true)
+        }
+
+        binding.touchOverlay?.visibility = View.GONE
+    }
+
     private fun initManualControls() {
         val prefs =
             requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
@@ -2433,6 +2463,9 @@ class CameraFragment : Fragment() {
 
         // Level 1: Pro Trigger Button (Toggles Level 2 Pills Bar)
         binding.btnProMode?.setOnClickListener {
+            if (binding.lutListContainer?.visibility == View.VISIBLE) {
+                binding.lutListContainer?.visibility = View.GONE
+            }
             val isBarOpen = binding.proInfoBarCard?.visibility == View.VISIBLE
             if (isBarOpen) {
                 binding.proInfoBarCard?.visibility = View.GONE
@@ -2440,21 +2473,18 @@ class CameraFragment : Fragment() {
                 binding.touchOverlay?.visibility = View.GONE
                 activeManualTab = null
                 updateFocusPeakingState()
+                updateLensControlRowPosition(animate = true)
             } else {
                 binding.proInfoBarCard?.visibility = View.VISIBLE
                 binding.touchOverlay?.visibility = View.VISIBLE
                 updateProInfoBar()
+                updateLensControlRowPosition(animate = true)
             }
         }
 
         // Dismiss touch overlay
         binding.touchOverlay?.setOnClickListener {
-            binding.proInfoBarCard?.visibility = View.GONE
-            binding.manualControlsRoot?.visibility = View.GONE
-            binding.touchOverlay?.visibility = View.GONE
-            activeManualTab = null
-            updateFocusPeakingState()
-            updateProInfoBar()
+            dismissFloatingOverlays()
         }
 
         isMultiCameraManualLinked = prefs.getBoolean("pref_multi_camera_manual_linked", true)
@@ -3576,8 +3606,7 @@ class CameraFragment : Fragment() {
                 pillHolder.btn.setOnClickListener {
                     onSelected(title, position)
                     if (autoDismiss) {
-                        container.visibility = View.GONE
-                        binding.touchOverlay?.visibility = View.GONE
+                        dismissFloatingOverlays()
                     }
                 }
             }
