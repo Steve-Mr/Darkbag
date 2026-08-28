@@ -9,8 +9,8 @@ import android.util.Range
 import kotlin.math.sqrt
 
 data class LensInfo(
-    val id: String,          // The ID to use for CameraX binding
-    val physicalId: String?, // The physical ID to set via Camera2Interop
+    val id: String,          // The Camera2 cameraId (e.g. "0", "1")
+    val physicalId: String?, // Physical cameraId for logical multi-camera
     val sensorId: String,    // A unique identifier for the physical sensor
     val name: String,
     val focalLength: Float,
@@ -22,7 +22,7 @@ data class LensInfo(
     val zoomRange: Range<Float>? = null,
     val isZoomPreset: Boolean = false,
     val targetZoomRatio: Float? = null,
-    val useCamera2: Boolean = false
+    val useCamera2: Boolean = true
 )
 
 enum class LensType {
@@ -64,7 +64,7 @@ class CameraRepository(private val context: Context) {
         }
     }
 
-    fun enumerateCameras(cameraXIds: Set<String>, facing: Int = CameraCharacteristics.LENS_FACING_BACK): List<LensInfo> {
+    fun enumerateCameras(facing: Int = CameraCharacteristics.LENS_FACING_BACK): List<LensInfo> {
         probeAllCameras()
 
         val availableLenses = mutableListOf<LensInfo>()
@@ -80,11 +80,7 @@ class CameraRepository(private val context: Context) {
 
         // 3. Identify Anchor and All Physicals
         val currentFacingIds = idToChars.keys
-
-        // Anchor is the first facing-matched ID that CameraX actually supports
-        val anchorId = cameraXIds.find { id ->
-            idToChars[id]?.get(CameraCharacteristics.LENS_FACING) == facing
-        } ?: currentFacingIds.firstOrNull() ?: return emptyList()
+        val anchorId = currentFacingIds.firstOrNull() ?: return emptyList()
 
         val anchorChars = idToChars[anchorId] ?: return emptyList()
         val zoomRange = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -92,12 +88,8 @@ class CameraRepository(private val context: Context) {
         } else null
 
         // A. Add ALL facing-matched physical sensors found during probe
-        // We prioritize physical sensors to give the user direct hardware access.
         for (id in currentFacingIds) {
             val chars = idToChars[id] ?: continue
-
-            // Strategy: Prefer direct Camera2 for all physical/logical sensors to ensure consistent hardware control.
-            // Only use CameraX if explicitly requested via settings (handled in CameraFragment).
             val isAnchor = id == anchorId
 
             val info = createLensInfo(
@@ -108,7 +100,7 @@ class CameraRepository(private val context: Context) {
                 facing = facing,
                 isAuto = isAnchor,
                 zoomRange = if (isAnchor) zoomRange else null,
-                useCamera2 = true // Prefer Camera2 for everyone by default
+                useCamera2 = true
             )
 
             // Avoid adding duplicates (e.g. if we already have a lens with this sensorId)
@@ -130,8 +122,8 @@ class CameraRepository(private val context: Context) {
      * Returns a unified list of physical lenses and digital focal length presets (28mm, 35mm, 2.0x).
      * Used for settings and UI logic.
      */
-    fun getFocalLengthPresets(cameraXIds: Set<String>, facing: Int = CameraCharacteristics.LENS_FACING_BACK): List<LensInfo> {
-        val physicalLenses = enumerateCameras(cameraXIds, facing)
+    fun getFocalLengthPresets(facing: Int = CameraCharacteristics.LENS_FACING_BACK): List<LensInfo> {
+        val physicalLenses = enumerateCameras(facing)
         val result = physicalLenses.filter { !it.isLogicalAuto }.toMutableList()
 
         // 2.0x virtual if no physical 2x exists (between 1.8x and 2.2x)
@@ -189,8 +181,8 @@ class CameraRepository(private val context: Context) {
     /**
      * Returns the "main wide" (1.0x) lens for a given facing.
      */
-    fun getMainWideLens(cameraXIds: Set<String>, facing: Int = CameraCharacteristics.LENS_FACING_BACK): LensInfo? {
-        val lenses = enumerateCameras(cameraXIds, facing)
+    fun getMainWideLens(facing: Int = CameraCharacteristics.LENS_FACING_BACK): LensInfo? {
+        val lenses = enumerateCameras(facing)
         return lenses.find { it.multiplier in 0.95f..1.05f && !it.isLogicalAuto }
             ?: lenses.find { it.isLogicalAuto }
             ?: lenses.firstOrNull()
@@ -199,9 +191,9 @@ class CameraRepository(private val context: Context) {
     /**
      * Returns a unified list of both back and front cameras for settings.
      */
-    fun getAllFocalLengthPresets(cameraXIds: Set<String>): List<LensInfo> {
-        return getFocalLengthPresets(cameraXIds, CameraCharacteristics.LENS_FACING_BACK) +
-                getFocalLengthPresets(cameraXIds, CameraCharacteristics.LENS_FACING_FRONT)
+    fun getAllFocalLengthPresets(): List<LensInfo> {
+        return getFocalLengthPresets(CameraCharacteristics.LENS_FACING_BACK) +
+                getFocalLengthPresets(CameraCharacteristics.LENS_FACING_FRONT)
     }
 
     fun getFacingOfSensorId(sensorId: String): Int {
@@ -271,7 +263,7 @@ class CameraRepository(private val context: Context) {
         isPreset: Boolean = false,
         targetZoom: Float? = null,
         zoomRange: Range<Float>? = null,
-        useCamera2: Boolean = false
+        useCamera2: Boolean = true
     ): LensInfo {
         val eqFocal = calculateEquivalentFocalLength(chars)
         val f = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.firstOrNull() ?: 0f

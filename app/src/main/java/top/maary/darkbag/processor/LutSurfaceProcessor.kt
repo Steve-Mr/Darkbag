@@ -6,21 +6,15 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.util.Log
 import android.view.Surface
-import androidx.camera.core.SurfaceOutput
-import androidx.camera.core.SurfaceProcessor
-import androidx.camera.core.SurfaceRequest
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
 import java.util.concurrent.Executors
 
-class LutSurfaceProcessor : SurfaceProcessor {
+class LutSurfaceProcessor {
 
     private val thread = HandlerThread("GLThread")
     private val handler: Handler
-    // Executor that runs tasks on the GL thread via the handler.
-    // This is safer as it won't throw RejectedExecutionException if shut down.
-    private val handlerExecutor = java.util.concurrent.Executor { runnable -> handler.post(runnable) }
 
     private var eglDisplay = EGL14.EGL_NO_DISPLAY
     private var eglContext = EGL14.EGL_NO_CONTEXT
@@ -172,68 +166,6 @@ class LutSurfaceProcessor : SurfaceProcessor {
         handler.post { initGl() }
     }
 
-    // CameraX SurfaceProcessor interface
-    override fun onInputSurface(request: SurfaceRequest) {
-        handler.post {
-            inputWidth = request.resolution.width
-            inputHeight = request.resolution.height
-
-            // Always create a new texture for each request to avoid race conditions
-            val textures = IntArray(1)
-            GLES30.glGenTextures(1, textures, 0)
-            val textureId = textures[0]
-
-            GLES30.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, textureId)
-            GLES30.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_NEAREST)
-            GLES30.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_NEAREST)
-            GLES30.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE)
-            GLES30.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE)
-
-            val surfaceTexture = SurfaceTexture(textureId)
-            surfaceTexture.setDefaultBufferSize(request.resolution.width, request.resolution.height)
-            surfaceTexture.setOnFrameAvailableListener({
-                handler.post { drawFrame() }
-            }, handler)
-
-            val surface = Surface(surfaceTexture)
-
-            // Update member variables for drawFrame to use
-            this.inputTextureId = textureId
-            this.inputSurfaceTexture = surfaceTexture
-
-            request.provideSurface(surface, handlerExecutor) { result ->
-                // Clean up ONLY the resources created for THIS request
-                surface.release()
-
-                handler.post {
-                    surfaceTexture.release()
-                    GLES30.glDeleteTextures(1, intArrayOf(textureId), 0)
-
-                    // Only clear the member variables if they still point to this request's resources
-                    if (this.inputTextureId == textureId) {
-                        this.inputTextureId = 0
-                    }
-                    if (this.inputSurfaceTexture === surfaceTexture) {
-                        this.inputSurfaceTexture = null
-                    }
-                }
-            }
-        }
-    }
-
-    override fun onOutputSurface(output: SurfaceOutput) {
-        handler.post {
-            val s = output.getSurface(handlerExecutor) {
-                // Handle close request if needed, though we manage EGL surface based on outputSurface var
-                if (outputSurface != null) {
-                    outputSurface = null
-                    releaseEglSurface()
-                }
-            }
-            setOutputSurfaceInternal(s, output.size.width, output.size.height)
-        }
-    }
-
     // Direct Surface binding (TextureView)
     fun getInputSurface(w: Int, h: Int, onSurfaceReady: (Surface) -> Unit) {
         handler.post {
@@ -367,7 +299,6 @@ class LutSurfaceProcessor : SurfaceProcessor {
              releaseGl()
              thread.quitSafely()
         }
-        // No need to shutdown handlerExecutor as it's just a wrapper
     }
 
     private fun initGl() {

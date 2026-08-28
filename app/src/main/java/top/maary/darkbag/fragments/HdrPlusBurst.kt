@@ -1,6 +1,5 @@
 package top.maary.darkbag.fragments
 
-import androidx.camera.core.ImageProxy
 import java.nio.ByteBuffer
 import java.util.concurrent.ConcurrentLinkedQueue
 
@@ -73,31 +72,6 @@ class HdrPlusBurst(
     private val frames = mutableListOf<HdrFrame>()
     private var megaBuffer: ByteBuffer? = null
 
-    fun addFrame(image: ImageProxy, physicalId: String? = null) {
-        if (frames.size < frameCount) {
-            try {
-                val frame = copyFrame(image, physicalId)
-                frames.add(frame)
-
-                if (frames.size == frameCount) {
-                    val resultBuffer = megaBuffer!!
-                    megaBuffer = null // Transfer ownership
-                    onBurstComplete(BurstResult(resultBuffer, frames.toList()))
-                    frames.clear()
-                }
-            } catch (e: Exception) {
-                megaBuffer?.let { releaseBuffer(it) }
-                megaBuffer = null
-                frames.clear()
-                throw e
-            } finally {
-                image.close()
-            }
-        } else {
-            image.close()
-        }
-    }
-
     /**
      * Entry point for manual Camera2 frames where we already have the buffer and metadata.
      */
@@ -137,20 +111,6 @@ class HdrPlusBurst(
         megaBuffer?.let { releaseBuffer(it) }
         megaBuffer = null
         frames.clear()
-    }
-
-    private fun copyFrame(image: ImageProxy, physicalId: String? = null): HdrFrame {
-        val plane = image.planes[0]
-        return copyData(
-            plane.buffer,
-            image.width,
-            image.height,
-            plane.rowStride,
-            plane.pixelStride,
-            image.imageInfo.timestamp,
-            image.imageInfo.rotationDegrees,
-            physicalId
-        )
     }
 
     private fun copyData(

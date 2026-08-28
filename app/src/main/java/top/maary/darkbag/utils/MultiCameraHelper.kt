@@ -170,7 +170,7 @@ object MultiCameraHelper {
         // 2. Fallback: Synthesize MultiCamera from standalone physical cameras probed on the device
         try {
             val repository = CameraRepository(context)
-            val allLenses = repository.enumerateCameras(emptySet(), facing)
+            val allLenses = repository.enumerateCameras(facing)
             val standalonePhysicalLenses = allLenses.filter { !it.isLogicalAuto && !it.isZoomPreset }
 
             if (standalonePhysicalLenses.size >= 2) {
