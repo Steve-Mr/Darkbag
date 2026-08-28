@@ -83,7 +83,8 @@ class HdrPlusProcessingService : LifecycleService() {
                     req.requestId, // tempRawPath - shared memory key!
                     req.zoomFactor,
                     req.mirror,
-                    req.metadata
+                    req.metadata,
+                    req.enableMemoryColor
                 )
             } else {
                 ColorProcessor.processHdrPlus(
@@ -104,7 +105,8 @@ class HdrPlusProcessingService : LifecycleService() {
                     req.requestId, // tempRawPath - shared memory key!
                     req.zoomFactor,
                     req.mirror,
-                    req.metadata
+                    req.metadata,
+                    req.enableMemoryColor
                 )
             }
 
@@ -133,7 +135,8 @@ class HdrPlusProcessingService : LifecycleService() {
                     whiteBalance = req.whiteBalance,
                     zoomFactor = req.zoomFactor,
                     mirror = req.mirror,
-                    metadata = req.metadata
+                    metadata = req.metadata,
+                    enableMemoryColor = req.enableMemoryColor
                 )
             }
 

@@ -49,7 +49,8 @@ data class HdrPlusRequest(
     val editConfig: EditConfig?,
     val runAblationTest: Boolean,
     val motionPhotoMp4Path: String? = null,
-    val motionPhotoStillPtsUs: Long = 0L
+    val motionPhotoStillPtsUs: Long = 0L,
+    val enableMemoryColor: Boolean = false
 )
 
 object HdrPlusRequestManager {

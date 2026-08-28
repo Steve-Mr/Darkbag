@@ -168,9 +168,10 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRaw(
         jobject outputBitmap,
         jint downsampleFactor,
         jfloat zoomFactor,
-        jobject metadataObj
+        jobject metadataObj,
+        jboolean enableMemoryColor
 ) {
-    LOGD("Native processRaw started using LibRaw.");
+    LOGD("Native processRaw started using LibRaw (enableMemoryColor=%d).", enableMemoryColor);
 
     // Get DNG Bytes
     jsize len = env->GetArrayLength(dngData);
@@ -297,7 +298,8 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRaw(
         outputBitmap != nullptr, // isPreview
         (int)downsampleFactor, // downsampleFactor
         (float)zoomFactor, // zoomFactor
-        (bool)mirror
+        (bool)mirror,
+        (bool)enableMemoryColor
     );
 
     if (bitmapPixels) AndroidBitmap_unlockPixels(env, outputBitmap);
