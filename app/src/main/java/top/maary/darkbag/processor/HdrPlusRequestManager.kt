@@ -50,7 +50,8 @@ data class HdrPlusRequest(
     val runAblationTest: Boolean,
     val motionPhotoMp4Path: String? = null,
     val motionPhotoStillPtsUs: Long = 0L,
-    val enableMemoryColor: Boolean = false
+    val enableMemoryColor: Boolean = false,
+    val colorEngineMode: Int = 0
 )
 
 object HdrPlusRequestManager {

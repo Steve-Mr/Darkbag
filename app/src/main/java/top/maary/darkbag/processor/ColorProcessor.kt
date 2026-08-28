@@ -58,7 +58,8 @@ object ColorProcessor {
         downsampleFactor: Int = 1,
         zoomFactor: Float = 1.0f,
         metadata: CaptureMetadata? = null,
-        enableMemoryColor: Boolean = false
+        enableMemoryColor: Boolean = false,
+        colorEngineMode: Int = 0
     ): Int
 
     /**
@@ -88,7 +89,8 @@ object ColorProcessor {
         zoomFactor: Float,
         mirror: Boolean,
         metadata: CaptureMetadata,
-        enableMemoryColor: Boolean = false
+        enableMemoryColor: Boolean = false,
+        colorEngineMode: Int = 0
     ): Int
 
     /**
@@ -149,7 +151,8 @@ object ColorProcessor {
         zoomFactor: Float,
         mirror: Boolean,
         metadata: CaptureMetadata,
-        enableMemoryColor: Boolean = false
+        enableMemoryColor: Boolean = false,
+        colorEngineMode: Int = 0
     ): Int
 
     external fun processHdrPlus(
@@ -180,6 +183,7 @@ object ColorProcessor {
         zoomFactor: Float,
         mirror: Boolean,
         metadata: CaptureMetadata,
-        enableMemoryColor: Boolean = false
+        enableMemoryColor: Boolean = false,
+        colorEngineMode: Int = 0
     ): Int
 }

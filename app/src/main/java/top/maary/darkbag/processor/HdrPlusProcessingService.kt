@@ -84,7 +84,8 @@ class HdrPlusProcessingService : LifecycleService() {
                     req.zoomFactor,
                     req.mirror,
                     req.metadata,
-                    req.enableMemoryColor
+                    req.enableMemoryColor,
+                    req.colorEngineMode
                 )
             } else {
                 ColorProcessor.processHdrPlus(
@@ -106,7 +107,8 @@ class HdrPlusProcessingService : LifecycleService() {
                     req.zoomFactor,
                     req.mirror,
                     req.metadata,
-                    req.enableMemoryColor
+                    req.enableMemoryColor,
+                    req.colorEngineMode
                 )
             }
 
@@ -136,7 +138,8 @@ class HdrPlusProcessingService : LifecycleService() {
                     zoomFactor = req.zoomFactor,
                     mirror = req.mirror,
                     metadata = req.metadata,
-                    enableMemoryColor = req.enableMemoryColor
+                    enableMemoryColor = req.enableMemoryColor,
+                    colorEngineMode = req.colorEngineMode
                 )
             }
 
