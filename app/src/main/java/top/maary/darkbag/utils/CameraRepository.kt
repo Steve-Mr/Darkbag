@@ -6,6 +6,7 @@ import android.hardware.camera2.CameraManager
 import android.os.Build
 import android.util.Log
 import android.util.Range
+import kotlin.math.abs
 import kotlin.math.sqrt
 
 data class LensInfo(
@@ -91,6 +92,10 @@ class CameraRepository(private val context: Context) {
         for (id in currentFacingIds) {
             val chars = idToChars[id] ?: continue
             val isAnchor = id == anchorId
+            val capabilities = chars.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES) ?: intArrayOf()
+            val isLogicalMulti = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                capabilities.contains(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_LOGICAL_MULTI_CAMERA)
+            } else false
 
             val info = createLensInfo(
                 id = id,
@@ -98,7 +103,7 @@ class CameraRepository(private val context: Context) {
                 chars = chars,
                 mainFocal35mm = mainWideEqFocal,
                 facing = facing,
-                isAuto = false,
+                isAuto = isLogicalMulti,
                 zoomRange = if (isAnchor) zoomRange else null,
                 useCamera2 = true
             )
@@ -124,10 +129,25 @@ class CameraRepository(private val context: Context) {
      */
     fun getFocalLengthPresets(facing: Int = CameraCharacteristics.LENS_FACING_BACK): List<LensInfo> {
         val physicalLenses = enumerateCameras(facing)
-        val result = physicalLenses.filter { !it.isLogicalAuto }.toMutableList()
+        val nonAutoLenses = physicalLenses.filter { !it.isLogicalAuto }
+        val baseLenses = if (nonAutoLenses.isNotEmpty()) {
+            nonAutoLenses
+        } else {
+            physicalLenses.map { it.copy(name = String.format("%.1fx", it.multiplier), isLogicalAuto = false) }
+        }
+
+        // Deduplicate physical lenses that share the same multiplier (e.g. logical anchor + physical wide both 1.0x)
+        val distinctPhysical = mutableListOf<LensInfo>()
+        for (lens in baseLenses) {
+            if (distinctPhysical.none { abs(it.multiplier - lens.multiplier) < 0.08f }) {
+                distinctPhysical.add(lens)
+            }
+        }
+
+        val result = distinctPhysical.toMutableList()
 
         // 2.0x virtual if no physical 2x exists (between 1.8x and 2.2x)
-        val hasPhysical2x = physicalLenses.any { it.multiplier in 1.8f..2.2f }
+        val hasPhysical2x = distinctPhysical.any { it.multiplier in 1.8f..2.2f }
         if (!hasPhysical2x) {
             val mainWide = result.find { it.multiplier in 0.95f..1.05f }
             if (mainWide != null) {

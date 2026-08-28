@@ -2486,7 +2486,7 @@ class CameraFragment : Fragment() {
         else
             CameraCharacteristics.LENS_FACING_FRONT
 
-        val filteredLenses = if (isMultiCameraModeActive) {
+        val filteredLenses = (if (isMultiCameraModeActive) {
             val physical = availableLenses.filter { it.facing == repoFacing && !it.isLogicalAuto && !it.isZoomPreset }
             if (physical.isNotEmpty()) physical else availableLenses.filter { it.facing == repoFacing && !it.isZoomPreset }
         } else {
@@ -2495,7 +2495,7 @@ class CameraFragment : Fragment() {
             }.filter {
                 !it.sensorId.contains(CameraRepository.VIRTUAL_TELE_2X_SUFFIX)
             }
-        }
+        }).distinctBy { it.name }
 
         // Populate lens controls if any are available
         if (filteredLenses.isNotEmpty()) {
