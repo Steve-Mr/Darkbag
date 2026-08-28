@@ -352,6 +352,127 @@ const Matrix3x3 M_Bradford_D50_to_D65 = {
     0.01231027f, -0.02050341f, 1.33023150f
 };
 
+// --- Color Rendering Engines ---
+
+// 1. Khronos PBR Neutral (Industry standard neutral 1:1 fidelity with smooth highlight compression)
+Vec3 apply_khronos_pbr_neutral(Vec3 color) {
+    constexpr float startCompression = 0.8f - 0.04f;
+    constexpr float desaturation = 0.15f;
+
+    float x = std::min(color.r, std::min(color.g, color.b));
+    float offset = (x < 0.08f) ? (x - 6.25f * x * x) : 0.04f;
+    color.r -= offset;
+    color.g -= offset;
+    color.b -= offset;
+
+    float peak = std::max(color.r, std::max(color.g, color.b));
+    if (peak < startCompression) {
+        return { std::max(0.0f, color.r), std::max(0.0f, color.g), std::max(0.0f, color.b) };
+    }
+
+    constexpr float d = 1.0f - startCompression;
+    float newPeak = 1.0f - d * d / (peak + d - startCompression);
+    float scale = newPeak / peak;
+    color.r *= scale;
+    color.g *= scale;
+    color.b *= scale;
+
+    float g = 1.0f - 1.0f / (desaturation * (peak - newPeak) + 1.0f);
+    return {
+        std::clamp(color.r + (newPeak - color.r) * g, 0.0f, 1.0f),
+        std::clamp(color.g + (newPeak - color.g) * g, 0.0f, 1.0f),
+        std::clamp(color.b + (newPeak - color.b) * g, 0.0f, 1.0f)
+    };
+}
+
+// 2. Pure Luma Filmic (Hasselblad/Leica micro-contrast with strictly locked hue)
+inline float filmic_luma_curve(float Y) {
+    if (Y <= 0.0f) return 0.0f;
+    constexpr float A = 2.35f;
+    constexpr float B = 0.02f;
+    constexpr float C = 2.35f;
+    constexpr float D = 0.70f;
+    constexpr float E = 0.12f;
+    float out = (Y * (A * Y + B)) / (Y * (C * Y + D) + E);
+    return std::clamp(out, 0.0f, 1.0f);
+}
+
+Vec3 apply_pure_luma_filmic(Vec3 c) {
+    float luma = 0.2126f * c.r + 0.7152f * c.g + 0.0722f * c.b;
+    if (luma <= 0.00001f) return {0.0f, 0.0f, 0.0f};
+
+    float mapped_luma = filmic_luma_curve(luma);
+    float scale = mapped_luma / luma;
+    Vec3 out = { c.r * scale, c.g * scale, c.b * scale };
+
+    // Highlight smooth desaturation above 0.85
+    if (mapped_luma > 0.85f) {
+        float t = (mapped_luma - 0.85f) / 0.15f;
+        float factor = 1.0f - (t * t * (3.0f - 2.0f * t)) * 0.5f;
+        out.r = mapped_luma + (out.r - mapped_luma) * factor;
+        out.g = mapped_luma + (out.g - mapped_luma) * factor;
+        out.b = mapped_luma + (out.b - mapped_luma) * factor;
+    }
+    out.r = std::clamp(out.r, 0.0f, 1.0f);
+    out.g = std::clamp(out.g, 0.0f, 1.0f);
+    out.b = std::clamp(out.b, 0.0f, 1.0f);
+    return out;
+}
+
+// 3. Sony Uchimura (Gran Turismo 7 piecewise photographic tone curve)
+inline float uchimura_scalar(float x, float P = 1.0f, float a = 1.25f, float m = 0.22f, float l = 0.40f, float c = 1.33f, float b = 0.0f) {
+    if (x <= 0.0f) return 0.0f;
+    float l0 = ((P - m) * l) / a;
+    float S0 = m + l0;
+    float S1 = m + a * l0;
+    float C2 = (a * P) / (P - S1);
+    float CP = -C2 / P;
+
+    if (x <= m) {
+        return m * std::pow(x / m, c) + b;
+    } else if (x < m + l0) {
+        return m + a * (x - m);
+    } else {
+        return P - (P - S1) * std::exp(CP * (x - S0));
+    }
+}
+
+Vec3 apply_sony_uchimura(Vec3 c) {
+    float luma = 0.2126f * c.r + 0.7152f * c.g + 0.0722f * c.b;
+    if (luma <= 0.00001f) return {0.0f, 0.0f, 0.0f};
+
+    float mapped_luma = uchimura_scalar(luma);
+    float scale = mapped_luma / luma;
+    Vec3 out = { c.r * scale, c.g * scale, c.b * scale };
+
+    // Highlight desaturation above 0.85
+    if (mapped_luma > 0.85f) {
+        float t = (mapped_luma - 0.85f) / 0.15f;
+        float factor = 1.0f - (t * t * (3.0f - 2.0f * t)) * 0.5f;
+        out.r = mapped_luma + (out.r - mapped_luma) * factor;
+        out.g = mapped_luma + (out.g - mapped_luma) * factor;
+        out.b = mapped_luma + (out.b - mapped_luma) * factor;
+    }
+    out.r = std::clamp(out.r, 0.0f, 1.0f);
+    out.g = std::clamp(out.g, 0.0f, 1.0f);
+    out.b = std::clamp(out.b, 0.0f, 1.0f);
+    return out;
+}
+
+// 4. ACES Fit (Classic cinematic display transform)
+inline float aces_fit_scalar(float v) {
+    float a = 2.51f, b = 0.03f, c = 2.43f, d = 0.59f, e = 0.14f;
+    return std::clamp((v * (a * v + b)) / (v * (c * v + d) + e), 0.0f, 1.0f);
+}
+
+Vec3 apply_aces_fit(Vec3 c) {
+    return {
+        aces_fit_scalar(c.r),
+        aces_fit_scalar(c.g),
+        aces_fit_scalar(c.b)
+    };
+}
+
 // --- Initialization ---
 void init_color_pipe() {
     TIFFSetWarningHandler(nullptr);
@@ -605,10 +726,12 @@ bool process_and_save_image(
     const char* jpgPath, const char* tiffPath, const ImageMetadata* metadata, int sourceColorSpace,
     const float* ccm, const float* wb, int orientation, unsigned char* out_rgb_buffer,
     int out_width, int out_height,
-    bool isPreview, int downsampleFactor, float zoomFactor, bool mirror
+    bool isPreview, int downsampleFactor, float zoomFactor, bool mirror,
+    bool enableMemoryColor,
+    int colorEngineMode
 ) {
-    LOGD("process_and_save_image: %dx%d, gain=%.2f, log=%d, lut=%d, jpg=%s, tiff=%s, preview=%d, ds=%d, zoom=%.2f, mirror=%d",
-         width, height, gain, targetLog, lut.size, jpgPath ? jpgPath : "null", tiffPath ? tiffPath : "null", isPreview, downsampleFactor, zoomFactor, mirror);
+    LOGD("process_and_save_image: %dx%d, gain=%.2f, log=%d, lut=%d, jpg=%s, tiff=%s, preview=%d, ds=%d, zoom=%.2f, mirror=%d, memColor=%d, engineMode=%d",
+         width, height, gain, targetLog, lut.size, jpgPath ? jpgPath : "null", tiffPath ? tiffPath : "null", isPreview, downsampleFactor, zoomFactor, mirror, enableMemoryColor, colorEngineMode);
     int outW = width / downsampleFactor, outH = height / downsampleFactor;
     bool swapDims = (orientation == 90 || orientation == 270);
     int finalW = swapDims ? outH : outW, finalH = swapDims ? outW : outH;
@@ -738,20 +861,40 @@ bool process_and_save_image(
         }
         if (stageB) *stageB = color;
 
-        // Apply ACES Filmic Tone Mapping ONLY for standard sRGB output
-        if (targetLog == 0) {
-            auto aces_fit = [](float v) {
-                float a = 2.51f, b = 0.03f, c = 2.43f, d = 0.59f, e = 0.14f;
-                return std::clamp((v * (a * v + b)) / (v * (c * v + d) + e), 0.0f, 1.0f);
-            };
-            color.r = aces_fit(color.r);
-            color.g = aces_fit(color.g);
-            color.b = aces_fit(color.b);
+        // Natural Multi-Engine Pipeline (when targetLog == 0 and no 3D LUT is attached)
+        if (targetLog == 0 && lut.size == 0) {
+            switch (colorEngineMode) {
+                case COLOR_ENGINE_PBR_NEUTRAL:
+                    color = apply_khronos_pbr_neutral(color);
+                    break;
+                case COLOR_ENGINE_PURE_LUMA:
+                    color = apply_pure_luma_filmic(color);
+                    break;
+                case COLOR_ENGINE_SONY_UCHIMURA:
+                    color = apply_sony_uchimura(color);
+                    break;
+                case COLOR_ENGINE_ACES_FIT:
+                default:
+                    color = apply_aces_fit(color);
+                    break;
+            }
+
+            // Apply sRGB OETF transfer function
+            color.r = srgb_oetf(color.r);
+            color.g = srgb_oetf(color.g);
+            color.b = srgb_oetf(color.b);
+        } else {
+            // Standard Log / LUT pipeline
+            if (targetLog == 0) {
+                color = apply_aces_fit(color);
+            }
+
+            color.r = apply_log(color.r, targetLog);
+            color.g = apply_log(color.g, targetLog);
+            color.b = apply_log(color.b, targetLog);
         }
 
-        color.r = apply_log(color.r, targetLog); color.g = apply_log(color.g, targetLog); color.b = apply_log(color.b, targetLog);
-
-        // 2. Contrast & Saturation (Log Space)
+        // 2. Contrast & Saturation (Log Space / Gamma Space)
         auto apply_contrast = [&](float v) {
             return std::max(0.0f, (v - 0.5f) * (contrast + 1.0f) + 0.5f);
         };

@@ -57,7 +57,9 @@ object ColorProcessor {
         outputBitmap: android.graphics.Bitmap? = null,
         downsampleFactor: Int = 1,
         zoomFactor: Float = 1.0f,
-        metadata: CaptureMetadata? = null
+        metadata: CaptureMetadata? = null,
+        enableMemoryColor: Boolean = false,
+        colorEngineMode: Int = 0
     ): Int
 
     /**
@@ -86,7 +88,9 @@ object ColorProcessor {
         tempRawPath: String? = null,
         zoomFactor: Float,
         mirror: Boolean,
-        metadata: CaptureMetadata
+        metadata: CaptureMetadata,
+        enableMemoryColor: Boolean = false,
+        colorEngineMode: Int = 0
     ): Int
 
     /**
@@ -146,7 +150,9 @@ object ColorProcessor {
         whiteBalance: FloatArray,
         zoomFactor: Float,
         mirror: Boolean,
-        metadata: CaptureMetadata
+        metadata: CaptureMetadata,
+        enableMemoryColor: Boolean = false,
+        colorEngineMode: Int = 0
     ): Int
 
     external fun processHdrPlus(
@@ -176,6 +182,8 @@ object ColorProcessor {
         tempRawPath: String? = null,
         zoomFactor: Float,
         mirror: Boolean,
-        metadata: CaptureMetadata
+        metadata: CaptureMetadata,
+        enableMemoryColor: Boolean = false,
+        colorEngineMode: Int = 0
     ): Int
 }

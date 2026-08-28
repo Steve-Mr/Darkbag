@@ -273,9 +273,11 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
     jfloat exposure, jfloat contrast, jfloat saturation, jfloat highlights, jfloat shadows, jfloat whites, jfloat blacks,
     jstring jpgPath, jstring dngPath,
     jfloatArray ccm, jfloatArray whiteBalance, jfloat zoomFactor, jboolean mirror,
-    jobject metadata
+    jobject metadata,
+    jboolean enableMemoryColor,
+    jint colorEngineMode
 ) {
-    LOGD("Native exportHdrPlus started.");
+    LOGD("Native exportHdrPlus started (enableMemoryColor=%d, colorEngineMode=%d).", enableMemoryColor, colorEngineMode);
 
     if (!tempRawPath) return -1;
     const char* temp_path_cstr = env->GetStringUTFChars(tempRawPath, 0);
@@ -329,7 +331,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
         LOGD("Exporting JPG: JPG=%s", jpg_path_cstr);
         saveOk = process_and_save_image(finalImage.data(), 1, width, width*height, nullptr, 0, 0, width, height, digitalGain, targetLog, lut,
                                         exposure, contrast, saturation, highlights, shadows, whites, blacks,
-                                        jpg_path_cstr, nullptr, &meta, 1, ccmVec.data(), wbVec.data(), orientation, nullptr, 0, 0, false, 1, zoomFactor, (bool)mirror);
+                                        jpg_path_cstr, nullptr, &meta, 1, ccmVec.data(), wbVec.data(), orientation, nullptr, 0, 0, false, 1, zoomFactor, (bool)mirror, (bool)enableMemoryColor, (int)colorEngineMode);
     }
     if (jpgPath && jpg_path_cstr) env->ReleaseStringUTFChars(jpgPath, jpg_path_cstr);
     if (dngPath && dng_path_cstr) env->ReleaseStringUTFChars(dngPath, dng_path_cstr);
@@ -346,9 +348,11 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
     JNIEnv* env, jobject /* this */, jobject dngBuffer, jint numFrames, jint width, jint height, jint orientation, jint whiteLevel, jintArray blackLevelPattern, jfloatArray lensShadingMap, jint lensShadingRows, jint lensShadingCols, jboolean useSensorColorMatrix, jfloatArray whiteBalance, jfloatArray ccm, jfloatArray ccmAlt, jboolean exportMatrixAB, jint cfaPattern,
     jint targetLog, jstring lutPath, jstring outputJpgPath, jstring outputDngPath,
     jfloat digitalGain, jlongArray debugStats, jobject outputBitmap, jstring tempRawPath, jfloat zoomFactor, jboolean mirror,
-    jobject metadata
+    jobject metadata,
+    jboolean enableMemoryColor,
+    jint colorEngineMode
 ) {
-    LOGD("Native processHdrPlus started.");
+    LOGD("Native processHdrPlus started (enableMemoryColor=%d, colorEngineMode=%d).", enableMemoryColor, colorEngineMode);
     (void)useSensorColorMatrix;
 
     auto nativeStart = std::chrono::high_resolution_clock::now();
@@ -504,7 +508,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
         process_and_save_image(raw_ptr, stride_x, stride_y, stride_c, lensShadingVec.empty() ? nullptr : lensShadingVec.data(), lensShadingRows, lensShadingCols,
                                 width, height, digitalGain, targetLog, lut,
                                 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, // HSWB not used for preview in standard pipe yet
-                                nullptr, nullptr, nullptr, 1, ccmVec.data(), wbVec.data(), orientation, bitmapPixels, out_w, out_h, true, fastPreviewDownsample, zoomFactor, (bool)mirror);
+                                nullptr, nullptr, nullptr, 1, ccmVec.data(), wbVec.data(), orientation, bitmapPixels, out_w, out_h, true, fastPreviewDownsample, zoomFactor, (bool)mirror, (bool)enableMemoryColor, (int)colorEngineMode);
         AndroidBitmap_unlockPixels(env, outputBitmap);
     }
 
@@ -530,7 +534,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
             process_and_save_image(raw_ptr, stride_x, stride_y, stride_c, lensShadingVec.empty() ? nullptr : lensShadingVec.data(), lensShadingRows, lensShadingCols,
                                     width, height, digitalGain, targetLog, lut,
                                     0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
-                                    jpgPathStr.c_str(), nullptr, &meta, 1, ccmVec.data(), wbVec.data(), orientation, nullptr, 0, 0, true, fastPreviewDownsample, zoomFactor, (bool)mirror);
+                                    jpgPathStr.c_str(), nullptr, &meta, 1, ccmVec.data(), wbVec.data(), orientation, nullptr, 0, 0, true, fastPreviewDownsample, zoomFactor, (bool)mirror, (bool)enableMemoryColor, (int)colorEngineMode);
 
             if (exportMatrixAB && !jpgPathStr.empty() && ccmAltVec.size() == 9) {
                 std::string suffix = useSensorColorMatrix ? "_AB_CAPTURE_CCM.jpg" : "_AB_SENSOR_CCM.jpg";
@@ -541,7 +545,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
                 process_and_save_image(raw_ptr, stride_x, stride_y, stride_c, lensShadingVec.empty() ? nullptr : lensShadingVec.data(), lensShadingRows, lensShadingCols,
                                         width, height, digitalGain, targetLog, lut,
                                         0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
-                                        altJpgPath.c_str(), nullptr, &meta, 1, ccmAltVec.data(), wbVec.data(), orientation, nullptr, 0, 0, false, 1, zoomFactor, (bool)mirror);
+                                        altJpgPath.c_str(), nullptr, &meta, 1, ccmAltVec.data(), wbVec.data(), orientation, nullptr, 0, 0, false, 1, zoomFactor, (bool)mirror, (bool)enableMemoryColor, (int)colorEngineMode);
             }
         }
     }
@@ -554,9 +558,11 @@ Java_top_maary_darkbag_processor_ColorProcessor_processSingleFrameRaw(
     JNIEnv* env, jobject /* this */, jobject bayerBuffer, jint width, jint height, jint orientation, jint whiteLevel, jintArray blackLevelPattern, jfloatArray lensShadingMap, jint lensShadingRows, jint lensShadingCols, jfloatArray whiteBalance, jfloatArray ccm, jint cfaPattern,
     jint targetLog, jstring lutPath, jstring outputJpgPath, jstring outputDngPath,
     jfloat digitalGain, jlongArray debugStats, jobject outputBitmap, jstring tempRawPath, jfloat zoomFactor, jboolean mirror,
-    jobject metadata
+    jobject metadata,
+    jboolean enableMemoryColor,
+    jint colorEngineMode
 ) {
-    LOGD("Native processSingleFrameRaw started.");
+    LOGD("Native processSingleFrameRaw started (enableMemoryColor=%d, colorEngineMode=%d).", enableMemoryColor, colorEngineMode);
 
     // Call the existing processHdrPlus logic directly with the buffer and numFrames=1
     return Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
@@ -565,6 +571,8 @@ Java_top_maary_darkbag_processor_ColorProcessor_processSingleFrameRaw(
         whiteBalance, ccm, nullptr, // ccmAlt
         false, // exportMatrixAB
         cfaPattern, targetLog, lutPath,
-        outputJpgPath, outputDngPath, digitalGain, debugStats, outputBitmap, tempRawPath, zoomFactor, mirror, metadata
+        outputJpgPath, outputDngPath, digitalGain, debugStats, outputBitmap, tempRawPath, zoomFactor, mirror, metadata,
+        enableMemoryColor,
+        colorEngineMode
     );
 }

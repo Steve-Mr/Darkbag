@@ -161,4 +161,6 @@
     <string name="collage_saved_toast">Multi-camera collage saved to gallery</string>
     <string name="multi_camera_link_synced">Manual controls synced to all lenses</string>
     <string name="multi_camera_link_primary_only">Manual controls applied to primary lens only</string>
+    <string name="setting_color_engine_title">Color Rendering Engine</string>
+    <string name="setting_color_engine_summary">Select default tone mapping algorithm when Log/LUT is None</string>
 </resources>

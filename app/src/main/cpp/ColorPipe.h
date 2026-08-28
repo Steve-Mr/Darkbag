@@ -58,6 +58,19 @@ struct LUT3D {
 LUT3D load_lut(const char* path);
 Vec3 apply_lut(const LUT3D& lut, Vec3 color);
 
+// --- Color Rendering Engines ---
+enum ColorEngineMode {
+    COLOR_ENGINE_PBR_NEUTRAL = 0,   // Khronos PBR Neutral (Industry standard neutral 1:1 fidelity)
+    COLOR_ENGINE_PURE_LUMA = 1,     // Natural Filmic / Luma Preserving (Hasselblad/Leica micro-contrast)
+    COLOR_ENGINE_SONY_UCHIMURA = 2, // Sony Polyphony Digital (Gran Turismo 7)
+    COLOR_ENGINE_ACES_FIT = 3       // Legacy ACES Filmic Fit (Original Darkbag default)
+};
+
+Vec3 apply_khronos_pbr_neutral(Vec3 color);
+Vec3 apply_pure_luma_filmic(Vec3 c);
+Vec3 apply_sony_uchimura(Vec3 c);
+Vec3 apply_aces_fit(Vec3 c);
+
 // --- Initialization ---
 void init_color_pipe();
 
@@ -95,7 +108,9 @@ bool process_and_save_image(
     bool isPreview = false,
     int downsampleFactor = 1,
     float zoomFactor = 1.0f,
-    bool mirror = false
+    bool mirror = false,
+    bool enableMemoryColor = false,
+    int colorEngineMode = 0
 );
 
 bool write_dng(const char* filename, int width, int height, const unsigned short* planarData, int stride_x, int stride_y, int stride_c, int whiteLevel, const std::vector<float>& ccm, const ImageMetadata& metadata, int orientation, bool mirror = false, float baselineExposure = 0.0f, const float* wbVec = nullptr);
