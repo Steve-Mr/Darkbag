@@ -352,6 +352,126 @@ const Matrix3x3 M_Bradford_D50_to_D65 = {
     0.01231027f, -0.02050341f, 1.33023150f
 };
 
+// --- OKLab & Natural Filmic Engine ---
+OKLab linear_srgb_to_oklab(Vec3 c) {
+    float r = (c.r > 0.0f) ? c.r : 0.0f;
+    float g = (c.g > 0.0f) ? c.g : 0.0f;
+    float b = (c.b > 0.0f) ? c.b : 0.0f;
+
+    float l = 0.4122214708f * r + 0.5363325363f * g + 0.0514459929f * b;
+    float m = 0.2119034982f * r + 0.6806995451f * g + 0.1073969566f * b;
+    float s = 0.0883024619f * r + 0.2817188376f * g + 0.6299787005f * b;
+
+    float l_ = std::cbrt((l > 0.0f) ? l : 0.0f);
+    float m_ = std::cbrt((m > 0.0f) ? m : 0.0f);
+    float s_ = std::cbrt((s > 0.0f) ? s : 0.0f);
+
+    return {
+        0.2104542553f * l_ + 0.7936177850f * m_ - 0.0040720468f * s_,
+        1.9779984951f * l_ - 2.4285922050f * m_ + 0.4505937099f * s_,
+        0.0259040371f * l_ + 0.7827717662f * m_ - 0.8086757660f * s_
+    };
+}
+
+Vec3 oklab_to_linear_srgb(OKLab lab) {
+    float l_ = lab.L + 0.3963377774f * lab.a + 0.2158037573f * lab.b;
+    float m_ = lab.L - 0.1055613458f * lab.a - 0.0638541728f * lab.b;
+    float s_ = lab.L - 0.0894841775f * lab.a - 1.2914855480f * lab.b;
+
+    float l = l_ * l_ * l_;
+    float m = m_ * m_ * m_;
+    float s = s_ * s_ * s_;
+
+    float r = +4.0767434721f * l - 3.3077115913f * m + 0.2309699292f * s;
+    float g = -1.2684380046f * l + 2.6097574011f * m - 0.3413193965f * s;
+    float b = -0.0041960863f * l - 0.7034186147f * m + 1.7076147010f * s;
+
+    return {
+        (r > 0.0f) ? r : 0.0f,
+        (g > 0.0f) ? g : 0.0f,
+        (b > 0.0f) ? b : 0.0f
+    };
+}
+
+float natural_filmic_l_curve(float L) {
+    if (!(L > 0.0f)) return 0.0f;
+    constexpr float a = 1.35f;
+    constexpr float b = 0.15f;
+    constexpr float c = 1.35f;
+    constexpr float d = 0.55f;
+    constexpr float e = 0.08f;
+
+    float num = L * (a * L + b);
+    float den = L * (c * L + d) + e;
+    float out = num / den;
+    return (out < 0.0f) ? 0.0f : ((out > 1.0f) ? 1.0f : out);
+}
+
+void apply_highlight_bleach(float L_mapped, float& a, float& b) {
+    constexpr float kBleachStart = 0.75f;
+    if (L_mapped > kBleachStart) {
+        float t = (L_mapped - kBleachStart) / (1.0f - kBleachStart);
+        if (t > 1.0f) t = 1.0f;
+        float decay = 1.0f - t * t * (3.0f - 2.0f * t);
+        a *= decay;
+        b *= decay;
+    }
+}
+
+void apply_memory_color_harmonization(float L, float& a, float& b) {
+    float chroma = std::sqrt(a * a + b * b);
+    if (chroma < 1e-5f) return;
+
+    float hue = std::atan2(b, a);
+    if (hue < 0.0f) hue += 6.283185307179586f;
+
+    // 1) Skin tone zone (~35° - 50°, approx 0.61 - 0.87 rad)
+    constexpr float kSkinHueTarget = 0.75f;
+    constexpr float kSkinSigma = 0.20f;
+    float dHueSkin = hue - kSkinHueTarget;
+    float wSkin = std::exp(-(dHueSkin * dHueSkin) / (2.0f * kSkinSigma * kSkinSigma));
+    float wSkinL = std::clamp((L - 0.2f) / 0.2f, 0.0f, 1.0f) * std::clamp((0.95f - L) / 0.15f, 0.0f, 1.0f);
+    float wSkinC = std::clamp(chroma / 0.04f, 0.0f, 1.0f) * std::clamp((0.25f - chroma) / 0.05f, 0.0f, 1.0f);
+    float totalSkinWeight = wSkin * wSkinL * wSkinC;
+
+    // 2) Sky blue zone (~230° - 248°, approx 4.01 - 4.33 rad)
+    constexpr float kSkyHueTarget = 4.18f;
+    constexpr float kSkySigma = 0.22f;
+    float dHueSky = hue - kSkyHueTarget;
+    float wSky = std::exp(-(dHueSky * dHueSky) / (2.0f * kSkySigma * kSkySigma));
+    float wSkyL = std::clamp((L - 0.35f) / 0.2f, 0.0f, 1.0f);
+    float wSkyC = std::clamp(chroma / 0.03f, 0.0f, 1.0f);
+    float totalSkyWeight = wSky * wSkyL * wSkyC;
+
+    // 3) Foliage green zone (~135° - 152°, approx 2.35 - 2.65 rad)
+    constexpr float kFoliageHueTarget = 2.48f;
+    constexpr float kFoliageSigma = 0.20f;
+    float dHueFoliage = hue - kFoliageHueTarget;
+    float wFoliage = std::exp(-(dHueFoliage * dHueFoliage) / (2.0f * kFoliageSigma * kFoliageSigma));
+    float wFoliageL = std::clamp((L - 0.2f) / 0.15f, 0.0f, 1.0f) * std::clamp((0.85f - L) / 0.15f, 0.0f, 1.0f);
+    float wFoliageC = std::clamp(chroma / 0.03f, 0.0f, 1.0f);
+    float totalFoliageWeight = wFoliage * wFoliageL * wFoliageC;
+
+    float finalHue = hue;
+    float finalChroma = chroma;
+
+    if (totalSkinWeight > 0.001f) {
+        finalHue += (kSkinHueTarget - hue) * 0.25f * totalSkinWeight;
+        finalChroma *= (1.0f + 0.04f * totalSkinWeight);
+    }
+    if (totalSkyWeight > 0.001f) {
+        finalHue += (kSkyHueTarget - hue) * 0.20f * totalSkyWeight;
+        finalChroma *= (1.0f + 0.05f * totalSkyWeight);
+    }
+    if (totalFoliageWeight > 0.001f) {
+        finalHue += (kFoliageHueTarget - hue) * 0.20f * totalFoliageWeight;
+        finalChroma *= (1.0f + 0.04f * totalFoliageWeight);
+    }
+
+    a = finalChroma * std::cos(finalHue);
+    b = finalChroma * std::sin(finalHue);
+}
+
 // --- Initialization ---
 void init_color_pipe() {
     TIFFSetWarningHandler(nullptr);
@@ -605,10 +725,11 @@ bool process_and_save_image(
     const char* jpgPath, const char* tiffPath, const ImageMetadata* metadata, int sourceColorSpace,
     const float* ccm, const float* wb, int orientation, unsigned char* out_rgb_buffer,
     int out_width, int out_height,
-    bool isPreview, int downsampleFactor, float zoomFactor, bool mirror
+    bool isPreview, int downsampleFactor, float zoomFactor, bool mirror,
+    bool enableMemoryColor
 ) {
-    LOGD("process_and_save_image: %dx%d, gain=%.2f, log=%d, lut=%d, jpg=%s, tiff=%s, preview=%d, ds=%d, zoom=%.2f, mirror=%d",
-         width, height, gain, targetLog, lut.size, jpgPath ? jpgPath : "null", tiffPath ? tiffPath : "null", isPreview, downsampleFactor, zoomFactor, mirror);
+    LOGD("process_and_save_image: %dx%d, gain=%.2f, log=%d, lut=%d, jpg=%s, tiff=%s, preview=%d, ds=%d, zoom=%.2f, mirror=%d, memColor=%d",
+         width, height, gain, targetLog, lut.size, jpgPath ? jpgPath : "null", tiffPath ? tiffPath : "null", isPreview, downsampleFactor, zoomFactor, mirror, enableMemoryColor);
     int outW = width / downsampleFactor, outH = height / downsampleFactor;
     bool swapDims = (orientation == 90 || orientation == 270);
     int finalW = swapDims ? outH : outW, finalH = swapDims ? outW : outH;
@@ -738,20 +859,47 @@ bool process_and_save_image(
         }
         if (stageB) *stageB = color;
 
-        // Apply ACES Filmic Tone Mapping ONLY for standard sRGB output
-        if (targetLog == 0) {
-            auto aces_fit = [](float v) {
-                float a = 2.51f, b = 0.03f, c = 2.43f, d = 0.59f, e = 0.14f;
-                return std::clamp((v * (a * v + b)) / (v * (c * v + d) + e), 0.0f, 1.0f);
-            };
-            color.r = aces_fit(color.r);
-            color.g = aces_fit(color.g);
-            color.b = aces_fit(color.b);
+        // Natural Filmic Engine (when targetLog == 0 and no 3D LUT is attached)
+        if (targetLog == 0 && lut.size == 0) {
+            // 1. Convert Linear Rec.709/sRGB (D65) to OKLab
+            OKLab lab = linear_srgb_to_oklab(color);
+
+            // 2. Scheme A Filmic Tone Curve on Lightness L
+            lab.L = natural_filmic_l_curve(lab.L);
+
+            // 3. Highlight Bleach (Chroma desaturation with 100% hue constancy)
+            apply_highlight_bleach(lab.L, lab.a, lab.b);
+
+            // 4. Memory Color Harmonization (if enabled)
+            if (enableMemoryColor) {
+                apply_memory_color_harmonization(lab.L, lab.a, lab.b);
+            }
+
+            // 5. Convert back to Linear sRGB
+            color = oklab_to_linear_srgb(lab);
+
+            // 6. Apply sRGB OETF transfer function
+            color.r = srgb_oetf(color.r);
+            color.g = srgb_oetf(color.g);
+            color.b = srgb_oetf(color.b);
+        } else {
+            // Standard Log / LUT pipeline
+            if (targetLog == 0) {
+                auto aces_fit = [](float v) {
+                    float a = 2.51f, b = 0.03f, c = 2.43f, d = 0.59f, e = 0.14f;
+                    return std::clamp((v * (a * v + b)) / (v * (c * v + d) + e), 0.0f, 1.0f);
+                };
+                color.r = aces_fit(color.r);
+                color.g = aces_fit(color.g);
+                color.b = aces_fit(color.b);
+            }
+
+            color.r = apply_log(color.r, targetLog);
+            color.g = apply_log(color.g, targetLog);
+            color.b = apply_log(color.b, targetLog);
         }
 
-        color.r = apply_log(color.r, targetLog); color.g = apply_log(color.g, targetLog); color.b = apply_log(color.b, targetLog);
-
-        // 2. Contrast & Saturation (Log Space)
+        // 2. Contrast & Saturation (Log Space / Gamma Space)
         auto apply_contrast = [&](float v) {
             return std::max(0.0f, (v - 0.5f) * (contrast + 1.0f) + 0.5f);
         };
