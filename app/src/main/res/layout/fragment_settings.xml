@@ -936,7 +936,24 @@
                             android:text="Use CameraX Engine (Fallback)"
                             android:textSize="16sp" />
 
-                        <Space android:layout_width="match_parent" android:layout_height="@dimen/spacing_large" />
+                        <Space android:layout_width="match_parent" android:layout_height="@dimen/spacing_medium" />
+
+                        <com.google.android.material.materialswitch.MaterialSwitch
+                            android:id="@+id/switch_memory_color_optimization"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/setting_memory_color_optimization_title"
+                            android:textSize="16sp" />
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/setting_memory_color_optimization_summary"
+                            android:textSize="12sp"
+                            android:textColor="?attr/colorOutline"
+                            android:layout_marginBottom="@dimen/spacing_small" />
+
+                        <Space android:layout_width="match_parent" android:layout_height="@dimen/spacing_medium" />
 
                         <TextView
                             android:layout_width="match_parent"

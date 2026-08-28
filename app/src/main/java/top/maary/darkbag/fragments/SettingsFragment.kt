@@ -493,6 +493,7 @@ class SettingsFragment : Fragment() {
         setupSwitch(binding.switchShowLutSwitcher, KEY_SHOW_LUT_SWITCHER)
 
         setupSwitch(binding.switchForce60fps, KEY_FORCE_60FPS, false)
+        setupSwitch(binding.switchMemoryColorOptimization, KEY_MEMORY_COLOR_OPTIMIZATION, false)
 
         binding.switchCloseDebug.setOnCheckedChangeListener { _, isChecked ->
             if (isChecked) {
@@ -769,6 +770,7 @@ class SettingsFragment : Fragment() {
         const val KEY_ENABLE_PLAYGROUND = "enable_playground"
         const val KEY_SHOW_FLOATING_TOOLBAR = "show_floating_toolbar"
         const val KEY_EXP_FOCUS_PEAKING = "exp_focus_peaking"
+        const val KEY_MEMORY_COLOR_OPTIMIZATION = "memory_color_optimization"
 
         val FOCAL_LENGTHS = listOf("24", "28", "35")
         val ANTIBANDING_MODES = listOf("Auto", "50Hz", "60Hz", "Off")

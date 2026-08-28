@@ -2235,7 +2235,8 @@ class CameraFragment : Fragment() {
                     ),
                     runAblationTest = false,
                     motionPhotoMp4Path = motionMp4Path,
-                    motionPhotoStillPtsUs = motionStillPtsUs
+                    motionPhotoStillPtsUs = motionStillPtsUs,
+                    enableMemoryColor = prefs.getBoolean(SettingsFragment.KEY_MEMORY_COLOR_OPTIMIZATION, false)
                 )
                 top.maary.darkbag.processor.HdrPlusRequestManager.enqueue(request)
                 val serviceIntent = android.content.Intent(context, top.maary.darkbag.processor.HdrPlusProcessingService::class.java)
@@ -4254,7 +4255,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         ),
                         runAblationTest = false,
                         motionPhotoMp4Path = motionMp4Path,
-                        motionPhotoStillPtsUs = motionStillPtsUs
+                        motionPhotoStillPtsUs = motionStillPtsUs,
+                        enableMemoryColor = prefs.getBoolean(SettingsFragment.KEY_MEMORY_COLOR_OPTIMIZATION, false)
                     )
                     top.maary.darkbag.processor.HdrPlusRequestManager.enqueue(request)
                     val serviceIntent = android.content.Intent(context, top.maary.darkbag.processor.HdrPlusProcessingService::class.java)

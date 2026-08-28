@@ -228,6 +228,9 @@ object ImageUtils {
             val bmpH = kotlin.math.max(1, (fullH / zoomFactor).toInt())
             val bitmap = Bitmap.createBitmap(bmpW, bmpH, Bitmap.Config.ARGB_8888)
 
+            val prefs = context.getSharedPreferences(top.maary.darkbag.fragments.SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+            val memColor = prefs.getBoolean(top.maary.darkbag.fragments.SettingsFragment.KEY_MEMORY_COLOR_OPTIMIZATION, false)
+
             coroutineContext.ensureActive()
             val result = ColorProcessor.processRaw(
                 dngData = dngBytes,
@@ -240,7 +243,8 @@ object ImageUtils {
                 mirror = false,
                 outputBitmap = bitmap,
                 downsampleFactor = downsample,
-                zoomFactor = zoomFactor
+                zoomFactor = zoomFactor,
+                enableMemoryColor = memColor
             )
 
             if (result < 0) {
