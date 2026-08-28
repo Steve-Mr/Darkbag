@@ -154,12 +154,19 @@ class ProDialWheelView @JvmOverloads constructor(
         resolveColors()
     }
 
+    fun setThemeColors(primary: Int, onSurface: Int = Color.WHITE, onSurfaceVariant: Int = Color.parseColor("#B0BEC5")) {
+        colorAccent = primary
+        colorIndicator = primary
+        colorOnSurface = onSurface
+        colorOnSurfaceVariant = onSurfaceVariant
+        invalidate()
+    }
+
     private fun resolveColors() {
-        // High-contrast, clean colors for camera overlay
-        colorOnSurface = Color.WHITE
-        colorOnSurfaceVariant = Color.parseColor("#B0BEC5") // Light blue-gray for minor ticks
-        colorAccent = Color.parseColor("#FFD54F") // Luminous Amber-Gold for selected item
+        colorAccent = MaterialColors.getColor(this, android.R.attr.colorPrimary, Color.parseColor("#FFD54F"))
         colorIndicator = colorAccent
+        colorOnSurface = MaterialColors.getColor(this, com.google.android.material.R.attr.colorOnSurface, Color.WHITE)
+        colorOnSurfaceVariant = MaterialColors.getColor(this, com.google.android.material.R.attr.colorOutlineVariant, Color.parseColor("#B0BEC5"))
     }
 
     fun setItems(newItems: List<DialItem>, initialIndex: Int = 0) {
