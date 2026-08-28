@@ -53,7 +53,8 @@ class LutSurfaceProcessor : SurfaceProcessor {
     private var inputHeight = 0
 
     private val transformMatrix = FloatArray(16)
-
+    private var currentColorEngineMode = 0
+    private var colorEngineModeLoc = -1
     private var scaleLoc = -1
     private var textureLoc = -1
     private var textureMatrixLoc = -1
@@ -71,6 +72,12 @@ class LutSurfaceProcessor : SurfaceProcessor {
     fun setFocusPeakingEnabled(enabled: Boolean) {
         handler.post {
             isFocusPeakingEnabled = enabled
+        }
+    }
+
+    fun updateColorEngineMode(engineMode: Int) {
+        handler.post {
+            currentColorEngineMode = engineMode
         }
     }
 
@@ -489,6 +496,7 @@ class LutSurfaceProcessor : SurfaceProcessor {
         if (gamutMatrixLoc >= 0) GLES30.glUniformMatrix3fv(gamutMatrixLoc, 1, false, currentGamutMatrix, 0)
         if (logTypeLoc >= 0) GLES30.glUniform1i(logTypeLoc, currentLogType)
         if (lutSizeLoc >= 0) GLES30.glUniform1i(lutSizeLoc, currentLutSize)
+        if (colorEngineModeLoc >= 0) GLES30.glUniform1i(colorEngineModeLoc, currentColorEngineMode)
         if (focusPeakingLoc >= 0) GLES30.glUniform1i(focusPeakingLoc, if (isFocusPeakingEnabled) 1 else 0)
         if (texelSizeLoc >= 0) {
             val tw = if (inputWidth > 0) 1.0f / inputWidth.toFloat() else 1.0f / 1080f
@@ -558,6 +566,7 @@ class LutSurfaceProcessor : SurfaceProcessor {
             if (gamutMatrixLoc >= 0) GLES30.glUniformMatrix3fv(gamutMatrixLoc, 1, false, currentGamutMatrix, 0)
             if (logTypeLoc >= 0) GLES30.glUniform1i(logTypeLoc, currentLogType)
             if (lutSizeLoc >= 0) GLES30.glUniform1i(lutSizeLoc, currentLutSize)
+            if (colorEngineModeLoc >= 0) GLES30.glUniform1i(colorEngineModeLoc, currentColorEngineMode)
 
             if (posHandle >= 0) {
                 vertexBuffer.position(0)
@@ -611,6 +620,7 @@ class LutSurfaceProcessor : SurfaceProcessor {
             uniform mat3 uGamutMatrix;
             uniform int uLogType;
             uniform int uLutSize;
+            uniform int uColorEngineMode;
             uniform int uFocusPeakingEnabled;
             uniform vec2 uTexelSize;
 
@@ -624,12 +634,118 @@ class LutSurfaceProcessor : SurfaceProcessor {
                 return mix(linearLow, linearHigh, step(vec3(0.04045), c));
             }
 
-            // 2. High-precision base-10 log helper
+            // 2. Precise Linear to sRGB OETF
+            vec3 linearToSrgb(vec3 c) {
+                vec3 low = 12.92 * c;
+                vec3 high = 1.055 * pow(max(c, vec3(0.0)), vec3(1.0 / 2.4)) - vec3(0.055);
+                return mix(low, high, step(vec3(0.0031308), c));
+            }
+
+            // 3. High-precision base-10 log helper
             float log10_f(float x) {
                 return log(max(x, 1e-7)) * 0.4342944819;
             }
 
-            // 3. GLSL Analytic Log Curves (Identical to ColorPipe.cpp)
+            // 4. Color Rendering Engines in Linear Domain
+            // 4.1 Khronos PBR Neutral
+            vec3 applyPbrNeutral(vec3 color) {
+                const float startCompression = 0.8 - 0.04;
+                const float desaturation = 0.15;
+
+                float x = min(color.r, min(color.g, color.b));
+                float offset = x < 0.08 ? x - 6.25 * x * x : 0.04;
+                color -= offset;
+
+                float peak = max(color.r, max(color.g, color.b));
+                if (peak < startCompression) return max(vec3(0.0), color);
+
+                const float d = 1.0 - startCompression;
+                float newPeak = 1.0 - d * d / (peak + d - startCompression);
+                color *= newPeak / peak;
+
+                float g = 1.0 - 1.0 / (desaturation * (peak - newPeak) + 1.0);
+                return clamp(mix(color, vec3(newPeak), g), 0.0, 1.0);
+            }
+
+            // 4.2 Pure Luma Filmic
+            float filmicLumaCurve(float Y) {
+                if (Y <= 0.0) return 0.0;
+                const float A = 2.35;
+                const float B = 0.02;
+                const float C = 2.35;
+                const float D = 0.70;
+                const float E = 0.12;
+                return clamp((Y * (A * Y + B)) / (Y * (C * Y + D) + E), 0.0, 1.0);
+            }
+
+            vec3 applyPureLuma(vec3 c) {
+                float luma = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+                if (luma <= 0.00001) return vec3(0.0);
+
+                float mappedLuma = filmicLumaCurve(luma);
+                float scale = mappedLuma / luma;
+                vec3 outCol = c * scale;
+
+                if (mappedLuma > 0.85) {
+                    float t = (mappedLuma - 0.85) / 0.15;
+                    float factor = 1.0 - (t * t * (3.0 - 2.0 * t)) * 0.5;
+                    outCol = vec3(mappedLuma) + (outCol - vec3(mappedLuma)) * factor;
+                }
+                return clamp(outCol, 0.0, 1.0);
+            }
+
+            // 4.3 Sony Uchimura
+            float uchimuraScalar(float x) {
+                if (x <= 0.0) return 0.0;
+                const float P = 1.0;
+                const float a = 1.25;
+                const float m = 0.22;
+                const float l = 0.40;
+                const float c = 1.33;
+                const float b = 0.0;
+
+                const float l0 = ((P - m) * l) / a;
+                const float S0 = m + l0;
+                const float S1 = m + a * l0;
+                const float C2 = (a * P) / (P - S1);
+                const float CP = -C2 / P;
+
+                if (x <= m) {
+                    return m * pow(x / m, c) + b;
+                } else if (x < m + l0) {
+                    return m + a * (x - m);
+                } else {
+                    return P - (P - S1) * exp(CP * (x - S0));
+                }
+            }
+
+            vec3 applySonyUchimura(vec3 c) {
+                float luma = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+                if (luma <= 0.00001) return vec3(0.0);
+
+                float mappedLuma = uchimuraScalar(luma);
+                float scale = mappedLuma / luma;
+                vec3 outCol = c * scale;
+
+                if (mappedLuma > 0.85) {
+                    float t = (mappedLuma - 0.85) / 0.15;
+                    float factor = 1.0 - (t * t * (3.0 - 2.0 * t)) * 0.5;
+                    outCol = vec3(mappedLuma) + (outCol - vec3(mappedLuma)) * factor;
+                }
+                return clamp(outCol, 0.0, 1.0);
+            }
+
+            // 4.4 ACES Fit
+            vec3 applyAcesFit(vec3 v) {
+                const float a = 2.51;
+                const float b = 0.03;
+                const float c = 2.43;
+                const float d = 0.59;
+                const float e = 0.14;
+                return clamp((v * (a * v + b)) / (v * (c * v + d) + e), 0.0, 1.0);
+            }
+
+            // 5. GLSL Analytic Log Curves (Identical to ColorPipe.cpp)
             float applyLogCurve(float x, int type) {
                 x = max(x, 0.0);
                 if (type == 1) { // Arri LogC3
@@ -648,14 +764,11 @@ class LutSurfaceProcessor : SurfaceProcessor {
                     if (x >= 0.01) return 0.241514 * log10_f(x + 0.008730) + 0.598206;
                     else return 5.6 * x + 0.125;
                 } else { // Default sRGB: ACES Filmic Tone Mapping + sRGB OETF
-                    float a = 2.51, b = 0.03, c = 2.43, d = 0.59, e = 0.14;
-                    float fitted = clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
-                    if (fitted <= 0.0031308) return 12.92 * fitted;
-                    else return 1.055 * pow(fitted, 1.0 / 2.4) - 0.055;
+                    return applyAcesFit(vec3(x)).r;
                 }
             }
 
-            // 4. True Triangular PDF (TPDF) dithering (+-1.0 LSB amplitude) to eliminate 8-bit quantization banding
+            // 6. True Triangular PDF (TPDF) dithering (+-1.0 LSB amplitude) to eliminate 8-bit quantization banding
             vec3 triangularDither(vec3 color, vec2 coord) {
                 vec3 n1 = fract(sin(vec3(
                     dot(coord, vec2(12.9898, 78.233)),
@@ -698,8 +811,31 @@ class LutSurfaceProcessor : SurfaceProcessor {
 
                     // Step F: Apply high-frequency TPDF dithering to eliminate 8-bit quantization banding
                     finalRgb = triangularDither(graded, gl_FragCoord.xy);
+                } else if (uLogType > 0) {
+                    // Pure Log mode (no LUT attached)
+                    vec3 linearRgb = srgbToLinear(src.rgb);
+                    vec3 wideGamutRgb = max(vec3(0.0), uGamutMatrix * linearRgb);
+                    vec3 logRgb = vec3(
+                        applyLogCurve(wideGamutRgb.r, uLogType),
+                        applyLogCurve(wideGamutRgb.g, uLogType),
+                        applyLogCurve(wideGamutRgb.b, uLogType)
+                    );
+                    finalRgb = triangularDither(logRgb, gl_FragCoord.xy);
                 } else {
-                    finalRgb = src.rgb;
+                    // Log=None and LUT=None: apply selected Color Rendering Engine
+                    vec3 linearRgb = srgbToLinear(src.rgb);
+                    vec3 mapped;
+                    if (uColorEngineMode == 0) {
+                        mapped = applyPbrNeutral(linearRgb);
+                    } else if (uColorEngineMode == 1) {
+                        mapped = applyPureLuma(linearRgb);
+                    } else if (uColorEngineMode == 2) {
+                        mapped = applySonyUchimura(linearRgb);
+                    } else {
+                        mapped = applyAcesFit(linearRgb);
+                    }
+                    vec3 srgbOut = linearToSrgb(mapped);
+                    finalRgb = triangularDither(srgbOut, gl_FragCoord.xy);
                 }
 
                 // Focus Peaking (High-pass Sobel / edge detection in OES texture coordinates)
@@ -735,6 +871,7 @@ class LutSurfaceProcessor : SurfaceProcessor {
         gamutMatrixLoc = GLES30.glGetUniformLocation(program, "uGamutMatrix")
         logTypeLoc = GLES30.glGetUniformLocation(program, "uLogType")
         lutSizeLoc = GLES30.glGetUniformLocation(program, "uLutSize")
+        colorEngineModeLoc = GLES30.glGetUniformLocation(program, "uColorEngineMode")
         focusPeakingLoc = GLES30.glGetUniformLocation(program, "uFocusPeakingEnabled")
         texelSizeLoc = GLES30.glGetUniformLocation(program, "uTexelSize")
 

@@ -3468,6 +3468,8 @@ class CameraFragment : Fragment() {
                 }
             }
             if (isActive) {
+                val engineMode = prefs.getInt(SettingsFragment.KEY_COLOR_ENGINE_MODE, 0)
+                proc.updateColorEngineMode(engineMode)
                 proc.updateLut(lutData, size, targetLogIndex)
             }
         }
