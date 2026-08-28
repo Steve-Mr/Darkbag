@@ -22,6 +22,7 @@ import top.maary.darkbag.utils.LensInfo
 import top.maary.darkbag.utils.CameraRepository
 import top.maary.darkbag.motionphoto.MotionPhotoEncoder
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.NonCancellable
 import android.content.res.ColorStateList
 
 import android.animation.ValueAnimator
@@ -496,7 +497,7 @@ class CameraFragment : Fragment() {
         motionPhotoEncoder?.stop()
         motionPhotoEncoder = null
         // Ensure Camera2 is closed when stopping to release hardware resources
-        lifecycleScope.launch {
+        lifecycleScope.launch(Dispatchers.Main.immediate + NonCancellable) {
             releaseCamera2Resources()
         }
     }
@@ -513,7 +514,6 @@ class CameraFragment : Fragment() {
         }
 
         updateHdrPlusConstraints()
-
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
         val previousMultiCam = isMultiCameraModeActive
         val previousHalfFrame = isHalfFrameModeEnabled
@@ -555,7 +555,7 @@ class CameraFragment : Fragment() {
         _fragmentCameraBinding = null
         super.onDestroyView()
 
-        lifecycleScope.launch {
+        lifecycleScope.launch(Dispatchers.Main.immediate + NonCancellable) {
             closeCamera2()
         }
 
@@ -607,12 +607,23 @@ class CameraFragment : Fragment() {
                 photoViewButton.alpha = 1f
             }
 
-            val file = java.io.File(filename)
-            val loadTarget = if (file.exists()) file else filename
-            Glide.with(photoViewButton)
-                .load(loadTarget)
-                .apply(RequestOptions.circleCropTransform())
-                .into(photoViewButton)
+            photoViewButton.setPadding(resources.getDimension(R.dimen.stroke_small).toInt())
+            lifecycleScope.launch(Dispatchers.Main) {
+                val lastModified = try {
+                    context?.let { mediaStoreUtils.getFileLastModified(it, android.net.Uri.parse(filename)) } ?: 0L
+                } catch (e: Exception) {
+                    val file = java.io.File(filename)
+                    if (file.exists()) file.lastModified() else 0L
+                }
+
+                val file = java.io.File(filename)
+                val loadTarget = if (file.exists()) file else filename
+                Glide.with(photoViewButton)
+                    .load(loadTarget)
+                    .apply(RequestOptions.circleCropTransform())
+                    .signature(com.bumptech.glide.signature.ObjectKey(lastModified))
+                    .into(photoViewButton)
+            }
         }
     }
 
@@ -1083,11 +1094,19 @@ class CameraFragment : Fragment() {
         // Re-apply half-frame transformations and UI if enabled
         updateHalfFrameUI()
 
-        // Pre-initialize JNI memory pool with burst size
+        // Pre-initialize JNI memory pool with burst size and sensor resolution
         val burstSizeStr = prefs.getString(SettingsFragment.KEY_HDR_BURST_COUNT, "5") ?: "5"
         val burstSize = burstSizeStr.toIntOrNull() ?: 5
         lifecycleScope.launch(Dispatchers.Default) {
-            ColorProcessor.initMemoryPool(4000, 3000, burstSize)
+            val targetCharId = currentLens?.id ?: targetId
+            val sensorSize = try {
+                val c = camera2Manager.getCameraCharacteristics(targetCharId)
+                val m = c.get(android.hardware.camera2.CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+                val rawSizes = m?.getOutputSizes(android.graphics.ImageFormat.RAW_SENSOR)
+                rawSizes?.maxByOrNull { it.width * it.height }
+                    ?: c.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)?.let { android.util.Size(it.width(), it.height()) }
+            } catch (e: Exception) { null } ?: android.util.Size(4000, 3000)
+            ColorProcessor.initMemoryPool(sensorSize.width, sensorSize.height, burstSize)
         }
 
         // Give system a moment to release hardware
@@ -3618,14 +3637,22 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         val map = chars.get(android.hardware.camera2.CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
 
         val isRawSupportedLocally = map?.getOutputFormats()?.contains(android.graphics.ImageFormat.RAW_SENSOR) == true
+        val targetCaptureSize: android.util.Size
         if (isRawSupportedLocally) {
             val rawSizes = map?.getOutputSizes(android.graphics.ImageFormat.RAW_SENSOR)
-            val size = rawSizes?.maxByOrNull { it.width * it.height } ?: android.util.Size(4000, 3000)
-            rawImageReader = ImageReader.newInstance(size.width, size.height, android.graphics.ImageFormat.RAW_SENSOR, 8)
+            targetCaptureSize = rawSizes?.maxByOrNull { it.width * it.height } ?: android.util.Size(4000, 3000)
+            rawImageReader = ImageReader.newInstance(targetCaptureSize.width, targetCaptureSize.height, android.graphics.ImageFormat.RAW_SENSOR, 8)
         } else {
             val jpegSizes = map?.getOutputSizes(android.graphics.ImageFormat.JPEG)
-            val size = jpegSizes?.maxByOrNull { it.width * it.height } ?: android.util.Size(4000, 3000)
-            rawImageReader = ImageReader.newInstance(size.width, size.height, android.graphics.ImageFormat.JPEG, 8)
+            targetCaptureSize = jpegSizes?.maxByOrNull { it.width * it.height } ?: android.util.Size(4000, 3000)
+            rawImageReader = ImageReader.newInstance(targetCaptureSize.width, targetCaptureSize.height, android.graphics.ImageFormat.JPEG, 8)
+        }
+
+        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val burstSizeStr = prefs.getString(SettingsFragment.KEY_HDR_BURST_COUNT, "5") ?: "5"
+        val burstSize = burstSizeStr.toIntOrNull() ?: 5
+        lifecycleScope.launch(Dispatchers.Default) {
+            ColorProcessor.initMemoryPool(targetCaptureSize.width, targetCaptureSize.height, burstSize)
         }
 
         val yuvSizes = map?.getOutputSizes(android.graphics.ImageFormat.YUV_420_888)
