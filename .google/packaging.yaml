@@ -12,7 +12,4 @@ solutions:    [Mobile]
 github:       android/camera
 level:        INTERMEDIATE
 icon:         screenshots/icon-web.png
-apiRefs:
-    - androidx.camera:camera-core
-    - androidx.camera:camera-camera2
 license: apache2

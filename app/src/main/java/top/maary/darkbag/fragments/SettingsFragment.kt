@@ -202,7 +202,7 @@ class SettingsFragment : Fragment() {
         }
 
         // Default Lens (Startup)
-        val lenses = cameraRepository.getAllFocalLengthPresets(emptySet())
+        val lenses = cameraRepository.getAllFocalLengthPresets()
         val lensDisplayNames = lenses.map { it.name }
         val lensAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, lensDisplayNames)
         binding.menuDefaultLens.setAdapter(lensAdapter)
@@ -223,7 +223,7 @@ class SettingsFragment : Fragment() {
         }
 
         // 1.0x Default Focal Length
-        val mainWide = cameraRepository.getMainWideLens(emptySet())
+        val mainWide = cameraRepository.getMainWideLens()
         if (mainWide != null) {
             val presets1x = cameraRepository.get1xPresets(mainWide)
             val names1x = presets1x.map { it.name }
@@ -485,7 +485,6 @@ class SettingsFragment : Fragment() {
         setupMultiCameraSettings()
 
         setupSwitch(binding.switchMirrorFront, KEY_MIRROR_FRONT_CAMERA)
-        setupSwitch(binding.switchUseCamerax, KEY_USE_CAMERAX, false)
         setupSwitch(binding.switchHdrPlusOis, KEY_HDR_PLUS_OIS)
 
         binding.switchUseInternalViewer.isChecked = prefs.getBoolean(KEY_USE_INTERNAL_VIEWER, true)
@@ -735,7 +734,6 @@ class SettingsFragment : Fragment() {
         const val KEY_SHOW_MODE_SWITCH_BUTTON = "show_mode_switch_button"
         const val KEY_SHOW_LENS_CONTROLS = "show_lens_controls"
         const val KEY_SHOW_LUT_SWITCHER = "show_lut_switcher"
-        const val KEY_USE_CAMERAX = "use_camerax_engine"
         const val KEY_MIRROR_FRONT_CAMERA = "mirror_front_camera"
         const val KEY_HDR_PLUS_OIS = "hdr_plus_ois_enabled"
         const val KEY_FORCE_60FPS = "force_60fps"

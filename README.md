@@ -1,20 +1,20 @@
-# CameraXbasic
+# Darkbag
 
-CameraXbasic aims to demonstrate how to use CameraX APIs written in Kotlin.
+Darkbag is a professional computational photography camera app powered by native Camera2 and Halide image processing pipelines written in Kotlin and C++.
 
 ## Features
-- **Manual Camera Controls**: ISO, Shutter Speed, Focus.
-- **Log Curves**: Support for F-Log2, S-Log3, Canon Log, etc.
-- **LUT Support**: Import and apply 3D LUTs (.cube) to previews and captured images.
-- **RAW Processing**: Native processing using LibRaw.
-- **HDR+ Support**: Burst mode computational photography.
+- **Manual Camera Controls**: ISO, Shutter Speed, Focus, Exposure Compensation (EV).
+- **Log Curves & ACES**: Support for F-Log2, S-Log3, Canon Log, Rec.709, and Film Emulation engines.
+- **LUT Support**: Import and apply 3D LUTs (.cube) with real-time EGL/GL preview and rendering.
+- **RAW Processing**: Native processing using LibRaw and high-performance Halide pipelines.
+- **HDR+ Support**: Burst mode computational photography with RAW alignment and merging.
 
 ## HDR+ Usage
 
 To use the HDR+ feature:
-1. Ensure your device supports RAW capture (CameraX/Camera2 API Level Full/Level 3).
+1. Ensure your device supports RAW capture (Camera2 Hardware Level Full/Level 3).
 2. Tap the **HDR+** toggle in the camera interface to enable it (icon turns blue).
-3. Press the shutter button. The app will capture a burst of 3 RAW frames.
+3. Press the shutter button. The app will capture a burst of RAW frames.
 4. The frames are aligned and merged using the [timothybrooks/hdr-plus](https://github.com/timothybrooks/hdr-plus) algorithm (implemented in Halide) to reduce noise and increase dynamic range.
 5. The result is saved as a new RAW (DNG) file, along with optional JPG outputs.
 

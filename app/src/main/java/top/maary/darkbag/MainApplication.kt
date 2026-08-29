@@ -1,19 +1,11 @@
 package top.maary.darkbag
 
 import android.app.Application
-import android.util.Log
-import androidx.camera.camera2.Camera2Config
-import androidx.camera.core.CameraXConfig
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableSharedFlow
 
-/**
- * Set CameraX logging level to Log.ERROR to avoid excessive logcat messages.
- * Refer to https://developer.android.com/reference/androidx/camera/core/CameraXConfig.Builder#setMinimumLoggingLevel(int)
- * for details.
- */
-class MainApplication : Application(), CameraXConfig.Provider {
+class MainApplication : Application() {
     // Global scope for background processing that should survive UI destruction
     val applicationScope = CoroutineScope(SupervisorJob())
 
@@ -23,15 +15,10 @@ class MainApplication : Application(), CameraXConfig.Provider {
     override fun onCreate() {
         super.onCreate()
         // Clear session-based camera settings on app startup
-        val prefs = getSharedPreferences("camera_settings", android.content.Context.MODE_PRIVATE)
+        val prefs = getSharedPreferences(top.maary.darkbag.fragments.SettingsFragment.PREFS_NAME, android.content.Context.MODE_PRIVATE)
         prefs.edit()
-            .remove("selected_lens_sensor_id")
-            .remove("lens_facing")
+            .remove(top.maary.darkbag.fragments.CameraFragment.KEY_SELECTED_LENS_ID)
+            .remove(top.maary.darkbag.fragments.CameraFragment.KEY_LENS_FACING)
             .apply()
-    }
-
-    override fun getCameraXConfig(): CameraXConfig {
-        return CameraXConfig.Builder.fromConfig(Camera2Config.defaultConfig())
-            .setMinimumLoggingLevel(Log.ERROR).build()
     }
 }
