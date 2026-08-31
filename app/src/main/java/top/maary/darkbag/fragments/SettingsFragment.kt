@@ -817,7 +817,7 @@ class SettingsFragment : Fragment() {
         )
 
         const val KEY_RAW_VIDEO_FPS = "raw_video_fps"
-        val RAW_VIDEO_FPS_OPTIONS = listOf("24", "60")
+        val RAW_VIDEO_FPS_OPTIONS = listOf("24", "30", "60")
 
         const val KEY_RAW_VIDEO_RESOLUTION = "raw_video_resolution"
         val RAW_VIDEO_RESOLUTION_OPTIONS = listOf("1080p", "2K")

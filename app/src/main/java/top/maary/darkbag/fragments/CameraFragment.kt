@@ -4378,6 +4378,15 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             orientation = combinedOrientation
         )
 
+        val targetFpsInt = targetFps.toInt()
+        val availableFpsRanges = chars.get(android.hardware.camera2.CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
+        val bestFpsRange = availableFpsRanges?.find { it.lower == targetFpsInt && it.upper == targetFpsInt }
+            ?: availableFpsRanges?.find { it.upper == targetFpsInt }
+            ?: availableFpsRanges?.find { it.lower <= targetFpsInt && it.upper >= targetFpsInt }
+            ?: availableFpsRanges?.maxByOrNull { it.upper }
+
+        val frameDurationNs = (1_000_000_000L / targetFps).toLong()
+
         if (success) {
             cameraUiContainerBinding?.cameraCaptureButton?.setRecordingState(true)
             cameraUiContainerBinding?.cameraCaptureButton?.startRotation()
@@ -4392,7 +4401,28 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 camera2PreviewSurface?.let { request.addTarget(it) }
                 request.addTarget(reader.surface)
                 analysisImageReader?.surface?.let { request.addTarget(it) }
+
+                // 1. Lock Target FPS range for AE to enforce frame rate and AE exposure ceiling
+                if (bestFpsRange != null) {
+                    request.set(android.hardware.camera2.CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, bestFpsRange)
+                    Log.i(TAG, "RAW video locked AE FPS Range: $bestFpsRange (target: ${targetFps}fps)")
+                }
+
+                // 2. Lock Frame Duration
+                request.set(android.hardware.camera2.CaptureRequest.SENSOR_FRAME_DURATION, frameDurationNs)
+
+                // 3. Apply manual exposure settings if active
                 applyManualSettingsToRequest(request)
+
+                // 4. Shutter speed safety clamp: in manual exposure mode, exposure time must NOT exceed frameDurationNs
+                if (isManualExposure) {
+                    val currentExp = request.get(android.hardware.camera2.CaptureRequest.SENSOR_EXPOSURE_TIME)
+                    if (currentExp != null && currentExp > frameDurationNs) {
+                        request.set(android.hardware.camera2.CaptureRequest.SENSOR_EXPOSURE_TIME, frameDurationNs)
+                        Log.w(TAG, "Clamped manual shutter ($currentExp ns) to frame duration ($frameDurationNs ns)")
+                    }
+                }
+
                 session.setRepeatingRequest(request.build(), object : android.hardware.camera2.CameraCaptureSession.CaptureCallback() {
                     override fun onCaptureCompleted(session: android.hardware.camera2.CameraCaptureSession, request: android.hardware.camera2.CaptureRequest, result: android.hardware.camera2.TotalCaptureResult) {
                         handleCaptureResult(result)
