@@ -35,7 +35,8 @@ class RawVideoSessionManager {
         initialResult: CaptureResult?,
         targetFps: Float = 24.0f,
         activeLutName: String? = null,
-        activeLogName: String? = null
+        activeLogName: String? = null,
+        orientation: Int = 0
     ): Boolean {
         if (isRecording.get()) {
             Log.w(TAG, "Recording already in progress")
@@ -43,7 +44,9 @@ class RawVideoSessionManager {
         }
 
         val rawSizes = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
-            ?.getOutputSizes(android.graphics.ImageFormat.RAW10)
+            ?.getOutputSizes(android.graphics.ImageFormat.RAW_SENSOR)
+            ?: characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+                ?.getOutputSizes(android.graphics.ImageFormat.RAW10)
         val selectedSize = rawSizes?.firstOrNull() ?: characteristics.get(CameraCharacteristics.SENSOR_INFO_PIXEL_ARRAY_SIZE)
         val width = selectedSize?.width ?: 1920
         val height = selectedSize?.height ?: 1080
@@ -89,6 +92,38 @@ class RawVideoSessionManager {
             System.arraycopy(colorMatrix1, 0, colorMatrix2, 0, 9)
         }
 
+        val forwardMatrix1 = FloatArray(9) { 0f }
+        val fm1 = characteristics.get(CameraCharacteristics.SENSOR_FORWARD_MATRIX1)
+        if (fm1 != null) {
+            for (r in 0 until 3) {
+                for (c in 0 until 3) {
+                    val rational = fm1.getElement(c, r)
+                    forwardMatrix1[r * 3 + c] = rational.numerator.toFloat() / rational.denominator.toFloat()
+                }
+            }
+        } else {
+            forwardMatrix1[0] = 1f; forwardMatrix1[4] = 1f; forwardMatrix1[8] = 1f
+        }
+
+        val forwardMatrix2 = FloatArray(9) { 0f }
+        val fm2 = characteristics.get(CameraCharacteristics.SENSOR_FORWARD_MATRIX2)
+        if (fm2 != null) {
+            for (r in 0 until 3) {
+                for (c in 0 until 3) {
+                    val rational = fm2.getElement(c, r)
+                    forwardMatrix2[r * 3 + c] = rational.numerator.toFloat() / rational.denominator.toFloat()
+                }
+            }
+        } else {
+            System.arraycopy(forwardMatrix1, 0, forwardMatrix2, 0, 9)
+        }
+
+        val calibrationIlluminant1 = (characteristics.get(CameraCharacteristics.SENSOR_REFERENCE_ILLUMINANT1) ?: 21).toInt()
+        val calibrationIlluminant2 = (characteristics.get(CameraCharacteristics.SENSOR_REFERENCE_ILLUMINANT2) ?: 17).toInt()
+        val baselineExposure = 0.0f
+        val make = android.os.Build.MANUFACTURER
+        val model = android.os.Build.MODEL
+
         val neutralPoint = FloatArray(3) { 1.0f }
         val np = initialResult?.get(CaptureResult.SENSOR_NEUTRAL_COLOR_POINT)
         if (np != null && np.size >= 3 && np[0].numerator > 0 && np[1].numerator > 0 && np[2].numerator > 0) {
@@ -125,9 +160,17 @@ class RawVideoSessionManager {
             blackLevel = blackLevelArray,
             colorMatrix1 = colorMatrix1,
             colorMatrix2 = colorMatrix2,
+            forwardMatrix1 = forwardMatrix1,
+            forwardMatrix2 = forwardMatrix2,
             neutralPoint = neutralPoint,
             lutName = activeLutName,
-            logName = activeLogName
+            logName = activeLogName,
+            orientation = orientation,
+            calibrationIlluminant1 = calibrationIlluminant1,
+            calibrationIlluminant2 = calibrationIlluminant2,
+            baselineExposure = baselineExposure,
+            make = make,
+            model = model
         )
 
         if (nativeHandle == 0L) {
@@ -138,16 +181,22 @@ class RawVideoSessionManager {
         currentOutputPath = outputPath
         recordedFrames = 0
         startTimestampNs = System.nanoTime()
-        isRecording.set(true)
 
         // Start synchronized audio recorder
-        audioRecorder = AudioRecorder(sampleRate = 48000) { buffer, size, timestampNs, sampleCount ->
-            if (isRecording.get() && nativeHandle != 0L) {
-                RawVideoNative.nativePushAudioPacket(nativeHandle, buffer, size, timestampNs, sampleCount)
+        audioRecorder = AudioRecorder(sampleRate = 48000) { pcmBuffer, size, timestampNs, sampleCount ->
+            if (nativeHandle != 0L && isRecording.get()) {
+                RawVideoNative.nativePushAudioPacket(
+                    handle = nativeHandle,
+                    pcmBuffer = pcmBuffer,
+                    pcmSize = size,
+                    timestampNs = timestampNs,
+                    sampleCount = sampleCount
+                )
             }
         }.apply { start() }
 
-        Log.i(TAG, "Raw video recording started ($width x $height @ $targetFps fps)")
+        isRecording.set(true)
+        Log.i(TAG, "Raw video recording started: $outputPath (${width}x${height} @ ${targetFps}fps, orient=$orientation)")
         return true
     }
 
@@ -168,6 +217,8 @@ class RawVideoSessionManager {
             val timestampNs = result?.get(CaptureResult.SENSOR_TIMESTAMP) ?: System.nanoTime()
             val exposureTimeNs = result?.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: 10_000_000L
             val iso = result?.get(CaptureResult.SENSOR_SENSITIVITY) ?: 100
+            val fNumber = result?.get(CaptureResult.LENS_APERTURE) ?: 0.0f
+            val focalLength = result?.get(CaptureResult.LENS_FOCAL_LENGTH) ?: 0.0f
 
             val neutralPoint = FloatArray(3) { 1.0f }
             val np = result?.get(CaptureResult.SENSOR_NEUTRAL_COLOR_POINT)
@@ -199,7 +250,9 @@ class RawVideoSessionManager {
                 timestampNs = timestampNs,
                 exposureTimeNs = exposureTimeNs,
                 iso = iso,
-                neutralColorPoint = neutralPoint
+                neutralColorPoint = neutralPoint,
+                fNumber = fNumber,
+                focalLength = focalLength
             )
 
             if (pushed) {

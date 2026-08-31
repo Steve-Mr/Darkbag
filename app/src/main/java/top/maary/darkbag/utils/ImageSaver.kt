@@ -872,7 +872,12 @@ object ImageSaver {
                         outBitmap = bmp
                     )
                     if (debayered) {
-                        thumbnailBitmap = bmp
+                        if (header.orientation != 0) {
+                            val matrix = android.graphics.Matrix().apply { postRotate(header.orientation.toFloat()) }
+                            thumbnailBitmap = Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, matrix, true)
+                        } else {
+                            thumbnailBitmap = bmp
+                        }
                     }
                 }
             }

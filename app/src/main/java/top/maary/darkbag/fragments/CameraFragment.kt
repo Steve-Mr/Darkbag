@@ -4367,13 +4367,15 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         val tempFile = File(tempDir, "${baseName}.rawvid")
 
         val lastResult = captureResults.values.lastOrNull()
+        val combinedOrientation = getCombinedOrientation()
         val success = rawVideoSessionManager.startRecording(
             outputPath = tempFile.absolutePath,
             characteristics = chars,
             initialResult = lastResult,
             targetFps = targetFps,
             activeLutName = activeLut,
-            activeLogName = activeLog
+            activeLogName = activeLog,
+            orientation = combinedOrientation
         )
 
         if (success) {

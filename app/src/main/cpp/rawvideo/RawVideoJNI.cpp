@@ -39,9 +39,17 @@ Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeStartRecording(
         jfloatArray jBlackLevel,
         jfloatArray jColorMatrix1,
         jfloatArray jColorMatrix2,
+        jfloatArray jForwardMatrix1,
+        jfloatArray jForwardMatrix2,
         jfloatArray jNeutralPoint,
         jstring jLutName,
-        jstring jLogName
+        jstring jLogName,
+        jint orientation,
+        jint calibrationIlluminant1,
+        jint calibrationIlluminant2,
+        jfloat baselineExposure,
+        jstring jMake,
+        jstring jModel
 ) {
     const char* outputPathStr = env->GetStringUTFChars(jOutputPath, nullptr);
     if (!outputPathStr) return 0;
@@ -57,6 +65,10 @@ Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeStartRecording(
     header.audioChannels = static_cast<uint32_t>(audioChannels);
     header.audioBitDepth = static_cast<uint32_t>(audioBitDepth);
     header.whiteLevel = static_cast<uint32_t>(whiteLevel);
+    header.orientation = static_cast<uint32_t>(orientation);
+    header.calibrationIlluminant1 = static_cast<uint32_t>(calibrationIlluminant1);
+    header.calibrationIlluminant2 = static_cast<uint32_t>(calibrationIlluminant2);
+    header.baselineExposure = baselineExposure;
 
     if (jBlackLevel) {
         jfloat* bl = env->GetFloatArrayElements(jBlackLevel, nullptr);
@@ -82,6 +94,22 @@ Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeStartRecording(
         env->ReleaseFloatArrayElements(jColorMatrix2, cm2, JNI_ABORT);
     }
 
+    if (jForwardMatrix1) {
+        jfloat* fm1 = env->GetFloatArrayElements(jForwardMatrix1, nullptr);
+        for (int i = 0; i < 9 && i < env->GetArrayLength(jForwardMatrix1); ++i) {
+            header.forwardMatrix1[i] = fm1[i];
+        }
+        env->ReleaseFloatArrayElements(jForwardMatrix1, fm1, JNI_ABORT);
+    }
+
+    if (jForwardMatrix2) {
+        jfloat* fm2 = env->GetFloatArrayElements(jForwardMatrix2, nullptr);
+        for (int i = 0; i < 9 && i < env->GetArrayLength(jForwardMatrix2); ++i) {
+            header.forwardMatrix2[i] = fm2[i];
+        }
+        env->ReleaseFloatArrayElements(jForwardMatrix2, fm2, JNI_ABORT);
+    }
+
     if (jNeutralPoint) {
         jfloat* np = env->GetFloatArrayElements(jNeutralPoint, nullptr);
         for (int i = 0; i < 3 && i < env->GetArrayLength(jNeutralPoint); ++i) {
@@ -92,14 +120,34 @@ Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeStartRecording(
 
     if (jLutName) {
         const char* lutStr = env->GetStringUTFChars(jLutName, nullptr);
-        strncpy(header.activeLutName, lutStr, sizeof(header.activeLutName) - 1);
-        env->ReleaseStringUTFChars(jLutName, lutStr);
+        if (lutStr) {
+            strncpy(header.activeLutName, lutStr, sizeof(header.activeLutName) - 1);
+            env->ReleaseStringUTFChars(jLutName, lutStr);
+        }
     }
 
     if (jLogName) {
         const char* logStr = env->GetStringUTFChars(jLogName, nullptr);
-        strncpy(header.activeLogName, logStr, sizeof(header.activeLogName) - 1);
-        env->ReleaseStringUTFChars(jLogName, logStr);
+        if (logStr) {
+            strncpy(header.activeLogName, logStr, sizeof(header.activeLogName) - 1);
+            env->ReleaseStringUTFChars(jLogName, logStr);
+        }
+    }
+
+    if (jMake) {
+        const char* makeStr = env->GetStringUTFChars(jMake, nullptr);
+        if (makeStr) {
+            strncpy(header.make, makeStr, sizeof(header.make) - 1);
+            env->ReleaseStringUTFChars(jMake, makeStr);
+        }
+    }
+
+    if (jModel) {
+        const char* modelStr = env->GetStringUTFChars(jModel, nullptr);
+        if (modelStr) {
+            strncpy(header.model, modelStr, sizeof(header.model) - 1);
+            env->ReleaseStringUTFChars(jModel, modelStr);
+        }
     }
 
     auto* recorder = new RawVideoRecorder();
@@ -126,7 +174,9 @@ Java_top_maary_darkbag_rawvideo_RawVideoNative_nativePushVideoFrame(
         jlong timestampNs,
         jlong exposureTimeNs,
         jint iso,
-        jfloatArray jNeutralColorPoint
+        jfloatArray jNeutralColorPoint,
+        jfloat fNumber,
+        jfloat focalLength
 ) {
     auto* recorder = reinterpret_cast<RawVideoRecorder*>(handle);
     if (!recorder) return JNI_FALSE;
@@ -152,7 +202,9 @@ Java_top_maary_darkbag_rawvideo_RawVideoNative_nativePushVideoFrame(
             static_cast<uint64_t>(timestampNs),
             static_cast<uint64_t>(exposureTimeNs),
             static_cast<uint32_t>(iso),
-            neutralPoint
+            neutralPoint,
+            fNumber,
+            focalLength
     );
 
     return success ? JNI_TRUE : JNI_FALSE;
@@ -164,7 +216,7 @@ Java_top_maary_darkbag_rawvideo_RawVideoNative_nativePushAudioPacket(
         jobject /* thiz */,
         jlong handle,
         jobject jPcmBuffer,
-        jint pcmSize,
+        jint dataSize,
         jlong timestampNs,
         jint sampleCount
 ) {
@@ -176,7 +228,7 @@ Java_top_maary_darkbag_rawvideo_RawVideoNative_nativePushAudioPacket(
 
     bool success = recorder->pushAudioPacket(
             bufferPtr,
-            static_cast<size_t>(pcmSize),
+            static_cast<size_t>(dataSize),
             static_cast<uint64_t>(timestampNs),
             static_cast<uint32_t>(sampleCount)
     );
@@ -191,7 +243,7 @@ Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeStopRecording(
         jlong handle
 ) {
     auto* recorder = reinterpret_cast<RawVideoRecorder*>(handle);
-    if (!recorder) return JNI_TRUE;
+    if (!recorder) return JNI_FALSE;
 
     bool success = recorder->stopRecording();
     delete recorder;
@@ -224,7 +276,6 @@ Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeOpenReaderFd(
         jobject /* thiz */,
         jint fd
 ) {
-    if (fd < 0) return 0;
     auto* reader = new RawVideoReader();
     if (!reader->openFd(fd)) {
         delete reader;
@@ -238,9 +289,9 @@ Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeGetHeader(
         JNIEnv* env,
         jobject /* thiz */,
         jlong handle,
-        jintArray jIntParams,    // [width, height, bitDepth, cfaPattern, compressionType, audioSampleRate, audioChannels, whiteLevel, frameCount]
-        jfloatArray jFloatParams, // [fps, blackLevel(4), neutralPoint(3)]
-        jobjectArray jStringParams // [activeLutName, activeLogName]
+        jintArray jIntParams,    // [width, height, bitDepth, cfaPattern, compressionType, audioSampleRate, audioChannels, whiteLevel, frameCount, orientation, calibrationIlluminant1, calibrationIlluminant2]
+        jfloatArray jFloatParams, // [fps, blackLevel(4), neutralPoint(3), baselineExposure, colorMatrix1(9), colorMatrix2(9), forwardMatrix1(9), forwardMatrix2(9)]
+        jobjectArray jStringParams // [activeLutName, activeLogName, make, model]
 ) {
     auto* reader = reinterpret_cast<RawVideoReader*>(handle);
     if (!reader) return JNI_FALSE;
@@ -248,8 +299,8 @@ Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeGetHeader(
     FileHeader header{};
     if (!reader->readHeader(header)) return JNI_FALSE;
 
-    if (jIntParams && env->GetArrayLength(jIntParams) >= 9) {
-        jint intData[9] = {
+    if (jIntParams && env->GetArrayLength(jIntParams) >= 12) {
+        jint intData[12] = {
                 static_cast<jint>(header.width),
                 static_cast<jint>(header.height),
                 static_cast<jint>(header.bitDepth),
@@ -258,25 +309,36 @@ Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeGetHeader(
                 static_cast<jint>(header.audioSampleRate),
                 static_cast<jint>(header.audioChannels),
                 static_cast<jint>(header.whiteLevel),
-                static_cast<jint>(header.frameCount)
+                static_cast<jint>(header.frameCount),
+                static_cast<jint>(header.orientation),
+                static_cast<jint>(header.calibrationIlluminant1),
+                static_cast<jint>(header.calibrationIlluminant2)
         };
-        env->SetIntArrayRegion(jIntParams, 0, 9, intData);
+        env->SetIntArrayRegion(jIntParams, 0, 12, intData);
     }
 
-    if (jFloatParams && env->GetArrayLength(jFloatParams) >= 8) {
-        jfloat floatData[8] = {
-                header.fps,
-                header.blackLevel[0], header.blackLevel[1], header.blackLevel[2], header.blackLevel[3],
-                header.neutralColorPoint[0], header.neutralColorPoint[1], header.neutralColorPoint[2]
-        };
-        env->SetFloatArrayRegion(jFloatParams, 0, 8, floatData);
+    if (jFloatParams && env->GetArrayLength(jFloatParams) >= 45) {
+        jfloat floatData[45];
+        floatData[0] = header.fps;
+        for (int i = 0; i < 4; ++i) floatData[1 + i] = header.blackLevel[i];
+        for (int i = 0; i < 3; ++i) floatData[5 + i] = header.neutralColorPoint[i];
+        floatData[8] = header.baselineExposure;
+        for (int i = 0; i < 9; ++i) floatData[9 + i] = header.colorMatrix1[i];
+        for (int i = 0; i < 9; ++i) floatData[18 + i] = header.colorMatrix2[i];
+        for (int i = 0; i < 9; ++i) floatData[27 + i] = header.forwardMatrix1[i];
+        for (int i = 0; i < 9; ++i) floatData[36 + i] = header.forwardMatrix2[i];
+        env->SetFloatArrayRegion(jFloatParams, 0, 45, floatData);
     }
 
-    if (jStringParams && env->GetArrayLength(jStringParams) >= 2) {
+    if (jStringParams && env->GetArrayLength(jStringParams) >= 4) {
         jstring lutStr = env->NewStringUTF(header.activeLutName);
         jstring logStr = env->NewStringUTF(header.activeLogName);
+        jstring makeStr = env->NewStringUTF(header.make);
+        jstring modelStr = env->NewStringUTF(header.model);
         env->SetObjectArrayElement(jStringParams, 0, lutStr);
         env->SetObjectArrayElement(jStringParams, 1, logStr);
+        env->SetObjectArrayElement(jStringParams, 2, makeStr);
+        env->SetObjectArrayElement(jStringParams, 3, modelStr);
     }
 
     return JNI_TRUE;
@@ -299,7 +361,7 @@ Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeReadFrame(
         jobject /* thiz */,
         jlong handle,
         jint frameIndex,
-        jlongArray jMetadata, // [timestampNs, exposureTimeNs, iso]
+        jlongArray jMetadata, // [timestampNs, exposureTimeNs, iso, fNumberBits, focalLengthBits]
         jobject jOutBuffer
 ) {
     auto* reader = reinterpret_cast<RawVideoReader*>(handle);
@@ -315,7 +377,21 @@ Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeReadFrame(
         return -1;
     }
 
-    if (jMetadata && env->GetArrayLength(jMetadata) >= 3) {
+    if (jMetadata && env->GetArrayLength(jMetadata) >= 5) {
+        uint32_t fnBits = 0, flBits = 0;
+        float fn = vh.fNumber;
+        float fl = vh.focalLength;
+        std::memcpy(&fnBits, &fn, sizeof(float));
+        std::memcpy(&flBits, &fl, sizeof(float));
+        jlong meta[5] = {
+                static_cast<jlong>(vh.timestampNs),
+                static_cast<jlong>(vh.exposureTimeNs),
+                static_cast<jlong>(vh.iso),
+                static_cast<jlong>(fnBits),
+                static_cast<jlong>(flBits)
+        };
+        env->SetLongArrayRegion(jMetadata, 0, 5, meta);
+    } else if (jMetadata && env->GetArrayLength(jMetadata) >= 3) {
         jlong meta[3] = {
                 static_cast<jlong>(vh.timestampNs),
                 static_cast<jlong>(vh.exposureTimeNs),

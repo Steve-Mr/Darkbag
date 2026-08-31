@@ -30,13 +30,25 @@ object RawVideoNative {
         val neutralPoint: FloatArray,
         val activeLutName: String,
         val activeLogName: String,
-        val frameCount: Int
+        val frameCount: Int,
+        val orientation: Int = 0,
+        val calibrationIlluminant1: Int = 21,
+        val calibrationIlluminant2: Int = 17,
+        val baselineExposure: Float = 0.0f,
+        val colorMatrix1: FloatArray = floatArrayOf(1f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f),
+        val colorMatrix2: FloatArray = floatArrayOf(1f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f),
+        val forwardMatrix1: FloatArray = floatArrayOf(1f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f),
+        val forwardMatrix2: FloatArray = floatArrayOf(1f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f),
+        val make: String = "",
+        val model: String = ""
     )
 
     data class FrameMetadata(
         val timestampNs: Long,
         val exposureTimeNs: Long,
-        val iso: Int
+        val iso: Int,
+        val fNumber: Float = 0.0f,
+        val focalLength: Float = 0.0f
     )
 
     external fun nativeStartRecording(
@@ -54,9 +66,17 @@ object RawVideoNative {
         blackLevel: FloatArray?,
         colorMatrix1: FloatArray?,
         colorMatrix2: FloatArray?,
+        forwardMatrix1: FloatArray?,
+        forwardMatrix2: FloatArray?,
         neutralPoint: FloatArray?,
         lutName: String?,
-        logName: String?
+        logName: String?,
+        orientation: Int = 0,
+        calibrationIlluminant1: Int = 21,
+        calibrationIlluminant2: Int = 17,
+        baselineExposure: Float = 0.0f,
+        make: String? = null,
+        model: String? = null
     ): Long
 
     external fun nativePushVideoFrame(
@@ -69,7 +89,9 @@ object RawVideoNative {
         timestampNs: Long,
         exposureTimeNs: Long,
         iso: Int,
-        neutralColorPoint: FloatArray?
+        neutralColorPoint: FloatArray?,
+        fNumber: Float = 0.0f,
+        focalLength: Float = 0.0f
     ): Boolean
 
     external fun nativePushAudioPacket(
@@ -87,9 +109,9 @@ object RawVideoNative {
 
     external fun nativeGetHeader(
         handle: Long,
-        intParams: IntArray, // [width, height, bitDepth, cfaPattern, compressionType, audioSampleRate, audioChannels, whiteLevel, frameCount]
-        floatParams: FloatArray, // [fps, bl0, bl1, bl2, bl3, np0, np1, np2]
-        stringParams: Array<String?> // [activeLutName, activeLogName]
+        intParams: IntArray, // [width, height, bitDepth, cfaPattern, compressionType, audioSampleRate, audioChannels, whiteLevel, frameCount, orientation, calibIllum1, calibIllum2]
+        floatParams: FloatArray, // [fps, bl0..3, np0..2, baselineExposure, cm1(9), cm2(9), fm1(9), fm2(9)]
+        stringParams: Array<String?> // [activeLutName, activeLogName, make, model]
     ): Boolean
 
     external fun nativeGetFrameCount(handle: Long): Int
@@ -97,7 +119,7 @@ object RawVideoNative {
     external fun nativeReadFrame(
         handle: Long,
         frameIndex: Int,
-        outMetadata: LongArray, // [timestampNs, exposureTimeNs, iso]
+        outMetadata: LongArray, // [timestampNs, exposureTimeNs, iso, fNumberBits, focalLengthBits]
         outByteBuffer: ByteBuffer
     ): Int
 
@@ -126,9 +148,9 @@ object RawVideoNative {
     ): Boolean
 
     fun readHeader(handle: Long): Header? {
-        val intParams = IntArray(9)
-        val floatParams = FloatArray(8)
-        val stringParams = arrayOfNulls<String>(2)
+        val intParams = IntArray(12)
+        val floatParams = FloatArray(45)
+        val stringParams = arrayOfNulls<String>(4)
 
         if (!nativeGetHeader(handle, intParams, floatParams, stringParams)) {
             return null
@@ -136,6 +158,11 @@ object RawVideoNative {
 
         val blackLevel = floatParams.copyOfRange(1, 5)
         val neutralPoint = floatParams.copyOfRange(5, 8)
+        val baselineExposure = floatParams[8]
+        val colorMatrix1 = floatParams.copyOfRange(9, 18)
+        val colorMatrix2 = floatParams.copyOfRange(18, 27)
+        val forwardMatrix1 = floatParams.copyOfRange(27, 36)
+        val forwardMatrix2 = floatParams.copyOfRange(36, 45)
 
         return Header(
             width = intParams[0],
@@ -151,7 +178,17 @@ object RawVideoNative {
             neutralPoint = neutralPoint,
             activeLutName = stringParams[0] ?: "",
             activeLogName = stringParams[1] ?: "",
-            frameCount = intParams[8]
+            frameCount = intParams[8],
+            orientation = intParams[9],
+            calibrationIlluminant1 = intParams[10],
+            calibrationIlluminant2 = intParams[11],
+            baselineExposure = baselineExposure,
+            colorMatrix1 = colorMatrix1,
+            colorMatrix2 = colorMatrix2,
+            forwardMatrix1 = forwardMatrix1,
+            forwardMatrix2 = forwardMatrix2,
+            make = stringParams[2] ?: "",
+            model = stringParams[3] ?: ""
         )
     }
 }

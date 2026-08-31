@@ -20,6 +20,8 @@ struct RawFrameInput {
     uint64_t exposureTimeNs = 0;
     uint32_t iso = 100;
     float neutralColorPoint[3] = {1.0f, 1.0f, 1.0f};
+    float fNumber = 0.0f;
+    float focalLength = 0.0f;
 };
 
 struct AudioPacketInput {
@@ -36,7 +38,7 @@ public:
     bool startRecording(const std::string& outputPath, const FileHeader& header);
     bool pushVideoFrame(const uint8_t* bayerData, size_t dataSize, uint32_t width, uint32_t height,
                         uint32_t rowStride, uint64_t timestampNs, uint64_t exposureTimeNs, uint32_t iso,
-                        const float* neutralColorPoint);
+                        const float* neutralColorPoint, float fNumber = 0.0f, float focalLength = 0.0f);
     bool pushAudioPacket(const uint8_t* pcmData, size_t pcmSize, uint64_t timestampNs, uint32_t sampleCount);
     bool stopRecording();
 

@@ -67,7 +67,7 @@ object RawVideoExporter {
                 // 1. Export DNG Frames
                 for (i in 0 until totalFrames) {
                     frameBuffer.clear()
-                    val meta = LongArray(3)
+                    val meta = LongArray(5)
                     val readBytes = RawVideoNative.nativeReadFrame(nativeHandle, i, meta, frameBuffer)
                     if (readBytes > 0) {
                         val dngFile = File(clipDir, String.format(java.util.Locale.US, "%s_%06d.dng", clipName, i))
@@ -95,7 +95,7 @@ object RawVideoExporter {
     }
 
     /**
-     * Exports a .rawvid clip into a tone-mapped MP4 video applying EditConfig.
+     * Exports a .rawvid clip into a tone-mapped MP4 video with orientation hint and BT.709 colorimetry.
      */
     suspend fun exportToMp4(
         context: Context,
@@ -143,6 +143,9 @@ object RawVideoExporter {
                     setInteger(MediaFormat.KEY_BIT_RATE, bitRate)
                     setFloat(MediaFormat.KEY_FRAME_RATE, fps)
                     setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
+                    setInteger(MediaFormat.KEY_COLOR_STANDARD, MediaFormat.COLOR_STANDARD_BT709)
+                    setInteger(MediaFormat.KEY_COLOR_RANGE, MediaFormat.COLOR_RANGE_LIMITED)
+                    setInteger(MediaFormat.KEY_COLOR_TRANSFER, MediaFormat.COLOR_TRANSFER_SDR_VIDEO)
                 }
 
                 val encoder = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
@@ -150,6 +153,9 @@ object RawVideoExporter {
                 encoder.start()
 
                 val muxer = MediaMuxer(outputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+                if (header.orientation != 0) {
+                    muxer.setOrientationHint(header.orientation)
+                }
                 var videoTrackIndex = -1
                 var muxerStarted = false
 
@@ -181,7 +187,7 @@ object RawVideoExporter {
 
                 for (i in 0 until totalFrames) {
                     bayerBuf.clear()
-                    val meta = LongArray(3)
+                    val meta = LongArray(5)
                     val readBytes = RawVideoNative.nativeReadFrame(nativeHandle, i, meta, bayerBuf)
                     if (readBytes <= 0) continue
 
@@ -307,17 +313,55 @@ object RawVideoExporter {
             else -> byteArrayOf(0, 1, 1, 2)
         }
 
+        val orientationVal = when (header.orientation) {
+            90 -> 6
+            180 -> 3
+            270 -> 8
+            else -> 1
+        }
+
+        val makeStr = (if (header.make.isNotBlank()) header.make else "Darkbag") + "\u0000"
+        val modelStr = (if (header.model.isNotBlank()) header.model else "Darkbag Camera") + "\u0000"
+        val ucmStr = "${header.make} ${header.model}".trim().ifBlank { "Darkbag RAW Video" } + "\u0000"
+
+        val makeBytes = makeStr.toByteArray(Charsets.US_ASCII)
+        val modelBytes = modelStr.toByteArray(Charsets.US_ASCII)
+        val ucmBytes = ucmStr.toByteArray(Charsets.US_ASCII)
+
         val ifdOffset = 8
-        val entryCount = 17
-        val ifdSize = 2 + entryCount * 12 + 4 // 210 bytes
-        val valueDataOffset = ((ifdOffset + ifdSize + 3) / 4) * 4 // 220 bytes
+        val entryCount = 27
+        val ifdSize = 2 + entryCount * 12 + 4 // 330 bytes
+        var curOffset = ((ifdOffset + ifdSize + 3) / 4) * 4 // 332 bytes
 
-        val blackLevelOffset = valueDataOffset // 220
-        val colorMatrix1Offset = blackLevelOffset + 32 // 252 (4 * 8 = 32 bytes)
-        val asShotNeutralOffset = colorMatrix1Offset + 72 // 324 (9 * 8 = 72 bytes)
-        val stripOffset = asShotNeutralOffset + 24 // 348 (3 * 8 = 24 bytes)
+        val makeOffset = curOffset
+        curOffset += makeBytes.size
+        val modelOffset = curOffset
+        curOffset += modelBytes.size
+        val ucmOffset = curOffset
+        curOffset += ucmBytes.size
 
-        val buf = ByteBuffer.allocate(1024).order(ByteOrder.LITTLE_ENDIAN)
+        curOffset = ((curOffset + 3) / 4) * 4
+        val exposureTimeOffset = curOffset
+        curOffset += 8
+
+        val blackLevelOffset = curOffset
+        curOffset += 32 // 4 RATIONALs (4 * 8 = 32)
+
+        val colorMatrix1Offset = curOffset
+        curOffset += 72 // 9 SRATIONALs (9 * 8 = 72)
+
+        val asShotNeutralOffset = curOffset
+        curOffset += 24 // 3 RATIONALs (3 * 8 = 24)
+
+        val baselineExposureOffset = curOffset
+        curOffset += 8 // 1 SRATIONAL (8 bytes)
+
+        val frameRateOffset = curOffset
+        curOffset += 8 // 1 RATIONAL (8 bytes)
+
+        val stripOffset = ((curOffset + 15) / 16) * 16 // 16-byte aligned
+
+        val buf = ByteBuffer.allocate(stripOffset).order(ByteOrder.LITTLE_ENDIAN)
 
         // 1. TIFF Header
         buf.putShort(0x4949.toShort()) // 'II'
@@ -344,8 +388,14 @@ object RawVideoExporter {
         putEntry(0x0103, 3, 1, 1)
         // Tag 0x0106: PhotometricInterpretation (SHORT = 32803 CFA)
         putEntry(0x0106, 3, 1, 32803)
+        // Tag 0x010F: Make (ASCII)
+        putEntry(0x010F, 2, makeBytes.size, makeOffset)
+        // Tag 0x0110: Model (ASCII)
+        putEntry(0x0110, 2, modelBytes.size, modelOffset)
         // Tag 0x0111: StripOffsets (LONG)
         putEntry(0x0111, 4, 1, stripOffset)
+        // Tag 0x0112: Orientation (SHORT)
+        putEntry(0x0112, 3, 1, orientationVal)
         // Tag 0x0115: SamplesPerPixel (SHORT = 1)
         putEntry(0x0115, 3, 1, 1)
         // Tag 0x0116: RowsPerStrip (LONG = h)
@@ -362,8 +412,17 @@ object RawVideoExporter {
                      ((cfaPatternBytes[1].toInt() and 0xFF) shl 8) or
                      (cfaPatternBytes[0].toInt() and 0xFF)
         putEntry(0x828E, 1, 4, cfaVal)
+        // Tag 0x829A: ExposureTime (RATIONAL)
+        putEntry(0x829A, 5, 1, exposureTimeOffset)
+        // Tag 0x8827: ISOSpeedRatings (SHORT)
+        val isoVal = if (meta.size > 2 && meta[2] > 0) meta[2].toInt().coerceIn(1, 65535) else 100
+        putEntry(0x8827, 3, 1, isoVal)
         // Tag 0xC612: DNGVersion (BYTE[4] = 1.4.0.0)
         putEntry(0xC612, 1, 4, 0x00000401)
+        // Tag 0xC613: DNGBackwardVersion (BYTE[4] = 1.1.0.0)
+        putEntry(0xC613, 1, 4, 0x00000101)
+        // Tag 0xC614: UniqueCameraModel (ASCII)
+        putEntry(0xC614, 2, ucmBytes.size, ucmOffset)
         // Tag 0xC61A: BlackLevel (RATIONAL[4])
         putEntry(0xC61A, 5, 4, blackLevelOffset)
         // Tag 0xC61D: WhiteLevel (LONG)
@@ -372,16 +431,32 @@ object RawVideoExporter {
         putEntry(0xC621, 10, 9, colorMatrix1Offset)
         // Tag 0xC628: AsShotNeutral (RATIONAL[3])
         putEntry(0xC628, 5, 3, asShotNeutralOffset)
+        // Tag 0xC62A: BaselineExposure (SRATIONAL)
+        putEntry(0xC62A, 10, 1, baselineExposureOffset)
+        // Tag 0xC65A: CalibrationIlluminant1 (SHORT)
+        putEntry(0xC65A, 3, 1, header.calibrationIlluminant1.takeIf { it > 0 } ?: 21)
+        // Tag 0xC764: FrameRate (RATIONAL)
+        putEntry(0xC764, 5, 1, frameRateOffset)
 
         // Next IFD = 0
         buf.putInt(0)
 
-        // Pad to valueDataOffset
-        while (buf.position() < valueDataOffset) {
-            buf.put(0.toByte())
-        }
+        // Write Make, Model, UniqueCameraModel strings
+        buf.position(makeOffset)
+        buf.put(makeBytes)
+        buf.position(modelOffset)
+        buf.put(modelBytes)
+        buf.position(ucmOffset)
+        buf.put(ucmBytes)
+
+        // Write ExposureTime (RATIONAL = numerator/denominator)
+        buf.position(exposureTimeOffset)
+        val expNs = if (meta.size > 1 && meta[1] > 0) meta[1] else (1_000_000_000L / (header.fps.takeIf { it > 0 } ?: 24f)).toLong()
+        buf.putInt((expNs / 1000).toInt())
+        buf.putInt(1_000_000)
 
         // Write BlackLevel (4 RATIONALs)
+        buf.position(blackLevelOffset)
         for (i in 0 until 4) {
             val bl = header.blackLevel.getOrElse(i) { 64.0f }
             buf.putInt((bl * 100).toInt())
@@ -389,23 +464,31 @@ object RawVideoExporter {
         }
 
         // Write ColorMatrix1 (9 SRATIONALs)
-        val defaultMatrix = floatArrayOf(
-            1.0f, 0.0f, 0.0f,
-            0.0f, 1.0f, 0.0f,
-            0.0f, 0.0f, 1.0f
-        )
+        buf.position(colorMatrix1Offset)
         for (i in 0 until 9) {
-            val cm = defaultMatrix[i]
+            val cm = header.colorMatrix1.getOrElse(i) { if (i % 4 == 0) 1.0f else 0.0f }
             buf.putInt((cm * 10000).toInt())
             buf.putInt(10000)
         }
 
         // Write AsShotNeutral (3 RATIONALs)
+        buf.position(asShotNeutralOffset)
         for (i in 0 until 3) {
             val np = header.neutralPoint.getOrElse(i) { 1.0f }
             buf.putInt((np * 10000).toInt())
             buf.putInt(10000)
         }
+
+        // Write BaselineExposure (1 SRATIONAL)
+        buf.position(baselineExposureOffset)
+        buf.putInt((header.baselineExposure * 100).toInt())
+        buf.putInt(100)
+
+        // Write FrameRate (1 RATIONAL)
+        buf.position(frameRateOffset)
+        val fpsVal = header.fps.takeIf { it > 0 } ?: 24.0f
+        buf.putInt((fpsVal * 1000).toInt())
+        buf.putInt(1000)
 
         file.parentFile?.mkdirs()
         FileOutputStream(file).use { fos ->

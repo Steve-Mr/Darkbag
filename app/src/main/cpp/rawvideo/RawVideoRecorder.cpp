@@ -95,15 +95,15 @@ bool RawVideoRecorder::startRecording(const std::string& outputPath, const FileH
 }
 
 bool RawVideoRecorder::pushVideoFrame(const uint8_t* bayerData, size_t dataSize, uint32_t width, uint32_t height,
-                                     uint32_t rowStride, uint64_t timestampNs, uint64_t exposureTimeNs, uint32_t iso,
-                                     const float* neutralColorPoint) {
+                                      uint32_t rowStride, uint64_t timestampNs, uint64_t exposureTimeNs, uint32_t iso,
+                                      const float* neutralColorPoint, float fNumber, float focalLength) {
     if (!isRecording_.load(std::memory_order_relaxed) || bayerData == nullptr || dataSize == 0) {
         return false;
     }
 
     std::unique_lock<std::mutex> lock(queueMutex_);
     if (videoQueue_.size() >= MAX_QUEUE_SIZE) {
-        LOGW("Video queue full (%zu), dropping frame at timestamp %llu", videoQueue_.size(), (unsigned long long)timestampNs);
+        LOGW("Video queue overflow (%zu frames), dropping frame to avoid OOM", videoQueue_.size());
         return false;
     }
 
@@ -115,7 +115,9 @@ bool RawVideoRecorder::pushVideoFrame(const uint8_t* bayerData, size_t dataSize,
     input.timestampNs = timestampNs;
     input.exposureTimeNs = exposureTimeNs;
     input.iso = iso;
-    if (neutralColorPoint != nullptr) {
+    input.fNumber = fNumber;
+    input.focalLength = focalLength;
+    if (neutralColorPoint) {
         input.neutralColorPoint[0] = neutralColorPoint[0];
         input.neutralColorPoint[1] = neutralColorPoint[1];
         input.neutralColorPoint[2] = neutralColorPoint[2];
@@ -227,6 +229,8 @@ void RawVideoRecorder::workerLoop() {
             vh.neutralColorPoint[0] = currentVideoFrame.neutralColorPoint[0];
             vh.neutralColorPoint[1] = currentVideoFrame.neutralColorPoint[1];
             vh.neutralColorPoint[2] = currentVideoFrame.neutralColorPoint[2];
+            vh.fNumber = currentVideoFrame.fNumber;
+            vh.focalLength = currentVideoFrame.focalLength;
             vh.uncompressedSize = static_cast<uint32_t>(rawSize);
 
             if (compressedSize > 0 && compressedSize < rawSize) {

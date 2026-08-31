@@ -54,6 +54,12 @@ struct FileHeader {
     char activeLogName[16] = {0};
     uint32_t frameCount = 0;
     uint64_t indexOffset = 0;
+    uint32_t orientation = 0; // 0, 90, 180, 270 degrees
+    uint32_t calibrationIlluminant1 = 21; // 21 = D65, 17 = Standard Light A
+    uint32_t calibrationIlluminant2 = 17;
+    float baselineExposure = 0.0f;
+    char make[32] = {0};
+    char model[64] = {0};
     uint8_t reserved[64] = {0};
 };
 
@@ -66,6 +72,9 @@ struct VideoFrameHeader {
     float neutralColorPoint[3] = {1.0f, 1.0f, 1.0f};
     uint32_t uncompressedSize = 0;
     uint32_t payloadSize = 0;
+    float fNumber = 0.0f;
+    float focalLength = 0.0f;
+    uint8_t reserved[16] = {0};
 };
 
 struct AudioPacketHeader {
