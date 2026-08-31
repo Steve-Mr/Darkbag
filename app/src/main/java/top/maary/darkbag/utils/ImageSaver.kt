@@ -928,27 +928,6 @@ object ImageSaver {
             }
         }
 
-        // 3. Save thumbnail JPG alongside if thumbnailBitmap was generated
-        if (thumbnailBitmap != null) {
-            val thumbFile = File(context.cacheDir, "thumb_$effectiveBaseName.jpg")
-            try {
-                FileOutputStream(thumbFile).use { out ->
-                    thumbnailBitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
-                }
-                if (jpgFolderUri != null) {
-                    saveFileToFolder(context, thumbFile, "$effectiveBaseName.jpg", "image/jpeg", jpgFolderUri)
-                } else {
-                    saveJpegToMediaStore(context, "$effectiveBaseName.jpg", null) { out ->
-                        thumbFile.inputStream().use { it.copyTo(out) }
-                    }
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed to save companion thumbnail", e)
-            } finally {
-                thumbFile.delete()
-            }
-        }
-
         // Cleanup temp file
         rawVideoFile.delete()
 

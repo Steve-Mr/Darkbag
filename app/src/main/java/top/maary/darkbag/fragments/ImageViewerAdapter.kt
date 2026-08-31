@@ -454,6 +454,17 @@ class ImageViewerAdapter(
             return
         }
 
+        val isRawVideo = group.isRawVideo || group.rawVideoUri != null
+        if (isRawVideo) {
+            val rawUri = group.rawVideoUri
+            if (group.jpgUri != null) {
+                loadImage(holder, group.jpgUri!!, version = group.lastModified)
+            } else if (rawUri != null) {
+                loadRawVideoPosterFrame(holder, rawUri, group)
+            }
+            return
+        }
+
         when (format) {
             FORMAT_JPG -> group.jpgUri?.let { loadImage(holder, it, version = group.lastModified) }
             FORMAT_DNG -> {
@@ -465,6 +476,33 @@ class ImageViewerAdapter(
                 }
             }
         }
+    }
+
+    private fun loadRawVideoPosterFrame(holder: ViewHolder, uri: Uri, group: ImageGroup) {
+        val ctx = holder.binding.root.context
+        val player = holder.rawVideoPlayer ?: top.maary.darkbag.rawvideo.RawVideoPlayer(
+            context = ctx,
+            onFrameRendered = { bitmap, _ ->
+                val orient = group.orientation
+                if (holder.binding.imageView.rotation != orient.toFloat()) {
+                    holder.binding.imageView.rotation = orient.toFloat()
+                }
+                holder.binding.imageView.setImageBitmap(bitmap)
+            },
+            onPlaybackStateChanged = { isPlaying ->
+                holder.isPlayingVideo = isPlaying
+                if (isPlaying) {
+                    holder.binding.btnMotionPhotoIndicator.setIconResource(R.drawable.ic_pause)
+                } else {
+                    holder.binding.btnMotionPhotoIndicator.setIconResource(R.drawable.ic_play_arrow)
+                }
+            }
+        ).also { holder.rawVideoPlayer = it }
+
+        if (!player.isVideoLoaded) {
+            player.load(uri)
+        }
+        player.updateAdjustments(group.editConfig)
     }
 
     private fun setBitmapAndRecyclePrevious(holder: ViewHolder, bitmap: android.graphics.Bitmap) {
@@ -801,6 +839,10 @@ class ImageViewerAdapter(
         val player = holder.rawVideoPlayer ?: top.maary.darkbag.rawvideo.RawVideoPlayer(
             context = holder.binding.root.context,
             onFrameRendered = { bitmap, _ ->
+                val orient = holder.rawVideoPlayer?.orientation ?: group.orientation
+                if (holder.binding.imageView.rotation != orient.toFloat()) {
+                    holder.binding.imageView.rotation = orient.toFloat()
+                }
                 holder.binding.imageView.setImageBitmap(bitmap)
             },
             onPlaybackStateChanged = { isPlaying ->

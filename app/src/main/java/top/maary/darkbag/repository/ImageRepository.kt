@@ -130,14 +130,19 @@ class ImageRepository(private val context: Context) {
                         if (header != null) {
                             builder.width = header.width
                             builder.height = header.height
+                            builder.orientation = header.orientation
                             builder.rawVideoFps = header.fps
                             builder.rawVideoFrameCount = header.frameCount
                             builder.rawVideoDurationMs = if (header.fps > 0) (header.frameCount * 1000L / header.fps).toLong() else 0L
                             val activeLut = header.activeLutName.takeIf { it.isNotBlank() }
                             val activeLog = header.activeLogName.takeIf { it.isNotBlank() }
-                            if (activeLut != null || activeLog != null) {
-                                builder.editConfig = EditConfig(log = activeLog ?: "None", lut = activeLut ?: "None")
-                            }
+                            builder.editConfig = EditConfig(
+                                log = activeLog ?: "None",
+                                lut = activeLut ?: "None",
+                                exposure = header.exposure,
+                                contrast = header.contrast,
+                                saturation = header.saturation
+                            )
                         }
                         top.maary.darkbag.rawvideo.RawVideoNative.nativeCloseReader(handle)
                     }
@@ -697,6 +702,7 @@ class ImageRepository(private val context: Context) {
         var hfLayout: String? = null
         var width: Int = 0
         var height: Int = 0
+        var orientation: Int = 0
         var captureTime: Long = 0L
         var lastModified: Long = 0L
         var editConfig: EditConfig? = null
@@ -730,6 +736,7 @@ class ImageRepository(private val context: Context) {
             hfLayout = group.hfLayout
             width = group.width
             height = group.height
+            orientation = group.orientation
             captureTime = group.captureTime
             lastModified = group.lastModified
             editConfig = group.editConfig
@@ -869,6 +876,7 @@ class ImageRepository(private val context: Context) {
                 hfLayout = finalLayout,
                 width = width,
                 height = height,
+                orientation = orientation,
                 captureTime = captureTime,
                 lastModified = if (lastModified > 0) lastModified else maxOf(jpgTime, dngTime, dngUri1Time, dngUri2Time, rawVideoTime, mp4VideoTime),
                 editConfig = editConfig,

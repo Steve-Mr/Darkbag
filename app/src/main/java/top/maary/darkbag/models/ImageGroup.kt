@@ -14,6 +14,7 @@ data class ImageGroup(
     val hfLayout: String? = null, // "SBS" or "TB"
     val width: Int = 0,
     val height: Int = 0,
+    val orientation: Int = 0,
     val captureTime: Long = 0L,
     val lastModified: Long = 0L,
     val editConfig: EditConfig? = null,
