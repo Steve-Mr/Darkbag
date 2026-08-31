@@ -1334,6 +1334,10 @@ open class ImageViewerFragment : Fragment() {
         }
         currentHolder?.binding?.imageView?.invalidateOutline()
 
+        if (currentGroup.isRawVideo) {
+            adapter.updateRawVideoAdjustments(currentIndex, config)
+        }
+
         previewJob?.cancel()
         previewJob = lifecycleScope.launch {
             delay(150)

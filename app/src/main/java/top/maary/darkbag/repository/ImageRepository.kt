@@ -118,6 +118,38 @@ class ImageRepository(private val context: Context) {
 
     private fun populateMetadata(builder: ImageGroupBuilder) {
         if (builder.metadataLoaded) return
+
+        val rawVideoUri = builder.rawVideoUri
+        if (rawVideoUri != null) {
+            try {
+                context.contentResolver.openFileDescriptor(rawVideoUri, "r")?.use { pfd ->
+                    val fd = pfd.detachFd()
+                    val fdPath = "/proc/self/fd/$fd"
+                    val handle = top.maary.darkbag.rawvideo.RawVideoNative.nativeOpenReader(fdPath)
+                    if (handle != 0L) {
+                        val header = top.maary.darkbag.rawvideo.RawVideoNative.readHeader(handle)
+                        if (header != null) {
+                            builder.width = header.width
+                            builder.height = header.height
+                            builder.rawVideoFps = header.fps
+                            builder.rawVideoFrameCount = header.frameCount
+                            builder.rawVideoDurationMs = if (header.fps > 0) (header.frameCount * 1000L / header.fps).toLong() else 0L
+                            val activeLut = header.activeLutName.takeIf { it.isNotBlank() }
+                            val activeLog = header.activeLogName.takeIf { it.isNotBlank() }
+                            if (activeLut != null || activeLog != null) {
+                                builder.editConfig = EditConfig(log = activeLog ?: "None", lut = activeLut ?: "None")
+                            }
+                        }
+                        top.maary.darkbag.rawvideo.RawVideoNative.nativeCloseReader(handle)
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("ImageRepository", "Failed to read raw video metadata for $rawVideoUri", e)
+            }
+            builder.metadataLoaded = true
+            return
+        }
+
         val jpgUri = builder.jpgUri
         if (jpgUri == null) {
             builder.metadataLoaded = true
@@ -273,6 +305,9 @@ class ImageRepository(private val context: Context) {
                             name.endsWith(".dng", ignoreCase = true) -> {
                                 builder.setDng(docUri, lastModified)
                             }
+                            name.endsWith(".rawvid", ignoreCase = true) -> {
+                                builder.setRawVideo(docUri, lastModified)
+                            }
                         }
                     }
                 }
@@ -314,6 +349,9 @@ class ImageRepository(private val context: Context) {
                         }
                         name.endsWith(".dng", ignoreCase = true) -> {
                             builder.setDng(file.uri, lastModified)
+                        }
+                        name.endsWith(".rawvid", ignoreCase = true) -> {
+                            builder.setRawVideo(file.uri, lastModified)
                         }
                     }
                 }
@@ -426,6 +464,9 @@ class ImageRepository(private val context: Context) {
                     }
                     mime == "image/x-adobe-dng" || name.endsWith(".dng", ignoreCase = true) -> {
                         builder.setDng(uri, date, modified)
+                    }
+                    name.endsWith(".rawvid", ignoreCase = true) -> {
+                        builder.setRawVideo(uri, date, modified)
                     }
                 }
             }
@@ -620,6 +661,12 @@ class ImageRepository(private val context: Context) {
         var dngUri1Time: Long = 0L
         var dngUri2: Uri? = null
         var dngUri2Time: Long = 0L
+        var rawVideoUri: Uri? = null
+        var rawVideoTime: Long = 0L
+        var isRawVideo: Boolean = false
+        var rawVideoFps: Float = 24.0f
+        var rawVideoFrameCount: Int = 0
+        var rawVideoDurationMs: Long = 0L
         val multiLensBuilders = mutableMapOf<String, MultiLensItemBuilder>()
         var isMultiCamera: Boolean = false
         var hfLayout: String? = null
@@ -638,6 +685,11 @@ class ImageRepository(private val context: Context) {
             dngUri = group.dngUri
             dngUri1 = group.dngUri1
             dngUri2 = group.dngUri2
+            rawVideoUri = group.rawVideoUri
+            isRawVideo = group.isRawVideo
+            rawVideoFps = group.rawVideoFps
+            rawVideoFrameCount = group.rawVideoFrameCount
+            rawVideoDurationMs = group.rawVideoDurationMs
             isMultiCamera = group.isMultiCamera
             multiLensBuilders.clear()
             for (lens in group.multiCameraLenses) {
@@ -678,6 +730,15 @@ class ImageRepository(private val context: Context) {
             val effectiveTag = if (tag.isNotEmpty()) tag else String.format(java.util.Locale.US, "%.1fx", mult)
             val item = multiLensBuilders.getOrPut(effectiveTag) { MultiLensItemBuilder(effectiveTag, mult) }
             item.dngUri = uri
+            updateTime(time, modifiedTime)
+        }
+
+        fun setRawVideo(uri: Uri, time: Long, modifiedTime: Long = time) {
+            if (rawVideoUri == null || (time > rawVideoTime + 2000)) {
+                rawVideoUri = uri
+                rawVideoTime = time
+                isRawVideo = true
+            }
             updateTime(time, modifiedTime)
         }
 
@@ -773,7 +834,7 @@ class ImageRepository(private val context: Context) {
                 width = width,
                 height = height,
                 captureTime = captureTime,
-                lastModified = if (lastModified > 0) lastModified else maxOf(jpgTime, dngTime, dngUri1Time, dngUri2Time),
+                lastModified = if (lastModified > 0) lastModified else maxOf(jpgTime, dngTime, dngUri1Time, dngUri2Time, rawVideoTime),
                 editConfig = editConfig,
                 metadataLoaded = metadataLoaded,
                 isInProgress = isInProgress,
@@ -784,7 +845,12 @@ class ImageRepository(private val context: Context) {
                 isMultiCamera = isMultiCamera || lenses.isNotEmpty(),
                 multiJpgUris = sortedJpgs,
                 multiDngUris = sortedDngs,
-                multiCameraLenses = lenses
+                multiCameraLenses = lenses,
+                rawVideoUri = rawVideoUri,
+                isRawVideo = isRawVideo,
+                rawVideoFps = rawVideoFps,
+                rawVideoFrameCount = rawVideoFrameCount,
+                rawVideoDurationMs = rawVideoDurationMs
             )
         }
     }

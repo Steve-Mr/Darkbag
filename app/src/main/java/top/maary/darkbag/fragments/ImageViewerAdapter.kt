@@ -84,6 +84,7 @@ class ImageViewerAdapter(
         var loadJob: Job? = null
         var extractJob: Job? = null
         var player: androidx.media3.exoplayer.ExoPlayer? = null
+        var rawVideoPlayer: top.maary.darkbag.rawvideo.RawVideoPlayer? = null
         var isPlayingVideo: Boolean = false
         var playCompletionCallback: (() -> Unit)? = null
         var manualBitmap: android.graphics.Bitmap? = null
@@ -258,26 +259,39 @@ class ImageViewerAdapter(
             val currentFormat = selectedFormats[group.baseName] ?: getSelectedFormat(group)
             val isRawSelected = currentFormat == FORMAT_DNG
 
-            // 1. Motion Photo button setup (disabled/hidden in RAW state)
-            val isMotion = group.isMotionPhoto && group.jpgUri != null && !isFormatSwitcherPersistentHidden && !isRawSelected
-            if (isMotion) {
+            val isRawVideo = group.isRawVideo || group.rawVideoUri != null
+            if (isRawVideo) {
                 btnMotionPhotoIndicator.visibility = View.VISIBLE
-                if (isMotionPhotoAutoPlay) {
-                    btnMotionPhotoIndicator.setIconResource(R.drawable.ic_play_arrow)
-                    btnMotionPhotoIndicator.contentDescription = "Motion Photo Auto-play On"
-                } else {
-                    btnMotionPhotoIndicator.setIconResource(R.drawable.ic_pause)
-                    btnMotionPhotoIndicator.contentDescription = "Motion Photo Auto-play Off"
-                }
+                btnMotionPhotoIndicator.setIconResource(R.drawable.ic_play_arrow)
+                btnMotionPhotoIndicator.contentDescription = "Play RAW Video"
                 btnMotionPhotoIndicator.setOnClickListener {
                     val currentPos = holder.bindingAdapterPosition
                     if (currentPos != RecyclerView.NO_POSITION) {
-                        onMotionPhotoIndicatorTapped?.invoke(currentPos)
+                        toggleRawVideoForPosition(currentPos)
                     }
                 }
             } else {
-                btnMotionPhotoIndicator.visibility = View.GONE
-                btnMotionPhotoIndicator.setOnClickListener(null)
+                // 1. Motion Photo button setup (disabled/hidden in RAW state)
+                val isMotion = group.isMotionPhoto && group.jpgUri != null && !isFormatSwitcherPersistentHidden && !isRawSelected
+                if (isMotion) {
+                    btnMotionPhotoIndicator.visibility = View.VISIBLE
+                    if (isMotionPhotoAutoPlay) {
+                        btnMotionPhotoIndicator.setIconResource(R.drawable.ic_play_arrow)
+                        btnMotionPhotoIndicator.contentDescription = "Motion Photo Auto-play On"
+                    } else {
+                        btnMotionPhotoIndicator.setIconResource(R.drawable.ic_pause)
+                        btnMotionPhotoIndicator.contentDescription = "Motion Photo Auto-play Off"
+                    }
+                    btnMotionPhotoIndicator.setOnClickListener {
+                        val currentPos = holder.bindingAdapterPosition
+                        if (currentPos != RecyclerView.NO_POSITION) {
+                            onMotionPhotoIndicatorTapped?.invoke(currentPos)
+                        }
+                    }
+                } else {
+                    btnMotionPhotoIndicator.visibility = View.GONE
+                    btnMotionPhotoIndicator.setOnClickListener(null)
+                }
             }
 
             // 2. RAW Format indicator setup
@@ -767,11 +781,59 @@ class ImageViewerAdapter(
         }
     }
 
+    fun playRawVideo(holder: ViewHolder, group: ImageGroup) {
+        val uri = group.rawVideoUri ?: return
+        val player = holder.rawVideoPlayer ?: top.maary.darkbag.rawvideo.RawVideoPlayer(
+            context = holder.binding.root.context,
+            onFrameRendered = { bitmap, _ ->
+                holder.binding.imageView.setImageBitmap(bitmap)
+            },
+            onPlaybackStateChanged = { isPlaying ->
+                holder.isPlayingVideo = isPlaying
+                if (isPlaying) {
+                    holder.binding.btnMotionPhotoIndicator.setIconResource(R.drawable.ic_pause)
+                } else {
+                    holder.binding.btnMotionPhotoIndicator.setIconResource(R.drawable.ic_play_arrow)
+                }
+            }
+        ).also { holder.rawVideoPlayer = it }
+
+        if (!player.isVideoLoaded) {
+            player.load(uri)
+        }
+        player.updateAdjustments(group.editConfig)
+        player.play()
+    }
+
+    fun stopRawVideo(holder: ViewHolder) {
+        holder.rawVideoPlayer?.pause()
+        holder.isPlayingVideo = false
+        holder.binding.btnMotionPhotoIndicator.setIconResource(R.drawable.ic_play_arrow)
+    }
+
+    fun toggleRawVideoForPosition(position: Int) {
+        val holder = recyclerView?.findViewHolderForAdapterPosition(position) as? ViewHolder
+        if (holder != null && position in differ.currentList.indices) {
+            val group = differ.currentList[position]
+            if (holder.isPlayingVideo) {
+                stopRawVideo(holder)
+            } else {
+                playRawVideo(holder, group)
+            }
+        }
+    }
+
+    fun updateRawVideoAdjustments(position: Int, editConfig: top.maary.darkbag.models.EditConfig?) {
+        val holder = recyclerView?.findViewHolderForAdapterPosition(position) as? ViewHolder
+        holder?.rawVideoPlayer?.updateAdjustments(editConfig)
+    }
+
     fun stopAllMotionVideos() {
         recyclerView?.let { rv ->
             for (i in 0 until itemCount) {
                 (rv.findViewHolderForAdapterPosition(i) as? ViewHolder)?.let { holder ->
                     stopMotionVideo(holder)
+                    stopRawVideo(holder)
                 }
             }
         }
