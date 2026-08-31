@@ -4452,9 +4452,6 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
     }
 
     private fun startMp4VideoRecording() {
-        val device = camera2Device ?: return
-        val session = camera2Session ?: return
-
         val timestamp = System.currentTimeMillis()
         val baseName = DarkbagIdentity.prefixedBaseName("VID_${timestamp}")
         val tempDir = File(requireContext().cacheDir, "video")
@@ -4462,58 +4459,30 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         val tempFile = File(tempDir, "${baseName}.mp4")
 
         val recorder = top.maary.darkbag.video.Mp4VideoRecorder(requireContext())
-        val videoSurface = recorder.prepare(tempFile, 1920, 1080, 30) ?: run {
+        val videoSurface = recorder.prepare(tempFile, 1080, 1920, 30) ?: run {
             Log.e(TAG, "Failed to prepare Mp4VideoRecorder")
             return
         }
 
+        lutProcessor?.setEncoderSurface(videoSurface, 1080, 1920)
+
         if (!recorder.start()) {
             Log.e(TAG, "Failed to start Mp4VideoRecorder")
+            lutProcessor?.setEncoderSurface(null, 0, 0)
+            recorder.release()
             return
         }
 
         mp4VideoRecorder = recorder
         cameraUiContainerBinding?.cameraCaptureButton?.setRecordingState(true)
         cameraUiContainerBinding?.cameraCaptureButton?.startRotation()
-
-        try {
-            val request = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_RECORD)
-            camera2PreviewSurface?.let { request.addTarget(it) }
-            request.addTarget(videoSurface)
-            analysisImageReader?.surface?.let { request.addTarget(it) }
-            applyManualSettingsToRequest(request)
-            session.setRepeatingRequest(request.build(), object : android.hardware.camera2.CameraCaptureSession.CaptureCallback() {
-                override fun onCaptureCompleted(session: android.hardware.camera2.CameraCaptureSession, request: android.hardware.camera2.CaptureRequest, result: android.hardware.camera2.TotalCaptureResult) {
-                    handleCaptureResult(result)
-                }
-            }, camera2Handler)
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to update repeating request for MP4 recording", e)
-        }
     }
 
     private fun stopMp4VideoRecording() {
         cameraUiContainerBinding?.cameraCaptureButton?.setRecordingState(false)
         cameraUiContainerBinding?.cameraCaptureButton?.stopRotation()
 
-        val device = camera2Device
-        val session = camera2Session
-        val surface = camera2PreviewSurface
-        if (device != null && session != null && surface != null) {
-            try {
-                val request = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_PREVIEW)
-                request.addTarget(surface)
-                analysisImageReader?.surface?.let { request.addTarget(it) }
-                applyManualSettingsToRequest(request)
-                session.setRepeatingRequest(request.build(), object : android.hardware.camera2.CameraCaptureSession.CaptureCallback() {
-                    override fun onCaptureCompleted(session: android.hardware.camera2.CameraCaptureSession, request: android.hardware.camera2.CaptureRequest, result: android.hardware.camera2.TotalCaptureResult) {
-                        handleCaptureResult(result)
-                    }
-                }, camera2Handler)
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to restore preview repeating request", e)
-            }
-        }
+        lutProcessor?.setEncoderSurface(null, 0, 0)
 
         val recorder = mp4VideoRecorder
         mp4VideoRecorder = null

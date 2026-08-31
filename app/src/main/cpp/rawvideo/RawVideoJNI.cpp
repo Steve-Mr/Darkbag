@@ -368,7 +368,7 @@ Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeCloseReader(
     }
 }
 
-// Fast Demosaicing of RAW10/Linear Bayer to RGBA_8888 Android Bitmap for smooth playback & thumbnail
+// Fast Demosaicing of 16-bit RAW_SENSOR / Linear Bayer to RGBA_8888 Android Bitmap for smooth playback & thumbnail
 JNIEXPORT jboolean JNICALL
 Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeDebayerFrameToBitmap(
         JNIEnv* env,
@@ -382,8 +382,8 @@ Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeDebayerFrameToBitmap(
         jfloat exposureMultiplier,
         jobject jOutBitmap
 ) {
-    auto* raw10Data = static_cast<const uint8_t*>(env->GetDirectBufferAddress(jBayerBuffer));
-    if (!raw10Data || !jOutBitmap) return JNI_FALSE;
+    auto* rawBytes = static_cast<const uint8_t*>(env->GetDirectBufferAddress(jBayerBuffer));
+    if (!rawBytes || !jOutBitmap || width <= 0 || height <= 0) return JNI_FALSE;
 
     AndroidBitmapInfo info;
     if (AndroidBitmap_getInfo(env, jOutBitmap, &info) < 0) return JNI_FALSE;
@@ -399,36 +399,25 @@ Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeDebayerFrameToBitmap(
     float norm = 1.0f / std::max(1.0f, static_cast<float>(whiteLevel) - blackLevel);
     norm *= exposureMultiplier;
 
+    const size_t rowStride = static_cast<size_t>(width) * 2; // 16-bit RAW_SENSOR (2 bytes per pixel)
+
     // Fast 2x2 Bayer downsampled debayering directly to target bitmap size
     #pragma omp parallel for schedule(dynamic, 16)
     for (int y = 0; y < outHeight; ++y) {
         int srcY = (y * height) / outHeight;
-        srcY = srcY & ~1; // Even row
+        srcY = std::min(height - 2, srcY & ~1); // Even row
+
+        const auto* row0 = reinterpret_cast<const uint16_t*>(rawBytes + srcY * rowStride);
+        const auto* row1 = reinterpret_cast<const uint16_t*>(rawBytes + (srcY + 1) * rowStride);
 
         for (int x = 0; x < outWidth; ++x) {
             int srcX = (x * width) / outWidth;
-            srcX = srcX & ~1; // Even col
+            srcX = std::min(width - 2, srcX & ~1); // Even col
 
-            // RAW10 unpack for 2x2 block at (srcX, srcY)
-            // 4 consecutive pixels in RAW10 take 5 bytes: [P0, P1, P2, P3, LSBS]
-            int rowStride = (width * 5) / 4;
-            const uint8_t* row0 = raw10Data + srcY * rowStride;
-            const uint8_t* row1 = raw10Data + (srcY + 1) * rowStride;
-
-            auto unpackPixel = [](const uint8_t* row, int px) -> uint16_t {
-                int block = px / 4;
-                int rem = px % 4;
-                const uint8_t* bPtr = row + block * 5;
-                uint16_t high = bPtr[rem];
-                uint8_t lsbByte = bPtr[4];
-                uint16_t low = (lsbByte >> (rem * 2)) & 0x03;
-                return (high << 2) | low;
-            };
-
-            uint16_t p00 = unpackPixel(row0, srcX);
-            uint16_t p01 = unpackPixel(row0, srcX + 1);
-            uint16_t p10 = unpackPixel(row1, srcX);
-            uint16_t p11 = unpackPixel(row1, srcX + 1);
+            uint16_t p00 = row0[srcX];
+            uint16_t p01 = row0[srcX + 1];
+            uint16_t p10 = row1[srcX];
+            uint16_t p11 = row1[srcX + 1];
 
             float r = 0.0f, g = 0.0f, b = 0.0f;
             if (cfaPattern == static_cast<int>(CfaPattern::RGGB)) {
@@ -439,26 +428,30 @@ Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeDebayerFrameToBitmap(
                 b = static_cast<float>(p00);
                 g = static_cast<float>(p01 + p10) * 0.5f;
                 r = static_cast<float>(p11);
-            } else { // Fallback GRBG/GBRG
-                g = static_cast<float>(p00 + p11) * 0.5f;
+            } else if (cfaPattern == static_cast<int>(CfaPattern::GRBG)) {
+                g = static_cast<float>(p00);
                 r = static_cast<float>(p01);
                 b = static_cast<float>(p10);
+            } else { // GBRG
+                g = static_cast<float>(p00);
+                b = static_cast<float>(p01);
+                r = static_cast<float>(p10);
             }
 
-            // Subtract black level, normalize, and apply simple tone curve (sqrt/gamma)
-            r = std::max(0.0f, (r - blackLevel) * norm);
-            g = std::max(0.0f, (g - blackLevel) * norm);
-            b = std::max(0.0f, (b - blackLevel) * norm);
+            // Subtract black level, normalize, and apply tone curve
+            r = std::clamp((r - blackLevel) * norm, 0.0f, 1.0f);
+            g = std::clamp((g - blackLevel) * norm, 0.0f, 1.0f);
+            b = std::clamp((b - blackLevel) * norm, 0.0f, 1.0f);
 
-            // Gamma 2.2 approximation
-            r = std::min(255.0f, std::sqrt(r) * 255.0f);
-            g = std::min(255.0f, std::sqrt(g) * 255.0f);
-            b = std::min(255.0f, std::sqrt(b) * 255.0f);
+            // Gamma 2.2 tone curve
+            r = std::min(255.0f, std::pow(r, 1.0f / 2.2f) * 255.0f);
+            g = std::min(255.0f, std::pow(g, 1.0f / 2.2f) * 255.0f);
+            b = std::min(255.0f, std::pow(b, 1.0f / 2.2f) * 255.0f);
 
-            uint8_t ru = static_cast<uint8_t>(r);
-            uint8_t gu = static_cast<uint8_t>(g);
-            uint8_t bu = static_cast<uint8_t>(b);
-            uint8_t au = 0xFF;
+            uint32_t ru = static_cast<uint32_t>(r);
+            uint32_t gu = static_cast<uint32_t>(g);
+            uint32_t bu = static_cast<uint32_t>(b);
+            uint32_t au = 0xFF;
 
             outPixels[y * outWidth + x] = (au << 24) | (bu << 16) | (gu << 8) | ru;
         }
