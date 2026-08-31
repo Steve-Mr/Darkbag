@@ -162,7 +162,22 @@ object RawVideoExporter {
                 val bufferInfo = MediaCodec.BufferInfo()
                 val frameIntervalUs = (1_000_000L / fps).toLong()
 
-                val exposureMultiplier = 2.0f.pow(editConfig?.exposure ?: 0f) * (editConfig?.digitalGain ?: 1.0f)
+                val targetLogIndex = if (editConfig?.log != null && editConfig.log != "None") {
+                    top.maary.darkbag.fragments.SettingsFragment.LOG_CURVES.indexOf(editConfig.log).takeIf { it >= 0 } ?: -1
+                } else -1
+
+                val lutManager = top.maary.darkbag.utils.LutManager(context)
+                val lutPath = if (editConfig?.lut != null && editConfig.lut != "None" && editConfig.lut!!.isNotBlank()) {
+                    val f = File(lutManager.lutDir, editConfig.lut!!)
+                    if (f.exists()) f.absolutePath else {
+                        val f2 = File(File(context.filesDir, "luts"), editConfig.lut!!)
+                        if (f2.exists()) f2.absolutePath else null
+                    }
+                } else null
+
+                val exposure = editConfig?.exposure ?: 0f
+                val contrast = editConfig?.contrast ?: 0f
+                val saturation = editConfig?.saturation ?: 0f
 
                 for (i in 0 until totalFrames) {
                     bayerBuf.clear()
@@ -170,7 +185,7 @@ object RawVideoExporter {
                     val readBytes = RawVideoNative.nativeReadFrame(nativeHandle, i, meta, bayerBuf)
                     if (readBytes <= 0) continue
 
-                    // Debayer to Bitmap
+                    // Debayer & Grade to Bitmap
                     RawVideoNative.nativeDebayerFrameToBitmap(
                         bayerBuffer = bayerBuf,
                         width = rawW,
@@ -178,7 +193,12 @@ object RawVideoExporter {
                         cfaPattern = header.cfaPattern,
                         whiteLevel = header.whiteLevel,
                         blackLevel = header.blackLevel.firstOrNull() ?: 64f,
-                        exposureMultiplier = exposureMultiplier,
+                        neutralPoint = header.neutralPoint,
+                        targetLog = targetLogIndex,
+                        lutPath = lutPath,
+                        exposure = exposure,
+                        contrast = contrast,
+                        saturation = saturation,
                         outBitmap = fullBmp
                     )
 

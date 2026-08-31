@@ -1608,7 +1608,17 @@ open class ImageViewerFragment : Fragment() {
                                     val readBytes = top.maary.darkbag.rawvideo.RawVideoNative.nativeReadFrame(handle, 0, meta, bayerBuf)
                                     if (readBytes > 0) {
                                         val bmp = android.graphics.Bitmap.createBitmap(header.width, header.height, android.graphics.Bitmap.Config.ARGB_8888)
-                                        val exposureMultiplier = 2.0f.pow(finalConfig.exposure) * finalConfig.digitalGain
+                                        val targetLogIndex = if (finalConfig.log != null && finalConfig.log != "None") {
+                                            SettingsFragment.LOG_CURVES.indexOf(finalConfig.log).takeIf { it >= 0 } ?: -1
+                                        } else -1
+                                        val lutPath = if (finalConfig.lut != null && finalConfig.lut != "None" && finalConfig.lut.isNotBlank()) {
+                                            val f = java.io.File(lutManager.lutDir, finalConfig.lut)
+                                            if (f.exists()) f.absolutePath else {
+                                                val f2 = java.io.File(java.io.File(appContext.filesDir, "luts"), finalConfig.lut)
+                                                if (f2.exists()) f2.absolutePath else null
+                                            }
+                                        } else null
+
                                         top.maary.darkbag.rawvideo.RawVideoNative.nativeDebayerFrameToBitmap(
                                             bayerBuffer = bayerBuf,
                                             width = header.width,
@@ -1616,7 +1626,12 @@ open class ImageViewerFragment : Fragment() {
                                             cfaPattern = header.cfaPattern,
                                             whiteLevel = header.whiteLevel,
                                             blackLevel = header.blackLevel.firstOrNull() ?: 64f,
-                                            exposureMultiplier = exposureMultiplier,
+                                            neutralPoint = header.neutralPoint,
+                                            targetLog = targetLogIndex,
+                                            lutPath = lutPath,
+                                            exposure = finalConfig.exposure,
+                                            contrast = finalConfig.contrast,
+                                            saturation = finalConfig.saturation,
                                             outBitmap = bmp
                                         )
 

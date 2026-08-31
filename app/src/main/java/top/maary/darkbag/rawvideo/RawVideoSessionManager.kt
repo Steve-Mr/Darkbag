@@ -91,10 +91,23 @@ class RawVideoSessionManager {
 
         val neutralPoint = FloatArray(3) { 1.0f }
         val np = initialResult?.get(CaptureResult.SENSOR_NEUTRAL_COLOR_POINT)
-        if (np != null && np.size >= 3) {
+        if (np != null && np.size >= 3 && np[0].numerator > 0 && np[1].numerator > 0 && np[2].numerator > 0) {
             neutralPoint[0] = np[0].numerator.toFloat() / np[0].denominator.toFloat()
             neutralPoint[1] = np[1].numerator.toFloat() / np[1].denominator.toFloat()
             neutralPoint[2] = np[2].numerator.toFloat() / np[2].denominator.toFloat()
+        } else {
+            val wbGains = initialResult?.get(CaptureResult.COLOR_CORRECTION_GAINS)
+            if (wbGains != null && wbGains.red > 0.1f && wbGains.blue > 0.1f) {
+                val gAvg = (wbGains.greenEven + wbGains.greenOdd) * 0.5f
+                neutralPoint[0] = 1.0f / (wbGains.red / gAvg)
+                neutralPoint[1] = 1.0f
+                neutralPoint[2] = 1.0f / (wbGains.blue / gAvg)
+            } else {
+                // Typical smartphone daylight neutral point fallback (prevents green cast)
+                neutralPoint[0] = 0.50f
+                neutralPoint[1] = 1.00f
+                neutralPoint[2] = 0.60f
+            }
         }
 
         nativeHandle = RawVideoNative.nativeStartRecording(
@@ -158,10 +171,22 @@ class RawVideoSessionManager {
 
             val neutralPoint = FloatArray(3) { 1.0f }
             val np = result?.get(CaptureResult.SENSOR_NEUTRAL_COLOR_POINT)
-            if (np != null && np.size >= 3) {
+            if (np != null && np.size >= 3 && np[0].numerator > 0 && np[1].numerator > 0 && np[2].numerator > 0) {
                 neutralPoint[0] = np[0].numerator.toFloat() / np[0].denominator.toFloat()
                 neutralPoint[1] = np[1].numerator.toFloat() / np[1].denominator.toFloat()
                 neutralPoint[2] = np[2].numerator.toFloat() / np[2].denominator.toFloat()
+            } else {
+                val wbGains = result?.get(CaptureResult.COLOR_CORRECTION_GAINS)
+                if (wbGains != null && wbGains.red > 0.1f && wbGains.blue > 0.1f) {
+                    val gAvg = (wbGains.greenEven + wbGains.greenOdd) * 0.5f
+                    neutralPoint[0] = 1.0f / (wbGains.red / gAvg)
+                    neutralPoint[1] = 1.0f
+                    neutralPoint[2] = 1.0f / (wbGains.blue / gAvg)
+                } else {
+                    neutralPoint[0] = 0.50f
+                    neutralPoint[1] = 1.00f
+                    neutralPoint[2] = 0.60f
+                }
             }
 
             val pushed = RawVideoNative.nativePushVideoFrame(

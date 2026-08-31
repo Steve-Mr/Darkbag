@@ -116,7 +116,12 @@ object RawVideoNative {
         cfaPattern: Int,
         whiteLevel: Int,
         blackLevel: Float,
-        exposureMultiplier: Float,
+        neutralPoint: FloatArray?,
+        targetLog: Int = -1,
+        lutPath: String? = null,
+        exposure: Float = 0.0f,
+        contrast: Float = 0.0f,
+        saturation: Float = 0.0f,
         outBitmap: Bitmap
     ): Boolean
 

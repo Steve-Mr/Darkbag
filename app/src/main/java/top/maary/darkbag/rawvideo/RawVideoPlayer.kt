@@ -201,7 +201,23 @@ class RawVideoPlayer(
         val meta = LongArray(3)
         val readBytes = RawVideoNative.nativeReadFrame(handle, frameIdx, meta, buf)
         if (readBytes > 0) {
-            val exposureMultiplier = 2.0f.pow(currentEditConfig?.exposure ?: 0f) * (currentEditConfig?.digitalGain ?: 1.0f)
+            val targetLogIndex = if (currentEditConfig?.log != null && currentEditConfig?.log != "None") {
+                top.maary.darkbag.fragments.SettingsFragment.LOG_CURVES.indexOf(currentEditConfig?.log).takeIf { it >= 0 } ?: -1
+            } else -1
+
+            val lutManager = top.maary.darkbag.utils.LutManager(context)
+            val lutPath = if (currentEditConfig?.lut != null && currentEditConfig?.lut != "None" && currentEditConfig?.lut!!.isNotBlank()) {
+                val f = java.io.File(lutManager.lutDir, currentEditConfig?.lut!!)
+                if (f.exists()) f.absolutePath else {
+                    val f2 = java.io.File(java.io.File(context.filesDir, "luts"), currentEditConfig?.lut!!)
+                    if (f2.exists()) f2.absolutePath else null
+                }
+            } else null
+
+            val exposure = currentEditConfig?.exposure ?: 0f
+            val contrast = currentEditConfig?.contrast ?: 0f
+            val saturation = currentEditConfig?.saturation ?: 0f
+
             val debayered = RawVideoNative.nativeDebayerFrameToBitmap(
                 bayerBuffer = buf,
                 width = hdr.width,
@@ -209,7 +225,12 @@ class RawVideoPlayer(
                 cfaPattern = hdr.cfaPattern,
                 whiteLevel = hdr.whiteLevel,
                 blackLevel = hdr.blackLevel.firstOrNull() ?: 64f,
-                exposureMultiplier = exposureMultiplier,
+                neutralPoint = hdr.neutralPoint,
+                targetLog = targetLogIndex,
+                lutPath = lutPath,
+                exposure = exposure,
+                contrast = contrast,
+                saturation = saturation,
                 outBitmap = bmp
             )
 

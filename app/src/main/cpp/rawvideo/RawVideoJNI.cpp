@@ -7,8 +7,10 @@
 #include <cstring>
 #include <algorithm>
 
+#include <omp.h>
 #include "RawVideoContainer.h"
 #include "RawVideoRecorder.h"
+#include "../ColorPipe.h"
 
 #define TAG "RawVideoJNI"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
@@ -393,7 +395,7 @@ static const std::array<uint8_t, 1024> kGammaLut = [] {
     return table;
 }();
 
-// Fast Demosaicing of 16-bit RAW_SENSOR / Linear Bayer to RGBA_8888 Android Bitmap for smooth playback & thumbnail
+// Fast Demosaicing of 16-bit RAW_SENSOR / Linear Bayer to RGBA_8888 Android Bitmap with White Balance, Tone Curves, and 3D LUT
 JNIEXPORT jboolean JNICALL
 Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeDebayerFrameToBitmap(
         JNIEnv* env,
@@ -404,7 +406,12 @@ Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeDebayerFrameToBitmap(
         jint cfaPattern,
         jint whiteLevel,
         jfloat blackLevel,
-        jfloat exposureMultiplier,
+        jfloatArray jNeutralPoint,
+        jint targetLog,
+        jstring jLutPath,
+        jfloat exposure,
+        jfloat contrast,
+        jfloat saturation,
         jobject jOutBitmap
 ) {
     auto* rawBytes = static_cast<const uint8_t*>(env->GetDirectBufferAddress(jBayerBuffer));
@@ -421,8 +428,47 @@ Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeDebayerFrameToBitmap(
     const int outWidth = static_cast<int>(info.width);
     const int outHeight = static_cast<int>(info.height);
 
-    float norm = 1.0f / std::max(1.0f, static_cast<float>(whiteLevel) - blackLevel);
-    norm *= exposureMultiplier;
+    // 1. Calculate White Balance Gains from Neutral Point
+    float wbR = 2.0f;
+    float wbG = 1.0f;
+    float wbB = 1.6f;
+
+    if (jNeutralPoint) {
+        jsize npLen = env->GetArrayLength(jNeutralPoint);
+        if (npLen >= 3) {
+            jfloat npVals[3];
+            env->GetFloatArrayRegion(jNeutralPoint, 0, 3, npVals);
+            if (npVals[0] > 0.001f && npVals[1] > 0.001f && npVals[2] > 0.001f) {
+                // If neutralPoint contains valid inverse-gain coordinates
+                if (std::abs(npVals[0] - 1.0f) > 0.001f || std::abs(npVals[2] - 1.0f) > 0.001f) {
+                    wbR = 1.0f / npVals[0];
+                    wbG = 1.0f / npVals[1];
+                    wbB = 1.0f / npVals[2];
+                    wbR /= wbG;
+                    wbB /= wbG;
+                    wbG = 1.0f;
+                }
+            }
+        }
+    }
+
+    // 2. Load 3D Film Simulation LUT if specified
+    LUT3D lut;
+    lut.size = 0;
+    if (jLutPath) {
+        const char* lutPathC = env->GetStringUTFChars(jLutPath, nullptr);
+        if (lutPathC && lutPathC[0] != '\0') {
+            lut = load_lut(lutPathC);
+        }
+        if (lutPathC) {
+            env->ReleaseStringUTFChars(jLutPath, lutPathC);
+        }
+    }
+
+    float exposureMult = std::pow(2.0f, exposure);
+    float norm = (1.0f / std::max(1.0f, static_cast<float>(whiteLevel) - blackLevel)) * exposureMult;
+    float contrastFactor = 1.0f + contrast;
+    float satFactor = 1.0f + saturation;
 
     const size_t rowStride = static_cast<size_t>(width) * 2; // 16-bit RAW_SENSOR (2 bytes per pixel)
 
@@ -463,14 +509,48 @@ Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeDebayerFrameToBitmap(
                 r = static_cast<float>(p10);
             }
 
-            // Subtract black level, normalize, and lookup tone curve
-            int rIdx = static_cast<int>(std::clamp((r - blackLevel) * norm, 0.0f, 1.0f) * 1023.0f);
-            int gIdx = static_cast<int>(std::clamp((g - blackLevel) * norm, 0.0f, 1.0f) * 1023.0f);
-            int bIdx = static_cast<int>(std::clamp((b - blackLevel) * norm, 0.0f, 1.0f) * 1023.0f);
+            // 1. Subtract Black Level, Normalize and Apply White Balance Gains
+            r = std::max(0.0f, (r - blackLevel) * norm * wbR);
+            g = std::max(0.0f, (g - blackLevel) * norm * wbG);
+            b = std::max(0.0f, (b - blackLevel) * norm * wbB);
 
-            uint32_t ru = kGammaLut[rIdx];
-            uint32_t gu = kGammaLut[gIdx];
-            uint32_t bu = kGammaLut[bIdx];
+            // 2. Contrast in linear domain (pivot at 0.18 mid-gray)
+            if (contrast != 0.0f) {
+                r = std::max(0.0f, (r - 0.18f) * contrastFactor + 0.18f);
+                g = std::max(0.0f, (g - 0.18f) * contrastFactor + 0.18f);
+                b = std::max(0.0f, (b - 0.18f) * contrastFactor + 0.18f);
+            }
+
+            // 3. Log Tone Curve or standard sRGB Gamma
+            if (targetLog >= 0) {
+                r = apply_log(r, targetLog);
+                g = apply_log(g, targetLog);
+                b = apply_log(b, targetLog);
+            } else {
+                r = srgb_oetf(r);
+                g = srgb_oetf(g);
+                b = srgb_oetf(b);
+            }
+
+            // 4. 3D Film Simulation LUT
+            if (lut.size > 0) {
+                Vec3 graded = apply_lut(lut, {r, g, b});
+                r = graded.r;
+                g = graded.g;
+                b = graded.b;
+            }
+
+            // 5. Saturation
+            if (saturation != 0.0f) {
+                float luma = 0.2126f * r + 0.7152f * g + 0.0722f * b;
+                r = luma + (r - luma) * satFactor;
+                g = luma + (g - luma) * satFactor;
+                b = luma + (b - luma) * satFactor;
+            }
+
+            uint32_t ru = static_cast<uint32_t>(std::clamp(r * 255.0f, 0.0f, 255.0f));
+            uint32_t gu = static_cast<uint32_t>(std::clamp(g * 255.0f, 0.0f, 255.0f));
+            uint32_t bu = static_cast<uint32_t>(std::clamp(b * 255.0f, 0.0f, 255.0f));
             uint32_t au = 0xFF;
 
             outPixels[y * outWidth + x] = (au << 24) | (bu << 16) | (gu << 8) | ru;

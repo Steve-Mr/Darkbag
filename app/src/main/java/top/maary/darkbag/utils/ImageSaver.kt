@@ -844,15 +844,32 @@ object ImageSaver {
                 val meta = LongArray(3)
                 val readBytes = top.maary.darkbag.rawvideo.RawVideoNative.nativeReadFrame(readerHandle, 0, meta, directBuf)
                 if (readBytes > 0) {
+                    val targetLogIndex = if (header.activeLogName.isNotBlank() && header.activeLogName != "None") {
+                        top.maary.darkbag.fragments.SettingsFragment.LOG_CURVES.indexOf(header.activeLogName).takeIf { it >= 0 } ?: -1
+                    } else -1
+                    val lutManager = top.maary.darkbag.utils.LutManager(context)
+                    val lutPath = if (header.activeLutName.isNotBlank() && header.activeLutName != "None") {
+                        val f = java.io.File(lutManager.lutDir, header.activeLutName)
+                        if (f.exists()) f.absolutePath else {
+                            val f2 = java.io.File(java.io.File(context.filesDir, "luts"), header.activeLutName)
+                            if (f2.exists()) f2.absolutePath else null
+                        }
+                    } else null
+
                     val debayered = top.maary.darkbag.rawvideo.RawVideoNative.nativeDebayerFrameToBitmap(
-                        directBuf,
-                        header.width,
-                        header.height,
-                        header.cfaPattern,
-                        header.whiteLevel,
-                        header.blackLevel.firstOrNull() ?: 64f,
-                        1.0f,
-                        bmp
+                        bayerBuffer = directBuf,
+                        width = header.width,
+                        height = header.height,
+                        cfaPattern = header.cfaPattern,
+                        whiteLevel = header.whiteLevel,
+                        blackLevel = header.blackLevel.firstOrNull() ?: 64f,
+                        neutralPoint = header.neutralPoint,
+                        targetLog = targetLogIndex,
+                        lutPath = lutPath,
+                        exposure = 0.0f,
+                        contrast = 0.0f,
+                        saturation = 0.0f,
+                        outBitmap = bmp
                     )
                     if (debayered) {
                         thumbnailBitmap = bmp
