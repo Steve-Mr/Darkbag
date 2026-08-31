@@ -38,10 +38,11 @@ object RawVideoExporter {
         pfd.use { parcelFd ->
             try {
                 val fd = parcelFd.fd
-                val fdPath = "/proc/self/fd/$fd"
-
-                nativeHandle = RawVideoNative.nativeOpenReader(fdPath)
-                if (nativeHandle == 0L) return@withContext null
+                nativeHandle = RawVideoNative.nativeOpenReaderFd(fd)
+                if (nativeHandle == 0L) {
+                    Log.e(TAG, "Failed to open native reader for CinemaDNG export (fd=$fd, uri=$rawVideoUri)")
+                    return@withContext null
+                }
 
                 val header = RawVideoNative.readHeader(nativeHandle) ?: run {
                     RawVideoNative.nativeCloseReader(nativeHandle)
@@ -108,10 +109,11 @@ object RawVideoExporter {
         pfd.use { parcelFd ->
             try {
                 val fd = parcelFd.fd
-                val fdPath = "/proc/self/fd/$fd"
-
-                nativeHandle = RawVideoNative.nativeOpenReader(fdPath)
-                if (nativeHandle == 0L) return@withContext false
+                nativeHandle = RawVideoNative.nativeOpenReaderFd(fd)
+                if (nativeHandle == 0L) {
+                    Log.e(TAG, "Failed to open native reader for MP4 export (fd=$fd, uri=$rawVideoUri)")
+                    return@withContext false
+                }
 
                 val header = RawVideoNative.readHeader(nativeHandle) ?: run {
                     RawVideoNative.nativeCloseReader(nativeHandle)

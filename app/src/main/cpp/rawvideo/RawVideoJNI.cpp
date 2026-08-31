@@ -216,6 +216,21 @@ Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeOpenReader(
     return reinterpret_cast<jlong>(reader);
 }
 
+JNIEXPORT jlong JNICALL
+Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeOpenReaderFd(
+        JNIEnv* /* env */,
+        jobject /* thiz */,
+        jint fd
+) {
+    if (fd < 0) return 0;
+    auto* reader = new RawVideoReader();
+    if (!reader->openFd(fd)) {
+        delete reader;
+        return 0;
+    }
+    return reinterpret_cast<jlong>(reader);
+}
+
 JNIEXPORT jboolean JNICALL
 Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeGetHeader(
         JNIEnv* env,

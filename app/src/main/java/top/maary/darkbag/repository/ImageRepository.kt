@@ -124,8 +124,7 @@ class ImageRepository(private val context: Context) {
             try {
                 context.contentResolver.openFileDescriptor(rawVideoUri, "r")?.use { pfd ->
                     val fd = pfd.fd
-                    val fdPath = "/proc/self/fd/$fd"
-                    val handle = top.maary.darkbag.rawvideo.RawVideoNative.nativeOpenReader(fdPath)
+                    val handle = top.maary.darkbag.rawvideo.RawVideoNative.nativeOpenReaderFd(fd)
                     if (handle != 0L) {
                         val header = top.maary.darkbag.rawvideo.RawVideoNative.readHeader(handle)
                         if (header != null) {

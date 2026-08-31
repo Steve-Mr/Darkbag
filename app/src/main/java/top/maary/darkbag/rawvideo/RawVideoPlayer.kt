@@ -59,11 +59,10 @@ class RawVideoPlayer(
             val pfd = context.contentResolver.openFileDescriptor(uri, "r") ?: return false
             currentPfd = pfd
             val fd = pfd.fd
-            val fdPath = "/proc/self/fd/$fd"
 
-            nativeHandle = RawVideoNative.nativeOpenReader(fdPath)
+            nativeHandle = RawVideoNative.nativeOpenReaderFd(fd)
             if (nativeHandle == 0L) {
-                Log.e(TAG, "Failed to open raw video: $uri")
+                Log.e(TAG, "Failed to open raw video via fd: $uri (fd=$fd)")
                 release()
                 return false
             }

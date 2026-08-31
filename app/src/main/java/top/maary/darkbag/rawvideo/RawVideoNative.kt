@@ -83,6 +83,7 @@ object RawVideoNative {
     external fun nativeStopRecording(handle: Long): Boolean
 
     external fun nativeOpenReader(filePath: String): Long
+    external fun nativeOpenReaderFd(fd: Int): Long
 
     external fun nativeGetHeader(
         handle: Long,

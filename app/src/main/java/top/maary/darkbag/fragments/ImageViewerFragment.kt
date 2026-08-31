@@ -2838,8 +2838,10 @@ open class ImageViewerFragment : Fragment() {
     private fun performExportCinemaDng(group: top.maary.darkbag.models.ImageGroup) {
         val uri = group.rawVideoUri ?: return
         val context = requireContext()
-        val publicDir = File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DCIM), "Darkbag/CinemaDNG")
-        val exportDir = if (publicDir.exists() || publicDir.mkdirs()) publicDir else File(context.getExternalFilesDir(null), "CinemaDNG").apply { mkdirs() }
+        val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val rawFolderUriStr = prefs.getString(SettingsFragment.KEY_RAW_STORAGE_URI, null)
+
+        val tempExportDir = File(context.cacheDir, "cdng_${System.currentTimeMillis()}").apply { mkdirs() }
 
         binding.initialLoadingIndicator.visibility = View.VISIBLE
         lifecycleScope.launch {
@@ -2847,14 +2849,41 @@ open class ImageViewerFragment : Fragment() {
             val resultDir = top.maary.darkbag.rawvideo.RawVideoExporter.exportToCinemaDng(
                 context = context,
                 rawVideoUri = uri,
-                outputDir = exportDir,
+                outputDir = tempExportDir,
                 onProgress = { _, _ -> }
             )
             binding.initialLoadingIndicator.visibility = View.GONE
+
             if (resultDir != null && resultDir.exists()) {
-                android.media.MediaScannerConnection.scanFile(context, arrayOf(resultDir.absolutePath), null, null)
-                Toast.makeText(context, "CinemaDNG exported to ${resultDir.absolutePath}", Toast.LENGTH_LONG).show()
+                val clipName = resultDir.name
+                if (rawFolderUriStr != null) {
+                    try {
+                        val treeUri = Uri.parse(rawFolderUriStr)
+                        val treeDoc = androidx.documentfile.provider.DocumentFile.fromTreeUri(context, treeUri)
+                        val clipDirDoc = treeDoc?.createDirectory(clipName)
+                        if (clipDirDoc != null) {
+                            resultDir.listFiles()?.forEach { file ->
+                                val mime = if (file.name.endsWith(".wav")) "audio/wav" else "image/x-adobe-dng"
+                                val targetDoc = clipDirDoc.createFile(mime, file.name)
+                                if (targetDoc != null) {
+                                    context.contentResolver.openOutputStream(targetDoc.uri)?.use { out ->
+                                        file.inputStream().use { it.copyTo(out) }
+                                    }
+                                }
+                            }
+                        }
+                    } catch (e: Exception) {
+                        android.util.Log.e("ImageViewerFragment", "Failed to copy CinemaDNG to SAF folder", e)
+                    }
+                }
+                val destDir = File(context.getExternalFilesDir(null), "CinemaDNG/$clipName").apply { mkdirs() }
+                resultDir.copyRecursively(destDir, overwrite = true)
+                tempExportDir.deleteRecursively()
+
+                android.media.MediaScannerConnection.scanFile(context, arrayOf(destDir.absolutePath), null, null)
+                Toast.makeText(context, "CinemaDNG exported: $clipName", Toast.LENGTH_LONG).show()
             } else {
+                tempExportDir.deleteRecursively()
                 Toast.makeText(context, "CinemaDNG export failed", Toast.LENGTH_SHORT).show()
             }
         }
@@ -2863,9 +2892,11 @@ open class ImageViewerFragment : Fragment() {
     private fun performExportMp4(group: top.maary.darkbag.models.ImageGroup) {
         val uri = group.rawVideoUri ?: return
         val context = requireContext()
-        val publicDir = File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_MOVIES), "Darkbag")
-        val exportDir = if (publicDir.exists() || publicDir.mkdirs()) publicDir else File(context.getExternalFilesDir(null), "Videos").apply { mkdirs() }
-        val mp4File = File(exportDir, "${group.baseName}_graded.mp4")
+        val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val rawFolderUri = prefs.getString(SettingsFragment.KEY_RAW_STORAGE_URI, null)
+        val jpgFolderUri = prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
+
+        val tempMp4File = File(context.cacheDir, "${group.baseName}_graded.mp4")
 
         binding.initialLoadingIndicator.visibility = View.VISIBLE
         lifecycleScope.launch {
@@ -2873,16 +2904,28 @@ open class ImageViewerFragment : Fragment() {
             val success = top.maary.darkbag.rawvideo.RawVideoExporter.exportToMp4(
                 context = context,
                 rawVideoUri = uri,
-                outputFile = mp4File,
+                outputFile = tempMp4File,
                 editConfig = currentEditConfig ?: group.editConfig,
                 onProgress = { _, _ -> }
             )
             binding.initialLoadingIndicator.visibility = View.GONE
-            if (success && mp4File.exists()) {
-                android.media.MediaScannerConnection.scanFile(context, arrayOf(mp4File.absolutePath), arrayOf("video/mp4"), null)
-                repository.invalidateCache()
-                Toast.makeText(context, "Graded MP4 saved: ${mp4File.name}", Toast.LENGTH_LONG).show()
+
+            if (success && tempMp4File.exists() && tempMp4File.length() > 0) {
+                val (savedUri, _) = top.maary.darkbag.utils.ImageSaver.saveMp4Video(
+                    context = context,
+                    mp4File = tempMp4File,
+                    baseName = "${group.baseName}_graded",
+                    rawFolderUri = rawFolderUri,
+                    jpgFolderUri = jpgFolderUri
+                )
+                if (savedUri != null) {
+                    repository.invalidateCache()
+                    Toast.makeText(context, "Graded MP4 saved: ${group.baseName}_graded.mp4", Toast.LENGTH_LONG).show()
+                } else {
+                    Toast.makeText(context, "Failed to save MP4 to storage", Toast.LENGTH_SHORT).show()
+                }
             } else {
+                tempMp4File.delete()
                 Toast.makeText(context, "MP4 export failed", Toast.LENGTH_SHORT).show()
             }
         }

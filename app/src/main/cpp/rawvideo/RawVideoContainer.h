@@ -121,6 +121,7 @@ public:
     ~RawVideoReader();
 
     bool open(const std::string& filePath);
+    bool openFd(int fd);
     bool readHeader(FileHeader& outHeader);
     const FileHeader& getHeader() const { return header_; }
     const std::vector<FrameIndexEntry>& getFrameIndex() const { return frameIndex_; }
@@ -135,6 +136,7 @@ public:
 private:
     std::string filePath_;
     std::ifstream file_;
+    int fd_ = -1;
     FileHeader header_;
     std::vector<FrameIndexEntry> frameIndex_;
     std::vector<AudioIndexEntry> audioIndex_;

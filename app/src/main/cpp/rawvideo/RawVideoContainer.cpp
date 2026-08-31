@@ -171,6 +171,104 @@ RawVideoReader::~RawVideoReader() {
     close();
 }
 
+bool RawVideoReader::openFd(int fd) {
+    std::lock_guard<std::mutex> lock(readMutex_);
+    close();
+
+    if (fd < 0) {
+        LOGE("RawVideoReader: Invalid fd %d", fd);
+        return false;
+    }
+
+    fd_ = dup(fd);
+    if (fd_ < 0) {
+        LOGE("RawVideoReader: Failed to dup fd %d: %s", fd, strerror(errno));
+        return false;
+    }
+
+    // Read FileHeader using pread
+    ssize_t bytesRead = pread(fd_, &header_, sizeof(FileHeader), 0);
+    if (bytesRead != static_cast<ssize_t>(sizeof(FileHeader)) || header_.magic != RAWVID_MAGIC) {
+        LOGE("RawVideoReader: Invalid header or magic in fd %d (got bytes %zd, expected %zu)",
+             fd, bytesRead, sizeof(FileHeader));
+        ::close(fd_);
+        fd_ = -1;
+        return false;
+    }
+
+    frameIndex_.clear();
+    audioIndex_.clear();
+
+    if (header_.indexOffset > 0) {
+        uint64_t indexMagic = 0;
+        pread(fd_, &indexMagic, sizeof(indexMagic), header_.indexOffset);
+        if (indexMagic == RAWVID_INDEX_MAGIC) {
+            uint32_t totalFrames = 0;
+            uint32_t totalAudio = 0;
+            uint64_t offset = header_.indexOffset + sizeof(indexMagic);
+            pread(fd_, &totalFrames, sizeof(totalFrames), offset);
+            offset += sizeof(totalFrames);
+            pread(fd_, &totalAudio, sizeof(totalAudio), offset);
+            offset += sizeof(totalAudio);
+
+            if (totalFrames > 0) {
+                frameIndex_.resize(totalFrames);
+                pread(fd_, frameIndex_.data(), totalFrames * sizeof(FrameIndexEntry), offset);
+                offset += totalFrames * sizeof(FrameIndexEntry);
+            }
+            if (totalAudio > 0) {
+                audioIndex_.resize(totalAudio);
+                pread(fd_, audioIndex_.data(), totalAudio * sizeof(AudioIndexEntry), offset);
+            }
+        }
+    }
+
+    // Fallback: If index missing, scan chunks sequentially using pread
+    if (frameIndex_.empty()) {
+        LOGI("RawVideoReader: Index table missing, scanning fd %d linearly...", fd);
+        uint64_t curOffset = sizeof(FileHeader);
+        uint32_t frameIdx = 0;
+        while (true) {
+            uint32_t chunkType = 0;
+            ssize_t r = pread(fd_, &chunkType, sizeof(chunkType), curOffset);
+            if (r != static_cast<ssize_t>(sizeof(chunkType))) break;
+
+            if (chunkType == CHUNK_VIDEO_FRAME) {
+                VideoFrameHeader vh;
+                ssize_t vhRead = pread(fd_, &vh, sizeof(VideoFrameHeader), curOffset);
+                if (vhRead != static_cast<ssize_t>(sizeof(VideoFrameHeader))) break;
+
+                FrameIndexEntry entry{};
+                entry.frameIndex = frameIdx++;
+                entry.fileOffset = curOffset;
+                entry.timestampNs = vh.timestampNs;
+                entry.payloadSize = vh.payloadSize;
+                entry.uncompressedSize = vh.uncompressedSize;
+                frameIndex_.push_back(entry);
+                curOffset += sizeof(VideoFrameHeader) + vh.payloadSize;
+            } else if (chunkType == CHUNK_AUDIO_PACKET) {
+                AudioPacketHeader ah;
+                ssize_t ahRead = pread(fd_, &ah, sizeof(AudioPacketHeader), curOffset);
+                if (ahRead != static_cast<ssize_t>(sizeof(AudioPacketHeader))) break;
+
+                AudioIndexEntry entry{};
+                entry.fileOffset = curOffset;
+                entry.timestampNs = ah.timestampNs;
+                entry.sampleCount = ah.sampleCount;
+                entry.payloadSize = ah.payloadSize;
+                audioIndex_.push_back(entry);
+                curOffset += sizeof(AudioPacketHeader) + ah.payloadSize;
+            } else {
+                break;
+            }
+        }
+    }
+
+    isOpen_ = true;
+    LOGI("RawVideoReader opened fd %d: %zu frames, %zu audio packets", fd, frameIndex_.size(), audioIndex_.size());
+    return true;
+}
+
 bool RawVideoReader::open(const std::string& filePath) {
     std::lock_guard<std::mutex> lock(readMutex_);
     close();
@@ -284,6 +382,24 @@ bool RawVideoReader::readVideoFrame(uint32_t frameIndex, VideoFrameHeader& outHe
     }
 
     const auto& entry = frameIndex_[frameIndex];
+    if (fd_ >= 0) {
+        ssize_t r = pread(fd_, &outHeader, sizeof(VideoFrameHeader), entry.fileOffset);
+        if (r != static_cast<ssize_t>(sizeof(VideoFrameHeader)) || outHeader.chunkType != CHUNK_VIDEO_FRAME) {
+            LOGE("RawVideoReader: Corrupt frame header in fd at index %u, offset %llu", frameIndex, (unsigned long long)entry.fileOffset);
+            return false;
+        }
+
+        outPayload.resize(outHeader.payloadSize);
+        if (outHeader.payloadSize > 0) {
+            ssize_t pr = pread(fd_, outPayload.data(), outHeader.payloadSize, entry.fileOffset + sizeof(VideoFrameHeader));
+            if (pr != static_cast<ssize_t>(outHeader.payloadSize)) {
+                LOGE("RawVideoReader: Failed to read video frame payload in fd at index %u", frameIndex);
+                return false;
+            }
+        }
+        return true;
+    }
+
     file_.clear();
     file_.seekg(entry.fileOffset, std::ios::beg);
 
@@ -308,6 +424,23 @@ bool RawVideoReader::readAudioPacket(uint32_t packetIndex, AudioPacketHeader& ou
     }
 
     const auto& entry = audioIndex_[packetIndex];
+    if (fd_ >= 0) {
+        ssize_t r = pread(fd_, &outHeader, sizeof(AudioPacketHeader), entry.fileOffset);
+        if (r != static_cast<ssize_t>(sizeof(AudioPacketHeader)) || outHeader.chunkType != CHUNK_AUDIO_PACKET) {
+            LOGE("RawVideoReader: Corrupt audio header in fd at index %u", packetIndex);
+            return false;
+        }
+
+        outPcm.resize(outHeader.payloadSize);
+        if (outHeader.payloadSize > 0) {
+            ssize_t pr = pread(fd_, outPcm.data(), outHeader.payloadSize, entry.fileOffset + sizeof(AudioPacketHeader));
+            if (pr != static_cast<ssize_t>(outHeader.payloadSize)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     file_.clear();
     file_.seekg(entry.fileOffset, std::ios::beg);
 
@@ -326,6 +459,10 @@ bool RawVideoReader::readAudioPacket(uint32_t packetIndex, AudioPacketHeader& ou
 }
 
 void RawVideoReader::close() {
+    if (fd_ >= 0) {
+        ::close(fd_);
+        fd_ = -1;
+    }
     if (file_.is_open()) {
         file_.close();
     }
