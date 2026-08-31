@@ -1,6 +1,7 @@
 package top.maary.darkbag.fragments
 
 import android.util.Log
+import java.io.File
 import android.os.Build
 import android.provider.MediaStore
 import android.app.Activity
@@ -567,8 +568,17 @@ open class ImageViewerFragment : Fragment() {
             binding.btnShareMenu.isChecked = true
             val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
             val popup = PopupMenu(requireContext(), it)
-            popup.menu.add(0, MENU_SHARE_TIFF, 0, getString(R.string.share_as_tiff)).apply {
-                setIcon(R.drawable.ic_photo)
+            if (currentGroup.isRawVideo) {
+                popup.menu.add(0, MENU_EXPORT_CINEMA_DNG, 0, "Export CinemaDNG Sequence").apply {
+                    setIcon(R.drawable.ic_photo)
+                }
+                popup.menu.add(0, MENU_EXPORT_MP4, 0, "Export Graded MP4 Video").apply {
+                    setIcon(R.drawable.ic_play_arrow)
+                }
+            } else {
+                popup.menu.add(0, MENU_SHARE_TIFF, 0, getString(R.string.share_as_tiff)).apply {
+                    setIcon(R.drawable.ic_photo)
+                }
             }
             if (currentGroup.isMultiCamera) {
                 popup.menu.add(0, MENU_COLLAGE, 0, getString(R.string.create_multi_cam_collage)).apply {
@@ -587,6 +597,8 @@ open class ImageViewerFragment : Fragment() {
             popup.setOnMenuItemClickListener { item ->
                 when (item.itemId) {
                     MENU_SHARE_TIFF -> performShareAsTiff()
+                    MENU_EXPORT_CINEMA_DNG -> performExportCinemaDng(adapter.getGroup(binding.imagePager.currentItem))
+                    MENU_EXPORT_MP4 -> performExportMp4(adapter.getGroup(binding.imagePager.currentItem))
                     MENU_COLLAGE -> showMultiCamCollageDialog(adapter.getGroup(binding.imagePager.currentItem))
                     MENU_DETAILS -> showImageDetails()
                     MENU_DELETE -> {
@@ -2818,6 +2830,54 @@ open class ImageViewerFragment : Fragment() {
         _binding = null
     }
 
+    private fun performExportCinemaDng(group: top.maary.darkbag.models.ImageGroup) {
+        val uri = group.rawVideoUri ?: return
+        val context = requireContext()
+        val exportDir = File(context.getExternalFilesDir(null), "CinemaDNG").apply { mkdirs() }
+
+        binding.initialLoadingIndicator.visibility = View.VISIBLE
+        lifecycleScope.launch {
+            Toast.makeText(context, "Exporting CinemaDNG sequence...", Toast.LENGTH_SHORT).show()
+            val resultDir = top.maary.darkbag.rawvideo.RawVideoExporter.exportToCinemaDng(
+                context = context,
+                rawVideoUri = uri,
+                outputDir = exportDir,
+                onProgress = { _, _ -> }
+            )
+            binding.initialLoadingIndicator.visibility = View.GONE
+            if (resultDir != null && resultDir.exists()) {
+                Toast.makeText(context, "CinemaDNG exported: ${resultDir.name}", Toast.LENGTH_LONG).show()
+            } else {
+                Toast.makeText(context, "CinemaDNG export failed", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    private fun performExportMp4(group: top.maary.darkbag.models.ImageGroup) {
+        val uri = group.rawVideoUri ?: return
+        val context = requireContext()
+        val exportDir = File(context.getExternalFilesDir(null), "Videos").apply { mkdirs() }
+        val mp4File = File(exportDir, "${group.baseName}_graded.mp4")
+
+        binding.initialLoadingIndicator.visibility = View.VISIBLE
+        lifecycleScope.launch {
+            Toast.makeText(context, "Exporting graded MP4 video...", Toast.LENGTH_SHORT).show()
+            val success = top.maary.darkbag.rawvideo.RawVideoExporter.exportToMp4(
+                context = context,
+                rawVideoUri = uri,
+                outputFile = mp4File,
+                editConfig = currentEditConfig ?: group.editConfig,
+                onProgress = { _, _ -> }
+            )
+            binding.initialLoadingIndicator.visibility = View.GONE
+            if (success && mp4File.exists()) {
+                Toast.makeText(context, "Graded MP4 saved: ${mp4File.name}", Toast.LENGTH_LONG).show()
+            } else {
+                Toast.makeText(context, "MP4 export failed", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
     companion object {
         const val KEY_VIEWER_MOTION_PHOTO_AUTO_PLAY = "viewer_motion_photo_auto_play"
 
@@ -2826,6 +2886,8 @@ open class ImageViewerFragment : Fragment() {
         private const val MENU_SAVE_AS = 3
         private const val MENU_SHARE_TIFF = 4
         private const val MENU_COLLAGE = 5
+        private const val MENU_EXPORT_CINEMA_DNG = 6
+        private const val MENU_EXPORT_MP4 = 7
 
         private const val EXPOSURE_MIN = -4f
         private const val EXPOSURE_MAX = 4f

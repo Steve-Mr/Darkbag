@@ -326,6 +326,35 @@ Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeReadFrame(
     }
 }
 
+JNIEXPORT jint JNICALL
+Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeReadAudioPacket(
+        JNIEnv* env,
+        jobject /* thiz */,
+        jlong handle,
+        jint packetIndex,
+        jobject jOutByteBuffer
+) {
+    auto* reader = reinterpret_cast<RawVideoReader*>(handle);
+    if (!reader || packetIndex < 0) return -1;
+
+    void* outBufferPtr = env->GetDirectBufferAddress(jOutByteBuffer);
+    jlong bufferCapacity = env->GetDirectBufferCapacity(jOutByteBuffer);
+    if (!outBufferPtr || bufferCapacity <= 0) return -1;
+
+    AudioPacketHeader ah{};
+    std::vector<uint8_t> pcm;
+    if (!reader->readAudioPacket(static_cast<uint32_t>(packetIndex), ah, pcm)) {
+        return -1;
+    }
+
+    if (pcm.size() > static_cast<size_t>(bufferCapacity)) {
+        return -1;
+    }
+
+    std::memcpy(outBufferPtr, pcm.data(), pcm.size());
+    return static_cast<jint>(pcm.size());
+}
+
 JNIEXPORT void JNICALL
 Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeCloseReader(
         JNIEnv* /* env */,

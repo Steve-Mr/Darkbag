@@ -100,6 +100,12 @@ object RawVideoNative {
         outByteBuffer: ByteBuffer
     ): Int
 
+    external fun nativeReadAudioPacket(
+        handle: Long,
+        packetIndex: Int,
+        outByteBuffer: ByteBuffer
+    ): Int
+
     external fun nativeCloseReader(handle: Long)
 
     external fun nativeDebayerFrameToBitmap(
