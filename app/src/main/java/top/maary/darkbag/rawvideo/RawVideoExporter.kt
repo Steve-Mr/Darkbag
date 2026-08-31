@@ -126,13 +126,19 @@ object RawVideoExporter {
                     return@withContext false
                 }
 
-                val w = header.width
-                val h = header.height
+                val rawW = header.width
+                val rawH = header.height
                 val fps = header.fps.takeIf { it > 0 } ?: 24.0f
-                val bitRate = 25_000_000 // 25 Mbps high quality
+                val bitRate = 20_000_000 // 20 Mbps high quality
 
-                val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, w, h).apply {
-                    setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible)
+                // Downscale / fit to standard 1080p (or 4K) resolution with 16-pixel alignment for MediaCodec
+                val maxDim = 1920
+                val scale = if (maxOf(rawW, rawH) > maxDim) maxDim.toFloat() / maxOf(rawW, rawH) else 1.0f
+                val exportW = (((rawW * scale).toInt() + 15) / 16) * 16
+                val exportH = (((rawH * scale).toInt() + 15) / 16) * 16
+
+                val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, exportW, exportH).apply {
+                    setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar)
                     setInteger(MediaFormat.KEY_BIT_RATE, bitRate)
                     setFloat(MediaFormat.KEY_FRAME_RATE, fps)
                     setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
@@ -146,9 +152,11 @@ object RawVideoExporter {
                 var videoTrackIndex = -1
                 var muxerStarted = false
 
-                val bayerBuf = ByteBuffer.allocateDirect(w * h * 2)
-                val renderBmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-                val yuvBuf = ByteArray(w * h * 3 / 2)
+                val bayerBuf = ByteBuffer.allocateDirect(rawW * rawH * 2)
+                val fullBmp = Bitmap.createBitmap(rawW, rawH, Bitmap.Config.ARGB_8888)
+                val scaledBmp = if (exportW == rawW && exportH == rawH) fullBmp else Bitmap.createBitmap(exportW, exportH, Bitmap.Config.ARGB_8888)
+                val canvas = if (scaledBmp !== fullBmp) android.graphics.Canvas(scaledBmp) else null
+                val yuvBuf = ByteArray(exportW * exportH * 3 / 2)
 
                 val bufferInfo = MediaCodec.BufferInfo()
                 val frameIntervalUs = (1_000_000L / fps).toLong()
@@ -164,17 +172,21 @@ object RawVideoExporter {
                     // Debayer to Bitmap
                     RawVideoNative.nativeDebayerFrameToBitmap(
                         bayerBuffer = bayerBuf,
-                        width = w,
-                        height = h,
+                        width = rawW,
+                        height = rawH,
                         cfaPattern = header.cfaPattern,
                         whiteLevel = header.whiteLevel,
                         blackLevel = header.blackLevel.firstOrNull() ?: 64f,
                         exposureMultiplier = exposureMultiplier,
-                        outBitmap = renderBmp
+                        outBitmap = fullBmp
                     )
 
+                    if (scaledBmp !== fullBmp && canvas != null) {
+                        canvas.drawBitmap(fullBmp, android.graphics.Rect(0, 0, rawW, rawH), android.graphics.Rect(0, 0, exportW, exportH), null)
+                    }
+
                     // Convert ARGB to NV12/YUV420
-                    bitmapToNv12(renderBmp, yuvBuf, w, h)
+                    bitmapToNv12(scaledBmp, yuvBuf, exportW, exportH)
 
                     // Feed to MediaCodec
                     val inIndex = encoder.dequeueInputBuffer(10000)
@@ -275,17 +287,16 @@ object RawVideoExporter {
         }
 
         val ifdOffset = 8
-        val entryCount = 16
-        val ifdSize = 2 + entryCount * 12 + 4
-        val valueDataOffset = ((ifdOffset + ifdSize + 3) / 4) * 4
+        val entryCount = 17
+        val ifdSize = 2 + entryCount * 12 + 4 // 210 bytes
+        val valueDataOffset = ((ifdOffset + ifdSize + 3) / 4) * 4 // 220 bytes
 
-        val blackLevelOffset = valueDataOffset
-        val colorMatrix1Offset = blackLevelOffset + 32
-        val asShotNeutralOffset = colorMatrix1Offset + 72
-        val stripOffset = asShotNeutralOffset + 24
+        val blackLevelOffset = valueDataOffset // 220
+        val colorMatrix1Offset = blackLevelOffset + 32 // 252 (4 * 8 = 32 bytes)
+        val asShotNeutralOffset = colorMatrix1Offset + 72 // 324 (9 * 8 = 72 bytes)
+        val stripOffset = asShotNeutralOffset + 24 // 348 (3 * 8 = 24 bytes)
 
-        val headerSize = stripOffset
-        val buf = ByteBuffer.allocate(headerSize).order(ByteOrder.LITTLE_ENDIAN)
+        val buf = ByteBuffer.allocate(1024).order(ByteOrder.LITTLE_ENDIAN)
 
         // 1. TIFF Header
         buf.putShort(0x4949.toShort()) // 'II'
@@ -376,7 +387,7 @@ object RawVideoExporter {
         }
 
         FileOutputStream(file).use { fos ->
-            fos.write(buf.array())
+            fos.write(buf.array(), 0, stripOffset)
             bayerData.position(0)
             bayerData.limit(payloadSize)
             fos.channel.write(bayerData)
