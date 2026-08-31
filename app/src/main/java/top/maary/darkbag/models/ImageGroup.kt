@@ -31,9 +31,11 @@ data class ImageGroup(
     val isRawVideo: Boolean = false,
     val rawVideoFps: Float = 24.0f,
     val rawVideoFrameCount: Int = 0,
-    val rawVideoDurationMs: Long = 0L
+    val rawVideoDurationMs: Long = 0L,
+    val mp4VideoUri: Uri? = null,
+    val isMp4Video: Boolean = false
 ) : Parcelable {
-    fun hasAny(): Boolean = jpgUri != null || dngUri != null || dngUri1 != null || dngUri2 != null || rawVideoUri != null || multiJpgUris.isNotEmpty() || multiDngUris.isNotEmpty() || multiCameraLenses.isNotEmpty()
+    fun hasAny(): Boolean = jpgUri != null || dngUri != null || dngUri1 != null || dngUri2 != null || rawVideoUri != null || mp4VideoUri != null || multiJpgUris.isNotEmpty() || multiDngUris.isNotEmpty() || multiCameraLenses.isNotEmpty()
 
     // 2.5: Only true if it has both DNGs, a stitched JPG, or an explicit layout.
     // If only dngUri1 exists and no jpg, it's NOT a half-frame group (shows as single image).

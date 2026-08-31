@@ -353,6 +353,9 @@ class ImageRepository(private val context: Context) {
                         name.endsWith(".rawvid", ignoreCase = true) -> {
                             builder.setRawVideo(file.uri, lastModified)
                         }
+                        name.endsWith(".mp4", ignoreCase = true) -> {
+                            builder.setMp4Video(file.uri, lastModified)
+                        }
                     }
                 }
             }
@@ -391,7 +394,6 @@ class ImageRepository(private val context: Context) {
     }
 
     private fun scanMediaStore(groups: MutableMap<String, ImageGroupBuilder>, fast: Boolean = false) {
-        val collection = MediaStore.Images.Media.EXTERNAL_CONTENT_URI
         val projection = arrayOf(
             MediaStore.MediaColumns._ID,
             MediaStore.MediaColumns.DISPLAY_NAME,
@@ -402,73 +404,91 @@ class ImageRepository(private val context: Context) {
             MediaStore.MediaColumns.HEIGHT
         )
 
-        val selection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ?"
+        val collections = mutableListOf(
+            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+            MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+        )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            collections.add(MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL))
         } else {
-            "${MediaStore.MediaColumns.DATA} LIKE ?"
+            collections.add(MediaStore.Files.getContentUri("external"))
         }
-        val pathFilter = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) "Pictures/Darkbag%" else "%Pictures/Darkbag%"
-        val selectionArgs = arrayOf(pathFilter)
 
-        context.contentResolver.query(collection, projection, selection, selectionArgs, null)?.use { cursor ->
-            val idColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
-            val nameColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
-            val dateColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_ADDED)
-            val modifiedColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_MODIFIED)
-            val mimeColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.MIME_TYPE)
-            val widthColumn = cursor.getColumnIndex(MediaStore.MediaColumns.WIDTH)
-            val heightColumn = cursor.getColumnIndex(MediaStore.MediaColumns.HEIGHT)
+        val selection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ? OR ${MediaStore.MediaColumns.DISPLAY_NAME} LIKE ?"
+        } else {
+            "${MediaStore.MediaColumns.DATA} LIKE ? OR ${MediaStore.MediaColumns.DISPLAY_NAME} LIKE ?"
+        }
+        val selectionArgs = arrayOf("%Darkbag%", "${DarkbagIdentity.FILE_PREFIX}%")
 
-            while (cursor.moveToNext()) {
-                val id = cursor.getLong(idColumn)
-                val name = cursor.getString(nameColumn)
-                if (!name.startsWith(DarkbagIdentity.FILE_PREFIX, ignoreCase = true)) continue
-                val date = cursor.getLong(dateColumn) * 1000 // Convert to ms
-                val modified = cursor.getLong(modifiedColumn) * 1000 // Convert to ms
-                val mime = cursor.getString(mimeColumn)
-                val uri = ContentUris.withAppendedId(collection, id)
+        for (collection in collections) {
+            try {
+                context.contentResolver.query(collection, projection, selection, selectionArgs, null)?.use { cursor ->
+                    val idColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
+                    val nameColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
+                    val dateColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_ADDED)
+                    val modifiedColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_MODIFIED)
+                    val mimeColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.MIME_TYPE)
+                    val widthColumn = cursor.getColumnIndex(MediaStore.MediaColumns.WIDTH)
+                    val heightColumn = cursor.getColumnIndex(MediaStore.MediaColumns.HEIGHT)
 
-                val baseName = getBaseName(name)
-                val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
+                    while (cursor.moveToNext()) {
+                        val id = cursor.getLong(idColumn)
+                        val name = cursor.getString(nameColumn) ?: continue
+                        if (!name.startsWith(DarkbagIdentity.FILE_PREFIX, ignoreCase = true)) continue
+                        val date = cursor.getLong(dateColumn) * 1000 // Convert to ms
+                        val modified = cursor.getLong(modifiedColumn) * 1000 // Convert to ms
+                        val mime = cursor.getString(mimeColumn)
+                        val uri = ContentUris.withAppendedId(collection, id)
 
-                if (widthColumn != -1 && heightColumn != -1 && builder.width == 0 && builder.height == 0) {
-                    val w = cursor.getInt(widthColumn)
-                    val h = cursor.getInt(heightColumn)
-                    if (w > 0 && h > 0) {
-                        builder.width = w
-                        builder.height = h
-                    }
-                }
+                        val baseName = getBaseName(name)
+                        val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
 
-                when {
-                    name.contains("_MULTI_") && mime == "image/jpeg" -> {
-                        builder.addMultiJpg(uri, name, date, modified)
-                        if (!fast) {
-                            readExifForScanning(uri, builder)
+                        if (widthColumn != -1 && heightColumn != -1 && builder.width == 0 && builder.height == 0) {
+                            val w = cursor.getInt(widthColumn)
+                            val h = cursor.getInt(heightColumn)
+                            if (w > 0 && h > 0) {
+                                builder.width = w
+                                builder.height = h
+                            }
+                        }
+
+                        when {
+                            name.contains("_MULTI_") && mime == "image/jpeg" -> {
+                                builder.addMultiJpg(uri, name, date, modified)
+                                if (!fast) {
+                                    readExifForScanning(uri, builder)
+                                }
+                            }
+                            name.contains("_MULTI_") && (mime == "image/x-adobe-dng" || name.endsWith(".dng", ignoreCase = true)) -> {
+                                builder.addMultiDng(uri, name, date, modified)
+                            }
+                            mime == "image/jpeg" || name.endsWith(".jpg", ignoreCase = true) || name.endsWith(".jpeg", ignoreCase = true) -> {
+                                builder.setJpg(uri, date, modified)
+                                if (!fast) {
+                                    readExifForScanning(uri, builder)
+                                }
+                            }
+                            name.contains("_HF2") && (mime == "image/x-adobe-dng" || name.endsWith(".dng", ignoreCase = true)) -> {
+                                builder.setDng2(uri, date, modified)
+                            }
+                            name.contains("_HF1") && (mime == "image/x-adobe-dng" || name.endsWith(".dng", ignoreCase = true)) -> {
+                                builder.setDng1(uri, date, modified)
+                            }
+                            mime == "image/x-adobe-dng" || name.endsWith(".dng", ignoreCase = true) -> {
+                                builder.setDng(uri, date, modified)
+                            }
+                            name.endsWith(".rawvid", ignoreCase = true) -> {
+                                builder.setRawVideo(uri, date, modified)
+                            }
+                            mime == "video/mp4" || name.endsWith(".mp4", ignoreCase = true) -> {
+                                builder.setMp4Video(uri, date, modified)
+                            }
                         }
                     }
-                    name.contains("_MULTI_") && (mime == "image/x-adobe-dng" || name.endsWith(".dng", ignoreCase = true)) -> {
-                        builder.addMultiDng(uri, name, date, modified)
-                    }
-                    mime == "image/jpeg" -> {
-                        builder.setJpg(uri, date, modified)
-                        if (!fast) {
-                            readExifForScanning(uri, builder)
-                        }
-                    }
-                    name.contains("_HF2") && (mime == "image/x-adobe-dng" || name.endsWith(".dng", ignoreCase = true)) -> {
-                        builder.setDng2(uri, date, modified)
-                    }
-                    name.contains("_HF1") && (mime == "image/x-adobe-dng" || name.endsWith(".dng", ignoreCase = true)) -> {
-                        builder.setDng1(uri, date, modified)
-                    }
-                    mime == "image/x-adobe-dng" || name.endsWith(".dng", ignoreCase = true) -> {
-                        builder.setDng(uri, date, modified)
-                    }
-                    name.endsWith(".rawvid", ignoreCase = true) -> {
-                        builder.setRawVideo(uri, date, modified)
-                    }
                 }
+            } catch (e: Exception) {
+                android.util.Log.w("ImageRepository", "Error querying collection $collection", e)
             }
         }
     }
@@ -667,6 +687,9 @@ class ImageRepository(private val context: Context) {
         var rawVideoFps: Float = 24.0f
         var rawVideoFrameCount: Int = 0
         var rawVideoDurationMs: Long = 0L
+        var mp4VideoUri: Uri? = null
+        var mp4VideoTime: Long = 0L
+        var isMp4Video: Boolean = false
         val multiLensBuilders = mutableMapOf<String, MultiLensItemBuilder>()
         var isMultiCamera: Boolean = false
         var hfLayout: String? = null
@@ -690,6 +713,8 @@ class ImageRepository(private val context: Context) {
             rawVideoFps = group.rawVideoFps
             rawVideoFrameCount = group.rawVideoFrameCount
             rawVideoDurationMs = group.rawVideoDurationMs
+            mp4VideoUri = group.mp4VideoUri
+            isMp4Video = group.isMp4Video
             isMultiCamera = group.isMultiCamera
             multiLensBuilders.clear()
             for (lens in group.multiCameraLenses) {
@@ -738,6 +763,15 @@ class ImageRepository(private val context: Context) {
                 rawVideoUri = uri
                 rawVideoTime = time
                 isRawVideo = true
+            }
+            updateTime(time, modifiedTime)
+        }
+
+        fun setMp4Video(uri: Uri, time: Long, modifiedTime: Long = time) {
+            if (mp4VideoUri == null || (time > mp4VideoTime + 2000)) {
+                mp4VideoUri = uri
+                mp4VideoTime = time
+                isMp4Video = true
             }
             updateTime(time, modifiedTime)
         }
@@ -834,7 +868,7 @@ class ImageRepository(private val context: Context) {
                 width = width,
                 height = height,
                 captureTime = captureTime,
-                lastModified = if (lastModified > 0) lastModified else maxOf(jpgTime, dngTime, dngUri1Time, dngUri2Time, rawVideoTime),
+                lastModified = if (lastModified > 0) lastModified else maxOf(jpgTime, dngTime, dngUri1Time, dngUri2Time, rawVideoTime, mp4VideoTime),
                 editConfig = editConfig,
                 metadataLoaded = metadataLoaded,
                 isInProgress = isInProgress,
@@ -850,7 +884,9 @@ class ImageRepository(private val context: Context) {
                 isRawVideo = isRawVideo,
                 rawVideoFps = rawVideoFps,
                 rawVideoFrameCount = rawVideoFrameCount,
-                rawVideoDurationMs = rawVideoDurationMs
+                rawVideoDurationMs = rawVideoDurationMs,
+                mp4VideoUri = mp4VideoUri,
+                isMp4Video = isMp4Video
             )
         }
     }

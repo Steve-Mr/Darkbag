@@ -725,6 +725,95 @@ object ImageSaver {
         return null
     }
 
+    suspend fun saveMp4Video(
+        context: Context,
+        mp4File: File,
+        baseName: String,
+        rawFolderUri: String? = null,
+        jpgFolderUri: String? = null
+    ): Pair<Uri?, Bitmap?> = withContext(Dispatchers.IO) {
+        if (!mp4File.exists() || mp4File.length() == 0L) {
+            Log.e(TAG, "MP4 file does not exist or is empty: ${mp4File.absolutePath}")
+            return@withContext Pair(null, null)
+        }
+
+        val effectiveBaseName = DarkbagIdentity.prefixedBaseName(baseName)
+        val mp4FileName = "$effectiveBaseName.mp4"
+        var videoUri: Uri? = null
+        var thumbnailBitmap: Bitmap? = null
+
+        // 1. Extract first frame thumbnail
+        val retriever = android.media.MediaMetadataRetriever()
+        try {
+            retriever.setDataSource(mp4File.absolutePath)
+            thumbnailBitmap = retriever.getFrameAtTime(0, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to extract MP4 thumbnail", e)
+        } finally {
+            try { retriever.release() } catch (_: Exception) {}
+        }
+
+        // 2. Save MP4 file
+        if (rawFolderUri != null) {
+            videoUri = saveFileToFolder(context, mp4File, mp4FileName, "video/mp4", rawFolderUri)
+        } else {
+            val contentResolver = context.contentResolver
+            val contentValues = ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, mp4FileName)
+                put(MediaStore.MediaColumns.MIME_TYPE, "video/mp4")
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, "Movies/Darkbag")
+                    put(MediaStore.MediaColumns.IS_PENDING, 1)
+                }
+            }
+            val collection = MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+            val insertedUri = contentResolver.insert(collection, contentValues)
+            if (insertedUri != null) {
+                try {
+                    contentResolver.openOutputStream(insertedUri, "wt")?.use { out ->
+                        mp4File.inputStream().use { it.copyTo(out) }
+                        out.flush()
+                    }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        val finalValues = ContentValues().apply {
+                            put(MediaStore.MediaColumns.IS_PENDING, 0)
+                        }
+                        contentResolver.update(insertedUri, finalValues, null, null)
+                    }
+                    videoUri = insertedUri
+                    Log.i(TAG, "Saved MP4 video to MediaStore: $videoUri")
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to write MP4 video to MediaStore", e)
+                    contentResolver.delete(insertedUri, null, null)
+                }
+            }
+        }
+
+        // 3. Save companion thumbnail
+        if (thumbnailBitmap != null) {
+            val thumbFile = File(context.cacheDir, "thumb_$effectiveBaseName.jpg")
+            try {
+                FileOutputStream(thumbFile).use { out ->
+                    thumbnailBitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
+                }
+                if (jpgFolderUri != null) {
+                    saveFileToFolder(context, thumbFile, "$effectiveBaseName.jpg", "image/jpeg", jpgFolderUri)
+                } else {
+                    saveJpegToMediaStore(context, "$effectiveBaseName.jpg", null) { out ->
+                        thumbFile.inputStream().use { it.copyTo(out) }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to save companion thumbnail for MP4", e)
+            } finally {
+                thumbFile.delete()
+            }
+        }
+
+        mp4File.delete()
+        Pair(videoUri, thumbnailBitmap)
+    }
+
     suspend fun saveRawVideo(
         context: Context,
         rawVideoFile: File,
@@ -738,6 +827,7 @@ object ImageSaver {
             return@withContext Pair(null, null)
         }
 
+        val effectiveBaseName = DarkbagIdentity.prefixedBaseName(baseName)
         var thumbnailBitmap: Bitmap? = null
         var videoUri: Uri? = null
 
@@ -773,7 +863,7 @@ object ImageSaver {
         }
 
         // 2. Save .rawvid file
-        val rawFileName = "$baseName.rawvid"
+        val rawFileName = "$effectiveBaseName.rawvid"
         if (rawFolderUri != null) {
             videoUri = saveFileToFolder(context, rawVideoFile, rawFileName, "application/octet-stream", rawFolderUri)
         } else {
@@ -818,13 +908,17 @@ object ImageSaver {
 
         // 3. Save thumbnail JPG alongside if thumbnailBitmap was generated
         if (thumbnailBitmap != null) {
-            val thumbFile = File(context.cacheDir, "thumb_$baseName.jpg")
+            val thumbFile = File(context.cacheDir, "thumb_$effectiveBaseName.jpg")
             try {
                 FileOutputStream(thumbFile).use { out ->
                     thumbnailBitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
                 }
                 if (jpgFolderUri != null) {
-                    saveFileToFolder(context, thumbFile, "$baseName.jpg", "image/jpeg", jpgFolderUri)
+                    saveFileToFolder(context, thumbFile, "$effectiveBaseName.jpg", "image/jpeg", jpgFolderUri)
+                } else {
+                    saveJpegToMediaStore(context, "$effectiveBaseName.jpg", null) { out ->
+                        thumbFile.inputStream().use { it.copyTo(out) }
+                    }
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "Failed to save companion thumbnail", e)

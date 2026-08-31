@@ -260,6 +260,7 @@ class ImageViewerAdapter(
             val isRawSelected = currentFormat == FORMAT_DNG
 
             val isRawVideo = group.isRawVideo || group.rawVideoUri != null
+            val isMp4Video = group.isMp4Video || group.mp4VideoUri != null
             if (isRawVideo) {
                 btnMotionPhotoIndicator.visibility = View.VISIBLE
                 btnMotionPhotoIndicator.setIconResource(R.drawable.ic_play_arrow)
@@ -268,6 +269,16 @@ class ImageViewerAdapter(
                     val currentPos = holder.bindingAdapterPosition
                     if (currentPos != RecyclerView.NO_POSITION) {
                         toggleRawVideoForPosition(currentPos)
+                    }
+                }
+            } else if (isMp4Video) {
+                btnMotionPhotoIndicator.visibility = View.VISIBLE
+                btnMotionPhotoIndicator.setIconResource(R.drawable.ic_play_arrow)
+                btnMotionPhotoIndicator.contentDescription = "Play MP4 Video"
+                btnMotionPhotoIndicator.setOnClickListener {
+                    val currentPos = holder.bindingAdapterPosition
+                    if (currentPos != RecyclerView.NO_POSITION) {
+                        toggleMp4VideoForPosition(currentPos)
                     }
                 }
             } else {
@@ -819,6 +830,47 @@ class ImageViewerAdapter(
                 stopRawVideo(holder)
             } else {
                 playRawVideo(holder, group)
+            }
+        }
+    }
+
+    fun playMp4Video(holder: ViewHolder, group: ImageGroup) {
+        val uri = group.mp4VideoUri ?: return
+        val player = holder.player ?: androidx.media3.exoplayer.ExoPlayer.Builder(holder.itemView.context).build().also { p ->
+            holder.player = p
+            p.setVideoTextureView(holder.binding.videoView)
+            p.addListener(object : androidx.media3.common.Player.Listener {
+                override fun onPlaybackStateChanged(playbackState: Int) {
+                    if (playbackState == androidx.media3.common.Player.STATE_ENDED) {
+                        stopMotionVideo(holder)
+                        holder.binding.btnMotionPhotoIndicator.setIconResource(R.drawable.ic_play_arrow)
+                    }
+                }
+                override fun onRenderedFirstFrame() {
+                    holder.binding.videoView.alpha = 1f
+                }
+            })
+        }
+        val mediaItem = androidx.media3.common.MediaItem.fromUri(uri)
+        player.setMediaItem(mediaItem)
+        player.repeatMode = androidx.media3.common.Player.REPEAT_MODE_OFF
+        player.seekTo(0)
+        player.prepare()
+        player.play()
+        holder.isPlayingVideo = true
+        holder.binding.videoView.visibility = View.VISIBLE
+        holder.binding.btnMotionPhotoIndicator.setIconResource(R.drawable.ic_pause)
+    }
+
+    fun toggleMp4VideoForPosition(position: Int) {
+        val holder = recyclerView?.findViewHolderForAdapterPosition(position) as? ViewHolder
+        if (holder != null && position in differ.currentList.indices) {
+            val group = differ.currentList[position]
+            if (holder.isPlayingVideo) {
+                stopMotionVideo(holder)
+                holder.binding.btnMotionPhotoIndicator.setIconResource(R.drawable.ic_play_arrow)
+            } else {
+                playMp4Video(holder, group)
             }
         }
     }

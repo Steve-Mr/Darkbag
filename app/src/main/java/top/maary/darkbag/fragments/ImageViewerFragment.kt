@@ -2833,7 +2833,8 @@ open class ImageViewerFragment : Fragment() {
     private fun performExportCinemaDng(group: top.maary.darkbag.models.ImageGroup) {
         val uri = group.rawVideoUri ?: return
         val context = requireContext()
-        val exportDir = File(context.getExternalFilesDir(null), "CinemaDNG").apply { mkdirs() }
+        val publicDir = File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DCIM), "Darkbag/CinemaDNG")
+        val exportDir = if (publicDir.exists() || publicDir.mkdirs()) publicDir else File(context.getExternalFilesDir(null), "CinemaDNG").apply { mkdirs() }
 
         binding.initialLoadingIndicator.visibility = View.VISIBLE
         lifecycleScope.launch {
@@ -2846,7 +2847,8 @@ open class ImageViewerFragment : Fragment() {
             )
             binding.initialLoadingIndicator.visibility = View.GONE
             if (resultDir != null && resultDir.exists()) {
-                Toast.makeText(context, "CinemaDNG exported: ${resultDir.name}", Toast.LENGTH_LONG).show()
+                android.media.MediaScannerConnection.scanFile(context, arrayOf(resultDir.absolutePath), null, null)
+                Toast.makeText(context, "CinemaDNG exported to ${resultDir.absolutePath}", Toast.LENGTH_LONG).show()
             } else {
                 Toast.makeText(context, "CinemaDNG export failed", Toast.LENGTH_SHORT).show()
             }
@@ -2856,7 +2858,8 @@ open class ImageViewerFragment : Fragment() {
     private fun performExportMp4(group: top.maary.darkbag.models.ImageGroup) {
         val uri = group.rawVideoUri ?: return
         val context = requireContext()
-        val exportDir = File(context.getExternalFilesDir(null), "Videos").apply { mkdirs() }
+        val publicDir = File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_MOVIES), "Darkbag")
+        val exportDir = if (publicDir.exists() || publicDir.mkdirs()) publicDir else File(context.getExternalFilesDir(null), "Videos").apply { mkdirs() }
         val mp4File = File(exportDir, "${group.baseName}_graded.mp4")
 
         binding.initialLoadingIndicator.visibility = View.VISIBLE
@@ -2871,6 +2874,8 @@ open class ImageViewerFragment : Fragment() {
             )
             binding.initialLoadingIndicator.visibility = View.GONE
             if (success && mp4File.exists()) {
+                android.media.MediaScannerConnection.scanFile(context, arrayOf(mp4File.absolutePath), arrayOf("video/mp4"), null)
+                repository.invalidateCache()
                 Toast.makeText(context, "Graded MP4 saved: ${mp4File.name}", Toast.LENGTH_LONG).show()
             } else {
                 Toast.makeText(context, "MP4 export failed", Toast.LENGTH_SHORT).show()

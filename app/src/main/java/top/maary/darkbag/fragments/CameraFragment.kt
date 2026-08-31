@@ -199,6 +199,7 @@ class CameraFragment : Fragment() {
 
     @Volatile private var isBurstActive = false
     private val rawVideoSessionManager = top.maary.darkbag.rawvideo.RawVideoSessionManager()
+    private var mp4VideoRecorder: top.maary.darkbag.video.Mp4VideoRecorder? = null
     private var hdrPlusBurstHelper: HdrPlusBurst? = null
     private var lastHdrPlusConfig: ExposureUtils.ExposureConfig? = null // Cache for instant trigger
     private var burstStartTime: Long = 0L // Profiling
@@ -1288,12 +1289,16 @@ class CameraFragment : Fragment() {
                 val action = prefs.getString(SettingsFragment.KEY_SHUTTER_LONG_PRESS_ACTION, SettingsFragment.SHUTTER_LONG_PRESS_MP4)
                 if (action == SettingsFragment.SHUTTER_LONG_PRESS_RAW_VIDEO) {
                     startRawVideoRecording()
+                } else if (action == SettingsFragment.SHUTTER_LONG_PRESS_MP4) {
+                    startMp4VideoRecording()
                 }
             }
         }
         shutter?.onLongPressHoldReleased = {
             if (rawVideoSessionManager.recording) {
                 stopRawVideoRecording()
+            } else if (mp4VideoRecorder?.recording == true) {
+                stopMp4VideoRecording()
             }
         }
 
@@ -4350,7 +4355,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         val activeLog = prefs.getString(SettingsFragment.KEY_TARGET_LOG, "None")
 
         val timestamp = System.currentTimeMillis()
-        val baseName = "RAWVID_${timestamp}"
+        val baseName = DarkbagIdentity.prefixedBaseName("RAWVID_${timestamp}")
         val tempDir = File(requireContext().cacheDir, "rawvideo")
         tempDir.mkdirs()
         val tempFile = File(tempDir, "${baseName}.rawvid")
@@ -4416,18 +4421,115 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             }
         }
 
-        val result = rawVideoSessionManager.stopRecording() ?: return
-        val baseName = result.file.nameWithoutExtension
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
         val rawFolderUri = prefs.getString(SettingsFragment.KEY_RAW_STORAGE_URI, null)
         val jpgFolderUri = prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
 
         lifecycleScope.launch(Dispatchers.IO) {
+            val result = rawVideoSessionManager.stopRecording() ?: return@launch
+            val baseName = result.file.nameWithoutExtension
+
             val (savedUri, thumbnail) = top.maary.darkbag.utils.ImageSaver.saveRawVideo(
                 context = requireContext(),
                 rawVideoFile = result.file,
                 baseName = baseName,
                 targetFps = 24.0f,
+                rawFolderUri = rawFolderUri,
+                jpgFolderUri = jpgFolderUri
+            )
+
+            if (savedUri != null) {
+                prefs.edit().putString(SettingsFragment.KEY_LAST_CAPTURE_URI, savedUri.toString()).apply()
+                imageRepository.invalidateCache()
+                withContext(Dispatchers.Main) {
+                    updateCurrentThumbnail(savedUri)
+                    if (thumbnail != null) {
+                        cameraUiContainerBinding?.photoViewButton?.setImageBitmap(thumbnail)
+                    }
+                }
+            }
+        }
+    }
+
+    private fun startMp4VideoRecording() {
+        val device = camera2Device ?: return
+        val session = camera2Session ?: return
+
+        val timestamp = System.currentTimeMillis()
+        val baseName = DarkbagIdentity.prefixedBaseName("VID_${timestamp}")
+        val tempDir = File(requireContext().cacheDir, "video")
+        tempDir.mkdirs()
+        val tempFile = File(tempDir, "${baseName}.mp4")
+
+        val recorder = top.maary.darkbag.video.Mp4VideoRecorder(requireContext())
+        val videoSurface = recorder.prepare(tempFile, 1920, 1080, 30) ?: run {
+            Log.e(TAG, "Failed to prepare Mp4VideoRecorder")
+            return
+        }
+
+        if (!recorder.start()) {
+            Log.e(TAG, "Failed to start Mp4VideoRecorder")
+            return
+        }
+
+        mp4VideoRecorder = recorder
+        cameraUiContainerBinding?.cameraCaptureButton?.setRecordingState(true)
+        cameraUiContainerBinding?.cameraCaptureButton?.startRotation()
+
+        try {
+            val request = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_RECORD)
+            camera2PreviewSurface?.let { request.addTarget(it) }
+            request.addTarget(videoSurface)
+            analysisImageReader?.surface?.let { request.addTarget(it) }
+            applyManualSettingsToRequest(request)
+            session.setRepeatingRequest(request.build(), object : android.hardware.camera2.CameraCaptureSession.CaptureCallback() {
+                override fun onCaptureCompleted(session: android.hardware.camera2.CameraCaptureSession, request: android.hardware.camera2.CaptureRequest, result: android.hardware.camera2.TotalCaptureResult) {
+                    handleCaptureResult(result)
+                }
+            }, camera2Handler)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to update repeating request for MP4 recording", e)
+        }
+    }
+
+    private fun stopMp4VideoRecording() {
+        cameraUiContainerBinding?.cameraCaptureButton?.setRecordingState(false)
+        cameraUiContainerBinding?.cameraCaptureButton?.stopRotation()
+
+        val device = camera2Device
+        val session = camera2Session
+        val surface = camera2PreviewSurface
+        if (device != null && session != null && surface != null) {
+            try {
+                val request = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_PREVIEW)
+                request.addTarget(surface)
+                analysisImageReader?.surface?.let { request.addTarget(it) }
+                applyManualSettingsToRequest(request)
+                session.setRepeatingRequest(request.build(), object : android.hardware.camera2.CameraCaptureSession.CaptureCallback() {
+                    override fun onCaptureCompleted(session: android.hardware.camera2.CameraCaptureSession, request: android.hardware.camera2.CaptureRequest, result: android.hardware.camera2.TotalCaptureResult) {
+                        handleCaptureResult(result)
+                    }
+                }, camera2Handler)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to restore preview repeating request", e)
+            }
+        }
+
+        val recorder = mp4VideoRecorder
+        mp4VideoRecorder = null
+
+        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val rawFolderUri = prefs.getString(SettingsFragment.KEY_RAW_STORAGE_URI, null)
+        val jpgFolderUri = prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            val result = recorder?.stop() ?: return@launch
+            val baseName = result.file.nameWithoutExtension
+
+            val (savedUri, thumbnail) = top.maary.darkbag.utils.ImageSaver.saveMp4Video(
+                context = requireContext(),
+                mp4File = result.file,
+                baseName = baseName,
                 rawFolderUri = rawFolderUri,
                 jpgFolderUri = jpgFolderUri
             )
