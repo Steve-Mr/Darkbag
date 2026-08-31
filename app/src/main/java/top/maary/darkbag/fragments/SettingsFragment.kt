@@ -266,6 +266,33 @@ class SettingsFragment : Fragment() {
             prefs.edit().putInt(KEY_COLOR_ENGINE_MODE, position).apply()
         }
 
+        // Shutter Long-Press Action
+        val shutterLongPressAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, SHUTTER_LONG_PRESS_OPTIONS)
+        binding.menuShutterLongPress.setAdapter(shutterLongPressAdapter)
+        val savedShutterAction = prefs.getString(KEY_SHUTTER_LONG_PRESS_ACTION, SHUTTER_LONG_PRESS_MP4)
+        binding.menuShutterLongPress.setText(savedShutterAction, false)
+        binding.menuShutterLongPress.setOnItemClickListener { _, _, position, _ ->
+            prefs.edit().putString(KEY_SHUTTER_LONG_PRESS_ACTION, SHUTTER_LONG_PRESS_OPTIONS[position]).apply()
+        }
+
+        // RAW Video FPS
+        val rawFpsAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, RAW_VIDEO_FPS_OPTIONS)
+        binding.menuRawVideoFps.setAdapter(rawFpsAdapter)
+        val savedRawFps = prefs.getString(KEY_RAW_VIDEO_FPS, "24")
+        binding.menuRawVideoFps.setText(savedRawFps, false)
+        binding.menuRawVideoFps.setOnItemClickListener { _, _, position, _ ->
+            prefs.edit().putString(KEY_RAW_VIDEO_FPS, RAW_VIDEO_FPS_OPTIONS[position]).apply()
+        }
+
+        // RAW Video Resolution
+        val rawResAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, RAW_VIDEO_RESOLUTION_OPTIONS)
+        binding.menuRawVideoResolution.setAdapter(rawResAdapter)
+        val savedRawRes = prefs.getString(KEY_RAW_VIDEO_RESOLUTION, "1080p")
+        binding.menuRawVideoResolution.setText(savedRawRes, false)
+        binding.menuRawVideoResolution.setOnItemClickListener { _, _, position, _ ->
+            prefs.edit().putString(KEY_RAW_VIDEO_RESOLUTION, RAW_VIDEO_RESOLUTION_OPTIONS[position]).apply()
+        }
+
         setupExternalViewerMenu()
 
     }
@@ -778,6 +805,22 @@ class SettingsFragment : Fragment() {
         const val KEY_SHOW_FLOATING_TOOLBAR = "show_floating_toolbar"
         const val KEY_EXP_FOCUS_PEAKING = "exp_focus_peaking"
         const val KEY_COLOR_ENGINE_MODE = "color_engine_mode"
+
+        const val KEY_SHUTTER_LONG_PRESS_ACTION = "shutter_long_press_action"
+        const val SHUTTER_LONG_PRESS_MP4 = "Standard MP4 (Default)"
+        const val SHUTTER_LONG_PRESS_RAW_VIDEO = "RAW Video (Bayer 10-bit)"
+        const val SHUTTER_LONG_PRESS_DISABLED = "Disabled"
+        val SHUTTER_LONG_PRESS_OPTIONS = listOf(
+            SHUTTER_LONG_PRESS_MP4,
+            SHUTTER_LONG_PRESS_RAW_VIDEO,
+            SHUTTER_LONG_PRESS_DISABLED
+        )
+
+        const val KEY_RAW_VIDEO_FPS = "raw_video_fps"
+        val RAW_VIDEO_FPS_OPTIONS = listOf("24", "60")
+
+        const val KEY_RAW_VIDEO_RESOLUTION = "raw_video_resolution"
+        val RAW_VIDEO_RESOLUTION_OPTIONS = listOf("1080p", "2K")
 
         val COLOR_ENGINE_MODES = listOf(
             "Khronos PBR Neutral (Default)",

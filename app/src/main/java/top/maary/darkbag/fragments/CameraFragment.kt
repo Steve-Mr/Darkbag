@@ -198,6 +198,7 @@ class CameraFragment : Fragment() {
                     .getBoolean(SettingsFragment.KEY_MIRROR_FRONT_CAMERA, true)
 
     @Volatile private var isBurstActive = false
+    private val rawVideoSessionManager = top.maary.darkbag.rawvideo.RawVideoSessionManager()
     private var hdrPlusBurstHelper: HdrPlusBurst? = null
     private var lastHdrPlusConfig: ExposureUtils.ExposureConfig? = null // Cache for instant trigger
     private var burstStartTime: Long = 0L // Profiling
@@ -1273,16 +1274,26 @@ class CameraFragment : Fragment() {
         }
 
         // Listener for button used to capture photo
-        cameraUiContainerBinding?.cameraCaptureButton?.setOnLongClickListener {
+        val shutter = cameraUiContainerBinding?.cameraCaptureButton
+        shutter?.isLongPressHoldEnabled = true
+        shutter?.onLongPressHoldStarted = {
             if (isHalfFrameModeEnabled && halfFrameStep == 1) {
                 // Cancel/Reset half-frame
                 val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
                 halfFrameSessionStore.clearCurrentSession(deleteTempFile = true)
                 writeScopedHalfFrameStep(prefs, 0)
                 updateHalfFrameUI()
-                true
-            } else {
-                false
+            } else if (!isBurstActive && !isHalfFrameModeEnabled && !isMultiCameraModeActive) {
+                val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                val action = prefs.getString(SettingsFragment.KEY_SHUTTER_LONG_PRESS_ACTION, SettingsFragment.SHUTTER_LONG_PRESS_MP4)
+                if (action == SettingsFragment.SHUTTER_LONG_PRESS_RAW_VIDEO) {
+                    startRawVideoRecording()
+                }
+            }
+        }
+        shutter?.onLongPressHoldReleased = {
+            if (rawVideoSessionManager.recording) {
+                stopRawVideoRecording()
             }
         }
 
@@ -4325,6 +4336,114 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         )
     }
 
+
+    private fun startRawVideoRecording() {
+        val device = camera2Device ?: return
+        val session = camera2Session ?: return
+        val reader = rawImageReader ?: return
+        val chars = camera2Manager.getCameraCharacteristics(device.id)
+        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+
+        val targetFpsStr = prefs.getString(SettingsFragment.KEY_RAW_VIDEO_FPS, "24") ?: "24"
+        val targetFps = targetFpsStr.toFloatOrNull() ?: 24.0f
+        val activeLut = prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, null)
+        val activeLog = prefs.getString(SettingsFragment.KEY_TARGET_LOG, "None")
+
+        val timestamp = System.currentTimeMillis()
+        val baseName = "RAWVID_${timestamp}"
+        val tempDir = File(requireContext().cacheDir, "rawvideo")
+        tempDir.mkdirs()
+        val tempFile = File(tempDir, "${baseName}.rawvid")
+
+        val lastResult = captureResults.values.lastOrNull()
+        val success = rawVideoSessionManager.startRecording(
+            outputPath = tempFile.absolutePath,
+            characteristics = chars,
+            initialResult = lastResult,
+            targetFps = targetFps,
+            activeLutName = activeLut,
+            activeLogName = activeLog
+        )
+
+        if (success) {
+            cameraUiContainerBinding?.cameraCaptureButton?.setRecordingState(true)
+            cameraUiContainerBinding?.cameraCaptureButton?.startRotation()
+            reader.setOnImageAvailableListener({ r ->
+                val image = r.acquireLatestImage() ?: return@setOnImageAvailableListener
+                val res = captureResults.values.lastOrNull()
+                rawVideoSessionManager.onRawImageAvailable(image, res)
+            }, camera2Handler)
+
+            try {
+                val request = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_RECORD)
+                camera2PreviewSurface?.let { request.addTarget(it) }
+                request.addTarget(reader.surface)
+                analysisImageReader?.surface?.let { request.addTarget(it) }
+                applyManualSettingsToRequest(request)
+                session.setRepeatingRequest(request.build(), object : android.hardware.camera2.CameraCaptureSession.CaptureCallback() {
+                    override fun onCaptureCompleted(session: android.hardware.camera2.CameraCaptureSession, request: android.hardware.camera2.CaptureRequest, result: android.hardware.camera2.TotalCaptureResult) {
+                        handleCaptureResult(result)
+                    }
+                }, camera2Handler)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to update repeating request for RAW video recording", e)
+            }
+        }
+    }
+
+    private fun stopRawVideoRecording() {
+        cameraUiContainerBinding?.cameraCaptureButton?.setRecordingState(false)
+        cameraUiContainerBinding?.cameraCaptureButton?.stopRotation()
+
+        rawImageReader?.setOnImageAvailableListener(null, null)
+
+        val device = camera2Device
+        val session = camera2Session
+        val surface = camera2PreviewSurface
+        if (device != null && session != null && surface != null) {
+            try {
+                val request = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_PREVIEW)
+                request.addTarget(surface)
+                analysisImageReader?.surface?.let { request.addTarget(it) }
+                applyManualSettingsToRequest(request)
+                session.setRepeatingRequest(request.build(), object : android.hardware.camera2.CameraCaptureSession.CaptureCallback() {
+                    override fun onCaptureCompleted(session: android.hardware.camera2.CameraCaptureSession, request: android.hardware.camera2.CaptureRequest, result: android.hardware.camera2.TotalCaptureResult) {
+                        handleCaptureResult(result)
+                    }
+                }, camera2Handler)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to restore preview repeating request", e)
+            }
+        }
+
+        val result = rawVideoSessionManager.stopRecording() ?: return
+        val baseName = result.file.nameWithoutExtension
+        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val rawFolderUri = prefs.getString(SettingsFragment.KEY_RAW_STORAGE_URI, null)
+        val jpgFolderUri = prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            val (savedUri, thumbnail) = top.maary.darkbag.utils.ImageSaver.saveRawVideo(
+                context = requireContext(),
+                rawVideoFile = result.file,
+                baseName = baseName,
+                targetFps = 24.0f,
+                rawFolderUri = rawFolderUri,
+                jpgFolderUri = jpgFolderUri
+            )
+
+            if (savedUri != null) {
+                prefs.edit().putString(SettingsFragment.KEY_LAST_CAPTURE_URI, savedUri.toString()).apply()
+                imageRepository.invalidateCache()
+                withContext(Dispatchers.Main) {
+                    updateCurrentThumbnail(savedUri)
+                    if (thumbnail != null) {
+                        cameraUiContainerBinding?.photoViewButton?.setImageBitmap(thumbnail)
+                    }
+                }
+            }
+        }
+    }
 
     private fun getTargetOisMode(isHdrBurst: Boolean): Int {
         return if (isHdrBurst && !isHdrOisEnabledPref) {
