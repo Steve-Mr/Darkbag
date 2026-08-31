@@ -318,7 +318,8 @@ Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeGetHeader(
     }
 
     if (jFloatParams && env->GetArrayLength(jFloatParams) >= 45) {
-        jfloat floatData[45];
+        int len = env->GetArrayLength(jFloatParams);
+        std::vector<jfloat> floatData(len, 0.0f);
         floatData[0] = header.fps;
         for (int i = 0; i < 4; ++i) floatData[1 + i] = header.blackLevel[i];
         for (int i = 0; i < 3; ++i) floatData[5 + i] = header.neutralColorPoint[i];
@@ -327,7 +328,12 @@ Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeGetHeader(
         for (int i = 0; i < 9; ++i) floatData[18 + i] = header.colorMatrix2[i];
         for (int i = 0; i < 9; ++i) floatData[27 + i] = header.forwardMatrix1[i];
         for (int i = 0; i < 9; ++i) floatData[36 + i] = header.forwardMatrix2[i];
-        env->SetFloatArrayRegion(jFloatParams, 0, 45, floatData);
+        if (len >= 48) {
+            floatData[45] = header.exposure;
+            floatData[46] = header.contrast;
+            floatData[47] = header.saturation;
+        }
+        env->SetFloatArrayRegion(jFloatParams, 0, len, floatData.data());
     }
 
     if (jStringParams && env->GetArrayLength(jStringParams) >= 4) {
@@ -341,6 +347,71 @@ Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeGetHeader(
         env->SetObjectArrayElement(jStringParams, 3, modelStr);
     }
 
+    return JNI_TRUE;
+}
+
+JNIEXPORT jboolean JNICALL
+Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeUpdateHeaderMetadata(
+        JNIEnv* env,
+        jobject /* thiz */,
+        jint fd,
+        jstring activeLog,
+        jstring activeLut,
+        jfloat exposure,
+        jfloat contrast,
+        jfloat saturation
+) {
+    if (fd < 0) return JNI_FALSE;
+
+    FileHeader header{};
+    off_t seekRes = lseek(fd, 0, SEEK_SET);
+    if (seekRes < 0) {
+        LOGE("nativeUpdateHeaderMetadata: failed to seek to start of fd %d", fd);
+        return JNI_FALSE;
+    }
+
+    ssize_t readBytes = read(fd, &header, sizeof(FileHeader));
+    if (readBytes != sizeof(FileHeader) || header.magic != RAWVID_MAGIC) {
+        LOGE("nativeUpdateHeaderMetadata: failed to read valid FileHeader from fd %d", fd);
+        return JNI_FALSE;
+    }
+
+    if (activeLog) {
+        const char* logStr = env->GetStringUTFChars(activeLog, nullptr);
+        if (logStr) {
+            memset(header.activeLogName, 0, sizeof(header.activeLogName));
+            strncpy(header.activeLogName, logStr, sizeof(header.activeLogName) - 1);
+            env->ReleaseStringUTFChars(activeLog, logStr);
+        }
+    }
+
+    if (activeLut) {
+        const char* lutStr = env->GetStringUTFChars(activeLut, nullptr);
+        if (lutStr) {
+            memset(header.activeLutName, 0, sizeof(header.activeLutName));
+            strncpy(header.activeLutName, lutStr, sizeof(header.activeLutName) - 1);
+            env->ReleaseStringUTFChars(activeLut, lutStr);
+        }
+    }
+
+    header.exposure = exposure;
+    header.contrast = contrast;
+    header.saturation = saturation;
+
+    seekRes = lseek(fd, 0, SEEK_SET);
+    if (seekRes < 0) {
+        LOGE("nativeUpdateHeaderMetadata: failed to seek before write on fd %d", fd);
+        return JNI_FALSE;
+    }
+
+    ssize_t written = write(fd, &header, sizeof(FileHeader));
+    if (written != sizeof(FileHeader)) {
+        LOGE("nativeUpdateHeaderMetadata: failed to write updated FileHeader to fd %d", fd);
+        return JNI_FALSE;
+    }
+
+    fsync(fd);
+    LOGI("nativeUpdateHeaderMetadata: successfully updated fd %d header (log=%s, lut=%s, exp=%.2f)", fd, header.activeLogName, header.activeLutName, exposure);
     return JNI_TRUE;
 }
 

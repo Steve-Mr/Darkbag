@@ -52,6 +52,12 @@ class RawVideoPlayer(
     val currentFrame: Int
         get() = currentFrameIndex
 
+    val orientation: Int
+        get() = header?.orientation ?: 0
+
+    val fps: Float
+        get() = header?.fps ?: 24.0f
+
     fun load(uri: Uri): Boolean {
         release()
 

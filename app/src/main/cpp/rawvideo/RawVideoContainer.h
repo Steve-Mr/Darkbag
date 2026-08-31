@@ -58,9 +58,12 @@ struct FileHeader {
     uint32_t calibrationIlluminant1 = 21; // 21 = D65, 17 = Standard Light A
     uint32_t calibrationIlluminant2 = 17;
     float baselineExposure = 0.0f;
+    float exposure = 0.0f;
+    float contrast = 0.0f;
+    float saturation = 0.0f;
     char make[32] = {0};
     char model[64] = {0};
-    uint8_t reserved[64] = {0};
+    uint8_t reserved[52] = {0};
 };
 
 struct VideoFrameHeader {

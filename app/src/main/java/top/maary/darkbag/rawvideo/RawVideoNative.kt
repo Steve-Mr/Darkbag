@@ -35,6 +35,9 @@ object RawVideoNative {
         val calibrationIlluminant1: Int = 21,
         val calibrationIlluminant2: Int = 17,
         val baselineExposure: Float = 0.0f,
+        val exposure: Float = 0.0f,
+        val contrast: Float = 0.0f,
+        val saturation: Float = 0.0f,
         val colorMatrix1: FloatArray = floatArrayOf(1f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f),
         val colorMatrix2: FloatArray = floatArrayOf(1f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f),
         val forwardMatrix1: FloatArray = floatArrayOf(1f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f),
@@ -147,9 +150,18 @@ object RawVideoNative {
         outBitmap: Bitmap
     ): Boolean
 
+    external fun nativeUpdateHeaderMetadata(
+        fd: Int,
+        activeLog: String?,
+        activeLut: String?,
+        exposure: Float,
+        contrast: Float,
+        saturation: Float
+    ): Boolean
+
     fun readHeader(handle: Long): Header? {
         val intParams = IntArray(12)
-        val floatParams = FloatArray(45)
+        val floatParams = FloatArray(48)
         val stringParams = arrayOfNulls<String>(4)
 
         if (!nativeGetHeader(handle, intParams, floatParams, stringParams)) {
@@ -163,6 +175,9 @@ object RawVideoNative {
         val colorMatrix2 = floatParams.copyOfRange(18, 27)
         val forwardMatrix1 = floatParams.copyOfRange(27, 36)
         val forwardMatrix2 = floatParams.copyOfRange(36, 45)
+        val exposure = if (floatParams.size >= 48) floatParams[45] else 0.0f
+        val contrast = if (floatParams.size >= 48) floatParams[46] else 0.0f
+        val saturation = if (floatParams.size >= 48) floatParams[47] else 0.0f
 
         return Header(
             width = intParams[0],
@@ -183,6 +198,9 @@ object RawVideoNative {
             calibrationIlluminant1 = intParams[10],
             calibrationIlluminant2 = intParams[11],
             baselineExposure = baselineExposure,
+            exposure = exposure,
+            contrast = contrast,
+            saturation = saturation,
             colorMatrix1 = colorMatrix1,
             colorMatrix2 = colorMatrix2,
             forwardMatrix1 = forwardMatrix1,
