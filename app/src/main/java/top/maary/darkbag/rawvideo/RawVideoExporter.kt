@@ -55,9 +55,9 @@ object RawVideoExporter {
                     return@withContext null
                 }
 
-                val clipName = rawVideoUri.lastPathSegment?.substringBeforeLast(".") ?: "RAWVID_${System.currentTimeMillis()}"
-                val clipDir = File(outputDir, clipName)
-                clipDir.mkdirs()
+                val rawSegment = rawVideoUri.lastPathSegment ?: "RAWVID_${System.currentTimeMillis()}"
+                val clipName = rawSegment.substringAfterLast("/").substringAfterLast(":").substringBeforeLast(".")
+                val clipDir = File(outputDir, clipName).apply { mkdirs() }
 
                 val w = header.width
                 val h = header.height
@@ -387,6 +387,7 @@ object RawVideoExporter {
             buf.putInt(10000)
         }
 
+        file.parentFile?.mkdirs()
         FileOutputStream(file).use { fos ->
             fos.write(buf.array(), 0, stripOffset)
             bayerData.position(0)
@@ -400,6 +401,7 @@ object RawVideoExporter {
         wavFile: File,
         header: RawVideoNative.Header
     ) {
+        wavFile.parentFile?.mkdirs()
         val sampleRate = header.audioSampleRate.takeIf { it > 0 } ?: 48000
         val channels = header.audioChannels.takeIf { it > 0 } ?: 1
         val bitsPerSample = 16
