@@ -102,6 +102,7 @@ object RawVideoExporter {
         rawVideoUri: Uri,
         outputFile: File,
         editConfig: EditConfig?,
+        targetResolution: Int = 1080,
         onProgress: (current: Int, total: Int) -> Unit
     ): Boolean = withContext(Dispatchers.IO) {
         var nativeHandle: Long = 0L
@@ -129,10 +130,10 @@ object RawVideoExporter {
                 val rawW = header.width
                 val rawH = header.height
                 val fps = header.fps.takeIf { it > 0 } ?: 24.0f
-                val bitRate = 20_000_000 // 20 Mbps high quality
+                val bitRate = if (targetResolution >= 2160) 40_000_000 else 20_000_000 // 40 Mbps for 4K, 20 Mbps for 1080p
 
                 // Downscale / fit to standard 1080p (or 4K) resolution with 16-pixel alignment for MediaCodec
-                val maxDim = 1920
+                val maxDim = if (targetResolution >= 2160) 3840 else 1920
                 val scale = if (maxOf(rawW, rawH) > maxDim) maxDim.toFloat() / maxOf(rawW, rawH) else 1.0f
                 val exportW = (((rawW * scale).toInt() + 15) / 16) * 16
                 val exportH = (((rawH * scale).toInt() + 15) / 16) * 16

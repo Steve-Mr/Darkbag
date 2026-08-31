@@ -397,8 +397,8 @@ open class ImageViewerFragment : Fragment() {
     protected fun updateControlsVisibility() {
         if (!::adapter.isInitialized || adapter.itemCount == 0) return
         val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
-
-        val canEdit = (currentGroup.dngUri != null || currentGroup.dngUri1 != null || currentGroup.dngUri2 != null || currentGroup.multiDngUris.isNotEmpty()) && !currentGroup.isPartial
+        val isRawVideo = currentGroup.isRawVideo || currentGroup.rawVideoUri != null
+        val canEdit = ((currentGroup.dngUri != null || currentGroup.dngUri1 != null || currentGroup.dngUri2 != null || currentGroup.multiDngUris.isNotEmpty()) && !currentGroup.isPartial) || isRawVideo
 
         val showBottomLeft = isUiVisible && !isEditingAdjustments && !isGalleryMode
         binding.bottomLeftControls.visibility = if (showBottomLeft) View.VISIBLE else View.GONE
@@ -598,7 +598,7 @@ open class ImageViewerFragment : Fragment() {
                 when (item.itemId) {
                     MENU_SHARE_TIFF -> performShareAsTiff()
                     MENU_EXPORT_CINEMA_DNG -> performExportCinemaDng(adapter.getGroup(binding.imagePager.currentItem))
-                    MENU_EXPORT_MP4 -> performExportMp4(adapter.getGroup(binding.imagePager.currentItem))
+                    MENU_EXPORT_MP4 -> showExportMp4Dialog(adapter.getGroup(binding.imagePager.currentItem))
                     MENU_COLLAGE -> showMultiCamCollageDialog(adapter.getGroup(binding.imagePager.currentItem))
                     MENU_DETAILS -> showImageDetails()
                     MENU_DELETE -> {
@@ -1005,9 +1005,10 @@ open class ImageViewerFragment : Fragment() {
             if (position == 0) {
                 showLutMenu()
             } else {
-                lifecycleScope.launch {
-                    ensureDngBytesLoaded()
-                    currentEditConfig = currentEditConfig?.copy(log = selectedLog)
+                val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
+                val isRawVideo = currentGroup.isRawVideo || currentGroup.rawVideoUri != null
+                if (isRawVideo) {
+                    currentEditConfig = (currentEditConfig ?: currentGroup.editConfig ?: top.maary.darkbag.models.EditConfig()).copy(log = selectedLog)
                     if (selectedLog == "None") {
                         currentEditConfig = currentEditConfig?.copy(lut = "None")
                     }
@@ -1015,6 +1016,18 @@ open class ImageViewerFragment : Fragment() {
                     updateEditUi()
                     showLutMenu()
                     applyEditPreview()
+                } else {
+                    lifecycleScope.launch {
+                        ensureDngBytesLoaded()
+                        currentEditConfig = currentEditConfig?.copy(log = selectedLog)
+                        if (selectedLog == "None") {
+                            currentEditConfig = currentEditConfig?.copy(lut = "None")
+                        }
+                        markAdjusted()
+                        updateEditUi()
+                        showLutMenu()
+                        applyEditPreview()
+                    }
                 }
             }
         }
@@ -1031,18 +1044,24 @@ open class ImageViewerFragment : Fragment() {
             if (position == 0) {
                 showLutMenu()
             } else {
-                lifecycleScope.launch {
-                    ensureDngBytesLoaded()
-                    if (position == 1) {
-                        currentEditConfig = currentEditConfig?.copy(lut = "None")
-                    } else {
-                        val filename = luts[position - 2].name
-                        currentEditConfig = currentEditConfig?.copy(lut = filename)
-                    }
+                val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
+                val isRawVideo = currentGroup.isRawVideo || currentGroup.rawVideoUri != null
+                val newLut = if (position == 1) "None" else luts[position - 2].name
+                if (isRawVideo) {
+                    currentEditConfig = (currentEditConfig ?: currentGroup.editConfig ?: top.maary.darkbag.models.EditConfig()).copy(lut = newLut)
                     markAdjusted()
                     updateEditUi()
                     showLutMenu()
                     applyEditPreview()
+                } else {
+                    lifecycleScope.launch {
+                        ensureDngBytesLoaded()
+                        currentEditConfig = currentEditConfig?.copy(lut = newLut)
+                        markAdjusted()
+                        updateEditUi()
+                        showLutMenu()
+                        applyEditPreview()
+                    }
                 }
             }
         }
@@ -1339,16 +1358,19 @@ open class ImageViewerFragment : Fragment() {
         val currentHolder = (binding.imagePager.getChildAt(0) as? androidx.recyclerview.widget.RecyclerView)
             ?.findViewHolderForAdapterPosition(currentIndex) as? ImageViewerAdapter.ViewHolder
 
+        if (currentGroup.isRawVideo || currentGroup.rawVideoUri != null) {
+            adapter.updateRawVideoAdjustments(currentIndex, config)
+            binding.initialLoadingIndicator.visibility = View.GONE
+            currentHolder?.binding?.loadingIndicator?.visibility = View.GONE
+            return
+        }
+
         if (isEditingAdjustments) {
             binding.initialLoadingIndicator.visibility = View.VISIBLE
         } else {
             currentHolder?.binding?.loadingIndicator?.visibility = View.VISIBLE
         }
         currentHolder?.binding?.imageView?.invalidateOutline()
-
-        if (currentGroup.isRawVideo) {
-            adapter.updateRawVideoAdjustments(currentIndex, config)
-        }
 
         previewJob?.cancel()
         previewJob = lifecycleScope.launch {
@@ -2889,7 +2911,91 @@ open class ImageViewerFragment : Fragment() {
         }
     }
 
-    private fun performExportMp4(group: top.maary.darkbag.models.ImageGroup) {
+    private fun showExportMp4Dialog(group: top.maary.darkbag.models.ImageGroup) {
+        val context = requireContext()
+        val initialConfig = currentEditConfig ?: group.editConfig ?: top.maary.darkbag.models.EditConfig()
+        var exportLog = initialConfig.log ?: "None"
+        var exportLut = initialConfig.lut ?: "None"
+        var exportResolution = 1080
+
+        val luts = lutManager.getLuts()
+        val lutOptions = listOf("None") + luts.map { it.name }
+        val logOptions = listOf("None") + SettingsFragment.LOG_CURVES
+        val resOptions = arrayOf("1080p (Full HD - Recommended)", "4K (Ultra HD - 2160p)")
+        var selectedResIndex = 0
+
+        val builder = com.google.android.material.dialog.MaterialAlertDialogBuilder(context)
+        builder.setTitle("Export Graded MP4 Video")
+
+        val currentLutDisplay = if (exportLut == "None" || exportLut.isBlank()) "None" else exportLut.substringBeforeLast(".")
+        val items = arrayOf(
+            "Log Curve: $exportLog",
+            "Film Simulation LUT: $currentLutDisplay",
+            "Resolution: ${if (selectedResIndex == 0) "1080p" else "4K"}"
+        )
+
+        fun refreshDialog(dialog: androidx.appcompat.app.AlertDialog) {
+            val updatedLutDisplay = if (exportLut == "None" || exportLut.isBlank()) "None" else exportLut.substringBeforeLast(".")
+            items[0] = "Log Curve: $exportLog"
+            items[1] = "Film Simulation LUT: $updatedLutDisplay"
+            items[2] = "Resolution: ${if (selectedResIndex == 0) "1080p" else "4K"}"
+            (dialog.listView?.adapter as? android.widget.BaseAdapter)?.notifyDataSetChanged()
+        }
+
+        var dialogRef: androidx.appcompat.app.AlertDialog? = null
+        builder.setItems(items) { _, which ->
+            when (which) {
+                0 -> {
+                    val logChoices = logOptions.toTypedArray()
+                    val curIdx = logOptions.indexOf(exportLog).coerceAtLeast(0)
+                    com.google.android.material.dialog.MaterialAlertDialogBuilder(context)
+                        .setTitle("Select Log Curve")
+                        .setSingleChoiceItems(logChoices, curIdx) { subD, pos ->
+                            exportLog = logOptions[pos]
+                            if (exportLog == "None") exportLut = "None"
+                            dialogRef?.let { refreshDialog(it) }
+                            subD.dismiss()
+                        }
+                        .show()
+                }
+                1 -> {
+                    val lutNames = listOf("None") + luts.map { it.nameWithoutExtension }
+                    val curIdx = lutOptions.indexOf(exportLut).coerceAtLeast(0)
+                    com.google.android.material.dialog.MaterialAlertDialogBuilder(context)
+                        .setTitle("Select Film Simulation LUT")
+                        .setSingleChoiceItems(lutNames.toTypedArray(), curIdx) { subD, pos ->
+                            exportLut = lutOptions[pos]
+                            dialogRef?.let { refreshDialog(it) }
+                            subD.dismiss()
+                        }
+                        .show()
+                }
+                2 -> {
+                    com.google.android.material.dialog.MaterialAlertDialogBuilder(context)
+                        .setTitle("Select Resolution")
+                        .setSingleChoiceItems(resOptions, selectedResIndex) { subD, pos ->
+                            selectedResIndex = pos
+                            exportResolution = if (pos == 0) 1080 else 2160
+                            dialogRef?.let { refreshDialog(it) }
+                            subD.dismiss()
+                        }
+                        .show()
+                }
+            }
+        }
+        builder.setPositiveButton("Export") { _, _ ->
+            val finalConfig = initialConfig.copy(log = exportLog, lut = exportLut)
+            performExportMp4(group, finalConfig, exportResolution)
+        }
+        builder.setNegativeButton(R.string.cancel, null)
+        dialogRef = builder.show()
+    }
+
+    private fun performExportMp4(
+        group: top.maary.darkbag.models.ImageGroup,
+        config: top.maary.darkbag.models.EditConfig = currentEditConfig ?: group.editConfig ?: top.maary.darkbag.models.EditConfig(),
+        targetResolution: Int = 1080
+    ) {
         val uri = group.rawVideoUri ?: return
         val context = requireContext()
         val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
@@ -2905,7 +3011,8 @@ open class ImageViewerFragment : Fragment() {
                 context = context,
                 rawVideoUri = uri,
                 outputFile = tempMp4File,
-                editConfig = currentEditConfig ?: group.editConfig,
+                editConfig = config,
+                targetResolution = targetResolution,
                 onProgress = { _, _ -> }
             )
             binding.initialLoadingIndicator.visibility = View.GONE
