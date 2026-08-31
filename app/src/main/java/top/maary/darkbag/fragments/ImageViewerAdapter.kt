@@ -632,6 +632,8 @@ class ImageViewerAdapter(
     override fun onViewRecycled(holder: ViewHolder) {
         holder.loadJob?.cancel()
         stopMotionVideo(holder)
+        holder.rawVideoPlayer?.release()
+        holder.rawVideoPlayer = null
         holder.player?.release()
         holder.player = null
         clearCurrentBitmap(holder)
@@ -646,6 +648,8 @@ class ImageViewerAdapter(
         stopAllMotionVideos()
         for (i in 0 until itemCount) {
             (recyclerView.findViewHolderForAdapterPosition(i) as? ViewHolder)?.let { holder ->
+                holder.rawVideoPlayer?.release()
+                holder.rawVideoPlayer = null
                 holder.player?.release()
                 holder.player = null
             }

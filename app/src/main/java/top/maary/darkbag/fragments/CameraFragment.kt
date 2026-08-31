@@ -493,6 +493,12 @@ class CameraFragment : Fragment() {
 
     override fun onStop() {
         super.onStop()
+        if (rawVideoSessionManager.recording) {
+            stopRawVideoRecording()
+        }
+        if (mp4VideoRecorder?.recording == true) {
+            stopMp4VideoRecording()
+        }
         locationHelper.stopListening()
         orientationEventListener.disable()
         lutProcessor?.setEncoderSurface(null, 0, 0)
@@ -4374,7 +4380,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             cameraUiContainerBinding?.cameraCaptureButton?.setRecordingState(true)
             cameraUiContainerBinding?.cameraCaptureButton?.startRotation()
             reader.setOnImageAvailableListener({ r ->
-                val image = r.acquireLatestImage() ?: return@setOnImageAvailableListener
+                val image = try { r.acquireNextImage() } catch (e: Exception) { r.acquireLatestImage() } ?: return@setOnImageAvailableListener
                 val res = captureResults.values.lastOrNull()
                 rawVideoSessionManager.onRawImageAvailable(image, res)
             }, camera2Handler)
@@ -4483,6 +4489,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         cameraUiContainerBinding?.cameraCaptureButton?.stopRotation()
 
         lutProcessor?.setEncoderSurface(null, 0, 0)
+        updateMotionPhotoEncoder()
 
         val recorder = mp4VideoRecorder
         mp4VideoRecorder = null

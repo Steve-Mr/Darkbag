@@ -29,7 +29,7 @@ class Mp4VideoRecorder(private val context: Context) {
         val durationMs: Long
     )
 
-    fun prepare(outputFile: File, width: Int = 1920, height: Int = 1080, fps: Int = 30): Surface? {
+    fun prepare(outputFile: File, width: Int = 1080, height: Int = 1920, fps: Int = 30): Surface? {
         if (isRecording.get()) return null
 
         try {
@@ -43,7 +43,14 @@ class Mp4VideoRecorder(private val context: Context) {
                 MediaRecorder()
             }
 
-            recorder.setAudioSource(MediaRecorder.AudioSource.CAMCORDER)
+            val hasAudioPerm = androidx.core.content.ContextCompat.checkSelfPermission(
+                context,
+                android.Manifest.permission.RECORD_AUDIO
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+
+            if (hasAudioPerm) {
+                recorder.setAudioSource(MediaRecorder.AudioSource.CAMCORDER)
+            }
             recorder.setVideoSource(MediaRecorder.VideoSource.SURFACE)
             recorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
             recorder.setOutputFile(outputFile.absolutePath)
@@ -51,9 +58,11 @@ class Mp4VideoRecorder(private val context: Context) {
             recorder.setVideoFrameRate(fps)
             recorder.setVideoSize(width, height)
             recorder.setVideoEncoder(MediaRecorder.VideoEncoder.H264)
-            recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-            recorder.setAudioEncodingBitRate(128_000)
-            recorder.setAudioSamplingRate(48_000)
+            if (hasAudioPerm) {
+                recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+                recorder.setAudioEncodingBitRate(128_000)
+                recorder.setAudioSamplingRate(48_000)
+            }
             recorder.prepare()
 
             mediaRecorder = recorder
@@ -97,9 +106,11 @@ class Mp4VideoRecorder(private val context: Context) {
             release()
         }
 
-        if (file != null && file.exists() && file.length() > 0) {
+        if (file != null && file.exists() && file.length() > 4096 && duration >= 300) {
             Log.i(TAG, "Recorded MP4 video: ${file.absolutePath} ($duration ms)")
             return RecordingResult(file, duration)
+        } else {
+            file?.delete()
         }
         return null
     }

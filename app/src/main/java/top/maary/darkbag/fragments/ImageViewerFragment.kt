@@ -2248,6 +2248,8 @@ open class ImageViewerFragment : Fragment() {
                 group.dngUri?.let { urisToDelete.add(it) }
                 group.dngUri1?.let { urisToDelete.add(it) }
                 group.dngUri2?.let { urisToDelete.add(it) }
+                group.rawVideoUri?.let { urisToDelete.add(it) }
+                group.mp4VideoUri?.let { urisToDelete.add(it) }
 
                 if (adapter.itemCount > 1) {
                     val nextIndex = if (currentIndex < adapter.itemCount - 1) currentIndex + 1 else currentIndex - 1
@@ -2546,6 +2548,8 @@ open class ImageViewerFragment : Fragment() {
                             group.dngUri?.let { urisToDelete.add(it) }
                             group.dngUri1?.let { urisToDelete.add(it) }
                             group.dngUri2?.let { urisToDelete.add(it) }
+                            group.rawVideoUri?.let { urisToDelete.add(it) }
+                            group.mp4VideoUri?.let { urisToDelete.add(it) }
                             group.multiJpgUris.forEach { urisToDelete.add(it) }
                             group.multiDngUris.forEach { urisToDelete.add(it) }
                         }
@@ -2553,6 +2557,7 @@ open class ImageViewerFragment : Fragment() {
                             group.dngUri?.let { urisToDelete.add(it) }
                             group.dngUri1?.let { urisToDelete.add(it) }
                             group.dngUri2?.let { urisToDelete.add(it) }
+                            group.rawVideoUri?.let { urisToDelete.add(it) }
                             group.multiDngUris.forEach { urisToDelete.add(it) }
                         }
                         2 -> { // JPG only

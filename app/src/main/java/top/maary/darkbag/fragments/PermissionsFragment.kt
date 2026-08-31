@@ -46,7 +46,7 @@ class PermissionsFragment : Fragment() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val permissionList = mutableListOf(Manifest.permission.CAMERA)
+        val permissionList = mutableListOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO)
         // add the storage access permission request for Android 9 and below.
         if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
             permissionList.add(Manifest.permission.WRITE_EXTERNAL_STORAGE)

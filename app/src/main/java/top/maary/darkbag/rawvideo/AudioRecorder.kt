@@ -86,7 +86,7 @@ class AudioRecorder(
                 directBuffer.clear()
                 val readBytes = audioRecord?.read(directBuffer, bufferSize) ?: -1
                 if (readBytes > 0) {
-                    val timestampNs = System.nanoTime()
+                    val timestampNs = android.os.SystemClock.elapsedRealtimeNanos()
                     val sampleCount = readBytes / (bytesPerSample * channelCount)
                     onAudioData(directBuffer, readBytes, timestampNs, sampleCount)
                 }

@@ -368,6 +368,16 @@ Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeCloseReader(
     }
 }
 
+static const std::array<uint8_t, 1024> kGammaLut = [] {
+    std::array<uint8_t, 1024> table{};
+    for (size_t i = 0; i < 1024; ++i) {
+        float val = static_cast<float>(i) / 1023.0f;
+        float gammaVal = std::pow(val, 1.0f / 2.2f) * 255.0f;
+        table[i] = static_cast<uint8_t>(std::clamp(gammaVal, 0.0f, 255.0f));
+    }
+    return table;
+}();
+
 // Fast Demosaicing of 16-bit RAW_SENSOR / Linear Bayer to RGBA_8888 Android Bitmap for smooth playback & thumbnail
 JNIEXPORT jboolean JNICALL
 Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeDebayerFrameToBitmap(
@@ -438,19 +448,14 @@ Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeDebayerFrameToBitmap(
                 r = static_cast<float>(p10);
             }
 
-            // Subtract black level, normalize, and apply tone curve
-            r = std::clamp((r - blackLevel) * norm, 0.0f, 1.0f);
-            g = std::clamp((g - blackLevel) * norm, 0.0f, 1.0f);
-            b = std::clamp((b - blackLevel) * norm, 0.0f, 1.0f);
+            // Subtract black level, normalize, and lookup tone curve
+            int rIdx = static_cast<int>(std::clamp((r - blackLevel) * norm, 0.0f, 1.0f) * 1023.0f);
+            int gIdx = static_cast<int>(std::clamp((g - blackLevel) * norm, 0.0f, 1.0f) * 1023.0f);
+            int bIdx = static_cast<int>(std::clamp((b - blackLevel) * norm, 0.0f, 1.0f) * 1023.0f);
 
-            // Gamma 2.2 tone curve
-            r = std::min(255.0f, std::pow(r, 1.0f / 2.2f) * 255.0f);
-            g = std::min(255.0f, std::pow(g, 1.0f / 2.2f) * 255.0f);
-            b = std::min(255.0f, std::pow(b, 1.0f / 2.2f) * 255.0f);
-
-            uint32_t ru = static_cast<uint32_t>(r);
-            uint32_t gu = static_cast<uint32_t>(g);
-            uint32_t bu = static_cast<uint32_t>(b);
+            uint32_t ru = kGammaLut[rIdx];
+            uint32_t gu = kGammaLut[gIdx];
+            uint32_t bu = kGammaLut[bIdx];
             uint32_t au = 0xFF;
 
             outPixels[y * outWidth + x] = (au << 24) | (bu << 16) | (gu << 8) | ru;

@@ -8,6 +8,7 @@ import android.media.AudioTrack
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
+import android.os.ParcelFileDescriptor
 import android.util.Log
 import kotlinx.coroutines.*
 import top.maary.darkbag.models.EditConfig
@@ -39,7 +40,8 @@ class RawVideoPlayer(
 
     private var frameBuffer: ByteBuffer? = null
     private var renderBitmap: Bitmap? = null
-    private var tempFdFile: File? = null
+    private var currentPfd: ParcelFileDescriptor? = null
+    private var audioJob: Job? = null
 
     val isVideoLoaded: Boolean
         get() = nativeHandle != 0L
@@ -55,12 +57,14 @@ class RawVideoPlayer(
 
         try {
             val pfd = context.contentResolver.openFileDescriptor(uri, "r") ?: return false
-            val fd = pfd.detachFd()
+            currentPfd = pfd
+            val fd = pfd.fd
             val fdPath = "/proc/self/fd/$fd"
 
             nativeHandle = RawVideoNative.nativeOpenReader(fdPath)
             if (nativeHandle == 0L) {
                 Log.e(TAG, "Failed to open raw video: $uri")
+                release()
                 return false
             }
 
@@ -135,12 +139,33 @@ class RawVideoPlayer(
                 delay(sleepTime)
             }
         }
+
+        // Stream audio packets from container to AudioTrack
+        val handle = nativeHandle
+        if (handle != 0L && audioTrack != null) {
+            audioJob = CoroutineScope(Dispatchers.IO).launch {
+                val audioBuf = ByteBuffer.allocateDirect(16384)
+                var packetIndex = 0
+                while (isPlaying.get()) {
+                    audioBuf.clear()
+                    val read = RawVideoNative.nativeReadAudioPacket(handle, packetIndex, audioBuf)
+                    if (read <= 0) break
+                    val bytes = ByteArray(read)
+                    audioBuf.position(0)
+                    audioBuf.get(bytes)
+                    audioTrack?.write(bytes, 0, read)
+                    packetIndex++
+                }
+            }
+        }
     }
 
     fun pause() {
         if (!isPlaying.getAndSet(false)) return
         playbackJob?.cancel()
         playbackJob = null
+        audioJob?.cancel()
+        audioJob = null
         audioTrack?.pause()
         onPlaybackStateChanged(false)
     }
@@ -203,11 +228,15 @@ class RawVideoPlayer(
             RawVideoNative.nativeCloseReader(nativeHandle)
             nativeHandle = 0L
         }
+        try {
+            currentPfd?.close()
+        } catch (e: Exception) {
+            Log.w(TAG, "Error closing pfd", e)
+        }
+        currentPfd = null
         audioTrack?.release()
         audioTrack = null
         renderBitmap = null
         frameBuffer = null
-        tempFdFile?.delete()
-        tempFdFile = null
     }
 }

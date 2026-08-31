@@ -64,7 +64,7 @@ private:
     std::vector<uint8_t> compressionBuffer_;
     std::vector<uint8_t> dpcmBuffer_;
 
-    static constexpr size_t MAX_QUEUE_SIZE = 120; // Up to 5s buffer @ 24fps or 2s @ 60fps
+    static constexpr size_t MAX_QUEUE_SIZE = 12; // Bounded ring queue to protect against native heap OOM
 };
 
 } // namespace rawvideo

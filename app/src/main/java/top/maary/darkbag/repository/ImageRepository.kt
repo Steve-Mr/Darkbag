@@ -123,7 +123,7 @@ class ImageRepository(private val context: Context) {
         if (rawVideoUri != null) {
             try {
                 context.contentResolver.openFileDescriptor(rawVideoUri, "r")?.use { pfd ->
-                    val fd = pfd.detachFd()
+                    val fd = pfd.fd
                     val fdPath = "/proc/self/fd/$fd"
                     val handle = top.maary.darkbag.rawvideo.RawVideoNative.nativeOpenReader(fdPath)
                     if (handle != 0L) {
@@ -307,6 +307,9 @@ class ImageRepository(private val context: Context) {
                             }
                             name.endsWith(".rawvid", ignoreCase = true) -> {
                                 builder.setRawVideo(docUri, lastModified)
+                            }
+                            name.endsWith(".mp4", ignoreCase = true) -> {
+                                builder.setMp4Video(docUri, lastModified)
                             }
                         }
                     }
