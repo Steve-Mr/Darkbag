@@ -61,7 +61,7 @@ class ImageViewerAdapter(
         }
 
         override fun areContentsTheSame(oldItem: ImageGroup, newItem: ImageGroup): Boolean {
-            return oldItem == newItem && oldItem.metadataLoaded == newItem.metadataLoaded && oldItem.isMotionPhoto == newItem.isMotionPhoto
+            return oldItem == newItem && oldItem.metadataLoaded == newItem.metadataLoaded && oldItem.isMotionPhoto == newItem.isMotionPhoto && oldItem.isCinemaDng == newItem.isCinemaDng && oldItem.cinemaDngFrameUris == newItem.cinemaDngFrameUris
         }
 
         override fun getChangePayload(oldItem: ImageGroup, newItem: ImageGroup): Any? {
@@ -72,6 +72,7 @@ class ImageViewerAdapter(
             if (oldItem.lastModified != newItem.lastModified) payloads.add("LAST_MODIFIED_CHANGED")
             if (oldItem.editConfig != newItem.editConfig) payloads.add("EDIT_CONFIG_CHANGED")
             if (oldItem.isMotionPhoto != newItem.isMotionPhoto) payloads.add("MOTION_PHOTO_CHANGED")
+            if (oldItem.isCinemaDng != newItem.isCinemaDng || oldItem.cinemaDngFrameUris != newItem.cinemaDngFrameUris) payloads.add("CINEMADNG_CHANGED")
 
             return if (payloads.isEmpty()) null else payloads
         }
@@ -100,6 +101,7 @@ class ImageViewerAdapter(
         var currentLoadedRawUri: Uri? = null
         val videoOutlineRect = android.graphics.Rect()
         var videoOutlineRadius = 0f
+        var filmstripAdapter: top.maary.darkbag.adapters.FilmstripFrameAdapter? = null
 
         init {
             binding.videoView.clipToOutline = true
@@ -137,7 +139,7 @@ class ImageViewerAdapter(
     override fun onBindViewHolder(holder: ViewHolder, position: Int, payloads: MutableList<Any>) {
         if (payloads.isNotEmpty()) {
             val group = differ.currentList[position]
-            val importantPayloads = setOf("JPG_URI_CHANGED", "LAST_MODIFIED_CHANGED", "EDIT_CONFIG_CHANGED")
+            val importantPayloads = setOf("JPG_URI_CHANGED", "LAST_MODIFIED_CHANGED", "EDIT_CONFIG_CHANGED", "CINEMADNG_CHANGED")
 
             val needsReload = payloads.any { payload ->
                 (payload as? Set<*>)?.any { it in importantPayloads } == true
@@ -157,6 +159,7 @@ class ImageViewerAdapter(
 
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
         val group = differ.currentList[position]
+        val isCinemaDngGroup = group.isCinemaDng || group.cinemaDngFolderUri != null || group.cinemaDngFirstFrameUri != null || group.cinemaDngFrameUris.isNotEmpty()
         holder.loadJob?.cancel()
 
         val isSameImage = holder.currentBaseName == group.baseName
@@ -180,6 +183,43 @@ class ImageViewerAdapter(
         holder.binding.motionPhotoToggleGroup.visibility = if (shouldShow) View.VISIBLE else View.GONE
         holder.binding.motionPhotoToggleGroup.alpha = if (shouldShow) 1f else 0f
 
+        if (isCinemaDngGroup) {
+            holder.binding.filmstripContainer.visibility = if (shouldShow) View.VISIBLE else View.GONE
+            holder.binding.filmstripContainer.alpha = if (shouldShow) 0.35f else 0f
+
+            val frameUris = if (group.cinemaDngFrameUris.isNotEmpty()) {
+                group.cinemaDngFrameUris
+            } else if (group.cinemaDngFirstFrameUri != null) {
+                listOf(group.cinemaDngFirstFrameUri)
+            } else {
+                emptyList()
+            }
+
+            var adapter = holder.filmstripAdapter
+            if (adapter == null) {
+                adapter = top.maary.darkbag.adapters.FilmstripFrameAdapter(frameUris)
+                holder.filmstripAdapter = adapter
+                holder.binding.rvFilmstrip.layoutManager = androidx.recyclerview.widget.LinearLayoutManager(
+                    holder.itemView.context,
+                    androidx.recyclerview.widget.LinearLayoutManager.HORIZONTAL,
+                    false
+                )
+                holder.binding.rvFilmstrip.adapter = adapter
+            } else {
+                adapter.setFrames(frameUris)
+            }
+
+            adapter.onFrameSelected = { frameIndex, uri ->
+                if (uri != null) {
+                    loadImage(holder, uri)
+                }
+            }
+        } else {
+            holder.binding.filmstripContainer.visibility = View.GONE
+            holder.binding.rvFilmstrip.adapter = null
+            holder.filmstripAdapter = null
+        }
+
         holder.binding.imageView.onZoomChanged = { isZoomed ->
             onZoomChanged?.invoke(isZoomed)
             val currentlyShouldShow = isUiVisible && !isZoomed && !isFormatSwitcherPersistentHidden
@@ -191,6 +231,10 @@ class ImageViewerAdapter(
             if (hasDots) {
                 holder.binding.derivativeDotsContainer.visibility = if (currentlyShouldShow) View.VISIBLE else View.GONE
                 holder.binding.derivativeDotsContainer.alpha = if (currentlyShouldShow) 1f else 0f
+            }
+            if (isCinemaDngGroup) {
+                holder.binding.filmstripContainer.visibility = if (currentlyShouldShow) View.VISIBLE else View.GONE
+                holder.binding.filmstripContainer.alpha = if (currentlyShouldShow) 0.35f else 0f
             }
         }
 
@@ -572,7 +616,7 @@ class ImageViewerAdapter(
             if (group.isHalfFrame()) {
                 loadHalfFrameDngs(holder, group, group.editConfig?.zoomFactor ?: 1.0f)
             } else {
-                val dngUri = group.dngUri ?: group.dngUri1 ?: group.dngUri2
+                val dngUri = group.cinemaDngFirstFrameUri ?: group.cinemaDngFrameUris.firstOrNull() ?: group.dngUri ?: group.dngUri1 ?: group.dngUri2
                 dngUri?.let { loadImage(holder, it) }
             }
             return
@@ -840,6 +884,8 @@ class ImageViewerAdapter(
         holder.currentBaseName = null
         holder.currentVersion = 0L
         holder.binding.loadingIndicator.visibility = View.GONE
+        holder.filmstripAdapter = null
+        holder.binding.rvFilmstrip.adapter = null
         super.onViewRecycled(holder)
     }
 
@@ -1237,7 +1283,9 @@ class ImageViewerAdapter(
                     val motionGroup = holder.binding.motionPhotoToggleGroup
                     val multiCamContainer = holder.binding.multiCameraToggleContainer
                     val dotsContainer = holder.binding.derivativeDotsContainer
+                    val filmstripContainer = holder.binding.filmstripContainer
                     val group = getGroup(i)
+                    val isCinemaDngGroup = group.isCinemaDng || group.cinemaDngFolderUri != null || group.cinemaDngFirstFrameUri != null || group.cinemaDngFrameUris.isNotEmpty()
                     val hasMultiCam = group.isMultiCamera && getMultiCameraLenses(group).size >= 2
                     val hasDots = !group.isMultiCamera && getDerivativeUris(group).size >= 2
                     val shouldBeVisible = isVisible && !isFormatSwitcherPersistentHidden
@@ -1253,6 +1301,10 @@ class ImageViewerAdapter(
                         if (hasDots) {
                             dotsContainer.visibility = View.VISIBLE
                             dotsContainer.animate().alpha(1f).setDuration(200).setListener(null).start()
+                        }
+                        if (isCinemaDngGroup) {
+                            filmstripContainer.visibility = View.VISIBLE
+                            filmstripContainer.animate().alpha(0.35f).setDuration(200).setListener(null).start()
                         }
                     } else {
                         formatGroup.animate().alpha(0f).setDuration(200)
@@ -1279,6 +1331,14 @@ class ImageViewerAdapter(
                                     if (!isUiVisible || isFormatSwitcherPersistentHidden) dotsContainer.visibility = View.GONE
                                 }
                             }).start()
+                        if (isCinemaDngGroup) {
+                            filmstripContainer.animate().alpha(0f).setDuration(200)
+                                .setListener(object : android.animation.AnimatorListenerAdapter() {
+                                    override fun onAnimationEnd(animation: android.animation.Animator) {
+                                        if (!isUiVisible || isFormatSwitcherPersistentHidden) filmstripContainer.visibility = View.GONE
+                                    }
+                                }).start()
+                        }
                     }
                 }
             }
@@ -1298,7 +1358,9 @@ class ImageViewerAdapter(
                     val motionGroup = holder.binding.motionPhotoToggleGroup
                     val multiCamContainer = holder.binding.multiCameraToggleContainer
                     val dotsContainer = holder.binding.derivativeDotsContainer
+                    val filmstripContainer = holder.binding.filmstripContainer
                     val group = getGroup(i)
+                    val isCinemaDngGroup = group.isCinemaDng || group.cinemaDngFolderUri != null || group.cinemaDngFirstFrameUri != null || group.cinemaDngFrameUris.isNotEmpty()
                     val hasMultiCam = group.isMultiCamera && getMultiCameraLenses(group).size >= 2
                     val hasDots = !group.isMultiCamera && getDerivativeUris(group).size >= 2
                     val shouldBeVisible = isUiVisible && !isFormatSwitcherPersistentHidden
@@ -1314,6 +1376,10 @@ class ImageViewerAdapter(
                         if (hasDots) {
                             dotsContainer.visibility = View.VISIBLE
                             dotsContainer.animate().alpha(1f).setDuration(200).setListener(null).start()
+                        }
+                        if (isCinemaDngGroup) {
+                            filmstripContainer.visibility = View.VISIBLE
+                            filmstripContainer.animate().alpha(0.35f).setDuration(200).setListener(null).start()
                         }
                     } else {
                         formatGroup.animate().alpha(0f).setDuration(200)
@@ -1340,6 +1406,14 @@ class ImageViewerAdapter(
                                     if (isFormatSwitcherPersistentHidden) dotsContainer.visibility = View.GONE
                                 }
                             }).start()
+                        if (isCinemaDngGroup) {
+                            filmstripContainer.animate().alpha(0f).setDuration(200)
+                                .setListener(object : android.animation.AnimatorListenerAdapter() {
+                                    override fun onAnimationEnd(animation: android.animation.Animator) {
+                                        if (isFormatSwitcherPersistentHidden) filmstripContainer.visibility = View.GONE
+                                    }
+                                }).start()
+                        }
                     }
                 }
             }

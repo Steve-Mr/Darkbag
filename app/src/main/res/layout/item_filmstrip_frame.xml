@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="38dp"
+    android:layout_height="50dp"
+    android:layout_marginStart="2dp"
+    android:layout_marginEnd="2dp"
+    android:layout_marginTop="3dp"
+    android:layout_marginBottom="3dp">
+
+    <com.google.android.material.imageview.ShapeableImageView
+        android:id="@+id/iv_frame_thumb"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scaleType="centerCrop"
+        android:background="#1E1E1E"
+        app:shapeAppearanceOverlay="@style/ShapeAppearance.App.FilmstripFrame" />
+
+    <View
+        android:id="@+id/view_selection_border"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@drawable/bg_filmstrip_frame_selected"
+        android:visibility="gone" />
+
+    <TextView
+        android:id="@+id/tv_frame_index"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|center_horizontal"
+        android:layout_marginBottom="2dp"
+        android:textColor="@android:color/white"
+        android:textSize="9sp"
+        android:fontFamily="sans-serif-medium"
+        android:shadowColor="#CC000000"
+        android:shadowDx="0"
+        android:shadowDy="1"
+        android:shadowRadius="2"
+        android:visibility="gone" />
+
+</FrameLayout>
