@@ -78,6 +78,7 @@ float apply_logc3(float x) {
 }
 
 float srgb_oetf(float x) {
+    x = max(0.0, x);
     if (x <= 0.0031308) return 12.92 * x;
     return 1.055 * pow(x, 1.0 / 2.4) - 0.055;
 }
@@ -430,7 +431,7 @@ void RawVideoGLRenderer::updateLutTexture(const char* lutPath) {
     glTexImage3D(
         GL_TEXTURE_3D,
         0,
-        GL_RGB,
+        GL_RGB16F,
         lut->size,
         lut->size,
         lut->size,
@@ -475,6 +476,7 @@ bool RawVideoGLRenderer::renderFrame(
     glUseProgram(program_);
 
     // 1. Upload or update Bayer Texture
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, bayerTexture_);
 

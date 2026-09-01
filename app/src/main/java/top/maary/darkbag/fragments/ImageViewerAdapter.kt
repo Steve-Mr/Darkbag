@@ -1020,8 +1020,18 @@ class ImageViewerAdapter(
         }
         player.updateAdjustments(group.editConfig)
 
-        holder.binding.videoView.visibility = View.VISIBLE
+        // Align videoView bounds immediately to match current imageView rect
+        val iv = holder.binding.imageView
+        val d = iv.drawable
+        if (d != null && iv.width > 0 && iv.height > 0) {
+            val rect = RectF(0f, 0f, d.intrinsicWidth.toFloat(), d.intrinsicHeight.toFloat())
+            iv.imageMatrix.mapRect(rect)
+            rect.intersect(0f, 0f, iv.width.toFloat(), iv.height.toFloat())
+            updateVideoViewBounds(holder, rect)
+        }
+
         holder.binding.videoView.alpha = 1f
+        holder.binding.videoView.visibility = View.VISIBLE
         if (holder.binding.videoView.isAvailable) {
             player.setSurface(android.view.Surface(holder.binding.videoView.surfaceTexture))
         } else {
@@ -1044,6 +1054,8 @@ class ImageViewerAdapter(
     fun stopRawVideo(holder: ViewHolder) {
         holder.rawVideoPlayer?.pause()
         holder.isPlayingVideo = false
+        holder.binding.videoView.visibility = View.GONE
+        holder.binding.videoView.alpha = 0f
         holder.binding.btnMotionPhotoIndicator.setIconResource(R.drawable.ic_play_arrow)
     }
 

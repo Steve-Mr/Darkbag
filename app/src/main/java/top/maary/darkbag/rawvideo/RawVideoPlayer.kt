@@ -326,6 +326,8 @@ class RawVideoPlayer(
             val exposure = currentEditConfig?.exposure ?: hdr.exposure
             val contrast = currentEditConfig?.contrast ?: hdr.contrast
             val saturation = currentEditConfig?.saturation ?: hdr.saturation
+            val wl = hdr.whiteLevel.takeIf { it > 0 } ?: 1023
+            val bl = hdr.blackLevel.firstOrNull() ?: 64f
 
             // 1. Fast GPU direct-to-surface rendering if Surface is available
             val surf = currentSurface
@@ -337,8 +339,8 @@ class RawVideoPlayer(
                     height = hdr.height,
                     orientation = hdr.orientation,
                     cfaPattern = hdr.cfaPattern,
-                    whiteLevel = hdr.whiteLevel,
-                    blackLevel = hdr.blackLevel.firstOrNull() ?: 64f,
+                    whiteLevel = wl,
+                    blackLevel = bl,
                     neutralPoint = hdr.neutralPoint,
                     targetLog = cachedTargetLogIndex,
                     lutPath = cachedLutPath,
@@ -358,8 +360,8 @@ class RawVideoPlayer(
                 height = hdr.height,
                 orientation = hdr.orientation,
                 cfaPattern = hdr.cfaPattern,
-                whiteLevel = hdr.whiteLevel,
-                blackLevel = hdr.blackLevel.firstOrNull() ?: 64f,
+                whiteLevel = wl,
+                blackLevel = bl,
                 neutralPoint = hdr.neutralPoint,
                 targetLog = cachedTargetLogIndex,
                 lutPath = cachedLutPath,
