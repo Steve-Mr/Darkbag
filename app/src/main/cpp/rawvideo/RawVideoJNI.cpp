@@ -600,13 +600,12 @@ Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeDebayerFrameToBitmap(
         }
     }
 
-    // 2. Load 3D Film Simulation LUT if specified
-    LUT3D lut;
-    lut.size = 0;
+    // 2. Load 3D Film Simulation LUT from memory cache if specified
+    std::shared_ptr<LUT3D> lut = nullptr;
     if (jLutPath) {
         const char* lutPathC = env->GetStringUTFChars(jLutPath, nullptr);
         if (lutPathC && lutPathC[0] != '\0') {
-            lut = load_lut(lutPathC);
+            lut = get_cached_lut(lutPathC);
         }
         if (lutPathC) {
             env->ReleaseStringUTFChars(jLutPath, lutPathC);
@@ -695,8 +694,8 @@ Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeDebayerFrameToBitmap(
             }
 
             // 4. 3D Film Simulation LUT
-            if (lut.size > 0) {
-                Vec3 graded = apply_lut(lut, {r, g, b});
+            if (lut && lut->size > 0) {
+                Vec3 graded = apply_lut(*lut, {r, g, b});
                 r = graded.r;
                 g = graded.g;
                 b = graded.b;

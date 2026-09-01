@@ -1,6 +1,9 @@
 #include "ColorPipe.h"
 #include <tiffio.h>
 #include <android/log.h>
+#include <unordered_map>
+#include <mutex>
+#include <memory>
 
 #define TAG "ColorPipe"
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, TAG, __VA_ARGS__)
@@ -479,10 +482,63 @@ void init_color_pipe() {
     TIFFSetErrorHandler(nullptr);
 }
 
+// --- Fast Gamma LUT (CPU) ---
+namespace {
+struct SrgbLutTable {
+    float table[4096];
+    SrgbLutTable() {
+        for (int i = 0; i < 4096; ++i) {
+            float x = static_cast<float>(i) / 4095.0f;
+            if (x <= 0.0031308f) {
+                table[i] = 12.92f * x;
+            } else {
+                table[i] = 1.055f * std::pow(x, 1.0f / 2.4f) - 0.055f;
+            }
+        }
+    }
+};
+const SrgbLutTable kSrgbLut;
+
+class LutCacheManager {
+public:
+    static LutCacheManager& instance() {
+        static LutCacheManager s_instance;
+        return s_instance;
+    }
+
+    std::shared_ptr<LUT3D> get(const std::string& path) {
+        if (path.empty()) return nullptr;
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto it = cache_.find(path);
+        if (it != cache_.end()) {
+            return it->second;
+        }
+        auto lut = std::make_shared<LUT3D>(load_lut(path.c_str()));
+        cache_[path] = lut;
+        return lut;
+    }
+
+    void clear() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        cache_.clear();
+    }
+
+private:
+    LutCacheManager() = default;
+    std::mutex mutex_;
+    std::unordered_map<std::string, std::shared_ptr<LUT3D>> cache_;
+};
+} // namespace
+
 // --- Log Curves (CPU) ---
 float srgb_oetf(float x) {
-    if (x <= 0.0031308f) return 12.92f * x;
-    else return 1.055f * pow(x, 1.0f / 2.4f) - 0.055f;
+    if (x <= 0.0f) return 0.0f;
+    if (x >= 1.0f) return 1.0f;
+    float idxF = x * 4095.0f;
+    int idx = static_cast<int>(idxF);
+    float frac = idxF - static_cast<float>(idx);
+    if (idx >= 4095) return kSrgbLut.table[4095];
+    return kSrgbLut.table[idx] * (1.0f - frac) + kSrgbLut.table[idx + 1] * frac;
 }
 
 float arri_logc3(float x) {
@@ -558,6 +614,15 @@ LUT3D load_lut(const char* path) {
         lut.data.clear();
     }
     return lut;
+}
+
+std::shared_ptr<LUT3D> get_cached_lut(const char* path) {
+    if (!path || path[0] == '\0') return nullptr;
+    return LutCacheManager::instance().get(path);
+}
+
+void clear_lut_cache() {
+    LutCacheManager::instance().clear();
 }
 
 Vec3 apply_lut(const LUT3D& lut, Vec3 color) {

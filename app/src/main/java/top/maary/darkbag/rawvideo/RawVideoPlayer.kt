@@ -43,6 +43,10 @@ class RawVideoPlayer(
     private var currentPfd: ParcelFileDescriptor? = null
     private var audioJob: Job? = null
 
+    private val frameMeta = LongArray(3)
+    private var cachedLutPath: String? = null
+    private var cachedTargetLogIndex: Int = -1
+
     val isVideoLoaded: Boolean
         get() = nativeHandle != 0L
 
@@ -57,6 +61,24 @@ class RawVideoPlayer(
 
     val fps: Float
         get() = header?.fps ?: 24.0f
+
+    private fun updateResolvedLutAndLog() {
+        val hdr = header
+        val effectiveLog = currentEditConfig?.log ?: hdr?.activeLogName?.takeIf { it.isNotBlank() }
+        cachedTargetLogIndex = if (effectiveLog != null && effectiveLog != "None") {
+            top.maary.darkbag.fragments.SettingsFragment.LOG_CURVES.indexOf(effectiveLog).takeIf { it >= 0 } ?: -1
+        } else -1
+
+        val effectiveLut = currentEditConfig?.lut ?: hdr?.activeLutName?.takeIf { it.isNotBlank() }
+        val lutManager = top.maary.darkbag.utils.LutManager(context)
+        cachedLutPath = if (effectiveLut != null && effectiveLut != "None" && effectiveLut.isNotBlank()) {
+            val f = java.io.File(lutManager.lutDir, effectiveLut)
+            if (f.exists()) f.absolutePath else {
+                val f2 = java.io.File(java.io.File(context.filesDir, "luts"), effectiveLut)
+                if (f2.exists()) f2.absolutePath else null
+            }
+        } else null
+    }
 
     fun load(uri: Uri): Boolean {
         release()
@@ -89,6 +111,8 @@ class RawVideoPlayer(
             val bmpH = if (swapDims) w else h
             frameBuffer = ByteBuffer.allocateDirect(w * h * 2)
             renderBitmap = Bitmap.createBitmap(bmpW, bmpH, Bitmap.Config.ARGB_8888)
+
+            updateResolvedLutAndLog()
 
             // Setup audio track
             val sampleRate = header!!.audioSampleRate.takeIf { it > 0 } ?: 48000
@@ -134,18 +158,33 @@ class RawVideoPlayer(
         onPlaybackStateChanged(true)
 
         val fps = header?.fps?.takeIf { it > 0 } ?: 24.0f
-        val frameIntervalMs = (1000.0 / fps).toLong()
+        val frameIntervalNs = (1_000_000_000.0 / fps).toLong()
 
         playbackJob = CoroutineScope(Dispatchers.Default).launch {
+            var nextFrameTimeNs = System.nanoTime()
             while (isPlaying.get()) {
-                val start = System.currentTimeMillis()
+                val startNs = System.nanoTime()
 
                 renderFrame(currentFrameIndex)
-                currentFrameIndex = (currentFrameIndex + 1) % totalFrames
 
-                val elapsed = System.currentTimeMillis() - start
-                val sleepTime = (frameIntervalMs - elapsed).coerceAtLeast(1L)
-                delay(sleepTime)
+                nextFrameTimeNs += frameIntervalNs
+                val nowNs = System.nanoTime()
+                val sleepNs = nextFrameTimeNs - nowNs
+
+                if (sleepNs > 0) {
+                    val sleepMs = sleepNs / 1_000_000L
+                    if (sleepMs > 0) {
+                        delay(sleepMs)
+                    }
+                    currentFrameIndex = (currentFrameIndex + 1) % totalFrames
+                } else {
+                    // Frame rendering took longer than frameIntervalNs:
+                    // Drop lagging frames to keep pace with real time and audio clock
+                    val behindNs = -sleepNs
+                    val framesToSkip = ((behindNs / frameIntervalNs).toInt() + 1).coerceAtMost(totalFrames - 1)
+                    currentFrameIndex = (currentFrameIndex + framesToSkip) % totalFrames
+                    nextFrameTimeNs = nowNs + frameIntervalNs
+                }
             }
         }
 
@@ -154,15 +193,15 @@ class RawVideoPlayer(
         if (handle != 0L && audioTrack != null) {
             audioJob = CoroutineScope(Dispatchers.IO).launch {
                 val audioBuf = ByteBuffer.allocateDirect(16384)
+                val tempBytes = ByteArray(16384)
                 var packetIndex = 0
                 while (isPlaying.get()) {
                     audioBuf.clear()
                     val read = RawVideoNative.nativeReadAudioPacket(handle, packetIndex, audioBuf)
                     if (read <= 0) break
-                    val bytes = ByteArray(read)
                     audioBuf.position(0)
-                    audioBuf.get(bytes)
-                    audioTrack?.write(bytes, 0, read)
+                    audioBuf.get(tempBytes, 0, read)
+                    audioTrack?.write(tempBytes, 0, read)
                     packetIndex++
                 }
             }
@@ -195,6 +234,7 @@ class RawVideoPlayer(
 
     fun updateAdjustments(editConfig: EditConfig?) {
         currentEditConfig = editConfig
+        updateResolvedLutAndLog()
         if (!isPlaying.get() && isVideoLoaded) {
             renderFrame(currentFrameIndex)
         }
@@ -208,24 +248,8 @@ class RawVideoPlayer(
         if (handle == 0L) return
 
         buf.clear()
-        val meta = LongArray(3)
-        val readBytes = RawVideoNative.nativeReadFrame(handle, frameIdx, meta, buf)
+        val readBytes = RawVideoNative.nativeReadFrame(handle, frameIdx, frameMeta, buf)
         if (readBytes > 0) {
-            val effectiveLog = currentEditConfig?.log ?: hdr.activeLogName.takeIf { it.isNotBlank() }
-            val targetLogIndex = if (effectiveLog != null && effectiveLog != "None") {
-                top.maary.darkbag.fragments.SettingsFragment.LOG_CURVES.indexOf(effectiveLog).takeIf { it >= 0 } ?: -1
-            } else -1
-
-            val effectiveLut = currentEditConfig?.lut ?: hdr.activeLutName.takeIf { it.isNotBlank() }
-            val lutManager = top.maary.darkbag.utils.LutManager(context)
-            val lutPath = if (effectiveLut != null && effectiveLut != "None" && effectiveLut.isNotBlank()) {
-                val f = java.io.File(lutManager.lutDir, effectiveLut)
-                if (f.exists()) f.absolutePath else {
-                    val f2 = java.io.File(java.io.File(context.filesDir, "luts"), effectiveLut)
-                    if (f2.exists()) f2.absolutePath else null
-                }
-            } else null
-
             val exposure = currentEditConfig?.exposure ?: hdr.exposure
             val contrast = currentEditConfig?.contrast ?: hdr.contrast
             val saturation = currentEditConfig?.saturation ?: hdr.saturation
@@ -239,8 +263,8 @@ class RawVideoPlayer(
                 whiteLevel = hdr.whiteLevel,
                 blackLevel = hdr.blackLevel.firstOrNull() ?: 64f,
                 neutralPoint = hdr.neutralPoint,
-                targetLog = targetLogIndex,
-                lutPath = lutPath,
+                targetLog = cachedTargetLogIndex,
+                lutPath = cachedLutPath,
                 exposure = exposure,
                 contrast = contrast,
                 saturation = saturation,

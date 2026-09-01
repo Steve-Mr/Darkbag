@@ -9,6 +9,7 @@
 #include <cmath>
 #include <algorithm>
 #include <iostream>
+#include <memory>
 
 // --- File Writers ---
 struct ImageMetadata {
@@ -57,6 +58,8 @@ struct LUT3D {
 };
 
 LUT3D load_lut(const char* path);
+std::shared_ptr<LUT3D> get_cached_lut(const char* path);
+void clear_lut_cache();
 Vec3 apply_lut(const LUT3D& lut, Vec3 color);
 
 // --- Color Rendering Engines ---

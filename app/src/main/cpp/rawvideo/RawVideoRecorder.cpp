@@ -278,17 +278,20 @@ size_t RawVideoRecorder::decompressFrame(const uint8_t* src, size_t srcSize, uin
     }
 
     if (useDpcm) {
-        std::vector<uint8_t> temp(dstCapacity);
+        thread_local std::vector<uint8_t> t_temp;
+        if (t_temp.size() < dstCapacity) {
+            t_temp.resize(dstCapacity);
+        }
         int decompressedBytes = LZ4_decompress_safe(
             reinterpret_cast<const char*>(src),
-            reinterpret_cast<char*>(temp.data()),
+            reinterpret_cast<char*>(t_temp.data()),
             static_cast<int>(srcSize),
             static_cast<int>(dstCapacity)
         );
         if (decompressedBytes <= 0) {
             return 0;
         }
-        applyDpcmDecode(temp.data(), dst, static_cast<size_t>(decompressedBytes), 2);
+        applyDpcmDecode(t_temp.data(), dst, static_cast<size_t>(decompressedBytes), 2);
         return static_cast<size_t>(decompressedBytes);
     } else {
         int decompressedBytes = LZ4_decompress_safe(
