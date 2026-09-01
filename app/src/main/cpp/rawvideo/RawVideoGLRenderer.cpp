@@ -107,22 +107,22 @@ void main() {
     uint p11 = texelFetch(uRawBayerTexture, coord + ivec2(1, 1), 0).r;
 
     float r = 0.0, g = 0.0, b = 0.0;
-    if (uCfaPattern == 0) {
+    if (uCfaPattern == 0) { // RGGB
         r = float(p00);
         g = float(p01 + p10) * 0.5;
         b = float(p11);
-    } else if (uCfaPattern == 1) {
+    } else if (uCfaPattern == 1) { // GRBG
+        g = float(p00 + p11) * 0.5;
+        r = float(p01);
+        b = float(p10);
+    } else if (uCfaPattern == 2) { // GBRG
+        g = float(p00 + p11) * 0.5;
+        b = float(p01);
+        r = float(p10);
+    } else { // BGGR (3)
         b = float(p00);
         g = float(p01 + p10) * 0.5;
         r = float(p11);
-    } else if (uCfaPattern == 2) {
-        g = float(p00);
-        r = float(p01);
-        b = float(p10);
-    } else {
-        g = float(p00);
-        b = float(p01);
-        r = float(p10);
     }
 
     float norm = (1.0 / max(1.0, uWhiteLevel - uBlackLevel)) * uExposureMult;
