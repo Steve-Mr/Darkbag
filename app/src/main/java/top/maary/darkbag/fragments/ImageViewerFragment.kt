@@ -102,6 +102,7 @@ open class ImageViewerFragment : Fragment() {
 
     protected var isAdjusted = false
     protected var isEditingAdjustments = false
+    protected var currentCinemaDngFrame: Pair<Int, Uri?>? = null
     private var systemTopInset = 0
     private var systemBottomInset = 0
     private var topBarHeight = 0
@@ -130,6 +131,13 @@ open class ImageViewerFragment : Fragment() {
             preloadAdjacentMetadata(position)
 
             val group = adapter.getGroup(position)
+            val isCinemaDngGroup = group.isCinemaDng || group.cinemaDngFolderUri != null || group.cinemaDngFirstFrameUri != null || group.cinemaDngFrameUris.isNotEmpty()
+            if (isCinemaDngGroup) {
+                currentCinemaDngFrame = adapter.getActiveCinemaDngFrame(position)
+            } else {
+                currentCinemaDngFrame = null
+            }
+
             if (!group.metadataLoaded) {
                 lifecycleScope.launch {
                     val updatedGroup = repository.loadMetadata(group)
@@ -324,6 +332,12 @@ open class ImageViewerFragment : Fragment() {
                         onMultiCameraLensChanged = { _, _ ->
                             updateSplitButtons()
                             updateToolbarIcon()
+                        }
+                        onCinemaDngFrameSelected = { group, index, uri ->
+                            val currentPosition = binding.imagePager.currentItem
+                            if (currentPosition in adapter.getGroups().indices && adapter.getGroup(currentPosition).baseName == group.baseName) {
+                                currentCinemaDngFrame = Pair(index, uri)
+                            }
                         }
                         setFormatSwitcherPersistentHidden(isAdjusted)
                         onCurrentListChanged = { previousList, currentList ->
@@ -1982,6 +1996,12 @@ open class ImageViewerFragment : Fragment() {
                         onMultiCameraLensChanged = { _, _ ->
                             updateSplitButtons()
                             updateToolbarIcon()
+                        }
+                        onCinemaDngFrameSelected = { group, index, uri ->
+                            val currentPosition = binding.imagePager.currentItem
+                            if (currentPosition in adapter.getGroups().indices && adapter.getGroup(currentPosition).baseName == group.baseName) {
+                                currentCinemaDngFrame = Pair(index, uri)
+                            }
                         }
                         setFormatSwitcherPersistentHidden(isAdjusted)
                         onCurrentListChanged = { previousList, currentList ->

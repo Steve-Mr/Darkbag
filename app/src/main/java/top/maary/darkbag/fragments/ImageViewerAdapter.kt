@@ -45,6 +45,7 @@ class ImageViewerAdapter(
     var onMotionPhotoIndicatorTapped: ((Int) -> Unit)? = null
     var onPinchToOverview: (() -> Unit)? = null
     var isMotionPhotoAutoPlay: Boolean = true
+    var onCinemaDngFrameSelected: ((group: ImageGroup, index: Int, uri: Uri?) -> Unit)? = null
 
     private var recyclerView: RecyclerView? = null
     private val selectedFormats = mutableMapOf<String, String>()
@@ -102,6 +103,9 @@ class ImageViewerAdapter(
         val videoOutlineRect = android.graphics.Rect()
         var videoOutlineRadius = 0f
         var filmstripAdapter: top.maary.darkbag.adapters.FilmstripFrameAdapter? = null
+        var activeCinemaDngFrameIndex: Int = 0
+        var activeCinemaDngFrameUri: Uri? = null
+        var filmstripFadeRunnable: Runnable? = null
 
         init {
             binding.videoView.clipToOutline = true
@@ -186,6 +190,7 @@ class ImageViewerAdapter(
         if (isCinemaDngGroup) {
             holder.binding.filmstripContainer.visibility = if (shouldShow) View.VISIBLE else View.GONE
             holder.binding.filmstripContainer.alpha = if (shouldShow) 0.35f else 0f
+            holder.binding.rvFilmstrip.alpha = 1.0f
 
             val frameUris = if (group.cinemaDngFrameUris.isNotEmpty()) {
                 group.cinemaDngFrameUris
@@ -195,9 +200,14 @@ class ImageViewerAdapter(
                 emptyList()
             }
 
+            val currentActiveIndex = holder.activeCinemaDngFrameIndex.coerceIn(0, (frameUris.size - 1).coerceAtLeast(0))
+            val currentActiveUri = frameUris.getOrNull(currentActiveIndex)
+            holder.activeCinemaDngFrameIndex = currentActiveIndex
+            holder.activeCinemaDngFrameUri = currentActiveUri
+
             var adapter = holder.filmstripAdapter
             if (adapter == null) {
-                adapter = top.maary.darkbag.adapters.FilmstripFrameAdapter(frameUris)
+                adapter = top.maary.darkbag.adapters.FilmstripFrameAdapter(frameUris, currentActiveIndex)
                 holder.filmstripAdapter = adapter
                 holder.binding.rvFilmstrip.layoutManager = androidx.recyclerview.widget.LinearLayoutManager(
                     holder.itemView.context,
@@ -206,18 +216,54 @@ class ImageViewerAdapter(
                 )
                 holder.binding.rvFilmstrip.adapter = adapter
             } else {
-                adapter.setFrames(frameUris)
+                adapter.setFrames(frameUris, currentActiveIndex)
+            }
+
+            adapter.onScrubStateChanged = { isScrubbing ->
+                holder.filmstripFadeRunnable?.let { holder.binding.filmstripContainer.removeCallbacks(it) }
+                holder.filmstripFadeRunnable = null
+
+                if (isScrubbing) {
+                    holder.binding.filmstripContainer.animate()
+                        .alpha(1.0f)
+                        .setDuration(150)
+                        .start()
+                } else {
+                    val fadeRunnable = Runnable {
+                        if (isUiVisible && !isFormatSwitcherPersistentHidden) {
+                            holder.binding.filmstripContainer.animate()
+                                .alpha(0.35f)
+                                .setDuration(400)
+                                .start()
+                        }
+                    }
+                    holder.filmstripFadeRunnable = fadeRunnable
+                    holder.binding.filmstripContainer.postDelayed(fadeRunnable, 3000)
+                }
             }
 
             adapter.onFrameSelected = { frameIndex, uri ->
-                if (uri != null) {
-                    loadImage(holder, uri)
+                val currentPos = holder.bindingAdapterPosition
+                val currentGroup = if (currentPos != RecyclerView.NO_POSITION && currentPos in differ.currentList.indices) {
+                    differ.currentList[currentPos]
+                } else {
+                    group
                 }
+                holder.activeCinemaDngFrameIndex = frameIndex
+                holder.activeCinemaDngFrameUri = uri
+                if (uri != null) {
+                    loadCinemaDngFrame(holder, currentGroup, uri, frameIndex)
+                }
+                onCinemaDngFrameSelected?.invoke(currentGroup, frameIndex, uri)
             }
         } else {
+            holder.filmstripFadeRunnable?.let { holder.binding.filmstripContainer.removeCallbacks(it) }
+            holder.filmstripFadeRunnable = null
             holder.binding.filmstripContainer.visibility = View.GONE
             holder.binding.rvFilmstrip.adapter = null
             holder.filmstripAdapter = null
+            holder.activeCinemaDngFrameIndex = 0
+            holder.activeCinemaDngFrameUri = null
         }
 
         holder.binding.imageView.onZoomChanged = { isZoomed ->
@@ -616,7 +662,12 @@ class ImageViewerAdapter(
             if (group.isHalfFrame()) {
                 loadHalfFrameDngs(holder, group, group.editConfig?.zoomFactor ?: 1.0f)
             } else {
-                val dngUri = group.cinemaDngFirstFrameUri ?: group.cinemaDngFrameUris.firstOrNull() ?: group.dngUri ?: group.dngUri1 ?: group.dngUri2
+                val isCinemaDngGroup = group.isCinemaDng || group.cinemaDngFolderUri != null || group.cinemaDngFirstFrameUri != null || group.cinemaDngFrameUris.isNotEmpty()
+                val dngUri = if (isCinemaDngGroup) {
+                    holder.activeCinemaDngFrameUri ?: group.cinemaDngFirstFrameUri ?: group.cinemaDngFrameUris.firstOrNull()
+                } else {
+                    group.dngUri ?: group.dngUri1 ?: group.dngUri2
+                }
                 dngUri?.let { loadImage(holder, it) }
             }
             return
@@ -777,6 +828,12 @@ class ImageViewerAdapter(
     }
 
 
+    fun loadCinemaDngFrame(holder: ViewHolder, group: ImageGroup, uri: Uri, index: Int) {
+        holder.activeCinemaDngFrameIndex = index
+        holder.activeCinemaDngFrameUri = uri
+        loadImage(holder, uri)
+    }
+
     private fun loadImage(holder: ViewHolder, uri: Uri, zoomFactor: Float = 1.0f, version: Long = 0L) {
         if (holder.currentUri == uri && holder.currentVersion == version && holder.binding.imageView.drawable != null) {
             holder.binding.loadingIndicator.visibility = View.GONE
@@ -874,6 +931,8 @@ class ImageViewerAdapter(
 
     override fun onViewRecycled(holder: ViewHolder) {
         holder.loadJob?.cancel()
+        holder.filmstripFadeRunnable?.let { holder.binding.filmstripContainer.removeCallbacks(it) }
+        holder.filmstripFadeRunnable = null
         stopMotionVideo(holder)
         holder.rawVideoPlayer?.release()
         holder.rawVideoPlayer = null
@@ -883,6 +942,8 @@ class ImageViewerAdapter(
         holder.currentUri = null
         holder.currentBaseName = null
         holder.currentVersion = 0L
+        holder.activeCinemaDngFrameIndex = 0
+        holder.activeCinemaDngFrameUri = null
         holder.binding.loadingIndicator.visibility = View.GONE
         holder.filmstripAdapter = null
         holder.binding.rvFilmstrip.adapter = null
@@ -893,6 +954,8 @@ class ImageViewerAdapter(
         stopAllMotionVideos()
         for (i in 0 until itemCount) {
             (recyclerView.findViewHolderForAdapterPosition(i) as? ViewHolder)?.let { holder ->
+                holder.filmstripFadeRunnable?.let { holder.binding.filmstripContainer.removeCallbacks(it) }
+                holder.filmstripFadeRunnable = null
                 holder.rawVideoPlayer?.release()
                 holder.rawVideoPlayer = null
                 holder.player?.release()
@@ -1250,10 +1313,27 @@ class ImageViewerAdapter(
         onMultiCameraLensChanged?.invoke(position, lensIndex)
     }
 
+    fun getActiveCinemaDngFrame(position: Int): Pair<Int, Uri?>? {
+        if (position !in differ.currentList.indices) return null
+        val group = differ.currentList[position]
+        val isCinemaDngGroup = group.isCinemaDng || group.cinemaDngFolderUri != null || group.cinemaDngFirstFrameUri != null || group.cinemaDngFrameUris.isNotEmpty()
+        if (!isCinemaDngGroup) return null
+
+        val holder = recyclerView?.findViewHolderForAdapterPosition(position) as? ViewHolder
+        val index = holder?.activeCinemaDngFrameIndex ?: 0
+        val uri = holder?.activeCinemaDngFrameUri ?: group.cinemaDngFrameUris.getOrNull(index) ?: group.cinemaDngFirstFrameUri
+        return Pair(index, uri)
+    }
+
     fun getCurrentUri(position: Int): Uri? {
         if (position >= differ.currentList.size) return null
         val group = differ.currentList[position]
         val format = getSelectedFormat(group)
+        val isCinemaDngGroup = group.isCinemaDng || group.cinemaDngFolderUri != null || group.cinemaDngFirstFrameUri != null || group.cinemaDngFrameUris.isNotEmpty()
+        if (isCinemaDngGroup) {
+            val holder = recyclerView?.findViewHolderForAdapterPosition(position) as? ViewHolder
+            return holder?.activeCinemaDngFrameUri ?: group.cinemaDngFirstFrameUri ?: group.cinemaDngFrameUris.firstOrNull() ?: group.dngUri
+        }
         return if (group.isMultiCamera) {
             val lenses = getMultiCameraLenses(group)
             val idx = (selectedLensIndices[group.baseName] ?: 0).coerceIn(0, (lenses.size - 1).coerceAtLeast(0))
@@ -1332,6 +1412,8 @@ class ImageViewerAdapter(
                                 }
                             }).start()
                         if (isCinemaDngGroup) {
+                            holder.filmstripFadeRunnable?.let { filmstripContainer.removeCallbacks(it) }
+                            holder.filmstripFadeRunnable = null
                             filmstripContainer.animate().alpha(0f).setDuration(200)
                                 .setListener(object : android.animation.AnimatorListenerAdapter() {
                                     override fun onAnimationEnd(animation: android.animation.Animator) {
@@ -1407,6 +1489,8 @@ class ImageViewerAdapter(
                                 }
                             }).start()
                         if (isCinemaDngGroup) {
+                            holder.filmstripFadeRunnable?.let { filmstripContainer.removeCallbacks(it) }
+                            holder.filmstripFadeRunnable = null
                             filmstripContainer.animate().alpha(0f).setDuration(200)
                                 .setListener(object : android.animation.AnimatorListenerAdapter() {
                                     override fun onAnimationEnd(animation: android.animation.Animator) {
