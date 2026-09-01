@@ -2513,6 +2513,8 @@ open class ImageViewerFragment : Fragment() {
 
 
     private fun setupToolbar() {
+        updateSplitButtons()
+        updateToolbarIcon()
         binding.btnNavigation.setOnClickListener {
             if (isGalleryMode) {
                 if (::galleryAdapter.isInitialized && galleryAdapter.isSelectionMode) {
