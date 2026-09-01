@@ -488,8 +488,9 @@ class DarkbagGalleryGridAdapter(
                     if (handle != 0L) {
                         val header = top.maary.darkbag.rawvideo.RawVideoNative.readHeader(handle)
                         if (header != null && header.width > 0 && header.height > 0) {
-                            val thumbW = 320
-                            val thumbH = (thumbW * header.height) / header.width
+                            val swapDims = (header.orientation == 90 || header.orientation == 270)
+                            val thumbW = if (swapDims) (320 * header.height) / header.width else 320
+                            val thumbH = if (swapDims) 320 else (320 * header.height) / header.width
                             val bmp = android.graphics.Bitmap.createBitmap(thumbW, thumbH, android.graphics.Bitmap.Config.ARGB_8888)
                             val bufSize = header.width * header.height * 2
                             val directBuf = java.nio.ByteBuffer.allocateDirect(bufSize)
@@ -509,6 +510,7 @@ class DarkbagGalleryGridAdapter(
                                     bayerBuffer = directBuf,
                                     width = header.width,
                                     height = header.height,
+                                    orientation = header.orientation,
                                     cfaPattern = header.cfaPattern,
                                     whiteLevel = header.whiteLevel,
                                     blackLevel = header.blackLevel.firstOrNull() ?: 64f,
@@ -521,17 +523,10 @@ class DarkbagGalleryGridAdapter(
                                     outBitmap = bmp
                                 )
                                 if (debayered) {
-                                    val finalBmp = if (header.orientation != 0) {
-                                        val m = android.graphics.Matrix().apply { postRotate(header.orientation.toFloat()) }
-                                        android.graphics.Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, m, true).also {
-                                            if (it !== bmp) bmp.recycle()
-                                        }
-                                    } else bmp
-
-                                    rawThumbCache.put(group.baseName, finalBmp)
+                                    rawThumbCache.put(group.baseName, bmp)
                                     withContext(Dispatchers.Main) {
                                         if (holder.bindingAdapterPosition != androidx.recyclerview.widget.RecyclerView.NO_POSITION) {
-                                            holder.binding.thumbnailView.setImageBitmap(finalBmp)
+                                            holder.binding.thumbnailView.setImageBitmap(bmp)
                                         }
                                     }
                                 }

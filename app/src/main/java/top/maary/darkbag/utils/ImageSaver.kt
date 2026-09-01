@@ -837,8 +837,10 @@ object ImageSaver {
             val header = top.maary.darkbag.rawvideo.RawVideoNative.readHeader(readerHandle)
             if (header != null && header.width > 0 && header.height > 0) {
                 val thumbWidth = 640
-                val thumbHeight = (thumbWidth * header.height) / header.width
-                val bmp = Bitmap.createBitmap(thumbWidth, thumbHeight, Bitmap.Config.ARGB_8888)
+                val swapDims = (header.orientation == 90 || header.orientation == 270)
+                val thumbW = if (swapDims) (thumbWidth * header.height) / header.width else thumbWidth
+                val thumbH = if (swapDims) thumbWidth else (thumbWidth * header.height) / header.width
+                val bmp = Bitmap.createBitmap(thumbW, thumbH, Bitmap.Config.ARGB_8888)
                 val bufferSize = header.width * header.height * 2
                 val directBuf = java.nio.ByteBuffer.allocateDirect(bufferSize)
                 val meta = LongArray(3)
@@ -860,6 +862,7 @@ object ImageSaver {
                         bayerBuffer = directBuf,
                         width = header.width,
                         height = header.height,
+                        orientation = header.orientation,
                         cfaPattern = header.cfaPattern,
                         whiteLevel = header.whiteLevel,
                         blackLevel = header.blackLevel.firstOrNull() ?: 64f,
@@ -872,12 +875,7 @@ object ImageSaver {
                         outBitmap = bmp
                     )
                     if (debayered) {
-                        if (header.orientation != 0) {
-                            val matrix = android.graphics.Matrix().apply { postRotate(header.orientation.toFloat()) }
-                            thumbnailBitmap = Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, matrix, true)
-                        } else {
-                            thumbnailBitmap = bmp
-                        }
+                        thumbnailBitmap = bmp
                     }
                 }
             }

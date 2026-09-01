@@ -550,6 +550,7 @@ Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeDebayerFrameToBitmap(
         jobject jBayerBuffer,
         jint width,
         jint height,
+        jint orientation,
         jint cfaPattern,
         jint whiteLevel,
         jfloat blackLevel,
@@ -618,19 +619,33 @@ Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeDebayerFrameToBitmap(
     float satFactor = 1.0f + saturation;
 
     const size_t rowStride = static_cast<size_t>(width) * 2; // 16-bit RAW_SENSOR (2 bytes per pixel)
+    const bool swapDims = (orientation == 90 || orientation == 270);
 
-    // Fast 2x2 Bayer downsampled debayering directly to target bitmap size
+    // Fast 2x2 Bayer downsampled debayering directly to target bitmap size with orientation mapping
     #pragma omp parallel for schedule(dynamic, 16)
     for (int y = 0; y < outHeight; ++y) {
-        int srcY = (y * height) / outHeight;
-        srcY = std::min(height - 2, srcY & ~1); // Even row
-
-        const auto* row0 = reinterpret_cast<const uint16_t*>(rawBytes + srcY * rowStride);
-        const auto* row1 = reinterpret_cast<const uint16_t*>(rawBytes + (srcY + 1) * rowStride);
-
         for (int x = 0; x < outWidth; ++x) {
-            int srcX = (x * width) / outWidth;
-            srcX = std::min(width - 2, srcX & ~1); // Even col
+            int sx = x;
+            int sy = y;
+            if (orientation == 90) {
+                sx = y;
+                sy = (outWidth - 1) - x;
+            } else if (orientation == 180) {
+                sx = (outWidth - 1) - x;
+                sy = (outHeight - 1) - y;
+            } else if (orientation == 270) {
+                sx = (outHeight - 1) - y;
+                sy = x;
+            }
+
+            int srcX = swapDims ? ((sx * width) / outHeight) : ((sx * width) / outWidth);
+            int srcY = swapDims ? ((sy * height) / outWidth) : ((sy * height) / outHeight);
+
+            srcX = std::min(width - 2, std::max(0, srcX & ~1));
+            srcY = std::min(height - 2, std::max(0, srcY & ~1));
+
+            const auto* row0 = reinterpret_cast<const uint16_t*>(rawBytes + srcY * rowStride);
+            const auto* row1 = reinterpret_cast<const uint16_t*>(rawBytes + (srcY + 1) * rowStride);
 
             uint16_t p00 = row0[srcX];
             uint16_t p01 = row0[srcX + 1];

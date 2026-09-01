@@ -138,6 +138,7 @@ object RawVideoNative {
         bayerBuffer: ByteBuffer,
         width: Int,
         height: Int,
+        orientation: Int = 0,
         cfaPattern: Int,
         whiteLevel: Int,
         blackLevel: Float,

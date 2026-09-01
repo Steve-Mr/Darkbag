@@ -183,6 +183,7 @@ class ImageViewerAdapter(
         }
 
         if (!isSameImage) {
+            holder.binding.imageView.rotation = 0f
             holder.binding.formatToggleGroup.translationX = 0f
             holder.binding.formatToggleGroup.translationY = 0f
             holder.binding.motionPhotoToggleGroup.translationX = 0f
@@ -483,9 +484,8 @@ class ImageViewerAdapter(
         val player = holder.rawVideoPlayer ?: top.maary.darkbag.rawvideo.RawVideoPlayer(
             context = ctx,
             onFrameRendered = { bitmap, _ ->
-                val orient = group.orientation
-                if (holder.binding.imageView.rotation != orient.toFloat()) {
-                    holder.binding.imageView.rotation = orient.toFloat()
+                if (holder.binding.imageView.rotation != 0f) {
+                    holder.binding.imageView.rotation = 0f
                 }
                 holder.binding.imageView.setImageBitmap(bitmap)
             },
@@ -839,9 +839,8 @@ class ImageViewerAdapter(
         val player = holder.rawVideoPlayer ?: top.maary.darkbag.rawvideo.RawVideoPlayer(
             context = holder.binding.root.context,
             onFrameRendered = { bitmap, _ ->
-                val orient = holder.rawVideoPlayer?.orientation ?: group.orientation
-                if (holder.binding.imageView.rotation != orient.toFloat()) {
-                    holder.binding.imageView.rotation = orient.toFloat()
+                if (holder.binding.imageView.rotation != 0f) {
+                    holder.binding.imageView.rotation = 0f
                 }
                 holder.binding.imageView.setImageBitmap(bitmap)
             },

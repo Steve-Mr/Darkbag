@@ -83,8 +83,12 @@ class RawVideoPlayer(
 
             val w = header!!.width
             val h = header!!.height
+            val orient = header!!.orientation
+            val swapDims = (orient == 90 || orient == 270)
+            val bmpW = if (swapDims) h else w
+            val bmpH = if (swapDims) w else h
             frameBuffer = ByteBuffer.allocateDirect(w * h * 2)
-            renderBitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+            renderBitmap = Bitmap.createBitmap(bmpW, bmpH, Bitmap.Config.ARGB_8888)
 
             // Setup audio track
             val sampleRate = header!!.audioSampleRate.takeIf { it > 0 } ?: 48000
@@ -228,6 +232,7 @@ class RawVideoPlayer(
                 bayerBuffer = buf,
                 width = hdr.width,
                 height = hdr.height,
+                orientation = hdr.orientation,
                 cfaPattern = hdr.cfaPattern,
                 whiteLevel = hdr.whiteLevel,
                 blackLevel = hdr.blackLevel.firstOrNull() ?: 64f,

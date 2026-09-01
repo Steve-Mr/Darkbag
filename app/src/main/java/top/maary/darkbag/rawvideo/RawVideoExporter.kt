@@ -196,6 +196,7 @@ object RawVideoExporter {
                         bayerBuffer = bayerBuf,
                         width = rawW,
                         height = rawH,
+                        orientation = 0,
                         cfaPattern = header.cfaPattern,
                         whiteLevel = header.whiteLevel,
                         blackLevel = header.blackLevel.firstOrNull() ?: 64f,
