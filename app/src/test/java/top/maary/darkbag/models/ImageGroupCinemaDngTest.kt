@@ -87,4 +87,41 @@ class ImageGroupCinemaDngTest {
         assertFalse(folderOnly.hasDerivatives)
         assertTrue(folderOnly.isSingleFormat())
     }
+
+    @Test
+    fun testFormatFrameBaseName() {
+        assertEquals("DBAG_PHOTO_20260901_220000_f0", top.maary.darkbag.rawvideo.RawVideoExporter.formatFrameBaseName("RAWVID_20260901_220000", 0))
+        assertEquals("DBAG_PHOTO_20260901_220000_f5", top.maary.darkbag.rawvideo.RawVideoExporter.formatFrameBaseName("DBAG_CDNG_20260901_220000", 5))
+        assertEquals("DBAG_PHOTO_20260901_220000_f12", top.maary.darkbag.rawvideo.RawVideoExporter.formatFrameBaseName("20260901_220000", 12))
+        assertEquals("DBAG_PHOTO_20260901_220000_f5", top.maary.darkbag.rawvideo.RawVideoExporter.formatFrameBaseName("DBAG_PHOTO_20260901_220000_f5", 5))
+    }
+
+    @Test
+    fun testExportedSingleFrameDngAndGradedJpgPairing() {
+        val baseName = top.maary.darkbag.rawvideo.RawVideoExporter.formatFrameBaseName("RAWVID_20260901_220000", 5)
+        val dngFileName = "$baseName.dng"
+        val gradedJpgFileName = "${baseName}_graded.jpg"
+
+        val dngBase = ImageUtils.getBaseName(dngFileName)
+        val jpgBase = ImageUtils.getBaseName(gradedJpgFileName)
+
+        assertEquals("PHOTO_20260901_220000_f5", dngBase)
+        assertEquals("PHOTO_20260901_220000_f5", jpgBase)
+        assertEquals(dngBase, jpgBase)
+
+        val dngUri = Uri.parse("content://media/external/images/media/101")
+        val jpgUri = Uri.parse("content://media/external/images/media/102")
+
+        val pairedGroup = ImageGroup(
+            baseName = dngBase,
+            dngUri = dngUri,
+            jpgUri = jpgUri
+        )
+
+        assertTrue(pairedGroup.hasAny())
+        assertTrue(pairedGroup.hasMasterRaw)
+        assertTrue(pairedGroup.hasDerivatives)
+        assertEquals(dngUri, pairedGroup.dngUri)
+        assertEquals(jpgUri, pairedGroup.jpgUri)
+    }
 }

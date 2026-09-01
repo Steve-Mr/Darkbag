@@ -163,4 +163,13 @@
     <string name="multi_camera_link_primary_only">Manual controls applied to primary lens only</string>
     <string name="setting_color_engine_title">Color Rendering Engine</string>
     <string name="setting_color_engine_summary">Select default tone mapping algorithm when Log/LUT is None</string>
+
+    <string name="cinemadng_export_dialog_title">CinemaDNG 导出与分享</string>
+    <string name="cinemadng_export_raw_dng">导出当前帧 RAW DNG (母带)</string>
+    <string name="cinemadng_export_graded_jpg">导出当前帧调色 JPG (所见即所得)</string>
+    <string name="cinemadng_export_pair">导出 RAW + 调色 JPG (成对母带衍生体)</string>
+    <string name="cinemadng_export_full_video">分享/导出完整视频 (MP4 / WAV)</string>
+    <string name="cinemadng_exporting_frame">正在导出单帧…</string>
+    <string name="cinemadng_export_success">单帧导出成功</string>
+    <string name="cinemadng_export_failed">单帧导出失败</string>
 </resources>

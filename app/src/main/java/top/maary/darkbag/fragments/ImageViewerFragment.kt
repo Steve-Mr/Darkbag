@@ -628,12 +628,17 @@ open class ImageViewerFragment : Fragment() {
             binding.btnShareMenu.isChecked = true
             val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
             val popup = PopupMenu(requireContext(), it)
+            val isCinemaDngGroup = currentGroup.isCinemaDng || currentGroup.cinemaDngFolderUri != null || currentGroup.cinemaDngFirstFrameUri != null || currentGroup.cinemaDngFrameUris.isNotEmpty() || currentCinemaDngFrame != null
             if (currentGroup.isRawVideo) {
                 popup.menu.add(0, MENU_EXPORT_CINEMA_DNG, 0, "Export CinemaDNG Sequence").apply {
                     setIcon(R.drawable.ic_photo)
                 }
                 popup.menu.add(0, MENU_EXPORT_MP4, 0, "Export Graded MP4 Video").apply {
                     setIcon(R.drawable.ic_play_arrow)
+                }
+            } else if (isCinemaDngGroup) {
+                popup.menu.add(0, MENU_EXPORT_CINEMADNG_FRAME, 0, getString(R.string.cinemadng_export_dialog_title)).apply {
+                    setIcon(R.drawable.ic_photo)
                 }
             } else {
                 popup.menu.add(0, MENU_SHARE_TIFF, 0, getString(R.string.share_as_tiff)).apply {
@@ -657,6 +662,7 @@ open class ImageViewerFragment : Fragment() {
             popup.setOnMenuItemClickListener { item ->
                 when (item.itemId) {
                     MENU_SHARE_TIFF -> performShareAsTiff()
+                    MENU_EXPORT_CINEMADNG_FRAME -> showCinemaDngShareExportDialog(adapter.getGroup(binding.imagePager.currentItem))
                     MENU_EXPORT_CINEMA_DNG -> performExportCinemaDng(adapter.getGroup(binding.imagePager.currentItem))
                     MENU_EXPORT_MP4 -> {
                         val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
@@ -911,6 +917,12 @@ open class ImageViewerFragment : Fragment() {
         val currentIndex = binding.imagePager.currentItem
         val currentGroup = adapter.getGroup(currentIndex)
         val selectedFormat = adapter.getSelectedFormat(currentIndex)
+
+        val isCinemaDngGroup = currentGroup.isCinemaDng || currentGroup.cinemaDngFolderUri != null || currentGroup.cinemaDngFirstFrameUri != null || currentGroup.cinemaDngFrameUris.isNotEmpty() || currentCinemaDngFrame != null
+        if (isCinemaDngGroup) {
+            showCinemaDngShareExportDialog(currentGroup)
+            return
+        }
 
         if (selectedFormat == "DNG" && currentGroup.isHalfFrame()) {
             showHalfFrameShareSheet(currentGroup)
@@ -2258,22 +2270,134 @@ open class ImageViewerFragment : Fragment() {
 
     private fun shareImages(uris: List<android.net.Uri>) {
         if (uris.isEmpty()) return
+        val mimeType = if (uris.size == 1) {
+            val u = uris[0]
+            val type = context?.contentResolver?.getType(u)
+            type ?: when {
+                u.toString().endsWith(".dng", true) -> "image/x-adobe-dng"
+                u.toString().endsWith(".mp4", true) -> "video/mp4"
+                u.toString().endsWith(".wav", true) -> "audio/wav"
+                else -> "image/jpeg"
+            }
+        } else {
+            val types = uris.mapNotNull { context?.contentResolver?.getType(it) ?: (if (it.toString().endsWith(".dng", true)) "image/x-adobe-dng" else "image/jpeg") }
+            if (types.all { it.startsWith("image/") }) "image/*" else "*/*"
+        }
         val intent = if (uris.size == 1) {
             android.content.Intent(android.content.Intent.ACTION_SEND).apply {
-                type = "image/*"
+                type = mimeType
                 putExtra(android.content.Intent.EXTRA_STREAM, uris[0])
             }
         } else {
             android.content.Intent(android.content.Intent.ACTION_SEND_MULTIPLE).apply {
-                type = "image/*"
+                type = mimeType
                 putParcelableArrayListExtra(android.content.Intent.EXTRA_STREAM, ArrayList(uris))
             }
         }
         intent.addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
         try {
-            startActivity(android.content.Intent.createChooser(intent, "Share Image"))
+            startActivity(android.content.Intent.createChooser(intent, "Share"))
         } catch (e: android.content.ActivityNotFoundException) {
-            android.widget.Toast.makeText(requireContext(), "No app found to share the image.", android.widget.Toast.LENGTH_SHORT).show()
+            android.widget.Toast.makeText(requireContext(), "No app found to share.", android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun showCinemaDngShareExportDialog(group: top.maary.darkbag.models.ImageGroup) {
+        val options = arrayOf(
+            getString(R.string.cinemadng_export_raw_dng),
+            getString(R.string.cinemadng_export_graded_jpg),
+            getString(R.string.cinemadng_export_pair),
+            getString(R.string.cinemadng_export_full_video)
+        )
+
+        com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
+            .setTitle(R.string.cinemadng_export_dialog_title)
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> exportCinemaDngFrame(group, top.maary.darkbag.rawvideo.RawVideoExporter.FrameExportType.RAW_DNG_ONLY)
+                    1 -> exportCinemaDngFrame(group, top.maary.darkbag.rawvideo.RawVideoExporter.FrameExportType.GRADED_JPG_ONLY)
+                    2 -> exportCinemaDngFrame(group, top.maary.darkbag.rawvideo.RawVideoExporter.FrameExportType.RAW_AND_GRADED_PAIR)
+                    3 -> handleCinemaDngFullVideoExport(group)
+                }
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
+    }
+
+    private fun exportCinemaDngFrame(
+        group: top.maary.darkbag.models.ImageGroup,
+        exportType: top.maary.darkbag.rawvideo.RawVideoExporter.FrameExportType
+    ) {
+        val currentIndex = binding.imagePager.currentItem
+        val frameInfo = currentCinemaDngFrame ?: adapter.getActiveCinemaDngFrame(currentIndex)
+        val frameIndex = frameInfo?.first ?: 0
+        val frameUri = frameInfo?.second
+            ?: group.cinemaDngFrameUris.getOrNull(frameIndex)
+            ?: group.cinemaDngFirstFrameUri
+            ?: group.dngUri
+
+        if (frameUri == null) {
+            Toast.makeText(requireContext(), R.string.cinemadng_export_failed, Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        binding.initialLoadingIndicator.visibility = View.VISIBLE
+        binding.interactionBlocker?.visibility = View.VISIBLE
+        Toast.makeText(requireContext(), R.string.cinemadng_exporting_frame, Toast.LENGTH_SHORT).show()
+
+        lifecycleScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                val fullyLoadedGroup = if (!group.metadataLoaded) {
+                    repository.loadMetadata(group)
+                } else {
+                    group
+                }
+                val config = currentEditConfig ?: fullyLoadedGroup.editConfig
+                top.maary.darkbag.rawvideo.RawVideoExporter.exportSingleFrameFromCinemaDng(
+                    context = requireContext().applicationContext,
+                    frameDngUri = frameUri,
+                    baseName = group.baseName,
+                    frameIndex = frameIndex,
+                    editConfig = config,
+                    exportType = exportType
+                )
+            }
+
+            binding.initialLoadingIndicator.visibility = View.GONE
+            binding.interactionBlocker?.visibility = View.GONE
+
+            val (rawUri, jpgUri) = result
+            if (rawUri != null || jpgUri != null) {
+                Toast.makeText(requireContext(), R.string.cinemadng_export_success, Toast.LENGTH_SHORT).show()
+                repository.invalidateCache()
+                val urisToShare = listOfNotNull(jpgUri, rawUri)
+                if (urisToShare.isNotEmpty()) {
+                    shareImages(urisToShare)
+                }
+            } else {
+                Toast.makeText(requireContext(), R.string.cinemadng_export_failed, Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    private fun handleCinemaDngFullVideoExport(group: top.maary.darkbag.models.ImageGroup) {
+        if (group.isRawVideo || group.rawVideoUri != null) {
+            lifecycleScope.launch {
+                val fullyLoadedGroup = if (!group.metadataLoaded) {
+                    repository.loadMetadata(group)
+                } else {
+                    group
+                }
+                val config = currentEditConfig ?: fullyLoadedGroup.editConfig
+                val sheet = RawVideoExportSheet.newInstance(config?.log, config?.lut)
+                sheet.show(childFragmentManager, RawVideoExportSheet.TAG)
+            }
+        } else if (group.mp4VideoUri != null) {
+            shareImages(listOf(group.mp4VideoUri))
+        } else if (group.cinemaDngAudioUri != null) {
+            shareImages(listOf(group.cinemaDngAudioUri))
+        } else {
+            performExportCinemaDng(group)
         }
     }
 
@@ -3155,6 +3279,7 @@ open class ImageViewerFragment : Fragment() {
         private const val MENU_COLLAGE = 5
         private const val MENU_EXPORT_CINEMA_DNG = 6
         private const val MENU_EXPORT_MP4 = 7
+        private const val MENU_EXPORT_CINEMADNG_FRAME = 8
 
         private const val EXPOSURE_MIN = -4f
         private const val EXPOSURE_MAX = 4f

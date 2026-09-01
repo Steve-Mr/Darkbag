@@ -8,10 +8,20 @@ import android.media.MediaFormat
 import android.media.MediaMuxer
 import android.net.Uri
 import android.util.Log
+import android.content.ContentValues
+import android.os.Build
+import android.provider.MediaStore
 import androidx.documentfile.provider.DocumentFile
+import androidx.exifinterface.media.ExifInterface
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import top.maary.darkbag.fragments.SettingsFragment
 import top.maary.darkbag.models.EditConfig
+import top.maary.darkbag.processor.ColorProcessor
+import top.maary.darkbag.repository.ImageRepository
+import top.maary.darkbag.utils.DarkbagIdentity
+import top.maary.darkbag.utils.ImageSaver
+import top.maary.darkbag.utils.LutManager
 import java.io.File
 import java.io.FileOutputStream
 import java.nio.ByteBuffer
@@ -20,6 +30,198 @@ import kotlin.math.pow
 
 object RawVideoExporter {
     private const val TAG = "RawVideoExporter"
+
+    enum class FrameExportType {
+        RAW_DNG_ONLY,
+        GRADED_JPG_ONLY,
+        RAW_AND_GRADED_PAIR
+    }
+
+    fun formatFrameBaseName(baseName: String, frameIndex: Int): String {
+        var clean = baseName.removePrefix(DarkbagIdentity.FILE_PREFIX)
+            .replace(Regex("^(RAWVID|CDNG)_"), "PHOTO_")
+        if (!clean.startsWith("PHOTO_")) {
+            clean = "PHOTO_$clean"
+        }
+        val frameSuffix = "_f$frameIndex"
+        if (!clean.endsWith(frameSuffix) && !clean.contains(Regex("_f\\d+$"))) {
+            clean += frameSuffix
+        }
+        return DarkbagIdentity.prefixedBaseName(clean)
+    }
+
+    /**
+     * Exports a single frame from a CinemaDNG / RAW video sequence:
+     * - RAW_DNG_ONLY: exports DBAG_PHOTO_YYYYMMDD_HHMMSS_f{index}.dng
+     * - GRADED_JPG_ONLY: exports DBAG_PHOTO_YYYYMMDD_HHMMSS_f{index}_graded.jpg
+     * - RAW_AND_GRADED_PAIR: exports both files with matching baseName for ImageGroup pairing
+     */
+    suspend fun exportSingleFrameFromCinemaDng(
+        context: Context,
+        frameDngUri: Uri,
+        baseName: String,
+        frameIndex: Int,
+        editConfig: EditConfig?,
+        exportType: FrameExportType
+    ): Pair<Uri?, Uri?> = withContext(Dispatchers.IO) {
+        try {
+            val prefs = context.getSharedPreferences(
+                SettingsFragment.PREFS_NAME,
+                Context.MODE_PRIVATE
+            )
+            val jpgFolderUri = prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
+            val rawFolderUri = prefs.getString(SettingsFragment.KEY_RAW_STORAGE_URI, null)
+
+            // 1. Read source DNG bytes
+            val dngBytes = context.contentResolver.openInputStream(frameDngUri)?.use { it.readBytes() }
+                ?: return@withContext Pair(null, null)
+
+            if (dngBytes.isEmpty()) {
+                Log.e(TAG, "Empty DNG frame data for uri: $frameDngUri")
+                return@withContext Pair(null, null)
+            }
+
+            val fullBaseName = formatFrameBaseName(baseName, frameIndex)
+            var finalRawUri: Uri? = null
+            var finalJpgUri: Uri? = null
+
+            val captureMetadata = ImageRepository(context).getCaptureMetadata(frameDngUri)
+
+            // 2. Export RAW DNG if requested
+            if (exportType == FrameExportType.RAW_DNG_ONLY || exportType == FrameExportType.RAW_AND_GRADED_PAIR) {
+                val dngDisplayName = "$fullBaseName.dng"
+                if (rawFolderUri != null) {
+                    try {
+                        val treeUri = Uri.parse(rawFolderUri)
+                        val parentFolder = DocumentFile.fromTreeUri(context, treeUri)
+                        val newFile = parentFolder?.createFile("image/x-adobe-dng", dngDisplayName)
+                        if (newFile != null) {
+                            context.contentResolver.openOutputStream(newFile.uri)?.use { out ->
+                                out.write(dngBytes)
+                            }
+                            finalRawUri = newFile.uri
+                            Log.i(TAG, "Exported single frame RAW DNG to SAF: $finalRawUri")
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to save RAW DNG to SAF folder", e)
+                    }
+                } else {
+                    try {
+                        val contentResolver = context.contentResolver
+                        val dngValues = ContentValues().apply {
+                            put(MediaStore.MediaColumns.DISPLAY_NAME, dngDisplayName)
+                            put(MediaStore.MediaColumns.MIME_TYPE, "image/x-adobe-dng")
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/Darkbag")
+                                put(MediaStore.MediaColumns.IS_PENDING, 1)
+                            }
+                        }
+                        val dngUri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, dngValues)
+                        if (dngUri != null) {
+                            contentResolver.openOutputStream(dngUri, "wt")?.use { out ->
+                                out.write(dngBytes)
+                            }
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                dngValues.clear()
+                                dngValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                                contentResolver.update(dngUri, dngValues, null, null)
+                            }
+                            finalRawUri = dngUri
+                            Log.i(TAG, "Exported single frame RAW DNG to MediaStore: $finalRawUri")
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to save RAW DNG to MediaStore", e)
+                    }
+                }
+            }
+
+            // 3. Export Graded JPG if requested
+            if (exportType == FrameExportType.GRADED_JPG_ONLY || exportType == FrameExportType.RAW_AND_GRADED_PAIR) {
+                val targetLogIndex = if (editConfig?.log != null && editConfig.log != "None") {
+                    SettingsFragment.LOG_CURVES.indexOf(editConfig.log).takeIf { it >= 0 } ?: 0
+                } else 0
+
+                val lutManager = LutManager(context)
+                val lutPath = if (editConfig?.lut != null && editConfig.lut != "None" && editConfig.lut!!.isNotBlank()) {
+                    val f = File(lutManager.lutDir, editConfig.lut!!)
+                    if (f.exists()) f.absolutePath else {
+                        val f2 = File(File(context.filesDir, "luts"), editConfig.lut!!)
+                        if (f2.exists()) f2.absolutePath else null
+                    }
+                } else null
+
+                val orientation = try {
+                    context.contentResolver.openInputStream(frameDngUri)?.use { input ->
+                        ExifInterface(input).getAttributeInt(
+                            ExifInterface.TAG_ORIENTATION,
+                            ExifInterface.ORIENTATION_NORMAL
+                        )
+                    } ?: ExifInterface.ORIENTATION_NORMAL
+                } catch (e: Exception) {
+                    ExifInterface.ORIENTATION_NORMAL
+                }
+
+                val rotDegrees = when (orientation) {
+                    ExifInterface.ORIENTATION_ROTATE_90 -> 90
+                    ExifInterface.ORIENTATION_ROTATE_180 -> 180
+                    ExifInterface.ORIENTATION_ROTATE_270 -> 270
+                    else -> 0
+                }
+
+                val tempJpg = File(context.cacheDir, "temp_graded_${fullBaseName}_${System.currentTimeMillis()}.jpg")
+                val ret = ColorProcessor.processRaw(
+                    dngData = dngBytes,
+                    targetLog = targetLogIndex,
+                    lutPath = lutPath,
+                    exposure = editConfig?.exposure ?: 0f,
+                    contrast = editConfig?.contrast ?: 0f,
+                    saturation = editConfig?.saturation ?: 0f,
+                    highlights = editConfig?.highlights ?: 0f,
+                    shadows = editConfig?.shadows ?: 0f,
+                    whites = editConfig?.whites ?: 0f,
+                    blacks = editConfig?.blacks ?: 0f,
+                    digitalGain = editConfig?.digitalGain ?: 1.0f,
+                    outputJpgPath = tempJpg.absolutePath,
+                    outputTiffPath = null,
+                    useGpu = false,
+                    orientation = rotDegrees,
+                    mirror = false,
+                    outputBitmap = null,
+                    downsampleFactor = 1,
+                    zoomFactor = editConfig?.zoomFactor ?: 1.0f,
+                    metadata = captureMetadata
+                )
+
+                if (ret >= 0 && tempJpg.exists() && tempJpg.length() > 0) {
+                    val jpgDisplayName = "${fullBaseName}_graded"
+                    finalJpgUri = ImageSaver.saveProcessedImage(
+                        context = context,
+                        inputBitmap = null,
+                        bmpPath = tempJpg.absolutePath,
+                        rotationDegrees = 0,
+                        zoomFactor = 1.0f,
+                        baseName = jpgDisplayName,
+                        linearDngPath = null,
+                        saveJpg = true,
+                        saveRaw = false,
+                        jpgFolderUri = jpgFolderUri,
+                        editConfig = editConfig,
+                        isAlreadyStitched = true,
+                        captureMetadata = captureMetadata
+                    )
+                    Log.i(TAG, "Exported single frame Graded JPG: $finalJpgUri")
+                } else {
+                    Log.e(TAG, "ColorProcessor.processRaw failed to generate graded JPG (ret=$ret)")
+                    if (tempJpg.exists()) tempJpg.delete()
+                }
+            }
+
+            Pair(finalRawUri, finalJpgUri)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to export single frame from CinemaDNG", e)
+            Pair(null, null)
+        }
+    }
 
     /**
      * Exports a .rawvid clip into a standard Adobe CinemaDNG folder:
