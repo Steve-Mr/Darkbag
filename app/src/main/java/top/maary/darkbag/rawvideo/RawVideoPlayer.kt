@@ -50,10 +50,34 @@ class RawVideoPlayer(
     private var glRendererHandle: Long = 0L
     private var currentSurface: android.view.Surface? = null
 
-    private val renderExecutor = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
-        Thread(r, "DarkbagRawVideoGLRenderThread")
+    @Volatile
+    private var renderExecutor: java.util.concurrent.ExecutorService = createRenderExecutor()
+    @Volatile
+    private var renderDispatcher: CoroutineDispatcher = renderExecutor.asCoroutineDispatcher()
+
+    private fun createRenderExecutor(): java.util.concurrent.ExecutorService {
+        return java.util.concurrent.Executors.newSingleThreadExecutor { r ->
+            Thread(r, "DarkbagRawVideoGLRenderThread")
+        }
     }
-    private val renderDispatcher = renderExecutor.asCoroutineDispatcher()
+
+    private fun ensureRenderExecutor(): java.util.concurrent.ExecutorService {
+        var exec = renderExecutor
+        if (exec.isShutdown || exec.isTerminated) {
+            exec = createRenderExecutor()
+            renderExecutor = exec
+            renderDispatcher = exec.asCoroutineDispatcher()
+        }
+        return exec
+    }
+
+    private fun safeExecuteRender(block: () -> Unit) {
+        try {
+            ensureRenderExecutor().execute(block)
+        } catch (e: java.util.concurrent.RejectedExecutionException) {
+            Log.w(TAG, "Render execution rejected", e)
+        }
+    }
 
     val isVideoLoaded: Boolean
         get() = nativeHandle != 0L
@@ -79,7 +103,7 @@ class RawVideoPlayer(
             RawVideoNative.nativeSetGLSurface(glRendererHandle, surface)
         }
         if (!isPlaying.get() && isVideoLoaded) {
-            renderExecutor.execute {
+            safeExecuteRender {
                 renderFrame(currentFrameIndex)
             }
         }
@@ -103,8 +127,28 @@ class RawVideoPlayer(
         } else null
     }
 
+    private fun closeCurrentVideo() {
+        pause()
+        if (nativeHandle != 0L) {
+            RawVideoNative.nativeCloseReader(nativeHandle)
+            nativeHandle = 0L
+        }
+        try {
+            currentPfd?.close()
+        } catch (e: Exception) {
+            Log.w(TAG, "Error closing pfd", e)
+        }
+        currentPfd = null
+        audioTrack?.release()
+        audioTrack = null
+        renderBitmap = null
+        frameBuffer = null
+        header = null
+        totalFrames = 0
+    }
+
     fun load(uri: Uri): Boolean {
-        release()
+        closeCurrentVideo()
 
         try {
             val pfd = context.contentResolver.openFileDescriptor(uri, "r") ?: return false
@@ -114,7 +158,7 @@ class RawVideoPlayer(
             nativeHandle = RawVideoNative.nativeOpenReaderFd(fd)
             if (nativeHandle == 0L) {
                 Log.e(TAG, "Failed to open raw video via fd: $uri (fd=$fd)")
-                release()
+                closeCurrentVideo()
                 return false
             }
 
@@ -122,7 +166,7 @@ class RawVideoPlayer(
             totalFrames = RawVideoNative.nativeGetFrameCount(nativeHandle)
             if (header == null || totalFrames <= 0) {
                 Log.e(TAG, "Failed to read header or empty frames: $uri")
-                release()
+                closeCurrentVideo()
                 return false
             }
 
@@ -160,15 +204,17 @@ class RawVideoPlayer(
                     .build()
             }
 
-            // Render first frame immediately
+            // Render first frame immediately on render thread
             currentFrameIndex = 0
-            renderFrame(0)
+            safeExecuteRender {
+                renderFrame(0)
+            }
 
             Log.i(TAG, "RawVideoPlayer loaded ($w x $h, $totalFrames frames @ ${header!!.fps} fps)")
             return true
         } catch (e: Exception) {
             Log.e(TAG, "Error loading raw video player", e)
-            release()
+            closeCurrentVideo()
             return false
         }
     }
@@ -252,7 +298,7 @@ class RawVideoPlayer(
     fun seekTo(frameIndex: Int) {
         if (!isVideoLoaded || totalFrames <= 0) return
         currentFrameIndex = frameIndex.coerceIn(0, totalFrames - 1)
-        renderExecutor.execute {
+        safeExecuteRender {
             renderFrame(currentFrameIndex)
         }
     }
@@ -261,7 +307,7 @@ class RawVideoPlayer(
         currentEditConfig = editConfig
         updateResolvedLutAndLog()
         if (!isPlaying.get() && isVideoLoaded) {
-            renderExecutor.execute {
+            safeExecuteRender {
                 renderFrame(currentFrameIndex)
             }
         }
@@ -332,29 +378,19 @@ class RawVideoPlayer(
     }
 
     fun release() {
-        pause()
+        closeCurrentVideo()
         val handle = glRendererHandle
         glRendererHandle = 0L
         if (handle != 0L) {
-            renderExecutor.execute {
+            safeExecuteRender {
                 RawVideoNative.nativeDestroyGLRenderer(handle)
             }
         }
-        renderExecutor.shutdown()
         currentSurface = null
-        if (nativeHandle != 0L) {
-            RawVideoNative.nativeCloseReader(nativeHandle)
-            nativeHandle = 0L
-        }
         try {
-            currentPfd?.close()
+            renderExecutor.shutdown()
         } catch (e: Exception) {
-            Log.w(TAG, "Error closing pfd", e)
+            Log.w(TAG, "Error shutting down renderExecutor", e)
         }
-        currentPfd = null
-        audioTrack?.release()
-        audioTrack = null
-        renderBitmap = null
-        frameBuffer = null
     }
 }
