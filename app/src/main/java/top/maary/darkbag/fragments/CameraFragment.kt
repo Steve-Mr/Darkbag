@@ -4595,8 +4595,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         mp4VideoRecorder = null
 
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        val rawFolderUri = prefs.getString(SettingsFragment.KEY_RAW_STORAGE_URI, null)
-        val jpgFolderUri = prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
+        val mediaFolderUri = prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
 
         lifecycleScope.launch(Dispatchers.IO) {
             val result = recorder?.stop() ?: return@launch
@@ -4606,8 +4605,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 context = requireContext(),
                 mp4File = result.file,
                 baseName = baseName,
-                rawFolderUri = rawFolderUri,
-                jpgFolderUri = jpgFolderUri
+                mediaFolderUri = mediaFolderUri
             )
 
             if (savedUri != null) {

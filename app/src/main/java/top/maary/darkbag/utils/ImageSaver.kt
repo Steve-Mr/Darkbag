@@ -729,8 +729,7 @@ object ImageSaver {
         context: Context,
         mp4File: File,
         baseName: String,
-        rawFolderUri: String? = null,
-        jpgFolderUri: String? = null
+        mediaFolderUri: String? = null
     ): Pair<Uri?, Bitmap?> = withContext(Dispatchers.IO) {
         if (!mp4File.exists() || mp4File.length() == 0L) {
             Log.e(TAG, "MP4 file does not exist or is empty: ${mp4File.absolutePath}")
@@ -742,7 +741,7 @@ object ImageSaver {
         var videoUri: Uri? = null
         var thumbnailBitmap: Bitmap? = null
 
-        // 1. Extract first frame thumbnail
+        // 1. Extract first frame thumbnail (for immediate in-memory UI preview)
         val retriever = android.media.MediaMetadataRetriever()
         try {
             retriever.setDataSource(mp4File.absolutePath)
@@ -753,16 +752,16 @@ object ImageSaver {
             try { retriever.release() } catch (_: Exception) {}
         }
 
-        // 2. Save MP4 file
-        if (rawFolderUri != null) {
-            videoUri = saveFileToFolder(context, mp4File, mp4FileName, "video/mp4", rawFolderUri)
+        // 2. Save MP4 file to mediaFolderUri (if configured) or Pictures/Darkbag via MediaStore
+        if (mediaFolderUri != null) {
+            videoUri = saveFileToFolder(context, mp4File, mp4FileName, "video/mp4", mediaFolderUri)
         } else {
             val contentResolver = context.contentResolver
             val contentValues = ContentValues().apply {
                 put(MediaStore.MediaColumns.DISPLAY_NAME, mp4FileName)
                 put(MediaStore.MediaColumns.MIME_TYPE, "video/mp4")
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    put(MediaStore.MediaColumns.RELATIVE_PATH, "Movies/Darkbag")
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/Darkbag")
                     put(MediaStore.MediaColumns.IS_PENDING, 1)
                 }
             }
@@ -786,27 +785,6 @@ object ImageSaver {
                     Log.e(TAG, "Failed to write MP4 video to MediaStore", e)
                     contentResolver.delete(insertedUri, null, null)
                 }
-            }
-        }
-
-        // 3. Save companion thumbnail
-        if (thumbnailBitmap != null) {
-            val thumbFile = File(context.cacheDir, "thumb_$effectiveBaseName.jpg")
-            try {
-                FileOutputStream(thumbFile).use { out ->
-                    thumbnailBitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
-                }
-                if (jpgFolderUri != null) {
-                    saveFileToFolder(context, thumbFile, "$effectiveBaseName.jpg", "image/jpeg", jpgFolderUri)
-                } else {
-                    saveJpegToMediaStore(context, "$effectiveBaseName.jpg", null) { out ->
-                        thumbFile.inputStream().use { it.copyTo(out) }
-                    }
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed to save companion thumbnail for MP4", e)
-            } finally {
-                thumbFile.delete()
             }
         }
 
@@ -893,7 +871,7 @@ object ImageSaver {
                 put(MediaStore.MediaColumns.DISPLAY_NAME, rawFileName)
                 put(MediaStore.MediaColumns.MIME_TYPE, "application/octet-stream")
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    put(MediaStore.MediaColumns.RELATIVE_PATH, "Movies/Darkbag")
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/Darkbag")
                     put(MediaStore.MediaColumns.IS_PENDING, 1)
                 }
             }

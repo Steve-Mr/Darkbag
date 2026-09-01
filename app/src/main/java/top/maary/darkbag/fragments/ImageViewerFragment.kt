@@ -3073,8 +3073,7 @@ open class ImageViewerFragment : Fragment() {
         val uri = group.rawVideoUri ?: return
         val context = requireContext()
         val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        val rawFolderUri = prefs.getString(SettingsFragment.KEY_RAW_STORAGE_URI, null)
-        val jpgFolderUri = prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
+        val mediaFolderUri = prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
 
         val tempMp4File = File(context.cacheDir, "${group.baseName}_graded.mp4")
 
@@ -3096,8 +3095,7 @@ open class ImageViewerFragment : Fragment() {
                     context = context,
                     mp4File = tempMp4File,
                     baseName = "${group.baseName}_graded",
-                    rawFolderUri = rawFolderUri,
-                    jpgFolderUri = jpgFolderUri
+                    mediaFolderUri = mediaFolderUri
                 )
                 if (savedUri != null) {
                     repository.invalidateCache()
