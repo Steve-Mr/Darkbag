@@ -96,6 +96,18 @@ class RawVideoPlayer(
 
     fun setSurface(surface: android.view.Surface?) {
         currentSurface = surface
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R && surface != null && surface.isValid) {
+            try {
+                val fps = header?.fps?.takeIf { it > 0 } ?: 24.0f
+                surface.setFrameRate(
+                    fps,
+                    android.view.Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE,
+                    android.view.Surface.CHANGE_FRAME_RATE_ALWAYS
+                )
+            } catch (_: Exception) {
+                // Ignore if device platform does not support dynamic framerate switching
+            }
+        }
         if (glRendererHandle == 0L && surface != null) {
             glRendererHandle = RawVideoNative.nativeCreateGLRenderer()
         }
@@ -340,8 +352,12 @@ class RawVideoPlayer(
                     orientation = hdr.orientation,
                     cfaPattern = hdr.cfaPattern,
                     whiteLevel = wl,
-                    blackLevel = bl,
+                    blackLevels = hdr.blackLevel,
                     neutralPoint = hdr.neutralPoint,
+                    forwardMatrix1 = hdr.forwardMatrix1,
+                    forwardMatrix2 = hdr.forwardMatrix2,
+                    calibIllum1 = hdr.calibrationIlluminant1,
+                    calibIllum2 = hdr.calibrationIlluminant2,
                     targetLog = cachedTargetLogIndex,
                     lutPath = cachedLutPath,
                     exposure = exposure,

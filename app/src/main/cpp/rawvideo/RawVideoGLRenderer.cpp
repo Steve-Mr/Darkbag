@@ -45,8 +45,9 @@ uniform int uHasLut;
 uniform float uLutSize;
 uniform int uCfaPattern;
 uniform float uWhiteLevel;
-uniform float uBlackLevel;
+uniform vec4 uBlackLevel; // R, Gr, Gb, B
 uniform vec3 uWbGains;
+uniform mat3 uColorMatrix; // 3x3 DNG color transform (Sensor WB -> sRGB Primaries)
 uniform float uExposureMult;
 uniform float uContrast;
 uniform float uSaturation;
@@ -57,16 +58,19 @@ in vec2 vTexCoord;
 out vec4 fragColor;
 
 float apply_flog2(float x) {
+    x = max(0.0, x);
     return (x >= 0.000889) ? (0.245281 * log(5.555556 * x + 0.064829) / log(10.0) + 0.384316)
                            : (8.799461 * x + 0.092864);
 }
 
 float apply_slog3(float x) {
+    x = max(0.0, x);
     return (x >= 0.011250) ? (420.0 + log((x + 0.01) / (0.18 + 0.01)) / log(10.0) * 261.5) / 1023.0
                            : (x * (171.2102946929 - 95.0) / 0.011250 + 95.0) / 1023.0;
 }
 
 float apply_logc3(float x) {
+    x = max(0.0, x);
     const float cut = 0.010591;
     const float a = 5.555556;
     const float b = 0.052272;
@@ -107,47 +111,51 @@ void main() {
     uint p11 = texelFetch(uRawBayerTexture, coord + ivec2(1, 1), 0).r;
 
     float r = 0.0, g = 0.0, b = 0.0;
+    float blR = uBlackLevel.r, blGr = uBlackLevel.g, blGb = uBlackLevel.b, blB = uBlackLevel.a;
+
     if (uCfaPattern == 0) { // RGGB
-        r = float(p00);
-        g = float(p01 + p10) * 0.5;
-        b = float(p11);
+        r = max(0.0, (float(p00) - blR) / max(1.0, uWhiteLevel - blR));
+        g = max(0.0, ((float(p01) - blGr) / max(1.0, uWhiteLevel - blGr) + (float(p10) - blGb) / max(1.0, uWhiteLevel - blGb)) * 0.5);
+        b = max(0.0, (float(p11) - blB) / max(1.0, uWhiteLevel - blB));
     } else if (uCfaPattern == 1) { // GRBG
-        g = float(p00 + p11) * 0.5;
-        r = float(p01);
-        b = float(p10);
+        g = max(0.0, ((float(p00) - blGr) / max(1.0, uWhiteLevel - blGr) + (float(p11) - blGb) / max(1.0, uWhiteLevel - blGb)) * 0.5);
+        r = max(0.0, (float(p01) - blR) / max(1.0, uWhiteLevel - blR));
+        b = max(0.0, (float(p10) - blB) / max(1.0, uWhiteLevel - blB));
     } else if (uCfaPattern == 2) { // GBRG
-        g = float(p00 + p11) * 0.5;
-        b = float(p01);
-        r = float(p10);
+        g = max(0.0, ((float(p00) - blGb) / max(1.0, uWhiteLevel - blGb) + (float(p11) - blGr) / max(1.0, uWhiteLevel - blGr)) * 0.5);
+        b = max(0.0, (float(p01) - blB) / max(1.0, uWhiteLevel - blB));
+        r = max(0.0, (float(p10) - blR) / max(1.0, uWhiteLevel - blR));
     } else { // BGGR (3)
-        b = float(p00);
-        g = float(p01 + p10) * 0.5;
-        r = float(p11);
+        b = max(0.0, (float(p00) - blB) / max(1.0, uWhiteLevel - blB));
+        g = max(0.0, ((float(p01) - blGb) / max(1.0, uWhiteLevel - blGb) + (float(p10) - blGr) / max(1.0, uWhiteLevel - blGr)) * 0.5);
+        r = max(0.0, (float(p11) - blR) / max(1.0, uWhiteLevel - blR));
     }
 
-    float norm = (1.0 / max(1.0, uWhiteLevel - uBlackLevel)) * uExposureMult;
-    r = max(0.0, (r - uBlackLevel) * norm * uWbGains.r);
-    g = max(0.0, (g - uBlackLevel) * norm * uWbGains.g);
-    b = max(0.0, (b - uBlackLevel) * norm * uWbGains.b);
+    // 1. White Balance & Exposure in linear sensor domain
+    vec3 col = max(vec3(0.0), vec3(r * uWbGains.r, g * uWbGains.g, b * uWbGains.b) * uExposureMult);
 
+    // 2. DNG Adaptive Color Matrix Transform (Sensor WB RGB -> sRGB Primaries)
+    col = max(vec3(0.0), uColorMatrix * col);
+
+    // 3. Contrast in linear domain (pivot 0.18 mid-gray)
     if (uContrast != 0.0) {
         float cf = 1.0 + uContrast;
-        r = max(0.0, (r - 0.18) * cf + 0.18);
-        g = max(0.0, (g - 0.18) * cf + 0.18);
-        b = max(0.0, (b - 0.18) * cf + 0.18);
+        col = max(vec3(0.0), (col - 0.18) * cf + 0.18);
     }
 
-    vec3 col = vec3(r, g, b);
+    // 4. Log Tone Curve or standard sRGB Gamma
     if (uTargetLog >= 0) {
         col = applyLog(col, uTargetLog);
     } else {
         col = vec3(srgb_oetf(col.r), srgb_oetf(col.g), srgb_oetf(col.b));
     }
 
+    // 5. 3D Film Simulation LUT (Hardware Trilinear Interpolation)
     if (uHasLut == 1 && uLutSize > 1.0) {
         col = sampleLut(clamp(col, 0.0, 1.0));
     }
 
+    // 6. Saturation
     if (uSaturation != 0.0) {
         float luma = dot(col, vec3(0.2126, 0.7152, 0.0722));
         col = max(vec3(0.0), luma + (col - luma) * (1.0 + uSaturation));
@@ -175,6 +183,86 @@ GLuint compileShader(GLenum type, const char* source) {
         return 0;
     }
     return shader;
+}
+
+void computeAdaptiveColorMatrix(
+    const float* neutralPoint,
+    const float* fm1,
+    const float* fm2,
+    int illum1,
+    int illum2,
+    float outMat3x3[9]
+) {
+    // Default 3x3 Identity Matrix in column-major order
+    outMat3x3[0] = 1.0f; outMat3x3[1] = 0.0f; outMat3x3[2] = 0.0f;
+    outMat3x3[3] = 0.0f; outMat3x3[4] = 1.0f; outMat3x3[5] = 0.0f;
+    outMat3x3[6] = 0.0f; outMat3x3[7] = 0.0f; outMat3x3[8] = 1.0f;
+
+    if (!fm1 && !fm2) return;
+
+    const float* activeFm = fm1 ? fm1 : fm2;
+    bool isTrivial = true;
+    if (activeFm) {
+        if (std::abs(activeFm[0] - 1.0f) > 0.01f || std::abs(activeFm[1]) > 0.01f ||
+            std::abs(activeFm[4] - 1.0f) > 0.01f || std::abs(activeFm[8] - 1.0f) > 0.01f) {
+            isTrivial = false;
+        }
+    }
+    if (isTrivial && (!fm2 || std::abs(fm2[0] - 1.0f) <= 0.01f)) return;
+
+    float interpFm[9];
+    if (fm1 && fm2 && !isTrivial) {
+        float t1 = (illum1 == 17) ? 2856.0f : (illum1 == 21) ? 6504.0f : 5000.0f;
+        float t2 = (illum2 == 17) ? 2856.0f : (illum2 == 21) ? 6504.0f : 5000.0f;
+        if (std::abs(t1 - t2) < 100.0f) {
+            t1 = 2856.0f;
+            t2 = 6504.0f;
+        }
+
+        float wbR = neutralPoint ? neutralPoint[0] : 0.5f;
+        float wbB = neutralPoint ? neutralPoint[2] : 0.7f;
+        float cct = 5500.0f;
+        if (wbR > 0.001f && wbB > 0.001f) {
+            float ratio = wbB / wbR;
+            cct = 2000.0f + ratio * 3500.0f;
+        }
+
+        float m1 = 1.0e6f / t1;
+        float m2 = 1.0e6f / t2;
+        float mCur = 1.0e6f / std::clamp(cct, 2000.0f, 10000.0f);
+        float weight = std::clamp((mCur - m2) / (m1 - m2), 0.0f, 1.0f);
+
+        for (int i = 0; i < 9; ++i) {
+            interpFm[i] = weight * fm1[i] + (1.0f - weight) * fm2[i];
+        }
+    } else if (fm1) {
+        std::copy(fm1, fm1 + 9, interpFm);
+    } else {
+        std::copy(fm2, fm2 + 9, interpFm);
+    }
+
+    const float M_xyz_bradford[9] = {
+        3.1338561f, -1.6168667f, -0.4906146f,
+       -0.9787684f,  1.9161415f,  0.0334540f,
+        0.0719453f, -0.2289914f,  1.4052427f
+    };
+
+    float compRowMajor[9];
+    for (int r = 0; r < 3; ++r) {
+        for (int c = 0; c < 3; ++c) {
+            compRowMajor[r * 3 + c] = 
+                M_xyz_bradford[r * 3 + 0] * interpFm[0 * 3 + c] +
+                M_xyz_bradford[r * 3 + 1] * interpFm[1 * 3 + c] +
+                M_xyz_bradford[r * 3 + 2] * interpFm[2 * 3 + c];
+        }
+    }
+
+    // Convert row-major composite matrix to column-major order for glUniformMatrix3fv (transpose=GL_FALSE)
+    for (int r = 0; r < 3; ++r) {
+        for (int c = 0; c < 3; ++c) {
+            outMat3x3[c * 3 + r] = compRowMajor[r * 3 + c];
+        }
+    }
 }
 
 } // namespace
@@ -364,6 +452,7 @@ bool RawVideoGLRenderer::initGL() {
     uWhiteLevelLoc_ = glGetUniformLocation(program_, "uWhiteLevel");
     uBlackLevelLoc_ = glGetUniformLocation(program_, "uBlackLevel");
     uWbGainsLoc_ = glGetUniformLocation(program_, "uWbGains");
+    uColorMatrixLoc_ = glGetUniformLocation(program_, "uColorMatrix");
     uExposureMultLoc_ = glGetUniformLocation(program_, "uExposureMult");
     uContrastLoc_ = glGetUniformLocation(program_, "uContrast");
     uSaturationLoc_ = glGetUniformLocation(program_, "uSaturation");
@@ -451,8 +540,12 @@ bool RawVideoGLRenderer::renderFrame(
     int orientation,
     int cfaPattern,
     int whiteLevel,
-    float blackLevel,
+    const float* blackLevels,
     const float* neutralPoint,
+    const float* forwardMatrix1,
+    const float* forwardMatrix2,
+    int calibIllum1,
+    int calibIllum2,
     int targetLog,
     const char* lutPath,
     float exposure,
@@ -539,18 +632,32 @@ bool RawVideoGLRenderer::renderFrame(
     }
     glUniform3f(uWbGainsLoc_, wbR, wbG, wbB);
 
-    // 4. Uniforms
+    // 4. Adaptive Color Matrix
+    float colorMat[9];
+    computeAdaptiveColorMatrix(neutralPoint, forwardMatrix1, forwardMatrix2, calibIllum1, calibIllum2, colorMat);
+    glUniformMatrix3fv(uColorMatrixLoc_, 1, GL_FALSE, colorMat);
+
+    // 5. Dynamic Quad-channel Black Level (R, Gr, Gb, B)
+    float blR = 64.0f, blGr = 64.0f, blGb = 64.0f, blB = 64.0f;
+    if (blackLevels) {
+        blR = blackLevels[0];
+        blGr = blackLevels[1];
+        blGb = blackLevels[2];
+        blB = blackLevels[3];
+    }
+    glUniform4f(uBlackLevelLoc_, blR, blGr, blGb, blB);
+
+    // 6. Other Uniforms
     glUniform1i(uCfaPatternLoc_, cfaPattern);
     glUniform1i(uOrientationLoc_, orientation);
     glUniform1f(uWhiteLevelLoc_, static_cast<float>(whiteLevel));
-    glUniform1f(uBlackLevelLoc_, blackLevel);
     glUniform1f(uExposureMultLoc_, std::pow(2.0f, exposure));
     glUniform1f(uContrastLoc_, contrast);
     glUniform1f(uSaturationLoc_, saturation);
     glUniform1i(uTargetLogLoc_, targetLog);
     glUniform2i(uImageSizeLoc_, width, height);
 
-    // 5. Draw Quad
+    // 7. Draw Quad
     static const float quadVertices[] = {
         // Pos(x, y), Tex(u, v)
         -1.0f, -1.0f, 0.0f, 1.0f,

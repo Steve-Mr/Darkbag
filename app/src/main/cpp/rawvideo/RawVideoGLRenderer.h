@@ -29,8 +29,12 @@ public:
         int orientation,
         int cfaPattern,
         int whiteLevel,
-        float blackLevel,
-        const float* neutralPoint,
+        const float* blackLevels, // 4 floats: R, Gr, Gb, B
+        const float* neutralPoint, // 3 floats: R, G, B
+        const float* forwardMatrix1, // 9 floats or nullptr
+        const float* forwardMatrix2, // 9 floats or nullptr
+        int calibIllum1,
+        int calibIllum2,
         int targetLog,
         const char* lutPath,
         float exposure,
@@ -73,6 +77,7 @@ private:
     GLint uWhiteLevelLoc_ = -1;
     GLint uBlackLevelLoc_ = -1;
     GLint uWbGainsLoc_ = -1;
+    GLint uColorMatrixLoc_ = -1;
     GLint uExposureMultLoc_ = -1;
     GLint uContrastLoc_ = -1;
     GLint uSaturationLoc_ = -1;

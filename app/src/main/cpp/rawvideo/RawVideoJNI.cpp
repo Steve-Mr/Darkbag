@@ -769,8 +769,12 @@ Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeRenderGLFrame(
         jint orientation,
         jint cfaPattern,
         jint whiteLevel,
-        jfloat blackLevel,
+        jfloatArray jBlackLevels,
         jfloatArray jNeutralPoint,
+        jfloatArray jForwardMatrix1,
+        jfloatArray jForwardMatrix2,
+        jint calibIllum1,
+        jint calibIllum2,
         jint targetLog,
         jstring jLutPath,
         jfloat exposure,
@@ -783,11 +787,37 @@ Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeRenderGLFrame(
     auto* rawBytes = static_cast<const uint8_t*>(env->GetDirectBufferAddress(jBayerBuffer));
     if (!rawBytes) return JNI_FALSE;
 
+    jfloat blVals[4] = {64.0f, 64.0f, 64.0f, 64.0f};
+    bool hasBl = false;
+    if (jBlackLevels && env->GetArrayLength(jBlackLevels) >= 4) {
+        env->GetFloatArrayRegion(jBlackLevels, 0, 4, blVals);
+        hasBl = true;
+    } else if (jBlackLevels && env->GetArrayLength(jBlackLevels) >= 1) {
+        jfloat singleBl = 64.0f;
+        env->GetFloatArrayRegion(jBlackLevels, 0, 1, &singleBl);
+        blVals[0] = blVals[1] = blVals[2] = blVals[3] = singleBl;
+        hasBl = true;
+    }
+
     jfloat npVals[3];
     bool hasNp = false;
     if (jNeutralPoint && env->GetArrayLength(jNeutralPoint) >= 3) {
         env->GetFloatArrayRegion(jNeutralPoint, 0, 3, npVals);
         hasNp = true;
+    }
+
+    jfloat fm1Vals[9];
+    bool hasFm1 = false;
+    if (jForwardMatrix1 && env->GetArrayLength(jForwardMatrix1) >= 9) {
+        env->GetFloatArrayRegion(jForwardMatrix1, 0, 9, fm1Vals);
+        hasFm1 = true;
+    }
+
+    jfloat fm2Vals[9];
+    bool hasFm2 = false;
+    if (jForwardMatrix2 && env->GetArrayLength(jForwardMatrix2) >= 9) {
+        env->GetFloatArrayRegion(jForwardMatrix2, 0, 9, fm2Vals);
+        hasFm2 = true;
     }
 
     const char* lutPathC = nullptr;
@@ -802,8 +832,12 @@ Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeRenderGLFrame(
         orientation,
         cfaPattern,
         whiteLevel,
-        blackLevel,
+        hasBl ? blVals : nullptr,
         hasNp ? npVals : nullptr,
+        hasFm1 ? fm1Vals : nullptr,
+        hasFm2 ? fm2Vals : nullptr,
+        calibIllum1,
+        calibIllum2,
         targetLog,
         lutPathC,
         exposure,
