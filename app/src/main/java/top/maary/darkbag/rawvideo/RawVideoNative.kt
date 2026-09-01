@@ -152,7 +152,7 @@ object RawVideoNative {
     ): Boolean
 
     external fun nativeCreateGLRenderer(): Long
-    external fun nativeSetGLSurface(rendererHandle: Long, surface: android.view.Surface?): Boolean
+    external fun nativeSetGLSurface(rendererHandle: Long, surface: android.view.Surface?)
     external fun nativeRenderGLFrame(
         rendererHandle: Long,
         bayerBuffer: ByteBuffer,

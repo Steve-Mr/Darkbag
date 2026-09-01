@@ -233,6 +233,10 @@ void RawVideoGLRenderer::terminateEGL() {
     cleanupGL();
     if (eglDisplay_ != EGL_NO_DISPLAY) {
         eglMakeCurrent(eglDisplay_, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+        if (eglSurface_ != EGL_NO_SURFACE) {
+            eglDestroySurface(eglDisplay_, eglSurface_);
+            eglSurface_ = EGL_NO_SURFACE;
+        }
         if (eglContext_ != EGL_NO_CONTEXT) {
             eglDestroyContext(eglDisplay_, eglContext_);
             eglContext_ = EGL_NO_CONTEXT;
@@ -240,50 +244,86 @@ void RawVideoGLRenderer::terminateEGL() {
         eglTerminate(eglDisplay_);
         eglDisplay_ = EGL_NO_DISPLAY;
     }
+    std::lock_guard<std::mutex> lock(surfaceMutex_);
+    if (pendingWindow_) {
+        ANativeWindow_release(pendingWindow_);
+        pendingWindow_ = nullptr;
+    }
+    if (currentWindow_) {
+        ANativeWindow_release(currentWindow_);
+        currentWindow_ = nullptr;
+    }
 }
 
-bool RawVideoGLRenderer::setSurface(ANativeWindow* window) {
-    releaseSurface();
-    if (!window) return false;
+void RawVideoGLRenderer::setSurface(ANativeWindow* window) {
+    std::lock_guard<std::mutex> lock(surfaceMutex_);
+    if (pendingWindow_) {
+        ANativeWindow_release(pendingWindow_);
+        pendingWindow_ = nullptr;
+    }
+    if (window) {
+        ANativeWindow_acquire(window);
+        pendingWindow_ = window;
+    }
+    windowChanged_ = true;
+}
 
-    if (!initEGL()) return false;
+void RawVideoGLRenderer::releaseSurface() {
+    std::lock_guard<std::mutex> lock(surfaceMutex_);
+    if (pendingWindow_) {
+        ANativeWindow_release(pendingWindow_);
+        pendingWindow_ = nullptr;
+    }
+    windowChanged_ = true;
+}
 
-    window_ = window;
-    ANativeWindow_acquire(window_);
+bool RawVideoGLRenderer::ensureEGLAndSurface() {
+    {
+        std::lock_guard<std::mutex> lock(surfaceMutex_);
+        if (windowChanged_) {
+            windowChanged_ = false;
+            if (currentWindow_) {
+                if (eglDisplay_ != EGL_NO_DISPLAY && eglSurface_ != EGL_NO_SURFACE) {
+                    eglMakeCurrent(eglDisplay_, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+                    eglDestroySurface(eglDisplay_, eglSurface_);
+                    eglSurface_ = EGL_NO_SURFACE;
+                }
+                ANativeWindow_release(currentWindow_);
+                currentWindow_ = nullptr;
+            }
+            if (pendingWindow_) {
+                currentWindow_ = pendingWindow_;
+                ANativeWindow_acquire(currentWindow_);
+            }
+        }
+    }
 
-    eglSurface_ = eglCreateWindowSurface(eglDisplay_, eglConfig_, window_, nullptr);
-    if (eglSurface_ == EGL_NO_SURFACE) {
-        LOGE("eglCreateWindowSurface failed");
-        releaseSurface();
+    if (!currentWindow_) {
         return false;
     }
 
+    if (!initEGL()) {
+        return false;
+    }
+
+    if (eglSurface_ == EGL_NO_SURFACE) {
+        eglSurface_ = eglCreateWindowSurface(eglDisplay_, eglConfig_, currentWindow_, nullptr);
+        if (eglSurface_ == EGL_NO_SURFACE) {
+            LOGE("eglCreateWindowSurface failed (0x%x)", eglGetError());
+            return false;
+        }
+    }
+
     if (!eglMakeCurrent(eglDisplay_, eglSurface_, eglSurface_, eglContext_)) {
-        LOGE("eglMakeCurrent failed");
-        releaseSurface();
+        LOGE("eglMakeCurrent failed (0x%x)", eglGetError());
         return false;
     }
 
     if (!initGL()) {
-        releaseSurface();
         return false;
     }
 
     return true;
-}
-
-void RawVideoGLRenderer::releaseSurface() {
-    if (eglDisplay_ != EGL_NO_DISPLAY) {
-        eglMakeCurrent(eglDisplay_, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
-        if (eglSurface_ != EGL_NO_SURFACE) {
-            eglDestroySurface(eglDisplay_, eglSurface_);
-            eglSurface_ = EGL_NO_SURFACE;
-        }
-    }
-    if (window_) {
-        ANativeWindow_release(window_);
-        window_ = nullptr;
-    }
 }
 
 bool RawVideoGLRenderer::initGL() {
@@ -418,14 +458,16 @@ bool RawVideoGLRenderer::renderFrame(
     float contrast,
     float saturation
 ) {
-    if (!window_ || eglSurface_ == EGL_NO_SURFACE || !bayerData || width <= 0 || height <= 0) {
+    if (!bayerData || width <= 0 || height <= 0) {
         return false;
     }
 
-    eglMakeCurrent(eglDisplay_, eglSurface_, eglSurface_, eglContext_);
+    if (!ensureEGLAndSurface()) {
+        return false;
+    }
 
-    int winWidth = ANativeWindow_getWidth(window_);
-    int winHeight = ANativeWindow_getHeight(window_);
+    int winWidth = ANativeWindow_getWidth(currentWindow_);
+    int winHeight = ANativeWindow_getHeight(currentWindow_);
     glViewport(0, 0, winWidth, winHeight);
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);

@@ -733,7 +733,7 @@ Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeCreateGLRenderer(
     return reinterpret_cast<jlong>(renderer);
 }
 
-JNIEXPORT jboolean JNICALL
+JNIEXPORT void JNICALL
 Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeSetGLSurface(
         JNIEnv* env,
         jobject /* thiz */,
@@ -741,22 +741,21 @@ Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeSetGLSurface(
         jobject jSurface
 ) {
     auto* renderer = reinterpret_cast<RawVideoGLRenderer*>(rendererHandle);
-    if (!renderer) return JNI_FALSE;
+    if (!renderer) return;
 
     if (!jSurface) {
         renderer->releaseSurface();
-        return JNI_TRUE;
+        return;
     }
 
     ANativeWindow* window = ANativeWindow_fromSurface(env, jSurface);
     if (!window) {
         LOGE("Failed to get ANativeWindow from Surface");
-        return JNI_FALSE;
+        return;
     }
 
-    bool ok = renderer->setSurface(window);
+    renderer->setSurface(window);
     ANativeWindow_release(window);
-    return ok ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT jboolean JNICALL

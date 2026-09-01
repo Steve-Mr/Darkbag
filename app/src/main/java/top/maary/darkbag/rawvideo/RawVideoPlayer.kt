@@ -50,6 +50,11 @@ class RawVideoPlayer(
     private var glRendererHandle: Long = 0L
     private var currentSurface: android.view.Surface? = null
 
+    private val renderExecutor = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
+        Thread(r, "DarkbagRawVideoGLRenderThread")
+    }
+    private val renderDispatcher = renderExecutor.asCoroutineDispatcher()
+
     val isVideoLoaded: Boolean
         get() = nativeHandle != 0L
 
@@ -72,6 +77,11 @@ class RawVideoPlayer(
         }
         if (glRendererHandle != 0L) {
             RawVideoNative.nativeSetGLSurface(glRendererHandle, surface)
+        }
+        if (!isPlaying.get() && isVideoLoaded) {
+            renderExecutor.execute {
+                renderFrame(currentFrameIndex)
+            }
         }
     }
 
@@ -173,7 +183,7 @@ class RawVideoPlayer(
         val fps = header?.fps?.takeIf { it > 0 } ?: 24.0f
         val frameIntervalNs = (1_000_000_000.0 / fps).toLong()
 
-        playbackJob = CoroutineScope(Dispatchers.Default).launch {
+        playbackJob = CoroutineScope(renderDispatcher).launch {
             var nextFrameTimeNs = System.nanoTime()
             while (isPlaying.get()) {
                 val startNs = System.nanoTime()
@@ -242,14 +252,18 @@ class RawVideoPlayer(
     fun seekTo(frameIndex: Int) {
         if (!isVideoLoaded || totalFrames <= 0) return
         currentFrameIndex = frameIndex.coerceIn(0, totalFrames - 1)
-        renderFrame(currentFrameIndex)
+        renderExecutor.execute {
+            renderFrame(currentFrameIndex)
+        }
     }
 
     fun updateAdjustments(editConfig: EditConfig?) {
         currentEditConfig = editConfig
         updateResolvedLutAndLog()
         if (!isPlaying.get() && isVideoLoaded) {
-            renderFrame(currentFrameIndex)
+            renderExecutor.execute {
+                renderFrame(currentFrameIndex)
+            }
         }
     }
 
@@ -319,10 +333,14 @@ class RawVideoPlayer(
 
     fun release() {
         pause()
-        if (glRendererHandle != 0L) {
-            RawVideoNative.nativeDestroyGLRenderer(glRendererHandle)
-            glRendererHandle = 0L
+        val handle = glRendererHandle
+        glRendererHandle = 0L
+        if (handle != 0L) {
+            renderExecutor.execute {
+                RawVideoNative.nativeDestroyGLRenderer(handle)
+            }
         }
+        renderExecutor.shutdown()
         currentSurface = null
         if (nativeHandle != 0L) {
             RawVideoNative.nativeCloseReader(nativeHandle)

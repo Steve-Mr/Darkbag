@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <string>
 #include <memory>
+#include <mutex>
 #include "../ColorPipe.h"
 
 namespace darkbag {
@@ -18,7 +19,7 @@ public:
     RawVideoGLRenderer();
     ~RawVideoGLRenderer();
 
-    bool setSurface(ANativeWindow* window);
+    void setSurface(ANativeWindow* window);
     void releaseSurface();
 
     bool renderFrame(
@@ -38,13 +39,18 @@ public:
     );
 
 private:
+    bool ensureEGLAndSurface();
     bool initEGL();
     void terminateEGL();
     bool initGL();
     void cleanupGL();
     void updateLutTexture(const char* lutPath);
 
-    ANativeWindow* window_ = nullptr;
+    std::mutex surfaceMutex_;
+    ANativeWindow* pendingWindow_ = nullptr;
+    bool windowChanged_ = false;
+
+    ANativeWindow* currentWindow_ = nullptr;
     EGLDisplay eglDisplay_ = EGL_NO_DISPLAY;
     EGLContext eglContext_ = EGL_NO_CONTEXT;
     EGLSurface eglSurface_ = EGL_NO_SURFACE;
