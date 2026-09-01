@@ -617,6 +617,67 @@ class CameraFragment : Fragment() {
 
             photoViewButton.setPadding(resources.getDimension(R.dimen.stroke_small).toInt())
             lifecycleScope.launch(Dispatchers.Main) {
+                val uri = try { android.net.Uri.parse(filename) } catch (_: Exception) { null }
+                val isRawVid = filename.endsWith(".rawvid", ignoreCase = true) || uri?.toString()?.endsWith(".rawvid", ignoreCase = true) == true
+
+                if (isRawVid && uri != null) {
+                    val bmp = withContext(Dispatchers.IO) {
+                        try {
+                            context?.contentResolver?.openFileDescriptor(uri, "r")?.use { pfd ->
+                                val handle = top.maary.darkbag.rawvideo.RawVideoNative.nativeOpenReaderFd(pfd.fd)
+                                if (handle != 0L) {
+                                    val header = top.maary.darkbag.rawvideo.RawVideoNative.readHeader(handle)
+                                    if (header != null && header.width > 0 && header.height > 0) {
+                                        val swapDims = (header.orientation == 90 || header.orientation == 270)
+                                        val thumbW = if (swapDims) (320 * header.height) / header.width else 320
+                                        val thumbH = if (swapDims) 320 else (320 * header.height) / header.width
+                                        val thumbBmp = android.graphics.Bitmap.createBitmap(thumbW, thumbH, android.graphics.Bitmap.Config.ARGB_8888)
+                                        val buf = java.nio.ByteBuffer.allocateDirect(header.width * header.height * 2)
+                                        val meta = LongArray(3)
+                                        val read = top.maary.darkbag.rawvideo.RawVideoNative.nativeReadFrame(handle, 0, meta, buf)
+                                        if (read > 0) {
+                                            val targetLogIndex = if (header.activeLogName.isNotBlank() && header.activeLogName != "None") {
+                                                SettingsFragment.LOG_CURVES.indexOf(header.activeLogName).takeIf { it >= 0 } ?: -1
+                                            } else -1
+                                            val lutManager = context?.let { top.maary.darkbag.utils.LutManager(it) }
+                                            val lutPath = if (header.activeLutName.isNotBlank() && header.activeLutName != "None" && lutManager != null) {
+                                                val f = java.io.File(lutManager.lutDir, header.activeLutName)
+                                                if (f.exists()) f.absolutePath else null
+                                            } else null
+                                            top.maary.darkbag.rawvideo.RawVideoNative.nativeDebayerFrameToBitmap(
+                                                bayerBuffer = buf,
+                                                width = header.width,
+                                                height = header.height,
+                                                orientation = header.orientation,
+                                                cfaPattern = header.cfaPattern,
+                                                whiteLevel = header.whiteLevel,
+                                                blackLevel = header.blackLevel.firstOrNull() ?: 64f,
+                                                neutralPoint = header.neutralPoint,
+                                                targetLog = targetLogIndex,
+                                                lutPath = lutPath,
+                                                exposure = header.exposure,
+                                                contrast = header.contrast,
+                                                saturation = header.saturation,
+                                                outBitmap = thumbBmp
+                                            )
+                                            thumbBmp
+                                        } else null
+                                    } else null
+                                } else null
+                            }
+                        } catch (e: Exception) {
+                            null
+                        }
+                    }
+                    if (bmp != null) {
+                        Glide.with(photoViewButton)
+                            .load(bmp)
+                            .apply(RequestOptions.circleCropTransform())
+                            .into(photoViewButton)
+                        return@launch
+                    }
+                }
+
                 val lastModified = try {
                     context?.let { mediaStoreUtils.getFileLastModified(it, android.net.Uri.parse(filename)) } ?: 0L
                 } catch (e: Exception) {
@@ -4481,8 +4542,15 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 imageRepository.invalidateCache()
                 withContext(Dispatchers.Main) {
                     updateCurrentThumbnail(savedUri)
-                    if (thumbnail != null) {
-                        cameraUiContainerBinding?.photoViewButton?.setImageBitmap(thumbnail)
+                    val photoViewButton = cameraUiContainerBinding?.photoViewButton
+                    if (photoViewButton != null && thumbnail != null) {
+                        photoViewButton.visibility = View.VISIBLE
+                        photoViewButton.alpha = 1f
+                        photoViewButton.setPadding(resources.getDimension(R.dimen.stroke_small).toInt())
+                        Glide.with(photoViewButton)
+                            .load(thumbnail)
+                            .apply(RequestOptions.circleCropTransform())
+                            .into(photoViewButton)
                     }
                 }
             }
@@ -4547,8 +4615,15 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 imageRepository.invalidateCache()
                 withContext(Dispatchers.Main) {
                     updateCurrentThumbnail(savedUri)
-                    if (thumbnail != null) {
-                        cameraUiContainerBinding?.photoViewButton?.setImageBitmap(thumbnail)
+                    val photoViewButton = cameraUiContainerBinding?.photoViewButton
+                    if (photoViewButton != null && thumbnail != null) {
+                        photoViewButton.visibility = View.VISIBLE
+                        photoViewButton.alpha = 1f
+                        photoViewButton.setPadding(resources.getDimension(R.dimen.stroke_small).toInt())
+                        Glide.with(photoViewButton)
+                            .load(thumbnail)
+                            .apply(RequestOptions.circleCropTransform())
+                            .into(photoViewButton)
                     }
                 }
             }
