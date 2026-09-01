@@ -1019,6 +1019,25 @@ class ImageViewerAdapter(
             player.load(uri)
         }
         player.updateAdjustments(group.editConfig)
+
+        holder.binding.videoView.visibility = View.VISIBLE
+        holder.binding.videoView.alpha = 1f
+        if (holder.binding.videoView.isAvailable) {
+            player.setSurface(android.view.Surface(holder.binding.videoView.surfaceTexture))
+        } else {
+            holder.binding.videoView.surfaceTextureListener = object : android.view.TextureView.SurfaceTextureListener {
+                override fun onSurfaceTextureAvailable(surface: android.graphics.SurfaceTexture, width: Int, height: Int) {
+                    player.setSurface(android.view.Surface(surface))
+                }
+                override fun onSurfaceTextureSizeChanged(surface: android.graphics.SurfaceTexture, width: Int, height: Int) {}
+                override fun onSurfaceTextureDestroyed(surface: android.graphics.SurfaceTexture): Boolean {
+                    player.setSurface(null)
+                    return true
+                }
+                override fun onSurfaceTextureUpdated(surface: android.graphics.SurfaceTexture) {}
+            }
+        }
+
         player.play()
     }
 

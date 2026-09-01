@@ -8,8 +8,10 @@
 #include <algorithm>
 
 #include <omp.h>
+#include <android/native_window_jni.h>
 #include "RawVideoContainer.h"
 #include "RawVideoRecorder.h"
+#include "RawVideoGLRenderer.h"
 #include "../ColorPipe.h"
 
 #define TAG "RawVideoJNI"
@@ -720,6 +722,113 @@ Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeDebayerFrameToBitmap(
 
     AndroidBitmap_unlockPixels(env, jOutBitmap);
     return JNI_TRUE;
+}
+
+JNIEXPORT jlong JNICALL
+Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeCreateGLRenderer(
+        JNIEnv* env,
+        jobject /* thiz */
+) {
+    auto* renderer = new RawVideoGLRenderer();
+    return reinterpret_cast<jlong>(renderer);
+}
+
+JNIEXPORT jboolean JNICALL
+Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeSetGLSurface(
+        JNIEnv* env,
+        jobject /* thiz */,
+        jlong rendererHandle,
+        jobject jSurface
+) {
+    auto* renderer = reinterpret_cast<RawVideoGLRenderer*>(rendererHandle);
+    if (!renderer) return JNI_FALSE;
+
+    if (!jSurface) {
+        renderer->releaseSurface();
+        return JNI_TRUE;
+    }
+
+    ANativeWindow* window = ANativeWindow_fromSurface(env, jSurface);
+    if (!window) {
+        LOGE("Failed to get ANativeWindow from Surface");
+        return JNI_FALSE;
+    }
+
+    bool ok = renderer->setSurface(window);
+    ANativeWindow_release(window);
+    return ok ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jboolean JNICALL
+Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeRenderGLFrame(
+        JNIEnv* env,
+        jobject /* thiz */,
+        jlong rendererHandle,
+        jobject jBayerBuffer,
+        jint width,
+        jint height,
+        jint orientation,
+        jint cfaPattern,
+        jint whiteLevel,
+        jfloat blackLevel,
+        jfloatArray jNeutralPoint,
+        jint targetLog,
+        jstring jLutPath,
+        jfloat exposure,
+        jfloat contrast,
+        jfloat saturation
+) {
+    auto* renderer = reinterpret_cast<RawVideoGLRenderer*>(rendererHandle);
+    if (!renderer || !jBayerBuffer || width <= 0 || height <= 0) return JNI_FALSE;
+
+    auto* rawBytes = static_cast<const uint8_t*>(env->GetDirectBufferAddress(jBayerBuffer));
+    if (!rawBytes) return JNI_FALSE;
+
+    jfloat npVals[3];
+    bool hasNp = false;
+    if (jNeutralPoint && env->GetArrayLength(jNeutralPoint) >= 3) {
+        env->GetFloatArrayRegion(jNeutralPoint, 0, 3, npVals);
+        hasNp = true;
+    }
+
+    const char* lutPathC = nullptr;
+    if (jLutPath) {
+        lutPathC = env->GetStringUTFChars(jLutPath, nullptr);
+    }
+
+    bool ok = renderer->renderFrame(
+        rawBytes,
+        width,
+        height,
+        orientation,
+        cfaPattern,
+        whiteLevel,
+        blackLevel,
+        hasNp ? npVals : nullptr,
+        targetLog,
+        lutPathC,
+        exposure,
+        contrast,
+        saturation
+    );
+
+    if (lutPathC) {
+        env->ReleaseStringUTFChars(jLutPath, lutPathC);
+    }
+
+    return ok ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT void JNICALL
+Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeDestroyGLRenderer(
+        JNIEnv* env,
+        jobject /* thiz */,
+        jlong rendererHandle
+) {
+    auto* renderer = reinterpret_cast<RawVideoGLRenderer*>(rendererHandle);
+    if (renderer) {
+        delete renderer;
+    }
 }
 
 } // extern "C"

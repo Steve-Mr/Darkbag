@@ -47,6 +47,9 @@ class RawVideoPlayer(
     private var cachedLutPath: String? = null
     private var cachedTargetLogIndex: Int = -1
 
+    private var glRendererHandle: Long = 0L
+    private var currentSurface: android.view.Surface? = null
+
     val isVideoLoaded: Boolean
         get() = nativeHandle != 0L
 
@@ -61,6 +64,16 @@ class RawVideoPlayer(
 
     val fps: Float
         get() = header?.fps ?: 24.0f
+
+    fun setSurface(surface: android.view.Surface?) {
+        currentSurface = surface
+        if (glRendererHandle == 0L && surface != null) {
+            glRendererHandle = RawVideoNative.nativeCreateGLRenderer()
+        }
+        if (glRendererHandle != 0L) {
+            RawVideoNative.nativeSetGLSurface(glRendererHandle, surface)
+        }
+    }
 
     private fun updateResolvedLutAndLog() {
         val hdr = header
@@ -254,6 +267,31 @@ class RawVideoPlayer(
             val contrast = currentEditConfig?.contrast ?: hdr.contrast
             val saturation = currentEditConfig?.saturation ?: hdr.saturation
 
+            // 1. Fast GPU direct-to-surface rendering if Surface is available
+            val surf = currentSurface
+            if (glRendererHandle != 0L && surf != null && surf.isValid) {
+                val rendered = RawVideoNative.nativeRenderGLFrame(
+                    rendererHandle = glRendererHandle,
+                    bayerBuffer = buf,
+                    width = hdr.width,
+                    height = hdr.height,
+                    orientation = hdr.orientation,
+                    cfaPattern = hdr.cfaPattern,
+                    whiteLevel = hdr.whiteLevel,
+                    blackLevel = hdr.blackLevel.firstOrNull() ?: 64f,
+                    neutralPoint = hdr.neutralPoint,
+                    targetLog = cachedTargetLogIndex,
+                    lutPath = cachedLutPath,
+                    exposure = exposure,
+                    contrast = contrast,
+                    saturation = saturation
+                )
+                if (rendered) {
+                    return
+                }
+            }
+
+            // 2. CPU fallback to Bitmap
             val debayered = RawVideoNative.nativeDebayerFrameToBitmap(
                 bayerBuffer = buf,
                 width = hdr.width,
@@ -281,6 +319,11 @@ class RawVideoPlayer(
 
     fun release() {
         pause()
+        if (glRendererHandle != 0L) {
+            RawVideoNative.nativeDestroyGLRenderer(glRendererHandle)
+            glRendererHandle = 0L
+        }
+        currentSurface = null
         if (nativeHandle != 0L) {
             RawVideoNative.nativeCloseReader(nativeHandle)
             nativeHandle = 0L

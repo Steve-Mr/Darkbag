@@ -234,6 +234,7 @@ add_library(
         rawvideo/RawVideoContainer.cpp
         rawvideo/RawVideoRecorder.cpp
         rawvideo/RawVideoJNI.cpp
+        rawvideo/RawVideoGLRenderer.cpp
         ${LIBRAW_SOURCES}
         "${GENERATED_LIB}"
         "${SINGLE_GENERATED_LIB}"
@@ -256,6 +257,14 @@ find_library(
         android-lib
         android)
 
+find_library(
+        gles3-lib
+        GLESv3)
+
+find_library(
+        egl-lib
+        EGL)
+
 target_link_libraries(
         native-lib
         "${GENERATED_LIB}"
@@ -268,6 +277,8 @@ target_link_libraries(
         ${log-lib}
         ${jnigraphics-lib}
         ${android-lib}
+        ${gles3-lib}
+        ${egl-lib}
         -fopenmp
         -static-openmp)
 

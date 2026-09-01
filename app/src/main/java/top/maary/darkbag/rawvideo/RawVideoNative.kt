@@ -151,6 +151,26 @@ object RawVideoNative {
         outBitmap: Bitmap
     ): Boolean
 
+    external fun nativeCreateGLRenderer(): Long
+    external fun nativeSetGLSurface(rendererHandle: Long, surface: android.view.Surface?): Boolean
+    external fun nativeRenderGLFrame(
+        rendererHandle: Long,
+        bayerBuffer: ByteBuffer,
+        width: Int,
+        height: Int,
+        orientation: Int = 0,
+        cfaPattern: Int,
+        whiteLevel: Int,
+        blackLevel: Float,
+        neutralPoint: FloatArray?,
+        targetLog: Int = -1,
+        lutPath: String? = null,
+        exposure: Float = 0.0f,
+        contrast: Float = 0.0f,
+        saturation: Float = 0.0f
+    ): Boolean
+    external fun nativeDestroyGLRenderer(rendererHandle: Long)
+
     external fun nativeUpdateHeaderMetadata(
         fd: Int,
         activeLog: String?,
