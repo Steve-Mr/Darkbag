@@ -127,6 +127,11 @@ open class ImageViewerFragment : Fragment() {
                             }
                         }
 
+                        if (binding.imagePager.currentItem == position && !isAdjusted) {
+                            prepareEditConfig(updatedGroup)
+                            updateControlsVisibility()
+                        }
+
                         val format = adapter.getSelectedFormat(position)
                         if (!isAdjusted && isMotionPhotoAutoPlay && hasAutoPlayedPosition != position && updatedGroup.isMotionPhoto && binding.imagePager.currentItem == position && format != ImageViewerAdapter.FORMAT_DNG) {
                             hasAutoPlayedPosition = position
@@ -306,7 +311,8 @@ open class ImageViewerFragment : Fragment() {
                     binding.imagePager.adapter = adapter
 
                     val initialPos = groups.indexOfFirst {
-                        it.jpgUri?.toString() == targetUri ||
+                        it.rawVideoUri?.toString() == targetUri ||
+                                it.jpgUri?.toString() == targetUri ||
                                 it.dngUri?.toString() == targetUri ||
                                 it.dngUri1?.toString() == targetUri ||
                                 it.dngUri2?.toString() == targetUri
@@ -609,9 +615,16 @@ open class ImageViewerFragment : Fragment() {
                     MENU_EXPORT_CINEMA_DNG -> performExportCinemaDng(adapter.getGroup(binding.imagePager.currentItem))
                     MENU_EXPORT_MP4 -> {
                         val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
-                        val config = currentEditConfig ?: currentGroup.editConfig
-                        val sheet = RawVideoExportSheet.newInstance(config?.log, config?.lut)
-                        sheet.show(childFragmentManager, RawVideoExportSheet.TAG)
+                        lifecycleScope.launch {
+                            val fullyLoadedGroup = if (!currentGroup.metadataLoaded) {
+                                repository.loadMetadata(currentGroup)
+                            } else {
+                                currentGroup
+                            }
+                            val config = currentEditConfig ?: fullyLoadedGroup.editConfig
+                            val sheet = RawVideoExportSheet.newInstance(config?.log, config?.lut)
+                            sheet.show(childFragmentManager, RawVideoExportSheet.TAG)
+                        }
                     }
                     MENU_COLLAGE -> showMultiCamCollageDialog(adapter.getGroup(binding.imagePager.currentItem))
                     MENU_DETAILS -> showImageDetails()
@@ -1694,8 +1707,13 @@ open class ImageViewerFragment : Fragment() {
                 if (updatedGroups.isNotEmpty()) {
                     val targetBaseName = currentGroup.baseName
                     val newPos = updatedGroups.indexOfFirst { it.baseName == targetBaseName }.coerceAtLeast(0)
-                    adapter.updateGroups(updatedGroups)
+                    val rawTargetGroup = updatedGroups[newPos]
+                    val targetGroup = repository.loadMetadata(rawTargetGroup)
+                    val mutableList = updatedGroups.toMutableList()
+                    mutableList[newPos] = targetGroup
+                    adapter.updateGroups(mutableList)
                     binding.imagePager.setCurrentItem(newPos, false)
+                    prepareEditConfig(targetGroup)
                     updateControlsVisibility()
                 }
                 Toast.makeText(appContext, "Saved adjustments for RAW video", Toast.LENGTH_SHORT).show()
@@ -1919,7 +1937,11 @@ open class ImageViewerFragment : Fragment() {
                 if (updatedGroups.isNotEmpty()) {
                     val targetBaseName = currentGroup.baseName
                     val newPos = updatedGroups.indexOfFirst { it.baseName == targetBaseName }.coerceAtLeast(0)
-                    adapter = ImageViewerAdapter(updatedGroups, lifecycleScope, requireContext()).apply {
+                    val rawTargetGroup = updatedGroups[newPos]
+                    val targetGroup = repository.loadMetadata(rawTargetGroup)
+                    val mutableList = updatedGroups.toMutableList()
+                    mutableList[newPos] = targetGroup
+                    adapter = ImageViewerAdapter(mutableList, lifecycleScope, requireContext()).apply {
                         isMotionPhotoAutoPlay = this@ImageViewerFragment.isMotionPhotoAutoPlay
                         onImageTapped = { toggleUi() }
                         onZoomChanged = { isZoomed -> if (isZoomed) hideUi() else showUi() }
@@ -1949,6 +1971,7 @@ open class ImageViewerFragment : Fragment() {
                     }
                     binding.imagePager.adapter = adapter
                     binding.imagePager.setCurrentItem(newPos, false)
+                    prepareEditConfig(targetGroup)
                     updateControlsVisibility()
                 }
             } finally {

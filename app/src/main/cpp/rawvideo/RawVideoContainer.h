@@ -50,8 +50,8 @@ struct FileHeader {
     float forwardMatrix1[9] = {1,0,0, 0,1,0, 0,0,1};
     float forwardMatrix2[9] = {1,0,0, 0,1,0, 0,0,1};
     float neutralColorPoint[3] = {1.0f, 1.0f, 1.0f};
-    char activeLutName[32] = {0};
-    char activeLogName[16] = {0};
+    char activeLutName[64] = {0};
+    char activeLogName[32] = {0};
     uint32_t frameCount = 0;
     uint64_t indexOffset = 0;
     uint32_t orientation = 0; // 0, 90, 180, 270 degrees
@@ -63,7 +63,7 @@ struct FileHeader {
     float saturation = 0.0f;
     char make[32] = {0};
     char model[64] = {0};
-    uint8_t reserved[52] = {0};
+    uint8_t reserved[64] = {0};
 };
 
 struct VideoFrameHeader {

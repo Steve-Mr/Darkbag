@@ -211,22 +211,24 @@ class RawVideoPlayer(
         val meta = LongArray(3)
         val readBytes = RawVideoNative.nativeReadFrame(handle, frameIdx, meta, buf)
         if (readBytes > 0) {
-            val targetLogIndex = if (currentEditConfig?.log != null && currentEditConfig?.log != "None") {
-                top.maary.darkbag.fragments.SettingsFragment.LOG_CURVES.indexOf(currentEditConfig?.log).takeIf { it >= 0 } ?: -1
+            val effectiveLog = currentEditConfig?.log ?: hdr.activeLogName.takeIf { it.isNotBlank() }
+            val targetLogIndex = if (effectiveLog != null && effectiveLog != "None") {
+                top.maary.darkbag.fragments.SettingsFragment.LOG_CURVES.indexOf(effectiveLog).takeIf { it >= 0 } ?: -1
             } else -1
 
+            val effectiveLut = currentEditConfig?.lut ?: hdr.activeLutName.takeIf { it.isNotBlank() }
             val lutManager = top.maary.darkbag.utils.LutManager(context)
-            val lutPath = if (currentEditConfig?.lut != null && currentEditConfig?.lut != "None" && currentEditConfig?.lut!!.isNotBlank()) {
-                val f = java.io.File(lutManager.lutDir, currentEditConfig?.lut!!)
+            val lutPath = if (effectiveLut != null && effectiveLut != "None" && effectiveLut.isNotBlank()) {
+                val f = java.io.File(lutManager.lutDir, effectiveLut)
                 if (f.exists()) f.absolutePath else {
-                    val f2 = java.io.File(java.io.File(context.filesDir, "luts"), currentEditConfig?.lut!!)
+                    val f2 = java.io.File(java.io.File(context.filesDir, "luts"), effectiveLut)
                     if (f2.exists()) f2.absolutePath else null
                 }
             } else null
 
-            val exposure = currentEditConfig?.exposure ?: 0f
-            val contrast = currentEditConfig?.contrast ?: 0f
-            val saturation = currentEditConfig?.saturation ?: 0f
+            val exposure = currentEditConfig?.exposure ?: hdr.exposure
+            val contrast = currentEditConfig?.contrast ?: hdr.contrast
+            val saturation = currentEditConfig?.saturation ?: hdr.saturation
 
             val debayered = RawVideoNative.nativeDebayerFrameToBitmap(
                 bayerBuffer = buf,
