@@ -56,10 +56,23 @@ open class ImageViewerFragment : Fragment() {
 
     private suspend fun deleteUriSafe(context: Context, uri: Uri): Boolean {
         return withContext(Dispatchers.IO) {
-            if (uri.scheme == "content" && DocumentsContract.isDocumentUri(context, uri)) {
-                DocumentsContract.deleteDocument(context.contentResolver, uri)
-            } else {
-                context.contentResolver.delete(uri, null, null) > 0
+            try {
+                if (uri.scheme == "content" && DocumentsContract.isDocumentUri(context, uri)) {
+                    DocumentsContract.deleteDocument(context.contentResolver, uri)
+                } else if (uri.scheme == "content" && DocumentsContract.isTreeUri(uri)) {
+                    val docUri = DocumentsContract.buildDocumentUriUsingTree(uri, DocumentsContract.getTreeDocumentId(uri))
+                    DocumentsContract.deleteDocument(context.contentResolver, docUri)
+                } else {
+                    context.contentResolver.delete(uri, null, null) > 0
+                }
+            } catch (e: Exception) {
+                try {
+                    val docFile = androidx.documentfile.provider.DocumentFile.fromSingleUri(context, uri)
+                        ?: androidx.documentfile.provider.DocumentFile.fromTreeUri(context, uri)
+                    docFile?.delete() ?: false
+                } catch (e2: Exception) {
+                    throw e
+                }
             }
         }
     }
@@ -2438,6 +2451,7 @@ open class ImageViewerFragment : Fragment() {
             val urisToDelete = mutableListOf<Uri>()
 
             if (deleteGroup) {
+                group.cinemaDngFolderUri?.let { urisToDelete.add(it) }
                 urisToDelete.addAll(group.allUris)
 
                 if (adapter.itemCount > 1) {
@@ -2447,7 +2461,8 @@ open class ImageViewerFragment : Fragment() {
                 }
             } else {
                 val selectedFormat = adapter.getSelectedFormat(binding.imagePager.currentItem)
-                if (selectedFormat == "DNG") {
+                if (selectedFormat == "DNG" || selectedFormat == "CDNG" || selectedFormat == "RAW") {
+                    group.cinemaDngFolderUri?.let { urisToDelete.add(it) }
                     urisToDelete.addAll(group.allMasterRawUris)
                 } else {
                     val derivatives = adapter.getDerivativeUris(group)
@@ -2731,8 +2746,14 @@ open class ImageViewerFragment : Fragment() {
                     }
                 } else {
                     when (deleteMode) {
-                        0 -> urisToDelete.addAll(group.allUris)
-                        1 -> urisToDelete.addAll(group.allMasterRawUris)
+                        0 -> {
+                            group.cinemaDngFolderUri?.let { urisToDelete.add(it) }
+                            urisToDelete.addAll(group.allUris)
+                        }
+                        1 -> {
+                            group.cinemaDngFolderUri?.let { urisToDelete.add(it) }
+                            urisToDelete.addAll(group.allMasterRawUris)
+                        }
                         2 -> urisToDelete.addAll(group.allDerivativeUris)
                     }
                 }

@@ -23,6 +23,14 @@ class ImageRepository(private val context: Context) {
     companion object {
         @Volatile
         private var cachedGroups: List<ImageGroup>? = null
+
+        private val CINEMADNG_FRAME_REGEX = Regex("^(?:DBAG_)?((?:RAWVID|CDNG)_[0-9]{8}_[0-9]{6}(?:_[0-9]+)?)_([0-9]{6})\\.dng$", RegexOption.IGNORE_CASE)
+        private val CINEMADNG_AUDIO_REGEX = Regex("^(?:DBAG_)?((?:RAWVID|CDNG)_[0-9]{8}_[0-9]{6}(?:_[0-9]+)?)\\.wav$", RegexOption.IGNORE_CASE)
+
+        private fun isCinemaDngDirectoryName(name: String): Boolean {
+            return (name.startsWith(DarkbagIdentity.FILE_PREFIX, ignoreCase = true) || name.startsWith("RAWVID_", ignoreCase = true) || name.startsWith("CDNG_", ignoreCase = true)) &&
+                    (name.contains("RAWVID", ignoreCase = true) || name.contains("CDNG", ignoreCase = true))
+        }
     }
 
     suspend fun getGroupedImages(forceRefresh: Boolean = false): List<ImageGroup> {
@@ -135,6 +143,9 @@ class ImageRepository(private val context: Context) {
                     builder.dngUri2?.toString() == initialUri ||
                     builder.rawVideoUri?.toString() == initialUri ||
                     builder.mp4VideoUri?.toString() == initialUri ||
+                    builder.cinemaDngFolderUri?.toString() == initialUri ||
+                    builder.cinemaDngFirstFrameUri?.toString() == initialUri ||
+                    builder.cinemaDngFrameUris.any { it.toString() == initialUri } ||
                     builder.derivativeJpgUris.any { it.toString() == initialUri } ||
                     builder.derivativeMp4Uris.any { it.toString() == initialUri }
         }
@@ -145,6 +156,15 @@ class ImageRepository(private val context: Context) {
 
     private fun populateMetadata(builder: ImageGroupBuilder) {
         if (builder.metadataLoaded) return
+
+        if (builder.isCinemaDng) {
+            val firstFrame = builder.cinemaDngFirstFrameUri
+            if (firstFrame != null && (builder.width == 0 || builder.height == 0)) {
+                readExifForScanning(firstFrame, builder)
+            }
+            builder.metadataLoaded = true
+            return
+        }
 
         val rawVideoUri = builder.rawVideoUri
         if (rawVideoUri != null) {
@@ -299,47 +319,145 @@ class ImageRepository(private val context: Context) {
                     scannedWithDirectQuery = true
                     val idColumn = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
                     val nameColumn = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+                    val mimeColumn = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_MIME_TYPE)
                     val modifiedColumn = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_LAST_MODIFIED)
 
                     while (cursor.moveToNext()) {
                         if (idColumn == -1 || nameColumn == -1) continue
                         val childDocId = cursor.getString(idColumn) ?: continue
                         val name = cursor.getString(nameColumn) ?: continue
-                        if (!name.startsWith(DarkbagIdentity.FILE_PREFIX, ignoreCase = true)) continue
-                        val baseName = getBaseName(name)
-                        val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
+                        val mime = if (mimeColumn != -1) cursor.getString(mimeColumn) else null
                         val lastModified = if (modifiedColumn != -1) cursor.getLong(modifiedColumn) else 0L
+
+                        if (mime == DocumentsContract.Document.MIME_TYPE_DIR || mime == "vnd.android.document/directory") {
+                            if (isCinemaDngDirectoryName(name)) {
+                                val baseName = getBaseName(name)
+                                val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
+                                val folderDocUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, childDocId)
+
+                                var firstFrameUri: Uri? = null
+                                var audioUri: Uri? = null
+                                var folderLastModified = lastModified
+                                val frameUris = mutableListOf<Uri>()
+
+                                try {
+                                    val subChildrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, childDocId)
+                                    context.contentResolver.query(subChildrenUri, projection, null, null, null)?.use { subCursor ->
+                                        val subIdCol = subCursor.getColumnIndex(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+                                        val subNameCol = subCursor.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+                                        val subModCol = subCursor.getColumnIndex(DocumentsContract.Document.COLUMN_LAST_MODIFIED)
+
+                                        val subFrames = mutableListOf<Pair<String, Uri>>()
+
+                                        while (subCursor.moveToNext()) {
+                                            if (subIdCol == -1 || subNameCol == -1) continue
+                                            val subDocId = subCursor.getString(subIdCol) ?: continue
+                                            val subName = subCursor.getString(subNameCol) ?: continue
+                                            val subMod = if (subModCol != -1) subCursor.getLong(subModCol) else 0L
+                                            val subDocUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, subDocId)
+                                            if (subMod > folderLastModified) folderLastModified = subMod
+
+                                            if (subName.endsWith(".dng", ignoreCase = true)) {
+                                                subFrames.add(subName to subDocUri)
+                                            } else if (subName.endsWith(".wav", ignoreCase = true)) {
+                                                audioUri = subDocUri
+                                            }
+                                        }
+
+                                        subFrames.sortBy { it.first }
+                                        firstFrameUri = subFrames.firstOrNull { it.first.contains("_000000.dng", ignoreCase = true) }?.second
+                                            ?: subFrames.firstOrNull()?.second
+                                        frameUris.addAll(subFrames.map { it.second })
+                                    }
+                                } catch (e: Exception) {
+                                    android.util.Log.w("ImageRepository", "Failed to query child documents for CinemaDNG folder $name", e)
+                                }
+
+                                builder.setCinemaDngFolder(
+                                    folderUri = folderDocUri,
+                                    firstFrameUri = firstFrameUri,
+                                    audioUri = audioUri,
+                                    frameCount = frameUris.size,
+                                    time = folderLastModified,
+                                    modifiedTime = folderLastModified
+                                )
+                                if (frameUris.isNotEmpty()) {
+                                    builder.cinemaDngFrameUris.clear()
+                                    builder.cinemaDngFrameUris.addAll(frameUris)
+                                }
+
+                                if (!fast) {
+                                    firstFrameUri?.let { readExifForScanning(it, builder) }
+                                }
+                                continue
+                            }
+                        }
+
+                        if (!name.startsWith(DarkbagIdentity.FILE_PREFIX, ignoreCase = true)) continue
                         val docUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, childDocId)
 
+                        val cdngFrameMatch = CINEMADNG_FRAME_REGEX.find(name)
+                        val cdngAudioMatch = CINEMADNG_AUDIO_REGEX.find(name)
+
                         when {
+                            cdngFrameMatch != null -> {
+                                val clipBaseName = cdngFrameMatch.groupValues[1]
+                                val frameIndex = cdngFrameMatch.groupValues[2].toIntOrNull() ?: 0
+                                val builder = groups.getOrPut(clipBaseName) { ImageGroupBuilder(clipBaseName) }
+                                builder.addCinemaDngFrame(docUri, frameIndex, lastModified)
+                                if (!fast && frameIndex == 0) {
+                                    readExifForScanning(docUri, builder)
+                                }
+                            }
+                            cdngAudioMatch != null -> {
+                                val clipBaseName = cdngAudioMatch.groupValues[1]
+                                val builder = groups.getOrPut(clipBaseName) { ImageGroupBuilder(clipBaseName) }
+                                builder.setCinemaDngAudio(docUri, lastModified)
+                            }
                             name.contains("_MULTI_") && (name.endsWith(".jpg", ignoreCase = true) || name.endsWith(".jpeg", ignoreCase = true)) -> {
+                                val baseName = getBaseName(name)
+                                val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
                                 builder.addMultiJpg(docUri, name, lastModified)
                                 if (!fast) {
                                     readExifForScanning(docUri, builder)
                                 }
                             }
                             name.contains("_MULTI_") && name.endsWith(".dng", ignoreCase = true) -> {
+                                val baseName = getBaseName(name)
+                                val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
                                 builder.addMultiDng(docUri, name, lastModified)
                             }
                             name.endsWith(".jpg", ignoreCase = true) || name.endsWith(".jpeg", ignoreCase = true) -> {
+                                val baseName = getBaseName(name)
+                                val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
                                 builder.setJpg(docUri, lastModified)
                                 if (!fast) {
                                     readExifForScanning(docUri, builder)
                                 }
                             }
                             name.contains("_HF2") && name.endsWith(".dng", ignoreCase = true) -> {
+                                val baseName = getBaseName(name)
+                                val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
                                 builder.setDng2(docUri, lastModified)
                             }
                             name.contains("_HF1") && name.endsWith(".dng", ignoreCase = true) -> {
+                                val baseName = getBaseName(name)
+                                val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
                                 builder.setDng1(docUri, lastModified)
                             }
                             name.endsWith(".dng", ignoreCase = true) -> {
+                                val baseName = getBaseName(name)
+                                val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
                                 builder.setDng(docUri, lastModified)
                             }
                             name.endsWith(".rawvid", ignoreCase = true) -> {
+                                val baseName = getBaseName(name)
+                                val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
                                 builder.setRawVideo(docUri, lastModified)
                             }
                             name.endsWith(".mp4", ignoreCase = true) -> {
+                                val baseName = getBaseName(name)
+                                val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
                                 builder.setMp4Video(docUri, lastModified)
                             }
                         }
@@ -354,40 +472,114 @@ class ImageRepository(private val context: Context) {
                 val root = DocumentFile.fromTreeUri(context, treeUri)
                 root?.listFiles()?.forEach { file ->
                     val name = file.name ?: return@forEach
+                    if (file.isDirectory) {
+                        if (isCinemaDngDirectoryName(name)) {
+                            val baseName = getBaseName(name)
+                            val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
+                            var firstFrameUri: Uri? = null
+                            var audioUri: Uri? = null
+                            val subFrames = mutableListOf<Pair<String, Uri>>()
+                            var folderLastModified = file.lastModified()
+
+                            file.listFiles().forEach { subFile ->
+                                val subName = subFile.name ?: return@forEach
+                                val subMod = subFile.lastModified()
+                                if (subMod > folderLastModified) folderLastModified = subMod
+                                if (subName.endsWith(".dng", ignoreCase = true)) {
+                                    subFrames.add(subName to subFile.uri)
+                                } else if (subName.endsWith(".wav", ignoreCase = true)) {
+                                    audioUri = subFile.uri
+                                }
+                            }
+                            subFrames.sortBy { it.first }
+                            firstFrameUri = subFrames.firstOrNull { it.first.contains("_000000.dng", ignoreCase = true) }?.second
+                                ?: subFrames.firstOrNull()?.second
+                            val frameUris = subFrames.map { it.second }
+
+                            builder.setCinemaDngFolder(
+                                folderUri = file.uri,
+                                firstFrameUri = firstFrameUri,
+                                audioUri = audioUri,
+                                frameCount = frameUris.size,
+                                time = folderLastModified,
+                                modifiedTime = folderLastModified
+                            )
+                            if (frameUris.isNotEmpty()) {
+                                builder.cinemaDngFrameUris.clear()
+                                builder.cinemaDngFrameUris.addAll(frameUris)
+                            }
+                            if (!fast) {
+                                firstFrameUri?.let { readExifForScanning(it, builder) }
+                            }
+                            return@forEach
+                        }
+                    }
+
                     if (!name.startsWith(DarkbagIdentity.FILE_PREFIX, ignoreCase = true)) return@forEach
-                    val baseName = getBaseName(name)
-                    val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
                     val lastModified = file.lastModified()
 
+                    val cdngFrameMatch = CINEMADNG_FRAME_REGEX.find(name)
+                    val cdngAudioMatch = CINEMADNG_AUDIO_REGEX.find(name)
+
                     when {
+                        cdngFrameMatch != null -> {
+                            val clipBaseName = cdngFrameMatch.groupValues[1]
+                            val frameIndex = cdngFrameMatch.groupValues[2].toIntOrNull() ?: 0
+                            val builder = groups.getOrPut(clipBaseName) { ImageGroupBuilder(clipBaseName) }
+                            builder.addCinemaDngFrame(file.uri, frameIndex, lastModified)
+                            if (!fast && frameIndex == 0) {
+                                readExifForScanning(file.uri, builder)
+                            }
+                        }
+                        cdngAudioMatch != null -> {
+                            val clipBaseName = cdngAudioMatch.groupValues[1]
+                            val builder = groups.getOrPut(clipBaseName) { ImageGroupBuilder(clipBaseName) }
+                            builder.setCinemaDngAudio(file.uri, lastModified)
+                        }
                         name.contains("_MULTI_") && (name.endsWith(".jpg", ignoreCase = true) || name.endsWith(".jpeg", ignoreCase = true)) -> {
+                            val baseName = getBaseName(name)
+                            val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
                             builder.addMultiJpg(file.uri, name, lastModified)
                             if (!fast) {
                                 readExifForScanning(file.uri, builder)
                             }
                         }
                         name.contains("_MULTI_") && name.endsWith(".dng", ignoreCase = true) -> {
+                            val baseName = getBaseName(name)
+                            val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
                             builder.addMultiDng(file.uri, name, lastModified)
                         }
                         name.endsWith(".jpg", ignoreCase = true) || name.endsWith(".jpeg", ignoreCase = true) -> {
+                            val baseName = getBaseName(name)
+                            val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
                             builder.setJpg(file.uri, lastModified)
                             if (!fast) {
                                 readExifForScanning(file.uri, builder)
                             }
                         }
                         name.contains("_HF2") && name.endsWith(".dng", ignoreCase = true) -> {
+                            val baseName = getBaseName(name)
+                            val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
                             builder.setDng2(file.uri, lastModified)
                         }
                         name.contains("_HF1") && name.endsWith(".dng", ignoreCase = true) -> {
+                            val baseName = getBaseName(name)
+                            val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
                             builder.setDng1(file.uri, lastModified)
                         }
                         name.endsWith(".dng", ignoreCase = true) -> {
+                            val baseName = getBaseName(name)
+                            val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
                             builder.setDng(file.uri, lastModified)
                         }
                         name.endsWith(".rawvid", ignoreCase = true) -> {
+                            val baseName = getBaseName(name)
+                            val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
                             builder.setRawVideo(file.uri, lastModified)
                         }
                         name.endsWith(".mp4", ignoreCase = true) -> {
+                            val baseName = getBaseName(name)
+                            val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
                             builder.setMp4Video(file.uri, lastModified)
                         }
                     }
@@ -440,7 +632,8 @@ class ImageRepository(private val context: Context) {
 
         val collections = mutableListOf(
             MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-            MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+            MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
         )
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             collections.add(MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL))
@@ -481,47 +674,92 @@ class ImageRepository(private val context: Context) {
 
                         val uri = ContentUris.withAppendedId(collection, id)
 
-                        val baseName = getBaseName(name)
-                        val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
-
-                        if (widthColumn != -1 && heightColumn != -1 && builder.width == 0 && builder.height == 0) {
-                            val w = cursor.getInt(widthColumn)
-                            val h = cursor.getInt(heightColumn)
-                            if (w > 0 && h > 0) {
-                                builder.width = w
-                                builder.height = h
-                            }
-                        }
+                        val cdngFrameMatch = CINEMADNG_FRAME_REGEX.find(name)
+                        val cdngAudioMatch = CINEMADNG_AUDIO_REGEX.find(name)
 
                         when {
+                            cdngFrameMatch != null -> {
+                                val clipBaseName = cdngFrameMatch.groupValues[1]
+                                val frameIndex = cdngFrameMatch.groupValues[2].toIntOrNull() ?: 0
+                                val builder = groups.getOrPut(clipBaseName) { ImageGroupBuilder(clipBaseName) }
+                                builder.addCinemaDngFrame(uri, frameIndex, date, modified)
+                                if (widthColumn != -1 && heightColumn != -1 && builder.width == 0 && builder.height == 0) {
+                                    val w = cursor.getInt(widthColumn)
+                                    val h = cursor.getInt(heightColumn)
+                                    if (w > 0 && h > 0) {
+                                        builder.width = w
+                                        builder.height = h
+                                    }
+                                }
+                                if (!fast && frameIndex == 0 && (builder.width == 0 || builder.height == 0)) {
+                                    readExifForScanning(uri, builder)
+                                }
+                            }
+                            cdngAudioMatch != null -> {
+                                val clipBaseName = cdngAudioMatch.groupValues[1]
+                                val builder = groups.getOrPut(clipBaseName) { ImageGroupBuilder(clipBaseName) }
+                                builder.setCinemaDngAudio(uri, date, modified)
+                            }
                             name.contains("_MULTI_") && mime == "image/jpeg" -> {
+                                val baseName = getBaseName(name)
+                                val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
+                                if (widthColumn != -1 && heightColumn != -1 && builder.width == 0 && builder.height == 0) {
+                                    val w = cursor.getInt(widthColumn)
+                                    val h = cursor.getInt(heightColumn)
+                                    if (w > 0 && h > 0) {
+                                        builder.width = w
+                                        builder.height = h
+                                    }
+                                }
                                 builder.addMultiJpg(uri, name, date, modified)
                                 if (!fast) {
                                     readExifForScanning(uri, builder)
                                 }
                             }
                             name.contains("_MULTI_") && (mime == "image/x-adobe-dng" || name.endsWith(".dng", ignoreCase = true)) -> {
+                                val baseName = getBaseName(name)
+                                val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
                                 builder.addMultiDng(uri, name, date, modified)
                             }
                             mime == "image/jpeg" || name.endsWith(".jpg", ignoreCase = true) || name.endsWith(".jpeg", ignoreCase = true) -> {
+                                val baseName = getBaseName(name)
+                                val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
+                                if (widthColumn != -1 && heightColumn != -1 && builder.width == 0 && builder.height == 0) {
+                                    val w = cursor.getInt(widthColumn)
+                                    val h = cursor.getInt(heightColumn)
+                                    if (w > 0 && h > 0) {
+                                        builder.width = w
+                                        builder.height = h
+                                    }
+                                }
                                 builder.setJpg(uri, date, modified)
                                 if (!fast) {
                                     readExifForScanning(uri, builder)
                                 }
                             }
                             name.contains("_HF2") && (mime == "image/x-adobe-dng" || name.endsWith(".dng", ignoreCase = true)) -> {
+                                val baseName = getBaseName(name)
+                                val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
                                 builder.setDng2(uri, date, modified)
                             }
                             name.contains("_HF1") && (mime == "image/x-adobe-dng" || name.endsWith(".dng", ignoreCase = true)) -> {
+                                val baseName = getBaseName(name)
+                                val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
                                 builder.setDng1(uri, date, modified)
                             }
                             mime == "image/x-adobe-dng" || name.endsWith(".dng", ignoreCase = true) -> {
+                                val baseName = getBaseName(name)
+                                val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
                                 builder.setDng(uri, date, modified)
                             }
                             name.endsWith(".rawvid", ignoreCase = true) -> {
+                                val baseName = getBaseName(name)
+                                val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
                                 builder.setRawVideo(uri, date, modified)
                             }
                             mime == "video/mp4" || name.endsWith(".mp4", ignoreCase = true) -> {
+                                val baseName = getBaseName(name)
+                                val builder = groups.getOrPut(baseName) { ImageGroupBuilder(baseName) }
                                 builder.setMp4Video(uri, date, modified)
                             }
                         }
@@ -732,6 +970,12 @@ class ImageRepository(private val context: Context) {
         var isMp4Video: Boolean = false
         val derivativeJpgUris = mutableListOf<Uri>()
         val derivativeMp4Uris = mutableListOf<Uri>()
+        var isCinemaDng: Boolean = false
+        var cinemaDngFolderUri: Uri? = null
+        var cinemaDngFirstFrameUri: Uri? = null
+        var cinemaDngAudioUri: Uri? = null
+        var cinemaDngFrameCount: Int = 0
+        val cinemaDngFrameUris = mutableListOf<Uri>()
         val multiLensBuilders = mutableMapOf<String, MultiLensItemBuilder>()
         var isMultiCamera: Boolean = false
         var hfLayout: String? = null
@@ -762,6 +1006,13 @@ class ImageRepository(private val context: Context) {
             derivativeJpgUris.addAll(group.derivativeJpgUris)
             derivativeMp4Uris.clear()
             derivativeMp4Uris.addAll(group.derivativeMp4Uris)
+            isCinemaDng = group.isCinemaDng
+            cinemaDngFolderUri = group.cinemaDngFolderUri
+            cinemaDngFirstFrameUri = group.cinemaDngFirstFrameUri
+            cinemaDngAudioUri = group.cinemaDngAudioUri
+            cinemaDngFrameCount = group.cinemaDngFrameCount
+            cinemaDngFrameUris.clear()
+            cinemaDngFrameUris.addAll(group.cinemaDngFrameUris)
             isMultiCamera = group.isMultiCamera
             multiLensBuilders.clear()
             for (lens in group.multiCameraLenses) {
@@ -824,6 +1075,16 @@ class ImageRepository(private val context: Context) {
                     derivativeMp4Uris.add(uri)
                 }
             }
+            if (other.isCinemaDng) {
+                isCinemaDng = true
+                if (other.cinemaDngFolderUri != null) cinemaDngFolderUri = other.cinemaDngFolderUri
+                if (other.cinemaDngFirstFrameUri != null) cinemaDngFirstFrameUri = other.cinemaDngFirstFrameUri
+                if (other.cinemaDngAudioUri != null) cinemaDngAudioUri = other.cinemaDngAudioUri
+                if (other.cinemaDngFrameCount > cinemaDngFrameCount) cinemaDngFrameCount = other.cinemaDngFrameCount
+                for (uri in other.cinemaDngFrameUris) {
+                    if (uri !in cinemaDngFrameUris) cinemaDngFrameUris.add(uri)
+                }
+            }
             for ((tag, lens) in other.multiLensBuilders) {
                 val item = multiLensBuilders.getOrPut(tag) { MultiLensItemBuilder(tag, lens.multiplier) }
                 if (lens.jpgUri != null) item.jpgUri = lens.jpgUri
@@ -847,6 +1108,33 @@ class ImageRepository(private val context: Context) {
             }
             if (other.metadataLoaded) metadataLoaded = true
             updateTime(other.captureTime, other.lastModified)
+        }
+
+        fun setCinemaDngFolder(folderUri: Uri, firstFrameUri: Uri?, audioUri: Uri?, frameCount: Int, time: Long, modifiedTime: Long = time) {
+            isCinemaDng = true
+            cinemaDngFolderUri = folderUri
+            if (firstFrameUri != null) cinemaDngFirstFrameUri = firstFrameUri
+            if (audioUri != null) cinemaDngAudioUri = audioUri
+            if (frameCount > 0) cinemaDngFrameCount = frameCount
+            updateTime(time, modifiedTime)
+        }
+
+        fun addCinemaDngFrame(uri: Uri, frameIndex: Int, time: Long, modifiedTime: Long = time) {
+            isCinemaDng = true
+            if (frameIndex == 0 || cinemaDngFirstFrameUri == null) {
+                cinemaDngFirstFrameUri = uri
+            }
+            if (uri !in cinemaDngFrameUris) {
+                cinemaDngFrameUris.add(uri)
+            }
+            cinemaDngFrameCount = maxOf(cinemaDngFrameCount, cinemaDngFrameUris.size)
+            updateTime(time, modifiedTime)
+        }
+
+        fun setCinemaDngAudio(uri: Uri, time: Long, modifiedTime: Long = time) {
+            isCinemaDng = true
+            cinemaDngAudioUri = uri
+            updateTime(time, modifiedTime)
         }
 
         fun addMultiJpg(uri: Uri, fileName: String, time: Long, modifiedTime: Long = time) {
@@ -1067,7 +1355,13 @@ class ImageRepository(private val context: Context) {
                 mp4VideoUri = mp4VideoUri,
                 isMp4Video = isMp4Video,
                 derivativeJpgUris = derivativeJpgUris.toList(),
-                derivativeMp4Uris = derivativeMp4Uris.toList()
+                derivativeMp4Uris = derivativeMp4Uris.toList(),
+                isCinemaDng = isCinemaDng,
+                cinemaDngFolderUri = cinemaDngFolderUri,
+                cinemaDngFirstFrameUri = cinemaDngFirstFrameUri,
+                cinemaDngAudioUri = cinemaDngAudioUri,
+                cinemaDngFrameCount = cinemaDngFrameCount,
+                cinemaDngFrameUris = cinemaDngFrameUris.toList()
             )
         }
     }

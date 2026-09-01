@@ -36,9 +36,15 @@ data class ImageGroup(
     val mp4VideoUri: Uri? = null,
     val isMp4Video: Boolean = false,
     val derivativeJpgUris: List<Uri> = emptyList(),
-    val derivativeMp4Uris: List<Uri> = emptyList()
+    val derivativeMp4Uris: List<Uri> = emptyList(),
+    val isCinemaDng: Boolean = false,
+    val cinemaDngFolderUri: Uri? = null,
+    val cinemaDngFirstFrameUri: Uri? = null,
+    val cinemaDngAudioUri: Uri? = null,
+    val cinemaDngFrameCount: Int = 0,
+    val cinemaDngFrameUris: List<Uri> = emptyList()
 ) : Parcelable {
-    fun hasAny(): Boolean = jpgUri != null || dngUri != null || dngUri1 != null || dngUri2 != null || rawVideoUri != null || mp4VideoUri != null || multiJpgUris.isNotEmpty() || multiDngUris.isNotEmpty() || multiCameraLenses.isNotEmpty() || derivativeJpgUris.isNotEmpty() || derivativeMp4Uris.isNotEmpty()
+    fun hasAny(): Boolean = isCinemaDng || cinemaDngFolderUri != null || cinemaDngFirstFrameUri != null || cinemaDngFrameUris.isNotEmpty() || jpgUri != null || dngUri != null || dngUri1 != null || dngUri2 != null || rawVideoUri != null || mp4VideoUri != null || multiJpgUris.isNotEmpty() || multiDngUris.isNotEmpty() || multiCameraLenses.isNotEmpty() || derivativeJpgUris.isNotEmpty() || derivativeMp4Uris.isNotEmpty()
 
     val allDerivativeUris: List<Uri>
         get() {
@@ -60,10 +66,16 @@ data class ImageGroup(
     val allMasterRawUris: List<Uri>
         get() {
             val list = mutableListOf<Uri>()
-            dngUri?.let { list.add(it) }
-            dngUri1?.let { list.add(it) }
-            dngUri2?.let { list.add(it) }
-            rawVideoUri?.let { list.add(it) }
+            cinemaDngFolderUri?.let { if (it !in list) list.add(it) }
+            cinemaDngFirstFrameUri?.let { if (it !in list) list.add(it) }
+            cinemaDngAudioUri?.let { if (it !in list) list.add(it) }
+            for (uri in cinemaDngFrameUris) {
+                if (uri !in list) list.add(uri)
+            }
+            dngUri?.let { if (it !in list) list.add(it) }
+            dngUri1?.let { if (it !in list) list.add(it) }
+            dngUri2?.let { if (it !in list) list.add(it) }
+            rawVideoUri?.let { if (it !in list) list.add(it) }
             for (uri in multiDngUris) {
                 if (uri !in list) list.add(uri)
             }
@@ -83,10 +95,10 @@ data class ImageGroup(
         }
 
     val firstAvailableUri: Uri?
-        get() = allDerivativeUris.firstOrNull() ?: allMasterRawUris.firstOrNull()
+        get() = allDerivativeUris.firstOrNull() ?: cinemaDngFirstFrameUri ?: cinemaDngFolderUri ?: allMasterRawUris.firstOrNull()
 
     val hasMasterRaw: Boolean
-        get() = dngUri != null || dngUri1 != null || dngUri2 != null || rawVideoUri != null || multiDngUris.isNotEmpty()
+        get() = isCinemaDng || cinemaDngFolderUri != null || cinemaDngFirstFrameUri != null || cinemaDngFrameUris.isNotEmpty() || dngUri != null || dngUri1 != null || dngUri2 != null || rawVideoUri != null || multiDngUris.isNotEmpty()
 
     val hasDerivatives: Boolean
         get() = allDerivativeUris.isNotEmpty()

@@ -57,6 +57,7 @@ class DarkbagGalleryGridAdapter(
             return oldItem == newItem &&
                     oldItem.metadataLoaded == newItem.metadataLoaded &&
                     oldItem.isMotionPhoto == newItem.isMotionPhoto &&
+                    oldItem.isCinemaDng == newItem.isCinemaDng &&
                     oldItem.lastModified == newItem.lastModified &&
                     oldItem.multiCameraLenses == newItem.multiCameraLenses
         }
@@ -200,13 +201,13 @@ class DarkbagGalleryGridAdapter(
     private val rawThumbCache = android.util.LruCache<String, android.graphics.Bitmap>(30)
 
     private fun bindSingleViewHolder(holder: SingleViewHolder, group: ImageGroup, position: Int) {
-        val targetUri = group.jpgUri ?: group.derivativeJpgUris.firstOrNull() ?: group.mp4VideoUri ?: group.derivativeMp4Uris.firstOrNull() ?: group.dngUri ?: group.dngUri1 ?: group.dngUri2
+        val targetUri = group.jpgUri ?: group.derivativeJpgUris.firstOrNull() ?: group.mp4VideoUri ?: group.derivativeMp4Uris.firstOrNull() ?: group.cinemaDngFirstFrameUri ?: group.dngUri ?: group.dngUri1 ?: group.dngUri2
 
         if (targetUri != null) {
-            val isDng = targetUri.toString().endsWith(".dng", ignoreCase = true) || group.dngUri == targetUri
+            val isDng = targetUri.toString().endsWith(".dng", ignoreCase = true) || group.dngUri == targetUri || group.cinemaDngFirstFrameUri == targetUri
             val isMp4 = targetUri.toString().endsWith(".mp4", ignoreCase = true) || (group.isMp4Video && group.rawVideoUri == null)
 
-            if (isDng && group.jpgUri == null && group.derivativeJpgUris.isEmpty()) {
+            if (isDng && group.jpgUri == null && group.derivativeJpgUris.isEmpty() && group.mp4VideoUri == null && group.derivativeMp4Uris.isEmpty()) {
                 loadDngThumbnail(holder, group, targetUri)
             } else if (isMp4) {
                 loadMp4Thumbnail(holder, group, targetUri)
@@ -279,13 +280,22 @@ class DarkbagGalleryGridAdapter(
     }
 
     private fun setupSingleBadges(holder: SingleViewHolder, group: ImageGroup) {
+        val isCinemaDng = group.isCinemaDng || group.cinemaDngFolderUri != null || group.cinemaDngFirstFrameUri != null || group.cinemaDngFrameUris.isNotEmpty()
         val isRawVideo = group.isRawVideo || group.rawVideoUri != null
         val hasMp4 = group.isMp4Video || group.mp4VideoUri != null || group.derivativeMp4Uris.isNotEmpty()
         val hasJpg = group.jpgUri != null || group.derivativeJpgUris.isNotEmpty()
         val hasDng = group.dngUri != null || group.dngUri1 != null || group.dngUri2 != null
         val derivCount = group.allDerivativeUris.size
 
-        if (isRawVideo) {
+        if (isCinemaDng) {
+            holder.binding.tvFormatBadge.visibility = View.VISIBLE
+            holder.binding.tvFormatBadge.text = when {
+                derivCount >= 2 -> "CDNG+${derivCount}V"
+                hasMp4 -> "CDNG+MP4"
+                hasJpg -> "CDNG+JPG"
+                else -> "CDNG"
+            }
+        } else if (isRawVideo) {
             holder.binding.tvFormatBadge.visibility = View.VISIBLE
             holder.binding.tvFormatBadge.text = when {
                 derivCount >= 2 -> "RAW+${derivCount}V"
@@ -314,7 +324,7 @@ class DarkbagGalleryGridAdapter(
             holder.binding.tvFormatBadge.visibility = View.GONE
         }
 
-        if (group.isMotionPhoto || isRawVideo || hasMp4) {
+        if (isCinemaDng || group.isMotionPhoto || isRawVideo || hasMp4) {
             holder.binding.iconMotionBadge.visibility = View.VISIBLE
         } else {
             holder.binding.iconMotionBadge.visibility = View.GONE
