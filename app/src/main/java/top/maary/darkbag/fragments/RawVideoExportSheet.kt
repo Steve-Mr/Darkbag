@@ -7,7 +7,6 @@ import android.view.ViewGroup
 import androidx.core.os.bundleOf
 import androidx.fragment.app.setFragmentResult
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
-import com.google.android.material.chip.Chip
 import top.maary.darkbag.databinding.LayoutRawVideoExportSheetBinding
 import top.maary.darkbag.utils.LutManager
 
@@ -32,43 +31,47 @@ class RawVideoExportSheet : BottomSheetDialogFragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
-        selectedLog = arguments?.getString(ARG_LOG) ?: "None"
-        selectedLut = arguments?.getString(ARG_LUT) ?: "None"
+        val initialLog = arguments?.getString(ARG_LOG)?.takeIf { it.isNotBlank() } ?: "None"
+        val initialLut = arguments?.getString(ARG_LUT)?.takeIf { it.isNotBlank() } ?: "None"
 
         val context = requireContext()
         val lutManager = LutManager(context)
         val luts = lutManager.getLuts()
 
-        // 1. Populate Log Chips
+        // 1. Setup Log Dropdown Menu
         val logOptions = listOf("None") + SettingsFragment.LOG_CURVES
-        logOptions.forEach { logName ->
-            val chip = Chip(context, null, com.google.android.material.R.attr.chipStyle).apply {
-                text = logName
-                isCheckable = true
-                isChecked = logName == selectedLog
-                setOnCheckedChangeListener { _, isChecked ->
-                    if (isChecked) {
-                        selectedLog = logName
-                    }
-                }
-            }
-            binding.chipGroupLog.addView(chip)
+        selectedLog = if (logOptions.contains(initialLog)) initialLog else "None"
+
+        val logAdapter = android.widget.ArrayAdapter(context, android.R.layout.simple_dropdown_item_1line, logOptions)
+        binding.menuLog.setAdapter(logAdapter)
+        binding.menuLog.setText(selectedLog, false)
+        binding.menuLog.setOnItemClickListener { _, _, position, _ ->
+            selectedLog = logOptions[position]
         }
 
-        // 2. Populate LUT Chips
-        val lutEntries = listOf("None" to "None") + luts.map { it.nameWithoutExtension to it.name }
-        lutEntries.forEach { (displayName, fileName) ->
-            val chip = Chip(context, null, com.google.android.material.R.attr.chipStyle).apply {
-                text = displayName
-                isCheckable = true
-                isChecked = fileName == selectedLut || (selectedLut == "None" && fileName == "None")
-                setOnCheckedChangeListener { _, isChecked ->
-                    if (isChecked) {
-                        selectedLut = fileName
-                    }
-                }
-            }
-            binding.chipGroupLut.addView(chip)
+        // 2. Setup LUT Dropdown Menu with robust matching
+        val lutEntries = mutableListOf("None" to "None")
+        luts.forEach { file ->
+            lutEntries.add(file.nameWithoutExtension to file.name)
+        }
+
+        val matchedEntry = if (initialLut.equals("None", ignoreCase = true)) {
+            lutEntries.first()
+        } else {
+            lutEntries.find { (displayName, fileName) ->
+                fileName.equals(initialLut, ignoreCase = true) ||
+                displayName.equals(initialLut, ignoreCase = true) ||
+                fileName.removeSuffix(".cube").equals(initialLut.removeSuffix(".cube"), ignoreCase = true)
+            } ?: ("None" to "None")
+        }
+
+        selectedLut = matchedEntry.second
+        val lutDisplayNames = lutEntries.map { it.first }
+        val lutAdapter = android.widget.ArrayAdapter(context, android.R.layout.simple_dropdown_item_1line, lutDisplayNames)
+        binding.menuLut.setAdapter(lutAdapter)
+        binding.menuLut.setText(matchedEntry.first, false)
+        binding.menuLut.setOnItemClickListener { _, _, position, _ ->
+            selectedLut = lutEntries[position].second
         }
 
         // 3. Resolution Chips

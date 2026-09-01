@@ -34,65 +34,41 @@
         android:textColor="?attr/colorOnSurfaceVariant"
         android:textSize="13sp" />
 
-    <!-- Section 1: Log Curve -->
-    <TextView
+    <!-- Section 1: Log Tone Curve Dropdown -->
+    <com.google.android.material.textfield.TextInputLayout
+        style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="8dp"
-        android:layout_marginBottom="8dp"
-        android:text="LOG TONE CURVE"
-        android:textColor="?attr/colorPrimary"
-        android:textSize="12sp"
-        android:textStyle="bold"
-        android:letterSpacing="0.08" />
+        android:hint="Log Tone Curve">
 
-    <HorizontalScrollView
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:scrollbars="none"
-        android:clipToPadding="false">
-
-        <com.google.android.material.chip.ChipGroup
-            android:id="@+id/chip_group_log"
-            android:layout_width="wrap_content"
+        <AutoCompleteTextView
+            android:id="@+id/menu_log"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            app:singleSelection="true"
-            app:selectionRequired="true"
-            app:chipSpacingHorizontal="8dp" />
-    </HorizontalScrollView>
+            android:inputType="none" />
+    </com.google.android.material.textfield.TextInputLayout>
 
-    <!-- Section 2: Film Simulation LUT -->
-    <TextView
+    <!-- Section 2: Film Simulation (3D LUT) Dropdown -->
+    <com.google.android.material.textfield.TextInputLayout
+        style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="16dp"
-        android:layout_marginBottom="8dp"
-        android:text="FILM SIMULATION (3D LUT)"
-        android:textColor="?attr/colorPrimary"
-        android:textSize="12sp"
-        android:textStyle="bold"
-        android:letterSpacing="0.08" />
+        android:hint="Film Simulation (3D LUT)">
 
-    <HorizontalScrollView
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:scrollbars="none"
-        android:clipToPadding="false">
-
-        <com.google.android.material.chip.ChipGroup
-            android:id="@+id/chip_group_lut"
-            android:layout_width="wrap_content"
+        <AutoCompleteTextView
+            android:id="@+id/menu_lut"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            app:singleSelection="true"
-            app:selectionRequired="true"
-            app:chipSpacingHorizontal="8dp" />
-    </HorizontalScrollView>
+            android:inputType="none" />
+    </com.google.android.material.textfield.TextInputLayout>
 
     <!-- Section 3: Resolution -->
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="16dp"
+        android:layout_marginTop="20dp"
         android:layout_marginBottom="8dp"
         android:text="RESOLUTION"
         android:textColor="?attr/colorPrimary"
