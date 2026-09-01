@@ -2438,35 +2438,27 @@ open class ImageViewerFragment : Fragment() {
             val urisToDelete = mutableListOf<Uri>()
 
             if (deleteGroup) {
-                group.jpgUri?.let { urisToDelete.add(it) }
-                group.dngUri?.let { urisToDelete.add(it) }
-                group.dngUri1?.let { urisToDelete.add(it) }
-                group.dngUri2?.let { urisToDelete.add(it) }
-                group.rawVideoUri?.let { urisToDelete.add(it) }
-                group.mp4VideoUri?.let { urisToDelete.add(it) }
+                urisToDelete.addAll(group.allUris)
 
                 if (adapter.itemCount > 1) {
                     val nextIndex = if (currentIndex < adapter.itemCount - 1) currentIndex + 1 else currentIndex - 1
                     val nextGroup = adapter.getGroup(nextIndex)
-                    nextTargetUri = (nextGroup.jpgUri ?: nextGroup.dngUri)?.toString()
+                    nextTargetUri = nextGroup.firstAvailableUri?.toString()
                 }
             } else {
                 val selectedFormat = adapter.getSelectedFormat(binding.imagePager.currentItem)
-                if (selectedFormat == "DNG" && group.isHalfFrame()) {
-                     group.dngUri1?.let { urisToDelete.add(it) }
-                     group.dngUri2?.let { urisToDelete.add(it) }
+                if (selectedFormat == "DNG") {
+                    urisToDelete.addAll(group.allMasterRawUris)
                 } else {
-                    val currentUri = when (selectedFormat) {
-                        "JPG" -> group.jpgUri
-                        "DNG" -> group.dngUri ?: group.dngUri1 ?: group.dngUri2
-                        else -> group.jpgUri ?: group.dngUri ?: group.dngUri1 ?: group.dngUri2
-                    }
-                    currentUri?.let { urisToDelete.add(it) }
+                    val derivatives = adapter.getDerivativeUris(group)
+                    val activeIndex = adapter.getSelectedDerivativeIndex(group.baseName).coerceIn(0, (derivatives.size - 1).coerceAtLeast(0))
+                    val activeUri = derivatives.getOrNull(activeIndex) ?: group.jpgUri ?: group.mp4VideoUri
+                    activeUri?.let { urisToDelete.add(it) }
                 }
             }
 
             val securityExceptionUris = mutableListOf<Uri>()
-            for (uri in urisToDelete) {
+            for (uri in urisToDelete.distinct()) {
                 try {
                     deleteUriSafe(context, uri)
                 } catch (e: SecurityException) {
@@ -2482,13 +2474,13 @@ open class ImageViewerFragment : Fragment() {
             if (!deleteGroup) {
                 repository.invalidateCache()
                 val remainingGroup = repository.getGroupedImages(forceRefresh = true).find { it.baseName == group.baseName }
-                nextTargetUri = if (remainingGroup != null) {
-                    (remainingGroup.jpgUri ?: remainingGroup.dngUri)?.toString()
+                nextTargetUri = if (remainingGroup != null && remainingGroup.hasAny()) {
+                    remainingGroup.firstAvailableUri?.toString()
                 } else {
                     if (adapter.itemCount > 1) {
                         val nextIndex = if (currentIndex < adapter.itemCount - 1) currentIndex + 1 else currentIndex - 1
                         val nextGroup = adapter.getGroup(nextIndex)
-                        (nextGroup.jpgUri ?: nextGroup.dngUri)?.toString()
+                        nextGroup.firstAvailableUri?.toString()
                     } else null
                 }
             }
@@ -2697,22 +2689,22 @@ open class ImageViewerFragment : Fragment() {
 
     private fun showBatchDeleteDialog(selectedItems: List<GallerySelectedItem>) {
         if (selectedItems.isEmpty()) return
-        val hasAnyDng = selectedItems.any { item ->
+        val hasAnyRaw = selectedItems.any { item ->
             if (item.specificLens != null) {
                 item.specificLens.dngUri != null
             } else {
-                item.group.dngUri != null || item.group.dngUri1 != null || item.group.dngUri2 != null || item.group.multiDngUris.isNotEmpty()
+                item.group.hasMasterRaw
             }
         }
-        val hasAnyJpg = selectedItems.any { item ->
+        val hasAnyDerivatives = selectedItems.any { item ->
             if (item.specificLens != null) {
                 item.specificLens.jpgUri != null
             } else {
-                item.group.jpgUri != null || item.group.multiJpgUris.isNotEmpty()
+                item.group.hasDerivatives
             }
         }
 
-        DarkbagBatchDeleteSheet.newInstance(selectedItems.size, hasAnyDng, hasAnyJpg)
+        DarkbagBatchDeleteSheet.newInstance(selectedItems.size, hasAnyRaw, hasAnyDerivatives)
             .show(childFragmentManager, DarkbagBatchDeleteSheet.TAG)
     }
 
@@ -2733,33 +2725,15 @@ open class ImageViewerFragment : Fragment() {
                         1 -> { // RAW only
                             lens.dngUri?.let { urisToDelete.add(it) }
                         }
-                        2 -> { // JPG only
+                        2 -> { // Derivatives only
                             lens.jpgUri?.let { urisToDelete.add(it) }
                         }
                     }
                 } else {
                     when (deleteMode) {
-                        0 -> { // Entire group
-                            group.jpgUri?.let { urisToDelete.add(it) }
-                            group.dngUri?.let { urisToDelete.add(it) }
-                            group.dngUri1?.let { urisToDelete.add(it) }
-                            group.dngUri2?.let { urisToDelete.add(it) }
-                            group.rawVideoUri?.let { urisToDelete.add(it) }
-                            group.mp4VideoUri?.let { urisToDelete.add(it) }
-                            group.multiJpgUris.forEach { urisToDelete.add(it) }
-                            group.multiDngUris.forEach { urisToDelete.add(it) }
-                        }
-                        1 -> { // RAW only
-                            group.dngUri?.let { urisToDelete.add(it) }
-                            group.dngUri1?.let { urisToDelete.add(it) }
-                            group.dngUri2?.let { urisToDelete.add(it) }
-                            group.rawVideoUri?.let { urisToDelete.add(it) }
-                            group.multiDngUris.forEach { urisToDelete.add(it) }
-                        }
-                        2 -> { // JPG only
-                            group.jpgUri?.let { urisToDelete.add(it) }
-                            group.multiJpgUris.forEach { urisToDelete.add(it) }
-                        }
+                        0 -> urisToDelete.addAll(group.allUris)
+                        1 -> urisToDelete.addAll(group.allMasterRawUris)
+                        2 -> urisToDelete.addAll(group.allDerivativeUris)
                     }
                 }
             }

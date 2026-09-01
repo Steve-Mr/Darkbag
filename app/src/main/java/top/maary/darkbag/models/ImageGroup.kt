@@ -51,11 +51,45 @@ data class ImageGroup(
             for (uri in derivativeMp4Uris) {
                 if (uri !in list) list.add(uri)
             }
+            for (uri in multiJpgUris) {
+                if (uri !in list) list.add(uri)
+            }
             return list
         }
 
+    val allMasterRawUris: List<Uri>
+        get() {
+            val list = mutableListOf<Uri>()
+            dngUri?.let { list.add(it) }
+            dngUri1?.let { list.add(it) }
+            dngUri2?.let { list.add(it) }
+            rawVideoUri?.let { list.add(it) }
+            for (uri in multiDngUris) {
+                if (uri !in list) list.add(uri)
+            }
+            return list
+        }
+
+    val allUris: List<Uri>
+        get() {
+            val list = mutableListOf<Uri>()
+            for (uri in allMasterRawUris) {
+                if (uri !in list) list.add(uri)
+            }
+            for (uri in allDerivativeUris) {
+                if (uri !in list) list.add(uri)
+            }
+            return list
+        }
+
+    val firstAvailableUri: Uri?
+        get() = allDerivativeUris.firstOrNull() ?: allMasterRawUris.firstOrNull()
+
     val hasMasterRaw: Boolean
         get() = dngUri != null || dngUri1 != null || dngUri2 != null || rawVideoUri != null || multiDngUris.isNotEmpty()
+
+    val hasDerivatives: Boolean
+        get() = allDerivativeUris.isNotEmpty()
 
     val hasMultipleDerivatives: Boolean
         get() = allDerivativeUris.size >= 2
@@ -67,9 +101,9 @@ data class ImageGroup(
                                 (hfLayout == "SBS" || hfLayout == "TB")
 
     fun isSingleFormat(): Boolean {
-        val hasJpg = jpgUri != null || derivativeJpgUris.isNotEmpty()
-        val hasDng = dngUri != null || dngUri1 != null || dngUri2 != null || rawVideoUri != null
-        return (hasJpg && !hasDng) || (!hasJpg && hasDng)
+        val hasRaw = hasMasterRaw
+        val derivCount = allDerivativeUris.size
+        return (hasRaw && derivCount == 0) || (!hasRaw && derivCount <= 1)
     }
 }
 

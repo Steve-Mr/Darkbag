@@ -1118,6 +1118,8 @@ class ImageViewerAdapter(
 
     fun getGroups(): List<ImageGroup> = differ.currentList
 
+    fun getSelectedDerivativeIndex(baseName: String): Int = selectedDerivativeIndices[baseName] ?: 0
+
     fun setFormat(position: Int, format: String) {
         if (position >= differ.currentList.size) return
         val group = differ.currentList[position]
