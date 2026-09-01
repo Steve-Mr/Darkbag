@@ -26,6 +26,12 @@ object ImageUtils {
         if (base.contains("_MULTI_")) {
             base = base.substringBefore("_MULTI_")
         }
+        if (base.contains("_edited")) {
+            base = base.substringBefore("_edited")
+        }
+        if (base.contains("_graded")) {
+            base = base.substringBefore("_graded")
+        }
         return base
     }
 

@@ -258,6 +258,8 @@ open class ImageViewerFragment : Fragment() {
             binding.imagePager.visibility = View.INVISIBLE
         }
 
+        var hasNavigatedToTargetUri = false
+
         lifecycleScope.launch {
             repository.getGroupedImagesFlow(targetUri).collect { groups ->
                 if (groups.isEmpty()) {
@@ -276,6 +278,26 @@ open class ImageViewerFragment : Fragment() {
                 }
 
                 val isFirstLoad = !::adapter.isInitialized
+
+                val targetBaseName = targetUri?.let { top.maary.darkbag.utils.ImageUtils.getBaseName(it) }
+                val targetPos = if (targetUri != null) {
+                    val pos = groups.indexOfFirst {
+                        (targetBaseName != null && it.baseName == targetBaseName) ||
+                                it.rawVideoUri?.toString() == targetUri ||
+                                it.mp4VideoUri?.toString() == targetUri ||
+                                it.jpgUri?.toString() == targetUri ||
+                                it.dngUri?.toString() == targetUri ||
+                                it.dngUri1?.toString() == targetUri ||
+                                it.dngUri2?.toString() == targetUri ||
+                                it.derivativeJpgUris.any { u -> u.toString() == targetUri } ||
+                                it.derivativeMp4Uris.any { u -> u.toString() == targetUri } ||
+                                it.multiJpgUris.any { u -> u.toString() == targetUri } ||
+                                it.multiDngUris.any { u -> u.toString() == targetUri }
+                    }
+                    if (pos != -1) pos else {
+                        groups.indexOfFirst { it.baseName.isNotEmpty() && targetUri.contains(it.baseName) }
+                    }
+                } else -1
 
                 if (isFirstLoad) {
                     adapter = ImageViewerAdapter(groups, lifecycleScope, requireContext()).apply {
@@ -310,18 +332,15 @@ open class ImageViewerFragment : Fragment() {
                     }
                     binding.imagePager.adapter = adapter
 
-                    val initialPos = groups.indexOfFirst {
-                        it.rawVideoUri?.toString() == targetUri ||
-                                it.jpgUri?.toString() == targetUri ||
-                                it.dngUri?.toString() == targetUri ||
-                                it.dngUri1?.toString() == targetUri ||
-                                it.dngUri2?.toString() == targetUri
+                    val initialIndex = if (targetPos != -1) targetPos else 0
+                    if (targetPos != -1) {
+                        hasNavigatedToTargetUri = true
                     }
-                    if (initialPos != -1) {
-                        binding.imagePager.setCurrentItem(initialPos, false)
+                    binding.imagePager.setCurrentItem(initialIndex, false)
 
-                        // Load metadata for the initial image immediately
-                        val initialGroup = groups[initialPos]
+                    // Load metadata for the initial image immediately
+                    val initialGroup = groups.getOrNull(initialIndex)
+                    if (initialGroup != null) {
                         if (!initialGroup.metadataLoaded) {
                             val updatedGroup = repository.loadMetadata(initialGroup)
                             prepareEditConfig(updatedGroup)
@@ -331,25 +350,20 @@ open class ImageViewerFragment : Fragment() {
                                         if (continuation.isActive) continuation.resume(Unit)
                                     }
                                 }
-                                if (!isAdjusted && isMotionPhotoAutoPlay && updatedGroup.isMotionPhoto && hasAutoPlayedPosition != initialPos && binding.imagePager.currentItem == initialPos) {
-                                    hasAutoPlayedPosition = initialPos
-                                    adapter.playMotionVideoForPosition(initialPos)
+                                if (!isAdjusted && isMotionPhotoAutoPlay && updatedGroup.isMotionPhoto && hasAutoPlayedPosition != initialIndex && binding.imagePager.currentItem == initialIndex) {
+                                    hasAutoPlayedPosition = initialIndex
+                                    adapter.playMotionVideoForPosition(initialIndex)
                                 }
                             }
                         } else {
                             prepareEditConfig(initialGroup)
-                            if (!isAdjusted && isMotionPhotoAutoPlay && initialGroup.isMotionPhoto && hasAutoPlayedPosition != initialPos) {
-                                hasAutoPlayedPosition = initialPos
-                                adapter.playMotionVideoForPosition(initialPos)
+                            if (!isAdjusted && isMotionPhotoAutoPlay && initialGroup.isMotionPhoto && hasAutoPlayedPosition != initialIndex) {
+                                hasAutoPlayedPosition = initialIndex
+                                adapter.playMotionVideoForPosition(initialIndex)
                             }
                         }
-                    } else {
-                        val firstGroup = groups.firstOrNull()
-                        if (!isAdjusted && isMotionPhotoAutoPlay && firstGroup != null && firstGroup.isMotionPhoto && hasAutoPlayedPosition != 0) {
-                            hasAutoPlayedPosition = 0
-                            adapter.playMotionVideoForPosition(0)
-                        }
                     }
+
                     binding.imagePager.isUserInputEnabled = !isAdjusted
                     setupActionButtons()
                     updateControlsVisibility()
@@ -358,16 +372,20 @@ open class ImageViewerFragment : Fragment() {
 
                     if (!isGalleryMode) {
                         binding.imagePager.visibility = View.VISIBLE
+                        binding.initialLoadingIndicator.visibility = View.GONE
                     }
-                    binding.initialLoadingIndicator.visibility = View.GONE
                 } else {
                     adapter.updateGroups(groups)
+                    if (targetUri != null && !hasNavigatedToTargetUri && targetPos != -1) {
+                        hasNavigatedToTargetUri = true
+                        binding.imagePager.setCurrentItem(targetPos, false)
+                    }
                     updateGalleryPill(binding.imagePager.currentItem, groups.size)
                     preloadAdjacentMetadata(binding.imagePager.currentItem)
-                    if (!isGalleryMode) {
+                    if (!isGalleryMode && (targetUri == null || hasNavigatedToTargetUri)) {
                         binding.imagePager.visibility = View.VISIBLE
+                        binding.initialLoadingIndicator.visibility = View.GONE
                     }
-                    binding.initialLoadingIndicator.visibility = View.GONE
 
                     val currentIndex = binding.imagePager.currentItem
                     if (currentIndex in groups.indices) {

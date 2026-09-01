@@ -34,9 +34,31 @@ data class ImageGroup(
     val rawVideoFrameCount: Int = 0,
     val rawVideoDurationMs: Long = 0L,
     val mp4VideoUri: Uri? = null,
-    val isMp4Video: Boolean = false
+    val isMp4Video: Boolean = false,
+    val derivativeJpgUris: List<Uri> = emptyList(),
+    val derivativeMp4Uris: List<Uri> = emptyList()
 ) : Parcelable {
-    fun hasAny(): Boolean = jpgUri != null || dngUri != null || dngUri1 != null || dngUri2 != null || rawVideoUri != null || mp4VideoUri != null || multiJpgUris.isNotEmpty() || multiDngUris.isNotEmpty() || multiCameraLenses.isNotEmpty()
+    fun hasAny(): Boolean = jpgUri != null || dngUri != null || dngUri1 != null || dngUri2 != null || rawVideoUri != null || mp4VideoUri != null || multiJpgUris.isNotEmpty() || multiDngUris.isNotEmpty() || multiCameraLenses.isNotEmpty() || derivativeJpgUris.isNotEmpty() || derivativeMp4Uris.isNotEmpty()
+
+    val allDerivativeUris: List<Uri>
+        get() {
+            val list = mutableListOf<Uri>()
+            jpgUri?.let { list.add(it) }
+            for (uri in derivativeJpgUris) {
+                if (uri !in list) list.add(uri)
+            }
+            mp4VideoUri?.let { list.add(it) }
+            for (uri in derivativeMp4Uris) {
+                if (uri !in list) list.add(uri)
+            }
+            return list
+        }
+
+    val hasMasterRaw: Boolean
+        get() = dngUri != null || dngUri1 != null || dngUri2 != null || rawVideoUri != null || multiDngUris.isNotEmpty()
+
+    val hasMultipleDerivatives: Boolean
+        get() = allDerivativeUris.size >= 2
 
     // 2.5: Only true if it has both DNGs, a stitched JPG, or an explicit layout.
     // If only dngUri1 exists and no jpg, it's NOT a half-frame group (shows as single image).
@@ -45,8 +67,8 @@ data class ImageGroup(
                                 (hfLayout == "SBS" || hfLayout == "TB")
 
     fun isSingleFormat(): Boolean {
-        val hasJpg = jpgUri != null
-        val hasDng = dngUri != null || dngUri1 != null || dngUri2 != null
+        val hasJpg = jpgUri != null || derivativeJpgUris.isNotEmpty()
+        val hasDng = dngUri != null || dngUri1 != null || dngUri2 != null || rawVideoUri != null
         return (hasJpg && !hasDng) || (!hasJpg && hasDng)
     }
 }

@@ -7,10 +7,9 @@ import android.os.Build
 import android.provider.DocumentsContract
 import android.provider.MediaStore
 import androidx.documentfile.provider.DocumentFile
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import top.maary.darkbag.fragments.SettingsFragment
@@ -79,37 +78,65 @@ class ImageRepository(private val context: Context) {
             emit(sorted)
         }
 
-        // Stage 1: Fast scan MediaStore (usually fastest as it's an indexed database)
-        withContext(Dispatchers.IO) {
-            scanMediaStore(groups, fast = true)
+        val safJpgUri = prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
+        val safRawUri = prefs.getString(SettingsFragment.KEY_RAW_STORAGE_URI, null)
+
+        // Stage 1: Fast concurrent scan of MediaStore + SAF Folders in parallel
+        coroutineScope {
+            val jobMediaStore = async(Dispatchers.IO) {
+                val msGroups = mutableMapOf<String, ImageGroupBuilder>()
+                scanMediaStore(msGroups, fast = true)
+                msGroups
+            }
+            val jobSafJpg = async(Dispatchers.IO) {
+                val jpgGroups = mutableMapOf<String, ImageGroupBuilder>()
+                if (safJpgUri != null) {
+                    scanSafFolder(safJpgUri, jpgGroups, fast = true)
+                }
+                jpgGroups
+            }
+            val jobSafRaw = async(Dispatchers.IO) {
+                val rawGroups = mutableMapOf<String, ImageGroupBuilder>()
+                if (safRawUri != null && safRawUri != safJpgUri) {
+                    scanSafFolder(safRawUri, rawGroups, fast = true)
+                }
+                rawGroups
+            }
+
+            val msResults = jobMediaStore.await()
+            val jpgResults = jobSafJpg.await()
+            val rawResults = jobSafRaw.await()
+
+            mergeGroupMaps(groups, msResults)
+            mergeGroupMaps(groups, jpgResults)
+            mergeGroupMaps(groups, rawResults)
+
             preloadInitialMetadata(groups, initialUri)
         }
+
         emitCurrent()
+    }
 
-        // Stage 2: Scan prioritized SAF folders
-        val safFolders = listOf(
-            prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null),
-            prefs.getString(SettingsFragment.KEY_RAW_STORAGE_URI, null)
-        )
-
-        for (folderUri in safFolders) {
-            if (folderUri != null) {
-                withContext(Dispatchers.IO) {
-                    scanSafFolder(folderUri, groups, fast = true)
-                    preloadInitialMetadata(groups, initialUri)
-                }
-                emitCurrent()
-            }
+    private fun mergeGroupMaps(target: MutableMap<String, ImageGroupBuilder>, source: Map<String, ImageGroupBuilder>) {
+        for ((baseName, builder) in source) {
+            val existing = target.getOrPut(baseName) { ImageGroupBuilder(baseName) }
+            existing.mergeFrom(builder)
         }
     }
 
     private fun preloadInitialMetadata(groups: Map<String, ImageGroupBuilder>, initialUri: String?) {
         if (initialUri == null) return
-        val targetBuilder = groups.values.firstOrNull { builder ->
-            builder.jpgUri?.toString() == initialUri ||
+        val targetBaseName = getBaseName(initialUri)
+        val targetBuilder = groups[targetBaseName] ?: groups.values.firstOrNull { builder ->
+            builder.baseName == targetBaseName ||
+                    builder.jpgUri?.toString() == initialUri ||
                     builder.dngUri?.toString() == initialUri ||
                     builder.dngUri1?.toString() == initialUri ||
-                    builder.dngUri2?.toString() == initialUri
+                    builder.dngUri2?.toString() == initialUri ||
+                    builder.rawVideoUri?.toString() == initialUri ||
+                    builder.mp4VideoUri?.toString() == initialUri ||
+                    builder.derivativeJpgUris.any { it.toString() == initialUri } ||
+                    builder.derivativeMp4Uris.any { it.toString() == initialUri }
         }
         if (targetBuilder != null && !targetBuilder.metadataLoaded) {
             populateMetadata(targetBuilder)
@@ -428,6 +455,8 @@ class ImageRepository(private val context: Context) {
         }
         val selectionArgs = arrayOf("%Darkbag%", "${DarkbagIdentity.FILE_PREFIX}%")
 
+        val processedMediaKeys = mutableSetOf<String>()
+
         for (collection in collections) {
             try {
                 context.contentResolver.query(collection, projection, selection, selectionArgs, null)?.use { cursor ->
@@ -446,6 +475,10 @@ class ImageRepository(private val context: Context) {
                         val date = cursor.getLong(dateColumn) * 1000 // Convert to ms
                         val modified = cursor.getLong(modifiedColumn) * 1000 // Convert to ms
                         val mime = cursor.getString(mimeColumn)
+                        
+                        val dedupeKey = "$name-$modified"
+                        if (!processedMediaKeys.add(dedupeKey)) continue
+
                         val uri = ContentUris.withAppendedId(collection, id)
 
                         val baseName = getBaseName(name)
@@ -697,6 +730,8 @@ class ImageRepository(private val context: Context) {
         var mp4VideoUri: Uri? = null
         var mp4VideoTime: Long = 0L
         var isMp4Video: Boolean = false
+        val derivativeJpgUris = mutableListOf<Uri>()
+        val derivativeMp4Uris = mutableListOf<Uri>()
         val multiLensBuilders = mutableMapOf<String, MultiLensItemBuilder>()
         var isMultiCamera: Boolean = false
         var hfLayout: String? = null
@@ -723,6 +758,10 @@ class ImageRepository(private val context: Context) {
             rawVideoDurationMs = group.rawVideoDurationMs
             mp4VideoUri = group.mp4VideoUri
             isMp4Video = group.isMp4Video
+            derivativeJpgUris.clear()
+            derivativeJpgUris.addAll(group.derivativeJpgUris)
+            derivativeMp4Uris.clear()
+            derivativeMp4Uris.addAll(group.derivativeMp4Uris)
             isMultiCamera = group.isMultiCamera
             multiLensBuilders.clear()
             for (lens in group.multiCameraLenses) {
@@ -747,6 +786,69 @@ class ImageRepository(private val context: Context) {
             return this
         }
 
+        private fun isSameBaseFile(existingUri: Uri?, newUri: Uri, expectedExt: String): Boolean {
+            if (existingUri == null) return false
+            if (existingUri == newUri || existingUri.toString() == newUri.toString()) return true
+            val existingName = existingUri.lastPathSegment?.let { 
+                try { java.net.URLDecoder.decode(it, "UTF-8") } catch (e: Exception) { it }
+            }?.substringAfterLast("/")?.substringAfterLast(":") ?: ""
+            val newName = newUri.lastPathSegment?.let { 
+                try { java.net.URLDecoder.decode(it, "UTF-8") } catch (e: Exception) { it }
+            }?.substringAfterLast("/")?.substringAfterLast(":") ?: ""
+            if (existingName.isNotEmpty() && newName.isNotEmpty() && existingName.equals(newName, ignoreCase = true)) {
+                return true
+            }
+            val defaultName1 = "${DarkbagIdentity.FILE_PREFIX}$baseName.$expectedExt"
+            val defaultName2 = "$baseName.$expectedExt"
+            val defaultGraded1 = "${DarkbagIdentity.FILE_PREFIX}${baseName}_graded.$expectedExt"
+            val defaultGraded2 = "${baseName}_graded.$expectedExt"
+            val isExistingDefault = existingName.isEmpty() || existingName.equals(defaultName1, true) || existingName.equals(defaultName2, true) || existingName.equals(defaultGraded1, true) || existingName.equals(defaultGraded2, true)
+            val isNewDefault = newName.isEmpty() || newName.equals(defaultName1, true) || newName.equals(defaultName2, true) || newName.equals(defaultGraded1, true) || newName.equals(defaultGraded2, true)
+            return isExistingDefault && isNewDefault
+        }
+
+        fun mergeFrom(other: ImageGroupBuilder) {
+            if (other.jpgUri != null) setJpg(other.jpgUri!!, other.jpgTime)
+            for (uri in other.derivativeJpgUris) {
+                if (!isSameBaseFile(jpgUri, uri, "jpg") && uri !in derivativeJpgUris) {
+                    derivativeJpgUris.add(uri)
+                }
+            }
+            if (other.dngUri != null) setDng(other.dngUri!!, other.dngTime)
+            if (other.dngUri1 != null) setDng1(other.dngUri1!!, other.dngUri1Time)
+            if (other.dngUri2 != null) setDng2(other.dngUri2!!, other.dngUri2Time)
+            if (other.rawVideoUri != null) setRawVideo(other.rawVideoUri!!, other.rawVideoTime)
+            if (other.mp4VideoUri != null) setMp4Video(other.mp4VideoUri!!, other.mp4VideoTime)
+            for (uri in other.derivativeMp4Uris) {
+                if (!isSameBaseFile(mp4VideoUri, uri, "mp4") && uri !in derivativeMp4Uris) {
+                    derivativeMp4Uris.add(uri)
+                }
+            }
+            for ((tag, lens) in other.multiLensBuilders) {
+                val item = multiLensBuilders.getOrPut(tag) { MultiLensItemBuilder(tag, lens.multiplier) }
+                if (lens.jpgUri != null) item.jpgUri = lens.jpgUri
+                if (lens.dngUri != null) item.dngUri = lens.dngUri
+            }
+            if (other.isMultiCamera) isMultiCamera = true
+            if (other.hfLayout != null) hfLayout = other.hfLayout
+            if (other.width > 0) width = other.width
+            if (other.height > 0) height = other.height
+            if (other.orientation != 0) orientation = other.orientation
+            if (other.editConfig != null) editConfig = other.editConfig
+            if (other.isMotionPhoto) {
+                isMotionPhoto = true
+                motionPhotoPtsUs = other.motionPhotoPtsUs
+                motionPhotoVideoLength = other.motionPhotoVideoLength
+            }
+            if (other.rawVideoFps > 0) {
+                rawVideoFps = other.rawVideoFps
+                rawVideoFrameCount = other.rawVideoFrameCount
+                rawVideoDurationMs = other.rawVideoDurationMs
+            }
+            if (other.metadataLoaded) metadataLoaded = true
+            updateTime(other.captureTime, other.lastModified)
+        }
+
         fun addMultiJpg(uri: Uri, fileName: String, time: Long, modifiedTime: Long = time) {
             isMultiCamera = true
             val tag = top.maary.darkbag.utils.ImageUtils.extractMultiCameraLensTag(fileName)
@@ -768,7 +870,17 @@ class ImageRepository(private val context: Context) {
         }
 
         fun setRawVideo(uri: Uri, time: Long, modifiedTime: Long = time) {
-            if (rawVideoUri == null || (time > rawVideoTime + 2000)) {
+            if (rawVideoUri == null) {
+                rawVideoUri = uri
+                rawVideoTime = time
+                isRawVideo = true
+            } else if (isSameBaseFile(rawVideoUri, uri, "rawvid")) {
+                if (uri.authority?.contains("documents") == true || uri.scheme == "file") {
+                    rawVideoUri = uri
+                }
+                rawVideoTime = maxOf(rawVideoTime, time)
+                isRawVideo = true
+            } else if (time > rawVideoTime + 2000) {
                 rawVideoUri = uri
                 rawVideoTime = time
                 isRawVideo = true
@@ -777,26 +889,67 @@ class ImageRepository(private val context: Context) {
         }
 
         fun setMp4Video(uri: Uri, time: Long, modifiedTime: Long = time) {
-            if (mp4VideoUri == null || (time > mp4VideoTime + 2000)) {
+            if (mp4VideoUri == null) {
                 mp4VideoUri = uri
                 mp4VideoTime = time
                 isMp4Video = true
+            } else if (isSameBaseFile(mp4VideoUri, uri, "mp4")) {
+                if (uri.authority?.contains("documents") == true || uri.scheme == "file") {
+                    mp4VideoUri = uri
+                }
+                mp4VideoTime = maxOf(mp4VideoTime, time)
+                isMp4Video = true
+            } else if (mp4VideoUri != uri) {
+                if (uri !in derivativeMp4Uris) {
+                    derivativeMp4Uris.add(uri)
+                }
+                if (time > mp4VideoTime + 2000) {
+                    val old = mp4VideoUri
+                    if (old != null && old !in derivativeMp4Uris) {
+                        derivativeMp4Uris.add(0, old)
+                    }
+                    mp4VideoUri = uri
+                    mp4VideoTime = time
+                }
             }
             updateTime(time, modifiedTime)
         }
 
         fun setJpg(uri: Uri, time: Long, modifiedTime: Long = time) {
-            // Avoid flipping URI if we already have one for the same file (within 2s)
-            // unless the new one is significantly newer (indicating a true update/edit)
-            if (jpgUri == null || (time > jpgTime + 2000)) {
+            if (jpgUri == null) {
                 jpgUri = uri
                 jpgTime = time
+            } else if (isSameBaseFile(jpgUri, uri, "jpg")) {
+                if (uri.authority?.contains("documents") == true || uri.scheme == "file") {
+                    jpgUri = uri
+                }
+                jpgTime = maxOf(jpgTime, time)
+            } else if (jpgUri != uri) {
+                if (uri !in derivativeJpgUris) {
+                    derivativeJpgUris.add(uri)
+                }
+                if (time > jpgTime + 2000) {
+                    val old = jpgUri
+                    if (old != null && old !in derivativeJpgUris) {
+                        derivativeJpgUris.add(0, old)
+                    }
+                    jpgUri = uri
+                    jpgTime = time
+                }
             }
             updateTime(time, modifiedTime)
         }
 
         fun setDng(uri: Uri, time: Long, modifiedTime: Long = time) {
-            if (dngUri == null || (time > dngTime + 2000)) {
+            if (dngUri == null) {
+                dngUri = uri
+                dngTime = time
+            } else if (isSameBaseFile(dngUri, uri, "dng")) {
+                if (uri.authority?.contains("documents") == true || uri.scheme == "file") {
+                    dngUri = uri
+                }
+                dngTime = maxOf(dngTime, time)
+            } else if (time > dngTime + 2000) {
                 dngUri = uri
                 dngTime = time
             }
@@ -804,7 +957,15 @@ class ImageRepository(private val context: Context) {
         }
 
         fun setDng1(uri: Uri, time: Long, modifiedTime: Long = time) {
-            if (dngUri1 == null || (time > dngUri1Time + 2000)) {
+            if (dngUri1 == null) {
+                dngUri1 = uri
+                dngUri1Time = time
+            } else if (isSameBaseFile(dngUri1, uri, "dng")) {
+                if (uri.authority?.contains("documents") == true || uri.scheme == "file") {
+                    dngUri1 = uri
+                }
+                dngUri1Time = maxOf(dngUri1Time, time)
+            } else if (time > dngUri1Time + 2000) {
                 dngUri1 = uri
                 dngUri1Time = time
             }
@@ -812,7 +973,15 @@ class ImageRepository(private val context: Context) {
         }
 
         fun setDng2(uri: Uri, time: Long, modifiedTime: Long = time) {
-            if (dngUri2 == null || (time > dngUri2Time + 2000)) {
+            if (dngUri2 == null) {
+                dngUri2 = uri
+                dngUri2Time = time
+            } else if (isSameBaseFile(dngUri2, uri, "dng")) {
+                if (uri.authority?.contains("documents") == true || uri.scheme == "file") {
+                    dngUri2 = uri
+                }
+                dngUri2Time = maxOf(dngUri2Time, time)
+            } else if (time > dngUri2Time + 2000) {
                 dngUri2 = uri
                 dngUri2Time = time
             }
@@ -896,7 +1065,9 @@ class ImageRepository(private val context: Context) {
                 rawVideoFrameCount = rawVideoFrameCount,
                 rawVideoDurationMs = rawVideoDurationMs,
                 mp4VideoUri = mp4VideoUri,
-                isMp4Video = isMp4Video
+                isMp4Video = isMp4Video,
+                derivativeJpgUris = derivativeJpgUris.toList(),
+                derivativeMp4Uris = derivativeMp4Uris.toList()
             )
         }
     }
