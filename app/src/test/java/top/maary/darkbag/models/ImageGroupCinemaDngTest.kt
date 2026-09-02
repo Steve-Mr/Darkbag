@@ -124,4 +124,55 @@ class ImageGroupCinemaDngTest {
         assertEquals(dngUri, pairedGroup.dngUri)
         assertEquals(jpgUri, pairedGroup.jpgUri)
     }
+
+    @Test
+    fun testDistinctMasterRawUriAccessors() {
+        val cdngFolder = Uri.parse("content://dng/folder")
+        val cdngFrame = Uri.parse("content://dng/frame0")
+        val rawvidUri = Uri.parse("content://rawvid/video.rawvid")
+        val photoDngUri = Uri.parse("content://photo/photo.dng")
+
+        val mixedGroup = ImageGroup(
+            baseName = "MIXED_TEST",
+            isCinemaDng = true,
+            cinemaDngFolderUri = cdngFolder,
+            cinemaDngFirstFrameUri = cdngFrame,
+            rawVideoUri = rawvidUri,
+            dngUri = photoDngUri
+        )
+
+        assertFalse(mixedGroup.isSingleFormat())
+
+        assertEquals(listOf(cdngFolder, cdngFrame), mixedGroup.allCinemaDngUris)
+        assertEquals(listOf(rawvidUri), mixedGroup.rawVideoMasterUris)
+        assertEquals(listOf(photoDngUri), mixedGroup.photoMasterUris)
+
+        val allMaster = mixedGroup.allMasterRawUris
+        assertTrue(allMaster.contains(cdngFolder))
+        assertTrue(allMaster.contains(cdngFrame))
+        assertTrue(allMaster.contains(rawvidUri))
+        assertTrue(allMaster.contains(photoDngUri))
+        assertEquals(4, allMaster.size)
+    }
+
+    @Test
+    fun testRawVideoExportSheetModes() {
+        assertEquals(0, top.maary.darkbag.fragments.RawVideoExportSheet.MODE_VIDEO)
+        assertEquals(1, top.maary.darkbag.fragments.RawVideoExportSheet.MODE_SINGLE_FRAME_JPG)
+        assertEquals(2, top.maary.darkbag.fragments.RawVideoExportSheet.MODE_SINGLE_FRAME_PAIR)
+
+        val sheet = top.maary.darkbag.fragments.RawVideoExportSheet.newInstance(
+            currentLog = "Log-C",
+            currentLut = "film.cube",
+            exportMode = top.maary.darkbag.fragments.RawVideoExportSheet.MODE_SINGLE_FRAME_JPG,
+            frameIndex = 7
+        )
+
+        val args = sheet.arguments
+        assertNotNull(args)
+        assertEquals("Log-C", args!!.getString(top.maary.darkbag.fragments.RawVideoExportSheet.ARG_LOG))
+        assertEquals("film.cube", args.getString(top.maary.darkbag.fragments.RawVideoExportSheet.ARG_LUT))
+        assertEquals(top.maary.darkbag.fragments.RawVideoExportSheet.MODE_SINGLE_FRAME_JPG, args.getInt(top.maary.darkbag.fragments.RawVideoExportSheet.ARG_EXPORT_MODE))
+        assertEquals(7, args.getInt(top.maary.darkbag.fragments.RawVideoExportSheet.ARG_FRAME_INDEX))
+    }
 }

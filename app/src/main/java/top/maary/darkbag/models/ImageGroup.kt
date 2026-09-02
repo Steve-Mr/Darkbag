@@ -63,7 +63,7 @@ data class ImageGroup(
             return list
         }
 
-    val allMasterRawUris: List<Uri>
+    val allCinemaDngUris: List<Uri>
         get() {
             val list = mutableListOf<Uri>()
             cinemaDngFolderUri?.let { if (it !in list) list.add(it) }
@@ -72,11 +72,38 @@ data class ImageGroup(
             for (uri in cinemaDngFrameUris) {
                 if (uri !in list) list.add(uri)
             }
+            return list
+        }
+
+    val rawVideoMasterUris: List<Uri>
+        get() {
+            val list = mutableListOf<Uri>()
+            rawVideoUri?.let { if (it !in list) list.add(it) }
+            return list
+        }
+
+    val photoMasterUris: List<Uri>
+        get() {
+            val list = mutableListOf<Uri>()
             dngUri?.let { if (it !in list) list.add(it) }
             dngUri1?.let { if (it !in list) list.add(it) }
             dngUri2?.let { if (it !in list) list.add(it) }
-            rawVideoUri?.let { if (it !in list) list.add(it) }
             for (uri in multiDngUris) {
+                if (uri !in list) list.add(uri)
+            }
+            return list
+        }
+
+    val allMasterRawUris: List<Uri>
+        get() {
+            val list = mutableListOf<Uri>()
+            for (uri in allCinemaDngUris) {
+                if (uri !in list) list.add(uri)
+            }
+            for (uri in rawVideoMasterUris) {
+                if (uri !in list) list.add(uri)
+            }
+            for (uri in photoMasterUris) {
                 if (uri !in list) list.add(uri)
             }
             return list
@@ -113,9 +140,12 @@ data class ImageGroup(
                                 (hfLayout == "SBS" || hfLayout == "TB")
 
     fun isSingleFormat(): Boolean {
-        val hasRaw = hasMasterRaw
+        var rawCount = 0
+        if (allCinemaDngUris.isNotEmpty() || isCinemaDng) rawCount++
+        if (rawVideoMasterUris.isNotEmpty() || isRawVideo) rawCount++
+        if (photoMasterUris.isNotEmpty()) rawCount++
         val derivCount = allDerivativeUris.size
-        return (hasRaw && derivCount == 0) || (!hasRaw && derivCount <= 1)
+        return (rawCount + derivCount) <= 1
     }
 }
 

@@ -7,6 +7,7 @@ import android.view.ViewGroup
 import androidx.core.os.bundleOf
 import androidx.fragment.app.setFragmentResult
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
+import top.maary.darkbag.R
 import top.maary.darkbag.databinding.LayoutRawVideoExportSheetBinding
 import top.maary.darkbag.utils.LutManager
 
@@ -33,6 +34,8 @@ class RawVideoExportSheet : BottomSheetDialogFragment() {
 
         val initialLog = arguments?.getString(ARG_LOG)?.takeIf { it.isNotBlank() } ?: "None"
         val initialLut = arguments?.getString(ARG_LUT)?.takeIf { it.isNotBlank() } ?: "None"
+        val exportMode = arguments?.getInt(ARG_EXPORT_MODE, MODE_VIDEO) ?: MODE_VIDEO
+        val frameIndex = arguments?.getInt(ARG_FRAME_INDEX, 0) ?: 0
 
         val context = requireContext()
         val lutManager = LutManager(context)
@@ -74,9 +77,23 @@ class RawVideoExportSheet : BottomSheetDialogFragment() {
             selectedLut = lutEntries[position].second
         }
 
-        // 3. Resolution Chips
-        binding.chipGroupResolution.setOnCheckedStateChangeListener { _, checkedIds ->
-            selectedResolution = if (checkedIds.contains(binding.chipRes4k.id)) 2160 else 1080
+        // 3. Setup UI based on Export Mode
+        if (exportMode != MODE_VIDEO) {
+            binding.tvResolutionLabel.visibility = View.GONE
+            binding.chipGroupResolution.visibility = View.GONE
+            binding.tvTitle.text = if (exportMode == MODE_SINGLE_FRAME_PAIR) {
+                "导出 RAW + 调色 JPG (Frame #${frameIndex + 1})"
+            } else {
+                "导出单帧调色照片 (Frame #${frameIndex + 1})"
+            }
+            binding.tvSubtitle.text = "选择母带输出的 Log 曲线与 3D LUT 胶片模拟"
+            binding.btnExportAction.text = "导出调色照片"
+            binding.btnExportAction.setIconResource(R.drawable.ic_camera)
+        } else {
+            // Resolution Chips for Video
+            binding.chipGroupResolution.setOnCheckedStateChangeListener { _, checkedIds ->
+                selectedResolution = if (checkedIds.contains(binding.chipRes4k.id)) 2160 else 1080
+            }
         }
 
         // 4. Export Button
@@ -86,7 +103,9 @@ class RawVideoExportSheet : BottomSheetDialogFragment() {
                 bundleOf(
                     RESULT_LOG to selectedLog,
                     RESULT_LUT to selectedLut,
-                    RESULT_RESOLUTION to selectedResolution
+                    RESULT_RESOLUTION to selectedResolution,
+                    RESULT_EXPORT_MODE to exportMode,
+                    RESULT_FRAME_INDEX to frameIndex
                 )
             )
             dismiss()
@@ -103,15 +122,30 @@ class RawVideoExportSheet : BottomSheetDialogFragment() {
         const val REQUEST_KEY = "request_raw_video_export"
         const val ARG_LOG = "arg_log"
         const val ARG_LUT = "arg_lut"
+        const val ARG_EXPORT_MODE = "arg_export_mode"
+        const val ARG_FRAME_INDEX = "arg_frame_index"
         const val RESULT_LOG = "result_log"
         const val RESULT_LUT = "result_lut"
         const val RESULT_RESOLUTION = "result_resolution"
+        const val RESULT_EXPORT_MODE = "result_export_mode"
+        const val RESULT_FRAME_INDEX = "result_frame_index"
 
-        fun newInstance(currentLog: String?, currentLut: String?): RawVideoExportSheet {
+        const val MODE_VIDEO = 0
+        const val MODE_SINGLE_FRAME_JPG = 1
+        const val MODE_SINGLE_FRAME_PAIR = 2
+
+        fun newInstance(
+            currentLog: String?,
+            currentLut: String?,
+            exportMode: Int = MODE_VIDEO,
+            frameIndex: Int = 0
+        ): RawVideoExportSheet {
             return RawVideoExportSheet().apply {
                 arguments = bundleOf(
                     ARG_LOG to (currentLog ?: "None"),
-                    ARG_LUT to (currentLut ?: "None")
+                    ARG_LUT to (currentLut ?: "None"),
+                    ARG_EXPORT_MODE to exportMode,
+                    ARG_FRAME_INDEX to frameIndex
                 )
             }
         }

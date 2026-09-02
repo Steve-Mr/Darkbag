@@ -257,9 +257,32 @@ open class ImageViewerFragment : Fragment() {
             val log = bundle.getString(RawVideoExportSheet.RESULT_LOG) ?: "None"
             val lut = bundle.getString(RawVideoExportSheet.RESULT_LUT) ?: "None"
             val resolution = bundle.getInt(RawVideoExportSheet.RESULT_RESOLUTION, 1080)
+            val exportMode = bundle.getInt(RawVideoExportSheet.RESULT_EXPORT_MODE, RawVideoExportSheet.MODE_VIDEO)
+            val frameIndex = bundle.getInt(RawVideoExportSheet.RESULT_FRAME_INDEX, 0)
             val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
             val config = (currentEditConfig ?: currentGroup.editConfig ?: top.maary.darkbag.models.EditConfig()).copy(log = log, lut = lut)
-            performExportMp4(currentGroup, config, resolution)
+
+            when (exportMode) {
+                RawVideoExportSheet.MODE_VIDEO -> {
+                    performExportMp4(currentGroup, config, resolution)
+                }
+                RawVideoExportSheet.MODE_SINGLE_FRAME_JPG -> {
+                    exportCinemaDngFrame(
+                        group = currentGroup,
+                        exportType = top.maary.darkbag.rawvideo.RawVideoExporter.FrameExportType.GRADED_JPG_ONLY,
+                        editConfig = config,
+                        targetFrameIndex = frameIndex
+                    )
+                }
+                RawVideoExportSheet.MODE_SINGLE_FRAME_PAIR -> {
+                    exportCinemaDngFrame(
+                        group = currentGroup,
+                        exportType = top.maary.darkbag.rawvideo.RawVideoExporter.FrameExportType.RAW_AND_GRADED_PAIR,
+                        editConfig = config,
+                        targetFrameIndex = frameIndex
+                    )
+                }
+            }
         }
 
         binding.imagePager.registerOnPageChangeCallback(pageChangeCallback)
@@ -2303,6 +2326,10 @@ open class ImageViewerFragment : Fragment() {
     }
 
     private fun showCinemaDngShareExportDialog(group: top.maary.darkbag.models.ImageGroup) {
+        val currentIndex = binding.imagePager.currentItem
+        val frameInfo = currentCinemaDngFrame ?: adapter.getActiveCinemaDngFrame(currentIndex)
+        val frameIndex = frameInfo?.first ?: 0
+
         val options = arrayOf(
             getString(R.string.cinemadng_export_raw_dng),
             getString(R.string.cinemadng_export_graded_jpg),
@@ -2314,9 +2341,46 @@ open class ImageViewerFragment : Fragment() {
             .setTitle(R.string.cinemadng_export_dialog_title)
             .setItems(options) { _, which ->
                 when (which) {
-                    0 -> exportCinemaDngFrame(group, top.maary.darkbag.rawvideo.RawVideoExporter.FrameExportType.RAW_DNG_ONLY)
-                    1 -> exportCinemaDngFrame(group, top.maary.darkbag.rawvideo.RawVideoExporter.FrameExportType.GRADED_JPG_ONLY)
-                    2 -> exportCinemaDngFrame(group, top.maary.darkbag.rawvideo.RawVideoExporter.FrameExportType.RAW_AND_GRADED_PAIR)
+                    0 -> exportCinemaDngFrame(
+                        group = group,
+                        exportType = top.maary.darkbag.rawvideo.RawVideoExporter.FrameExportType.RAW_DNG_ONLY,
+                        editConfig = null,
+                        targetFrameIndex = frameIndex
+                    )
+                    1 -> {
+                        lifecycleScope.launch {
+                            val fullyLoadedGroup = if (!group.metadataLoaded) {
+                                repository.loadMetadata(group)
+                            } else {
+                                group
+                            }
+                            val config = currentEditConfig ?: fullyLoadedGroup.editConfig
+                            val sheet = RawVideoExportSheet.newInstance(
+                                currentLog = config?.log,
+                                currentLut = config?.lut,
+                                exportMode = RawVideoExportSheet.MODE_SINGLE_FRAME_JPG,
+                                frameIndex = frameIndex
+                            )
+                            sheet.show(childFragmentManager, RawVideoExportSheet.TAG)
+                        }
+                    }
+                    2 -> {
+                        lifecycleScope.launch {
+                            val fullyLoadedGroup = if (!group.metadataLoaded) {
+                                repository.loadMetadata(group)
+                            } else {
+                                group
+                            }
+                            val config = currentEditConfig ?: fullyLoadedGroup.editConfig
+                            val sheet = RawVideoExportSheet.newInstance(
+                                currentLog = config?.log,
+                                currentLut = config?.lut,
+                                exportMode = RawVideoExportSheet.MODE_SINGLE_FRAME_PAIR,
+                                frameIndex = frameIndex
+                            )
+                            sheet.show(childFragmentManager, RawVideoExportSheet.TAG)
+                        }
+                    }
                     3 -> handleCinemaDngFullVideoExport(group)
                 }
             }
@@ -2326,15 +2390,21 @@ open class ImageViewerFragment : Fragment() {
 
     private fun exportCinemaDngFrame(
         group: top.maary.darkbag.models.ImageGroup,
-        exportType: top.maary.darkbag.rawvideo.RawVideoExporter.FrameExportType
+        exportType: top.maary.darkbag.rawvideo.RawVideoExporter.FrameExportType,
+        editConfig: top.maary.darkbag.models.EditConfig? = null,
+        targetFrameIndex: Int? = null
     ) {
         val currentIndex = binding.imagePager.currentItem
         val frameInfo = currentCinemaDngFrame ?: adapter.getActiveCinemaDngFrame(currentIndex)
-        val frameIndex = frameInfo?.first ?: 0
-        val frameUri = frameInfo?.second
-            ?: group.cinemaDngFrameUris.getOrNull(frameIndex)
-            ?: group.cinemaDngFirstFrameUri
-            ?: group.dngUri
+        val frameIndex = targetFrameIndex ?: frameInfo?.first ?: 0
+        val frameUri = if (targetFrameIndex != null && group.cinemaDngFrameUris.indices.contains(targetFrameIndex)) {
+            group.cinemaDngFrameUris[targetFrameIndex]
+        } else {
+            frameInfo?.second
+                ?: group.cinemaDngFrameUris.getOrNull(frameIndex)
+                ?: group.cinemaDngFirstFrameUri
+                ?: group.dngUri
+        }
 
         if (frameUri == null) {
             Toast.makeText(requireContext(), R.string.cinemadng_export_failed, Toast.LENGTH_SHORT).show()
@@ -2352,7 +2422,7 @@ open class ImageViewerFragment : Fragment() {
                 } else {
                     group
                 }
-                val config = currentEditConfig ?: fullyLoadedGroup.editConfig
+                val config = editConfig ?: currentEditConfig ?: fullyLoadedGroup.editConfig
                 top.maary.darkbag.rawvideo.RawVideoExporter.exportSingleFrameFromCinemaDng(
                     context = requireContext().applicationContext,
                     frameDngUri = frameUri,
@@ -2573,7 +2643,22 @@ open class ImageViewerFragment : Fragment() {
             return
         }
 
-        val options = arrayOf(getString(R.string.delete_this_format_only), getString(R.string.delete_entire_group))
+        val selectedFormat = adapter.getSelectedFormat(binding.imagePager.currentItem)
+        val isRawSelected = selectedFormat == ImageViewerAdapter.FORMAT_DNG || selectedFormat == "RAW" || selectedFormat == "CDNG" || selectedFormat == "RAWVID"
+
+        val deleteSpecificOption = when {
+            selectedFormat == "CDNG" || (isRawSelected && (group.isCinemaDng || group.cinemaDngFolderUri != null || group.cinemaDngFirstFrameUri != null || group.cinemaDngFrameUris.isNotEmpty())) -> {
+                getString(R.string.delete_cdng_only)
+            }
+            selectedFormat == "RAWVID" || (isRawSelected && (group.isRawVideo || group.rawVideoUri != null)) -> {
+                getString(R.string.delete_rawvid_only)
+            }
+            else -> {
+                getString(R.string.delete_this_format_only)
+            }
+        }
+
+        val options = arrayOf(deleteSpecificOption, getString(R.string.delete_entire_group))
         var checkedItem = 1
         com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
             .setTitle(R.string.delete_image_title)
@@ -2595,7 +2680,6 @@ open class ImageViewerFragment : Fragment() {
             val urisToDelete = mutableListOf<Uri>()
 
             if (deleteGroup) {
-                group.cinemaDngFolderUri?.let { urisToDelete.add(it) }
                 urisToDelete.addAll(group.allUris)
 
                 if (adapter.itemCount > 1) {
@@ -2604,15 +2688,27 @@ open class ImageViewerFragment : Fragment() {
                     nextTargetUri = nextGroup.firstAvailableUri?.toString()
                 }
             } else {
-                val selectedFormat = adapter.getSelectedFormat(binding.imagePager.currentItem)
-                if (selectedFormat == "DNG" || selectedFormat == "CDNG" || selectedFormat == "RAW") {
-                    group.cinemaDngFolderUri?.let { urisToDelete.add(it) }
-                    urisToDelete.addAll(group.allMasterRawUris)
-                } else {
-                    val derivatives = adapter.getDerivativeUris(group)
-                    val activeIndex = adapter.getSelectedDerivativeIndex(group.baseName).coerceIn(0, (derivatives.size - 1).coerceAtLeast(0))
-                    val activeUri = derivatives.getOrNull(activeIndex) ?: group.jpgUri ?: group.mp4VideoUri
-                    activeUri?.let { urisToDelete.add(it) }
+                val selectedFormat = adapter.getSelectedFormat(currentIndex)
+                val isCdng = selectedFormat == "CDNG" || ((selectedFormat == ImageViewerAdapter.FORMAT_DNG || selectedFormat == "RAW") && (group.isCinemaDng || group.cinemaDngFolderUri != null || group.cinemaDngFirstFrameUri != null || group.cinemaDngFrameUris.isNotEmpty()))
+                val isRawVid = selectedFormat == "RAWVID" || ((selectedFormat == ImageViewerAdapter.FORMAT_DNG || selectedFormat == "RAW") && (group.isRawVideo || group.rawVideoUri != null))
+                val isPhotoDng = selectedFormat == ImageViewerAdapter.FORMAT_DNG || selectedFormat == "DNG" || selectedFormat == "RAW"
+
+                when {
+                    isCdng -> {
+                        urisToDelete.addAll(group.allCinemaDngUris)
+                    }
+                    isRawVid -> {
+                        urisToDelete.addAll(group.rawVideoMasterUris)
+                    }
+                    isPhotoDng -> {
+                        urisToDelete.addAll(group.photoMasterUris)
+                    }
+                    else -> {
+                        val derivatives = adapter.getDerivativeUris(group)
+                        val activeIndex = adapter.getSelectedDerivativeIndex(group.baseName).coerceIn(0, (derivatives.size - 1).coerceAtLeast(0))
+                        val activeUri = derivatives.getOrNull(activeIndex) ?: group.jpgUri ?: group.mp4VideoUri
+                        activeUri?.let { urisToDelete.add(it) }
+                    }
                 }
             }
 
