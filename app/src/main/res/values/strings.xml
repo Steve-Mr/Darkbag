@@ -174,4 +174,16 @@
     <string name="cinemadng_exporting_frame">正在导出单帧…</string>
     <string name="cinemadng_export_success">单帧导出成功</string>
     <string name="cinemadng_export_failed">单帧导出失败</string>
+
+    <!-- Export Hub Strings -->
+    <string name="export_hub_title">暗袋出片中心</string>
+    <string name="export_hub_subtitle_default">选择色彩方案与母带衍生体导出规格</string>
+    <string name="export_hub_mp4_action">导出调色 MP4 视频</string>
+    <string name="export_hub_cinemadng_action">导出 CinemaDNG 序列包</string>
+    <string name="export_hub_frame_section_title">当前定格单帧 (Frame #%1$d)</string>
+    <string name="export_hub_frame_jpg">导出调色 JPG</string>
+    <string name="export_hub_frame_dng">提取单帧 RAW DNG</string>
+    <string name="export_hub_frame_pair">导出 RAW + 调色 JPG 成对母带</string>
+    <string name="action_export">Export…</string>
+    <string name="action_export_main">Export</string>
 </resources>

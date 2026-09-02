@@ -175,4 +175,41 @@ class ImageGroupCinemaDngTest {
         assertEquals(top.maary.darkbag.fragments.RawVideoExportSheet.MODE_SINGLE_FRAME_JPG, args.getInt(top.maary.darkbag.fragments.RawVideoExportSheet.ARG_EXPORT_MODE))
         assertEquals(7, args.getInt(top.maary.darkbag.fragments.RawVideoExportSheet.ARG_FRAME_INDEX))
     }
+
+    @Test
+    fun testUnifiedExportHubActionConstantsAndFactory() {
+        assertEquals("action_export_mp4", top.maary.darkbag.fragments.RawVideoExportSheet.ACTION_EXPORT_MP4)
+        assertEquals("action_export_cinemadng", top.maary.darkbag.fragments.RawVideoExportSheet.ACTION_EXPORT_CINEMADNG)
+        assertEquals("action_frame_jpg", top.maary.darkbag.fragments.RawVideoExportSheet.ACTION_FRAME_JPG)
+        assertEquals("action_frame_dng", top.maary.darkbag.fragments.RawVideoExportSheet.ACTION_FRAME_DNG)
+        assertEquals("action_frame_pair", top.maary.darkbag.fragments.RawVideoExportSheet.ACTION_FRAME_PAIR)
+
+        val group = ImageGroup(
+            baseName = "RAWVID_20260901_220000",
+            isRawVideo = true,
+            rawVideoFrameCount = 120,
+            rawVideoDurationMs = 5000L
+        )
+
+        val hubSheet = top.maary.darkbag.fragments.RawVideoExportSheet.newInstance(
+            group = group,
+            currentLog = "V-Log",
+            currentLut = "vintage.cube",
+            frameIndex = 15
+        )
+
+        val args = hubSheet.arguments
+        assertNotNull(args)
+        val parcelledGroup = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            args!!.getParcelable(top.maary.darkbag.fragments.RawVideoExportSheet.ARG_GROUP, ImageGroup::class.java)
+        } else {
+            @Suppress("DEPRECATION")
+            args!!.getParcelable(top.maary.darkbag.fragments.RawVideoExportSheet.ARG_GROUP)
+        }
+        assertNotNull(parcelledGroup)
+        assertEquals("RAWVID_20260901_220000", parcelledGroup!!.baseName)
+        assertEquals("V-Log", args.getString(top.maary.darkbag.fragments.RawVideoExportSheet.ARG_LOG))
+        assertEquals("vintage.cube", args.getString(top.maary.darkbag.fragments.RawVideoExportSheet.ARG_LUT))
+        assertEquals(15, args.getInt(top.maary.darkbag.fragments.RawVideoExportSheet.ARG_FRAME_INDEX))
+    }
 }

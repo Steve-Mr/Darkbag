@@ -257,16 +257,19 @@ open class ImageViewerFragment : Fragment() {
             val log = bundle.getString(RawVideoExportSheet.RESULT_LOG) ?: "None"
             val lut = bundle.getString(RawVideoExportSheet.RESULT_LUT) ?: "None"
             val resolution = bundle.getInt(RawVideoExportSheet.RESULT_RESOLUTION, 1080)
-            val exportMode = bundle.getInt(RawVideoExportSheet.RESULT_EXPORT_MODE, RawVideoExportSheet.MODE_VIDEO)
+            val action = bundle.getString(RawVideoExportSheet.RESULT_ACTION)
             val frameIndex = bundle.getInt(RawVideoExportSheet.RESULT_FRAME_INDEX, 0)
             val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
             val config = (currentEditConfig ?: currentGroup.editConfig ?: top.maary.darkbag.models.EditConfig()).copy(log = log, lut = lut)
 
-            when (exportMode) {
-                RawVideoExportSheet.MODE_VIDEO -> {
+            when (action) {
+                RawVideoExportSheet.ACTION_EXPORT_MP4 -> {
                     performExportMp4(currentGroup, config, resolution)
                 }
-                RawVideoExportSheet.MODE_SINGLE_FRAME_JPG -> {
+                RawVideoExportSheet.ACTION_EXPORT_CINEMADNG -> {
+                    performExportCinemaDng(currentGroup)
+                }
+                RawVideoExportSheet.ACTION_FRAME_JPG -> {
                     exportCinemaDngFrame(
                         group = currentGroup,
                         exportType = top.maary.darkbag.rawvideo.RawVideoExporter.FrameExportType.GRADED_JPG_ONLY,
@@ -274,13 +277,45 @@ open class ImageViewerFragment : Fragment() {
                         targetFrameIndex = frameIndex
                     )
                 }
-                RawVideoExportSheet.MODE_SINGLE_FRAME_PAIR -> {
+                RawVideoExportSheet.ACTION_FRAME_DNG -> {
+                    exportCinemaDngFrame(
+                        group = currentGroup,
+                        exportType = top.maary.darkbag.rawvideo.RawVideoExporter.FrameExportType.RAW_DNG_ONLY,
+                        editConfig = null,
+                        targetFrameIndex = frameIndex
+                    )
+                }
+                RawVideoExportSheet.ACTION_FRAME_PAIR -> {
                     exportCinemaDngFrame(
                         group = currentGroup,
                         exportType = top.maary.darkbag.rawvideo.RawVideoExporter.FrameExportType.RAW_AND_GRADED_PAIR,
                         editConfig = config,
                         targetFrameIndex = frameIndex
                     )
+                }
+                else -> {
+                    val exportMode = bundle.getInt(RawVideoExportSheet.RESULT_EXPORT_MODE, RawVideoExportSheet.MODE_VIDEO)
+                    when (exportMode) {
+                        RawVideoExportSheet.MODE_VIDEO -> {
+                            performExportMp4(currentGroup, config, resolution)
+                        }
+                        RawVideoExportSheet.MODE_SINGLE_FRAME_JPG -> {
+                            exportCinemaDngFrame(
+                                group = currentGroup,
+                                exportType = top.maary.darkbag.rawvideo.RawVideoExporter.FrameExportType.GRADED_JPG_ONLY,
+                                editConfig = config,
+                                targetFrameIndex = frameIndex
+                            )
+                        }
+                        RawVideoExportSheet.MODE_SINGLE_FRAME_PAIR -> {
+                            exportCinemaDngFrame(
+                                group = currentGroup,
+                                exportType = top.maary.darkbag.rawvideo.RawVideoExporter.FrameExportType.RAW_AND_GRADED_PAIR,
+                                editConfig = config,
+                                targetFrameIndex = frameIndex
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -631,6 +666,20 @@ open class ImageViewerFragment : Fragment() {
         } else {
             binding.splitShare.visibility = View.VISIBLE
             binding.splitSave.visibility = View.GONE
+
+            if (::adapter.isInitialized && adapter.itemCount > 0) {
+                val currentIndex = binding.imagePager.currentItem
+                val currentGroup = adapter.getGroup(currentIndex)
+                val isUnrenderedRawVideoOrCinemaDng = (currentGroup.isRawVideo || currentGroup.rawVideoUri != null || currentGroup.isCinemaDng || currentGroup.cinemaDngFolderUri != null || currentGroup.cinemaDngFirstFrameUri != null || currentGroup.cinemaDngFrameUris.isNotEmpty()) && currentGroup.mp4VideoUri == null
+
+                if (isUnrenderedRawVideoOrCinemaDng) {
+                    binding.btnShareMain.setIconResource(R.drawable.ic_save)
+                    binding.btnShareMain.contentDescription = getString(R.string.action_export_main)
+                } else {
+                    binding.btnShareMain.setIconResource(R.drawable.ic_share)
+                    binding.btnShareMain.contentDescription = getString(R.string.share_button_alt)
+                }
+            }
         }
     }
 
@@ -644,28 +693,37 @@ open class ImageViewerFragment : Fragment() {
 
     protected open fun setupActionButtons() {
         binding.btnShareMain.setOnClickListener {
-            performShare()
+            if (::adapter.isInitialized && adapter.itemCount > 0) {
+                val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
+                val isUnrenderedRawVideoOrCinemaDng = (currentGroup.isRawVideo || currentGroup.rawVideoUri != null || currentGroup.isCinemaDng || currentGroup.cinemaDngFolderUri != null || currentGroup.cinemaDngFirstFrameUri != null || currentGroup.cinemaDngFrameUris.isNotEmpty()) && currentGroup.mp4VideoUri == null
+                if (isUnrenderedRawVideoOrCinemaDng) {
+                    openExportHub()
+                } else {
+                    performShare()
+                }
+            } else {
+                performShare()
+            }
         }
         binding.btnShareMenu.setOnClickListener {
             binding.btnShareMenu.isCheckable = true
             binding.btnShareMenu.isChecked = true
             val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
             val popup = PopupMenu(requireContext(), it)
-            val isCinemaDngGroup = currentGroup.isCinemaDng || currentGroup.cinemaDngFolderUri != null || currentGroup.cinemaDngFirstFrameUri != null || currentGroup.cinemaDngFrameUris.isNotEmpty() || currentCinemaDngFrame != null
-            if (currentGroup.isRawVideo) {
-                popup.menu.add(0, MENU_EXPORT_CINEMA_DNG, 0, "Export CinemaDNG Sequence").apply {
-                    setIcon(R.drawable.ic_photo)
-                }
-                popup.menu.add(0, MENU_EXPORT_MP4, 0, "Export Graded MP4 Video").apply {
-                    setIcon(R.drawable.ic_play_arrow)
-                }
-            } else if (isCinemaDngGroup) {
-                popup.menu.add(0, MENU_EXPORT_CINEMADNG_FRAME, 0, getString(R.string.cinemadng_export_dialog_title)).apply {
-                    setIcon(R.drawable.ic_photo)
+            val isUnrenderedRawVideoOrCinemaDng = (currentGroup.isRawVideo || currentGroup.rawVideoUri != null || currentGroup.isCinemaDng || currentGroup.cinemaDngFolderUri != null || currentGroup.cinemaDngFirstFrameUri != null || currentGroup.cinemaDngFrameUris.isNotEmpty()) && currentGroup.mp4VideoUri == null
+
+            if (isUnrenderedRawVideoOrCinemaDng) {
+                popup.menu.add(0, MENU_SHARE, 0, getString(R.string.share_button_alt)).apply {
+                    setIcon(R.drawable.ic_share)
                 }
             } else {
-                popup.menu.add(0, MENU_SHARE_TIFF, 0, getString(R.string.share_as_tiff)).apply {
-                    setIcon(R.drawable.ic_photo)
+                popup.menu.add(0, MENU_EXPORT_HUB, 0, getString(R.string.action_export)).apply {
+                    setIcon(R.drawable.ic_save)
+                }
+                if (currentGroup.dngUri != null || currentGroup.dngUri1 != null || currentGroup.dngUri2 != null) {
+                    popup.menu.add(0, MENU_SHARE_TIFF, 0, getString(R.string.share_as_tiff)).apply {
+                        setIcon(R.drawable.ic_photo)
+                    }
                 }
             }
             if (currentGroup.isMultiCamera) {
@@ -684,22 +742,12 @@ open class ImageViewerFragment : Fragment() {
 
             popup.setOnMenuItemClickListener { item ->
                 when (item.itemId) {
+                    MENU_SHARE -> performShare()
+                    MENU_EXPORT_HUB -> openExportHub()
                     MENU_SHARE_TIFF -> performShareAsTiff()
-                    MENU_EXPORT_CINEMADNG_FRAME -> showCinemaDngShareExportDialog(adapter.getGroup(binding.imagePager.currentItem))
+                    MENU_EXPORT_CINEMADNG_FRAME -> openExportHub()
                     MENU_EXPORT_CINEMA_DNG -> performExportCinemaDng(adapter.getGroup(binding.imagePager.currentItem))
-                    MENU_EXPORT_MP4 -> {
-                        val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
-                        lifecycleScope.launch {
-                            val fullyLoadedGroup = if (!currentGroup.metadataLoaded) {
-                                repository.loadMetadata(currentGroup)
-                            } else {
-                                currentGroup
-                            }
-                            val config = currentEditConfig ?: fullyLoadedGroup.editConfig
-                            val sheet = RawVideoExportSheet.newInstance(config?.log, config?.lut)
-                            sheet.show(childFragmentManager, RawVideoExportSheet.TAG)
-                        }
-                    }
+                    MENU_EXPORT_MP4 -> openExportHub()
                     MENU_COLLAGE -> showMultiCamCollageDialog(adapter.getGroup(binding.imagePager.currentItem))
                     MENU_DETAILS -> showImageDetails()
                     MENU_DELETE -> {
@@ -936,26 +984,55 @@ open class ImageViewerFragment : Fragment() {
         updateControlsVisibility()
     }
 
+    private fun openExportHub() {
+        if (!::adapter.isInitialized || adapter.itemCount == 0) return
+        val currentIndex = binding.imagePager.currentItem
+        val currentGroup = adapter.getGroup(currentIndex)
+        lifecycleScope.launch {
+            val fullyLoadedGroup = if (!currentGroup.metadataLoaded) {
+                repository.loadMetadata(currentGroup)
+            } else {
+                currentGroup
+            }
+            val config = currentEditConfig ?: fullyLoadedGroup.editConfig
+            val frameInfo = currentCinemaDngFrame ?: adapter.getActiveCinemaDngFrame(currentIndex)
+            val frameIndex = frameInfo?.first ?: 0
+            val sheet = RawVideoExportSheet.newInstance(
+                group = fullyLoadedGroup,
+                currentLog = config?.log,
+                currentLut = config?.lut,
+                frameIndex = frameIndex
+            )
+            sheet.show(childFragmentManager, RawVideoExportSheet.TAG)
+        }
+    }
+
     private fun performShare() {
+        if (!::adapter.isInitialized || adapter.itemCount == 0) return
         val currentIndex = binding.imagePager.currentItem
         val currentGroup = adapter.getGroup(currentIndex)
         val selectedFormat = adapter.getSelectedFormat(currentIndex)
 
-        val isCinemaDngGroup = currentGroup.isCinemaDng || currentGroup.cinemaDngFolderUri != null || currentGroup.cinemaDngFirstFrameUri != null || currentGroup.cinemaDngFrameUris.isNotEmpty() || currentCinemaDngFrame != null
-        if (isCinemaDngGroup) {
-            showCinemaDngShareExportDialog(currentGroup)
+        if (selectedFormat == "DNG" && currentGroup.isHalfFrame()) {
+            showHalfFrameShareSheet(currentGroup)
             return
         }
 
-        if (selectedFormat == "DNG" && currentGroup.isHalfFrame()) {
-            showHalfFrameShareSheet(currentGroup)
-        } else {
-            val currentUri = when (selectedFormat) {
-                "JPG" -> currentGroup.jpgUri
-                "DNG" -> currentGroup.dngUri ?: currentGroup.dngUri1 ?: currentGroup.dngUri2
-                else -> currentGroup.jpgUri ?: currentGroup.dngUri ?: currentGroup.dngUri1 ?: currentGroup.dngUri2
+        val currentUri = when (selectedFormat) {
+            "JPG" -> currentGroup.jpgUri
+            "MP4" -> currentGroup.mp4VideoUri
+            "DNG" -> currentGroup.dngUri ?: currentGroup.dngUri1 ?: currentGroup.dngUri2 ?: currentGroup.cinemaDngFirstFrameUri
+            else -> currentGroup.jpgUri ?: currentGroup.mp4VideoUri ?: currentGroup.dngUri ?: currentGroup.dngUri1 ?: currentGroup.dngUri2 ?: currentGroup.rawVideoUri ?: currentGroup.cinemaDngFirstFrameUri ?: currentGroup.cinemaDngAudioUri
+        }
+        currentUri?.let {
+            shareImages(listOf(it))
+        } ?: run {
+            val fallbackUri = currentGroup.firstAvailableUri
+            if (fallbackUri != null) {
+                shareImages(listOf(fallbackUri))
+            } else {
+                Toast.makeText(requireContext(), R.string.error_no_external_viewer, Toast.LENGTH_SHORT).show()
             }
-            currentUri?.let { shareImages(listOf(it)) }
         }
     }
 
@@ -2326,66 +2403,7 @@ open class ImageViewerFragment : Fragment() {
     }
 
     private fun showCinemaDngShareExportDialog(group: top.maary.darkbag.models.ImageGroup) {
-        val currentIndex = binding.imagePager.currentItem
-        val frameInfo = currentCinemaDngFrame ?: adapter.getActiveCinemaDngFrame(currentIndex)
-        val frameIndex = frameInfo?.first ?: 0
-
-        val options = arrayOf(
-            getString(R.string.cinemadng_export_raw_dng),
-            getString(R.string.cinemadng_export_graded_jpg),
-            getString(R.string.cinemadng_export_pair),
-            getString(R.string.cinemadng_export_full_video)
-        )
-
-        com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
-            .setTitle(R.string.cinemadng_export_dialog_title)
-            .setItems(options) { _, which ->
-                when (which) {
-                    0 -> exportCinemaDngFrame(
-                        group = group,
-                        exportType = top.maary.darkbag.rawvideo.RawVideoExporter.FrameExportType.RAW_DNG_ONLY,
-                        editConfig = null,
-                        targetFrameIndex = frameIndex
-                    )
-                    1 -> {
-                        lifecycleScope.launch {
-                            val fullyLoadedGroup = if (!group.metadataLoaded) {
-                                repository.loadMetadata(group)
-                            } else {
-                                group
-                            }
-                            val config = currentEditConfig ?: fullyLoadedGroup.editConfig
-                            val sheet = RawVideoExportSheet.newInstance(
-                                currentLog = config?.log,
-                                currentLut = config?.lut,
-                                exportMode = RawVideoExportSheet.MODE_SINGLE_FRAME_JPG,
-                                frameIndex = frameIndex
-                            )
-                            sheet.show(childFragmentManager, RawVideoExportSheet.TAG)
-                        }
-                    }
-                    2 -> {
-                        lifecycleScope.launch {
-                            val fullyLoadedGroup = if (!group.metadataLoaded) {
-                                repository.loadMetadata(group)
-                            } else {
-                                group
-                            }
-                            val config = currentEditConfig ?: fullyLoadedGroup.editConfig
-                            val sheet = RawVideoExportSheet.newInstance(
-                                currentLog = config?.log,
-                                currentLut = config?.lut,
-                                exportMode = RawVideoExportSheet.MODE_SINGLE_FRAME_PAIR,
-                                frameIndex = frameIndex
-                            )
-                            sheet.show(childFragmentManager, RawVideoExportSheet.TAG)
-                        }
-                    }
-                    3 -> handleCinemaDngFullVideoExport(group)
-                }
-            }
-            .setNegativeButton(R.string.cancel, null)
-            .show()
+        openExportHub()
     }
 
     private fun exportCinemaDngFrame(
@@ -2452,16 +2470,7 @@ open class ImageViewerFragment : Fragment() {
 
     private fun handleCinemaDngFullVideoExport(group: top.maary.darkbag.models.ImageGroup) {
         if (group.isRawVideo || group.rawVideoUri != null) {
-            lifecycleScope.launch {
-                val fullyLoadedGroup = if (!group.metadataLoaded) {
-                    repository.loadMetadata(group)
-                } else {
-                    group
-                }
-                val config = currentEditConfig ?: fullyLoadedGroup.editConfig
-                val sheet = RawVideoExportSheet.newInstance(config?.log, config?.lut)
-                sheet.show(childFragmentManager, RawVideoExportSheet.TAG)
-            }
+            openExportHub()
         } else if (group.mp4VideoUri != null) {
             shareImages(listOf(group.mp4VideoUri))
         } else if (group.cinemaDngAudioUri != null) {
@@ -3376,6 +3385,8 @@ open class ImageViewerFragment : Fragment() {
         private const val MENU_EXPORT_CINEMA_DNG = 6
         private const val MENU_EXPORT_MP4 = 7
         private const val MENU_EXPORT_CINEMADNG_FRAME = 8
+        private const val MENU_SHARE = 9
+        private const val MENU_EXPORT_HUB = 10
 
         private const val EXPOSURE_MIN = -4f
         private const val EXPOSURE_MAX = 4f
