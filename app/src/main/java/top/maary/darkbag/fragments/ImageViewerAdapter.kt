@@ -102,7 +102,6 @@ class ImageViewerAdapter(
         var currentLoadedRawUri: Uri? = null
         val videoOutlineRect = android.graphics.Rect()
         var videoOutlineRadius = 0f
-        var filmstripAdapter: top.maary.darkbag.adapters.FilmstripFrameAdapter? = null
         var activeCinemaDngFrameIndex: Int = 0
         var activeCinemaDngFrameUri: Uri? = null
         var filmstripFadeRunnable: Runnable? = null
@@ -190,7 +189,7 @@ class ImageViewerAdapter(
         if (isCinemaDngGroup) {
             holder.binding.filmstripContainer.visibility = if (shouldShow) View.VISIBLE else View.GONE
             holder.binding.filmstripContainer.alpha = if (shouldShow) 0.35f else 0f
-            holder.binding.rvFilmstrip.alpha = 1.0f
+            holder.binding.filmstripSeekbar.alpha = 1.0f
 
             val frameUris = if (group.cinemaDngFrameUris.isNotEmpty()) {
                 group.cinemaDngFrameUris
@@ -205,21 +204,9 @@ class ImageViewerAdapter(
             holder.activeCinemaDngFrameIndex = currentActiveIndex
             holder.activeCinemaDngFrameUri = currentActiveUri
 
-            var adapter = holder.filmstripAdapter
-            if (adapter == null) {
-                adapter = top.maary.darkbag.adapters.FilmstripFrameAdapter(frameUris, currentActiveIndex)
-                holder.filmstripAdapter = adapter
-                holder.binding.rvFilmstrip.layoutManager = androidx.recyclerview.widget.LinearLayoutManager(
-                    holder.itemView.context,
-                    androidx.recyclerview.widget.LinearLayoutManager.HORIZONTAL,
-                    false
-                )
-                holder.binding.rvFilmstrip.adapter = adapter
-            } else {
-                adapter.setFrames(frameUris, currentActiveIndex)
-            }
+            holder.binding.filmstripSeekbar.setFrames(frameUris, currentActiveIndex)
 
-            adapter.onScrubStateChanged = { isScrubbing ->
+            holder.binding.filmstripSeekbar.onScrubStateChanged = { isScrubbing ->
                 holder.filmstripFadeRunnable?.let { holder.binding.filmstripContainer.removeCallbacks(it) }
                 holder.filmstripFadeRunnable = null
 
@@ -242,7 +229,7 @@ class ImageViewerAdapter(
                 }
             }
 
-            adapter.onFrameSelected = { frameIndex, uri ->
+            holder.binding.filmstripSeekbar.onFrameSelected = { frameIndex, uri ->
                 val currentPos = holder.bindingAdapterPosition
                 val currentGroup = if (currentPos != RecyclerView.NO_POSITION && currentPos in differ.currentList.indices) {
                     differ.currentList[currentPos]
@@ -260,8 +247,6 @@ class ImageViewerAdapter(
             holder.filmstripFadeRunnable?.let { holder.binding.filmstripContainer.removeCallbacks(it) }
             holder.filmstripFadeRunnable = null
             holder.binding.filmstripContainer.visibility = View.GONE
-            holder.binding.rvFilmstrip.adapter = null
-            holder.filmstripAdapter = null
             holder.activeCinemaDngFrameIndex = 0
             holder.activeCinemaDngFrameUri = null
         }
@@ -945,8 +930,6 @@ class ImageViewerAdapter(
         holder.activeCinemaDngFrameIndex = 0
         holder.activeCinemaDngFrameUri = null
         holder.binding.loadingIndicator.visibility = View.GONE
-        holder.filmstripAdapter = null
-        holder.binding.rvFilmstrip.adapter = null
         super.onViewRecycled(holder)
     }
 
