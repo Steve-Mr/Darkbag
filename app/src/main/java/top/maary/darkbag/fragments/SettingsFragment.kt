@@ -287,7 +287,7 @@ class SettingsFragment : Fragment() {
         // RAW Video Resolution
         val rawResAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, RAW_VIDEO_RESOLUTION_OPTIONS)
         binding.menuRawVideoResolution.setAdapter(rawResAdapter)
-        val savedRawRes = prefs.getString(KEY_RAW_VIDEO_RESOLUTION, "1080p")
+        val savedRawRes = prefs.getString(KEY_RAW_VIDEO_RESOLUTION, DEFAULT_RAW_VIDEO_RESOLUTION) ?: DEFAULT_RAW_VIDEO_RESOLUTION
         binding.menuRawVideoResolution.setText(savedRawRes, false)
         binding.menuRawVideoResolution.setOnItemClickListener { _, _, position, _ ->
             prefs.edit().putString(KEY_RAW_VIDEO_RESOLUTION, RAW_VIDEO_RESOLUTION_OPTIONS[position]).apply()
@@ -820,7 +820,48 @@ class SettingsFragment : Fragment() {
         val RAW_VIDEO_FPS_OPTIONS = listOf("24", "30", "60")
 
         const val KEY_RAW_VIDEO_RESOLUTION = "raw_video_resolution"
-        val RAW_VIDEO_RESOLUTION_OPTIONS = listOf("1080p", "2K")
+        const val DEFAULT_RAW_VIDEO_RESOLUTION = "Max Native"
+        val RAW_VIDEO_RESOLUTION_OPTIONS = listOf("Max Native", "4K UHD", "1080p")
+
+        fun selectRawVideoSize(preference: String, availableSizes: Array<android.util.Size>): android.util.Size {
+            if (availableSizes.isEmpty()) {
+                return android.util.Size(4000, 3000)
+            }
+            return when (preference) {
+                "1080p" -> {
+                    val exact = availableSizes.find { it.width == 1920 && it.height == 1080 }
+                    if (exact != null) {
+                        exact
+                    } else {
+                        val candidate16x9 = availableSizes
+                            .filter { it.width <= 1920 && kotlin.math.abs((it.width.toFloat() / it.height.toFloat()) - (16.0f / 9.0f)) < 0.05f }
+                            .maxByOrNull { it.width * it.height }
+                        candidate16x9
+                            ?: availableSizes.minByOrNull { kotlin.math.abs(it.width * it.height - 1920 * 1080) }
+                            ?: (availableSizes.maxByOrNull { it.width * it.height } ?: android.util.Size(4000, 3000))
+                    }
+                }
+                "4K UHD" -> {
+                    val exact = availableSizes.find { it.width == 3840 && it.height == 2160 }
+                    if (exact != null) {
+                        exact
+                    } else {
+                        val candidate16x9 = availableSizes
+                            .filter { kotlin.math.abs((it.width.toFloat() / it.height.toFloat()) - (16.0f / 9.0f)) < 0.05f }
+                            .minByOrNull { kotlin.math.abs(it.width * it.height - 3840 * 2160) }
+                        candidate16x9
+                            ?: availableSizes.minByOrNull { kotlin.math.abs(it.width * it.height - 3840 * 2160) }
+                            ?: (availableSizes.maxByOrNull { it.width * it.height } ?: android.util.Size(4000, 3000))
+                    }
+                }
+                "Max Native" -> {
+                    availableSizes.maxByOrNull { it.width * it.height } ?: android.util.Size(4000, 3000)
+                }
+                else -> {
+                    availableSizes.maxByOrNull { it.width * it.height } ?: android.util.Size(4000, 3000)
+                }
+            }
+        }
 
         val COLOR_ENGINE_MODES = listOf(
             "Khronos PBR Neutral (Default)",

@@ -2,6 +2,7 @@
 #include "lz4/lz4.h"
 #include <android/log.h>
 #include <cstring>
+#include <chrono>
 
 #if defined(__ARM_NEON) || defined(__ARM_NEON__)
 #include <arm_neon.h>
@@ -77,20 +78,34 @@ bool RawVideoRecorder::startRecording(const std::string& outputPath, const FileH
         return false;
     }
 
-    // Clear queues
+    // Clear queues and reset frame indices
     {
         std::lock_guard<std::mutex> lock(queueMutex_);
         std::queue<RawFrameInput> emptyVideo;
         std::swap(videoQueue_, emptyVideo);
+        nextFrameIndex_ = 0;
+    }
+    {
+        std::lock_guard<std::mutex> lock(writerMutex_);
         std::queue<AudioPacketInput> emptyAudio;
         std::swap(audioQueue_, emptyAudio);
+        pendingWrites_.clear();
+        nextWriteFrameIndex_ = 0;
     }
 
     stopRequested_.store(false, std::memory_order_relaxed);
+    allCompressionFinished_.store(false, std::memory_order_relaxed);
     isRecording_.store(true, std::memory_order_relaxed);
 
-    workerThread_ = std::thread(&RawVideoRecorder::workerLoop, this);
-    LOGI("RawVideoRecorder started recording to %s", outputPath.c_str());
+    compressionThreads_.clear();
+    compressionThreads_.reserve(NUM_COMPRESSION_THREADS);
+    for (size_t i = 0; i < NUM_COMPRESSION_THREADS; ++i) {
+        compressionThreads_.emplace_back(&RawVideoRecorder::compressionWorkerLoop, this);
+    }
+    writerThread_ = std::thread(&RawVideoRecorder::writerLoop, this);
+
+    LOGI("RawVideoRecorder started recording to %s (%zu compression workers + 1 writer thread)",
+         outputPath.c_str(), NUM_COMPRESSION_THREADS);
     return true;
 }
 
@@ -108,6 +123,7 @@ bool RawVideoRecorder::pushVideoFrame(const uint8_t* bayerData, size_t dataSize,
     }
 
     RawFrameInput input;
+    input.frameIndex = nextFrameIndex_++;
     input.data.assign(bayerData, bayerData + dataSize);
     input.width = width;
     input.height = height;
@@ -138,7 +154,7 @@ bool RawVideoRecorder::pushAudioPacket(const uint8_t* pcmData, size_t pcmSize, u
         return false;
     }
 
-    std::unique_lock<std::mutex> lock(queueMutex_);
+    std::unique_lock<std::mutex> lock(writerMutex_);
     AudioPacketInput input;
     input.pcmData.assign(pcmData, pcmData + pcmSize);
     input.timestampNs = timestampNs;
@@ -146,7 +162,7 @@ bool RawVideoRecorder::pushAudioPacket(const uint8_t* pcmData, size_t pcmSize, u
 
     audioQueue_.push(std::move(input));
     lock.unlock();
-    queueCv_.notify_one();
+    writerCv_.notify_one();
     return true;
 }
 
@@ -158,92 +174,163 @@ bool RawVideoRecorder::stopRecording() {
     stopRequested_.store(true, std::memory_order_relaxed);
     queueCv_.notify_all();
 
-    if (workerThread_.joinable()) {
-        workerThread_.join();
+    for (auto& t : compressionThreads_) {
+        if (t.joinable()) {
+            t.join();
+        }
+    }
+    compressionThreads_.clear();
+
+    allCompressionFinished_.store(true, std::memory_order_relaxed);
+    writerCv_.notify_all();
+
+    if (writerThread_.joinable()) {
+        writerThread_.join();
     }
 
     bool success = writer_.close();
-    LOGI("RawVideoRecorder stopped. Success: %d", success);
+    LOGI("RawVideoRecorder stopped. Success: %d, written frames: %u", success, writer_.getWrittenFrameCount());
     return success;
 }
 
-void RawVideoRecorder::workerLoop() {
-    LOGI("Worker thread started for RawVideoRecorder");
+void RawVideoRecorder::compressionWorkerLoop() {
+    LOGI("Compression worker thread started for RawVideoRecorder");
+    std::vector<uint8_t> compBuffer;
 
     while (true) {
-        RawFrameInput currentVideoFrame;
-        bool hasVideo = false;
-
-        AudioPacketInput currentAudioPacket;
-        bool hasAudio = false;
-
+        RawFrameInput frame;
         {
             std::unique_lock<std::mutex> lock(queueMutex_);
             queueCv_.wait(lock, [this]() {
-                return !videoQueue_.empty() || !audioQueue_.empty() || stopRequested_.load(std::memory_order_relaxed);
+                return !videoQueue_.empty() || stopRequested_.load(std::memory_order_relaxed);
             });
 
-            if (!audioQueue_.empty()) {
-                currentAudioPacket = std::move(audioQueue_.front());
-                audioQueue_.pop();
-                hasAudio = true;
-            } else if (!videoQueue_.empty()) {
-                currentVideoFrame = std::move(videoQueue_.front());
+            if (!videoQueue_.empty()) {
+                frame = std::move(videoQueue_.front());
                 videoQueue_.pop();
-                hasVideo = true;
             } else if (stopRequested_.load(std::memory_order_relaxed)) {
                 break;
+            } else {
+                continue;
+            }
+        }
+
+        const size_t rawSize = frame.data.size();
+        const int maxCompressedSize = LZ4_compressBound(static_cast<int>(rawSize));
+        if (compBuffer.size() < static_cast<size_t>(maxCompressedSize)) {
+            compBuffer.resize(maxCompressedSize);
+        }
+
+        size_t compressedSize = 0;
+        if (header_.compressionType == static_cast<uint32_t>(CompressionType::NEON_DPCM_LZ4)) {
+            compressedSize = compressFrame(frame.data.data(), rawSize,
+                                           compBuffer.data(), compBuffer.size(), true);
+        }
+
+        CompressedFrame cf;
+        cf.frameIndex = frame.frameIndex;
+        cf.header.chunkType = CHUNK_VIDEO_FRAME;
+        cf.header.frameIndex = frame.frameIndex;
+        cf.header.timestampNs = frame.timestampNs;
+        cf.header.exposureTimeNs = frame.exposureTimeNs;
+        cf.header.iso = frame.iso;
+        cf.header.neutralColorPoint[0] = frame.neutralColorPoint[0];
+        cf.header.neutralColorPoint[1] = frame.neutralColorPoint[1];
+        cf.header.neutralColorPoint[2] = frame.neutralColorPoint[2];
+        cf.header.fNumber = frame.fNumber;
+        cf.header.focalLength = frame.focalLength;
+        cf.header.uncompressedSize = static_cast<uint32_t>(rawSize);
+
+        if (compressedSize > 0 && compressedSize < rawSize) {
+            cf.header.payloadSize = static_cast<uint32_t>(compressedSize);
+            cf.data.assign(compBuffer.data(), compBuffer.data() + compressedSize);
+        } else {
+            cf.header.payloadSize = static_cast<uint32_t>(rawSize);
+            cf.data = std::move(frame.data);
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(writerMutex_);
+            pendingWrites_[cf.frameIndex] = std::move(cf);
+        }
+        writerCv_.notify_one();
+    }
+
+    LOGI("Compression worker thread exiting for RawVideoRecorder");
+}
+
+void RawVideoRecorder::writerLoop() {
+    LOGI("Writer thread started for RawVideoRecorder");
+
+    while (true) {
+        CompressedFrame videoToWrite;
+        bool hasVideo = false;
+        AudioPacketInput audioToWrite;
+        bool hasAudio = false;
+
+        {
+            std::unique_lock<std::mutex> lock(writerMutex_);
+            writerCv_.wait_for(lock, std::chrono::milliseconds(20), [this]() {
+                bool hasNextVideo = (pendingWrites_.find(nextWriteFrameIndex_) != pendingWrites_.end());
+                bool isDone = allCompressionFinished_.load(std::memory_order_relaxed) &&
+                              pendingWrites_.empty() && audioQueue_.empty();
+                bool hasAudioPkt = !audioQueue_.empty();
+                return hasNextVideo || isDone || (allCompressionFinished_.load(std::memory_order_relaxed) && hasAudioPkt);
+            });
+
+            if (allCompressionFinished_.load(std::memory_order_relaxed) &&
+                pendingWrites_.empty() && audioQueue_.empty()) {
+                break;
+            }
+
+            auto it = pendingWrites_.find(nextWriteFrameIndex_);
+            if (it != pendingWrites_.end()) {
+                uint64_t videoTs = it->second.header.timestampNs;
+                if (!audioQueue_.empty() && audioQueue_.front().timestampNs <= videoTs) {
+                    audioToWrite = std::move(audioQueue_.front());
+                    audioQueue_.pop();
+                    hasAudio = true;
+                } else {
+                    videoToWrite = std::move(it->second);
+                    pendingWrites_.erase(it);
+                    nextWriteFrameIndex_++;
+                    hasVideo = true;
+                }
+            } else if (allCompressionFinished_.load(std::memory_order_relaxed)) {
+                // Compression finished for all incoming frames
+                if (!pendingWrites_.empty()) {
+                    auto lowest = pendingWrites_.begin();
+                    nextWriteFrameIndex_ = lowest->first;
+                    videoToWrite = std::move(lowest->second);
+                    pendingWrites_.erase(lowest);
+                    nextWriteFrameIndex_++;
+                    hasVideo = true;
+                } else if (!audioQueue_.empty()) {
+                    audioToWrite = std::move(audioQueue_.front());
+                    audioQueue_.pop();
+                    hasAudio = true;
+                }
+            } else if (!audioQueue_.empty()) {
+                // Video frame not ready yet, but audio is accumulating; flush audio
+                audioToWrite = std::move(audioQueue_.front());
+                audioQueue_.pop();
+                hasAudio = true;
             }
         }
 
         if (hasAudio) {
             AudioPacketHeader ah;
-            ah.timestampNs = currentAudioPacket.timestampNs;
-            ah.sampleCount = currentAudioPacket.sampleCount;
-            writer_.writeAudioPacket(ah, currentAudioPacket.pcmData.data(), currentAudioPacket.pcmData.size());
+            ah.timestampNs = audioToWrite.timestampNs;
+            ah.sampleCount = audioToWrite.sampleCount;
+            writer_.writeAudioPacket(ah, audioToWrite.pcmData.data(), audioToWrite.pcmData.size());
         }
 
         if (hasVideo) {
-            const size_t rawSize = currentVideoFrame.data.size();
-            const int maxCompressedSize = LZ4_compressBound(static_cast<int>(rawSize));
-            
-            if (compressionBuffer_.size() < static_cast<size_t>(maxCompressedSize)) {
-                compressionBuffer_.resize(maxCompressedSize);
-            }
-            if (dpcmBuffer_.size() < rawSize) {
-                dpcmBuffer_.resize(rawSize);
-            }
-
-            size_t compressedSize = 0;
-            if (header_.compressionType == static_cast<uint32_t>(CompressionType::NEON_DPCM_LZ4)) {
-                compressedSize = compressFrame(currentVideoFrame.data.data(), rawSize,
-                                               compressionBuffer_.data(), compressionBuffer_.size(), true);
-            } else {
-                compressedSize = 0; // Uncompressed
-            }
-
-            VideoFrameHeader vh;
-            vh.timestampNs = currentVideoFrame.timestampNs;
-            vh.exposureTimeNs = currentVideoFrame.exposureTimeNs;
-            vh.iso = currentVideoFrame.iso;
-            vh.neutralColorPoint[0] = currentVideoFrame.neutralColorPoint[0];
-            vh.neutralColorPoint[1] = currentVideoFrame.neutralColorPoint[1];
-            vh.neutralColorPoint[2] = currentVideoFrame.neutralColorPoint[2];
-            vh.fNumber = currentVideoFrame.fNumber;
-            vh.focalLength = currentVideoFrame.focalLength;
-            vh.uncompressedSize = static_cast<uint32_t>(rawSize);
-
-            if (compressedSize > 0 && compressedSize < rawSize) {
-                writer_.writeVideoFrame(vh, compressionBuffer_.data(), compressedSize);
-            } else {
-                // Fallback to uncompressed if compression did not yield savings
-                vh.uncompressedSize = static_cast<uint32_t>(rawSize);
-                writer_.writeVideoFrame(vh, currentVideoFrame.data.data(), rawSize);
-            }
+            writer_.writeVideoFrame(videoToWrite.header, videoToWrite.data.data(), videoToWrite.data.size());
         }
     }
 
-    LOGI("Worker thread exiting for RawVideoRecorder");
+    LOGI("Writer thread exiting for RawVideoRecorder");
 }
 
 size_t RawVideoRecorder::compressFrame(const uint8_t* src, size_t srcSize, uint8_t* dst, size_t dstCapacity, bool useDpcm) {
@@ -252,10 +339,13 @@ size_t RawVideoRecorder::compressFrame(const uint8_t* src, size_t srcSize, uint8
     }
 
     if (useDpcm) {
-        std::vector<uint8_t> dpcm(srcSize);
-        applyDpcmEncode(src, dpcm.data(), srcSize, 2);
+        thread_local std::vector<uint8_t> t_dpcm;
+        if (t_dpcm.size() < srcSize) {
+            t_dpcm.resize(srcSize);
+        }
+        applyDpcmEncode(src, t_dpcm.data(), srcSize, 2);
         int compressedBytes = LZ4_compress_default(
-            reinterpret_cast<const char*>(dpcm.data()),
+            reinterpret_cast<const char*>(t_dpcm.data()),
             reinterpret_cast<char*>(dst),
             static_cast<int>(srcSize),
             static_cast<int>(dstCapacity)

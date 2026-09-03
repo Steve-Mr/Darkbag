@@ -3719,19 +3719,20 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         val chars = camera2Manager.getCameraCharacteristics(device.id)
         val map = chars.get(android.hardware.camera2.CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
 
+        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val rawResPref = prefs.getString(SettingsFragment.KEY_RAW_VIDEO_RESOLUTION, SettingsFragment.DEFAULT_RAW_VIDEO_RESOLUTION) ?: SettingsFragment.DEFAULT_RAW_VIDEO_RESOLUTION
+
         val isRawSupportedLocally = map?.getOutputFormats()?.contains(android.graphics.ImageFormat.RAW_SENSOR) == true
         val targetCaptureSize: android.util.Size
         if (isRawSupportedLocally) {
-            val rawSizes = map?.getOutputSizes(android.graphics.ImageFormat.RAW_SENSOR)
-            targetCaptureSize = rawSizes?.maxByOrNull { it.width * it.height } ?: android.util.Size(4000, 3000)
+            val rawSizes = map?.getOutputSizes(android.graphics.ImageFormat.RAW_SENSOR) ?: emptyArray()
+            targetCaptureSize = SettingsFragment.selectRawVideoSize(rawResPref, rawSizes)
             rawImageReader = ImageReader.newInstance(targetCaptureSize.width, targetCaptureSize.height, android.graphics.ImageFormat.RAW_SENSOR, 8)
         } else {
-            val jpegSizes = map?.getOutputSizes(android.graphics.ImageFormat.JPEG)
-            targetCaptureSize = jpegSizes?.maxByOrNull { it.width * it.height } ?: android.util.Size(4000, 3000)
+            val jpegSizes = map?.getOutputSizes(android.graphics.ImageFormat.JPEG) ?: emptyArray()
+            targetCaptureSize = jpegSizes.maxByOrNull { it.width * it.height } ?: android.util.Size(4000, 3000)
             rawImageReader = ImageReader.newInstance(targetCaptureSize.width, targetCaptureSize.height, android.graphics.ImageFormat.JPEG, 8)
         }
-
-        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
         val burstSizeStr = prefs.getString(SettingsFragment.KEY_HDR_BURST_COUNT, "5") ?: "5"
         val burstSize = burstSizeStr.toIntOrNull() ?: 5
         lifecycleScope.launch(Dispatchers.Default) {
@@ -4436,7 +4437,9 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             targetFps = targetFps,
             activeLutName = activeLut,
             activeLogName = activeLog,
-            orientation = combinedOrientation
+            orientation = combinedOrientation,
+            targetWidth = reader.width,
+            targetHeight = reader.height
         )
 
         val targetFpsInt = targetFps.toInt()

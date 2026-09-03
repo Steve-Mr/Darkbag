@@ -389,7 +389,7 @@
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:inputType="none"
-                            android:text="1080p" />
+                            android:text="Max Native" />
                     </com.google.android.material.textfield.TextInputLayout>
 
                 </LinearLayout>

@@ -36,7 +36,9 @@ class RawVideoSessionManager {
         targetFps: Float = 24.0f,
         activeLutName: String? = null,
         activeLogName: String? = null,
-        orientation: Int = 0
+        orientation: Int = 0,
+        targetWidth: Int = 0,
+        targetHeight: Int = 0
     ): Boolean {
         if (isRecording.get()) {
             Log.w(TAG, "Recording already in progress")
@@ -48,8 +50,8 @@ class RawVideoSessionManager {
             ?: characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
                 ?.getOutputSizes(android.graphics.ImageFormat.RAW10)
         val selectedSize = rawSizes?.firstOrNull() ?: characteristics.get(CameraCharacteristics.SENSOR_INFO_PIXEL_ARRAY_SIZE)
-        val width = selectedSize?.width ?: 1920
-        val height = selectedSize?.height ?: 1080
+        val width = if (targetWidth > 0) targetWidth else (selectedSize?.width ?: 1920)
+        val height = if (targetHeight > 0) targetHeight else (selectedSize?.height ?: 1080)
 
         val cfaArrangement = characteristics.get(CameraCharacteristics.SENSOR_INFO_COLOR_FILTER_ARRANGEMENT) ?: 0
         val cfaPattern = when (cfaArrangement) {
