@@ -149,22 +149,14 @@ class ImageRepository(private val context: Context) {
                     builder.derivativeJpgUris.any { it.toString() == initialUri } ||
                     builder.derivativeMp4Uris.any { it.toString() == initialUri }
         }
-        if (targetBuilder != null && !targetBuilder.metadataLoaded) {
+        if (targetBuilder != null && (!targetBuilder.metadataLoaded || (targetBuilder.editConfig == null && (targetBuilder.rawVideoUri != null || targetBuilder.isCinemaDng)))) {
+            targetBuilder.metadataLoaded = false
             populateMetadata(targetBuilder)
         }
     }
 
     private fun populateMetadata(builder: ImageGroupBuilder) {
         if (builder.metadataLoaded) return
-
-        if (builder.isCinemaDng) {
-            val firstFrame = builder.cinemaDngFirstFrameUri
-            if (firstFrame != null && (builder.width == 0 || builder.height == 0)) {
-                readExifForScanning(firstFrame, builder)
-            }
-            builder.metadataLoaded = true
-            return
-        }
 
         val rawVideoUri = builder.rawVideoUri
         if (rawVideoUri != null) {
@@ -196,6 +188,15 @@ class ImageRepository(private val context: Context) {
                 }
             } catch (e: Exception) {
                 android.util.Log.w("ImageRepository", "Failed to read raw video metadata for $rawVideoUri", e)
+            }
+            builder.metadataLoaded = true
+            return
+        }
+
+        if (builder.isCinemaDng) {
+            val firstFrame = builder.cinemaDngFirstFrameUri ?: builder.cinemaDngFrameUris.firstOrNull()
+            if (firstFrame != null) {
+                readExifForScanning(firstFrame, builder)
             }
             builder.metadataLoaded = true
             return

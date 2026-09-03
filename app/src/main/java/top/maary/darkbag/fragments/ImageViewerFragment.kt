@@ -2458,10 +2458,6 @@ open class ImageViewerFragment : Fragment() {
             if (rawUri != null || jpgUri != null) {
                 Toast.makeText(requireContext(), R.string.cinemadng_export_success, Toast.LENGTH_SHORT).show()
                 repository.invalidateCache()
-                val urisToShare = listOfNotNull(jpgUri, rawUri)
-                if (urisToShare.isNotEmpty()) {
-                    shareImages(urisToShare)
-                }
             } else {
                 Toast.makeText(requireContext(), R.string.cinemadng_export_failed, Toast.LENGTH_SHORT).show()
             }

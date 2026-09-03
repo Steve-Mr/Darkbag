@@ -531,10 +531,21 @@ object RawVideoExporter {
         val modelBytes = modelStr.toByteArray(Charsets.US_ASCII)
         val ucmBytes = ucmStr.toByteArray(Charsets.US_ASCII)
 
+        val safeLog = header.activeLogName.ifBlank { "None" }.replace("\"", "\\\"")
+        val safeLut = header.activeLutName.ifBlank { "None" }.replace("\"", "\\\"")
+        val editConfigJson = "{\"log\":\"$safeLog\",\"lut\":\"$safeLut\",\"exposure\":${header.exposure},\"contrast\":${header.contrast},\"saturation\":${header.saturation}}"
+        val userCommentHeader = "ASCII\u0000\u0000\u0000".toByteArray(Charsets.US_ASCII)
+        val userCommentBytes = userCommentHeader + editConfigJson.toByteArray(Charsets.US_ASCII)
+
         val ifdOffset = 8
-        val entryCount = 29
-        val ifdSize = 2 + entryCount * 12 + 4 // 354 bytes
-        var curOffset = ((ifdOffset + ifdSize + 3) / 4) * 4 // 364 bytes
+        val entryCount = 37
+        val ifdSize = 2 + entryCount * 12 + 4 // 450 bytes
+        var curOffset = ((ifdOffset + ifdSize + 3) / 4) * 4 // 460 bytes
+
+        val exifIfdOffset = curOffset
+        val exifEntryCount = 5
+        val exifIfdSize = 2 + exifEntryCount * 12 + 4 // 66 bytes
+        curOffset = ((curOffset + exifIfdSize + 3) / 4) * 4 // 528 bytes
 
         val makeOffset = curOffset
         curOffset += makeBytes.size
@@ -542,15 +553,32 @@ object RawVideoExporter {
         curOffset += modelBytes.size
         val ucmOffset = curOffset
         curOffset += ucmBytes.size
+        val userCommentOffset = curOffset
+        curOffset += userCommentBytes.size
 
         curOffset = ((curOffset + 3) / 4) * 4
         val exposureTimeOffset = curOffset
+        curOffset += 8
+
+        val fNumberOffset = curOffset
+        curOffset += 8
+
+        val focalLengthOffset = curOffset
         curOffset += 8
 
         val blackLevelOffset = curOffset
         curOffset += 32 // 4 RATIONALs (4 * 8 = 32)
 
         val colorMatrix1Offset = curOffset
+        curOffset += 72 // 9 SRATIONALs (9 * 8 = 72)
+
+        val colorMatrix2Offset = curOffset
+        curOffset += 72 // 9 SRATIONALs (9 * 8 = 72)
+
+        val forwardMatrix1Offset = curOffset
+        curOffset += 72 // 9 SRATIONALs (9 * 8 = 72)
+
+        val forwardMatrix2Offset = curOffset
         curOffset += 72 // 9 SRATIONALs (9 * 8 = 72)
 
         val baselineExposureOffset = curOffset
@@ -619,9 +647,17 @@ object RawVideoExporter {
         putEntry(0x828E, 1, 4, cfaVal)
         // Tag 0x829A: ExposureTime (RATIONAL)
         putEntry(0x829A, 5, 1, exposureTimeOffset)
+        // Tag 0x829D: FNumber (RATIONAL)
+        putEntry(0x829D, 5, 1, fNumberOffset)
+        // Tag 0x8769: ExifIFDPointer (LONG)
+        putEntry(0x8769, 4, 1, exifIfdOffset)
         // Tag 0x8827: ISOSpeedRatings (SHORT)
         val isoVal = if (meta.size > 2 && meta[2] > 0) meta[2].toInt().coerceIn(1, 65535) else 100
         putEntry(0x8827, 3, 1, isoVal)
+        // Tag 0x920A: FocalLength (RATIONAL)
+        putEntry(0x920A, 5, 1, focalLengthOffset)
+        // Tag 0x9286: UserComment (UNDEFINED)
+        putEntry(0x9286, 7, userCommentBytes.size, userCommentOffset)
         // Tag 0xC612: DNGVersion (BYTE[4] = 1.4.0.0)
         putEntry(0xC612, 1, 4, 0x00000401)
         // Tag 0xC613: DNGBackwardVersion (BYTE[4] = 1.1.0.0)
@@ -636,31 +672,71 @@ object RawVideoExporter {
         putEntry(0xC61D, 4, 1, header.whiteLevel)
         // Tag 0xC621: ColorMatrix1 (SRATIONAL[9])
         putEntry(0xC621, 10, 9, colorMatrix1Offset)
+        // Tag 0xC622: ColorMatrix2 (SRATIONAL[9])
+        putEntry(0xC622, 10, 9, colorMatrix2Offset)
         // Tag 0xC62A: BaselineExposure (SRATIONAL)
         putEntry(0xC62A, 10, 1, baselineExposureOffset)
         // Tag 0xC634: AsShotNeutral (RATIONAL[3])
         putEntry(0xC634, 5, 3, asShotNeutralOffset)
         // Tag 0xC65A: CalibrationIlluminant1 (SHORT)
         putEntry(0xC65A, 3, 1, header.calibrationIlluminant1.takeIf { it > 0 } ?: 21)
+        // Tag 0xC65B: CalibrationIlluminant2 (SHORT)
+        putEntry(0xC65B, 3, 1, header.calibrationIlluminant2.takeIf { it > 0 } ?: 17)
+        // Tag 0xC714: ForwardMatrix1 (SRATIONAL[9])
+        putEntry(0xC714, 10, 9, forwardMatrix1Offset)
+        // Tag 0xC715: ForwardMatrix2 (SRATIONAL[9])
+        putEntry(0xC715, 10, 9, forwardMatrix2Offset)
         // Tag 0xC764: FrameRate (RATIONAL)
         putEntry(0xC764, 5, 1, frameRateOffset)
 
         // Next IFD = 0
         buf.putInt(0)
 
-        // Write Make, Model, UniqueCameraModel strings
+        // 3. Exif Sub-IFD Entries (Sorted ascending by Tag ID)
+        buf.position(exifIfdOffset)
+        buf.putShort(exifEntryCount.toShort())
+        // Tag 0x829A: ExposureTime (RATIONAL)
+        putEntry(0x829A, 5, 1, exposureTimeOffset)
+        // Tag 0x829D: FNumber (RATIONAL)
+        putEntry(0x829D, 5, 1, fNumberOffset)
+        // Tag 0x8827: ISOSpeedRatings (SHORT)
+        putEntry(0x8827, 3, 1, isoVal)
+        // Tag 0x920A: FocalLength (RATIONAL)
+        putEntry(0x920A, 5, 1, focalLengthOffset)
+        // Tag 0x9286: UserComment (UNDEFINED)
+        putEntry(0x9286, 7, userCommentBytes.size, userCommentOffset)
+        // Next IFD for Exif IFD = 0
+        buf.putInt(0)
+
+        // Write Make, Model, UniqueCameraModel strings & UserComment
         buf.position(makeOffset)
         buf.put(makeBytes)
         buf.position(modelOffset)
         buf.put(modelBytes)
         buf.position(ucmOffset)
         buf.put(ucmBytes)
+        buf.position(userCommentOffset)
+        buf.put(userCommentBytes)
 
         // Write ExposureTime (RATIONAL = numerator/denominator)
         buf.position(exposureTimeOffset)
         val expNs = if (meta.size > 1 && meta[1] > 0) meta[1] else (1_000_000_000L / (header.fps.takeIf { it > 0 } ?: 24f)).toLong()
         buf.putInt((expNs / 1000).toInt())
         buf.putInt(1_000_000)
+
+        // Write FNumber (1 RATIONAL)
+        buf.position(fNumberOffset)
+        val fnVal = if (meta.size > 3 && meta[3] != 0L) java.lang.Float.intBitsToFloat(meta[3].toInt()) else 0.0f
+        val fNumber = if (fnVal > 0f) fnVal else 1.8f
+        buf.putInt((fNumber * 100).toInt())
+        buf.putInt(100)
+
+        // Write FocalLength (1 RATIONAL)
+        buf.position(focalLengthOffset)
+        val flVal = if (meta.size > 4 && meta[4] != 0L) java.lang.Float.intBitsToFloat(meta[4].toInt()) else 0.0f
+        val focalLength = if (flVal > 0f) flVal else 5.0f
+        buf.putInt((focalLength * 100).toInt())
+        buf.putInt(100)
 
         // Write BlackLevel (4 RATIONALs)
         buf.position(blackLevelOffset)
@@ -675,6 +751,30 @@ object RawVideoExporter {
         for (i in 0 until 9) {
             val cm = header.colorMatrix1.getOrElse(i) { if (i % 4 == 0) 1.0f else 0.0f }
             buf.putInt((cm * 10000).toInt())
+            buf.putInt(10000)
+        }
+
+        // Write ColorMatrix2 (9 SRATIONALs)
+        buf.position(colorMatrix2Offset)
+        for (i in 0 until 9) {
+            val cm = header.colorMatrix2.getOrElse(i) { if (i % 4 == 0) 1.0f else 0.0f }
+            buf.putInt((cm * 10000).toInt())
+            buf.putInt(10000)
+        }
+
+        // Write ForwardMatrix1 (9 SRATIONALs)
+        buf.position(forwardMatrix1Offset)
+        for (i in 0 until 9) {
+            val fm = header.forwardMatrix1.getOrElse(i) { if (i % 4 == 0) 1.0f else 0.0f }
+            buf.putInt((fm * 10000).toInt())
+            buf.putInt(10000)
+        }
+
+        // Write ForwardMatrix2 (9 SRATIONALs)
+        buf.position(forwardMatrix2Offset)
+        for (i in 0 until 9) {
+            val fm = header.forwardMatrix2.getOrElse(i) { if (i % 4 == 0) 1.0f else 0.0f }
+            buf.putInt((fm * 10000).toInt())
             buf.putInt(10000)
         }
 

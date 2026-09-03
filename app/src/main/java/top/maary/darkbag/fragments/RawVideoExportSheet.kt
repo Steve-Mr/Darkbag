@@ -114,6 +114,7 @@ class RawVideoExportSheet : BottomSheetDialogFragment() {
         val isCinemaDngGroup = group?.isCinemaDng == true || group?.cinemaDngFolderUri != null || group?.cinemaDngFirstFrameUri != null || group?.cinemaDngFrameUris?.isNotEmpty() == true
         val showVideoSection = hasRawVid || isCinemaDngGroup || group == null
 
+        binding.cardVideoExport.visibility = if (showVideoSection) View.VISIBLE else View.GONE
         binding.btnExportMp4.visibility = if (showVideoSection) View.VISIBLE else View.GONE
         binding.btnExportCinemadng.visibility = if (hasRawVid) View.VISIBLE else View.GONE
         binding.tvResolutionLabel.visibility = if (showVideoSection) View.VISIBLE else View.GONE
