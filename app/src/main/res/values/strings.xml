@@ -90,9 +90,13 @@
     <string name="delete_image_title">Delete Image</string>
     <string name="delete_image_message">Are you sure you want to delete this image?</string>
     <string name="delete_entire_group">Delete entire group</string>
+    <string name="delete_entire_group_detailed">删除整组 (包含所有源文件与导出文件)</string>
     <string name="delete_this_format_only">Delete this format only</string>
-    <string name="delete_cdng_only">仅删除 CinemaDNG 序列</string>
-    <string name="delete_rawvid_only">仅删除 RAWVID 母带容器</string>
+    <string name="delete_cdng_only">仅删除 CinemaDNG 序列包</string>
+    <string name="delete_rawvid_only">仅删除 RAWVID 原生母带</string>
+    <string name="delete_derivatives_only">仅删除导出的调色成片</string>
+    <string name="delete_photo_raw_only">仅删除 RAW (DNG)</string>
+    <string name="delete_photo_jpg_only">仅删除调色 JPG</string>
     <string name="format_raw">RAW</string>
 
     <string name="playground_btn_delete">Delete</string>
@@ -126,6 +130,8 @@
     <string name="gallery_delete_desc_raw_only">Frees storage space while keeping JPG/MP4 deliverables</string>
     <string name="gallery_delete_option_jpg_only">Delete Deliverables (JPG/MP4) only</string>
     <string name="gallery_delete_desc_jpg_only">Removes JPG/MP4 deliverables while keeping original RAW/RAWVID files</string>
+    <string name="batch_delete_cdng_only">仅清理 CinemaDNG 序列包</string>
+    <string name="batch_delete_cdng_only_desc">释放数十 GB 序列帧文件夹，保留 RAWVID 录制源文件与调色成片</string>
     <string name="gallery_delete_confirm_format">Delete (%1$d items)</string>
     <string name="gallery_delete_summary">Selected %1$d item(s). Choose deletion scope:</string>
     <string name="format_raw_jpg">RAW+JPG</string>

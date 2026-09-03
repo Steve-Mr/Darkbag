@@ -2635,63 +2635,104 @@ open class ImageViewerFragment : Fragment() {
         return String.format("%.1f %s", size / 1024.0.pow(digitGroups.toDouble()), units[digitGroups])
     }
 
+    private data class SingleDeleteOption(
+        val label: String,
+        val uris: List<Uri>,
+        val isEntireGroup: Boolean
+    )
+
     private fun showDeleteDialog(group: ImageGroup) {
-        if (group.isSingleFormat()) {
+        val hasCdng = group.isCinemaDng || group.cinemaDngFolderUri != null || group.cinemaDngFirstFrameUri != null || group.cinemaDngFrameUris.isNotEmpty()
+        val hasRawVid = group.isRawVideo || group.rawVideoUri != null
+        val hasDerivatives = group.allDerivativeUris.isNotEmpty()
+        val hasPhotoDng = group.dngUri != null || group.dngUri1 != null || group.dngUri2 != null || group.multiDngUris.isNotEmpty()
+
+        val options = mutableListOf<SingleDeleteOption>()
+
+        if (hasCdng && hasRawVid) {
+            options.add(SingleDeleteOption(getString(R.string.delete_cdng_only), group.allCinemaDngUris, false))
+            options.add(SingleDeleteOption(getString(R.string.delete_rawvid_only), group.rawVideoMasterUris, false))
+            if (hasDerivatives) {
+                options.add(SingleDeleteOption(getString(R.string.delete_derivatives_only), group.allDerivativeUris, false))
+            }
+            options.add(SingleDeleteOption(getString(R.string.delete_entire_group_detailed), group.allUris, true))
+        } else if (hasCdng) {
+            options.add(SingleDeleteOption(getString(R.string.delete_cdng_only), group.allCinemaDngUris, false))
+            if (hasDerivatives) {
+                options.add(SingleDeleteOption(getString(R.string.delete_derivatives_only), group.allDerivativeUris, false))
+            }
+            options.add(SingleDeleteOption(getString(R.string.delete_entire_group_detailed), group.allUris, true))
+        } else if (hasRawVid) {
+            options.add(SingleDeleteOption(getString(R.string.delete_rawvid_only), group.rawVideoMasterUris, false))
+            if (hasDerivatives) {
+                options.add(SingleDeleteOption(getString(R.string.delete_derivatives_only), group.allDerivativeUris, false))
+            }
+            options.add(SingleDeleteOption(getString(R.string.delete_entire_group_detailed), group.allUris, true))
+        } else if (hasPhotoDng && hasDerivatives) {
+            options.add(SingleDeleteOption(getString(R.string.delete_photo_raw_only), group.photoMasterUris, false))
+            options.add(SingleDeleteOption(getString(R.string.delete_photo_jpg_only), group.allDerivativeUris, false))
+            options.add(SingleDeleteOption(getString(R.string.delete_entire_group_detailed), group.allUris, true))
+        } else if (hasPhotoDng) {
+            options.add(SingleDeleteOption(getString(R.string.delete_photo_raw_only), group.photoMasterUris, true))
+        } else if (hasDerivatives) {
+            if (group.allDerivativeUris.size > 1) {
+                val derivatives = adapter.getDerivativeUris(group)
+                val activeIndex = adapter.getSelectedDerivativeIndex(group.baseName).coerceIn(0, (derivatives.size - 1).coerceAtLeast(0))
+                val activeUri = derivatives.getOrNull(activeIndex) ?: group.jpgUri ?: group.mp4VideoUri
+                if (activeUri != null) {
+                    options.add(SingleDeleteOption(getString(R.string.delete_this_format_only), listOf(activeUri), false))
+                }
+                options.add(SingleDeleteOption(getString(R.string.delete_entire_group_detailed), group.allUris, true))
+            } else {
+                options.add(SingleDeleteOption(getString(R.string.delete_entire_group), group.allUris, true))
+            }
+        } else {
+            options.add(SingleDeleteOption(getString(R.string.delete_entire_group), group.allUris, true))
+        }
+
+        if (group.isSingleFormat() || options.size <= 1) {
             com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
                 .setTitle(R.string.delete_image_title)
                 .setMessage(R.string.delete_image_message)
                 .setPositiveButton(R.string.delete_button_alt) { _, _ ->
-                    deleteImage(group, true)
+                    val chosen = options.firstOrNull()
+                    deleteImage(group, chosen?.uris ?: group.allUris, chosen?.isEntireGroup ?: true)
                 }
                 .setNegativeButton(R.string.cancel, null)
                 .show()
             return
         }
 
-        val selectedFormat = adapter.getSelectedFormat(binding.imagePager.currentItem)
-        val isRawSelected = selectedFormat == ImageViewerAdapter.FORMAT_DNG || selectedFormat == "RAW" || selectedFormat == "CDNG" || selectedFormat == "RAWVID"
-
-        val deleteSpecificOption = when {
-            selectedFormat == "CDNG" || (isRawSelected && (group.isCinemaDng || group.cinemaDngFolderUri != null || group.cinemaDngFirstFrameUri != null || group.cinemaDngFrameUris.isNotEmpty())) -> {
-                getString(R.string.delete_cdng_only)
-            }
-            selectedFormat == "RAWVID" || (isRawSelected && (group.isRawVideo || group.rawVideoUri != null)) -> {
-                getString(R.string.delete_rawvid_only)
-            }
-            else -> {
-                getString(R.string.delete_this_format_only)
-            }
-        }
-
-        val options = arrayOf(deleteSpecificOption, getString(R.string.delete_entire_group))
-        var checkedItem = 1
+        val labels = options.map { it.label }.toTypedArray()
+        var checkedItem = options.size - 1
         com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
             .setTitle(R.string.delete_image_title)
-            .setSingleChoiceItems(options, checkedItem) { _, which ->
+            .setSingleChoiceItems(labels, checkedItem) { _, which ->
                 checkedItem = which
             }
             .setPositiveButton(R.string.delete_button_alt) { _, _ ->
-                deleteImage(group, checkedItem == 1)
+                val chosen = options[checkedItem]
+                deleteImage(group, chosen.uris, chosen.isEntireGroup)
             }
             .setNegativeButton(R.string.cancel, null)
             .show()
     }
 
     protected open fun deleteImage(group: ImageGroup, deleteGroup: Boolean) {
+        deleteImage(group, if (deleteGroup) group.allUris else null, deleteGroup)
+    }
+
+    protected open fun deleteImage(group: ImageGroup, targetUris: List<Uri>?, deleteGroup: Boolean) {
         val context = context ?: return
         lifecycleScope.launch {
             var nextTargetUri: String? = null
             val currentIndex = binding.imagePager.currentItem
             val urisToDelete = mutableListOf<Uri>()
 
-            if (deleteGroup) {
+            if (targetUris != null) {
+                urisToDelete.addAll(targetUris)
+            } else if (deleteGroup) {
                 urisToDelete.addAll(group.allUris)
-
-                if (adapter.itemCount > 1) {
-                    val nextIndex = if (currentIndex < adapter.itemCount - 1) currentIndex + 1 else currentIndex - 1
-                    val nextGroup = adapter.getGroup(nextIndex)
-                    nextTargetUri = nextGroup.firstAvailableUri?.toString()
-                }
             } else {
                 val selectedFormat = adapter.getSelectedFormat(currentIndex)
                 val isCdng = selectedFormat == "CDNG" || ((selectedFormat == ImageViewerAdapter.FORMAT_DNG || selectedFormat == "RAW") && (group.isCinemaDng || group.cinemaDngFolderUri != null || group.cinemaDngFirstFrameUri != null || group.cinemaDngFrameUris.isNotEmpty()))
@@ -2714,6 +2755,21 @@ open class ImageViewerFragment : Fragment() {
                         val activeUri = derivatives.getOrNull(activeIndex) ?: group.jpgUri ?: group.mp4VideoUri
                         activeUri?.let { urisToDelete.add(it) }
                     }
+                }
+            }
+
+            // Ensure CinemaDNG folder is included if sequence frames are deleted
+            if (urisToDelete.any { group.allCinemaDngUris.contains(it) } && group.cinemaDngFolderUri != null) {
+                if (!urisToDelete.contains(group.cinemaDngFolderUri)) {
+                    group.cinemaDngFolderUri?.let { urisToDelete.add(it) }
+                }
+            }
+
+            if (deleteGroup) {
+                if (adapter.itemCount > 1) {
+                    val nextIndex = if (currentIndex < adapter.itemCount - 1) currentIndex + 1 else currentIndex - 1
+                    val nextGroup = adapter.getGroup(nextIndex)
+                    nextTargetUri = nextGroup.firstAvailableUri?.toString()
                 }
             }
 
@@ -2964,7 +3020,12 @@ open class ImageViewerFragment : Fragment() {
             }
         }
 
-        DarkbagBatchDeleteSheet.newInstance(selectedItems.size, hasAnyRaw, hasAnyDerivatives)
+        val hasAnyCinemaDng = selectedItems.any { item ->
+            val g = item.group
+            g.isCinemaDng || g.cinemaDngFolderUri != null || g.cinemaDngFirstFrameUri != null || g.cinemaDngFrameUris.isNotEmpty()
+        }
+
+        DarkbagBatchDeleteSheet.newInstance(selectedItems.size, hasAnyRaw, hasAnyDerivatives, hasAnyCinemaDng)
             .show(childFragmentManager, DarkbagBatchDeleteSheet.TAG)
     }
 
@@ -2978,28 +3039,37 @@ open class ImageViewerFragment : Fragment() {
                 val lens = item.specificLens
                 if (lens != null) {
                     when (deleteMode) {
-                        0 -> { // Entire group / lens
+                        DarkbagBatchDeleteSheet.MODE_ENTIRE_GROUP -> { // Entire group / lens
                             lens.jpgUri?.let { urisToDelete.add(it) }
                             lens.dngUri?.let { urisToDelete.add(it) }
                         }
-                        1 -> { // RAW only
+                        DarkbagBatchDeleteSheet.MODE_RAW_ONLY -> { // RAW only
                             lens.dngUri?.let { urisToDelete.add(it) }
                         }
-                        2 -> { // Derivatives only
+                        DarkbagBatchDeleteSheet.MODE_DERIVATIVES_ONLY -> { // Derivatives only
                             lens.jpgUri?.let { urisToDelete.add(it) }
+                        }
+                        DarkbagBatchDeleteSheet.MODE_CINEMADNG_ONLY -> {
+                            // Lens is photo, no CDNG sequence
                         }
                     }
                 } else {
                     when (deleteMode) {
-                        0 -> {
+                        DarkbagBatchDeleteSheet.MODE_ENTIRE_GROUP -> {
                             group.cinemaDngFolderUri?.let { urisToDelete.add(it) }
                             urisToDelete.addAll(group.allUris)
                         }
-                        1 -> {
+                        DarkbagBatchDeleteSheet.MODE_RAW_ONLY -> {
                             group.cinemaDngFolderUri?.let { urisToDelete.add(it) }
                             urisToDelete.addAll(group.allMasterRawUris)
                         }
-                        2 -> urisToDelete.addAll(group.allDerivativeUris)
+                        DarkbagBatchDeleteSheet.MODE_DERIVATIVES_ONLY -> {
+                            urisToDelete.addAll(group.allDerivativeUris)
+                        }
+                        DarkbagBatchDeleteSheet.MODE_CINEMADNG_ONLY -> {
+                            group.cinemaDngFolderUri?.let { urisToDelete.add(it) }
+                            urisToDelete.addAll(group.allCinemaDngUris)
+                        }
                     }
                 }
             }

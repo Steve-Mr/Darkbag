@@ -353,13 +353,23 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
     }
 
     override fun deleteImage(group: ImageGroup, deleteGroup: Boolean) {
+        deleteImage(group, null, deleteGroup)
+    }
+
+    override fun deleteImage(group: ImageGroup, targetUris: List<Uri>?, deleteGroup: Boolean) {
         lifecycleScope.launch {
             val filesToDelete = mutableListOf<File>()
 
-            group.jpgUri?.let { if (it.scheme == "file") it.path?.let { p -> filesToDelete.add(File(p)) } }
-            group.dngUri?.let { if (it.scheme == "file") it.path?.let { p -> filesToDelete.add(File(p)) } }
-            group.dngUri1?.let { if (it.scheme == "file") it.path?.let { p -> filesToDelete.add(File(p)) } }
-            group.dngUri2?.let { if (it.scheme == "file") it.path?.let { p -> filesToDelete.add(File(p)) } }
+            if (targetUris != null) {
+                for (u in targetUris) {
+                    if (u.scheme == "file") u.path?.let { p -> filesToDelete.add(File(p)) }
+                }
+            } else {
+                group.jpgUri?.let { if (it.scheme == "file") it.path?.let { p -> filesToDelete.add(File(p)) } }
+                group.dngUri?.let { if (it.scheme == "file") it.path?.let { p -> filesToDelete.add(File(p)) } }
+                group.dngUri1?.let { if (it.scheme == "file") it.path?.let { p -> filesToDelete.add(File(p)) } }
+                group.dngUri2?.let { if (it.scheme == "file") it.path?.let { p -> filesToDelete.add(File(p)) } }
+            }
 
             val deletedCount = withContext(Dispatchers.IO) {
                 var count = 0

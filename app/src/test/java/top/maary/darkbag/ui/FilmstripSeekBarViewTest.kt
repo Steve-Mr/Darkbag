@@ -108,4 +108,31 @@ class FilmstripSeekBarViewTest {
 
         assertFalse(isScrubbingState)
     }
+
+    @Test
+    fun testOnAttachedToWindowRestoresSlices() {
+        val uris = listOf(
+            Uri.parse("file:///dng/0.dng"),
+            Uri.parse("file:///dng/1.dng")
+        )
+        seekbar.setFrames(uris, 0)
+        seekbar.measure(
+            android.view.View.MeasureSpec.makeMeasureSpec(400, android.view.View.MeasureSpec.EXACTLY),
+            android.view.View.MeasureSpec.makeMeasureSpec(100, android.view.View.MeasureSpec.EXACTLY)
+        )
+        seekbar.layout(0, 0, 400, 100)
+
+        // Detach clears slices
+        val onDetached = seekbar.javaClass.getDeclaredMethod("onDetachedFromWindow")
+        onDetached.isAccessible = true
+        onDetached.invoke(seekbar)
+
+        // Attach restores slices
+        val onAttached = seekbar.javaClass.getDeclaredMethod("onAttachedToWindow")
+        onAttached.isAccessible = true
+        onAttached.invoke(seekbar)
+
+        assertEquals(2, seekbar.totalFrames)
+        assertEquals(uris, seekbar.frameUris)
+    }
 }

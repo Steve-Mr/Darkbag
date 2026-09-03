@@ -219,6 +219,21 @@ class FilmstripSeekBarView @JvmOverloads constructor(
         }
     }
 
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        if (sliceBitmaps.isEmpty() && frameUris.isNotEmpty()) {
+            if (width > 0 && height > 0) {
+                loadSlices()
+            } else {
+                post {
+                    if (width > 0 && height > 0 && sliceBitmaps.isEmpty()) {
+                        loadSlices()
+                    }
+                }
+            }
+        }
+    }
+
     override fun onDetachedFromWindow() {
         clearSlices()
         super.onDetachedFromWindow()

@@ -816,6 +816,9 @@ class ImageViewerAdapter(
     fun loadCinemaDngFrame(holder: ViewHolder, group: ImageGroup, uri: Uri, index: Int) {
         holder.activeCinemaDngFrameIndex = index
         holder.activeCinemaDngFrameUri = uri
+        stopMotionVideo(holder)
+        holder.binding.videoView.visibility = View.GONE
+        holder.binding.imageView.visibility = View.VISIBLE
         loadImage(holder, uri)
     }
 
