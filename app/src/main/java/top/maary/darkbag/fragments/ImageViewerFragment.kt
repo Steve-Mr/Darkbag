@@ -2457,7 +2457,7 @@ open class ImageViewerFragment : Fragment() {
             val (rawUri, jpgUri) = result
             if (rawUri != null || jpgUri != null) {
                 Toast.makeText(requireContext(), R.string.cinemadng_export_success, Toast.LENGTH_SHORT).show()
-                repository.invalidateCache()
+                refreshCurrentGroupAndAdapter(group.baseName)
             } else {
                 Toast.makeText(requireContext(), R.string.cinemadng_export_failed, Toast.LENGTH_SHORT).show()
             }
@@ -3341,6 +3341,32 @@ open class ImageViewerFragment : Fragment() {
         _binding = null
     }
 
+    private suspend fun refreshCurrentGroupAndAdapter(targetBaseName: String, autoSelectFormat: String? = null) {
+        repository.invalidateCache()
+        val newGroups = repository.getGroupedImages(forceRefresh = true)
+        if (_binding == null || !::adapter.isInitialized) return
+        adapter.updateGroups(newGroups) {
+            if (_binding == null || !::adapter.isInitialized) return@updateGroups
+            if (autoSelectFormat != null) {
+                adapter.setFormatForGroup(targetBaseName, autoSelectFormat)
+            }
+            val currentIndex = binding.imagePager.currentItem
+            if (currentIndex in newGroups.indices) {
+                val currentGroup = newGroups[currentIndex]
+                if (currentGroup.baseName == targetBaseName) {
+                    adapter.notifyItemChanged(currentIndex)
+                    prepareEditConfig(currentGroup)
+                    updateSplitButtons()
+                    updateControlsVisibility()
+                    updateToolbarIcon()
+                }
+            }
+        }
+        if (::galleryAdapter.isInitialized) {
+            galleryAdapter.submitList(newGroups)
+        }
+    }
+
     private fun performExportCinemaDng(group: top.maary.darkbag.models.ImageGroup) {
         val uri = group.rawVideoUri ?: return
         val context = requireContext()
@@ -3387,6 +3413,7 @@ open class ImageViewerFragment : Fragment() {
                 tempExportDir.deleteRecursively()
 
                 android.media.MediaScannerConnection.scanFile(context, arrayOf(destDir.absolutePath), null, null)
+                refreshCurrentGroupAndAdapter(group.baseName)
                 Toast.makeText(context, "CinemaDNG exported: $clipName", Toast.LENGTH_LONG).show()
             } else {
                 tempExportDir.deleteRecursively()
@@ -3428,7 +3455,7 @@ open class ImageViewerFragment : Fragment() {
                     mediaFolderUri = mediaFolderUri
                 )
                 if (savedUri != null) {
-                    repository.invalidateCache()
+                    refreshCurrentGroupAndAdapter(group.baseName, autoSelectFormat = ImageViewerAdapter.FORMAT_JPG)
                     Toast.makeText(context, "Graded MP4 saved: ${group.baseName}_graded.mp4", Toast.LENGTH_LONG).show()
                 } else {
                     Toast.makeText(context, "Failed to save MP4 to storage", Toast.LENGTH_SHORT).show()

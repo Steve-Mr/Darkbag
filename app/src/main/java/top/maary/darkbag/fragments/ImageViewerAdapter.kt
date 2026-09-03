@@ -34,8 +34,8 @@ class ImageViewerAdapter(
         const val FORMAT_DNG = "DNG"
     }
 
-    private val margin = context.resources.getDimensionPixelSize(R.dimen.margin_medium).toFloat()
-    private val radius = context.resources.getDimension(R.dimen.radius_medium)
+    private val margin = runCatching { context.resources.getDimensionPixelSize(R.dimen.margin_medium).toFloat() }.getOrDefault(0f)
+    private val radius = runCatching { context.resources.getDimension(R.dimen.radius_medium) }.getOrDefault(0f)
 
     var onImageTapped: (() -> Unit)? = null
     var onZoomChanged: ((Boolean) -> Unit)? = null
@@ -56,13 +56,21 @@ class ImageViewerAdapter(
     private var isUiVisible = true
     private var isFormatSwitcherPersistentHidden = false
 
-    private val diffCallback = object : DiffUtil.ItemCallback<ImageGroup>() {
+    internal val diffCallback = object : DiffUtil.ItemCallback<ImageGroup>() {
         override fun areItemsTheSame(oldItem: ImageGroup, newItem: ImageGroup): Boolean {
             return oldItem.baseName == newItem.baseName
         }
 
         override fun areContentsTheSame(oldItem: ImageGroup, newItem: ImageGroup): Boolean {
-            return oldItem == newItem && oldItem.metadataLoaded == newItem.metadataLoaded && oldItem.isMotionPhoto == newItem.isMotionPhoto && oldItem.isCinemaDng == newItem.isCinemaDng && oldItem.cinemaDngFrameUris == newItem.cinemaDngFrameUris
+            return oldItem == newItem &&
+                oldItem.metadataLoaded == newItem.metadataLoaded &&
+                oldItem.isMotionPhoto == newItem.isMotionPhoto &&
+                oldItem.isCinemaDng == newItem.isCinemaDng &&
+                oldItem.cinemaDngFrameUris == newItem.cinemaDngFrameUris &&
+                oldItem.mp4VideoUri == newItem.mp4VideoUri &&
+                oldItem.derivativeMp4Uris == newItem.derivativeMp4Uris &&
+                oldItem.derivativeJpgUris == newItem.derivativeJpgUris &&
+                oldItem.cinemaDngFolderUri == newItem.cinemaDngFolderUri
         }
 
         override fun getChangePayload(oldItem: ImageGroup, newItem: ImageGroup): Any? {
@@ -73,7 +81,9 @@ class ImageViewerAdapter(
             if (oldItem.lastModified != newItem.lastModified) payloads.add("LAST_MODIFIED_CHANGED")
             if (oldItem.editConfig != newItem.editConfig) payloads.add("EDIT_CONFIG_CHANGED")
             if (oldItem.isMotionPhoto != newItem.isMotionPhoto) payloads.add("MOTION_PHOTO_CHANGED")
-            if (oldItem.isCinemaDng != newItem.isCinemaDng || oldItem.cinemaDngFrameUris != newItem.cinemaDngFrameUris) payloads.add("CINEMADNG_CHANGED")
+            if (oldItem.cinemaDngFolderUri != newItem.cinemaDngFolderUri || oldItem.isCinemaDng != newItem.isCinemaDng || oldItem.cinemaDngFrameUris != newItem.cinemaDngFrameUris) payloads.add("CINEMADNG_CHANGED")
+            if (oldItem.mp4VideoUri != newItem.mp4VideoUri || oldItem.derivativeMp4Uris != newItem.derivativeMp4Uris) payloads.add("MP4_URI_CHANGED")
+            if (oldItem.allDerivativeUris != newItem.allDerivativeUris) payloads.add("DERIVATIVES_CHANGED")
 
             return if (payloads.isEmpty()) null else payloads
         }
@@ -142,7 +152,14 @@ class ImageViewerAdapter(
     override fun onBindViewHolder(holder: ViewHolder, position: Int, payloads: MutableList<Any>) {
         if (payloads.isNotEmpty()) {
             val group = differ.currentList[position]
-            val importantPayloads = setOf("JPG_URI_CHANGED", "LAST_MODIFIED_CHANGED", "EDIT_CONFIG_CHANGED", "CINEMADNG_CHANGED")
+            val importantPayloads = setOf(
+                "JPG_URI_CHANGED",
+                "LAST_MODIFIED_CHANGED",
+                "EDIT_CONFIG_CHANGED",
+                "CINEMADNG_CHANGED",
+                "MP4_URI_CHANGED",
+                "DERIVATIVES_CHANGED"
+            )
 
             val needsReload = payloads.any { payload ->
                 (payload as? Set<*>)?.any { it in importantPayloads } == true
@@ -1507,6 +1524,10 @@ class ImageViewerAdapter(
 
     fun findGroupIndex(baseName: String): Int {
         return differ.currentList.indexOfFirst { it.baseName == baseName }
+    }
+
+    fun setFormatForGroup(baseName: String, format: String) {
+        selectedFormats[baseName] = format
     }
 
     fun forceFormat(baseName: String, format: String) {
