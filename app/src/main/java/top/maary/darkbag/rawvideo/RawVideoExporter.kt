@@ -296,6 +296,38 @@ object RawVideoExporter {
         }
     }
 
+    fun calculateMeasuredFps(
+        totalFrames: Int,
+        firstFrameNs: Long,
+        lastFrameNs: Long,
+        fallbackFps: Float
+    ): Float {
+        return if (totalFrames > 1 && lastFrameNs > firstFrameNs) {
+            ((totalFrames - 1) * 1_000_000_000.0 / (lastFrameNs - firstFrameNs)).toFloat().coerceIn(1.0f, 120.0f)
+        } else {
+            fallbackFps.takeIf { it > 0 } ?: 24.0f
+        }
+    }
+
+    fun calculatePtsUs(
+        frameIndex: Int,
+        frameTsNs: Long,
+        firstFrameNs: Long,
+        lastPtsUs: Long,
+        fallbackIntervalUs: Long
+    ): Long {
+        val rawPtsUs = if (firstFrameNs > 0L && frameTsNs >= firstFrameNs) {
+            (frameTsNs - firstFrameNs) / 1000L
+        } else {
+            frameIndex * fallbackIntervalUs
+        }
+        return if (lastPtsUs < 0L) {
+            rawPtsUs.coerceAtLeast(0L)
+        } else {
+            maxOf(rawPtsUs, lastPtsUs + 1000L) // Enforce strictly monotonic increase for MediaCodec
+        }
+    }
+
     /**
      * Exports a .rawvid clip into a tone-mapped MP4 video with orientation hint and BT.709 colorimetry.
      */
@@ -331,7 +363,16 @@ object RawVideoExporter {
 
                 val rawW = header.width
                 val rawH = header.height
-                val fps = header.fps.takeIf { it > 0 } ?: 24.0f
+
+                val bayerBuf = ByteBuffer.allocateDirect(rawW * rawH * 2)
+                val firstMeta = LongArray(5)
+                val lastMeta = LongArray(5)
+                RawVideoNative.nativeReadFrame(nativeHandle, 0, firstMeta, bayerBuf)
+                RawVideoNative.nativeReadFrame(nativeHandle, totalFrames - 1, lastMeta, bayerBuf)
+                val firstFrameNs = firstMeta[0]
+                val lastFrameNs = lastMeta[0]
+                val measuredFps = calculateMeasuredFps(totalFrames, firstFrameNs, lastFrameNs, header.fps)
+
                 val bitRate = if (targetResolution >= 2160) 40_000_000 else 20_000_000 // 40 Mbps for 4K, 20 Mbps for 1080p
 
                 // Downscale / fit to standard 1080p (or 4K) resolution with 16-pixel alignment for MediaCodec
@@ -343,7 +384,7 @@ object RawVideoExporter {
                 val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, exportW, exportH).apply {
                     setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar)
                     setInteger(MediaFormat.KEY_BIT_RATE, bitRate)
-                    setFloat(MediaFormat.KEY_FRAME_RATE, fps)
+                    setFloat(MediaFormat.KEY_FRAME_RATE, measuredFps)
                     setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
                     setInteger(MediaFormat.KEY_COLOR_STANDARD, MediaFormat.COLOR_STANDARD_BT709)
                     setInteger(MediaFormat.KEY_COLOR_RANGE, MediaFormat.COLOR_RANGE_LIMITED)
@@ -361,14 +402,14 @@ object RawVideoExporter {
                 var videoTrackIndex = -1
                 var muxerStarted = false
 
-                val bayerBuf = ByteBuffer.allocateDirect(rawW * rawH * 2)
                 val fullBmp = Bitmap.createBitmap(rawW, rawH, Bitmap.Config.ARGB_8888)
                 val scaledBmp = if (exportW == rawW && exportH == rawH) fullBmp else Bitmap.createBitmap(exportW, exportH, Bitmap.Config.ARGB_8888)
                 val canvas = if (scaledBmp !== fullBmp) android.graphics.Canvas(scaledBmp) else null
                 val yuvBuf = ByteArray(exportW * exportH * 3 / 2)
 
                 val bufferInfo = MediaCodec.BufferInfo()
-                val frameIntervalUs = (1_000_000L / fps).toLong()
+                val fallbackIntervalUs = (1_000_000L / measuredFps).toLong().coerceAtLeast(1000L)
+                var lastPtsUs = -1L
 
                 val targetLogIndex = if (editConfig?.log != null && editConfig.log != "None") {
                     top.maary.darkbag.fragments.SettingsFragment.LOG_CURVES.indexOf(editConfig.log).takeIf { it >= 0 } ?: -1
@@ -424,7 +465,9 @@ object RawVideoExporter {
                         val inputBuffer = encoder.getInputBuffer(inIndex)
                         inputBuffer?.clear()
                         inputBuffer?.put(yuvBuf)
-                        val ptsUs = i * frameIntervalUs
+                        val frameTsNs = meta[0]
+                        val ptsUs = calculatePtsUs(i, frameTsNs, firstFrameNs, lastPtsUs, fallbackIntervalUs)
+                        lastPtsUs = ptsUs
                         encoder.queueInputBuffer(inIndex, 0, yuvBuf.size, ptsUs, 0)
                     }
 
@@ -454,7 +497,8 @@ object RawVideoExporter {
                 // Signal End of Stream
                 val eosIndex = encoder.dequeueInputBuffer(10000)
                 if (eosIndex >= 0) {
-                    encoder.queueInputBuffer(eosIndex, 0, 0, totalFrames * frameIntervalUs, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                    val eosPtsUs = (if (lastPtsUs >= 0L) lastPtsUs else 0L) + fallbackIntervalUs
+                    encoder.queueInputBuffer(eosIndex, 0, 0, eosPtsUs, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
                 }
 
                 // Drain remaining

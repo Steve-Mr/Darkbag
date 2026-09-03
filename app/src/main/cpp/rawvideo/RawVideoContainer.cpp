@@ -151,6 +151,17 @@ bool RawVideoWriter::close() {
     file_.write(reinterpret_cast<const char*>(&footerMagic), sizeof(footerMagic));
 
     // 2. Seek back and rewrite updated FileHeader with final frameCount and indexOffset
+    if (frameIndex_.size() >= 2) {
+        uint64_t startNs = frameIndex_.front().timestampNs;
+        uint64_t endNs = frameIndex_.back().timestampNs;
+        if (endNs > startNs) {
+            uint64_t durationNs = endNs - startNs;
+            float measuredFps = static_cast<float>((frameIndex_.size() - 1) * 1000000000.0 / durationNs);
+            if (measuredFps > 0.1f && measuredFps < 240.0f) {
+                header_.fps = measuredFps;
+            }
+        }
+    }
     header_.frameCount = frameCount_;
     header_.indexOffset = indexOffset;
     file_.seekp(0, std::ios::beg);
@@ -160,8 +171,8 @@ bool RawVideoWriter::close() {
     file_.close();
     isOpen_ = false;
 
-    LOGI("RawVideoWriter closed successfully. Total frames: %u, Audio packets: %u, Index offset: %llu",
-         frameCount_, totalAudio, (unsigned long long)indexOffset);
+    LOGI("RawVideoWriter closed successfully. Total frames: %u (fps: %.2f), Audio packets: %u, Index offset: %llu",
+         frameCount_, header_.fps, totalAudio, (unsigned long long)indexOffset);
     return true;
 }
 
