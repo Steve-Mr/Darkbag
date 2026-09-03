@@ -339,7 +339,12 @@ object RawVideoExporter {
         targetResolution: Int = 1080,
         onProgress: (current: Int, total: Int) -> Unit
     ): Boolean = withContext(Dispatchers.IO) {
-        var nativeHandle: Long = 0L
+        var nativeHandle = 0L
+        var encoder: MediaCodec? = null
+        var muxer: MediaMuxer? = null
+        var muxerStarted = false
+        var fullBmp: Bitmap? = null
+        var scaledBmp: Bitmap? = null
         val pfd = context.contentResolver.openFileDescriptor(rawVideoUri, "r") ?: return@withContext false
         pfd.use { parcelFd ->
             try {
@@ -350,14 +355,10 @@ object RawVideoExporter {
                     return@withContext false
                 }
 
-                val header = RawVideoNative.readHeader(nativeHandle) ?: run {
-                    RawVideoNative.nativeCloseReader(nativeHandle)
-                    return@withContext false
-                }
+                val header = RawVideoNative.readHeader(nativeHandle) ?: return@withContext false
 
                 val totalFrames = RawVideoNative.nativeGetFrameCount(nativeHandle)
                 if (totalFrames <= 0) {
-                    RawVideoNative.nativeCloseReader(nativeHandle)
                     return@withContext false
                 }
 
@@ -391,20 +392,25 @@ object RawVideoExporter {
                     setInteger(MediaFormat.KEY_COLOR_TRANSFER, MediaFormat.COLOR_TRANSFER_SDR_VIDEO)
                 }
 
-                val encoder = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
-                encoder.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
-                encoder.start()
-
-                val muxer = MediaMuxer(outputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
-                if (header.orientation != 0) {
-                    muxer.setOrientationHint(header.orientation)
+                val enc = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC).apply {
+                    configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+                    start()
                 }
-                var videoTrackIndex = -1
-                var muxerStarted = false
+                encoder = enc
 
-                val fullBmp = Bitmap.createBitmap(rawW, rawH, Bitmap.Config.ARGB_8888)
-                val scaledBmp = if (exportW == rawW && exportH == rawH) fullBmp else Bitmap.createBitmap(exportW, exportH, Bitmap.Config.ARGB_8888)
-                val canvas = if (scaledBmp !== fullBmp) android.graphics.Canvas(scaledBmp) else null
+                val mux = MediaMuxer(outputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4).apply {
+                    if (header.orientation != 0) {
+                        setOrientationHint(header.orientation)
+                    }
+                }
+                muxer = mux
+                var videoTrackIndex = -1
+
+                val fBmp = Bitmap.createBitmap(rawW, rawH, Bitmap.Config.ARGB_8888)
+                fullBmp = fBmp
+                val sBmp = if (exportW == rawW && exportH == rawH) fBmp else Bitmap.createBitmap(exportW, exportH, Bitmap.Config.ARGB_8888)
+                scaledBmp = sBmp
+                val canvas = if (sBmp !== fBmp) android.graphics.Canvas(sBmp) else null
                 val yuvBuf = ByteArray(exportW * exportH * 3 / 2)
 
                 val bufferInfo = MediaCodec.BufferInfo()
@@ -449,43 +455,43 @@ object RawVideoExporter {
                         exposure = exposure,
                         contrast = contrast,
                         saturation = saturation,
-                        outBitmap = fullBmp
+                        outBitmap = fBmp
                     )
 
-                    if (scaledBmp !== fullBmp && canvas != null) {
-                        canvas.drawBitmap(fullBmp, android.graphics.Rect(0, 0, rawW, rawH), android.graphics.Rect(0, 0, exportW, exportH), null)
+                    if (sBmp !== fBmp && canvas != null) {
+                        canvas.drawBitmap(fBmp, android.graphics.Rect(0, 0, rawW, rawH), android.graphics.Rect(0, 0, exportW, exportH), null)
                     }
 
                     // Convert ARGB to NV12/YUV420
-                    bitmapToNv12(scaledBmp, yuvBuf, exportW, exportH)
+                    bitmapToNv12(sBmp, yuvBuf, exportW, exportH)
 
                     // Feed to MediaCodec
-                    val inIndex = encoder.dequeueInputBuffer(10000)
+                    val inIndex = enc.dequeueInputBuffer(10000)
                     if (inIndex >= 0) {
-                        val inputBuffer = encoder.getInputBuffer(inIndex)
+                        val inputBuffer = enc.getInputBuffer(inIndex)
                         inputBuffer?.clear()
                         inputBuffer?.put(yuvBuf)
                         val frameTsNs = meta[0]
                         val ptsUs = calculatePtsUs(i, frameTsNs, firstFrameNs, lastPtsUs, fallbackIntervalUs)
                         lastPtsUs = ptsUs
-                        encoder.queueInputBuffer(inIndex, 0, yuvBuf.size, ptsUs, 0)
+                        enc.queueInputBuffer(inIndex, 0, yuvBuf.size, ptsUs, 0)
                     }
 
                     // Drain MediaCodec
                     while (true) {
-                        val outIndex = encoder.dequeueOutputBuffer(bufferInfo, 0)
+                        val outIndex = enc.dequeueOutputBuffer(bufferInfo, 0)
                         if (outIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
-                            videoTrackIndex = muxer.addTrack(encoder.outputFormat)
-                            muxer.start()
+                            videoTrackIndex = mux.addTrack(enc.outputFormat)
+                            mux.start()
                             muxerStarted = true
                         } else if (outIndex >= 0) {
-                            val encodedData = encoder.getOutputBuffer(outIndex)
+                            val encodedData = enc.getOutputBuffer(outIndex)
                             if (encodedData != null && muxerStarted && bufferInfo.size > 0) {
                                 encodedData.position(bufferInfo.offset)
                                 encodedData.limit(bufferInfo.offset + bufferInfo.size)
-                                muxer.writeSampleData(videoTrackIndex, encodedData, bufferInfo)
+                                mux.writeSampleData(videoTrackIndex, encodedData, bufferInfo)
                             }
-                            encoder.releaseOutputBuffer(outIndex, false)
+                            enc.releaseOutputBuffer(outIndex, false)
                         } else {
                             break
                         }
@@ -495,49 +501,47 @@ object RawVideoExporter {
                 }
 
                 // Signal End of Stream
-                val eosIndex = encoder.dequeueInputBuffer(10000)
+                val eosIndex = enc.dequeueInputBuffer(10000)
                 if (eosIndex >= 0) {
                     val eosPtsUs = (if (lastPtsUs >= 0L) lastPtsUs else 0L) + fallbackIntervalUs
-                    encoder.queueInputBuffer(eosIndex, 0, 0, eosPtsUs, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                    enc.queueInputBuffer(eosIndex, 0, 0, eosPtsUs, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
                 }
 
                 // Drain remaining
                 while (true) {
-                    val outIndex = encoder.dequeueOutputBuffer(bufferInfo, 10000)
+                    val outIndex = enc.dequeueOutputBuffer(bufferInfo, 10000)
                     if (outIndex >= 0) {
                         if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
-                            encoder.releaseOutputBuffer(outIndex, false)
+                            enc.releaseOutputBuffer(outIndex, false)
                             break
                         }
-                        val encodedData = encoder.getOutputBuffer(outIndex)
+                        val encodedData = enc.getOutputBuffer(outIndex)
                         if (encodedData != null && muxerStarted && bufferInfo.size > 0) {
                             encodedData.position(bufferInfo.offset)
                             encodedData.limit(bufferInfo.offset + bufferInfo.size)
-                            muxer.writeSampleData(videoTrackIndex, encodedData, bufferInfo)
+                            mux.writeSampleData(videoTrackIndex, encodedData, bufferInfo)
                         }
-                        encoder.releaseOutputBuffer(outIndex, false)
+                        enc.releaseOutputBuffer(outIndex, false)
                     } else if (outIndex == MediaCodec.INFO_TRY_AGAIN_LATER) {
                         break
                     }
                 }
 
-                encoder.stop()
-                encoder.release()
-                if (muxerStarted) {
-                    muxer.stop()
-                }
-                muxer.release()
-
-                RawVideoNative.nativeCloseReader(nativeHandle)
-                nativeHandle = 0L
-
                 return@withContext true
             } catch (e: Exception) {
                 Log.e(TAG, "Failed MP4 export", e)
-                if (nativeHandle != 0L) {
-                    RawVideoNative.nativeCloseReader(nativeHandle)
-                }
                 return@withContext false
+            } finally {
+                try { fullBmp?.recycle() } catch (_: Exception) {}
+                try { if (scaledBmp !== fullBmp) scaledBmp?.recycle() } catch (_: Exception) {}
+                try { encoder?.stop() } catch (_: Exception) {}
+                try { encoder?.release() } catch (_: Exception) {}
+                try { if (muxerStarted) muxer?.stop() } catch (_: Exception) {}
+                try { muxer?.release() } catch (_: Exception) {}
+                if (nativeHandle != 0L) {
+                    try { RawVideoNative.nativeCloseReader(nativeHandle) } catch (_: Exception) {}
+                    nativeHandle = 0L
+                }
             }
         }
     }

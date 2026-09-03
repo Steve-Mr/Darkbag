@@ -215,9 +215,10 @@ class CameraFragment : Fragment() {
     private var currentIso = 100
     private var currentExposureTime = 10_000_000L // 10ms
     private var currentEvIndex = 0
+    private var isVideoSaving = false
 
     private val isProcessing: Boolean
-        get() = top.maary.darkbag.processor.HdrPlusRequestManager.pendingTasksCount.value > 0
+        get() = top.maary.darkbag.processor.HdrPlusRequestManager.pendingTasksCount.value > 0 || isVideoSaving
 
     // Half-frame State
     private var pendingVfSnapshot: android.graphics.Bitmap? = null
@@ -4532,38 +4533,50 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             }
         }
 
+        isVideoSaving = true
+        showProcessingAnimation()
+
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
         val rawFolderUri = prefs.getString(SettingsFragment.KEY_RAW_STORAGE_URI, null)
         val jpgFolderUri = prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
 
         lifecycleScope.launch(Dispatchers.IO) {
-            val result = rawVideoSessionManager.stopRecording() ?: return@launch
-            val baseName = result.file.nameWithoutExtension
+            try {
+                val result = rawVideoSessionManager.stopRecording() ?: return@launch
+                val baseName = result.file.nameWithoutExtension
 
-            val (savedUri, thumbnail) = top.maary.darkbag.utils.ImageSaver.saveRawVideo(
-                context = requireContext(),
-                rawVideoFile = result.file,
-                baseName = baseName,
-                targetFps = 24.0f,
-                rawFolderUri = rawFolderUri,
-                jpgFolderUri = jpgFolderUri
-            )
+                val (savedUri, thumbnail) = top.maary.darkbag.utils.ImageSaver.saveRawVideo(
+                    context = requireContext(),
+                    rawVideoFile = result.file,
+                    baseName = baseName,
+                    targetFps = 24.0f,
+                    rawFolderUri = rawFolderUri,
+                    jpgFolderUri = jpgFolderUri
+                )
 
-            if (savedUri != null) {
-                prefs.edit().putString(SettingsFragment.KEY_LAST_CAPTURE_URI, savedUri.toString()).apply()
-                imageRepository.invalidateCache()
-                withContext(Dispatchers.Main) {
-                    updateCurrentThumbnail(savedUri)
-                    val photoViewButton = cameraUiContainerBinding?.photoViewButton
-                    if (photoViewButton != null && thumbnail != null) {
-                        photoViewButton.visibility = View.VISIBLE
-                        photoViewButton.alpha = 1f
-                        photoViewButton.setPadding(resources.getDimension(R.dimen.stroke_small).toInt())
-                        Glide.with(photoViewButton)
-                            .load(thumbnail)
-                            .apply(RequestOptions.circleCropTransform())
-                            .into(photoViewButton)
+                if (savedUri != null) {
+                    prefs.edit().putString(SettingsFragment.KEY_LAST_CAPTURE_URI, savedUri.toString()).apply()
+                    imageRepository.invalidateCache()
+                    withContext(Dispatchers.Main) {
+                        updateCurrentThumbnail(savedUri)
+                        val photoViewButton = cameraUiContainerBinding?.photoViewButton
+                        if (photoViewButton != null && thumbnail != null) {
+                            photoViewButton.visibility = View.VISIBLE
+                            photoViewButton.alpha = 1f
+                            photoViewButton.setPadding(resources.getDimension(R.dimen.stroke_small).toInt())
+                            Glide.with(photoViewButton)
+                                .load(thumbnail)
+                                .apply(RequestOptions.circleCropTransform())
+                                .into(photoViewButton)
+                        }
                     }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error saving raw video", e)
+            } finally {
+                withContext(Dispatchers.Main) {
+                    isVideoSaving = false
+                    hideProcessingAnimation()
                 }
             }
         }

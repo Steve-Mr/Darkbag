@@ -115,6 +115,7 @@ class ImageViewerAdapter(
         var activeCinemaDngFrameIndex: Int = 0
         var activeCinemaDngFrameUri: Uri? = null
         var filmstripFadeRunnable: Runnable? = null
+        var lastDisplayRect: RectF? = null
 
         init {
             binding.videoView.clipToOutline = true
@@ -146,7 +147,13 @@ class ImageViewerAdapter(
         val binding = ItemImageGroupBinding.inflate(
             LayoutInflater.from(parent.context), parent, false
         )
-        return ViewHolder(binding)
+        val holder = ViewHolder(binding)
+        holder.binding.videoView.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            holder.lastDisplayRect?.let { rect ->
+                updateVideoViewBounds(holder, rect)
+            }
+        }
+        return holder
     }
 
     override fun onBindViewHolder(holder: ViewHolder, position: Int, payloads: MutableList<Any>) {
@@ -275,10 +282,14 @@ class ImageViewerAdapter(
             holder.binding.formatToggleGroup.alpha = if (currentlyShouldShow) 1f else 0f
             holder.binding.motionPhotoToggleGroup.visibility = if (currentlyShouldShow) View.VISIBLE else View.GONE
             holder.binding.motionPhotoToggleGroup.alpha = if (currentlyShouldShow) 1f else 0f
-            val hasDots = !group.isMultiCamera && getDerivativeUris(group).size >= 2
+            val isRawSelected = selectedFormats[group.baseName] == FORMAT_DNG
+            val hasDots = !group.isMultiCamera && !isRawSelected && getDerivativeUris(group).size >= 2
             if (hasDots) {
                 holder.binding.derivativeDotsContainer.visibility = if (currentlyShouldShow) View.VISIBLE else View.GONE
                 holder.binding.derivativeDotsContainer.alpha = if (currentlyShouldShow) 1f else 0f
+            } else {
+                holder.binding.derivativeDotsContainer.visibility = View.GONE
+                holder.binding.derivativeDotsContainer.alpha = 0f
             }
             if (isCinemaDngGroup) {
                 holder.binding.filmstripContainer.visibility = if (currentlyShouldShow) View.VISIBLE else View.GONE
@@ -300,6 +311,7 @@ class ImageViewerAdapter(
         }
 
         holder.binding.imageView.onMatrixChanged = { rect ->
+            holder.lastDisplayRect = RectF(rect)
             // Use measured dimensions if layout hasn't happened yet
             val viewWidth = holder.binding.imageView.measuredWidth.takeIf { it > 0 } ?: holder.binding.imageView.width
             val viewHeight = holder.binding.imageView.measuredHeight.takeIf { it > 0 } ?: holder.binding.imageView.height
@@ -562,9 +574,9 @@ class ImageViewerAdapter(
             // 4. Derivative Version Stacking Dots setup (Bottom Center Colorful Dots)
             val dotsContainer = derivativeDotsContainer
             val dotsGroup = derivativeDotsGroup
-            val shouldShowDots = !group.isMultiCamera && derivatives.size >= 2 && !isFormatSwitcherPersistentHidden
+            val shouldShowDots = !group.isMultiCamera && !isRawSelected && derivatives.size >= 2 && !isFormatSwitcherPersistentHidden
             if (shouldShowDots) {
-                dotsContainer.visibility = if (isUiVisible) View.VISIBLE else View.GONE
+                dotsContainer.visibility = if (isUiVisible && shouldShowDots) View.VISIBLE else View.GONE
                 dotsGroup.removeAllViews()
 
                 val density = holder.itemView.context.resources.displayMetrics.density
@@ -986,6 +998,7 @@ class ImageViewerAdapter(
             val rect = RectF(0f, 0f, d.intrinsicWidth.toFloat(), d.intrinsicHeight.toFloat())
             iv.imageMatrix.mapRect(rect)
             rect.intersect(0f, 0f, iv.width.toFloat(), iv.height.toFloat())
+            holder.lastDisplayRect = RectF(rect)
             updateVideoViewBounds(holder, rect)
         }
 
@@ -1139,6 +1152,7 @@ class ImageViewerAdapter(
             val rect = RectF(0f, 0f, d.intrinsicWidth.toFloat(), d.intrinsicHeight.toFloat())
             iv.imageMatrix.mapRect(rect)
             rect.intersect(0f, 0f, iv.width.toFloat(), iv.height.toFloat())
+            holder.lastDisplayRect = RectF(rect)
             updateVideoViewBounds(holder, rect)
         }
 
@@ -1370,7 +1384,8 @@ class ImageViewerAdapter(
                     val group = getGroup(i)
                     val isCinemaDngGroup = group.isCinemaDng || group.cinemaDngFolderUri != null || group.cinemaDngFirstFrameUri != null || group.cinemaDngFrameUris.isNotEmpty()
                     val hasMultiCam = group.isMultiCamera && getMultiCameraLenses(group).size >= 2
-                    val hasDots = !group.isMultiCamera && getDerivativeUris(group).size >= 2
+                    val isRawSelected = selectedFormats[group.baseName] == FORMAT_DNG
+                    val hasDots = !group.isMultiCamera && !isRawSelected && getDerivativeUris(group).size >= 2
                     val shouldBeVisible = isVisible && !isFormatSwitcherPersistentHidden
                     if (shouldBeVisible) {
                         formatGroup.visibility = View.VISIBLE
@@ -1384,6 +1399,9 @@ class ImageViewerAdapter(
                         if (hasDots) {
                             dotsContainer.visibility = View.VISIBLE
                             dotsContainer.animate().alpha(1f).setDuration(200).setListener(null).start()
+                        } else {
+                            dotsContainer.visibility = View.GONE
+                            dotsContainer.alpha = 0f
                         }
                         if (isCinemaDngGroup) {
                             filmstripContainer.visibility = View.VISIBLE
@@ -1447,7 +1465,8 @@ class ImageViewerAdapter(
                     val group = getGroup(i)
                     val isCinemaDngGroup = group.isCinemaDng || group.cinemaDngFolderUri != null || group.cinemaDngFirstFrameUri != null || group.cinemaDngFrameUris.isNotEmpty()
                     val hasMultiCam = group.isMultiCamera && getMultiCameraLenses(group).size >= 2
-                    val hasDots = !group.isMultiCamera && getDerivativeUris(group).size >= 2
+                    val isRawSelected = selectedFormats[group.baseName] == FORMAT_DNG
+                    val hasDots = !group.isMultiCamera && !isRawSelected && getDerivativeUris(group).size >= 2
                     val shouldBeVisible = isUiVisible && !isFormatSwitcherPersistentHidden
                     if (shouldBeVisible) {
                         formatGroup.visibility = View.VISIBLE
@@ -1461,6 +1480,9 @@ class ImageViewerAdapter(
                         if (hasDots) {
                             dotsContainer.visibility = View.VISIBLE
                             dotsContainer.animate().alpha(1f).setDuration(200).setListener(null).start()
+                        } else {
+                            dotsContainer.visibility = View.GONE
+                            dotsContainer.alpha = 0f
                         }
                         if (isCinemaDngGroup) {
                             filmstripContainer.visibility = View.VISIBLE

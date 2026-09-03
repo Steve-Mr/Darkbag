@@ -3123,6 +3123,10 @@ open class ImageViewerFragment : Fragment() {
 
         adapter.setUiVisibility(true)
 
+        binding.topBarContainer.animate().cancel()
+        binding.bottomLeftControls.animate().cancel()
+        binding.bottomRightControls.animate().cancel()
+
         binding.topBarContainer.animate().translationY(0f).alpha(1f).setDuration(200).setListener(null).start()
         binding.bottomLeftControls.animate().translationY(0f).alpha(1f).setDuration(200).setListener(null).start()
         binding.bottomRightControls.animate().translationY(0f).alpha(1f).setDuration(200).setListener(null).start()
@@ -3135,6 +3139,10 @@ open class ImageViewerFragment : Fragment() {
         isUiVisible = false
 
         adapter.setUiVisibility(false)
+
+        binding.topBarContainer.animate().cancel()
+        binding.bottomLeftControls.animate().cancel()
+        binding.bottomRightControls.animate().cancel()
 
         val topShift = -(binding.topBarContainer.height + (binding.topBarContainer.layoutParams as ViewGroup.MarginLayoutParams).topMargin).toFloat()
         val bottomShift = (binding.bottomLeftControls.height + (binding.bottomLeftControls.layoutParams as ViewGroup.MarginLayoutParams).bottomMargin).toFloat()
@@ -3248,14 +3256,18 @@ open class ImageViewerFragment : Fragment() {
             bottomPadding = 0
         }
 
-        android.transition.TransitionManager.beginDelayedTransition(binding.viewerRoot, android.transition.AutoTransition().apply {
-            duration = 200
-            addTarget(binding.imagePager)
-        })
+        val currentGroup = if (::adapter.isInitialized && adapter.itemCount > 0 && binding.imagePager.currentItem in 0 until adapter.itemCount) adapter.getGroup(binding.imagePager.currentItem) else null
+        val isVideo = currentGroup?.isRawVideo == true || currentGroup?.mp4VideoUri != null || (binding.imagePager.getChildAt(0) as? androidx.recyclerview.widget.RecyclerView)?.findViewHolderForAdapterPosition(binding.imagePager.currentItem)?.let { (it as? ImageViewerAdapter.ViewHolder)?.isPlayingVideo } == true
+
+        if (!isVideo) {
+            android.transition.TransitionManager.beginDelayedTransition(binding.viewerRoot, android.transition.AutoTransition().apply {
+                duration = 200
+                addTarget(binding.imagePager)
+            })
+        }
         binding.imagePager.setPadding(0, topPadding, 0, bottomPadding)
 
         // Ensure half-frame masks match the visible viewport
-        val currentGroup = if (::adapter.isInitialized && adapter.itemCount > 0) adapter.getGroup(binding.imagePager.currentItem) else null
         val activeLayout = currentEditConfig?.hfLayout ?: currentGroup?.hfLayout
         val isTB = activeLayout == "TB" || activeLayout?.contains("top", ignoreCase = true) == true
 
@@ -3384,39 +3396,43 @@ open class ImageViewerFragment : Fragment() {
                 outputDir = tempExportDir,
                 onProgress = { _, _ -> }
             )
-            binding.initialLoadingIndicator.visibility = View.GONE
-
             if (resultDir != null && resultDir.exists()) {
                 val clipName = resultDir.name
-                if (rawFolderUriStr != null) {
-                    try {
-                        val treeUri = Uri.parse(rawFolderUriStr)
-                        val treeDoc = androidx.documentfile.provider.DocumentFile.fromTreeUri(context, treeUri)
-                        val clipDirDoc = treeDoc?.createDirectory(clipName)
-                        if (clipDirDoc != null) {
-                            resultDir.listFiles()?.forEach { file ->
-                                val mime = if (file.name.endsWith(".wav")) "audio/wav" else "image/x-adobe-dng"
-                                val targetDoc = clipDirDoc.createFile(mime, file.name)
-                                if (targetDoc != null) {
-                                    context.contentResolver.openOutputStream(targetDoc.uri)?.use { out ->
-                                        file.inputStream().use { it.copyTo(out) }
+                withContext(Dispatchers.IO) {
+                    if (rawFolderUriStr != null) {
+                        try {
+                            val treeUri = Uri.parse(rawFolderUriStr)
+                            val treeDoc = androidx.documentfile.provider.DocumentFile.fromTreeUri(context, treeUri)
+                            val clipDirDoc = treeDoc?.createDirectory(clipName)
+                            if (clipDirDoc != null) {
+                                resultDir.listFiles()?.forEach { file ->
+                                    val mime = if (file.name.endsWith(".wav")) "audio/wav" else "image/x-adobe-dng"
+                                    val targetDoc = clipDirDoc.createFile(mime, file.name)
+                                    if (targetDoc != null) {
+                                        context.contentResolver.openOutputStream(targetDoc.uri)?.use { out ->
+                                            file.inputStream().use { it.copyTo(out) }
+                                        }
                                     }
                                 }
                             }
+                        } catch (e: Exception) {
+                            android.util.Log.e("ImageViewerFragment", "Failed to copy CinemaDNG to SAF folder", e)
                         }
-                    } catch (e: Exception) {
-                        android.util.Log.e("ImageViewerFragment", "Failed to copy CinemaDNG to SAF folder", e)
                     }
-                }
-                val destDir = File(context.getExternalFilesDir(null), "CinemaDNG/$clipName").apply { mkdirs() }
-                resultDir.copyRecursively(destDir, overwrite = true)
-                tempExportDir.deleteRecursively()
+                    val destDir = File(context.getExternalFilesDir(null), "CinemaDNG/$clipName").apply { mkdirs() }
+                    resultDir.copyRecursively(destDir, overwrite = true)
+                    tempExportDir.deleteRecursively()
 
-                android.media.MediaScannerConnection.scanFile(context, arrayOf(destDir.absolutePath), null, null)
+                    android.media.MediaScannerConnection.scanFile(context, arrayOf(destDir.absolutePath), null, null)
+                }
+                binding.initialLoadingIndicator.visibility = View.GONE
                 refreshCurrentGroupAndAdapter(group.baseName)
                 Toast.makeText(context, "CinemaDNG exported: $clipName", Toast.LENGTH_LONG).show()
             } else {
-                tempExportDir.deleteRecursively()
+                withContext(Dispatchers.IO) {
+                    tempExportDir.deleteRecursively()
+                }
+                binding.initialLoadingIndicator.visibility = View.GONE
                 Toast.makeText(context, "CinemaDNG export failed", Toast.LENGTH_SHORT).show()
             }
         }
