@@ -51,7 +51,8 @@ Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeStartRecording(
         jint calibrationIlluminant2,
         jfloat baselineExposure,
         jstring jMake,
-        jstring jModel
+        jstring jModel,
+        jint downsampleMode
 ) {
     const char* outputPathStr = env->GetStringUTFChars(jOutputPath, nullptr);
     if (!outputPathStr) return 0;
@@ -153,7 +154,8 @@ Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeStartRecording(
     }
 
     auto* recorder = new RawVideoRecorder();
-    if (!recorder->startRecording(outputPathStr, header)) {
+    auto mode = static_cast<DownsampleMode>(downsampleMode);
+    if (!recorder->startRecording(outputPathStr, header, mode)) {
         delete recorder;
         env->ReleaseStringUTFChars(jOutputPath, outputPathStr);
         return 0;

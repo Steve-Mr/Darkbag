@@ -1,6 +1,7 @@
 #pragma once
 
 #include "RawVideoContainer.h"
+#include "BayerProcessor.h"
 #include <thread>
 #include <atomic>
 #include <queue>
@@ -44,7 +45,7 @@ public:
     RawVideoRecorder();
     ~RawVideoRecorder();
 
-    bool startRecording(const std::string& outputPath, const FileHeader& header);
+    bool startRecording(const std::string& outputPath, const FileHeader& header, DownsampleMode downsampleMode = DownsampleMode::NONE);
     bool pushVideoFrame(const uint8_t* bayerData, size_t dataSize, uint32_t width, uint32_t height,
                         uint32_t rowStride, uint64_t timestampNs, uint64_t exposureTimeNs, uint32_t iso,
                         const float* neutralColorPoint, float fNumber = 0.0f, float focalLength = 0.0f);
@@ -64,6 +65,7 @@ private:
 
     RawVideoWriter writer_;
     FileHeader header_{};
+    DownsampleMode downsampleMode_ = DownsampleMode::NONE;
     std::atomic<bool> isRecording_{false};
     std::atomic<bool> stopRequested_{false};
     std::atomic<bool> allCompressionFinished_{false};

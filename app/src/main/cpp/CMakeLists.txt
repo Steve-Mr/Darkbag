@@ -233,6 +233,7 @@ add_library(
         rawvideo/lz4/lz4.c
         rawvideo/RawVideoContainer.cpp
         rawvideo/RawVideoRecorder.cpp
+        rawvideo/BayerProcessor.cpp
         rawvideo/RawVideoJNI.cpp
         rawvideo/RawVideoGLRenderer.cpp
         ${LIBRAW_SOURCES}

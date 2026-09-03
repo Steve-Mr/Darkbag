@@ -38,7 +38,8 @@ class RawVideoSessionManager {
         activeLogName: String? = null,
         orientation: Int = 0,
         targetWidth: Int = 0,
-        targetHeight: Int = 0
+        targetHeight: Int = 0,
+        downsampleMode: Int = 0
     ): Boolean {
         if (isRecording.get()) {
             Log.w(TAG, "Recording already in progress")
@@ -172,7 +173,8 @@ class RawVideoSessionManager {
             calibrationIlluminant2 = calibrationIlluminant2,
             baselineExposure = baselineExposure,
             make = make,
-            model = model
+            model = model,
+            downsampleMode = downsampleMode
         )
 
         if (nativeHandle == 0L) {
@@ -198,7 +200,7 @@ class RawVideoSessionManager {
         }.apply { start() }
 
         isRecording.set(true)
-        Log.i(TAG, "Raw video recording started: $outputPath (${width}x${height} @ ${targetFps}fps, orient=$orientation)")
+        Log.i(TAG, "Raw video recording started: $outputPath (${width}x${height} @ ${targetFps}fps, orient=$orientation, downsampleMode=$downsampleMode)")
         return true
     }
 

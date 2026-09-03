@@ -16,6 +16,10 @@ object RawVideoNative {
     const val COMPRESSION_NONE = 0
     const val COMPRESSION_NEON_DPCM_LZ4 = 1
 
+    const val DOWNSAMPLE_NONE = 0
+    const val DOWNSAMPLE_CROP_4K = 1
+    const val DOWNSAMPLE_BINNING_1080P = 2
+
     data class Header(
         val width: Int,
         val height: Int,
@@ -79,7 +83,8 @@ object RawVideoNative {
         calibrationIlluminant2: Int = 17,
         baselineExposure: Float = 0.0f,
         make: String? = null,
-        model: String? = null
+        model: String? = null,
+        downsampleMode: Int = 0
     ): Long
 
     external fun nativePushVideoFrame(

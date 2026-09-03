@@ -66,13 +66,22 @@ RawVideoRecorder::~RawVideoRecorder() {
     stopRecording();
 }
 
-bool RawVideoRecorder::startRecording(const std::string& outputPath, const FileHeader& header) {
+bool RawVideoRecorder::startRecording(const std::string& outputPath, const FileHeader& header, DownsampleMode downsampleMode) {
     if (isRecording_.load(std::memory_order_relaxed)) {
         LOGW("startRecording called while already recording");
         return false;
     }
 
+    downsampleMode_ = downsampleMode;
     header_ = header;
+    if (downsampleMode_ == DownsampleMode::BINNING_1080P) {
+        header_.width = 1920;
+        header_.height = 1080;
+    } else if (downsampleMode_ == DownsampleMode::CROP_4K) {
+        header_.width = 3840;
+        header_.height = 2160;
+    }
+
     if (!writer_.open(outputPath, header_)) {
         LOGE("Failed to initialize writer for path: %s", outputPath.c_str());
         return false;
@@ -104,8 +113,8 @@ bool RawVideoRecorder::startRecording(const std::string& outputPath, const FileH
     }
     writerThread_ = std::thread(&RawVideoRecorder::writerLoop, this);
 
-    LOGI("RawVideoRecorder started recording to %s (%zu compression workers + 1 writer thread)",
-         outputPath.c_str(), NUM_COMPRESSION_THREADS);
+    LOGI("RawVideoRecorder started recording to %s (%zu compression workers + 1 writer thread, downsampleMode=%u)",
+         outputPath.c_str(), NUM_COMPRESSION_THREADS, static_cast<uint32_t>(downsampleMode_));
     return true;
 }
 
@@ -116,18 +125,24 @@ bool RawVideoRecorder::pushVideoFrame(const uint8_t* bayerData, size_t dataSize,
         return false;
     }
 
-    std::unique_lock<std::mutex> lock(queueMutex_);
-    if (videoQueue_.size() >= MAX_QUEUE_SIZE) {
-        LOGW("Video queue overflow (%zu frames), dropping frame to avoid OOM", videoQueue_.size());
-        return false;
+    RawFrameInput input;
+    if (downsampleMode_ != DownsampleMode::NONE) {
+        size_t allocSize = (downsampleMode_ == DownsampleMode::BINNING_1080P)
+                               ? (1920 * 1080 * sizeof(uint16_t))
+                               : (3840 * 2160 * sizeof(uint16_t));
+        input.data.resize(allocSize);
+        auto result = BayerProcessor::processBayerFrame(bayerData, width, height, rowStride, downsampleMode_, input.data.data());
+        input.data.resize(result.outDataSize);
+        input.width = result.outWidth;
+        input.height = result.outHeight;
+        input.rowStride = result.outWidth * sizeof(uint16_t);
+    } else {
+        input.data.assign(bayerData, bayerData + dataSize);
+        input.width = width;
+        input.height = height;
+        input.rowStride = rowStride;
     }
 
-    RawFrameInput input;
-    input.frameIndex = nextFrameIndex_++;
-    input.data.assign(bayerData, bayerData + dataSize);
-    input.width = width;
-    input.height = height;
-    input.rowStride = rowStride;
     input.timestampNs = timestampNs;
     input.exposureTimeNs = exposureTimeNs;
     input.iso = iso;
@@ -143,6 +158,13 @@ bool RawVideoRecorder::pushVideoFrame(const uint8_t* bayerData, size_t dataSize,
         input.neutralColorPoint[2] = 1.0f;
     }
 
+    std::unique_lock<std::mutex> lock(queueMutex_);
+    if (videoQueue_.size() >= MAX_QUEUE_SIZE) {
+        LOGW("Video queue overflow (%zu frames), dropping frame to avoid OOM", videoQueue_.size());
+        return false;
+    }
+
+    input.frameIndex = nextFrameIndex_++;
     videoQueue_.push(std::move(input));
     lock.unlock();
     queueCv_.notify_one();

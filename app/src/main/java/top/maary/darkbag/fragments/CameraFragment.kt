@@ -20,6 +20,7 @@ import top.maary.darkbag.ui.ExpressiveShutterButton
 import top.maary.darkbag.utils.DebugLogManager
 import top.maary.darkbag.utils.LensInfo
 import top.maary.darkbag.utils.CameraRepository
+import top.maary.darkbag.rawvideo.RawVideoNative
 import top.maary.darkbag.motionphoto.MotionPhotoEncoder
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.NonCancellable
@@ -3726,7 +3727,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         val targetCaptureSize: android.util.Size
         if (isRawSupportedLocally) {
             val rawSizes = map?.getOutputSizes(android.graphics.ImageFormat.RAW_SENSOR) ?: emptyArray()
-            targetCaptureSize = SettingsFragment.selectRawVideoSize(rawResPref, rawSizes)
+            targetCaptureSize = rawSizes.maxByOrNull { it.width * it.height } ?: android.util.Size(4000, 3000)
             rawImageReader = ImageReader.newInstance(targetCaptureSize.width, targetCaptureSize.height, android.graphics.ImageFormat.RAW_SENSOR, 8)
         } else {
             val jpegSizes = map?.getOutputSizes(android.graphics.ImageFormat.JPEG) ?: emptyArray()
@@ -4421,6 +4422,12 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         val targetFps = targetFpsStr.toFloatOrNull() ?: 24.0f
         val activeLut = prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, null)
         val activeLog = prefs.getString(SettingsFragment.KEY_TARGET_LOG, "None")
+        val rawResPref = prefs.getString(SettingsFragment.KEY_RAW_VIDEO_RESOLUTION, SettingsFragment.DEFAULT_RAW_VIDEO_RESOLUTION)
+        val downsampleMode = when (rawResPref) {
+            "1080p" -> RawVideoNative.DOWNSAMPLE_BINNING_1080P
+            "4K UHD" -> RawVideoNative.DOWNSAMPLE_CROP_4K
+            else -> RawVideoNative.DOWNSAMPLE_NONE
+        }
 
         val timestamp = System.currentTimeMillis()
         val baseName = DarkbagIdentity.prefixedBaseName("RAWVID_${timestamp}")
@@ -4439,7 +4446,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             activeLogName = activeLog,
             orientation = combinedOrientation,
             targetWidth = reader.width,
-            targetHeight = reader.height
+            targetHeight = reader.height,
+            downsampleMode = downsampleMode
         )
 
         val targetFpsInt = targetFps.toInt()
