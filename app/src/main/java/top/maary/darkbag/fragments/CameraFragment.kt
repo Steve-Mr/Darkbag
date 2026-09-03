@@ -4422,10 +4422,11 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         val targetFps = targetFpsStr.toFloatOrNull() ?: 24.0f
         val activeLut = prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, null)
         val activeLog = prefs.getString(SettingsFragment.KEY_TARGET_LOG, "None")
-        val rawResPref = prefs.getString(SettingsFragment.KEY_RAW_VIDEO_RESOLUTION, SettingsFragment.DEFAULT_RAW_VIDEO_RESOLUTION)
-        val downsampleMode = when (rawResPref) {
-            "1080p" -> RawVideoNative.DOWNSAMPLE_BINNING_1080P
-            "4K UHD" -> RawVideoNative.DOWNSAMPLE_CROP_4K
+        val rawResPref = prefs.getString(SettingsFragment.KEY_RAW_VIDEO_RESOLUTION, SettingsFragment.DEFAULT_RAW_VIDEO_RESOLUTION) ?: SettingsFragment.DEFAULT_RAW_VIDEO_RESOLUTION
+        val downsampleMode = when {
+            rawResPref.contains("1080p") -> RawVideoNative.DOWNSAMPLE_BINNING_1080P
+            rawResPref.contains("2K Open Gate") || (rawResPref.contains("4:3") && !rawResPref.contains("Max")) -> RawVideoNative.DOWNSAMPLE_BINNING_2K_OPEN_GATE_4_3
+            rawResPref.contains("4K") -> RawVideoNative.DOWNSAMPLE_CROP_4K
             else -> RawVideoNative.DOWNSAMPLE_NONE
         }
 

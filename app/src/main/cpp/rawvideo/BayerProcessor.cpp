@@ -181,6 +181,15 @@ BayerProcessResult BayerProcessor::processBayerFrame(
     auto* dst16 = reinterpret_cast<uint16_t*>(dstBytes);
 
     switch (mode) {
+        case DownsampleMode::BINNING_2K_OPEN_GATE_4_3: {
+            const uint32_t targetW = (srcWidth / 2) & ~1u;
+            const uint32_t targetH = (srcHeight / 2) & ~1u;
+            bayer2x2BinningNEON(srcBytes, targetW * 2, targetH * 2, srcRowStrideBytes, dst16);
+            result.outWidth = targetW;
+            result.outHeight = targetH;
+            result.outDataSize = static_cast<size_t>(targetW) * targetH * sizeof(uint16_t);
+            return result;
+        }
         case DownsampleMode::BINNING_1080P: {
             // Target: 1920x1080
             // Check if sensor is large enough for 2x2 binning into at least 1920x1080

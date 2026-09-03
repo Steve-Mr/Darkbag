@@ -19,6 +19,7 @@ object RawVideoNative {
     const val DOWNSAMPLE_NONE = 0
     const val DOWNSAMPLE_CROP_4K = 1
     const val DOWNSAMPLE_BINNING_1080P = 2
+    const val DOWNSAMPLE_BINNING_2K_OPEN_GATE_4_3 = 3
 
     data class Header(
         val width: Int,

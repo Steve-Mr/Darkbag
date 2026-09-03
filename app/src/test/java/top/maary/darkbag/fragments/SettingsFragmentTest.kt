@@ -13,8 +13,11 @@ class SettingsFragmentTest {
 
     @Test
     fun testRawVideoResolutionOptionsAndDefault() {
-        assertEquals(listOf("Max Native", "4K UHD", "1080p"), SettingsFragment.RAW_VIDEO_RESOLUTION_OPTIONS)
-        assertEquals("Max Native", SettingsFragment.DEFAULT_RAW_VIDEO_RESOLUTION)
+        assertEquals(
+            listOf("Max Native (4:3)", "2K Open Gate (4:3)", "4K UHD (16:9)", "1080p (16:9)"),
+            SettingsFragment.RAW_VIDEO_RESOLUTION_OPTIONS
+        )
+        assertEquals("Max Native (4:3)", SettingsFragment.DEFAULT_RAW_VIDEO_RESOLUTION)
     }
 
     @Test
@@ -25,10 +28,28 @@ class SettingsFragmentTest {
             Size(4000, 3000),
             Size(1280, 720)
         )
-        val selected = SettingsFragment.selectRawVideoSize("Max Native", sizes)
+        val selected = SettingsFragment.selectRawVideoSize("Max Native (4:3)", sizes)
         assertEquals(Size(4000, 3000), selected)
 
-        val emptySelected = SettingsFragment.selectRawVideoSize("Max Native", emptyArray())
+        val legacySelected = SettingsFragment.selectRawVideoSize("Max Native", sizes)
+        assertEquals(Size(4000, 3000), legacySelected)
+
+        val emptySelected = SettingsFragment.selectRawVideoSize("Max Native (4:3)", emptyArray())
+        assertEquals(Size(4000, 3000), emptySelected)
+    }
+
+    @Test
+    fun testSelectRawVideoSize_2KOpenGate() {
+        val sizes = arrayOf(
+            Size(1920, 1080),
+            Size(3840, 2160),
+            Size(4000, 3000),
+            Size(1280, 720)
+        )
+        val selected = SettingsFragment.selectRawVideoSize("2K Open Gate (4:3)", sizes)
+        assertEquals(Size(4000, 3000), selected)
+
+        val emptySelected = SettingsFragment.selectRawVideoSize("2K Open Gate (4:3)", emptyArray())
         assertEquals(Size(4000, 3000), emptySelected)
     }
 
@@ -39,8 +60,11 @@ class SettingsFragmentTest {
             Size(3840, 2160),
             Size(4000, 3000)
         )
-        val selected = SettingsFragment.selectRawVideoSize("4K UHD", sizes)
+        val selected = SettingsFragment.selectRawVideoSize("4K UHD (16:9)", sizes)
         assertEquals(Size(3840, 2160), selected)
+
+        val legacySelected = SettingsFragment.selectRawVideoSize("4K UHD", sizes)
+        assertEquals(Size(3840, 2160), legacySelected)
     }
 
     @Test
@@ -50,7 +74,7 @@ class SettingsFragmentTest {
             Size(4096, 2304), // 16:9 near 4K
             Size(4000, 3000)
         )
-        val selected = SettingsFragment.selectRawVideoSize("4K UHD", sizes)
+        val selected = SettingsFragment.selectRawVideoSize("4K UHD (16:9)", sizes)
         assertEquals(Size(4096, 2304), selected)
     }
 
@@ -62,7 +86,7 @@ class SettingsFragmentTest {
             Size(3200, 2400), // 7,680,000 px (closest to 3840*2160 = 8,294,400)
             Size(4000, 3000)  // 12,000,000 px
         )
-        val selected = SettingsFragment.selectRawVideoSize("4K UHD", sizes)
+        val selected = SettingsFragment.selectRawVideoSize("4K UHD (16:9)", sizes)
         assertEquals(Size(3200, 2400), selected)
     }
 
@@ -73,8 +97,11 @@ class SettingsFragmentTest {
             Size(3840, 2160),
             Size(4000, 3000)
         )
-        val selected = SettingsFragment.selectRawVideoSize("1080p", sizes)
+        val selected = SettingsFragment.selectRawVideoSize("1080p (16:9)", sizes)
         assertEquals(Size(1920, 1080), selected)
+
+        val legacySelected = SettingsFragment.selectRawVideoSize("1080p", sizes)
+        assertEquals(Size(1920, 1080), legacySelected)
     }
 
     @Test

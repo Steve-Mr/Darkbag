@@ -9,7 +9,8 @@ namespace rawvideo {
 enum class DownsampleMode : uint32_t {
     NONE = 0,
     CROP_4K = 1,
-    BINNING_1080P = 2
+    BINNING_1080P = 2,
+    BINNING_2K_OPEN_GATE_4_3 = 3
 };
 
 struct BayerProcessResult {
@@ -80,6 +81,7 @@ public:
 
     /**
      * Process raw Bayer sensor frame according to DownsampleMode:
+     * - BINNING_2K_OPEN_GATE_4_3: Full-sensor 2x2 Bayer binning without cropping (preserves full 4:3 FOV).
      * - BINNING_1080P: 2x2 Bayer binning with center crop to 1920x1080 (even offsets).
      * - CROP_4K: Center crop to 3840x2160 (even offsets).
      * - NONE: Straight copy respecting stride (or returns original dimensions).

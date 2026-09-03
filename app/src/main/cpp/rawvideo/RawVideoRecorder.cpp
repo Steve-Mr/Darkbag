@@ -74,7 +74,10 @@ bool RawVideoRecorder::startRecording(const std::string& outputPath, const FileH
 
     downsampleMode_ = downsampleMode;
     header_ = header;
-    if (downsampleMode_ == DownsampleMode::BINNING_1080P) {
+    if (downsampleMode_ == DownsampleMode::BINNING_2K_OPEN_GATE_4_3) {
+        header_.width = (header_.width / 2) & ~1u;
+        header_.height = (header_.height / 2) & ~1u;
+    } else if (downsampleMode_ == DownsampleMode::BINNING_1080P) {
         header_.width = 1920;
         header_.height = 1080;
     } else if (downsampleMode_ == DownsampleMode::CROP_4K) {
@@ -127,9 +130,14 @@ bool RawVideoRecorder::pushVideoFrame(const uint8_t* bayerData, size_t dataSize,
 
     RawFrameInput input;
     if (downsampleMode_ != DownsampleMode::NONE) {
-        size_t allocSize = (downsampleMode_ == DownsampleMode::BINNING_1080P)
-                               ? (1920 * 1080 * sizeof(uint16_t))
-                               : (3840 * 2160 * sizeof(uint16_t));
+        size_t allocSize;
+        if (downsampleMode_ == DownsampleMode::BINNING_2K_OPEN_GATE_4_3) {
+            allocSize = static_cast<size_t>((width / 2) & ~1u) * ((height / 2) & ~1u) * sizeof(uint16_t);
+        } else if (downsampleMode_ == DownsampleMode::BINNING_1080P) {
+            allocSize = 1920 * 1080 * sizeof(uint16_t);
+        } else {
+            allocSize = 3840 * 2160 * sizeof(uint16_t);
+        }
         input.data.resize(allocSize);
         auto result = BayerProcessor::processBayerFrame(bayerData, width, height, rowStride, downsampleMode_, input.data.data());
         input.data.resize(result.outDataSize);

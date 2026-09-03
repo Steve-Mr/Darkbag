@@ -12,20 +12,28 @@ class BayerProcessorUnitTest {
         assertEquals(0, RawVideoNative.DOWNSAMPLE_NONE)
         assertEquals(1, RawVideoNative.DOWNSAMPLE_CROP_4K)
         assertEquals(2, RawVideoNative.DOWNSAMPLE_BINNING_1080P)
+        assertEquals(3, RawVideoNative.DOWNSAMPLE_BINNING_2K_OPEN_GATE_4_3)
     }
 
     @Test
     fun testResolutionSettingToDownsampleModeMapping() {
         fun mapPreferenceToMode(pref: String?): Int {
-            return when (pref) {
-                "1080p" -> RawVideoNative.DOWNSAMPLE_BINNING_1080P
-                "4K UHD" -> RawVideoNative.DOWNSAMPLE_CROP_4K
+            if (pref == null) return RawVideoNative.DOWNSAMPLE_NONE
+            return when {
+                pref.contains("1080p") -> RawVideoNative.DOWNSAMPLE_BINNING_1080P
+                pref.contains("2K Open Gate") || (pref.contains("4:3") && !pref.contains("Max")) -> RawVideoNative.DOWNSAMPLE_BINNING_2K_OPEN_GATE_4_3
+                pref.contains("4K") -> RawVideoNative.DOWNSAMPLE_CROP_4K
                 else -> RawVideoNative.DOWNSAMPLE_NONE
             }
         }
 
+        assertEquals(RawVideoNative.DOWNSAMPLE_BINNING_1080P, mapPreferenceToMode("1080p (16:9)"))
         assertEquals(RawVideoNative.DOWNSAMPLE_BINNING_1080P, mapPreferenceToMode("1080p"))
+        assertEquals(RawVideoNative.DOWNSAMPLE_BINNING_2K_OPEN_GATE_4_3, mapPreferenceToMode("2K Open Gate (4:3)"))
+        assertEquals(RawVideoNative.DOWNSAMPLE_BINNING_2K_OPEN_GATE_4_3, mapPreferenceToMode("2K Open Gate"))
+        assertEquals(RawVideoNative.DOWNSAMPLE_CROP_4K, mapPreferenceToMode("4K UHD (16:9)"))
         assertEquals(RawVideoNative.DOWNSAMPLE_CROP_4K, mapPreferenceToMode("4K UHD"))
+        assertEquals(RawVideoNative.DOWNSAMPLE_NONE, mapPreferenceToMode("Max Native (4:3)"))
         assertEquals(RawVideoNative.DOWNSAMPLE_NONE, mapPreferenceToMode("Max Native"))
         assertEquals(RawVideoNative.DOWNSAMPLE_NONE, mapPreferenceToMode(SettingsFragment.DEFAULT_RAW_VIDEO_RESOLUTION))
         assertEquals(RawVideoNative.DOWNSAMPLE_NONE, mapPreferenceToMode(null))
@@ -130,15 +138,66 @@ class BayerProcessorUnitTest {
     }
 
     @Test
+    fun test2KOpenGateBinningMathAndPreservedAspectRatio() {
+        val srcW = 4000
+        val srcH = 3000
+
+        // In 2K Open Gate 4:3 mode:
+        // targetW = (srcWidth / 2) & ~1u
+        // targetH = (srcHeight / 2) & ~1u
+        val targetW = (srcW / 2) and 1.inv()
+        val targetH = (srcH / 2) and 1.inv()
+
+        assertEquals(2000, targetW)
+        assertEquals(1500, targetH)
+
+        // Verifies exact 4:3 aspect ratio retention without cropping
+        val srcAspect = srcW.toDouble() / srcH.toDouble()
+        val targetAspect = targetW.toDouble() / targetH.toDouble()
+        assertEquals(4.0 / 3.0, srcAspect, 1e-6)
+        assertEquals(4.0 / 3.0, targetAspect, 1e-6)
+        assertEquals(srcAspect, targetAspect, 1e-6)
+
+        // Verifies even coordinate / CFA phase preservation
+        assertEquals(0, targetW % 2)
+        assertEquals(0, targetH % 2)
+
+        // Block size in source is exactly 2x output, multiple of 4
+        assertEquals(4000, targetW * 2)
+        assertEquals(3000, targetH * 2)
+        assertEquals(0, (targetW * 2) % 4)
+        assertEquals(0, (targetH * 2) % 4)
+
+        // Check odd dimension sensor resilience (e.g. 4001x3001)
+        val oddSrcW = 4001
+        val oddSrcH = 3001
+        val oddTargetW = (oddSrcW / 2) and 1.inv()
+        val oddTargetH = (oddSrcH / 2) and 1.inv()
+        assertEquals(2000, oddTargetW)
+        assertEquals(1500, oddTargetH)
+        assertEquals(0, oddTargetW % 2)
+        assertEquals(0, oddTargetH % 2)
+
+        // Memory footprint comparison: exactly 4x reduction (75% savings)
+        val srcBytes = srcW * srcH * 2L
+        val dstBytes = targetW * targetH * 2L
+        val ratio = srcBytes.toDouble() / dstBytes.toDouble()
+        assertEquals(4.0, ratio, 1e-6)
+    }
+
+    @Test
     fun testQueueMemoryFootprintReduction() {
         val nativeFrameBytes = 4000 * 3000 * 2L // ~24 MB
         val binned1080pBytes = 1920 * 1080 * 2L // ~4.15 MB
         val crop4kBytes = 3840 * 2160 * 2L      // ~16.59 MB
+        val binned2kOpenGateBytes = 2000 * 1500 * 2L // ~6.00 MB
 
         val reductionRatio1080p = nativeFrameBytes.toDouble() / binned1080pBytes.toDouble()
         val reductionRatio4k = nativeFrameBytes.toDouble() / crop4kBytes.toDouble()
+        val reductionRatio2kOpenGate = nativeFrameBytes.toDouble() / binned2kOpenGateBytes.toDouble()
 
         assertTrue("1080p binning should reduce queue footprint by > 5.5x", reductionRatio1080p > 5.5)
         assertTrue("4K crop should reduce queue footprint by > 1.4x", reductionRatio4k > 1.4)
+        assertEquals(4.0, reductionRatio2kOpenGate, 1e-6)
     }
 }

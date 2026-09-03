@@ -820,15 +820,15 @@ class SettingsFragment : Fragment() {
         val RAW_VIDEO_FPS_OPTIONS = listOf("24", "30", "60")
 
         const val KEY_RAW_VIDEO_RESOLUTION = "raw_video_resolution"
-        const val DEFAULT_RAW_VIDEO_RESOLUTION = "Max Native"
-        val RAW_VIDEO_RESOLUTION_OPTIONS = listOf("Max Native", "4K UHD", "1080p")
+        const val DEFAULT_RAW_VIDEO_RESOLUTION = "Max Native (4:3)"
+        val RAW_VIDEO_RESOLUTION_OPTIONS = listOf("Max Native (4:3)", "2K Open Gate (4:3)", "4K UHD (16:9)", "1080p (16:9)")
 
         fun selectRawVideoSize(preference: String, availableSizes: Array<android.util.Size>): android.util.Size {
             if (availableSizes.isEmpty()) {
                 return android.util.Size(4000, 3000)
             }
-            return when (preference) {
-                "1080p" -> {
+            return when {
+                preference.contains("1080p") -> {
                     val exact = availableSizes.find { it.width == 1920 && it.height == 1080 }
                     if (exact != null) {
                         exact
@@ -841,7 +841,7 @@ class SettingsFragment : Fragment() {
                             ?: (availableSizes.maxByOrNull { it.width * it.height } ?: android.util.Size(4000, 3000))
                     }
                 }
-                "4K UHD" -> {
+                preference.contains("4K") -> {
                     val exact = availableSizes.find { it.width == 3840 && it.height == 2160 }
                     if (exact != null) {
                         exact
@@ -854,7 +854,7 @@ class SettingsFragment : Fragment() {
                             ?: (availableSizes.maxByOrNull { it.width * it.height } ?: android.util.Size(4000, 3000))
                     }
                 }
-                "Max Native" -> {
+                preference.contains("2K Open Gate") || preference.contains("Max Native") -> {
                     availableSizes.maxByOrNull { it.width * it.height } ?: android.util.Size(4000, 3000)
                 }
                 else -> {
