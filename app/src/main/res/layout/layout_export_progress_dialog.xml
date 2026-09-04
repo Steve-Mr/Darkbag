@@ -10,7 +10,7 @@
         android:id="@+id/export_dialog_title"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="正在导出..."
+        android:text="@string/export_dialog_title_exporting"
         android:textAppearance="?attr/textAppearanceTitleMedium"
         android:textColor="?attr/colorOnSurface" />
 
@@ -27,7 +27,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="8dp"
-        android:text="导出中: 0% (0/0)"
+        android:text="@string/export_dialog_initial_progress"
         android:textAppearance="?attr/textAppearanceBodyMedium"
         android:textColor="?attr/colorOnSurfaceVariant" />
 

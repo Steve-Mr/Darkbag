@@ -3396,7 +3396,7 @@ open class ImageViewerFragment : Fragment() {
         titleView.text = title
         progressBar.isIndeterminate = false
         progressBar.progress = 0
-        progressText.text = "准备中..."
+        progressText.text = getString(R.string.export_progress_preparing)
 
         val dialog = com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
             .setView(dialogView)
@@ -3411,7 +3411,7 @@ open class ImageViewerFragment : Fragment() {
                 lifecycleScope.launch(Dispatchers.Main) {
                     if (dialog.isShowing) {
                         progressBar.progress = percent
-                        progressText.text = "导出中: $percent% ($current/$total)"
+                        progressText.text = getString(R.string.export_progress_format, percent, current, total)
                     }
                 }
             }
@@ -3427,7 +3427,7 @@ open class ImageViewerFragment : Fragment() {
 
         val tempExportDir = File(context.cacheDir, "cdng_${System.currentTimeMillis()}").apply { mkdirs() }
 
-        val (progressDialog, updateProgress) = showExportProgressDialog("正在导出 CinemaDNG 序列...")
+        val (progressDialog, updateProgress) = showExportProgressDialog(getString(R.string.export_progress_exporting_cdng))
         lifecycleScope.launch {
             try {
                 val resultDir = top.maary.darkbag.rawvideo.RawVideoExporter.exportToCinemaDng(
@@ -3509,7 +3509,7 @@ open class ImageViewerFragment : Fragment() {
 
         val tempMp4File = File(context.cacheDir, "${group.baseName}_graded.mp4")
 
-        val (progressDialog, updateProgress) = showExportProgressDialog("正在导出 MP4 视频...")
+        val (progressDialog, updateProgress) = showExportProgressDialog(getString(R.string.export_progress_exporting_mp4))
         lifecycleScope.launch {
             try {
                 val success = top.maary.darkbag.rawvideo.RawVideoExporter.exportToMp4(

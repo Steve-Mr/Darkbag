@@ -360,10 +360,11 @@
 
                     <!-- RAW Video FPS -->
                     <com.google.android.material.textfield.TextInputLayout
+                        android:id="@+id/layout_raw_video_fps"
                         style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:hint="RAW Video Frame Rate">
+                        android:hint="@string/raw_video_fps_hint">
 
                         <AutoCompleteTextView
                             android:id="@+id/menu_raw_video_fps"
@@ -379,10 +380,11 @@
 
                     <!-- RAW Video Resolution -->
                     <com.google.android.material.textfield.TextInputLayout
+                        android:id="@+id/layout_raw_video_resolution"
                         style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:hint="RAW Video Resolution">
+                        android:hint="@string/raw_video_resolution_hint">
 
                         <AutoCompleteTextView
                             android:id="@+id/menu_raw_video_resolution"

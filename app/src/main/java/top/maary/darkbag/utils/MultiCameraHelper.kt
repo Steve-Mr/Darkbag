@@ -5,6 +5,7 @@ import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.os.Build
 import android.util.Log
+import top.maary.darkbag.R
 import kotlin.math.sqrt
 
 enum class MultiCameraCountPreference(val key: String, val title: String) {
@@ -236,12 +237,12 @@ object MultiCameraHelper {
     }
 
     fun getHardwareTypeDescription(context: Context): String {
-        val info = getLogicalMultiCameraInfo(context) ?: return "未检测到多物理镜头 (Single Camera Only)"
+        val info = getLogicalMultiCameraInfo(context) ?: return context.getString(R.string.multi_camera_hw_none)
         return when (info.hardwareType) {
-            MultiCameraHardwareType.NATIVE_LOGICAL -> "硬件原生逻辑多摄 (Native Logical Multi-Camera)"
-            MultiCameraHardwareType.CONCURRENT_STANDALONE -> "独立多摄并发模式 (Concurrent Multi-Camera)"
-            MultiCameraHardwareType.FAST_RELAY_BURST -> "极速接力快拍模式 (Fast Relay Burst Mode)"
-            MultiCameraHardwareType.NONE -> "未检测到多物理镜头 (Single Camera Only)"
+            MultiCameraHardwareType.NATIVE_LOGICAL -> context.getString(R.string.multi_camera_hw_native)
+            MultiCameraHardwareType.CONCURRENT_STANDALONE -> context.getString(R.string.multi_camera_hw_concurrent)
+            MultiCameraHardwareType.FAST_RELAY_BURST -> context.getString(R.string.multi_camera_hw_relay)
+            MultiCameraHardwareType.NONE -> context.getString(R.string.multi_camera_hw_none)
         }
     }
 

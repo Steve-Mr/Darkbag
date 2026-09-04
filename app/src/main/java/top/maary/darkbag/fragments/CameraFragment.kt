@@ -1371,7 +1371,7 @@ class CameraFragment : Fragment() {
                         android.Manifest.permission.RECORD_AUDIO
                     ) == android.content.pm.PackageManager.PERMISSION_GRANTED
                     if (!hasAudio) {
-                        Toast.makeText(context, "Microphone permission not granted; recording silent video", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, getString(R.string.error_mic_permission_silent_video), Toast.LENGTH_SHORT).show()
                     }
                     if (action == SettingsFragment.SHUTTER_LONG_PRESS_RAW_VIDEO) {
                         startRawVideoRecording()
@@ -1794,7 +1794,7 @@ class CameraFragment : Fragment() {
                 val fastOutputUri: android.net.Uri? = null
                 
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(requireContext(), "Processing Queued", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(requireContext(), getString(R.string.toast_processing_queued), Toast.LENGTH_SHORT).show()
                     if (isHalfFrameModeEnabled && prefs.getInt(scopedHalfFrameStepKey(prefs), 0) == 1) {
                         setGalleryThumbnail(null)
                     }
@@ -3486,7 +3486,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 val fastJpegUri: android.net.Uri? = null
                 
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(requireContext(), "HDR+ Queued for processing", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(requireContext(), getString(R.string.toast_hdr_queued), Toast.LENGTH_SHORT).show()
                     if (isHalfFrameModeEnabled && prefs.getInt(scopedHalfFrameStepKey(prefs), 0) == 1) {
                         setGalleryThumbnail(null)
                     }
@@ -3570,7 +3570,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             } catch (e: Exception) {
                 Log.e(TAG, "HDR+ processing failed, falling back to single shot", e)
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(appContext, "HDR+ failed, saving single frame...", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(appContext, appContext.getString(R.string.toast_hdr_failed_fallback), Toast.LENGTH_SHORT).show()
                 }
 
                 if (burstResult.frames.isNotEmpty()) {
@@ -3721,7 +3721,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     }
 
                     lifecycleScope.launch(Dispatchers.Main) {
-                        Toast.makeText(requireContext(), "Camera hardware error: $error. Please restart the app.", Toast.LENGTH_LONG).show()
+                        Toast.makeText(requireContext(), getString(R.string.error_camera_hardware, error), Toast.LENGTH_LONG).show()
                     }
                 }
             }, camera2Handler)
@@ -3987,7 +3987,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 lifecycleScope.launch(Dispatchers.Main) {
                     processingSemaphore.release()
                     hideProcessingAnimation()
-                    Toast.makeText(requireContext(), "Multi-camera capture failed: $errorMsg", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(requireContext(), getString(R.string.error_multi_camera_capture_failed, errorMsg), Toast.LENGTH_SHORT).show()
                 }
             }
         )
@@ -4469,8 +4469,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         rawVideoSessionManager.onLowStorageCallback = {
             android.os.Handler(android.os.Looper.getMainLooper()).post {
                 if (rawVideoSessionManager.recording) {
-                    context?.let {
-                        Toast.makeText(it, "Low storage (<500MB), recording stopped automatically", Toast.LENGTH_LONG).show()
+                    context?.let { ctx ->
+                        Toast.makeText(ctx, ctx.getString(R.string.toast_low_storage_recording_stopped), Toast.LENGTH_LONG).show()
                     }
                     stopRawVideoRecording()
                 }
@@ -4618,7 +4618,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 if (result == null) {
                     if (appContext != null) {
                         withContext(Dispatchers.Main) {
-                            Toast.makeText(appContext, "Recording too short, cancelled", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(appContext, appContext.getString(R.string.toast_recording_too_short), Toast.LENGTH_SHORT).show()
                         }
                     }
                     return@launch
@@ -4716,7 +4716,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 if (result == null) {
                     if (appContext != null) {
                         withContext(Dispatchers.Main) {
-                            Toast.makeText(appContext, "Recording too short, cancelled", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(appContext, appContext.getString(R.string.toast_recording_too_short), Toast.LENGTH_SHORT).show()
                         }
                     }
                     return@launch

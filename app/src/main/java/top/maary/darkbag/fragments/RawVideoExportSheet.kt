@@ -54,13 +54,18 @@ class RawVideoExportSheet : BottomSheetDialogFragment() {
         if (group != null) {
             binding.tvSubtitle.text = when {
                 group.rawVideoFrameCount > 0 && group.rawVideoDurationMs > 0 -> {
-                    "${group.baseName} (${group.rawVideoFrameCount} frames / ${String.format(Locale.US, "%.1fs", group.rawVideoDurationMs / 1000f)})"
+                    getString(
+                        R.string.export_hub_subtitle_rawvid,
+                        group.baseName,
+                        group.rawVideoFrameCount,
+                        String.format(Locale.US, "%.1fs", group.rawVideoDurationMs / 1000f)
+                    )
                 }
                 group.cinemaDngFrameUris.isNotEmpty() -> {
-                    "${group.baseName} (${group.cinemaDngFrameUris.size} frames CinemaDNG)"
+                    getString(R.string.export_hub_subtitle_cdng, group.baseName, group.cinemaDngFrameUris.size)
                 }
                 group.cinemaDngFrameCount > 0 -> {
-                    "${group.baseName} (${group.cinemaDngFrameCount} frames CinemaDNG)"
+                    getString(R.string.export_hub_subtitle_cdng, group.baseName, group.cinemaDngFrameCount)
                 }
                 else -> group.baseName
             }

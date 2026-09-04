@@ -79,7 +79,7 @@
                     style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:hint="Log Tone Curve">
+                    android:hint="@string/export_hub_log_tone_curve">
 
                     <AutoCompleteTextView
                         android:id="@+id/menu_log"
@@ -94,7 +94,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="12dp"
-                    android:hint="Film Simulation (3D LUT)">
+                    android:hint="@string/export_hub_film_simulation">
 
                     <AutoCompleteTextView
                         android:id="@+id/menu_lut"
@@ -154,14 +154,14 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:checked="true"
-                        android:text="1080p (Full HD - Recommended)" />
+                        android:text="@string/export_hub_res_1080p" />
 
                     <com.google.android.material.chip.Chip
                         android:id="@+id/chip_res_4k"
                         style="@style/Widget.Material3.Chip.Filter"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="4K (Ultra HD - 2160p)" />
+                        android:text="@string/export_hub_res_4k" />
                 </com.google.android.material.chip.ChipGroup>
 
                 <!-- Video Export Buttons -->

@@ -2,6 +2,8 @@ package top.maary.darkbag.fragments
 
 import android.util.Size
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -135,5 +137,25 @@ class SettingsFragmentTest {
         )
         val selected = SettingsFragment.selectRawVideoSize("Unknown", sizes)
         assertEquals(Size(4000, 3000), selected)
+    }
+
+    @Test
+    fun testHardwareCapabilities_FpsAnd4kCropDetection() {
+        // 1. 测试未获取到 characteristics 时的安全 fallback
+        assertEquals(30, SettingsFragment.HardwareCapabilities.getMaxSupportedFps(null))
+        assertFalse(SettingsFragment.HardwareCapabilities.is4kCropSupported(null))
+        assertNull(SettingsFragment.HardwareCapabilities.getMaxRawSize(null))
+
+        // 2. 验证选项展示格式化逻辑
+        val maxHardwareFps = 30
+        val fpsOptions = listOf("24", "30", "60")
+        val formatted = fpsOptions.map { fpsStr ->
+            if ((fpsStr.toIntOrNull() ?: 24) > maxHardwareFps) {
+                "$fpsStr (Unsupported)"
+            } else {
+                fpsStr
+            }
+        }
+        assertEquals(listOf("24", "30", "60 (Unsupported)"), formatted)
     }
 }

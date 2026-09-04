@@ -90,13 +90,13 @@
     <string name="delete_image_title">Delete Image</string>
     <string name="delete_image_message">Are you sure you want to delete this image?</string>
     <string name="delete_entire_group">Delete entire group</string>
-    <string name="delete_entire_group_detailed">删除整组 (包含所有源文件与导出文件)</string>
+    <string name="delete_entire_group_detailed">Delete entire group (all source &amp; exported files)</string>
     <string name="delete_this_format_only">Delete this format only</string>
-    <string name="delete_cdng_only">仅删除 CinemaDNG 序列包</string>
-    <string name="delete_rawvid_only">仅删除 RAWVID 原生母带</string>
-    <string name="delete_derivatives_only">仅删除导出的调色成片</string>
-    <string name="delete_photo_raw_only">仅删除 RAW (DNG)</string>
-    <string name="delete_photo_jpg_only">仅删除调色 JPG</string>
+    <string name="delete_cdng_only">Delete CinemaDNG sequence only</string>
+    <string name="delete_rawvid_only">Delete RAWVID master only</string>
+    <string name="delete_derivatives_only">Delete exported deliverables only</string>
+    <string name="delete_photo_raw_only">Delete RAW (DNG) only</string>
+    <string name="delete_photo_jpg_only">Delete graded JPG only</string>
     <string name="format_raw">RAW</string>
 
     <string name="playground_btn_delete">Delete</string>
@@ -130,8 +130,8 @@
     <string name="gallery_delete_desc_raw_only">Frees storage space while keeping JPG/MP4 deliverables</string>
     <string name="gallery_delete_option_jpg_only">Delete Deliverables (JPG/MP4) only</string>
     <string name="gallery_delete_desc_jpg_only">Removes JPG/MP4 deliverables while keeping original RAW/RAWVID files</string>
-    <string name="batch_delete_cdng_only">仅清理 CinemaDNG 序列包</string>
-    <string name="batch_delete_cdng_only_desc">释放数十 GB 序列帧文件夹，保留 RAWVID 录制源文件与调色成片</string>
+    <string name="batch_delete_cdng_only">Clean Up CinemaDNG Sequences Only</string>
+    <string name="batch_delete_cdng_only_desc">Frees multi-gigabyte frame sequence folders while keeping RAWVID masters and graded deliverables</string>
     <string name="gallery_delete_confirm_format">Delete (%1$d items)</string>
     <string name="gallery_delete_summary">Selected %1$d item(s). Choose deletion scope:</string>
     <string name="format_raw_jpg">RAW+JPG</string>
@@ -172,28 +172,64 @@
     <string name="setting_color_engine_title">Color Rendering Engine</string>
     <string name="setting_color_engine_summary">Select default tone mapping algorithm when Log/LUT is None</string>
 
-    <string name="cinemadng_export_dialog_title">CinemaDNG 导出与分享</string>
-    <string name="cinemadng_export_raw_dng">导出当前帧 RAW DNG (母带)</string>
-    <string name="cinemadng_export_graded_jpg">导出当前帧调色 JPG (所见即所得)</string>
-    <string name="cinemadng_export_pair">导出 RAW + 调色 JPG (成对母带衍生体)</string>
-    <string name="cinemadng_export_full_video">分享/导出完整视频 (MP4 / WAV)</string>
-    <string name="cinemadng_exporting_frame">正在导出单帧…</string>
-    <string name="cinemadng_export_success">CinemaDNG 单帧已导出并保存</string>
-    <string name="cinemadng_export_failed">单帧导出失败</string>
+    <!-- CinemaDNG Export Strings -->
+    <string name="cinemadng_export_dialog_title">CinemaDNG Export &amp; Share</string>
+    <string name="cinemadng_export_raw_dng">Export Current Frame RAW DNG (Master)</string>
+    <string name="cinemadng_export_graded_jpg">Export Current Frame Graded JPG (WYSIWYG)</string>
+    <string name="cinemadng_export_pair">Export RAW + Graded JPG (Master Derivative Pair)</string>
+    <string name="cinemadng_export_full_video">Share / Export Full Video (MP4 / WAV)</string>
+    <string name="cinemadng_exporting_frame">Exporting single frame…</string>
+    <string name="cinemadng_export_success">CinemaDNG single frame exported and saved</string>
+    <string name="cinemadng_export_failed">Failed to export single frame</string>
 
     <!-- Export Hub Strings -->
-    <string name="export_hub_title">暗袋出片中心</string>
-    <string name="export_hub_subtitle_default">选择色彩方案与母带衍生体导出规格</string>
-    <string name="export_hub_section_color_preset">调色预设 (Color Grading)</string>
-    <string name="export_hub_color_preset_hint">选定的 Log 与 LUT 将同时应用于 MP4 视频与静态 JPG 照片</string>
-    <string name="export_hub_section_video_delivery">视频导出 (Video Delivery)</string>
-    <string name="export_hub_resolution_title">导出分辨率 (Resolution)</string>
-    <string name="export_hub_mp4_action">导出调色 MP4 视频</string>
-    <string name="export_hub_cinemadng_action">导出 CinemaDNG 序列包</string>
-    <string name="export_hub_frame_section_title">当前定格单帧 (Frame #%1$d)</string>
-    <string name="export_hub_frame_jpg">导出调色 JPG</string>
-    <string name="export_hub_frame_dng">提取单帧 RAW DNG</string>
-    <string name="export_hub_frame_pair">导出 RAW + 调色 JPG 成对照片</string>
+    <string name="export_hub_title">Darkbag Export Center</string>
+    <string name="export_hub_subtitle_default">Select color grading and derivative export profiles</string>
+    <string name="export_hub_subtitle_rawvid">%1$s (%2$d frames / %3$s)</string>
+    <string name="export_hub_subtitle_cdng">%1$s (%2$d frames CinemaDNG)</string>
+    <string name="export_hub_section_color_preset">Color Grading Preset</string>
+    <string name="export_hub_color_preset_hint">Selected Log tone curve and LUT will be applied to MP4 video and exported JPG stills</string>
+    <string name="export_hub_log_tone_curve">Log Tone Curve</string>
+    <string name="export_hub_film_simulation">Film Simulation (3D LUT)</string>
+    <string name="export_hub_section_video_delivery">Video Delivery</string>
+    <string name="export_hub_resolution_title">Resolution</string>
+    <string name="export_hub_res_1080p">1080p (Full HD - Recommended)</string>
+    <string name="export_hub_res_4k">4K (Ultra HD - 2160p)</string>
+    <string name="export_hub_mp4_action">Export Graded MP4 Video</string>
+    <string name="export_hub_cinemadng_action">Export CinemaDNG Sequence Package</string>
+    <string name="export_hub_frame_section_title">Current Frame Freeze (#%1$d)</string>
+    <string name="export_hub_frame_jpg">Export Graded JPG</string>
+    <string name="export_hub_frame_dng">Extract Single Frame RAW DNG</string>
+    <string name="export_hub_frame_pair">Export RAW + Graded JPG Photo Pair</string>
     <string name="action_export">Export…</string>
     <string name="action_export_main">Export</string>
+
+    <!-- Export Progress Dialog -->
+    <string name="export_dialog_title_exporting">Exporting…</string>
+    <string name="export_dialog_initial_progress">Exporting: 0% (0/0)</string>
+    <string name="export_progress_preparing">Preparing…</string>
+    <string name="export_progress_format">Exporting: %1$d%% (%2$d/%3$d)</string>
+    <string name="export_progress_exporting_cdng">Exporting CinemaDNG sequence…</string>
+    <string name="export_progress_exporting_mp4">Exporting MP4 video…</string>
+
+    <!-- Camera / Settings Notices & Hardware Linkage -->
+    <string name="error_mic_permission_silent_video">Microphone permission not granted; recording silent video</string>
+    <string name="toast_processing_queued">Processing Queued</string>
+    <string name="toast_hdr_queued">HDR+ Queued for processing</string>
+    <string name="toast_hdr_failed_fallback">HDR+ failed, saving single frame…</string>
+    <string name="error_camera_hardware">Camera hardware error: %1$d. Please restart the app.</string>
+    <string name="error_multi_camera_capture_failed">Multi-camera capture failed: %1$s</string>
+    <string name="toast_low_storage_recording_stopped">Low storage (&lt;500MB), recording stopped automatically</string>
+    <string name="toast_recording_too_short">Recording too short, cancelled</string>
+    <string name="multi_camera_detected_lenses">Detected lenses: %1$s</string>
+    <string name="multi_camera_hw_native">Native Logical Multi-Camera</string>
+    <string name="multi_camera_hw_concurrent">Concurrent Multi-Camera</string>
+    <string name="multi_camera_hw_relay">Fast Relay Burst Mode</string>
+    <string name="multi_camera_hw_none">Single Camera Only</string>
+
+    <string name="raw_video_fps_hint">RAW Video Frame Rate</string>
+    <string name="raw_video_resolution_hint">RAW Video Resolution</string>
+    <string name="raw_video_fps_unsupported_warning">Sensor max AE rate is %1$d fps. %2$s fps is not supported and may drop frames.</string>
+    <string name="raw_video_res_4k_unsupported_warning">Sensor resolution (%1$s) is smaller than 4K (3840x2160). 4K crop is not supported.</string>
+    <string name="raw_video_option_unsupported_suffix">%1$s (Unsupported)</string>
 </resources>

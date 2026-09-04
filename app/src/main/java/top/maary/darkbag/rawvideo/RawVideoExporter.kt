@@ -33,6 +33,12 @@ import kotlin.math.pow
 object RawVideoExporter {
     private const val TAG = "RawVideoExporter"
 
+    class PendingMuxerSample(
+        val isAudio: Boolean,
+        val data: ByteArray,
+        val info: MediaCodec.BufferInfo
+    )
+
     enum class FrameExportType {
         RAW_DNG_ONLY,
         GRADED_JPG_ONLY,
@@ -486,11 +492,6 @@ object RawVideoExporter {
                 var audioEosQueued = false
                 val audioBufferInfo = MediaCodec.BufferInfo()
 
-                class PendingMuxerSample(
-                    val isAudio: Boolean,
-                    val data: ByteArray,
-                    val info: MediaCodec.BufferInfo
-                )
                 val pendingMuxerSamples = mutableListOf<PendingMuxerSample>()
 
                 fun flushPendingSamples() {
@@ -879,11 +880,6 @@ object RawVideoExporter {
                 var audioEosQueued = false
                 val audioBufferInfo = MediaCodec.BufferInfo()
 
-                class PendingMuxerSample(
-                    val isAudio: Boolean,
-                    val data: ByteArray,
-                    val info: MediaCodec.BufferInfo
-                )
                 val pendingMuxerSamples = mutableListOf<PendingMuxerSample>()
 
                 fun flushPendingSamples() {

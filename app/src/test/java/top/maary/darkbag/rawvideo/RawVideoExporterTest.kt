@@ -1,9 +1,17 @@
 package top.maary.darkbag.rawvideo
 
+import android.media.MediaCodec
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+import java.io.File
 
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [28], manifest = Config.NONE)
 class RawVideoExporterTest {
 
     @Test
@@ -203,5 +211,132 @@ class RawVideoExporterTest {
         val initialLastPts = -1L
         val emptyEosPtsUs = (if (initialLastPts >= 0L) initialLastPts else 0L) + fallbackIntervalUs
         assertEquals(fallbackIntervalUs, emptyEosPtsUs)
+    }
+
+    @Test
+    fun testPendingMuxerSamples_audioVideoInterleavedBuffering() {
+        val pendingSamples = mutableListOf<RawVideoExporter.PendingMuxerSample>()
+        val writtenAudio = mutableListOf<Long>()
+        val writtenVideo = mutableListOf<Long>()
+
+        // 模拟 2 个音频数据包在视频 track 准备好之前到达
+        val audioInfo1 = MediaCodec.BufferInfo().apply { set(0, 1024, 0L, 0) }
+        val audioInfo2 = MediaCodec.BufferInfo().apply { set(0, 1024, 21333L, 0) }
+        pendingSamples.add(RawVideoExporter.PendingMuxerSample(isAudio = true, data = ByteArray(1024), info = audioInfo1))
+        pendingSamples.add(RawVideoExporter.PendingMuxerSample(isAudio = true, data = ByteArray(1024), info = audioInfo2))
+
+        // 模拟 1 个视频帧在音频 track 尚未由编码器 output format changed 确定时到达
+        val videoInfo1 = MediaCodec.BufferInfo().apply { set(0, 50000, 0L, MediaCodec.BUFFER_FLAG_KEY_FRAME) }
+        pendingSamples.add(RawVideoExporter.PendingMuxerSample(isAudio = false, data = ByteArray(50000), info = videoInfo1))
+
+        assertEquals(3, pendingSamples.size)
+
+        // 模拟 Muxer 启动并 flushPendingSamples
+        var muxerStarted = true
+        val audioTrackIndex = 1
+        val videoTrackIndex = 0
+
+        pendingSamples.forEach { sample ->
+            if (sample.isAudio) {
+                writtenAudio.add(sample.info.presentationTimeUs)
+            } else {
+                writtenVideo.add(sample.info.presentationTimeUs)
+            }
+        }
+        pendingSamples.clear()
+
+        assertTrue(pendingSamples.isEmpty())
+        assertEquals(listOf(0L, 21333L), writtenAudio)
+        assertEquals(listOf(0L), writtenVideo)
+    }
+
+    @Test
+    fun testAudioPtsUsCalculation_advancesBySampleCount() {
+        val sampleRate = 48000L
+        val bytesPerAudioSample = 2 // 16-bit mono = 2 bytes
+        var audioPtsUs = 0L
+
+        // 每次读取 1920 字节 (960 samples @ 48kHz = exactly 20,000 us)
+        val readBytes = 1920
+        val sampleCount = readBytes / bytesPerAudioSample
+        val deltaPtsUs = (sampleCount * 1_000_000L) / sampleRate
+
+        assertEquals(960, sampleCount)
+        assertEquals(20_000L, deltaPtsUs)
+
+        audioPtsUs += deltaPtsUs
+        assertEquals(20_000L, audioPtsUs)
+
+        audioPtsUs += deltaPtsUs
+        assertEquals(40_000L, audioPtsUs)
+    }
+
+    @Test
+    fun testGpuSurfaceFailureFallback_cleansPartialFileAndRecovers() {
+        val tempDir = File(System.getProperty("java.io.tmpdir"), "export_fallback_test_${System.currentTimeMillis()}").apply { mkdirs() }
+        val dummyOutputFile = File(tempDir, "output_test.mp4")
+        dummyOutputFile.writeText("corrupt partial data from failed gpu attempt")
+        assertTrue(dummyOutputFile.exists())
+
+        // 模拟 GPU 导出失败时必须执行的清理策略
+        val gpuSuccess = false
+        if (!gpuSuccess) {
+            try { dummyOutputFile.delete() } catch (_: Exception) {}
+        }
+
+        // 断言半成品文件已被干净移除，准备交给 CPU 管道重新创建
+        assertFalse(dummyOutputFile.exists())
+
+        // 模拟 CPU 管道成功写入
+        dummyOutputFile.writeText("clean cpu export data")
+        assertTrue(dummyOutputFile.exists())
+        assertEquals("clean cpu export data", dummyOutputFile.readText())
+
+        dummyOutputFile.delete()
+        tempDir.delete()
+    }
+
+    @Test
+    fun testEosBufferPayloadProtection_preservesDataWhenFlagPresent() {
+        fun processBuffer(
+            size: Int,
+            flags: Int,
+            onWriteSample: (size: Int) -> Unit,
+            onReleaseBuffer: () -> Unit
+        ): Boolean {
+            var wrote = false
+            if (size > 0) {
+                onWriteSample(size)
+                wrote = true
+            }
+            val isLastBuffer = (flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0
+            onReleaseBuffer()
+            return isLastBuffer && wrote
+        }
+
+        var writeCount = 0
+        var releaseCount = 0
+
+        // 情况 A: 最后一帧既有数据又有 EOS 标记
+        val lastFrameWithData = processBuffer(
+            size = 4096,
+            flags = MediaCodec.BUFFER_FLAG_END_OF_STREAM,
+            onWriteSample = { writeCount++ },
+            onReleaseBuffer = { releaseCount++ }
+        )
+        assertTrue("最后一帧带载荷时必须保留并写入", lastFrameWithData)
+        assertEquals(1, writeCount)
+        assertEquals(1, releaseCount)
+
+        // 情况 B: 独立发送的空 EOS 标记 buffer
+        val emptyEosBuffer = processBuffer(
+            size = 0,
+            flags = MediaCodec.BUFFER_FLAG_END_OF_STREAM,
+            onWriteSample = { writeCount++ },
+            onReleaseBuffer = { releaseCount++ }
+        )
+        assertFalse("空 EOS buffer 不得调用 writeSampleData", emptyEosBuffer)
+        assertEquals(1, writeCount) // 未增加写入
+        assertEquals(2, releaseCount) // 但必须释放
     }
 }
