@@ -149,4 +149,63 @@
 
     </FrameLayout>
 
+    <!-- Bottom Video Control Bar -->
+    <LinearLayout
+        android:id="@+id/video_control_bar"
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:layout_marginStart="16dp"
+        android:layout_marginEnd="16dp"
+        android:layout_marginBottom="16dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:background="@drawable/bg_multi_camera_capsule"
+        android:elevation="4dp"
+        android:paddingStart="8dp"
+        android:paddingEnd="12dp"
+        android:visibility="gone"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_video_play_pause"
+            style="@style/Widget.Material3.Button.IconButton"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            app:icon="@drawable/ic_play_arrow"
+            app:iconTint="@android:color/white"
+            app:backgroundTint="@android:color/transparent"
+            android:contentDescription="Play/Pause" />
+
+        <TextView
+            android:id="@+id/video_current_time"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="4dp"
+            android:text="00:00"
+            android:textSize="12sp"
+            android:textColor="@android:color/white"
+            android:fontFamily="monospace" />
+
+        <SeekBar
+            android:id="@+id/video_seek_bar"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="4dp"
+            android:layout_marginEnd="4dp"
+            android:max="1000" />
+
+        <TextView
+            android:id="@+id/video_total_time"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="00:00"
+            android:textSize="12sp"
+            android:textColor="#B3FFFFFF"
+            android:fontFamily="monospace" />
+
+    </LinearLayout>
+
 </androidx.constraintlayout.widget.ConstraintLayout>

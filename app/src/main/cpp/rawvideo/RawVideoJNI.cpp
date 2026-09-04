@@ -617,7 +617,7 @@ Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeDebayerFrameToBitmap(
     }
 
     float exposureMult = std::pow(2.0f, exposure);
-    float norm = (1.0f / std::max(1.0f, static_cast<float>(whiteLevel) - blackLevel)) * exposureMult;
+    float denom = std::max(1.0f, static_cast<float>(whiteLevel) - blackLevel);
     float contrastFactor = 1.0f + contrast;
     float satFactor = 1.0f + saturation;
 
@@ -674,10 +674,26 @@ Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeDebayerFrameToBitmap(
                 r = static_cast<float>(p10);
             }
 
-            // 1. Subtract Black Level, Normalize and Apply White Balance Gains
-            r = std::max(0.0f, (r - blackLevel) * norm * wbR);
-            g = std::max(0.0f, (g - blackLevel) * norm * wbG);
-            b = std::max(0.0f, (b - blackLevel) * norm * wbB);
+            // 1. Subtract Black Level, Normalize and Clamp to [0.0, 1.0]
+            float rawR = std::clamp((r - blackLevel) / denom, 0.0f, 1.0f);
+            float rawG = std::clamp((g - blackLevel) / denom, 0.0f, 1.0f);
+            float rawB = std::clamp((b - blackLevel) / denom, 0.0f, 1.0f);
+
+            // Apply Exposure and White Balance Gains
+            r = rawR * exposureMult * wbR;
+            g = rawG * exposureMult * wbG;
+            b = rawB * exposureMult * wbB;
+
+            // Highlight Desaturation protection to prevent pink/magenta fringes on clipped highlights
+            float maxRaw = std::max({rawR, rawG, rawB});
+            if (maxRaw > 0.92f) {
+                float t = std::clamp((maxRaw - 0.92f) / (1.0f - 0.92f), 0.0f, 1.0f);
+                float blendFactor = t * t * (3.0f - 2.0f * t);
+                float peakLuma = std::max({r, g, b});
+                r = r * (1.0f - blendFactor) + peakLuma * blendFactor;
+                g = g * (1.0f - blendFactor) + peakLuma * blendFactor;
+                b = b * (1.0f - blendFactor) + peakLuma * blendFactor;
+            }
 
             // 2. Contrast in linear domain (pivot at 0.18 mid-gray)
             if (contrast != 0.0f) {
@@ -781,7 +797,8 @@ Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeRenderGLFrame(
         jstring jLutPath,
         jfloat exposure,
         jfloat contrast,
-        jfloat saturation
+        jfloat saturation,
+        jlong ptsNs
 ) {
     auto* renderer = reinterpret_cast<RawVideoGLRenderer*>(rendererHandle);
     if (!renderer || !jBayerBuffer || width <= 0 || height <= 0) return JNI_FALSE;
@@ -844,7 +861,8 @@ Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeRenderGLFrame(
         lutPathC,
         exposure,
         contrast,
-        saturation
+        saturation,
+        static_cast<int64_t>(ptsNs)
     );
 
     if (lutPathC) {

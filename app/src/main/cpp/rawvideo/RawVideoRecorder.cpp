@@ -124,7 +124,7 @@ bool RawVideoRecorder::startRecording(const std::string& outputPath, const FileH
 bool RawVideoRecorder::pushVideoFrame(const uint8_t* bayerData, size_t dataSize, uint32_t width, uint32_t height,
                                       uint32_t rowStride, uint64_t timestampNs, uint64_t exposureTimeNs, uint32_t iso,
                                       const float* neutralColorPoint, float fNumber, float focalLength) {
-    if (!isRecording_.load(std::memory_order_relaxed) || bayerData == nullptr || dataSize == 0) {
+    if (!isRecording_.load(std::memory_order_relaxed) || bayerData == nullptr || dataSize == 0 || width == 0 || height == 0) {
         return false;
     }
 
@@ -145,10 +145,34 @@ bool RawVideoRecorder::pushVideoFrame(const uint8_t* bayerData, size_t dataSize,
         input.height = result.outHeight;
         input.rowStride = result.outWidth * sizeof(uint16_t);
     } else {
-        input.data.assign(bayerData, bayerData + dataSize);
+        const size_t packedRowBytes = static_cast<size_t>(width) * sizeof(uint16_t);
+        if (rowStride < packedRowBytes) {
+            return false;
+        }
+        const size_t minRequiredSize = (height > 0) ? static_cast<size_t>(height - 1) * rowStride + packedRowBytes : 0;
+        if (dataSize < minRequiredSize) {
+            return false;
+        }
+        const size_t packedSize = packedRowBytes * height;
+        input.data.resize(packedSize);
         input.width = width;
         input.height = height;
-        input.rowStride = rowStride;
+        input.rowStride = packedRowBytes;
+
+        if (rowStride == packedRowBytes) {
+            std::memcpy(input.data.data(), bayerData, packedSize);
+        } else {
+            #if defined(_OPENMP)
+            #pragma omp parallel for schedule(static)
+            #endif
+            for (uint32_t y = 0; y < height; ++y) {
+                std::memcpy(
+                    input.data.data() + y * packedRowBytes,
+                    bayerData + y * rowStride,
+                    packedRowBytes
+                );
+            }
+        }
     }
 
     input.timestampNs = timestampNs;

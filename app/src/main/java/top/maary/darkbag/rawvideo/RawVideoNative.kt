@@ -177,7 +177,8 @@ object RawVideoNative {
         lutPath: String? = null,
         exposure: Float = 0.0f,
         contrast: Float = 0.0f,
-        saturation: Float = 0.0f
+        saturation: Float = 0.0f,
+        ptsNs: Long = -1L
     ): Boolean
     external fun nativeDestroyGLRenderer(rendererHandle: Long)
 

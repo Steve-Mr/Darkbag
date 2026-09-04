@@ -116,6 +116,8 @@ class ImageViewerAdapter(
         var activeCinemaDngFrameUri: Uri? = null
         var filmstripFadeRunnable: Runnable? = null
         var lastDisplayRect: RectF? = null
+        var videoProgressRunnable: Runnable? = null
+        var isUserSeeking: Boolean = false
 
         init {
             binding.videoView.clipToOutline = true
@@ -760,8 +762,14 @@ class ImageViewerAdapter(
                 holder.isPlayingVideo = isPlaying
                 if (isPlaying) {
                     holder.binding.btnMotionPhotoIndicator.setIconResource(R.drawable.ic_pause)
+                    holder.binding.btnVideoPlayPause.setIconResource(R.drawable.ic_pause)
+                    holder.videoProgressRunnable?.let {
+                        holder.binding.videoControlBar.removeCallbacks(it)
+                        holder.binding.videoControlBar.post(it)
+                    }
                 } else {
                     holder.binding.btnMotionPhotoIndicator.setIconResource(R.drawable.ic_play_arrow)
+                    holder.binding.btnVideoPlayPause.setIconResource(R.drawable.ic_play_arrow)
                 }
             }
         ).also { holder.rawVideoPlayer = it }
@@ -1067,7 +1075,135 @@ class ImageViewerAdapter(
         }
     }
 
+    private fun formatVideoTime(millis: Long): String {
+        val totalSec = (millis / 1000).coerceAtLeast(0)
+        val minutes = totalSec / 60
+        val seconds = totalSec % 60
+        return String.format(java.util.Locale.US, "%02d:%02d", minutes, seconds)
+    }
+
+    private fun setupVideoControlBar(holder: ViewHolder) {
+        val binding = holder.binding
+
+        binding.btnVideoPlayPause.setOnClickListener {
+            val rawPlayer = holder.rawVideoPlayer
+            val exo = holder.player
+            if (rawPlayer != null && rawPlayer.isVideoLoaded) {
+                rawPlayer.togglePlayPause()
+            } else if (exo != null) {
+                if (exo.isPlaying) {
+                    exo.pause()
+                    holder.isPlayingVideo = false
+                    binding.btnVideoPlayPause.setIconResource(R.drawable.ic_play_arrow)
+                    binding.btnMotionPhotoIndicator.setIconResource(R.drawable.ic_play_arrow)
+                } else {
+                    exo.play()
+                    holder.isPlayingVideo = true
+                    binding.btnVideoPlayPause.setIconResource(R.drawable.ic_pause)
+                    binding.btnMotionPhotoIndicator.setIconResource(R.drawable.ic_pause)
+                    holder.videoProgressRunnable?.let {
+                        binding.videoControlBar.removeCallbacks(it)
+                        binding.videoControlBar.post(it)
+                    }
+                }
+            }
+        }
+
+        binding.videoSeekBar.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+            override fun onStartTrackingTouch(seekBar: android.widget.SeekBar?) {
+                holder.isUserSeeking = true
+            }
+
+            override fun onProgressChanged(seekBar: android.widget.SeekBar?, progress: Int, fromUser: Boolean) {
+                if (!fromUser) return
+                val rawPlayer = holder.rawVideoPlayer
+                val exo = holder.player
+                if (rawPlayer != null && rawPlayer.isVideoLoaded) {
+                    val count = rawPlayer.frameCount
+                    if (count > 0) {
+                        val targetFrame = ((progress.toFloat() / 1000f) * (count - 1)).toInt().coerceIn(0, count - 1)
+                        rawPlayer.seekTo(targetFrame)
+                        val fps = rawPlayer.fps.takeIf { it > 0 } ?: 24.0f
+                        val ms = ((targetFrame / fps) * 1000).toLong()
+                        binding.videoCurrentTime.text = formatVideoTime(ms)
+                    }
+                } else if (exo != null) {
+                    val dur = exo.duration
+                    if (dur > 0) {
+                        val targetMs = ((progress.toFloat() / 1000f) * dur).toLong().coerceIn(0, dur)
+                        exo.seekTo(targetMs)
+                        binding.videoCurrentTime.text = formatVideoTime(targetMs)
+                    }
+                }
+            }
+
+            override fun onStopTrackingTouch(seekBar: android.widget.SeekBar?) {
+                holder.isUserSeeking = false
+            }
+        })
+    }
+
+    private fun startVideoProgressTracking(holder: ViewHolder) {
+        stopVideoProgressTracking(holder)
+        val binding = holder.binding
+        binding.videoControlBar.visibility = View.VISIBLE
+        binding.videoControlBar.alpha = 1f
+        setupVideoControlBar(holder)
+
+        val runnable = object : Runnable {
+            override fun run() {
+                val rawPlayer = holder.rawVideoPlayer
+                val exo = holder.player
+
+                if (rawPlayer != null && rawPlayer.isVideoLoaded) {
+                    val frame = rawPlayer.currentFrame
+                    val count = rawPlayer.frameCount
+                    val fps = rawPlayer.fps.takeIf { it > 0 } ?: 24.0f
+                    val curMs = ((frame / fps) * 1000).toLong()
+                    val totalMs = ((count / fps) * 1000).toLong()
+
+                    binding.videoCurrentTime.text = formatVideoTime(curMs)
+                    binding.videoTotalTime.text = formatVideoTime(totalMs)
+
+                    if (!holder.isUserSeeking && count > 1) {
+                        binding.videoSeekBar.progress = ((frame.toFloat() / (count - 1)) * 1000).toInt()
+                    }
+                    val isPlaying = holder.isPlayingVideo
+                    binding.btnVideoPlayPause.setIconResource(if (isPlaying) R.drawable.ic_pause else R.drawable.ic_play_arrow)
+                } else if (exo != null) {
+                    val curMs = exo.currentPosition.coerceAtLeast(0)
+                    val totalMs = exo.duration.takeIf { it > 0 } ?: 0L
+
+                    binding.videoCurrentTime.text = formatVideoTime(curMs)
+                    binding.videoTotalTime.text = formatVideoTime(totalMs)
+
+                    if (!holder.isUserSeeking && totalMs > 0) {
+                        binding.videoSeekBar.progress = ((curMs.toFloat() / totalMs) * 1000).toInt()
+                    }
+                    val isPlaying = exo.isPlaying
+                    binding.btnVideoPlayPause.setIconResource(if (isPlaying) R.drawable.ic_pause else R.drawable.ic_play_arrow)
+                }
+
+                if (holder.isPlayingVideo) {
+                    binding.videoControlBar.postDelayed(this, 100)
+                }
+            }
+        }
+        holder.videoProgressRunnable = runnable
+        binding.videoControlBar.post(runnable)
+    }
+
+    private fun stopVideoProgressTracking(holder: ViewHolder) {
+        holder.videoProgressRunnable?.let {
+            holder.binding.videoControlBar.removeCallbacks(it)
+        }
+        holder.videoProgressRunnable = null
+        holder.binding.videoControlBar.visibility = View.GONE
+        holder.isUserSeeking = false
+    }
+
     fun stopMotionVideo(holder: ViewHolder) {
+        stopVideoProgressTracking(holder)
         holder.extractJob?.cancel()
         holder.extractJob = null
         holder.player?.stop()
@@ -1134,8 +1270,14 @@ class ImageViewerAdapter(
                 holder.isPlayingVideo = isPlaying
                 if (isPlaying) {
                     holder.binding.btnMotionPhotoIndicator.setIconResource(R.drawable.ic_pause)
+                    holder.binding.btnVideoPlayPause.setIconResource(R.drawable.ic_pause)
+                    holder.videoProgressRunnable?.let {
+                        holder.binding.videoControlBar.removeCallbacks(it)
+                        holder.binding.videoControlBar.post(it)
+                    }
                 } else {
                     holder.binding.btnMotionPhotoIndicator.setIconResource(R.drawable.ic_play_arrow)
+                    holder.binding.btnVideoPlayPause.setIconResource(R.drawable.ic_play_arrow)
                 }
             }
         ).also { holder.rawVideoPlayer = it }
@@ -1175,9 +1317,11 @@ class ImageViewerAdapter(
         }
 
         player.play()
+        startVideoProgressTracking(holder)
     }
 
     fun stopRawVideo(holder: ViewHolder) {
+        stopVideoProgressTracking(holder)
         holder.rawVideoPlayer?.pause()
         holder.isPlayingVideo = false
         holder.binding.videoView.visibility = View.GONE
@@ -1258,6 +1402,7 @@ class ImageViewerAdapter(
         player.play()
         holder.isPlayingVideo = true
         holder.binding.btnMotionPhotoIndicator.setIconResource(R.drawable.ic_pause)
+        startVideoProgressTracking(holder)
     }
 
     fun toggleMp4VideoForPosition(position: Int) {

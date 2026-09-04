@@ -1,6 +1,9 @@
 #ifndef RAW_VIDEO_GL_RENDERER_H
 #define RAW_VIDEO_GL_RENDERER_H
 
+#ifndef EGL_EGLEXT_PROTOTYPES
+#define EGL_EGLEXT_PROTOTYPES
+#endif
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 #include <GLES3/gl3.h>
@@ -39,7 +42,8 @@ public:
         const char* lutPath,
         float exposure,
         float contrast,
-        float saturation
+        float saturation,
+        int64_t ptsNs = -1
     );
 
 private:

@@ -200,6 +200,8 @@ class CameraFragment : Fragment() {
 
     @Volatile private var isBurstActive = false
     private val rawVideoSessionManager = top.maary.darkbag.rawvideo.RawVideoSessionManager()
+    private var rawVideoRecordingStartTime: Long = 0L
+    private var rawVideoTimerRunnable: Runnable? = null
     private var mp4VideoRecorder: top.maary.darkbag.video.Mp4VideoRecorder? = null
     private var hdrPlusBurstHelper: HdrPlusBurst? = null
     private var lastHdrPlusConfig: ExposureUtils.ExposureConfig? = null // Cache for instant trigger
@@ -562,6 +564,9 @@ class CameraFragment : Fragment() {
     }
 
     override fun onDestroyView() {
+        rawVideoTimerRunnable?.let { cameraUiContainerBinding?.root?.removeCallbacks(it) }
+        rawVideoTimerRunnable = null
+        cameraUiContainerBinding?.recDot?.clearAnimation()
         _fragmentCameraBinding = null
         super.onDestroyView()
 
@@ -4429,7 +4434,17 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         val device = camera2Device ?: return
         val session = camera2Session ?: return
         val reader = rawImageReader ?: return
-        val chars = camera2Manager.getCameraCharacteristics(device.id)
+
+        val lastResult = captureResults.values.lastOrNull()
+        val activePhysicalId = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            lastResult?.get(CaptureResult.LOGICAL_MULTI_CAMERA_ACTIVE_PHYSICAL_ID)
+        } else null
+        val targetCharId = activePhysicalId ?: currentLens?.physicalId ?: currentLens?.id ?: device.id
+        val chars = try {
+            camera2Manager.getCameraCharacteristics(targetCharId)
+        } catch (_: Exception) {
+            camera2Manager.getCameraCharacteristics(device.id)
+        }
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
 
         val targetFpsStr = prefs.getString(SettingsFragment.KEY_RAW_VIDEO_FPS, "24") ?: "24"
@@ -4450,7 +4465,6 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         tempDir.mkdirs()
         val tempFile = File(tempDir, "${baseName}.rawvid")
 
-        val lastResult = captureResults.values.lastOrNull()
         val combinedOrientation = getCombinedOrientation()
         rawVideoSessionManager.onLowStorageCallback = {
             android.os.Handler(android.os.Looper.getMainLooper()).post {
@@ -4475,11 +4489,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             downsampleMode = downsampleMode
         )
 
-        val targetFpsInt = targetFps.toInt()
         val availableFpsRanges = chars.get(android.hardware.camera2.CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
-        val bestFpsRange = availableFpsRanges?.find { it.lower == targetFpsInt && it.upper == targetFpsInt }
-            ?: availableFpsRanges?.find { it.upper == targetFpsInt }
-            ?: availableFpsRanges?.find { it.lower <= targetFpsInt && it.upper >= targetFpsInt }
+        val bestFpsRange = availableFpsRanges?.filter { it.upper == targetFps.toInt() }?.maxByOrNull { it.lower }
             ?: availableFpsRanges?.maxByOrNull { it.upper }
 
         val frameDurationNs = (1_000_000_000L / targetFps).toLong()
@@ -4487,6 +4498,37 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         if (success) {
             cameraUiContainerBinding?.cameraCaptureButton?.setRecordingState(true)
             cameraUiContainerBinding?.cameraCaptureButton?.startRotation()
+
+            // Start dynamic recording timer capsule
+            rawVideoRecordingStartTime = android.os.SystemClock.elapsedRealtime()
+            cameraUiContainerBinding?.recordingIndicatorCapsule?.visibility = View.VISIBLE
+            cameraUiContainerBinding?.tvRecTimer?.text = "REC 00:00"
+
+            cameraUiContainerBinding?.recDot?.let { dot ->
+                dot.clearAnimation()
+                val blinkAnim = android.view.animation.AlphaAnimation(1.0f, 0.2f).apply {
+                    duration = 600
+                    repeatMode = android.view.animation.Animation.REVERSE
+                    repeatCount = android.view.animation.Animation.INFINITE
+                }
+                dot.startAnimation(blinkAnim)
+            }
+
+            rawVideoTimerRunnable?.let { cameraUiContainerBinding?.root?.removeCallbacks(it) }
+            val timerRunnable = object : Runnable {
+                override fun run() {
+                    if (rawVideoSessionManager.recording) {
+                        val elapsedSec = (android.os.SystemClock.elapsedRealtime() - rawVideoRecordingStartTime) / 1000L
+                        val mins = elapsedSec / 60
+                        val secs = elapsedSec % 60
+                        cameraUiContainerBinding?.tvRecTimer?.text = String.format(java.util.Locale.US, "REC %02d:%02d", mins, secs)
+                        cameraUiContainerBinding?.root?.postDelayed(this, 500)
+                    }
+                }
+            }
+            rawVideoTimerRunnable = timerRunnable
+            cameraUiContainerBinding?.root?.postDelayed(timerRunnable, 500)
+
             reader.setOnImageAvailableListener({ r ->
                 val image = try { r.acquireNextImage() } catch (e: Exception) { r.acquireLatestImage() } ?: return@setOnImageAvailableListener
                 val res = captureResults.values.lastOrNull()
@@ -4534,6 +4576,12 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
     private fun stopRawVideoRecording() {
         cameraUiContainerBinding?.cameraCaptureButton?.setRecordingState(false)
         cameraUiContainerBinding?.cameraCaptureButton?.stopRotation()
+
+        cameraUiContainerBinding?.recDot?.clearAnimation()
+        rawVideoTimerRunnable?.let { cameraUiContainerBinding?.root?.removeCallbacks(it) }
+        rawVideoTimerRunnable = null
+        cameraUiContainerBinding?.recordingIndicatorCapsule?.visibility = View.GONE
+        cameraUiContainerBinding?.tvRecTimer?.text = "REC 00:00"
 
         rawImageReader?.setOnImageAvailableListener(null, null)
 

@@ -3344,7 +3344,15 @@ open class ImageViewerFragment : Fragment() {
         }
     }
 
+    private var activeExportDialog: androidx.appcompat.app.AlertDialog? = null
+
     override fun onDestroyView() {
+        activeExportDialog?.let {
+            if (it.isShowing) {
+                try { it.dismiss() } catch (_: Exception) {}
+            }
+        }
+        activeExportDialog = null
         if (::adapter.isInitialized) {
             adapter.stopAllMotionVideos()
         }
@@ -3379,6 +3387,38 @@ open class ImageViewerFragment : Fragment() {
         }
     }
 
+    private fun showExportProgressDialog(title: String): Pair<androidx.appcompat.app.AlertDialog, (Int, Int) -> Unit> {
+        val dialogView = layoutInflater.inflate(R.layout.layout_export_progress_dialog, null)
+        val titleView = dialogView.findViewById<TextView>(R.id.export_dialog_title)
+        val progressBar = dialogView.findViewById<com.google.android.material.progressindicator.LinearProgressIndicator>(R.id.export_progress_bar)
+        val progressText = dialogView.findViewById<TextView>(R.id.export_progress_text)
+
+        titleView.text = title
+        progressBar.isIndeterminate = false
+        progressBar.progress = 0
+        progressText.text = "准备中..."
+
+        val dialog = com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
+            .setView(dialogView)
+            .setCancelable(false)
+            .create()
+        dialog.show()
+        activeExportDialog = dialog
+
+        val updateProgress: (Int, Int) -> Unit = { current, total ->
+            if (total > 0) {
+                val percent = (current * 100) / total
+                lifecycleScope.launch(Dispatchers.Main) {
+                    if (dialog.isShowing) {
+                        progressBar.progress = percent
+                        progressText.text = "导出中: $percent% ($current/$total)"
+                    }
+                }
+            }
+        }
+        return Pair(dialog, updateProgress)
+    }
+
     private fun performExportCinemaDng(group: top.maary.darkbag.models.ImageGroup) {
         val uri = group.rawVideoUri ?: return
         val context = requireContext()
@@ -3387,62 +3427,72 @@ open class ImageViewerFragment : Fragment() {
 
         val tempExportDir = File(context.cacheDir, "cdng_${System.currentTimeMillis()}").apply { mkdirs() }
 
-        binding.initialLoadingIndicator.visibility = View.VISIBLE
+        val (progressDialog, updateProgress) = showExportProgressDialog("正在导出 CinemaDNG 序列...")
         lifecycleScope.launch {
-            Toast.makeText(context, "Exporting CinemaDNG sequence...", Toast.LENGTH_SHORT).show()
-            val resultDir = top.maary.darkbag.rawvideo.RawVideoExporter.exportToCinemaDng(
-                context = context,
-                rawVideoUri = uri,
-                outputDir = tempExportDir,
-                onProgress = { _, _ -> }
-            )
-            if (resultDir != null && resultDir.exists()) {
-                val clipName = resultDir.name
-                withContext(Dispatchers.IO) {
-                    if (rawFolderUriStr != null) {
-                        try {
-                            val treeUri = Uri.parse(rawFolderUriStr)
-                            val treeDoc = androidx.documentfile.provider.DocumentFile.fromTreeUri(context, treeUri)
-                            val clipDirDoc = treeDoc?.createDirectory(clipName)
-                            if (clipDirDoc != null) {
-                                resultDir.listFiles()?.forEach { file ->
-                                    val mime = if (file.name.endsWith(".wav")) "audio/wav" else "image/x-adobe-dng"
-                                    val targetDoc = clipDirDoc.createFile(mime, file.name)
-                                    if (targetDoc != null) {
-                                        context.contentResolver.openOutputStream(targetDoc.uri)?.use { out ->
-                                            file.inputStream().use { it.copyTo(out) }
+            try {
+                val resultDir = top.maary.darkbag.rawvideo.RawVideoExporter.exportToCinemaDng(
+                    context = context,
+                    rawVideoUri = uri,
+                    outputDir = tempExportDir,
+                    onProgress = updateProgress
+                )
+                if (resultDir != null && resultDir.exists()) {
+                    val clipName = resultDir.name
+                    withContext(Dispatchers.IO) {
+                        if (rawFolderUriStr != null) {
+                            try {
+                                val treeUri = Uri.parse(rawFolderUriStr)
+                                val treeDoc = androidx.documentfile.provider.DocumentFile.fromTreeUri(context, treeUri)
+                                val clipDirDoc = treeDoc?.createDirectory(clipName)
+                                if (clipDirDoc != null) {
+                                    resultDir.listFiles()?.forEach { file ->
+                                        val mime = if (file.name.endsWith(".wav")) "audio/wav" else "image/x-adobe-dng"
+                                        val targetDoc = clipDirDoc.createFile(mime, file.name)
+                                        if (targetDoc != null) {
+                                            context.contentResolver.openOutputStream(targetDoc.uri)?.use { out ->
+                                                file.inputStream().use { it.copyTo(out) }
+                                            }
                                         }
                                     }
                                 }
+                            } catch (e: Exception) {
+                                android.util.Log.e("ImageViewerFragment", "Failed to copy CinemaDNG to SAF folder", e)
                             }
-                        } catch (e: Exception) {
-                            android.util.Log.e("ImageViewerFragment", "Failed to copy CinemaDNG to SAF folder", e)
-                        }
-                    } else {
-                        // Fallback to public Pictures/Darkbag directory so ImageRepository can scan and manage it
-                        try {
-                            val picturesDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_PICTURES)
-                            val destDir = File(picturesDir, "Darkbag/CinemaDNG/$clipName").apply { mkdirs() }
-                            resultDir.copyRecursively(destDir, overwrite = true)
-                            val filePaths = destDir.listFiles()?.map { it.absolutePath }?.toTypedArray()
-                            if (!filePaths.isNullOrEmpty()) {
-                                android.media.MediaScannerConnection.scanFile(context, filePaths, null, null)
+                        } else {
+                            // Fallback to public Pictures/Darkbag directory so ImageRepository can scan and manage it
+                            try {
+                                val picturesDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_PICTURES)
+                                val destDir = File(picturesDir, "Darkbag/CinemaDNG/$clipName").apply { mkdirs() }
+                                resultDir.copyRecursively(destDir, overwrite = true)
+                                val filePaths = destDir.listFiles()?.map { it.absolutePath }?.toTypedArray()
+                                if (!filePaths.isNullOrEmpty()) {
+                                    android.media.MediaScannerConnection.scanFile(context, filePaths, null, null)
+                                }
+                            } catch (e: Exception) {
+                                android.util.Log.e("ImageViewerFragment", "Failed to copy CinemaDNG to Pictures folder", e)
                             }
-                        } catch (e: Exception) {
-                            android.util.Log.e("ImageViewerFragment", "Failed to copy CinemaDNG to Pictures folder", e)
                         }
+                        tempExportDir.deleteRecursively()
                     }
-                    tempExportDir.deleteRecursively()
+                    refreshCurrentGroupAndAdapter(group.baseName)
+                    Toast.makeText(context, "CinemaDNG exported: $clipName", Toast.LENGTH_LONG).show()
+                } else {
+                    withContext(Dispatchers.IO) {
+                        tempExportDir.deleteRecursively()
+                    }
+                    Toast.makeText(context, "CinemaDNG export failed", Toast.LENGTH_SHORT).show()
                 }
-                binding.initialLoadingIndicator.visibility = View.GONE
-                refreshCurrentGroupAndAdapter(group.baseName)
-                Toast.makeText(context, "CinemaDNG exported: $clipName", Toast.LENGTH_LONG).show()
-            } else {
-                withContext(Dispatchers.IO) {
-                    tempExportDir.deleteRecursively()
+            } catch (e: Exception) {
+                android.util.Log.e("ImageViewerFragment", "CinemaDNG export error", e)
+                withContext(Dispatchers.IO) { tempExportDir.deleteRecursively() }
+                Toast.makeText(context, "CinemaDNG export error: ${e.message}", Toast.LENGTH_SHORT).show()
+            } finally {
+                if (progressDialog.isShowing) {
+                    try { progressDialog.dismiss() } catch (_: Exception) {}
                 }
-                binding.initialLoadingIndicator.visibility = View.GONE
-                Toast.makeText(context, "CinemaDNG export failed", Toast.LENGTH_SHORT).show()
+                if (activeExportDialog === progressDialog) {
+                    activeExportDialog = null
+                }
             }
         }
     }
@@ -3459,35 +3509,46 @@ open class ImageViewerFragment : Fragment() {
 
         val tempMp4File = File(context.cacheDir, "${group.baseName}_graded.mp4")
 
-        binding.initialLoadingIndicator.visibility = View.VISIBLE
+        val (progressDialog, updateProgress) = showExportProgressDialog("正在导出 MP4 视频...")
         lifecycleScope.launch {
-            Toast.makeText(context, "Exporting graded MP4 video...", Toast.LENGTH_SHORT).show()
-            val success = top.maary.darkbag.rawvideo.RawVideoExporter.exportToMp4(
-                context = context,
-                rawVideoUri = uri,
-                outputFile = tempMp4File,
-                editConfig = config,
-                targetResolution = targetResolution,
-                onProgress = { _, _ -> }
-            )
-            binding.initialLoadingIndicator.visibility = View.GONE
-
-            if (success && tempMp4File.exists() && tempMp4File.length() > 0) {
-                val (savedUri, _) = top.maary.darkbag.utils.ImageSaver.saveMp4Video(
+            try {
+                val success = top.maary.darkbag.rawvideo.RawVideoExporter.exportToMp4(
                     context = context,
-                    mp4File = tempMp4File,
-                    baseName = "${group.baseName}_graded",
-                    mediaFolderUri = mediaFolderUri
+                    rawVideoUri = uri,
+                    outputFile = tempMp4File,
+                    editConfig = config,
+                    targetResolution = targetResolution,
+                    onProgress = updateProgress
                 )
-                if (savedUri != null) {
-                    refreshCurrentGroupAndAdapter(group.baseName, autoSelectFormat = ImageViewerAdapter.FORMAT_JPG)
-                    Toast.makeText(context, "Graded MP4 saved: ${group.baseName}_graded.mp4", Toast.LENGTH_LONG).show()
+
+                if (success && tempMp4File.exists() && tempMp4File.length() > 0) {
+                    val (savedUri, _) = top.maary.darkbag.utils.ImageSaver.saveMp4Video(
+                        context = context,
+                        mp4File = tempMp4File,
+                        baseName = "${group.baseName}_graded",
+                        mediaFolderUri = mediaFolderUri
+                    )
+                    if (savedUri != null) {
+                        refreshCurrentGroupAndAdapter(group.baseName, autoSelectFormat = ImageViewerAdapter.FORMAT_JPG)
+                        Toast.makeText(context, "Graded MP4 saved: ${group.baseName}_graded.mp4", Toast.LENGTH_LONG).show()
+                    } else {
+                        Toast.makeText(context, "Failed to save MP4 to storage", Toast.LENGTH_SHORT).show()
+                    }
                 } else {
-                    Toast.makeText(context, "Failed to save MP4 to storage", Toast.LENGTH_SHORT).show()
+                    tempMp4File.delete()
+                    Toast.makeText(context, "MP4 export failed", Toast.LENGTH_SHORT).show()
                 }
-            } else {
+            } catch (e: Exception) {
+                android.util.Log.e("ImageViewerFragment", "MP4 export error", e)
                 tempMp4File.delete()
-                Toast.makeText(context, "MP4 export failed", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "MP4 export error: ${e.message}", Toast.LENGTH_SHORT).show()
+            } finally {
+                if (progressDialog.isShowing) {
+                    try { progressDialog.dismiss() } catch (_: Exception) {}
+                }
+                if (activeExportDialog === progressDialog) {
+                    activeExportDialog = null
+                }
             }
         }
     }

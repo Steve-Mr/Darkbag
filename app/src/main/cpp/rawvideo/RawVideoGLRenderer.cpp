@@ -114,21 +114,21 @@ void main() {
     float blR = uBlackLevel.r, blGr = uBlackLevel.g, blGb = uBlackLevel.b, blB = uBlackLevel.a;
 
     if (uCfaPattern == 0) { // RGGB
-        r = max(0.0, (float(p00) - blR) / max(1.0, uWhiteLevel - blR));
-        g = max(0.0, ((float(p01) - blGr) / max(1.0, uWhiteLevel - blGr) + (float(p10) - blGb) / max(1.0, uWhiteLevel - blGb)) * 0.5);
-        b = max(0.0, (float(p11) - blB) / max(1.0, uWhiteLevel - blB));
+        r = clamp((float(p00) - blR) / max(1.0, uWhiteLevel - blR), 0.0, 1.0);
+        g = clamp(((float(p01) - blGr) / max(1.0, uWhiteLevel - blGr) + (float(p10) - blGb) / max(1.0, uWhiteLevel - blGb)) * 0.5, 0.0, 1.0);
+        b = clamp((float(p11) - blB) / max(1.0, uWhiteLevel - blB), 0.0, 1.0);
     } else if (uCfaPattern == 1) { // GRBG
-        g = max(0.0, ((float(p00) - blGr) / max(1.0, uWhiteLevel - blGr) + (float(p11) - blGb) / max(1.0, uWhiteLevel - blGb)) * 0.5);
-        r = max(0.0, (float(p01) - blR) / max(1.0, uWhiteLevel - blR));
-        b = max(0.0, (float(p10) - blB) / max(1.0, uWhiteLevel - blB));
+        g = clamp(((float(p00) - blGr) / max(1.0, uWhiteLevel - blGr) + (float(p11) - blGb) / max(1.0, uWhiteLevel - blGb)) * 0.5, 0.0, 1.0);
+        r = clamp((float(p01) - blR) / max(1.0, uWhiteLevel - blR), 0.0, 1.0);
+        b = clamp((float(p10) - blB) / max(1.0, uWhiteLevel - blB), 0.0, 1.0);
     } else if (uCfaPattern == 2) { // GBRG
-        g = max(0.0, ((float(p00) - blGb) / max(1.0, uWhiteLevel - blGb) + (float(p11) - blGr) / max(1.0, uWhiteLevel - blGr)) * 0.5);
-        b = max(0.0, (float(p01) - blB) / max(1.0, uWhiteLevel - blB));
-        r = max(0.0, (float(p10) - blR) / max(1.0, uWhiteLevel - blR));
+        g = clamp(((float(p00) - blGb) / max(1.0, uWhiteLevel - blGb) + (float(p11) - blGr) / max(1.0, uWhiteLevel - blGr)) * 0.5, 0.0, 1.0);
+        b = clamp((float(p01) - blB) / max(1.0, uWhiteLevel - blB), 0.0, 1.0);
+        r = clamp((float(p10) - blR) / max(1.0, uWhiteLevel - blR), 0.0, 1.0);
     } else { // BGGR (3)
-        b = max(0.0, (float(p00) - blB) / max(1.0, uWhiteLevel - blB));
-        g = max(0.0, ((float(p01) - blGb) / max(1.0, uWhiteLevel - blGb) + (float(p10) - blGr) / max(1.0, uWhiteLevel - blGr)) * 0.5);
-        r = max(0.0, (float(p11) - blR) / max(1.0, uWhiteLevel - blR));
+        b = clamp((float(p00) - blB) / max(1.0, uWhiteLevel - blB), 0.0, 1.0);
+        g = clamp(((float(p01) - blGb) / max(1.0, uWhiteLevel - blGb) + (float(p10) - blGr) / max(1.0, uWhiteLevel - blGr)) * 0.5, 0.0, 1.0);
+        r = clamp((float(p11) - blR) / max(1.0, uWhiteLevel - blR), 0.0, 1.0);
     }
 
     // 1. White Balance & Exposure in linear sensor domain
@@ -136,6 +136,14 @@ void main() {
 
     // 2. DNG Adaptive Color Matrix Transform (Sensor WB RGB -> sRGB Primaries)
     col = max(vec3(0.0), uColorMatrix * col);
+
+    // Highlight Desaturation protection to prevent pink/magenta fringes on clipped highlights
+    float maxRaw = max(r, max(g, b));
+    if (maxRaw > 0.92) {
+        float blendFactor = smoothstep(0.92, 1.0, maxRaw);
+        float peakLuma = max(col.r, max(col.g, col.b));
+        col = mix(col, vec3(peakLuma), blendFactor);
+    }
 
     // 3. Contrast in linear domain (pivot 0.18 mid-gray)
     if (uContrast != 0.0) {
@@ -550,7 +558,8 @@ bool RawVideoGLRenderer::renderFrame(
     const char* lutPath,
     float exposure,
     float contrast,
-    float saturation
+    float saturation,
+    int64_t ptsNs
 ) {
     if (!bayerData || width <= 0 || height <= 0) {
         return false;
@@ -675,6 +684,17 @@ bool RawVideoGLRenderer::renderFrame(
 
     glDisableVertexAttribArray(0);
     glDisableVertexAttribArray(1);
+
+    if (ptsNs >= 0) {
+        static auto pfnPresentationTime = reinterpret_cast<PFNEGLPRESENTATIONTIMEANDROIDPROC>(
+            eglGetProcAddress("eglPresentationTimeANDROID")
+        );
+        if (pfnPresentationTime) {
+            pfnPresentationTime(eglDisplay_, eglSurface_, ptsNs);
+        } else {
+            eglPresentationTimeANDROID(eglDisplay_, eglSurface_, ptsNs);
+        }
+    }
 
     eglSwapBuffers(eglDisplay_, eglSurface_);
     return true;

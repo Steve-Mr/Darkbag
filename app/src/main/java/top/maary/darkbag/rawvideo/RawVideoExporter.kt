@@ -14,7 +14,9 @@ import android.provider.MediaStore
 import androidx.documentfile.provider.DocumentFile
 import androidx.exifinterface.media.ExifInterface
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.withContext
+import java.util.concurrent.Executors
 import top.maary.darkbag.fragments.SettingsFragment
 import top.maary.darkbag.models.EditConfig
 import top.maary.darkbag.processor.ColorProcessor
@@ -330,8 +332,444 @@ object RawVideoExporter {
 
     /**
      * Exports a .rawvid clip into a tone-mapped MP4 video with orientation hint and BT.709 colorimetry.
+     * Primary path: GPU Surface direct encoding with eglPresentationTimeANDROID.
+     * Fallback path: CPU debayering to Bitmap and NV12 byte buffers.
      */
     suspend fun exportToMp4(
+        context: Context,
+        rawVideoUri: Uri,
+        outputFile: File,
+        editConfig: EditConfig?,
+        targetResolution: Int = 1080,
+        onProgress: (current: Int, total: Int) -> Unit
+    ): Boolean = withContext(Dispatchers.IO) {
+        val gpuSuccess = try {
+            exportToMp4GpuSurface(
+                context = context,
+                rawVideoUri = rawVideoUri,
+                outputFile = outputFile,
+                editConfig = editConfig,
+                targetResolution = targetResolution,
+                onProgress = onProgress
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "GPU Surface MP4 export failed or unsupported, falling back to CPU pipeline", e)
+            false
+        }
+
+        if (gpuSuccess) {
+            return@withContext true
+        }
+
+        Log.i(TAG, "Executing CPU fallback MP4 export pipeline")
+        try { outputFile.delete() } catch (_: Exception) {}
+        exportToMp4Cpu(
+            context = context,
+            rawVideoUri = rawVideoUri,
+            outputFile = outputFile,
+            editConfig = editConfig,
+            targetResolution = targetResolution,
+            onProgress = onProgress
+        )
+    }
+
+    /**
+     * GPU Surface-based MP4 export pipeline with direct EGL frame rendering and hardware timestamps.
+     */
+    private suspend fun exportToMp4GpuSurface(
+        context: Context,
+        rawVideoUri: Uri,
+        outputFile: File,
+        editConfig: EditConfig?,
+        targetResolution: Int = 1080,
+        onProgress: (current: Int, total: Int) -> Unit
+    ): Boolean = withContext(Dispatchers.IO) {
+        var nativeHandle = 0L
+        var encoder: MediaCodec? = null
+        var audioEncoder: MediaCodec? = null
+        var muxer: MediaMuxer? = null
+        var muxerStarted = false
+        var inputSurface: android.view.Surface? = null
+        var glExecutor: java.util.concurrent.ExecutorService? = null
+        var glRenderer = 0L
+
+        val pfd = context.contentResolver.openFileDescriptor(rawVideoUri, "r") ?: return@withContext false
+        pfd.use { parcelFd ->
+            try {
+                val fd = parcelFd.fd
+                nativeHandle = RawVideoNative.nativeOpenReaderFd(fd)
+                if (nativeHandle == 0L) {
+                    Log.e(TAG, "Failed to open native reader for GPU MP4 export (fd=$fd, uri=$rawVideoUri)")
+                    return@withContext false
+                }
+
+                val header = RawVideoNative.readHeader(nativeHandle) ?: return@withContext false
+
+                val totalFrames = RawVideoNative.nativeGetFrameCount(nativeHandle)
+                if (totalFrames <= 0) {
+                    return@withContext false
+                }
+
+                val rawW = header.width
+                val rawH = header.height
+
+                val bayerBuf = ByteBuffer.allocateDirect(rawW * rawH * 2)
+                val firstMeta = LongArray(5)
+                val lastMeta = LongArray(5)
+                RawVideoNative.nativeReadFrame(nativeHandle, 0, firstMeta, bayerBuf)
+                RawVideoNative.nativeReadFrame(nativeHandle, totalFrames - 1, lastMeta, bayerBuf)
+                val firstFrameNs = firstMeta[0]
+                val lastFrameNs = lastMeta[0]
+                val measuredFps = calculateMeasuredFps(totalFrames, firstFrameNs, lastFrameNs, header.fps)
+
+                val bitRate = if (targetResolution >= 2160) 40_000_000 else 20_000_000 // 40 Mbps for 4K, 20 Mbps for 1080p
+
+                val maxDim = if (targetResolution >= 2160) 3840 else 1920
+                val scale = if (maxOf(rawW, rawH) > maxDim) maxDim.toFloat() / maxOf(rawW, rawH) else 1.0f
+                val exportW = (((rawW * scale).toInt() + 15) / 16) * 16
+                val exportH = (((rawH * scale).toInt() + 15) / 16) * 16
+
+                val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, exportW, exportH).apply {
+                    setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
+                    setInteger(MediaFormat.KEY_BIT_RATE, bitRate)
+                    setFloat(MediaFormat.KEY_FRAME_RATE, measuredFps)
+                    setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
+                    setInteger(MediaFormat.KEY_COLOR_STANDARD, MediaFormat.COLOR_STANDARD_BT709)
+                    setInteger(MediaFormat.KEY_COLOR_RANGE, MediaFormat.COLOR_RANGE_LIMITED)
+                    setInteger(MediaFormat.KEY_COLOR_TRANSFER, MediaFormat.COLOR_TRANSFER_SDR_VIDEO)
+                }
+
+                val enc = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC).apply {
+                    configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+                }
+                encoder = enc
+                val surf = enc.createInputSurface()
+                inputSurface = surf
+                enc.start()
+
+                val mux = MediaMuxer(outputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4).apply {
+                    if (header.orientation != 0) {
+                        setOrientationHint(header.orientation)
+                    }
+                }
+                muxer = mux
+                var videoTrackIndex = -1
+                var audioTrackIndex = -1
+
+                val audioChannels = header.audioChannels.takeIf { it > 0 } ?: 1
+                val audioSampleRate = header.audioSampleRate.takeIf { it > 0 } ?: 48000
+                val audioDirectBuf = ByteBuffer.allocateDirect(16384)
+                audioDirectBuf.clear()
+                val firstAudioPacketSize = RawVideoNative.nativeReadAudioPacket(nativeHandle, 0, audioDirectBuf)
+                val hasAudio = firstAudioPacketSize > 0
+
+                if (hasAudio) {
+                    try {
+                        val aFormat = MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_AAC, audioSampleRate, audioChannels).apply {
+                            setInteger(MediaFormat.KEY_BIT_RATE, 128_000)
+                            setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC)
+                        }
+                        audioEncoder = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_AUDIO_AAC).apply {
+                            configure(aFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+                            start()
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Failed to initialize AAC audio encoder, exporting video only", e)
+                        audioEncoder = null
+                    }
+                }
+                val effectiveHasAudio = audioEncoder != null
+
+                var audioPacketIndex = 0
+                var audioPtsUs = 0L
+                val bytesPerAudioSample = audioChannels * 2
+                var audioEosQueued = false
+                val audioBufferInfo = MediaCodec.BufferInfo()
+
+                class PendingMuxerSample(
+                    val isAudio: Boolean,
+                    val data: ByteArray,
+                    val info: MediaCodec.BufferInfo
+                )
+                val pendingMuxerSamples = mutableListOf<PendingMuxerSample>()
+
+                fun flushPendingSamples() {
+                    for (sample in pendingMuxerSamples) {
+                        val track = if (sample.isAudio) audioTrackIndex else videoTrackIndex
+                        if (track >= 0) {
+                            val buf = ByteBuffer.wrap(sample.data)
+                            mux.writeSampleData(track, buf, sample.info)
+                        }
+                    }
+                    pendingMuxerSamples.clear()
+                }
+
+                fun checkStartMuxer() {
+                    if (!muxerStarted && videoTrackIndex >= 0 && (!effectiveHasAudio || audioTrackIndex >= 0)) {
+                        mux.start()
+                        muxerStarted = true
+                        flushPendingSamples()
+                    }
+                }
+
+                data class DrainResult(val isEos: Boolean, val hadOutput: Boolean)
+
+                fun drainAudio(timeoutUs: Long = 0): DrainResult {
+                    val aEnc = audioEncoder ?: return DrainResult(isEos = true, hadOutput = false)
+                    var isEos = false
+                    var hadOutput = false
+                    while (true) {
+                        val outIdx = aEnc.dequeueOutputBuffer(audioBufferInfo, timeoutUs)
+                        if (outIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                            audioTrackIndex = mux.addTrack(aEnc.outputFormat)
+                            checkStartMuxer()
+                            hadOutput = true
+                        } else if (outIdx >= 0) {
+                            hadOutput = true
+                            if ((audioBufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
+                                isEos = true
+                                aEnc.releaseOutputBuffer(outIdx, false)
+                                break
+                            }
+                            val encodedData = aEnc.getOutputBuffer(outIdx)
+                            if (encodedData != null && audioBufferInfo.size > 0) {
+                                if (muxerStarted && audioTrackIndex >= 0) {
+                                    encodedData.position(audioBufferInfo.offset)
+                                    encodedData.limit(audioBufferInfo.offset + audioBufferInfo.size)
+                                    mux.writeSampleData(audioTrackIndex, encodedData, audioBufferInfo)
+                                } else {
+                                    val bytes = ByteArray(audioBufferInfo.size)
+                                    encodedData.position(audioBufferInfo.offset)
+                                    encodedData.get(bytes)
+                                    val copyInfo = MediaCodec.BufferInfo().apply {
+                                        set(0, bytes.size, audioBufferInfo.presentationTimeUs, audioBufferInfo.flags)
+                                    }
+                                    pendingMuxerSamples.add(PendingMuxerSample(true, bytes, copyInfo))
+                                }
+                            }
+                            aEnc.releaseOutputBuffer(outIdx, false)
+                        } else {
+                            break
+                        }
+                    }
+                    return DrainResult(isEos, hadOutput)
+                }
+
+                fun feedAudio() {
+                    val aEnc = audioEncoder ?: return
+                    while (!audioEosQueued) {
+                        val inIdx = aEnc.dequeueInputBuffer(0)
+                        if (inIdx < 0) break
+
+                        audioDirectBuf.clear()
+                        val read = RawVideoNative.nativeReadAudioPacket(nativeHandle, audioPacketIndex, audioDirectBuf)
+                        val inBuf = aEnc.getInputBuffer(inIdx)
+                        if (read > 0 && inBuf != null) {
+                            inBuf.clear()
+                            audioDirectBuf.position(0)
+                            audioDirectBuf.limit(read)
+                            inBuf.put(audioDirectBuf)
+                            aEnc.queueInputBuffer(inIdx, 0, read, audioPtsUs, 0)
+                            val sampleCount = read / bytesPerAudioSample
+                            audioPtsUs += (sampleCount * 1_000_000L) / audioSampleRate
+                            audioPacketIndex++
+                        } else {
+                            aEnc.queueInputBuffer(inIdx, 0, 0, audioPtsUs, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                            audioEosQueued = true
+                            break
+                        }
+                    }
+                }
+
+                val bufferInfo = MediaCodec.BufferInfo()
+
+                fun drainVideo(timeoutUs: Long = 0): DrainResult {
+                    var isEos = false
+                    var hadOutput = false
+                    while (true) {
+                        val outIndex = enc.dequeueOutputBuffer(bufferInfo, timeoutUs)
+                        if (outIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                            videoTrackIndex = mux.addTrack(enc.outputFormat)
+                            checkStartMuxer()
+                            hadOutput = true
+                        } else if (outIndex >= 0) {
+                            hadOutput = true
+                            if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
+                                isEos = true
+                                enc.releaseOutputBuffer(outIndex, false)
+                                break
+                            }
+                            val encodedData = enc.getOutputBuffer(outIndex)
+                            if (encodedData != null && bufferInfo.size > 0) {
+                                if (muxerStarted && videoTrackIndex >= 0) {
+                                    encodedData.position(bufferInfo.offset)
+                                    encodedData.limit(bufferInfo.offset + bufferInfo.size)
+                                    mux.writeSampleData(videoTrackIndex, encodedData, bufferInfo)
+                                } else {
+                                    val bytes = ByteArray(bufferInfo.size)
+                                    encodedData.position(bufferInfo.offset)
+                                    encodedData.get(bytes)
+                                    val copyInfo = MediaCodec.BufferInfo().apply {
+                                        set(0, bytes.size, bufferInfo.presentationTimeUs, bufferInfo.flags)
+                                    }
+                                    pendingMuxerSamples.add(PendingMuxerSample(false, bytes, copyInfo))
+                                }
+                            }
+                            enc.releaseOutputBuffer(outIndex, false)
+                        } else {
+                            break
+                        }
+                    }
+                    return DrainResult(isEos, hadOutput)
+                }
+
+                val fallbackIntervalUs = (1_000_000L / measuredFps).toLong().coerceAtLeast(1000L)
+                var lastPtsUs = -1L
+
+                val targetLogIndex = if (editConfig?.log != null && editConfig.log != "None") {
+                    top.maary.darkbag.fragments.SettingsFragment.LOG_CURVES.indexOf(editConfig.log).takeIf { it >= 0 } ?: -1
+                } else -1
+
+                val lutManager = top.maary.darkbag.utils.LutManager(context)
+                val lutPath = if (editConfig?.lut != null && editConfig.lut != "None" && editConfig.lut!!.isNotBlank()) {
+                    val f = File(lutManager.lutDir, editConfig.lut!!)
+                    if (f.exists()) f.absolutePath else {
+                        val f2 = File(File(context.filesDir, "luts"), editConfig.lut!!)
+                        if (f2.exists()) f2.absolutePath else null
+                    }
+                } else null
+
+                val exposure = editConfig?.exposure ?: 0f
+                val contrast = editConfig?.contrast ?: 0f
+                val saturation = editConfig?.saturation ?: 0f
+
+                val exec = Executors.newSingleThreadExecutor { Thread(it, "RawVideoExportGL") }
+                glExecutor = exec
+                val glDispatcher = exec.asCoroutineDispatcher()
+
+                withContext(glDispatcher) {
+                    val renderer = RawVideoNative.nativeCreateGLRenderer()
+                    if (renderer == 0L) {
+                        throw IllegalStateException("Failed to create native GL renderer")
+                    }
+                    glRenderer = renderer
+                    try {
+                        RawVideoNative.nativeSetGLSurface(renderer, surf)
+
+                        for (i in 0 until totalFrames) {
+                            bayerBuf.clear()
+                            val meta = LongArray(5)
+                            val readBytes = RawVideoNative.nativeReadFrame(nativeHandle, i, meta, bayerBuf)
+                            if (readBytes <= 0) continue
+
+                            val frameTsNs = meta[0]
+                            val ptsUs = calculatePtsUs(i, frameTsNs, firstFrameNs, lastPtsUs, fallbackIntervalUs)
+                            lastPtsUs = ptsUs
+
+                            val rendered = RawVideoNative.nativeRenderGLFrame(
+                                rendererHandle = renderer,
+                                bayerBuffer = bayerBuf,
+                                width = rawW,
+                                height = rawH,
+                                orientation = 0,
+                                cfaPattern = header.cfaPattern,
+                                whiteLevel = header.whiteLevel,
+                                blackLevels = header.blackLevel,
+                                neutralPoint = header.neutralPoint,
+                                forwardMatrix1 = header.forwardMatrix1,
+                                forwardMatrix2 = header.forwardMatrix2,
+                                calibIllum1 = header.calibrationIlluminant1,
+                                calibIllum2 = header.calibrationIlluminant2,
+                                targetLog = targetLogIndex,
+                                lutPath = lutPath,
+                                exposure = exposure,
+                                contrast = contrast,
+                                saturation = saturation,
+                                ptsNs = ptsUs * 1000L
+                            )
+                            if (!rendered) {
+                                throw IllegalStateException("GPU GL frame render failed for frame $i")
+                            }
+
+                            if (effectiveHasAudio) {
+                                feedAudio()
+                                drainAudio()
+                            }
+                            drainVideo()
+
+                            onProgress(i + 1, totalFrames)
+                        }
+
+                        enc.signalEndOfInputStream()
+                    } finally {
+                        try { RawVideoNative.nativeSetGLSurface(renderer, null) } catch (_: Exception) {}
+                        try { RawVideoNative.nativeDestroyGLRenderer(renderer) } catch (_: Exception) {}
+                        glRenderer = 0L
+                    }
+                }
+
+                // Signal End of Stream for Audio
+                if (effectiveHasAudio && !audioEosQueued) {
+                    audioEncoder?.let { aEnc ->
+                        val inIdx = aEnc.dequeueInputBuffer(10000)
+                        if (inIdx >= 0) {
+                            aEnc.queueInputBuffer(inIdx, 0, 0, audioPtsUs, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                            audioEosQueued = true
+                        }
+                    }
+                }
+
+                // Interleaved lockstep drain for remaining video and audio
+                var videoEos = false
+                var audioEos = !effectiveHasAudio
+                var idleLoops = 0
+                while ((!videoEos || !audioEos) && idleLoops < 100) {
+                    var activity = false
+                    if (!videoEos) {
+                        val r = drainVideo(timeoutUs = 10000)
+                        if (r.isEos) videoEos = true
+                        if (r.hadOutput) activity = true
+                    }
+                    if (!audioEos) {
+                        val r = drainAudio(timeoutUs = 10000)
+                        if (r.isEos) audioEos = true
+                        if (r.hadOutput) activity = true
+                    }
+                    if (activity) idleLoops = 0 else idleLoops++
+                }
+
+                return@withContext true
+            } catch (e: Exception) {
+                Log.w(TAG, "Exception during GPU Surface export", e)
+                throw e
+            } finally {
+                if (glRenderer != 0L) {
+                    try {
+                        RawVideoNative.nativeSetGLSurface(glRenderer, null)
+                        RawVideoNative.nativeDestroyGLRenderer(glRenderer)
+                    } catch (_: Exception) {}
+                    glRenderer = 0L
+                }
+                try { glExecutor?.shutdown() } catch (_: Exception) {}
+                try { inputSurface?.release() } catch (_: Exception) {}
+                try { encoder?.stop() } catch (_: Exception) {}
+                try { encoder?.release() } catch (_: Exception) {}
+                try { audioEncoder?.stop() } catch (_: Exception) {}
+                try { audioEncoder?.release() } catch (_: Exception) {}
+                try { if (muxerStarted) muxer?.stop() } catch (_: Exception) {}
+                try { muxer?.release() } catch (_: Exception) {}
+                if (nativeHandle != 0L) {
+                    try { RawVideoNative.nativeCloseReader(nativeHandle) } catch (_: Exception) {}
+                    nativeHandle = 0L
+                }
+            }
+        }
+    }
+
+    /**
+     * Fallback CPU-based MP4 export pipeline using software debayering and NV12 byte buffers.
+     */
+    private suspend fun exportToMp4Cpu(
         context: Context,
         rawVideoUri: Uri,
         outputFile: File,
@@ -463,14 +901,25 @@ object RawVideoExporter {
                     }
                 }
 
-                fun drainAudio() {
-                    val aEnc = audioEncoder ?: return
+                data class DrainResult(val isEos: Boolean, val hadOutput: Boolean)
+
+                fun drainAudio(timeoutUs: Long = 0): DrainResult {
+                    val aEnc = audioEncoder ?: return DrainResult(isEos = true, hadOutput = false)
+                    var isEos = false
+                    var hadOutput = false
                     while (true) {
-                        val outIdx = aEnc.dequeueOutputBuffer(audioBufferInfo, 0)
+                        val outIdx = aEnc.dequeueOutputBuffer(audioBufferInfo, timeoutUs)
                         if (outIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
                             audioTrackIndex = mux.addTrack(aEnc.outputFormat)
                             checkStartMuxer()
+                            hadOutput = true
                         } else if (outIdx >= 0) {
+                            hadOutput = true
+                            if ((audioBufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
+                                isEos = true
+                                aEnc.releaseOutputBuffer(outIdx, false)
+                                break
+                            }
                             val encodedData = aEnc.getOutputBuffer(outIdx)
                             if (encodedData != null && audioBufferInfo.size > 0) {
                                 if (muxerStarted && audioTrackIndex >= 0) {
@@ -488,13 +937,11 @@ object RawVideoExporter {
                                 }
                             }
                             aEnc.releaseOutputBuffer(outIdx, false)
-                            if ((audioBufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
-                                break
-                            }
                         } else {
                             break
                         }
                     }
+                    return DrainResult(isEos, hadOutput)
                 }
 
                 fun feedAudio() {
@@ -525,13 +972,22 @@ object RawVideoExporter {
 
                 val bufferInfo = MediaCodec.BufferInfo()
 
-                fun drainVideo() {
+                fun drainVideo(timeoutUs: Long = 0): DrainResult {
+                    var isEos = false
+                    var hadOutput = false
                     while (true) {
-                        val outIndex = enc.dequeueOutputBuffer(bufferInfo, 0)
+                        val outIndex = enc.dequeueOutputBuffer(bufferInfo, timeoutUs)
                         if (outIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
                             videoTrackIndex = mux.addTrack(enc.outputFormat)
                             checkStartMuxer()
+                            hadOutput = true
                         } else if (outIndex >= 0) {
+                            hadOutput = true
+                            if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
+                                isEos = true
+                                enc.releaseOutputBuffer(outIndex, false)
+                                break
+                            }
                             val encodedData = enc.getOutputBuffer(outIndex)
                             if (encodedData != null && bufferInfo.size > 0) {
                                 if (muxerStarted && videoTrackIndex >= 0) {
@@ -549,13 +1005,11 @@ object RawVideoExporter {
                                 }
                             }
                             enc.releaseOutputBuffer(outIndex, false)
-                            if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
-                                break
-                            }
                         } else {
                             break
                         }
                     }
+                    return DrainResult(isEos, hadOutput)
                 }
 
                 val fBmp = Bitmap.createBitmap(rawW, rawH, Bitmap.Config.ARGB_8888)
@@ -659,48 +1113,23 @@ object RawVideoExporter {
                     }
                 }
 
-                // Drain remaining video
-                while (true) {
-                    val outIndex = enc.dequeueOutputBuffer(bufferInfo, 10000)
-                    if (outIndex >= 0) {
-                        if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
-                            enc.releaseOutputBuffer(outIndex, false)
-                            break
-                        }
-                        val encodedData = enc.getOutputBuffer(outIndex)
-                        if (encodedData != null && muxerStarted && bufferInfo.size > 0 && videoTrackIndex >= 0) {
-                            encodedData.position(bufferInfo.offset)
-                            encodedData.limit(bufferInfo.offset + bufferInfo.size)
-                            mux.writeSampleData(videoTrackIndex, encodedData, bufferInfo)
-                        }
-                        enc.releaseOutputBuffer(outIndex, false)
-                    } else if (outIndex == MediaCodec.INFO_TRY_AGAIN_LATER) {
-                        break
+                // Interleaved lockstep drain for remaining video and audio
+                var videoEos = false
+                var audioEos = !effectiveHasAudio
+                var idleLoops = 0
+                while ((!videoEos || !audioEos) && idleLoops < 100) {
+                    var activity = false
+                    if (!videoEos) {
+                        val r = drainVideo(timeoutUs = 10000)
+                        if (r.isEos) videoEos = true
+                        if (r.hadOutput) activity = true
                     }
-                }
-
-                // Drain remaining audio
-                if (effectiveHasAudio) {
-                    audioEncoder?.let { aEnc ->
-                        while (true) {
-                            val outIdx = aEnc.dequeueOutputBuffer(audioBufferInfo, 10000)
-                            if (outIdx >= 0) {
-                                if ((audioBufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
-                                    aEnc.releaseOutputBuffer(outIdx, false)
-                                    break
-                                }
-                                val encodedData = aEnc.getOutputBuffer(outIdx)
-                                if (encodedData != null && muxerStarted && audioBufferInfo.size > 0 && audioTrackIndex >= 0) {
-                                    encodedData.position(audioBufferInfo.offset)
-                                    encodedData.limit(audioBufferInfo.offset + audioBufferInfo.size)
-                                    mux.writeSampleData(audioTrackIndex, encodedData, audioBufferInfo)
-                                }
-                                aEnc.releaseOutputBuffer(outIdx, false)
-                            } else if (outIdx == MediaCodec.INFO_TRY_AGAIN_LATER) {
-                                break
-                            }
-                        }
+                    if (!audioEos) {
+                        val r = drainAudio(timeoutUs = 10000)
+                        if (r.isEos) audioEos = true
+                        if (r.hadOutput) activity = true
                     }
+                    if (activity) idleLoops = 0 else idleLoops++
                 }
 
                 return@withContext true
