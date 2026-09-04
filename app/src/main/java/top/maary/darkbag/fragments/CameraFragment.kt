@@ -200,8 +200,6 @@ class CameraFragment : Fragment() {
 
     @Volatile private var isBurstActive = false
     private val rawVideoSessionManager = top.maary.darkbag.rawvideo.RawVideoSessionManager()
-    private var rawVideoRecordingStartTime: Long = 0L
-    private var rawVideoTimerRunnable: Runnable? = null
     private var mp4VideoRecorder: top.maary.darkbag.video.Mp4VideoRecorder? = null
     private var hdrPlusBurstHelper: HdrPlusBurst? = null
     private var lastHdrPlusConfig: ExposureUtils.ExposureConfig? = null // Cache for instant trigger
@@ -564,9 +562,6 @@ class CameraFragment : Fragment() {
     }
 
     override fun onDestroyView() {
-        rawVideoTimerRunnable?.let { cameraUiContainerBinding?.root?.removeCallbacks(it) }
-        rawVideoTimerRunnable = null
-        cameraUiContainerBinding?.recDot?.clearAnimation()
         _fragmentCameraBinding = null
         super.onDestroyView()
 
@@ -4499,36 +4494,6 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             cameraUiContainerBinding?.cameraCaptureButton?.setRecordingState(true)
             cameraUiContainerBinding?.cameraCaptureButton?.startRotation()
 
-            // Start dynamic recording timer capsule
-            rawVideoRecordingStartTime = android.os.SystemClock.elapsedRealtime()
-            cameraUiContainerBinding?.recordingIndicatorCapsule?.visibility = View.VISIBLE
-            cameraUiContainerBinding?.tvRecTimer?.text = "REC 00:00"
-
-            cameraUiContainerBinding?.recDot?.let { dot ->
-                dot.clearAnimation()
-                val blinkAnim = android.view.animation.AlphaAnimation(1.0f, 0.2f).apply {
-                    duration = 600
-                    repeatMode = android.view.animation.Animation.REVERSE
-                    repeatCount = android.view.animation.Animation.INFINITE
-                }
-                dot.startAnimation(blinkAnim)
-            }
-
-            rawVideoTimerRunnable?.let { cameraUiContainerBinding?.root?.removeCallbacks(it) }
-            val timerRunnable = object : Runnable {
-                override fun run() {
-                    if (rawVideoSessionManager.recording) {
-                        val elapsedSec = (android.os.SystemClock.elapsedRealtime() - rawVideoRecordingStartTime) / 1000L
-                        val mins = elapsedSec / 60
-                        val secs = elapsedSec % 60
-                        cameraUiContainerBinding?.tvRecTimer?.text = String.format(java.util.Locale.US, "REC %02d:%02d", mins, secs)
-                        cameraUiContainerBinding?.root?.postDelayed(this, 500)
-                    }
-                }
-            }
-            rawVideoTimerRunnable = timerRunnable
-            cameraUiContainerBinding?.root?.postDelayed(timerRunnable, 500)
-
             reader.setOnImageAvailableListener({ r ->
                 val image = try { r.acquireNextImage() } catch (e: Exception) { r.acquireLatestImage() } ?: return@setOnImageAvailableListener
                 val res = captureResults.values.lastOrNull()
@@ -4576,12 +4541,6 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
     private fun stopRawVideoRecording() {
         cameraUiContainerBinding?.cameraCaptureButton?.setRecordingState(false)
         cameraUiContainerBinding?.cameraCaptureButton?.stopRotation()
-
-        cameraUiContainerBinding?.recDot?.clearAnimation()
-        rawVideoTimerRunnable?.let { cameraUiContainerBinding?.root?.removeCallbacks(it) }
-        rawVideoTimerRunnable = null
-        cameraUiContainerBinding?.recordingIndicatorCapsule?.visibility = View.GONE
-        cameraUiContainerBinding?.tvRecTimer?.text = "REC 00:00"
 
         rawImageReader?.setOnImageAvailableListener(null, null)
 

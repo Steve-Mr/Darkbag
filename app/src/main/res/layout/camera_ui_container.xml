@@ -102,43 +102,6 @@
             android:contentDescription="@string/settings_button_alt" />
     </LinearLayout>
 
-    <!-- Recording Status Indicator Capsule (Top Center) -->
-    <LinearLayout
-        android:id="@+id/recording_indicator_capsule"
-        android:layout_width="wrap_content"
-        android:layout_height="36dp"
-        android:orientation="horizontal"
-        android:gravity="center_vertical"
-        android:background="@drawable/bg_multi_camera_capsule"
-        android:paddingStart="12dp"
-        android:paddingEnd="14dp"
-        android:visibility="gone"
-        android:elevation="4dp"
-        app:layout_constraintTop_toTopOf="@id/top_right_controls"
-        app:layout_constraintBottom_toBottomOf="@id/top_right_controls"
-        app:layout_constraintStart_toEndOf="@id/hdr_plus_pill"
-        app:layout_constraintEnd_toStartOf="@id/top_right_controls">
-
-        <View
-            android:id="@+id/rec_dot"
-            android:layout_width="10dp"
-            android:layout_height="10dp"
-            android:layout_marginEnd="6dp"
-            android:background="@drawable/bg_rec_dot" />
-
-        <TextView
-            android:id="@+id/tv_rec_timer"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="REC 00:00"
-            android:textColor="@android:color/white"
-            android:textSize="13sp"
-            android:textStyle="bold"
-            android:fontFamily="monospace" />
-
-    </LinearLayout>
-
-
     <!-- Level 1: Pro Mode Trigger Button (Top-Left of Viewfinder) -->
     <com.google.android.material.button.MaterialButton
         android:id="@+id/btn_pro_mode"
