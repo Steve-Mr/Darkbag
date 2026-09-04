@@ -339,4 +339,117 @@ class RawVideoExporterTest {
         assertEquals(1, writeCount) // 未增加写入
         assertEquals(2, releaseCount) // 但必须释放
     }
+
+    @Test
+    fun testAudioChunking_splitsLargePacketAcrossMultipleInputBuffers() {
+        val sampleRate = 48000
+        val audioChannels = 1
+        val bytesPerAudioSample = audioChannels * 2 // 2 bytes
+        val inputBufferCapacity = 2048 // Standard AAC input buffer capacity
+
+        // Simulate a 7680-byte audio packet from AudioRecord on MediaTek device
+        val largePacketSize = 7680
+        val dummyAudioData = ByteArray(largePacketSize) { (it % 128).toByte() }
+        val audioDirectBuf = java.nio.ByteBuffer.allocateDirect(65536)
+        audioDirectBuf.clear()
+        audioDirectBuf.put(dummyAudioData)
+        audioDirectBuf.flip()
+
+        var audioPacketIndex = 0
+        var noMoreAudioPackets = false
+        var audioPtsUs = 0L
+        var audioEosQueued = false
+
+        data class QueuedBuffer(val size: Int, val ptsUs: Long, val flags: Int, val payload: ByteArray)
+        val queuedBuffers = mutableListOf<QueuedBuffer>()
+
+        // Simulate simulated native reader with 1 packet of 7680 bytes
+        fun mockNativeReadPacket(packetIdx: Int, dest: java.nio.ByteBuffer): Int {
+            return if (packetIdx == 1) {
+                dest.clear()
+                val secondPacket = ByteArray(2000) { ((it + 5) % 128).toByte() }
+                dest.put(secondPacket)
+                dest.flip()
+                secondPacket.size
+            } else {
+                -1 // No more packets
+            }
+        }
+
+        fun simulateFeedAudio(availableInputBufferSlots: Int) {
+            var slotsLeft = availableInputBufferSlots
+            while (!audioEosQueued && slotsLeft > 0) {
+                if (!audioDirectBuf.hasRemaining() && !noMoreAudioPackets) {
+                    val read = mockNativeReadPacket(audioPacketIndex, audioDirectBuf)
+                    if (read > 0) {
+                        audioDirectBuf.position(0)
+                        audioDirectBuf.limit(read)
+                        audioPacketIndex++
+                    } else {
+                        noMoreAudioPackets = true
+                        audioDirectBuf.position(0)
+                        audioDirectBuf.limit(0)
+                    }
+                }
+
+                // Simulate dequeueInputBuffer
+                val inBuf = java.nio.ByteBuffer.allocate(inputBufferCapacity)
+                slotsLeft--
+
+                if (audioDirectBuf.hasRemaining()) {
+                    inBuf.clear()
+                    val toWrite = minOf(audioDirectBuf.remaining(), inBuf.remaining())
+                    val chunkBytes = (toWrite / bytesPerAudioSample) * bytesPerAudioSample
+                    if (chunkBytes > 0) {
+                        val oldLimit = audioDirectBuf.limit()
+                        audioDirectBuf.limit(audioDirectBuf.position() + chunkBytes)
+                        inBuf.put(audioDirectBuf)
+                        audioDirectBuf.limit(oldLimit)
+
+                        val payload = ByteArray(chunkBytes)
+                        inBuf.flip()
+                        inBuf.get(payload)
+
+                        queuedBuffers.add(QueuedBuffer(chunkBytes, audioPtsUs, 0, payload))
+                        val sampleCount = chunkBytes / bytesPerAudioSample
+                        audioPtsUs += (sampleCount * 1_000_000L) / sampleRate
+                    }
+                } else if (noMoreAudioPackets && !audioDirectBuf.hasRemaining()) {
+                    queuedBuffers.add(QueuedBuffer(0, audioPtsUs, MediaCodec.BUFFER_FLAG_END_OF_STREAM, ByteArray(0)))
+                    audioEosQueued = true
+                    break
+                }
+            }
+        }
+
+        // Call 1: Feed 2 chunks (2 x 2048 = 4096 bytes)
+        audioPacketIndex = 1 // First packet was already in audioDirectBuf
+        simulateFeedAudio(availableInputBufferSlots = 2)
+        assertEquals(2, queuedBuffers.size)
+        assertEquals(2048, queuedBuffers[0].size)
+        assertEquals(2048, queuedBuffers[1].size)
+        assertEquals(0L, queuedBuffers[0].ptsUs)
+        assertEquals((1024 * 1_000_000L) / 48000, queuedBuffers[1].ptsUs)
+        assertFalse(audioEosQueued)
+
+        // Call 2: Feed next chunks and read second packet
+        simulateFeedAudio(availableInputBufferSlots = 10)
+        assertTrue(audioEosQueued)
+
+        // Total data across all chunks should equal first packet (7680) + second packet (2000)
+        val dataBuffers = queuedBuffers.filter { it.flags != MediaCodec.BUFFER_FLAG_END_OF_STREAM }
+        val totalBytesQueued = dataBuffers.sumOf { it.size }
+        assertEquals(7680 + 2000, totalBytesQueued)
+
+        // Verify EOS buffer was queued with flag
+        val eosBuffer = queuedBuffers.last()
+        assertEquals(MediaCodec.BUFFER_FLAG_END_OF_STREAM, eosBuffer.flags)
+        assertEquals(0, eosBuffer.size)
+
+        // Verify all timestamps are strictly increasing
+        for (i in 1 until dataBuffers.size) {
+            assertTrue("PTS must be monotonically increasing", dataBuffers[i].ptsUs > dataBuffers[i - 1].ptsUs)
+        }
+    }
 }
+

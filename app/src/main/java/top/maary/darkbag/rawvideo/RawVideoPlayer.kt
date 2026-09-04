@@ -288,8 +288,8 @@ class RawVideoPlayer(
         // Stream audio packets from container to AudioTrack
         if (audioTrack != null) {
             audioJob = CoroutineScope(Dispatchers.IO).launch {
-                val audioBuf = ByteBuffer.allocateDirect(16384)
-                val tempBytes = ByteArray(16384)
+                val audioBuf = ByteBuffer.allocateDirect(65536)
+                val tempBytes = ByteArray(65536)
                 var packetIndex = 0
                 try {
                     while (isPlaying.get()) {

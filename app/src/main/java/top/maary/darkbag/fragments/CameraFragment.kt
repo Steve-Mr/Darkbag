@@ -4559,7 +4559,11 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             }, camera2Handler)
 
             try {
-                val request = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_RECORD)
+                val request = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_PREVIEW)
+                val activeArray = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
+                if (activeArray != null) {
+                    request.set(android.hardware.camera2.CaptureRequest.SCALER_CROP_REGION, activeArray)
+                }
                 camera2PreviewSurface?.let { request.addTarget(it) }
                 request.addTarget(reader.surface)
                 analysisImageReader?.surface?.let { request.addTarget(it) }

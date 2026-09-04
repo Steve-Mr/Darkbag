@@ -464,7 +464,7 @@ object RawVideoExporter {
 
                 val audioChannels = header.audioChannels.takeIf { it > 0 } ?: 1
                 val audioSampleRate = header.audioSampleRate.takeIf { it > 0 } ?: 48000
-                val audioDirectBuf = ByteBuffer.allocateDirect(16384)
+                val audioDirectBuf = ByteBuffer.allocateDirect(65536)
                 audioDirectBuf.clear()
                 val firstAudioPacketSize = RawVideoNative.nativeReadAudioPacket(nativeHandle, 0, audioDirectBuf)
                 val hasAudio = firstAudioPacketSize > 0
@@ -487,6 +487,15 @@ object RawVideoExporter {
                 val effectiveHasAudio = audioEncoder != null
 
                 var audioPacketIndex = 0
+                if (hasAudio) {
+                    audioDirectBuf.position(0)
+                    audioDirectBuf.limit(firstAudioPacketSize)
+                    audioPacketIndex = 1
+                } else {
+                    audioDirectBuf.position(0)
+                    audioDirectBuf.limit(0)
+                }
+                var noMoreAudioPackets = !hasAudio
                 var audioPtsUs = 0L
                 val bytesPerAudioSample = audioChannels * 2
                 var audioEosQueued = false
@@ -561,24 +570,46 @@ object RawVideoExporter {
                 fun feedAudio() {
                     val aEnc = audioEncoder ?: return
                     while (!audioEosQueued) {
+                        if (!audioDirectBuf.hasRemaining() && !noMoreAudioPackets) {
+                            audioDirectBuf.clear()
+                            val read = RawVideoNative.nativeReadAudioPacket(nativeHandle, audioPacketIndex, audioDirectBuf)
+                            if (read > 0) {
+                                audioDirectBuf.position(0)
+                                audioDirectBuf.limit(read)
+                                audioPacketIndex++
+                            } else {
+                                noMoreAudioPackets = true
+                                audioDirectBuf.position(0)
+                                audioDirectBuf.limit(0)
+                            }
+                        }
+
                         val inIdx = aEnc.dequeueInputBuffer(0)
                         if (inIdx < 0) break
 
-                        audioDirectBuf.clear()
-                        val read = RawVideoNative.nativeReadAudioPacket(nativeHandle, audioPacketIndex, audioDirectBuf)
                         val inBuf = aEnc.getInputBuffer(inIdx)
-                        if (read > 0 && inBuf != null) {
+                        if (audioDirectBuf.hasRemaining() && inBuf != null) {
                             inBuf.clear()
-                            audioDirectBuf.position(0)
-                            audioDirectBuf.limit(read)
-                            inBuf.put(audioDirectBuf)
-                            aEnc.queueInputBuffer(inIdx, 0, read, audioPtsUs, 0)
-                            val sampleCount = read / bytesPerAudioSample
-                            audioPtsUs += (sampleCount * 1_000_000L) / audioSampleRate
-                            audioPacketIndex++
-                        } else {
+                            val toWrite = minOf(audioDirectBuf.remaining(), inBuf.remaining())
+                            val chunkBytes = (toWrite / bytesPerAudioSample) * bytesPerAudioSample
+                            if (chunkBytes > 0) {
+                                val oldLimit = audioDirectBuf.limit()
+                                audioDirectBuf.limit(audioDirectBuf.position() + chunkBytes)
+                                inBuf.put(audioDirectBuf)
+                                audioDirectBuf.limit(oldLimit)
+                                aEnc.queueInputBuffer(inIdx, 0, chunkBytes, audioPtsUs, 0)
+                                val sampleCount = chunkBytes / bytesPerAudioSample
+                                audioPtsUs += (sampleCount * 1_000_000L) / audioSampleRate
+                            } else {
+                                aEnc.queueInputBuffer(inIdx, 0, 0, audioPtsUs, 0)
+                                break
+                            }
+                        } else if (noMoreAudioPackets && !audioDirectBuf.hasRemaining()) {
                             aEnc.queueInputBuffer(inIdx, 0, 0, audioPtsUs, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
                             audioEosQueued = true
+                            break
+                        } else {
+                            aEnc.queueInputBuffer(inIdx, 0, 0, audioPtsUs, 0)
                             break
                         }
                     }
@@ -713,13 +744,25 @@ object RawVideoExporter {
                     }
                 }
 
-                // Signal End of Stream for Audio
+                // Signal End of Stream for Audio after draining any remaining audio packets
                 if (effectiveHasAudio && !audioEosQueued) {
-                    audioEncoder?.let { aEnc ->
-                        val inIdx = aEnc.dequeueInputBuffer(10000)
-                        if (inIdx >= 0) {
-                            aEnc.queueInputBuffer(inIdx, 0, 0, audioPtsUs, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
-                            audioEosQueued = true
+                    var retries = 0
+                    while (!audioEosQueued && retries < 100) {
+                        feedAudio()
+                        val r = drainAudio(timeoutUs = 10000)
+                        if (!r.hadOutput && !audioEosQueued) {
+                            retries++
+                        } else {
+                            retries = 0
+                        }
+                    }
+                    if (!audioEosQueued) {
+                        audioEncoder?.let { aEnc ->
+                            val inIdx = aEnc.dequeueInputBuffer(10000)
+                            if (inIdx >= 0) {
+                                aEnc.queueInputBuffer(inIdx, 0, 0, audioPtsUs, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                                audioEosQueued = true
+                            }
                         }
                     }
                 }
@@ -852,7 +895,7 @@ object RawVideoExporter {
 
                 val audioChannels = header.audioChannels.takeIf { it > 0 } ?: 1
                 val audioSampleRate = header.audioSampleRate.takeIf { it > 0 } ?: 48000
-                val audioDirectBuf = ByteBuffer.allocateDirect(16384)
+                val audioDirectBuf = ByteBuffer.allocateDirect(65536)
                 audioDirectBuf.clear()
                 val firstAudioPacketSize = RawVideoNative.nativeReadAudioPacket(nativeHandle, 0, audioDirectBuf)
                 val hasAudio = firstAudioPacketSize > 0
@@ -875,6 +918,15 @@ object RawVideoExporter {
                 val effectiveHasAudio = audioEncoder != null
 
                 var audioPacketIndex = 0
+                if (hasAudio) {
+                    audioDirectBuf.position(0)
+                    audioDirectBuf.limit(firstAudioPacketSize)
+                    audioPacketIndex = 1
+                } else {
+                    audioDirectBuf.position(0)
+                    audioDirectBuf.limit(0)
+                }
+                var noMoreAudioPackets = !hasAudio
                 var audioPtsUs = 0L
                 val bytesPerAudioSample = audioChannels * 2
                 var audioEosQueued = false
@@ -949,24 +1001,46 @@ object RawVideoExporter {
                 fun feedAudio() {
                     val aEnc = audioEncoder ?: return
                     while (!audioEosQueued) {
+                        if (!audioDirectBuf.hasRemaining() && !noMoreAudioPackets) {
+                            audioDirectBuf.clear()
+                            val read = RawVideoNative.nativeReadAudioPacket(nativeHandle, audioPacketIndex, audioDirectBuf)
+                            if (read > 0) {
+                                audioDirectBuf.position(0)
+                                audioDirectBuf.limit(read)
+                                audioPacketIndex++
+                            } else {
+                                noMoreAudioPackets = true
+                                audioDirectBuf.position(0)
+                                audioDirectBuf.limit(0)
+                            }
+                        }
+
                         val inIdx = aEnc.dequeueInputBuffer(0)
                         if (inIdx < 0) break
 
-                        audioDirectBuf.clear()
-                        val read = RawVideoNative.nativeReadAudioPacket(nativeHandle, audioPacketIndex, audioDirectBuf)
                         val inBuf = aEnc.getInputBuffer(inIdx)
-                        if (read > 0 && inBuf != null) {
+                        if (audioDirectBuf.hasRemaining() && inBuf != null) {
                             inBuf.clear()
-                            audioDirectBuf.position(0)
-                            audioDirectBuf.limit(read)
-                            inBuf.put(audioDirectBuf)
-                            aEnc.queueInputBuffer(inIdx, 0, read, audioPtsUs, 0)
-                            val sampleCount = read / bytesPerAudioSample
-                            audioPtsUs += (sampleCount * 1_000_000L) / audioSampleRate
-                            audioPacketIndex++
-                        } else {
+                            val toWrite = minOf(audioDirectBuf.remaining(), inBuf.remaining())
+                            val chunkBytes = (toWrite / bytesPerAudioSample) * bytesPerAudioSample
+                            if (chunkBytes > 0) {
+                                val oldLimit = audioDirectBuf.limit()
+                                audioDirectBuf.limit(audioDirectBuf.position() + chunkBytes)
+                                inBuf.put(audioDirectBuf)
+                                audioDirectBuf.limit(oldLimit)
+                                aEnc.queueInputBuffer(inIdx, 0, chunkBytes, audioPtsUs, 0)
+                                val sampleCount = chunkBytes / bytesPerAudioSample
+                                audioPtsUs += (sampleCount * 1_000_000L) / audioSampleRate
+                            } else {
+                                aEnc.queueInputBuffer(inIdx, 0, 0, audioPtsUs, 0)
+                                break
+                            }
+                        } else if (noMoreAudioPackets && !audioDirectBuf.hasRemaining()) {
                             aEnc.queueInputBuffer(inIdx, 0, 0, audioPtsUs, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
                             audioEosQueued = true
+                            break
+                        } else {
+                            aEnc.queueInputBuffer(inIdx, 0, 0, audioPtsUs, 0)
                             break
                         }
                     }
@@ -1106,13 +1180,25 @@ object RawVideoExporter {
                     enc.queueInputBuffer(eosIndex, 0, 0, eosPtsUs, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
                 }
 
-                // Signal End of Stream for Audio
+                // Signal End of Stream for Audio after draining any remaining audio packets
                 if (effectiveHasAudio && !audioEosQueued) {
-                    audioEncoder?.let { aEnc ->
-                        val inIdx = aEnc.dequeueInputBuffer(10000)
-                        if (inIdx >= 0) {
-                            aEnc.queueInputBuffer(inIdx, 0, 0, audioPtsUs, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
-                            audioEosQueued = true
+                    var retries = 0
+                    while (!audioEosQueued && retries < 100) {
+                        feedAudio()
+                        val r = drainAudio(timeoutUs = 10000)
+                        if (!r.hadOutput && !audioEosQueued) {
+                            retries++
+                        } else {
+                            retries = 0
+                        }
+                    }
+                    if (!audioEosQueued) {
+                        audioEncoder?.let { aEnc ->
+                            val inIdx = aEnc.dequeueInputBuffer(10000)
+                            if (inIdx >= 0) {
+                                aEnc.queueInputBuffer(inIdx, 0, 0, audioPtsUs, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                                audioEosQueued = true
+                            }
                         }
                     }
                 }
@@ -1496,7 +1582,7 @@ object RawVideoExporter {
 
             // Read audio packets from native reader
             var totalDataBytes = 0
-            val audioBuf = ByteBuffer.allocateDirect(16384)
+            val audioBuf = ByteBuffer.allocateDirect(65536)
             var packetIndex = 0
 
             while (true) {
