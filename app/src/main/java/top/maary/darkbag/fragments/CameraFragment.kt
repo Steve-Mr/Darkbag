@@ -4488,16 +4488,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         val session = camera2Session ?: return
         val reader = rawImageReader ?: return
 
-        val lastResult = captureResults.values.lastOrNull()
-        val activePhysicalId = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            lastResult?.get(CaptureResult.LOGICAL_MULTI_CAMERA_ACTIVE_PHYSICAL_ID)
-        } else null
-        val targetCharId = activePhysicalId ?: currentLens?.physicalId ?: currentLens?.id ?: device.id
-        val chars = try {
-            camera2Manager.getCameraCharacteristics(targetCharId)
-        } catch (_: Exception) {
-            camera2Manager.getCameraCharacteristics(device.id)
-        }
+        val chars = camera2Manager.getCameraCharacteristics(device.id)
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
 
         val targetFpsStr = prefs.getString(SettingsFragment.KEY_RAW_VIDEO_FPS, "24") ?: "24"
@@ -4518,6 +4509,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         tempDir.mkdirs()
         val tempFile = File(tempDir, "${baseName}.rawvid")
 
+        val lastResult = captureResults.values.lastOrNull()
         val combinedOrientation = getCombinedOrientation()
         rawVideoSessionManager.onLowStorageCallback = {
             android.os.Handler(android.os.Looper.getMainLooper()).post {
@@ -4542,8 +4534,11 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             downsampleMode = downsampleMode
         )
 
+        val targetFpsInt = targetFps.toInt()
         val availableFpsRanges = chars.get(android.hardware.camera2.CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
-        val bestFpsRange = availableFpsRanges?.filter { it.upper == targetFps.toInt() }?.maxByOrNull { it.lower }
+        val bestFpsRange = availableFpsRanges?.find { it.lower == targetFpsInt && it.upper == targetFpsInt }
+            ?: availableFpsRanges?.find { it.upper == targetFpsInt }
+            ?: availableFpsRanges?.find { it.lower <= targetFpsInt && it.upper >= targetFpsInt }
             ?: availableFpsRanges?.maxByOrNull { it.upper }
 
         val frameDurationNs = (1_000_000_000L / targetFps).toLong()
@@ -4559,11 +4554,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             }, camera2Handler)
 
             try {
-                val request = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_PREVIEW)
-                val activeArray = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
-                if (activeArray != null) {
-                    request.set(android.hardware.camera2.CaptureRequest.SCALER_CROP_REGION, activeArray)
-                }
+                val request = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_RECORD)
                 camera2PreviewSurface?.let { request.addTarget(it) }
                 request.addTarget(reader.surface)
                 analysisImageReader?.surface?.let { request.addTarget(it) }
