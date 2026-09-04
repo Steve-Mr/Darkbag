@@ -128,6 +128,15 @@ bool RawVideoRecorder::pushVideoFrame(const uint8_t* bayerData, size_t dataSize,
         return false;
     }
 
+    const size_t packedRowBytes = static_cast<size_t>(width) * sizeof(uint16_t);
+    if (rowStride < packedRowBytes) {
+        return false;
+    }
+    const size_t minRequiredSize = static_cast<size_t>(height - 1) * rowStride + packedRowBytes;
+    if (dataSize < minRequiredSize) {
+        return false;
+    }
+
     RawFrameInput input;
     if (downsampleMode_ != DownsampleMode::NONE) {
         size_t allocSize;
@@ -145,10 +154,26 @@ bool RawVideoRecorder::pushVideoFrame(const uint8_t* bayerData, size_t dataSize,
         input.height = result.outHeight;
         input.rowStride = result.outWidth * sizeof(uint16_t);
     } else {
-        input.data.assign(bayerData, bayerData + dataSize);
+        const size_t packedSize = packedRowBytes * height;
+        input.data.resize(packedSize);
         input.width = width;
         input.height = height;
-        input.rowStride = rowStride;
+        input.rowStride = packedRowBytes;
+
+        if (rowStride == packedRowBytes) {
+            std::memcpy(input.data.data(), bayerData, packedSize);
+        } else {
+            #if defined(_OPENMP)
+            #pragma omp parallel for schedule(static)
+            #endif
+            for (uint32_t y = 0; y < height; ++y) {
+                std::memcpy(
+                    input.data.data() + y * packedRowBytes,
+                    bayerData + y * rowStride,
+                    packedRowBytes
+                );
+            }
+        }
     }
 
     input.timestampNs = timestampNs;

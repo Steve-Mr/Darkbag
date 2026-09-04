@@ -297,7 +297,21 @@ bool RawVideoGLRenderer::initEGL() {
         return false;
     }
 
-    const EGLint attribs[] = {
+#ifndef EGL_RECORDABLE_ANDROID
+#define EGL_RECORDABLE_ANDROID 0x3142
+#endif
+
+    const EGLint recordableAttribs[] = {
+        EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT,
+        EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
+        EGL_BLUE_SIZE, 8,
+        EGL_GREEN_SIZE, 8,
+        EGL_RED_SIZE, 8,
+        EGL_RECORDABLE_ANDROID, 1,
+        EGL_NONE
+    };
+
+    const EGLint fallbackAttribs[] = {
         EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT,
         EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
         EGL_BLUE_SIZE, 8,
@@ -307,9 +321,11 @@ bool RawVideoGLRenderer::initEGL() {
     };
 
     EGLint numConfigs = 0;
-    if (!eglChooseConfig(eglDisplay_, attribs, &eglConfig_, 1, &numConfigs) || numConfigs == 0) {
-        LOGE("eglChooseConfig failed");
-        return false;
+    if (!eglChooseConfig(eglDisplay_, recordableAttribs, &eglConfig_, 1, &numConfigs) || numConfigs == 0) {
+        if (!eglChooseConfig(eglDisplay_, fallbackAttribs, &eglConfig_, 1, &numConfigs) || numConfigs == 0) {
+            LOGE("eglChooseConfig failed");
+            return false;
+        }
     }
 
     const EGLint contextAttribs[] = {
@@ -569,9 +585,16 @@ bool RawVideoGLRenderer::renderFrame(
         return false;
     }
 
-    int winWidth = ANativeWindow_getWidth(currentWindow_);
-    int winHeight = ANativeWindow_getHeight(currentWindow_);
-    glViewport(0, 0, winWidth, winHeight);
+    EGLint surfWidth = 0, surfHeight = 0;
+    if (eglDisplay_ != EGL_NO_DISPLAY && eglSurface_ != EGL_NO_SURFACE) {
+        eglQuerySurface(eglDisplay_, eglSurface_, EGL_WIDTH, &surfWidth);
+        eglQuerySurface(eglDisplay_, eglSurface_, EGL_HEIGHT, &surfHeight);
+    }
+    if (surfWidth <= 0 || surfHeight <= 0) {
+        surfWidth = currentWindow_ ? ANativeWindow_getWidth(currentWindow_) : 0;
+        surfHeight = currentWindow_ ? ANativeWindow_getHeight(currentWindow_) : 0;
+    }
+    glViewport(0, 0, surfWidth, surfHeight);
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
 
