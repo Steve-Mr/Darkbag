@@ -29,7 +29,7 @@ class Mp4VideoRecorder(private val context: Context) {
         val durationMs: Long
     )
 
-    fun prepare(outputFile: File, width: Int = 1080, height: Int = 1920, fps: Int = 30): Surface? {
+    fun prepare(outputFile: File, width: Int = 1080, height: Int = 1920, fps: Int = 30, orientationHint: Int = 0): Surface? {
         if (isRecording.get()) return null
 
         try {
@@ -62,6 +62,9 @@ class Mp4VideoRecorder(private val context: Context) {
                 recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
                 recorder.setAudioEncodingBitRate(128_000)
                 recorder.setAudioSamplingRate(48_000)
+            }
+            if (orientationHint != 0) {
+                recorder.setOrientationHint(orientationHint)
             }
             recorder.prepare()
 

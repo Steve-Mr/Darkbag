@@ -1201,6 +1201,20 @@ class ImageViewerAdapter(
         val derivatives = getDerivativeUris(group)
         val activeIndex = (selectedDerivativeIndices[group.baseName] ?: 0).coerceIn(0, (derivatives.size - 1).coerceAtLeast(0))
         val uri = derivatives.getOrNull(activeIndex) ?: group.mp4VideoUri ?: return
+
+        val iv = holder.binding.imageView
+        val d = iv.drawable
+        if (d != null && iv.width > 0 && iv.height > 0) {
+            val rect = RectF(0f, 0f, d.intrinsicWidth.toFloat(), d.intrinsicHeight.toFloat())
+            iv.imageMatrix.mapRect(rect)
+            rect.intersect(0f, 0f, iv.width.toFloat(), iv.height.toFloat())
+            holder.lastDisplayRect = RectF(rect)
+            updateVideoViewBounds(holder, rect)
+        }
+
+        holder.binding.videoView.alpha = 0f
+        holder.binding.videoView.visibility = View.VISIBLE
+
         val player = holder.player ?: androidx.media3.exoplayer.ExoPlayer.Builder(holder.itemView.context).build().also { p ->
             holder.player = p
             p.setVideoTextureView(holder.binding.videoView)
@@ -1211,8 +1225,28 @@ class ImageViewerAdapter(
                         holder.binding.btnMotionPhotoIndicator.setIconResource(R.drawable.ic_play_arrow)
                     }
                 }
+                override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                    android.util.Log.e("ImageViewerAdapter", "MP4 playback error", error)
+                    stopMotionVideo(holder)
+                    holder.binding.btnMotionPhotoIndicator.setIconResource(R.drawable.ic_play_arrow)
+                }
                 override fun onRenderedFirstFrame() {
                     holder.binding.videoView.alpha = 1f
+                }
+                override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
+                    val iv = holder.binding.imageView
+                    val d = iv.drawable
+                    if (d != null && iv.width > 0 && iv.height > 0) {
+                        val rect = RectF(0f, 0f, d.intrinsicWidth.toFloat(), d.intrinsicHeight.toFloat())
+                        iv.imageMatrix.mapRect(rect)
+                        rect.intersect(0f, 0f, iv.width.toFloat(), iv.height.toFloat())
+                        holder.lastDisplayRect = RectF(rect)
+                        updateVideoViewBounds(holder, rect)
+                    } else {
+                        holder.lastDisplayRect?.let { rect ->
+                            updateVideoViewBounds(holder, rect)
+                        }
+                    }
                 }
             })
         }
@@ -1223,7 +1257,6 @@ class ImageViewerAdapter(
         player.prepare()
         player.play()
         holder.isPlayingVideo = true
-        holder.binding.videoView.visibility = View.VISIBLE
         holder.binding.btnMotionPhotoIndicator.setIconResource(R.drawable.ic_pause)
     }
 

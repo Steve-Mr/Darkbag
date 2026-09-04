@@ -4590,7 +4590,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         val tempFile = File(tempDir, "${baseName}.mp4")
 
         val recorder = top.maary.darkbag.video.Mp4VideoRecorder(requireContext())
-        val videoSurface = recorder.prepare(tempFile, 1080, 1920, 30) ?: run {
+        val videoSurface = recorder.prepare(tempFile, 1080, 1920, 30, deviceOrientationDegrees) ?: run {
             Log.e(TAG, "Failed to prepare Mp4VideoRecorder")
             return
         }
@@ -4616,6 +4616,9 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         lutProcessor?.setEncoderSurface(null, 0, 0)
         updateMotionPhotoEncoder()
 
+        isVideoSaving = true
+        showProcessingAnimation()
+
         val recorder = mp4VideoRecorder
         mp4VideoRecorder = null
 
@@ -4623,31 +4626,40 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         val mediaFolderUri = prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
 
         lifecycleScope.launch(Dispatchers.IO) {
-            val result = recorder?.stop() ?: return@launch
-            val baseName = result.file.nameWithoutExtension
+            try {
+                val result = recorder?.stop() ?: return@launch
+                val baseName = result.file.nameWithoutExtension
 
-            val (savedUri, thumbnail) = top.maary.darkbag.utils.ImageSaver.saveMp4Video(
-                context = requireContext(),
-                mp4File = result.file,
-                baseName = baseName,
-                mediaFolderUri = mediaFolderUri
-            )
+                val (savedUri, thumbnail) = top.maary.darkbag.utils.ImageSaver.saveMp4Video(
+                    context = requireContext(),
+                    mp4File = result.file,
+                    baseName = baseName,
+                    mediaFolderUri = mediaFolderUri
+                )
 
-            if (savedUri != null) {
-                prefs.edit().putString(SettingsFragment.KEY_LAST_CAPTURE_URI, savedUri.toString()).apply()
-                imageRepository.invalidateCache()
-                withContext(Dispatchers.Main) {
-                    updateCurrentThumbnail(savedUri)
-                    val photoViewButton = cameraUiContainerBinding?.photoViewButton
-                    if (photoViewButton != null && thumbnail != null) {
-                        photoViewButton.visibility = View.VISIBLE
-                        photoViewButton.alpha = 1f
-                        photoViewButton.setPadding(resources.getDimension(R.dimen.stroke_small).toInt())
-                        Glide.with(photoViewButton)
-                            .load(thumbnail)
-                            .apply(RequestOptions.circleCropTransform())
-                            .into(photoViewButton)
+                if (savedUri != null) {
+                    prefs.edit().putString(SettingsFragment.KEY_LAST_CAPTURE_URI, savedUri.toString()).apply()
+                    imageRepository.invalidateCache()
+                    withContext(Dispatchers.Main) {
+                        updateCurrentThumbnail(savedUri)
+                        val photoViewButton = cameraUiContainerBinding?.photoViewButton
+                        if (photoViewButton != null && thumbnail != null) {
+                            photoViewButton.visibility = View.VISIBLE
+                            photoViewButton.alpha = 1f
+                            photoViewButton.setPadding(resources.getDimension(R.dimen.stroke_small).toInt())
+                            Glide.with(photoViewButton)
+                                .load(thumbnail)
+                                .apply(RequestOptions.circleCropTransform())
+                                .into(photoViewButton)
+                        }
                     }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error saving mp4 video", e)
+            } finally {
+                withContext(Dispatchers.Main) {
+                    isVideoSaving = false
+                    hideProcessingAnimation()
                 }
             }
         }
