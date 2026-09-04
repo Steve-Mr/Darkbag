@@ -125,6 +125,44 @@
                 android:gravity="center" />
         </FrameLayout>
 
+        <!-- Video Duration Indicator Container -->
+        <FrameLayout
+            android:id="@+id/videoDurationGroup"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom|end"
+            android:layout_marginEnd="16dp"
+            android:layout_marginBottom="16dp"
+            android:visibility="gone">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnVideoDuration"
+                style="@style/Widget.Material3.Button.TonalButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:minHeight="36dp"
+                android:minWidth="0dp"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp"
+                android:paddingTop="0dp"
+                android:paddingBottom="0dp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:insetLeft="0dp"
+                android:insetRight="0dp"
+                app:cornerRadius="100dp"
+                app:backgroundTint="@color/format_indicator_background_tint"
+                app:icon="@drawable/ic_play_arrow"
+                app:iconSize="14dp"
+                app:iconTint="@color/format_indicator_icon_tint"
+                app:iconPadding="4dp"
+                android:textColor="?attr/colorOnSurface"
+                android:textSize="11sp"
+                android:fontFamily="monospace"
+                android:text="00:00" />
+
+        </FrameLayout>
+
     </FrameLayout>
 
     <!-- Bottom Filmstrip Container -->
@@ -148,64 +186,5 @@
             android:alpha="0.35" />
 
     </FrameLayout>
-
-    <!-- Bottom Video Control Bar -->
-    <LinearLayout
-        android:id="@+id/video_control_bar"
-        android:layout_width="match_parent"
-        android:layout_height="48dp"
-        android:layout_marginStart="16dp"
-        android:layout_marginEnd="16dp"
-        android:layout_marginBottom="16dp"
-        android:orientation="horizontal"
-        android:gravity="center_vertical"
-        android:background="@drawable/bg_multi_camera_capsule"
-        android:elevation="4dp"
-        android:paddingStart="8dp"
-        android:paddingEnd="12dp"
-        android:visibility="gone"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent">
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btn_video_play_pause"
-            style="@style/Widget.Material3.Button.IconButton"
-            android:layout_width="36dp"
-            android:layout_height="36dp"
-            app:icon="@drawable/ic_play_arrow"
-            app:iconTint="@android:color/white"
-            app:backgroundTint="@android:color/transparent"
-            android:contentDescription="Play/Pause" />
-
-        <TextView
-            android:id="@+id/video_current_time"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="4dp"
-            android:text="00:00"
-            android:textSize="12sp"
-            android:textColor="@android:color/white"
-            android:fontFamily="monospace" />
-
-        <SeekBar
-            android:id="@+id/video_seek_bar"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:layout_marginStart="4dp"
-            android:layout_marginEnd="4dp"
-            android:max="1000" />
-
-        <TextView
-            android:id="@+id/video_total_time"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="00:00"
-            android:textSize="12sp"
-            android:textColor="#B3FFFFFF"
-            android:fontFamily="monospace" />
-
-    </LinearLayout>
 
 </androidx.constraintlayout.widget.ConstraintLayout>

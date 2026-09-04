@@ -51,6 +51,7 @@ class ImageViewerAdapter(
     private val selectedFormats = mutableMapOf<String, String>()
     private val selectedLensIndices = mutableMapOf<String, Int>()
     private val selectedDerivativeIndices = mutableMapOf<String, Int>()
+    private val videoDurationCache = java.util.concurrent.ConcurrentHashMap<Uri, Long>()
     var onMultiCameraLensChanged: ((position: Int, lensIndex: Int) -> Unit)? = null
     var onDerivativeVersionChanged: ((position: Int, derivativeUri: Uri) -> Unit)? = null
     private var isUiVisible = true
@@ -117,7 +118,6 @@ class ImageViewerAdapter(
         var filmstripFadeRunnable: Runnable? = null
         var lastDisplayRect: RectF? = null
         var videoProgressRunnable: Runnable? = null
-        var isUserSeeking: Boolean = false
 
         init {
             binding.videoView.clipToOutline = true
@@ -293,6 +293,16 @@ class ImageViewerAdapter(
                 holder.binding.derivativeDotsContainer.visibility = View.GONE
                 holder.binding.derivativeDotsContainer.alpha = 0f
             }
+            val activeDerivUri = getDerivativeUris(group).getOrNull(selectedDerivativeIndices[group.baseName] ?: 0) ?: group.jpgUri ?: group.mp4VideoUri
+            val isMp4 = !isRawSelected && activeDerivUri != null && (activeDerivUri.toString().endsWith(".mp4", ignoreCase = true) || group.isMp4Video)
+            val isVideo = (isRawSelected && group.isRawVideo) || isMp4
+            if (isVideo) {
+                holder.binding.videoDurationGroup.visibility = if (currentlyShouldShow) View.VISIBLE else View.GONE
+                holder.binding.videoDurationGroup.alpha = if (currentlyShouldShow) 1f else 0f
+            } else {
+                holder.binding.videoDurationGroup.visibility = View.GONE
+                holder.binding.videoDurationGroup.alpha = 0f
+            }
             if (isCinemaDngGroup) {
                 holder.binding.filmstripContainer.visibility = if (currentlyShouldShow) View.VISIBLE else View.GONE
                 holder.binding.filmstripContainer.alpha = if (currentlyShouldShow) 0.35f else 0f
@@ -309,6 +319,8 @@ class ImageViewerAdapter(
             holder.binding.multiCameraToggleContainer.translationY = 0f
             holder.binding.derivativeDotsContainer.translationX = 0f
             holder.binding.derivativeDotsContainer.translationY = 0f
+            holder.binding.videoDurationGroup.translationX = 0f
+            holder.binding.videoDurationGroup.translationY = 0f
             stopMotionVideo(holder)
         }
 
@@ -337,6 +349,8 @@ class ImageViewerAdapter(
                 holder.binding.motionPhotoToggleGroup.translationY = topMargin
                 holder.binding.multiCameraToggleContainer.translationY = -bottomMargin
                 holder.binding.derivativeDotsContainer.translationY = -bottomMargin
+                holder.binding.videoDurationGroup.translationX = -rightMargin
+                holder.binding.videoDurationGroup.translationY = -bottomMargin
 
                 updateVideoViewBounds(holder, rect)
             }
@@ -393,6 +407,7 @@ class ImageViewerAdapter(
         with(holder.binding) {
             val currentFormat = selectedFormats[group.baseName] ?: getSelectedFormat(group)
             val isRawSelected = currentFormat == FORMAT_DNG
+            val shouldShow = isUiVisible && !isFormatSwitcherPersistentHidden
 
             val isRawVideo = group.isRawVideo || group.rawVideoUri != null
             val derivatives = getDerivativeUris(group)
@@ -442,6 +457,43 @@ class ImageViewerAdapter(
                     btnMotionPhotoIndicator.visibility = View.GONE
                     btnMotionPhotoIndicator.setOnClickListener(null)
                 }
+            }
+
+            // Video Duration indicator setup (Bottom-Right Anchor)
+            val videoDurationGroup = holder.binding.videoDurationGroup
+            val btnVideoDuration = holder.binding.btnVideoDuration
+            val shouldShowDuration = shouldShow && ((isRawSelected && isRawVideo) || isMp4Active)
+
+            if (isRawSelected && isRawVideo) {
+                videoDurationGroup.visibility = if (shouldShowDuration) View.VISIBLE else View.GONE
+                videoDurationGroup.alpha = if (shouldShowDuration) 1f else 0f
+                val currentUri = group.rawVideoUri
+                val durMs = currentUri?.let { videoDurationCache[it] } ?: 0L
+                btnVideoDuration.text = if (durMs > 0) formatVideoTime(durMs) else "00:00"
+                btnVideoDuration.setIconResource(if (holder.isPlayingVideo) R.drawable.ic_pause else R.drawable.ic_play_arrow)
+                btnVideoDuration.setOnClickListener {
+                    val currentPos = holder.bindingAdapterPosition
+                    if (currentPos != RecyclerView.NO_POSITION) {
+                        toggleRawVideoForPosition(currentPos)
+                    }
+                }
+            } else if (isMp4Active) {
+                videoDurationGroup.visibility = if (shouldShowDuration) View.VISIBLE else View.GONE
+                videoDurationGroup.alpha = if (shouldShowDuration) 1f else 0f
+                val currentUri = activeDerivativeUri ?: group.mp4VideoUri
+                val durMs = currentUri?.let { videoDurationCache[it] } ?: 0L
+                btnVideoDuration.text = if (durMs > 0) formatVideoTime(durMs) else "00:00"
+                btnVideoDuration.setIconResource(if (holder.isPlayingVideo) R.drawable.ic_pause else R.drawable.ic_play_arrow)
+                btnVideoDuration.setOnClickListener {
+                    val currentPos = holder.bindingAdapterPosition
+                    if (currentPos != RecyclerView.NO_POSITION) {
+                        toggleMp4VideoForPosition(currentPos)
+                    }
+                }
+            } else {
+                videoDurationGroup.visibility = View.GONE
+                videoDurationGroup.alpha = 0f
+                btnVideoDuration.setOnClickListener(null)
             }
 
             // 2. Master RAW Format indicator setup (Top-Right Anchor)
@@ -712,20 +764,27 @@ class ImageViewerAdapter(
         val ctx = holder.binding.root.context
         scope.launch(Dispatchers.IO) {
             var bmp: Bitmap? = null
+            var durMs: Long = 0L
             try {
                 val retriever = android.media.MediaMetadataRetriever()
                 if (uri.scheme == "content") {
                     ctx.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
                         retriever.setDataSource(pfd.fileDescriptor)
                         bmp = retriever.getFrameAtTime(0, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                        durMs = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
                     }
                 } else {
                     retriever.setDataSource(uri.path)
                     bmp = retriever.getFrameAtTime(0, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                    durMs = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
                 }
                 retriever.release()
             } catch (e: Exception) {
                 Log.w("ImageViewerAdapter", "MediaMetadataRetriever failed for $uri", e)
+            }
+
+            if (durMs > 0) {
+                videoDurationCache[uri] = durMs
             }
 
             withContext(Dispatchers.Main) {
@@ -740,6 +799,9 @@ class ImageViewerAdapter(
                         .load(uri)
                         .apply(RequestOptions().frame(0).diskCacheStrategy(DiskCacheStrategy.RESOURCE))
                         .into(holder.binding.imageView)
+                }
+                if (durMs > 0 && !holder.isPlayingVideo) {
+                    holder.binding.btnVideoDuration.text = formatVideoTime(durMs)
                 }
             }
         }
@@ -762,14 +824,18 @@ class ImageViewerAdapter(
                 holder.isPlayingVideo = isPlaying
                 if (isPlaying) {
                     holder.binding.btnMotionPhotoIndicator.setIconResource(R.drawable.ic_pause)
-                    holder.binding.btnVideoPlayPause.setIconResource(R.drawable.ic_pause)
+                    holder.binding.btnVideoDuration.setIconResource(R.drawable.ic_pause)
                     holder.videoProgressRunnable?.let {
-                        holder.binding.videoControlBar.removeCallbacks(it)
-                        holder.binding.videoControlBar.post(it)
+                        holder.binding.btnVideoDuration.removeCallbacks(it)
+                        holder.binding.btnVideoDuration.post(it)
                     }
                 } else {
                     holder.binding.btnMotionPhotoIndicator.setIconResource(R.drawable.ic_play_arrow)
-                    holder.binding.btnVideoPlayPause.setIconResource(R.drawable.ic_play_arrow)
+                    holder.binding.btnVideoDuration.setIconResource(R.drawable.ic_play_arrow)
+                    val cached = videoDurationCache[uri] ?: 0L
+                    if (cached > 0) {
+                        holder.binding.btnVideoDuration.text = formatVideoTime(cached)
+                    }
                 }
             }
         ).also { holder.rawVideoPlayer = it }
@@ -779,6 +845,14 @@ class ImageViewerAdapter(
             player.load(uri)
         } else {
             player.seekTo(0)
+        }
+        val fps = player.fps.takeIf { it > 0 } ?: 24.0f
+        val totalMs = ((player.frameCount / fps) * 1000).toLong()
+        if (totalMs > 0) {
+            videoDurationCache[uri] = totalMs
+            if (!holder.isPlayingVideo) {
+                holder.binding.btnVideoDuration.text = formatVideoTime(totalMs)
+            }
         }
         player.updateAdjustments(group.editConfig)
     }
@@ -1082,73 +1156,9 @@ class ImageViewerAdapter(
         return String.format(java.util.Locale.US, "%02d:%02d", minutes, seconds)
     }
 
-    private fun setupVideoControlBar(holder: ViewHolder) {
-        val binding = holder.binding
-
-        binding.btnVideoPlayPause.setOnClickListener {
-            val rawPlayer = holder.rawVideoPlayer
-            val exo = holder.player
-            if (rawPlayer != null && rawPlayer.isVideoLoaded) {
-                rawPlayer.togglePlayPause()
-            } else if (exo != null) {
-                if (exo.isPlaying) {
-                    exo.pause()
-                    holder.isPlayingVideo = false
-                    binding.btnVideoPlayPause.setIconResource(R.drawable.ic_play_arrow)
-                    binding.btnMotionPhotoIndicator.setIconResource(R.drawable.ic_play_arrow)
-                } else {
-                    exo.play()
-                    holder.isPlayingVideo = true
-                    binding.btnVideoPlayPause.setIconResource(R.drawable.ic_pause)
-                    binding.btnMotionPhotoIndicator.setIconResource(R.drawable.ic_pause)
-                    holder.videoProgressRunnable?.let {
-                        binding.videoControlBar.removeCallbacks(it)
-                        binding.videoControlBar.post(it)
-                    }
-                }
-            }
-        }
-
-        binding.videoSeekBar.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
-            override fun onStartTrackingTouch(seekBar: android.widget.SeekBar?) {
-                holder.isUserSeeking = true
-            }
-
-            override fun onProgressChanged(seekBar: android.widget.SeekBar?, progress: Int, fromUser: Boolean) {
-                if (!fromUser) return
-                val rawPlayer = holder.rawVideoPlayer
-                val exo = holder.player
-                if (rawPlayer != null && rawPlayer.isVideoLoaded) {
-                    val count = rawPlayer.frameCount
-                    if (count > 0) {
-                        val targetFrame = ((progress.toFloat() / 1000f) * (count - 1)).toInt().coerceIn(0, count - 1)
-                        rawPlayer.seekTo(targetFrame)
-                        val fps = rawPlayer.fps.takeIf { it > 0 } ?: 24.0f
-                        val ms = ((targetFrame / fps) * 1000).toLong()
-                        binding.videoCurrentTime.text = formatVideoTime(ms)
-                    }
-                } else if (exo != null) {
-                    val dur = exo.duration
-                    if (dur > 0) {
-                        val targetMs = ((progress.toFloat() / 1000f) * dur).toLong().coerceIn(0, dur)
-                        exo.seekTo(targetMs)
-                        binding.videoCurrentTime.text = formatVideoTime(targetMs)
-                    }
-                }
-            }
-
-            override fun onStopTrackingTouch(seekBar: android.widget.SeekBar?) {
-                holder.isUserSeeking = false
-            }
-        })
-    }
-
     private fun startVideoProgressTracking(holder: ViewHolder) {
         stopVideoProgressTracking(holder)
         val binding = holder.binding
-        binding.videoControlBar.visibility = View.VISIBLE
-        binding.videoControlBar.alpha = 1f
-        setupVideoControlBar(holder)
 
         val runnable = object : Runnable {
             override fun run() {
@@ -1162,44 +1172,51 @@ class ImageViewerAdapter(
                     val curMs = ((frame / fps) * 1000).toLong()
                     val totalMs = ((count / fps) * 1000).toLong()
 
-                    binding.videoCurrentTime.text = formatVideoTime(curMs)
-                    binding.videoTotalTime.text = formatVideoTime(totalMs)
-
-                    if (!holder.isUserSeeking && count > 1) {
-                        binding.videoSeekBar.progress = ((frame.toFloat() / (count - 1)) * 1000).toInt()
-                    }
+                    binding.btnVideoDuration.text = "${formatVideoTime(curMs)} / ${formatVideoTime(totalMs)}"
                     val isPlaying = holder.isPlayingVideo
-                    binding.btnVideoPlayPause.setIconResource(if (isPlaying) R.drawable.ic_pause else R.drawable.ic_play_arrow)
+                    binding.btnVideoDuration.setIconResource(if (isPlaying) R.drawable.ic_pause else R.drawable.ic_play_arrow)
                 } else if (exo != null) {
                     val curMs = exo.currentPosition.coerceAtLeast(0)
                     val totalMs = exo.duration.takeIf { it > 0 } ?: 0L
 
-                    binding.videoCurrentTime.text = formatVideoTime(curMs)
-                    binding.videoTotalTime.text = formatVideoTime(totalMs)
-
-                    if (!holder.isUserSeeking && totalMs > 0) {
-                        binding.videoSeekBar.progress = ((curMs.toFloat() / totalMs) * 1000).toInt()
+                    if (totalMs > 0) {
+                        binding.btnVideoDuration.text = "${formatVideoTime(curMs)} / ${formatVideoTime(totalMs)}"
+                    } else {
+                        binding.btnVideoDuration.text = formatVideoTime(curMs)
                     }
                     val isPlaying = exo.isPlaying
-                    binding.btnVideoPlayPause.setIconResource(if (isPlaying) R.drawable.ic_pause else R.drawable.ic_play_arrow)
+                    binding.btnVideoDuration.setIconResource(if (isPlaying) R.drawable.ic_pause else R.drawable.ic_play_arrow)
                 }
 
                 if (holder.isPlayingVideo) {
-                    binding.videoControlBar.postDelayed(this, 100)
+                    binding.btnVideoDuration.postDelayed(this, 100)
                 }
             }
         }
         holder.videoProgressRunnable = runnable
-        binding.videoControlBar.post(runnable)
+        binding.btnVideoDuration.post(runnable)
     }
 
     private fun stopVideoProgressTracking(holder: ViewHolder) {
         holder.videoProgressRunnable?.let {
-            holder.binding.videoControlBar.removeCallbacks(it)
+            holder.binding.btnVideoDuration.removeCallbacks(it)
         }
         holder.videoProgressRunnable = null
-        holder.binding.videoControlBar.visibility = View.GONE
-        holder.isUserSeeking = false
+        val rawPlayer = holder.rawVideoPlayer
+        val exo = holder.player
+        val currentUri = holder.currentUri
+        val cached = currentUri?.let { videoDurationCache[it] }
+        if (cached != null && cached > 0) {
+            holder.binding.btnVideoDuration.text = formatVideoTime(cached)
+        } else if (rawPlayer != null && rawPlayer.isVideoLoaded) {
+            val count = rawPlayer.frameCount
+            val fps = rawPlayer.fps.takeIf { it > 0 } ?: 24.0f
+            val totalMs = ((count / fps) * 1000).toLong()
+            holder.binding.btnVideoDuration.text = formatVideoTime(totalMs)
+        } else if (exo != null && exo.duration > 0) {
+            holder.binding.btnVideoDuration.text = formatVideoTime(exo.duration)
+        }
+        holder.binding.btnVideoDuration.setIconResource(R.drawable.ic_play_arrow)
     }
 
     fun stopMotionVideo(holder: ViewHolder) {
@@ -1210,6 +1227,8 @@ class ImageViewerAdapter(
         holder.binding.videoView.visibility = View.INVISIBLE
         holder.binding.videoView.alpha = 0f
         holder.isPlayingVideo = false
+        holder.binding.btnMotionPhotoIndicator.setIconResource(R.drawable.ic_play_arrow)
+        holder.binding.btnVideoDuration.setIconResource(R.drawable.ic_play_arrow)
     }
 
     private fun updateVideoViewBounds(holder: ViewHolder, rect: RectF) {
@@ -1270,20 +1289,29 @@ class ImageViewerAdapter(
                 holder.isPlayingVideo = isPlaying
                 if (isPlaying) {
                     holder.binding.btnMotionPhotoIndicator.setIconResource(R.drawable.ic_pause)
-                    holder.binding.btnVideoPlayPause.setIconResource(R.drawable.ic_pause)
+                    holder.binding.btnVideoDuration.setIconResource(R.drawable.ic_pause)
                     holder.videoProgressRunnable?.let {
-                        holder.binding.videoControlBar.removeCallbacks(it)
-                        holder.binding.videoControlBar.post(it)
+                        holder.binding.btnVideoDuration.removeCallbacks(it)
+                        holder.binding.btnVideoDuration.post(it)
                     }
                 } else {
                     holder.binding.btnMotionPhotoIndicator.setIconResource(R.drawable.ic_play_arrow)
-                    holder.binding.btnVideoPlayPause.setIconResource(R.drawable.ic_play_arrow)
+                    holder.binding.btnVideoDuration.setIconResource(R.drawable.ic_play_arrow)
+                    val cached = videoDurationCache[uri] ?: 0L
+                    if (cached > 0) {
+                        holder.binding.btnVideoDuration.text = formatVideoTime(cached)
+                    }
                 }
             }
         ).also { holder.rawVideoPlayer = it }
 
         if (!player.isVideoLoaded) {
             player.load(uri)
+        }
+        val fps = player.fps.takeIf { it > 0 } ?: 24.0f
+        val totalMs = ((player.frameCount / fps) * 1000).toLong()
+        if (totalMs > 0) {
+            videoDurationCache[uri] = totalMs
         }
         player.updateAdjustments(group.editConfig)
 
@@ -1317,6 +1345,8 @@ class ImageViewerAdapter(
         }
 
         player.play()
+        holder.binding.btnMotionPhotoIndicator.setIconResource(R.drawable.ic_pause)
+        holder.binding.btnVideoDuration.setIconResource(R.drawable.ic_pause)
         startVideoProgressTracking(holder)
     }
 
@@ -1327,6 +1357,7 @@ class ImageViewerAdapter(
         holder.binding.videoView.visibility = View.GONE
         holder.binding.videoView.alpha = 0f
         holder.binding.btnMotionPhotoIndicator.setIconResource(R.drawable.ic_play_arrow)
+        holder.binding.btnVideoDuration.setIconResource(R.drawable.ic_play_arrow)
     }
 
     fun toggleRawVideoForPosition(position: Int) {
@@ -1367,12 +1398,19 @@ class ImageViewerAdapter(
                     if (playbackState == androidx.media3.common.Player.STATE_ENDED) {
                         stopMotionVideo(holder)
                         holder.binding.btnMotionPhotoIndicator.setIconResource(R.drawable.ic_play_arrow)
+                        holder.binding.btnVideoDuration.setIconResource(R.drawable.ic_play_arrow)
+                    } else if (playbackState == androidx.media3.common.Player.STATE_READY) {
+                        val dur = p.duration
+                        if (dur > 0) {
+                            videoDurationCache[uri] = dur
+                        }
                     }
                 }
                 override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                     android.util.Log.e("ImageViewerAdapter", "MP4 playback error", error)
                     stopMotionVideo(holder)
                     holder.binding.btnMotionPhotoIndicator.setIconResource(R.drawable.ic_play_arrow)
+                    holder.binding.btnVideoDuration.setIconResource(R.drawable.ic_play_arrow)
                 }
                 override fun onRenderedFirstFrame() {
                     holder.binding.videoView.alpha = 1f
@@ -1402,6 +1440,7 @@ class ImageViewerAdapter(
         player.play()
         holder.isPlayingVideo = true
         holder.binding.btnMotionPhotoIndicator.setIconResource(R.drawable.ic_pause)
+        holder.binding.btnVideoDuration.setIconResource(R.drawable.ic_pause)
         startVideoProgressTracking(holder)
     }
 
@@ -1412,6 +1451,7 @@ class ImageViewerAdapter(
             if (holder.isPlayingVideo) {
                 stopMotionVideo(holder)
                 holder.binding.btnMotionPhotoIndicator.setIconResource(R.drawable.ic_play_arrow)
+                holder.binding.btnVideoDuration.setIconResource(R.drawable.ic_play_arrow)
             } else {
                 playMp4Video(holder, group)
             }
@@ -1559,11 +1599,15 @@ class ImageViewerAdapter(
                     val multiCamContainer = holder.binding.multiCameraToggleContainer
                     val dotsContainer = holder.binding.derivativeDotsContainer
                     val filmstripContainer = holder.binding.filmstripContainer
+                    val durationGroup = holder.binding.videoDurationGroup
                     val group = getGroup(i)
                     val isCinemaDngGroup = group.isCinemaDng || group.cinemaDngFolderUri != null || group.cinemaDngFirstFrameUri != null || group.cinemaDngFrameUris.isNotEmpty()
                     val hasMultiCam = group.isMultiCamera && getMultiCameraLenses(group).size >= 2
                     val isRawSelected = selectedFormats[group.baseName] == FORMAT_DNG
                     val hasDots = !group.isMultiCamera && !isRawSelected && getDerivativeUris(group).size >= 2
+                    val activeDerivUri = getDerivativeUris(group).getOrNull(selectedDerivativeIndices[group.baseName] ?: 0) ?: group.jpgUri ?: group.mp4VideoUri
+                    val isMp4 = !isRawSelected && activeDerivUri != null && (activeDerivUri.toString().endsWith(".mp4", ignoreCase = true) || group.isMp4Video)
+                    val isVideo = (isRawSelected && (group.isRawVideo || group.rawVideoUri != null)) || isMp4
                     val shouldBeVisible = isVisible && !isFormatSwitcherPersistentHidden
                     if (shouldBeVisible) {
                         formatGroup.visibility = View.VISIBLE
@@ -1580,6 +1624,13 @@ class ImageViewerAdapter(
                         } else {
                             dotsContainer.visibility = View.GONE
                             dotsContainer.alpha = 0f
+                        }
+                        if (isVideo) {
+                            durationGroup.visibility = View.VISIBLE
+                            durationGroup.animate().alpha(1f).setDuration(200).setListener(null).start()
+                        } else {
+                            durationGroup.visibility = View.GONE
+                            durationGroup.alpha = 0f
                         }
                         if (isCinemaDngGroup) {
                             filmstripContainer.visibility = View.VISIBLE
@@ -1610,6 +1661,12 @@ class ImageViewerAdapter(
                                     if (!isUiVisible || isFormatSwitcherPersistentHidden) dotsContainer.visibility = View.GONE
                                 }
                             }).start()
+                        durationGroup.animate().alpha(0f).setDuration(200)
+                            .setListener(object : android.animation.AnimatorListenerAdapter() {
+                                override fun onAnimationEnd(animation: android.animation.Animator) {
+                                    if (!isUiVisible || isFormatSwitcherPersistentHidden || !isVideo) durationGroup.visibility = View.GONE
+                                }
+                            }).start()
                         if (isCinemaDngGroup) {
                             holder.filmstripFadeRunnable?.let { filmstripContainer.removeCallbacks(it) }
                             holder.filmstripFadeRunnable = null
@@ -1618,7 +1675,7 @@ class ImageViewerAdapter(
                                     override fun onAnimationEnd(animation: android.animation.Animator) {
                                         if (!isUiVisible || isFormatSwitcherPersistentHidden) filmstripContainer.visibility = View.GONE
                                     }
-                                }).start()
+                                    }).start()
                         }
                     }
                 }
@@ -1640,11 +1697,15 @@ class ImageViewerAdapter(
                     val multiCamContainer = holder.binding.multiCameraToggleContainer
                     val dotsContainer = holder.binding.derivativeDotsContainer
                     val filmstripContainer = holder.binding.filmstripContainer
+                    val durationGroup = holder.binding.videoDurationGroup
                     val group = getGroup(i)
                     val isCinemaDngGroup = group.isCinemaDng || group.cinemaDngFolderUri != null || group.cinemaDngFirstFrameUri != null || group.cinemaDngFrameUris.isNotEmpty()
                     val hasMultiCam = group.isMultiCamera && getMultiCameraLenses(group).size >= 2
                     val isRawSelected = selectedFormats[group.baseName] == FORMAT_DNG
                     val hasDots = !group.isMultiCamera && !isRawSelected && getDerivativeUris(group).size >= 2
+                    val activeDerivUri = getDerivativeUris(group).getOrNull(selectedDerivativeIndices[group.baseName] ?: 0) ?: group.jpgUri ?: group.mp4VideoUri
+                    val isMp4 = !isRawSelected && activeDerivUri != null && (activeDerivUri.toString().endsWith(".mp4", ignoreCase = true) || group.isMp4Video)
+                    val isVideo = (isRawSelected && (group.isRawVideo || group.rawVideoUri != null)) || isMp4
                     val shouldBeVisible = isUiVisible && !isFormatSwitcherPersistentHidden
                     if (shouldBeVisible) {
                         formatGroup.visibility = View.VISIBLE
@@ -1661,6 +1722,13 @@ class ImageViewerAdapter(
                         } else {
                             dotsContainer.visibility = View.GONE
                             dotsContainer.alpha = 0f
+                        }
+                        if (isVideo) {
+                            durationGroup.visibility = View.VISIBLE
+                            durationGroup.animate().alpha(1f).setDuration(200).setListener(null).start()
+                        } else {
+                            durationGroup.visibility = View.GONE
+                            durationGroup.alpha = 0f
                         }
                         if (isCinemaDngGroup) {
                             filmstripContainer.visibility = View.VISIBLE
@@ -1689,6 +1757,12 @@ class ImageViewerAdapter(
                             .setListener(object : android.animation.AnimatorListenerAdapter() {
                                 override fun onAnimationEnd(animation: android.animation.Animator) {
                                     if (isFormatSwitcherPersistentHidden) dotsContainer.visibility = View.GONE
+                                }
+                            }).start()
+                        durationGroup.animate().alpha(0f).setDuration(200)
+                            .setListener(object : android.animation.AnimatorListenerAdapter() {
+                                override fun onAnimationEnd(animation: android.animation.Animator) {
+                                    if (isFormatSwitcherPersistentHidden || !isVideo) durationGroup.visibility = View.GONE
                                 }
                             }).start()
                         if (isCinemaDngGroup) {
