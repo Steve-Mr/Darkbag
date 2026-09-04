@@ -526,11 +526,6 @@ object RawVideoExporter {
                             hadOutput = true
                         } else if (outIdx >= 0) {
                             hadOutput = true
-                            if ((audioBufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
-                                isEos = true
-                                aEnc.releaseOutputBuffer(outIdx, false)
-                                break
-                            }
                             val encodedData = aEnc.getOutputBuffer(outIdx)
                             if (encodedData != null && audioBufferInfo.size > 0) {
                                 if (muxerStarted && audioTrackIndex >= 0) {
@@ -547,7 +542,14 @@ object RawVideoExporter {
                                     pendingMuxerSamples.add(PendingMuxerSample(true, bytes, copyInfo))
                                 }
                             }
+                            val isLastBuffer = (audioBufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0
+                            if (isLastBuffer) {
+                                isEos = true
+                            }
                             aEnc.releaseOutputBuffer(outIdx, false)
+                            if (isLastBuffer) {
+                                break
+                            }
                         } else {
                             break
                         }
@@ -594,11 +596,6 @@ object RawVideoExporter {
                             hadOutput = true
                         } else if (outIndex >= 0) {
                             hadOutput = true
-                            if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
-                                isEos = true
-                                enc.releaseOutputBuffer(outIndex, false)
-                                break
-                            }
                             val encodedData = enc.getOutputBuffer(outIndex)
                             if (encodedData != null && bufferInfo.size > 0) {
                                 if (muxerStarted && videoTrackIndex >= 0) {
@@ -615,7 +612,14 @@ object RawVideoExporter {
                                     pendingMuxerSamples.add(PendingMuxerSample(false, bytes, copyInfo))
                                 }
                             }
+                            val isLastBuffer = (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0
+                            if (isLastBuffer) {
+                                isEos = true
+                            }
                             enc.releaseOutputBuffer(outIndex, false)
+                            if (isLastBuffer) {
+                                break
+                            }
                         } else {
                             break
                         }
@@ -915,11 +919,6 @@ object RawVideoExporter {
                             hadOutput = true
                         } else if (outIdx >= 0) {
                             hadOutput = true
-                            if ((audioBufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
-                                isEos = true
-                                aEnc.releaseOutputBuffer(outIdx, false)
-                                break
-                            }
                             val encodedData = aEnc.getOutputBuffer(outIdx)
                             if (encodedData != null && audioBufferInfo.size > 0) {
                                 if (muxerStarted && audioTrackIndex >= 0) {
@@ -936,7 +935,14 @@ object RawVideoExporter {
                                     pendingMuxerSamples.add(PendingMuxerSample(true, bytes, copyInfo))
                                 }
                             }
+                            val isLastBuffer = (audioBufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0
+                            if (isLastBuffer) {
+                                isEos = true
+                            }
                             aEnc.releaseOutputBuffer(outIdx, false)
+                            if (isLastBuffer) {
+                                break
+                            }
                         } else {
                             break
                         }
@@ -983,11 +989,6 @@ object RawVideoExporter {
                             hadOutput = true
                         } else if (outIndex >= 0) {
                             hadOutput = true
-                            if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
-                                isEos = true
-                                enc.releaseOutputBuffer(outIndex, false)
-                                break
-                            }
                             val encodedData = enc.getOutputBuffer(outIndex)
                             if (encodedData != null && bufferInfo.size > 0) {
                                 if (muxerStarted && videoTrackIndex >= 0) {
@@ -1004,7 +1005,14 @@ object RawVideoExporter {
                                     pendingMuxerSamples.add(PendingMuxerSample(false, bytes, copyInfo))
                                 }
                             }
+                            val isLastBuffer = (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0
+                            if (isLastBuffer) {
+                                isEos = true
+                            }
                             enc.releaseOutputBuffer(outIndex, false)
+                            if (isLastBuffer) {
+                                break
+                            }
                         } else {
                             break
                         }
