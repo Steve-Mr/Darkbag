@@ -49,6 +49,7 @@ class RawVideoPlayer(
 
     private var glRendererHandle: Long = 0L
     private var currentSurface: android.view.Surface? = null
+    private val readerLock = Any()
 
     @Volatile
     private var renderExecutor: java.util.concurrent.ExecutorService = createRenderExecutor()
@@ -140,10 +141,25 @@ class RawVideoPlayer(
     }
 
     private fun closeCurrentVideo() {
-        pause()
-        if (nativeHandle != 0L) {
-            RawVideoNative.nativeCloseReader(nativeHandle)
+        isPlaying.set(false)
+        val pJob = playbackJob
+        val aJob = audioJob
+        playbackJob = null
+        audioJob = null
+        runBlocking {
+            try { pJob?.cancelAndJoin() } catch (_: Exception) {}
+            try { aJob?.cancelAndJoin() } catch (_: Exception) {}
+        }
+        audioTrack?.pause()
+        onPlaybackStateChanged(false)
+
+        val handleToClose: Long
+        synchronized(readerLock) {
+            handleToClose = nativeHandle
             nativeHandle = 0L
+        }
+        if (handleToClose != 0L) {
+            RawVideoNative.nativeCloseReader(handleToClose)
         }
         try {
             currentPfd?.close()
@@ -270,20 +286,37 @@ class RawVideoPlayer(
         }
 
         // Stream audio packets from container to AudioTrack
-        val handle = nativeHandle
-        if (handle != 0L && audioTrack != null) {
+        if (audioTrack != null) {
             audioJob = CoroutineScope(Dispatchers.IO).launch {
                 val audioBuf = ByteBuffer.allocateDirect(16384)
                 val tempBytes = ByteArray(16384)
                 var packetIndex = 0
-                while (isPlaying.get()) {
-                    audioBuf.clear()
-                    val read = RawVideoNative.nativeReadAudioPacket(handle, packetIndex, audioBuf)
-                    if (read <= 0) break
-                    audioBuf.position(0)
-                    audioBuf.get(tempBytes, 0, read)
-                    audioTrack?.write(tempBytes, 0, read)
-                    packetIndex++
+                try {
+                    while (isPlaying.get()) {
+                        audioBuf.clear()
+                        val read = synchronized(readerLock) {
+                            if (nativeHandle == 0L) -1
+                            else RawVideoNative.nativeReadAudioPacket(nativeHandle, packetIndex, audioBuf)
+                        }
+                        if (read <= 0) {
+                            if (packetIndex == 0) break // No audio packets at all
+                            packetIndex = 0 // Loop audio with video
+                            continue
+                        }
+                        audioBuf.position(0)
+                        audioBuf.get(tempBytes, 0, read)
+                        try {
+                            audioTrack?.write(tempBytes, 0, read)
+                        } catch (e: Exception) {
+                            Log.w(TAG, "AudioTrack write failed or track closed", e)
+                            break
+                        }
+                        packetIndex++
+                    }
+                } catch (_: CancellationException) {
+                    // Normal coroutine cancellation
+                } catch (e: Exception) {
+                    Log.w(TAG, "Exception in audio playback job", e)
                 }
             }
         }
@@ -326,14 +359,17 @@ class RawVideoPlayer(
     }
 
     private fun renderFrame(frameIdx: Int) {
-        val handle = nativeHandle
         val hdr = header ?: return
         val buf = frameBuffer ?: return
         val bmp = renderBitmap ?: return
-        if (handle == 0L) return
 
-        buf.clear()
-        val readBytes = RawVideoNative.nativeReadFrame(handle, frameIdx, frameMeta, buf)
+        val readBytes = synchronized(readerLock) {
+            if (nativeHandle == 0L) -1
+            else {
+                buf.clear()
+                RawVideoNative.nativeReadFrame(nativeHandle, frameIdx, frameMeta, buf)
+            }
+        }
         if (readBytes > 0) {
             val exposure = currentEditConfig?.exposure ?: hdr.exposure
             val contrast = currentEditConfig?.contrast ?: hdr.contrast

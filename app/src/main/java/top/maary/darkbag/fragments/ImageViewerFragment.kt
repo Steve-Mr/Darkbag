@@ -3418,12 +3418,21 @@ open class ImageViewerFragment : Fragment() {
                         } catch (e: Exception) {
                             android.util.Log.e("ImageViewerFragment", "Failed to copy CinemaDNG to SAF folder", e)
                         }
+                    } else {
+                        // Fallback to public Pictures/Darkbag directory so ImageRepository can scan and manage it
+                        try {
+                            val picturesDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_PICTURES)
+                            val destDir = File(picturesDir, "Darkbag/CinemaDNG/$clipName").apply { mkdirs() }
+                            resultDir.copyRecursively(destDir, overwrite = true)
+                            val filePaths = destDir.listFiles()?.map { it.absolutePath }?.toTypedArray()
+                            if (!filePaths.isNullOrEmpty()) {
+                                android.media.MediaScannerConnection.scanFile(context, filePaths, null, null)
+                            }
+                        } catch (e: Exception) {
+                            android.util.Log.e("ImageViewerFragment", "Failed to copy CinemaDNG to Pictures folder", e)
+                        }
                     }
-                    val destDir = File(context.getExternalFilesDir(null), "CinemaDNG/$clipName").apply { mkdirs() }
-                    resultDir.copyRecursively(destDir, overwrite = true)
                     tempExportDir.deleteRecursively()
-
-                    android.media.MediaScannerConnection.scanFile(context, arrayOf(destDir.absolutePath), null, null)
                 }
                 binding.initialLoadingIndicator.visibility = View.GONE
                 refreshCurrentGroupAndAdapter(group.baseName)

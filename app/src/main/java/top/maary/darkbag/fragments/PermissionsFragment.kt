@@ -111,9 +111,15 @@ class PermissionsFragment : Fragment() {
             val cameraGranted = permissions[Manifest.permission.CAMERA] ?: (
                 ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
             )
+            val audioGranted = permissions[Manifest.permission.RECORD_AUDIO] ?: (
+                ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+            )
             if (!cameraGranted) {
                 Toast.makeText(context, "Camera permission request denied", Toast.LENGTH_LONG).show()
             } else {
+                if (!audioGranted) {
+                    Toast.makeText(context, "Microphone permission not granted; video recording will be silent", Toast.LENGTH_SHORT).show()
+                }
                 routeStartup()
             }
         }

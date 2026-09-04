@@ -23,6 +23,8 @@ class RawVideoSessionManager {
     val recording: Boolean
         get() = isRecording.get()
 
+    var onLowStorageCallback: (() -> Unit)? = null
+
     data class RecordingResult(
         val file: File,
         val frameCount: Int,
@@ -261,6 +263,16 @@ class RawVideoSessionManager {
 
             if (pushed) {
                 recordedFrames++
+                if (recordedFrames % 30 == 0) {
+                    val outPath = currentOutputPath
+                    if (outPath != null) {
+                        val file = File(outPath)
+                        if (file.usableSpace in 1 until 500L * 1024 * 1024) {
+                            Log.w(TAG, "Low disk space (< 500MB), invoking onLowStorageCallback")
+                            onLowStorageCallback?.invoke()
+                        }
+                    }
+                }
             }
             return pushed
         } catch (e: Exception) {
@@ -272,15 +284,19 @@ class RawVideoSessionManager {
     }
 
     fun stopRecording(): RecordingResult? {
-        if (!isRecording.getAndSet(false) || nativeHandle == 0L) {
+        isRecording.set(false)
+        onLowStorageCallback = null
+
+        val handle = nativeHandle
+        if (handle == 0L) {
             return null
         }
+        nativeHandle = 0L
 
         audioRecorder?.stop()
         audioRecorder = null
 
-        val success = RawVideoNative.nativeStopRecording(nativeHandle)
-        nativeHandle = 0L
+        val success = RawVideoNative.nativeStopRecording(handle)
 
         val path = currentOutputPath
         currentOutputPath = null
@@ -288,6 +304,11 @@ class RawVideoSessionManager {
 
         if (success && path != null) {
             val file = File(path)
+            if (recordedFrames < 3 || durationMs < 500) {
+                Log.w(TAG, "Recording too short ($recordedFrames frames, $durationMs ms), discarding file: ${file.absolutePath}")
+                try { file.delete() } catch (_: Exception) {}
+                return null
+            }
             Log.i(TAG, "Raw video saved: ${file.absolutePath} ($recordedFrames frames, $durationMs ms)")
             return RecordingResult(file, recordedFrames, durationMs)
         }

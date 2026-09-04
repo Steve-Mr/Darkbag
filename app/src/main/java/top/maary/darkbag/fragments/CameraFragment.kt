@@ -628,43 +628,47 @@ class CameraFragment : Fragment() {
                             context?.contentResolver?.openFileDescriptor(uri, "r")?.use { pfd ->
                                 val handle = top.maary.darkbag.rawvideo.RawVideoNative.nativeOpenReaderFd(pfd.fd)
                                 if (handle != 0L) {
-                                    val header = top.maary.darkbag.rawvideo.RawVideoNative.readHeader(handle)
-                                    if (header != null && header.width > 0 && header.height > 0) {
-                                        val swapDims = (header.orientation == 90 || header.orientation == 270)
-                                        val thumbW = if (swapDims) (320 * header.height) / header.width else 320
-                                        val thumbH = if (swapDims) 320 else (320 * header.height) / header.width
-                                        val thumbBmp = android.graphics.Bitmap.createBitmap(thumbW, thumbH, android.graphics.Bitmap.Config.ARGB_8888)
-                                        val buf = java.nio.ByteBuffer.allocateDirect(header.width * header.height * 2)
-                                        val meta = LongArray(3)
-                                        val read = top.maary.darkbag.rawvideo.RawVideoNative.nativeReadFrame(handle, 0, meta, buf)
-                                        if (read > 0) {
-                                            val targetLogIndex = if (header.activeLogName.isNotBlank() && header.activeLogName != "None") {
-                                                SettingsFragment.LOG_CURVES.indexOf(header.activeLogName).takeIf { it >= 0 } ?: -1
-                                            } else -1
-                                            val lutManager = context?.let { top.maary.darkbag.utils.LutManager(it) }
-                                            val lutPath = if (header.activeLutName.isNotBlank() && header.activeLutName != "None" && lutManager != null) {
-                                                val f = java.io.File(lutManager.lutDir, header.activeLutName)
-                                                if (f.exists()) f.absolutePath else null
+                                    try {
+                                        val header = top.maary.darkbag.rawvideo.RawVideoNative.readHeader(handle)
+                                        if (header != null && header.width > 0 && header.height > 0) {
+                                            val swapDims = (header.orientation == 90 || header.orientation == 270)
+                                            val thumbW = if (swapDims) (320 * header.height) / header.width else 320
+                                            val thumbH = if (swapDims) 320 else (320 * header.height) / header.width
+                                            val thumbBmp = android.graphics.Bitmap.createBitmap(thumbW, thumbH, android.graphics.Bitmap.Config.ARGB_8888)
+                                            val buf = java.nio.ByteBuffer.allocateDirect(header.width * header.height * 2)
+                                            val meta = LongArray(3)
+                                            val read = top.maary.darkbag.rawvideo.RawVideoNative.nativeReadFrame(handle, 0, meta, buf)
+                                            if (read > 0) {
+                                                val targetLogIndex = if (header.activeLogName.isNotBlank() && header.activeLogName != "None") {
+                                                    SettingsFragment.LOG_CURVES.indexOf(header.activeLogName).takeIf { it >= 0 } ?: -1
+                                                } else -1
+                                                val lutManager = context?.let { top.maary.darkbag.utils.LutManager(it) }
+                                                val lutPath = if (header.activeLutName.isNotBlank() && header.activeLutName != "None" && lutManager != null) {
+                                                    val f = java.io.File(lutManager.lutDir, header.activeLutName)
+                                                    if (f.exists()) f.absolutePath else null
+                                                } else null
+                                                top.maary.darkbag.rawvideo.RawVideoNative.nativeDebayerFrameToBitmap(
+                                                    bayerBuffer = buf,
+                                                    width = header.width,
+                                                    height = header.height,
+                                                    orientation = header.orientation,
+                                                    cfaPattern = header.cfaPattern,
+                                                    whiteLevel = header.whiteLevel,
+                                                    blackLevel = header.blackLevel.firstOrNull() ?: 64f,
+                                                    neutralPoint = header.neutralPoint,
+                                                    targetLog = targetLogIndex,
+                                                    lutPath = lutPath,
+                                                    exposure = header.exposure,
+                                                    contrast = header.contrast,
+                                                    saturation = header.saturation,
+                                                    outBitmap = thumbBmp
+                                                )
+                                                thumbBmp
                                             } else null
-                                            top.maary.darkbag.rawvideo.RawVideoNative.nativeDebayerFrameToBitmap(
-                                                bayerBuffer = buf,
-                                                width = header.width,
-                                                height = header.height,
-                                                orientation = header.orientation,
-                                                cfaPattern = header.cfaPattern,
-                                                whiteLevel = header.whiteLevel,
-                                                blackLevel = header.blackLevel.firstOrNull() ?: 64f,
-                                                neutralPoint = header.neutralPoint,
-                                                targetLog = targetLogIndex,
-                                                lutPath = lutPath,
-                                                exposure = header.exposure,
-                                                contrast = header.contrast,
-                                                saturation = header.saturation,
-                                                outBitmap = thumbBmp
-                                            )
-                                            thumbBmp
                                         } else null
-                                    } else null
+                                    } finally {
+                                        top.maary.darkbag.rawvideo.RawVideoNative.nativeCloseReader(handle)
+                                    }
                                 } else null
                             }
                         } catch (e: Exception) {
@@ -1356,10 +1360,19 @@ class CameraFragment : Fragment() {
             } else if (!isBurstActive && !isHalfFrameModeEnabled && !isMultiCameraModeActive) {
                 val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
                 val action = prefs.getString(SettingsFragment.KEY_SHUTTER_LONG_PRESS_ACTION, SettingsFragment.SHUTTER_LONG_PRESS_MP4)
-                if (action == SettingsFragment.SHUTTER_LONG_PRESS_RAW_VIDEO) {
-                    startRawVideoRecording()
-                } else if (action == SettingsFragment.SHUTTER_LONG_PRESS_MP4) {
-                    startMp4VideoRecording()
+                if (action == SettingsFragment.SHUTTER_LONG_PRESS_RAW_VIDEO || action == SettingsFragment.SHUTTER_LONG_PRESS_MP4) {
+                    val hasAudio = androidx.core.content.ContextCompat.checkSelfPermission(
+                        requireContext(),
+                        android.Manifest.permission.RECORD_AUDIO
+                    ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                    if (!hasAudio) {
+                        Toast.makeText(context, "Microphone permission not granted; recording silent video", Toast.LENGTH_SHORT).show()
+                    }
+                    if (action == SettingsFragment.SHUTTER_LONG_PRESS_RAW_VIDEO) {
+                        startRawVideoRecording()
+                    } else {
+                        startMp4VideoRecording()
+                    }
                 }
             }
         }
@@ -4439,6 +4452,16 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
         val lastResult = captureResults.values.lastOrNull()
         val combinedOrientation = getCombinedOrientation()
+        rawVideoSessionManager.onLowStorageCallback = {
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                if (rawVideoSessionManager.recording) {
+                    context?.let {
+                        Toast.makeText(it, "Low storage (<500MB), recording stopped automatically", Toast.LENGTH_LONG).show()
+                    }
+                    stopRawVideoRecording()
+                }
+            }
+        }
         val success = rawVideoSessionManager.startRecording(
             outputPath = tempFile.absolutePath,
             characteristics = chars,
@@ -4536,17 +4559,30 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         isVideoSaving = true
         showProcessingAnimation()
 
-        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        val rawFolderUri = prefs.getString(SettingsFragment.KEY_RAW_STORAGE_URI, null)
-        val jpgFolderUri = prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
+        val appContext = context?.applicationContext
+        val prefs = appContext?.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val rawFolderUri = prefs?.getString(SettingsFragment.KEY_RAW_STORAGE_URI, null)
+        val jpgFolderUri = prefs?.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
 
         lifecycleScope.launch(Dispatchers.IO) {
             try {
-                val result = rawVideoSessionManager.stopRecording() ?: return@launch
+                val result = rawVideoSessionManager.stopRecording()
+                if (result == null) {
+                    if (appContext != null) {
+                        withContext(Dispatchers.Main) {
+                            Toast.makeText(appContext, "Recording too short, cancelled", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                    return@launch
+                }
+                if (appContext == null) {
+                    result.file.delete()
+                    return@launch
+                }
                 val baseName = result.file.nameWithoutExtension
 
                 val (savedUri, thumbnail) = top.maary.darkbag.utils.ImageSaver.saveRawVideo(
-                    context = requireContext(),
+                    context = appContext,
                     rawVideoFile = result.file,
                     baseName = baseName,
                     targetFps = 24.0f,
@@ -4555,7 +4591,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 )
 
                 if (savedUri != null) {
-                    prefs.edit().putString(SettingsFragment.KEY_LAST_CAPTURE_URI, savedUri.toString()).apply()
+                    prefs?.edit()?.putString(SettingsFragment.KEY_LAST_CAPTURE_URI, savedUri.toString())?.apply()
                     imageRepository.invalidateCache()
                     withContext(Dispatchers.Main) {
                         updateCurrentThumbnail(savedUri)
@@ -4622,23 +4658,36 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         val recorder = mp4VideoRecorder
         mp4VideoRecorder = null
 
-        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-        val mediaFolderUri = prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
+        val appContext = context?.applicationContext
+        val prefs = appContext?.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val mediaFolderUri = prefs?.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
 
         lifecycleScope.launch(Dispatchers.IO) {
             try {
-                val result = recorder?.stop() ?: return@launch
+                val result = recorder?.stop()
+                if (result == null) {
+                    if (appContext != null) {
+                        withContext(Dispatchers.Main) {
+                            Toast.makeText(appContext, "Recording too short, cancelled", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                    return@launch
+                }
+                if (appContext == null) {
+                    result.file.delete()
+                    return@launch
+                }
                 val baseName = result.file.nameWithoutExtension
 
                 val (savedUri, thumbnail) = top.maary.darkbag.utils.ImageSaver.saveMp4Video(
-                    context = requireContext(),
+                    context = appContext,
                     mp4File = result.file,
                     baseName = baseName,
                     mediaFolderUri = mediaFolderUri
                 )
 
                 if (savedUri != null) {
-                    prefs.edit().putString(SettingsFragment.KEY_LAST_CAPTURE_URI, savedUri.toString()).apply()
+                    prefs?.edit()?.putString(SettingsFragment.KEY_LAST_CAPTURE_URI, savedUri.toString())?.apply()
                     imageRepository.invalidateCache()
                     withContext(Dispatchers.Main) {
                         updateCurrentThumbnail(savedUri)
