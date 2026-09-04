@@ -6,6 +6,7 @@ import android.net.Uri
 import android.os.Build
 import android.provider.DocumentsContract
 import android.provider.MediaStore
+import androidx.annotation.VisibleForTesting
 import androidx.documentfile.provider.DocumentFile
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.Flow
@@ -22,7 +23,8 @@ class ImageRepository(private val context: Context) {
 
     companion object {
         @Volatile
-        private var cachedGroups: List<ImageGroup>? = null
+        @VisibleForTesting
+        internal var cachedGroups: List<ImageGroup>? = null
 
         private val CINEMADNG_FRAME_REGEX = Regex("^(?:DBAG_)?((?:RAWVID|CDNG)_[0-9]{8}_[0-9]{6}(?:_[0-9]+)?)_([0-9]{6})\\.dng$", RegexOption.IGNORE_CASE)
         private val CINEMADNG_AUDIO_REGEX = Regex("^(?:DBAG_)?((?:RAWVID|CDNG)_[0-9]{8}_[0-9]{6}(?:_[0-9]+)?)\\.wav$", RegexOption.IGNORE_CASE)
@@ -118,6 +120,11 @@ class ImageRepository(private val context: Context) {
             mergeGroupMaps(groups, msResults)
             mergeGroupMaps(groups, jpgResults)
             mergeGroupMaps(groups, rawResults)
+
+            val validBaseNames = msResults.keys + jpgResults.keys + rawResults.keys
+            groups.keys.retainAll { baseName ->
+                baseName in validBaseNames || groups[baseName]?.isInProgress == true
+            }
 
             preloadInitialMetadata(groups, initialUri)
         }
@@ -278,14 +285,8 @@ class ImageRepository(private val context: Context) {
 
         val updated = builder.build()
         val currentCache = cachedGroups
-        cachedGroups = if (currentCache != null) {
-            if (currentCache.any { it.baseName == updated.baseName }) {
-                currentCache.map { if (it.baseName == updated.baseName) updated else it }
-            } else {
-                currentCache + updated
-            }
-        } else {
-            listOf(updated)
+        if (currentCache != null && currentCache.any { it.baseName == updated.baseName }) {
+            cachedGroups = currentCache.map { if (it.baseName == updated.baseName) updated else it }
         }
         updated
     }
@@ -990,6 +991,7 @@ class ImageRepository(private val context: Context) {
         var motionPhotoPtsUs: Long = 0L
         var motionPhotoVideoLength: Long = 0L
         var metadataLoaded: Boolean = false
+        var isInProgress: Boolean = false
 
         fun applyFrom(group: ImageGroup): ImageGroupBuilder {
             jpgUri = group.jpgUri
@@ -1035,6 +1037,7 @@ class ImageRepository(private val context: Context) {
             motionPhotoPtsUs = group.motionPhotoPtsUs
             motionPhotoVideoLength = group.motionPhotoVideoLength
             metadataLoaded = group.metadataLoaded
+            isInProgress = group.isInProgress
             return this
         }
 
@@ -1108,6 +1111,7 @@ class ImageRepository(private val context: Context) {
                 rawVideoDurationMs = other.rawVideoDurationMs
             }
             if (other.metadataLoaded) metadataLoaded = true
+            if (other.isInProgress) isInProgress = true
             updateTime(other.captureTime, other.lastModified)
         }
 
@@ -1283,7 +1287,7 @@ class ImageRepository(private val context: Context) {
         }
 
         fun build(): ImageGroup {
-            var isInProgress = false
+            var isInProgress = this.isInProgress
             var isPartial = false
 
             // Check for in-progress half-frame capture
