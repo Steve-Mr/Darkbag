@@ -213,4 +213,13 @@
     <string name="raw_video_fps_unsupported_warning">警告: 传感器最高 AE 目标为 %1$d fps。不支持 %2$s fps，可能会掉帧。</string>
     <string name="raw_video_res_4k_unsupported_warning">警告: 传感器分辨率 (%1$s) 小于 4K (3840x2160)，不支持 4K 裁剪。</string>
     <string name="raw_video_option_unsupported_suffix">%1$s (硬件不支持)</string>
+
+    <!-- Dynamic Microphone Permission -->
+    <string name="dialog_mic_permission_title">需要麦克风权限</string>
+    <string name="dialog_mic_permission_message">录制视频需要麦克风权限以捕获声音。是否现在授予权限？</string>
+    <string name="dialog_mic_permission_denied_message">麦克风权限已被拒绝。您可以在系统设置中开启权限以录制声音，或继续静音录制。</string>
+    <string name="dialog_mic_permission_grant">授予权限</string>
+    <string name="dialog_mic_permission_silent">直接静音录制</string>
+    <string name="dialog_mic_permission_settings">去设置</string>
+    <string name="toast_audio_permission_granted">已授予麦克风权限，将包含音频录制</string>
 </resources>

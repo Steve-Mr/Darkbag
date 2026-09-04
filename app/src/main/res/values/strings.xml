@@ -232,4 +232,13 @@
     <string name="raw_video_fps_unsupported_warning">Sensor max AE rate is %1$d fps. %2$s fps is not supported and may drop frames.</string>
     <string name="raw_video_res_4k_unsupported_warning">Sensor resolution (%1$s) is smaller than 4K (3840x2160). 4K crop is not supported.</string>
     <string name="raw_video_option_unsupported_suffix">%1$s (Unsupported)</string>
+
+    <!-- Dynamic Microphone Permission -->
+    <string name="dialog_mic_permission_title">Microphone Permission Required</string>
+    <string name="dialog_mic_permission_message">Video recording requires microphone access to capture audio. Would you like to grant permission now?</string>
+    <string name="dialog_mic_permission_denied_message">Microphone permission has been denied. You can enable it in App Settings to record audio, or continue with silent video.</string>
+    <string name="dialog_mic_permission_grant">Grant Permission</string>
+    <string name="dialog_mic_permission_silent">Record Silent</string>
+    <string name="dialog_mic_permission_settings">Settings</string>
+    <string name="toast_audio_permission_granted">Microphone permission granted; audio recording enabled</string>
 </resources>

@@ -80,6 +80,7 @@ import java.io.File
 import java.io.FileOutputStream
 import android.net.Uri
 import androidx.activity.OnBackPressedCallback
+import androidx.activity.result.contract.ActivityResultContracts
 import kotlin.math.*
 import androidx.core.view.setPadding
 import androidx.fragment.app.Fragment
@@ -201,6 +202,52 @@ class CameraFragment : Fragment() {
     @Volatile private var isBurstActive = false
     private val rawVideoSessionManager = top.maary.darkbag.rawvideo.RawVideoSessionManager()
     private var mp4VideoRecorder: top.maary.darkbag.video.Mp4VideoRecorder? = null
+    private val requestAudioPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            Toast.makeText(context, R.string.toast_audio_permission_granted, Toast.LENGTH_SHORT).show()
+        } else {
+            if (!shouldShowRequestPermissionRationale(android.Manifest.permission.RECORD_AUDIO)) {
+                showAudioPermissionSettingsDialog()
+            } else {
+                Toast.makeText(context, R.string.error_mic_permission_silent_video, Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    private fun showAudioPermissionSettingsDialog() {
+        val ctx = context ?: return
+        com.google.android.material.dialog.MaterialAlertDialogBuilder(ctx)
+            .setTitle(R.string.dialog_mic_permission_title)
+            .setMessage(R.string.dialog_mic_permission_denied_message)
+            .setPositiveButton(R.string.dialog_mic_permission_settings) { _, _ ->
+                try {
+                    val intent = android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                        data = android.net.Uri.fromParts("package", ctx.packageName, null)
+                    }
+                    startActivity(intent)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to open application settings", e)
+                }
+            }
+            .setNegativeButton(R.string.dialog_mic_permission_silent, null)
+            .show()
+    }
+
+    private fun showAudioPermissionRationaleDialog(onContinueSilent: () -> Unit) {
+        val ctx = context ?: return
+        com.google.android.material.dialog.MaterialAlertDialogBuilder(ctx)
+            .setTitle(R.string.dialog_mic_permission_title)
+            .setMessage(R.string.dialog_mic_permission_message)
+            .setPositiveButton(R.string.dialog_mic_permission_grant) { _, _ ->
+                requestAudioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+            }
+            .setNegativeButton(R.string.dialog_mic_permission_silent) { _, _ ->
+                onContinueSilent()
+            }
+            .show()
+    }
     private var hdrPlusBurstHelper: HdrPlusBurst? = null
     private var lastHdrPlusConfig: ExposureUtils.ExposureConfig? = null // Cache for instant trigger
     private var burstStartTime: Long = 0L // Profiling
@@ -1366,12 +1413,23 @@ class CameraFragment : Fragment() {
                         android.Manifest.permission.RECORD_AUDIO
                     ) == android.content.pm.PackageManager.PERMISSION_GRANTED
                     if (!hasAudio) {
-                        Toast.makeText(context, getString(R.string.error_mic_permission_silent_video), Toast.LENGTH_SHORT).show()
-                    }
-                    if (action == SettingsFragment.SHUTTER_LONG_PRESS_RAW_VIDEO) {
-                        startRawVideoRecording()
+                        if (shouldShowRequestPermissionRationale(android.Manifest.permission.RECORD_AUDIO)) {
+                            showAudioPermissionRationaleDialog {
+                                if (action == SettingsFragment.SHUTTER_LONG_PRESS_RAW_VIDEO) {
+                                    startRawVideoRecording()
+                                } else {
+                                    startMp4VideoRecording()
+                                }
+                            }
+                        } else {
+                            requestAudioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                        }
                     } else {
-                        startMp4VideoRecording()
+                        if (action == SettingsFragment.SHUTTER_LONG_PRESS_RAW_VIDEO) {
+                            startRawVideoRecording()
+                        } else {
+                            startMp4VideoRecording()
+                        }
                     }
                 }
             }

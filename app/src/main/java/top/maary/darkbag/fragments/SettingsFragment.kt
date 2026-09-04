@@ -66,6 +66,16 @@ class SettingsFragment : Fragment() {
         }
     }
 
+    private val audioPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            Toast.makeText(context, R.string.toast_audio_permission_granted, Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(context, R.string.error_mic_permission_silent_video, Toast.LENGTH_SHORT).show()
+        }
+    }
+
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
         _binding = FragmentSettingsBinding.inflate(inflater, container, false)
         return binding.root
@@ -276,7 +286,17 @@ class SettingsFragment : Fragment() {
         val savedShutterAction = prefs.getString(KEY_SHUTTER_LONG_PRESS_ACTION, SHUTTER_LONG_PRESS_MP4)
         binding.menuShutterLongPress.setText(savedShutterAction, false)
         binding.menuShutterLongPress.setOnItemClickListener { _, _, position, _ ->
-            prefs.edit().putString(KEY_SHUTTER_LONG_PRESS_ACTION, SHUTTER_LONG_PRESS_OPTIONS[position]).apply()
+            val selectedAction = SHUTTER_LONG_PRESS_OPTIONS[position]
+            prefs.edit().putString(KEY_SHUTTER_LONG_PRESS_ACTION, selectedAction).apply()
+            if (selectedAction == SHUTTER_LONG_PRESS_MP4 || selectedAction == SHUTTER_LONG_PRESS_RAW_VIDEO) {
+                if (ContextCompat.checkSelfPermission(
+                        requireContext(),
+                        android.Manifest.permission.RECORD_AUDIO
+                    ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+                ) {
+                    audioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                }
+            }
         }
 
         setupRawVideoSettings()
