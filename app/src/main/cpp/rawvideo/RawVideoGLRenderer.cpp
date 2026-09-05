@@ -1,4 +1,5 @@
 #include "RawVideoGLRenderer.h"
+#include "ColorMath.h"
 #include <android/log.h>
 #include <cmath>
 #include <algorithm>
@@ -191,86 +192,6 @@ GLuint compileShader(GLenum type, const char* source) {
         return 0;
     }
     return shader;
-}
-
-void computeAdaptiveColorMatrix(
-    const float* neutralPoint,
-    const float* fm1,
-    const float* fm2,
-    int illum1,
-    int illum2,
-    float outMat3x3[9]
-) {
-    // Default 3x3 Identity Matrix in column-major order
-    outMat3x3[0] = 1.0f; outMat3x3[1] = 0.0f; outMat3x3[2] = 0.0f;
-    outMat3x3[3] = 0.0f; outMat3x3[4] = 1.0f; outMat3x3[5] = 0.0f;
-    outMat3x3[6] = 0.0f; outMat3x3[7] = 0.0f; outMat3x3[8] = 1.0f;
-
-    if (!fm1 && !fm2) return;
-
-    const float* activeFm = fm1 ? fm1 : fm2;
-    bool isTrivial = true;
-    if (activeFm) {
-        if (std::abs(activeFm[0] - 1.0f) > 0.01f || std::abs(activeFm[1]) > 0.01f ||
-            std::abs(activeFm[4] - 1.0f) > 0.01f || std::abs(activeFm[8] - 1.0f) > 0.01f) {
-            isTrivial = false;
-        }
-    }
-    if (isTrivial && (!fm2 || std::abs(fm2[0] - 1.0f) <= 0.01f)) return;
-
-    float interpFm[9];
-    if (fm1 && fm2 && !isTrivial) {
-        float t1 = (illum1 == 17) ? 2856.0f : (illum1 == 21) ? 6504.0f : 5000.0f;
-        float t2 = (illum2 == 17) ? 2856.0f : (illum2 == 21) ? 6504.0f : 5000.0f;
-        if (std::abs(t1 - t2) < 100.0f) {
-            t1 = 2856.0f;
-            t2 = 6504.0f;
-        }
-
-        float wbR = neutralPoint ? neutralPoint[0] : 0.5f;
-        float wbB = neutralPoint ? neutralPoint[2] : 0.7f;
-        float cct = 5500.0f;
-        if (wbR > 0.001f && wbB > 0.001f) {
-            float ratio = wbB / wbR;
-            cct = 2000.0f + ratio * 3500.0f;
-        }
-
-        float m1 = 1.0e6f / t1;
-        float m2 = 1.0e6f / t2;
-        float mCur = 1.0e6f / std::clamp(cct, 2000.0f, 10000.0f);
-        float weight = std::clamp((mCur - m2) / (m1 - m2), 0.0f, 1.0f);
-
-        for (int i = 0; i < 9; ++i) {
-            interpFm[i] = weight * fm1[i] + (1.0f - weight) * fm2[i];
-        }
-    } else if (fm1) {
-        std::copy(fm1, fm1 + 9, interpFm);
-    } else {
-        std::copy(fm2, fm2 + 9, interpFm);
-    }
-
-    const float M_xyz_bradford[9] = {
-        3.1338561f, -1.6168667f, -0.4906146f,
-       -0.9787684f,  1.9161415f,  0.0334540f,
-        0.0719453f, -0.2289914f,  1.4052427f
-    };
-
-    float compRowMajor[9];
-    for (int r = 0; r < 3; ++r) {
-        for (int c = 0; c < 3; ++c) {
-            compRowMajor[r * 3 + c] = 
-                M_xyz_bradford[r * 3 + 0] * interpFm[0 * 3 + c] +
-                M_xyz_bradford[r * 3 + 1] * interpFm[1 * 3 + c] +
-                M_xyz_bradford[r * 3 + 2] * interpFm[2 * 3 + c];
-        }
-    }
-
-    // Convert row-major composite matrix to column-major order for glUniformMatrix3fv (transpose=GL_FALSE)
-    for (int r = 0; r < 3; ++r) {
-        for (int c = 0; c < 3; ++c) {
-            outMat3x3[c * 3 + r] = compRowMajor[r * 3 + c];
-        }
-    }
 }
 
 } // namespace
@@ -666,7 +587,7 @@ bool RawVideoGLRenderer::renderFrame(
 
     // 4. Adaptive Color Matrix
     float colorMat[9];
-    computeAdaptiveColorMatrix(neutralPoint, forwardMatrix1, forwardMatrix2, calibIllum1, calibIllum2, colorMat);
+    computeAdaptiveColorMatrix(neutralPoint, forwardMatrix1, forwardMatrix2, calibIllum1, calibIllum2, nullptr, colorMat);
     glUniformMatrix3fv(uColorMatrixLoc_, 1, GL_FALSE, colorMat);
 
     // 5. Dynamic Quad-channel Black Level (R, Gr, Gb, B)

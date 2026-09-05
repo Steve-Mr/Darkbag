@@ -12,6 +12,7 @@
 #include "RawVideoContainer.h"
 #include "RawVideoRecorder.h"
 #include "RawVideoGLRenderer.h"
+#include "ColorMath.h"
 #include "../ColorPipe.h"
 
 #define TAG "RawVideoJNI"
@@ -559,6 +560,10 @@ Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeDebayerFrameToBitmap(
         jint whiteLevel,
         jfloat blackLevel,
         jfloatArray jNeutralPoint,
+        jfloatArray jForwardMatrix1,
+        jfloatArray jForwardMatrix2,
+        jint calibIllum1,
+        jint calibIllum2,
         jint targetLog,
         jstring jLutPath,
         jfloat exposure,
@@ -580,16 +585,18 @@ Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeDebayerFrameToBitmap(
     const int outWidth = static_cast<int>(info.width);
     const int outHeight = static_cast<int>(info.height);
 
-    // 1. Calculate White Balance Gains from Neutral Point
+    // 1. Calculate White Balance Gains and Adaptive Color Matrix from Neutral Point & Forward Matrices
     float wbR = 2.0f;
     float wbG = 1.0f;
     float wbB = 1.6f;
 
+    jfloat npVals[3] = {0.5f, 1.0f, 0.7f};
+    bool hasNp = false;
     if (jNeutralPoint) {
         jsize npLen = env->GetArrayLength(jNeutralPoint);
         if (npLen >= 3) {
-            jfloat npVals[3];
             env->GetFloatArrayRegion(jNeutralPoint, 0, 3, npVals);
+            hasNp = true;
             if (npVals[0] > 0.001f && npVals[1] > 0.001f && npVals[2] > 0.001f) {
                 // If neutralPoint contains valid inverse-gain coordinates
                 if (std::abs(npVals[0] - 1.0f) > 0.001f || std::abs(npVals[2] - 1.0f) > 0.001f) {
@@ -603,6 +610,30 @@ Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeDebayerFrameToBitmap(
             }
         }
     }
+
+    jfloat fm1Vals[9];
+    bool hasFm1 = false;
+    if (jForwardMatrix1 && env->GetArrayLength(jForwardMatrix1) >= 9) {
+        env->GetFloatArrayRegion(jForwardMatrix1, 0, 9, fm1Vals);
+        hasFm1 = true;
+    }
+
+    jfloat fm2Vals[9];
+    bool hasFm2 = false;
+    if (jForwardMatrix2 && env->GetArrayLength(jForwardMatrix2) >= 9) {
+        env->GetFloatArrayRegion(jForwardMatrix2, 0, 9, fm2Vals);
+        hasFm2 = true;
+    }
+
+    float colorMat[9];
+    computeAdaptiveColorMatrix(
+        hasNp ? npVals : nullptr,
+        hasFm1 ? fm1Vals : nullptr,
+        hasFm2 ? fm2Vals : nullptr,
+        calibIllum1,
+        calibIllum2,
+        colorMat
+    );
 
     // 2. Load 3D Film Simulation LUT from memory cache if specified
     std::shared_ptr<LUT3D> lut = nullptr;
@@ -679,12 +710,20 @@ Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeDebayerFrameToBitmap(
             float rawG = std::clamp((g - blackLevel) / denom, 0.0f, 1.0f);
             float rawB = std::clamp((b - blackLevel) / denom, 0.0f, 1.0f);
 
-            // Apply Exposure and White Balance Gains
+            // 1) Apply Exposure and White Balance Gains in linear sensor domain
             r = rawR * exposureMult * wbR;
             g = rawG * exposureMult * wbG;
             b = rawB * exposureMult * wbB;
 
-            // Highlight Desaturation protection to prevent pink/magenta fringes on clipped highlights
+            // 2) Apply 3x3 Adaptive Color Matrix Transform (Sensor WB RGB -> sRGB Primaries)
+            float sR = colorMat[0] * r + colorMat[1] * g + colorMat[2] * b;
+            float sG = colorMat[3] * r + colorMat[4] * g + colorMat[5] * b;
+            float sB = colorMat[6] * r + colorMat[7] * g + colorMat[8] * b;
+            r = std::max(0.0f, sR);
+            g = std::max(0.0f, sG);
+            b = std::max(0.0f, sB);
+
+            // 3) Highlight Desaturation protection to prevent pink/magenta fringes on clipped highlights
             float maxRaw = std::max({rawR, rawG, rawB});
             if (maxRaw > 0.92f) {
                 float t = std::clamp((maxRaw - 0.92f) / (1.0f - 0.92f), 0.0f, 1.0f);
