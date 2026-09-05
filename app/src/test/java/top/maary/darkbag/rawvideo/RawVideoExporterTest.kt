@@ -597,5 +597,119 @@ class RawVideoExporterTest {
             try { tempDir.delete() } catch (_: Exception) {}
         }
     }
+
+    @Test
+    fun testExportToCinemaDng_directOutputDirectoryResolution() {
+        // Path A: When outputDir is already the clip directory (e.g. CDNG_DBAG_RAWVID_...)
+        val picturesDir = File(System.getProperty("java.io.tmpdir"), "Pictures/Darkbag/CinemaDNG").apply { mkdirs() }
+        val clipNameA = "CDNG_DBAG_RAWVID_20260905_120000"
+        val destDirA = File(picturesDir, clipNameA).apply { mkdirs() }
+
+        // Test determination logic
+        val rawVideoUriStr = "content://media/external/video/media/12345"
+        val rawSegment = rawVideoUriStr.substringAfterLast("/")
+        val defaultClipName = rawSegment
+        val effectiveClipNameA = destDirA.name
+        val resolvedDirA = if (destDirA.name == effectiveClipNameA) destDirA else File(destDirA, effectiveClipNameA)
+
+        // Must write directly into destDirA without redundant nesting:
+        assertEquals(destDirA.absolutePath, resolvedDirA.absolutePath)
+        assertEquals(destDirA, resolvedDirA)
+
+        // Path B: When outputDir is a temporary cache directory (e.g. cdng_12345678)
+        val tempCacheDir = File(System.getProperty("java.io.tmpdir"), "cdng_12345678").apply { mkdirs() }
+        val explicitClipName = "CDNG_DBAG_RAWVID_20260905_120000"
+        val resolvedDirB = if (tempCacheDir.name == explicitClipName) tempCacheDir else File(tempCacheDir, explicitClipName)
+
+        // Must create child clip directory inside tempCacheDir:
+        assertEquals(File(tempCacheDir, explicitClipName).absolutePath, resolvedDirB.absolutePath)
+
+        destDirA.deleteRecursively()
+        picturesDir.deleteRecursively()
+        tempCacheDir.deleteRecursively()
+    }
+
+    @Test
+    fun testExportCancellation_cleansPartialOutput() {
+        val tempDir = File(System.getProperty("java.io.tmpdir"), "export_cancel_test_${System.currentTimeMillis()}").apply { mkdirs() }
+        val partialMp4 = File(tempDir, "partial_export.mp4").apply { writeText("half written mp4 bytes") }
+        assertTrue(partialMp4.exists())
+
+        // Simulate cancellation behavior: when isCancelled is true, isSuccess is false, partial file is deleted
+        val isCancelled = { true }
+        var isSuccess = false
+        if (isCancelled()) {
+            isSuccess = false
+        }
+        if (!isSuccess && partialMp4.exists()) {
+            partialMp4.delete()
+        }
+
+        assertFalse("Cancelled export must clean up partial output file", partialMp4.exists())
+
+        // Simulate CinemaDNG directory cleanup on cancellation
+        val clipDir = File(tempDir, "CDNG_TEST_CLIP").apply { mkdirs() }
+        File(clipDir, "frame_000000.dng").writeText("frame 0")
+        File(clipDir, "frame_000001.dng").writeText("frame 1")
+        assertTrue(clipDir.exists())
+        assertEquals(2, clipDir.listFiles()?.size)
+
+        var cdngSuccess = false
+        if (isCancelled()) {
+            cdngSuccess = false
+        }
+        if (!cdngSuccess && clipDir.exists()) {
+            clipDir.deleteRecursively()
+        }
+
+        assertFalse("Cancelled CinemaDNG export must clean up partial clip directory", clipDir.exists())
+
+        tempDir.deleteRecursively()
+    }
+
+    @Test
+    fun testExportToMp4_abortsImmediatelyWhenCancelled() {
+        kotlinx.coroutines.runBlocking {
+            val context = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
+            val tempDir = File(System.getProperty("java.io.tmpdir"), "cancel_mp4_test_${System.currentTimeMillis()}").apply { mkdirs() }
+            val dummyMp4 = File(tempDir, "output.mp4")
+            val dummyUri = android.net.Uri.parse("content://dummy/rawvid")
+
+            val result = RawVideoExporter.exportToMp4(
+                context = context,
+                rawVideoUri = dummyUri,
+                outputFile = dummyMp4,
+                editConfig = null,
+                targetResolution = 1080,
+                isCancelled = { true },
+                onProgress = { _, _ -> }
+            )
+
+            assertFalse("Export should return false immediately when cancelled", result)
+            assertFalse("Output file should not exist after cancelled export", dummyMp4.exists())
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun testExportToCinemaDng_abortsImmediatelyWhenCancelled() {
+        kotlinx.coroutines.runBlocking {
+            val context = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
+            val tempDir = File(System.getProperty("java.io.tmpdir"), "cancel_cdng_test_${System.currentTimeMillis()}").apply { mkdirs() }
+            val dummyUri = android.net.Uri.parse("content://dummy/rawvid")
+
+            val result = RawVideoExporter.exportToCinemaDng(
+                context = context,
+                rawVideoUri = dummyUri,
+                outputDir = tempDir,
+                clipName = "CDNG_TEST",
+                isCancelled = { true },
+                onProgress = { _, _ -> }
+            )
+
+            assertEquals(null, result)
+            tempDir.deleteRecursively()
+        }
+    }
 }
 

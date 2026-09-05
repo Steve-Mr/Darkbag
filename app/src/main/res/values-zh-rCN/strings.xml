@@ -193,6 +193,7 @@
     <string name="export_progress_format">导出中: %1$d%% (%2$d/%3$d)</string>
     <string name="export_progress_exporting_cdng">正在导出 CinemaDNG 序列…</string>
     <string name="export_progress_exporting_mp4">正在导出 MP4 视频…</string>
+    <string name="toast_export_cancelled">导出已取消</string>
 
     <string name="error_mic_permission_silent_video">未授予麦克风权限，将录制静音视频</string>
     <string name="toast_processing_queued">已加入处理队列</string>

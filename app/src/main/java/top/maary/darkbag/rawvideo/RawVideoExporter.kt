@@ -241,12 +241,26 @@ object RawVideoExporter {
         context: Context,
         rawVideoUri: Uri,
         outputDir: File,
+        clipName: String? = null,
+        isCancelled: (() -> Boolean)? = null,
         onProgress: (current: Int, total: Int) -> Unit
     ): File? = withContext(Dispatchers.IO) {
         var nativeHandle: Long = 0L
-        val pfd = context.contentResolver.openFileDescriptor(rawVideoUri, "r") ?: return@withContext null
+        var clipDir: File? = null
+        var isSuccess = false
+        if (isCancelled?.invoke() == true) {
+            Log.i(TAG, "Export cancelled by user before opening reader, aborting...")
+            return@withContext null
+        }
+        val pfd = try {
+            context.contentResolver.openFileDescriptor(rawVideoUri, "r")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to open rawVideoUri: $rawVideoUri", e)
+            null
+        } ?: return@withContext null
         pfd.use { parcelFd ->
             try {
+
                 val fd = parcelFd.fd
                 nativeHandle = RawVideoNative.nativeOpenReaderFd(fd)
                 if (nativeHandle == 0L) {
@@ -262,8 +276,14 @@ object RawVideoExporter {
                 }
 
                 val rawSegment = rawVideoUri.lastPathSegment ?: "RAWVID_${System.currentTimeMillis()}"
-                val clipName = rawSegment.substringAfterLast("/").substringAfterLast(":").substringBeforeLast(".")
-                val clipDir = File(outputDir, clipName).apply { mkdirs() }
+                val defaultClipName = rawSegment.substringAfterLast("/").substringAfterLast(":").substringBeforeLast(".")
+                val effectiveClipName = clipName ?: if (outputDir.name.startsWith("CDNG_") || outputDir.name.startsWith("RAWVID_") || outputDir.name == defaultClipName) {
+                    outputDir.name
+                } else {
+                    defaultClipName
+                }
+                val dir = if (outputDir.name == effectiveClipName) outputDir else File(outputDir, effectiveClipName).apply { mkdirs() }
+                clipDir = dir
 
                 val w = header.width
                 val h = header.height
@@ -272,25 +292,49 @@ object RawVideoExporter {
 
                 // 1. Export DNG Frames
                 for (i in 0 until totalFrames) {
+                    if (isCancelled?.invoke() == true) {
+                        Log.i(TAG, "Export cancelled by user, aborting CinemaDNG frame export...")
+                        return@withContext null
+                    }
                     frameBuffer.clear()
                     val meta = LongArray(5)
                     val readBytes = RawVideoNative.nativeReadFrame(nativeHandle, i, meta, frameBuffer)
                     if (readBytes > 0) {
-                        val dngFile = File(clipDir, String.format(java.util.Locale.US, "%s_%06d.dng", clipName, i))
+                        val dngFile = File(dir, String.format(java.util.Locale.US, "%s_%06d.dng", effectiveClipName, i))
                         writeDngFile(dngFile, header, meta, frameBuffer, readBytes)
                     }
                     onProgress(i + 1, totalFrames)
+
+                    if (isCancelled?.invoke() == true) {
+                        Log.i(TAG, "Export cancelled by user after frame $i, aborting...")
+                        return@withContext null
+                    }
+                }
+
+                if (isCancelled?.invoke() == true) {
+                    Log.i(TAG, "Export cancelled by user before WAV write, aborting...")
+                    return@withContext null
                 }
 
                 // 2. Export WAV Audio
-                val wavFile = File(clipDir, "${clipName}.wav")
+                val wavFile = File(dir, "${effectiveClipName}.wav")
                 writeWavFile(nativeHandle, wavFile, header)
 
-                return@withContext clipDir
+                isSuccess = true
+                return@withContext dir
             } catch (e: Exception) {
                 Log.e(TAG, "Failed CinemaDNG export", e)
                 return@withContext null
             } finally {
+                if (!isSuccess) {
+                    clipDir?.let { d ->
+                        try {
+                            if (d.exists()) {
+                                d.deleteRecursively()
+                            }
+                        } catch (_: Exception) {}
+                    }
+                }
                 if (nativeHandle != 0L) {
                     try { RawVideoNative.nativeCloseReader(nativeHandle) } catch (_: Exception) {}
                     nativeHandle = 0L
@@ -342,36 +386,59 @@ object RawVideoExporter {
         outputFile: File,
         editConfig: EditConfig?,
         targetResolution: Int = 1080,
+        isCancelled: (() -> Boolean)? = null,
         onProgress: (current: Int, total: Int) -> Unit
     ): Boolean = withContext(Dispatchers.IO) {
-        val gpuSuccess = try {
-            exportToMp4GpuSurface(
+        var isSuccess = false
+        try {
+            if (isCancelled?.invoke() == true) {
+                Log.i(TAG, "Export cancelled by user before starting MP4 export, aborting...")
+                return@withContext false
+            }
+
+            val gpuSuccess = try {
+                exportToMp4GpuSurface(
+                    context = context,
+                    rawVideoUri = rawVideoUri,
+                    outputFile = outputFile,
+                    editConfig = editConfig,
+                    targetResolution = targetResolution,
+                    isCancelled = isCancelled,
+                    onProgress = onProgress
+                )
+            } catch (e: Exception) {
+                Log.w(TAG, "GPU Surface MP4 export failed or unsupported, falling back to CPU pipeline", e)
+                false
+            }
+
+            if (gpuSuccess) {
+                isSuccess = true
+                return@withContext true
+            }
+
+            if (isCancelled?.invoke() == true) {
+                Log.i(TAG, "Export cancelled by user after GPU attempt, aborting without CPU fallback...")
+                return@withContext false
+            }
+
+            Log.i(TAG, "Executing CPU fallback MP4 export pipeline")
+            try { outputFile.delete() } catch (_: Exception) {}
+            val cpuSuccess = exportToMp4Cpu(
                 context = context,
                 rawVideoUri = rawVideoUri,
                 outputFile = outputFile,
                 editConfig = editConfig,
                 targetResolution = targetResolution,
+                isCancelled = isCancelled,
                 onProgress = onProgress
             )
-        } catch (e: Exception) {
-            Log.w(TAG, "GPU Surface MP4 export failed or unsupported, falling back to CPU pipeline", e)
-            false
+            isSuccess = cpuSuccess
+            return@withContext cpuSuccess
+        } finally {
+            if (!isSuccess && outputFile.exists()) {
+                try { outputFile.delete() } catch (_: Exception) {}
+            }
         }
-
-        if (gpuSuccess) {
-            return@withContext true
-        }
-
-        Log.i(TAG, "Executing CPU fallback MP4 export pipeline")
-        try { outputFile.delete() } catch (_: Exception) {}
-        exportToMp4Cpu(
-            context = context,
-            rawVideoUri = rawVideoUri,
-            outputFile = outputFile,
-            editConfig = editConfig,
-            targetResolution = targetResolution,
-            onProgress = onProgress
-        )
     }
 
     /**
@@ -383,6 +450,7 @@ object RawVideoExporter {
         outputFile: File,
         editConfig: EditConfig?,
         targetResolution: Int = 1080,
+        isCancelled: (() -> Boolean)? = null,
         onProgress: (current: Int, total: Int) -> Unit
     ): Boolean = withContext(Dispatchers.IO) {
         var nativeHandle = 0L
@@ -393,8 +461,19 @@ object RawVideoExporter {
         var inputSurface: android.view.Surface? = null
         var glExecutor: java.util.concurrent.ExecutorService? = null
         var glRenderer = 0L
+        var isSuccess = false
 
-        val pfd = context.contentResolver.openFileDescriptor(rawVideoUri, "r") ?: return@withContext false
+        if (isCancelled?.invoke() == true) {
+            Log.i(TAG, "Export cancelled by user before GPU pipeline setup, aborting...")
+            return@withContext false
+        }
+
+        val pfd = try {
+            context.contentResolver.openFileDescriptor(rawVideoUri, "r")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to open rawVideoUri: $rawVideoUri", e)
+            null
+        } ?: return@withContext false
         pfd.use { parcelFd ->
             try {
                 val fd = parcelFd.fd
@@ -678,7 +757,7 @@ object RawVideoExporter {
                 glExecutor = exec
                 val glDispatcher = exec.asCoroutineDispatcher()
 
-                withContext(glDispatcher) {
+                val glCompleted = withContext(glDispatcher) {
                     val renderer = RawVideoNative.nativeCreateGLRenderer()
                     if (renderer == 0L) {
                         throw IllegalStateException("Failed to create native GL renderer")
@@ -688,6 +767,11 @@ object RawVideoExporter {
                         RawVideoNative.nativeSetGLSurface(renderer, surf)
 
                         for (i in 0 until totalFrames) {
+                            if (isCancelled?.invoke() == true) {
+                                Log.i(TAG, "Export cancelled by user during GPU frame loop, aborting...")
+                                return@withContext false
+                            }
+
                             bayerBuf.clear()
                             val meta = LongArray(5)
                             val readBytes = RawVideoNative.nativeReadFrame(nativeHandle, i, meta, bayerBuf)
@@ -729,9 +813,15 @@ object RawVideoExporter {
                             drainVideo()
 
                             onProgress(i + 1, totalFrames)
+
+                            if (isCancelled?.invoke() == true) {
+                                Log.i(TAG, "Export cancelled by user after GPU frame $i, aborting...")
+                                return@withContext false
+                            }
                         }
 
                         enc.signalEndOfInputStream()
+                        true
                     } finally {
                         try { RawVideoNative.nativeSetGLSurface(renderer, null) } catch (_: Exception) {}
                         try { RawVideoNative.nativeDestroyGLRenderer(renderer) } catch (_: Exception) {}
@@ -739,8 +829,17 @@ object RawVideoExporter {
                     }
                 }
 
+                if (!glCompleted || isCancelled?.invoke() == true) {
+                    Log.i(TAG, "GPU frame render loop cancelled or incomplete, aborting...")
+                    return@withContext false
+                }
+
                 // Signal End of Stream for Audio after draining any remaining audio packets
                 if (effectiveHasAudio && !audioEosQueued) {
+                    if (isCancelled?.invoke() == true) {
+                        Log.i(TAG, "Export cancelled before audio EOS drain, aborting...")
+                        return@withContext false
+                    }
                     var retries = 0
                     while (!audioEosQueued && retries < 100) {
                         feedAudio()
@@ -767,6 +866,10 @@ object RawVideoExporter {
                 var audioEos = !effectiveHasAudio
                 var idleLoops = 0
                 while ((!videoEos || !audioEos) && idleLoops < 100) {
+                    if (isCancelled?.invoke() == true) {
+                        Log.i(TAG, "Export cancelled during GPU final drain, aborting...")
+                        return@withContext false
+                    }
                     var activity = false
                     if (!videoEos) {
                         val r = drainVideo(timeoutUs = 10000)
@@ -781,7 +884,7 @@ object RawVideoExporter {
                     if (activity) idleLoops = 0 else idleLoops++
                 }
 
-                val isSuccess = muxerStarted && videoEos && outputFile.exists() && outputFile.length() > 0
+                isSuccess = isExportSuccessful(muxerStarted, videoEos, outputFile)
                 if (!isSuccess) {
                     Log.w(TAG, "GPU surface export ended prematurely: muxerStarted=$muxerStarted, videoEos=$videoEos, fileLength=${outputFile.length()}")
                 }
@@ -809,6 +912,9 @@ object RawVideoExporter {
                     try { RawVideoNative.nativeCloseReader(nativeHandle) } catch (_: Exception) {}
                     nativeHandle = 0L
                 }
+                if (!isSuccess && outputFile.exists()) {
+                    try { outputFile.delete() } catch (_: Exception) {}
+                }
             }
         }
     }
@@ -822,6 +928,7 @@ object RawVideoExporter {
         outputFile: File,
         editConfig: EditConfig?,
         targetResolution: Int = 1080,
+        isCancelled: (() -> Boolean)? = null,
         onProgress: (current: Int, total: Int) -> Unit
     ): Boolean = withContext(Dispatchers.IO) {
         var nativeHandle = 0L
@@ -831,7 +938,19 @@ object RawVideoExporter {
         var muxerStarted = false
         var fullBmp: Bitmap? = null
         var scaledBmp: Bitmap? = null
-        val pfd = context.contentResolver.openFileDescriptor(rawVideoUri, "r") ?: return@withContext false
+        var isSuccess = false
+
+        if (isCancelled?.invoke() == true) {
+            Log.i(TAG, "Export cancelled by user before CPU pipeline setup, aborting...")
+            return@withContext false
+        }
+
+        val pfd = try {
+            context.contentResolver.openFileDescriptor(rawVideoUri, "r")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to open rawVideoUri: $rawVideoUri", e)
+            null
+        } ?: return@withContext false
         pfd.use { parcelFd ->
             try {
                 val fd = parcelFd.fd
@@ -1118,6 +1237,11 @@ object RawVideoExporter {
                 val saturation = editConfig?.saturation ?: 0f
 
                 for (i in 0 until totalFrames) {
+                    if (isCancelled?.invoke() == true) {
+                        Log.i(TAG, "Export cancelled by user during CPU frame loop, aborting...")
+                        return@withContext false
+                    }
+
                     bayerBuf.clear()
                     val meta = LongArray(5)
                     val readBytes = RawVideoNative.nativeReadFrame(nativeHandle, i, meta, bayerBuf)
@@ -1175,6 +1299,16 @@ object RawVideoExporter {
                     drainVideo()
 
                     onProgress(i + 1, totalFrames)
+
+                    if (isCancelled?.invoke() == true) {
+                        Log.i(TAG, "Export cancelled by user after CPU frame $i, aborting...")
+                        return@withContext false
+                    }
+                }
+
+                if (isCancelled?.invoke() == true) {
+                    Log.i(TAG, "Export cancelled before video EOS, aborting...")
+                    return@withContext false
                 }
 
                 // Signal End of Stream for Video
@@ -1186,6 +1320,10 @@ object RawVideoExporter {
 
                 // Signal End of Stream for Audio after draining any remaining audio packets
                 if (effectiveHasAudio && !audioEosQueued) {
+                    if (isCancelled?.invoke() == true) {
+                        Log.i(TAG, "Export cancelled before audio EOS drain, aborting...")
+                        return@withContext false
+                    }
                     var retries = 0
                     while (!audioEosQueued && retries < 100) {
                         feedAudio()
@@ -1212,6 +1350,10 @@ object RawVideoExporter {
                 var audioEos = !effectiveHasAudio
                 var idleLoops = 0
                 while ((!videoEos || !audioEos) && idleLoops < 100) {
+                    if (isCancelled?.invoke() == true) {
+                        Log.i(TAG, "Export cancelled during CPU final drain, aborting...")
+                        return@withContext false
+                    }
                     var activity = false
                     if (!videoEos) {
                         val r = drainVideo(timeoutUs = 10000)
@@ -1226,7 +1368,7 @@ object RawVideoExporter {
                     if (activity) idleLoops = 0 else idleLoops++
                 }
 
-                val isSuccess = muxerStarted && videoEos && outputFile.exists() && outputFile.length() > 0
+                isSuccess = isExportSuccessful(muxerStarted, videoEos, outputFile)
                 if (!isSuccess) {
                     Log.w(TAG, "CPU export ended prematurely: muxerStarted=$muxerStarted, videoEos=$videoEos, fileLength=${outputFile.length()}")
                 }
@@ -1246,6 +1388,9 @@ object RawVideoExporter {
                 if (nativeHandle != 0L) {
                     try { RawVideoNative.nativeCloseReader(nativeHandle) } catch (_: Exception) {}
                     nativeHandle = 0L
+                }
+                if (!isSuccess && outputFile.exists()) {
+                    try { outputFile.delete() } catch (_: Exception) {}
                 }
             }
         }

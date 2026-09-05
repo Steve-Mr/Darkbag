@@ -3390,7 +3390,10 @@ open class ImageViewerFragment : Fragment() {
         }
     }
 
-    private fun showExportProgressDialog(title: String): Pair<androidx.appcompat.app.AlertDialog, (Int, Int) -> Unit> {
+    private fun showExportProgressDialog(
+        title: String,
+        onCancel: (() -> Unit)? = null
+    ): Pair<androidx.appcompat.app.AlertDialog, (Int, Int) -> Unit> {
         val dialogView = layoutInflater.inflate(R.layout.layout_export_progress_dialog, null)
         val titleView = dialogView.findViewById<TextView>(R.id.export_dialog_title)
         val progressBar = dialogView.findViewById<com.google.android.material.progressindicator.LinearProgressIndicator>(R.id.export_progress_bar)
@@ -3401,10 +3404,17 @@ open class ImageViewerFragment : Fragment() {
         progressBar.progress = 0
         progressText.text = getString(R.string.export_progress_preparing)
 
-        val dialog = com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
+        val builder = com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
             .setView(dialogView)
             .setCancelable(false)
-            .create()
+
+        if (onCancel != null) {
+            builder.setNegativeButton(R.string.cancel) { _, _ ->
+                onCancel()
+            }
+        }
+
+        val dialog = builder.create()
         dialog.show()
         activeExportDialog = dialog
 
@@ -3427,28 +3437,55 @@ open class ImageViewerFragment : Fragment() {
         val context = requireContext()
         val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
         val rawFolderUriStr = prefs.getString(SettingsFragment.KEY_RAW_STORAGE_URI, null)
+        val clipName = "CDNG_${group.baseName}"
 
-        val tempExportDir = File(context.cacheDir, "cdng_${System.currentTimeMillis()}").apply { mkdirs() }
+        var isUserCancelled = false
+        var exportJob: kotlinx.coroutines.Job? = null
 
-        val (progressDialog, updateProgress) = showExportProgressDialog(getString(R.string.export_progress_exporting_cdng))
-        lifecycleScope.launch {
+        val (progressDialog, updateProgress) = showExportProgressDialog(
+            title = getString(R.string.export_progress_exporting_cdng),
+            onCancel = {
+                isUserCancelled = true
+                exportJob?.cancel()
+            }
+        )
+
+        exportJob = lifecycleScope.launch {
+            var tempExportDir: File? = null
+            var destDir: File? = null
             try {
-                val resultDir = top.maary.darkbag.rawvideo.RawVideoExporter.exportToCinemaDng(
-                    context = context,
-                    rawVideoUri = uri,
-                    outputDir = tempExportDir,
-                    onProgress = updateProgress
-                )
-                if (resultDir != null && resultDir.exists()) {
-                    val clipName = resultDir.name
-                    withContext(Dispatchers.IO) {
-                        if (rawFolderUriStr != null) {
+                if (rawFolderUriStr != null) {
+                    // 路径 B（配置了 SAF Tree URI）：向 cacheDir 临时输出并流式复制到 SAF DocumentFile
+                    val tempDir = File(context.cacheDir, "cdng_${System.currentTimeMillis()}").apply { mkdirs() }
+                    tempExportDir = tempDir
+
+                    val resultDir = top.maary.darkbag.rawvideo.RawVideoExporter.exportToCinemaDng(
+                        context = context,
+                        rawVideoUri = uri,
+                        outputDir = tempDir,
+                        clipName = clipName,
+                        isCancelled = { isUserCancelled || !isActive },
+                        onProgress = updateProgress
+                    )
+
+                    if (isUserCancelled || !isActive) {
+                        withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
+                            tempDir.deleteRecursively()
+                        }
+                        Toast.makeText(context, R.string.toast_export_cancelled, Toast.LENGTH_SHORT).show()
+                        return@launch
+                    }
+
+                    if (resultDir != null && resultDir.exists()) {
+                        val exportedClipName = resultDir.name
+                        withContext(Dispatchers.IO) {
                             try {
                                 val treeUri = Uri.parse(rawFolderUriStr)
                                 val treeDoc = androidx.documentfile.provider.DocumentFile.fromTreeUri(context, treeUri)
-                                val clipDirDoc = treeDoc?.createDirectory(clipName)
+                                val clipDirDoc = treeDoc?.createDirectory(exportedClipName)
                                 if (clipDirDoc != null) {
                                     resultDir.listFiles()?.forEach { file ->
+                                        if (isUserCancelled || !isActive) return@forEach
                                         val mime = if (file.name.endsWith(".wav")) "audio/wav" else "image/x-adobe-dng"
                                         val targetDoc = clipDirDoc.createFile(mime, file.name)
                                         if (targetDoc != null) {
@@ -3460,35 +3497,80 @@ open class ImageViewerFragment : Fragment() {
                                 }
                             } catch (e: Exception) {
                                 android.util.Log.e("ImageViewerFragment", "Failed to copy CinemaDNG to SAF folder", e)
-                            }
-                        } else {
-                            // Fallback to public Pictures/Darkbag directory so ImageRepository can scan and manage it
-                            try {
-                                val picturesDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_PICTURES)
-                                val destDir = File(picturesDir, "Darkbag/CinemaDNG/$clipName").apply { mkdirs() }
-                                resultDir.copyRecursively(destDir, overwrite = true)
-                                val filePaths = destDir.listFiles()?.map { it.absolutePath }?.toTypedArray()
-                                if (!filePaths.isNullOrEmpty()) {
-                                    android.media.MediaScannerConnection.scanFile(context, filePaths, null, null)
-                                }
-                            } catch (e: Exception) {
-                                android.util.Log.e("ImageViewerFragment", "Failed to copy CinemaDNG to Pictures folder", e)
+                            } finally {
+                                tempDir.deleteRecursively()
                             }
                         }
-                        tempExportDir.deleteRecursively()
+
+                        if (isUserCancelled || !isActive) {
+                            Toast.makeText(context, R.string.toast_export_cancelled, Toast.LENGTH_SHORT).show()
+                            return@launch
+                        }
+
+                        refreshCurrentGroupAndAdapter(group.baseName)
+                        Toast.makeText(context, "CinemaDNG exported: $exportedClipName", Toast.LENGTH_LONG).show()
+                    } else {
+                        withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
+                            tempDir.deleteRecursively()
+                        }
+                        Toast.makeText(context, "CinemaDNG export failed", Toast.LENGTH_SHORT).show()
                     }
-                    refreshCurrentGroupAndAdapter(group.baseName)
-                    Toast.makeText(context, "CinemaDNG exported: $clipName", Toast.LENGTH_LONG).show()
                 } else {
-                    withContext(Dispatchers.IO) {
-                        tempExportDir.deleteRecursively()
+                    // 路径 A（未配置 SAF，保存到公共 Pictures 目录）：直接写出，避免双重写入
+                    val picturesDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_PICTURES)
+                    val targetDir = File(picturesDir, "Darkbag/CinemaDNG/$clipName").apply { mkdirs() }
+                    destDir = targetDir
+
+                    val resultDir = top.maary.darkbag.rawvideo.RawVideoExporter.exportToCinemaDng(
+                        context = context,
+                        rawVideoUri = uri,
+                        outputDir = targetDir,
+                        clipName = clipName,
+                        isCancelled = { isUserCancelled || !isActive },
+                        onProgress = updateProgress
+                    )
+
+                    if (isUserCancelled || !isActive) {
+                        withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
+                            targetDir.deleteRecursively()
+                        }
+                        Toast.makeText(context, R.string.toast_export_cancelled, Toast.LENGTH_SHORT).show()
+                        return@launch
                     }
-                    Toast.makeText(context, "CinemaDNG export failed", Toast.LENGTH_SHORT).show()
+
+                    if (resultDir != null && resultDir.exists()) {
+                        withContext(Dispatchers.IO) {
+                            val filePaths = resultDir.listFiles()?.map { it.absolutePath }?.toTypedArray()
+                            if (!filePaths.isNullOrEmpty()) {
+                                android.media.MediaScannerConnection.scanFile(context, filePaths, null, null)
+                            }
+                        }
+                        refreshCurrentGroupAndAdapter(group.baseName)
+                        Toast.makeText(context, "CinemaDNG exported: $clipName", Toast.LENGTH_LONG).show()
+                    } else {
+                        withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
+                            targetDir.deleteRecursively()
+                        }
+                        Toast.makeText(context, "CinemaDNG export failed", Toast.LENGTH_SHORT).show()
+                    }
                 }
+            } catch (e: java.util.concurrent.CancellationException) {
+                withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
+                    tempExportDir?.deleteRecursively()
+                    destDir?.deleteRecursively()
+                }
+                Toast.makeText(context, R.string.toast_export_cancelled, Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
-                android.util.Log.e("ImageViewerFragment", "CinemaDNG export error", e)
-                withContext(Dispatchers.IO) { tempExportDir.deleteRecursively() }
-                Toast.makeText(context, "CinemaDNG export error: ${e.message}", Toast.LENGTH_SHORT).show()
+                withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
+                    tempExportDir?.deleteRecursively()
+                    destDir?.deleteRecursively()
+                }
+                if (isUserCancelled) {
+                    Toast.makeText(context, R.string.toast_export_cancelled, Toast.LENGTH_SHORT).show()
+                } else {
+                    android.util.Log.e("ImageViewerFragment", "CinemaDNG export error", e)
+                    Toast.makeText(context, "CinemaDNG export error: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
             } finally {
                 if (progressDialog.isShowing) {
                     try { progressDialog.dismiss() } catch (_: Exception) {}
@@ -3512,8 +3594,18 @@ open class ImageViewerFragment : Fragment() {
 
         val tempMp4File = File(context.cacheDir, "${group.baseName}_graded.mp4")
 
-        val (progressDialog, updateProgress) = showExportProgressDialog(getString(R.string.export_progress_exporting_mp4))
-        lifecycleScope.launch {
+        var isUserCancelled = false
+        var exportJob: kotlinx.coroutines.Job? = null
+
+        val (progressDialog, updateProgress) = showExportProgressDialog(
+            title = getString(R.string.export_progress_exporting_mp4),
+            onCancel = {
+                isUserCancelled = true
+                exportJob?.cancel()
+            }
+        )
+
+        exportJob = lifecycleScope.launch {
             try {
                 val success = top.maary.darkbag.rawvideo.RawVideoExporter.exportToMp4(
                     context = context,
@@ -3521,8 +3613,17 @@ open class ImageViewerFragment : Fragment() {
                     outputFile = tempMp4File,
                     editConfig = config,
                     targetResolution = targetResolution,
+                    isCancelled = { isUserCancelled || !isActive },
                     onProgress = updateProgress
                 )
+
+                if (isUserCancelled || !isActive) {
+                    withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
+                        tempMp4File.delete()
+                    }
+                    Toast.makeText(context, R.string.toast_export_cancelled, Toast.LENGTH_SHORT).show()
+                    return@launch
+                }
 
                 if (success && tempMp4File.exists() && tempMp4File.length() > 0) {
                     val (savedUri, _) = top.maary.darkbag.utils.ImageSaver.saveMp4Video(
@@ -3538,13 +3639,26 @@ open class ImageViewerFragment : Fragment() {
                         Toast.makeText(context, "Failed to save MP4 to storage", Toast.LENGTH_SHORT).show()
                     }
                 } else {
-                    tempMp4File.delete()
+                    withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
+                        tempMp4File.delete()
+                    }
                     Toast.makeText(context, "MP4 export failed", Toast.LENGTH_SHORT).show()
                 }
+            } catch (e: java.util.concurrent.CancellationException) {
+                withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
+                    tempMp4File.delete()
+                }
+                Toast.makeText(context, R.string.toast_export_cancelled, Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
-                android.util.Log.e("ImageViewerFragment", "MP4 export error", e)
-                tempMp4File.delete()
-                Toast.makeText(context, "MP4 export error: ${e.message}", Toast.LENGTH_SHORT).show()
+                withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
+                    tempMp4File.delete()
+                }
+                if (isUserCancelled) {
+                    Toast.makeText(context, R.string.toast_export_cancelled, Toast.LENGTH_SHORT).show()
+                } else {
+                    android.util.Log.e("ImageViewerFragment", "MP4 export error", e)
+                    Toast.makeText(context, "MP4 export error: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
             } finally {
                 if (progressDialog.isShowing) {
                     try { progressDialog.dismiss() } catch (_: Exception) {}

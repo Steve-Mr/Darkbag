@@ -211,6 +211,7 @@
     <string name="export_progress_format">Exporting: %1$d%% (%2$d/%3$d)</string>
     <string name="export_progress_exporting_cdng">Exporting CinemaDNG sequence…</string>
     <string name="export_progress_exporting_mp4">Exporting MP4 video…</string>
+    <string name="toast_export_cancelled">Export cancelled</string>
 
     <!-- Camera / Settings Notices & Hardware Linkage -->
     <string name="error_mic_permission_silent_video">Microphone permission not granted; recording silent video</string>
