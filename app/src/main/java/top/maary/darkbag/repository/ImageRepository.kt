@@ -172,25 +172,28 @@ class ImageRepository(private val context: Context) {
                     val fd = pfd.fd
                     val handle = top.maary.darkbag.rawvideo.RawVideoNative.nativeOpenReaderFd(fd)
                     if (handle != 0L) {
-                        val header = top.maary.darkbag.rawvideo.RawVideoNative.readHeader(handle)
-                        if (header != null) {
-                            builder.width = header.width
-                            builder.height = header.height
-                            builder.orientation = header.orientation
-                            builder.rawVideoFps = header.fps
-                            builder.rawVideoFrameCount = header.frameCount
-                            builder.rawVideoDurationMs = if (header.fps > 0) (header.frameCount * 1000L / header.fps).toLong() else 0L
-                            val activeLut = header.activeLutName.takeIf { it.isNotBlank() }
-                            val activeLog = header.activeLogName.takeIf { it.isNotBlank() }
-                            builder.editConfig = EditConfig(
-                                log = activeLog ?: "None",
-                                lut = activeLut ?: "None",
-                                exposure = header.exposure,
-                                contrast = header.contrast,
-                                saturation = header.saturation
-                            )
+                        try {
+                            val header = top.maary.darkbag.rawvideo.RawVideoNative.readHeader(handle)
+                            if (header != null) {
+                                builder.width = header.width
+                                builder.height = header.height
+                                builder.orientation = header.orientation
+                                builder.rawVideoFps = header.fps
+                                builder.rawVideoFrameCount = header.frameCount
+                                builder.rawVideoDurationMs = if (header.fps > 0) (header.frameCount * 1000L / header.fps).toLong() else 0L
+                                val activeLut = header.activeLutName.takeIf { it.isNotBlank() }
+                                val activeLog = header.activeLogName.takeIf { it.isNotBlank() }
+                                builder.editConfig = EditConfig(
+                                    log = activeLog ?: "None",
+                                    lut = activeLut ?: "None",
+                                    exposure = header.exposure,
+                                    contrast = header.contrast,
+                                    saturation = header.saturation
+                                )
+                            }
+                        } finally {
+                            top.maary.darkbag.rawvideo.RawVideoNative.nativeCloseReader(handle)
                         }
-                        top.maary.darkbag.rawvideo.RawVideoNative.nativeCloseReader(handle)
                     }
                 }
             } catch (e: Exception) {

@@ -254,14 +254,10 @@ object RawVideoExporter {
                     return@withContext null
                 }
 
-                val header = RawVideoNative.readHeader(nativeHandle) ?: run {
-                    RawVideoNative.nativeCloseReader(nativeHandle)
-                    return@withContext null
-                }
+                val header = RawVideoNative.readHeader(nativeHandle) ?: return@withContext null
 
                 val totalFrames = RawVideoNative.nativeGetFrameCount(nativeHandle)
                 if (totalFrames <= 0) {
-                    RawVideoNative.nativeCloseReader(nativeHandle)
                     return@withContext null
                 }
 
@@ -290,16 +286,15 @@ object RawVideoExporter {
                 val wavFile = File(clipDir, "${clipName}.wav")
                 writeWavFile(nativeHandle, wavFile, header)
 
-                RawVideoNative.nativeCloseReader(nativeHandle)
-                nativeHandle = 0L
-
                 return@withContext clipDir
             } catch (e: Exception) {
                 Log.e(TAG, "Failed CinemaDNG export", e)
-                if (nativeHandle != 0L) {
-                    RawVideoNative.nativeCloseReader(nativeHandle)
-                }
                 return@withContext null
+            } finally {
+                if (nativeHandle != 0L) {
+                    try { RawVideoNative.nativeCloseReader(nativeHandle) } catch (_: Exception) {}
+                    nativeHandle = 0L
+                }
             }
         }
     }

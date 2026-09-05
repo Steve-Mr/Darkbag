@@ -522,53 +522,56 @@ class DarkbagGalleryGridAdapter(
                 context.contentResolver.openFileDescriptor(rawUri, "r")?.use { pfd ->
                     val handle = top.maary.darkbag.rawvideo.RawVideoNative.nativeOpenReaderFd(pfd.fd)
                     if (handle != 0L) {
-                        val header = top.maary.darkbag.rawvideo.RawVideoNative.readHeader(handle)
-                        if (header != null && header.width > 0 && header.height > 0) {
-                            val swapDims = (header.orientation == 90 || header.orientation == 270)
-                            val thumbW = if (swapDims) (320 * header.height) / header.width else 320
-                            val thumbH = if (swapDims) 320 else (320 * header.height) / header.width
-                            val bmp = android.graphics.Bitmap.createBitmap(thumbW, thumbH, android.graphics.Bitmap.Config.ARGB_8888)
-                            val bufSize = header.width * header.height * 2
-                            val directBuf = java.nio.ByteBuffer.allocateDirect(bufSize)
-                            val meta = LongArray(3)
-                            val read = top.maary.darkbag.rawvideo.RawVideoNative.nativeReadFrame(handle, 0, meta, directBuf)
-                            if (read > 0) {
-                                val targetLogIndex = if (header.activeLogName.isNotBlank() && header.activeLogName != "None") {
-                                    top.maary.darkbag.fragments.SettingsFragment.LOG_CURVES.indexOf(header.activeLogName).takeIf { it >= 0 } ?: -1
-                                } else -1
-                                val lutManager = top.maary.darkbag.utils.LutManager(context)
-                                val lutPath = if (header.activeLutName.isNotBlank() && header.activeLutName != "None") {
-                                    val f = java.io.File(lutManager.lutDir, header.activeLutName)
-                                    if (f.exists()) f.absolutePath else null
-                                } else null
+                        try {
+                            val header = top.maary.darkbag.rawvideo.RawVideoNative.readHeader(handle)
+                            if (header != null && header.width > 0 && header.height > 0) {
+                                val swapDims = (header.orientation == 90 || header.orientation == 270)
+                                val thumbW = if (swapDims) (320 * header.height) / header.width else 320
+                                val thumbH = if (swapDims) 320 else (320 * header.height) / header.width
+                                val bmp = android.graphics.Bitmap.createBitmap(thumbW, thumbH, android.graphics.Bitmap.Config.ARGB_8888)
+                                val bufSize = header.width * header.height * 2
+                                val directBuf = java.nio.ByteBuffer.allocateDirect(bufSize)
+                                val meta = LongArray(3)
+                                val read = top.maary.darkbag.rawvideo.RawVideoNative.nativeReadFrame(handle, 0, meta, directBuf)
+                                if (read > 0) {
+                                    val targetLogIndex = if (header.activeLogName.isNotBlank() && header.activeLogName != "None") {
+                                        top.maary.darkbag.fragments.SettingsFragment.LOG_CURVES.indexOf(header.activeLogName).takeIf { it >= 0 } ?: -1
+                                    } else -1
+                                    val lutManager = top.maary.darkbag.utils.LutManager(context)
+                                    val lutPath = if (header.activeLutName.isNotBlank() && header.activeLutName != "None") {
+                                        val f = java.io.File(lutManager.lutDir, header.activeLutName)
+                                        if (f.exists()) f.absolutePath else null
+                                    } else null
 
-                                val debayered = top.maary.darkbag.rawvideo.RawVideoNative.nativeDebayerFrameToBitmap(
-                                    bayerBuffer = directBuf,
-                                    width = header.width,
-                                    height = header.height,
-                                    orientation = header.orientation,
-                                    cfaPattern = header.cfaPattern,
-                                    whiteLevel = header.whiteLevel,
-                                    blackLevel = header.blackLevel.firstOrNull() ?: 64f,
-                                    neutralPoint = header.neutralPoint,
-                                    targetLog = targetLogIndex,
-                                    lutPath = lutPath,
-                                    exposure = header.exposure,
-                                    contrast = header.contrast,
-                                    saturation = header.saturation,
-                                    outBitmap = bmp
-                                )
-                                if (debayered) {
-                                    rawThumbCache.put(group.baseName, bmp)
-                                    withContext(Dispatchers.Main) {
-                                        if (holder.bindingAdapterPosition != androidx.recyclerview.widget.RecyclerView.NO_POSITION) {
-                                            holder.binding.thumbnailView.setImageBitmap(bmp)
+                                    val debayered = top.maary.darkbag.rawvideo.RawVideoNative.nativeDebayerFrameToBitmap(
+                                        bayerBuffer = directBuf,
+                                        width = header.width,
+                                        height = header.height,
+                                        orientation = header.orientation,
+                                        cfaPattern = header.cfaPattern,
+                                        whiteLevel = header.whiteLevel,
+                                        blackLevel = header.blackLevel.firstOrNull() ?: 64f,
+                                        neutralPoint = header.neutralPoint,
+                                        targetLog = targetLogIndex,
+                                        lutPath = lutPath,
+                                        exposure = header.exposure,
+                                        contrast = header.contrast,
+                                        saturation = header.saturation,
+                                        outBitmap = bmp
+                                    )
+                                    if (debayered) {
+                                        rawThumbCache.put(group.baseName, bmp)
+                                        withContext(Dispatchers.Main) {
+                                            if (holder.bindingAdapterPosition != androidx.recyclerview.widget.RecyclerView.NO_POSITION) {
+                                                holder.binding.thumbnailView.setImageBitmap(bmp)
+                                            }
                                         }
                                     }
                                 }
                             }
+                        } finally {
+                            top.maary.darkbag.rawvideo.RawVideoNative.nativeCloseReader(handle)
                         }
-                        top.maary.darkbag.rawvideo.RawVideoNative.nativeCloseReader(handle)
                     }
                 }
             } catch (e: Exception) {

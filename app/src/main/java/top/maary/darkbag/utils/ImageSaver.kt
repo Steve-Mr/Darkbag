@@ -812,52 +812,55 @@ object ImageSaver {
         // 1. Generate thumbnail from first frame using JNI
         val readerHandle = top.maary.darkbag.rawvideo.RawVideoNative.nativeOpenReader(rawVideoFile.absolutePath)
         if (readerHandle != 0L) {
-            val header = top.maary.darkbag.rawvideo.RawVideoNative.readHeader(readerHandle)
-            if (header != null && header.width > 0 && header.height > 0) {
-                val thumbWidth = 640
-                val swapDims = (header.orientation == 90 || header.orientation == 270)
-                val thumbW = if (swapDims) (thumbWidth * header.height) / header.width else thumbWidth
-                val thumbH = if (swapDims) thumbWidth else (thumbWidth * header.height) / header.width
-                val bmp = Bitmap.createBitmap(thumbW, thumbH, Bitmap.Config.ARGB_8888)
-                val bufferSize = header.width * header.height * 2
-                val directBuf = java.nio.ByteBuffer.allocateDirect(bufferSize)
-                val meta = LongArray(3)
-                val readBytes = top.maary.darkbag.rawvideo.RawVideoNative.nativeReadFrame(readerHandle, 0, meta, directBuf)
-                if (readBytes > 0) {
-                    val targetLogIndex = if (header.activeLogName.isNotBlank() && header.activeLogName != "None") {
-                        top.maary.darkbag.fragments.SettingsFragment.LOG_CURVES.indexOf(header.activeLogName).takeIf { it >= 0 } ?: -1
-                    } else -1
-                    val lutManager = top.maary.darkbag.utils.LutManager(context)
-                    val lutPath = if (header.activeLutName.isNotBlank() && header.activeLutName != "None") {
-                        val f = java.io.File(lutManager.lutDir, header.activeLutName)
-                        if (f.exists()) f.absolutePath else {
-                            val f2 = java.io.File(java.io.File(context.filesDir, "luts"), header.activeLutName)
-                            if (f2.exists()) f2.absolutePath else null
-                        }
-                    } else null
+            try {
+                val header = top.maary.darkbag.rawvideo.RawVideoNative.readHeader(readerHandle)
+                if (header != null && header.width > 0 && header.height > 0) {
+                    val thumbWidth = 640
+                    val swapDims = (header.orientation == 90 || header.orientation == 270)
+                    val thumbW = if (swapDims) (thumbWidth * header.height) / header.width else thumbWidth
+                    val thumbH = if (swapDims) thumbWidth else (thumbWidth * header.height) / header.width
+                    val bmp = Bitmap.createBitmap(thumbW, thumbH, Bitmap.Config.ARGB_8888)
+                    val bufferSize = header.width * header.height * 2
+                    val directBuf = java.nio.ByteBuffer.allocateDirect(bufferSize)
+                    val meta = LongArray(3)
+                    val readBytes = top.maary.darkbag.rawvideo.RawVideoNative.nativeReadFrame(readerHandle, 0, meta, directBuf)
+                    if (readBytes > 0) {
+                        val targetLogIndex = if (header.activeLogName.isNotBlank() && header.activeLogName != "None") {
+                            top.maary.darkbag.fragments.SettingsFragment.LOG_CURVES.indexOf(header.activeLogName).takeIf { it >= 0 } ?: -1
+                        } else -1
+                        val lutManager = top.maary.darkbag.utils.LutManager(context)
+                        val lutPath = if (header.activeLutName.isNotBlank() && header.activeLutName != "None") {
+                            val f = java.io.File(lutManager.lutDir, header.activeLutName)
+                            if (f.exists()) f.absolutePath else {
+                                val f2 = java.io.File(java.io.File(context.filesDir, "luts"), header.activeLutName)
+                                if (f2.exists()) f2.absolutePath else null
+                            }
+                        } else null
 
-                    val debayered = top.maary.darkbag.rawvideo.RawVideoNative.nativeDebayerFrameToBitmap(
-                        bayerBuffer = directBuf,
-                        width = header.width,
-                        height = header.height,
-                        orientation = header.orientation,
-                        cfaPattern = header.cfaPattern,
-                        whiteLevel = header.whiteLevel,
-                        blackLevel = header.blackLevel.firstOrNull() ?: 64f,
-                        neutralPoint = header.neutralPoint,
-                        targetLog = targetLogIndex,
-                        lutPath = lutPath,
-                        exposure = 0.0f,
-                        contrast = 0.0f,
-                        saturation = 0.0f,
-                        outBitmap = bmp
-                    )
-                    if (debayered) {
-                        thumbnailBitmap = bmp
+                        val debayered = top.maary.darkbag.rawvideo.RawVideoNative.nativeDebayerFrameToBitmap(
+                            bayerBuffer = directBuf,
+                            width = header.width,
+                            height = header.height,
+                            orientation = header.orientation,
+                            cfaPattern = header.cfaPattern,
+                            whiteLevel = header.whiteLevel,
+                            blackLevel = header.blackLevel.firstOrNull() ?: 64f,
+                            neutralPoint = header.neutralPoint,
+                            targetLog = targetLogIndex,
+                            lutPath = lutPath,
+                            exposure = 0.0f,
+                            contrast = 0.0f,
+                            saturation = 0.0f,
+                            outBitmap = bmp
+                        )
+                        if (debayered) {
+                            thumbnailBitmap = bmp
+                        }
                     }
                 }
+            } finally {
+                top.maary.darkbag.rawvideo.RawVideoNative.nativeCloseReader(readerHandle)
             }
-            top.maary.darkbag.rawvideo.RawVideoNative.nativeCloseReader(readerHandle)
         }
 
         // 2. Save .rawvid file

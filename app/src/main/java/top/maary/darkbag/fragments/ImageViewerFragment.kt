@@ -1789,64 +1789,67 @@ open class ImageViewerFragment : Fragment() {
                             pfd?.use { parcelFd ->
                                 val handle = top.maary.darkbag.rawvideo.RawVideoNative.nativeOpenReaderFd(parcelFd.fd)
                                 if (handle != 0L) {
-                                    val header = top.maary.darkbag.rawvideo.RawVideoNative.readHeader(handle)
-                                    if (header != null) {
-                                        val bayerBuf = java.nio.ByteBuffer.allocateDirect(header.width * header.height * 2)
-                                        val meta = LongArray(3)
-                                        val readBytes = top.maary.darkbag.rawvideo.RawVideoNative.nativeReadFrame(handle, 0, meta, bayerBuf)
-                                        if (readBytes > 0) {
-                                            val bmp = android.graphics.Bitmap.createBitmap(header.width, header.height, android.graphics.Bitmap.Config.ARGB_8888)
-                                            val targetLogIndex = if (finalConfig.log != null && finalConfig.log != "None") {
-                                                SettingsFragment.LOG_CURVES.indexOf(finalConfig.log).takeIf { it >= 0 } ?: -1
-                                            } else -1
-                                            val lutPath = if (finalConfig.lut != null && finalConfig.lut != "None" && finalConfig.lut.isNotBlank()) {
-                                                val f = java.io.File(lutManager.lutDir, finalConfig.lut)
-                                                if (f.exists()) f.absolutePath else {
-                                                    val f2 = java.io.File(java.io.File(appContext.filesDir, "luts"), finalConfig.lut)
-                                                    if (f2.exists()) f2.absolutePath else null
-                                                }
-                                            } else null
+                                    try {
+                                        val header = top.maary.darkbag.rawvideo.RawVideoNative.readHeader(handle)
+                                        if (header != null) {
+                                            val bayerBuf = java.nio.ByteBuffer.allocateDirect(header.width * header.height * 2)
+                                            val meta = LongArray(3)
+                                            val readBytes = top.maary.darkbag.rawvideo.RawVideoNative.nativeReadFrame(handle, 0, meta, bayerBuf)
+                                            if (readBytes > 0) {
+                                                val bmp = android.graphics.Bitmap.createBitmap(header.width, header.height, android.graphics.Bitmap.Config.ARGB_8888)
+                                                val targetLogIndex = if (finalConfig.log != null && finalConfig.log != "None") {
+                                                    SettingsFragment.LOG_CURVES.indexOf(finalConfig.log).takeIf { it >= 0 } ?: -1
+                                                } else -1
+                                                val lutPath = if (finalConfig.lut != null && finalConfig.lut != "None" && finalConfig.lut.isNotBlank()) {
+                                                    val f = java.io.File(lutManager.lutDir, finalConfig.lut)
+                                                    if (f.exists()) f.absolutePath else {
+                                                        val f2 = java.io.File(java.io.File(appContext.filesDir, "luts"), finalConfig.lut)
+                                                        if (f2.exists()) f2.absolutePath else null
+                                                    }
+                                                } else null
 
-                                            top.maary.darkbag.rawvideo.RawVideoNative.nativeDebayerFrameToBitmap(
-                                                bayerBuffer = bayerBuf,
-                                                width = header.width,
-                                                height = header.height,
-                                                cfaPattern = header.cfaPattern,
-                                                whiteLevel = header.whiteLevel,
-                                                blackLevel = header.blackLevel.firstOrNull() ?: 64f,
-                                                neutralPoint = header.neutralPoint,
-                                                targetLog = targetLogIndex,
-                                                lutPath = lutPath,
-                                                exposure = finalConfig.exposure,
-                                                contrast = finalConfig.contrast,
-                                                saturation = finalConfig.saturation,
-                                                outBitmap = bmp
-                                            )
+                                                top.maary.darkbag.rawvideo.RawVideoNative.nativeDebayerFrameToBitmap(
+                                                    bayerBuffer = bayerBuf,
+                                                    width = header.width,
+                                                    height = header.height,
+                                                    cfaPattern = header.cfaPattern,
+                                                    whiteLevel = header.whiteLevel,
+                                                    blackLevel = header.blackLevel.firstOrNull() ?: 64f,
+                                                    neutralPoint = header.neutralPoint,
+                                                    targetLog = targetLogIndex,
+                                                    lutPath = lutPath,
+                                                    exposure = finalConfig.exposure,
+                                                    contrast = finalConfig.contrast,
+                                                    saturation = finalConfig.saturation,
+                                                    outBitmap = bmp
+                                                )
 
-                                            val baseName = if (isReplacement) currentGroup.baseName else "${currentGroup.baseName}_edited_${System.currentTimeMillis()}"
-                                            val targetUri = if (isReplacement) currentGroup.jpgUri else null
-                                            val jpgFolderUri = appContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-                                                .getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
+                                                val baseName = if (isReplacement) currentGroup.baseName else "${currentGroup.baseName}_edited_${System.currentTimeMillis()}"
+                                                val targetUri = if (isReplacement) currentGroup.jpgUri else null
+                                                val jpgFolderUri = appContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                                                    .getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
 
-                                            top.maary.darkbag.utils.ImageSaver.saveProcessedImage(
-                                                context = appContext,
-                                                inputBitmap = bmp,
-                                                bmpPath = null,
-                                                rotationDegrees = header.orientation,
-                                                zoomFactor = 1.0f,
-                                                baseName = baseName,
-                                                linearDngPath = null,
-                                                saveJpg = true,
-                                                saveRaw = false,
-                                                targetUri = targetUri,
-                                                jpgFolderUri = if (isReplacement) null else jpgFolderUri,
-                                                editConfig = finalConfig,
-                                                isAlreadyStitched = true
-                                            )
-                                            bmp.recycle()
+                                                top.maary.darkbag.utils.ImageSaver.saveProcessedImage(
+                                                    context = appContext,
+                                                    inputBitmap = bmp,
+                                                    bmpPath = null,
+                                                    rotationDegrees = header.orientation,
+                                                    zoomFactor = 1.0f,
+                                                    baseName = baseName,
+                                                    linearDngPath = null,
+                                                    saveJpg = true,
+                                                    saveRaw = false,
+                                                    targetUri = targetUri,
+                                                    jpgFolderUri = if (isReplacement) null else jpgFolderUri,
+                                                    editConfig = finalConfig,
+                                                    isAlreadyStitched = true
+                                                )
+                                                bmp.recycle()
+                                            }
                                         }
+                                    } finally {
+                                        top.maary.darkbag.rawvideo.RawVideoNative.nativeCloseReader(handle)
                                     }
-                                    top.maary.darkbag.rawvideo.RawVideoNative.nativeCloseReader(handle)
                                 }
                             }
                         }
