@@ -786,7 +786,11 @@ object RawVideoExporter {
                     if (activity) idleLoops = 0 else idleLoops++
                 }
 
-                return@withContext true
+                val isSuccess = muxerStarted && videoEos && outputFile.exists() && outputFile.length() > 0
+                if (!isSuccess) {
+                    Log.w(TAG, "GPU surface export ended prematurely: muxerStarted=$muxerStarted, videoEos=$videoEos, fileLength=${outputFile.length()}")
+                }
+                return@withContext isSuccess
             } catch (e: Exception) {
                 Log.w(TAG, "Exception during GPU Surface export", e)
                 throw e
@@ -1096,6 +1100,7 @@ object RawVideoExporter {
                 scaledBmp = sBmp
                 val canvas = if (sBmp !== fBmp) android.graphics.Canvas(sBmp) else null
                 val yuvBuf = ByteArray(exportW * exportH * 3 / 2)
+                val reusableArgb = IntArray(exportW * exportH)
 
                 val fallbackIntervalUs = (1_000_000L / measuredFps).toLong().coerceAtLeast(1000L)
                 var lastPtsUs = -1L
@@ -1154,7 +1159,7 @@ object RawVideoExporter {
                     }
 
                     // Convert to NV12
-                    bitmapToNv12(inputBmp, yuvBuf, exportW, exportH)
+                    bitmapToNv12(inputBmp, reusableArgb, yuvBuf, exportW, exportH)
 
                     // Feed MediaCodec Video
                     val inIndex = enc.dequeueInputBuffer(10000)
@@ -1226,7 +1231,11 @@ object RawVideoExporter {
                     if (activity) idleLoops = 0 else idleLoops++
                 }
 
-                return@withContext true
+                val isSuccess = muxerStarted && videoEos && outputFile.exists() && outputFile.length() > 0
+                if (!isSuccess) {
+                    Log.w(TAG, "CPU export ended prematurely: muxerStarted=$muxerStarted, videoEos=$videoEos, fileLength=${outputFile.length()}")
+                }
+                return@withContext isSuccess
             } catch (e: Exception) {
                 Log.e(TAG, "Failed MP4 export", e)
                 return@withContext false
@@ -1612,8 +1621,11 @@ object RawVideoExporter {
         }
     }
 
-    private fun bitmapToNv12(bitmap: Bitmap, nv12: ByteArray, width: Int, height: Int) {
-        val argb = IntArray(width * height)
+    internal fun isExportSuccessful(muxerStarted: Boolean, videoEos: Boolean, outputFile: File): Boolean {
+        return muxerStarted && videoEos && outputFile.exists() && outputFile.length() > 0
+    }
+
+    internal fun bitmapToNv12(bitmap: Bitmap, argb: IntArray, nv12: ByteArray, width: Int, height: Int) {
         bitmap.getPixels(argb, 0, width, 0, 0, width, height)
 
         val frameSize = width * height

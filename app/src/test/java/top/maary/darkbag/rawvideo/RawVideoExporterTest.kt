@@ -1,5 +1,7 @@
 package top.maary.darkbag.rawvideo
 
+import android.graphics.Bitmap
+import android.graphics.Color
 import android.media.MediaCodec
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -449,6 +451,150 @@ class RawVideoExporterTest {
         // Verify all timestamps are strictly increasing
         for (i in 1 until dataBuffers.size) {
             assertTrue("PTS must be monotonically increasing", dataBuffers[i].ptsUs > dataBuffers[i - 1].ptsUs)
+        }
+    }
+
+    @Test
+    fun testBitmapToNv12_bufferReuseAndNumericalCorrectness() {
+        val width = 4
+        val height = 4
+        val frameSize = width * height
+        val reusableArgb = IntArray(frameSize)
+        val nv12 = ByteArray(frameSize * 3 / 2)
+
+        // Frame 1: Pure Red bitmap (0xFFFF0000)
+        val redBmp = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        for (y in 0 until height) {
+            for (x in 0 until width) {
+                redBmp.setPixel(x, y, Color.RED)
+            }
+        }
+
+        RawVideoExporter.bitmapToNv12(redBmp, reusableArgb, nv12, width, height)
+
+        // Red conversion:
+        // Y = ((66 * 255 + 128) >> 8) + 16 = 82
+        // U = ((-38 * 255 + 128) >> 8) + 128 = 90
+        // V = ((112 * 255 + 128) >> 8) + 128 = 240
+        for (i in 0 until frameSize) {
+            assertEquals(82.toByte(), nv12[i])
+        }
+        var uvIdx = frameSize
+        for (j in 0 until height step 2) {
+            for (i in 0 until width step 2) {
+                assertEquals(90.toByte(), nv12[uvIdx++])
+                assertEquals(240.toByte(), nv12[uvIdx++])
+            }
+        }
+        assertEquals(nv12.size, uvIdx)
+
+        // Frame 2: Pure Black bitmap (0xFF000000), reusing the exact same reusableArgb and nv12
+        val blackBmp = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        for (y in 0 until height) {
+            for (x in 0 until width) {
+                blackBmp.setPixel(x, y, Color.BLACK)
+            }
+        }
+
+        RawVideoExporter.bitmapToNv12(blackBmp, reusableArgb, nv12, width, height)
+
+        // Black conversion:
+        // Y = (128 >> 8) + 16 = 16
+        // U = (128 >> 8) + 128 = 128
+        // V = (128 >> 8) + 128 = 128
+        // Assert that every single byte in the buffer has been overwritten and no residual red values remain
+        for (i in 0 until frameSize) {
+            assertEquals(16.toByte(), nv12[i])
+        }
+        uvIdx = frameSize
+        for (j in 0 until height step 2) {
+            for (i in 0 until width step 2) {
+                assertEquals(128.toByte(), nv12[uvIdx++])
+                assertEquals(128.toByte(), nv12[uvIdx++])
+            }
+        }
+        assertEquals(nv12.size, uvIdx)
+    }
+
+    @Test
+    fun testBitmapToNv12_fullResolutionZeroOutOfBounds() {
+        val width = 1920
+        val height = 1080
+        val frameSize = width * height
+        val totalNv12Bytes = frameSize * 3 / 2
+
+        val reusableArgb = IntArray(frameSize)
+        val nv12 = ByteArray(totalNv12Bytes)
+
+        val bmp = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        // Set first pixel to Pure Red, last pixel to Pure Green
+        bmp.setPixel(0, 0, Color.RED)
+        bmp.setPixel(width - 1, height - 1, Color.GREEN)
+
+        // Reusing the same buffers across multiple consecutive frames without reallocation or out-of-bounds
+        for (frame in 0 until 3) {
+            RawVideoExporter.bitmapToNv12(bmp, reusableArgb, nv12, width, height)
+
+            assertEquals(totalNv12Bytes, nv12.size)
+            // First pixel (0,0) is Red: Y=82, U=90, V=240
+            assertEquals(82.toByte(), nv12[0])
+            assertEquals(90.toByte(), nv12[frameSize])
+            assertEquals(240.toByte(), nv12[frameSize + 1])
+
+            // Last pixel (width-1, height-1) is Green:
+            // Y = ((129 * 255 + 128) >> 8) + 16 = 144
+            assertEquals(144.toByte(), nv12[frameSize - 1])
+        }
+    }
+
+    @Test
+    fun testExportSuccessCondition_assertMuxerAndEosAndFile() {
+        val tempDir = File(System.getProperty("java.io.tmpdir"), "export_success_test_${System.currentTimeMillis()}").apply { mkdirs() }
+        val testFile = File(tempDir, "test_output.mp4")
+
+        try {
+            // Case 1: Muxer not started -> MUST fail even if EOS reached and file exists with content
+            testFile.writeText("sample mp4 content")
+            assertFalse(
+                "Muxer not started must lead to export failure",
+                RawVideoExporter.isExportSuccessful(muxerStarted = false, videoEos = true, outputFile = testFile)
+            )
+
+            // Case 2: Video EOS not reached -> MUST fail even if Muxer started and file exists
+            assertFalse(
+                "Incomplete video stream (no EOS) must lead to export failure",
+                RawVideoExporter.isExportSuccessful(muxerStarted = true, videoEos = false, outputFile = testFile)
+            )
+
+            // Case 3: Output file does not exist -> MUST fail
+            testFile.delete()
+            assertFalse(
+                "Missing output file must lead to export failure",
+                RawVideoExporter.isExportSuccessful(muxerStarted = true, videoEos = true, outputFile = testFile)
+            )
+
+            // Case 4: Output file exists but is empty (0 bytes) -> MUST fail
+            testFile.createNewFile()
+            assertEquals(0L, testFile.length())
+            assertFalse(
+                "Zero byte output file must lead to export failure",
+                RawVideoExporter.isExportSuccessful(muxerStarted = true, videoEos = true, outputFile = testFile)
+            )
+
+            // Case 5: All conditions satisfied -> MUST succeed
+            testFile.writeText("valid mp4 container data")
+            assertTrue(
+                "Export must succeed when muxer started, video EOS reached, and output file is non-empty",
+                RawVideoExporter.isExportSuccessful(muxerStarted = true, videoEos = true, outputFile = testFile)
+            )
+
+            // Case 6: Neither muxer started nor video EOS -> MUST fail
+            assertFalse(
+                RawVideoExporter.isExportSuccessful(muxerStarted = false, videoEos = false, outputFile = testFile)
+            )
+        } finally {
+            try { testFile.delete() } catch (_: Exception) {}
+            try { tempDir.delete() } catch (_: Exception) {}
         }
     }
 }
