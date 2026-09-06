@@ -3556,10 +3556,61 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         motionStillPtsUs = result?.second ?: 0L
                     }
 
+                    // Evaluate burst sharpness and select anchor frame, rejecting blurred frames
+                    var finalNumFrames = burstResult.frames.size
+                    var anchorFrameIndex = 0
+                    if (burstResult.frames.size > 1) {
+                        try {
+                            val evalResult = top.maary.darkbag.rawvideo.RawVideoNative.nativeEvaluateBurst(
+                                megaBuffer = megaBuffer,
+                                numFrames = burstResult.frames.size,
+                                width = width,
+                                height = height,
+                                rowStride = width * 2,
+                                cfaPattern = cfa,
+                                iso = iso ?: 100,
+                                triggerIndex = 0,
+                                rejectionThreshold = 0.45f
+                            )
+                            if (evalResult != null && evalResult.size >= 2) {
+                                anchorFrameIndex = evalResult[0]
+                                val acceptedCount = evalResult[1]
+                                Log.i(TAG, "Burst evaluation: anchorFrame=$anchorFrameIndex, accepted=$acceptedCount/${burstResult.frames.size}")
+
+                                if (anchorFrameIndex in 1 until burstResult.frames.size) {
+                                    val frameSizeBytes = width * 2 * height
+                                    val tempBuf = java.nio.ByteBuffer.allocateDirect(frameSizeBytes)
+                                    val dup = megaBuffer.duplicate()
+                                    dup.position(0)
+                                    dup.limit(frameSizeBytes)
+                                    tempBuf.put(dup)
+                                    tempBuf.rewind()
+
+                                    dup.position(anchorFrameIndex * frameSizeBytes)
+                                    dup.limit((anchorFrameIndex + 1) * frameSizeBytes)
+                                    val dupDst = megaBuffer.duplicate()
+                                    dupDst.position(0)
+                                    dupDst.limit(frameSizeBytes)
+                                    dupDst.put(dup)
+
+                                    dupDst.position(anchorFrameIndex * frameSizeBytes)
+                                    dupDst.limit((anchorFrameIndex + 1) * frameSizeBytes)
+                                    dupDst.put(tempBuf)
+
+                                    megaBuffer.rewind()
+                                    Log.i(TAG, "Swapped Anchor Frame $anchorFrameIndex to index 0 for Halide alignment")
+                                }
+                                finalNumFrames = acceptedCount.coerceIn(1, burstResult.frames.size)
+                            }
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Failed to evaluate burst sharpness, falling back to default order", e)
+                        }
+                    }
+
                     val request = top.maary.darkbag.processor.HdrPlusRequest(
                         requestId = java.util.UUID.randomUUID().toString(),
                         megaBuffer = megaBuffer,
-                        numFrames = burstResult.frames.size,
+                        numFrames = finalNumFrames,
                         width = width,
                         height = height,
                         orientation = combinedOrientation,
@@ -3621,6 +3672,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     // Native timing stats are now recorded in HdrPlusProcessingService
 
             } catch (e: Exception) {
+                isHdrPlusSuccess = false
                 Log.e(TAG, "HDR+ processing failed, falling back to single shot", e)
                 withContext(Dispatchers.Main) {
                     Toast.makeText(appContext, appContext.getString(R.string.toast_hdr_failed_fallback), Toast.LENGTH_SHORT).show()
@@ -3655,7 +3707,9 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 }
             } finally {
                 burstResult.frames.forEach { it.close() }
-                HdrPlusBurst.releaseBuffer(burstResult.megaBuffer)
+                if (!isHdrPlusSuccess) {
+                    HdrPlusBurst.releaseBuffer(burstResult.megaBuffer)
+                }
                 
                 if (!fallbackSent) {
                     processingSemaphore.release()

@@ -14,6 +14,7 @@
 #include "RawVideoGLRenderer.h"
 #include "ColorMath.h"
 #include "../ColorPipe.h"
+#include "BurstSelector.h"
 
 #define TAG "RawVideoJNI"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
@@ -965,6 +966,59 @@ Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeBayerBinning4x4(
         bMode
     );
     return JNI_TRUE;
+}
+
+JNIEXPORT jintArray JNICALL
+Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeEvaluateBurst(
+        JNIEnv* env,
+        jobject /* thiz */,
+        jobject jMegaBuffer,
+        jint numFrames,
+        jint width,
+        jint height,
+        jint rowStride,
+        jint cfaPattern,
+        jint iso,
+        jint triggerIndex,
+        jfloat rejectionThreshold
+) {
+    if (!jMegaBuffer || numFrames <= 0 || width <= 0 || height <= 0) {
+        return nullptr;
+    }
+
+    auto* bufferPtr = static_cast<const uint8_t*>(env->GetDirectBufferAddress(jMegaBuffer));
+    if (!bufferPtr) return nullptr;
+
+    const size_t frameSizeBytes = static_cast<size_t>(height) * rowStride;
+    std::vector<const uint8_t*> framePointers(numFrames);
+    for (int i = 0; i < numFrames; ++i) {
+        framePointers[i] = bufferPtr + i * frameSizeBytes;
+    }
+
+    auto result = darkbag::burst::BurstSelector::evaluateBurst(
+        framePointers,
+        static_cast<uint32_t>(width),
+        static_cast<uint32_t>(height),
+        static_cast<uint32_t>(rowStride),
+        cfaPattern,
+        static_cast<uint32_t>(iso),
+        triggerIndex,
+        rejectionThreshold
+    );
+
+    const jsize outSize = 2 + static_cast<jsize>(result.acceptedIndices.size());
+    jintArray jResult = env->NewIntArray(outSize);
+    if (!jResult) return nullptr;
+
+    std::vector<jint> rawOut(outSize);
+    rawOut[0] = result.anchorIndex;
+    rawOut[1] = result.acceptedCount;
+    for (size_t i = 0; i < result.acceptedIndices.size(); ++i) {
+        rawOut[2 + i] = result.acceptedIndices[i];
+    }
+
+    env->SetIntArrayRegion(jResult, 0, outSize, rawOut.data());
+    return jResult;
 }
 
 } // extern "C"

@@ -162,6 +162,18 @@ object RawVideoNative {
         mode: Int = BINNING_MODE_AVERAGE
     ): Boolean
 
+    external fun nativeEvaluateBurst(
+        megaBuffer: ByteBuffer,
+        numFrames: Int,
+        width: Int,
+        height: Int,
+        rowStride: Int,
+        cfaPattern: Int,
+        iso: Int = 100,
+        triggerIndex: Int = 0,
+        rejectionThreshold: Float = 0.45f
+    ): IntArray?
+
     external fun nativeDebayerFrameToBitmap(
         bayerBuffer: ByteBuffer,
         width: Int,
