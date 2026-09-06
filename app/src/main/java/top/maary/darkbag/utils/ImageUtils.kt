@@ -26,6 +26,16 @@ object ImageUtils {
         if (base.contains("_MULTI_")) {
             base = base.substringBefore("_MULTI_")
         }
+        if (base.contains("_edited")) {
+            base = base.substringBefore("_edited")
+        }
+        if (base.contains("_graded")) {
+            base = base.substringBefore("_graded")
+        }
+        val cdngSeqMatch = Regex("^((?:RAWVID|CDNG)_[0-9]{8}_[0-9]{6}(?:_[0-9]+)?)_[0-9]{6}$", RegexOption.IGNORE_CASE).find(base)
+        if (cdngSeqMatch != null) {
+            base = cdngSeqMatch.groupValues[1]
+        }
         return base
     }
 

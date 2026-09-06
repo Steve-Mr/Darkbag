@@ -221,12 +221,21 @@ file(GLOB_RECURSE LIBRAW_SOURCES
 # *_ph.cpp files are usually "placeholders" or specific implementation alternatives that conflict with the standard ones
 list(FILTER LIBRAW_SOURCES EXCLUDE REGEX ".*_ph\\.cpp$")
 
+include_directories(rawvideo)
+include_directories(rawvideo/lz4)
+
 add_library(
         native-lib
         SHARED
         native-lib.cpp
         HdrPlusJNI.cpp
         ColorPipe.cpp
+        rawvideo/lz4/lz4.c
+        rawvideo/RawVideoContainer.cpp
+        rawvideo/RawVideoRecorder.cpp
+        rawvideo/BayerProcessor.cpp
+        rawvideo/RawVideoJNI.cpp
+        rawvideo/RawVideoGLRenderer.cpp
         ${LIBRAW_SOURCES}
         "${GENERATED_LIB}"
         "${SINGLE_GENERATED_LIB}"
@@ -249,6 +258,14 @@ find_library(
         android-lib
         android)
 
+find_library(
+        gles3-lib
+        GLESv3)
+
+find_library(
+        egl-lib
+        EGL)
+
 target_link_libraries(
         native-lib
         "${GENERATED_LIB}"
@@ -261,6 +278,8 @@ target_link_libraries(
         ${log-lib}
         ${jnigraphics-lib}
         ${android-lib}
+        ${gles3-lib}
+        ${egl-lib}
         -fopenmp
         -static-openmp)
 

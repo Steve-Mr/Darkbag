@@ -1,6 +1,7 @@
 package top.maary.darkbag.fragments
 
 import android.util.Log
+import java.io.File
 import android.os.Build
 import android.provider.MediaStore
 import android.app.Activity
@@ -55,10 +56,23 @@ open class ImageViewerFragment : Fragment() {
 
     private suspend fun deleteUriSafe(context: Context, uri: Uri): Boolean {
         return withContext(Dispatchers.IO) {
-            if (uri.scheme == "content" && DocumentsContract.isDocumentUri(context, uri)) {
-                DocumentsContract.deleteDocument(context.contentResolver, uri)
-            } else {
-                context.contentResolver.delete(uri, null, null) > 0
+            try {
+                if (uri.scheme == "content" && DocumentsContract.isDocumentUri(context, uri)) {
+                    DocumentsContract.deleteDocument(context.contentResolver, uri)
+                } else if (uri.scheme == "content" && DocumentsContract.isTreeUri(uri)) {
+                    val docUri = DocumentsContract.buildDocumentUriUsingTree(uri, DocumentsContract.getTreeDocumentId(uri))
+                    DocumentsContract.deleteDocument(context.contentResolver, docUri)
+                } else {
+                    context.contentResolver.delete(uri, null, null) > 0
+                }
+            } catch (e: Exception) {
+                try {
+                    val docFile = androidx.documentfile.provider.DocumentFile.fromSingleUri(context, uri)
+                        ?: androidx.documentfile.provider.DocumentFile.fromTreeUri(context, uri)
+                    docFile?.delete() ?: false
+                } catch (e2: Exception) {
+                    throw e
+                }
             }
         }
     }
@@ -88,6 +102,7 @@ open class ImageViewerFragment : Fragment() {
 
     protected var isAdjusted = false
     protected var isEditingAdjustments = false
+    protected var currentCinemaDngFrame: Pair<Int, Uri?>? = null
     private var systemTopInset = 0
     private var systemBottomInset = 0
     private var topBarHeight = 0
@@ -116,6 +131,13 @@ open class ImageViewerFragment : Fragment() {
             preloadAdjacentMetadata(position)
 
             val group = adapter.getGroup(position)
+            val isCinemaDngGroup = group.isCinemaDng || group.cinemaDngFolderUri != null || group.cinemaDngFirstFrameUri != null || group.cinemaDngFrameUris.isNotEmpty()
+            if (isCinemaDngGroup) {
+                currentCinemaDngFrame = adapter.getActiveCinemaDngFrame(position)
+            } else {
+                currentCinemaDngFrame = null
+            }
+
             if (!group.metadataLoaded) {
                 lifecycleScope.launch {
                     val updatedGroup = repository.loadMetadata(group)
@@ -124,6 +146,11 @@ open class ImageViewerFragment : Fragment() {
                             adapter.updateSingleGroup(updatedGroup) {
                                 if (continuation.isActive) continuation.resume(Unit)
                             }
+                        }
+
+                        if (binding.imagePager.currentItem == position && !isAdjusted) {
+                            prepareEditConfig(updatedGroup)
+                            updateControlsVisibility()
                         }
 
                         val format = adapter.getSelectedFormat(position)
@@ -226,6 +253,73 @@ open class ImageViewerFragment : Fragment() {
             }
         }
 
+        childFragmentManager.setFragmentResultListener(RawVideoExportSheet.REQUEST_KEY, viewLifecycleOwner) { _, bundle ->
+            val log = bundle.getString(RawVideoExportSheet.RESULT_LOG) ?: "None"
+            val lut = bundle.getString(RawVideoExportSheet.RESULT_LUT) ?: "None"
+            val resolution = bundle.getInt(RawVideoExportSheet.RESULT_RESOLUTION, 1080)
+            val action = bundle.getString(RawVideoExportSheet.RESULT_ACTION)
+            val frameIndex = bundle.getInt(RawVideoExportSheet.RESULT_FRAME_INDEX, 0)
+            val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
+            val config = (currentEditConfig ?: currentGroup.editConfig ?: top.maary.darkbag.models.EditConfig()).copy(log = log, lut = lut)
+
+            when (action) {
+                RawVideoExportSheet.ACTION_EXPORT_MP4 -> {
+                    performExportMp4(currentGroup, config, resolution)
+                }
+                RawVideoExportSheet.ACTION_EXPORT_CINEMADNG -> {
+                    performExportCinemaDng(currentGroup)
+                }
+                RawVideoExportSheet.ACTION_FRAME_JPG -> {
+                    exportCinemaDngFrame(
+                        group = currentGroup,
+                        exportType = top.maary.darkbag.rawvideo.RawVideoExporter.FrameExportType.GRADED_JPG_ONLY,
+                        editConfig = config,
+                        targetFrameIndex = frameIndex
+                    )
+                }
+                RawVideoExportSheet.ACTION_FRAME_DNG -> {
+                    exportCinemaDngFrame(
+                        group = currentGroup,
+                        exportType = top.maary.darkbag.rawvideo.RawVideoExporter.FrameExportType.RAW_DNG_ONLY,
+                        editConfig = null,
+                        targetFrameIndex = frameIndex
+                    )
+                }
+                RawVideoExportSheet.ACTION_FRAME_PAIR -> {
+                    exportCinemaDngFrame(
+                        group = currentGroup,
+                        exportType = top.maary.darkbag.rawvideo.RawVideoExporter.FrameExportType.RAW_AND_GRADED_PAIR,
+                        editConfig = config,
+                        targetFrameIndex = frameIndex
+                    )
+                }
+                else -> {
+                    val exportMode = bundle.getInt(RawVideoExportSheet.RESULT_EXPORT_MODE, RawVideoExportSheet.MODE_VIDEO)
+                    when (exportMode) {
+                        RawVideoExportSheet.MODE_VIDEO -> {
+                            performExportMp4(currentGroup, config, resolution)
+                        }
+                        RawVideoExportSheet.MODE_SINGLE_FRAME_JPG -> {
+                            exportCinemaDngFrame(
+                                group = currentGroup,
+                                exportType = top.maary.darkbag.rawvideo.RawVideoExporter.FrameExportType.GRADED_JPG_ONLY,
+                                editConfig = config,
+                                targetFrameIndex = frameIndex
+                            )
+                        }
+                        RawVideoExportSheet.MODE_SINGLE_FRAME_PAIR -> {
+                            exportCinemaDngFrame(
+                                group = currentGroup,
+                                exportType = top.maary.darkbag.rawvideo.RawVideoExporter.FrameExportType.RAW_AND_GRADED_PAIR,
+                                editConfig = config,
+                                targetFrameIndex = frameIndex
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
         binding.imagePager.registerOnPageChangeCallback(pageChangeCallback)
         loadImages(forceRefresh = true)
 
@@ -242,6 +336,8 @@ open class ImageViewerFragment : Fragment() {
             binding.initialLoadingIndicator.visibility = View.VISIBLE
             binding.imagePager.visibility = View.INVISIBLE
         }
+
+        var hasNavigatedToTargetUri = false
 
         lifecycleScope.launch {
             repository.getGroupedImagesFlow(targetUri).collect { groups ->
@@ -262,6 +358,26 @@ open class ImageViewerFragment : Fragment() {
 
                 val isFirstLoad = !::adapter.isInitialized
 
+                val targetBaseName = targetUri?.let { top.maary.darkbag.utils.ImageUtils.getBaseName(it) }
+                val targetPos = if (targetUri != null) {
+                    val pos = groups.indexOfFirst {
+                        (targetBaseName != null && it.baseName == targetBaseName) ||
+                                it.rawVideoUri?.toString() == targetUri ||
+                                it.mp4VideoUri?.toString() == targetUri ||
+                                it.jpgUri?.toString() == targetUri ||
+                                it.dngUri?.toString() == targetUri ||
+                                it.dngUri1?.toString() == targetUri ||
+                                it.dngUri2?.toString() == targetUri ||
+                                it.derivativeJpgUris.any { u -> u.toString() == targetUri } ||
+                                it.derivativeMp4Uris.any { u -> u.toString() == targetUri } ||
+                                it.multiJpgUris.any { u -> u.toString() == targetUri } ||
+                                it.multiDngUris.any { u -> u.toString() == targetUri }
+                    }
+                    if (pos != -1) pos else {
+                        groups.indexOfFirst { it.baseName.isNotEmpty() && targetUri.contains(it.baseName) }
+                    }
+                } else -1
+
                 if (isFirstLoad) {
                     adapter = ImageViewerAdapter(groups, lifecycleScope, requireContext()).apply {
                         isMotionPhotoAutoPlay = this@ImageViewerFragment.isMotionPhotoAutoPlay
@@ -274,6 +390,12 @@ open class ImageViewerFragment : Fragment() {
                         onMultiCameraLensChanged = { _, _ ->
                             updateSplitButtons()
                             updateToolbarIcon()
+                        }
+                        onCinemaDngFrameSelected = { group, index, uri ->
+                            val currentPosition = binding.imagePager.currentItem
+                            if (currentPosition in adapter.getGroups().indices && adapter.getGroup(currentPosition).baseName == group.baseName) {
+                                currentCinemaDngFrame = Pair(index, uri)
+                            }
                         }
                         setFormatSwitcherPersistentHidden(isAdjusted)
                         onCurrentListChanged = { previousList, currentList ->
@@ -295,17 +417,15 @@ open class ImageViewerFragment : Fragment() {
                     }
                     binding.imagePager.adapter = adapter
 
-                    val initialPos = groups.indexOfFirst {
-                        it.jpgUri?.toString() == targetUri ||
-                                it.dngUri?.toString() == targetUri ||
-                                it.dngUri1?.toString() == targetUri ||
-                                it.dngUri2?.toString() == targetUri
+                    val initialIndex = if (targetPos != -1) targetPos else 0
+                    if (targetPos != -1) {
+                        hasNavigatedToTargetUri = true
                     }
-                    if (initialPos != -1) {
-                        binding.imagePager.setCurrentItem(initialPos, false)
+                    binding.imagePager.setCurrentItem(initialIndex, false)
 
-                        // Load metadata for the initial image immediately
-                        val initialGroup = groups[initialPos]
+                    // Load metadata for the initial image immediately
+                    val initialGroup = groups.getOrNull(initialIndex)
+                    if (initialGroup != null) {
                         if (!initialGroup.metadataLoaded) {
                             val updatedGroup = repository.loadMetadata(initialGroup)
                             prepareEditConfig(updatedGroup)
@@ -315,25 +435,20 @@ open class ImageViewerFragment : Fragment() {
                                         if (continuation.isActive) continuation.resume(Unit)
                                     }
                                 }
-                                if (!isAdjusted && isMotionPhotoAutoPlay && updatedGroup.isMotionPhoto && hasAutoPlayedPosition != initialPos && binding.imagePager.currentItem == initialPos) {
-                                    hasAutoPlayedPosition = initialPos
-                                    adapter.playMotionVideoForPosition(initialPos)
+                                if (!isAdjusted && isMotionPhotoAutoPlay && updatedGroup.isMotionPhoto && hasAutoPlayedPosition != initialIndex && binding.imagePager.currentItem == initialIndex) {
+                                    hasAutoPlayedPosition = initialIndex
+                                    adapter.playMotionVideoForPosition(initialIndex)
                                 }
                             }
                         } else {
                             prepareEditConfig(initialGroup)
-                            if (!isAdjusted && isMotionPhotoAutoPlay && initialGroup.isMotionPhoto && hasAutoPlayedPosition != initialPos) {
-                                hasAutoPlayedPosition = initialPos
-                                adapter.playMotionVideoForPosition(initialPos)
+                            if (!isAdjusted && isMotionPhotoAutoPlay && initialGroup.isMotionPhoto && hasAutoPlayedPosition != initialIndex) {
+                                hasAutoPlayedPosition = initialIndex
+                                adapter.playMotionVideoForPosition(initialIndex)
                             }
                         }
-                    } else {
-                        val firstGroup = groups.firstOrNull()
-                        if (!isAdjusted && isMotionPhotoAutoPlay && firstGroup != null && firstGroup.isMotionPhoto && hasAutoPlayedPosition != 0) {
-                            hasAutoPlayedPosition = 0
-                            adapter.playMotionVideoForPosition(0)
-                        }
                     }
+
                     binding.imagePager.isUserInputEnabled = !isAdjusted
                     setupActionButtons()
                     updateControlsVisibility()
@@ -342,16 +457,20 @@ open class ImageViewerFragment : Fragment() {
 
                     if (!isGalleryMode) {
                         binding.imagePager.visibility = View.VISIBLE
+                        binding.initialLoadingIndicator.visibility = View.GONE
                     }
-                    binding.initialLoadingIndicator.visibility = View.GONE
                 } else {
                     adapter.updateGroups(groups)
+                    if (targetUri != null && !hasNavigatedToTargetUri && targetPos != -1) {
+                        hasNavigatedToTargetUri = true
+                        binding.imagePager.setCurrentItem(targetPos, false)
+                    }
                     updateGalleryPill(binding.imagePager.currentItem, groups.size)
                     preloadAdjacentMetadata(binding.imagePager.currentItem)
-                    if (!isGalleryMode) {
+                    if (!isGalleryMode && (targetUri == null || hasNavigatedToTargetUri)) {
                         binding.imagePager.visibility = View.VISIBLE
+                        binding.initialLoadingIndicator.visibility = View.GONE
                     }
-                    binding.initialLoadingIndicator.visibility = View.GONE
 
                     val currentIndex = binding.imagePager.currentItem
                     if (currentIndex in groups.indices) {
@@ -396,8 +515,8 @@ open class ImageViewerFragment : Fragment() {
     protected fun updateControlsVisibility() {
         if (!::adapter.isInitialized || adapter.itemCount == 0) return
         val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
-
-        val canEdit = (currentGroup.dngUri != null || currentGroup.dngUri1 != null || currentGroup.dngUri2 != null || currentGroup.multiDngUris.isNotEmpty()) && !currentGroup.isPartial
+        val isRawVideo = currentGroup.isRawVideo || currentGroup.rawVideoUri != null
+        val canEdit = ((currentGroup.dngUri != null || currentGroup.dngUri1 != null || currentGroup.dngUri2 != null || currentGroup.multiDngUris.isNotEmpty()) && !currentGroup.isPartial) || isRawVideo
 
         val showBottomLeft = isUiVisible && !isEditingAdjustments && !isGalleryMode
         binding.bottomLeftControls.visibility = if (showBottomLeft) View.VISIBLE else View.GONE
@@ -547,6 +666,20 @@ open class ImageViewerFragment : Fragment() {
         } else {
             binding.splitShare.visibility = View.VISIBLE
             binding.splitSave.visibility = View.GONE
+
+            if (::adapter.isInitialized && adapter.itemCount > 0) {
+                val currentIndex = binding.imagePager.currentItem
+                val currentGroup = adapter.getGroup(currentIndex)
+                val isUnrenderedRawVideoOrCinemaDng = (currentGroup.isRawVideo || currentGroup.rawVideoUri != null || currentGroup.isCinemaDng || currentGroup.cinemaDngFolderUri != null || currentGroup.cinemaDngFirstFrameUri != null || currentGroup.cinemaDngFrameUris.isNotEmpty()) && currentGroup.mp4VideoUri == null
+
+                if (isUnrenderedRawVideoOrCinemaDng) {
+                    binding.btnShareMain.setIconResource(R.drawable.ic_save)
+                    binding.btnShareMain.contentDescription = getString(R.string.action_export_main)
+                } else {
+                    binding.btnShareMain.setIconResource(R.drawable.ic_share)
+                    binding.btnShareMain.contentDescription = getString(R.string.share_button_alt)
+                }
+            }
         }
     }
 
@@ -560,15 +693,38 @@ open class ImageViewerFragment : Fragment() {
 
     protected open fun setupActionButtons() {
         binding.btnShareMain.setOnClickListener {
-            performShare()
+            if (::adapter.isInitialized && adapter.itemCount > 0) {
+                val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
+                val isUnrenderedRawVideoOrCinemaDng = (currentGroup.isRawVideo || currentGroup.rawVideoUri != null || currentGroup.isCinemaDng || currentGroup.cinemaDngFolderUri != null || currentGroup.cinemaDngFirstFrameUri != null || currentGroup.cinemaDngFrameUris.isNotEmpty()) && currentGroup.mp4VideoUri == null
+                if (isUnrenderedRawVideoOrCinemaDng) {
+                    openExportHub()
+                } else {
+                    performShare()
+                }
+            } else {
+                performShare()
+            }
         }
         binding.btnShareMenu.setOnClickListener {
             binding.btnShareMenu.isCheckable = true
             binding.btnShareMenu.isChecked = true
             val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
             val popup = PopupMenu(requireContext(), it)
-            popup.menu.add(0, MENU_SHARE_TIFF, 0, getString(R.string.share_as_tiff)).apply {
-                setIcon(R.drawable.ic_photo)
+            val isUnrenderedRawVideoOrCinemaDng = (currentGroup.isRawVideo || currentGroup.rawVideoUri != null || currentGroup.isCinemaDng || currentGroup.cinemaDngFolderUri != null || currentGroup.cinemaDngFirstFrameUri != null || currentGroup.cinemaDngFrameUris.isNotEmpty()) && currentGroup.mp4VideoUri == null
+
+            if (isUnrenderedRawVideoOrCinemaDng) {
+                popup.menu.add(0, MENU_SHARE, 0, getString(R.string.share_button_alt)).apply {
+                    setIcon(R.drawable.ic_share)
+                }
+            } else {
+                popup.menu.add(0, MENU_EXPORT_HUB, 0, getString(R.string.action_export)).apply {
+                    setIcon(R.drawable.ic_save)
+                }
+                if (currentGroup.dngUri != null || currentGroup.dngUri1 != null || currentGroup.dngUri2 != null) {
+                    popup.menu.add(0, MENU_SHARE_TIFF, 0, getString(R.string.share_as_tiff)).apply {
+                        setIcon(R.drawable.ic_photo)
+                    }
+                }
             }
             if (currentGroup.isMultiCamera) {
                 popup.menu.add(0, MENU_COLLAGE, 0, getString(R.string.create_multi_cam_collage)).apply {
@@ -586,7 +742,12 @@ open class ImageViewerFragment : Fragment() {
 
             popup.setOnMenuItemClickListener { item ->
                 when (item.itemId) {
+                    MENU_SHARE -> performShare()
+                    MENU_EXPORT_HUB -> openExportHub()
                     MENU_SHARE_TIFF -> performShareAsTiff()
+                    MENU_EXPORT_CINEMADNG_FRAME -> openExportHub()
+                    MENU_EXPORT_CINEMA_DNG -> performExportCinemaDng(adapter.getGroup(binding.imagePager.currentItem))
+                    MENU_EXPORT_MP4 -> openExportHub()
                     MENU_COLLAGE -> showMultiCamCollageDialog(adapter.getGroup(binding.imagePager.currentItem))
                     MENU_DETAILS -> showImageDetails()
                     MENU_DELETE -> {
@@ -823,20 +984,55 @@ open class ImageViewerFragment : Fragment() {
         updateControlsVisibility()
     }
 
+    private fun openExportHub() {
+        if (!::adapter.isInitialized || adapter.itemCount == 0) return
+        val currentIndex = binding.imagePager.currentItem
+        val currentGroup = adapter.getGroup(currentIndex)
+        lifecycleScope.launch {
+            val fullyLoadedGroup = if (!currentGroup.metadataLoaded) {
+                repository.loadMetadata(currentGroup)
+            } else {
+                currentGroup
+            }
+            val config = currentEditConfig ?: fullyLoadedGroup.editConfig
+            val frameInfo = currentCinemaDngFrame ?: adapter.getActiveCinemaDngFrame(currentIndex)
+            val frameIndex = frameInfo?.first ?: 0
+            val sheet = RawVideoExportSheet.newInstance(
+                group = fullyLoadedGroup,
+                currentLog = config?.log,
+                currentLut = config?.lut,
+                frameIndex = frameIndex
+            )
+            sheet.show(childFragmentManager, RawVideoExportSheet.TAG)
+        }
+    }
+
     private fun performShare() {
+        if (!::adapter.isInitialized || adapter.itemCount == 0) return
         val currentIndex = binding.imagePager.currentItem
         val currentGroup = adapter.getGroup(currentIndex)
         val selectedFormat = adapter.getSelectedFormat(currentIndex)
 
         if (selectedFormat == "DNG" && currentGroup.isHalfFrame()) {
             showHalfFrameShareSheet(currentGroup)
-        } else {
-            val currentUri = when (selectedFormat) {
-                "JPG" -> currentGroup.jpgUri
-                "DNG" -> currentGroup.dngUri ?: currentGroup.dngUri1 ?: currentGroup.dngUri2
-                else -> currentGroup.jpgUri ?: currentGroup.dngUri ?: currentGroup.dngUri1 ?: currentGroup.dngUri2
+            return
+        }
+
+        val currentUri = when (selectedFormat) {
+            "JPG" -> currentGroup.jpgUri
+            "MP4" -> currentGroup.mp4VideoUri
+            "DNG" -> currentGroup.dngUri ?: currentGroup.dngUri1 ?: currentGroup.dngUri2 ?: currentGroup.cinemaDngFirstFrameUri
+            else -> currentGroup.jpgUri ?: currentGroup.mp4VideoUri ?: currentGroup.dngUri ?: currentGroup.dngUri1 ?: currentGroup.dngUri2 ?: currentGroup.rawVideoUri ?: currentGroup.cinemaDngFirstFrameUri ?: currentGroup.cinemaDngAudioUri
+        }
+        currentUri?.let {
+            shareImages(listOf(it))
+        } ?: run {
+            val fallbackUri = currentGroup.firstAvailableUri
+            if (fallbackUri != null) {
+                shareImages(listOf(fallbackUri))
+            } else {
+                Toast.makeText(requireContext(), R.string.error_no_external_viewer, Toast.LENGTH_SHORT).show()
             }
-            currentUri?.let { shareImages(listOf(it)) }
         }
     }
 
@@ -993,9 +1189,10 @@ open class ImageViewerFragment : Fragment() {
             if (position == 0) {
                 showLutMenu()
             } else {
-                lifecycleScope.launch {
-                    ensureDngBytesLoaded()
-                    currentEditConfig = currentEditConfig?.copy(log = selectedLog)
+                val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
+                val isRawVideo = currentGroup.isRawVideo || currentGroup.rawVideoUri != null
+                if (isRawVideo) {
+                    currentEditConfig = (currentEditConfig ?: currentGroup.editConfig ?: top.maary.darkbag.models.EditConfig()).copy(log = selectedLog)
                     if (selectedLog == "None") {
                         currentEditConfig = currentEditConfig?.copy(lut = "None")
                     }
@@ -1003,6 +1200,18 @@ open class ImageViewerFragment : Fragment() {
                     updateEditUi()
                     showLutMenu()
                     applyEditPreview()
+                } else {
+                    lifecycleScope.launch {
+                        ensureDngBytesLoaded()
+                        currentEditConfig = currentEditConfig?.copy(log = selectedLog)
+                        if (selectedLog == "None") {
+                            currentEditConfig = currentEditConfig?.copy(lut = "None")
+                        }
+                        markAdjusted()
+                        updateEditUi()
+                        showLutMenu()
+                        applyEditPreview()
+                    }
                 }
             }
         }
@@ -1019,18 +1228,24 @@ open class ImageViewerFragment : Fragment() {
             if (position == 0) {
                 showLutMenu()
             } else {
-                lifecycleScope.launch {
-                    ensureDngBytesLoaded()
-                    if (position == 1) {
-                        currentEditConfig = currentEditConfig?.copy(lut = "None")
-                    } else {
-                        val filename = luts[position - 2].name
-                        currentEditConfig = currentEditConfig?.copy(lut = filename)
-                    }
+                val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
+                val isRawVideo = currentGroup.isRawVideo || currentGroup.rawVideoUri != null
+                val newLut = if (position == 1) "None" else luts[position - 2].name
+                if (isRawVideo) {
+                    currentEditConfig = (currentEditConfig ?: currentGroup.editConfig ?: top.maary.darkbag.models.EditConfig()).copy(lut = newLut)
                     markAdjusted()
                     updateEditUi()
                     showLutMenu()
                     applyEditPreview()
+                } else {
+                    lifecycleScope.launch {
+                        ensureDngBytesLoaded()
+                        currentEditConfig = currentEditConfig?.copy(lut = newLut)
+                        markAdjusted()
+                        updateEditUi()
+                        showLutMenu()
+                        applyEditPreview()
+                    }
                 }
             }
         }
@@ -1327,6 +1542,13 @@ open class ImageViewerFragment : Fragment() {
         val currentHolder = (binding.imagePager.getChildAt(0) as? androidx.recyclerview.widget.RecyclerView)
             ?.findViewHolderForAdapterPosition(currentIndex) as? ImageViewerAdapter.ViewHolder
 
+        if (currentGroup.isRawVideo || currentGroup.rawVideoUri != null) {
+            adapter.updateRawVideoAdjustments(currentIndex, config)
+            binding.initialLoadingIndicator.visibility = View.GONE
+            currentHolder?.binding?.loadingIndicator?.visibility = View.GONE
+            return
+        }
+
         if (isEditingAdjustments) {
             binding.initialLoadingIndicator.visibility = View.VISIBLE
         } else {
@@ -1533,6 +1755,131 @@ open class ImageViewerFragment : Fragment() {
         val config = currentEditConfig ?: return
         val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
         val finalConfig = config.copy(hfLayout = config.hfLayout ?: currentGroup.hfLayout)
+
+        if (currentGroup.isRawVideo || currentGroup.rawVideoUri != null) {
+            val rawVideoUri = currentGroup.rawVideoUri ?: return
+            val ctx = context ?: return
+            val appContext = ctx.applicationContext
+            previewJob?.cancel()
+            binding.initialLoadingIndicator.visibility = View.VISIBLE
+            binding.interactionBlocker?.visibility = View.VISIBLE
+
+            lifecycleScope.launch {
+                try {
+                    withContext(Dispatchers.IO) {
+                        // 1. In-place update .rawvid FileHeader with latest Log, LUT, and adjustments
+                        try {
+                            appContext.contentResolver.openFileDescriptor(rawVideoUri, "rw")?.use { rwFd ->
+                                top.maary.darkbag.rawvideo.RawVideoNative.nativeUpdateHeaderMetadata(
+                                    fd = rwFd.fd,
+                                    activeLog = finalConfig.log,
+                                    activeLut = finalConfig.lut,
+                                    exposure = finalConfig.exposure,
+                                    contrast = finalConfig.contrast,
+                                    saturation = finalConfig.saturation
+                                )
+                            }
+                        } catch (e: Exception) {
+                            android.util.Log.w("ImageViewerFragment", "Failed to in-place update rawvid header", e)
+                        }
+
+                        // 2. If companion JPG exists, re-render it with orientation and save
+                        if (currentGroup.jpgUri != null) {
+                            val pfd = appContext.contentResolver.openFileDescriptor(rawVideoUri, "r")
+                            pfd?.use { parcelFd ->
+                                val handle = top.maary.darkbag.rawvideo.RawVideoNative.nativeOpenReaderFd(parcelFd.fd)
+                                if (handle != 0L) {
+                                    try {
+                                        val header = top.maary.darkbag.rawvideo.RawVideoNative.readHeader(handle)
+                                        if (header != null) {
+                                            val bayerBuf = java.nio.ByteBuffer.allocateDirect(header.width * header.height * 2)
+                                            val meta = LongArray(3)
+                                            val readBytes = top.maary.darkbag.rawvideo.RawVideoNative.nativeReadFrame(handle, 0, meta, bayerBuf)
+                                            if (readBytes > 0) {
+                                                val bmp = android.graphics.Bitmap.createBitmap(header.width, header.height, android.graphics.Bitmap.Config.ARGB_8888)
+                                                val targetLogIndex = if (finalConfig.log != null && finalConfig.log != "None") {
+                                                    SettingsFragment.LOG_CURVES.indexOf(finalConfig.log).takeIf { it >= 0 } ?: -1
+                                                } else -1
+                                                val lutPath = if (finalConfig.lut != null && finalConfig.lut != "None" && finalConfig.lut.isNotBlank()) {
+                                                    val f = java.io.File(lutManager.lutDir, finalConfig.lut)
+                                                    if (f.exists()) f.absolutePath else {
+                                                        val f2 = java.io.File(java.io.File(appContext.filesDir, "luts"), finalConfig.lut)
+                                                        if (f2.exists()) f2.absolutePath else null
+                                                    }
+                                                } else null
+
+                                                top.maary.darkbag.rawvideo.RawVideoNative.nativeDebayerFrameToBitmap(
+                                                    bayerBuffer = bayerBuf,
+                                                    width = header.width,
+                                                    height = header.height,
+                                                    cfaPattern = header.cfaPattern,
+                                                    whiteLevel = header.whiteLevel,
+                                                    blackLevel = header.blackLevel.firstOrNull() ?: 64f,
+                                                    neutralPoint = header.neutralPoint,
+                                                    targetLog = targetLogIndex,
+                                                    lutPath = lutPath,
+                                                    exposure = finalConfig.exposure,
+                                                    contrast = finalConfig.contrast,
+                                                    saturation = finalConfig.saturation,
+                                                    outBitmap = bmp
+                                                )
+
+                                                val baseName = if (isReplacement) currentGroup.baseName else "${currentGroup.baseName}_edited_${System.currentTimeMillis()}"
+                                                val targetUri = if (isReplacement) currentGroup.jpgUri else null
+                                                val jpgFolderUri = appContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                                                    .getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
+
+                                                top.maary.darkbag.utils.ImageSaver.saveProcessedImage(
+                                                    context = appContext,
+                                                    inputBitmap = bmp,
+                                                    bmpPath = null,
+                                                    rotationDegrees = header.orientation,
+                                                    zoomFactor = 1.0f,
+                                                    baseName = baseName,
+                                                    linearDngPath = null,
+                                                    saveJpg = true,
+                                                    saveRaw = false,
+                                                    targetUri = targetUri,
+                                                    jpgFolderUri = if (isReplacement) null else jpgFolderUri,
+                                                    editConfig = finalConfig,
+                                                    isAlreadyStitched = true
+                                                )
+                                                bmp.recycle()
+                                            }
+                                        }
+                                    } finally {
+                                        top.maary.darkbag.rawvideo.RawVideoNative.nativeCloseReader(handle)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("ImageViewerFragment", "Failed to save RAW video adjustments", e)
+                } finally {
+                    binding.initialLoadingIndicator.visibility = View.GONE
+                    binding.interactionBlocker?.visibility = View.GONE
+                }
+
+                resetAdjustments()
+                repository.invalidateCache()
+                val updatedGroups = repository.getGroupedImages(forceRefresh = true)
+                if (updatedGroups.isNotEmpty()) {
+                    val targetBaseName = currentGroup.baseName
+                    val newPos = updatedGroups.indexOfFirst { it.baseName == targetBaseName }.coerceAtLeast(0)
+                    val rawTargetGroup = updatedGroups[newPos]
+                    val targetGroup = repository.loadMetadata(rawTargetGroup)
+                    val mutableList = updatedGroups.toMutableList()
+                    mutableList[newPos] = targetGroup
+                    adapter.updateGroups(mutableList)
+                    binding.imagePager.setCurrentItem(newPos, false)
+                    prepareEditConfig(targetGroup)
+                    updateControlsVisibility()
+                }
+                Toast.makeText(appContext, "Saved adjustments for RAW video", Toast.LENGTH_SHORT).show()
+            }
+            return
+        }
 
         val dngUri1 = currentGroup.dngUri ?: currentGroup.dngUri1
         val dngUri2 = currentGroup.dngUri2
@@ -1750,7 +2097,11 @@ open class ImageViewerFragment : Fragment() {
                 if (updatedGroups.isNotEmpty()) {
                     val targetBaseName = currentGroup.baseName
                     val newPos = updatedGroups.indexOfFirst { it.baseName == targetBaseName }.coerceAtLeast(0)
-                    adapter = ImageViewerAdapter(updatedGroups, lifecycleScope, requireContext()).apply {
+                    val rawTargetGroup = updatedGroups[newPos]
+                    val targetGroup = repository.loadMetadata(rawTargetGroup)
+                    val mutableList = updatedGroups.toMutableList()
+                    mutableList[newPos] = targetGroup
+                    adapter = ImageViewerAdapter(mutableList, lifecycleScope, requireContext()).apply {
                         isMotionPhotoAutoPlay = this@ImageViewerFragment.isMotionPhotoAutoPlay
                         onImageTapped = { toggleUi() }
                         onZoomChanged = { isZoomed -> if (isZoomed) hideUi() else showUi() }
@@ -1760,6 +2111,12 @@ open class ImageViewerFragment : Fragment() {
                         onMultiCameraLensChanged = { _, _ ->
                             updateSplitButtons()
                             updateToolbarIcon()
+                        }
+                        onCinemaDngFrameSelected = { group, index, uri ->
+                            val currentPosition = binding.imagePager.currentItem
+                            if (currentPosition in adapter.getGroups().indices && adapter.getGroup(currentPosition).baseName == group.baseName) {
+                                currentCinemaDngFrame = Pair(index, uri)
+                            }
                         }
                         setFormatSwitcherPersistentHidden(isAdjusted)
                         onCurrentListChanged = { previousList, currentList ->
@@ -1780,6 +2137,7 @@ open class ImageViewerFragment : Fragment() {
                     }
                     binding.imagePager.adapter = adapter
                     binding.imagePager.setCurrentItem(newPos, false)
+                    prepareEditConfig(targetGroup)
                     updateControlsVisibility()
                 }
             } finally {
@@ -2015,22 +2373,109 @@ open class ImageViewerFragment : Fragment() {
 
     private fun shareImages(uris: List<android.net.Uri>) {
         if (uris.isEmpty()) return
+        val mimeType = if (uris.size == 1) {
+            val u = uris[0]
+            val type = context?.contentResolver?.getType(u)
+            type ?: when {
+                u.toString().endsWith(".dng", true) -> "image/x-adobe-dng"
+                u.toString().endsWith(".mp4", true) -> "video/mp4"
+                u.toString().endsWith(".wav", true) -> "audio/wav"
+                else -> "image/jpeg"
+            }
+        } else {
+            val types = uris.mapNotNull { context?.contentResolver?.getType(it) ?: (if (it.toString().endsWith(".dng", true)) "image/x-adobe-dng" else "image/jpeg") }
+            if (types.all { it.startsWith("image/") }) "image/*" else "*/*"
+        }
         val intent = if (uris.size == 1) {
             android.content.Intent(android.content.Intent.ACTION_SEND).apply {
-                type = "image/*"
+                type = mimeType
                 putExtra(android.content.Intent.EXTRA_STREAM, uris[0])
             }
         } else {
             android.content.Intent(android.content.Intent.ACTION_SEND_MULTIPLE).apply {
-                type = "image/*"
+                type = mimeType
                 putParcelableArrayListExtra(android.content.Intent.EXTRA_STREAM, ArrayList(uris))
             }
         }
         intent.addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
         try {
-            startActivity(android.content.Intent.createChooser(intent, "Share Image"))
+            startActivity(android.content.Intent.createChooser(intent, "Share"))
         } catch (e: android.content.ActivityNotFoundException) {
-            android.widget.Toast.makeText(requireContext(), "No app found to share the image.", android.widget.Toast.LENGTH_SHORT).show()
+            android.widget.Toast.makeText(requireContext(), "No app found to share.", android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun showCinemaDngShareExportDialog(group: top.maary.darkbag.models.ImageGroup) {
+        openExportHub()
+    }
+
+    private fun exportCinemaDngFrame(
+        group: top.maary.darkbag.models.ImageGroup,
+        exportType: top.maary.darkbag.rawvideo.RawVideoExporter.FrameExportType,
+        editConfig: top.maary.darkbag.models.EditConfig? = null,
+        targetFrameIndex: Int? = null
+    ) {
+        val currentIndex = binding.imagePager.currentItem
+        val frameInfo = currentCinemaDngFrame ?: adapter.getActiveCinemaDngFrame(currentIndex)
+        val frameIndex = targetFrameIndex ?: frameInfo?.first ?: 0
+        val frameUri = if (targetFrameIndex != null && group.cinemaDngFrameUris.indices.contains(targetFrameIndex)) {
+            group.cinemaDngFrameUris[targetFrameIndex]
+        } else {
+            frameInfo?.second
+                ?: group.cinemaDngFrameUris.getOrNull(frameIndex)
+                ?: group.cinemaDngFirstFrameUri
+                ?: group.dngUri
+        }
+
+        if (frameUri == null) {
+            Toast.makeText(requireContext(), R.string.cinemadng_export_failed, Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        binding.initialLoadingIndicator.visibility = View.VISIBLE
+        binding.interactionBlocker?.visibility = View.VISIBLE
+        Toast.makeText(requireContext(), R.string.cinemadng_exporting_frame, Toast.LENGTH_SHORT).show()
+
+        lifecycleScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                val fullyLoadedGroup = if (!group.metadataLoaded) {
+                    repository.loadMetadata(group)
+                } else {
+                    group
+                }
+                val config = editConfig ?: currentEditConfig ?: fullyLoadedGroup.editConfig
+                top.maary.darkbag.rawvideo.RawVideoExporter.exportSingleFrameFromCinemaDng(
+                    context = requireContext().applicationContext,
+                    frameDngUri = frameUri,
+                    baseName = group.baseName,
+                    frameIndex = frameIndex,
+                    editConfig = config,
+                    exportType = exportType
+                )
+            }
+
+            binding.initialLoadingIndicator.visibility = View.GONE
+            binding.interactionBlocker?.visibility = View.GONE
+
+            val (rawUri, jpgUri) = result
+            if (rawUri != null || jpgUri != null) {
+                Toast.makeText(requireContext(), R.string.cinemadng_export_success, Toast.LENGTH_SHORT).show()
+                refreshCurrentGroupAndAdapter(group.baseName)
+            } else {
+                Toast.makeText(requireContext(), R.string.cinemadng_export_failed, Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    private fun handleCinemaDngFullVideoExport(group: top.maary.darkbag.models.ImageGroup) {
+        if (group.isRawVideo || group.rawVideoUri != null) {
+            openExportHub()
+        } else if (group.mp4VideoUri != null) {
+            shareImages(listOf(group.mp4VideoUri))
+        } else if (group.cinemaDngAudioUri != null) {
+            shareImages(listOf(group.cinemaDngAudioUri))
+        } else {
+            performExportCinemaDng(group)
         }
     }
 
@@ -2193,68 +2638,146 @@ open class ImageViewerFragment : Fragment() {
         return String.format("%.1f %s", size / 1024.0.pow(digitGroups.toDouble()), units[digitGroups])
     }
 
+    private data class SingleDeleteOption(
+        val label: String,
+        val uris: List<Uri>,
+        val isEntireGroup: Boolean
+    )
+
     private fun showDeleteDialog(group: ImageGroup) {
-        if (group.isSingleFormat()) {
+        val hasCdng = group.isCinemaDng || group.cinemaDngFolderUri != null || group.cinemaDngFirstFrameUri != null || group.cinemaDngFrameUris.isNotEmpty()
+        val hasRawVid = group.isRawVideo || group.rawVideoUri != null
+        val hasDerivatives = group.allDerivativeUris.isNotEmpty()
+        val hasPhotoDng = group.dngUri != null || group.dngUri1 != null || group.dngUri2 != null || group.multiDngUris.isNotEmpty()
+
+        val options = mutableListOf<SingleDeleteOption>()
+
+        if (hasCdng && hasRawVid) {
+            options.add(SingleDeleteOption(getString(R.string.delete_cdng_only), group.allCinemaDngUris, false))
+            options.add(SingleDeleteOption(getString(R.string.delete_rawvid_only), group.rawVideoMasterUris, false))
+            if (hasDerivatives) {
+                options.add(SingleDeleteOption(getString(R.string.delete_derivatives_only), group.allDerivativeUris, false))
+            }
+            options.add(SingleDeleteOption(getString(R.string.delete_entire_group_detailed), group.allUris, true))
+        } else if (hasCdng) {
+            options.add(SingleDeleteOption(getString(R.string.delete_cdng_only), group.allCinemaDngUris, false))
+            if (hasDerivatives) {
+                options.add(SingleDeleteOption(getString(R.string.delete_derivatives_only), group.allDerivativeUris, false))
+            }
+            options.add(SingleDeleteOption(getString(R.string.delete_entire_group_detailed), group.allUris, true))
+        } else if (hasRawVid) {
+            options.add(SingleDeleteOption(getString(R.string.delete_rawvid_only), group.rawVideoMasterUris, false))
+            if (hasDerivatives) {
+                options.add(SingleDeleteOption(getString(R.string.delete_derivatives_only), group.allDerivativeUris, false))
+            }
+            options.add(SingleDeleteOption(getString(R.string.delete_entire_group_detailed), group.allUris, true))
+        } else if (hasPhotoDng && hasDerivatives) {
+            options.add(SingleDeleteOption(getString(R.string.delete_photo_raw_only), group.photoMasterUris, false))
+            options.add(SingleDeleteOption(getString(R.string.delete_photo_jpg_only), group.allDerivativeUris, false))
+            options.add(SingleDeleteOption(getString(R.string.delete_entire_group_detailed), group.allUris, true))
+        } else if (hasPhotoDng) {
+            options.add(SingleDeleteOption(getString(R.string.delete_photo_raw_only), group.photoMasterUris, true))
+        } else if (hasDerivatives) {
+            if (group.allDerivativeUris.size > 1) {
+                val derivatives = adapter.getDerivativeUris(group)
+                val activeIndex = adapter.getSelectedDerivativeIndex(group.baseName).coerceIn(0, (derivatives.size - 1).coerceAtLeast(0))
+                val activeUri = derivatives.getOrNull(activeIndex) ?: group.jpgUri ?: group.mp4VideoUri
+                if (activeUri != null) {
+                    options.add(SingleDeleteOption(getString(R.string.delete_this_format_only), listOf(activeUri), false))
+                }
+                options.add(SingleDeleteOption(getString(R.string.delete_entire_group_detailed), group.allUris, true))
+            } else {
+                options.add(SingleDeleteOption(getString(R.string.delete_entire_group), group.allUris, true))
+            }
+        } else {
+            options.add(SingleDeleteOption(getString(R.string.delete_entire_group), group.allUris, true))
+        }
+
+        if (group.isSingleFormat() || options.size <= 1) {
             com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
                 .setTitle(R.string.delete_image_title)
                 .setMessage(R.string.delete_image_message)
                 .setPositiveButton(R.string.delete_button_alt) { _, _ ->
-                    deleteImage(group, true)
+                    val chosen = options.firstOrNull()
+                    deleteImage(group, chosen?.uris ?: group.allUris, chosen?.isEntireGroup ?: true)
                 }
                 .setNegativeButton(R.string.cancel, null)
                 .show()
             return
         }
 
-        val options = arrayOf(getString(R.string.delete_this_format_only), getString(R.string.delete_entire_group))
-        var checkedItem = 1
+        val labels = options.map { it.label }.toTypedArray()
+        var checkedItem = options.size - 1
         com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
             .setTitle(R.string.delete_image_title)
-            .setSingleChoiceItems(options, checkedItem) { _, which ->
+            .setSingleChoiceItems(labels, checkedItem) { _, which ->
                 checkedItem = which
             }
             .setPositiveButton(R.string.delete_button_alt) { _, _ ->
-                deleteImage(group, checkedItem == 1)
+                val chosen = options[checkedItem]
+                deleteImage(group, chosen.uris, chosen.isEntireGroup)
             }
             .setNegativeButton(R.string.cancel, null)
             .show()
     }
 
     protected open fun deleteImage(group: ImageGroup, deleteGroup: Boolean) {
+        deleteImage(group, if (deleteGroup) group.allUris else null, deleteGroup)
+    }
+
+    protected open fun deleteImage(group: ImageGroup, targetUris: List<Uri>?, deleteGroup: Boolean) {
         val context = context ?: return
         lifecycleScope.launch {
             var nextTargetUri: String? = null
             val currentIndex = binding.imagePager.currentItem
             val urisToDelete = mutableListOf<Uri>()
 
-            if (deleteGroup) {
-                group.jpgUri?.let { urisToDelete.add(it) }
-                group.dngUri?.let { urisToDelete.add(it) }
-                group.dngUri1?.let { urisToDelete.add(it) }
-                group.dngUri2?.let { urisToDelete.add(it) }
+            if (targetUris != null) {
+                urisToDelete.addAll(targetUris)
+            } else if (deleteGroup) {
+                urisToDelete.addAll(group.allUris)
+            } else {
+                val selectedFormat = adapter.getSelectedFormat(currentIndex)
+                val isCdng = selectedFormat == "CDNG" || ((selectedFormat == ImageViewerAdapter.FORMAT_DNG || selectedFormat == "RAW") && (group.isCinemaDng || group.cinemaDngFolderUri != null || group.cinemaDngFirstFrameUri != null || group.cinemaDngFrameUris.isNotEmpty()))
+                val isRawVid = selectedFormat == "RAWVID" || ((selectedFormat == ImageViewerAdapter.FORMAT_DNG || selectedFormat == "RAW") && (group.isRawVideo || group.rawVideoUri != null))
+                val isPhotoDng = selectedFormat == ImageViewerAdapter.FORMAT_DNG || selectedFormat == "DNG" || selectedFormat == "RAW"
 
+                when {
+                    isCdng -> {
+                        urisToDelete.addAll(group.allCinemaDngUris)
+                    }
+                    isRawVid -> {
+                        urisToDelete.addAll(group.rawVideoMasterUris)
+                    }
+                    isPhotoDng -> {
+                        urisToDelete.addAll(group.photoMasterUris)
+                    }
+                    else -> {
+                        val derivatives = adapter.getDerivativeUris(group)
+                        val activeIndex = adapter.getSelectedDerivativeIndex(group.baseName).coerceIn(0, (derivatives.size - 1).coerceAtLeast(0))
+                        val activeUri = derivatives.getOrNull(activeIndex) ?: group.jpgUri ?: group.mp4VideoUri
+                        activeUri?.let { urisToDelete.add(it) }
+                    }
+                }
+            }
+
+            // Ensure CinemaDNG folder is included if sequence frames are deleted
+            if (urisToDelete.any { group.allCinemaDngUris.contains(it) } && group.cinemaDngFolderUri != null) {
+                if (!urisToDelete.contains(group.cinemaDngFolderUri)) {
+                    group.cinemaDngFolderUri?.let { urisToDelete.add(it) }
+                }
+            }
+
+            if (deleteGroup) {
                 if (adapter.itemCount > 1) {
                     val nextIndex = if (currentIndex < adapter.itemCount - 1) currentIndex + 1 else currentIndex - 1
                     val nextGroup = adapter.getGroup(nextIndex)
-                    nextTargetUri = (nextGroup.jpgUri ?: nextGroup.dngUri)?.toString()
-                }
-            } else {
-                val selectedFormat = adapter.getSelectedFormat(binding.imagePager.currentItem)
-                if (selectedFormat == "DNG" && group.isHalfFrame()) {
-                     group.dngUri1?.let { urisToDelete.add(it) }
-                     group.dngUri2?.let { urisToDelete.add(it) }
-                } else {
-                    val currentUri = when (selectedFormat) {
-                        "JPG" -> group.jpgUri
-                        "DNG" -> group.dngUri ?: group.dngUri1 ?: group.dngUri2
-                        else -> group.jpgUri ?: group.dngUri ?: group.dngUri1 ?: group.dngUri2
-                    }
-                    currentUri?.let { urisToDelete.add(it) }
+                    nextTargetUri = nextGroup.firstAvailableUri?.toString()
                 }
             }
 
             val securityExceptionUris = mutableListOf<Uri>()
-            for (uri in urisToDelete) {
+            for (uri in urisToDelete.distinct()) {
                 try {
                     deleteUriSafe(context, uri)
                 } catch (e: SecurityException) {
@@ -2270,13 +2793,13 @@ open class ImageViewerFragment : Fragment() {
             if (!deleteGroup) {
                 repository.invalidateCache()
                 val remainingGroup = repository.getGroupedImages(forceRefresh = true).find { it.baseName == group.baseName }
-                nextTargetUri = if (remainingGroup != null) {
-                    (remainingGroup.jpgUri ?: remainingGroup.dngUri)?.toString()
+                nextTargetUri = if (remainingGroup != null && remainingGroup.hasAny()) {
+                    remainingGroup.firstAvailableUri?.toString()
                 } else {
                     if (adapter.itemCount > 1) {
                         val nextIndex = if (currentIndex < adapter.itemCount - 1) currentIndex + 1 else currentIndex - 1
                         val nextGroup = adapter.getGroup(nextIndex)
-                        (nextGroup.jpgUri ?: nextGroup.dngUri)?.toString()
+                        nextGroup.firstAvailableUri?.toString()
                     } else null
                 }
             }
@@ -2301,6 +2824,8 @@ open class ImageViewerFragment : Fragment() {
 
 
     private fun setupToolbar() {
+        updateSplitButtons()
+        updateToolbarIcon()
         binding.btnNavigation.setOnClickListener {
             if (isGalleryMode) {
                 if (::galleryAdapter.isInitialized && galleryAdapter.isSelectionMode) {
@@ -2483,22 +3008,27 @@ open class ImageViewerFragment : Fragment() {
 
     private fun showBatchDeleteDialog(selectedItems: List<GallerySelectedItem>) {
         if (selectedItems.isEmpty()) return
-        val hasAnyDng = selectedItems.any { item ->
+        val hasAnyRaw = selectedItems.any { item ->
             if (item.specificLens != null) {
                 item.specificLens.dngUri != null
             } else {
-                item.group.dngUri != null || item.group.dngUri1 != null || item.group.dngUri2 != null || item.group.multiDngUris.isNotEmpty()
+                item.group.hasMasterRaw
             }
         }
-        val hasAnyJpg = selectedItems.any { item ->
+        val hasAnyDerivatives = selectedItems.any { item ->
             if (item.specificLens != null) {
                 item.specificLens.jpgUri != null
             } else {
-                item.group.jpgUri != null || item.group.multiJpgUris.isNotEmpty()
+                item.group.hasDerivatives
             }
         }
 
-        DarkbagBatchDeleteSheet.newInstance(selectedItems.size, hasAnyDng, hasAnyJpg)
+        val hasAnyCinemaDng = selectedItems.any { item ->
+            val g = item.group
+            g.isCinemaDng || g.cinemaDngFolderUri != null || g.cinemaDngFirstFrameUri != null || g.cinemaDngFrameUris.isNotEmpty()
+        }
+
+        DarkbagBatchDeleteSheet.newInstance(selectedItems.size, hasAnyRaw, hasAnyDerivatives, hasAnyCinemaDng)
             .show(childFragmentManager, DarkbagBatchDeleteSheet.TAG)
     }
 
@@ -2512,36 +3042,36 @@ open class ImageViewerFragment : Fragment() {
                 val lens = item.specificLens
                 if (lens != null) {
                     when (deleteMode) {
-                        0 -> { // Entire group / lens
+                        DarkbagBatchDeleteSheet.MODE_ENTIRE_GROUP -> { // Entire group / lens
                             lens.jpgUri?.let { urisToDelete.add(it) }
                             lens.dngUri?.let { urisToDelete.add(it) }
                         }
-                        1 -> { // RAW only
+                        DarkbagBatchDeleteSheet.MODE_RAW_ONLY -> { // RAW only
                             lens.dngUri?.let { urisToDelete.add(it) }
                         }
-                        2 -> { // JPG only
+                        DarkbagBatchDeleteSheet.MODE_DERIVATIVES_ONLY -> { // Derivatives only
                             lens.jpgUri?.let { urisToDelete.add(it) }
+                        }
+                        DarkbagBatchDeleteSheet.MODE_CINEMADNG_ONLY -> {
+                            // Lens is photo, no CDNG sequence
                         }
                     }
                 } else {
                     when (deleteMode) {
-                        0 -> { // Entire group
-                            group.jpgUri?.let { urisToDelete.add(it) }
-                            group.dngUri?.let { urisToDelete.add(it) }
-                            group.dngUri1?.let { urisToDelete.add(it) }
-                            group.dngUri2?.let { urisToDelete.add(it) }
-                            group.multiJpgUris.forEach { urisToDelete.add(it) }
-                            group.multiDngUris.forEach { urisToDelete.add(it) }
+                        DarkbagBatchDeleteSheet.MODE_ENTIRE_GROUP -> {
+                            group.cinemaDngFolderUri?.let { urisToDelete.add(it) }
+                            urisToDelete.addAll(group.allUris)
                         }
-                        1 -> { // RAW only
-                            group.dngUri?.let { urisToDelete.add(it) }
-                            group.dngUri1?.let { urisToDelete.add(it) }
-                            group.dngUri2?.let { urisToDelete.add(it) }
-                            group.multiDngUris.forEach { urisToDelete.add(it) }
+                        DarkbagBatchDeleteSheet.MODE_RAW_ONLY -> {
+                            group.cinemaDngFolderUri?.let { urisToDelete.add(it) }
+                            urisToDelete.addAll(group.allMasterRawUris)
                         }
-                        2 -> { // JPG only
-                            group.jpgUri?.let { urisToDelete.add(it) }
-                            group.multiJpgUris.forEach { urisToDelete.add(it) }
+                        DarkbagBatchDeleteSheet.MODE_DERIVATIVES_ONLY -> {
+                            urisToDelete.addAll(group.allDerivativeUris)
+                        }
+                        DarkbagBatchDeleteSheet.MODE_CINEMADNG_ONLY -> {
+                            group.cinemaDngFolderUri?.let { urisToDelete.add(it) }
+                            urisToDelete.addAll(group.allCinemaDngUris)
                         }
                     }
                 }
@@ -2596,6 +3126,10 @@ open class ImageViewerFragment : Fragment() {
 
         adapter.setUiVisibility(true)
 
+        binding.topBarContainer.animate().cancel()
+        binding.bottomLeftControls.animate().cancel()
+        binding.bottomRightControls.animate().cancel()
+
         binding.topBarContainer.animate().translationY(0f).alpha(1f).setDuration(200).setListener(null).start()
         binding.bottomLeftControls.animate().translationY(0f).alpha(1f).setDuration(200).setListener(null).start()
         binding.bottomRightControls.animate().translationY(0f).alpha(1f).setDuration(200).setListener(null).start()
@@ -2608,6 +3142,10 @@ open class ImageViewerFragment : Fragment() {
         isUiVisible = false
 
         adapter.setUiVisibility(false)
+
+        binding.topBarContainer.animate().cancel()
+        binding.bottomLeftControls.animate().cancel()
+        binding.bottomRightControls.animate().cancel()
 
         val topShift = -(binding.topBarContainer.height + (binding.topBarContainer.layoutParams as ViewGroup.MarginLayoutParams).topMargin).toFloat()
         val bottomShift = (binding.bottomLeftControls.height + (binding.bottomLeftControls.layoutParams as ViewGroup.MarginLayoutParams).bottomMargin).toFloat()
@@ -2721,14 +3259,18 @@ open class ImageViewerFragment : Fragment() {
             bottomPadding = 0
         }
 
-        android.transition.TransitionManager.beginDelayedTransition(binding.viewerRoot, android.transition.AutoTransition().apply {
-            duration = 200
-            addTarget(binding.imagePager)
-        })
+        val currentGroup = if (::adapter.isInitialized && adapter.itemCount > 0 && binding.imagePager.currentItem in 0 until adapter.itemCount) adapter.getGroup(binding.imagePager.currentItem) else null
+        val isVideo = currentGroup?.isRawVideo == true || currentGroup?.mp4VideoUri != null || (binding.imagePager.getChildAt(0) as? androidx.recyclerview.widget.RecyclerView)?.findViewHolderForAdapterPosition(binding.imagePager.currentItem)?.let { (it as? ImageViewerAdapter.ViewHolder)?.isPlayingVideo } == true
+
+        if (!isVideo) {
+            android.transition.TransitionManager.beginDelayedTransition(binding.viewerRoot, android.transition.AutoTransition().apply {
+                duration = 200
+                addTarget(binding.imagePager)
+            })
+        }
         binding.imagePager.setPadding(0, topPadding, 0, bottomPadding)
 
         // Ensure half-frame masks match the visible viewport
-        val currentGroup = if (::adapter.isInitialized && adapter.itemCount > 0) adapter.getGroup(binding.imagePager.currentItem) else null
         val activeLayout = currentEditConfig?.hfLayout ?: currentGroup?.hfLayout
         val isTB = activeLayout == "TB" || activeLayout?.contains("top", ignoreCase = true) == true
 
@@ -2805,13 +3347,327 @@ open class ImageViewerFragment : Fragment() {
         }
     }
 
+    private var activeExportDialog: androidx.appcompat.app.AlertDialog? = null
+
     override fun onDestroyView() {
+        activeExportDialog?.let {
+            if (it.isShowing) {
+                try { it.dismiss() } catch (_: Exception) {}
+            }
+        }
+        activeExportDialog = null
         if (::adapter.isInitialized) {
             adapter.stopAllMotionVideos()
         }
         binding.imagePager.unregisterOnPageChangeCallback(pageChangeCallback)
         super.onDestroyView()
         _binding = null
+    }
+
+    private suspend fun refreshCurrentGroupAndAdapter(targetBaseName: String, autoSelectFormat: String? = null) {
+        repository.invalidateCache()
+        val newGroups = repository.getGroupedImages(forceRefresh = true)
+        if (_binding == null || !::adapter.isInitialized) return
+        adapter.updateGroups(newGroups) {
+            if (_binding == null || !::adapter.isInitialized) return@updateGroups
+            if (autoSelectFormat != null) {
+                adapter.setFormatForGroup(targetBaseName, autoSelectFormat)
+            }
+            val currentIndex = binding.imagePager.currentItem
+            if (currentIndex in newGroups.indices) {
+                val currentGroup = newGroups[currentIndex]
+                if (currentGroup.baseName == targetBaseName) {
+                    adapter.notifyItemChanged(currentIndex)
+                    prepareEditConfig(currentGroup)
+                    updateSplitButtons()
+                    updateControlsVisibility()
+                    updateToolbarIcon()
+                }
+            }
+        }
+        if (::galleryAdapter.isInitialized) {
+            galleryAdapter.submitList(newGroups)
+        }
+    }
+
+    private fun showExportProgressDialog(
+        title: String,
+        onCancel: (() -> Unit)? = null
+    ): Pair<androidx.appcompat.app.AlertDialog, (Int, Int) -> Unit> {
+        val dialogView = layoutInflater.inflate(R.layout.layout_export_progress_dialog, null)
+        val titleView = dialogView.findViewById<TextView>(R.id.export_dialog_title)
+        val progressBar = dialogView.findViewById<com.google.android.material.progressindicator.LinearProgressIndicator>(R.id.export_progress_bar)
+        val progressText = dialogView.findViewById<TextView>(R.id.export_progress_text)
+
+        titleView.text = title
+        progressBar.isIndeterminate = false
+        progressBar.progress = 0
+        progressText.text = getString(R.string.export_progress_preparing)
+
+        val builder = com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
+            .setView(dialogView)
+            .setCancelable(false)
+
+        if (onCancel != null) {
+            builder.setNegativeButton(R.string.cancel) { _, _ ->
+                onCancel()
+            }
+        }
+
+        val dialog = builder.create()
+        dialog.show()
+        activeExportDialog = dialog
+
+        val updateProgress: (Int, Int) -> Unit = { current, total ->
+            if (total > 0) {
+                val percent = (current * 100) / total
+                lifecycleScope.launch(Dispatchers.Main) {
+                    if (dialog.isShowing) {
+                        progressBar.progress = percent
+                        progressText.text = getString(R.string.export_progress_format, percent, current, total)
+                    }
+                }
+            }
+        }
+        return Pair(dialog, updateProgress)
+    }
+
+    private fun performExportCinemaDng(group: top.maary.darkbag.models.ImageGroup) {
+        val uri = group.rawVideoUri ?: return
+        val context = requireContext()
+        val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val rawFolderUriStr = prefs.getString(SettingsFragment.KEY_RAW_STORAGE_URI, null)
+        val clipName = "CDNG_${group.baseName}"
+
+        val isUserCancelled = java.util.concurrent.atomic.AtomicBoolean(false)
+        var exportJob: kotlinx.coroutines.Job? = null
+
+        val (progressDialog, updateProgress) = showExportProgressDialog(
+            title = getString(R.string.export_progress_exporting_cdng),
+            onCancel = {
+                isUserCancelled.set(true)
+                exportJob?.cancel()
+            }
+        )
+
+        exportJob = lifecycleScope.launch {
+            var tempExportDir: File? = null
+            var destDir: File? = null
+            try {
+                if (rawFolderUriStr != null) {
+                    // 路径 B（配置了 SAF Tree URI）：向 cacheDir 临时输出并流式复制到 SAF DocumentFile
+                    val tempDir = File(context.cacheDir, "cdng_${System.currentTimeMillis()}").apply { mkdirs() }
+                    tempExportDir = tempDir
+
+                    val resultDir = top.maary.darkbag.rawvideo.RawVideoExporter.exportToCinemaDng(
+                        context = context,
+                        rawVideoUri = uri,
+                        outputDir = tempDir,
+                        clipName = clipName,
+                        isCancelled = { isUserCancelled.get() || !isActive },
+                        onProgress = updateProgress
+                    )
+
+                    if (isUserCancelled.get() || !isActive) {
+                        withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
+                            tempDir.deleteRecursively()
+                        }
+                        Toast.makeText(context, R.string.toast_export_cancelled, Toast.LENGTH_SHORT).show()
+                        return@launch
+                    }
+
+                    if (resultDir != null && resultDir.exists()) {
+                        val exportedClipName = resultDir.name
+                        withContext(Dispatchers.IO) {
+                            try {
+                                val treeUri = Uri.parse(rawFolderUriStr)
+                                val treeDoc = androidx.documentfile.provider.DocumentFile.fromTreeUri(context, treeUri)
+                                val clipDirDoc = treeDoc?.createDirectory(exportedClipName)
+                                if (clipDirDoc != null) {
+                                    resultDir.listFiles()?.forEach { file ->
+                                        if (isUserCancelled.get() || !isActive) return@forEach
+                                        val mime = if (file.name.endsWith(".wav")) "audio/wav" else "image/x-adobe-dng"
+                                        val targetDoc = clipDirDoc.createFile(mime, file.name)
+                                        if (targetDoc != null) {
+                                            context.contentResolver.openOutputStream(targetDoc.uri)?.use { out ->
+                                                file.inputStream().use { it.copyTo(out) }
+                                            }
+                                        }
+                                    }
+                                }
+                            } catch (e: Exception) {
+                                android.util.Log.e("ImageViewerFragment", "Failed to copy CinemaDNG to SAF folder", e)
+                            } finally {
+                                tempDir.deleteRecursively()
+                            }
+                        }
+
+                        if (isUserCancelled.get() || !isActive) {
+                            Toast.makeText(context, R.string.toast_export_cancelled, Toast.LENGTH_SHORT).show()
+                            return@launch
+                        }
+
+                        refreshCurrentGroupAndAdapter(group.baseName)
+                        Toast.makeText(context, "CinemaDNG exported: $exportedClipName", Toast.LENGTH_LONG).show()
+                    } else {
+                        withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
+                            tempDir.deleteRecursively()
+                        }
+                        Toast.makeText(context, "CinemaDNG export failed", Toast.LENGTH_SHORT).show()
+                    }
+                } else {
+                    // 路径 A（未配置 SAF，保存到公共 Pictures 目录）：直接写出，避免双重写入
+                    val picturesDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_PICTURES)
+                    val targetDir = File(picturesDir, "Darkbag/CinemaDNG/$clipName").apply { mkdirs() }
+                    destDir = targetDir
+
+                    val resultDir = top.maary.darkbag.rawvideo.RawVideoExporter.exportToCinemaDng(
+                        context = context,
+                        rawVideoUri = uri,
+                        outputDir = targetDir,
+                        clipName = clipName,
+                        isCancelled = { isUserCancelled.get() || !isActive },
+                        onProgress = updateProgress
+                    )
+
+                    if (isUserCancelled.get() || !isActive) {
+                        withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
+                            targetDir.deleteRecursively()
+                        }
+                        Toast.makeText(context, R.string.toast_export_cancelled, Toast.LENGTH_SHORT).show()
+                        return@launch
+                    }
+
+                    if (resultDir != null && resultDir.exists()) {
+                        withContext(Dispatchers.IO) {
+                            val filePaths = resultDir.listFiles()?.map { it.absolutePath }?.toTypedArray()
+                            if (!filePaths.isNullOrEmpty()) {
+                                android.media.MediaScannerConnection.scanFile(context, filePaths, null, null)
+                            }
+                        }
+                        refreshCurrentGroupAndAdapter(group.baseName)
+                        Toast.makeText(context, "CinemaDNG exported: $clipName", Toast.LENGTH_LONG).show()
+                    } else {
+                        withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
+                            targetDir.deleteRecursively()
+                        }
+                        Toast.makeText(context, "CinemaDNG export failed", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            } catch (e: java.util.concurrent.CancellationException) {
+                withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
+                    tempExportDir?.deleteRecursively()
+                    destDir?.deleteRecursively()
+                }
+                Toast.makeText(context, R.string.toast_export_cancelled, Toast.LENGTH_SHORT).show()
+            } catch (e: Exception) {
+                withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
+                    tempExportDir?.deleteRecursively()
+                    destDir?.deleteRecursively()
+                }
+                if (isUserCancelled.get()) {
+                    Toast.makeText(context, R.string.toast_export_cancelled, Toast.LENGTH_SHORT).show()
+                } else {
+                    android.util.Log.e("ImageViewerFragment", "CinemaDNG export error", e)
+                    Toast.makeText(context, "CinemaDNG export error: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            } finally {
+                if (progressDialog.isShowing) {
+                    try { progressDialog.dismiss() } catch (_: Exception) {}
+                }
+                if (activeExportDialog === progressDialog) {
+                    activeExportDialog = null
+                }
+            }
+        }
+    }
+
+    private fun performExportMp4(
+        group: top.maary.darkbag.models.ImageGroup,
+        config: top.maary.darkbag.models.EditConfig = currentEditConfig ?: group.editConfig ?: top.maary.darkbag.models.EditConfig(),
+        targetResolution: Int = 1080
+    ) {
+        val uri = group.rawVideoUri ?: return
+        val context = requireContext()
+        val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val mediaFolderUri = prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
+
+        val tempMp4File = File(context.cacheDir, "${group.baseName}_graded.mp4")
+
+        val isUserCancelled = java.util.concurrent.atomic.AtomicBoolean(false)
+        var exportJob: kotlinx.coroutines.Job? = null
+
+        val (progressDialog, updateProgress) = showExportProgressDialog(
+            title = getString(R.string.export_progress_exporting_mp4),
+            onCancel = {
+                isUserCancelled.set(true)
+                exportJob?.cancel()
+            }
+        )
+
+        exportJob = lifecycleScope.launch {
+            try {
+                val success = top.maary.darkbag.rawvideo.RawVideoExporter.exportToMp4(
+                    context = context,
+                    rawVideoUri = uri,
+                    outputFile = tempMp4File,
+                    editConfig = config,
+                    targetResolution = targetResolution,
+                    isCancelled = { isUserCancelled.get() || !isActive },
+                    onProgress = updateProgress
+                )
+
+                if (isUserCancelled.get() || !isActive) {
+                    withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
+                        tempMp4File.delete()
+                    }
+                    Toast.makeText(context, R.string.toast_export_cancelled, Toast.LENGTH_SHORT).show()
+                    return@launch
+                }
+
+                if (success && tempMp4File.exists() && tempMp4File.length() > 0) {
+                    val (savedUri, _) = top.maary.darkbag.utils.ImageSaver.saveMp4Video(
+                        context = context,
+                        mp4File = tempMp4File,
+                        baseName = "${group.baseName}_graded",
+                        mediaFolderUri = mediaFolderUri
+                    )
+                    if (savedUri != null) {
+                        refreshCurrentGroupAndAdapter(group.baseName, autoSelectFormat = ImageViewerAdapter.FORMAT_JPG)
+                        Toast.makeText(context, "Graded MP4 saved: ${group.baseName}_graded.mp4", Toast.LENGTH_LONG).show()
+                    } else {
+                        Toast.makeText(context, "Failed to save MP4 to storage", Toast.LENGTH_SHORT).show()
+                    }
+                } else {
+                    withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
+                        tempMp4File.delete()
+                    }
+                    Toast.makeText(context, "MP4 export failed", Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: java.util.concurrent.CancellationException) {
+                withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
+                    tempMp4File.delete()
+                }
+                Toast.makeText(context, R.string.toast_export_cancelled, Toast.LENGTH_SHORT).show()
+            } catch (e: Exception) {
+                withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
+                    tempMp4File.delete()
+                }
+                if (isUserCancelled.get()) {
+                    Toast.makeText(context, R.string.toast_export_cancelled, Toast.LENGTH_SHORT).show()
+                } else {
+                    android.util.Log.e("ImageViewerFragment", "MP4 export error", e)
+                    Toast.makeText(context, "MP4 export error: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            } finally {
+                if (progressDialog.isShowing) {
+                    try { progressDialog.dismiss() } catch (_: Exception) {}
+                }
+                if (activeExportDialog === progressDialog) {
+                    activeExportDialog = null
+                }
+            }
+        }
     }
 
     companion object {
@@ -2822,6 +3678,11 @@ open class ImageViewerFragment : Fragment() {
         private const val MENU_SAVE_AS = 3
         private const val MENU_SHARE_TIFF = 4
         private const val MENU_COLLAGE = 5
+        private const val MENU_EXPORT_CINEMA_DNG = 6
+        private const val MENU_EXPORT_MP4 = 7
+        private const val MENU_EXPORT_CINEMADNG_FRAME = 8
+        private const val MENU_SHARE = 9
+        private const val MENU_EXPORT_HUB = 10
 
         private const val EXPOSURE_MIN = -4f
         private const val EXPOSURE_MAX = 4f

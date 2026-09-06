@@ -166,6 +166,23 @@ class ExpressiveShutterButton @JvmOverloads constructor(
         clipToOutline = false // Don't clip so we can see the progress ring
     }
 
+    private var isHoldingLongPress = false
+    var isLongPressHoldEnabled: Boolean = false
+    var onLongPressHoldStarted: (() -> Unit)? = null
+    var onLongPressHoldReleased: (() -> Unit)? = null
+
+    private var isRecordingVideo = false
+    private val recordingDotColor = Color.parseColor("#E53935") // Vivid Red
+
+    private val longPressRunnable = Runnable {
+        if (!isEnabled || !isLongPressHoldEnabled) return@Runnable
+        isHoldingLongPress = true
+        isRecordingVideo = true
+        performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+        invalidate()
+        onLongPressHoldStarted?.invoke()
+    }
+
     override fun onTouchEvent(event: android.view.MotionEvent): Boolean {
         if (!isEnabled) return super.onTouchEvent(event)
 
@@ -174,21 +191,53 @@ class ExpressiveShutterButton @JvmOverloads constructor(
                 if (!isPointInsidePath(event.x, event.y)) {
                     return false
                 }
+                isHoldingLongPress = false
+                if (isLongPressHoldEnabled) {
+                    removeCallbacks(longPressRunnable)
+                    postDelayed(longPressRunnable, 350L)
+                }
                 animate().scaleX(0.95f).scaleY(0.95f).setDuration(100).start()
             }
             android.view.MotionEvent.ACTION_UP -> {
+                removeCallbacks(longPressRunnable)
                 animate().scaleX(1.0f).scaleY(1.0f).setDuration(150).withEndAction {
                     if (!isRotating) {
                         clickSpinAnimator.cancel()
                         clickSpinAnimator.start()
                     }
                 }.start()
+
+                if (isHoldingLongPress) {
+                    isHoldingLongPress = false
+                    isRecordingVideo = false
+                    invalidate()
+                    onLongPressHoldReleased?.invoke()
+                    return true
+                }
             }
             android.view.MotionEvent.ACTION_CANCEL -> {
+                removeCallbacks(longPressRunnable)
                 animate().scaleX(1.0f).scaleY(1.0f).setDuration(150).start()
+                if (isHoldingLongPress) {
+                    isHoldingLongPress = false
+                    isRecordingVideo = false
+                    invalidate()
+                    onLongPressHoldReleased?.invoke()
+                    return true
+                }
             }
         }
         return super.onTouchEvent(event)
+    }
+
+    fun setRecordingState(recording: Boolean) {
+        isRecordingVideo = recording
+        if (recording) {
+            progressPaint.color = recordingDotColor
+        } else {
+            progressPaint.color = colorPrimary
+        }
+        invalidate()
     }
 
     private fun isPointInsidePath(x: Float, y: Float): Boolean {
@@ -271,7 +320,12 @@ class ExpressiveShutterButton @JvmOverloads constructor(
         val dx = cx + (dotDistance * cos(angleRad)).toFloat()
         val dy = cy + (dotDistance * sin(angleRad)).toFloat()
 
+        val originalDotColor = dotPaint.color
+        if (isRecordingVideo) {
+            dotPaint.color = recordingDotColor
+        }
         canvas.drawCircle(dx, dy, dotRadius, dotPaint)
+        dotPaint.color = originalDotColor
 
         // 4. Draw the icon (ImageButton's src)
         super.onDraw(canvas)

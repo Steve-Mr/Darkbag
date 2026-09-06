@@ -498,6 +498,7 @@ class LutSurfaceProcessor {
             if (logTypeLoc >= 0) GLES30.glUniform1i(logTypeLoc, currentLogType)
             if (lutSizeLoc >= 0) GLES30.glUniform1i(lutSizeLoc, currentLutSize)
             if (colorEngineModeLoc >= 0) GLES30.glUniform1i(colorEngineModeLoc, currentColorEngineMode)
+            if (focusPeakingLoc >= 0) GLES30.glUniform1i(focusPeakingLoc, 0) // Never bake peaking lines into video output
 
             if (posHandle >= 0) {
                 vertexBuffer.position(0)

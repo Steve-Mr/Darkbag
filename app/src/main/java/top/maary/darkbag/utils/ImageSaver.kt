@@ -7,6 +7,8 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.net.Uri
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import android.os.Build
 import android.provider.MediaStore
 import android.util.Log
@@ -721,5 +723,193 @@ object ImageSaver {
             }
         }
         return null
+    }
+
+    suspend fun saveMp4Video(
+        context: Context,
+        mp4File: File,
+        baseName: String,
+        mediaFolderUri: String? = null
+    ): Pair<Uri?, Bitmap?> = withContext(Dispatchers.IO) {
+        if (!mp4File.exists() || mp4File.length() == 0L) {
+            Log.e(TAG, "MP4 file does not exist or is empty: ${mp4File.absolutePath}")
+            return@withContext Pair(null, null)
+        }
+
+        val effectiveBaseName = DarkbagIdentity.prefixedBaseName(baseName)
+        val mp4FileName = "$effectiveBaseName.mp4"
+        var videoUri: Uri? = null
+        var thumbnailBitmap: Bitmap? = null
+
+        // 1. Extract first frame thumbnail (for immediate in-memory UI preview)
+        val retriever = android.media.MediaMetadataRetriever()
+        try {
+            retriever.setDataSource(mp4File.absolutePath)
+            thumbnailBitmap = retriever.getFrameAtTime(0, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to extract MP4 thumbnail", e)
+        } finally {
+            try { retriever.release() } catch (_: Exception) {}
+        }
+
+        // 2. Save MP4 file to mediaFolderUri (if configured) or Pictures/Darkbag via MediaStore
+        if (mediaFolderUri != null) {
+            videoUri = saveFileToFolder(context, mp4File, mp4FileName, "video/mp4", mediaFolderUri)
+        } else {
+            val contentResolver = context.contentResolver
+            val contentValues = ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, mp4FileName)
+                put(MediaStore.MediaColumns.MIME_TYPE, "video/mp4")
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/Darkbag")
+                    put(MediaStore.MediaColumns.IS_PENDING, 1)
+                }
+            }
+            val collection = MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+            val insertedUri = contentResolver.insert(collection, contentValues)
+            if (insertedUri != null) {
+                try {
+                    contentResolver.openOutputStream(insertedUri, "wt")?.use { out ->
+                        mp4File.inputStream().use { it.copyTo(out) }
+                        out.flush()
+                    }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        val finalValues = ContentValues().apply {
+                            put(MediaStore.MediaColumns.IS_PENDING, 0)
+                        }
+                        contentResolver.update(insertedUri, finalValues, null, null)
+                    }
+                    videoUri = insertedUri
+                    Log.i(TAG, "Saved MP4 video to MediaStore: $videoUri")
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to write MP4 video to MediaStore", e)
+                    contentResolver.delete(insertedUri, null, null)
+                }
+            }
+        }
+
+        mp4File.delete()
+        Pair(videoUri, thumbnailBitmap)
+    }
+
+    suspend fun saveRawVideo(
+        context: Context,
+        rawVideoFile: File,
+        baseName: String,
+        targetFps: Float = 24.0f,
+        rawFolderUri: String? = null,
+        jpgFolderUri: String? = null
+    ): Pair<Uri?, Bitmap?> = withContext(Dispatchers.IO) {
+        if (!rawVideoFile.exists() || rawVideoFile.length() == 0L) {
+            Log.e(TAG, "Raw video file does not exist or is empty: ${rawVideoFile.absolutePath}")
+            return@withContext Pair(null, null)
+        }
+
+        val effectiveBaseName = DarkbagIdentity.prefixedBaseName(baseName)
+        var thumbnailBitmap: Bitmap? = null
+        var videoUri: Uri? = null
+
+        // 1. Generate thumbnail from first frame using JNI
+        val readerHandle = top.maary.darkbag.rawvideo.RawVideoNative.nativeOpenReader(rawVideoFile.absolutePath)
+        if (readerHandle != 0L) {
+            try {
+                val header = top.maary.darkbag.rawvideo.RawVideoNative.readHeader(readerHandle)
+                if (header != null && header.width > 0 && header.height > 0) {
+                    val thumbWidth = 640
+                    val swapDims = (header.orientation == 90 || header.orientation == 270)
+                    val thumbW = if (swapDims) (thumbWidth * header.height) / header.width else thumbWidth
+                    val thumbH = if (swapDims) thumbWidth else (thumbWidth * header.height) / header.width
+                    val bmp = Bitmap.createBitmap(thumbW, thumbH, Bitmap.Config.ARGB_8888)
+                    val bufferSize = header.width * header.height * 2
+                    val directBuf = java.nio.ByteBuffer.allocateDirect(bufferSize)
+                    val meta = LongArray(3)
+                    val readBytes = top.maary.darkbag.rawvideo.RawVideoNative.nativeReadFrame(readerHandle, 0, meta, directBuf)
+                    if (readBytes > 0) {
+                        val targetLogIndex = if (header.activeLogName.isNotBlank() && header.activeLogName != "None") {
+                            top.maary.darkbag.fragments.SettingsFragment.LOG_CURVES.indexOf(header.activeLogName).takeIf { it >= 0 } ?: -1
+                        } else -1
+                        val lutManager = top.maary.darkbag.utils.LutManager(context)
+                        val lutPath = if (header.activeLutName.isNotBlank() && header.activeLutName != "None") {
+                            val f = java.io.File(lutManager.lutDir, header.activeLutName)
+                            if (f.exists()) f.absolutePath else {
+                                val f2 = java.io.File(java.io.File(context.filesDir, "luts"), header.activeLutName)
+                                if (f2.exists()) f2.absolutePath else null
+                            }
+                        } else null
+
+                        val debayered = top.maary.darkbag.rawvideo.RawVideoNative.nativeDebayerFrameToBitmap(
+                            bayerBuffer = directBuf,
+                            width = header.width,
+                            height = header.height,
+                            orientation = header.orientation,
+                            cfaPattern = header.cfaPattern,
+                            whiteLevel = header.whiteLevel,
+                            blackLevel = header.blackLevel.firstOrNull() ?: 64f,
+                            neutralPoint = header.neutralPoint,
+                            targetLog = targetLogIndex,
+                            lutPath = lutPath,
+                            exposure = 0.0f,
+                            contrast = 0.0f,
+                            saturation = 0.0f,
+                            outBitmap = bmp
+                        )
+                        if (debayered) {
+                            thumbnailBitmap = bmp
+                        }
+                    }
+                }
+            } finally {
+                top.maary.darkbag.rawvideo.RawVideoNative.nativeCloseReader(readerHandle)
+            }
+        }
+
+        // 2. Save .rawvid file
+        val rawFileName = "$effectiveBaseName.rawvid"
+        if (rawFolderUri != null) {
+            videoUri = saveFileToFolder(context, rawVideoFile, rawFileName, "application/octet-stream", rawFolderUri)
+        } else {
+            // Save to MediaStore
+            val contentResolver = context.contentResolver
+            val contentValues = ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, rawFileName)
+                put(MediaStore.MediaColumns.MIME_TYPE, "application/octet-stream")
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/Darkbag")
+                    put(MediaStore.MediaColumns.IS_PENDING, 1)
+                }
+            }
+
+            val collection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL)
+            } else {
+                MediaStore.Files.getContentUri("external")
+            }
+
+            val insertedUri = contentResolver.insert(collection, contentValues)
+            if (insertedUri != null) {
+                try {
+                    contentResolver.openOutputStream(insertedUri, "wt")?.use { out ->
+                        rawVideoFile.inputStream().use { it.copyTo(out) }
+                        out.flush()
+                    }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        val finalValues = ContentValues().apply {
+                            put(MediaStore.MediaColumns.IS_PENDING, 0)
+                        }
+                        contentResolver.update(insertedUri, finalValues, null, null)
+                    }
+                    videoUri = insertedUri
+                    Log.i(TAG, "Saved raw video to MediaStore: $videoUri")
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to write raw video to MediaStore", e)
+                    contentResolver.delete(insertedUri, null, null)
+                }
+            }
+        }
+
+        // Cleanup temp file
+        rawVideoFile.delete()
+
+        Pair(videoUri, thumbnailBitmap)
     }
 }

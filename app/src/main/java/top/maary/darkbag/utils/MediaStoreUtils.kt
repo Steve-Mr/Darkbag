@@ -70,20 +70,30 @@ class MediaStoreUtils(private val context: Context) {
             }
         }
 
-        // 2. Search prioritized folders
-        val priorityList = listOf(
-            prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null) to "image/jpeg",
-            prefs.getString(SettingsFragment.KEY_RAW_STORAGE_URI, null) to "image/x-adobe-dng"
-        )
+        // 2. Search prioritized SAF folders across JPG and RAW (photos and videos)
+        val safFolders = listOfNotNull(
+            prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null),
+            prefs.getString(SettingsFragment.KEY_RAW_STORAGE_URI, null)
+        ).distinct()
 
-        for ((folderUri, mimeType) in priorityList) {
-            if (folderUri != null) {
-                val latest = getLatestFileInSAF(context, folderUri, mimeType)
-                if (latest != null) {
-                    prefs.edit().putString(SettingsFragment.KEY_LAST_CAPTURE_URI, latest.toString()).apply()
-                    return@withContext latest
-                }
+        val allSafFiles = mutableListOf<androidx.documentfile.provider.DocumentFile>()
+        for (folderUri in safFolders) {
+            try {
+                val treeUri = Uri.parse(folderUri)
+                val root = androidx.documentfile.provider.DocumentFile.fromTreeUri(context, treeUri)
+                root?.listFiles()?.filter {
+                    val name = it.name ?: return@filter false
+                    name.startsWith(DarkbagIdentity.FILE_PREFIX, ignoreCase = true)
+                }?.let { allSafFiles.addAll(it) }
+            } catch (e: Exception) {
+                // ignore
             }
+        }
+
+        val latestSaf = allSafFiles.maxByOrNull { it.lastModified() }?.uri
+        if (latestSaf != null) {
+            prefs.edit().putString(SettingsFragment.KEY_LAST_CAPTURE_URI, latestSaf.toString()).apply()
+            return@withContext latestSaf
         }
 
         // 3. Fallback to MediaStore filtered by Pictures/Darkbag
@@ -121,6 +131,11 @@ class MediaStoreUtils(private val context: Context) {
     private fun verifyUriExists(context: Context, uri: Uri): Boolean {
         return try {
             if (uri.scheme == "content") {
+                try {
+                    context.contentResolver.openFileDescriptor(uri, "r")?.use { return true }
+                } catch (e: Exception) {
+                    // Fallback to DocumentFile
+                }
                 val doc = androidx.documentfile.provider.DocumentFile.fromSingleUri(context, uri)
                 doc?.exists() == true
             } else {
@@ -134,7 +149,17 @@ class MediaStoreUtils(private val context: Context) {
     private fun isDarkbagAssetUri(context: Context, uri: Uri): Boolean {
         return try {
             val name = when (uri.scheme) {
-                "content" -> androidx.documentfile.provider.DocumentFile.fromSingleUri(context, uri)?.name
+                "content" -> {
+                    var docName = androidx.documentfile.provider.DocumentFile.fromSingleUri(context, uri)?.name
+                    if (docName == null) {
+                        context.contentResolver.query(uri, arrayOf(MediaStore.MediaColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                            if (cursor.moveToFirst()) {
+                                docName = cursor.getString(0)
+                            }
+                        }
+                    }
+                    docName
+                }
                 else -> File(uri.path ?: return false).name
             }
             name?.startsWith(DarkbagIdentity.FILE_PREFIX, ignoreCase = true) == true
@@ -161,7 +186,7 @@ class MediaStoreUtils(private val context: Context) {
     }
 
     private fun getLatestMediaStoreImageFiltered(context: Context): Uri? {
-        val priorityMimes = listOf("image/jpeg", "image/x-adobe-dng")
+        val priorityMimes = listOf("image/jpeg", "image/x-adobe-dng", "video/mp4")
         for (mime in priorityMimes) {
             val uri = queryLatestInMediaStore(context, mime)
             if (uri != null) return uri
@@ -170,7 +195,11 @@ class MediaStoreUtils(private val context: Context) {
     }
 
     private fun queryLatestInMediaStore(context: Context, mimeType: String): Uri? {
-        val collection = MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+        val collection = if (mimeType.startsWith("video/")) {
+            MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+        } else {
+            MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+        }
         val projection = arrayOf(MediaStore.MediaColumns._ID)
         val selection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ? AND ${MediaStore.MediaColumns.MIME_TYPE} = ? AND ${MediaStore.MediaColumns.DISPLAY_NAME} LIKE ?"

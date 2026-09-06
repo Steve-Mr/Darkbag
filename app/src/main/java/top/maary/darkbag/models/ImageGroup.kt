@@ -14,6 +14,7 @@ data class ImageGroup(
     val hfLayout: String? = null, // "SBS" or "TB"
     val width: Int = 0,
     val height: Int = 0,
+    val orientation: Int = 0,
     val captureTime: Long = 0L,
     val lastModified: Long = 0L,
     val editConfig: EditConfig? = null,
@@ -26,9 +27,111 @@ data class ImageGroup(
     val isMultiCamera: Boolean = false,
     val multiJpgUris: List<Uri> = emptyList(),
     val multiDngUris: List<Uri> = emptyList(),
-    val multiCameraLenses: List<MultiCameraLensItem> = emptyList()
+    val multiCameraLenses: List<MultiCameraLensItem> = emptyList(),
+    val rawVideoUri: Uri? = null,
+    val isRawVideo: Boolean = false,
+    val rawVideoFps: Float = 24.0f,
+    val rawVideoFrameCount: Int = 0,
+    val rawVideoDurationMs: Long = 0L,
+    val mp4VideoUri: Uri? = null,
+    val isMp4Video: Boolean = false,
+    val derivativeJpgUris: List<Uri> = emptyList(),
+    val derivativeMp4Uris: List<Uri> = emptyList(),
+    val isCinemaDng: Boolean = false,
+    val cinemaDngFolderUri: Uri? = null,
+    val cinemaDngFirstFrameUri: Uri? = null,
+    val cinemaDngAudioUri: Uri? = null,
+    val cinemaDngFrameCount: Int = 0,
+    val cinemaDngFrameUris: List<Uri> = emptyList()
 ) : Parcelable {
-    fun hasAny(): Boolean = jpgUri != null || dngUri != null || dngUri1 != null || dngUri2 != null || multiJpgUris.isNotEmpty() || multiDngUris.isNotEmpty() || multiCameraLenses.isNotEmpty()
+    fun hasAny(): Boolean = isCinemaDng || cinemaDngFolderUri != null || cinemaDngFirstFrameUri != null || cinemaDngFrameUris.isNotEmpty() || jpgUri != null || dngUri != null || dngUri1 != null || dngUri2 != null || rawVideoUri != null || mp4VideoUri != null || multiJpgUris.isNotEmpty() || multiDngUris.isNotEmpty() || multiCameraLenses.isNotEmpty() || derivativeJpgUris.isNotEmpty() || derivativeMp4Uris.isNotEmpty()
+
+    val allDerivativeUris: List<Uri>
+        get() {
+            val list = mutableListOf<Uri>()
+            jpgUri?.let { list.add(it) }
+            for (uri in derivativeJpgUris) {
+                if (uri !in list) list.add(uri)
+            }
+            mp4VideoUri?.let { list.add(it) }
+            for (uri in derivativeMp4Uris) {
+                if (uri !in list) list.add(uri)
+            }
+            for (uri in multiJpgUris) {
+                if (uri !in list) list.add(uri)
+            }
+            return list
+        }
+
+    val allCinemaDngUris: List<Uri>
+        get() {
+            val list = mutableListOf<Uri>()
+            cinemaDngFolderUri?.let { if (it !in list) list.add(it) }
+            cinemaDngFirstFrameUri?.let { if (it !in list) list.add(it) }
+            cinemaDngAudioUri?.let { if (it !in list) list.add(it) }
+            for (uri in cinemaDngFrameUris) {
+                if (uri !in list) list.add(uri)
+            }
+            return list
+        }
+
+    val rawVideoMasterUris: List<Uri>
+        get() {
+            val list = mutableListOf<Uri>()
+            rawVideoUri?.let { if (it !in list) list.add(it) }
+            return list
+        }
+
+    val photoMasterUris: List<Uri>
+        get() {
+            val list = mutableListOf<Uri>()
+            dngUri?.let { if (it !in list) list.add(it) }
+            dngUri1?.let { if (it !in list) list.add(it) }
+            dngUri2?.let { if (it !in list) list.add(it) }
+            for (uri in multiDngUris) {
+                if (uri !in list) list.add(uri)
+            }
+            return list
+        }
+
+    val allMasterRawUris: List<Uri>
+        get() {
+            val list = mutableListOf<Uri>()
+            for (uri in allCinemaDngUris) {
+                if (uri !in list) list.add(uri)
+            }
+            for (uri in rawVideoMasterUris) {
+                if (uri !in list) list.add(uri)
+            }
+            for (uri in photoMasterUris) {
+                if (uri !in list) list.add(uri)
+            }
+            return list
+        }
+
+    val allUris: List<Uri>
+        get() {
+            val list = mutableListOf<Uri>()
+            for (uri in allMasterRawUris) {
+                if (uri !in list) list.add(uri)
+            }
+            for (uri in allDerivativeUris) {
+                if (uri !in list) list.add(uri)
+            }
+            return list
+        }
+
+    val firstAvailableUri: Uri?
+        get() = allDerivativeUris.firstOrNull() ?: cinemaDngFirstFrameUri ?: cinemaDngFolderUri ?: allMasterRawUris.firstOrNull()
+
+    val hasMasterRaw: Boolean
+        get() = isCinemaDng || cinemaDngFolderUri != null || cinemaDngFirstFrameUri != null || cinemaDngFrameUris.isNotEmpty() || dngUri != null || dngUri1 != null || dngUri2 != null || rawVideoUri != null || multiDngUris.isNotEmpty()
+
+    val hasDerivatives: Boolean
+        get() = allDerivativeUris.isNotEmpty()
+
+    val hasMultipleDerivatives: Boolean
+        get() = allDerivativeUris.size >= 2
 
     // 2.5: Only true if it has both DNGs, a stitched JPG, or an explicit layout.
     // If only dngUri1 exists and no jpg, it's NOT a half-frame group (shows as single image).
@@ -37,9 +140,12 @@ data class ImageGroup(
                                 (hfLayout == "SBS" || hfLayout == "TB")
 
     fun isSingleFormat(): Boolean {
-        val hasJpg = jpgUri != null
-        val hasDng = dngUri != null || dngUri1 != null || dngUri2 != null
-        return (hasJpg && !hasDng) || (!hasJpg && hasDng)
+        var rawCount = 0
+        if (allCinemaDngUris.isNotEmpty() || isCinemaDng) rawCount++
+        if (rawVideoMasterUris.isNotEmpty() || isRawVideo) rawCount++
+        if (photoMasterUris.isNotEmpty()) rawCount++
+        val derivCount = allDerivativeUris.size
+        return (rawCount + derivCount) <= 1
     }
 }
 

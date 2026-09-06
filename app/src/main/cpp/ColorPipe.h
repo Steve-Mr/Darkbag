@@ -9,6 +9,7 @@
 #include <cmath>
 #include <algorithm>
 #include <iostream>
+#include <memory>
 
 // --- File Writers ---
 struct ImageMetadata {
@@ -43,6 +44,7 @@ Matrix3x3 multiply(const Matrix3x3& a, const Matrix3x3& b);
 Matrix3x3 invert(const Matrix3x3& src);
 
 // --- Log Curves ---
+float srgb_oetf(float x);
 float arri_logc3(float x);
 float s_log3(float x);
 float f_log(float x);
@@ -56,6 +58,8 @@ struct LUT3D {
 };
 
 LUT3D load_lut(const char* path);
+std::shared_ptr<LUT3D> get_cached_lut(const char* path);
+void clear_lut_cache();
 Vec3 apply_lut(const LUT3D& lut, Vec3 color);
 
 // --- Color Rendering Engines ---

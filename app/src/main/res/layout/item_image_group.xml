@@ -5,98 +5,186 @@
     android:layout_height="match_parent"
     android:background="?attr/colorSurfaceContainerLowest">
 
-    <top.maary.darkbag.ui.ZoomableImageView
-        android:id="@+id/image_view"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:contentDescription="Full size image" />
-
-    <TextureView
-        android:id="@+id/video_view"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:visibility="gone" />
-
-    <com.google.android.material.progressindicator.CircularProgressIndicator
-        android:id="@+id/loading_indicator"
-        style="@style/Widget.Material3Expressive.CircularProgressIndicator.Wavy"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:indeterminate="true"
-        android:visibility="gone"
-        android:elevation="10dp"
-        app:indicatorSize="48dp"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent" />
-
-    <!-- Motion Photo Indicator Container -->
+    <!-- Top Image Viewing Container -->
     <FrameLayout
-        android:id="@+id/motionPhotoToggleGroup"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginStart="16dp"
-        android:layout_marginTop="16dp"
+        android:id="@+id/image_container"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toTopOf="@id/filmstrip_container"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent">
+        app:layout_constraintEnd_toEndOf="parent">
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnMotionPhotoIndicator"
-            style="@style/Widget.Material3.Button.IconButton"
+        <top.maary.darkbag.ui.ZoomableImageView
+            android:id="@+id/image_view"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:contentDescription="Full size image" />
+
+        <TextureView
+            android:id="@+id/video_view"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="gone" />
+
+        <com.google.android.material.progressindicator.CircularProgressIndicator
+            android:id="@+id/loading_indicator"
+            style="@style/Widget.Material3Expressive.CircularProgressIndicator.Wavy"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:contentDescription="Motion Photo"
-            app:backgroundTint="@color/format_indicator_background_tint"
-            app:iconTint="@color/format_indicator_icon_tint"
-            app:icon="@drawable/ic_play_arrow"
-            android:visibility="gone" />
+            android:layout_gravity="center"
+            android:indeterminate="true"
+            android:visibility="gone"
+            android:elevation="10dp"
+            app:indicatorSize="48dp" />
+
+        <!-- Motion Photo Indicator Container -->
+        <FrameLayout
+            android:id="@+id/motionPhotoToggleGroup"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top|start"
+            android:layout_marginStart="16dp"
+            android:layout_marginTop="16dp">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnMotionPhotoIndicator"
+                style="@style/Widget.Material3.Button.IconButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:contentDescription="Motion Photo"
+                app:backgroundTint="@color/format_indicator_background_tint"
+                app:iconTint="@color/format_indicator_icon_tint"
+                app:icon="@drawable/ic_play_arrow"
+                android:visibility="gone" />
+
+        </FrameLayout>
+
+        <!-- RAW Format Indicator Container -->
+        <FrameLayout
+            android:id="@+id/formatToggleGroup"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top|end"
+            android:layout_marginEnd="16dp"
+            android:layout_marginTop="16dp">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnFormatIndicator"
+                style="@style/Widget.Material3.Button.IconButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:contentDescription="@string/format_raw"
+                app:backgroundTint="@color/format_indicator_background_tint"
+                app:iconTint="@color/format_indicator_icon_tint"
+                app:icon="@drawable/ic_raw"
+                android:visibility="gone" />
+
+        </FrameLayout>
+
+        <!-- Multi-Camera Lens Switcher Container (Dynamically positioned below image) -->
+        <FrameLayout
+            android:id="@+id/multiCameraToggleContainer"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom|center_horizontal"
+            android:layout_marginBottom="16dp"
+            android:background="@drawable/bg_multi_camera_capsule"
+            android:elevation="3dp"
+            android:padding="4dp"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:id="@+id/multiCameraToggleGroup"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center" />
+        </FrameLayout>
+
+        <!-- Derivative Version Stacking Dots Container (Dynamically positioned below image) -->
+        <FrameLayout
+            android:id="@+id/derivativeDotsContainer"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom|center_horizontal"
+            android:layout_marginBottom="16dp"
+            android:background="@drawable/bg_multi_camera_capsule"
+            android:elevation="3dp"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            android:paddingTop="4dp"
+            android:paddingBottom="4dp"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:id="@+id/derivativeDotsGroup"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center" />
+        </FrameLayout>
+
+        <!-- Video Duration Indicator Container -->
+        <FrameLayout
+            android:id="@+id/videoDurationGroup"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom|end"
+            android:layout_marginEnd="16dp"
+            android:layout_marginBottom="16dp"
+            android:visibility="gone">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnVideoDuration"
+                style="@style/Widget.Material3.Button.TonalButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:minHeight="36dp"
+                android:minWidth="0dp"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp"
+                android:paddingTop="0dp"
+                android:paddingBottom="0dp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:insetLeft="0dp"
+                android:insetRight="0dp"
+                app:cornerRadius="100dp"
+                app:backgroundTint="@color/format_indicator_background_tint"
+                app:icon="@drawable/ic_play_arrow"
+                app:iconSize="14dp"
+                app:iconTint="@color/format_indicator_icon_tint"
+                app:iconPadding="4dp"
+                android:textColor="?attr/colorOnSurface"
+                android:textSize="11sp"
+                android:fontFamily="monospace"
+                android:text="00:00" />
+
+        </FrameLayout>
 
     </FrameLayout>
 
-    <!-- RAW Format Indicator Container -->
+    <!-- Bottom Filmstrip Container -->
     <FrameLayout
-        android:id="@+id/formatToggleGroup"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginEnd="16dp"
-        android:layout_marginTop="16dp"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintTop_toTopOf="parent">
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnFormatIndicator"
-            style="@style/Widget.Material3.Button.IconButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:contentDescription="@string/format_raw"
-            app:backgroundTint="@color/format_indicator_background_tint"
-            app:iconTint="@color/format_indicator_icon_tint"
-            app:icon="@drawable/ic_raw"
-            android:visibility="gone" />
-
-    </FrameLayout>
-
-    <!-- Multi-Camera Lens Switcher Container (Dynamically positioned below image) -->
-    <FrameLayout
-        android:id="@+id/multiCameraToggleContainer"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
+        android:id="@+id/filmstrip_container"
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
         android:layout_marginBottom="16dp"
-        android:background="@drawable/bg_multi_camera_capsule"
-        android:elevation="3dp"
-        android:padding="4dp"
+        android:layout_marginStart="16dp"
+        android:layout_marginEnd="16dp"
         android:visibility="gone"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent">
 
-        <LinearLayout
-            android:id="@+id/multiCameraToggleGroup"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center" />
+        <top.maary.darkbag.ui.FilmstripSeekBarView
+            android:id="@+id/filmstrip_seekbar"
+            android:layout_width="match_parent"
+            android:layout_height="44dp"
+            android:layout_gravity="center"
+            android:alpha="0.35" />
+
     </FrameLayout>
 
 </androidx.constraintlayout.widget.ConstraintLayout>

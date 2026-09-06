@@ -1,7 +1,9 @@
 package top.maary.darkbag.fragments
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.Color
+import android.net.Uri
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -17,6 +19,11 @@ import top.maary.darkbag.databinding.ItemDarkbagGalleryGridBinding
 import top.maary.darkbag.databinding.ItemDarkbagGalleryMultiCamGroupBinding
 import top.maary.darkbag.models.ImageGroup
 import top.maary.darkbag.models.MultiCameraLensItem
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import android.util.Log
 
 data class GallerySelectedItem(
     val group: ImageGroup,
@@ -50,6 +57,7 @@ class DarkbagGalleryGridAdapter(
             return oldItem == newItem &&
                     oldItem.metadataLoaded == newItem.metadataLoaded &&
                     oldItem.isMotionPhoto == newItem.isMotionPhoto &&
+                    oldItem.isCinemaDng == newItem.isCinemaDng &&
                     oldItem.lastModified == newItem.lastModified &&
                     oldItem.multiCameraLenses == newItem.multiCameraLenses
         }
@@ -190,15 +198,32 @@ class DarkbagGalleryGridAdapter(
         }
     }
 
-    private fun bindSingleViewHolder(holder: SingleViewHolder, group: ImageGroup, position: Int) {
-        val targetUri = group.jpgUri ?: group.dngUri ?: group.dngUri1 ?: group.dngUri2
+    private val rawThumbCache = android.util.LruCache<String, android.graphics.Bitmap>(30)
 
-        // Load thumbnail with Glide
-        Glide.with(holder.itemView.context)
-            .load(targetUri)
-            .apply(RequestOptions().centerCrop().diskCacheStrategy(DiskCacheStrategy.RESOURCE))
-            .transition(DrawableTransitionOptions.withCrossFade())
-            .into(holder.binding.thumbnailView)
+    private fun bindSingleViewHolder(holder: SingleViewHolder, group: ImageGroup, position: Int) {
+        val targetUri = group.jpgUri ?: group.derivativeJpgUris.firstOrNull() ?: group.mp4VideoUri ?: group.derivativeMp4Uris.firstOrNull() ?: group.cinemaDngFirstFrameUri ?: group.dngUri ?: group.dngUri1 ?: group.dngUri2
+
+        if (targetUri != null) {
+            val isDng = targetUri.toString().endsWith(".dng", ignoreCase = true) || group.dngUri == targetUri || group.cinemaDngFirstFrameUri == targetUri
+            val isMp4 = targetUri.toString().endsWith(".mp4", ignoreCase = true) || (group.isMp4Video && group.rawVideoUri == null)
+
+            if (isDng && group.jpgUri == null && group.derivativeJpgUris.isEmpty() && group.mp4VideoUri == null && group.derivativeMp4Uris.isEmpty()) {
+                loadDngThumbnail(holder, group, targetUri)
+            } else if (isMp4) {
+                loadMp4Thumbnail(holder, group, targetUri)
+            } else {
+                Glide.with(holder.itemView.context)
+                    .load(targetUri)
+                    .apply(RequestOptions().centerCrop().diskCacheStrategy(DiskCacheStrategy.RESOURCE))
+                    .transition(DrawableTransitionOptions.withCrossFade())
+                    .into(holder.binding.thumbnailView)
+            }
+        } else if (group.rawVideoUri != null) {
+            loadRawVideoThumbnail(holder, group)
+        } else {
+            Glide.with(holder.itemView.context).clear(holder.binding.thumbnailView)
+            holder.binding.thumbnailView.setImageDrawable(null)
+        }
 
         // Setup format badges
         setupSingleBadges(holder, group)
@@ -255,12 +280,37 @@ class DarkbagGalleryGridAdapter(
     }
 
     private fun setupSingleBadges(holder: SingleViewHolder, group: ImageGroup) {
-        val hasJpg = group.jpgUri != null
+        val isCinemaDng = group.isCinemaDng || group.cinemaDngFolderUri != null || group.cinemaDngFirstFrameUri != null || group.cinemaDngFrameUris.isNotEmpty()
+        val isRawVideo = group.isRawVideo || group.rawVideoUri != null
+        val hasMp4 = group.isMp4Video || group.mp4VideoUri != null || group.derivativeMp4Uris.isNotEmpty()
+        val hasJpg = group.jpgUri != null || group.derivativeJpgUris.isNotEmpty()
         val hasDng = group.dngUri != null || group.dngUri1 != null || group.dngUri2 != null
+        val derivCount = group.allDerivativeUris.size
 
-        if (group.isHalfFrame()) {
+        if (isCinemaDng) {
+            holder.binding.tvFormatBadge.visibility = View.VISIBLE
+            holder.binding.tvFormatBadge.text = when {
+                derivCount >= 2 -> "CDNG+${derivCount}V"
+                hasMp4 -> "CDNG+MP4"
+                hasJpg -> "CDNG+JPG"
+                else -> "CDNG"
+            }
+        } else if (isRawVideo) {
+            holder.binding.tvFormatBadge.visibility = View.VISIBLE
+            holder.binding.tvFormatBadge.text = when {
+                derivCount >= 2 -> "RAW+${derivCount}V"
+                hasMp4 -> "RAW+MP4"
+                else -> "RAW VID"
+            }
+        } else if (group.isMp4Video && !hasDng && !hasJpg) {
+            holder.binding.tvFormatBadge.visibility = View.VISIBLE
+            holder.binding.tvFormatBadge.text = if (derivCount >= 2) "GRADED+${derivCount}V" else if (group.derivativeMp4Uris.isNotEmpty()) "GRADED" else "MP4"
+        } else if (group.isHalfFrame()) {
             holder.binding.tvFormatBadge.visibility = View.VISIBLE
             holder.binding.tvFormatBadge.text = context.getString(R.string.format_half_frame)
+        } else if (hasDng && derivCount >= 2) {
+            holder.binding.tvFormatBadge.visibility = View.VISIBLE
+            holder.binding.tvFormatBadge.text = "RAW+${derivCount}V"
         } else if (hasJpg && hasDng) {
             holder.binding.tvFormatBadge.visibility = View.VISIBLE
             holder.binding.tvFormatBadge.text = context.getString(R.string.format_raw_jpg)
@@ -269,12 +319,12 @@ class DarkbagGalleryGridAdapter(
             holder.binding.tvFormatBadge.text = context.getString(R.string.format_raw)
         } else if (hasJpg) {
             holder.binding.tvFormatBadge.visibility = View.VISIBLE
-            holder.binding.tvFormatBadge.text = context.getString(R.string.format_jpg)
+            holder.binding.tvFormatBadge.text = if (derivCount >= 2) "${derivCount}V" else context.getString(R.string.format_jpg)
         } else {
             holder.binding.tvFormatBadge.visibility = View.GONE
         }
 
-        if (group.isMotionPhoto) {
+        if (isCinemaDng || group.isMotionPhoto || isRawVideo || hasMp4) {
             holder.binding.iconMotionBadge.visibility = View.VISIBLE
         } else {
             holder.binding.iconMotionBadge.visibility = View.GONE
@@ -451,6 +501,144 @@ class DarkbagGalleryGridAdapter(
                 holder.binding.iconUnselected3.visibility = View.GONE
                 holder.binding.slotLens3.strokeWidth = 0
                 holder.binding.slotLens3.strokeColor = Color.TRANSPARENT
+            }
+        }
+    }
+
+    private fun loadRawVideoThumbnail(holder: SingleViewHolder, group: ImageGroup) {
+        val rawUri = group.rawVideoUri ?: return
+        val cached = rawThumbCache.get(group.baseName)
+        if (cached != null && !cached.isRecycled) {
+            holder.binding.thumbnailView.setImageBitmap(cached)
+            return
+        }
+
+        Glide.with(holder.itemView.context).clear(holder.binding.thumbnailView)
+        holder.binding.thumbnailView.setImageDrawable(null)
+
+        val context = holder.itemView.context.applicationContext
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                context.contentResolver.openFileDescriptor(rawUri, "r")?.use { pfd ->
+                    val handle = top.maary.darkbag.rawvideo.RawVideoNative.nativeOpenReaderFd(pfd.fd)
+                    if (handle != 0L) {
+                        try {
+                            val header = top.maary.darkbag.rawvideo.RawVideoNative.readHeader(handle)
+                            if (header != null && header.width > 0 && header.height > 0) {
+                                val swapDims = (header.orientation == 90 || header.orientation == 270)
+                                val thumbW = if (swapDims) (320 * header.height) / header.width else 320
+                                val thumbH = if (swapDims) 320 else (320 * header.height) / header.width
+                                val bmp = android.graphics.Bitmap.createBitmap(thumbW, thumbH, android.graphics.Bitmap.Config.ARGB_8888)
+                                val bufSize = header.width * header.height * 2
+                                val directBuf = java.nio.ByteBuffer.allocateDirect(bufSize)
+                                val meta = LongArray(3)
+                                val read = top.maary.darkbag.rawvideo.RawVideoNative.nativeReadFrame(handle, 0, meta, directBuf)
+                                if (read > 0) {
+                                    val targetLogIndex = if (header.activeLogName.isNotBlank() && header.activeLogName != "None") {
+                                        top.maary.darkbag.fragments.SettingsFragment.LOG_CURVES.indexOf(header.activeLogName).takeIf { it >= 0 } ?: -1
+                                    } else -1
+                                    val lutManager = top.maary.darkbag.utils.LutManager(context)
+                                    val lutPath = if (header.activeLutName.isNotBlank() && header.activeLutName != "None") {
+                                        val f = java.io.File(lutManager.lutDir, header.activeLutName)
+                                        if (f.exists()) f.absolutePath else null
+                                    } else null
+
+                                    val debayered = top.maary.darkbag.rawvideo.RawVideoNative.nativeDebayerFrameToBitmap(
+                                        bayerBuffer = directBuf,
+                                        width = header.width,
+                                        height = header.height,
+                                        orientation = header.orientation,
+                                        cfaPattern = header.cfaPattern,
+                                        whiteLevel = header.whiteLevel,
+                                        blackLevel = header.blackLevel.firstOrNull() ?: 64f,
+                                        neutralPoint = header.neutralPoint,
+                                        targetLog = targetLogIndex,
+                                        lutPath = lutPath,
+                                        exposure = header.exposure,
+                                        contrast = header.contrast,
+                                        saturation = header.saturation,
+                                        outBitmap = bmp
+                                    )
+                                    if (debayered) {
+                                        rawThumbCache.put(group.baseName, bmp)
+                                        withContext(Dispatchers.Main) {
+                                            if (holder.bindingAdapterPosition != androidx.recyclerview.widget.RecyclerView.NO_POSITION) {
+                                                holder.binding.thumbnailView.setImageBitmap(bmp)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } finally {
+                            top.maary.darkbag.rawvideo.RawVideoNative.nativeCloseReader(handle)
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w("DarkbagGalleryGridAdapter", "Failed to load raw video thumb: $rawUri", e)
+            }
+        }
+    }
+
+    private fun loadMp4Thumbnail(holder: SingleViewHolder, group: ImageGroup, uri: Uri) {
+        val cached = rawThumbCache.get("MP4_${group.baseName}")
+        if (cached != null && !cached.isRecycled) {
+            holder.binding.thumbnailView.setImageBitmap(cached)
+            return
+        }
+        val context = holder.itemView.context.applicationContext
+        CoroutineScope(Dispatchers.IO).launch {
+            var bmp: Bitmap? = null
+            try {
+                val retriever = android.media.MediaMetadataRetriever()
+                if (uri.scheme == "content") {
+                    context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                        retriever.setDataSource(pfd.fileDescriptor)
+                        bmp = retriever.getFrameAtTime(0, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                    }
+                } else {
+                    retriever.setDataSource(uri.path)
+                    bmp = retriever.getFrameAtTime(0, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                }
+                retriever.release()
+            } catch (e: Exception) {
+                Log.w("DarkbagGalleryGridAdapter", "MediaMetadataRetriever failed for $uri", e)
+            }
+
+            if (bmp != null) {
+                rawThumbCache.put("MP4_${group.baseName}", bmp)
+                withContext(Dispatchers.Main) {
+                    if (holder.bindingAdapterPosition != RecyclerView.NO_POSITION) {
+                        holder.binding.thumbnailView.setImageBitmap(bmp)
+                    }
+                }
+            } else {
+                withContext(Dispatchers.Main) {
+                    Glide.with(holder.itemView.context)
+                        .load(uri)
+                        .apply(RequestOptions().frame(0).centerCrop().diskCacheStrategy(DiskCacheStrategy.RESOURCE))
+                        .into(holder.binding.thumbnailView)
+                }
+            }
+        }
+    }
+
+    private fun loadDngThumbnail(holder: SingleViewHolder, group: ImageGroup, uri: Uri) {
+        val cached = rawThumbCache.get("DNG_${group.baseName}")
+        if (cached != null && !cached.isRecycled) {
+            holder.binding.thumbnailView.setImageBitmap(cached)
+            return
+        }
+        val context = holder.itemView.context.applicationContext
+        CoroutineScope(Dispatchers.IO).launch {
+            val bmp = top.maary.darkbag.utils.ImageUtils.renderDngBitmap(context, uri, reqWidth = 512, reqHeight = 512)
+            if (bmp != null) {
+                rawThumbCache.put("DNG_${group.baseName}", bmp)
+                withContext(Dispatchers.Main) {
+                    if (holder.bindingAdapterPosition != RecyclerView.NO_POSITION) {
+                        holder.binding.thumbnailView.setImageBitmap(bmp)
+                    }
+                }
             }
         }
     }

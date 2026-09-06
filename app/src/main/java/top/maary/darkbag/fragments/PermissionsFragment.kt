@@ -46,7 +46,7 @@ class PermissionsFragment : Fragment() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val permissionList = mutableListOf(Manifest.permission.CAMERA)
+        val permissionList = mutableListOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO)
         // add the storage access permission request for Android 9 and below.
         if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
             permissionList.add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
@@ -111,9 +111,15 @@ class PermissionsFragment : Fragment() {
             val cameraGranted = permissions[Manifest.permission.CAMERA] ?: (
                 ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
             )
+            val audioGranted = permissions[Manifest.permission.RECORD_AUDIO] ?: (
+                ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+            )
             if (!cameraGranted) {
                 Toast.makeText(context, "Camera permission request denied", Toast.LENGTH_LONG).show()
             } else {
+                if (!audioGranted) {
+                    Toast.makeText(context, "Microphone permission not granted; video recording will be silent", Toast.LENGTH_SHORT).show()
+                }
                 routeStartup()
             }
         }

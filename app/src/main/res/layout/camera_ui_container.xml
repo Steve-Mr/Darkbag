@@ -102,7 +102,6 @@
             android:contentDescription="@string/settings_button_alt" />
     </LinearLayout>
 
-
     <!-- Level 1: Pro Mode Trigger Button (Top-Left of Viewfinder) -->
     <com.google.android.material.button.MaterialButton
         android:id="@+id/btn_pro_mode"

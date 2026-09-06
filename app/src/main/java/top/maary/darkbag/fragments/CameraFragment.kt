@@ -20,6 +20,7 @@ import top.maary.darkbag.ui.ExpressiveShutterButton
 import top.maary.darkbag.utils.DebugLogManager
 import top.maary.darkbag.utils.LensInfo
 import top.maary.darkbag.utils.CameraRepository
+import top.maary.darkbag.rawvideo.RawVideoNative
 import top.maary.darkbag.motionphoto.MotionPhotoEncoder
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.NonCancellable
@@ -79,6 +80,7 @@ import java.io.File
 import java.io.FileOutputStream
 import android.net.Uri
 import androidx.activity.OnBackPressedCallback
+import androidx.activity.result.contract.ActivityResultContracts
 import kotlin.math.*
 import androidx.core.view.setPadding
 import androidx.fragment.app.Fragment
@@ -198,6 +200,54 @@ class CameraFragment : Fragment() {
                     .getBoolean(SettingsFragment.KEY_MIRROR_FRONT_CAMERA, true)
 
     @Volatile private var isBurstActive = false
+    private val rawVideoSessionManager = top.maary.darkbag.rawvideo.RawVideoSessionManager()
+    private var mp4VideoRecorder: top.maary.darkbag.video.Mp4VideoRecorder? = null
+    private val requestAudioPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            Toast.makeText(context, R.string.toast_audio_permission_granted, Toast.LENGTH_SHORT).show()
+        } else {
+            if (!shouldShowRequestPermissionRationale(android.Manifest.permission.RECORD_AUDIO)) {
+                showAudioPermissionSettingsDialog()
+            } else {
+                Toast.makeText(context, R.string.error_mic_permission_silent_video, Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    private fun showAudioPermissionSettingsDialog() {
+        val ctx = context ?: return
+        com.google.android.material.dialog.MaterialAlertDialogBuilder(ctx)
+            .setTitle(R.string.dialog_mic_permission_title)
+            .setMessage(R.string.dialog_mic_permission_denied_message)
+            .setPositiveButton(R.string.dialog_mic_permission_settings) { _, _ ->
+                try {
+                    val intent = android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                        data = android.net.Uri.fromParts("package", ctx.packageName, null)
+                    }
+                    startActivity(intent)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to open application settings", e)
+                }
+            }
+            .setNegativeButton(R.string.dialog_mic_permission_silent, null)
+            .show()
+    }
+
+    private fun showAudioPermissionRationaleDialog(onContinueSilent: () -> Unit) {
+        val ctx = context ?: return
+        com.google.android.material.dialog.MaterialAlertDialogBuilder(ctx)
+            .setTitle(R.string.dialog_mic_permission_title)
+            .setMessage(R.string.dialog_mic_permission_message)
+            .setPositiveButton(R.string.dialog_mic_permission_grant) { _, _ ->
+                requestAudioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+            }
+            .setNegativeButton(R.string.dialog_mic_permission_silent) { _, _ ->
+                onContinueSilent()
+            }
+            .show()
+    }
     private var hdrPlusBurstHelper: HdrPlusBurst? = null
     private var lastHdrPlusConfig: ExposureUtils.ExposureConfig? = null // Cache for instant trigger
     private var burstStartTime: Long = 0L // Profiling
@@ -212,9 +262,10 @@ class CameraFragment : Fragment() {
     private var currentIso = 100
     private var currentExposureTime = 10_000_000L // 10ms
     private var currentEvIndex = 0
+    private var isVideoSaving = false
 
     private val isProcessing: Boolean
-        get() = top.maary.darkbag.processor.HdrPlusRequestManager.pendingTasksCount.value > 0
+        get() = top.maary.darkbag.processor.HdrPlusRequestManager.pendingTasksCount.value > 0 || isVideoSaving
 
     // Half-frame State
     private var pendingVfSnapshot: android.graphics.Bitmap? = null
@@ -491,6 +542,12 @@ class CameraFragment : Fragment() {
 
     override fun onStop() {
         super.onStop()
+        if (rawVideoSessionManager.recording) {
+            stopRawVideoRecording()
+        }
+        if (mp4VideoRecorder?.recording == true) {
+            stopMp4VideoRecording()
+        }
         locationHelper.stopListening()
         orientationEventListener.disable()
         lutProcessor?.setEncoderSurface(null, 0, 0)
@@ -609,6 +666,71 @@ class CameraFragment : Fragment() {
 
             photoViewButton.setPadding(resources.getDimension(R.dimen.stroke_small).toInt())
             lifecycleScope.launch(Dispatchers.Main) {
+                val uri = try { android.net.Uri.parse(filename) } catch (_: Exception) { null }
+                val isRawVid = filename.endsWith(".rawvid", ignoreCase = true) || uri?.toString()?.endsWith(".rawvid", ignoreCase = true) == true
+
+                if (isRawVid && uri != null) {
+                    val bmp = withContext(Dispatchers.IO) {
+                        try {
+                            context?.contentResolver?.openFileDescriptor(uri, "r")?.use { pfd ->
+                                val handle = top.maary.darkbag.rawvideo.RawVideoNative.nativeOpenReaderFd(pfd.fd)
+                                if (handle != 0L) {
+                                    try {
+                                        val header = top.maary.darkbag.rawvideo.RawVideoNative.readHeader(handle)
+                                        if (header != null && header.width > 0 && header.height > 0) {
+                                            val swapDims = (header.orientation == 90 || header.orientation == 270)
+                                            val thumbW = if (swapDims) (320 * header.height) / header.width else 320
+                                            val thumbH = if (swapDims) 320 else (320 * header.height) / header.width
+                                            val thumbBmp = android.graphics.Bitmap.createBitmap(thumbW, thumbH, android.graphics.Bitmap.Config.ARGB_8888)
+                                            val buf = java.nio.ByteBuffer.allocateDirect(header.width * header.height * 2)
+                                            val meta = LongArray(3)
+                                            val read = top.maary.darkbag.rawvideo.RawVideoNative.nativeReadFrame(handle, 0, meta, buf)
+                                            if (read > 0) {
+                                                val targetLogIndex = if (header.activeLogName.isNotBlank() && header.activeLogName != "None") {
+                                                    SettingsFragment.LOG_CURVES.indexOf(header.activeLogName).takeIf { it >= 0 } ?: -1
+                                                } else -1
+                                                val lutManager = context?.let { top.maary.darkbag.utils.LutManager(it) }
+                                                val lutPath = if (header.activeLutName.isNotBlank() && header.activeLutName != "None" && lutManager != null) {
+                                                    val f = java.io.File(lutManager.lutDir, header.activeLutName)
+                                                    if (f.exists()) f.absolutePath else null
+                                                } else null
+                                                top.maary.darkbag.rawvideo.RawVideoNative.nativeDebayerFrameToBitmap(
+                                                    bayerBuffer = buf,
+                                                    width = header.width,
+                                                    height = header.height,
+                                                    orientation = header.orientation,
+                                                    cfaPattern = header.cfaPattern,
+                                                    whiteLevel = header.whiteLevel,
+                                                    blackLevel = header.blackLevel.firstOrNull() ?: 64f,
+                                                    neutralPoint = header.neutralPoint,
+                                                    targetLog = targetLogIndex,
+                                                    lutPath = lutPath,
+                                                    exposure = header.exposure,
+                                                    contrast = header.contrast,
+                                                    saturation = header.saturation,
+                                                    outBitmap = thumbBmp
+                                                )
+                                                thumbBmp
+                                            } else null
+                                        } else null
+                                    } finally {
+                                        top.maary.darkbag.rawvideo.RawVideoNative.nativeCloseReader(handle)
+                                    }
+                                } else null
+                            }
+                        } catch (e: Exception) {
+                            null
+                        }
+                    }
+                    if (bmp != null) {
+                        Glide.with(photoViewButton)
+                            .load(bmp)
+                            .apply(RequestOptions.circleCropTransform())
+                            .into(photoViewButton)
+                        return@launch
+                    }
+                }
+
                 val lastModified = try {
                     context?.let { mediaStoreUtils.getFileLastModified(it, android.net.Uri.parse(filename)) } ?: 0L
                 } catch (e: Exception) {
@@ -1273,16 +1395,50 @@ class CameraFragment : Fragment() {
         }
 
         // Listener for button used to capture photo
-        cameraUiContainerBinding?.cameraCaptureButton?.setOnLongClickListener {
+        val shutter = cameraUiContainerBinding?.cameraCaptureButton
+        shutter?.isLongPressHoldEnabled = true
+        shutter?.onLongPressHoldStarted = {
             if (isHalfFrameModeEnabled && halfFrameStep == 1) {
                 // Cancel/Reset half-frame
                 val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
                 halfFrameSessionStore.clearCurrentSession(deleteTempFile = true)
                 writeScopedHalfFrameStep(prefs, 0)
                 updateHalfFrameUI()
-                true
-            } else {
-                false
+            } else if (!isBurstActive && !isHalfFrameModeEnabled && !isMultiCameraModeActive) {
+                val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                val action = prefs.getString(SettingsFragment.KEY_SHUTTER_LONG_PRESS_ACTION, SettingsFragment.SHUTTER_LONG_PRESS_MP4)
+                if (action == SettingsFragment.SHUTTER_LONG_PRESS_RAW_VIDEO || action == SettingsFragment.SHUTTER_LONG_PRESS_MP4) {
+                    val hasAudio = androidx.core.content.ContextCompat.checkSelfPermission(
+                        requireContext(),
+                        android.Manifest.permission.RECORD_AUDIO
+                    ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                    if (!hasAudio) {
+                        if (shouldShowRequestPermissionRationale(android.Manifest.permission.RECORD_AUDIO)) {
+                            showAudioPermissionRationaleDialog {
+                                if (action == SettingsFragment.SHUTTER_LONG_PRESS_RAW_VIDEO) {
+                                    startRawVideoRecording()
+                                } else {
+                                    startMp4VideoRecording()
+                                }
+                            }
+                        } else {
+                            requestAudioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                        }
+                    } else {
+                        if (action == SettingsFragment.SHUTTER_LONG_PRESS_RAW_VIDEO) {
+                            startRawVideoRecording()
+                        } else {
+                            startMp4VideoRecording()
+                        }
+                    }
+                }
+            }
+        }
+        shutter?.onLongPressHoldReleased = {
+            if (rawVideoSessionManager.recording) {
+                stopRawVideoRecording()
+            } else if (mp4VideoRecorder?.recording == true) {
+                stopMp4VideoRecording()
             }
         }
 
@@ -1691,7 +1847,7 @@ class CameraFragment : Fragment() {
                 val fastOutputUri: android.net.Uri? = null
                 
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(requireContext(), "Processing Queued", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(requireContext(), getString(R.string.toast_processing_queued), Toast.LENGTH_SHORT).show()
                     if (isHalfFrameModeEnabled && prefs.getInt(scopedHalfFrameStepKey(prefs), 0) == 1) {
                         setGalleryThumbnail(null)
                     }
@@ -3383,7 +3539,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 val fastJpegUri: android.net.Uri? = null
                 
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(requireContext(), "HDR+ Queued for processing", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(requireContext(), getString(R.string.toast_hdr_queued), Toast.LENGTH_SHORT).show()
                     if (isHalfFrameModeEnabled && prefs.getInt(scopedHalfFrameStepKey(prefs), 0) == 1) {
                         setGalleryThumbnail(null)
                     }
@@ -3467,7 +3623,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             } catch (e: Exception) {
                 Log.e(TAG, "HDR+ processing failed, falling back to single shot", e)
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(appContext, "HDR+ failed, saving single frame...", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(appContext, appContext.getString(R.string.toast_hdr_failed_fallback), Toast.LENGTH_SHORT).show()
                 }
 
                 if (burstResult.frames.isNotEmpty()) {
@@ -3618,7 +3774,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     }
 
                     lifecycleScope.launch(Dispatchers.Main) {
-                        Toast.makeText(requireContext(), "Camera hardware error: $error. Please restart the app.", Toast.LENGTH_LONG).show()
+                        Toast.makeText(requireContext(), getString(R.string.error_camera_hardware, error), Toast.LENGTH_LONG).show()
                     }
                 }
             }, camera2Handler)
@@ -3636,19 +3792,20 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         val chars = camera2Manager.getCameraCharacteristics(device.id)
         val map = chars.get(android.hardware.camera2.CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
 
+        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val rawResPref = prefs.getString(SettingsFragment.KEY_RAW_VIDEO_RESOLUTION, SettingsFragment.DEFAULT_RAW_VIDEO_RESOLUTION) ?: SettingsFragment.DEFAULT_RAW_VIDEO_RESOLUTION
+
         val isRawSupportedLocally = map?.getOutputFormats()?.contains(android.graphics.ImageFormat.RAW_SENSOR) == true
         val targetCaptureSize: android.util.Size
         if (isRawSupportedLocally) {
-            val rawSizes = map?.getOutputSizes(android.graphics.ImageFormat.RAW_SENSOR)
-            targetCaptureSize = rawSizes?.maxByOrNull { it.width * it.height } ?: android.util.Size(4000, 3000)
+            val rawSizes = map?.getOutputSizes(android.graphics.ImageFormat.RAW_SENSOR) ?: emptyArray()
+            targetCaptureSize = rawSizes.maxByOrNull { it.width * it.height } ?: android.util.Size(4000, 3000)
             rawImageReader = ImageReader.newInstance(targetCaptureSize.width, targetCaptureSize.height, android.graphics.ImageFormat.RAW_SENSOR, 8)
         } else {
-            val jpegSizes = map?.getOutputSizes(android.graphics.ImageFormat.JPEG)
-            targetCaptureSize = jpegSizes?.maxByOrNull { it.width * it.height } ?: android.util.Size(4000, 3000)
+            val jpegSizes = map?.getOutputSizes(android.graphics.ImageFormat.JPEG) ?: emptyArray()
+            targetCaptureSize = jpegSizes.maxByOrNull { it.width * it.height } ?: android.util.Size(4000, 3000)
             rawImageReader = ImageReader.newInstance(targetCaptureSize.width, targetCaptureSize.height, android.graphics.ImageFormat.JPEG, 8)
         }
-
-        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
         val burstSizeStr = prefs.getString(SettingsFragment.KEY_HDR_BURST_COUNT, "5") ?: "5"
         val burstSize = burstSizeStr.toIntOrNull() ?: 5
         lifecycleScope.launch(Dispatchers.Default) {
@@ -3883,7 +4040,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 lifecycleScope.launch(Dispatchers.Main) {
                     processingSemaphore.release()
                     hideProcessingAnimation()
-                    Toast.makeText(requireContext(), "Multi-camera capture failed: $errorMsg", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(requireContext(), getString(R.string.error_multi_camera_capture_failed, errorMsg), Toast.LENGTH_SHORT).show()
                 }
             }
         )
@@ -4325,6 +4482,297 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         )
     }
 
+
+    private fun startRawVideoRecording() {
+        val device = camera2Device ?: return
+        val session = camera2Session ?: return
+        val reader = rawImageReader ?: return
+
+        val chars = camera2Manager.getCameraCharacteristics(device.id)
+        val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+
+        val targetFpsStr = prefs.getString(SettingsFragment.KEY_RAW_VIDEO_FPS, "24") ?: "24"
+        val targetFps = targetFpsStr.toFloatOrNull() ?: 24.0f
+        val activeLut = prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, null)
+        val activeLog = prefs.getString(SettingsFragment.KEY_TARGET_LOG, "None")
+        val rawResPref = prefs.getString(SettingsFragment.KEY_RAW_VIDEO_RESOLUTION, SettingsFragment.DEFAULT_RAW_VIDEO_RESOLUTION) ?: SettingsFragment.DEFAULT_RAW_VIDEO_RESOLUTION
+        val downsampleMode = when {
+            rawResPref.contains("1080p") -> RawVideoNative.DOWNSAMPLE_BINNING_1080P
+            rawResPref.contains("2K Open Gate") || (rawResPref.contains("4:3") && !rawResPref.contains("Max")) -> RawVideoNative.DOWNSAMPLE_BINNING_2K_OPEN_GATE_4_3
+            rawResPref.contains("4K") -> RawVideoNative.DOWNSAMPLE_CROP_4K
+            else -> RawVideoNative.DOWNSAMPLE_NONE
+        }
+
+        val timestamp = System.currentTimeMillis()
+        val baseName = DarkbagIdentity.prefixedBaseName("RAWVID_${timestamp}")
+        val tempDir = File(requireContext().cacheDir, "rawvideo")
+        tempDir.mkdirs()
+        val tempFile = File(tempDir, "${baseName}.rawvid")
+
+        val lastResult = captureResults.values.lastOrNull()
+        val combinedOrientation = getCombinedOrientation()
+        rawVideoSessionManager.onLowStorageCallback = {
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                if (rawVideoSessionManager.recording) {
+                    context?.let { ctx ->
+                        Toast.makeText(ctx, ctx.getString(R.string.toast_low_storage_recording_stopped), Toast.LENGTH_LONG).show()
+                    }
+                    stopRawVideoRecording()
+                }
+            }
+        }
+        val success = rawVideoSessionManager.startRecording(
+            outputPath = tempFile.absolutePath,
+            characteristics = chars,
+            initialResult = lastResult,
+            targetFps = targetFps,
+            activeLutName = activeLut,
+            activeLogName = activeLog,
+            orientation = combinedOrientation,
+            targetWidth = reader.width,
+            targetHeight = reader.height,
+            downsampleMode = downsampleMode
+        )
+
+        val targetFpsInt = targetFps.toInt()
+        val availableFpsRanges = chars.get(android.hardware.camera2.CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
+        val bestFpsRange = availableFpsRanges?.find { it.lower == targetFpsInt && it.upper == targetFpsInt }
+            ?: availableFpsRanges?.find { it.upper == targetFpsInt }
+            ?: availableFpsRanges?.find { it.lower <= targetFpsInt && it.upper >= targetFpsInt }
+            ?: availableFpsRanges?.maxByOrNull { it.upper }
+
+        val frameDurationNs = (1_000_000_000L / targetFps).toLong()
+
+        if (success) {
+            cameraUiContainerBinding?.cameraCaptureButton?.setRecordingState(true)
+            cameraUiContainerBinding?.cameraCaptureButton?.startRotation()
+
+            reader.setOnImageAvailableListener({ r ->
+                val image = try { r.acquireNextImage() } catch (e: Exception) { r.acquireLatestImage() } ?: return@setOnImageAvailableListener
+                val res = captureResults.values.lastOrNull()
+                rawVideoSessionManager.onRawImageAvailable(image, res)
+            }, camera2Handler)
+
+            try {
+                val request = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_RECORD)
+                camera2PreviewSurface?.let { request.addTarget(it) }
+                request.addTarget(reader.surface)
+                analysisImageReader?.surface?.let { request.addTarget(it) }
+
+                // 1. Lock Target FPS range for AE to enforce frame rate and AE exposure ceiling
+                if (bestFpsRange != null) {
+                    request.set(android.hardware.camera2.CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, bestFpsRange)
+                    Log.i(TAG, "RAW video locked AE FPS Range: $bestFpsRange (target: ${targetFps}fps)")
+                }
+
+                // 2. Lock Frame Duration
+                request.set(android.hardware.camera2.CaptureRequest.SENSOR_FRAME_DURATION, frameDurationNs)
+
+                // 3. Apply manual exposure settings if active
+                applyManualSettingsToRequest(request)
+
+                // 4. Shutter speed safety clamp: in manual exposure mode, exposure time must NOT exceed frameDurationNs
+                if (isManualExposure) {
+                    val currentExp = request.get(android.hardware.camera2.CaptureRequest.SENSOR_EXPOSURE_TIME)
+                    if (currentExp != null && currentExp > frameDurationNs) {
+                        request.set(android.hardware.camera2.CaptureRequest.SENSOR_EXPOSURE_TIME, frameDurationNs)
+                        Log.w(TAG, "Clamped manual shutter ($currentExp ns) to frame duration ($frameDurationNs ns)")
+                    }
+                }
+
+                session.setRepeatingRequest(request.build(), object : android.hardware.camera2.CameraCaptureSession.CaptureCallback() {
+                    override fun onCaptureCompleted(session: android.hardware.camera2.CameraCaptureSession, request: android.hardware.camera2.CaptureRequest, result: android.hardware.camera2.TotalCaptureResult) {
+                        handleCaptureResult(result)
+                    }
+                }, camera2Handler)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to update repeating request for RAW video recording", e)
+            }
+        }
+    }
+
+    private fun stopRawVideoRecording() {
+        cameraUiContainerBinding?.cameraCaptureButton?.setRecordingState(false)
+        cameraUiContainerBinding?.cameraCaptureButton?.stopRotation()
+
+        rawImageReader?.setOnImageAvailableListener(null, null)
+
+        val device = camera2Device
+        val session = camera2Session
+        val surface = camera2PreviewSurface
+        if (device != null && session != null && surface != null) {
+            try {
+                val request = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_PREVIEW)
+                request.addTarget(surface)
+                analysisImageReader?.surface?.let { request.addTarget(it) }
+                applyManualSettingsToRequest(request)
+                session.setRepeatingRequest(request.build(), object : android.hardware.camera2.CameraCaptureSession.CaptureCallback() {
+                    override fun onCaptureCompleted(session: android.hardware.camera2.CameraCaptureSession, request: android.hardware.camera2.CaptureRequest, result: android.hardware.camera2.TotalCaptureResult) {
+                        handleCaptureResult(result)
+                    }
+                }, camera2Handler)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to restore preview repeating request", e)
+            }
+        }
+
+        isVideoSaving = true
+        showProcessingAnimation()
+
+        val appContext = context?.applicationContext
+        val prefs = appContext?.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val rawFolderUri = prefs?.getString(SettingsFragment.KEY_RAW_STORAGE_URI, null)
+        val jpgFolderUri = prefs?.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val result = rawVideoSessionManager.stopRecording()
+                if (result == null) {
+                    if (appContext != null) {
+                        withContext(Dispatchers.Main) {
+                            Toast.makeText(appContext, appContext.getString(R.string.toast_recording_too_short), Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                    return@launch
+                }
+                if (appContext == null) {
+                    result.file.delete()
+                    return@launch
+                }
+                val baseName = result.file.nameWithoutExtension
+
+                val (savedUri, thumbnail) = top.maary.darkbag.utils.ImageSaver.saveRawVideo(
+                    context = appContext,
+                    rawVideoFile = result.file,
+                    baseName = baseName,
+                    targetFps = 24.0f,
+                    rawFolderUri = rawFolderUri,
+                    jpgFolderUri = jpgFolderUri
+                )
+
+                if (savedUri != null) {
+                    prefs?.edit()?.putString(SettingsFragment.KEY_LAST_CAPTURE_URI, savedUri.toString())?.apply()
+                    imageRepository.invalidateCache()
+                    withContext(Dispatchers.Main) {
+                        updateCurrentThumbnail(savedUri)
+                        val photoViewButton = cameraUiContainerBinding?.photoViewButton
+                        if (photoViewButton != null && thumbnail != null) {
+                            photoViewButton.visibility = View.VISIBLE
+                            photoViewButton.alpha = 1f
+                            photoViewButton.setPadding(resources.getDimension(R.dimen.stroke_small).toInt())
+                            Glide.with(photoViewButton)
+                                .load(thumbnail)
+                                .apply(RequestOptions.circleCropTransform())
+                                .into(photoViewButton)
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error saving raw video", e)
+            } finally {
+                withContext(Dispatchers.Main) {
+                    isVideoSaving = false
+                    hideProcessingAnimation()
+                }
+            }
+        }
+    }
+
+    private fun startMp4VideoRecording() {
+        val timestamp = System.currentTimeMillis()
+        val baseName = DarkbagIdentity.prefixedBaseName("VID_${timestamp}")
+        val tempDir = File(requireContext().cacheDir, "video")
+        tempDir.mkdirs()
+        val tempFile = File(tempDir, "${baseName}.mp4")
+
+        val recorder = top.maary.darkbag.video.Mp4VideoRecorder(requireContext())
+        val videoSurface = recorder.prepare(tempFile, 1080, 1920, 30, deviceOrientationDegrees) ?: run {
+            Log.e(TAG, "Failed to prepare Mp4VideoRecorder")
+            return
+        }
+
+        lutProcessor?.setEncoderSurface(videoSurface, 1080, 1920)
+
+        if (!recorder.start()) {
+            Log.e(TAG, "Failed to start Mp4VideoRecorder")
+            lutProcessor?.setEncoderSurface(null, 0, 0)
+            recorder.release()
+            return
+        }
+
+        mp4VideoRecorder = recorder
+        cameraUiContainerBinding?.cameraCaptureButton?.setRecordingState(true)
+        cameraUiContainerBinding?.cameraCaptureButton?.startRotation()
+    }
+
+    private fun stopMp4VideoRecording() {
+        cameraUiContainerBinding?.cameraCaptureButton?.setRecordingState(false)
+        cameraUiContainerBinding?.cameraCaptureButton?.stopRotation()
+
+        lutProcessor?.setEncoderSurface(null, 0, 0)
+        updateMotionPhotoEncoder()
+
+        isVideoSaving = true
+        showProcessingAnimation()
+
+        val recorder = mp4VideoRecorder
+        mp4VideoRecorder = null
+
+        val appContext = context?.applicationContext
+        val prefs = appContext?.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val mediaFolderUri = prefs?.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val result = recorder?.stop()
+                if (result == null) {
+                    if (appContext != null) {
+                        withContext(Dispatchers.Main) {
+                            Toast.makeText(appContext, appContext.getString(R.string.toast_recording_too_short), Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                    return@launch
+                }
+                if (appContext == null) {
+                    result.file.delete()
+                    return@launch
+                }
+                val baseName = result.file.nameWithoutExtension
+
+                val (savedUri, thumbnail) = top.maary.darkbag.utils.ImageSaver.saveMp4Video(
+                    context = appContext,
+                    mp4File = result.file,
+                    baseName = baseName,
+                    mediaFolderUri = mediaFolderUri
+                )
+
+                if (savedUri != null) {
+                    prefs?.edit()?.putString(SettingsFragment.KEY_LAST_CAPTURE_URI, savedUri.toString())?.apply()
+                    imageRepository.invalidateCache()
+                    withContext(Dispatchers.Main) {
+                        updateCurrentThumbnail(savedUri)
+                        val photoViewButton = cameraUiContainerBinding?.photoViewButton
+                        if (photoViewButton != null && thumbnail != null) {
+                            photoViewButton.visibility = View.VISIBLE
+                            photoViewButton.alpha = 1f
+                            photoViewButton.setPadding(resources.getDimension(R.dimen.stroke_small).toInt())
+                            Glide.with(photoViewButton)
+                                .load(thumbnail)
+                                .apply(RequestOptions.circleCropTransform())
+                                .into(photoViewButton)
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error saving mp4 video", e)
+            } finally {
+                withContext(Dispatchers.Main) {
+                    isVideoSaving = false
+                    hideProcessingAnimation()
+                }
+            }
+        }
+    }
 
     private fun getTargetOisMode(isHdrBurst: Boolean): Int {
         return if (isHdrBurst && !isHdrOisEnabledPref) {

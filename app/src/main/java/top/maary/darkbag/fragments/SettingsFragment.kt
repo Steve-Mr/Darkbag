@@ -15,8 +15,12 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
+import android.graphics.ImageFormat
+import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CameraManager
 import android.net.Uri
 import android.os.Build
+import android.util.Size
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -59,6 +63,16 @@ class SettingsFragment : Fragment() {
             prefs.edit().putBoolean(KEY_SAVE_LOCATION, false).apply()
             syncLocationSettingState()
             Toast.makeText(context, R.string.location_permission_denied, Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private val audioPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            Toast.makeText(context, R.string.toast_audio_permission_granted, Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(context, R.string.error_mic_permission_silent_video, Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -266,8 +280,109 @@ class SettingsFragment : Fragment() {
             prefs.edit().putInt(KEY_COLOR_ENGINE_MODE, position).apply()
         }
 
+        // Shutter Long-Press Action
+        val shutterLongPressAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, SHUTTER_LONG_PRESS_OPTIONS)
+        binding.menuShutterLongPress.setAdapter(shutterLongPressAdapter)
+        val savedShutterAction = prefs.getString(KEY_SHUTTER_LONG_PRESS_ACTION, SHUTTER_LONG_PRESS_MP4)
+        binding.menuShutterLongPress.setText(savedShutterAction, false)
+        binding.menuShutterLongPress.setOnItemClickListener { _, _, position, _ ->
+            val selectedAction = SHUTTER_LONG_PRESS_OPTIONS[position]
+            prefs.edit().putString(KEY_SHUTTER_LONG_PRESS_ACTION, selectedAction).apply()
+            if (selectedAction == SHUTTER_LONG_PRESS_MP4 || selectedAction == SHUTTER_LONG_PRESS_RAW_VIDEO) {
+                if (ContextCompat.checkSelfPermission(
+                        requireContext(),
+                        android.Manifest.permission.RECORD_AUDIO
+                    ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+                ) {
+                    audioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                }
+            }
+        }
+
+        setupRawVideoSettings()
+
         setupExternalViewerMenu()
 
+    }
+
+    private fun setupRawVideoSettings() {
+        val cameraManager = requireContext().getSystemService(Context.CAMERA_SERVICE) as? CameraManager
+        val backCameraChars = try {
+            val backId = cameraManager?.cameraIdList?.firstOrNull { id ->
+                val c = cameraManager.getCameraCharacteristics(id)
+                c.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK
+            } ?: cameraManager?.cameraIdList?.firstOrNull()
+            backId?.let { cameraManager?.getCameraCharacteristics(it) }
+        } catch (_: Exception) {
+            null
+        }
+
+        val maxHardwareFps = HardwareCapabilities.getMaxSupportedFps(backCameraChars)
+        val is4kSupported = HardwareCapabilities.is4kCropSupported(backCameraChars)
+        val maxRawSize = HardwareCapabilities.getMaxRawSize(backCameraChars)
+
+        // 1. RAW Video FPS 联动
+        val fpsDisplayOptions = RAW_VIDEO_FPS_OPTIONS.map { fpsStr ->
+            val fpsVal = fpsStr.toIntOrNull() ?: 24
+            if (fpsVal > maxHardwareFps) {
+                getString(R.string.raw_video_option_unsupported_suffix, fpsStr)
+            } else {
+                fpsStr
+            }
+        }
+        val rawFpsAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, fpsDisplayOptions)
+        binding.menuRawVideoFps.setAdapter(rawFpsAdapter)
+
+        val savedRawFps = prefs.getString(KEY_RAW_VIDEO_FPS, "24") ?: "24"
+        val savedFpsIndex = RAW_VIDEO_FPS_OPTIONS.indexOf(savedRawFps).coerceAtLeast(0)
+        binding.menuRawVideoFps.setText(fpsDisplayOptions[savedFpsIndex], false)
+
+        fun updateFpsHelperText(selectedFps: String) {
+            val fpsVal = selectedFps.toIntOrNull() ?: 24
+            if (fpsVal > maxHardwareFps) {
+                binding.layoutRawVideoFps.helperText = getString(R.string.raw_video_fps_unsupported_warning, maxHardwareFps, selectedFps)
+            } else {
+                binding.layoutRawVideoFps.helperText = null
+            }
+        }
+        updateFpsHelperText(savedRawFps)
+
+        binding.menuRawVideoFps.setOnItemClickListener { _, _, position, _ ->
+            val actualFps = RAW_VIDEO_FPS_OPTIONS[position]
+            prefs.edit().putString(KEY_RAW_VIDEO_FPS, actualFps).apply()
+            updateFpsHelperText(actualFps)
+        }
+
+        // 2. RAW Video Resolution 联动
+        val resDisplayOptions = RAW_VIDEO_RESOLUTION_OPTIONS.map { resStr ->
+            if (resStr.contains("4K") && !is4kSupported) {
+                getString(R.string.raw_video_option_unsupported_suffix, resStr)
+            } else {
+                resStr
+            }
+        }
+        val rawResAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, resDisplayOptions)
+        binding.menuRawVideoResolution.setAdapter(rawResAdapter)
+
+        val savedRawRes = prefs.getString(KEY_RAW_VIDEO_RESOLUTION, DEFAULT_RAW_VIDEO_RESOLUTION) ?: DEFAULT_RAW_VIDEO_RESOLUTION
+        val savedResIndex = RAW_VIDEO_RESOLUTION_OPTIONS.indexOf(savedRawRes).coerceAtLeast(0)
+        binding.menuRawVideoResolution.setText(resDisplayOptions[savedResIndex], false)
+
+        fun updateResHelperText(selectedRes: String) {
+            if (selectedRes.contains("4K") && !is4kSupported) {
+                val sizeDesc = maxRawSize?.let { "${it.width}x${it.height}" } ?: "Unknown"
+                binding.layoutRawVideoResolution.helperText = getString(R.string.raw_video_res_4k_unsupported_warning, sizeDesc)
+            } else {
+                binding.layoutRawVideoResolution.helperText = null
+            }
+        }
+        updateResHelperText(savedRawRes)
+
+        binding.menuRawVideoResolution.setOnItemClickListener { _, _, position, _ ->
+            val actualRes = RAW_VIDEO_RESOLUTION_OPTIONS[position]
+            prefs.edit().putString(KEY_RAW_VIDEO_RESOLUTION, actualRes).apply()
+            updateResHelperText(actualRes)
+        }
     }
 
 
@@ -572,7 +687,7 @@ class SettingsFragment : Fragment() {
         }
 
         val physLenses = multiCamInfo?.physicalLenses?.joinToString { "${it.name} (${it.type})" } ?: "None"
-        binding.tvMultiCameraStatus.text = "$hwDesc\n检测到镜头: $physLenses"
+        binding.tvMultiCameraStatus.text = "$hwDesc\n" + getString(R.string.multi_camera_detected_lenses, physLenses)
         binding.switchMultiCameraMode.isEnabled = true
 
         setupSwitch(binding.switchMultiCameraMode, KEY_MULTI_CAMERA_MODE, false)
@@ -779,6 +894,63 @@ class SettingsFragment : Fragment() {
         const val KEY_EXP_FOCUS_PEAKING = "exp_focus_peaking"
         const val KEY_COLOR_ENGINE_MODE = "color_engine_mode"
 
+        const val KEY_SHUTTER_LONG_PRESS_ACTION = "shutter_long_press_action"
+        const val SHUTTER_LONG_PRESS_MP4 = "Standard MP4 (Default)"
+        const val SHUTTER_LONG_PRESS_RAW_VIDEO = "RAW Video (Bayer 10-bit)"
+        const val SHUTTER_LONG_PRESS_DISABLED = "Disabled"
+        val SHUTTER_LONG_PRESS_OPTIONS = listOf(
+            SHUTTER_LONG_PRESS_MP4,
+            SHUTTER_LONG_PRESS_RAW_VIDEO,
+            SHUTTER_LONG_PRESS_DISABLED
+        )
+
+        const val KEY_RAW_VIDEO_FPS = "raw_video_fps"
+        val RAW_VIDEO_FPS_OPTIONS = listOf("24", "30", "60")
+
+        const val KEY_RAW_VIDEO_RESOLUTION = "raw_video_resolution"
+        const val DEFAULT_RAW_VIDEO_RESOLUTION = "Max Native (4:3)"
+        val RAW_VIDEO_RESOLUTION_OPTIONS = listOf("Max Native (4:3)", "2K Open Gate (4:3)", "4K UHD (16:9)", "1080p (16:9)")
+
+        fun selectRawVideoSize(preference: String, availableSizes: Array<android.util.Size>): android.util.Size {
+            if (availableSizes.isEmpty()) {
+                return android.util.Size(4000, 3000)
+            }
+            return when {
+                preference.contains("1080p") -> {
+                    val exact = availableSizes.find { it.width == 1920 && it.height == 1080 }
+                    if (exact != null) {
+                        exact
+                    } else {
+                        val candidate16x9 = availableSizes
+                            .filter { it.width <= 1920 && kotlin.math.abs((it.width.toFloat() / it.height.toFloat()) - (16.0f / 9.0f)) < 0.05f }
+                            .maxByOrNull { it.width * it.height }
+                        candidate16x9
+                            ?: availableSizes.minByOrNull { kotlin.math.abs(it.width * it.height - 1920 * 1080) }
+                            ?: (availableSizes.maxByOrNull { it.width * it.height } ?: android.util.Size(4000, 3000))
+                    }
+                }
+                preference.contains("4K") -> {
+                    val exact = availableSizes.find { it.width == 3840 && it.height == 2160 }
+                    if (exact != null) {
+                        exact
+                    } else {
+                        val candidate16x9 = availableSizes
+                            .filter { kotlin.math.abs((it.width.toFloat() / it.height.toFloat()) - (16.0f / 9.0f)) < 0.05f }
+                            .minByOrNull { kotlin.math.abs(it.width * it.height - 3840 * 2160) }
+                        candidate16x9
+                            ?: availableSizes.minByOrNull { kotlin.math.abs(it.width * it.height - 3840 * 2160) }
+                            ?: (availableSizes.maxByOrNull { it.width * it.height } ?: android.util.Size(4000, 3000))
+                    }
+                }
+                preference.contains("2K Open Gate") || preference.contains("Max Native") -> {
+                    availableSizes.maxByOrNull { it.width * it.height } ?: android.util.Size(4000, 3000)
+                }
+                else -> {
+                    availableSizes.maxByOrNull { it.width * it.height } ?: android.util.Size(4000, 3000)
+                }
+            }
+        }
+
         val COLOR_ENGINE_MODES = listOf(
             "Khronos PBR Neutral (Default)",
             "Natural Filmic (Leica/Hasselblad)",
@@ -810,5 +982,38 @@ class SettingsFragment : Fragment() {
             "D-Log",
             "Log3G10"
         )
+    }
+
+    object HardwareCapabilities {
+        /**
+         * 读取指定 CameraCharacteristics 支持的最大 AE 目标帧率。
+         * 若 characteristics 为空或没有有效区间，安全返回 30。
+         */
+        fun getMaxSupportedFps(chars: CameraCharacteristics?): Int {
+            if (chars == null) return 30
+            val ranges = chars.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES) ?: return 30
+            return ranges.maxOfOrNull { it.upper } ?: 30
+        }
+
+        /**
+         * 判断传感器 RAW_SENSOR 输出是否能够支持 4K UHD (3840 x 2160) 裁剪。
+         */
+        fun is4kCropSupported(chars: CameraCharacteristics?): Boolean {
+            if (chars == null) return false
+            val map = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP) ?: return false
+            val rawSizes = map.getOutputSizes(ImageFormat.RAW_SENSOR) ?: return false
+            val maxRaw = rawSizes.maxByOrNull { it.width * it.height } ?: return false
+            return maxRaw.width >= 3840 && maxRaw.height >= 2160
+        }
+
+        /**
+         * 获取最大 RAW 输出尺寸
+         */
+        fun getMaxRawSize(chars: CameraCharacteristics?): Size? {
+            if (chars == null) return null
+            val map = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP) ?: return null
+            val rawSizes = map.getOutputSizes(ImageFormat.RAW_SENSOR) ?: return null
+            return rawSizes.maxByOrNull { it.width * it.height }
+        }
     }
 }
