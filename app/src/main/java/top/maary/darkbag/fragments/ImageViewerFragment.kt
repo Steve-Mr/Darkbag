@@ -3439,13 +3439,13 @@ open class ImageViewerFragment : Fragment() {
         val rawFolderUriStr = prefs.getString(SettingsFragment.KEY_RAW_STORAGE_URI, null)
         val clipName = "CDNG_${group.baseName}"
 
-        var isUserCancelled = false
+        val isUserCancelled = java.util.concurrent.atomic.AtomicBoolean(false)
         var exportJob: kotlinx.coroutines.Job? = null
 
         val (progressDialog, updateProgress) = showExportProgressDialog(
             title = getString(R.string.export_progress_exporting_cdng),
             onCancel = {
-                isUserCancelled = true
+                isUserCancelled.set(true)
                 exportJob?.cancel()
             }
         )
@@ -3464,11 +3464,11 @@ open class ImageViewerFragment : Fragment() {
                         rawVideoUri = uri,
                         outputDir = tempDir,
                         clipName = clipName,
-                        isCancelled = { isUserCancelled || !isActive },
+                        isCancelled = { isUserCancelled.get() || !isActive },
                         onProgress = updateProgress
                     )
 
-                    if (isUserCancelled || !isActive) {
+                    if (isUserCancelled.get() || !isActive) {
                         withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
                             tempDir.deleteRecursively()
                         }
@@ -3485,7 +3485,7 @@ open class ImageViewerFragment : Fragment() {
                                 val clipDirDoc = treeDoc?.createDirectory(exportedClipName)
                                 if (clipDirDoc != null) {
                                     resultDir.listFiles()?.forEach { file ->
-                                        if (isUserCancelled || !isActive) return@forEach
+                                        if (isUserCancelled.get() || !isActive) return@forEach
                                         val mime = if (file.name.endsWith(".wav")) "audio/wav" else "image/x-adobe-dng"
                                         val targetDoc = clipDirDoc.createFile(mime, file.name)
                                         if (targetDoc != null) {
@@ -3502,7 +3502,7 @@ open class ImageViewerFragment : Fragment() {
                             }
                         }
 
-                        if (isUserCancelled || !isActive) {
+                        if (isUserCancelled.get() || !isActive) {
                             Toast.makeText(context, R.string.toast_export_cancelled, Toast.LENGTH_SHORT).show()
                             return@launch
                         }
@@ -3526,11 +3526,11 @@ open class ImageViewerFragment : Fragment() {
                         rawVideoUri = uri,
                         outputDir = targetDir,
                         clipName = clipName,
-                        isCancelled = { isUserCancelled || !isActive },
+                        isCancelled = { isUserCancelled.get() || !isActive },
                         onProgress = updateProgress
                     )
 
-                    if (isUserCancelled || !isActive) {
+                    if (isUserCancelled.get() || !isActive) {
                         withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
                             targetDir.deleteRecursively()
                         }
@@ -3565,7 +3565,7 @@ open class ImageViewerFragment : Fragment() {
                     tempExportDir?.deleteRecursively()
                     destDir?.deleteRecursively()
                 }
-                if (isUserCancelled) {
+                if (isUserCancelled.get()) {
                     Toast.makeText(context, R.string.toast_export_cancelled, Toast.LENGTH_SHORT).show()
                 } else {
                     android.util.Log.e("ImageViewerFragment", "CinemaDNG export error", e)
@@ -3594,13 +3594,13 @@ open class ImageViewerFragment : Fragment() {
 
         val tempMp4File = File(context.cacheDir, "${group.baseName}_graded.mp4")
 
-        var isUserCancelled = false
+        val isUserCancelled = java.util.concurrent.atomic.AtomicBoolean(false)
         var exportJob: kotlinx.coroutines.Job? = null
 
         val (progressDialog, updateProgress) = showExportProgressDialog(
             title = getString(R.string.export_progress_exporting_mp4),
             onCancel = {
-                isUserCancelled = true
+                isUserCancelled.set(true)
                 exportJob?.cancel()
             }
         )
@@ -3613,11 +3613,11 @@ open class ImageViewerFragment : Fragment() {
                     outputFile = tempMp4File,
                     editConfig = config,
                     targetResolution = targetResolution,
-                    isCancelled = { isUserCancelled || !isActive },
+                    isCancelled = { isUserCancelled.get() || !isActive },
                     onProgress = updateProgress
                 )
 
-                if (isUserCancelled || !isActive) {
+                if (isUserCancelled.get() || !isActive) {
                     withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
                         tempMp4File.delete()
                     }
@@ -3653,7 +3653,7 @@ open class ImageViewerFragment : Fragment() {
                 withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
                     tempMp4File.delete()
                 }
-                if (isUserCancelled) {
+                if (isUserCancelled.get()) {
                     Toast.makeText(context, R.string.toast_export_cancelled, Toast.LENGTH_SHORT).show()
                 } else {
                     android.util.Log.e("ImageViewerFragment", "MP4 export error", e)

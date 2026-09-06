@@ -537,16 +537,6 @@ Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeCloseReader(
     }
 }
 
-static const std::array<uint8_t, 1024> kGammaLut = [] {
-    std::array<uint8_t, 1024> table{};
-    for (size_t i = 0; i < 1024; ++i) {
-        float val = static_cast<float>(i) / 1023.0f;
-        float gammaVal = std::pow(val, 1.0f / 2.2f) * 255.0f;
-        table[i] = static_cast<uint8_t>(std::clamp(gammaVal, 0.0f, 255.0f));
-    }
-    return table;
-}();
-
 // Fast Demosaicing of 16-bit RAW_SENSOR / Linear Bayer to RGBA_8888 Android Bitmap with White Balance, Tone Curves, and 3D LUT
 JNIEXPORT jboolean JNICALL
 Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeDebayerFrameToBitmap(
