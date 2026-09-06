@@ -47,6 +47,7 @@ import android.view.TextureView
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.media.ImageReader
 import android.os.Handler
@@ -2057,36 +2058,92 @@ class CameraFragment : Fragment() {
 
                 if (saveRaw) {
                     try {
-                        val dngThumbnailSource: java.io.File? = null
+                        val dngTargetFile = bayerDngFile
+                        var dngSuccess = false
 
-                        val dngCreator = android.hardware.camera2.DngCreator(chars, captureResult)
-                        dngCreator.setDescription(DarkbagIdentity.imageDescription(isHdrPlus = false))
-                        captureMetadata.location?.let { dngCreator.setLocation(it) }
-
-                        val dngOrientation = when (image.combinedOrientation) {
-                            90 -> ExifInterface.ORIENTATION_ROTATE_90
-                            180 -> ExifInterface.ORIENTATION_ROTATE_180
-                            270 -> ExifInterface.ORIENTATION_ROTATE_270
-                            else -> ExifInterface.ORIENTATION_NORMAL
-                        }
-                        dngCreator.setOrientation(dngOrientation)
-                        dngThumbnailSource?.let { createDngThumbnailBitmap(it) }?.let { thumb ->
+                        if (binningFactor == 1) {
+                            // 1x1 全尺寸模式：使用系统 DngCreator，保留厂商镜头阴影校正等元数据
                             try {
-                                dngCreator.setThumbnail(thumb)
-                            } finally {
-                                thumb.recycle()
+                                val dngThumbnailSource: java.io.File? = null
+                                val dngCreator = android.hardware.camera2.DngCreator(chars, captureResult)
+                                dngCreator.setDescription(DarkbagIdentity.imageDescription(isHdrPlus = false))
+                                captureMetadata.location?.let { dngCreator.setLocation(it) }
+
+                                val dngOrientation = when (image.combinedOrientation) {
+                                    90 -> ExifInterface.ORIENTATION_ROTATE_90
+                                    180 -> ExifInterface.ORIENTATION_ROTATE_180
+                                    270 -> ExifInterface.ORIENTATION_ROTATE_270
+                                    else -> ExifInterface.ORIENTATION_NORMAL
+                                }
+                                dngCreator.setOrientation(dngOrientation)
+                                dngThumbnailSource?.let { createDngThumbnailBitmap(it) }?.let { thumb ->
+                                    try {
+                                        dngCreator.setThumbnail(thumb)
+                                    } finally {
+                                        thumb.recycle()
+                                    }
+                                }
+
+                                val dupBuffer = procBuffer.duplicate()
+                                dupBuffer.rewind()
+                                FileOutputStream(dngTargetFile).use {
+                                    dngCreator.writeByteBuffer(it, Size(image.width, image.height), dupBuffer, 0L)
+                                }
+                                dngSuccess = true
+                            } catch (e: Exception) {
+                                Log.e(TAG, "DngCreator failed for 1x1 RAW, fallback to LibTIFF writeBayerDng", e)
+                                dngSuccess = false
                             }
                         }
 
-                        val dngTargetFile = if (image.halfFrameMetadata != null) {
-                            File(context.cacheDir, "${dngName}_orig.dng")
-                        } else {
-                            bayerDngFile
+                        if (!dngSuccess) {
+                            // 2x2 / 4x4 Binning（或 1x1 异常降级）：使用 LibTIFF 原生封装 Bayer CFA DNG，彻底避开 DngCreator 崩溃
+                            val thumbBytes = instantThumb?.let { bmp ->
+                                val baos = java.io.ByteArrayOutputStream()
+                                bmp.compress(Bitmap.CompressFormat.JPEG, 85, baos)
+                                baos.toByteArray()
+                            }
+                            val dupBuffer = procBuffer.duplicate()
+                            dupBuffer.rewind()
+                            dngSuccess = ColorProcessor.writeBayerDng(
+                                filename = dngTargetFile.absolutePath,
+                                width = procWidth,
+                                height = procHeight,
+                                bayerBuffer = dupBuffer,
+                                cfaPattern = cfa,
+                                whiteLevel = whiteLevel,
+                                blackLevel = blackLevelPattern.firstOrNull() ?: 64,
+                                ccm = ccm,
+                                orientation = image.combinedOrientation,
+                                whiteBalance = wb,
+                                metadata = captureMetadata,
+                                thumbnailJpeg = thumbBytes,
+                                thumbWidth = instantThumb?.width ?: 0,
+                                thumbHeight = instantThumb?.height ?: 0
+                            )
                         }
 
-                        FileOutputStream(dngTargetFile).use { dngCreator.writeByteBuffer(it, Size(procWidth, procHeight), procBuffer, 0L) }
-                        dngWritten = true
-                        Log.d(TAG, "RAW saved: ${dngTargetFile.absolutePath} (${dngTargetFile.length()} bytes)")
+                        if (dngSuccess) {
+                            dngWritten = true
+                            Log.d(TAG, "RAW saved to cache: ${dngTargetFile.absolutePath} (${dngTargetFile.length()} bytes)")
+                            // 恢复前台落盘调用，将 Bayer DNG 安全移入系统相册或自定义 RAW 存储目录
+                            ImageSaver.saveProcessedImage(
+                                context = context,
+                                inputBitmap = null,
+                                bmpPath = null,
+                                rotationDegrees = 0,
+                                zoomFactor = 1.0f,
+                                baseName = dngName,
+                                linearDngPath = dngTargetFile.absolutePath,
+                                saveJpg = false,
+                                saveRaw = saveRaw,
+                                jpgFolderUri = null,
+                                rawFolderUri = rawFolderUri,
+                                isFastPath = false,
+                                captureMetadata = captureMetadata
+                            )
+                            Log.d(TAG, "RAW successfully saved via ImageSaver: $dngName")
+                        }
                     } catch (e: Exception) {
                         Log.e(TAG, "Failed to save RAW", e)
                     }

@@ -119,6 +119,22 @@ bool process_and_save_image(
 
 bool write_dng(const char* filename, int width, int height, const unsigned short* planarData, int stride_x, int stride_y, int stride_c, int whiteLevel, const std::vector<float>& ccm, const ImageMetadata& metadata, int orientation, bool mirror = false, float baselineExposure = 0.0f, const float* wbVec = nullptr);
 
+bool write_bayer_dng(
+    const char* filename,
+    int width, int height,
+    const unsigned short* bayerData,
+    int cfaPattern,
+    int whiteLevel, int blackLevel,
+    const std::vector<float>& ccm,
+    const ImageMetadata& metadata,
+    int orientation,
+    const float* wbVec = nullptr,
+    const unsigned char* thumbnailJpeg = nullptr,
+    size_t thumbnailSize = 0,
+    int thumbWidth = 0,
+    int thumbHeight = 0
+);
+
 bool write_bmp(const char* filename, int width, int height, const unsigned short* planarData, int stride_x, int stride_y, int stride_c);
 
 bool write_jpeg(const char* filename, int width, int height, const unsigned short* planarData, int stride_x, int stride_y, int stride_c, int quality);

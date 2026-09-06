@@ -151,6 +151,7 @@ object ImageUtils {
         try {
             var bitmap: Bitmap? = null
             var orientation = ExifInterface.ORIENTATION_NORMAL
+            var isFromThumbnail = false
 
             context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
                 val exif = ExifInterface(pfd.fileDescriptor)
@@ -159,6 +160,9 @@ object ImageUtils {
                     val thumb = exif.thumbnailBytes
                     if (thumb != null) {
                         bitmap = BitmapFactory.decodeByteArray(thumb, 0, thumb.size)
+                        if (bitmap != null) {
+                            isFromThumbnail = true
+                        }
                     }
                 }
             }
@@ -175,7 +179,11 @@ object ImageUtils {
                 }
             }
 
-            bitmap = bitmap?.let { rotateBitmap(it, orientation) }
+            // Only rotate if the bitmap was decoded from raw sensor pixels.
+            // Embedded thumbnails in IFD1 are already rendered upright (ORIENTATION_TOPLEFT).
+            if (bitmap != null && !isFromThumbnail) {
+                bitmap = rotateBitmap(bitmap!!, orientation)
+            }
 
             return@withContext if (bitmap != null && zoomFactor > 1.05f) {
                 val newWidth = (bitmap.width / zoomFactor).toInt()

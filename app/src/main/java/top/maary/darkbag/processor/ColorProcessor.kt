@@ -115,6 +115,26 @@ object ColorProcessor {
     ): Boolean
 
     /**
+     * Directly writes a Bayer CFA RAW (.dng) file using LibTIFF.
+     */
+    external fun writeBayerDng(
+        filename: String,
+        width: Int,
+        height: Int,
+        bayerBuffer: ByteBuffer,
+        cfaPattern: Int,
+        whiteLevel: Int,
+        blackLevel: Int,
+        ccm: FloatArray,
+        orientation: Int,
+        whiteBalance: FloatArray,
+        metadata: CaptureMetadata,
+        thumbnailJpeg: ByteArray? = null,
+        thumbWidth: Int = 0,
+        thumbHeight: Int = 0
+    ): Boolean
+
+    /**
      * Callback for background export completion. Called from JNI thread.
      */
     @JvmStatic

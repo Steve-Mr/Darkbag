@@ -587,3 +587,87 @@ Java_top_maary_darkbag_processor_ColorProcessor_processSingleFrameRaw(
         enableDualStreamFusion
     );
 }
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_top_maary_darkbag_processor_ColorProcessor_writeBayerDng(
+    JNIEnv* env, jobject /* this */,
+    jstring filename,
+    jint width, jint height,
+    jobject bayerBuffer,
+    jint cfaPattern,
+    jint whiteLevel,
+    jint blackLevel,
+    jfloatArray ccm,
+    jint orientation,
+    jfloatArray whiteBalance,
+    jobject metadata,
+    jbyteArray thumbnailJpeg,
+    jint thumbWidth,
+    jint thumbHeight
+) {
+    if (!filename || !bayerBuffer) {
+        LOGE("writeBayerDng: invalid arguments");
+        return JNI_FALSE;
+    }
+
+    const char* filePath = env->GetStringUTFChars(filename, nullptr);
+    const unsigned short* bayerPtr = (const unsigned short*)env->GetDirectBufferAddress(bayerBuffer);
+    if (!bayerPtr) {
+        LOGE("writeBayerDng: failed to get bayer buffer address");
+        env->ReleaseStringUTFChars(filename, filePath);
+        return JNI_FALSE;
+    }
+
+    std::vector<float> ccmVec;
+    if (ccm) {
+        jsize ccmLen = env->GetArrayLength(ccm);
+        if (ccmLen >= 9) {
+            ccmVec.resize(ccmLen);
+            env->GetFloatArrayRegion(ccm, 0, ccmLen, ccmVec.data());
+        }
+    }
+
+    std::vector<float> wbVec;
+    if (whiteBalance) {
+        jsize wbLen = env->GetArrayLength(whiteBalance);
+        if (wbLen >= 4) {
+            wbVec.resize(wbLen);
+            env->GetFloatArrayRegion(whiteBalance, 0, wbLen, wbVec.data());
+        }
+    }
+
+    ImageMetadata meta = metadataFromJava(env, metadata);
+
+    const unsigned char* thumbPtr = nullptr;
+    size_t thumbSize = 0;
+    std::vector<unsigned char> thumbBuf;
+    if (thumbnailJpeg) {
+        jsize len = env->GetArrayLength(thumbnailJpeg);
+        if (len > 0) {
+            thumbBuf.resize(len);
+            env->GetByteArrayRegion(thumbnailJpeg, 0, len, reinterpret_cast<jbyte*>(thumbBuf.data()));
+            thumbPtr = thumbBuf.data();
+            thumbSize = static_cast<size_t>(len);
+        }
+    }
+
+    bool ok = write_bayer_dng(
+        filePath,
+        width, height,
+        bayerPtr,
+        cfaPattern,
+        whiteLevel, blackLevel,
+        ccmVec,
+        meta,
+        orientation,
+        wbVec.empty() ? nullptr : wbVec.data(),
+        thumbPtr,
+        thumbSize,
+        thumbWidth,
+        thumbHeight
+    );
+
+    env->ReleaseStringUTFChars(filename, filePath);
+    return ok ? JNI_TRUE : JNI_FALSE;
+}
+

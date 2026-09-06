@@ -213,7 +213,9 @@ static const TIFFFieldInfo dng_field_info[] = {
     { TIFFTAG_SUBSECTIMEORIGINAL, -1, -1, TIFF_ASCII, FIELD_CUSTOM, 1, 0, const_cast<char*>("SubSecTimeOriginal") },
     { TIFFTAG_SUBSECTIMEDIGITIZED, -1, -1, TIFF_ASCII, FIELD_CUSTOM, 1, 0, const_cast<char*>("SubSecTimeDigitized") },
     { TIFFTAG_LENSMODEL, -1, -1, TIFF_ASCII, FIELD_CUSTOM, 1, 0, const_cast<char*>("LensModel") },
-    { TIFFTAG_FOCALLENGTHIN35MMFILM, 1, 1, TIFF_SHORT, FIELD_CUSTOM, 1, 0, const_cast<char*>("FocalLengthIn35mmFilm") }
+    { TIFFTAG_FOCALLENGTHIN35MMFILM, 1, 1, TIFF_SHORT, FIELD_CUSTOM, 1, 0, const_cast<char*>("FocalLengthIn35mmFilm") },
+    { TIFFTAG_CFAREPEATPATTERNDIM, -1, -1, TIFF_SHORT, FIELD_CUSTOM, 1, 0, const_cast<char*>("CFARepeatPatternDim") },
+    { TIFFTAG_CFAPATTERN, -1, -1, TIFF_BYTE, FIELD_CUSTOM, 1, 0, const_cast<char*>("CFAPattern") }
 };
 
 static void DNGTagExtender(TIFF *tif) {
@@ -1504,6 +1506,156 @@ bool write_dng(const char* filename, int width, int height, const unsigned short
             return false;
         }
 
+        if (!TIFFWriteDirectory(tif)) {
+            TIFFClose(tif);
+            return false;
+        }
+    }
+
+    TIFFClose(tif);
+    return true;
+}
+
+bool write_bayer_dng(
+    const char* filename,
+    int width, int height,
+    const unsigned short* bayerData,
+    int cfaPattern,
+    int whiteLevel, int blackLevel,
+    const std::vector<float>& ccm,
+    const ImageMetadata& metadata,
+    int orientation,
+    const float* wbVec,
+    const unsigned char* thumbnailJpeg,
+    size_t thumbnailSize,
+    int thumbWidth,
+    int thumbHeight
+) {
+    TIFFSetTagExtender(DNGTagExtender);
+    TIFF* tif = TIFFOpen(filename, "w");
+    if (!tif) return false;
+
+    TIFFSetField(tif, TIFFTAG_SUBFILETYPE, 0);
+    TIFFSetField(tif, TIFFTAG_IMAGEWIDTH, width);
+    TIFFSetField(tif, TIFFTAG_IMAGELENGTH, height);
+    TIFFSetField(tif, TIFFTAG_BITSPERSAMPLE, 16);
+    TIFFSetField(tif, TIFFTAG_COMPRESSION, COMPRESSION_NONE);
+    TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_CFA);
+    TIFFSetField(tif, TIFFTAG_SAMPLESPERPIXEL, 1);
+    TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG);
+    TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, 1);
+
+    uint16_t tiffOrientation = 1;
+    switch (orientation) {
+        case 90: tiffOrientation = 6; break;
+        case 180: tiffOrientation = 3; break;
+        case 270: tiffOrientation = 8; break;
+        default: tiffOrientation = 1; break;
+    }
+    TIFFSetField(tif, TIFFTAG_ORIENTATION, tiffOrientation);
+
+    uint16_t cfaRepeatDim[2] = {2, 2};
+    TIFFSetField(tif, TIFFTAG_CFAREPEATPATTERNDIM, 2, cfaRepeatDim);
+
+    // CFAPattern: 0=Red, 1=Green, 2=Blue
+    uint8_t cfaPatternBytes[4] = {0, 1, 1, 2}; // default RGGB
+    switch (cfaPattern) {
+        case 0: // RGGB
+            cfaPatternBytes[0] = 0; cfaPatternBytes[1] = 1; cfaPatternBytes[2] = 1; cfaPatternBytes[3] = 2; break;
+        case 1: // GRBG
+            cfaPatternBytes[0] = 1; cfaPatternBytes[1] = 0; cfaPatternBytes[2] = 2; cfaPatternBytes[3] = 1; break;
+        case 2: // GBRG
+            cfaPatternBytes[0] = 1; cfaPatternBytes[1] = 2; cfaPatternBytes[2] = 0; cfaPatternBytes[3] = 1; break;
+        case 3: // BGGR
+            cfaPatternBytes[0] = 2; cfaPatternBytes[1] = 1; cfaPatternBytes[2] = 1; cfaPatternBytes[3] = 0; break;
+        default:
+            break;
+    }
+    TIFFSetField(tif, TIFFTAG_CFAPATTERN, 4, cfaPatternBytes);
+
+    write_tiff_metadata(tif, &metadata);
+
+    static const uint8_t dng_version[] = {1, 4, 0, 0};
+    TIFFSetField(tif, TIFFTAG_DNGVERSION, dng_version);
+    static const uint8_t dng_backward_version[] = {1, 1, 0, 0};
+    TIFFSetField(tif, TIFFTAG_DNGBACKWARDVERSION, dng_backward_version);
+    TIFFSetField(tif, TIFFTAG_UNIQUECAMERAMODEL, metadata.uniqueCameraModel.c_str());
+
+    uint32_t white_level_val = (uint32_t)whiteLevel;
+    if (white_level_val == 0) white_level_val = 1023;
+    TIFFSetField(tif, TIFFTAG_WHITELEVEL, 1, &white_level_val);
+    uint32_t black_level_val = (uint32_t)std::max(0, blackLevel);
+    TIFFSetField(tif, TIFFTAG_BLACKLEVEL, 1, &black_level_val);
+
+    float as_shot_neutral[3] = {
+        wbVec ? (1.0f / std::max(1e-4f, wbVec[0])) : 1.0f,
+        wbVec ? (1.0f / std::max(1e-4f, wbVec[1])) : 1.0f,
+        wbVec ? (1.0f / std::max(1e-4f, wbVec[3])) : 1.0f
+    };
+    TIFFSetField(tif, TIFFTAG_ASSHOTNEUTRAL, 3, as_shot_neutral);
+
+    Matrix3x3 colorMatrix1 = M_XYZ_to_sRGB_D65; // Fallback
+    if (ccm.size() >= 9) {
+        Matrix3x3 sensor_to_srgb = {
+            ccm[0], ccm[1], ccm[2],
+            ccm[3], ccm[4], ccm[5],
+            ccm[6], ccm[7], ccm[8]
+        };
+        Matrix3x3 srgb_to_sensor = inverse_matrix(sensor_to_srgb);
+        colorMatrix1 = multiply(srgb_to_sensor, M_XYZ_to_sRGB_D65);
+    }
+    for (int r = 0; r < 3; r++) {
+        colorMatrix1.m[r * 3 + 0] *= as_shot_neutral[r];
+        colorMatrix1.m[r * 3 + 1] *= as_shot_neutral[r];
+        colorMatrix1.m[r * 3 + 2] *= as_shot_neutral[r];
+    }
+    TIFFSetField(tif, TIFFTAG_COLORMATRIX1, 9, colorMatrix1.m);
+    TIFFSetField(tif, TIFFTAG_CALIBRATIONILLUMINANT1, 21);
+
+    float exposureTimeSec = (float)metadata.exposureTime / 1000000000.0f;
+    TIFFSetField(tif, TIFFTAG_EXPOSURETIME, exposureTimeSec);
+    TIFFSetField(tif, TIFFTAG_FNUMBER, metadata.fNumber);
+    TIFFSetField(tif, TIFFTAG_FOCALLENGTH, metadata.focalLength);
+    if (metadata.focalLengthIn35mmFilm > 0) {
+        TIFFSetField(tif, TIFFTAG_FOCALLENGTHIN35MMFILM, (uint16_t)metadata.focalLengthIn35mmFilm);
+    }
+    unsigned short iso_short = (unsigned short)metadata.iso;
+    TIFFSetField(tif, TIFFTAG_ISOSPEEDRATINGS, (uint16_t)1, &iso_short);
+
+    for (int y = 0; y < height; y++) {
+        if (TIFFWriteScanline(tif, const_cast<unsigned short*>(bayerData + (size_t)y * width), y, 0) < 0) {
+            TIFFClose(tif);
+            return false;
+        }
+    }
+
+    if (!TIFFWriteDirectory(tif)) {
+        TIFFClose(tif);
+        return false;
+    }
+
+    // IFD1: Embedded JPEG thumbnail if available
+    if (thumbnailJpeg && thumbnailSize > 0 && thumbWidth > 0 && thumbHeight > 0) {
+        TIFFSetField(tif, TIFFTAG_SUBFILETYPE, FILETYPE_REDUCEDIMAGE);
+        TIFFSetField(tif, TIFFTAG_IMAGEWIDTH, thumbWidth);
+        TIFFSetField(tif, TIFFTAG_IMAGELENGTH, thumbHeight);
+        TIFFSetField(tif, TIFFTAG_BITSPERSAMPLE, 8);
+        TIFFSetField(tif, TIFFTAG_COMPRESSION, COMPRESSION_JPEG);
+        TIFFSetField(tif, TIFFTAG_ORIENTATION, ORIENTATION_TOPLEFT);
+        TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_YCBCR);
+        TIFFSetField(tif, TIFFTAG_SAMPLESPERPIXEL, 3);
+        TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG);
+        TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, thumbHeight);
+        TIFFSetField(tif, TIFFTAG_JPEGCOLORMODE, JPEGCOLORMODE_RGB);
+        TIFFSetField(tif, TIFFTAG_MAKE, metadata.make.c_str());
+        TIFFSetField(tif, TIFFTAG_MODEL, metadata.model.c_str());
+        TIFFSetField(tif, TIFFTAG_SOFTWARE, metadata.software.c_str());
+        TIFFSetField(tif, TIFFTAG_IMAGEDESCRIPTION, "Darkbag Embedded JPEG Thumbnail");
+
+        if (TIFFWriteRawStrip(tif, 0, const_cast<unsigned char*>(thumbnailJpeg), static_cast<tmsize_t>(thumbnailSize)) < 0) {
+            TIFFClose(tif);
+            return false;
+        }
         if (!TIFFWriteDirectory(tif)) {
             TIFFClose(tif);
             return false;
