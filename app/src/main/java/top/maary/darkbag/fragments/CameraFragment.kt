@@ -1923,6 +1923,19 @@ class CameraFragment : Fragment() {
                     for(row in 0 until 3) for(col in 0 until 3) ccm[idx++] = ccmMat.getElement(col, row).toFloat()
                 }
 
+                var sensorColorMatrix: FloatArray? = null
+                val sensorMat = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_COLOR_TRANSFORM1)
+                if (sensorMat != null) {
+                    val mat = FloatArray(9)
+                    var idx = 0
+                    for (row in 0 until 3) {
+                        for (col in 0 until 3) {
+                            mat[idx++] = sensorMat.getElement(col, row).toFloat()
+                        }
+                    }
+                    sensorColorMatrix = mat
+                }
+
                 var lensShadingMapData: FloatArray? = null
                 var lensShadingRows = 0
                 var lensShadingCols = 0
@@ -2127,7 +2140,7 @@ class CameraFragment : Fragment() {
                                 cfaPattern = cfa,
                                 whiteLevel = whiteLevel,
                                 blackLevel = blackLevelPattern.firstOrNull() ?: 64,
-                                ccm = ccm,
+                                ccm = sensorColorMatrix ?: ccm,
                                 orientation = image.combinedOrientation,
                                 whiteBalance = wb,
                                 metadata = captureMetadata,

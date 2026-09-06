@@ -198,7 +198,7 @@ static const TIFFFieldInfo dng_field_info[] = {
     { TIFFTAG_DNGVERSION, 4, 4, TIFF_BYTE, FIELD_CUSTOM, 1, 0, const_cast<char*>("DNGVersion") },
     { TIFFTAG_DNGBACKWARDVERSION, 4, 4, TIFF_BYTE, FIELD_CUSTOM, 1, 0, const_cast<char*>("DNGBackwardVersion") },
     { TIFFTAG_UNIQUECAMERAMODEL, -1, -1, TIFF_ASCII, FIELD_CUSTOM, 1, 0, const_cast<char*>("UniqueCameraModel") },
-    { TIFFTAG_BLACKLEVEL, -1, -1, TIFF_LONG, FIELD_CUSTOM, 1, 1, const_cast<char*>("BlackLevel") },
+    { TIFFTAG_BLACKLEVEL, -1, -1, TIFF_RATIONAL, FIELD_CUSTOM, 1, 1, const_cast<char*>("BlackLevel") },
     { TIFFTAG_WHITELEVEL, -1, -1, TIFF_LONG, FIELD_CUSTOM, 1, 1, const_cast<char*>("WhiteLevel") },
     { TIFFTAG_COLORMATRIX1, -1, -1, TIFF_SRATIONAL, FIELD_CUSTOM, 1, 1, const_cast<char*>("ColorMatrix1") },
     { TIFFTAG_ASSHOTNEUTRAL, -1, -1, TIFF_RATIONAL, FIELD_CUSTOM, 1, 1, const_cast<char*>("AsShotNeutral") },
@@ -1391,7 +1391,7 @@ bool write_dng(const char* filename, int width, int height, const unsigned short
     uint32_t white_level_val = (uint32_t)whiteLevel;
     if (white_level_val == 0) white_level_val = 65535;
     TIFFSetField(tif, TIFFTAG_WHITELEVEL, 1, &white_level_val);
-    uint32_t black_level_val = 0;
+    float black_level_val = 0.0f;
     TIFFSetField(tif, TIFFTAG_BLACKLEVEL, 1, &black_level_val);
 
     float as_shot_neutral[3] = {
@@ -1588,11 +1588,11 @@ bool write_bayer_dng(
     uint32_t white_level_val = (uint32_t)whiteLevel;
     if (white_level_val == 0) white_level_val = 1023;
     TIFFSetField(tif, TIFFTAG_WHITELEVEL, 1, &white_level_val);
-    uint32_t black_level_val = (uint32_t)std::max(0, blackLevel);
-    if (black_level_val == 0) {
-        black_level_val = (white_level_val <= 1023) ? 64 : (white_level_val / 16);
-    }
-    TIFFSetField(tif, TIFFTAG_BLACKLEVEL, 1, &black_level_val);
+    float black_level_float = (blackLevel > 0) ? (float)blackLevel : ((white_level_val <= 1023) ? 64.0f : (white_level_val / 16.0f));
+    float black_levels[4] = {black_level_float, black_level_float, black_level_float, black_level_float};
+    uint16_t blRepeatDim[2] = {2, 2};
+    TIFFSetField(tif, TIFFTAG_BLACKLEVELREPEATDIM, blRepeatDim);
+    TIFFSetField(tif, TIFFTAG_BLACKLEVEL, 4, black_levels);
     TIFFSetField(tif, TIFFTAG_BASELINEEXPOSURE, 0.0f);
 
     float as_shot_neutral[3] = {
@@ -1604,18 +1604,9 @@ bool write_bayer_dng(
 
     Matrix3x3 colorMatrix1 = M_XYZ_to_sRGB_D65; // Fallback
     if (ccm.size() >= 9) {
-        Matrix3x3 sensor_to_srgb = {
-            ccm[0], ccm[1], ccm[2],
-            ccm[3], ccm[4], ccm[5],
-            ccm[6], ccm[7], ccm[8]
-        };
-        Matrix3x3 srgb_to_sensor = inverse_matrix(sensor_to_srgb);
-        colorMatrix1 = multiply(srgb_to_sensor, M_XYZ_to_sRGB_D65);
-    }
-    for (int r = 0; r < 3; r++) {
-        colorMatrix1.m[r * 3 + 0] *= as_shot_neutral[r];
-        colorMatrix1.m[r * 3 + 1] *= as_shot_neutral[r];
-        colorMatrix1.m[r * 3 + 2] *= as_shot_neutral[r];
+        for (int i = 0; i < 9; i++) {
+            colorMatrix1.m[i] = ccm[i];
+        }
     }
     TIFFSetField(tif, TIFFTAG_COLORMATRIX1, 9, colorMatrix1.m);
     TIFFSetField(tif, TIFFTAG_CALIBRATIONILLUMINANT1, 21);
