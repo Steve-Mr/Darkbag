@@ -1970,11 +1970,70 @@ class CameraFragment : Fragment() {
                     captureResult = captureResult
                 )
 
-                // 3. Instant Echo Thumbnail & Enqueue to Processing Service
+                // 3. Resolution Binning (Half-Frame Economical Mode or User Resolution Setting)
+                val photoResolution = prefs.getString(SettingsFragment.KEY_PHOTO_RESOLUTION, SettingsFragment.RESOLUTION_FULL)
+                val isHfDownsample = isHalfFrameModeEnabled && prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_DOWNSAMPLE, true)
+                val binningFactor = when {
+                    isHfDownsample || photoResolution == SettingsFragment.RESOLUTION_BINNING_2X2 -> 2
+                    photoResolution == SettingsFragment.RESOLUTION_BINNING_4X4 -> 4
+                    else -> 1
+                }
+
+                var procBuffer = image.data
+                var procWidth = image.width
+                var procHeight = image.height
+
+                if (binningFactor == 2 && procWidth >= 4 && procHeight >= 4) {
+                    val targetW = procWidth / 2
+                    val targetH = procHeight / 2
+                    val binnedBuf = java.nio.ByteBuffer.allocateDirect(targetW * targetH * 2)
+                    val dup = image.data.duplicate()
+                    dup.position(0)
+                    val ok = top.maary.darkbag.rawvideo.RawVideoNative.nativeBayerBinning2x2(
+                        srcBuffer = dup,
+                        srcWidth = procWidth,
+                        srcHeight = procHeight,
+                        srcRowStrideBytes = procWidth * 2,
+                        dstBuffer = binnedBuf,
+                        mode = top.maary.darkbag.rawvideo.RawVideoNative.BINNING_MODE_AVERAGE
+                    )
+                    if (ok) {
+                        binnedBuf.rewind()
+                        procBuffer = binnedBuf
+                        procWidth = targetW
+                        procHeight = targetH
+                        Log.i(TAG, "Applied RAW Bayer 2x2 Binning: ${image.width}x${image.height} -> ${procWidth}x${procHeight}")
+                    }
+                } else if (binningFactor == 4 && procWidth >= 8 && procHeight >= 8) {
+                    val targetW = procWidth / 4
+                    val targetH = procHeight / 4
+                    val binnedBuf = java.nio.ByteBuffer.allocateDirect(targetW * targetH * 2)
+                    val dup = image.data.duplicate()
+                    dup.position(0)
+                    val ok = top.maary.darkbag.rawvideo.RawVideoNative.nativeBayerBinning4x4(
+                        srcBuffer = dup,
+                        srcWidth = procWidth,
+                        srcHeight = procHeight,
+                        srcRowStrideBytes = procWidth * 2,
+                        dstBuffer = binnedBuf,
+                        mode = top.maary.darkbag.rawvideo.RawVideoNative.BINNING_MODE_AVERAGE
+                    )
+                    if (ok) {
+                        binnedBuf.rewind()
+                        procBuffer = binnedBuf
+                        procWidth = targetW
+                        procHeight = targetH
+                        Log.i(TAG, "Applied RAW Bayer 4x4 Binning: ${image.width}x${image.height} -> ${procWidth}x${procHeight}")
+                    }
+                }
+
+                val enableDualStreamFusion = prefs.getBoolean(SettingsFragment.KEY_DUAL_STREAM_FUSION, true)
+
+                // Instant Echo Thumbnail & Enqueue to Processing Service
                 val instantThumb = generateInstantThumbnail(
-                    rawBuffer = image.data,
-                    width = image.width,
-                    height = image.height,
+                    rawBuffer = procBuffer,
+                    width = procWidth,
+                    height = procHeight,
                     orientation = image.combinedOrientation,
                     cfaPattern = cfa,
                     whiteLevel = whiteLevel,
@@ -2025,7 +2084,7 @@ class CameraFragment : Fragment() {
                             bayerDngFile
                         }
 
-                        FileOutputStream(dngTargetFile).use { dngCreator.writeByteBuffer(it, Size(image.width, image.height), image.data, 0L) }
+                        FileOutputStream(dngTargetFile).use { dngCreator.writeByteBuffer(it, Size(procWidth, procHeight), procBuffer, 0L) }
                         dngWritten = true
                         Log.d(TAG, "RAW saved: ${dngTargetFile.absolutePath} (${dngTargetFile.length()} bytes)")
                     } catch (e: Exception) {
@@ -2033,7 +2092,7 @@ class CameraFragment : Fragment() {
                     }
                 }
 
-                image.data.rewind()
+                procBuffer.rewind()
 
                 // 4. Submit to HdrPlusProcessingService
                 var motionMp4Path = image.motionPhotoMp4Path
@@ -2048,10 +2107,10 @@ class CameraFragment : Fragment() {
 
                 val request = top.maary.darkbag.processor.HdrPlusRequest(
                     requestId = java.util.UUID.randomUUID().toString(),
-                    megaBuffer = image.data!!,
+                    megaBuffer = procBuffer,
                     numFrames = 1,
-                    width = image.width,
-                    height = image.height,
+                    width = procWidth,
+                    height = procHeight,
                     orientation = image.combinedOrientation,
                     whiteLevel = whiteLevel,
                     blackLevelPattern = blackLevelPattern ?: intArrayOf(64,64,64,64),
@@ -2098,7 +2157,8 @@ class CameraFragment : Fragment() {
                     motionPhotoMp4Path = motionMp4Path,
                     motionPhotoStillPtsUs = motionStillPtsUs,
                     enableMemoryColor = false,
-                    colorEngineMode = prefs.getInt(SettingsFragment.KEY_COLOR_ENGINE_MODE, 0)
+                    colorEngineMode = prefs.getInt(SettingsFragment.KEY_COLOR_ENGINE_MODE, 0),
+                    enableDualStreamFusion = enableDualStreamFusion
                 )
                 top.maary.darkbag.processor.HdrPlusRequestManager.enqueue(request)
                 val serviceIntent = android.content.Intent(context, top.maary.darkbag.processor.HdrPlusProcessingService::class.java)
@@ -3496,6 +3556,7 @@ class CameraFragment : Fragment() {
         (appContext as MainApplication).applicationScope.launch(Dispatchers.IO) {
             var fallbackSent = false
             var isHdrPlusSuccess = false
+            var megaBufferReleased = false
             try {
                 val context = appContext
                 val frames = burstResult.frames
@@ -3682,6 +3743,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     // Evaluate burst sharpness and select anchor frame, rejecting blurred frames
                     var finalNumFrames = burstResult.frames.size
                     var anchorFrameIndex = 0
+                    var acceptedIndices: List<Int> = (0 until burstResult.frames.size).toList()
                     if (burstResult.frames.size > 1) {
                         try {
                             val evalResult = top.maary.darkbag.rawvideo.RawVideoNative.nativeEvaluateBurst(
@@ -3697,45 +3759,155 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                             )
                             if (evalResult != null && evalResult.size >= 2) {
                                 anchorFrameIndex = evalResult[0]
-                                val acceptedCount = evalResult[1]
-                                Log.i(TAG, "Burst evaluation: anchorFrame=$anchorFrameIndex, accepted=$acceptedCount/${burstResult.frames.size}")
-
-                                if (anchorFrameIndex in 1 until burstResult.frames.size) {
-                                    val frameSizeBytes = width * 2 * height
-                                    val tempBuf = java.nio.ByteBuffer.allocateDirect(frameSizeBytes)
-                                    val dup = megaBuffer.duplicate()
-                                    dup.position(0)
-                                    dup.limit(frameSizeBytes)
-                                    tempBuf.put(dup)
-                                    tempBuf.rewind()
-
-                                    dup.position(anchorFrameIndex * frameSizeBytes)
-                                    dup.limit((anchorFrameIndex + 1) * frameSizeBytes)
-                                    val dupDst = megaBuffer.duplicate()
-                                    dupDst.position(0)
-                                    dupDst.limit(frameSizeBytes)
-                                    dupDst.put(dup)
-
-                                    dupDst.position(anchorFrameIndex * frameSizeBytes)
-                                    dupDst.limit((anchorFrameIndex + 1) * frameSizeBytes)
-                                    dupDst.put(tempBuf)
-
-                                    megaBuffer.rewind()
-                                    Log.i(TAG, "Swapped Anchor Frame $anchorFrameIndex to index 0 for Halide alignment")
+                                val acceptedCount = evalResult[1].coerceIn(1, burstResult.frames.size)
+                                val list = mutableListOf<Int>()
+                                for (i in 0 until acceptedCount) {
+                                    if (2 + i < evalResult.size) {
+                                        list.add(evalResult[2 + i])
+                                    }
                                 }
-                                finalNumFrames = acceptedCount.coerceIn(1, burstResult.frames.size)
+                                if (list.isNotEmpty()) {
+                                    acceptedIndices = list
+                                    finalNumFrames = list.size
+                                }
+                                Log.i(TAG, "Burst evaluation: anchorFrame=$anchorFrameIndex, accepted=$finalNumFrames/${burstResult.frames.size}")
                             }
                         } catch (e: Exception) {
                             Log.w(TAG, "Failed to evaluate burst sharpness, falling back to default order", e)
                         }
                     }
 
+                    val photoResolution = prefs.getString(SettingsFragment.KEY_PHOTO_RESOLUTION, SettingsFragment.RESOLUTION_FULL)
+                    val isHfDownsample = isHalfFrameModeEnabled && prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_DOWNSAMPLE, true)
+
+                    val binningFactor = when {
+                        isHfDownsample || photoResolution == SettingsFragment.RESOLUTION_BINNING_2X2 -> 2
+                        photoResolution == SettingsFragment.RESOLUTION_BINNING_4X4 -> 4
+                        else -> 1
+                    }
+
+                    var procBuffer = megaBuffer
+                    var procWidth = width
+                    var procHeight = height
+
+                    if (binningFactor == 2 && width >= 4 && height >= 4) {
+                        val targetW = width / 2
+                        val targetH = height / 2
+                        val binnedFrameSizeBytes = targetW * targetH * 2
+                        val binnedMega = ByteBuffer.allocateDirect(binnedFrameSizeBytes * finalNumFrames)
+                        val frameSizeBytes = width * height * 2
+
+                        var allOk = true
+                        for (i in 0 until finalNumFrames) {
+                            val srcIndex = acceptedIndices[i]
+                            val srcSlice = megaBuffer.duplicate()
+                            srcSlice.position(srcIndex * frameSizeBytes)
+                            srcSlice.limit((srcIndex + 1) * frameSizeBytes)
+
+                            val dstSlice = binnedMega.duplicate()
+                            dstSlice.position(i * binnedFrameSizeBytes)
+                            dstSlice.limit((i + 1) * binnedFrameSizeBytes)
+
+                            val ok = top.maary.darkbag.rawvideo.RawVideoNative.nativeBayerBinning2x2(
+                                srcBuffer = srcSlice.slice(),
+                                srcWidth = width,
+                                srcHeight = height,
+                                srcRowStrideBytes = width * 2,
+                                dstBuffer = dstSlice.slice(),
+                                mode = top.maary.darkbag.rawvideo.RawVideoNative.BINNING_MODE_AVERAGE
+                            )
+                            if (!ok) {
+                                allOk = false
+                                break
+                            }
+                        }
+
+                        if (allOk) {
+                            binnedMega.rewind()
+                            HdrPlusBurst.releaseBuffer(burstResult.megaBuffer)
+                            megaBufferReleased = true
+                            procBuffer = binnedMega
+                            procWidth = targetW
+                            procHeight = targetH
+                            Log.i(TAG, "Applied RAW Bayer 2x2 Binning to HDR+ burst: ${width}x${height} -> ${procWidth}x${procHeight}, frames=$finalNumFrames")
+                        }
+                    } else if (binningFactor == 4 && width >= 8 && height >= 8) {
+                        val targetW = width / 4
+                        val targetH = height / 4
+                        val binnedFrameSizeBytes = targetW * targetH * 2
+                        val binnedMega = ByteBuffer.allocateDirect(binnedFrameSizeBytes * finalNumFrames)
+                        val frameSizeBytes = width * height * 2
+
+                        var allOk = true
+                        for (i in 0 until finalNumFrames) {
+                            val srcIndex = acceptedIndices[i]
+                            val srcSlice = megaBuffer.duplicate()
+                            srcSlice.position(srcIndex * frameSizeBytes)
+                            srcSlice.limit((srcIndex + 1) * frameSizeBytes)
+
+                            val dstSlice = binnedMega.duplicate()
+                            dstSlice.position(i * binnedFrameSizeBytes)
+                            dstSlice.limit((i + 1) * binnedFrameSizeBytes)
+
+                            val ok = top.maary.darkbag.rawvideo.RawVideoNative.nativeBayerBinning4x4(
+                                srcBuffer = srcSlice.slice(),
+                                srcWidth = width,
+                                srcHeight = height,
+                                srcRowStrideBytes = width * 2,
+                                dstBuffer = dstSlice.slice(),
+                                mode = top.maary.darkbag.rawvideo.RawVideoNative.BINNING_MODE_AVERAGE
+                            )
+                            if (!ok) {
+                                allOk = false
+                                break
+                            }
+                        }
+
+                        if (allOk) {
+                            binnedMega.rewind()
+                            HdrPlusBurst.releaseBuffer(burstResult.megaBuffer)
+                            megaBufferReleased = true
+                            procBuffer = binnedMega
+                            procWidth = targetW
+                            procHeight = targetH
+                            Log.i(TAG, "Applied RAW Bayer 4x4 Binning to HDR+ burst: ${width}x${height} -> ${procWidth}x${procHeight}, frames=$finalNumFrames")
+                        }
+                    } else {
+                        // Binning not applied (Full resolution).
+                        // Ensure accepted anchor frame is placed at index 0
+                        if (anchorFrameIndex in 1 until burstResult.frames.size) {
+                            val frameSizeBytes = width * 2 * height
+                            val tempBuf = java.nio.ByteBuffer.allocateDirect(frameSizeBytes)
+                            val dup = megaBuffer.duplicate()
+                            dup.position(0)
+                            dup.limit(frameSizeBytes)
+                            tempBuf.put(dup)
+                            tempBuf.rewind()
+
+                            dup.position(anchorFrameIndex * frameSizeBytes)
+                            dup.limit((anchorFrameIndex + 1) * frameSizeBytes)
+                            val dupDst = megaBuffer.duplicate()
+                            dupDst.position(0)
+                            dupDst.limit(frameSizeBytes)
+                            dupDst.put(dup)
+
+                            dupDst.position(anchorFrameIndex * frameSizeBytes)
+                            dupDst.limit((anchorFrameIndex + 1) * frameSizeBytes)
+                            dupDst.put(tempBuf)
+
+                            megaBuffer.rewind()
+                            Log.i(TAG, "Swapped Anchor Frame $anchorFrameIndex to index 0 for Halide alignment")
+                        }
+                    }
+
+                    val enableDualStreamFusion = prefs.getBoolean(SettingsFragment.KEY_DUAL_STREAM_FUSION, true)
+
                     // Instant Echo: generate thumbnail directly from Anchor Frame (index 0) in <20ms
                     val evAdjust = if (digitalGain > 0.01f) (kotlin.math.ln(digitalGain) / kotlin.math.ln(2.0)).toFloat() else 0f
                     val instantThumb = generateInstantThumbnail(
-                        rawBuffer = megaBuffer,
-                        width = width,
-                        height = height,
+                        rawBuffer = procBuffer,
+                        width = procWidth,
+                        height = procHeight,
                         orientation = combinedOrientation,
                         cfaPattern = cfa,
                         whiteLevel = whiteLevel,
@@ -3757,10 +3929,10 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
                     val request = top.maary.darkbag.processor.HdrPlusRequest(
                         requestId = java.util.UUID.randomUUID().toString(),
-                        megaBuffer = megaBuffer,
+                        megaBuffer = procBuffer,
                         numFrames = finalNumFrames,
-                        width = width,
-                        height = height,
+                        width = procWidth,
+                        height = procHeight,
                         orientation = combinedOrientation,
                         whiteLevel = whiteLevel,
                         blackLevelPattern = blackLevelPattern ?: intArrayOf(64,64,64,64),
@@ -3808,7 +3980,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         motionPhotoMp4Path = motionMp4Path,
                         motionPhotoStillPtsUs = motionStillPtsUs,
                         enableMemoryColor = false,
-                        colorEngineMode = prefs.getInt(SettingsFragment.KEY_COLOR_ENGINE_MODE, 0)
+                        colorEngineMode = prefs.getInt(SettingsFragment.KEY_COLOR_ENGINE_MODE, 0),
+                        enableDualStreamFusion = enableDualStreamFusion
                     )
                     top.maary.darkbag.processor.HdrPlusRequestManager.enqueue(request)
                     val serviceIntent = android.content.Intent(context, top.maary.darkbag.processor.HdrPlusProcessingService::class.java)
@@ -3831,10 +4004,12 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         val firstFrame = burstResult.frames[0]
                         val frameSize = firstFrame.width * firstFrame.height * 2
                         val data = ByteBuffer.allocateDirect(frameSize)
-                        burstResult.megaBuffer.position(0)
-                        burstResult.megaBuffer.limit(frameSize)
-                        data.put(burstResult.megaBuffer)
-                        data.rewind()
+                        if (!megaBufferReleased) {
+                            burstResult.megaBuffer.position(0)
+                            burstResult.megaBuffer.limit(frameSize)
+                            data.put(burstResult.megaBuffer)
+                            data.rewind()
+                        }
 
                         val holder = RawImageHolder(
                             data = data,
@@ -3855,7 +4030,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 }
             } finally {
                 burstResult.frames.forEach { it.close() }
-                if (!isHdrPlusSuccess) {
+                if (!isHdrPlusSuccess && !megaBufferReleased) {
                     HdrPlusBurst.releaseBuffer(burstResult.megaBuffer)
                 }
                 

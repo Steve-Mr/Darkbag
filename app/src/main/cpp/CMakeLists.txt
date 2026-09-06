@@ -235,6 +235,7 @@ add_library(
         rawvideo/RawVideoRecorder.cpp
         rawvideo/BayerProcessor.cpp
         rawvideo/BurstSelector.cpp
+        rawvideo/FastGuidedFilter.cpp
         rawvideo/RawVideoJNI.cpp
         rawvideo/RawVideoGLRenderer.cpp
         ${LIBRAW_SOURCES}

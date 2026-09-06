@@ -40,10 +40,17 @@
     <string name="half_frame_mode_title">半格相机模式</string>
     <string name="enable_half_frame_mode">开启半格相机模式</string>
     <string name="half_frame_layout_hint">半格画幅排布</string>
-    <string name="half_frame_downsample_title">省流经济模式 (采样下分)</string>
+    <string name="half_frame_downsample_title">省流经济模式 (RAW 2x2 Binning 高信噪比)</string>
     <string name="half_frame_date_stamp">复古日期戳印</string>
     <string name="half_frame_light_leak">随机拟真漏光</string>
     <string name="half_frame_auto_burst">连拍两张成组</string>
+
+    <string name="photo_resolution_title">照片产物分辨率</string>
+    <string name="resolution_full">全像素原始分辨率</string>
+    <string name="resolution_binning_2x2">2x2 Binning (高信噪比 / 极速)</string>
+    <string name="resolution_binning_4x4">4x4 Binning (超高信噪比 / 复古底片)</string>
+    <string name="dual_stream_fusion_title">弱光双流多尺度融合</string>
+    <string name="dual_stream_fusion_summary">暗光环境下结合 Bayer 降采样与引导滤波，大幅抑制暗部噪点并保留高频边缘</string>
 
     <string name="multi_camera_mode_title">多镜头同开多摄捕获</string>
     <string name="enable_multi_camera_mode">开启多摄模式</string>

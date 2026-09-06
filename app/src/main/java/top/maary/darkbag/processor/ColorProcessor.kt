@@ -90,7 +90,8 @@ object ColorProcessor {
         mirror: Boolean,
         metadata: CaptureMetadata,
         enableMemoryColor: Boolean = false,
-        colorEngineMode: Int = 0
+        colorEngineMode: Int = 0,
+        enableDualStreamFusion: Boolean = true
     ): Int
 
     /**
@@ -184,6 +185,7 @@ object ColorProcessor {
         mirror: Boolean,
         metadata: CaptureMetadata,
         enableMemoryColor: Boolean = false,
-        colorEngineMode: Int = 0
+        colorEngineMode: Int = 0,
+        enableDualStreamFusion: Boolean = true
     ): Int
 }

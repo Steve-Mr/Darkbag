@@ -99,21 +99,7 @@ object HalfFrameUtils {
         val secondBitmap = ensureOrientation(secondRaw, isSideBySide)
 
         try {
-            var resultBitmap = composeBitmaps(firstBitmap, secondBitmap, isSideBySide)
-
-            if (downsample) {
-                // Digital "film saving": Downsample so the final area is approx equal to a single frame.
-                // Combined area is ~2x. Scale factor = sqrt(0.5) ~ 0.707
-                val scale = 0.707f
-                val scaledW = (resultBitmap.width * scale).toInt().coerceAtLeast(1)
-                val scaledH = (resultBitmap.height * scale).toInt().coerceAtLeast(1)
-                val scaled = Bitmap.createScaledBitmap(resultBitmap, scaledW, scaledH, true)
-                if (scaled != resultBitmap) {
-                    resultBitmap.recycle()
-                }
-                return scaled
-            }
-
+            val resultBitmap = composeBitmaps(firstBitmap, secondBitmap, isSideBySide)
             return resultBitmap
         } catch (e: OutOfMemoryError) {
             Log.e(TAG, "OOM during stitching", e)

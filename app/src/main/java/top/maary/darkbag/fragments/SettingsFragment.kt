@@ -561,6 +561,25 @@ class SettingsFragment : Fragment() {
 
         setupSwitch(binding.switchManualControls, KEY_MANUAL_CONTROLS, false)
         setupSwitch(binding.switchExpFocusPeaking, KEY_EXP_FOCUS_PEAKING, false)
+
+        val resolutionKeys = listOf(RESOLUTION_FULL, RESOLUTION_BINNING_2X2, RESOLUTION_BINNING_4X4)
+        val resolutionLabels = listOf(
+            getString(R.string.resolution_full),
+            getString(R.string.resolution_binning_2x2),
+            getString(R.string.resolution_binning_4x4)
+        )
+        val currentRes = prefs.getString(KEY_PHOTO_RESOLUTION, RESOLUTION_FULL)
+        val currentResIndex = resolutionKeys.indexOf(currentRes).coerceAtLeast(0)
+        binding.menuPhotoResolution.setText(resolutionLabels[currentResIndex], false)
+        val resAdapter = android.widget.ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, resolutionLabels)
+        binding.menuPhotoResolution.setAdapter(resAdapter)
+        binding.menuPhotoResolution.setOnItemClickListener { _, _, position, _ ->
+            if (position in resolutionKeys.indices) {
+                prefs.edit().putString(KEY_PHOTO_RESOLUTION, resolutionKeys[position]).apply()
+            }
+        }
+
+        setupSwitch(binding.switchDualStreamFusion, KEY_DUAL_STREAM_FUSION, true)
         setupSwitch(binding.switchMotionPhoto, KEY_MOTION_PHOTO, false)
 
         syncLocationSettingState()
@@ -864,6 +883,11 @@ class SettingsFragment : Fragment() {
         const val KEY_HALF_FRAME_MODE = "half_frame_mode"
         const val KEY_HALF_FRAME_LAYOUT = "half_frame_layout"
         const val KEY_HALF_FRAME_DOWNSAMPLE = "half_frame_downsample"
+        const val KEY_PHOTO_RESOLUTION = "photo_resolution"
+        const val RESOLUTION_FULL = "full"
+        const val RESOLUTION_BINNING_2X2 = "binning_2x2"
+        const val RESOLUTION_BINNING_4X4 = "binning_4x4"
+        const val KEY_DUAL_STREAM_FUSION = "dual_stream_fusion"
         const val KEY_HALF_FRAME_STEP = "half_frame_step"
         const val KEY_HALF_FRAME_TEMP_PATH = "half_frame_temp_path"
         const val KEY_HALF_FRAME_DATE_STAMP = "half_frame_date_stamp"

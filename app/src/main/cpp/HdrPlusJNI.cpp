@@ -26,6 +26,7 @@
 #include "hdrplus_raw_pipeline.h" // Generated header
 #include "hdrplus_high_pipeline.h"
 #include "hdrplus_single_pipeline.h" // Generated header for single frame
+#include "rawvideo/FastGuidedFilter.h"
 
 
 #define TAG "HdrPlusJNI"
@@ -350,7 +351,8 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
     jfloat digitalGain, jlongArray debugStats, jobject outputBitmap, jstring tempRawPath, jfloat zoomFactor, jboolean mirror,
     jobject metadata,
     jboolean enableMemoryColor,
-    jint colorEngineMode
+    jint colorEngineMode,
+    jboolean enableDualStreamFusion
 ) {
     LOGD("Native processHdrPlus started (enableMemoryColor=%d, colorEngineMode=%d).", enableMemoryColor, colorEngineMode);
     (void)useSensorColorMatrix;
@@ -483,7 +485,14 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
     LUT3D lut; if (lut_path_cstr) { lut = load_lut(lut_path_cstr); env->ReleaseStringUTFChars(lutPath, lut_path_cstr); }
 
     int stride_x = outputBuf.dim(0).stride(), stride_y = outputBuf.dim(1).stride(), stride_c = outputBuf.dim(2).stride();
-    const uint16_t* raw_ptr = outputBuf.data();
+    uint16_t* raw_ptr = outputBuf.data();
+
+    if (enableDualStreamFusion && iso >= 600) {
+        auto fusionStart = std::chrono::high_resolution_clock::now();
+        rawvideo::FastGuidedFilter::filterPlanarRGB(raw_ptr, width, height, iso, 4);
+        auto fusionDurationMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - fusionStart).count();
+        LOGD("FastGuidedFilter multi-scale dual-stream fusion completed in %lld ms (iso=%d)", (long long)fusionDurationMs, iso);
+    }
     auto postStart = std::chrono::high_resolution_clock::now();
     auto postDurationMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - postStart).count();
 
@@ -560,9 +569,10 @@ Java_top_maary_darkbag_processor_ColorProcessor_processSingleFrameRaw(
     jfloat digitalGain, jlongArray debugStats, jobject outputBitmap, jstring tempRawPath, jfloat zoomFactor, jboolean mirror,
     jobject metadata,
     jboolean enableMemoryColor,
-    jint colorEngineMode
+    jint colorEngineMode,
+    jboolean enableDualStreamFusion
 ) {
-    LOGD("Native processSingleFrameRaw started (enableMemoryColor=%d, colorEngineMode=%d).", enableMemoryColor, colorEngineMode);
+    LOGD("Native processSingleFrameRaw started (enableMemoryColor=%d, colorEngineMode=%d, enableDualStreamFusion=%d).", enableMemoryColor, colorEngineMode, enableDualStreamFusion);
 
     // Call the existing processHdrPlus logic directly with the buffer and numFrames=1
     return Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
@@ -573,6 +583,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processSingleFrameRaw(
         cfaPattern, targetLog, lutPath,
         outputJpgPath, outputDngPath, digitalGain, debugStats, outputBitmap, tempRawPath, zoomFactor, mirror, metadata,
         enableMemoryColor,
-        colorEngineMode
+        colorEngineMode,
+        enableDualStreamFusion
     );
 }
