@@ -1895,6 +1895,20 @@ class CameraFragment : Fragment() {
                 chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_BLACK_LEVEL_PATTERN)?.let { bl ->
                     blackLevelPattern = intArrayOf(bl.getOffsetForIndex(0, 0), bl.getOffsetForIndex(1, 0), bl.getOffsetForIndex(0, 1), bl.getOffsetForIndex(1, 1))
                 }
+                captureResult.get(android.hardware.camera2.CaptureResult.SENSOR_DYNAMIC_BLACK_LEVEL)?.let { dynBl ->
+                    if (dynBl.size >= 4 && dynBl.any { it > 0f }) {
+                        blackLevelPattern = intArrayOf(
+                            Math.round(dynBl[0]),
+                            Math.round(dynBl[1]),
+                            Math.round(dynBl[2]),
+                            Math.round(dynBl[3])
+                        )
+                    }
+                }
+                if (blackLevelPattern.all { it == 0 }) {
+                    val defaultBl = if (whiteLevel <= 1023) 64 else if (whiteLevel <= 4095) 256 else 1024
+                    blackLevelPattern = intArrayOf(defaultBl, defaultBl, defaultBl, defaultBl)
+                }
                 chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_COLOR_FILTER_ARRANGEMENT)?.let { cfa = it }
                 val activeArrayRect = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
                 val activeArray = if (activeArrayRect != null) {
@@ -3661,6 +3675,20 @@ class CameraFragment : Fragment() {
                         bl.getOffsetForIndex(0, 1),
                         bl.getOffsetForIndex(1, 1)
                     )
+                }
+                result?.get(android.hardware.camera2.CaptureResult.SENSOR_DYNAMIC_BLACK_LEVEL)?.let { dynBl ->
+                    if (dynBl.size >= 4 && dynBl.any { it > 0f }) {
+                        blackLevelPattern = intArrayOf(
+                            Math.round(dynBl[0]),
+                            Math.round(dynBl[1]),
+                            Math.round(dynBl[2]),
+                            Math.round(dynBl[3])
+                        )
+                    }
+                }
+                if (blackLevelPattern.all { it == 0 }) {
+                    val defaultBl = if (whiteLevel <= 1023) 64 else if (whiteLevel <= 4095) 256 else 1024
+                    blackLevelPattern = intArrayOf(defaultBl, defaultBl, defaultBl, defaultBl)
                 }
 
                 val cfaEnum = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_COLOR_FILTER_ARRANGEMENT)

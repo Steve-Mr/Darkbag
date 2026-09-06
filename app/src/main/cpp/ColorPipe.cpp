@@ -1589,7 +1589,11 @@ bool write_bayer_dng(
     if (white_level_val == 0) white_level_val = 1023;
     TIFFSetField(tif, TIFFTAG_WHITELEVEL, 1, &white_level_val);
     uint32_t black_level_val = (uint32_t)std::max(0, blackLevel);
+    if (black_level_val == 0) {
+        black_level_val = (white_level_val <= 1023) ? 64 : (white_level_val / 16);
+    }
     TIFFSetField(tif, TIFFTAG_BLACKLEVEL, 1, &black_level_val);
+    TIFFSetField(tif, TIFFTAG_BASELINEEXPOSURE, 0.0f);
 
     float as_shot_neutral[3] = {
         wbVec ? (1.0f / std::max(1e-4f, wbVec[0])) : 1.0f,
