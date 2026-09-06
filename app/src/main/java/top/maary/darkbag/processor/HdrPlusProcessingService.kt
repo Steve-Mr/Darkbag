@@ -85,7 +85,8 @@ class HdrPlusProcessingService : LifecycleService() {
                     req.mirror,
                     req.metadata,
                     req.enableMemoryColor,
-                    req.colorEngineMode
+                    req.colorEngineMode,
+                    req.enableDualStreamFusion
                 )
             } else {
                 ColorProcessor.processHdrPlus(
@@ -108,7 +109,8 @@ class HdrPlusProcessingService : LifecycleService() {
                     req.mirror,
                     req.metadata,
                     req.enableMemoryColor,
-                    req.colorEngineMode
+                    req.colorEngineMode,
+                    req.enableDualStreamFusion
                 )
             }
 

@@ -47,6 +47,7 @@ import android.view.TextureView
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.media.ImageReader
 import android.os.Handler
@@ -264,8 +265,12 @@ class CameraFragment : Fragment() {
     private var currentEvIndex = 0
     private var isVideoSaving = false
 
+    private val localProcessingCount = java.util.concurrent.atomic.AtomicInteger(0)
+
     private val isProcessing: Boolean
-        get() = top.maary.darkbag.processor.HdrPlusRequestManager.pendingTasksCount.value > 0 || isVideoSaving
+        get() = localProcessingCount.get() > 0 ||
+                top.maary.darkbag.processor.HdrPlusRequestManager.pendingTasksCount.value > 0 ||
+                isVideoSaving
 
     // Half-frame State
     private var pendingVfSnapshot: android.graphics.Bitmap? = null
@@ -380,12 +385,14 @@ class CameraFragment : Fragment() {
     }
 
     private fun showProcessingAnimation() {
+        localProcessingCount.incrementAndGet()
         lifecycleScope.launch(Dispatchers.Main) {
             updateProcessingAnimationUi()
         }
     }
 
     private fun hideProcessingAnimation() {
+        localProcessingCount.updateAndGet { (it - 1).coerceAtLeast(0) }
         lifecycleScope.launch(Dispatchers.Main) {
             updateProcessingAnimationUi()
         }
@@ -746,6 +753,134 @@ class CameraFragment : Fragment() {
                     .signature(com.bumptech.glide.signature.ObjectKey(lastModified))
                     .into(photoViewButton)
             }
+        }
+    }
+
+    private fun setGalleryThumbnailBitmap(bitmap: android.graphics.Bitmap?) {
+        val binding = cameraUiContainerBinding ?: return
+        val photoViewButton = binding.photoViewButton ?: return
+
+        photoViewButton.post {
+            if (bitmap == null) {
+                photoViewButton.setImageDrawable(null)
+                if (isHalfFrameModeEnabled || isProcessing) {
+                    photoViewButton.visibility = View.INVISIBLE
+                } else {
+                    photoViewButton.visibility = View.GONE
+                }
+                return@post
+            }
+
+            if (isHalfFrameModeEnabled && (halfFrameStep != 0 || isProcessing)) {
+                photoViewButton.visibility = View.INVISIBLE
+            } else {
+                photoViewButton.visibility = View.VISIBLE
+                photoViewButton.alpha = 1f
+            }
+
+            photoViewButton.setPadding(resources.getDimension(R.dimen.stroke_small).toInt())
+            photoViewButton.scaleX = 0.88f
+            photoViewButton.scaleY = 0.88f
+            Glide.with(photoViewButton)
+                .load(bitmap)
+                .apply(RequestOptions.circleCropTransform())
+                .into(photoViewButton)
+            photoViewButton.animate()
+                .scaleX(1.0f)
+                .scaleY(1.0f)
+                .setDuration(120)
+                .start()
+        }
+    }
+
+    private fun generateInstantThumbnail(
+        rawBuffer: java.nio.ByteBuffer,
+        width: Int,
+        height: Int,
+        orientation: Int,
+        cfaPattern: Int,
+        whiteLevel: Int,
+        blackLevel: Float,
+        wb: FloatArray,
+        targetLogIndex: Int,
+        lutPath: String?,
+        exposure: Float = 0f
+    ): android.graphics.Bitmap? {
+        return try {
+            val thumbDim = 256
+            val swapDims = (orientation == 90 || orientation == 270)
+            val thumbW = if (swapDims) (thumbDim * height) / width else thumbDim
+            val thumbH = if (swapDims) thumbDim else (thumbDim * height) / width
+            val thumbBmp = android.graphics.Bitmap.createBitmap(thumbW.coerceAtLeast(1), thumbH.coerceAtLeast(1), android.graphics.Bitmap.Config.ARGB_8888)
+
+            val np = if (wb.size >= 4 && wb[0] > 0.001f && wb[1] > 0.001f && wb[3] > 0.001f) {
+                floatArrayOf(1.0f / wb[0], 1.0f / wb[1], 1.0f / wb[3])
+            } else {
+                null
+            }
+
+            val dup = rawBuffer.duplicate()
+            dup.position(0)
+
+            // If input Bayer is high resolution (>= 2000x1500), perform 2x2 binning to eliminate Bayer aliasing and improve SNR
+            var debayerSuccess = false
+            if (width >= 2000 && height >= 1500) {
+                val bW = width / 2
+                val bH = height / 2
+                val binnedBuf = java.nio.ByteBuffer.allocateDirect(bW * bH * 2)
+                val binSuccess = top.maary.darkbag.rawvideo.RawVideoNative.nativeBayerBinning2x2(
+                    srcBuffer = dup,
+                    srcWidth = width,
+                    srcHeight = height,
+                    srcRowStrideBytes = width * 2,
+                    dstBuffer = binnedBuf,
+                    mode = top.maary.darkbag.rawvideo.RawVideoNative.BINNING_MODE_AVERAGE
+                )
+                if (binSuccess) {
+                    binnedBuf.rewind()
+                    debayerSuccess = top.maary.darkbag.rawvideo.RawVideoNative.nativeDebayerFrameToBitmap(
+                        bayerBuffer = binnedBuf,
+                        width = bW,
+                        height = bH,
+                        orientation = orientation,
+                        cfaPattern = cfaPattern,
+                        whiteLevel = whiteLevel,
+                        blackLevel = blackLevel,
+                        neutralPoint = np,
+                        targetLog = targetLogIndex,
+                        lutPath = lutPath,
+                        exposure = exposure,
+                        contrast = 0f,
+                        saturation = 0f,
+                        outBitmap = thumbBmp
+                    )
+                }
+            }
+
+            if (!debayerSuccess) {
+                dup.position(0)
+                debayerSuccess = top.maary.darkbag.rawvideo.RawVideoNative.nativeDebayerFrameToBitmap(
+                    bayerBuffer = dup,
+                    width = width,
+                    height = height,
+                    orientation = orientation,
+                    cfaPattern = cfaPattern,
+                    whiteLevel = whiteLevel,
+                    blackLevel = blackLevel,
+                    neutralPoint = np,
+                    targetLog = targetLogIndex,
+                    lutPath = lutPath,
+                    exposure = exposure,
+                    contrast = 0f,
+                    saturation = 0f,
+                    outBitmap = thumbBmp
+                )
+            }
+
+            if (debayerSuccess) thumbBmp else null
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to generate instant echo thumbnail", e)
+            null
         }
     }
 
@@ -1741,6 +1876,7 @@ class CameraFragment : Fragment() {
                         TAG,
                         "Timed out waiting for android.hardware.camera2.CaptureResult for timestamp ${image.timestamp}"
                     )
+                    hideProcessingAnimation()
                     return@withContext
                 }
 
@@ -1766,6 +1902,20 @@ class CameraFragment : Fragment() {
                 chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_BLACK_LEVEL_PATTERN)?.let { bl ->
                     blackLevelPattern = intArrayOf(bl.getOffsetForIndex(0, 0), bl.getOffsetForIndex(1, 0), bl.getOffsetForIndex(0, 1), bl.getOffsetForIndex(1, 1))
                 }
+                captureResult.get(android.hardware.camera2.CaptureResult.SENSOR_DYNAMIC_BLACK_LEVEL)?.let { dynBl ->
+                    if (dynBl.size >= 4 && dynBl.any { it > 0f }) {
+                        blackLevelPattern = intArrayOf(
+                            Math.round(dynBl[0]),
+                            Math.round(dynBl[1]),
+                            Math.round(dynBl[2]),
+                            Math.round(dynBl[3])
+                        )
+                    }
+                }
+                if (blackLevelPattern.all { it == 0 }) {
+                    val defaultBl = if (whiteLevel <= 1023) 64 else if (whiteLevel <= 4095) 256 else 1024
+                    blackLevelPattern = intArrayOf(defaultBl, defaultBl, defaultBl, defaultBl)
+                }
                 chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_COLOR_FILTER_ARRANGEMENT)?.let { cfa = it }
                 val activeArrayRect = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
                 val activeArray = if (activeArrayRect != null) {
@@ -1778,6 +1928,19 @@ class CameraFragment : Fragment() {
                 captureResult.get(android.hardware.camera2.CaptureResult.COLOR_CORRECTION_TRANSFORM)?.let { ccmMat ->
                     var idx = 0
                     for(row in 0 until 3) for(col in 0 until 3) ccm[idx++] = ccmMat.getElement(col, row).toFloat()
+                }
+
+                var sensorColorMatrix: FloatArray? = null
+                val sensorMat = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_COLOR_TRANSFORM1)
+                if (sensorMat != null) {
+                    val mat = FloatArray(9)
+                    var idx = 0
+                    for (row in 0 until 3) {
+                        for (col in 0 until 3) {
+                            mat[idx++] = sensorMat.getElement(col, row).toFloat()
+                        }
+                    }
+                    sensorColorMatrix = mat
                 }
 
                 var lensShadingMapData: FloatArray? = null
@@ -1842,69 +2005,188 @@ class CameraFragment : Fragment() {
                     captureResult = captureResult
                 )
 
-                // 3. JNI Halide Processing (REMOVED)
-                // 前台 JNI 调用与 fastjpg 生成已移除，直接交由 HdrPlusProcessingService 处理
-                val fastOutputUri: android.net.Uri? = null
+                // 3. Resolution Binning (Half-Frame Economical Mode or User Resolution Setting)
+                val photoResolution = prefs.getString(SettingsFragment.KEY_PHOTO_RESOLUTION, SettingsFragment.RESOLUTION_FULL)
+                val isHfRawBinning = isHalfFrameModeEnabled && (prefs.getString(SettingsFragment.KEY_HALF_FRAME_COMPRESSION_MODE, null) == SettingsFragment.HF_COMPRESSION_BINNING_2X2)
+                val binningFactor = when {
+                    isHfRawBinning || photoResolution == SettingsFragment.RESOLUTION_BINNING_2X2 -> 2
+                    photoResolution == SettingsFragment.RESOLUTION_BINNING_4X4 -> 4
+                    else -> 1
+                }
+
+                var procBuffer = image.data
+                var procWidth = image.width
+                var procHeight = image.height
+
+                if (binningFactor == 2 && procWidth >= 4 && procHeight >= 4) {
+                    val targetW = procWidth / 2
+                    val targetH = procHeight / 2
+                    val binnedBuf = java.nio.ByteBuffer.allocateDirect(targetW * targetH * 2)
+                    val dup = image.data.duplicate()
+                    dup.position(0)
+                    val ok = top.maary.darkbag.rawvideo.RawVideoNative.nativeBayerBinning2x2(
+                        srcBuffer = dup,
+                        srcWidth = procWidth,
+                        srcHeight = procHeight,
+                        srcRowStrideBytes = procWidth * 2,
+                        dstBuffer = binnedBuf,
+                        mode = top.maary.darkbag.rawvideo.RawVideoNative.BINNING_MODE_AVERAGE
+                    )
+                    if (ok) {
+                        binnedBuf.rewind()
+                        procBuffer = binnedBuf
+                        procWidth = targetW
+                        procHeight = targetH
+                        Log.i(TAG, "Applied RAW Bayer 2x2 Binning: ${image.width}x${image.height} -> ${procWidth}x${procHeight}")
+                    }
+                } else if (binningFactor == 4 && procWidth >= 8 && procHeight >= 8) {
+                    val targetW = procWidth / 4
+                    val targetH = procHeight / 4
+                    val binnedBuf = java.nio.ByteBuffer.allocateDirect(targetW * targetH * 2)
+                    val dup = image.data.duplicate()
+                    dup.position(0)
+                    val ok = top.maary.darkbag.rawvideo.RawVideoNative.nativeBayerBinning4x4(
+                        srcBuffer = dup,
+                        srcWidth = procWidth,
+                        srcHeight = procHeight,
+                        srcRowStrideBytes = procWidth * 2,
+                        dstBuffer = binnedBuf,
+                        mode = top.maary.darkbag.rawvideo.RawVideoNative.BINNING_MODE_AVERAGE
+                    )
+                    if (ok) {
+                        binnedBuf.rewind()
+                        procBuffer = binnedBuf
+                        procWidth = targetW
+                        procHeight = targetH
+                        Log.i(TAG, "Applied RAW Bayer 4x4 Binning: ${image.width}x${image.height} -> ${procWidth}x${procHeight}")
+                    }
+                }
+
+                val enableDualStreamFusion = prefs.getBoolean(SettingsFragment.KEY_DUAL_STREAM_FUSION, true)
+
+                // Instant Echo Thumbnail & Enqueue to Processing Service
+                val instantThumb = generateInstantThumbnail(
+                    rawBuffer = procBuffer,
+                    width = procWidth,
+                    height = procHeight,
+                    orientation = image.combinedOrientation,
+                    cfaPattern = cfa,
+                    whiteLevel = whiteLevel,
+                    blackLevel = blackLevelPattern.firstOrNull()?.toFloat() ?: 64f,
+                    wb = wb,
+                    targetLogIndex = targetLogIndex,
+                    lutPath = nativeLutPath,
+                    exposure = 0f
+                )
                 
+                val fastOutputUri: android.net.Uri? = null
                 withContext(Dispatchers.Main) {
                     Toast.makeText(requireContext(), getString(R.string.toast_processing_queued), Toast.LENGTH_SHORT).show()
-                    if (isHalfFrameModeEnabled && prefs.getInt(scopedHalfFrameStepKey(prefs), 0) == 1) {
+                    val isHf = isHalfFrameModeEnabled || image.halfFrameMetadata != null
+                    if (isHf) {
                         setGalleryThumbnail(null)
+                    } else if (instantThumb != null) {
+                        setGalleryThumbnailBitmap(instantThumb)
                     }
                     // 保持加载动画，直到服务处理完毕
                 }
 
                 if (saveRaw) {
                     try {
-                        val dngThumbnailSource: java.io.File? = null
+                        val dngTargetFile = bayerDngFile
+                        var dngSuccess = false
 
-                        val dngCreator = android.hardware.camera2.DngCreator(chars, captureResult)
-                        dngCreator.setDescription(DarkbagIdentity.imageDescription(isHdrPlus = false))
-                        captureMetadata.location?.let { dngCreator.setLocation(it) }
-
-                        val dngOrientation = when (image.combinedOrientation) {
-                            90 -> ExifInterface.ORIENTATION_ROTATE_90
-                            180 -> ExifInterface.ORIENTATION_ROTATE_180
-                            270 -> ExifInterface.ORIENTATION_ROTATE_270
-                            else -> ExifInterface.ORIENTATION_NORMAL
-                        }
-                        dngCreator.setOrientation(dngOrientation)
-                        dngThumbnailSource?.let { createDngThumbnailBitmap(it) }?.let { thumb ->
+                        if (binningFactor == 1) {
+                            // 1x1 全尺寸模式：使用系统 DngCreator，保留厂商镜头阴影校正等元数据
                             try {
-                                dngCreator.setThumbnail(thumb)
-                            } finally {
-                                thumb.recycle()
+                                val dngThumbnailSource: java.io.File? = null
+                                val dngCreator = android.hardware.camera2.DngCreator(chars, captureResult)
+                                dngCreator.setDescription(DarkbagIdentity.imageDescription(isHdrPlus = false))
+                                captureMetadata.location?.let { dngCreator.setLocation(it) }
+
+                                val dngOrientation = when (image.combinedOrientation) {
+                                    90 -> ExifInterface.ORIENTATION_ROTATE_90
+                                    180 -> ExifInterface.ORIENTATION_ROTATE_180
+                                    270 -> ExifInterface.ORIENTATION_ROTATE_270
+                                    else -> ExifInterface.ORIENTATION_NORMAL
+                                }
+                                dngCreator.setOrientation(dngOrientation)
+                                dngThumbnailSource?.let { createDngThumbnailBitmap(it) }?.let { thumb ->
+                                    try {
+                                        dngCreator.setThumbnail(thumb)
+                                    } finally {
+                                        thumb.recycle()
+                                    }
+                                }
+
+                                val dupBuffer = procBuffer.duplicate()
+                                dupBuffer.rewind()
+                                FileOutputStream(dngTargetFile).use {
+                                    dngCreator.writeByteBuffer(it, Size(image.width, image.height), dupBuffer, 0L)
+                                }
+                                dngSuccess = true
+                            } catch (e: Exception) {
+                                Log.e(TAG, "DngCreator failed for 1x1 RAW, fallback to LibTIFF writeBayerDng", e)
+                                dngSuccess = false
                             }
                         }
 
-                        val dngBuffer = image.data.duplicate()
-                        dngBuffer.rewind()
-                        FileOutputStream(bayerDngFile).use { out ->
-                            dngCreator.writeByteBuffer(out, Size(image.width, image.height), dngBuffer, 0)
+                        if (!dngSuccess) {
+                            // 2x2 / 4x4 Binning（或 1x1 异常降级）：使用 LibTIFF 原生封装 Bayer CFA DNG，彻底避开 DngCreator 崩溃
+                            val thumbBytes = instantThumb?.let { bmp ->
+                                val baos = java.io.ByteArrayOutputStream()
+                                bmp.compress(Bitmap.CompressFormat.JPEG, 85, baos)
+                                baos.toByteArray()
+                            }
+                            val dupBuffer = procBuffer.duplicate()
+                            dupBuffer.rewind()
+                            dngSuccess = ColorProcessor.writeBayerDng(
+                                filename = dngTargetFile.absolutePath,
+                                width = procWidth,
+                                height = procHeight,
+                                bayerBuffer = dupBuffer,
+                                cfaPattern = cfa,
+                                whiteLevel = whiteLevel,
+                                blackLevel = blackLevelPattern.firstOrNull() ?: 64,
+                                ccm = sensorColorMatrix ?: ccm,
+                                orientation = image.combinedOrientation,
+                                whiteBalance = wb,
+                                metadata = captureMetadata,
+                                thumbnailJpeg = thumbBytes,
+                                thumbWidth = instantThumb?.width ?: 0,
+                                thumbHeight = instantThumb?.height ?: 0
+                            )
                         }
-                        
-                        ImageSaver.saveProcessedImage(
-                            context = context,
-                            inputBitmap = null,
-                            bmpPath = null,
-                            rotationDegrees = 0,
-                            zoomFactor = 1.0f,
-                            baseName = dngName,
-                            linearDngPath = bayerDngFile.absolutePath,
-                            saveJpg = false,
-                            saveRaw = saveRaw,
-                            jpgFolderUri = null,
-                            rawFolderUri = rawFolderUri,
-                            isFastPath = false,
-                            captureMetadata = captureMetadata
-                        )
+
+                        if (dngSuccess) {
+                            dngWritten = true
+                            Log.d(TAG, "RAW saved to cache: ${dngTargetFile.absolutePath} (${dngTargetFile.length()} bytes)")
+                            // 恢复前台落盘调用，将 Bayer DNG 安全移入系统相册或自定义 RAW 存储目录
+                            ImageSaver.saveProcessedImage(
+                                context = context,
+                                inputBitmap = null,
+                                bmpPath = null,
+                                rotationDegrees = 0,
+                                zoomFactor = 1.0f,
+                                baseName = dngName,
+                                linearDngPath = dngTargetFile.absolutePath,
+                                saveJpg = false,
+                                saveRaw = saveRaw,
+                                jpgFolderUri = null,
+                                rawFolderUri = rawFolderUri,
+                                isFastPath = false,
+                                captureMetadata = captureMetadata
+                            )
+                            Log.d(TAG, "RAW successfully saved via ImageSaver: $dngName")
+                        }
                     } catch (e: Exception) {
-                        Log.e(TAG, "Failed to save DNG asynchronously", e)
+                        Log.e(TAG, "Failed to save RAW", e)
                     }
                 }
 
+                procBuffer.rewind()
 
-                // 5. Enqueue HQ Processing
+                // 4. Submit to HdrPlusProcessingService
                 var motionMp4Path = image.motionPhotoMp4Path
                 var motionStillPtsUs = image.motionPhotoStillPtsUs
                 if (motionMp4Path == null && pendingMotionPhotoTask != null) {
@@ -1917,10 +2199,10 @@ class CameraFragment : Fragment() {
 
                 val request = top.maary.darkbag.processor.HdrPlusRequest(
                     requestId = java.util.UUID.randomUUID().toString(),
-                    megaBuffer = image.data!!,
+                    megaBuffer = procBuffer,
                     numFrames = 1,
-                    width = image.width,
-                    height = image.height,
+                    width = procWidth,
+                    height = procHeight,
                     orientation = image.combinedOrientation,
                     whiteLevel = whiteLevel,
                     blackLevelPattern = blackLevelPattern ?: intArrayOf(64,64,64,64),
@@ -1930,7 +2212,7 @@ class CameraFragment : Fragment() {
                     useSensorColorMatrix = false,
                     whiteBalance = wb,
                     ccm = ccm,
-                    ccmAlt = null,
+                    ccmAlt = ccm,
                     exportMatrixAB = false,
                     cfaPattern = cfa,
                     targetLogIndex = targetLogIndex,
@@ -1967,9 +2249,11 @@ class CameraFragment : Fragment() {
                     motionPhotoMp4Path = motionMp4Path,
                     motionPhotoStillPtsUs = motionStillPtsUs,
                     enableMemoryColor = false,
-                    colorEngineMode = prefs.getInt(SettingsFragment.KEY_COLOR_ENGINE_MODE, 0)
+                    colorEngineMode = prefs.getInt(SettingsFragment.KEY_COLOR_ENGINE_MODE, 0),
+                    enableDualStreamFusion = enableDualStreamFusion
                 )
                 top.maary.darkbag.processor.HdrPlusRequestManager.enqueue(request)
+                hideProcessingAnimation()
                 val serviceIntent = android.content.Intent(context, top.maary.darkbag.processor.HdrPlusProcessingService::class.java)
                 if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
                     context.startForegroundService(serviceIntent)
@@ -1995,6 +2279,7 @@ class CameraFragment : Fragment() {
 
             } catch (e: Exception) {
                 Log.e(TAG, "Error in background processing", e)
+                hideProcessingAnimation()
             }
         }
 
@@ -3365,6 +3650,7 @@ class CameraFragment : Fragment() {
         (appContext as MainApplication).applicationScope.launch(Dispatchers.IO) {
             var fallbackSent = false
             var isHdrPlusSuccess = false
+            var megaBufferReleased = false
             try {
                 val context = appContext
                 val frames = burstResult.frames
@@ -3412,6 +3698,20 @@ class CameraFragment : Fragment() {
                         bl.getOffsetForIndex(0, 1),
                         bl.getOffsetForIndex(1, 1)
                     )
+                }
+                result?.get(android.hardware.camera2.CaptureResult.SENSOR_DYNAMIC_BLACK_LEVEL)?.let { dynBl ->
+                    if (dynBl.size >= 4 && dynBl.any { it > 0f }) {
+                        blackLevelPattern = intArrayOf(
+                            Math.round(dynBl[0]),
+                            Math.round(dynBl[1]),
+                            Math.round(dynBl[2]),
+                            Math.round(dynBl[3])
+                        )
+                    }
+                }
+                if (blackLevelPattern.all { it == 0 }) {
+                    val defaultBl = if (whiteLevel <= 1023) 64 else if (whiteLevel <= 4095) 256 else 1024
+                    blackLevelPattern = intArrayOf(defaultBl, defaultBl, defaultBl, defaultBl)
                 }
 
                 val cfaEnum = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_COLOR_FILTER_ARRANGEMENT)
@@ -3537,14 +3837,6 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 val mirror = shouldMirror
                 isHdrPlusSuccess = true
                 val fastJpegUri: android.net.Uri? = null
-                
-                withContext(Dispatchers.Main) {
-                    Toast.makeText(requireContext(), getString(R.string.toast_hdr_queued), Toast.LENGTH_SHORT).show()
-                    if (isHalfFrameModeEnabled && prefs.getInt(scopedHalfFrameStepKey(prefs), 0) == 1) {
-                        setGalleryThumbnail(null)
-                    }
-                    // 保持加载动画，不调用 hideProcessingAnimation()
-                }
 
                     var motionMp4Path: String? = null
                     var motionStillPtsUs: Long = 0L
@@ -3556,12 +3848,200 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         motionStillPtsUs = result?.second ?: 0L
                     }
 
+                    // Evaluate burst sharpness and select anchor frame, rejecting blurred frames
+                    var finalNumFrames = burstResult.frames.size
+                    var anchorFrameIndex = 0
+                    var acceptedIndices: List<Int> = (0 until burstResult.frames.size).toList()
+                    if (burstResult.frames.size > 1) {
+                        try {
+                            val evalResult = top.maary.darkbag.rawvideo.RawVideoNative.nativeEvaluateBurst(
+                                megaBuffer = megaBuffer,
+                                numFrames = burstResult.frames.size,
+                                width = width,
+                                height = height,
+                                rowStride = width * 2,
+                                cfaPattern = cfa,
+                                iso = iso ?: 100,
+                                triggerIndex = 0,
+                                rejectionThreshold = 0.45f
+                            )
+                            if (evalResult != null && evalResult.size >= 2) {
+                                anchorFrameIndex = evalResult[0]
+                                val acceptedCount = evalResult[1].coerceIn(1, burstResult.frames.size)
+                                val list = mutableListOf<Int>()
+                                for (i in 0 until acceptedCount) {
+                                    if (2 + i < evalResult.size) {
+                                        list.add(evalResult[2 + i])
+                                    }
+                                }
+                                if (list.isNotEmpty()) {
+                                    acceptedIndices = list
+                                    finalNumFrames = list.size
+                                }
+                                Log.i(TAG, "Burst evaluation: anchorFrame=$anchorFrameIndex, accepted=$finalNumFrames/${burstResult.frames.size}")
+                            }
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Failed to evaluate burst sharpness, falling back to default order", e)
+                        }
+                    }
+
+                    val photoResolution = prefs.getString(SettingsFragment.KEY_PHOTO_RESOLUTION, SettingsFragment.RESOLUTION_FULL)
+                    val isHfRawBinning = isHalfFrameModeEnabled && (prefs.getString(SettingsFragment.KEY_HALF_FRAME_COMPRESSION_MODE, null) == SettingsFragment.HF_COMPRESSION_BINNING_2X2)
+
+                    val binningFactor = when {
+                        isHfRawBinning || photoResolution == SettingsFragment.RESOLUTION_BINNING_2X2 -> 2
+                        photoResolution == SettingsFragment.RESOLUTION_BINNING_4X4 -> 4
+                        else -> 1
+                    }
+
+                    var procBuffer = megaBuffer
+                    var procWidth = width
+                    var procHeight = height
+
+                    if (binningFactor == 2 && width >= 4 && height >= 4) {
+                        val targetW = width / 2
+                        val targetH = height / 2
+                        val binnedFrameSizeBytes = targetW * targetH * 2
+                        val binnedMega = ByteBuffer.allocateDirect(binnedFrameSizeBytes * finalNumFrames)
+                        val frameSizeBytes = width * height * 2
+
+                        var allOk = true
+                        for (i in 0 until finalNumFrames) {
+                            val srcIndex = acceptedIndices[i]
+                            val srcSlice = megaBuffer.duplicate()
+                            srcSlice.position(srcIndex * frameSizeBytes)
+                            srcSlice.limit((srcIndex + 1) * frameSizeBytes)
+
+                            val dstSlice = binnedMega.duplicate()
+                            dstSlice.position(i * binnedFrameSizeBytes)
+                            dstSlice.limit((i + 1) * binnedFrameSizeBytes)
+
+                            val ok = top.maary.darkbag.rawvideo.RawVideoNative.nativeBayerBinning2x2(
+                                srcBuffer = srcSlice.slice(),
+                                srcWidth = width,
+                                srcHeight = height,
+                                srcRowStrideBytes = width * 2,
+                                dstBuffer = dstSlice.slice(),
+                                mode = top.maary.darkbag.rawvideo.RawVideoNative.BINNING_MODE_AVERAGE
+                            )
+                            if (!ok) {
+                                allOk = false
+                                break
+                            }
+                        }
+
+                        if (allOk) {
+                            binnedMega.rewind()
+                            HdrPlusBurst.releaseBuffer(burstResult.megaBuffer)
+                            megaBufferReleased = true
+                            procBuffer = binnedMega
+                            procWidth = targetW
+                            procHeight = targetH
+                            Log.i(TAG, "Applied RAW Bayer 2x2 Binning to HDR+ burst: ${width}x${height} -> ${procWidth}x${procHeight}, frames=$finalNumFrames")
+                        }
+                    } else if (binningFactor == 4 && width >= 8 && height >= 8) {
+                        val targetW = width / 4
+                        val targetH = height / 4
+                        val binnedFrameSizeBytes = targetW * targetH * 2
+                        val binnedMega = ByteBuffer.allocateDirect(binnedFrameSizeBytes * finalNumFrames)
+                        val frameSizeBytes = width * height * 2
+
+                        var allOk = true
+                        for (i in 0 until finalNumFrames) {
+                            val srcIndex = acceptedIndices[i]
+                            val srcSlice = megaBuffer.duplicate()
+                            srcSlice.position(srcIndex * frameSizeBytes)
+                            srcSlice.limit((srcIndex + 1) * frameSizeBytes)
+
+                            val dstSlice = binnedMega.duplicate()
+                            dstSlice.position(i * binnedFrameSizeBytes)
+                            dstSlice.limit((i + 1) * binnedFrameSizeBytes)
+
+                            val ok = top.maary.darkbag.rawvideo.RawVideoNative.nativeBayerBinning4x4(
+                                srcBuffer = srcSlice.slice(),
+                                srcWidth = width,
+                                srcHeight = height,
+                                srcRowStrideBytes = width * 2,
+                                dstBuffer = dstSlice.slice(),
+                                mode = top.maary.darkbag.rawvideo.RawVideoNative.BINNING_MODE_AVERAGE
+                            )
+                            if (!ok) {
+                                allOk = false
+                                break
+                            }
+                        }
+
+                        if (allOk) {
+                            binnedMega.rewind()
+                            HdrPlusBurst.releaseBuffer(burstResult.megaBuffer)
+                            megaBufferReleased = true
+                            procBuffer = binnedMega
+                            procWidth = targetW
+                            procHeight = targetH
+                            Log.i(TAG, "Applied RAW Bayer 4x4 Binning to HDR+ burst: ${width}x${height} -> ${procWidth}x${procHeight}, frames=$finalNumFrames")
+                        }
+                    } else {
+                        // Binning not applied (Full resolution).
+                        // Ensure accepted anchor frame is placed at index 0
+                        if (anchorFrameIndex in 1 until burstResult.frames.size) {
+                            val frameSizeBytes = width * 2 * height
+                            val tempBuf = java.nio.ByteBuffer.allocateDirect(frameSizeBytes)
+                            val dup = megaBuffer.duplicate()
+                            dup.position(0)
+                            dup.limit(frameSizeBytes)
+                            tempBuf.put(dup)
+                            tempBuf.rewind()
+
+                            dup.position(anchorFrameIndex * frameSizeBytes)
+                            dup.limit((anchorFrameIndex + 1) * frameSizeBytes)
+                            val dupDst = megaBuffer.duplicate()
+                            dupDst.position(0)
+                            dupDst.limit(frameSizeBytes)
+                            dupDst.put(dup)
+
+                            dupDst.position(anchorFrameIndex * frameSizeBytes)
+                            dupDst.limit((anchorFrameIndex + 1) * frameSizeBytes)
+                            dupDst.put(tempBuf)
+
+                            megaBuffer.rewind()
+                            Log.i(TAG, "Swapped Anchor Frame $anchorFrameIndex to index 0 for Halide alignment")
+                        }
+                    }
+
+                    val enableDualStreamFusion = prefs.getBoolean(SettingsFragment.KEY_DUAL_STREAM_FUSION, true)
+
+                    // Instant Echo: generate thumbnail directly from Anchor Frame (index 0) in <20ms
+                    val evAdjust = if (digitalGain > 0.01f) (kotlin.math.ln(digitalGain) / kotlin.math.ln(2.0)).toFloat() else 0f
+                    val instantThumb = generateInstantThumbnail(
+                        rawBuffer = procBuffer,
+                        width = procWidth,
+                        height = procHeight,
+                        orientation = combinedOrientation,
+                        cfaPattern = cfa,
+                        whiteLevel = whiteLevel,
+                        blackLevel = blackLevelPattern.firstOrNull()?.toFloat() ?: 64f,
+                        wb = wb,
+                        targetLogIndex = targetLogIndex,
+                        lutPath = nativeLutPath,
+                        exposure = evAdjust
+                    )
+
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(requireContext(), getString(R.string.toast_hdr_queued), Toast.LENGTH_SHORT).show()
+                        val isHf = isHalfFrameModeEnabled || hfMetadata != null
+                        if (isHf) {
+                            setGalleryThumbnail(null)
+                        } else if (instantThumb != null) {
+                            setGalleryThumbnailBitmap(instantThumb)
+                        }
+                    }
+
                     val request = top.maary.darkbag.processor.HdrPlusRequest(
                         requestId = java.util.UUID.randomUUID().toString(),
-                        megaBuffer = megaBuffer,
-                        numFrames = burstResult.frames.size,
-                        width = width,
-                        height = height,
+                        megaBuffer = procBuffer,
+                        numFrames = finalNumFrames,
+                        width = procWidth,
+                        height = procHeight,
                         orientation = combinedOrientation,
                         whiteLevel = whiteLevel,
                         blackLevelPattern = blackLevelPattern ?: intArrayOf(64,64,64,64),
@@ -3609,9 +4089,11 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         motionPhotoMp4Path = motionMp4Path,
                         motionPhotoStillPtsUs = motionStillPtsUs,
                         enableMemoryColor = false,
-                        colorEngineMode = prefs.getInt(SettingsFragment.KEY_COLOR_ENGINE_MODE, 0)
+                        colorEngineMode = prefs.getInt(SettingsFragment.KEY_COLOR_ENGINE_MODE, 0),
+                        enableDualStreamFusion = enableDualStreamFusion
                     )
                     top.maary.darkbag.processor.HdrPlusRequestManager.enqueue(request)
+                    hideProcessingAnimation()
                     val serviceIntent = android.content.Intent(context, top.maary.darkbag.processor.HdrPlusProcessingService::class.java)
                     if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
                         context.startForegroundService(serviceIntent)
@@ -3621,7 +4103,9 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     // Native timing stats are now recorded in HdrPlusProcessingService
 
             } catch (e: Exception) {
+                isHdrPlusSuccess = false
                 Log.e(TAG, "HDR+ processing failed, falling back to single shot", e)
+                hideProcessingAnimation()
                 withContext(Dispatchers.Main) {
                     Toast.makeText(appContext, appContext.getString(R.string.toast_hdr_failed_fallback), Toast.LENGTH_SHORT).show()
                 }
@@ -3631,10 +4115,12 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         val firstFrame = burstResult.frames[0]
                         val frameSize = firstFrame.width * firstFrame.height * 2
                         val data = ByteBuffer.allocateDirect(frameSize)
-                        burstResult.megaBuffer.position(0)
-                        burstResult.megaBuffer.limit(frameSize)
-                        data.put(burstResult.megaBuffer)
-                        data.rewind()
+                        if (!megaBufferReleased) {
+                            burstResult.megaBuffer.position(0)
+                            burstResult.megaBuffer.limit(frameSize)
+                            data.put(burstResult.megaBuffer)
+                            data.rewind()
+                        }
 
                         val holder = RawImageHolder(
                             data = data,
@@ -3655,7 +4141,9 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 }
             } finally {
                 burstResult.frames.forEach { it.close() }
-                HdrPlusBurst.releaseBuffer(burstResult.megaBuffer)
+                if (!isHdrPlusSuccess && !megaBufferReleased) {
+                    HdrPlusBurst.releaseBuffer(burstResult.megaBuffer)
+                }
                 
                 if (!fallbackSent) {
                     processingSemaphore.release()
@@ -4242,7 +4730,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
                         val holder = copyAndroidImageToHolder(image, currentZoom, getCombinedOrientation(), currentLens?.id, hfMetadata?.copy(digitalGain = digitalGain)).copy(timing = timing, digitalGain = digitalGain)
                         image.close()
-                        if (!isFrame1Trigger) {
+                        if (!isHalfFrameModeEnabled) {
                             showProcessingAnimation()
                         }
                         lifecycleScope.launch {
@@ -4256,7 +4744,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         buffer.get(data)
                         image.close()
                        
-                        if (!isFrame1Trigger) {
+                        if (!isHalfFrameModeEnabled) {
                             showProcessingAnimation()
                         }
 
@@ -4400,7 +4888,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         watchdog.cancel()
                         lifecycleScope.launch(Dispatchers.Main) {
                             resetBurstUi()
-                            if (!isFrame1Trigger) {
+                            if (!isHalfFrameModeEnabled) {
                                 showProcessingAnimation()
                             }
 

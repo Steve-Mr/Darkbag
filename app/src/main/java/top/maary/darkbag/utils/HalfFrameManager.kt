@@ -46,8 +46,22 @@ class HalfFrameManager(private val context: Context) {
     val layout: String
         get() = prefs.getString(SettingsFragment.KEY_HALF_FRAME_LAYOUT, SettingsFragment.HALF_FRAME_LAYOUT_SBS) ?: SettingsFragment.HALF_FRAME_LAYOUT_SBS
 
+    val compressionMode: String
+        get() {
+            val mode = prefs.getString(SettingsFragment.KEY_HALF_FRAME_COMPRESSION_MODE, null)
+            if (mode != null) return mode
+            val oldBool = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_DOWNSAMPLE, true)
+            return if (oldBool) SettingsFragment.HF_COMPRESSION_BITMAP else SettingsFragment.HF_COMPRESSION_OFF
+        }
+
+    val isBitmapDownsample: Boolean
+        get() = compressionMode == SettingsFragment.HF_COMPRESSION_BITMAP
+
+    val isRawBinning2x2: Boolean
+        get() = compressionMode == SettingsFragment.HF_COMPRESSION_BINNING_2X2
+
     val downsample: Boolean
-        get() = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_DOWNSAMPLE, true)
+        get() = isBitmapDownsample
 
     val dateStamp: Boolean
         get() = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_DATE_STAMP, false)

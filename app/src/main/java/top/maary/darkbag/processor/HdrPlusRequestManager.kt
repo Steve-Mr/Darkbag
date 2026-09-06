@@ -51,7 +51,8 @@ data class HdrPlusRequest(
     val motionPhotoMp4Path: String? = null,
     val motionPhotoStillPtsUs: Long = 0L,
     val enableMemoryColor: Boolean = false,
-    val colorEngineMode: Int = 0
+    val colorEngineMode: Int = 0,
+    val enableDualStreamFusion: Boolean = true
 )
 
 object HdrPlusRequestManager {

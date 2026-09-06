@@ -90,7 +90,8 @@ object ColorProcessor {
         mirror: Boolean,
         metadata: CaptureMetadata,
         enableMemoryColor: Boolean = false,
-        colorEngineMode: Int = 0
+        colorEngineMode: Int = 0,
+        enableDualStreamFusion: Boolean = true
     ): Int
 
     /**
@@ -111,6 +112,26 @@ object ColorProcessor {
         bitmap: android.graphics.Bitmap,
         outputTiffPath: String,
         metadata: CaptureMetadata
+    ): Boolean
+
+    /**
+     * Directly writes a Bayer CFA RAW (.dng) file using LibTIFF.
+     */
+    external fun writeBayerDng(
+        filename: String,
+        width: Int,
+        height: Int,
+        bayerBuffer: ByteBuffer,
+        cfaPattern: Int,
+        whiteLevel: Int,
+        blackLevel: Int,
+        ccm: FloatArray,
+        orientation: Int,
+        whiteBalance: FloatArray,
+        metadata: CaptureMetadata,
+        thumbnailJpeg: ByteArray? = null,
+        thumbWidth: Int = 0,
+        thumbHeight: Int = 0
     ): Boolean
 
     /**
@@ -184,6 +205,7 @@ object ColorProcessor {
         mirror: Boolean,
         metadata: CaptureMetadata,
         enableMemoryColor: Boolean = false,
-        colorEngineMode: Int = 0
+        colorEngineMode: Int = 0,
+        enableDualStreamFusion: Boolean = true
     ): Int
 }

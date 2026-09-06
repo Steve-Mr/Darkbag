@@ -35,6 +35,7 @@ object HalfFrameUtils {
     /**
      * Composes two bitmaps into a single half-frame layout.
      * Assumes the bitmaps have already been correctly oriented (e.g., using ensureOrientation).
+     * Supports photos taken by different physical lenses with differing native resolutions/aspect ratios.
      */
     fun composeBitmaps(firstBitmap: Bitmap, secondBitmap: Bitmap, isSideBySide: Boolean): Bitmap {
         val w1 = firstBitmap.width
@@ -42,12 +43,13 @@ object HalfFrameUtils {
         val w2 = secondBitmap.width
         val h2 = secondBitmap.height
 
-        // Target size for each slot (use first frame as reference)
-        val targetW = w1
-        val targetH = h1
+        // Target size for each slot (use balanced max dimensions to cleanly accommodate different lenses)
+        val targetW = maxOf(w1, w2)
+        val targetH = maxOf(h1, h2)
 
         // Divider width
         val divider = calculateGap(maxOf(targetW, targetH))
+        val paint = Paint(Paint.FILTER_BITMAP_FLAG)
 
         return if (isSideBySide) {
             val combinedW = targetW + divider + targetW
@@ -57,12 +59,14 @@ object HalfFrameUtils {
             val canvas = Canvas(result)
             canvas.drawColor(Color.BLACK)
 
-            // Draw first (Left)
-            canvas.drawBitmap(firstBitmap, 0f, 0f, null)
-            // Draw second (Right) - scaled to fit if necessary, but keep aspect ratio
+            // Draw first (Left slot: [0, targetW])
+            val rect1 = getFitRect(w1, h1, targetW, targetH)
+            canvas.drawBitmap(firstBitmap, Rect(0, 0, w1, h1), rect1, paint)
+
+            // Draw second (Right slot: [targetW + divider, 2*targetW + divider])
             val rect2 = getFitRect(w2, h2, targetW, targetH)
             val dest2 = Rect(targetW + divider + rect2.left, rect2.top, targetW + divider + rect2.right, rect2.bottom)
-            canvas.drawBitmap(secondBitmap, Rect(0, 0, w2, h2), dest2, Paint(Paint.FILTER_BITMAP_FLAG))
+            canvas.drawBitmap(secondBitmap, Rect(0, 0, w2, h2), dest2, paint)
             result
         } else {
             // Top-bottom: [Img1 / Divider / Img2]
@@ -73,12 +77,14 @@ object HalfFrameUtils {
             val canvas = Canvas(result)
             canvas.drawColor(Color.BLACK)
 
-            // Draw first (Top)
-            canvas.drawBitmap(firstBitmap, 0f, 0f, null)
-            // Draw second (Bottom)
+            // Draw first (Top slot: [0, targetH])
+            val rect1 = getFitRect(w1, h1, targetW, targetH)
+            canvas.drawBitmap(firstBitmap, Rect(0, 0, w1, h1), rect1, paint)
+
+            // Draw second (Bottom slot: [targetH + divider, 2*targetH + divider])
             val rect2 = getFitRect(w2, h2, targetW, targetH)
             val dest2 = Rect(rect2.left, targetH + divider + rect2.top, rect2.right, targetH + divider + rect2.bottom)
-            canvas.drawBitmap(secondBitmap, Rect(0, 0, w2, h2), dest2, Paint(Paint.FILTER_BITMAP_FLAG))
+            canvas.drawBitmap(secondBitmap, Rect(0, 0, w2, h2), dest2, paint)
             result
         }
     }
@@ -100,7 +106,6 @@ object HalfFrameUtils {
 
         try {
             var resultBitmap = composeBitmaps(firstBitmap, secondBitmap, isSideBySide)
-
             if (downsample) {
                 // Digital "film saving": Downsample so the final area is approx equal to a single frame.
                 // Combined area is ~2x. Scale factor = sqrt(0.5) ~ 0.707
@@ -110,10 +115,9 @@ object HalfFrameUtils {
                 val scaled = Bitmap.createScaledBitmap(resultBitmap, scaledW, scaledH, true)
                 if (scaled != resultBitmap) {
                     resultBitmap.recycle()
+                    resultBitmap = scaled
                 }
-                return scaled
             }
-
             return resultBitmap
         } catch (e: OutOfMemoryError) {
             Log.e(TAG, "OOM during stitching", e)
