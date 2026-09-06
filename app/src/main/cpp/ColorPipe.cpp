@@ -213,9 +213,7 @@ static const TIFFFieldInfo dng_field_info[] = {
     { TIFFTAG_SUBSECTIMEORIGINAL, -1, -1, TIFF_ASCII, FIELD_CUSTOM, 1, 0, const_cast<char*>("SubSecTimeOriginal") },
     { TIFFTAG_SUBSECTIMEDIGITIZED, -1, -1, TIFF_ASCII, FIELD_CUSTOM, 1, 0, const_cast<char*>("SubSecTimeDigitized") },
     { TIFFTAG_LENSMODEL, -1, -1, TIFF_ASCII, FIELD_CUSTOM, 1, 0, const_cast<char*>("LensModel") },
-    { TIFFTAG_FOCALLENGTHIN35MMFILM, 1, 1, TIFF_SHORT, FIELD_CUSTOM, 1, 0, const_cast<char*>("FocalLengthIn35mmFilm") },
-    { TIFFTAG_CFAREPEATPATTERNDIM, -1, -1, TIFF_SHORT, FIELD_CUSTOM, 1, 0, const_cast<char*>("CFARepeatPatternDim") },
-    { TIFFTAG_CFAPATTERN, -1, -1, TIFF_BYTE, FIELD_CUSTOM, 1, 0, const_cast<char*>("CFAPattern") }
+    { TIFFTAG_FOCALLENGTHIN35MMFILM, 1, 1, TIFF_SHORT, FIELD_CUSTOM, 1, 0, const_cast<char*>("FocalLengthIn35mmFilm") }
 };
 
 static void DNGTagExtender(TIFF *tif) {
@@ -1555,7 +1553,7 @@ bool write_bayer_dng(
     TIFFSetField(tif, TIFFTAG_ORIENTATION, tiffOrientation);
 
     uint16_t cfaRepeatDim[2] = {2, 2};
-    TIFFSetField(tif, TIFFTAG_CFAREPEATPATTERNDIM, 2, cfaRepeatDim);
+    TIFFSetField(tif, TIFFTAG_CFAREPEATPATTERNDIM, cfaRepeatDim);
 
     // CFAPattern: 0=Red, 1=Green, 2=Blue
     uint8_t cfaPatternBytes[4] = {0, 1, 1, 2}; // default RGGB
