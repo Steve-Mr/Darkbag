@@ -1,6 +1,7 @@
 #include "BayerProcessor.h"
 #include <cstring>
 #include <algorithm>
+#include <vector>
 
 #if defined(__ARM_NEON) || defined(__ARM_NEON__)
 #include <arm_neon.h>
@@ -18,7 +19,8 @@ void BayerProcessor::bayer2x2BinningNEON(
     uint32_t srcWidth,
     uint32_t srcHeight,
     uint32_t srcRowStrideBytes,
-    uint16_t* dst
+    uint16_t* dst,
+    BinningMode mode
 ) {
     if (!srcBytes || !dst || srcWidth < 2 || srcHeight < 2) {
         return;
@@ -51,7 +53,6 @@ void BayerProcessor::bayer2x2BinningNEON(
             uint32x4x2_t r0_uzp = vuzpq_u32(vreinterpretq_u32_u16(r0_0), vreinterpretq_u32_u16(r0_1));
             uint16x8_t r0_even = vreinterpretq_u16_u32(r0_uzp.val[0]);
             uint16x8_t r0_odd  = vreinterpretq_u16_u32(r0_uzp.val[1]);
-            uint16x8_t r0_h_avg = vrhaddq_u16(r0_even, r0_odd);
 
             // Row 2
             uint16x8_t r2_0 = vld1q_u16(r2 + x);
@@ -59,11 +60,6 @@ void BayerProcessor::bayer2x2BinningNEON(
             uint32x4x2_t r2_uzp = vuzpq_u32(vreinterpretq_u32_u16(r2_0), vreinterpretq_u32_u16(r2_1));
             uint16x8_t r2_even = vreinterpretq_u16_u32(r2_uzp.val[0]);
             uint16x8_t r2_odd  = vreinterpretq_u16_u32(r2_uzp.val[1]);
-            uint16x8_t r2_h_avg = vrhaddq_u16(r2_even, r2_odd);
-
-            // Vertical combine for even output row
-            uint16x8_t out0 = vrhaddq_u16(r0_h_avg, r2_h_avg);
-            vst1q_u16(outRow0 + dstX, out0);
 
             // Row 1
             uint16x8_t r1_0 = vld1q_u16(r1 + x);
@@ -71,7 +67,6 @@ void BayerProcessor::bayer2x2BinningNEON(
             uint32x4x2_t r1_uzp = vuzpq_u32(vreinterpretq_u32_u16(r1_0), vreinterpretq_u32_u16(r1_1));
             uint16x8_t r1_even = vreinterpretq_u16_u32(r1_uzp.val[0]);
             uint16x8_t r1_odd  = vreinterpretq_u16_u32(r1_uzp.val[1]);
-            uint16x8_t r1_h_avg = vrhaddq_u16(r1_even, r1_odd);
 
             // Row 3
             uint16x8_t r3_0 = vld1q_u16(r3 + x);
@@ -79,36 +74,76 @@ void BayerProcessor::bayer2x2BinningNEON(
             uint32x4x2_t r3_uzp = vuzpq_u32(vreinterpretq_u32_u16(r3_0), vreinterpretq_u32_u16(r3_1));
             uint16x8_t r3_even = vreinterpretq_u16_u32(r3_uzp.val[0]);
             uint16x8_t r3_odd  = vreinterpretq_u16_u32(r3_uzp.val[1]);
-            uint16x8_t r3_h_avg = vrhaddq_u16(r3_even, r3_odd);
 
-            // Vertical combine for odd output row
-            uint16x8_t out1 = vrhaddq_u16(r1_h_avg, r3_h_avg);
-            vst1q_u16(outRow1 + dstX, out1);
+            if (mode == BinningMode::SUMMATION) {
+                uint16x8_t r0_h_sum = vqaddq_u16(r0_even, r0_odd);
+                uint16x8_t r2_h_sum = vqaddq_u16(r2_even, r2_odd);
+                uint16x8_t out0 = vqaddq_u16(r0_h_sum, r2_h_sum);
+                vst1q_u16(outRow0 + dstX, out0);
+
+                uint16x8_t r1_h_sum = vqaddq_u16(r1_even, r1_odd);
+                uint16x8_t r3_h_sum = vqaddq_u16(r3_even, r3_odd);
+                uint16x8_t out1 = vqaddq_u16(r1_h_sum, r3_h_sum);
+                vst1q_u16(outRow1 + dstX, out1);
+            } else {
+                uint16x8_t r0_h_avg = vrhaddq_u16(r0_even, r0_odd);
+                uint16x8_t r2_h_avg = vrhaddq_u16(r2_even, r2_odd);
+                uint16x8_t out0 = vrhaddq_u16(r0_h_avg, r2_h_avg);
+                vst1q_u16(outRow0 + dstX, out0);
+
+                uint16x8_t r1_h_avg = vrhaddq_u16(r1_even, r1_odd);
+                uint16x8_t r3_h_avg = vrhaddq_u16(r3_even, r3_odd);
+                uint16x8_t out1 = vrhaddq_u16(r1_h_avg, r3_h_avg);
+                vst1q_u16(outRow1 + dstX, out1);
+            }
         }
         #endif
 
         // Scalar loop for remaining 4-pixel chunks
         for (; x + 4 <= srcWidth && dstX + 2 <= dstWidth; x += 4, dstX += 2) {
-            uint32_t c0 = (static_cast<uint32_t>(r0[x])     + r0[x + 2] + r2[x]     + r2[x + 2] + 2) / 4;
-            uint32_t c1 = (static_cast<uint32_t>(r0[x + 1]) + r0[x + 3] + r2[x + 1] + r2[x + 3] + 2) / 4;
-            outRow0[dstX]     = static_cast<uint16_t>(c0);
-            outRow0[dstX + 1] = static_cast<uint16_t>(c1);
+            if (mode == BinningMode::SUMMATION) {
+                uint32_t c0 = static_cast<uint32_t>(r0[x])     + r0[x + 2] + r2[x]     + r2[x + 2];
+                uint32_t c1 = static_cast<uint32_t>(r0[x + 1]) + r0[x + 3] + r2[x + 1] + r2[x + 3];
+                outRow0[dstX]     = static_cast<uint16_t>(std::min(c0, 65535u));
+                outRow0[dstX + 1] = static_cast<uint16_t>(std::min(c1, 65535u));
 
-            uint32_t c2 = (static_cast<uint32_t>(r1[x])     + r1[x + 2] + r3[x]     + r3[x + 2] + 2) / 4;
-            uint32_t c3 = (static_cast<uint32_t>(r1[x + 1]) + r1[x + 3] + r3[x + 1] + r3[x + 3] + 2) / 4;
-            outRow1[dstX]     = static_cast<uint16_t>(c2);
-            outRow1[dstX + 1] = static_cast<uint16_t>(c3);
+                uint32_t c2 = static_cast<uint32_t>(r1[x])     + r1[x + 2] + r3[x]     + r3[x + 2];
+                uint32_t c3 = static_cast<uint32_t>(r1[x + 1]) + r1[x + 3] + r3[x + 1] + r3[x + 3];
+                outRow1[dstX]     = static_cast<uint16_t>(std::min(c2, 65535u));
+                outRow1[dstX + 1] = static_cast<uint16_t>(std::min(c3, 65535u));
+            } else {
+                uint32_t c0 = (static_cast<uint32_t>(r0[x])     + r0[x + 2] + r2[x]     + r2[x + 2] + 2) / 4;
+                uint32_t c1 = (static_cast<uint32_t>(r0[x + 1]) + r0[x + 3] + r2[x + 1] + r2[x + 3] + 2) / 4;
+                outRow0[dstX]     = static_cast<uint16_t>(c0);
+                outRow0[dstX + 1] = static_cast<uint16_t>(c1);
+
+                uint32_t c2 = (static_cast<uint32_t>(r1[x])     + r1[x + 2] + r3[x]     + r3[x + 2] + 2) / 4;
+                uint32_t c3 = (static_cast<uint32_t>(r1[x + 1]) + r1[x + 3] + r3[x + 1] + r3[x + 3] + 2) / 4;
+                outRow1[dstX]     = static_cast<uint16_t>(c2);
+                outRow1[dstX + 1] = static_cast<uint16_t>(c3);
+            }
         }
 
         // Remainder if boundary contains an extra 2 pixels
         if (x + 2 <= srcWidth && dstX < dstWidth) {
-            outRow0[dstX] = static_cast<uint16_t>((static_cast<uint32_t>(r0[x]) + r2[x] + 1) / 2);
-            if (x + 1 < srcWidth && dstX + 1 < dstWidth) {
-                outRow0[dstX + 1] = static_cast<uint16_t>((static_cast<uint32_t>(r0[x + 1]) + r2[x + 1] + 1) / 2);
-            }
-            outRow1[dstX] = static_cast<uint16_t>((static_cast<uint32_t>(r1[x]) + r3[x] + 1) / 2);
-            if (x + 1 < srcWidth && dstX + 1 < dstWidth) {
-                outRow1[dstX + 1] = static_cast<uint16_t>((static_cast<uint32_t>(r1[x + 1]) + r3[x + 1] + 1) / 2);
+            if (mode == BinningMode::SUMMATION) {
+                outRow0[dstX] = static_cast<uint16_t>(std::min<uint32_t>(65535u, static_cast<uint32_t>(r0[x]) + r2[x]));
+                if (x + 1 < srcWidth && dstX + 1 < dstWidth) {
+                    outRow0[dstX + 1] = static_cast<uint16_t>(std::min<uint32_t>(65535u, static_cast<uint32_t>(r0[x + 1]) + r2[x + 1]));
+                }
+                outRow1[dstX] = static_cast<uint16_t>(std::min<uint32_t>(65535u, static_cast<uint32_t>(r1[x]) + r3[x]));
+                if (x + 1 < srcWidth && dstX + 1 < dstWidth) {
+                    outRow1[dstX + 1] = static_cast<uint16_t>(std::min<uint32_t>(65535u, static_cast<uint32_t>(r1[x + 1]) + r3[x + 1]));
+                }
+            } else {
+                outRow0[dstX] = static_cast<uint16_t>((static_cast<uint32_t>(r0[x]) + r2[x] + 1) / 2);
+                if (x + 1 < srcWidth && dstX + 1 < dstWidth) {
+                    outRow0[dstX + 1] = static_cast<uint16_t>((static_cast<uint32_t>(r0[x + 1]) + r2[x + 1] + 1) / 2);
+                }
+                outRow1[dstX] = static_cast<uint16_t>((static_cast<uint32_t>(r1[x]) + r3[x] + 1) / 2);
+                if (x + 1 < srcWidth && dstX + 1 < dstWidth) {
+                    outRow1[dstX + 1] = static_cast<uint16_t>((static_cast<uint32_t>(r1[x + 1]) + r3[x + 1] + 1) / 2);
+                }
             }
         }
     }
@@ -124,14 +159,53 @@ void BayerProcessor::bayer2x2BinningNEON(
         uint32_t rx = 0;
         uint32_t rDstX = 0;
         for (; rx + 4 <= srcWidth && rDstX + 2 <= dstWidth; rx += 4, rDstX += 2) {
-            remOutRow0[rDstX]     = static_cast<uint16_t>((static_cast<uint32_t>(remR0[rx])     + remR0[rx + 2] + 1) / 2);
-            remOutRow0[rDstX + 1] = static_cast<uint16_t>((static_cast<uint32_t>(remR0[rx + 1]) + remR0[rx + 3] + 1) / 2);
-            if (remOutRow1) {
-                remOutRow1[rDstX]     = static_cast<uint16_t>((static_cast<uint32_t>(remR1[rx])     + remR1[rx + 2] + 1) / 2);
-                remOutRow1[rDstX + 1] = static_cast<uint16_t>((static_cast<uint32_t>(remR1[rx + 1]) + remR1[rx + 3] + 1) / 2);
+            if (mode == BinningMode::SUMMATION) {
+                remOutRow0[rDstX]     = static_cast<uint16_t>(std::min<uint32_t>(65535u, static_cast<uint32_t>(remR0[rx])     + remR0[rx + 2]));
+                remOutRow0[rDstX + 1] = static_cast<uint16_t>(std::min<uint32_t>(65535u, static_cast<uint32_t>(remR0[rx + 1]) + remR0[rx + 3]));
+                if (remOutRow1) {
+                    remOutRow1[rDstX]     = static_cast<uint16_t>(std::min<uint32_t>(65535u, static_cast<uint32_t>(remR1[rx])     + remR1[rx + 2]));
+                    remOutRow1[rDstX + 1] = static_cast<uint16_t>(std::min<uint32_t>(65535u, static_cast<uint32_t>(remR1[rx + 1]) + remR1[rx + 3]));
+                }
+            } else {
+                remOutRow0[rDstX]     = static_cast<uint16_t>((static_cast<uint32_t>(remR0[rx])     + remR0[rx + 2] + 1) / 2);
+                remOutRow0[rDstX + 1] = static_cast<uint16_t>((static_cast<uint32_t>(remR0[rx + 1]) + remR0[rx + 3] + 1) / 2);
+                if (remOutRow1) {
+                    remOutRow1[rDstX]     = static_cast<uint16_t>((static_cast<uint32_t>(remR1[rx])     + remR1[rx + 2] + 1) / 2);
+                    remOutRow1[rDstX + 1] = static_cast<uint16_t>((static_cast<uint32_t>(remR1[rx + 1]) + remR1[rx + 3] + 1) / 2);
+                }
             }
         }
     }
+}
+
+void BayerProcessor::bayer4x4BinningNEON(
+    const uint8_t* srcBytes,
+    uint32_t srcWidth,
+    uint32_t srcHeight,
+    uint32_t srcRowStrideBytes,
+    uint16_t* dst,
+    BinningMode mode
+) {
+    if (!srcBytes || !dst || srcWidth < 4 || srcHeight < 4) {
+        return;
+    }
+
+    const uint32_t midWidth = srcWidth / 2;
+    const uint32_t midHeight = srcHeight / 2;
+    std::vector<uint16_t> tempBuffer(static_cast<size_t>(midWidth) * midHeight);
+
+    // Pass 1: 2x2 binning from input into tempBuffer
+    bayer2x2BinningNEON(srcBytes, srcWidth, srcHeight, srcRowStrideBytes, tempBuffer.data(), mode);
+
+    // Pass 2: 2x2 binning from tempBuffer into dst
+    bayer2x2BinningNEON(
+        reinterpret_cast<const uint8_t*>(tempBuffer.data()),
+        midWidth,
+        midHeight,
+        midWidth * sizeof(uint16_t),
+        dst,
+        mode
+    );
 }
 
 void BayerProcessor::cropBayer16(
@@ -223,6 +297,15 @@ BayerProcessResult BayerProcessor::processBayerFrame(
                 result.outDataSize = outW * outH * sizeof(uint16_t);
             }
             break;
+        }
+        case DownsampleMode::BINNING_4X4: {
+            const uint32_t targetW = (srcWidth / 4) & ~1u;
+            const uint32_t targetH = (srcHeight / 4) & ~1u;
+            bayer4x4BinningNEON(srcBytes, targetW * 4, targetH * 4, srcRowStrideBytes, dst16, BinningMode::AVERAGE);
+            result.outWidth = targetW;
+            result.outHeight = targetH;
+            result.outDataSize = static_cast<size_t>(targetW) * targetH * sizeof(uint16_t);
+            return result;
         }
         case DownsampleMode::CROP_4K: {
             // Target: 3840x2160

@@ -10,7 +10,13 @@ enum class DownsampleMode : uint32_t {
     NONE = 0,
     CROP_4K = 1,
     BINNING_1080P = 2,
-    BINNING_2K_OPEN_GATE_4_3 = 3
+    BINNING_2K_OPEN_GATE_4_3 = 3,
+    BINNING_4X4 = 4
+};
+
+enum class BinningMode : uint32_t {
+    AVERAGE = 0,    // (A + B + 1) / 2 rounded halving average
+    SUMMATION = 1   // A + B saturation addition (10-bit -> 12-bit, WhiteLevel * 4)
 };
 
 struct BayerProcessResult {
@@ -22,10 +28,10 @@ struct BayerProcessResult {
 class BayerProcessor {
 public:
     /**
-     * Lossless 2x2 Bayer Binning using ARM NEON vector instructions (vrhadd_u16).
+     * Lossless 2x2 Bayer Binning using ARM NEON vector instructions (vrhadd_u16 or vqaddq_u16).
      * Preserves CFA pattern without cross-channel mixing (never mixes Gr and Gb).
-     * Computes rounding halving averages for 4x4 input blocks into 2x2 output blocks:
-     *   R'  = (R00 + R02 + R20 + R22 + 2) / 4
+     * Computes rounding halving averages or sums for 4x4 input blocks into 2x2 output blocks:
+     *   R'  = (R00 + R02 + R20 + R22 + 2) / 4   (or sum in SUMMATION mode)
      *   Gr' = (Gr01 + Gr03 + Gr21 + Gr23 + 2) / 4
      *   Gb' = (Gb10 + Gb12 + Gb30 + Gb32 + 2) / 4
      *   B'  = (B11 + B13 + B31 + B33 + 2) / 4
@@ -38,7 +44,8 @@ public:
         uint32_t srcWidth,
         uint32_t srcHeight,
         uint32_t srcRowStrideBytes,
-        uint16_t* dst
+        uint16_t* dst,
+        BinningMode mode = BinningMode::AVERAGE
     );
 
     static void bayer2x2BinningNEON(
@@ -46,9 +53,35 @@ public:
         uint32_t srcWidth,
         uint32_t srcHeight,
         uint32_t srcRowStrideBytes,
-        uint8_t* dstBytes
+        uint8_t* dstBytes,
+        BinningMode mode = BinningMode::AVERAGE
     ) {
-        bayer2x2BinningNEON(srcBytes, srcWidth, srcHeight, srcRowStrideBytes, reinterpret_cast<uint16_t*>(dstBytes));
+        bayer2x2BinningNEON(srcBytes, srcWidth, srcHeight, srcRowStrideBytes, reinterpret_cast<uint16_t*>(dstBytes), mode);
+    }
+
+    /**
+     * Cascaded 4x4 Bayer Binning using two-pass 2x2 NEON binning.
+     * Preserves CFA pattern and reduces resolution to (srcWidth / 4) x (srcHeight / 4).
+     * Data size reduced to 1/16th of original.
+     */
+    static void bayer4x4BinningNEON(
+        const uint8_t* srcBytes,
+        uint32_t srcWidth,
+        uint32_t srcHeight,
+        uint32_t srcRowStrideBytes,
+        uint16_t* dst,
+        BinningMode mode = BinningMode::AVERAGE
+    );
+
+    static void bayer4x4BinningNEON(
+        const uint8_t* srcBytes,
+        uint32_t srcWidth,
+        uint32_t srcHeight,
+        uint32_t srcRowStrideBytes,
+        uint8_t* dstBytes,
+        BinningMode mode = BinningMode::AVERAGE
+    ) {
+        bayer4x4BinningNEON(srcBytes, srcWidth, srcHeight, srcRowStrideBytes, reinterpret_cast<uint16_t*>(dstBytes), mode);
     }
 
     /**

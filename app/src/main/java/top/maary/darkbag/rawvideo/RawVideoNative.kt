@@ -20,6 +20,10 @@ object RawVideoNative {
     const val DOWNSAMPLE_CROP_4K = 1
     const val DOWNSAMPLE_BINNING_1080P = 2
     const val DOWNSAMPLE_BINNING_2K_OPEN_GATE_4_3 = 3
+    const val DOWNSAMPLE_BINNING_4X4 = 4
+
+    const val BINNING_MODE_AVERAGE = 0
+    const val BINNING_MODE_SUMMATION = 1
 
     data class Header(
         val width: Int,
@@ -139,6 +143,24 @@ object RawVideoNative {
     ): Int
 
     external fun nativeCloseReader(handle: Long)
+    
+    external fun nativeBayerBinning2x2(
+        srcBuffer: ByteBuffer,
+        srcWidth: Int,
+        srcHeight: Int,
+        srcRowStrideBytes: Int,
+        dstBuffer: ByteBuffer,
+        mode: Int = BINNING_MODE_AVERAGE
+    ): Boolean
+
+    external fun nativeBayerBinning4x4(
+        srcBuffer: ByteBuffer,
+        srcWidth: Int,
+        srcHeight: Int,
+        srcRowStrideBytes: Int,
+        dstBuffer: ByteBuffer,
+        mode: Int = BINNING_MODE_AVERAGE
+    ): Boolean
 
     external fun nativeDebayerFrameToBitmap(
         bayerBuffer: ByteBuffer,

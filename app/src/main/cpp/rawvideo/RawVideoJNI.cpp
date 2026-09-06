@@ -913,4 +913,58 @@ Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeDestroyGLRenderer(
     }
 }
 
+JNIEXPORT jboolean JNICALL
+Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeBayerBinning2x2(
+        JNIEnv* env,
+        jobject /* thiz */,
+        jobject jSrcBuffer,
+        jint srcWidth,
+        jint srcHeight,
+        jint srcRowStrideBytes,
+        jobject jDstBuffer,
+        jint mode
+) {
+    auto* src = static_cast<const uint8_t*>(env->GetDirectBufferAddress(jSrcBuffer));
+    auto* dst = static_cast<uint16_t*>(env->GetDirectBufferAddress(jDstBuffer));
+    if (!src || !dst || srcWidth < 2 || srcHeight < 2) return JNI_FALSE;
+
+    darkbag::rawvideo::BinningMode bMode = (mode == 1) ? darkbag::rawvideo::BinningMode::SUMMATION : darkbag::rawvideo::BinningMode::AVERAGE;
+    darkbag::rawvideo::BayerProcessor::bayer2x2BinningNEON(
+        src,
+        static_cast<uint32_t>(srcWidth),
+        static_cast<uint32_t>(srcHeight),
+        static_cast<uint32_t>(srcRowStrideBytes),
+        dst,
+        bMode
+    );
+    return JNI_TRUE;
+}
+
+JNIEXPORT jboolean JNICALL
+Java_top_maary_darkbag_rawvideo_RawVideoNative_nativeBayerBinning4x4(
+        JNIEnv* env,
+        jobject /* thiz */,
+        jobject jSrcBuffer,
+        jint srcWidth,
+        jint srcHeight,
+        jint srcRowStrideBytes,
+        jobject jDstBuffer,
+        jint mode
+) {
+    auto* src = static_cast<const uint8_t*>(env->GetDirectBufferAddress(jSrcBuffer));
+    auto* dst = static_cast<uint16_t*>(env->GetDirectBufferAddress(jDstBuffer));
+    if (!src || !dst || srcWidth < 4 || srcHeight < 4) return JNI_FALSE;
+
+    darkbag::rawvideo::BinningMode bMode = (mode == 1) ? darkbag::rawvideo::BinningMode::SUMMATION : darkbag::rawvideo::BinningMode::AVERAGE;
+    darkbag::rawvideo::BayerProcessor::bayer4x4BinningNEON(
+        src,
+        static_cast<uint32_t>(srcWidth),
+        static_cast<uint32_t>(srcHeight),
+        static_cast<uint32_t>(srcRowStrideBytes),
+        dst,
+        bMode
+    );
+    return JNI_TRUE;
+}
+
 } // extern "C"
