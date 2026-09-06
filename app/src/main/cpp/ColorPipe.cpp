@@ -213,7 +213,13 @@ static const TIFFFieldInfo dng_field_info[] = {
     { TIFFTAG_SUBSECTIMEORIGINAL, -1, -1, TIFF_ASCII, FIELD_CUSTOM, 1, 0, const_cast<char*>("SubSecTimeOriginal") },
     { TIFFTAG_SUBSECTIMEDIGITIZED, -1, -1, TIFF_ASCII, FIELD_CUSTOM, 1, 0, const_cast<char*>("SubSecTimeDigitized") },
     { TIFFTAG_LENSMODEL, -1, -1, TIFF_ASCII, FIELD_CUSTOM, 1, 0, const_cast<char*>("LensModel") },
-    { TIFFTAG_FOCALLENGTHIN35MMFILM, 1, 1, TIFF_SHORT, FIELD_CUSTOM, 1, 0, const_cast<char*>("FocalLengthIn35mmFilm") }
+    { TIFFTAG_FOCALLENGTHIN35MMFILM, 1, 1, TIFF_SHORT, FIELD_CUSTOM, 1, 0, const_cast<char*>("FocalLengthIn35mmFilm") },
+    { TIFFTAG_CFAREPEATPATTERNDIM, 2, 2, TIFF_SHORT, FIELD_CUSTOM, 1, 0, const_cast<char*>("CFARepeatPatternDim") },
+    { TIFFTAG_CFAPATTERN, -1, -1, TIFF_BYTE, FIELD_CUSTOM, 1, 1, const_cast<char*>("CFAPattern") },
+    { TIFFTAG_EXPOSURETIME, 1, 1, TIFF_RATIONAL, FIELD_CUSTOM, 1, 0, const_cast<char*>("ExposureTime") },
+    { TIFFTAG_FNUMBER, 1, 1, TIFF_RATIONAL, FIELD_CUSTOM, 1, 0, const_cast<char*>("FNumber") },
+    { TIFFTAG_FOCALLENGTH, 1, 1, TIFF_RATIONAL, FIELD_CUSTOM, 1, 0, const_cast<char*>("FocalLength") },
+    { TIFFTAG_ISOSPEEDRATINGS, -1, -1, TIFF_SHORT, FIELD_CUSTOM, 1, 1, const_cast<char*>("ISOSpeedRatings") }
 };
 
 static void DNGTagExtender(TIFF *tif) {
