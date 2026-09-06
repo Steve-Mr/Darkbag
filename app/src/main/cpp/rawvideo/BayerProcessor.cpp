@@ -344,5 +344,236 @@ BayerProcessResult BayerProcessor::processBayerFrame(
     return result;
 }
 
+void BayerProcessor::demosaicHamiltonAdams(
+    const uint16_t* bayerData,
+    uint32_t width,
+    uint32_t height,
+    int cfaPattern,
+    const int* blackLevelPattern,
+    int whiteLevel,
+    uint16_t* outPlanarRgb
+) {
+    if (!bayerData || !outPlanarRgb || width < 4 || height < 4) {
+        return;
+    }
+
+    const int safePattern = std::clamp(cfaPattern, 0, 3);
+    const float safeWhiteLevel = (whiteLevel > 0) ? static_cast<float>(whiteLevel) : 1023.0f;
+
+    // cfaColor[pattern][row][col]: 0=Red, 1=Green, 2=Blue
+    static const int cfaColor[4][2][2] = {
+        { {0, 1}, {1, 2} }, // 0: RGGB
+        { {1, 0}, {2, 1} }, // 1: GRBG
+        { {1, 2}, {0, 1} }, // 2: GBRG
+        { {2, 1}, {1, 0} }  // 3: BGGR
+    };
+
+    const uint32_t padW = width + 4;
+    const uint32_t padH = height + 4;
+    std::vector<float> padData(padW * padH);
+
+    // 1. Black level subtract, normalize to [0, 65535.0f], and fill padded buffer with mirror reflection
+    #if defined(_OPENMP)
+    #pragma omp parallel for schedule(static)
+    #endif
+    for (uint32_t y = 0; y < height; ++y) {
+        const uint32_t py = y + 2;
+        const auto* srcRow = bayerData + (size_t)y * width;
+        auto* padRow = padData.data() + (size_t)py * padW;
+
+        for (uint32_t x = 0; x < width; ++x) {
+            int phase = static_cast<int>((y & 1) * 2 + (x & 1));
+            float bl = blackLevelPattern ? static_cast<float>(blackLevelPattern[phase]) : 64.0f;
+            float scale = 65535.0f / std::max(1.0f, safeWhiteLevel - bl);
+            float norm = std::clamp((static_cast<float>(srcRow[x]) - bl) * scale, 0.0f, 65535.0f);
+            padRow[x + 2] = norm;
+        }
+
+        // Horizontal mirror padding (2 pixels on each side)
+        padRow[1] = padRow[3];
+        padRow[0] = padRow[4];
+        padRow[padW - 2] = padRow[padW - 4];
+        padRow[padW - 1] = padRow[padW - 5];
+    }
+
+    // Vertical mirror padding (2 rows top and bottom)
+    std::memcpy(padData.data() + 1 * padW, padData.data() + 3 * padW, padW * sizeof(float));
+    std::memcpy(padData.data() + 0 * padW, padData.data() + 4 * padW, padW * sizeof(float));
+    std::memcpy(padData.data() + (padH - 2) * padW, padData.data() + (padH - 4) * padW, padW * sizeof(float));
+    std::memcpy(padData.data() + (padH - 1) * padW, padData.data() + (padH - 5) * padW, padW * sizeof(float));
+
+    uint16_t* planeR = outPlanarRgb + 0 * (size_t)width * height;
+    uint16_t* planeG = outPlanarRgb + 1 * (size_t)width * height;
+    uint16_t* planeB = outPlanarRgb + 2 * (size_t)width * height;
+
+    // Buffers for color differences (R - G and B - G)
+    std::vector<float> padDR(padW * padH, 0.0f);
+    std::vector<float> padDB(padW * padH, 0.0f);
+
+    // 2. Populate known pixels and interpolate Green at Red/Blue locations
+    #if defined(_OPENMP)
+    #pragma omp parallel for schedule(static)
+    #endif
+    for (uint32_t y = 0; y < height; ++y) {
+        const uint32_t py = y + 2;
+        const auto* padRow = padData.data() + (size_t)py * padW;
+        const auto* padRowM1 = padData.data() + (size_t)(py - 1) * padW;
+        const auto* padRowP1 = padData.data() + (size_t)(py + 1) * padW;
+        const auto* padRowM2 = padData.data() + (size_t)(py - 2) * padW;
+        const auto* padRowP2 = padData.data() + (size_t)(py + 2) * padW;
+
+        auto* rowG = planeG + (size_t)y * width;
+        auto* rowR = planeR + (size_t)y * width;
+        auto* rowB = planeB + (size_t)y * width;
+
+        auto* rowDR = padDR.data() + (size_t)py * padW;
+        auto* rowDB = padDB.data() + (size_t)py * padW;
+
+        for (uint32_t x = 0; x < width; ++x) {
+            const uint32_t px = x + 2;
+            int ch = cfaColor[safePattern][y & 1][x & 1];
+            float P = padRow[px];
+
+            if (ch == 1) {
+                // Known Green
+                rowG[x] = static_cast<uint16_t>(P);
+            } else if (ch == 0) {
+                // Known Red, interpolate Green
+                rowR[x] = static_cast<uint16_t>(P);
+                float dH = std::abs(padRow[px - 1] - padRow[px + 1]) + std::abs(2.0f * P - padRow[px - 2] - padRow[px + 2]);
+                float dV = std::abs(padRowM1[px] - padRowP1[px]) + std::abs(2.0f * P - padRowM2[px] - padRowP2[px]);
+
+                float g_val;
+                if (dH < dV) {
+                    g_val = 0.5f * (padRow[px - 1] + padRow[px + 1]) + 0.25f * (2.0f * P - padRow[px - 2] - padRow[px + 2]);
+                } else if (dV < dH) {
+                    g_val = 0.5f * (padRowM1[px] + padRowP1[px]) + 0.25f * (2.0f * P - padRowM2[px] - padRowP2[px]);
+                } else {
+                    g_val = 0.25f * (padRow[px - 1] + padRow[px + 1] + padRowM1[px] + padRowP1[px]) +
+                            0.125f * (4.0f * P - padRow[px - 2] - padRow[px + 2] - padRowM2[px] - padRowP2[px]);
+                }
+                float clampedG = std::clamp(g_val, 0.0f, 65535.0f);
+                rowG[x] = static_cast<uint16_t>(clampedG);
+                rowDR[px] = P - clampedG;
+            } else {
+                // Known Blue, interpolate Green
+                rowB[x] = static_cast<uint16_t>(P);
+                float dH = std::abs(padRow[px - 1] - padRow[px + 1]) + std::abs(2.0f * P - padRow[px - 2] - padRow[px + 2]);
+                float dV = std::abs(padRowM1[px] - padRowP1[px]) + std::abs(2.0f * P - padRowM2[px] - padRowP2[px]);
+
+                float g_val;
+                if (dH < dV) {
+                    g_val = 0.5f * (padRow[px - 1] + padRow[px + 1]) + 0.25f * (2.0f * P - padRow[px - 2] - padRow[px + 2]);
+                } else if (dV < dH) {
+                    g_val = 0.5f * (padRowM1[px] + padRowP1[px]) + 0.25f * (2.0f * P - padRowM2[px] - padRowP2[px]);
+                } else {
+                    g_val = 0.25f * (padRow[px - 1] + padRow[px + 1] + padRowM1[px] + padRowP1[px]) +
+                            0.125f * (4.0f * P - padRow[px - 2] - padRow[px + 2] - padRowM2[px] - padRowP2[px]);
+                }
+                float clampedG = std::clamp(g_val, 0.0f, 65535.0f);
+                rowG[x] = static_cast<uint16_t>(clampedG);
+                rowDB[px] = P - clampedG;
+            }
+        }
+
+        // Horizontal mirror padding for padDR and padDB
+        rowDR[1] = rowDR[3];
+        rowDR[0] = rowDR[4];
+        rowDR[padW - 2] = rowDR[padW - 4];
+        rowDR[padW - 1] = rowDR[padW - 5];
+
+        rowDB[1] = rowDB[3];
+        rowDB[0] = rowDB[4];
+        rowDB[padW - 2] = rowDB[padW - 4];
+        rowDB[padW - 1] = rowDB[padW - 5];
+    }
+
+    // Vertical mirror padding for padDR and padDB
+    std::memcpy(padDR.data() + 1 * padW, padDR.data() + 3 * padW, padW * sizeof(float));
+    std::memcpy(padDR.data() + 0 * padW, padDR.data() + 4 * padW, padW * sizeof(float));
+    std::memcpy(padDR.data() + (padH - 2) * padW, padDR.data() + (padH - 4) * padW, padW * sizeof(float));
+    std::memcpy(padDR.data() + (padH - 1) * padW, padDR.data() + (padH - 5) * padW, padW * sizeof(float));
+
+    std::memcpy(padDB.data() + 1 * padW, padDB.data() + 3 * padW, padW * sizeof(float));
+    std::memcpy(padDB.data() + 0 * padW, padDB.data() + 4 * padW, padW * sizeof(float));
+    std::memcpy(padDB.data() + (padH - 2) * padW, padDB.data() + (padH - 4) * padW, padW * sizeof(float));
+    std::memcpy(padDB.data() + (padH - 1) * padW, padDB.data() + (padH - 5) * padW, padW * sizeof(float));
+
+    // 3. Interpolate Red and Blue in color-difference domain
+    #if defined(_OPENMP)
+    #pragma omp parallel for schedule(static)
+    #endif
+    for (uint32_t y = 0; y < height; ++y) {
+        const uint32_t py = y + 2;
+        const auto* drRow = padDR.data() + (size_t)py * padW;
+        const auto* drRowM1 = padDR.data() + (size_t)(py - 1) * padW;
+        const auto* drRowP1 = padDR.data() + (size_t)(py + 1) * padW;
+
+        const auto* dbRow = padDB.data() + (size_t)py * padW;
+        const auto* dbRowM1 = padDB.data() + (size_t)(py - 1) * padW;
+        const auto* dbRowP1 = padDB.data() + (size_t)(py + 1) * padW;
+
+        const auto* rowG = planeG + (size_t)y * width;
+        auto* rowR = planeR + (size_t)y * width;
+        auto* rowB = planeB + (size_t)y * width;
+
+        for (uint32_t x = 0; x < width; ++x) {
+            const uint32_t px = x + 2;
+            int ch = cfaColor[safePattern][y & 1][x & 1];
+            float G_val = static_cast<float>(rowG[x]);
+
+            // Interpolate Red if not known
+            if (ch != 0) {
+                float dr;
+                if (ch == 1) {
+                    // Green pixel: Red is either horizontally or vertically adjacent
+                    if (cfaColor[safePattern][y & 1][(x + 1) & 1] == 0) {
+                        dr = 0.5f * (drRow[px - 1] + drRow[px + 1]);
+                    } else {
+                        dr = 0.5f * (drRowM1[px] + drRowP1[px]);
+                    }
+                } else {
+                    // Blue pixel: Red is at 4 diagonal neighbors
+                    float dD1 = std::abs(drRowM1[px + 1] - drRowP1[px - 1]);
+                    float dD2 = std::abs(drRowM1[px - 1] - drRowP1[px + 1]);
+                    if (dD1 < dD2) {
+                        dr = 0.5f * (drRowM1[px + 1] + drRowP1[px - 1]);
+                    } else if (dD2 < dD1) {
+                        dr = 0.5f * (drRowM1[px - 1] + drRowP1[px + 1]);
+                    } else {
+                        dr = 0.25f * (drRowM1[px - 1] + drRowM1[px + 1] + drRowP1[px - 1] + drRowP1[px + 1]);
+                    }
+                }
+                rowR[x] = static_cast<uint16_t>(std::clamp(G_val + dr, 0.0f, 65535.0f));
+            }
+
+            // Interpolate Blue if not known
+            if (ch != 2) {
+                float db;
+                if (ch == 1) {
+                    // Green pixel: Blue is either horizontally or vertically adjacent
+                    if (cfaColor[safePattern][y & 1][(x + 1) & 1] == 2) {
+                        db = 0.5f * (dbRow[px - 1] + dbRow[px + 1]);
+                    } else {
+                        db = 0.5f * (dbRowM1[px] + dbRowP1[px]);
+                    }
+                } else {
+                    // Red pixel: Blue is at 4 diagonal neighbors
+                    float dD1 = std::abs(dbRowM1[px + 1] - dbRowP1[px - 1]);
+                    float dD2 = std::abs(dbRowM1[px - 1] - dbRowP1[px + 1]);
+                    if (dD1 < dD2) {
+                        db = 0.5f * (dbRowM1[px + 1] + dbRowP1[px - 1]);
+                    } else if (dD2 < dD1) {
+                        db = 0.5f * (dbRowM1[px - 1] + dbRowP1[px + 1]);
+                    } else {
+                        db = 0.25f * (dbRowM1[px - 1] + dbRowM1[px + 1] + dbRowP1[px - 1] + dbRowP1[px + 1]);
+                    }
+                }
+                rowB[x] = static_cast<uint16_t>(std::clamp(G_val + db, 0.0f, 65535.0f));
+            }
+        }
+    }
+}
+
 } // namespace rawvideo
 } // namespace darkbag

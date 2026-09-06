@@ -138,6 +138,32 @@ public:
     ) {
         return processBayerFrame(srcBytes, srcWidth, srcHeight, srcRowStrideBytes, mode, reinterpret_cast<uint8_t*>(dst));
     }
+
+    /**
+     * High-fidelity Edge-Aware Bayer Demosaicing using the Hamilton-Adams gradient-directed algorithm.
+     * Evaluates horizontal and vertical second-order laplacian gradients to interpolate Green along
+     * the minimum gradient direction, then reconstructs Red and Blue in the smooth color-difference domain
+     * (R - G and B - G) with diagonal gradient steering.
+     *
+     * Produces planar 16-bit Sensor-Linear RGB [R, G, B] in range [0, 65535] with zero isotropic blurring.
+     *
+     * @param bayerData Input 16-bit Bayer sensor data of size width * height
+     * @param width Width of Bayer frame (must be even, >= 4)
+     * @param height Height of Bayer frame (must be even, >= 4)
+     * @param cfaPattern CFA arrangement (0: RGGB, 1: GRBG, 2: GBRG, 3: BGGR)
+     * @param blackLevelPattern 4-channel black levels (or nullptr, defaults to 64)
+     * @param whiteLevel Sensor white level (defaults to 1023 if <= 0)
+     * @param outPlanarRgb Destination buffer of size width * height * 3 (planar format: R[w*h], G[w*h], B[w*h])
+     */
+    static void demosaicHamiltonAdams(
+        const uint16_t* bayerData,
+        uint32_t width,
+        uint32_t height,
+        int cfaPattern,
+        const int* blackLevelPattern,
+        int whiteLevel,
+        uint16_t* outPlanarRgb
+    );
 };
 
 } // namespace rawvideo

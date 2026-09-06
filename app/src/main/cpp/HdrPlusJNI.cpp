@@ -27,6 +27,7 @@
 #include "hdrplus_high_pipeline.h"
 #include "hdrplus_single_pipeline.h" // Generated header for single frame
 #include "rawvideo/FastGuidedFilter.h"
+#include "rawvideo/BayerProcessor.h"
 
 
 #define TAG "HdrPlusJNI"
@@ -572,20 +573,146 @@ Java_top_maary_darkbag_processor_ColorProcessor_processSingleFrameRaw(
     jint colorEngineMode,
     jboolean enableDualStreamFusion
 ) {
-    LOGD("Native processSingleFrameRaw started (enableMemoryColor=%d, colorEngineMode=%d, enableDualStreamFusion=%d).", enableMemoryColor, colorEngineMode, enableDualStreamFusion);
+    LOGD("Native processSingleFrameRaw started with Hamilton-Adams debayering (enableMemoryColor=%d, colorEngineMode=%d, enableDualStreamFusion=%d).", enableMemoryColor, colorEngineMode, enableDualStreamFusion);
 
-    // Call the existing processHdrPlus logic directly with the buffer and numFrames=1
-    return Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
-        env, nullptr, bayerBuffer, 1, width, height, orientation, whiteLevel, blackLevelPattern, lensShadingMap, lensShadingRows, lensShadingCols,
-        false, // useSensorColorMatrix
-        whiteBalance, ccm, nullptr, // ccmAlt
-        false, // exportMatrixAB
-        cfaPattern, targetLog, lutPath,
-        outputJpgPath, outputDngPath, digitalGain, debugStats, outputBitmap, tempRawPath, zoomFactor, mirror, metadata,
-        enableMemoryColor,
-        colorEngineMode,
-        enableDualStreamFusion
+    auto nativeStart = std::chrono::high_resolution_clock::now();
+    auto jniPrepStart = std::chrono::high_resolution_clock::now();
+
+    if (!bayerBuffer) {
+        LOGE("processSingleFrameRaw: bayerBuffer is null");
+        return -1;
+    }
+    const uint16_t* rawDataPtr = reinterpret_cast<const uint16_t*>(env->GetDirectBufferAddress(bayerBuffer));
+    if (!rawDataPtr) {
+        LOGE("processSingleFrameRaw: failed to get direct buffer address");
+        return -1;
+    }
+
+    const size_t totalSizeBytes = static_cast<size_t>(width) * static_cast<size_t>(height) * sizeof(uint16_t);
+    jlong capacity = env->GetDirectBufferCapacity(bayerBuffer);
+    if (capacity < (jlong)totalSizeBytes) {
+        LOGE("processSingleFrameRaw: Direct buffer capacity %lld is smaller than expected %zu", (long long)capacity, totalSizeBytes);
+        return -1;
+    }
+
+    auto sharedBuf = std::make_shared<std::vector<uint16_t>>(static_cast<size_t>(width) * height * 3);
+    uint16_t* raw_ptr = sharedBuf->data();
+
+    int bl_pattern[4] = {64, 64, 64, 64};
+    if (blackLevelPattern && env->GetArrayLength(blackLevelPattern) >= 4) {
+        env->GetIntArrayRegion(blackLevelPattern, 0, 4, bl_pattern);
+    }
+
+    jfloat* wbData = env->GetFloatArrayElements(whiteBalance, nullptr);
+    std::vector<float> wbVec = {wbData[0], wbData[1], wbData[2], wbData[3]};
+    env->ReleaseFloatArrayElements(whiteBalance, wbData, JNI_ABORT);
+
+    std::vector<float> lensShadingVec;
+    if (lensShadingMap && lensShadingRows > 0 && lensShadingCols > 0) {
+        const jsize l = env->GetArrayLength(lensShadingMap);
+        const int expected = 4 * lensShadingRows * lensShadingCols;
+        if (l >= expected) {
+            lensShadingVec.resize(expected);
+            env->GetFloatArrayRegion(lensShadingMap, 0, expected, lensShadingVec.data());
+        }
+    }
+
+    jfloat* ccmData = env->GetFloatArrayElements(ccm, nullptr);
+    std::vector<float> ccmVec(9);
+    for (int i = 0; i < 9; ++i) ccmVec[i] = ccmData[i];
+    env->ReleaseFloatArrayElements(ccm, ccmData, JNI_ABORT);
+
+    ImageMetadata meta = metadataFromJava(env, metadata);
+    int iso = meta.iso;
+
+    auto jniPrepMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - jniPrepStart).count();
+
+    auto demosaicStart = std::chrono::high_resolution_clock::now();
+    darkbag::rawvideo::BayerProcessor::demosaicHamiltonAdams(
+        rawDataPtr,
+        static_cast<uint32_t>(width),
+        static_cast<uint32_t>(height),
+        cfaPattern,
+        bl_pattern,
+        whiteLevel,
+        raw_ptr
     );
+    auto demosaicDurationMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - demosaicStart).count();
+
+    if (enableDualStreamFusion && iso >= 600) {
+        auto fusionStart = std::chrono::high_resolution_clock::now();
+        rawvideo::FastGuidedFilter::filterPlanarRGB(raw_ptr, width, height, iso, 4);
+        auto fusionDurationMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - fusionStart).count();
+        LOGD("FastGuidedFilter multi-scale dual-stream fusion completed in %lld ms (iso=%d)", (long long)fusionDurationMs, iso);
+    }
+
+    int stride_x = 1;
+    int stride_y = width;
+    int stride_c = width * height;
+
+    const char* tr_p_cstr = (tempRawPath) ? env->GetStringUTFChars(tempRawPath, 0) : nullptr;
+    if (tr_p_cstr) {
+        std::lock_guard<std::mutex> mapLock(g_sharedMemoryMutex);
+        g_sharedMemoryMap[tr_p_cstr] = sharedBuf;
+        env->ReleaseStringUTFChars(tempRawPath, tr_p_cstr);
+    }
+
+    unsigned char* bitmapPixels = nullptr;
+    if (outputBitmap) AndroidBitmap_lockPixels(env, outputBitmap, (void**)&bitmapPixels);
+
+    const char* lut_path_cstr = (lutPath) ? env->GetStringUTFChars(lutPath, 0) : nullptr;
+    LUT3D lut;
+    if (lut_path_cstr) {
+        lut = load_lut(lut_path_cstr);
+        env->ReleaseStringUTFChars(lutPath, lut_path_cstr);
+    }
+
+    const char* jpg_p_cstr = (outputJpgPath) ? env->GetStringUTFChars(outputJpgPath, 0) : nullptr;
+    const char* dng_p_cstr = (outputDngPath) ? env->GetStringUTFChars(outputDngPath, 0) : nullptr;
+    std::string jpgPathStr = jpg_p_cstr ? jpg_p_cstr : "", dngPathStr = dng_p_cstr ? dng_p_cstr : "";
+    if (outputJpgPath && jpg_p_cstr) env->ReleaseStringUTFChars(outputJpgPath, jpg_p_cstr);
+    if (outputDngPath && dng_p_cstr) env->ReleaseStringUTFChars(outputDngPath, dng_p_cstr);
+
+    auto saveStart = std::chrono::high_resolution_clock::now();
+    const int fastPreviewDownsample = compute_preview_downsample_factor(width, height, 1280);
+
+    AndroidBitmapInfo info;
+    int out_w = 0, out_h = 0;
+    if (outputBitmap) {
+        AndroidBitmap_getInfo(env, outputBitmap, &info);
+        out_w = info.width;
+        out_h = info.height;
+    }
+
+    if (bitmapPixels) {
+        process_and_save_image(raw_ptr, stride_x, stride_y, stride_c, lensShadingVec.empty() ? nullptr : lensShadingVec.data(), lensShadingRows, lensShadingCols,
+                                width, height, digitalGain, targetLog, lut,
+                                0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                                nullptr, nullptr, nullptr, 1, ccmVec.data(), wbVec.data(), orientation, bitmapPixels, out_w, out_h, true, fastPreviewDownsample, zoomFactor, (bool)mirror, (bool)enableMemoryColor, (int)colorEngineMode);
+        AndroidBitmap_unlockPixels(env, outputBitmap);
+    }
+
+    if (!jpgPathStr.empty() || !dngPathStr.empty()) {
+        if (!dngPathStr.empty()) {
+            float baselineExposure = (digitalGain > 0.0f) ? std::log2(digitalGain) : 0.0f;
+            write_dng(dngPathStr.c_str(), width, height, raw_ptr, stride_x, stride_y, stride_c, kMax16BitValue, ccmVec, meta, orientation, (bool)mirror, baselineExposure, wbVec.data());
+        }
+
+        if (!jpgPathStr.empty()) {
+            process_and_save_image(raw_ptr, stride_x, stride_y, stride_c, lensShadingVec.empty() ? nullptr : lensShadingVec.data(), lensShadingRows, lensShadingCols,
+                                    width, height, digitalGain, targetLog, lut,
+                                    0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                                    jpgPathStr.c_str(), nullptr, &meta, 1, ccmVec.data(), wbVec.data(), orientation, nullptr, 0, 0, true, fastPreviewDownsample, zoomFactor, (bool)mirror, (bool)enableMemoryColor, (int)colorEngineMode);
+        }
+    }
+
+    HalideStageStats stageStats;
+    stageStats.demosaic = demosaicDurationMs;
+    auto saveDurationMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - saveStart).count();
+    auto totalDurationMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - nativeStart).count();
+
+    fillDebugStats(env, debugStats, 0, (jlong)demosaicDurationMs, 0, 0, (jlong)saveDurationMs, 0, (jlong)totalDurationMs, (jlong)jniPrepMs, stageStats);
+    return 0;
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
