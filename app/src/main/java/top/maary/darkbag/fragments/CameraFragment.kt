@@ -749,6 +749,134 @@ class CameraFragment : Fragment() {
         }
     }
 
+    private fun setGalleryThumbnailBitmap(bitmap: android.graphics.Bitmap?) {
+        val binding = cameraUiContainerBinding ?: return
+        val photoViewButton = binding.photoViewButton ?: return
+
+        photoViewButton.post {
+            if (bitmap == null) {
+                photoViewButton.setImageDrawable(null)
+                if (isHalfFrameModeEnabled || isProcessing) {
+                    photoViewButton.visibility = View.INVISIBLE
+                } else {
+                    photoViewButton.visibility = View.GONE
+                }
+                return@post
+            }
+
+            if (isHalfFrameModeEnabled && (halfFrameStep != 0 || isProcessing)) {
+                photoViewButton.visibility = View.INVISIBLE
+            } else {
+                photoViewButton.visibility = View.VISIBLE
+                photoViewButton.alpha = 1f
+            }
+
+            photoViewButton.setPadding(resources.getDimension(R.dimen.stroke_small).toInt())
+            photoViewButton.scaleX = 0.88f
+            photoViewButton.scaleY = 0.88f
+            Glide.with(photoViewButton)
+                .load(bitmap)
+                .apply(RequestOptions.circleCropTransform())
+                .into(photoViewButton)
+            photoViewButton.animate()
+                .scaleX(1.0f)
+                .scaleY(1.0f)
+                .setDuration(120)
+                .start()
+        }
+    }
+
+    private fun generateInstantThumbnail(
+        rawBuffer: java.nio.ByteBuffer,
+        width: Int,
+        height: Int,
+        orientation: Int,
+        cfaPattern: Int,
+        whiteLevel: Int,
+        blackLevel: Float,
+        wb: FloatArray,
+        targetLogIndex: Int,
+        lutPath: String?,
+        exposure: Float = 0f
+    ): android.graphics.Bitmap? {
+        return try {
+            val thumbDim = 256
+            val swapDims = (orientation == 90 || orientation == 270)
+            val thumbW = if (swapDims) (thumbDim * height) / width else thumbDim
+            val thumbH = if (swapDims) thumbDim else (thumbDim * height) / width
+            val thumbBmp = android.graphics.Bitmap.createBitmap(thumbW.coerceAtLeast(1), thumbH.coerceAtLeast(1), android.graphics.Bitmap.Config.ARGB_8888)
+
+            val np = if (wb.size >= 4 && wb[0] > 0.001f && wb[1] > 0.001f && wb[3] > 0.001f) {
+                floatArrayOf(1.0f / wb[0], 1.0f / wb[1], 1.0f / wb[3])
+            } else {
+                null
+            }
+
+            val dup = rawBuffer.duplicate()
+            dup.position(0)
+
+            // If input Bayer is high resolution (>= 2000x1500), perform 2x2 binning to eliminate Bayer aliasing and improve SNR
+            var debayerSuccess = false
+            if (width >= 2000 && height >= 1500) {
+                val bW = width / 2
+                val bH = height / 2
+                val binnedBuf = java.nio.ByteBuffer.allocateDirect(bW * bH * 2)
+                val binSuccess = top.maary.darkbag.rawvideo.RawVideoNative.nativeBayerBinning2x2(
+                    srcBuffer = dup,
+                    srcWidth = width,
+                    srcHeight = height,
+                    srcRowStrideBytes = width * 2,
+                    dstBuffer = binnedBuf,
+                    mode = top.maary.darkbag.rawvideo.RawVideoNative.BINNING_MODE_AVERAGE
+                )
+                if (binSuccess) {
+                    binnedBuf.rewind()
+                    debayerSuccess = top.maary.darkbag.rawvideo.RawVideoNative.nativeDebayerFrameToBitmap(
+                        bayerBuffer = binnedBuf,
+                        width = bW,
+                        height = bH,
+                        orientation = orientation,
+                        cfaPattern = cfaPattern,
+                        whiteLevel = whiteLevel,
+                        blackLevel = blackLevel,
+                        neutralPoint = np,
+                        targetLog = targetLogIndex,
+                        lutPath = lutPath,
+                        exposure = exposure,
+                        contrast = 0f,
+                        saturation = 0f,
+                        outBitmap = thumbBmp
+                    )
+                }
+            }
+
+            if (!debayerSuccess) {
+                dup.position(0)
+                debayerSuccess = top.maary.darkbag.rawvideo.RawVideoNative.nativeDebayerFrameToBitmap(
+                    bayerBuffer = dup,
+                    width = width,
+                    height = height,
+                    orientation = orientation,
+                    cfaPattern = cfaPattern,
+                    whiteLevel = whiteLevel,
+                    blackLevel = blackLevel,
+                    neutralPoint = np,
+                    targetLog = targetLogIndex,
+                    lutPath = lutPath,
+                    exposure = exposure,
+                    contrast = 0f,
+                    saturation = 0f,
+                    outBitmap = thumbBmp
+                )
+            }
+
+            if (debayerSuccess) thumbBmp else null
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to generate instant echo thumbnail", e)
+            null
+        }
+    }
+
     @SuppressLint("MissingPermission")
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
@@ -1842,14 +1970,28 @@ class CameraFragment : Fragment() {
                     captureResult = captureResult
                 )
 
-                // 3. JNI Halide Processing (REMOVED)
-                // 前台 JNI 调用与 fastjpg 生成已移除，直接交由 HdrPlusProcessingService 处理
-                val fastOutputUri: android.net.Uri? = null
+                // 3. Instant Echo Thumbnail & Enqueue to Processing Service
+                val instantThumb = generateInstantThumbnail(
+                    rawBuffer = image.data,
+                    width = image.width,
+                    height = image.height,
+                    orientation = image.combinedOrientation,
+                    cfaPattern = cfa,
+                    whiteLevel = whiteLevel,
+                    blackLevel = blackLevelPattern.firstOrNull()?.toFloat() ?: 64f,
+                    wb = wb,
+                    targetLogIndex = targetLogIndex,
+                    lutPath = nativeLutPath,
+                    exposure = 0f
+                )
                 
+                val fastOutputUri: android.net.Uri? = null
                 withContext(Dispatchers.Main) {
                     Toast.makeText(requireContext(), getString(R.string.toast_processing_queued), Toast.LENGTH_SHORT).show()
                     if (isHalfFrameModeEnabled && prefs.getInt(scopedHalfFrameStepKey(prefs), 0) == 1) {
                         setGalleryThumbnail(null)
+                    } else if (instantThumb != null) {
+                        setGalleryThumbnailBitmap(instantThumb)
                     }
                     // 保持加载动画，直到服务处理完毕
                 }
@@ -1877,34 +2019,23 @@ class CameraFragment : Fragment() {
                             }
                         }
 
-                        val dngBuffer = image.data.duplicate()
-                        dngBuffer.rewind()
-                        FileOutputStream(bayerDngFile).use { out ->
-                            dngCreator.writeByteBuffer(out, Size(image.width, image.height), dngBuffer, 0)
+                        val dngTargetFile = if (image.halfFrameMetadata != null) {
+                            File(context.cacheDir, "${dngName}_orig.dng")
+                        } else {
+                            bayerDngFile
                         }
-                        
-                        ImageSaver.saveProcessedImage(
-                            context = context,
-                            inputBitmap = null,
-                            bmpPath = null,
-                            rotationDegrees = 0,
-                            zoomFactor = 1.0f,
-                            baseName = dngName,
-                            linearDngPath = bayerDngFile.absolutePath,
-                            saveJpg = false,
-                            saveRaw = saveRaw,
-                            jpgFolderUri = null,
-                            rawFolderUri = rawFolderUri,
-                            isFastPath = false,
-                            captureMetadata = captureMetadata
-                        )
+
+                        FileOutputStream(dngTargetFile).use { dngCreator.writeByteBuffer(it, Size(image.width, image.height), image.data, 0L) }
+                        dngWritten = true
+                        Log.d(TAG, "RAW saved: ${dngTargetFile.absolutePath} (${dngTargetFile.length()} bytes)")
                     } catch (e: Exception) {
-                        Log.e(TAG, "Failed to save DNG asynchronously", e)
+                        Log.e(TAG, "Failed to save RAW", e)
                     }
                 }
 
+                image.data.rewind()
 
-                // 5. Enqueue HQ Processing
+                // 4. Submit to HdrPlusProcessingService
                 var motionMp4Path = image.motionPhotoMp4Path
                 var motionStillPtsUs = image.motionPhotoStillPtsUs
                 if (motionMp4Path == null && pendingMotionPhotoTask != null) {
@@ -1930,7 +2061,7 @@ class CameraFragment : Fragment() {
                     useSensorColorMatrix = false,
                     whiteBalance = wb,
                     ccm = ccm,
-                    ccmAlt = null,
+                    ccmAlt = ccm,
                     exportMatrixAB = false,
                     cfaPattern = cfa,
                     targetLogIndex = targetLogIndex,
@@ -3537,14 +3668,6 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 val mirror = shouldMirror
                 isHdrPlusSuccess = true
                 val fastJpegUri: android.net.Uri? = null
-                
-                withContext(Dispatchers.Main) {
-                    Toast.makeText(requireContext(), getString(R.string.toast_hdr_queued), Toast.LENGTH_SHORT).show()
-                    if (isHalfFrameModeEnabled && prefs.getInt(scopedHalfFrameStepKey(prefs), 0) == 1) {
-                        setGalleryThumbnail(null)
-                    }
-                    // 保持加载动画，不调用 hideProcessingAnimation()
-                }
 
                     var motionMp4Path: String? = null
                     var motionStillPtsUs: Long = 0L
@@ -3604,6 +3727,31 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                             }
                         } catch (e: Exception) {
                             Log.w(TAG, "Failed to evaluate burst sharpness, falling back to default order", e)
+                        }
+                    }
+
+                    // Instant Echo: generate thumbnail directly from Anchor Frame (index 0) in <20ms
+                    val evAdjust = if (digitalGain > 0.01f) (kotlin.math.ln(digitalGain) / kotlin.math.ln(2.0)).toFloat() else 0f
+                    val instantThumb = generateInstantThumbnail(
+                        rawBuffer = megaBuffer,
+                        width = width,
+                        height = height,
+                        orientation = combinedOrientation,
+                        cfaPattern = cfa,
+                        whiteLevel = whiteLevel,
+                        blackLevel = blackLevelPattern.firstOrNull()?.toFloat() ?: 64f,
+                        wb = wb,
+                        targetLogIndex = targetLogIndex,
+                        lutPath = nativeLutPath,
+                        exposure = evAdjust
+                    )
+
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(requireContext(), getString(R.string.toast_hdr_queued), Toast.LENGTH_SHORT).show()
+                        if (isHalfFrameModeEnabled && prefs.getInt(scopedHalfFrameStepKey(prefs), 0) == 1) {
+                            setGalleryThumbnail(null)
+                        } else if (instantThumb != null) {
+                            setGalleryThumbnailBitmap(instantThumb)
                         }
                     }
 
