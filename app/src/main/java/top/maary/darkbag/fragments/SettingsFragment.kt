@@ -606,7 +606,29 @@ class SettingsFragment : Fragment() {
         binding.switchHalfFrameMode.setOnCheckedChangeListener { _, isChecked ->
             prefs.edit().putBoolean(KEY_HALF_FRAME_MODE, isChecked).apply()
         }
-        setupSwitch(binding.switchHalfFrameDownsample, KEY_HALF_FRAME_DOWNSAMPLE)
+        val hfCompKeys = listOf(HF_COMPRESSION_OFF, HF_COMPRESSION_BITMAP, HF_COMPRESSION_BINNING_2X2)
+        val hfCompLabels = listOf(
+            getString(R.string.half_frame_compression_off),
+            getString(R.string.half_frame_compression_bitmap),
+            getString(R.string.half_frame_compression_binning_2x2)
+        )
+        val currentHfComp = prefs.getString(KEY_HALF_FRAME_COMPRESSION_MODE, null) ?: run {
+            val oldDownsample = prefs.getBoolean(KEY_HALF_FRAME_DOWNSAMPLE, true)
+            if (oldDownsample) HF_COMPRESSION_BITMAP else HF_COMPRESSION_OFF
+        }
+        val currentHfCompIndex = hfCompKeys.indexOf(currentHfComp).coerceAtLeast(0)
+        binding.menuHalfFrameDownsample.setText(hfCompLabels[currentHfCompIndex], false)
+        val hfCompAdapter = android.widget.ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, hfCompLabels)
+        binding.menuHalfFrameDownsample.setAdapter(hfCompAdapter)
+        binding.menuHalfFrameDownsample.setOnItemClickListener { _, _, position, _ ->
+            if (position in hfCompKeys.indices) {
+                val selectedKey = hfCompKeys[position]
+                prefs.edit()
+                    .putString(KEY_HALF_FRAME_COMPRESSION_MODE, selectedKey)
+                    .putBoolean(KEY_HALF_FRAME_DOWNSAMPLE, selectedKey == HF_COMPRESSION_BITMAP)
+                    .apply()
+            }
+        }
         setupSwitch(binding.switchHalfFrameDateStamp, KEY_HALF_FRAME_DATE_STAMP, false)
         setupSwitch(binding.switchHalfFrameLightLeak, KEY_HALF_FRAME_LIGHT_LEAK, false)
         setupSwitch(binding.switchHalfFrameAutoBurst, KEY_HALF_FRAME_AUTO_BURST, false)
@@ -883,6 +905,10 @@ class SettingsFragment : Fragment() {
         const val KEY_HALF_FRAME_MODE = "half_frame_mode"
         const val KEY_HALF_FRAME_LAYOUT = "half_frame_layout"
         const val KEY_HALF_FRAME_DOWNSAMPLE = "half_frame_downsample"
+        const val KEY_HALF_FRAME_COMPRESSION_MODE = "half_frame_compression_mode"
+        const val HF_COMPRESSION_OFF = "off"
+        const val HF_COMPRESSION_BITMAP = "bitmap"
+        const val HF_COMPRESSION_BINNING_2X2 = "binning_2x2"
         const val KEY_PHOTO_RESOLUTION = "photo_resolution"
         const val RESOLUTION_FULL = "full"
         const val RESOLUTION_BINNING_2X2 = "binning_2x2"

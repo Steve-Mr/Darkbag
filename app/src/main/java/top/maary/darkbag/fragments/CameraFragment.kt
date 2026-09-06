@@ -2000,9 +2000,9 @@ class CameraFragment : Fragment() {
 
                 // 3. Resolution Binning (Half-Frame Economical Mode or User Resolution Setting)
                 val photoResolution = prefs.getString(SettingsFragment.KEY_PHOTO_RESOLUTION, SettingsFragment.RESOLUTION_FULL)
-                val isHfDownsample = isHalfFrameModeEnabled && prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_DOWNSAMPLE, true)
+                val isHfRawBinning = isHalfFrameModeEnabled && (prefs.getString(SettingsFragment.KEY_HALF_FRAME_COMPRESSION_MODE, null) == SettingsFragment.HF_COMPRESSION_BINNING_2X2)
                 val binningFactor = when {
-                    isHfDownsample || photoResolution == SettingsFragment.RESOLUTION_BINNING_2X2 -> 2
+                    isHfRawBinning || photoResolution == SettingsFragment.RESOLUTION_BINNING_2X2 -> 2
                     photoResolution == SettingsFragment.RESOLUTION_BINNING_4X4 -> 4
                     else -> 1
                 }
@@ -3876,10 +3876,10 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     }
 
                     val photoResolution = prefs.getString(SettingsFragment.KEY_PHOTO_RESOLUTION, SettingsFragment.RESOLUTION_FULL)
-                    val isHfDownsample = isHalfFrameModeEnabled && prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_DOWNSAMPLE, true)
+                    val isHfRawBinning = isHalfFrameModeEnabled && (prefs.getString(SettingsFragment.KEY_HALF_FRAME_COMPRESSION_MODE, null) == SettingsFragment.HF_COMPRESSION_BINNING_2X2)
 
                     val binningFactor = when {
-                        isHfDownsample || photoResolution == SettingsFragment.RESOLUTION_BINNING_2X2 -> 2
+                        isHfRawBinning || photoResolution == SettingsFragment.RESOLUTION_BINNING_2X2 -> 2
                         photoResolution == SettingsFragment.RESOLUTION_BINNING_4X4 -> 4
                         else -> 1
                     }

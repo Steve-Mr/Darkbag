@@ -55,15 +55,21 @@
     <string name="half_frame_mode_title">Half-frame Mode</string>
     <string name="enable_half_frame_mode">Enable Half-frame Mode</string>
     <string name="half_frame_layout_hint">Half-frame Layout</string>
-    <string name="half_frame_downsample_title">Economical Mode (RAW 2x2 Binning High SNR)</string>
+    <string name="half_frame_compression_hint">Half-frame Compression Mode</string>
+    <string name="half_frame_compression_off">Full Quality (No Compression)</string>
+    <string name="half_frame_compression_bitmap">Original Bitmap Scaling (Film Saving)</string>
+    <string name="half_frame_compression_binning_2x2">RAW 2x2 Binning (Hardware Binning, High SNR)</string>
+    <string name="half_frame_downsample_title">Economical Mode</string>
     <string name="half_frame_date_stamp">Date Stamp</string>
     <string name="half_frame_light_leak">Random Light Leak</string>
     <string name="half_frame_auto_burst">Auto Burst (Double Shot)</string>
 
+    <string name="settings_section_experimental">Experimental</string>
     <string name="photo_resolution_title">Capture Resolution</string>
-    <string name="resolution_full">Full Resolution</string>
-    <string name="resolution_binning_2x2">2x2 Binning (High SNR, Fast)</string>
-    <string name="resolution_binning_4x4">4x4 Binning (Ultra SNR / Retro)</string>
+    <string name="photo_resolution_summary">Default is 1x1 full resolution. 2x2/4x4 Binning merges pixels at the Bayer RAW layer for ultra-fast readout and higher SNR at the cost of lower resolution.</string>
+    <string name="resolution_full">Full Resolution (1x1)</string>
+    <string name="resolution_binning_2x2">2x2 Binning (High SNR, Fast) [Experimental]</string>
+    <string name="resolution_binning_4x4">4x4 Binning (Ultra SNR / Retro) [Experimental]</string>
     <string name="dual_stream_fusion_title">Low-light Dual-stream Fusion</string>
     <string name="dual_stream_fusion_summary">Enhances dark shadow SNR using multi-scale guided filtering in low-light environments</string>
 
