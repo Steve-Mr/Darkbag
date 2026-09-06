@@ -470,6 +470,8 @@
                 android:id="@+id/photo_view_container"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
+                android:clipChildren="false"
+                android:clipToPadding="false"
                 app:layout_constraintEnd_toEndOf="parent"
                 app:layout_constraintTop_toTopOf="@id/camera_capture_button"
                 app:layout_constraintBottom_toBottomOf="@id/camera_capture_button">
@@ -478,18 +480,27 @@
                     android:id="@+id/photo_view_button"
                     android:layout_width="@dimen/round_button_medium"
                     android:layout_height="@dimen/round_button_medium"
+                    android:layout_gravity="center"
                     android:padding="@dimen/spacing_medium"
                     android:scaleType="fitCenter"
                     android:background="@drawable/ic_outer_circle"
                     android:src="@drawable/ic_photo"
                     android:contentDescription="@string/gallery_button_alt" />
 
-                <com.google.android.material.loadingindicator.LoadingIndicator
+                <com.google.android.material.progressindicator.CircularProgressIndicator
                     android:id="@+id/processing_progress"
-                    android:layout_width="48dp"
-                    android:layout_height="48dp"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
                     android:layout_gravity="center"
-                    android:visibility="gone" />
+                    android:clickable="false"
+                    android:focusable="false"
+                    android:indeterminate="true"
+                    android:visibility="gone"
+                    app:indicatorSize="68dp"
+                    app:trackThickness="3dp"
+                    app:trackCornerRadius="2dp"
+                    app:indicatorColor="?attr/colorPrimary"
+                    app:trackColor="@android:color/transparent" />
             </FrameLayout>
 
         </androidx.constraintlayout.widget.ConstraintLayout>

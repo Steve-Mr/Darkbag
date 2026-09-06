@@ -265,8 +265,12 @@ class CameraFragment : Fragment() {
     private var currentEvIndex = 0
     private var isVideoSaving = false
 
+    private val localProcessingCount = java.util.concurrent.atomic.AtomicInteger(0)
+
     private val isProcessing: Boolean
-        get() = top.maary.darkbag.processor.HdrPlusRequestManager.pendingTasksCount.value > 0 || isVideoSaving
+        get() = localProcessingCount.get() > 0 ||
+                top.maary.darkbag.processor.HdrPlusRequestManager.pendingTasksCount.value > 0 ||
+                isVideoSaving
 
     // Half-frame State
     private var pendingVfSnapshot: android.graphics.Bitmap? = null
@@ -381,12 +385,14 @@ class CameraFragment : Fragment() {
     }
 
     private fun showProcessingAnimation() {
+        localProcessingCount.incrementAndGet()
         lifecycleScope.launch(Dispatchers.Main) {
             updateProcessingAnimationUi()
         }
     }
 
     private fun hideProcessingAnimation() {
+        localProcessingCount.updateAndGet { (it - 1).coerceAtLeast(0) }
         lifecycleScope.launch(Dispatchers.Main) {
             updateProcessingAnimationUi()
         }
@@ -1870,6 +1876,7 @@ class CameraFragment : Fragment() {
                         TAG,
                         "Timed out waiting for android.hardware.camera2.CaptureResult for timestamp ${image.timestamp}"
                     )
+                    hideProcessingAnimation()
                     return@withContext
                 }
 
@@ -2075,7 +2082,8 @@ class CameraFragment : Fragment() {
                 val fastOutputUri: android.net.Uri? = null
                 withContext(Dispatchers.Main) {
                     Toast.makeText(requireContext(), getString(R.string.toast_processing_queued), Toast.LENGTH_SHORT).show()
-                    if (isHalfFrameModeEnabled && prefs.getInt(scopedHalfFrameStepKey(prefs), 0) == 1) {
+                    val isHf = isHalfFrameModeEnabled || image.halfFrameMetadata != null
+                    if (isHf) {
                         setGalleryThumbnail(null)
                     } else if (instantThumb != null) {
                         setGalleryThumbnailBitmap(instantThumb)
@@ -2245,6 +2253,7 @@ class CameraFragment : Fragment() {
                     enableDualStreamFusion = enableDualStreamFusion
                 )
                 top.maary.darkbag.processor.HdrPlusRequestManager.enqueue(request)
+                hideProcessingAnimation()
                 val serviceIntent = android.content.Intent(context, top.maary.darkbag.processor.HdrPlusProcessingService::class.java)
                 if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
                     context.startForegroundService(serviceIntent)
@@ -2270,6 +2279,7 @@ class CameraFragment : Fragment() {
 
             } catch (e: Exception) {
                 Log.e(TAG, "Error in background processing", e)
+                hideProcessingAnimation()
             }
         }
 
@@ -4018,7 +4028,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
                     withContext(Dispatchers.Main) {
                         Toast.makeText(requireContext(), getString(R.string.toast_hdr_queued), Toast.LENGTH_SHORT).show()
-                        if (isHalfFrameModeEnabled && prefs.getInt(scopedHalfFrameStepKey(prefs), 0) == 1) {
+                        val isHf = isHalfFrameModeEnabled || hfMetadata != null
+                        if (isHf) {
                             setGalleryThumbnail(null)
                         } else if (instantThumb != null) {
                             setGalleryThumbnailBitmap(instantThumb)
@@ -4082,6 +4093,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         enableDualStreamFusion = enableDualStreamFusion
                     )
                     top.maary.darkbag.processor.HdrPlusRequestManager.enqueue(request)
+                    hideProcessingAnimation()
                     val serviceIntent = android.content.Intent(context, top.maary.darkbag.processor.HdrPlusProcessingService::class.java)
                     if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
                         context.startForegroundService(serviceIntent)
@@ -4093,6 +4105,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             } catch (e: Exception) {
                 isHdrPlusSuccess = false
                 Log.e(TAG, "HDR+ processing failed, falling back to single shot", e)
+                hideProcessingAnimation()
                 withContext(Dispatchers.Main) {
                     Toast.makeText(appContext, appContext.getString(R.string.toast_hdr_failed_fallback), Toast.LENGTH_SHORT).show()
                 }
@@ -4717,7 +4730,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
                         val holder = copyAndroidImageToHolder(image, currentZoom, getCombinedOrientation(), currentLens?.id, hfMetadata?.copy(digitalGain = digitalGain)).copy(timing = timing, digitalGain = digitalGain)
                         image.close()
-                        if (!isFrame1Trigger) {
+                        if (!isHalfFrameModeEnabled) {
                             showProcessingAnimation()
                         }
                         lifecycleScope.launch {
@@ -4731,7 +4744,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         buffer.get(data)
                         image.close()
                        
-                        if (!isFrame1Trigger) {
+                        if (!isHalfFrameModeEnabled) {
                             showProcessingAnimation()
                         }
 
@@ -4875,7 +4888,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         watchdog.cancel()
                         lifecycleScope.launch(Dispatchers.Main) {
                             resetBurstUi()
-                            if (!isFrame1Trigger) {
+                            if (!isHalfFrameModeEnabled) {
                                 showProcessingAnimation()
                             }
 
