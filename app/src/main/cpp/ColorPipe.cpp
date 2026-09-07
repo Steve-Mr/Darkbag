@@ -1358,7 +1358,9 @@ bool write_dng(const char* filename, int width, int height, const unsigned short
     TIFFSetField(tif, TIFFTAG_IMAGEWIDTH, width);
     TIFFSetField(tif, TIFFTAG_IMAGELENGTH, height);
     TIFFSetField(tif, TIFFTAG_BITSPERSAMPLE, 16);
-    TIFFSetField(tif, TIFFTAG_COMPRESSION, COMPRESSION_NONE);
+    TIFFSetField(tif, TIFFTAG_COMPRESSION, COMPRESSION_DEFLATE);
+    TIFFSetField(tif, TIFFTAG_PREDICTOR, PREDICTOR_HORIZONTAL);
+    TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, 64);
 
     uint16_t tiffOrientation = 1;
     switch (orientation) {
@@ -1371,7 +1373,6 @@ bool write_dng(const char* filename, int width, int height, const unsigned short
     TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_LINEAR_RAW);
     TIFFSetField(tif, TIFFTAG_SAMPLESPERPIXEL, 3);
     TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG);
-    TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, 1);
     TIFFSetField(tif, TIFFTAG_SUBFILETYPE, 0);
 
     write_tiff_metadata(tif, &metadata);

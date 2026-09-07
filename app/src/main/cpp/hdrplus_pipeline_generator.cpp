@@ -210,37 +210,83 @@ private:
   };
 
   DemosaicResult demosaic(Func input, Expr width, Expr height) {
-    Buffer<int32_t> f0(5, 5, "demosaic_f0");
-    Buffer<int32_t> f1(5, 5, "demosaic_f1");
-    Buffer<int32_t> f2(5, 5, "demosaic_f2");
-    Buffer<int32_t> f3(5, 5, "demosaic_f3");
-    f0.translate({-2, -2}); f1.translate({-2, -2}); f2.translate({-2, -2}); f3.translate({-2, -2});
-
     Func d0("demosaic_0"), d1("demosaic_1"), d2("demosaic_2"), d3("demosaic_3");
     Func output_dm("demosaic_output");
-    RDom r0(-2, 5, -2, 5);
 
     Func input_mirror = BoundaryConditions::mirror_interior(input, {Range(0, width), Range(0, height)});
 
-    f0.fill(0); f1.fill(0); f2.fill(0); f3.fill(0);
-    int f0_sum = 8; int f1_sum = 16; int f2_sum = 16; int f3_sum = 16;
-    f0(0, -2) = -1; f0(0, -1) = 2; f0(-2, 0) = -1; f0(-1, 0) = 2; f0(0, 0) = 4; f0(1, 0) = 2; f0(2, 0) = -1; f0(0, 1) = 2; f0(0, 2) = -1;
-    f1(0, -2) = 1; f1(-1, -1) = -2; f1(1, -1) = -2; f1(-2, 0) = -2; f1(-1, 0) = 8; f1(0, 0) = 10; f1(1, 0) = 8; f1(2, 0) = -2; f1(-1, 1) = -2; f1(1, 1) = -2; f1(0, 2) = 1;
-    f2(0, -2) = -2; f2(-1, -1) = -2; f2(0, -1) = 8; f2(1, -1) = -2; f2(-2, 0) = 1; f2(0, 0) = 10; f2(2, 0) = 1; f2(-1, 1) = -2; f2(0, 1) = 8; f2(1, 1) = -2; f2(0, 2) = -2;
-    f3(0, -2) = -3; f3(-1, -1) = 4; f3(1, -1) = 4; f3(-2, 0) = -3; f3(0, 0) = 12; f3(2, 0) = -3; f3(-1, 1) = 4; f3(1, 1) = 4; f3(0, 2) = -3;
+    auto P = [&](int dx, int dy) {
+      return i32(input_mirror(x + dx, y + dy));
+    };
 
-    d0(x, y) = u16_sat(sum(i32(input_mirror(x + r0.x, y + r0.y)) * f0(r0.x, r0.y)) / f0_sum);
-    d1(x, y) = u16_sat(sum(i32(input_mirror(x + r0.x, y + r0.y)) * f1(r0.x, r0.y)) / f1_sum);
-    d2(x, y) = u16_sat(sum(i32(input_mirror(x + r0.x, y + r0.y)) * f2(r0.x, r0.y)) / f2_sum);
-    d3(x, y) = u16_sat(sum(i32(input_mirror(x + r0.x, y + r0.y)) * f3(r0.x, r0.y)) / f3_sum);
+    // --- Step 1: Green channel reconstruction (d0) ---
+    // Horizontal and vertical classifiers with 1st-order gradient + 2nd-order Laplacian
+    Expr dH = abs(P(-1, 0) - P(1, 0)) + abs(2 * P(0, 0) - P(-2, 0) - P(2, 0));
+    Expr dV = abs(P(0, -1) - P(0, 1)) + abs(2 * P(0, 0) - P(0, -2) - P(0, 2));
 
-    Expr R_row = y % 2 == 0; Expr B_row = !R_row; Expr R_col = x % 2 == 0; Expr B_col = !R_col;
-    Expr at_R = c == 0; Expr at_G = c == 1; Expr at_B = c == 2;
-    output_dm(x, y, c) = select(at_R && R_row && B_col, d1(x, y), at_R && B_row && R_col, d2(x, y),
-                             at_R && B_row && B_col, d3(x, y), at_G && R_row && R_col, d0(x, y),
-                             at_G && B_row && B_col, d0(x, y), at_B && B_row && R_col, d1(x, y),
-                             at_B && R_row && B_col, d2(x, y), at_B && R_row && R_col, d3(x, y),
-                             input(x, y));
+    Expr g_h = (2 * (P(-1, 0) + P(1, 0)) + (2 * P(0, 0) - P(-2, 0) - P(2, 0))) / 4;
+    Expr g_v = (2 * (P(0, -1) + P(0, 1)) + (2 * P(0, 0) - P(0, -2) - P(0, 2))) / 4;
+    Expr g_center = select(dH < dV, g_h, select(dV < dH, g_v, (g_h + g_v) / 2));
+
+    d0(x, y) = u16_sat(g_center);
+
+    // --- Step 2: Red and Blue recovery in (R-G, B-G) color difference domain ---
+    // d1: Horizontal color-difference interpolation at Green pixels
+    Expr d1_val = (2 * (P(-1, 0) + P(1, 0)) + (2 * P(0, 0) - P(-2, 0) - P(2, 0))) / 4;
+    d1(x, y) = u16_sat(d1_val);
+
+    // d2: Vertical color-difference interpolation at Green pixels
+    Expr d2_val = (2 * (P(0, -1) + P(0, 1)) + (2 * P(0, 0) - P(0, -2) - P(0, 2))) / 4;
+    d2(x, y) = u16_sat(d2_val);
+
+    // d3: Diagonal color-difference interpolation at opposite color pixels
+    Expr c_tl = P(-1, -1);
+    Expr c_tr = P(1, -1);
+    Expr c_bl = P(-1, 1);
+    Expr c_br = P(1, 1);
+
+    Expr g_tl = (P(-2, -1) + P(0, -1) + P(-1, -2) + P(-1, 0)) / 4;
+    Expr g_tr = (P(0, -1) + P(2, -1) + P(1, -2) + P(1, 0)) / 4;
+    Expr g_bl = (P(-2, 1) + P(0, 1) + P(-1, 0) + P(-1, 2)) / 4;
+    Expr g_br = (P(0, 1) + P(2, 1) + P(1, 0) + P(1, 2)) / 4;
+
+    Expr diff_tl = c_tl - g_tl;
+    Expr diff_tr = c_tr - g_tr;
+    Expr diff_bl = c_bl - g_bl;
+    Expr diff_br = c_br - g_br;
+
+    Expr dD1 = abs(c_tl - c_br) + abs(2 * g_center - g_tl - g_br);
+    Expr dD2 = abs(c_tr - c_bl) + abs(2 * g_center - g_tr - g_bl);
+
+    Expr diff_diag = select(dD1 < dD2, (diff_tl + diff_br) / 2,
+                     select(dD2 < dD1, (diff_tr + diff_bl) / 2,
+                                       (diff_tl + diff_br + diff_tr + diff_bl) / 4));
+
+    // Step 3: Saturated output of green + diff in color difference domain
+    Expr d3_val = g_center + diff_diag;
+    d3(x, y) = u16_sat(d3_val);
+
+    Expr R_row = y % 2 == 0;
+    Expr B_row = !R_row;
+    Expr R_col = x % 2 == 0;
+    Expr B_col = !R_col;
+
+    Expr at_R = c == 0;
+    Expr at_G = c == 1;
+    Expr at_B = c == 2;
+
+    output_dm(x, y, c) = select(
+        at_R && R_row && B_col, d1(x, y),
+        at_R && B_row && R_col, d2(x, y),
+        at_R && B_row && B_col, d3(x, y),
+        at_G && R_row && R_col, d0(x, y),
+        at_G && B_row && B_col, d0(x, y),
+        at_B && B_row && R_col, d1(x, y),
+        at_B && R_row && B_col, d2(x, y),
+        at_B && R_row && R_col, d3(x, y),
+        input(x, y)
+    );
+
     return {output_dm, d0, d1, d2, d3};
   }
 
