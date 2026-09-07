@@ -1358,7 +1358,7 @@ bool write_dng(const char* filename, int width, int height, const unsigned short
     TIFFSetField(tif, TIFFTAG_IMAGEWIDTH, width);
     TIFFSetField(tif, TIFFTAG_IMAGELENGTH, height);
     TIFFSetField(tif, TIFFTAG_BITSPERSAMPLE, 16);
-    TIFFSetField(tif, TIFFTAG_COMPRESSION, COMPRESSION_DEFLATE);
+    TIFFSetField(tif, TIFFTAG_COMPRESSION, COMPRESSION_ADOBE_DEFLATE);
     TIFFSetField(tif, TIFFTAG_PREDICTOR, PREDICTOR_HORIZONTAL);
     TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, 64);
 
@@ -1379,7 +1379,7 @@ bool write_dng(const char* filename, int width, int height, const unsigned short
 
     static const uint8_t dng_version[] = {1, 4, 0, 0};
     TIFFSetField(tif, TIFFTAG_DNGVERSION, dng_version);
-    static const uint8_t dng_backward_version[] = {1, 1, 0, 0};
+    static const uint8_t dng_backward_version[] = {1, 4, 0, 0};
     TIFFSetField(tif, TIFFTAG_DNGBACKWARDVERSION, dng_backward_version);
     TIFFSetField(tif, TIFFTAG_UNIQUECAMERAMODEL, metadata.uniqueCameraModel.c_str());
 

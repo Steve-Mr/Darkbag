@@ -152,7 +152,8 @@ object ColorProcessor {
         mirror: Boolean,
         metadata: CaptureMetadata,
         enableMemoryColor: Boolean = false,
-        colorEngineMode: Int = 0
+        colorEngineMode: Int = 0,
+        debugStats: LongArray? = null
     ): Int
 
     external fun processHdrPlus(
