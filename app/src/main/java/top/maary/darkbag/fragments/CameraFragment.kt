@@ -1917,8 +1917,10 @@ class CameraFragment : Fragment() {
                     // 保持加载动画，直到服务处理完毕
                 }
 
+                var dngWriteDurationMs = 0L
                 if (saveRaw) {
                     try {
+                        val dngWriteStart = System.currentTimeMillis()
                         val dngThumbnailSource: java.io.File? = null
 
                         val dngCreator = android.hardware.camera2.DngCreator(chars, captureResult)
@@ -1945,6 +1947,8 @@ class CameraFragment : Fragment() {
                         FileOutputStream(bayerDngFile).use { out ->
                             dngCreator.writeByteBuffer(out, Size(image.width, image.height), dngBuffer, 0)
                         }
+                        dngWriteDurationMs = System.currentTimeMillis() - dngWriteStart
+                        timing?.firstOutputWritten = System.currentTimeMillis()
                         
                         ImageSaver.saveProcessedImage(
                             context = context,
@@ -2041,16 +2045,20 @@ class CameraFragment : Fragment() {
                 }
 
                 // 6. Timing Report
+                val queueEnqueueTime = System.currentTimeMillis()
                 timing?.let { t ->
+                    if (t.firstOutputWritten == 0L) {
+                        t.firstOutputWritten = queueEnqueueTime
+                    }
+                    t.jniDone = queueEnqueueTime
                     val report = """
-                        [Standard Mode Report]
-                        Total (to First Output): ${t.firstOutputWritten - t.shutterClick}ms
+                        [Standard Mode Dispatch Report]
+                        Total (to Enqueue): ${queueEnqueueTime - t.shutterClick}ms
                         Shutter to Callback: ${t.captureCallback - t.shutterClick}ms
                         Callback to Enqueued: ${t.enqueued - t.captureCallback}ms
                         Wait in Queue: ${t.processingStart - t.enqueued}ms
-                        JNI (Halide + FastJPG): ${t.jniDone - t.processingStart}ms
-                        DNG Write (DngCreator): ${t.firstOutputWritten - t.jniDone}ms
-                        Native Halide Detail: ${debugStats[0]}ms
+                        DNG Write (DngCreator): ${dngWriteDurationMs}ms
+                        Dispatched to Service: ${queueEnqueueTime - t.processingStart}ms
                     """.trimIndent()
                     Log.i(TAG, report)
                     DebugLogManager.addLog(report)

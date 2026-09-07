@@ -111,11 +111,10 @@ public:
             .parallel(yo)
             .vectorize(xi, kVec);
     } else {
-        // Optimized CPU Schedule (Stage Fusion)
-        // Fuse early stages into demosaic
-        black_white_level_output.compute_at(demosaic_output, yi).vectorize(x, kVec);
-        lsc_output.compute_at(demosaic_output, yi).vectorize(x, kVec);
-        white_balance_output.compute_at(demosaic_output, yi).vectorize(x, kVec);
+        // Compute early preprocessing stages at root to avoid redundant 5x5 stencil recomputation in demosaic
+        black_white_level_output.compute_root().parallel(y).vectorize(x, kVec);
+        lsc_output.compute_root().parallel(y).vectorize(x, kVec);
+        white_balance_output.compute_root().parallel(y).vectorize(x, kVec);
 
         demosaic_output.compute_root()
             .tile(x, y, xo, yo, xi, yi, kTileX, kTileY)
