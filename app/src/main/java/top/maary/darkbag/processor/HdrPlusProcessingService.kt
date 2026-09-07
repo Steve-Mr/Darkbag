@@ -139,7 +139,8 @@ class HdrPlusProcessingService : LifecycleService() {
                     mirror = req.mirror,
                     metadata = req.metadata,
                     enableMemoryColor = req.enableMemoryColor,
-                    colorEngineMode = req.colorEngineMode
+                    colorEngineMode = req.colorEngineMode,
+                    debugStats = debugStats
                 )
             }
 

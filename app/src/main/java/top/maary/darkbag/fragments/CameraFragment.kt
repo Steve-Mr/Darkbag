@@ -104,7 +104,11 @@ import top.maary.darkbag.processor.LutSurfaceProcessor
 import top.maary.darkbag.utils.ExposureUtils
 import top.maary.darkbag.utils.simulateClick
 import com.bumptech.glide.Glide
+import com.bumptech.glide.load.resource.drawable.DrawableTransitionOptions
 import com.bumptech.glide.request.RequestOptions
+import android.graphics.Bitmap
+import top.maary.darkbag.capture.CaptureEchoCoordinator
+import top.maary.darkbag.imaging.ImagingNative
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -264,8 +268,13 @@ class CameraFragment : Fragment() {
     private var currentEvIndex = 0
     private var isVideoSaving = false
 
+    private val localProcessingCount = java.util.concurrent.atomic.AtomicInteger(0)
+    private var isEchoThumbnailDisplayed = false
+
     private val isProcessing: Boolean
-        get() = top.maary.darkbag.processor.HdrPlusRequestManager.pendingTasksCount.value > 0 || isVideoSaving
+        get() = localProcessingCount.get() > 0 ||
+                top.maary.darkbag.processor.HdrPlusRequestManager.pendingTasksCount.value > 0 ||
+                isVideoSaving
 
     // Half-frame State
     private var pendingVfSnapshot: android.graphics.Bitmap? = null
@@ -362,30 +371,42 @@ class CameraFragment : Fragment() {
 
     private fun updateProcessingAnimationUi() {
         val processing = isProcessing
+        val binding = cameraUiContainerBinding ?: return
         if (processing) {
-            cameraUiContainerBinding?.processingProgress?.visibility = View.VISIBLE
-            cameraUiContainerBinding?.photoViewContainer?.visibility = View.VISIBLE
+            binding.processingProgress?.visibility = View.VISIBLE
+            binding.photoViewContainer?.visibility = View.VISIBLE
             // Hide thumbnail image while processing if in half-frame mode
-            if (isHalfFrameModeEnabled) {
-                cameraUiContainerBinding?.photoViewButton?.visibility = View.INVISIBLE
+            if (isHalfFrameModeEnabled && halfFrameStep != 0) {
+                binding.photoViewButton?.visibility = View.INVISIBLE
             }
         } else {
-            cameraUiContainerBinding?.processingProgress?.visibility = View.GONE
+            binding.processingProgress?.visibility = View.GONE
             // Restore thumbnail visibility if not in the middle of a half-frame pair
             if (!isHalfFrameModeEnabled || halfFrameStep == 0) {
-                cameraUiContainerBinding?.photoViewButton?.visibility = View.VISIBLE
-                cameraUiContainerBinding?.photoViewButton?.alpha = 1f
+                binding.photoViewButton?.visibility = View.VISIBLE
+                binding.photoViewButton?.alpha = 1f
+            } else {
+                binding.photoViewButton?.visibility = View.INVISIBLE
             }
         }
     }
 
     private fun showProcessingAnimation() {
+        localProcessingCount.incrementAndGet()
         lifecycleScope.launch(Dispatchers.Main) {
             updateProcessingAnimationUi()
         }
     }
 
     private fun hideProcessingAnimation() {
+        localProcessingCount.updateAndGet { current -> if (current > 0) current - 1 else 0 }
+        lifecycleScope.launch(Dispatchers.Main) {
+            updateProcessingAnimationUi()
+        }
+    }
+
+    private fun resetProcessingAnimation() {
+        localProcessingCount.set(0)
         lifecycleScope.launch(Dispatchers.Main) {
             updateProcessingAnimationUi()
         }
@@ -657,7 +678,7 @@ class CameraFragment : Fragment() {
             } catch (_: Exception) {}
 
             // In half-frame mode, control visibility based on idle state, but do not block loading
-            if (isHalfFrameModeEnabled && (halfFrameStep != 0 || isProcessing)) {
+            if (isHalfFrameModeEnabled && halfFrameStep != 0) {
                 photoViewButton.visibility = View.INVISIBLE
             } else {
                 photoViewButton.visibility = View.VISIBLE
@@ -726,6 +747,7 @@ class CameraFragment : Fragment() {
                         Glide.with(photoViewButton)
                             .load(bmp)
                             .apply(RequestOptions.circleCropTransform())
+                            .transition(DrawableTransitionOptions.withCrossFade(200))
                             .into(photoViewButton)
                         return@launch
                     }
@@ -744,8 +766,30 @@ class CameraFragment : Fragment() {
                     .load(loadTarget)
                     .apply(RequestOptions.circleCropTransform())
                     .signature(com.bumptech.glide.signature.ObjectKey(lastModified))
+                    .transition(DrawableTransitionOptions.withCrossFade(200))
                     .into(photoViewButton)
             }
+        }
+    }
+
+    private fun setGalleryThumbnailBitmap(bitmap: Bitmap) {
+        val binding = cameraUiContainerBinding ?: return
+        val photoViewButton = binding.photoViewButton ?: return
+
+        photoViewButton.post {
+            if (isHalfFrameModeEnabled && halfFrameStep != 0) {
+                photoViewButton.visibility = View.INVISIBLE
+                return@post
+            }
+
+            photoViewButton.visibility = View.VISIBLE
+            photoViewButton.alpha = 1f
+            photoViewButton.setPadding(resources.getDimension(R.dimen.stroke_small).toInt())
+            Glide.with(photoViewButton)
+                .load(bitmap)
+                .apply(RequestOptions.circleCropTransform())
+                .transition(DrawableTransitionOptions.withCrossFade(200))
+                .into(photoViewButton)
         }
     }
 
@@ -859,8 +903,11 @@ class CameraFragment : Fragment() {
 
         // Listen for HDR+/RAW processing queue changes to drive loading animation
         viewLifecycleOwner.lifecycleScope.launch {
-            top.maary.darkbag.processor.HdrPlusRequestManager.pendingTasksCount.collect {
+            top.maary.darkbag.processor.HdrPlusRequestManager.pendingTasksCount.collect { count ->
                 withContext(Dispatchers.Main) {
+                    if (count == 0 && !isVideoSaving) {
+                        localProcessingCount.set(0)
+                    }
                     updateProcessingAnimationUi()
                 }
             }
@@ -881,7 +928,7 @@ class CameraFragment : Fragment() {
                         processingSemaphore.release()
                         withContext(Dispatchers.Main) {
                             cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
-                            // Wait for final stitched result in backgroundSaveFlow to hide animation for ALL pipelines.
+                            hideProcessingAnimation()
                         }
                     }
                 }
@@ -1510,7 +1557,6 @@ class CameraFragment : Fragment() {
                 fragmentCameraBinding.viewFinder.postDelayed({
                     updateHalfFrameUI(animate = true)
                 }, 50)
-                showProcessingAnimation()
             }
 
             var hfMetadataForTrigger: HalfFrameManager.Metadata? = null
@@ -1538,10 +1584,21 @@ class CameraFragment : Fragment() {
                     updateHalfFrameUI(animate = true)
                 }, 50)
 
-                showProcessingAnimation() // Immediate indicator on click for second frame
-                cameraUiContainerBinding?.photoViewButton?.visibility = View.VISIBLE // Show thumbnail container for progress indicator
-                setGalleryThumbnail(null) // Clear previous thumbnail and show placeholder/indicator
+                cameraUiContainerBinding?.photoViewButton?.visibility = View.VISIBLE
+                setGalleryThumbnail(null)
             }
+
+            isEchoThumbnailDisplayed = false
+            // Immediately capture visual echo thumbnail (<2ms from GPU viewfinder)
+            lifecycleScope.launch {
+                val echoBmp = CaptureEchoCoordinator.captureEcho(_fragmentCameraBinding?.viewFinder)
+                if (echoBmp != null && (!isHalfFrameModeEnabled || isFrame2Trigger)) {
+                    isEchoThumbnailDisplayed = true
+                    setGalleryThumbnailBitmap(echoBmp)
+                }
+            }
+
+            showProcessingAnimation()
 
             if (isMultiCameraModeActive && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 takeMultiCameraPicture(timing)
@@ -1638,6 +1695,12 @@ class CameraFragment : Fragment() {
 
         // Listener for button used to view the most recent photo
         cameraUiContainerBinding?.photoViewButton?.setOnClickListener {
+            if (isProcessing) {
+                context?.let { ctx ->
+                    Toast.makeText(ctx, R.string.toast_image_still_processing, Toast.LENGTH_SHORT).show()
+                }
+                return@setOnClickListener
+            }
             // Only navigate when the gallery has photos
             lifecycleScope.launch {
                 val uri = currentThumbnailUri ?: mediaStoreUtils.getLatestAppImage()
@@ -1854,8 +1917,10 @@ class CameraFragment : Fragment() {
                     // 保持加载动画，直到服务处理完毕
                 }
 
+                var dngWriteDurationMs = 0L
                 if (saveRaw) {
                     try {
+                        val dngWriteStart = System.currentTimeMillis()
                         val dngThumbnailSource: java.io.File? = null
 
                         val dngCreator = android.hardware.camera2.DngCreator(chars, captureResult)
@@ -1882,6 +1947,8 @@ class CameraFragment : Fragment() {
                         FileOutputStream(bayerDngFile).use { out ->
                             dngCreator.writeByteBuffer(out, Size(image.width, image.height), dngBuffer, 0)
                         }
+                        dngWriteDurationMs = System.currentTimeMillis() - dngWriteStart
+                        timing?.firstOutputWritten = System.currentTimeMillis()
                         
                         ImageSaver.saveProcessedImage(
                             context = context,
@@ -1978,16 +2045,20 @@ class CameraFragment : Fragment() {
                 }
 
                 // 6. Timing Report
+                val queueEnqueueTime = System.currentTimeMillis()
                 timing?.let { t ->
+                    if (t.firstOutputWritten == 0L) {
+                        t.firstOutputWritten = queueEnqueueTime
+                    }
+                    t.jniDone = queueEnqueueTime
                     val report = """
-                        [Standard Mode Report]
-                        Total (to First Output): ${t.firstOutputWritten - t.shutterClick}ms
+                        [Standard Mode Dispatch Report]
+                        Total (to Enqueue): ${queueEnqueueTime - t.shutterClick}ms
                         Shutter to Callback: ${t.captureCallback - t.shutterClick}ms
                         Callback to Enqueued: ${t.enqueued - t.captureCallback}ms
                         Wait in Queue: ${t.processingStart - t.enqueued}ms
-                        JNI (Halide + FastJPG): ${t.jniDone - t.processingStart}ms
-                        DNG Write (DngCreator): ${t.firstOutputWritten - t.jniDone}ms
-                        Native Halide Detail: ${debugStats[0]}ms
+                        DNG Write (DngCreator): ${dngWriteDurationMs}ms
+                        Dispatched to Service: ${queueEnqueueTime - t.processingStart}ms
                     """.trimIndent()
                     Log.i(TAG, report)
                     DebugLogManager.addLog(report)
@@ -3315,9 +3386,7 @@ class CameraFragment : Fragment() {
                 processingSemaphore.release()
                 withContext(Dispatchers.Main) {
                     cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
-                    if (!isHalfFrameModeEnabled) {
-                        hideProcessingAnimation()
-                    }
+                    hideProcessingAnimation()
                 }
             }
         }
@@ -3556,10 +3625,27 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         motionStillPtsUs = result?.second ?: 0L
                     }
 
+                    // Native burst frame evaluation and zero-copy in-place compact rearrangement
+                    val evalResult = ImagingNative.evaluateBurstAndCompact(
+                        megaBuffer = megaBuffer,
+                        numFrames = burstResult.frames.size,
+                        width = width,
+                        height = height,
+                        rowStride = width * 2,
+                        cfaPattern = cfa,
+                        iso = iso.toInt(),
+                        triggerIndex = 0,
+                        rejectionThreshold = 0.45f
+                    )
+
+                    val finalNumFrames = evalResult?.acceptedCount ?: burstResult.frames.size
+                    megaBuffer.rewind()
+                    Log.i(TAG, "Burst evaluation & compaction: retained $finalNumFrames/${burstResult.frames.size} frames, anchor index ${evalResult?.anchorIndex}")
+
                     val request = top.maary.darkbag.processor.HdrPlusRequest(
                         requestId = java.util.UUID.randomUUID().toString(),
                         megaBuffer = megaBuffer,
-                        numFrames = burstResult.frames.size,
+                        numFrames = finalNumFrames,
                         width = width,
                         height = height,
                         orientation = combinedOrientation,
@@ -3655,15 +3741,15 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 }
             } finally {
                 burstResult.frames.forEach { it.close() }
-                HdrPlusBurst.releaseBuffer(burstResult.megaBuffer)
-                
+                if (!isHdrPlusSuccess && !fallbackSent) {
+                    HdrPlusBurst.releaseBuffer(burstResult.megaBuffer)
+                }
+
                 if (!fallbackSent) {
                     processingSemaphore.release()
                     lifecycleScope.launch(Dispatchers.Main) {
                         resetBurstUi()
-                        if (!isHdrPlusSuccess) {
-                            hideProcessingAnimation()
-                        }
+                        hideProcessingAnimation()
                     }
                 }
             }
@@ -3989,16 +4075,17 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
     private fun takeMultiCameraPicture(timing: StandardTimingTracker? = null) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
             processingSemaphore.release()
+            hideProcessingAnimation()
             return
         }
 
         val manager = multiCameraManager ?: run {
             processingSemaphore.release()
+            hideProcessingAnimation()
             return
         }
 
         showShutterBlackout()
-        showProcessingAnimation()
 
         val orientation = getCombinedOrientation()
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
@@ -4212,10 +4299,10 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         isFrame1Trigger: Boolean = false,
         hfMetadata: HalfFrameManager.Metadata? = null
     ) {
-        val device = camera2Device ?: run { processingSemaphore.release(); return }
-        val session = camera2Session ?: run { processingSemaphore.release(); return }
-        val reader = rawImageReader ?: run { processingSemaphore.release(); return }
-        val handler = camera2Handler ?: run { processingSemaphore.release(); return }
+        val device = camera2Device ?: run { processingSemaphore.release(); hideProcessingAnimation(); return }
+        val session = camera2Session ?: run { processingSemaphore.release(); hideProcessingAnimation(); return }
+        val reader = rawImageReader ?: run { processingSemaphore.release(); hideProcessingAnimation(); return }
+        val handler = camera2Handler ?: run { processingSemaphore.release(); hideProcessingAnimation(); return }
 
         try {
             val request = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_STILL_CAPTURE)
@@ -4240,11 +4327,38 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                             timing?.shutterClick
                         )
 
+                        if (!isEchoThumbnailDisplayed && (!isHalfFrameModeEnabled || hfMetadata?.frame1BaseName != null)) {
+                            try {
+                                val chars = camera2Manager.getCameraCharacteristics(currentLens?.id ?: "0")
+                                val sensorOrientation = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
+                                val cfa = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_COLOR_FILTER_ARRANGEMENT) ?: 0
+                                val whiteLevel = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_WHITE_LEVEL) ?: 1023
+                                val blackLevel = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_BLACK_LEVEL_PATTERN)?.getOffsetForIndex(0, 0)?.toFloat() ?: 64f
+                                val plane = image.planes[0]
+                                val params = CaptureEchoCoordinator.RawFallbackParams(
+                                    bayerBuffer = plane.buffer.duplicate(),
+                                    width = image.width,
+                                    height = image.height,
+                                    rowStride = plane.rowStride,
+                                    cfaPattern = cfa,
+                                    whiteLevel = whiteLevel,
+                                    blackLevel = blackLevel,
+                                    orientation = sensorOrientation
+                                )
+                                lifecycleScope.launch {
+                                    val fallbackBmp = CaptureEchoCoordinator.captureEcho(null, params)
+                                    if (fallbackBmp != null && !isEchoThumbnailDisplayed) {
+                                        isEchoThumbnailDisplayed = true
+                                        setGalleryThumbnailBitmap(fallbackBmp)
+                                    }
+                                }
+                            } catch (e: Exception) {
+                                Log.w(TAG, "Fallback thumbnail generation failed in single shot", e)
+                            }
+                        }
+
                         val holder = copyAndroidImageToHolder(image, currentZoom, getCombinedOrientation(), currentLens?.id, hfMetadata?.copy(digitalGain = digitalGain)).copy(timing = timing, digitalGain = digitalGain)
                         image.close()
-                        if (!isFrame1Trigger) {
-                            showProcessingAnimation()
-                        }
                         lifecycleScope.launch {
                             timing?.enqueued = System.currentTimeMillis()
                             processingChannel.send(holder)
@@ -4255,10 +4369,6 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         val data = ByteArray(buffer.remaining())
                         buffer.get(data)
                         image.close()
-                       
-                        if (!isFrame1Trigger) {
-                            showProcessingAnimation()
-                        }
 
                         val captureMetadata = if (hfMetadata == null) createCaptureMetadataFromTimestamp(image.timestamp) else null
 
@@ -4268,6 +4378,9 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     Log.e(TAG, "Failed to process Camera2 image", e)
                     image.close()
                     processingSemaphore.release()
+                    lifecycleScope.launch(Dispatchers.Main) {
+                        hideProcessingAnimation()
+                    }
                 }
             }, handler)
 
@@ -4292,6 +4405,9 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         } catch (e: Exception) {
             Log.e(TAG, "Camera2 capture failed", e)
             processingSemaphore.release()
+            lifecycleScope.launch(Dispatchers.Main) {
+                hideProcessingAnimation()
+            }
         }
     }
 
@@ -4299,10 +4415,10 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         isFrame1Trigger: Boolean = false,
         hfMetadata: HalfFrameManager.Metadata? = null
     ) {
-        val device = camera2Device ?: run { processingSemaphore.release(); return }
-        val session = camera2Session ?: run { processingSemaphore.release(); return }
-        val reader = rawImageReader ?: run { processingSemaphore.release(); return }
-        val handler = camera2Handler ?: run { processingSemaphore.release(); return }
+        val device = camera2Device ?: run { processingSemaphore.release(); hideProcessingAnimation(); return }
+        val session = camera2Session ?: run { processingSemaphore.release(); hideProcessingAnimation(); return }
+        val reader = rawImageReader ?: run { processingSemaphore.release(); hideProcessingAnimation(); return }
+        val handler = camera2Handler ?: run { processingSemaphore.release(); hideProcessingAnimation(); return }
 
         isBurstActive = true
         val captureStartTime = hfMetadata?.captureTimeMillis ?: System.currentTimeMillis()
@@ -4371,6 +4487,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     isBurstActive = false
                     processingSemaphore.release()
                     resetBurstUi()
+                    hideProcessingAnimation()
                 }
             }
 
@@ -4380,6 +4497,33 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     val plane = image.planes[0]
                     val chars = camera2Manager.getCameraCharacteristics(currentLens?.id ?: "0")
                     val sensorOrientation = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
+
+                    if (!isEchoThumbnailDisplayed && (!isHalfFrameModeEnabled || hfMetadata?.frame1BaseName != null) && framesCaptured == 0) {
+                        try {
+                            val cfa = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_COLOR_FILTER_ARRANGEMENT) ?: 0
+                            val whiteLevel = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_WHITE_LEVEL) ?: 1023
+                            val blackLevel = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_BLACK_LEVEL_PATTERN)?.getOffsetForIndex(0, 0)?.toFloat() ?: 64f
+                            val params = CaptureEchoCoordinator.RawFallbackParams(
+                                bayerBuffer = plane.buffer.duplicate(),
+                                width = image.width,
+                                height = image.height,
+                                rowStride = plane.rowStride,
+                                cfaPattern = cfa,
+                                whiteLevel = whiteLevel,
+                                blackLevel = blackLevel,
+                                orientation = sensorOrientation
+                            )
+                            lifecycleScope.launch {
+                                val fallbackBmp = CaptureEchoCoordinator.captureEcho(null, params)
+                                if (fallbackBmp != null && !isEchoThumbnailDisplayed) {
+                                    isEchoThumbnailDisplayed = true
+                                    setGalleryThumbnailBitmap(fallbackBmp)
+                                }
+                            }
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Fallback thumbnail generation failed in burst", e)
+                        }
+                    }
 
                     hdrPlusBurstHelper?.addManualFrame(
                         plane.buffer,
@@ -4400,10 +4544,6 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         watchdog.cancel()
                         lifecycleScope.launch(Dispatchers.Main) {
                             resetBurstUi()
-                            if (!isFrame1Trigger) {
-                                showProcessingAnimation()
-                            }
-
                             if (isFrame1Trigger) {
                                 triggerAutoBurst(prefs)
                             }
@@ -4432,6 +4572,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             processingSemaphore.release()
             lifecycleScope.launch(Dispatchers.Main) {
                 resetBurstUi()
+                hideProcessingAnimation()
             }
         }
     }

@@ -223,6 +223,10 @@ list(FILTER LIBRAW_SOURCES EXCLUDE REGEX ".*_ph\\.cpp$")
 
 include_directories(rawvideo)
 include_directories(rawvideo/lz4)
+include_directories(imaging)
+
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fopenmp -O3 -ffast-math -DUSE_ZLIB")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fopenmp -O3 -ffast-math -DUSE_ZLIB")
 
 add_library(
         native-lib
@@ -230,6 +234,8 @@ add_library(
         native-lib.cpp
         HdrPlusJNI.cpp
         ColorPipe.cpp
+        imaging/BurstFrameSelector.cpp
+        imaging/ImagingJNI.cpp
         rawvideo/lz4/lz4.c
         rawvideo/RawVideoContainer.cpp
         rawvideo/RawVideoRecorder.cpp
@@ -242,6 +248,9 @@ add_library(
         "${FAST_GENERATED_LIB}"
         "${HIGH_GENERATED_LIB}"
 )
+
+target_compile_options(native-lib PRIVATE -fopenmp -O3 -ffast-math)
+target_compile_definitions(native-lib PRIVATE USE_ZLIB)
 
 # Ensure the generation happens before native-lib compilation
 add_dependencies(native-lib generate_hdrplus_halide libjpeg-turbo)
@@ -280,9 +289,6 @@ target_link_libraries(
         ${android-lib}
         ${gles3-lib}
         ${egl-lib}
+        z
         -fopenmp
         -static-openmp)
-
-
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fopenmp -O3 -ffast-math")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fopenmp -O3 -ffast-math")

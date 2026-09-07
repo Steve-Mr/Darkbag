@@ -299,6 +299,25 @@ class SettingsFragment : Fragment() {
             }
         }
 
+        // DNG Compression Mode
+        val dngCompressionOptions = listOf(
+            getString(R.string.dng_compression_deflate),
+            getString(R.string.dng_compression_jxl)
+        )
+        val dngCompressionAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, dngCompressionOptions)
+        binding.menuDngCompression.setAdapter(dngCompressionAdapter)
+        val savedDngMode = prefs.getString(KEY_DNG_COMPRESSION_MODE, DNG_COMPRESSION_DEFLATE)
+        val initialDngSelection = if (savedDngMode == DNG_COMPRESSION_JXL) {
+            getString(R.string.dng_compression_jxl)
+        } else {
+            getString(R.string.dng_compression_deflate)
+        }
+        binding.menuDngCompression.setText(initialDngSelection, false)
+        binding.menuDngCompression.setOnItemClickListener { _, _, position, _ ->
+            val mode = if (position == 1) DNG_COMPRESSION_JXL else DNG_COMPRESSION_DEFLATE
+            prefs.edit().putString(KEY_DNG_COMPRESSION_MODE, mode).apply()
+        }
+
         setupRawVideoSettings()
 
         setupExternalViewerMenu()
@@ -630,6 +649,7 @@ class SettingsFragment : Fragment() {
     private fun updateStorageVisibility() {
         binding.layoutJpgStorage.visibility = if (binding.cbSaveJpg.isChecked) View.VISIBLE else View.GONE
         binding.layoutRawStorage.visibility = if (binding.cbSaveRaw.isChecked) View.VISIBLE else View.GONE
+        binding.layoutDngCompression.visibility = if (binding.cbSaveRaw.isChecked) View.VISIBLE else View.GONE
 
         binding.tvJpgPath.text = prefs.getString(KEY_JPG_STORAGE_URI_NAME, "Default (Pictures/Darkbag)")
         binding.tvRawPath.text = prefs.getString(KEY_RAW_STORAGE_URI_NAME, "Default (Pictures/Darkbag)")
@@ -893,6 +913,10 @@ class SettingsFragment : Fragment() {
         const val KEY_SHOW_FLOATING_TOOLBAR = "show_floating_toolbar"
         const val KEY_EXP_FOCUS_PEAKING = "exp_focus_peaking"
         const val KEY_COLOR_ENGINE_MODE = "color_engine_mode"
+
+        const val KEY_DNG_COMPRESSION_MODE = "dng_compression_mode"
+        const val DNG_COMPRESSION_DEFLATE = "deflate"
+        const val DNG_COMPRESSION_JXL = "jxl"
 
         const val KEY_SHUTTER_LONG_PRESS_ACTION = "shutter_long_press_action"
         const val SHUTTER_LONG_PRESS_MP4 = "Standard MP4 (Default)"

@@ -223,4 +223,10 @@
     <string name="dialog_mic_permission_silent">直接静音录制</string>
     <string name="dialog_mic_permission_settings">去设置</string>
     <string name="toast_audio_permission_granted">已授予麦克风权限，将包含音频录制</string>
+
+    <string name="toast_image_still_processing">照片正在后台处理中，请稍候…</string>
+    <string name="focus_peaking_title">峰值对焦 (实验性)</string>
+    <string name="dng_compression_title">DNG 压缩模式</string>
+    <string name="dng_compression_deflate">标准无损 (Deflate - 兼容所有软件)</string>
+    <string name="dng_compression_jxl">极致无损 (DNG 1.7 JPEG XL) [实验性]</string>
 </resources>

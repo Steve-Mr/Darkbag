@@ -803,8 +803,37 @@ bool process_and_save_image(
     Matrix3x3 effective_CCM = {0}; if (sourceColorSpace == 1 && ccm) std::copy(ccm, ccm + 9, effective_CCM.m);
     thread_local std::vector<unsigned short> tls_processedImage; 
     thread_local std::vector<unsigned char> tls_previewRgb8;
+    thread_local std::vector<unsigned char> tls_directJpgRgb8;
 
     AdaptiveEdgeComp edgeComp = calculate_adaptive_edge_comp(planarData, stride_x, stride_y, stride_c, width, height);
+
+    // Precompute constant color pipeline transforms outside the pixel loop:
+    const float exp_gain = std::pow(2.0f, exposure);
+    const float base_norm_scale = (gain * exp_gain) / 65535.0f;
+    const bool has_hswb = (highlights != 0.0f || shadows != 0.0f || whites != 0.0f || blacks != 0.0f);
+    const bool has_contrast_sat = (contrast != 0.0f || saturation != 0.0f);
+
+    Matrix3x3 M_stage1 = {1.0f, 0.0f, 0.0f,  0.0f, 1.0f, 0.0f,  0.0f, 0.0f, 1.0f};
+    if (sourceColorSpace == 1) {
+        if (ccm) M_stage1 = multiply(M_sRGB_D65_to_XYZ, effective_CCM);
+        else M_stage1 = M_sRGB_D65_to_XYZ;
+    } else if (sourceColorSpace == 2) {
+        M_stage1 = M_sRGB_D65_to_XYZ;
+    } else if (sourceColorSpace == 0) {
+        M_stage1 = multiply(M_Bradford_D50_to_D65, M_ProPhoto_D50_to_XYZ);
+    }
+
+    Matrix3x3 M_target = M_XYZ_to_Rec709_D65;
+    switch (targetLog) {
+        case 1: M_target = M_XYZ_to_AlexaWideGamut_D65; break;
+        case 2:
+        case 3: M_target = M_XYZ_to_Rec2020_D65; break;
+        case 5:
+        case 6: M_target = M_XYZ_to_SGamut3Cine_D65; break;
+        case 7: M_target = M_XYZ_to_VGamut_D65; break;
+        default: M_target = M_XYZ_to_Rec709_D65; break;
+    }
+    const Matrix3x3 combined_color_matrix = multiply(M_target, M_stage1);
 
     // Debug stage split output (A/B/C):
     const bool enableStageDebug = false;
@@ -883,18 +912,17 @@ bool process_and_save_image(
         g = std::min(g, 65535.0f);
         b = std::min(b, 65535.0f);
         
-        float exp_gain = std::pow(2.0f, exposure);
-        float norm_r = (r / 65535.0f) * gain * exp_gain;
-        float norm_g = (g / 65535.0f) * gain * exp_gain;
-        float norm_b = (b / 65535.0f) * gain * exp_gain;
+        float norm_r = r * base_norm_scale;
+        float norm_g = g * base_norm_scale;
+        float norm_b = b * base_norm_scale;
 
         if (edgeComp.enabled) {
             const float nx = (x - edgeComp.centerX) * edgeComp.invMaxRadius;
             const float ny = (y - edgeComp.centerY) * edgeComp.invMaxRadius;
-            float r = std::sqrt(nx * nx + ny * ny);
+            float r_dist = std::sqrt(nx * nx + ny * ny);
 
             // Smooth radial blend: start near 55% radius and fully applied at edges.
-            float t = std::clamp((r - kBlendStartRadius) / (kBlendEndRadius - kBlendStartRadius), 0.0f, 1.0f);
+            float t = std::clamp((r_dist - kBlendStartRadius) / (kBlendEndRadius - kBlendStartRadius), 0.0f, 1.0f);
             t = t * t * (3.0f - 2.0f * t); // smoothstep
 
             float lumaGain = 1.0f + (edgeComp.lumaEdgeGain - 1.0f) * t;
@@ -910,20 +938,7 @@ bool process_and_save_image(
         Vec3 colorA = {norm_r, norm_g, norm_b};
         if (stageA) *stageA = colorA;
 
-        Vec3 color = colorA;
-        if (sourceColorSpace == 1) { if (ccm) color = multiply(effective_CCM, color); color = multiply(M_sRGB_D65_to_XYZ, color); }
-        else if (sourceColorSpace == 2) { color = multiply(M_sRGB_D65_to_XYZ, color); }
-        else if (sourceColorSpace == 0) { color = multiply(M_ProPhoto_D50_to_XYZ, color); color = multiply(M_Bradford_D50_to_D65, color); }
-
-        switch (targetLog) {
-            case 1: color = multiply(M_XYZ_to_AlexaWideGamut_D65, color); break;
-            case 2:
-            case 3: color = multiply(M_XYZ_to_Rec2020_D65, color); break;
-            case 5:
-            case 6: color = multiply(M_XYZ_to_SGamut3Cine_D65, color); break;
-            case 7: color = multiply(M_XYZ_to_VGamut_D65, color); break;
-            default: color = multiply(M_XYZ_to_Rec709_D65, color); break;
-        }
+        Vec3 color = multiply(combined_color_matrix, colorA);
         if (stageB) *stageB = color;
 
         // Natural Multi-Engine Pipeline (when targetLog == 0 and no 3D LUT is attached)
@@ -960,45 +975,53 @@ bool process_and_save_image(
         }
 
         // 2. Contrast & Saturation (Log Space / Gamma Space)
-        auto apply_contrast = [&](float v) {
-            return std::max(0.0f, (v - 0.5f) * (contrast + 1.0f) + 0.5f);
-        };
-        color.r = apply_contrast(color.r);
-        color.g = apply_contrast(color.g);
-        color.b = apply_contrast(color.b);
+        if (has_contrast_sat) {
+            if (contrast != 0.0f) {
+                auto apply_contrast = [&](float v) {
+                    return std::max(0.0f, (v - 0.5f) * (contrast + 1.0f) + 0.5f);
+                };
+                color.r = apply_contrast(color.r);
+                color.g = apply_contrast(color.g);
+                color.b = apply_contrast(color.b);
+            }
 
-        float luma = 0.2126f * color.r + 0.7152f * color.g + 0.0722f * color.b;
-        color.r = std::max(0.0f, luma + (color.r - luma) * (saturation + 1.0f));
-        color.g = std::max(0.0f, luma + (color.g - luma) * (saturation + 1.0f));
-        color.b = std::max(0.0f, luma + (color.b - luma) * (saturation + 1.0f));
+            if (saturation != 0.0f) {
+                float luma = 0.2126f * color.r + 0.7152f * color.g + 0.0722f * color.b;
+                color.r = std::max(0.0f, luma + (color.r - luma) * (saturation + 1.0f));
+                color.g = std::max(0.0f, luma + (color.g - luma) * (saturation + 1.0f));
+                color.b = std::max(0.0f, luma + (color.b - luma) * (saturation + 1.0f));
+            }
+        }
 
         // 3. Highlights / Shadows / Whites / Blacks (Log Space)
-        auto apply_hswb = [&](float v) {
-            // Highlights: affecting upper range
-            if (highlights != 0.0f) {
-                float weight = std::pow(std::clamp(v, 0.0f, 1.0f), 2.0f);
-                v += highlights * weight * 0.2f;
-            }
-            // Shadows: affecting lower range
-            if (shadows != 0.0f) {
-                float weight = std::pow(1.0f - std::clamp(v, 0.0f, 1.0f), 2.0f);
-                v += shadows * weight * 0.2f;
-            }
-            // Whites: offset upper
-            if (whites != 0.0f) {
-                float weight = std::clamp((v - 0.5f) * 2.0f, 0.0f, 1.0f);
-                v += whites * weight * 0.2f;
-            }
-            // Blacks: offset lower
-            if (blacks != 0.0f) {
-                float weight = std::clamp((0.5f - v) * 2.0f, 0.0f, 1.0f);
-                v += blacks * weight * 0.2f;
-            }
-            return std::max(0.0f, v);
-        };
-        color.r = apply_hswb(color.r);
-        color.g = apply_hswb(color.g);
-        color.b = apply_hswb(color.b);
+        if (has_hswb) {
+            auto apply_hswb = [&](float v) {
+                // Highlights: affecting upper range
+                if (highlights != 0.0f) {
+                    float weight = std::pow(std::clamp(v, 0.0f, 1.0f), 2.0f);
+                    v += highlights * weight * 0.2f;
+                }
+                // Shadows: affecting lower range
+                if (shadows != 0.0f) {
+                    float weight = std::pow(1.0f - std::clamp(v, 0.0f, 1.0f), 2.0f);
+                    v += shadows * weight * 0.2f;
+                }
+                // Whites: offset upper
+                if (whites != 0.0f) {
+                    float weight = std::clamp((v - 0.5f) * 2.0f, 0.0f, 1.0f);
+                    v += whites * weight * 0.2f;
+                }
+                // Blacks: offset lower
+                if (blacks != 0.0f) {
+                    float weight = std::clamp((0.5f - v) * 2.0f, 0.0f, 1.0f);
+                    v += blacks * weight * 0.2f;
+                }
+                return std::max(0.0f, v);
+            };
+            color.r = apply_hswb(color.r);
+            color.g = apply_hswb(color.g);
+            color.b = apply_hswb(color.b);
+        }
 
         if (stageC) *stageC = color;
 
@@ -1019,6 +1042,8 @@ bool process_and_save_image(
         debugB8.resize(n);
         debugC8.resize(n);
     }
+
+    const bool need16BitIntermediate = (tiffPath != nullptr || enableStageDebug);
 
     if (isPreview) {
         // If a bitmap buffer is provided, prioritize its dimensions.
@@ -1065,6 +1090,42 @@ bool process_and_save_image(
         // Update dimensions for JPEG writing if we used bitmap dimensions
         finalW_zoomed = renderW;
         finalH_zoomed = renderH;
+    } else if (!need16BitIntermediate) {
+        // High-performance direct RGB8 rendering (bypasses 36MB 16-bit intermediate buffer & second pass)
+        tls_directJpgRgb8.resize(static_cast<size_t>(finalW_zoomed) * finalH_zoomed * 3);
+        #pragma omp parallel for
+        for (int py = 0; py < finalH_zoomed; py++) {
+            for (int px = 0; px < finalW_zoomed; px++) {
+                int sx, sy;
+                int opx = mirror ? (finalW_zoomed - 1 - px) : px;
+
+                float fx = (float)opx / finalW_zoomed * (swapDims ? cropH : cropW);
+                float fy = (float)py / finalH_zoomed * (swapDims ? cropW : cropH);
+
+                if (orientation == 90) { sx = (int)fy; sy = (cropH - 1) - (int)fx; }
+                else if (orientation == 180) { sx = (cropW - 1) - (int)fx; sy = (cropH - 1) - (int)fy; }
+                else if (orientation == 270) { sx = (cropW - 1) - (int)fy; sy = (int)fx; }
+                else { sx = (int)fx; sy = (int)fy; }
+
+                Vec3 color = process_pixel(cropX + sx, cropY + sy, nullptr, nullptr, nullptr);
+                size_t outIdx = (static_cast<size_t>(py) * finalW_zoomed + px) * 3;
+                unsigned char r8 = (unsigned char)std::max(0.0f, std::min(255.0f, color.r * 255.0f + 0.5f));
+                unsigned char g8 = (unsigned char)std::max(0.0f, std::min(255.0f, color.g * 255.0f + 0.5f));
+                unsigned char b8 = (unsigned char)std::max(0.0f, std::min(255.0f, color.b * 255.0f + 0.5f));
+
+                tls_directJpgRgb8[outIdx + 0] = r8;
+                tls_directJpgRgb8[outIdx + 1] = g8;
+                tls_directJpgRgb8[outIdx + 2] = b8;
+
+                if (out_rgb_buffer) {
+                    size_t bIdx = (static_cast<size_t>(py) * finalW_zoomed + px) * 4;
+                    out_rgb_buffer[bIdx+0] = r8;
+                    out_rgb_buffer[bIdx+1] = g8;
+                    out_rgb_buffer[bIdx+2] = b8;
+                    out_rgb_buffer[bIdx+3] = 255;
+                }
+            }
+        }
     } else {
         processedImage.resize(static_cast<size_t>(finalW_zoomed) * finalH_zoomed * 3);
         #pragma omp parallel for
@@ -1129,6 +1190,8 @@ bool process_and_save_image(
     if (jpgPath) {
         if (isPreview && !previewRgb8.empty()) {
             jpgOk = write_jpeg_turbo(jpgPath, finalW_zoomed, finalH_zoomed, TJSAMP_422, previewRgb8.data(), jpegQuality);
+        } else if (!need16BitIntermediate && !tls_directJpgRgb8.empty()) {
+            jpgOk = write_jpeg_turbo(jpgPath, finalW_zoomed, finalH_zoomed, TJSAMP_422, tls_directJpgRgb8.data(), jpegQuality);
         } else {
             jpgOk = write_jpeg(jpgPath, finalW_zoomed, finalH_zoomed, processedImage.data(), 3, finalW_zoomed*3, 1, jpegQuality);
         }
@@ -1355,10 +1418,14 @@ bool write_dng(const char* filename, int width, int height, const unsigned short
     TIFF* tif = TIFFOpen(filename, "w");
     if (!tif) return false;
 
+    const int rowsPerStrip = 64;
     TIFFSetField(tif, TIFFTAG_IMAGEWIDTH, width);
     TIFFSetField(tif, TIFFTAG_IMAGELENGTH, height);
     TIFFSetField(tif, TIFFTAG_BITSPERSAMPLE, 16);
-    TIFFSetField(tif, TIFFTAG_COMPRESSION, COMPRESSION_NONE);
+    TIFFSetField(tif, TIFFTAG_COMPRESSION, COMPRESSION_ADOBE_DEFLATE);
+    TIFFSetField(tif, TIFFTAG_PREDICTOR, PREDICTOR_HORIZONTAL);
+    TIFFSetField(tif, TIFFTAG_ZIPQUALITY, 1);
+    TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, rowsPerStrip);
 
     uint16_t tiffOrientation = 1;
     switch (orientation) {
@@ -1371,14 +1438,13 @@ bool write_dng(const char* filename, int width, int height, const unsigned short
     TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_LINEAR_RAW);
     TIFFSetField(tif, TIFFTAG_SAMPLESPERPIXEL, 3);
     TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG);
-    TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, 1);
     TIFFSetField(tif, TIFFTAG_SUBFILETYPE, 0);
 
     write_tiff_metadata(tif, &metadata);
 
     static const uint8_t dng_version[] = {1, 4, 0, 0};
     TIFFSetField(tif, TIFFTAG_DNGVERSION, dng_version);
-    static const uint8_t dng_backward_version[] = {1, 1, 0, 0};
+    static const uint8_t dng_backward_version[] = {1, 4, 0, 0};
     TIFFSetField(tif, TIFFTAG_DNGBACKWARDVERSION, dng_backward_version);
     TIFFSetField(tif, TIFFTAG_UNIQUECAMERAMODEL, metadata.uniqueCameraModel.c_str());
 
@@ -1434,20 +1500,26 @@ bool write_dng(const char* filename, int width, int height, const unsigned short
     unsigned short iso_short = (unsigned short)metadata.iso;
     TIFFSetField(tif, TIFFTAG_ISOSPEEDRATINGS, (uint16_t)1, &iso_short);
 
-    std::vector<unsigned short> rowBuffer(width * 3);
+    std::vector<unsigned short> stripBuffer(static_cast<size_t>(rowsPerStrip) * width * 3);
+    uint32_t stripIndex = 0;
 
-    for (int y = 0; y < height; y++) {
-        for (int x = 0; x < width; x++) {
-             size_t r_idx = (size_t)y*stride_y + (size_t)x*stride_x + 0*stride_c;
-             size_t g_idx = (size_t)y*stride_y + (size_t)x*stride_x + 1*stride_c;
-             size_t b_idx = (size_t)y*stride_y + (size_t)x*stride_x + 2*stride_c;
-             
-             // Keep pure Sensor Linear data in DNG without destructive pre-multiplied WB clamping
-             rowBuffer[x*3+0] = planarData[r_idx];
-             rowBuffer[x*3+1] = planarData[g_idx];
-             rowBuffer[x*3+2] = planarData[b_idx];
+    for (int y0 = 0; y0 < height; y0 += rowsPerStrip) {
+        int currentStripRows = std::min(rowsPerStrip, height - y0);
+        #pragma omp parallel for
+        for (int r = 0; r < currentStripRows; r++) {
+            int y = y0 + r;
+            unsigned short* dstRow = stripBuffer.data() + static_cast<size_t>(r) * width * 3;
+            for (int x = 0; x < width; x++) {
+                size_t r_idx = (size_t)y*stride_y + (size_t)x*stride_x + 0*stride_c;
+                size_t g_idx = (size_t)y*stride_y + (size_t)x*stride_x + 1*stride_c;
+                size_t b_idx = (size_t)y*stride_y + (size_t)x*stride_x + 2*stride_c;
+                dstRow[x*3+0] = planarData[r_idx];
+                dstRow[x*3+1] = planarData[g_idx];
+                dstRow[x*3+2] = planarData[b_idx];
+            }
         }
-        if (TIFFWriteScanline(tif, rowBuffer.data(), y, 0) < 0) {
+        tmsize_t stripBytes = static_cast<tmsize_t>(currentStripRows) * width * 3 * sizeof(unsigned short);
+        if (TIFFWriteEncodedStrip(tif, stripIndex++, stripBuffer.data(), stripBytes) < 0) {
             TIFFClose(tif);
             return false;
         }

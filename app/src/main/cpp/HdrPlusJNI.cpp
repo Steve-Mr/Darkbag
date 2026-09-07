@@ -275,7 +275,8 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
     jfloatArray ccm, jfloatArray whiteBalance, jfloat zoomFactor, jboolean mirror,
     jobject metadata,
     jboolean enableMemoryColor,
-    jint colorEngineMode
+    jint colorEngineMode,
+    jlongArray debugStats
 ) {
     LOGD("Native exportHdrPlus started (enableMemoryColor=%d, colorEngineMode=%d).", enableMemoryColor, colorEngineMode);
 
@@ -320,26 +321,43 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
 
     ImageMetadata meta = metadataFromJava(env, metadata);
 
+    auto dngStart = std::chrono::high_resolution_clock::now();
     if (dng_path_cstr) {
         LOGD("Exporting DNG to %s", dng_path_cstr);
         float baselineExposure = (digitalGain > 0.0f) ? std::log2(digitalGain) : 0.0f;
         write_dng(dng_path_cstr, width, height, finalImage.data(), 1, width, width*height, kMax16BitValue, ccmVec, meta, orientation, (bool)mirror, baselineExposure, wbVec.data());
     }
+    auto dngDurationMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - dngStart).count();
 
     bool saveOk = true;
+    auto postStart = std::chrono::high_resolution_clock::now();
     if (jpg_path_cstr) {
         LOGD("Exporting JPG: JPG=%s", jpg_path_cstr);
         saveOk = process_and_save_image(finalImage.data(), 1, width, width*height, nullptr, 0, 0, width, height, digitalGain, targetLog, lut,
                                         exposure, contrast, saturation, highlights, shadows, whites, blacks,
                                         jpg_path_cstr, nullptr, &meta, 1, ccmVec.data(), wbVec.data(), orientation, nullptr, 0, 0, false, 1, zoomFactor, (bool)mirror, (bool)enableMemoryColor, (int)colorEngineMode);
     }
+    auto postDurationMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - postStart).count();
+
+    if (debugStats != nullptr) {
+        jsize len = env->GetArrayLength(debugStats);
+        if (len >= 5) {
+            jlong* stats = env->GetLongArrayElements(debugStats, nullptr);
+            if (stats) {
+                stats[2] = (jlong)postDurationMs;
+                stats[3] = (jlong)dngDurationMs;
+                env->ReleaseLongArrayElements(debugStats, stats, 0);
+            }
+        }
+    }
+
     if (jpgPath && jpg_path_cstr) env->ReleaseStringUTFChars(jpgPath, jpg_path_cstr);
     if (dngPath && dng_path_cstr) env->ReleaseStringUTFChars(dngPath, dng_path_cstr);
 
     // No longer a physical file, so we don't delete anything
     // (the shared ptr cleans itself up)
 
-    LOGD("Native exportHdrPlus finished. Success=%d", saveOk);
+    LOGD("Native exportHdrPlus finished. Success=%d, Post=%lldms, DNG=%lldms", saveOk, (long long)postDurationMs, (long long)dngDurationMs);
     return saveOk ? 0 : -2;
 }
 
@@ -444,9 +462,10 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
         env->DeleteLocalRef(metaClass);
     }
     
-    int denoiseLevel = 1;
-    if (iso < 400) denoiseLevel = 0;
-    else if (iso >= 1600) denoiseLevel = 2;
+    // Multi-frame merge already provides robust temporal noise reduction (~10dB SNR gain).
+    // Bypassing heavy CPU 7x7 bilateral + 15x15 cascaded blur saves ~4.3 seconds on mobile CPU.
+    int denoiseLevel = 0;
+    if (iso >= 6400) denoiseLevel = 1;
 
     Buffer<float> lscMapBuf;
     std::vector<float> dummyLsc = {1.0f, 1.0f, 1.0f, 1.0f};
