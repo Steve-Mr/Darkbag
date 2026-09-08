@@ -147,7 +147,19 @@ object ImageUtils {
         return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
     }
 
-    suspend fun decodeDngThumbnail(context: Context, uri: Uri, zoomFactor: Float = 1.0f): Bitmap? = withContext(Dispatchers.IO) {
+    suspend fun decodeDngThumbnail(
+        context: Context,
+        uri: Uri,
+        zoomFactor: Float
+    ): Bitmap? = decodeDngThumbnail(context, uri, reqWidth = 1024, reqHeight = 1024, zoomFactor = zoomFactor)
+
+    suspend fun decodeDngThumbnail(
+        context: Context,
+        uri: Uri,
+        reqWidth: Int = 1024,
+        reqHeight: Int = 1024,
+        zoomFactor: Float = 1.0f
+    ): Bitmap? = withContext(Dispatchers.IO) {
         try {
             var bitmap: Bitmap? = null
             var orientation = ExifInterface.ORIENTATION_NORMAL
@@ -158,7 +170,11 @@ object ImageUtils {
                 if (exif.hasThumbnail()) {
                     val thumb = exif.thumbnailBytes
                     if (thumb != null) {
-                        bitmap = BitmapFactory.decodeByteArray(thumb, 0, thumb.size)
+                        val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                        BitmapFactory.decodeByteArray(thumb, 0, thumb.size, options)
+                        options.inSampleSize = calculateInSampleSize(options, reqWidth, reqHeight)
+                        options.inJustDecodeBounds = false
+                        bitmap = BitmapFactory.decodeByteArray(thumb, 0, thumb.size, options)
                     }
                 }
             }
@@ -169,7 +185,7 @@ object ImageUtils {
                         inJustDecodeBounds = true
                     }
                     BitmapFactory.decodeFileDescriptor(pfd.fileDescriptor, null, options)
-                    options.inSampleSize = calculateInSampleSize(options, 1024, 1024)
+                    options.inSampleSize = calculateInSampleSize(options, reqWidth, reqHeight)
                     options.inJustDecodeBounds = false
                     bitmap = BitmapFactory.decodeFileDescriptor(pfd.fileDescriptor, null, options)
                 }
@@ -206,6 +222,14 @@ object ImageUtils {
     ): Bitmap? = withContext(Dispatchers.IO) {
         try {
             coroutineContext.ensureActive()
+
+            if (reqWidth <= 1024 && reqHeight <= 1024) {
+                val fastBmp = decodeDngThumbnail(context, uri, reqWidth, reqHeight, zoomFactor)
+                if (fastBmp != null) {
+                    return@withContext fastBmp
+                }
+            }
+
             val dngBytes = context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
                 java.io.FileInputStream(pfd.fileDescriptor).use { it.readBytes() }
             } ?: return@withContext null
@@ -216,8 +240,8 @@ object ImageUtils {
             val downsample = calculateInSampleSize(bounds, reqWidth, reqHeight)
 
             val orientation = try {
-                context.contentResolver.openInputStream(uri)?.use { input ->
-                    ExifInterface(input).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
+                context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                    ExifInterface(pfd.fileDescriptor).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
                 } ?: ExifInterface.ORIENTATION_NORMAL
             } catch (e: Exception) {
                 ExifInterface.ORIENTATION_NORMAL
