@@ -55,6 +55,8 @@ data class HdrPlusRequest(
 )
 
 object HdrPlusRequestManager {
+    private const val MAX_CONCURRENT_TASKS = 2
+
     // UNLIMITED channel to prevent dropping requests during bursts
     private val requestChannel = Channel<HdrPlusRequest>(Channel.UNLIMITED)
     
@@ -62,6 +64,10 @@ object HdrPlusRequestManager {
 
     private val _pendingTasksCount = MutableStateFlow(0)
     val pendingTasksCount: StateFlow<Int> = _pendingTasksCount.asStateFlow()
+
+    fun canAcceptRequest(): Boolean {
+        return _pendingTasksCount.value < MAX_CONCURRENT_TASKS
+    }
 
     fun enqueue(request: HdrPlusRequest) {
         _pendingTasksCount.update { it + 1 }

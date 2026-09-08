@@ -436,8 +436,8 @@ class CameraFragment : Fragment() {
         onBufferOverflow = BufferOverflow.DROP_OLDEST
     )
 
-    // Rate limiting semaphore to prevent OOM
-    private val processingSemaphore = kotlinx.coroutines.sync.Semaphore(6)
+    // Rate limiting semaphore to prevent OOM (cap at 2 to limit direct memory allocation <= 400MB)
+    private val processingSemaphore = kotlinx.coroutines.sync.Semaphore(2)
 
     private var camera2RetryCount = 0
     private val processingChannel = kotlinx.coroutines.channels.Channel<RawImageHolder>(2)
@@ -1451,7 +1451,7 @@ class CameraFragment : Fragment() {
             }
 
             // Check concurrency limit
-            if (!processingSemaphore.tryAcquire()) {
+            if (!top.maary.darkbag.processor.HdrPlusRequestManager.canAcceptRequest() || !processingSemaphore.tryAcquire()) {
                 Toast.makeText(requireContext(),
                     "Processing queue full, please wait...",
                     Toast.LENGTH_SHORT
@@ -3535,7 +3535,6 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 // 2) optional fast downsampled JPEG (tempJpgPath) for immediate gallery update.
                 // REFACTORED: REMOVED synchronous front-end JNI.
                 val mirror = shouldMirror
-                isHdrPlusSuccess = true
                 val fastJpegUri: android.net.Uri? = null
                 
                 withContext(Dispatchers.Main) {
@@ -3612,6 +3611,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         colorEngineMode = prefs.getInt(SettingsFragment.KEY_COLOR_ENGINE_MODE, 0)
                     )
                     top.maary.darkbag.processor.HdrPlusRequestManager.enqueue(request)
+                    isHdrPlusSuccess = true
                     val serviceIntent = android.content.Intent(context, top.maary.darkbag.processor.HdrPlusProcessingService::class.java)
                     if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
                         context.startForegroundService(serviceIntent)
@@ -3655,7 +3655,9 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 }
             } finally {
                 burstResult.frames.forEach { it.close() }
-                HdrPlusBurst.releaseBuffer(burstResult.megaBuffer)
+                if (!isHdrPlusSuccess) {
+                    HdrPlusBurst.releaseBuffer(burstResult.megaBuffer)
+                }
                 
                 if (!fallbackSent) {
                     processingSemaphore.release()

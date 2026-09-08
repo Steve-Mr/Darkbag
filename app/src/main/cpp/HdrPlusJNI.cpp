@@ -128,7 +128,7 @@ struct GlobalBuffers {
     bool isInitialized = false;
 
     void ensureCapacity(int w, int h, int frames) {
-        if (!isInitialized || inputPool.width() < w || inputPool.height() < h || inputPool.dim(2).extent() < frames) {
+        if (!isInitialized || inputPool.width() != w || inputPool.height() != h || inputPool.dim(2).extent() < frames) {
             inputPool = Buffer<uint16_t>(w, h, frames);
             outputPool = Buffer<uint16_t>(w, h, 3);
             interleavedPool.resize(static_cast<size_t>(w) * h * 3);
