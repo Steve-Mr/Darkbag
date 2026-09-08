@@ -436,8 +436,8 @@ class CameraFragment : Fragment() {
         onBufferOverflow = BufferOverflow.DROP_OLDEST
     )
 
-    // Rate limiting semaphore to prevent OOM
-    private val processingSemaphore = kotlinx.coroutines.sync.Semaphore(6)
+    // Rate limiting semaphore to prevent OOM (cap at 2 to limit direct memory allocation <= 400MB)
+    private val processingSemaphore = kotlinx.coroutines.sync.Semaphore(2)
 
     private var camera2RetryCount = 0
     private val processingChannel = kotlinx.coroutines.channels.Channel<RawImageHolder>(2)
@@ -1451,7 +1451,7 @@ class CameraFragment : Fragment() {
             }
 
             // Check concurrency limit
-            if (!processingSemaphore.tryAcquire()) {
+            if (!top.maary.darkbag.processor.HdrPlusRequestManager.canAcceptRequest() || !processingSemaphore.tryAcquire()) {
                 Toast.makeText(requireContext(),
                     "Processing queue full, please wait...",
                     Toast.LENGTH_SHORT

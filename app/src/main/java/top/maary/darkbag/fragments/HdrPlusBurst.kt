@@ -52,7 +52,10 @@ class HdrPlusBurst(
          */
         fun acquireBuffer(capacity: Int): ByteBuffer {
             var buffer = bufferPool.poll()
-            if (buffer == null || buffer.capacity() < capacity) {
+            while (buffer != null && buffer.capacity() < capacity) {
+                buffer = bufferPool.poll()
+            }
+            if (buffer == null) {
                 buffer = ByteBuffer.allocateDirect(capacity)
             }
             buffer.clear()
@@ -63,7 +66,7 @@ class HdrPlusBurst(
          * Returns a buffer to the pool for reuse.
          */
         fun releaseBuffer(buffer: ByteBuffer?) {
-            if (buffer != null && buffer.isDirect && bufferPool.size < MAX_POOL_SIZE) {
+            if (buffer != null && buffer.isDirect && !bufferPool.contains(buffer) && bufferPool.size < MAX_POOL_SIZE) {
                 bufferPool.offer(buffer)
             }
         }
