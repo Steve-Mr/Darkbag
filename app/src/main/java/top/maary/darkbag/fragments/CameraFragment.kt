@@ -1216,20 +1216,6 @@ class CameraFragment : Fragment() {
         // Re-apply half-frame transformations and UI if enabled
         updateHalfFrameUI()
 
-        // Pre-initialize JNI memory pool with burst size and sensor resolution
-        val burstSizeStr = prefs.getString(SettingsFragment.KEY_HDR_BURST_COUNT, "5") ?: "5"
-        val burstSize = burstSizeStr.toIntOrNull() ?: 5
-        lifecycleScope.launch(Dispatchers.Default) {
-            val targetCharId = currentLens?.id ?: targetId
-            val sensorSize = try {
-                val c = camera2Manager.getCameraCharacteristics(targetCharId)
-                val m = c.get(android.hardware.camera2.CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
-                val rawSizes = m?.getOutputSizes(android.graphics.ImageFormat.RAW_SENSOR)
-                rawSizes?.maxByOrNull { it.width * it.height }
-                    ?: c.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)?.let { android.util.Size(it.width(), it.height()) }
-            } catch (e: Exception) { null } ?: android.util.Size(4000, 3000)
-            ColorProcessor.initMemoryPool(sensorSize.width, sensorSize.height, burstSize)
-        }
 
         // Give system a moment to release hardware
         delay(300)
@@ -3655,7 +3641,9 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 }
             } finally {
                 burstResult.frames.forEach { it.close() }
-                HdrPlusBurst.releaseBuffer(burstResult.megaBuffer)
+                if (!isHdrPlusSuccess) {
+                    HdrPlusBurst.releaseBuffer(burstResult.megaBuffer)
+                }
                 
                 if (!fallbackSent) {
                     processingSemaphore.release()
@@ -3805,11 +3793,6 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             val jpegSizes = map?.getOutputSizes(android.graphics.ImageFormat.JPEG) ?: emptyArray()
             targetCaptureSize = jpegSizes.maxByOrNull { it.width * it.height } ?: android.util.Size(4000, 3000)
             rawImageReader = ImageReader.newInstance(targetCaptureSize.width, targetCaptureSize.height, android.graphics.ImageFormat.JPEG, 8)
-        }
-        val burstSizeStr = prefs.getString(SettingsFragment.KEY_HDR_BURST_COUNT, "5") ?: "5"
-        val burstSize = burstSizeStr.toIntOrNull() ?: 5
-        lifecycleScope.launch(Dispatchers.Default) {
-            ColorProcessor.initMemoryPool(targetCaptureSize.width, targetCaptureSize.height, burstSize)
         }
 
         val yuvSizes = map?.getOutputSizes(android.graphics.ImageFormat.YUV_420_888)
