@@ -121,6 +121,22 @@ class HdrPlusBurst(
         }
     }
 
+    /**
+     * Flushes whatever frames have been captured so far into a BurstResult,
+     * transferring ownership of megaBuffer and clearing internal frames.
+     * Used for partial burst fallback on watchdog timeout.
+     */
+    fun flush(): BurstResult? {
+        if (frames.isNotEmpty() && megaBuffer != null) {
+            val resultBuffer = megaBuffer!!
+            megaBuffer = null
+            val resultFrames = frames.toList()
+            frames.clear()
+            return BurstResult(resultBuffer, resultFrames)
+        }
+        return null
+    }
+
     fun reset() {
         megaBuffer?.let { releaseBuffer(it) }
         megaBuffer = null

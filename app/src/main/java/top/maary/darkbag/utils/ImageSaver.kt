@@ -62,7 +62,7 @@ object ImageSaver {
         onBitmapReady: ((Bitmap) -> Unit)? = null
     ): Uri? {
         val halfFrameManager = HalfFrameManager(context)
-        val isHalfFrameActive = !isAlreadyStitched && (halfFrameMetadata != null || halfFrameManager.isEnabled)
+        val isHalfFrameActive = !isAlreadyStitched && (halfFrameMetadata != null && halfFrameMetadata.profile != HalfFrameSessionStore.PROFILE_NORMAL)
 
         // Motion photos are strictly disabled in half-frame mode
         val effectiveMotionMp4Path = if (isHalfFrameActive) {
