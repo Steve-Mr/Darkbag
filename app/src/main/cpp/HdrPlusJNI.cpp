@@ -1,6 +1,8 @@
 #include <jni.h>
 #include <android/log.h>
 #include <vector>
+#include <unordered_map>
+#include <unordered_set>
 #include <string>
 #include <memory>
 #include <algorithm>
@@ -121,9 +123,10 @@ void fillDebugStats(JNIEnv* env, jlongArray debugStats, jlong copyMs, jlong hali
     env->SetLongArrayRegion(debugStats, 0, std::min<jsize>(len, 15), stats);
 }
 
-#include <unordered_map>
 std::unordered_map<std::string, std::shared_ptr<std::vector<uint16_t>>> g_sharedMemoryMap;
 std::mutex g_sharedMemoryMutex;
+static std::unordered_set<void*> g_nativeAllocatedBuffers;
+static std::mutex g_nativeBufferMutex;
 
 std::string getStringField(JNIEnv* env, jobject obj, jfieldID fieldID, const std::string& defaultValue) {
     jstring jstr = (jstring)env->GetObjectField(obj, fieldID);
@@ -250,6 +253,41 @@ Java_top_maary_darkbag_processor_ColorProcessor_initMemoryPool(JNIEnv* env, jobj
     (void)width;
     (void)height;
     (void)frames;
+}
+
+extern "C" JNIEXPORT jobject JNICALL
+Java_top_maary_darkbag_processor_ColorProcessor_allocateDirectBuffer(JNIEnv* env, jobject /* this */, jlong capacity) {
+    if (capacity <= 0) return nullptr;
+    void* ptr = malloc(static_cast<size_t>(capacity));
+    if (!ptr) {
+        LOGE("Failed to allocate native direct buffer of size %lld", (long long)capacity);
+        return nullptr;
+    }
+    {
+        std::lock_guard<std::mutex> lock(g_nativeBufferMutex);
+        g_nativeAllocatedBuffers.insert(ptr);
+    }
+    return env->NewDirectByteBuffer(ptr, capacity);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_top_maary_darkbag_processor_ColorProcessor_freeDirectBuffer(JNIEnv* env, jobject /* this */, jobject buffer) {
+    if (!buffer) return;
+    void* ptr = env->GetDirectBufferAddress(buffer);
+    if (!ptr) return;
+
+    bool isNative = false;
+    {
+        std::lock_guard<std::mutex> lock(g_nativeBufferMutex);
+        auto it = g_nativeAllocatedBuffers.find(ptr);
+        if (it != g_nativeAllocatedBuffers.end()) {
+            g_nativeAllocatedBuffers.erase(it);
+            isNative = true;
+        }
+    }
+    if (isNative) {
+        free(ptr);
+    }
 }
 
 extern "C" JNIEXPORT jint JNICALL

@@ -1,5 +1,6 @@
 package top.maary.darkbag.fragments
 
+import top.maary.darkbag.processor.ColorProcessor
 import java.nio.ByteBuffer
 import java.util.concurrent.ConcurrentLinkedQueue
 
@@ -43,28 +44,41 @@ class HdrPlusBurst(
          * Clears all pooled ByteBuffers to free native memory.
          */
         fun clearPool() {
-            bufferPool.clear()
+            var buf = bufferPool.poll()
+            while (buf != null) {
+                ColorProcessor.freeDirectBuffer(buf)
+                buf = bufferPool.poll()
+            }
         }
 
         /**
          * Returns a Direct ByteBuffer of at least [capacity] from the pool,
-         * or allocates a new one if necessary.
+         * or allocates a new one if necessary using native memory to avoid Dalvik OOM.
          */
         fun acquireBuffer(capacity: Int): ByteBuffer {
             var buffer = bufferPool.poll()
-            if (buffer == null || buffer.capacity() < capacity) {
-                buffer = ByteBuffer.allocateDirect(capacity)
+            if (buffer != null && buffer.capacity() < capacity) {
+                ColorProcessor.freeDirectBuffer(buffer)
+                buffer = null
+            }
+            if (buffer == null) {
+                buffer = ColorProcessor.allocateDirectBuffer(capacity.toLong())
+                    ?: ByteBuffer.allocateDirect(capacity)
             }
             buffer.clear()
             return buffer
         }
 
         /**
-         * Returns a buffer to the pool for reuse.
+         * Returns a buffer to the pool for reuse, or frees it if pool is full.
          */
         fun releaseBuffer(buffer: ByteBuffer?) {
-            if (buffer != null && buffer.isDirect && bufferPool.size < MAX_POOL_SIZE) {
-                bufferPool.offer(buffer)
+            if (buffer != null && buffer.isDirect) {
+                if (bufferPool.size < MAX_POOL_SIZE) {
+                    bufferPool.offer(buffer)
+                } else {
+                    ColorProcessor.freeDirectBuffer(buffer)
+                }
             }
         }
     }

@@ -17,6 +17,9 @@ object ColorProcessor {
 
     external fun initMemoryPool(width: Int, height: Int, frames: Int)
 
+    external fun allocateDirectBuffer(capacity: Long): ByteBuffer?
+    external fun freeDirectBuffer(buffer: ByteBuffer)
+
     data class BackgroundSaveEvent(
         val baseName: String,
         val dngPath: String?,

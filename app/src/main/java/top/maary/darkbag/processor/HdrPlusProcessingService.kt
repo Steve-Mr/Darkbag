@@ -112,6 +112,10 @@ class HdrPlusProcessingService : LifecycleService() {
                 )
             }
 
+            // Immediately release megaBuffer as soon as Halide processing is done to free ~168-208MB memory
+            HdrPlusBurst.releaseBuffer(req.megaBuffer)
+            buffersReleased = true
+
             var exportRet = ret
             if (ret >= 0) {
                 // Export full resolution image from shared memory using C++
@@ -142,10 +146,6 @@ class HdrPlusProcessingService : LifecycleService() {
                     colorEngineMode = req.colorEngineMode
                 )
             }
-
-            // Immediately release megaBuffer to free ~168MB memory
-            HdrPlusBurst.releaseBuffer(req.megaBuffer)
-            buffersReleased = true
 
             if (exportRet == 0) {
                 val totalTime = System.currentTimeMillis() - start
