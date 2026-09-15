@@ -207,6 +207,8 @@ object ImageUtils {
                 if (cropped != bitmap) bitmap.recycle()
                 cropped
             } else bitmap
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             android.util.Log.e("ImageUtils", "Failed to decode DNG: $uri", e)
         }
@@ -222,13 +224,6 @@ object ImageUtils {
     ): Bitmap? = withContext(Dispatchers.IO) {
         try {
             coroutineContext.ensureActive()
-
-            if (reqWidth <= 1024 && reqHeight <= 1024) {
-                val fastBmp = decodeDngThumbnail(context, uri, reqWidth, reqHeight, zoomFactor)
-                if (fastBmp != null) {
-                    return@withContext fastBmp
-                }
-            }
 
             val dngBytes = context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
                 java.io.FileInputStream(pfd.fileDescriptor).use { it.readBytes() }
