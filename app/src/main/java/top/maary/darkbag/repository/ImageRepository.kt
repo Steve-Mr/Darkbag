@@ -287,8 +287,17 @@ class ImageRepository(private val context: Context) {
         populateMetadata(builder)
 
         val updated = builder.build()
+        val isSandboxGroup = listOfNotNull(
+            updated.jpgUri,
+            updated.dngUri,
+            updated.dngUri1,
+            updated.dngUri2,
+            updated.rawVideoUri,
+            updated.mp4VideoUri
+        ).any { it.scheme == "file" }
+
         val currentCache = cachedGroups
-        if (currentCache != null && currentCache.any { it.baseName == updated.baseName }) {
+        if (!isSandboxGroup && currentCache != null && currentCache.any { it.baseName == updated.baseName }) {
             cachedGroups = currentCache.map { if (it.baseName == updated.baseName) updated else it }
         }
         updated

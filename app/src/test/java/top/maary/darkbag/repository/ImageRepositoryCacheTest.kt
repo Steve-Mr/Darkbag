@@ -98,4 +98,30 @@ class ImageRepositoryCacheTest {
         assertFalse("Stale group not found on disk should be pruned from flow emission", results.any { it.baseName == "stale_deleted_item" })
         assertFalse("Stale group should be pruned from cachedGroups", ImageRepository.cachedGroups?.any { it.baseName == "stale_deleted_item" } ?: false)
     }
+
+    @Test
+    fun testLoadMetadata_sandboxFileUri_doesNotUpdateCachedGroups() = runBlocking {
+        val cachedGroup = ImageGroup(
+            baseName = "test_item",
+            jpgUri = android.net.Uri.parse("content://media/external/images/media/1234"),
+            metadataLoaded = false
+        )
+        ImageRepository.cachedGroups = listOf(cachedGroup)
+
+        // A group loaded in Playground with the same baseName but file:// sandbox URI
+        val sandboxGroup = ImageGroup(
+            baseName = "test_item",
+            jpgUri = android.net.Uri.parse("file:///data/user/0/top.maary.darkbag/files/playground_dngs/test_item.jpg"),
+            metadataLoaded = false
+        )
+        val loaded = repository.loadMetadata(sandboxGroup)
+
+        assertTrue("Returned sandbox group should have metadataLoaded = true", loaded.metadataLoaded)
+        val currentCache = ImageRepository.cachedGroups
+        assertNotNull("cachedGroups must not be null", currentCache)
+        val cacheItem = currentCache!!.find { it.baseName == "test_item" }
+        assertNotNull(cacheItem)
+        assertEquals("content", cacheItem!!.jpgUri?.scheme)
+        assertFalse("cachedGroups must NOT be overwritten by file:// sandbox group", cacheItem.metadataLoaded)
+    }
 }

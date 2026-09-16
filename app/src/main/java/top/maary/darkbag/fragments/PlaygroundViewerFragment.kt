@@ -193,7 +193,8 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
                         val finalBitmap = generateProcessedBitmap(finalConfig, currentGroup)
 
                         finalBitmap?.let { bitmap ->
-                            newBaseName = if (isReplacement) currentGroup.baseName else "${currentGroup.baseName}_edited_${System.currentTimeMillis()}"
+                            val editTimestamp = java.text.SimpleDateFormat("yyyy-MM-dd-HH-mm-ss-SSS", java.util.Locale.US).format(java.util.Date())
+                            newBaseName = if (isReplacement) currentGroup.baseName else "${currentGroup.baseName}_edited_$editTimestamp"
 
                             val playgroundDir = File(appContext.filesDir, "playground_dngs")
                             if (!playgroundDir.exists()) playgroundDir.mkdirs()
@@ -490,7 +491,7 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
                                 bmpPath = tempJpgFile.absolutePath,
                                 rotationDegrees = 0,
                                 zoomFactor = 1.0f,
-                                baseName = currentGroup.baseName,
+                                baseName = top.maary.darkbag.utils.DarkbagIdentity.prefixedBaseName(currentGroup.baseName),
                                 linearDngPath = null,
                                 saveJpg = true,
                                 saveRaw = false,
@@ -635,7 +636,7 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
                                 bmpPath = null,
                                 rotationDegrees = 0,
                                 zoomFactor = 1.0f,
-                                baseName = currentGroup.baseName,
+                                baseName = top.maary.darkbag.utils.DarkbagIdentity.prefixedBaseName(currentGroup.baseName),
                                 linearDngPath = null,
                                 saveJpg = true,
                                 saveRaw = false,

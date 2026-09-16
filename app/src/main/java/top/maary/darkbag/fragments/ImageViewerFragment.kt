@@ -1885,7 +1885,13 @@ open class ImageViewerFragment : Fragment() {
                                                     r
                                                 } else bmp
 
-                                                val baseName = if (isReplacement) currentGroup.baseName else "${currentGroup.baseName}_edited_${System.currentTimeMillis()}"
+                                                val rootBaseName = top.maary.darkbag.utils.DarkbagIdentity.prefixedBaseName(currentGroup.baseName)
+                                                val baseName = if (isReplacement) {
+                                                    rootBaseName
+                                                } else {
+                                                    val editTimestamp = java.text.SimpleDateFormat("yyyy-MM-dd-HH-mm-ss-SSS", java.util.Locale.US).format(java.util.Date())
+                                                    "${rootBaseName}_edited_$editTimestamp"
+                                                }
                                                 val targetUri = if (isReplacement) currentGroup.jpgUri else null
                                                 val jpgFolderUri = appContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
                                                     .getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
@@ -2055,8 +2061,18 @@ open class ImageViewerFragment : Fragment() {
                             val bmp = processFull(null, dngUri, i)
                             if (bmp != null) {
                                 val jpgUri = lens.jpgUri
-                                val fileName = if (jpgUri != null) getFileName(context, jpgUri).substringBeforeLast(".") else "${currentGroup.baseName}_MULTI_${lens.lensTag}"
-                                val baseName = if (isReplacement) fileName else "${fileName}_edited_${System.currentTimeMillis()}"
+                                val rootBaseName = top.maary.darkbag.utils.DarkbagIdentity.prefixedBaseName(currentGroup.baseName)
+                                val fileName = if (jpgUri != null) {
+                                    top.maary.darkbag.utils.DarkbagIdentity.prefixedBaseName(getFileName(context, jpgUri).substringBeforeLast("."))
+                                } else {
+                                    "${rootBaseName}_MULTI_${lens.lensTag}"
+                                }
+                                val baseName = if (isReplacement) {
+                                    fileName
+                                } else {
+                                    val editTimestamp = java.text.SimpleDateFormat("yyyy-MM-dd-HH-mm-ss-SSS", java.util.Locale.US).format(java.util.Date())
+                                    "${fileName}_edited_$editTimestamp"
+                                }
                                 val targetUri = if (isReplacement) jpgUri else null
                                 val jpgFolderUri = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
                                     .getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
@@ -2155,7 +2171,13 @@ open class ImageViewerFragment : Fragment() {
                     }
 
                     finalBitmap?.let { bitmap ->
-                        val baseName = if (isReplacement) currentGroup.baseName else "${currentGroup.baseName}_edited_${System.currentTimeMillis()}"
+                        val rootBaseName = top.maary.darkbag.utils.DarkbagIdentity.prefixedBaseName(currentGroup.baseName)
+                        val baseName = if (isReplacement) {
+                            rootBaseName
+                        } else {
+                            val editTimestamp = java.text.SimpleDateFormat("yyyy-MM-dd-HH-mm-ss-SSS", java.util.Locale.US).format(java.util.Date())
+                            "${rootBaseName}_edited_$editTimestamp"
+                        }
                         val targetUri = if (isReplacement) currentGroup.jpgUri else null
                         val jpgFolderUri = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
                             .getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
