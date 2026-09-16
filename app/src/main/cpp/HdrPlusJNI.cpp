@@ -1,6 +1,8 @@
 #include <jni.h>
 #include <android/log.h>
 #include <vector>
+#include <unordered_map>
+#include <unordered_set>
 #include <string>
 #include <memory>
 #include <algorithm>
@@ -121,28 +123,10 @@ void fillDebugStats(JNIEnv* env, jlongArray debugStats, jlong copyMs, jlong hali
     env->SetLongArrayRegion(debugStats, 0, std::min<jsize>(len, 15), stats);
 }
 
-struct GlobalBuffers {
-    Buffer<uint16_t> inputPool;
-    Buffer<uint16_t> outputPool;
-    std::vector<uint16_t> interleavedPool;
-    bool isInitialized = false;
-
-    void ensureCapacity(int w, int h, int frames) {
-        if (!isInitialized || inputPool.width() < w || inputPool.height() < h || inputPool.dim(2).extent() < frames) {
-            inputPool = Buffer<uint16_t>(w, h, frames);
-            outputPool = Buffer<uint16_t>(w, h, 3);
-            interleavedPool.resize(static_cast<size_t>(w) * h * 3);
-            isInitialized = true;
-            LOGD("Memory pool (re)allocated: %d x %d x %d", w, h, frames);
-        }
-    }
-};
-
-GlobalBuffers g_hdrPlusBuffers;
-
-#include <unordered_map>
 std::unordered_map<std::string, std::shared_ptr<std::vector<uint16_t>>> g_sharedMemoryMap;
 std::mutex g_sharedMemoryMutex;
+static std::unordered_set<void*> g_nativeAllocatedBuffers;
+static std::mutex g_nativeBufferMutex;
 
 std::string getStringField(JNIEnv* env, jobject obj, jfieldID fieldID, const std::string& defaultValue) {
     jstring jstr = (jstring)env->GetObjectField(obj, fieldID);
@@ -263,8 +247,47 @@ ImageMetadata metadataFromJava(JNIEnv* env, jobject metadataObj) {
 
 extern "C" JNIEXPORT void JNICALL
 Java_top_maary_darkbag_processor_ColorProcessor_initMemoryPool(JNIEnv* env, jobject /* this */, jint width, jint height, jint frames) {
+    // No-op: Output buffers are allocated on-demand directly into sharedBuf or locally scoped,
+    // avoiding dangerous concurrent reallocations during camera switches.
+    (void)env;
+    (void)width;
+    (void)height;
+    (void)frames;
+}
 
-    g_hdrPlusBuffers.ensureCapacity(width, height, frames);
+extern "C" JNIEXPORT jobject JNICALL
+Java_top_maary_darkbag_processor_ColorProcessor_allocateDirectBuffer(JNIEnv* env, jobject /* this */, jlong capacity) {
+    if (capacity <= 0) return nullptr;
+    void* ptr = malloc(static_cast<size_t>(capacity));
+    if (!ptr) {
+        LOGE("Failed to allocate native direct buffer of size %lld", (long long)capacity);
+        return nullptr;
+    }
+    {
+        std::lock_guard<std::mutex> lock(g_nativeBufferMutex);
+        g_nativeAllocatedBuffers.insert(ptr);
+    }
+    return env->NewDirectByteBuffer(ptr, capacity);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_top_maary_darkbag_processor_ColorProcessor_freeDirectBuffer(JNIEnv* env, jobject /* this */, jobject buffer) {
+    if (!buffer) return;
+    void* ptr = env->GetDirectBufferAddress(buffer);
+    if (!ptr) return;
+
+    bool isNative = false;
+    {
+        std::lock_guard<std::mutex> lock(g_nativeBufferMutex);
+        auto it = g_nativeAllocatedBuffers.find(ptr);
+        if (it != g_nativeAllocatedBuffers.end()) {
+            g_nativeAllocatedBuffers.erase(it);
+            isNative = true;
+        }
+    }
+    if (isNative) {
+        free(ptr);
+    }
 }
 
 extern "C" JNIEXPORT jint JNICALL
@@ -361,8 +384,6 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
     if (numFrames < 1) { LOGE("Processing requires at least 1 frame."); return -1; }
     if (!dngBuffer) { LOGE("dngBuffer is null"); return -1; }
 
-    g_hdrPlusBuffers.ensureCapacity(width, height, numFrames);
-    
     uint16_t* rawDataPtr = (uint16_t*)env->GetDirectBufferAddress(dngBuffer);
     if (!rawDataPtr) { LOGE("Failed to get direct buffer address"); return -1; }
     
@@ -375,9 +396,17 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
     
     auto copyDurationMs = 0; // Zero copy!
 
-    // Create properly dimensioned Halide buffers wrapping the pool memory
     Buffer<uint16_t> inputBuf(rawDataPtr, width, height, numFrames);
-    Buffer<uint16_t> outputBuf(g_hdrPlusBuffers.outputPool.data(), width, height, 3);
+
+    const char* tr_p_cstr = (tempRawPath) ? env->GetStringUTFChars(tempRawPath, 0) : nullptr;
+    std::shared_ptr<std::vector<uint16_t>> sharedBuf;
+    Buffer<uint16_t> outputBuf;
+    if (tr_p_cstr) {
+        sharedBuf = std::make_shared<std::vector<uint16_t>>(static_cast<size_t>(width) * height * 3);
+        outputBuf = Buffer<uint16_t>(sharedBuf->data(), width, height, 3);
+    } else {
+        outputBuf = Buffer<uint16_t>(width, height, 3);
+    }
 
     jfloat* wbData = env->GetFloatArrayElements(whiteBalance, nullptr);
     float wb_r = wbData[0], wb_g0 = wbData[1], wb_g1 = wbData[2], wb_b = wbData[3];
@@ -421,8 +450,11 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
 
     static bool halideThreadsConfigured = false;
     if (!halideThreadsConfigured) {
-        int cpuThreads = (int)std::thread::hardware_concurrency(); if (cpuThreads <= 0) cpuThreads = 4;
-        halide_set_num_threads(cpuThreads); halideThreadsConfigured = true;
+        int cpuThreads = (int)std::thread::hardware_concurrency();
+        if (cpuThreads <= 0) cpuThreads = 4;
+        int halideThreads = (cpuThreads >= 6) ? (cpuThreads - 2) : std::max(2, cpuThreads - 1);
+        halide_set_num_threads(halideThreads);
+        halideThreadsConfigured = true;
     }
 
     int iso = 100;
@@ -474,7 +506,11 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
     halide_report_buffer.clear(); halide_profiler_report(nullptr);
     HalideStageStats stageStats = parseHalideReport(halide_report_buffer); halide_profiler_reset();
 
-    if (halide_res != 0) { LOGE("Halide failed: %d", halide_res); return -1; }
+    if (halide_res != 0) {
+        LOGE("Halide failed: %d", halide_res);
+        if (tr_p_cstr) env->ReleaseStringUTFChars(tempRawPath, tr_p_cstr);
+        return -1;
+    }
 
     unsigned char* bitmapPixels = nullptr;
     if (outputBitmap) AndroidBitmap_lockPixels(env, outputBitmap, (void**)&bitmapPixels);
@@ -512,10 +548,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
         AndroidBitmap_unlockPixels(env, outputBitmap);
     }
 
-    const char* tr_p_cstr = (tempRawPath) ? env->GetStringUTFChars(tempRawPath, 0) : nullptr;
     if (tr_p_cstr) {
-        // Copy the planar output directly. The reader (e.g. exportHdrPlus) now knows it's planar.
-        auto sharedBuf = std::make_shared<std::vector<uint16_t>>(raw_ptr, raw_ptr + width*height*3);
         {
             std::lock_guard<std::mutex> mapLock(g_sharedMemoryMutex);
             g_sharedMemoryMap[tr_p_cstr] = sharedBuf;

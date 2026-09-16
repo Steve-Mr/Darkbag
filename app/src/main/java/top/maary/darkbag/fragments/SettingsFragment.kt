@@ -215,6 +215,15 @@ class SettingsFragment : Fragment() {
             prefs.edit().putString(KEY_HDR_UNDEREXPOSURE_MODE, HDR_UNDEREXPOSURE_MODES[position]).apply()
         }
 
+        // Burst Processing Strategy
+        val burstStrategyAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, BURST_PROCESSING_STRATEGIES)
+        binding.menuBurstProcessingStrategy.setAdapter(burstStrategyAdapter)
+        val savedBurstStrategy = prefs.getString(KEY_BURST_PROCESSING_STRATEGY, BURST_STRATEGY_BALANCED) ?: BURST_STRATEGY_BALANCED
+        binding.menuBurstProcessingStrategy.setText(savedBurstStrategy, false)
+        binding.menuBurstProcessingStrategy.setOnItemClickListener { _, _, position, _ ->
+            prefs.edit().putString(KEY_BURST_PROCESSING_STRATEGY, BURST_PROCESSING_STRATEGIES[position]).apply()
+        }
+
         // Default Lens (Startup)
         val lenses = cameraRepository.getAllFocalLengthPresets()
         val lensDisplayNames = lenses.map { it.name }
@@ -839,6 +848,10 @@ class SettingsFragment : Fragment() {
         const val KEY_FLASH_MODE = "flash_mode"
         const val KEY_HDR_BURST_COUNT = "hdr_burst_count"
         const val KEY_HDR_UNDEREXPOSURE_MODE = "hdr_underexposure_mode"
+        const val KEY_BURST_PROCESSING_STRATEGY = "burst_processing_strategy"
+        const val BURST_STRATEGY_BALANCED = "Balanced (Smooth UI)"
+        const val BURST_STRATEGY_AGGRESSIVE = "Rapid Burst (Maximum Shots)"
+        val BURST_PROCESSING_STRATEGIES = listOf(BURST_STRATEGY_BALANCED, BURST_STRATEGY_AGGRESSIVE)
         const val KEY_SHOW_HDR_UNDEREXPOSURE_BUTTON = "show_hdr_underexposure_button"
         const val KEY_SHOW_HDR_PLUS_SWITCH = "show_hdr_plus_switch"
         const val KEY_USE_INTERNAL_VIEWER = "use_internal_viewer"

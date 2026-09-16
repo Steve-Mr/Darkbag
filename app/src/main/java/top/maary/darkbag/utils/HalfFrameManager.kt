@@ -76,12 +76,9 @@ class HalfFrameManager(private val context: Context) {
         metadata: Metadata? = null,
         digitalGain: Float = 1.0f
     ): String? {
-        val activeProfile = metadata?.profile ?: sessionStore.currentProfile()
-        val isManualMode = metadata != null
-
-        // If no metadata and not enabled globally, it's a normal capture
-        if (!isManualMode && !isEnabled) return currentJpgPath
-        // If metadata profile is "normal", it's a normal capture even if HF is enabled globally
+        // If no metadata, it is strictly not a half-frame capture
+        if (metadata == null) return currentJpgPath
+        val activeProfile = metadata.profile
         if (activeProfile == HalfFrameSessionStore.PROFILE_NORMAL) return currentJpgPath
 
         val f1Base = sessionStore.readSession(profile = activeProfile).baseName

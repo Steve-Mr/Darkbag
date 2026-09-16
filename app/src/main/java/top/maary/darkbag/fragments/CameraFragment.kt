@@ -436,11 +436,17 @@ class CameraFragment : Fragment() {
         onBufferOverflow = BufferOverflow.DROP_OLDEST
     )
 
-    // Rate limiting semaphore to prevent OOM
-    private val processingSemaphore = kotlinx.coroutines.sync.Semaphore(6)
+    // Rate limiting semaphore placeholder (backpressure managed by HdrPlusRequestManager)
+    private val processingSemaphore = object : kotlinx.coroutines.sync.Semaphore {
+        override val availablePermits: Int get() = 3
+        override suspend fun acquire() {}
+        override fun release() {}
+        override fun tryAcquire(): Boolean = true
+    }
 
     private var camera2RetryCount = 0
     private val processingChannel = kotlinx.coroutines.channels.Channel<RawImageHolder>(2)
+    private var processingChannelJob: kotlinx.coroutines.Job? = null
 
     data class StandardTimingTracker(
         val shutterClick: Long,
@@ -867,21 +873,23 @@ class CameraFragment : Fragment() {
         }
 
         // Start processing consumer
-        // Use viewLifecycleOwner.lifecycleScope for the listener loop to avoid leaking fragment.
-        viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
-            for (holder in processingChannel) {
-                val appContext = requireContext().applicationContext
-                // Launch each task in applicationScope so it continues even if fragment is destroyed
-                (appContext as MainApplication).applicationScope.launch(Dispatchers.IO) {
-                    try {
-                        processImageAsync(appContext, holder)
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Error processing image from channel", e)
-                    } finally {
-                        processingSemaphore.release()
-                        withContext(Dispatchers.Main) {
-                            cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
-                            // Wait for final stitched result in backgroundSaveFlow to hide animation for ALL pipelines.
+        if (processingChannelJob == null || processingChannelJob?.isActive != true) {
+            val app = requireContext().applicationContext as MainApplication
+            processingChannelJob = app.applicationScope.launch(Dispatchers.IO) {
+                for (holder in processingChannel) {
+                    val appContext = app
+                    // Launch each task in applicationScope so it continues even if fragment is destroyed
+                    app.applicationScope.launch(Dispatchers.IO) {
+                        try {
+                            processImageAsync(appContext, holder)
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Error processing image from channel", e)
+                        } finally {
+                            processingSemaphore.release()
+                            withContext(Dispatchers.Main) {
+                                cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = true
+                                // Wait for final stitched result in backgroundSaveFlow to hide animation for ALL pipelines.
+                            }
                         }
                     }
                 }
@@ -1216,20 +1224,6 @@ class CameraFragment : Fragment() {
         // Re-apply half-frame transformations and UI if enabled
         updateHalfFrameUI()
 
-        // Pre-initialize JNI memory pool with burst size and sensor resolution
-        val burstSizeStr = prefs.getString(SettingsFragment.KEY_HDR_BURST_COUNT, "5") ?: "5"
-        val burstSize = burstSizeStr.toIntOrNull() ?: 5
-        lifecycleScope.launch(Dispatchers.Default) {
-            val targetCharId = currentLens?.id ?: targetId
-            val sensorSize = try {
-                val c = camera2Manager.getCameraCharacteristics(targetCharId)
-                val m = c.get(android.hardware.camera2.CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
-                val rawSizes = m?.getOutputSizes(android.graphics.ImageFormat.RAW_SENSOR)
-                rawSizes?.maxByOrNull { it.width * it.height }
-                    ?: c.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)?.let { android.util.Size(it.width(), it.height()) }
-            } catch (e: Exception) { null } ?: android.util.Size(4000, 3000)
-            ColorProcessor.initMemoryPool(sensorSize.width, sensorSize.height, burstSize)
-        }
 
         // Give system a moment to release hardware
         delay(300)
@@ -1450,19 +1444,23 @@ class CameraFragment : Fragment() {
                 pendingVfSnapshot = _fragmentCameraBinding?.viewFinder?.bitmap
             }
 
-            // Check concurrency limit
-            if (!processingSemaphore.tryAcquire()) {
-                Toast.makeText(requireContext(),
-                    "Processing queue full, please wait...",
-                    Toast.LENGTH_SHORT
-                ).show()
+            val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+            val burstStrategy = prefs.getString(SettingsFragment.KEY_BURST_PROCESSING_STRATEGY, SettingsFragment.BURST_STRATEGY_BALANCED)
+            val maxQueue = if (burstStrategy == SettingsFragment.BURST_STRATEGY_AGGRESSIVE) 8 else 3
+            if (!top.maary.darkbag.processor.HdrPlusRequestManager.canAcceptNewTask(maxQueue, requireContext())) {
+                val pending = top.maary.darkbag.processor.HdrPlusRequestManager.pendingTasksCount.value
+                val msg = if (pending >= maxQueue) {
+                    "Queue full: processing $pending photos, please wait..."
+                } else {
+                    "System memory low, waiting for processing to complete..."
+                }
+                Toast.makeText(requireContext(), msg, Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
 
             val timing = StandardTimingTracker(shutterClick = System.currentTimeMillis())
 
             // Early Step Update for Half-frame to allow rapid follow-up
-            val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
             val isFrame1Trigger = isHalfFrameModeEnabled && halfFrameStep == 0
             val isFrame2Trigger = isHalfFrameModeEnabled && halfFrameStep == 1
 
@@ -1606,6 +1604,7 @@ class CameraFragment : Fragment() {
         _fragmentCameraBinding?.modeSwitchButton?.let { btn ->
             updateModeSwitchIcon(btn)
             btn.setOnClickListener {
+                if (isBurstActive) return@setOnClickListener
                 cycleCaptureMode()
                 updateModeSwitchIcon(btn)
             }
@@ -1737,18 +1736,17 @@ class CameraFragment : Fragment() {
                 val captureResult = findCaptureResult(image.timestamp)
 
                 if (captureResult == null) {
-                    Log.e(
+                    Log.w(
                         TAG,
-                        "Timed out waiting for android.hardware.camera2.CaptureResult for timestamp ${image.timestamp}"
+                        "Timed out waiting for CaptureResult for timestamp ${image.timestamp}, continuing with camera defaults."
                     )
-                    return@withContext
                 }
 
                 val cameraManager =
                     context.getSystemService(Context.CAMERA_SERVICE) as android.hardware.camera2.CameraManager
 
                 val activePhysicalId = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                    captureResult.get(android.hardware.camera2.CaptureResult.LOGICAL_MULTI_CAMERA_ACTIVE_PHYSICAL_ID)
+                    captureResult?.get(android.hardware.camera2.CaptureResult.LOGICAL_MULTI_CAMERA_ACTIVE_PHYSICAL_ID)
                 } else null
 
                 val targetCharId = activePhysicalId ?: image.physicalId ?: currentLens?.id ?: "0"
@@ -1772,10 +1770,10 @@ class CameraFragment : Fragment() {
                     intArrayOf(activeArrayRect.top, activeArrayRect.left, activeArrayRect.bottom, activeArrayRect.right)
                 } else null
 
-                captureResult.get(android.hardware.camera2.CaptureResult.COLOR_CORRECTION_GAINS)?.let { wbVec ->
+                captureResult?.get(android.hardware.camera2.CaptureResult.COLOR_CORRECTION_GAINS)?.let { wbVec ->
                     wb = floatArrayOf(wbVec.red, wbVec.greenEven, wbVec.greenOdd, wbVec.blue)
                 }
-                captureResult.get(android.hardware.camera2.CaptureResult.COLOR_CORRECTION_TRANSFORM)?.let { ccmMat ->
+                captureResult?.get(android.hardware.camera2.CaptureResult.COLOR_CORRECTION_TRANSFORM)?.let { ccmMat ->
                     var idx = 0
                     for(row in 0 until 3) for(col in 0 until 3) ccm[idx++] = ccmMat.getElement(col, row).toFloat()
                 }
@@ -1783,7 +1781,7 @@ class CameraFragment : Fragment() {
                 var lensShadingMapData: FloatArray? = null
                 var lensShadingRows = 0
                 var lensShadingCols = 0
-                captureResult.get(android.hardware.camera2.CaptureResult.STATISTICS_LENS_SHADING_CORRECTION_MAP)?.let { lsc ->
+                captureResult?.get(android.hardware.camera2.CaptureResult.STATISTICS_LENS_SHADING_CORRECTION_MAP)?.let { lsc ->
                     lensShadingRows = lsc.rowCount
                     lensShadingCols = lsc.columnCount
                     val out = FloatArray(4 * lensShadingRows * lensShadingCols)
@@ -1822,10 +1820,10 @@ class CameraFragment : Fragment() {
                 val bayerDngFile = File(context.cacheDir, "${dngName}_bayer.dng")
                 var dngWritten = false
 
-                val iso = captureResult.get(android.hardware.camera2.CaptureResult.SENSOR_SENSITIVITY) ?: 100
-                val exposureTime = captureResult.get(android.hardware.camera2.CaptureResult.SENSOR_EXPOSURE_TIME) ?: 10_000_000L
-                val fNumber = captureResult.get(android.hardware.camera2.CaptureResult.LENS_APERTURE) ?: 1.8f
-                val focalLength = captureResult.get(android.hardware.camera2.CaptureResult.LENS_FOCAL_LENGTH) ?: 0.0f
+                val iso = captureResult?.get(android.hardware.camera2.CaptureResult.SENSOR_SENSITIVITY) ?: 100
+                val exposureTime = captureResult?.get(android.hardware.camera2.CaptureResult.SENSOR_EXPOSURE_TIME) ?: 10_000_000L
+                val fNumber = captureResult?.get(android.hardware.camera2.CaptureResult.LENS_APERTURE) ?: 1.8f
+                val focalLength = captureResult?.get(android.hardware.camera2.CaptureResult.LENS_FOCAL_LENGTH) ?: 0.0f
                 val captureTime = System.currentTimeMillis()
 
                 val debugStats = LongArray(15)
@@ -1854,7 +1852,7 @@ class CameraFragment : Fragment() {
                     // 保持加载动画，直到服务处理完毕
                 }
 
-                if (saveRaw) {
+                if (saveRaw && captureResult != null) {
                     try {
                         val dngThumbnailSource: java.io.File? = null
 
@@ -2698,6 +2696,7 @@ class CameraFragment : Fragment() {
                     cornerRadius = resources.getDimensionPixelSize(R.dimen.radius_full)
 
                     setOnClickListener {
+                        if (isBurstActive) return@setOnClickListener
                         if (isMultiCameraModeActive) {
                             currentLens = lens
                             updateLensUI()
@@ -3655,7 +3654,9 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 }
             } finally {
                 burstResult.frames.forEach { it.close() }
-                HdrPlusBurst.releaseBuffer(burstResult.megaBuffer)
+                if (!isHdrPlusSuccess) {
+                    HdrPlusBurst.releaseBuffer(burstResult.megaBuffer)
+                }
                 
                 if (!fallbackSent) {
                     processingSemaphore.release()
@@ -3805,11 +3806,6 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             val jpegSizes = map?.getOutputSizes(android.graphics.ImageFormat.JPEG) ?: emptyArray()
             targetCaptureSize = jpegSizes.maxByOrNull { it.width * it.height } ?: android.util.Size(4000, 3000)
             rawImageReader = ImageReader.newInstance(targetCaptureSize.width, targetCaptureSize.height, android.graphics.ImageFormat.JPEG, 8)
-        }
-        val burstSizeStr = prefs.getString(SettingsFragment.KEY_HDR_BURST_COUNT, "5") ?: "5"
-        val burstSize = burstSizeStr.toIntOrNull() ?: 5
-        lifecycleScope.launch(Dispatchers.Default) {
-            ColorProcessor.initMemoryPool(targetCaptureSize.width, targetCaptureSize.height, burstSize)
         }
 
         val yuvSizes = map?.getOutputSizes(android.graphics.ImageFormat.YUV_420_888)
@@ -4245,7 +4241,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         if (!isFrame1Trigger) {
                             showProcessingAnimation()
                         }
-                        lifecycleScope.launch {
+                        (requireContext().applicationContext as MainApplication).applicationScope.launch {
                             timing?.enqueued = System.currentTimeMillis()
                             processingChannel.send(holder)
                         }
@@ -4367,19 +4363,29 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             val watchdog = lifecycleScope.launch(Dispatchers.Main) {
                 delay(8000)
                 if (isBurstActive && framesCaptured < burstSize) {
-                    Log.e(TAG, "Burst capture timed out! Resetting UI.")
+                    Log.e(TAG, "Burst capture timed out! Captured $framesCaptured/$burstSize frames.")
                     isBurstActive = false
-                    processingSemaphore.release()
                     resetBurstUi()
+                    val partialResult = hdrPlusBurstHelper?.flush()
+                    if (partialResult != null && partialResult.frames.isNotEmpty()) {
+                        Log.i(TAG, "Submitting partial burst (${partialResult.frames.size} frames) for processing.")
+                        processHdrPlusBurst(partialResult, burstGain, hfMetadata?.copy(digitalGain = burstGain))
+                    } else {
+                        hdrPlusBurstHelper?.reset()
+                        processingSemaphore.release()
+                        hideProcessingAnimation()
+                    }
                 }
             }
+
+            val burstLensId = currentLens?.id ?: "0"
+            val burstChars = camera2Manager.getCameraCharacteristics(burstLensId)
+            val burstSensorOrientation = burstChars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
 
             reader.setOnImageAvailableListener({ r ->
                 val image = r.acquireNextImage() ?: return@setOnImageAvailableListener
                 try {
                     val plane = image.planes[0]
-                    val chars = camera2Manager.getCameraCharacteristics(currentLens?.id ?: "0")
-                    val sensorOrientation = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
 
                     hdrPlusBurstHelper?.addManualFrame(
                         plane.buffer,
@@ -4388,8 +4394,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         plane.rowStride,
                         plane.pixelStride,
                         image.timestamp,
-                        sensorOrientation,
-                        currentLens?.id
+                        burstSensorOrientation,
+                        burstLensId
                     )
                     image.close()
                     framesCaptured++
@@ -5189,6 +5195,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
     }
 
     private fun cycleCaptureMode() {
+        if (isBurstActive) return
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
         val isHalfFramePref = prefs.getBoolean(SettingsFragment.KEY_HALF_FRAME_MODE, false)
         val isMultiCamPref = prefs.getBoolean(SettingsFragment.KEY_MULTI_CAMERA_MODE, false)

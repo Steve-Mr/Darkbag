@@ -158,4 +158,14 @@ class SettingsFragmentTest {
         }
         assertEquals(listOf("24", "30", "60 (Unsupported)"), formatted)
     }
+
+    @Test
+    fun testBurstProcessingStrategies() {
+        assertEquals(
+            listOf(SettingsFragment.BURST_STRATEGY_BALANCED, SettingsFragment.BURST_STRATEGY_AGGRESSIVE),
+            SettingsFragment.BURST_PROCESSING_STRATEGIES
+        )
+        assertEquals("Balanced (Smooth UI)", SettingsFragment.BURST_STRATEGY_BALANCED)
+        assertEquals("Rapid Burst (Maximum Shots)", SettingsFragment.BURST_STRATEGY_AGGRESSIVE)
+    }
 }
