@@ -1535,7 +1535,13 @@ open class ImageViewerFragment : Fragment() {
 
     private fun applyEditPreviewInternal(config: top.maary.darkbag.models.EditConfig) {
         val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
-        val dngUri1 = currentGroup.dngUri ?: currentGroup.dngUri1
+        val dngUri1 = if (currentGroup.isMultiCamera) {
+            val lenses = if (currentGroup.multiCameraLenses.isNotEmpty()) currentGroup.multiCameraLenses else adapter.getMultiCameraLenses(currentGroup)
+            val idx = adapter.getSelectedLensIndex(binding.imagePager.currentItem).coerceIn(0, (lenses.size - 1).coerceAtLeast(0))
+            lenses.getOrNull(idx)?.dngUri ?: currentGroup.multiDngUris.getOrNull(idx) ?: currentGroup.multiDngUris.firstOrNull()
+        } else {
+            currentGroup.dngUri ?: currentGroup.dngUri1
+        }
         val dngUri2 = currentGroup.dngUri2
 
         val currentIndex = binding.imagePager.currentItem
@@ -1579,13 +1585,14 @@ open class ImageViewerFragment : Fragment() {
                             }
                         } ?: return null
 
-                        val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                        BitmapFactory.decodeByteArray(finalBytes, 0, finalBytes.size, options)
-                        val ds = top.maary.darkbag.utils.ImageUtils.calculateInSampleSize(options, 1024, 1024)
-
+                        var rawWidth = 0
+                        var rawHeight = 0
                         val orientation = try {
-                            context.contentResolver.openInputStream(uri)?.use { input ->
-                                androidx.exifinterface.media.ExifInterface(input).getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION, androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL)
+                            context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                                val exif = androidx.exifinterface.media.ExifInterface(pfd.fileDescriptor)
+                                rawWidth = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_IMAGE_WIDTH, 0)
+                                rawHeight = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_IMAGE_LENGTH, 0)
+                                exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION, androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL)
                             } ?: androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL
                         } catch (e: Exception) { androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL }
 
@@ -1596,10 +1603,30 @@ open class ImageViewerFragment : Fragment() {
                             else -> 0
                         }
 
-                        val fullW = if (rotDegrees == 90 || rotDegrees == 270) options.outHeight / ds else options.outWidth / ds
-                        val fullH = if (rotDegrees == 90 || rotDegrees == 270) options.outWidth / ds else options.outHeight / ds
-                        val bmpW = (fullW / config.zoomFactor).toInt()
-                        val bmpH = (fullH / config.zoomFactor).toInt()
+                        val isRotated90or270 = (rotDegrees == 90 || rotDegrees == 270)
+                        val ds: Int
+                        val fullW: Int
+                        val fullH: Int
+
+                        if (rawWidth > 0 && rawHeight > 0) {
+                            ds = top.maary.darkbag.utils.ImageUtils.calculateInSampleSize(rawWidth, rawHeight, 1024, 1024)
+                            fullW = if (isRotated90or270) rawHeight / ds else rawWidth / ds
+                            fullH = if (isRotated90or270) rawWidth / ds else rawHeight / ds
+                        } else {
+                            val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                            BitmapFactory.decodeByteArray(finalBytes, 0, finalBytes.size, options)
+                            ds = top.maary.darkbag.utils.ImageUtils.calculateInSampleSize(options, 1024, 1024)
+                            if (isRotated90or270 && options.outWidth > options.outHeight) {
+                                fullW = options.outHeight / ds
+                                fullH = options.outWidth / ds
+                            } else {
+                                fullW = options.outWidth / ds
+                                fullH = options.outHeight / ds
+                            }
+                        }
+
+                        val bmpW = (fullW / config.zoomFactor).toInt().coerceAtLeast(1)
+                        val bmpH = (fullH / config.zoomFactor).toInt().coerceAtLeast(1)
                         val previewBitmap = android.graphics.Bitmap.createBitmap(bmpW, bmpH, android.graphics.Bitmap.Config.ARGB_8888)
 
                         val adj = if (currentGroup.isHalfFrame()) config.adjustments?.get(index) ?: top.maary.darkbag.models.BasicAdjustments() else config.toBasic()
@@ -1881,7 +1908,13 @@ open class ImageViewerFragment : Fragment() {
             return
         }
 
-        val dngUri1 = currentGroup.dngUri ?: currentGroup.dngUri1
+        val dngUri1 = if (currentGroup.isMultiCamera) {
+            val lenses = if (currentGroup.multiCameraLenses.isNotEmpty()) currentGroup.multiCameraLenses else adapter.getMultiCameraLenses(currentGroup)
+            val idx = adapter.getSelectedLensIndex(binding.imagePager.currentItem).coerceIn(0, (lenses.size - 1).coerceAtLeast(0))
+            lenses.getOrNull(idx)?.dngUri ?: currentGroup.multiDngUris.getOrNull(idx) ?: currentGroup.multiDngUris.firstOrNull()
+        } else {
+            currentGroup.dngUri ?: currentGroup.dngUri1
+        }
         val dngUri2 = currentGroup.dngUri2
 
         previewJob?.cancel()
@@ -1907,11 +1940,15 @@ open class ImageViewerFragment : Fragment() {
                                 java.io.FileInputStream(pfd.fileDescriptor).use { it.readBytes() }
                             }
                         } ?: return null
-                        val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                        BitmapFactory.decodeByteArray(finalBytes, 0, finalBytes.size, options)
+
+                        var rawWidth = 0
+                        var rawHeight = 0
                         val orientation = try {
-                            context.contentResolver.openInputStream(uri)?.use { input ->
-                                androidx.exifinterface.media.ExifInterface(input).getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION, androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL)
+                            context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                                val exif = androidx.exifinterface.media.ExifInterface(pfd.fileDescriptor)
+                                rawWidth = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_IMAGE_WIDTH, 0)
+                                rawHeight = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_IMAGE_LENGTH, 0)
+                                exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION, androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL)
                             } ?: androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL
                         } catch (e: Exception) { androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL }
 
@@ -1921,10 +1958,28 @@ open class ImageViewerFragment : Fragment() {
                             androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270 -> 270
                             else -> 0
                         }
-                        val fullW = if (rotDegrees == 90 || rotDegrees == 270) options.outHeight else options.outWidth
-                        val fullH = if (rotDegrees == 90 || rotDegrees == 270) options.outWidth else options.outHeight
-                        val bmpW = (fullW / config.zoomFactor).toInt()
-                        val bmpH = (fullH / config.zoomFactor).toInt()
+
+                        val isRotated90or270 = (rotDegrees == 90 || rotDegrees == 270)
+                        val fullW: Int
+                        val fullH: Int
+
+                        if (rawWidth > 0 && rawHeight > 0) {
+                            fullW = if (isRotated90or270) rawHeight else rawWidth
+                            fullH = if (isRotated90or270) rawWidth else rawHeight
+                        } else {
+                            val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                            BitmapFactory.decodeByteArray(finalBytes, 0, finalBytes.size, options)
+                            if (isRotated90or270 && options.outWidth > options.outHeight) {
+                                fullW = options.outHeight
+                                fullH = options.outWidth
+                            } else {
+                                fullW = options.outWidth
+                                fullH = options.outHeight
+                            }
+                        }
+
+                        val bmpW = (fullW / config.zoomFactor).toInt().coerceAtLeast(1)
+                        val bmpH = (fullH / config.zoomFactor).toInt().coerceAtLeast(1)
                         val previewBitmap = android.graphics.Bitmap.createBitmap(bmpW, bmpH, android.graphics.Bitmap.Config.ARGB_8888)
                         val adj = if (currentGroup.isHalfFrame()) config.adjustments?.get(index) ?: top.maary.darkbag.models.BasicAdjustments() else config.toBasic()
 

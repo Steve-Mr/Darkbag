@@ -1128,61 +1128,38 @@ class PlaygroundAdapter(
             var decodedBitmap: Bitmap? = null
             var bitmapAssigned = false
             try {
-                val exifInterface = ExifInterface(file.absolutePath)
-                if (exifInterface.hasThumbnail()) {
-                    val thumbnailBytes = exifInterface.thumbnailBytes
-                    if (thumbnailBytes != null) {
-                        decodedBitmap = BitmapFactory.decodeByteArray(thumbnailBytes, 0, thumbnailBytes.size)
-                    }
-                }
+                decodedBitmap = top.maary.darkbag.utils.ImageUtils.decodeDngThumbnail(
+                    context = context,
+                    uri = Uri.fromFile(file),
+                    reqWidth = 400,
+                    reqHeight = 400
+                )
 
                 if (decodedBitmap == null) {
                     val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                     BitmapFactory.decodeFile(file.absolutePath, options)
-                    var inSampleSize = 1
-                    val maxDimension = 400
-                    while ((options.outWidth / inSampleSize) > maxDimension || (options.outHeight / inSampleSize) > maxDimension) {
-                        inSampleSize *= 2
-                    }
+                    val inSampleSize = top.maary.darkbag.utils.ImageUtils.calculateInSampleSize(options, 400, 400)
                     val decodeOpts = BitmapFactory.Options().apply {
                         this.inSampleSize = inSampleSize
                         inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888
                     }
                     decodedBitmap = BitmapFactory.decodeFile(file.absolutePath, decodeOpts)
-                }
-
-                ensureActive()
-
-                // Fix orientation issues for extracted thumbnails or downsampled decodes
-                if (decodedBitmap != null) {
-                    val orientation = try {
-                        ExifInterface(file.absolutePath).getAttributeInt(
-                            ExifInterface.TAG_ORIENTATION,
+                    if (decodedBitmap != null) {
+                        val orientation = try {
+                            ExifInterface(file.absolutePath).getAttributeInt(
+                                ExifInterface.TAG_ORIENTATION,
+                                ExifInterface.ORIENTATION_NORMAL
+                            )
+                        } catch (e: Exception) {
                             ExifInterface.ORIENTATION_NORMAL
-                        )
-                    } catch (e: Exception) {
-                        ExifInterface.ORIENTATION_NORMAL
-                    }
-
-                    val rotationDegrees = when (orientation) {
-                        ExifInterface.ORIENTATION_ROTATE_90 -> 90f
-                        ExifInterface.ORIENTATION_ROTATE_180 -> 180f
-                        ExifInterface.ORIENTATION_ROTATE_270 -> 270f
-                        else -> 0f
-                    }
-
-                    if (rotationDegrees != 0f) {
-                        val matrix = android.graphics.Matrix()
-                        matrix.postRotate(rotationDegrees)
-                        val rotatedBitmap = android.graphics.Bitmap.createBitmap(
-                            decodedBitmap!!, 0, 0, decodedBitmap!!.width, decodedBitmap!!.height, matrix, true
-                        )
-                        if (rotatedBitmap != decodedBitmap) {
-                            decodedBitmap!!.recycle()
-                            decodedBitmap = rotatedBitmap
+                        }
+                        if (orientation != ExifInterface.ORIENTATION_NORMAL) {
+                            decodedBitmap = top.maary.darkbag.utils.ImageUtils.rotateBitmap(decodedBitmap!!, orientation)
                         }
                     }
                 }
+
+                ensureActive()
 
                 kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
                     if (imageView.tag == currentTag) {
