@@ -96,6 +96,7 @@ open class ImageViewerFragment : Fragment() {
     protected lateinit var adapter: ImageViewerAdapter
     protected lateinit var galleryAdapter: DarkbagGalleryGridAdapter
     protected var isGalleryMode = false
+    protected open val isGallerySupported: Boolean = true
 
     var isMotionPhotoAutoPlay = true
     protected var hasAutoPlayedPosition = -1
@@ -2944,6 +2945,7 @@ open class ImageViewerFragment : Fragment() {
     }
 
     protected fun setupGalleryView() {
+        if (!isGallerySupported) return
         val isLandscape = resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
         val spanCount = if (isLandscape) 5 else 3
 
@@ -2997,7 +2999,7 @@ open class ImageViewerFragment : Fragment() {
     }
 
     protected fun updateGalleryPill(position: Int, totalCount: Int) {
-        if (totalCount <= 0) {
+        if (!isGallerySupported || totalCount <= 0) {
             binding.btnGalleryPill.visibility = View.GONE
         } else {
             val currentPos = (position + 1).coerceIn(1, totalCount)
@@ -3007,6 +3009,7 @@ open class ImageViewerFragment : Fragment() {
     }
 
     fun enterGalleryMode(targetPosition: Int = binding.imagePager.currentItem) {
+        if (!isGallerySupported) return
         if (isEditingAdjustments || isAdjusted) return
         if (isGalleryMode) return
         isGalleryMode = true
