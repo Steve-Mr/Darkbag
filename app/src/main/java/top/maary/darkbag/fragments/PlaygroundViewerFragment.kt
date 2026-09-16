@@ -138,35 +138,33 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
 
     override fun setupActionButtons() {
         super.setupActionButtons()
+    }
 
-        binding.btnSaveMenu.setOnClickListener {
-            binding.btnSaveMenu.isCheckable = true
-            binding.btnSaveMenu.isChecked = true
-            val popup = PopupMenu(requireContext(), it)
+    override fun showSaveMenu(anchor: View) {
+        val popup = PopupMenu(requireContext(), anchor)
 
-            popup.menu.add(0, 1001, 0, "Save as new file").apply {
-                setIcon(R.drawable.ic_save_as)
-            }
-            popup.menu.add(0, 1002, 0, getString(R.string.share_as_tiff)).apply {
-                setIcon(R.drawable.ic_photo)
-            }
-            popup.menu.add(0, 1003, 0, "Export to JPG (Pictures)").apply {
-                setIcon(R.drawable.ic_save)
-            }
-
-            forceShowIcons(popup)
-
-            popup.setOnMenuItemClickListener { item ->
-                when (item.itemId) {
-                    1001 -> saveEdit(isReplacement = false)
-                    1002 -> performShareAsTiff()
-                    1003 -> exportToJpg()
-                }
-                true
-            }
-            popup.setOnDismissListener { binding.btnSaveMenu.isChecked = false }
-            popup.show()
+        popup.menu.add(0, 1001, 0, "Save as new file").apply {
+            setIcon(R.drawable.ic_save_as)
         }
+        popup.menu.add(0, 1002, 0, getString(R.string.share_as_tiff)).apply {
+            setIcon(R.drawable.ic_photo)
+        }
+        popup.menu.add(0, 1003, 0, "Export to JPG (Pictures)").apply {
+            setIcon(R.drawable.ic_save)
+        }
+
+        forceShowIcons(popup)
+
+        popup.setOnMenuItemClickListener { item ->
+            when (item.itemId) {
+                1001 -> saveEdit(isReplacement = false)
+                1002 -> performShareAsTiff()
+                1003 -> exportToJpg()
+            }
+            true
+        }
+        popup.setOnDismissListener { binding.btnActionMenu?.isChecked = false }
+        popup.show()
     }
 
     override fun saveEdit(isReplacement: Boolean) {

@@ -662,25 +662,25 @@ open class ImageViewerFragment : Fragment() {
     }
 
     private fun updateSplitButtons() {
-        if (isAdjusted || isEditingAdjustments) {
-            binding.splitShare.visibility = View.GONE
-            binding.splitSave.visibility = View.VISIBLE
+        if (isEditingAdjustments || isAdjusted) {
+            binding.btnActionMain?.setIconResource(R.drawable.ic_save)
+            binding.btnActionMain?.contentDescription = getString(R.string.save)
         } else {
-            binding.splitShare.visibility = View.VISIBLE
-            binding.splitSave.visibility = View.GONE
-
             if (::adapter.isInitialized && adapter.itemCount > 0) {
                 val currentIndex = binding.imagePager.currentItem
                 val currentGroup = adapter.getGroup(currentIndex)
                 val isUnrenderedRawVideoOrCinemaDng = (currentGroup.isRawVideo || currentGroup.rawVideoUri != null || currentGroup.isCinemaDng || currentGroup.cinemaDngFolderUri != null || currentGroup.cinemaDngFirstFrameUri != null || currentGroup.cinemaDngFrameUris.isNotEmpty()) && currentGroup.mp4VideoUri == null
 
                 if (isUnrenderedRawVideoOrCinemaDng) {
-                    binding.btnShareMain.setIconResource(R.drawable.ic_save)
-                    binding.btnShareMain.contentDescription = getString(R.string.action_export_main)
+                    binding.btnActionMain?.setIconResource(R.drawable.ic_save)
+                    binding.btnActionMain?.contentDescription = getString(R.string.action_export_main)
                 } else {
-                    binding.btnShareMain.setIconResource(R.drawable.ic_share)
-                    binding.btnShareMain.contentDescription = getString(R.string.share_button_alt)
+                    binding.btnActionMain?.setIconResource(R.drawable.ic_share)
+                    binding.btnActionMain?.contentDescription = getString(R.string.share_button_alt)
                 }
+            } else {
+                binding.btnActionMain?.setIconResource(R.drawable.ic_share)
+                binding.btnActionMain?.contentDescription = getString(R.string.share_button_alt)
             }
         }
     }
@@ -694,100 +694,35 @@ open class ImageViewerFragment : Fragment() {
     }
 
     protected open fun setupActionButtons() {
-        binding.btnShareMain.setOnClickListener {
-            if (::adapter.isInitialized && adapter.itemCount > 0) {
-                val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
-                val isUnrenderedRawVideoOrCinemaDng = (currentGroup.isRawVideo || currentGroup.rawVideoUri != null || currentGroup.isCinemaDng || currentGroup.cinemaDngFolderUri != null || currentGroup.cinemaDngFirstFrameUri != null || currentGroup.cinemaDngFrameUris.isNotEmpty()) && currentGroup.mp4VideoUri == null
-                if (isUnrenderedRawVideoOrCinemaDng) {
-                    openExportHub()
+        binding.btnActionMain?.setOnClickListener {
+            if (isSaving) return@setOnClickListener
+            it.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+
+            if (isEditingAdjustments || isAdjusted) {
+                saveEdit(isReplacement = true)
+            } else {
+                if (::adapter.isInitialized && adapter.itemCount > 0) {
+                    val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
+                    val isUnrenderedRawVideoOrCinemaDng = (currentGroup.isRawVideo || currentGroup.rawVideoUri != null || currentGroup.isCinemaDng || currentGroup.cinemaDngFolderUri != null || currentGroup.cinemaDngFirstFrameUri != null || currentGroup.cinemaDngFrameUris.isNotEmpty()) && currentGroup.mp4VideoUri == null
+                    if (isUnrenderedRawVideoOrCinemaDng) {
+                        openExportHub()
+                    } else {
+                        performShare()
+                    }
                 } else {
                     performShare()
                 }
+            }
+        }
+
+        binding.btnActionMenu?.setOnClickListener {
+            binding.btnActionMenu?.isCheckable = true
+            binding.btnActionMenu?.isChecked = true
+            if (isEditingAdjustments || isAdjusted) {
+                showSaveMenu(it)
             } else {
-                performShare()
+                showViewMenu(it)
             }
-        }
-        binding.btnShareMenu.setOnClickListener {
-            binding.btnShareMenu.isCheckable = true
-            binding.btnShareMenu.isChecked = true
-            val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
-            val popup = PopupMenu(requireContext(), it)
-            val isUnrenderedRawVideoOrCinemaDng = (currentGroup.isRawVideo || currentGroup.rawVideoUri != null || currentGroup.isCinemaDng || currentGroup.cinemaDngFolderUri != null || currentGroup.cinemaDngFirstFrameUri != null || currentGroup.cinemaDngFrameUris.isNotEmpty()) && currentGroup.mp4VideoUri == null
-
-            if (isUnrenderedRawVideoOrCinemaDng) {
-                popup.menu.add(0, MENU_SHARE, 0, getString(R.string.share_button_alt)).apply {
-                    setIcon(R.drawable.ic_share)
-                }
-            } else {
-                popup.menu.add(0, MENU_EXPORT_HUB, 0, getString(R.string.action_export)).apply {
-                    setIcon(R.drawable.ic_save)
-                }
-                if (currentGroup.dngUri != null || currentGroup.dngUri1 != null || currentGroup.dngUri2 != null) {
-                    popup.menu.add(0, MENU_SHARE_TIFF, 0, getString(R.string.share_as_tiff)).apply {
-                        setIcon(R.drawable.ic_photo)
-                    }
-                }
-            }
-            if (currentGroup.isMultiCamera) {
-                popup.menu.add(0, MENU_COLLAGE, 0, getString(R.string.create_multi_cam_collage)).apply {
-                    setIcon(R.drawable.ic_photo)
-                }
-            }
-            popup.menu.add(0, MENU_DETAILS, 0, "Details").apply {
-                setIcon(R.drawable.ic_info)
-            }
-            popup.menu.add(0, MENU_DELETE, 0, "Delete").apply {
-                setIcon(R.drawable.ic_delete)
-            }
-
-            forceShowIcons(popup)
-
-            popup.setOnMenuItemClickListener { item ->
-                when (item.itemId) {
-                    MENU_SHARE -> performShare()
-                    MENU_EXPORT_HUB -> openExportHub()
-                    MENU_SHARE_TIFF -> performShareAsTiff()
-                    MENU_EXPORT_CINEMADNG_FRAME -> openExportHub()
-                    MENU_EXPORT_CINEMA_DNG -> performExportCinemaDng(adapter.getGroup(binding.imagePager.currentItem))
-                    MENU_EXPORT_MP4 -> openExportHub()
-                    MENU_COLLAGE -> showMultiCamCollageDialog(adapter.getGroup(binding.imagePager.currentItem))
-                    MENU_DETAILS -> showImageDetails()
-                    MENU_DELETE -> {
-                        val groupToDelete = adapter.getGroup(binding.imagePager.currentItem)
-                        showDeleteDialog(groupToDelete)
-                    }
-                }
-                true
-            }
-            popup.setOnDismissListener { binding.btnShareMenu.isChecked = false }
-            popup.show()
-        }
-
-        binding.btnSaveMain.setOnClickListener {
-            saveEdit(isReplacement = true)
-        }
-        binding.btnSaveMenu.setOnClickListener {
-            binding.btnSaveMenu.isCheckable = true
-            binding.btnSaveMenu.isChecked = true
-            val popup = PopupMenu(requireContext(), it)
-            popup.menu.add(0, MENU_SAVE_AS, 0, "Save as new file").apply {
-                setIcon(R.drawable.ic_save_as)
-            }
-            popup.menu.add(0, MENU_SHARE_TIFF, 0, getString(R.string.share_as_tiff)).apply {
-                setIcon(R.drawable.ic_photo)
-            }
-
-            forceShowIcons(popup)
-
-            popup.setOnMenuItemClickListener { item ->
-                when (item.itemId) {
-                    MENU_SAVE_AS -> saveEdit(isReplacement = false)
-                    MENU_SHARE_TIFF -> performShareAsTiff()
-                }
-                true
-            }
-            popup.setOnDismissListener { binding.btnSaveMenu.isChecked = false }
-            popup.show()
         }
 
         binding.btnLogLut.setOnClickListener {
@@ -950,6 +885,86 @@ open class ImageViewerFragment : Fragment() {
                 applyEditPreview()
             }
         }
+    }
+
+    protected open fun showSaveMenu(anchor: View) {
+        val popup = PopupMenu(requireContext(), anchor)
+        popup.menu.add(0, MENU_SAVE_AS, 0, "Save as new file").apply {
+            setIcon(R.drawable.ic_save_as)
+        }
+        popup.menu.add(0, MENU_SHARE_TIFF, 0, getString(R.string.share_as_tiff)).apply {
+            setIcon(R.drawable.ic_photo)
+        }
+
+        forceShowIcons(popup)
+
+        popup.setOnMenuItemClickListener { item ->
+            when (item.itemId) {
+                MENU_SAVE_AS -> saveEdit(isReplacement = false)
+                MENU_SHARE_TIFF -> performShareAsTiff()
+            }
+            true
+        }
+        popup.setOnDismissListener { binding.btnActionMenu?.isChecked = false }
+        popup.show()
+    }
+
+    protected open fun showViewMenu(anchor: View) {
+        if (!::adapter.isInitialized || adapter.itemCount == 0) {
+            binding.btnActionMenu?.isChecked = false
+            return
+        }
+        val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
+        val popup = PopupMenu(requireContext(), anchor)
+        val isUnrenderedRawVideoOrCinemaDng = (currentGroup.isRawVideo || currentGroup.rawVideoUri != null || currentGroup.isCinemaDng || currentGroup.cinemaDngFolderUri != null || currentGroup.cinemaDngFirstFrameUri != null || currentGroup.cinemaDngFrameUris.isNotEmpty()) && currentGroup.mp4VideoUri == null
+
+        if (isUnrenderedRawVideoOrCinemaDng) {
+            popup.menu.add(0, MENU_SHARE, 0, getString(R.string.share_button_alt)).apply {
+                setIcon(R.drawable.ic_share)
+            }
+        } else {
+            popup.menu.add(0, MENU_EXPORT_HUB, 0, getString(R.string.action_export)).apply {
+                setIcon(R.drawable.ic_save)
+            }
+            if (currentGroup.dngUri != null || currentGroup.dngUri1 != null || currentGroup.dngUri2 != null) {
+                popup.menu.add(0, MENU_SHARE_TIFF, 0, getString(R.string.share_as_tiff)).apply {
+                    setIcon(R.drawable.ic_photo)
+                }
+            }
+        }
+        if (currentGroup.isMultiCamera) {
+            popup.menu.add(0, MENU_COLLAGE, 0, getString(R.string.create_multi_cam_collage)).apply {
+                setIcon(R.drawable.ic_photo)
+            }
+        }
+        popup.menu.add(0, MENU_DETAILS, 0, "Details").apply {
+            setIcon(R.drawable.ic_info)
+        }
+        popup.menu.add(0, MENU_DELETE, 0, "Delete").apply {
+            setIcon(R.drawable.ic_delete)
+        }
+
+        forceShowIcons(popup)
+
+        popup.setOnMenuItemClickListener { item ->
+            when (item.itemId) {
+                MENU_SHARE -> performShare()
+                MENU_EXPORT_HUB -> openExportHub()
+                MENU_SHARE_TIFF -> performShareAsTiff()
+                MENU_EXPORT_CINEMADNG_FRAME -> openExportHub()
+                MENU_EXPORT_CINEMA_DNG -> performExportCinemaDng(adapter.getGroup(binding.imagePager.currentItem))
+                MENU_EXPORT_MP4 -> openExportHub()
+                MENU_COLLAGE -> showMultiCamCollageDialog(adapter.getGroup(binding.imagePager.currentItem))
+                MENU_DETAILS -> showImageDetails()
+                MENU_DELETE -> {
+                    val groupToDelete = adapter.getGroup(binding.imagePager.currentItem)
+                    showDeleteDialog(groupToDelete)
+                }
+            }
+            true
+        }
+        popup.setOnDismissListener { binding.btnActionMenu?.isChecked = false }
+        popup.show()
     }
 
     protected fun markAdjusted() {
@@ -1352,8 +1367,11 @@ open class ImageViewerFragment : Fragment() {
         isEditingAdjustments = false
 
         if (!apply) {
+            isAdjusted = false
             currentEditConfig = configBeforeEditing?.copy()
             applyEditPreview()
+            updateSplitButtons()
+            updateToolbarIcon()
         }
 
         binding.imagePager.isUserInputEnabled = !isAdjusted
@@ -3307,10 +3325,7 @@ open class ImageViewerFragment : Fragment() {
             binding.btnNavigation.updateLayoutParams<ViewGroup.MarginLayoutParams> {
                 leftMargin = marginMedium
             }
-            binding.splitShare.updateLayoutParams<ViewGroup.MarginLayoutParams> {
-                rightMargin = systemBars.right + marginMedium
-            }
-            binding.splitSave.updateLayoutParams<ViewGroup.MarginLayoutParams> {
+            binding.splitAction?.updateLayoutParams<ViewGroup.MarginLayoutParams> {
                 rightMargin = systemBars.right + marginMedium
             }
             binding.bottomLeftControls.updateLayoutParams<ViewGroup.MarginLayoutParams> {
