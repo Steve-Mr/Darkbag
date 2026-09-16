@@ -1,5 +1,6 @@
 package top.maary.darkbag.processor
 
+import android.content.Context
 import android.net.Uri
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -74,5 +75,16 @@ object HdrPlusRequestManager {
 
     fun onTaskFinished() {
         _pendingTasksCount.update { (it - 1).coerceAtLeast(0) }
+    }
+
+    fun canAcceptNewTask(maxAllowedQueue: Int, context: Context): Boolean {
+        if (_pendingTasksCount.value >= maxAllowedQueue) return false
+        val actManager = context.getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
+        val memInfo = android.app.ActivityManager.MemoryInfo()
+        actManager?.getMemoryInfo(memInfo)
+        if (memInfo.lowMemory || memInfo.availMem < 600L * 1024L * 1024L) {
+            return false
+        }
+        return true
     }
 }

@@ -450,8 +450,11 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
 
     static bool halideThreadsConfigured = false;
     if (!halideThreadsConfigured) {
-        int cpuThreads = (int)std::thread::hardware_concurrency(); if (cpuThreads <= 0) cpuThreads = 4;
-        halide_set_num_threads(cpuThreads); halideThreadsConfigured = true;
+        int cpuThreads = (int)std::thread::hardware_concurrency();
+        if (cpuThreads <= 0) cpuThreads = 4;
+        int halideThreads = (cpuThreads >= 6) ? (cpuThreads - 2) : std::max(2, cpuThreads - 1);
+        halide_set_num_threads(halideThreads);
+        halideThreadsConfigured = true;
     }
 
     int iso = 100;

@@ -1,6 +1,7 @@
 package top.maary.darkbag.processor
 
 import java.nio.ByteBuffer
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.flow.MutableSharedFlow
 import top.maary.darkbag.models.CaptureMetadata
 
@@ -12,8 +13,19 @@ object ColorProcessor {
     val backgroundSaveFlow = MutableSharedFlow<BackgroundSaveEvent>(extraBufferCapacity = 10)
     val halfFrameFlow = MutableSharedFlow<Int>(extraBufferCapacity = 5)
 
-    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
-    val imageProcessingDispatcher = kotlinx.coroutines.newSingleThreadContext("HdrPlusProcessor")
+    val imageProcessingDispatcher = java.util.concurrent.Executors.newSingleThreadExecutor { runnable ->
+        Thread {
+            try {
+                android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_DEFAULT + 2)
+            } catch (e: Exception) {
+                // Ignore
+            }
+            runnable.run()
+        }.apply {
+            name = "HdrPlusProcessor"
+            isDaemon = true
+        }
+    }.asCoroutineDispatcher()
 
     external fun initMemoryPool(width: Int, height: Int, frames: Int)
 

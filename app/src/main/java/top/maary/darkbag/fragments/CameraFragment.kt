@@ -436,8 +436,13 @@ class CameraFragment : Fragment() {
         onBufferOverflow = BufferOverflow.DROP_OLDEST
     )
 
-    // Rate limiting semaphore to prevent OOM
-    private val processingSemaphore = kotlinx.coroutines.sync.Semaphore(3)
+    // Rate limiting semaphore placeholder (backpressure managed by HdrPlusRequestManager)
+    private val processingSemaphore = object : kotlinx.coroutines.sync.Semaphore {
+        override val availablePermits: Int get() = 3
+        override suspend fun acquire() {}
+        override fun release() {}
+        override fun tryAcquire(): Boolean = true
+    }
 
     private var camera2RetryCount = 0
     private val processingChannel = kotlinx.coroutines.channels.Channel<RawImageHolder>(2)
@@ -1439,19 +1444,23 @@ class CameraFragment : Fragment() {
                 pendingVfSnapshot = _fragmentCameraBinding?.viewFinder?.bitmap
             }
 
-            // Check concurrency limit
-            if (!processingSemaphore.tryAcquire()) {
-                Toast.makeText(requireContext(),
-                    "Processing queue full, please wait...",
-                    Toast.LENGTH_SHORT
-                ).show()
+            val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+            val burstStrategy = prefs.getString(SettingsFragment.KEY_BURST_PROCESSING_STRATEGY, SettingsFragment.BURST_STRATEGY_BALANCED)
+            val maxQueue = if (burstStrategy == SettingsFragment.BURST_STRATEGY_AGGRESSIVE) 8 else 3
+            if (!top.maary.darkbag.processor.HdrPlusRequestManager.canAcceptNewTask(maxQueue, requireContext())) {
+                val pending = top.maary.darkbag.processor.HdrPlusRequestManager.pendingTasksCount.value
+                val msg = if (pending >= maxQueue) {
+                    "Queue full: processing $pending photos, please wait..."
+                } else {
+                    "System memory low, waiting for processing to complete..."
+                }
+                Toast.makeText(requireContext(), msg, Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
 
             val timing = StandardTimingTracker(shutterClick = System.currentTimeMillis())
 
             // Early Step Update for Half-frame to allow rapid follow-up
-            val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
             val isFrame1Trigger = isHalfFrameModeEnabled && halfFrameStep == 0
             val isFrame2Trigger = isHalfFrameModeEnabled && halfFrameStep == 1
 
@@ -4369,12 +4378,14 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 }
             }
 
+            val burstLensId = currentLens?.id ?: "0"
+            val burstChars = camera2Manager.getCameraCharacteristics(burstLensId)
+            val burstSensorOrientation = burstChars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
+
             reader.setOnImageAvailableListener({ r ->
                 val image = r.acquireNextImage() ?: return@setOnImageAvailableListener
                 try {
                     val plane = image.planes[0]
-                    val chars = camera2Manager.getCameraCharacteristics(currentLens?.id ?: "0")
-                    val sensorOrientation = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
 
                     hdrPlusBurstHelper?.addManualFrame(
                         plane.buffer,
@@ -4383,8 +4394,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         plane.rowStride,
                         plane.pixelStride,
                         image.timestamp,
-                        sensorOrientation,
-                        currentLens?.id
+                        burstSensorOrientation,
+                        burstLensId
                     )
                     image.close()
                     framesCaptured++
