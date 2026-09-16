@@ -203,6 +203,7 @@
     <string name="export_hub_frame_pair">Export RAW + Graded JPG Photo Pair</string>
     <string name="action_export">Export…</string>
     <string name="action_export_main">Export</string>
+    <string name="action_export_options">Export options</string>
 
     <!-- Export Progress Dialog -->
     <string name="export_dialog_title_exporting">Exporting…</string>

@@ -141,10 +141,10 @@
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btn_save_main"
-                style="@style/Widget.Material3.Button"
+                style="?attr/materialSplitButtonIconFilledStyle"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Save"
+                android:contentDescription="@string/save"
                 app:icon="@drawable/ic_save"
                 app:iconTint="?attr/colorOnPrimary" />
 
@@ -154,6 +154,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:checkable="true"
+                android:contentDescription="@string/action_export_options"
                 app:icon="@drawable/m3_split_button_chevron_avd"
                 app:iconTint="?attr/colorOnPrimary"/>
         </com.google.android.material.button.MaterialSplitButton>

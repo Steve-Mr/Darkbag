@@ -102,6 +102,7 @@ open class ImageViewerFragment : Fragment() {
 
     protected var isAdjusted = false
     protected var isEditingAdjustments = false
+    private var isSaving = false
     protected var currentCinemaDngFrame: Pair<Int, Uri?>? = null
     private var systemTopInset = 0
     private var systemBottomInset = 0
@@ -1779,13 +1780,21 @@ open class ImageViewerFragment : Fragment() {
     )
 
     protected open fun saveEdit(isReplacement: Boolean) {
+        if (isSaving) return
         val config = currentEditConfig ?: return
         val currentGroup = adapter.getGroup(binding.imagePager.currentItem)
         val finalConfig = config.copy(hfLayout = config.hfLayout ?: currentGroup.hfLayout)
+        isSaving = true
 
         if (currentGroup.isRawVideo || currentGroup.rawVideoUri != null) {
-            val rawVideoUri = currentGroup.rawVideoUri ?: return
-            val ctx = context ?: return
+            val rawVideoUri = currentGroup.rawVideoUri ?: run {
+                isSaving = false
+                return
+            }
+            val ctx = context ?: run {
+                isSaving = false
+                return
+            }
             val appContext = ctx.applicationContext
             previewJob?.cancel()
             binding.initialLoadingIndicator.visibility = View.VISIBLE
@@ -1839,6 +1848,7 @@ open class ImageViewerFragment : Fragment() {
                                                     bayerBuffer = bayerBuf,
                                                     width = header.width,
                                                     height = header.height,
+                                                    orientation = header.orientation,
                                                     cfaPattern = header.cfaPattern,
                                                     whiteLevel = header.whiteLevel,
                                                     blackLevel = header.blackLevel.firstOrNull() ?: 64f,
@@ -1851,16 +1861,41 @@ open class ImageViewerFragment : Fragment() {
                                                     outBitmap = bmp
                                                 )
 
+                                                val orientation = try {
+                                                    appContext.contentResolver.openFileDescriptor(currentGroup.jpgUri, "r")?.use { jPfd ->
+                                                        androidx.exifinterface.media.ExifInterface(jPfd.fileDescriptor).getAttributeInt(
+                                                            androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION,
+                                                            androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL
+                                                        )
+                                                    } ?: androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL
+                                                } catch (e: Exception) { androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL }
+
+                                                val rotDegrees = when (orientation) {
+                                                    androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90 -> 90
+                                                    androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_180 -> 180
+                                                    androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270 -> 270
+                                                    else -> 0
+                                                }
+
+                                                val finalJpgBmp = if (rotDegrees != 0) {
+                                                    val m = android.graphics.Matrix().apply { postRotate(rotDegrees.toFloat()) }
+                                                    val r = android.graphics.Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, m, true)
+                                                    if (r != bmp) bmp.recycle()
+                                                    r
+                                                } else bmp
+
                                                 val baseName = if (isReplacement) currentGroup.baseName else "${currentGroup.baseName}_edited_${System.currentTimeMillis()}"
                                                 val targetUri = if (isReplacement) currentGroup.jpgUri else null
                                                 val jpgFolderUri = appContext.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
                                                     .getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
 
+                                                val captureMetadata = currentGroup.jpgUri?.let { repository.getCaptureMetadata(it) }
+
                                                 top.maary.darkbag.utils.ImageSaver.saveProcessedImage(
                                                     context = appContext,
-                                                    inputBitmap = bmp,
+                                                    inputBitmap = finalJpgBmp,
                                                     bmpPath = null,
-                                                    rotationDegrees = header.orientation,
+                                                    rotationDegrees = 0,
                                                     zoomFactor = 1.0f,
                                                     baseName = baseName,
                                                     linearDngPath = null,
@@ -1869,9 +1904,10 @@ open class ImageViewerFragment : Fragment() {
                                                     targetUri = targetUri,
                                                     jpgFolderUri = if (isReplacement) null else jpgFolderUri,
                                                     editConfig = finalConfig,
-                                                    isAlreadyStitched = true
+                                                    isAlreadyStitched = true,
+                                                    captureMetadata = captureMetadata
                                                 )
-                                                bmp.recycle()
+                                                finalJpgBmp.recycle()
                                             }
                                         }
                                     } finally {
@@ -1881,29 +1917,31 @@ open class ImageViewerFragment : Fragment() {
                             }
                         }
                     }
+
+                    resetAdjustments()
+                    repository.invalidateCache()
+                    val updatedGroups = repository.getGroupedImages(forceRefresh = true)
+                    if (updatedGroups.isNotEmpty()) {
+                        val targetBaseName = currentGroup.baseName
+                        val newPos = updatedGroups.indexOfFirst { it.baseName == targetBaseName }.coerceAtLeast(0)
+                        val rawTargetGroup = updatedGroups[newPos]
+                        val targetGroup = repository.loadMetadata(rawTargetGroup)
+                        val mutableList = updatedGroups.toMutableList()
+                        mutableList[newPos] = targetGroup
+                        adapter.updateGroups(mutableList)
+                        binding.imagePager.setCurrentItem(newPos, false)
+                        prepareEditConfig(targetGroup)
+                        updateControlsVisibility()
+                    }
+                    binding.root.performHapticFeedback(android.view.HapticFeedbackConstants.CONFIRM)
+                    Toast.makeText(appContext, "Saved adjustments for RAW video", Toast.LENGTH_SHORT).show()
                 } catch (e: Exception) {
                     android.util.Log.e("ImageViewerFragment", "Failed to save RAW video adjustments", e)
                 } finally {
                     binding.initialLoadingIndicator.visibility = View.GONE
                     binding.interactionBlocker?.visibility = View.GONE
+                    isSaving = false
                 }
-
-                resetAdjustments()
-                repository.invalidateCache()
-                val updatedGroups = repository.getGroupedImages(forceRefresh = true)
-                if (updatedGroups.isNotEmpty()) {
-                    val targetBaseName = currentGroup.baseName
-                    val newPos = updatedGroups.indexOfFirst { it.baseName == targetBaseName }.coerceAtLeast(0)
-                    val rawTargetGroup = updatedGroups[newPos]
-                    val targetGroup = repository.loadMetadata(rawTargetGroup)
-                    val mutableList = updatedGroups.toMutableList()
-                    mutableList[newPos] = targetGroup
-                    adapter.updateGroups(mutableList)
-                    binding.imagePager.setCurrentItem(newPos, false)
-                    prepareEditConfig(targetGroup)
-                    updateControlsVisibility()
-                }
-                Toast.makeText(appContext, "Saved adjustments for RAW video", Toast.LENGTH_SHORT).show()
             }
             return
         }
@@ -2194,10 +2232,12 @@ open class ImageViewerFragment : Fragment() {
                     binding.imagePager.setCurrentItem(newPos, false)
                     prepareEditConfig(targetGroup)
                     updateControlsVisibility()
+                    binding.root.performHapticFeedback(android.view.HapticFeedbackConstants.CONFIRM)
                 }
             } finally {
                 binding.initialLoadingIndicator.visibility = View.GONE
                 binding.interactionBlocker?.visibility = View.GONE
+                isSaving = false
             }
         }
     }
