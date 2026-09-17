@@ -320,9 +320,9 @@ const Matrix3x3 M_ProPhoto_D50_to_XYZ = {
 };
 
 const Matrix3x3 M_XYZ_to_AlexaWideGamut_D65 = {
-    1.99234198f, -0.57196805f, -0.29536100f,
-    -0.79989925f, 1.74791391f, 0.01134474f,
-    0.00760860f, -0.02558954f, 0.93508164f
+    1.78906555f, -0.48253386f, -0.20007579f,
+   -0.63984866f,  1.39639996f,  0.19443229f,
+   -0.04153155f,  0.08233537f,  0.87886848f
 };
 
 const Matrix3x3 M_XYZ_to_SGamut3Cine_D65 = {
@@ -565,6 +565,28 @@ float vlog(float x) {
     if (x >= cut) return c * log10(x + b) + d;
     else return 5.6f * x + 0.125f;
 }
+float canon_log2(float x) {
+    float xr = std::max(0.0f, x / 0.9f);
+    return 0.24136077f * log10(xr * 87.09937546f + 1.0f) + 0.092864125f;
+}
+float canon_log3(float x) {
+    float xr = std::max(0.0f, x / 0.9f);
+    if (xr <= 0.014f) return 1.9754798f * xr + 0.12512219f;
+    else return 0.36726845f * log10(xr * 14.98325f + 1.0f) + 0.12240537f;
+}
+float n_log(float x) {
+    if (x < 0.328f) return (650.0f * std::pow(std::max(0.0f, x + 0.0075f), 1.0f / 3.0f)) / 1023.0f;
+    else return (150.0f * logf(std::max(1e-7f, x)) + 619.0f) / 1023.0f;
+}
+float d_log(float x) {
+    if (x <= 0.0078f) return 6.025f * x + 0.0929f;
+    else return log10(x * 0.9892f + 0.0108f) * 0.256663f + 0.584555f;
+}
+float log3g10(float x) {
+    const float a = 0.224282f, b = 155.975327f, c = 0.01f;
+    if (x >= 0.0f) return a * log10(x * b + 1.0f) + c;
+    else return -a * log10(-x * b + 1.0f) + c;
+}
 float apply_log(float x, int type) {
     // Note: Log curves handle x < 0 usually by clipping or linear extension.
     // We clamp slightly above 0 if needed, but linear extension is better for noise.
@@ -579,6 +601,11 @@ float apply_log(float x, int type) {
         case 5:
         case 6: return s_log3(x);
         case 7: return vlog(x);
+        case 8: return canon_log2(x);
+        case 9: return canon_log3(x);
+        case 10: return n_log(x);
+        case 11: return d_log(x);
+        case 12: return log3g10(x);
         default: return srgb_oetf(x);
     }
 }
@@ -919,7 +946,13 @@ bool process_and_save_image(
         switch (targetLog) {
             case 1: color = multiply(M_XYZ_to_AlexaWideGamut_D65, color); break;
             case 2:
-            case 3: color = multiply(M_XYZ_to_Rec2020_D65, color); break;
+            case 3:
+            case 4:
+            case 8:
+            case 9:
+            case 10:
+            case 11:
+            case 12: color = multiply(M_XYZ_to_Rec2020_D65, color); break;
             case 5:
             case 6: color = multiply(M_XYZ_to_SGamut3Cine_D65, color); break;
             case 7: color = multiply(M_XYZ_to_VGamut_D65, color); break;
@@ -1278,7 +1311,8 @@ static const std::vector<unsigned char>& make_preview_rgb8(
     float gain,
     int& outWidth,
     int& outHeight,
-    const float* wbVec = nullptr
+    const float* wbVec = nullptr,
+    const Matrix3x3* ccmMat = nullptr
 ) {
     const int longEdge = std::max(width, height);
     const int scale = std::max(1, (longEdge + targetLongEdge - 1) / targetLongEdge);
@@ -1287,6 +1321,10 @@ static const std::vector<unsigned char>& make_preview_rgb8(
     const bool swapDims = (orientation == 90 || orientation == 270);
     outWidth = swapDims ? sampledHeight : sampledWidth;
     outHeight = swapDims ? sampledWidth : sampledHeight;
+
+    const float wb_r = wbVec ? wbVec[0] : 1.0f;
+    const float wb_g = wbVec ? wbVec[1] : 1.0f;
+    const float wb_b = wbVec ? wbVec[3] : 1.0f;
 
     thread_local std::vector<unsigned char> preview;
     preview.resize(static_cast<size_t>(outWidth) * outHeight * 3);
@@ -1315,19 +1353,25 @@ static const std::vector<unsigned char>& make_preview_rgb8(
             const size_t b_idx = (size_t)srcY*stride_y + (size_t)srcX*stride_x + 2*stride_c;
             const size_t dstIdx = (static_cast<size_t>(y) * outWidth + x) * 3;
 
-            auto encodePreviewChannel = [&](unsigned short sample, float wbGain) -> unsigned char {
-                const float linear = std::clamp((sample * wbGain / 65535.0f) * gain, 0.0f, 1.0f); // 16-bit max from Halide
-                const float gammaEncoded = std::pow(linear, 1.0f / 2.2f);
-                return (unsigned char)std::clamp(gammaEncoded * 255.0f + 0.5f, 0.0f, 255.0f);
+            float r = static_cast<float>(planarData[r_idx]);
+            float g = static_cast<float>(planarData[g_idx]);
+            float b = static_cast<float>(planarData[b_idx]);
+
+            Vec3 linear = {
+                (r * wb_r / 65535.0f) * gain,
+                (g * wb_g / 65535.0f) * gain,
+                (b * wb_b / 65535.0f) * gain
             };
 
-            float wb_r = wbVec ? wbVec[0] : 1.0f;
-            float wb_g = wbVec ? wbVec[1] : 1.0f;
-            float wb_b = wbVec ? wbVec[3] : 1.0f;
+            if (ccmMat) {
+                linear = multiply(*ccmMat, linear);
+            }
 
-            preview[dstIdx + 0] = encodePreviewChannel(planarData[r_idx], wb_r);
-            preview[dstIdx + 1] = encodePreviewChannel(planarData[g_idx], wb_g);
-            preview[dstIdx + 2] = encodePreviewChannel(planarData[b_idx], wb_b);
+            linear = apply_khronos_pbr_neutral(linear);
+
+            preview[dstIdx + 0] = (unsigned char)std::clamp(srgb_oetf(linear.r) * 255.0f + 0.5f, 0.0f, 255.0f);
+            preview[dstIdx + 1] = (unsigned char)std::clamp(srgb_oetf(linear.g) * 255.0f + 0.5f, 0.0f, 255.0f);
+            preview[dstIdx + 2] = (unsigned char)std::clamp(srgb_oetf(linear.b) * 255.0f + 0.5f, 0.0f, 255.0f);
         }
     }
     return preview;
@@ -1402,12 +1446,15 @@ bool write_dng(const char* filename, int width, int height, const unsigned short
     // RawSensorRGB = diag(AsShotNeutral) * CCM^-1 * sRGB
     // ColorMatrix1 = diag(AsShotNeutral) * Inverse(CCM) * M_XYZ_to_sRGB_D65
     Matrix3x3 colorMatrix1 = M_XYZ_to_sRGB_D65; // Fallback
+    Matrix3x3 sensor_to_srgb = {0};
+    bool has_sensor_to_srgb = false;
     if (ccm.size() >= 9) {
-        Matrix3x3 sensor_to_srgb = {
+        sensor_to_srgb = {
             ccm[0], ccm[1], ccm[2],
             ccm[3], ccm[4], ccm[5],
             ccm[6], ccm[7], ccm[8]
         };
+        has_sensor_to_srgb = true;
         Matrix3x3 srgb_to_sensor = inverse_matrix(sensor_to_srgb);
         colorMatrix1 = multiply(srgb_to_sensor, M_XYZ_to_sRGB_D65);
     }
@@ -1470,7 +1517,7 @@ bool write_dng(const char* filename, int width, int height, const unsigned short
     for (const auto& spec : previewSpecs) {
         int previewWidth = 0, previewHeight = 0;
         const std::vector<unsigned char>& previewRgb8 = make_preview_rgb8(
-            planarData, stride_x, stride_y, stride_c, width, height, spec.targetLongEdge, orientation, mirror, std::pow(2.0f, baselineExposure), previewWidth, previewHeight, wbVec
+            planarData, stride_x, stride_y, stride_c, width, height, spec.targetLongEdge, orientation, mirror, std::pow(2.0f, baselineExposure), previewWidth, previewHeight, wbVec, has_sensor_to_srgb ? &sensor_to_srgb : nullptr
         );
 
         if (previewRgb8.empty()) {
