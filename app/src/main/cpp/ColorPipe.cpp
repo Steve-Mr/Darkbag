@@ -867,13 +867,15 @@ bool process_and_save_image(
         }
 
         // 2. Highlight Desaturation
+        float exp_gain = std::pow(2.0f, exposure);
+        float eff_gain = std::max(1.0f, gain * exp_gain);
+        float threshold = (65535.0f * 0.8f) / eff_gain;
+        float theoretical_max = (65535.0f * (wb ? std::max({wb[0], wb[1], wb[3]}) : 1.0f)) / eff_gain;
         float max_rgb = std::max({r, g, b});
-        float theoretical_max = 65535.0f * (wb ? std::max({wb[0], wb[1], wb[3]}) : 1.0f);
-        float threshold = 65535.0f * 0.8f;
         if (max_rgb > threshold) {
-            float desat = std::clamp((max_rgb - threshold) / (theoretical_max - threshold), 0.0f, 1.0f);
+            float desat = std::clamp((max_rgb - threshold) / std::max(1.0f, theoretical_max - threshold), 0.0f, 1.0f);
             desat = desat * desat * (3.0f - 2.0f * desat); // Smoothstep
-            float y_lum = 0.299f * r + 0.587f * g + 0.114f * b;
+            float y_lum = 0.2126f * r + 0.7152f * g + 0.0722f * b;
             r = r * (1.0f - desat) + y_lum * desat;
             g = g * (1.0f - desat) + y_lum * desat;
             b = b * (1.0f - desat) + y_lum * desat;
@@ -883,7 +885,6 @@ bool process_and_save_image(
         g = std::min(g, 65535.0f);
         b = std::min(b, 65535.0f);
         
-        float exp_gain = std::pow(2.0f, exposure);
         float norm_r = (r / 65535.0f) * gain * exp_gain;
         float norm_g = (g / 65535.0f) * gain * exp_gain;
         float norm_b = (b / 65535.0f) * gain * exp_gain;
@@ -1428,7 +1429,7 @@ bool write_dng(const char* filename, int width, int height, const unsigned short
         TIFFSetField(tif, TIFFTAG_FOCALLENGTHIN35MMFILM, (uint16_t)metadata.focalLengthIn35mmFilm);
     }
 
-    float safeBaselineExposure = std::clamp(baselineExposure, 0.0f, 0.5f);
+    float safeBaselineExposure = std::clamp(baselineExposure, 0.0f, 4.0f);
     TIFFSetField(tif, TIFFTAG_BASELINEEXPOSURE, safeBaselineExposure);
 
     unsigned short iso_short = (unsigned short)metadata.iso;
