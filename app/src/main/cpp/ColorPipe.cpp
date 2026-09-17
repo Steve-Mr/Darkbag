@@ -47,19 +47,18 @@ static bool write_jpeg_turbo(const char* filename, int width, int height, int su
     return true;
 }
 
-static const std::vector<unsigned char>& encode_rgb8_jpeg(
+static std::vector<unsigned char> encode_rgb8_jpeg(
     const std::vector<unsigned char>& rgb8,
     int width,
     int height,
     int quality
 ) {
-    thread_local std::vector<unsigned char> tls_jpeg_bytes;
-    tls_jpeg_bytes.clear();
+    std::vector<unsigned char> jpeg_bytes;
     
-    if (rgb8.empty()) return tls_jpeg_bytes;
+    if (rgb8.empty()) return jpeg_bytes;
     
     tjhandle _jpegCompressor = tjInitCompress();
-    if (!_jpegCompressor) return tls_jpeg_bytes;
+    if (!_jpegCompressor) return jpeg_bytes;
     
     unsigned char* jpegBuf = NULL;
     unsigned long jpegSize = 0;
@@ -68,12 +67,12 @@ static const std::vector<unsigned char>& encode_rgb8_jpeg(
                               &jpegBuf, &jpegSize, TJSAMP_420, quality, TJFLAG_FASTDCT);
                               
     if (tj_stat == 0 && jpegBuf != NULL) {
-        tls_jpeg_bytes.assign(jpegBuf, jpegBuf + jpegSize);
+        jpeg_bytes.assign(jpegBuf, jpegBuf + jpegSize);
         tjFree(jpegBuf);
     }
     tjDestroy(_jpegCompressor);
     
-    return tls_jpeg_bytes;
+    return jpeg_bytes;
 }
 
 #include <vector>
@@ -590,8 +589,11 @@ float log3g10(float x) {
 float apply_log(float x, int type) {
     // Note: Log curves handle x < 0 usually by clipping or linear extension.
     // We clamp slightly above 0 if needed, but linear extension is better for noise.
+    // RED Log3G10 (type 12) has a symmetric reflection curve for negative values.
     // Use a robust check that also handles NaN (NaN > 0 is false)
-    x = (x > 0.0f) ? x : 0.0f;
+    if (type != 12) {
+        x = (x > 0.0f) ? x : 0.0f;
+    }
 
     switch (type) {
         case 1: return arri_logc3(x);
@@ -1316,7 +1318,7 @@ int compute_preview_downsample_factor(int width, int height, int targetLongEdge)
 
 
 
-static const std::vector<unsigned char>& make_preview_rgb8(
+static std::vector<unsigned char> make_preview_rgb8(
     const unsigned short* planarData, int stride_x, int stride_y, int stride_c,
     int width,
     int height,
@@ -1341,7 +1343,7 @@ static const std::vector<unsigned char>& make_preview_rgb8(
     const float wb_g = wbVec ? wbVec[1] : 1.0f;
     const float wb_b = wbVec ? wbVec[3] : 1.0f;
 
-    thread_local std::vector<unsigned char> preview;
+    std::vector<unsigned char> preview;
     preview.resize(static_cast<size_t>(outWidth) * outHeight * 3);
     for (int y = 0; y < outHeight; ++y) {
         for (int x = 0; x < outWidth; ++x) {
@@ -1531,7 +1533,7 @@ bool write_dng(const char* filename, int width, int height, const unsigned short
 
     for (const auto& spec : previewSpecs) {
         int previewWidth = 0, previewHeight = 0;
-        const std::vector<unsigned char>& previewRgb8 = make_preview_rgb8(
+        std::vector<unsigned char> previewRgb8 = make_preview_rgb8(
             planarData, stride_x, stride_y, stride_c, width, height, spec.targetLongEdge, orientation, mirror, std::pow(2.0f, baselineExposure), previewWidth, previewHeight, wbVec, has_sensor_to_srgb ? &sensor_to_srgb : nullptr
         );
 
@@ -1540,7 +1542,7 @@ bool write_dng(const char* filename, int width, int height, const unsigned short
             return false;
         }
 
-        const std::vector<unsigned char>& jpegPreview = encode_rgb8_jpeg(previewRgb8, previewWidth, previewHeight, 82);
+        std::vector<unsigned char> jpegPreview = encode_rgb8_jpeg(previewRgb8, previewWidth, previewHeight, 82);
         if (jpegPreview.empty()) {
             TIFFClose(tif);
             return false;

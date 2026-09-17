@@ -332,10 +332,12 @@ private:
   }
 
   Func chroma_denoise(Func input, Expr width, Expr height, int num_passes, const CompiletimeWhiteBalance &wb) {
+    if (num_passes <= 0) return input;
+
     Func wb_input("wb_input");
-    wb_input(x, y, c) = select(c == 0, u16_sat(f32(input(x, y, 0)) * wb.r),
-                               c == 1, u16_sat(f32(input(x, y, 1)) * wb.g0),
-                                       u16_sat(f32(input(x, y, 2)) * wb.b));
+    wb_input(x, y, c) = select(c == 0, f32(input(x, y, 0)) * wb.r,
+                               c == 1, f32(input(x, y, 1)) * wb.g0,
+                                       f32(input(x, y, 2)) * wb.b);
 
     Func output_denoise = rgb_to_yuv(wb_input);
     int pass = 0;
@@ -346,12 +348,19 @@ private:
       pass++;
     }
     if (num_passes > 2) output_denoise = increase_saturation(output_denoise, 1.1f);
-    Func filtered = yuv_to_rgb(output_denoise);
+
+    Func filtered("yuv_to_rgb_f32_filtered");
+    Expr Y = output_denoise(x, y, 0);
+    Expr U = output_denoise(x, y, 1);
+    Expr V = output_denoise(x, y, 2);
+    filtered(x, y, c) = select(c == 0, Y + 1.403f * V,
+                               c == 1, Y - 0.344f * U - 0.714f * V,
+                                       Y + 1.770f * U);
 
     Func output_unwb("chroma_denoise_output");
-    output_unwb(x, y, c) = select(c == 0, u16_sat(f32(filtered(x, y, 0)) / max(0.0001f, wb.r)),
-                                  c == 1, u16_sat(f32(filtered(x, y, 1)) / max(0.0001f, wb.g0)),
-                                          u16_sat(f32(filtered(x, y, 2)) / max(0.0001f, wb.b)));
+    output_unwb(x, y, c) = select(c == 0, u16_sat(filtered(x, y, 0) / max(0.0001f, wb.r)),
+                                  c == 1, u16_sat(filtered(x, y, 1) / max(0.0001f, wb.g0)),
+                                          u16_sat(filtered(x, y, 2) / max(0.0001f, wb.b)));
     return output_unwb;
   }
 

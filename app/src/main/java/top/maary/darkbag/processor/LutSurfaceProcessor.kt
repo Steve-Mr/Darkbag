@@ -679,7 +679,9 @@ class LutSurfaceProcessor {
 
             // 5. GLSL Analytic Log Curves (Identical to ColorPipe.cpp)
             float applyLogCurve(float x, int type) {
-                x = max(x, 0.0);
+                if (type != 12) {
+                    x = max(x, 0.0);
+                }
                 if (type == 1) { // Arri LogC3
                     if (x > 0.010591) return 0.247190 * log10_f(5.555556 * x + 0.052272) + 0.385537;
                     else return 5.367655 * x + 0.092809;
