@@ -163,10 +163,18 @@ object ImageUtils {
         try {
             var bitmap: Bitmap? = null
             var orientation = ExifInterface.ORIENTATION_NORMAL
+            var isEmbeddedThumbnail = false
+            var rawWidth = 0
+            var rawHeight = 0
+            var software: String? = null
 
             context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
                 val exif = ExifInterface(pfd.fileDescriptor)
                 orientation = exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
+                rawWidth = exif.getAttributeInt(ExifInterface.TAG_IMAGE_WIDTH, 0)
+                rawHeight = exif.getAttributeInt(ExifInterface.TAG_IMAGE_LENGTH, 0)
+                software = exif.getAttribute(ExifInterface.TAG_SOFTWARE)
+
                 if (exif.hasThumbnail()) {
                     val thumb = exif.thumbnailBytes
                     if (thumb != null) {
@@ -175,6 +183,9 @@ object ImageUtils {
                         options.inSampleSize = calculateInSampleSize(options, reqWidth, reqHeight)
                         options.inJustDecodeBounds = false
                         bitmap = BitmapFactory.decodeByteArray(thumb, 0, thumb.size, options)
+                        if (bitmap != null) {
+                            isEmbeddedThumbnail = true
+                        }
                     }
                 }
             }
@@ -191,7 +202,23 @@ object ImageUtils {
                 }
             }
 
-            bitmap = bitmap?.let { rotateBitmap(it, orientation) }
+            if (bitmap != null) {
+                val isDarkbag = software?.contains("Darkbag", ignoreCase = true) == true
+                val isSwap = orientation == ExifInterface.ORIENTATION_ROTATE_90 || orientation == ExifInterface.ORIENTATION_ROTATE_270
+                val isAspectSwapped = rawWidth > 0 && rawHeight > 0 && ((rawWidth > rawHeight) != (bitmap.width > bitmap.height))
+
+                val shouldRotate = if (isEmbeddedThumbnail) {
+                    // Darkbag write_dng pre-rotates embedded thumbnails to upright (ORIENTATION_TOPLEFT).
+                    // Other camera encoders may also pre-rotate if aspect ratio is already swapped.
+                    !(isDarkbag || (isSwap && isAspectSwapped))
+                } else {
+                    true
+                }
+
+                if (shouldRotate && orientation != ExifInterface.ORIENTATION_NORMAL) {
+                    bitmap = rotateBitmap(bitmap, orientation)
+                }
+            }
 
             return@withContext if (bitmap != null && zoomFactor > 1.05f) {
                 val newWidth = (bitmap.width / zoomFactor).toInt()
@@ -230,13 +257,15 @@ object ImageUtils {
             } ?: return@withContext null
 
             coroutineContext.ensureActive()
-            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            BitmapFactory.decodeByteArray(dngBytes, 0, dngBytes.size, bounds)
-            val downsample = calculateInSampleSize(bounds, reqWidth, reqHeight)
 
+            var rawWidth = 0
+            var rawHeight = 0
             val orientation = try {
                 context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
-                    ExifInterface(pfd.fileDescriptor).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
+                    val exif = ExifInterface(pfd.fileDescriptor)
+                    rawWidth = exif.getAttributeInt(ExifInterface.TAG_IMAGE_WIDTH, 0)
+                    rawHeight = exif.getAttributeInt(ExifInterface.TAG_IMAGE_LENGTH, 0)
+                    exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
                 } ?: ExifInterface.ORIENTATION_NORMAL
             } catch (e: Exception) {
                 ExifInterface.ORIENTATION_NORMAL
@@ -249,8 +278,28 @@ object ImageUtils {
                 else -> 0
             }
 
-            val fullW = if (rotDegrees == 90 || rotDegrees == 270) bounds.outHeight / downsample else bounds.outWidth / downsample
-            val fullH = if (rotDegrees == 90 || rotDegrees == 270) bounds.outWidth / downsample else bounds.outHeight / downsample
+            val isRotated90or270 = (rotDegrees == 90 || rotDegrees == 270)
+            val downsample: Int
+            val fullW: Int
+            val fullH: Int
+
+            if (rawWidth > 0 && rawHeight > 0) {
+                downsample = calculateInSampleSize(rawWidth, rawHeight, reqWidth, reqHeight)
+                fullW = if (isRotated90or270) rawHeight / downsample else rawWidth / downsample
+                fullH = if (isRotated90or270) rawWidth / downsample else rawHeight / downsample
+            } else {
+                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                BitmapFactory.decodeByteArray(dngBytes, 0, dngBytes.size, bounds)
+                downsample = calculateInSampleSize(bounds, reqWidth, reqHeight)
+                if (isRotated90or270 && bounds.outWidth > bounds.outHeight) {
+                    fullW = bounds.outHeight / downsample
+                    fullH = bounds.outWidth / downsample
+                } else {
+                    fullW = bounds.outWidth / downsample
+                    fullH = bounds.outHeight / downsample
+                }
+            }
+
             if (fullW <= 0 || fullH <= 0) return@withContext null
 
             val bmpW = kotlin.math.max(1, (fullW / zoomFactor).toInt())
@@ -305,18 +354,18 @@ object ImageUtils {
         return rotated
     }
 
-
-
-    fun calculateInSampleSize(options: BitmapFactory.Options, reqWidth: Int, reqHeight: Int): Int {
-        val (height: Int, width: Int) = options.run { outHeight to outWidth }
+    fun calculateInSampleSize(srcWidth: Int, srcHeight: Int, reqWidth: Int, reqHeight: Int): Int {
         var inSampleSize = 1
-        if (height > reqHeight || width > reqWidth) {
-            val halfHeight: Int = height / 2
-            val halfWidth: Int = width / 2
+        if (srcHeight > reqHeight || srcWidth > reqWidth) {
+            val halfHeight: Int = srcHeight / 2
+            val halfWidth: Int = srcWidth / 2
             while (halfHeight / inSampleSize >= reqHeight && halfWidth / inSampleSize >= reqWidth) {
                 inSampleSize *= 2
             }
         }
-        return inSampleSize
+        return inSampleSize.coerceAtLeast(1)
     }
+
+    fun calculateInSampleSize(options: BitmapFactory.Options, reqWidth: Int, reqHeight: Int): Int =
+        calculateInSampleSize(options.outWidth, options.outHeight, reqWidth, reqHeight)
 }

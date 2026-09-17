@@ -186,6 +186,7 @@
     <string name="export_hub_frame_pair">导出 RAW + 调色 JPG 成对照片</string>
     <string name="action_export">导出…</string>
     <string name="action_export_main">导出</string>
+    <string name="action_export_options">导出选项</string>
 
     <string name="export_dialog_title_exporting">正在导出…</string>
     <string name="export_dialog_initial_progress">导出中: 0% (0/0)</string>

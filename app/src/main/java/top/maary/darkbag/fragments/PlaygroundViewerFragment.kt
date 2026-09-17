@@ -16,15 +16,11 @@ import androidx.appcompat.widget.PopupMenu
 
 class PlaygroundViewerFragment : ImageViewerFragment() {
 
-    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
-        super.onViewCreated(view, savedInstanceState)
-        binding.btnGalleryPill.visibility = View.GONE
-    }
+    override val isGallerySupported: Boolean = false
 
     override fun loadImages(targetUri: String?, forceRefresh: Boolean) {
         binding.initialLoadingIndicator.visibility = View.VISIBLE
         binding.imagePager.visibility = View.INVISIBLE
-        binding.btnGalleryPill.visibility = View.GONE
 
         val playgroundPaths = arguments?.getStringArray("playground_dng_paths")
         if (playgroundPaths != null && playgroundPaths.isNotEmpty()) {
@@ -142,35 +138,33 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
 
     override fun setupActionButtons() {
         super.setupActionButtons()
+    }
 
-        binding.btnSaveMenu.setOnClickListener {
-            binding.btnSaveMenu.isCheckable = true
-            binding.btnSaveMenu.isChecked = true
-            val popup = PopupMenu(requireContext(), it)
+    override fun showSaveMenu(anchor: View) {
+        val popup = PopupMenu(requireContext(), anchor)
 
-            popup.menu.add(0, 1001, 0, "Save as new file").apply {
-                setIcon(R.drawable.ic_save_as)
-            }
-            popup.menu.add(0, 1002, 0, getString(R.string.share_as_tiff)).apply {
-                setIcon(R.drawable.ic_photo)
-            }
-            popup.menu.add(0, 1003, 0, "Export to JPG (Pictures)").apply {
-                setIcon(R.drawable.ic_save)
-            }
-
-            forceShowIcons(popup)
-
-            popup.setOnMenuItemClickListener { item ->
-                when (item.itemId) {
-                    1001 -> saveEdit(isReplacement = false)
-                    1002 -> performShareAsTiff()
-                    1003 -> exportToJpg()
-                }
-                true
-            }
-            popup.setOnDismissListener { binding.btnSaveMenu.isChecked = false }
-            popup.show()
+        popup.menu.add(0, 1001, 0, "Save as new file").apply {
+            setIcon(R.drawable.ic_save_as)
         }
+        popup.menu.add(0, 1002, 0, getString(R.string.share_as_tiff)).apply {
+            setIcon(R.drawable.ic_photo)
+        }
+        popup.menu.add(0, 1003, 0, "Export to JPG (Pictures)").apply {
+            setIcon(R.drawable.ic_save)
+        }
+
+        forceShowIcons(popup)
+
+        popup.setOnMenuItemClickListener { item ->
+            when (item.itemId) {
+                1001 -> saveEdit(isReplacement = false)
+                1002 -> performShareAsTiff()
+                1003 -> exportToJpg()
+            }
+            true
+        }
+        popup.setOnDismissListener { binding.btnActionMenu?.isChecked = false }
+        popup.show()
     }
 
     override fun saveEdit(isReplacement: Boolean) {
@@ -197,7 +191,8 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
                         val finalBitmap = generateProcessedBitmap(finalConfig, currentGroup)
 
                         finalBitmap?.let { bitmap ->
-                            newBaseName = if (isReplacement) currentGroup.baseName else "${currentGroup.baseName}_edited_${System.currentTimeMillis()}"
+                            val editTimestamp = java.text.SimpleDateFormat("yyyy-MM-dd-HH-mm-ss-SSS", java.util.Locale.US).format(java.util.Date())
+                            newBaseName = if (isReplacement) currentGroup.baseName else "${currentGroup.baseName}_edited_$editTimestamp"
 
                             val playgroundDir = File(appContext.filesDir, "playground_dngs")
                             if (!playgroundDir.exists()) playgroundDir.mkdirs()
@@ -494,7 +489,7 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
                                 bmpPath = tempJpgFile.absolutePath,
                                 rotationDegrees = 0,
                                 zoomFactor = 1.0f,
-                                baseName = currentGroup.baseName,
+                                baseName = top.maary.darkbag.utils.DarkbagIdentity.prefixedBaseName(currentGroup.baseName),
                                 linearDngPath = null,
                                 saveJpg = true,
                                 saveRaw = false,
@@ -639,7 +634,7 @@ class PlaygroundViewerFragment : ImageViewerFragment() {
                                 bmpPath = null,
                                 rotationDegrees = 0,
                                 zoomFactor = 1.0f,
-                                baseName = currentGroup.baseName,
+                                baseName = top.maary.darkbag.utils.DarkbagIdentity.prefixedBaseName(currentGroup.baseName),
                                 linearDngPath = null,
                                 saveJpg = true,
                                 saveRaw = false,

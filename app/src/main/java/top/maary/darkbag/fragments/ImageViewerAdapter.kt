@@ -889,6 +889,11 @@ class ImageViewerAdapter(
                     ImageUtils.decodeDngThumbnail(holder.binding.root.context, uri, zoomFactor)
                 ensureActive()
 
+                if (thumbnailBitmap == null) {
+                    thumbnailBitmap = ImageUtils.renderDngBitmap(holder.binding.root.context, uri, reqWidth = 1024, reqHeight = 1024, zoomFactor = zoomFactor)
+                    ensureActive()
+                }
+
                 if (thumbnailBitmap != null) {
                     setBitmapAndRecyclePrevious(holder, thumbnailBitmap)
                     thumbnailBitmap = null // Now owned by ViewHolder
