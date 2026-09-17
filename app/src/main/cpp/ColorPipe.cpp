@@ -886,6 +886,21 @@ bool process_and_save_image(
         float g = static_cast<float>(planarData[g_idx]);
         float b = static_cast<float>(planarData[b_idx]);
         
+        // Smooth knee shoulder compression for display rendering highlights
+        float max_rgb_raw = std::max({r, g, b});
+        const float knee = 50000.0f;
+        if (max_rgb_raw > knee) {
+            const float range = 65535.0f - knee;
+            auto compress = [knee, range](float v) {
+                if (v <= knee) return v;
+                float excess = v - knee;
+                return knee + range * (excess / (excess + range));
+            };
+            r = compress(r);
+            g = compress(g);
+            b = compress(b);
+        }
+
         // 1. Apply White Balance
         if (wb) {
             r *= wb[0];

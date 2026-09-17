@@ -58,7 +58,7 @@ public:
 
     Func bayer_shifted = shift_bayer_to_rggb(merged, cfa_pattern);
     Func black_white_level_output = black_white_level(bayer_shifted, black_point_r, black_point_g0, black_point_g1, black_point_b, white_point, cfa_pattern);
-    Func lsc_output = apply_lsc(black_white_level_output, inputs.width(), inputs.height());
+    Func lsc_output = apply_lsc(black_white_level_output, inputs.width(), inputs.height(), cfa_pattern);
     Func white_balance_output = white_balance(lsc_output, wb);
 
     // Demosaic
@@ -70,7 +70,7 @@ public:
     
     Func chroma_denoised_output;
     if (!single_frame_mode) {
-        chroma_denoised_output = chroma_denoise(linear_rgb_output, inputs.width(), inputs.height(), denoise_passes);
+        chroma_denoised_output = chroma_denoise(linear_rgb_output, inputs.width(), inputs.height(), denoise_passes, wb);
     } else {
         chroma_denoised_output = linear_rgb_output;
     }
@@ -141,7 +141,7 @@ public:
 private:
   Var x{"x"}, y{"y"}, c{"c"}, xo{"xo"}, yo{"yo"}, xi{"xi"}, yi{"yi"};
 
-  Func apply_lsc(Func input, Expr width, Expr height) {
+  Func apply_lsc(Func input, Expr width, Expr height, const Expr cfa_pattern) {
     Func output("lsc_output");
     
     Expr num_cols = lens_shading_map.dim(0).extent();
@@ -160,9 +160,10 @@ private:
     Expr w_y1 = fy - cast<float>(iy0);
     Expr w_y0 = 1.0f - w_y1;
 
+    Expr is_vert_shifted = (cfa_pattern == int(CfaPattern::CFA_GBRG) || cfa_pattern == int(CfaPattern::CFA_BGGR));
     Expr c_idx = select(y % 2 == 0,
-                    select(x % 2 == 0, 0, 1),
-                    select(x % 2 == 0, 2, 3));
+                    select(x % 2 == 0, 0, select(is_vert_shifted, 2, 1)),
+                    select(x % 2 == 0, select(is_vert_shifted, 1, 2), 3));
 
     Expr v00 = lens_shading_map(ix0, iy0, c_idx);
     Expr v10 = lens_shading_map(ix1, iy0, c_idx);
@@ -176,15 +177,7 @@ private:
     Expr final_gain = select(num_cols > 0, gain, 1.0f);
     
     Expr raw_val = cast<float>(input(x, y)) * final_gain;
-    // Smooth shoulder compression for values above knee (50000.0f) to prevent hard clipping and rainbow halo rings
-    float knee = 50000.0f;
-    float max_val = 65535.0f;
-    float range = max_val - knee;
-    Expr excess = raw_val - knee;
-    Expr compressed = knee + range * (excess / (excess + range));
-    Expr soft_val = select(raw_val <= knee, raw_val, compressed);
-
-    output(x, y) = u16_sat(soft_val);
+    output(x, y) = u16_sat(raw_val);
     return output;
   }
 
@@ -338,8 +331,13 @@ private:
     return output_is;
   }
 
-  Func chroma_denoise(Func input, Expr width, Expr height, int num_passes) {
-    Func output_denoise = rgb_to_yuv(input);
+  Func chroma_denoise(Func input, Expr width, Expr height, int num_passes, const CompiletimeWhiteBalance &wb) {
+    Func wb_input("wb_input");
+    wb_input(x, y, c) = select(c == 0, u16_sat(f32(input(x, y, 0)) * wb.r),
+                               c == 1, u16_sat(f32(input(x, y, 1)) * wb.g0),
+                                       u16_sat(f32(input(x, y, 2)) * wb.b));
+
+    Func output_denoise = rgb_to_yuv(wb_input);
     int pass = 0;
     if (num_passes > 0) output_denoise = bilateral_filter(output_denoise, width, height);
     pass++;
@@ -348,7 +346,13 @@ private:
       pass++;
     }
     if (num_passes > 2) output_denoise = increase_saturation(output_denoise, 1.1f);
-    return yuv_to_rgb(output_denoise);
+    Func filtered = yuv_to_rgb(output_denoise);
+
+    Func output_unwb("chroma_denoise_output");
+    output_unwb(x, y, c) = select(c == 0, u16_sat(f32(filtered(x, y, 0)) / max(0.0001f, wb.r)),
+                                  c == 1, u16_sat(f32(filtered(x, y, 1)) / max(0.0001f, wb.g0)),
+                                          u16_sat(f32(filtered(x, y, 2)) / max(0.0001f, wb.b)));
+    return output_unwb;
   }
 
   Func srgb(Func input, Func srgb_matrix) {
