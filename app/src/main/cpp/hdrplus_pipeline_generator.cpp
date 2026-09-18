@@ -58,15 +58,17 @@ public:
 
     Func bayer_shifted = shift_bayer_to_rggb(merged, cfa_pattern);
     Func black_white_level_output = black_white_level(bayer_shifted, black_point_r, black_point_g0, black_point_g1, black_point_b, white_point, cfa_pattern);
-    Func lsc_output = apply_lsc(black_white_level_output, inputs.width(), inputs.height(), cfa_pattern);
-    Func white_balance_output = white_balance(lsc_output, wb);
+    Func white_balance_output = white_balance(black_white_level_output, wb);
 
     // Demosaic
     DemosaicResult dm = demosaic(white_balance_output, inputs.width(), inputs.height());
     Func demosaic_output = dm.output;
 
+    // Apply LSC on demosaiced RGB with joint proportional highlight protection
+    Func lsc_output = apply_lsc(demosaic_output, inputs.width(), inputs.height());
+
     // Denoise (applies on Sensor Linear data now)
-    Func linear_rgb_output = demosaic_output;
+    Func linear_rgb_output = lsc_output;
     
     Func chroma_denoised_output;
     if (!single_frame_mode) {
@@ -82,6 +84,7 @@ public:
         // GPU Schedule
         Var tx{"tx"}, ty{"ty"};
         output.gpu_tile(x, y, tx, ty, xi, yi, 16, 16);
+        demosaic_output.compute_at(output, tx);
         linear_rgb_output.compute_at(output, tx);
 
         // We'd need to propagate GPU scheduling into helper functions or refactor them
@@ -91,7 +94,6 @@ public:
     } else if (!use_optimized_schedule) {
         // Legacy CPU Schedule
         black_white_level_output.compute_root().parallel(y).vectorize(x, kVec);
-        lsc_output.compute_root().parallel(y).vectorize(x, kVec);
         white_balance_output.compute_root().parallel(y).vectorize(x, kVec);
 
         demosaic_output.compute_root()
@@ -106,6 +108,12 @@ public:
         dm.d2.compute_at(demosaic_output, yi).vectorize(x, kVec);
         dm.d3.compute_at(demosaic_output, yi).vectorize(x, kVec);
 
+        lsc_output.compute_root()
+            .tile(x, y, xo, yo, xi, yi, kTileX, kTileY)
+            .reorder(c, xi, yi, xo, yo)
+            .parallel(yo)
+            .vectorize(xi, kVec);
+
         output.compute_root()
             .tile(x, y, xo, yo, xi, yi, kTileX, kTileY)
             .parallel(yo)
@@ -114,7 +122,6 @@ public:
         // Optimized CPU Schedule (Stage Fusion)
         // Fuse early stages into demosaic
         black_white_level_output.compute_at(demosaic_output, yi).vectorize(x, kVec);
-        lsc_output.compute_at(demosaic_output, yi).vectorize(x, kVec);
         white_balance_output.compute_at(demosaic_output, yi).vectorize(x, kVec);
 
         demosaic_output.compute_root()
@@ -130,6 +137,12 @@ public:
         dm.d2.compute_at(demosaic_output, yi).vectorize(x, kVec);
         dm.d3.compute_at(demosaic_output, yi).vectorize(x, kVec);
 
+        lsc_output.compute_root()
+            .tile(x, y, xo, yo, xi, yi, kTileX, kTileY)
+            .reorder(c, xi, yi, xo, yo)
+            .parallel(yo)
+            .vectorize(xi, kVec);
+
         // Fuse sRGB and YUV conversions into output
         output.compute_root()
             .tile(x, y, xo, yo, xi, yi, kTileX, kTileY)
@@ -141,7 +154,7 @@ public:
 private:
   Var x{"x"}, y{"y"}, c{"c"}, xo{"xo"}, yo{"yo"}, xi{"xi"}, yi{"yi"};
 
-  Func apply_lsc(Func input, Expr width, Expr height, const Expr cfa_pattern) {
+  Func apply_lsc(Func input, Expr width, Expr height) {
     Func output("lsc_output");
     
     Expr num_cols = lens_shading_map.dim(0).extent();
@@ -150,34 +163,47 @@ private:
     Expr fx = cast<float>(x) * cast<float>(num_cols - 1) / cast<float>(max(1, width - 1));
     Expr fy = cast<float>(y) * cast<float>(num_rows - 1) / cast<float>(max(1, height - 1));
 
-    Expr ix0 = clamp(cast<int>(floor(fx)), 0, num_cols - 1);
-    Expr ix1 = min(ix0 + 1, num_cols - 1);
-    Expr iy0 = clamp(cast<int>(floor(fy)), 0, num_rows - 1);
-    Expr iy1 = min(iy0 + 1, num_rows - 1);
+    Expr max_col = max(0, num_cols - 1);
+    Expr max_row = max(0, num_rows - 1);
+    Expr ix0 = clamp(cast<int>(floor(fx)), 0, max_col);
+    Expr ix1 = min(ix0 + 1, max_col);
+    Expr iy0 = clamp(cast<int>(floor(fy)), 0, max_row);
+    Expr iy1 = min(iy0 + 1, max_row);
     
     Expr w_x1 = fx - cast<float>(ix0);
     Expr w_x0 = 1.0f - w_x1;
     Expr w_y1 = fy - cast<float>(iy0);
     Expr w_y0 = 1.0f - w_y1;
 
-    Expr is_vert_shifted = (cfa_pattern == int(CfaPattern::CFA_GBRG) || cfa_pattern == int(CfaPattern::CFA_BGGR));
-    Expr c_idx = select(y % 2 == 0,
-                    select(x % 2 == 0, 0, select(is_vert_shifted, 2, 1)),
-                    select(x % 2 == 0, select(is_vert_shifted, 1, 2), 3));
+    auto sample_lsc = [&](int ch) {
+        Expr v00 = lens_shading_map(ix0, iy0, ch);
+        Expr v10 = lens_shading_map(ix1, iy0, ch);
+        Expr v01 = lens_shading_map(ix0, iy1, ch);
+        Expr v11 = lens_shading_map(ix1, iy1, ch);
+        Expr v0 = v00 * w_x0 + v10 * w_x1;
+        Expr v1 = v01 * w_x0 + v11 * w_x1;
+        return select(num_cols > 0, v0 * w_y0 + v1 * w_y1, 1.0f);
+    };
 
-    Expr v00 = lens_shading_map(ix0, iy0, c_idx);
-    Expr v10 = lens_shading_map(ix1, iy0, c_idx);
-    Expr v01 = lens_shading_map(ix0, iy1, c_idx);
-    Expr v11 = lens_shading_map(ix1, iy1, c_idx);
+    Expr gain_r = sample_lsc(0);
+    Expr gain_g = 0.5f * (sample_lsc(1) + sample_lsc(2));
+    Expr gain_b = sample_lsc(3);
 
-    Expr v0 = v00 * w_x0 + v10 * w_x1;
-    Expr v1 = v01 * w_x0 + v11 * w_x1;
-    Expr gain = v0 * w_y0 + v1 * w_y1;
-    
-    Expr final_gain = select(num_cols > 0, gain, 1.0f);
-    
-    Expr raw_val = cast<float>(input(x, y)) * final_gain;
-    output(x, y) = u16_sat(raw_val);
+    Expr raw_r = cast<float>(input(x, y, 0)) * gain_r;
+    Expr raw_g = cast<float>(input(x, y, 1)) * gain_g;
+    Expr raw_b = cast<float>(input(x, y, 2)) * gain_b;
+
+    Expr max_ch = max(raw_r, max(raw_g, raw_b));
+
+    float knee = 50000.0f;
+    float range = 15535.0f;
+    Expr excess = max_ch - knee;
+    Expr compressed = knee + range * (excess / (excess + range));
+    Expr scale = select(max_ch > knee, compressed / max(1.0f, max_ch), 1.0f);
+
+    output(x, y, c) = select(c == 0, u16_sat(raw_r * scale),
+                             c == 1, u16_sat(raw_g * scale),
+                                     u16_sat(raw_b * scale));
     return output;
   }
 
