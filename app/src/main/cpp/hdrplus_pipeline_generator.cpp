@@ -195,11 +195,19 @@ private:
 
     Expr max_ch = max(raw_r, max(raw_g, raw_b));
 
-    float knee = 50000.0f;
-    float range = 15535.0f;
-    Expr excess = max_ch - knee;
-    Expr compressed = knee + range * (excess / (excess + range));
-    Expr scale = select(max_ch > knee, compressed / max(1.0f, max_ch), 1.0f);
+    // Joint, proportional highlight knee. This is a display-oriented soft shoulder
+    // (not part of the Camera2 / DNG colour model) and it only makes sense for the
+    // multi-frame pipeline, whose result is later multiplied by a display-domain
+    // digital gain. The minimal single-frame path must stay linear all the way up
+    // to the sensor white level, so the knee is skipped there.
+    Expr scale = 1.0f;
+    if (!single_frame_mode) {
+      const float knee = 50000.0f;
+      const float range = 15535.0f;
+      Expr excess = max_ch - knee;
+      Expr compressed = knee + range * (excess / (excess + range));
+      scale = select(max_ch > knee, compressed / max(1.0f, max_ch), 1.0f);
+    }
 
     output(x, y, c) = select(c == 0, u16_sat(raw_r * scale),
                              c == 1, u16_sat(raw_g * scale),

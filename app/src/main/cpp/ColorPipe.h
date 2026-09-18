@@ -114,7 +114,11 @@ bool process_and_save_image(
     float zoomFactor = 1.0f,
     bool mirror = false,
     bool enableMemoryColor = false,
-    int colorEngineMode = 0
+    int colorEngineMode = 0,
+    // Minimal, spec-faithful single-frame path: keep the sensor data linear
+    // (no knee) and neutralize sensor-saturated pixels point-wise instead of
+    // applying the display-oriented highlight desaturation ramp.
+    bool faithfulHighlights = false
 );
 
 bool write_dng(
