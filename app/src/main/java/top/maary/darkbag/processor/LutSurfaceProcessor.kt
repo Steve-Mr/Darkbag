@@ -84,9 +84,9 @@ class LutSurfaceProcessor {
         )
 
         private val M_XYZ_to_AlexaWideGamut_D65 = floatArrayOf(
-            1.99234198f, -0.57196805f, -0.29536100f,
-            -0.79989925f, 1.74791391f, 0.01134474f,
-            0.00760860f, -0.02558954f, 0.93508164f
+            1.78906555f, -0.48253386f, -0.20007579f,
+           -0.63984866f,  1.39639996f,  0.19443229f,
+           -0.04153155f,  0.08233537f,  0.87886848f
         )
 
         private val M_XYZ_to_Rec2020_D65 = floatArrayOf(
@@ -139,7 +139,7 @@ class LutSurfaceProcessor {
         fun getGamutMatrix(targetLog: Int): FloatArray {
             val targetM = when (targetLog) {
                 1 -> M_XYZ_to_AlexaWideGamut_D65 // Arri LogC3
-                2, 3, 4, 10, 11 -> M_XYZ_to_Rec2020_D65  // F-Log, F-Log2, F-Log2 C, N-Log, D-Log
+                2, 3, 4, 8, 9, 10, 11, 12 -> M_XYZ_to_Rec2020_D65  // F-Log, F-Log2, F-Log2 C, Canon Log 2/3, N-Log, D-Log, Log3G10
                 5, 6 -> M_XYZ_to_SGamut3Cine_D65 // S-Log3, S-Log3.Cine
                 7 -> M_XYZ_to_VGamut_D65         // V-Log
                 else -> M_XYZ_to_Rec709_D65      // Default sRGB / Rec.709
@@ -679,7 +679,9 @@ class LutSurfaceProcessor {
 
             // 5. GLSL Analytic Log Curves (Identical to ColorPipe.cpp)
             float applyLogCurve(float x, int type) {
-                x = max(x, 0.0);
+                if (type != 12) {
+                    x = max(x, 0.0);
+                }
                 if (type == 1) { // Arri LogC3
                     if (x > 0.010591) return 0.247190 * log10_f(5.555556 * x + 0.052272) + 0.385537;
                     else return 5.367655 * x + 0.092809;
@@ -695,6 +697,25 @@ class LutSurfaceProcessor {
                 } else if (type == 7) { // V-Log
                     if (x >= 0.01) return 0.241514 * log10_f(x + 0.008730) + 0.598206;
                     else return 5.6 * x + 0.125;
+                } else if (type == 8) { // Canon Log 2
+                    float xr = max(0.0, x / 0.9);
+                    return 0.24136077 * log10_f(xr * 87.09937546 + 1.0) + 0.092864125;
+                } else if (type == 9) { // Canon Log 3
+                    float xr = max(0.0, x / 0.9);
+                    if (xr <= 0.014) return 1.9754798 * xr + 0.12512219;
+                    else return 0.36726845 * log10_f(xr * 14.98325 + 1.0) + 0.12240537;
+                } else if (type == 10) { // N-Log
+                    if (x < 0.328) return (650.0 * pow(max(0.0, x + 0.0075), 1.0 / 3.0)) / 1023.0;
+                    else return (150.0 * log(max(x, 1e-7)) + 619.0) / 1023.0;
+                } else if (type == 11) { // D-Log
+                    if (x <= 0.0078) return 6.025 * x + 0.0929;
+                    else return log10_f(x * 0.9892 + 0.0108) * 0.256663 + 0.584555;
+                } else if (type == 12) { // Log3G10
+                    const float a = 0.224282;
+                    const float b = 155.975327;
+                    const float c = 0.01;
+                    if (x >= 0.0) return a * log10_f(x * b + 1.0) + c;
+                    else return -a * log10_f(-x * b + 1.0) + c;
                 } else { // Default sRGB: ACES Filmic Tone Mapping + sRGB OETF
                     return applyAcesFit(vec3(x)).r;
                 }

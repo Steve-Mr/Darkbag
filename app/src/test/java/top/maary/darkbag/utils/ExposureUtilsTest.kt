@@ -40,7 +40,7 @@ class ExposureUtilsTest {
     @Test
     fun testBrightScene_FloorHit() {
         // Scenario: Scene is so bright that AE is already at ISO 100, 100us (the floor).
-        // We want -3 EV (at ISO 100), but hardware cannot go lower.
+        // We want -1.0 EV (at ISO 100), but hardware cannot go lower.
         val configFloor = ExposureUtils.calculateHdrPlusExposure(
             currentIso = 100,
             currentTime = 100_000L, // Already at minTime
@@ -51,8 +51,8 @@ class ExposureUtilsTest {
         )
 
         // baseline = 100 * 100k = 10M
-        // underexposeFactor for ISO 100 is -3 EV (0.125)
-        // targetTotalExposure = 10M * 0.125 = 1.25M
+        // underexposeFactor for ISO 100 is -1.0 EV (0.5)
+        // targetTotalExposure = 10M * 0.5 = 5.0M
         // actual hardware floor = 100 * 100k = 10M (cannot go lower than minIso * minTime)
 
         // Refactored logic: digitalGain = baseline / actual = 10M / 10M = 1.0
@@ -108,15 +108,15 @@ class ExposureUtilsTest {
         val achievedFactor800 = (config800.iso.toDouble() * config800.exposureTime.toDouble()) / (800.0 * tenMs)
         assertEquals(1.0, achievedFactor800, 0.1)
 
-        // ISO 40 -> -3 EV (0.125)
+        // ISO 40 -> -1.5 EV (0.3535)
         val config40 = ExposureUtils.calculateHdrPlusExposure(40, tenMs, isoRange, timeRange)
         val achievedFactor40 = (config40.iso.toDouble() * config40.exposureTime.toDouble()) / (40.0 * tenMs)
-        assertEquals(0.125, achievedFactor40, 0.05)
+        assertEquals(0.3535, achievedFactor40, 0.05)
 
-        // ISO 100 -> -2 EV (0.25)
+        // ISO 100 -> -1.0 EV (0.5)
         val config100 = ExposureUtils.calculateHdrPlusExposure(100, tenMs, isoRange, timeRange)
         val achievedFactor100 = (config100.iso.toDouble() * config100.exposureTime.toDouble()) / (100.0 * tenMs)
-        assertEquals(0.25, achievedFactor100, 0.05)
+        assertEquals(0.5, achievedFactor100, 0.05)
     }
 
     @Test

@@ -57,20 +57,22 @@ public:
                                white_balance_g1, white_balance_b};
 
     Func bayer_shifted = shift_bayer_to_rggb(merged, cfa_pattern);
-    Func black_white_level_output = black_white_level(bayer_shifted, black_point_r, black_point_g0, black_point_g1, black_point_b, white_point);
-    Func lsc_output = apply_lsc(black_white_level_output, inputs.width(), inputs.height());
-    Func white_balance_output = white_balance(lsc_output, wb);
+    Func black_white_level_output = black_white_level(bayer_shifted, black_point_r, black_point_g0, black_point_g1, black_point_b, white_point, cfa_pattern);
+    Func white_balance_output = white_balance(black_white_level_output, wb);
 
     // Demosaic
     DemosaicResult dm = demosaic(white_balance_output, inputs.width(), inputs.height());
     Func demosaic_output = dm.output;
 
+    // Apply LSC on demosaiced RGB with joint proportional highlight protection
+    Func lsc_output = apply_lsc(demosaic_output, inputs.width(), inputs.height());
+
     // Denoise (applies on Sensor Linear data now)
-    Func linear_rgb_output = demosaic_output;
+    Func linear_rgb_output = lsc_output;
     
     Func chroma_denoised_output;
     if (!single_frame_mode) {
-        chroma_denoised_output = chroma_denoise(linear_rgb_output, inputs.width(), inputs.height(), denoise_passes);
+        chroma_denoised_output = chroma_denoise(linear_rgb_output, inputs.width(), inputs.height(), denoise_passes, wb);
     } else {
         chroma_denoised_output = linear_rgb_output;
     }
@@ -82,6 +84,7 @@ public:
         // GPU Schedule
         Var tx{"tx"}, ty{"ty"};
         output.gpu_tile(x, y, tx, ty, xi, yi, 16, 16);
+        demosaic_output.compute_at(output, tx);
         linear_rgb_output.compute_at(output, tx);
 
         // We'd need to propagate GPU scheduling into helper functions or refactor them
@@ -91,7 +94,6 @@ public:
     } else if (!use_optimized_schedule) {
         // Legacy CPU Schedule
         black_white_level_output.compute_root().parallel(y).vectorize(x, kVec);
-        lsc_output.compute_root().parallel(y).vectorize(x, kVec);
         white_balance_output.compute_root().parallel(y).vectorize(x, kVec);
 
         demosaic_output.compute_root()
@@ -106,6 +108,12 @@ public:
         dm.d2.compute_at(demosaic_output, yi).vectorize(x, kVec);
         dm.d3.compute_at(demosaic_output, yi).vectorize(x, kVec);
 
+        lsc_output.compute_root()
+            .tile(x, y, xo, yo, xi, yi, kTileX, kTileY)
+            .reorder(c, xi, yi, xo, yo)
+            .parallel(yo)
+            .vectorize(xi, kVec);
+
         output.compute_root()
             .tile(x, y, xo, yo, xi, yi, kTileX, kTileY)
             .parallel(yo)
@@ -114,7 +122,6 @@ public:
         // Optimized CPU Schedule (Stage Fusion)
         // Fuse early stages into demosaic
         black_white_level_output.compute_at(demosaic_output, yi).vectorize(x, kVec);
-        lsc_output.compute_at(demosaic_output, yi).vectorize(x, kVec);
         white_balance_output.compute_at(demosaic_output, yi).vectorize(x, kVec);
 
         demosaic_output.compute_root()
@@ -129,6 +136,12 @@ public:
         dm.d1.compute_at(demosaic_output, yi).vectorize(x, kVec);
         dm.d2.compute_at(demosaic_output, yi).vectorize(x, kVec);
         dm.d3.compute_at(demosaic_output, yi).vectorize(x, kVec);
+
+        lsc_output.compute_root()
+            .tile(x, y, xo, yo, xi, yi, kTileX, kTileY)
+            .reorder(c, xi, yi, xo, yo)
+            .parallel(yo)
+            .vectorize(xi, kVec);
 
         // Fuse sRGB and YUV conversions into output
         output.compute_root()
@@ -150,49 +163,77 @@ private:
     Expr fx = cast<float>(x) * cast<float>(num_cols - 1) / cast<float>(max(1, width - 1));
     Expr fy = cast<float>(y) * cast<float>(num_rows - 1) / cast<float>(max(1, height - 1));
 
-    Expr ix0 = clamp(cast<int>(floor(fx)), 0, num_cols - 1);
-    Expr ix1 = min(ix0 + 1, num_cols - 1);
-    Expr iy0 = clamp(cast<int>(floor(fy)), 0, num_rows - 1);
-    Expr iy1 = min(iy0 + 1, num_rows - 1);
+    Expr max_col = max(0, num_cols - 1);
+    Expr max_row = max(0, num_rows - 1);
+    Expr ix0 = clamp(cast<int>(floor(fx)), 0, max_col);
+    Expr ix1 = min(ix0 + 1, max_col);
+    Expr iy0 = clamp(cast<int>(floor(fy)), 0, max_row);
+    Expr iy1 = min(iy0 + 1, max_row);
     
     Expr w_x1 = fx - cast<float>(ix0);
     Expr w_x0 = 1.0f - w_x1;
     Expr w_y1 = fy - cast<float>(iy0);
     Expr w_y0 = 1.0f - w_y1;
 
-    Expr c_idx = select(y % 2 == 0,
-                    select(x % 2 == 0, 0, 1),
-                    select(x % 2 == 0, 2, 3));
+    auto sample_lsc = [&](int ch) {
+        Expr v00 = lens_shading_map(ix0, iy0, ch);
+        Expr v10 = lens_shading_map(ix1, iy0, ch);
+        Expr v01 = lens_shading_map(ix0, iy1, ch);
+        Expr v11 = lens_shading_map(ix1, iy1, ch);
+        Expr v0 = v00 * w_x0 + v10 * w_x1;
+        Expr v1 = v01 * w_x0 + v11 * w_x1;
+        return select(num_cols > 0, v0 * w_y0 + v1 * w_y1, 1.0f);
+    };
 
-    Expr v00 = lens_shading_map(ix0, iy0, c_idx);
-    Expr v10 = lens_shading_map(ix1, iy0, c_idx);
-    Expr v01 = lens_shading_map(ix0, iy1, c_idx);
-    Expr v11 = lens_shading_map(ix1, iy1, c_idx);
+    Expr gain_r = sample_lsc(0);
+    Expr gain_g = 0.5f * (sample_lsc(1) + sample_lsc(2));
+    Expr gain_b = sample_lsc(3);
 
-    Expr v0 = v00 * w_x0 + v10 * w_x1;
-    Expr v1 = v01 * w_x0 + v11 * w_x1;
-    Expr gain = v0 * w_y0 + v1 * w_y1;
-    
-    Expr final_gain = select(num_cols > 0, gain, 1.0f);
-    
-    Expr raw_val = cast<float>(input(x, y)) * final_gain;
-    // Smooth shoulder compression for values above knee (50000.0f) to prevent hard clipping and rainbow halo rings
+    Expr raw_r = cast<float>(input(x, y, 0)) * gain_r;
+    Expr raw_g = cast<float>(input(x, y, 1)) * gain_g;
+    Expr raw_b = cast<float>(input(x, y, 2)) * gain_b;
+
+    Expr max_ch = max(raw_r, max(raw_g, raw_b));
+
     float knee = 50000.0f;
-    float max_val = 65535.0f;
-    float range = max_val - knee;
-    Expr excess = raw_val - knee;
+    float range = 15535.0f;
+    Expr excess = max_ch - knee;
     Expr compressed = knee + range * (excess / (excess + range));
-    Expr soft_val = select(raw_val <= knee, raw_val, compressed);
+    Expr scale = select(max_ch > knee, compressed / max(1.0f, max_ch), 1.0f);
 
-    output(x, y) = u16_sat(soft_val);
+    output(x, y, c) = select(c == 0, u16_sat(raw_r * scale),
+                             c == 1, u16_sat(raw_g * scale),
+                                     u16_sat(raw_b * scale));
     return output;
   }
 
-  Func black_white_level(Func input, const Expr bp_r, const Expr bp_g0, const Expr bp_g1, const Expr bp_b, const Expr wp) {
+  Func black_white_level(Func input, const Expr bp_r, const Expr bp_g0, const Expr bp_g1, const Expr bp_b, const Expr wp, const Expr cfa_pattern) {
     Func output("black_white_level_output");
+
+    // Remap the black points to RGGB order to match the shifted bayer output
+    Expr rggb_bp_r = select(cfa_pattern == int(CfaPattern::CFA_RGGB), bp_r,
+                            cfa_pattern == int(CfaPattern::CFA_GRBG), bp_g0,
+                            cfa_pattern == int(CfaPattern::CFA_GBRG), bp_g1,
+                            cfa_pattern == int(CfaPattern::CFA_BGGR), bp_b, bp_r);
+
+    Expr rggb_bp_g0 = select(cfa_pattern == int(CfaPattern::CFA_RGGB), bp_g0,
+                             cfa_pattern == int(CfaPattern::CFA_GRBG), bp_r,
+                             cfa_pattern == int(CfaPattern::CFA_GBRG), bp_b,
+                             cfa_pattern == int(CfaPattern::CFA_BGGR), bp_g1, bp_g0);
+
+    Expr rggb_bp_g1 = select(cfa_pattern == int(CfaPattern::CFA_RGGB), bp_g1,
+                             cfa_pattern == int(CfaPattern::CFA_GRBG), bp_b,
+                             cfa_pattern == int(CfaPattern::CFA_GBRG), bp_r,
+                             cfa_pattern == int(CfaPattern::CFA_BGGR), bp_g0, bp_g1);
+
+    Expr rggb_bp_b = select(cfa_pattern == int(CfaPattern::CFA_RGGB), bp_b,
+                            cfa_pattern == int(CfaPattern::CFA_GRBG), bp_g1,
+                            cfa_pattern == int(CfaPattern::CFA_GBRG), bp_g0,
+                            cfa_pattern == int(CfaPattern::CFA_BGGR), bp_r, bp_b);
+
     Expr bp = select(y % 2 == 0,
-                     select(x % 2 == 0, bp_r, bp_g0),
-                     select(x % 2 == 0, bp_g1, bp_b));
+                     select(x % 2 == 0, rggb_bp_r, rggb_bp_g0),
+                     select(x % 2 == 0, rggb_bp_g1, rggb_bp_b));
     Expr white_factor = 65535.f / max(1.f, f32(wp) - f32(bp));
     output(x, y) = u16_sat((i32(input(x, y)) - bp) * white_factor);
     return output;
@@ -316,8 +357,15 @@ private:
     return output_is;
   }
 
-  Func chroma_denoise(Func input, Expr width, Expr height, int num_passes) {
-    Func output_denoise = rgb_to_yuv(input);
+  Func chroma_denoise(Func input, Expr width, Expr height, int num_passes, const CompiletimeWhiteBalance &wb) {
+    if (num_passes <= 0) return input;
+
+    Func wb_input("wb_input");
+    wb_input(x, y, c) = select(c == 0, f32(input(x, y, 0)) * wb.r,
+                               c == 1, f32(input(x, y, 1)) * wb.g0,
+                                       f32(input(x, y, 2)) * wb.b);
+
+    Func output_denoise = rgb_to_yuv(wb_input);
     int pass = 0;
     if (num_passes > 0) output_denoise = bilateral_filter(output_denoise, width, height);
     pass++;
@@ -326,7 +374,20 @@ private:
       pass++;
     }
     if (num_passes > 2) output_denoise = increase_saturation(output_denoise, 1.1f);
-    return yuv_to_rgb(output_denoise);
+
+    Func filtered("yuv_to_rgb_f32_filtered");
+    Expr Y = output_denoise(x, y, 0);
+    Expr U = output_denoise(x, y, 1);
+    Expr V = output_denoise(x, y, 2);
+    filtered(x, y, c) = select(c == 0, Y + 1.403f * V,
+                               c == 1, Y - 0.344f * U - 0.714f * V,
+                                       Y + 1.770f * U);
+
+    Func output_unwb("chroma_denoise_output");
+    output_unwb(x, y, c) = select(c == 0, u16_sat(filtered(x, y, 0) / max(0.0001f, wb.r)),
+                                  c == 1, u16_sat(filtered(x, y, 1) / max(0.0001f, wb.g0)),
+                                          u16_sat(filtered(x, y, 2) / max(0.0001f, wb.b)));
+    return output_unwb;
   }
 
   Func srgb(Func input, Func srgb_matrix) {

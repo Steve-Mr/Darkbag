@@ -58,6 +58,16 @@ uniform ivec2 uImageSize;
 in vec2 vTexCoord;
 out vec4 fragColor;
 
+float apply_flog(float x) {
+    x = max(0.0, x);
+    const float cut = 0.00089;
+    const float a = 0.555556;
+    const float b = 0.009468;
+    const float c = 0.344676;
+    const float d = 0.790453;
+    return (x >= cut) ? (c * log(a * x + b) / log(10.0) + d) : (8.52 * x + 0.0929);
+}
+
 float apply_flog2(float x) {
     x = max(0.0, x);
     return (x >= 0.000889) ? (0.245281 * log(5.555556 * x + 0.064829) / log(10.0) + 0.384316)
@@ -82,6 +92,44 @@ float apply_logc3(float x) {
     return (x > cut) ? (c * log(a * x + b) / log(10.0) + d) : (e * x + f);
 }
 
+float apply_vlog(float x) {
+    x = max(0.0, x);
+    const float cut = 0.01;
+    const float b = 0.008730;
+    const float c = 0.241514;
+    const float d = 0.598206;
+    return (x >= cut) ? (c * log(x + b) / log(10.0) + d) : (5.6 * x + 0.125);
+}
+
+float apply_canon_log2(float x) {
+    float xr = max(0.0, x / 0.9);
+    return 0.24136077 * log(xr * 87.09937546 + 1.0) / log(10.0) + 0.092864125;
+}
+
+float apply_canon_log3(float x) {
+    float xr = max(0.0, x / 0.9);
+    return (xr <= 0.014) ? (1.9754798 * xr + 0.12512219)
+                         : (0.36726845 * log(xr * 14.98325 + 1.0) / log(10.0) + 0.12240537);
+}
+
+float apply_n_log(float x) {
+    return (x < 0.328) ? ((650.0 * pow(max(0.0, x + 0.0075), 1.0 / 3.0)) / 1023.0)
+                       : ((150.0 * log(max(1e-7, x)) + 619.0) / 1023.0);
+}
+
+float apply_d_log(float x) {
+    return (x <= 0.0078) ? (6.025 * x + 0.0929)
+                         : (log(max(1e-7, x * 0.9892 + 0.0108)) / log(10.0) * 0.256663 + 0.584555);
+}
+
+float apply_log3g10(float x) {
+    const float a = 0.224282;
+    const float b = 155.975327;
+    const float c = 0.01;
+    return (x >= 0.0) ? (a * log(x * b + 1.0) / log(10.0) + c)
+                      : (-a * log(-x * b + 1.0) / log(10.0) + c);
+}
+
 float srgb_oetf(float x) {
     x = max(0.0, x);
     if (x <= 0.0031308) return 12.92 * x;
@@ -90,8 +138,15 @@ float srgb_oetf(float x) {
 
 vec3 applyLog(vec3 c, int type) {
     if (type == 1) return vec3(apply_logc3(c.r), apply_logc3(c.g), apply_logc3(c.b));
-    if (type == 2 || type == 3 || type == 4) return vec3(apply_flog2(c.r), apply_flog2(c.g), apply_flog2(c.b));
+    if (type == 2) return vec3(apply_flog(c.r), apply_flog(c.g), apply_flog(c.b));
+    if (type == 3 || type == 4) return vec3(apply_flog2(c.r), apply_flog2(c.g), apply_flog2(c.b));
     if (type == 5 || type == 6) return vec3(apply_slog3(c.r), apply_slog3(c.g), apply_slog3(c.b));
+    if (type == 7) return vec3(apply_vlog(c.r), apply_vlog(c.g), apply_vlog(c.b));
+    if (type == 8) return vec3(apply_canon_log2(c.r), apply_canon_log2(c.g), apply_canon_log2(c.b));
+    if (type == 9) return vec3(apply_canon_log3(c.r), apply_canon_log3(c.g), apply_canon_log3(c.b));
+    if (type == 10) return vec3(apply_n_log(c.r), apply_n_log(c.g), apply_n_log(c.b));
+    if (type == 11) return vec3(apply_d_log(c.r), apply_d_log(c.g), apply_d_log(c.b));
+    if (type == 12) return vec3(apply_log3g10(c.r), apply_log3g10(c.g), apply_log3g10(c.b));
     return c;
 }
 

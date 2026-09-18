@@ -282,7 +282,7 @@ class SettingsFragment : Fragment() {
         // Color Engine Mode
         val colorEngineAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, COLOR_ENGINE_MODES)
         binding.menuColorEngine.setAdapter(colorEngineAdapter)
-        val savedColorEngineIndex = prefs.getInt(KEY_COLOR_ENGINE_MODE, 0)
+        val savedColorEngineIndex = prefs.getInt(KEY_COLOR_ENGINE_MODE, 2)
         val safeColorEngineIndex = savedColorEngineIndex.coerceIn(0, COLOR_ENGINE_MODES.size - 1)
         binding.menuColorEngine.setText(COLOR_ENGINE_MODES[safeColorEngineIndex], false)
         binding.menuColorEngine.setOnItemClickListener { _, _, position, _ ->
@@ -965,9 +965,9 @@ class SettingsFragment : Fragment() {
         }
 
         val COLOR_ENGINE_MODES = listOf(
-            "Khronos PBR Neutral (Default)",
+            "Khronos PBR Neutral",
             "Natural Filmic (Leica/Hasselblad)",
-            "Sony Uchimura (GT7)",
+            "Sony Uchimura (GT7, Default)",
             "Legacy ACES Filmic (Original)"
         )
 

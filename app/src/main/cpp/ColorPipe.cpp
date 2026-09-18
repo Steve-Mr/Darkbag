@@ -47,19 +47,18 @@ static bool write_jpeg_turbo(const char* filename, int width, int height, int su
     return true;
 }
 
-static const std::vector<unsigned char>& encode_rgb8_jpeg(
+static std::vector<unsigned char> encode_rgb8_jpeg(
     const std::vector<unsigned char>& rgb8,
     int width,
     int height,
     int quality
 ) {
-    thread_local std::vector<unsigned char> tls_jpeg_bytes;
-    tls_jpeg_bytes.clear();
+    std::vector<unsigned char> jpeg_bytes;
     
-    if (rgb8.empty()) return tls_jpeg_bytes;
+    if (rgb8.empty()) return jpeg_bytes;
     
     tjhandle _jpegCompressor = tjInitCompress();
-    if (!_jpegCompressor) return tls_jpeg_bytes;
+    if (!_jpegCompressor) return jpeg_bytes;
     
     unsigned char* jpegBuf = NULL;
     unsigned long jpegSize = 0;
@@ -68,12 +67,12 @@ static const std::vector<unsigned char>& encode_rgb8_jpeg(
                               &jpegBuf, &jpegSize, TJSAMP_420, quality, TJFLAG_FASTDCT);
                               
     if (tj_stat == 0 && jpegBuf != NULL) {
-        tls_jpeg_bytes.assign(jpegBuf, jpegBuf + jpegSize);
+        jpeg_bytes.assign(jpegBuf, jpegBuf + jpegSize);
         tjFree(jpegBuf);
     }
     tjDestroy(_jpegCompressor);
     
-    return tls_jpeg_bytes;
+    return jpeg_bytes;
 }
 
 #include <vector>
@@ -167,11 +166,26 @@ static const std::vector<unsigned char>& encode_rgb8_jpeg(
 #ifndef TIFFTAG_COLORMATRIX1
 #define TIFFTAG_COLORMATRIX1 50721
 #endif
+#ifndef TIFFTAG_COLORMATRIX2
+#define TIFFTAG_COLORMATRIX2 50722
+#endif
+#ifndef TIFFTAG_FORWARDMATRIX1
+#define TIFFTAG_FORWARDMATRIX1 50964
+#endif
+#ifndef TIFFTAG_FORWARDMATRIX2
+#define TIFFTAG_FORWARDMATRIX2 50965
+#endif
 #ifndef TIFFTAG_ASSHOTNEUTRAL
 #define TIFFTAG_ASSHOTNEUTRAL 50728
 #endif
 #ifndef TIFFTAG_CALIBRATIONILLUMINANT1
 #define TIFFTAG_CALIBRATIONILLUMINANT1 50778
+#endif
+#ifndef TIFFTAG_CALIBRATIONILLUMINANT2
+#define TIFFTAG_CALIBRATIONILLUMINANT2 50779
+#endif
+#ifndef TIFFTAG_ANALOGBALANCE
+#define TIFFTAG_ANALOGBALANCE 50727
 #endif
 #ifndef TIFFTAG_OPCODELIST1
 #define TIFFTAG_OPCODELIST1 51008
@@ -201,8 +215,13 @@ static const TIFFFieldInfo dng_field_info[] = {
     { TIFFTAG_BLACKLEVEL, -1, -1, TIFF_LONG, FIELD_CUSTOM, 1, 1, const_cast<char*>("BlackLevel") },
     { TIFFTAG_WHITELEVEL, -1, -1, TIFF_LONG, FIELD_CUSTOM, 1, 1, const_cast<char*>("WhiteLevel") },
     { TIFFTAG_COLORMATRIX1, -1, -1, TIFF_SRATIONAL, FIELD_CUSTOM, 1, 1, const_cast<char*>("ColorMatrix1") },
+    { TIFFTAG_COLORMATRIX2, -1, -1, TIFF_SRATIONAL, FIELD_CUSTOM, 1, 1, const_cast<char*>("ColorMatrix2") },
+    { TIFFTAG_FORWARDMATRIX1, -1, -1, TIFF_SRATIONAL, FIELD_CUSTOM, 1, 1, const_cast<char*>("ForwardMatrix1") },
+    { TIFFTAG_FORWARDMATRIX2, -1, -1, TIFF_SRATIONAL, FIELD_CUSTOM, 1, 1, const_cast<char*>("ForwardMatrix2") },
     { TIFFTAG_ASSHOTNEUTRAL, -1, -1, TIFF_RATIONAL, FIELD_CUSTOM, 1, 1, const_cast<char*>("AsShotNeutral") },
     { TIFFTAG_CALIBRATIONILLUMINANT1, 1, 1, TIFF_SHORT, FIELD_CUSTOM, 1, 0, const_cast<char*>("CalibrationIlluminant1") },
+    { TIFFTAG_CALIBRATIONILLUMINANT2, 1, 1, TIFF_SHORT, FIELD_CUSTOM, 1, 0, const_cast<char*>("CalibrationIlluminant2") },
+    { TIFFTAG_ANALOGBALANCE, -1, -1, TIFF_RATIONAL, FIELD_CUSTOM, 1, 1, const_cast<char*>("AnalogBalance") },
     { TIFFTAG_BASELINEEXPOSURE, 1, 1, TIFF_SRATIONAL, FIELD_CUSTOM, 1, 0, const_cast<char*>("BaselineExposure") },
     { TIFFTAG_DATETIMEORIGINAL, -1, -1, TIFF_ASCII, FIELD_CUSTOM, 1, 0, const_cast<char*>("DateTimeOriginal") },
     { TIFFTAG_DATETIMEDIGITIZED, -1, -1, TIFF_ASCII, FIELD_CUSTOM, 1, 0, const_cast<char*>("DateTimeDigitized") },
@@ -320,9 +339,9 @@ const Matrix3x3 M_ProPhoto_D50_to_XYZ = {
 };
 
 const Matrix3x3 M_XYZ_to_AlexaWideGamut_D65 = {
-    1.99234198f, -0.57196805f, -0.29536100f,
-    -0.79989925f, 1.74791391f, 0.01134474f,
-    0.00760860f, -0.02558954f, 0.93508164f
+    1.78906555f, -0.48253386f, -0.20007579f,
+   -0.63984866f,  1.39639996f,  0.19443229f,
+   -0.04153155f,  0.08233537f,  0.87886848f
 };
 
 const Matrix3x3 M_XYZ_to_SGamut3Cine_D65 = {
@@ -423,13 +442,13 @@ Vec3 apply_pure_luma_filmic(Vec3 c) {
 }
 
 // 3. Sony Uchimura (Gran Turismo 7 piecewise photographic tone curve)
-inline float uchimura_scalar(float x, float P = 1.0f, float a = 1.25f, float m = 0.22f, float l = 0.40f, float c = 1.33f, float b = 0.0f) {
+inline float uchimura_scalar(float x, float P = 1.0f, float a = 1.25f, float m = 0.22f, float l = 0.40f, float c = 1.33f, float b = 0.0f, float gain = 1.0f) {
     if (x <= 0.0f) return 0.0f;
     float l0 = ((P - m) * l) / a;
     float S0 = m + l0;
     float S1 = m + a * l0;
     float C2 = (a * P) / (P - S1);
-    float CP = -C2 / P;
+    float CP = -C2 / (P * std::max(1.0f, gain * 0.75f));
 
     if (x <= m) {
         return m * std::pow(x / m, c) + b;
@@ -440,11 +459,11 @@ inline float uchimura_scalar(float x, float P = 1.0f, float a = 1.25f, float m =
     }
 }
 
-Vec3 apply_sony_uchimura(Vec3 c) {
+Vec3 apply_sony_uchimura(Vec3 c, float gain) {
     float luma = 0.2126f * c.r + 0.7152f * c.g + 0.0722f * c.b;
     if (luma <= 0.00001f) return {0.0f, 0.0f, 0.0f};
 
-    float mapped_luma = uchimura_scalar(luma);
+    float mapped_luma = uchimura_scalar(luma, 1.0f, 1.25f, 0.22f, 0.40f, 1.33f, 0.0f, gain);
     float scale = mapped_luma / luma;
     Vec3 out = { c.r * scale, c.g * scale, c.b * scale };
 
@@ -460,6 +479,20 @@ Vec3 apply_sony_uchimura(Vec3 c) {
     out.g = std::clamp(out.g, 0.0f, 1.0f);
     out.b = std::clamp(out.b, 0.0f, 1.0f);
     return out;
+}
+
+// Fast spatial triangular probability density function (TPDF) dither for 8-bit quantization
+inline float spatial_tpdf_dither(int x, int y, int c) {
+    auto hash = [](uint32_t a, uint32_t b, uint32_t c) -> float {
+        uint32_t h = (a * 1597334677U) ^ (b * 3812015801U) ^ (c * 2798796415U);
+        h = (h ^ (h >> 16)) * 0x85ebca6b;
+        h = (h ^ (h >> 13)) * 0xc2b2ae35;
+        h = h ^ (h >> 16);
+        return (h & 0x00ffffff) * (1.0f / 16777216.0f) - 0.5f;
+    };
+    float u1 = hash(static_cast<uint32_t>(x), static_cast<uint32_t>(y), static_cast<uint32_t>(c * 2 + 0));
+    float u2 = hash(static_cast<uint32_t>(x), static_cast<uint32_t>(y), static_cast<uint32_t>(c * 2 + 1));
+    return u1 + u2; // in [-1.0f, 1.0f]
 }
 
 // 4. ACES Fit (Classic cinematic display transform)
@@ -565,11 +598,36 @@ float vlog(float x) {
     if (x >= cut) return c * log10(x + b) + d;
     else return 5.6f * x + 0.125f;
 }
+float canon_log2(float x) {
+    float xr = std::max(0.0f, x / 0.9f);
+    return 0.24136077f * log10(xr * 87.09937546f + 1.0f) + 0.092864125f;
+}
+float canon_log3(float x) {
+    float xr = std::max(0.0f, x / 0.9f);
+    if (xr <= 0.014f) return 1.9754798f * xr + 0.12512219f;
+    else return 0.36726845f * log10(xr * 14.98325f + 1.0f) + 0.12240537f;
+}
+float n_log(float x) {
+    if (x < 0.328f) return (650.0f * std::pow(std::max(0.0f, x + 0.0075f), 1.0f / 3.0f)) / 1023.0f;
+    else return (150.0f * logf(std::max(1e-7f, x)) + 619.0f) / 1023.0f;
+}
+float d_log(float x) {
+    if (x <= 0.0078f) return 6.025f * x + 0.0929f;
+    else return log10(x * 0.9892f + 0.0108f) * 0.256663f + 0.584555f;
+}
+float log3g10(float x) {
+    const float a = 0.224282f, b = 155.975327f, c = 0.01f;
+    if (x >= 0.0f) return a * log10(x * b + 1.0f) + c;
+    else return -a * log10(-x * b + 1.0f) + c;
+}
 float apply_log(float x, int type) {
     // Note: Log curves handle x < 0 usually by clipping or linear extension.
     // We clamp slightly above 0 if needed, but linear extension is better for noise.
+    // RED Log3G10 (type 12) has a symmetric reflection curve for negative values.
     // Use a robust check that also handles NaN (NaN > 0 is false)
-    x = (x > 0.0f) ? x : 0.0f;
+    if (type != 12) {
+        x = (x > 0.0f) ? x : 0.0f;
+    }
 
     switch (type) {
         case 1: return arri_logc3(x);
@@ -579,6 +637,11 @@ float apply_log(float x, int type) {
         case 5:
         case 6: return s_log3(x);
         case 7: return vlog(x);
+        case 8: return canon_log2(x);
+        case 9: return canon_log3(x);
+        case 10: return n_log(x);
+        case 11: return d_log(x);
+        case 12: return log3g10(x);
         default: return srgb_oetf(x);
     }
 }
@@ -859,6 +922,19 @@ bool process_and_save_image(
         float g = static_cast<float>(planarData[g_idx]);
         float b = static_cast<float>(planarData[b_idx]);
         
+        // Smooth knee shoulder compression for display rendering highlights (Joint Proportional)
+        float max_rgb_raw = std::max({r, g, b});
+        const float knee = 50000.0f;
+        if (max_rgb_raw > knee) {
+            const float range = 65535.0f - knee;
+            float excess = max_rgb_raw - knee;
+            float compressed = knee + range * (excess / (excess + range));
+            float scale = compressed / max_rgb_raw;
+            r *= scale;
+            g *= scale;
+            b *= scale;
+        }
+
         // 1. Apply White Balance
         if (wb) {
             r *= wb[0];
@@ -867,13 +943,15 @@ bool process_and_save_image(
         }
 
         // 2. Highlight Desaturation
+        float exp_gain = std::pow(2.0f, exposure);
+        float eff_gain = std::max(1.0f, gain * exp_gain);
+        float threshold = (65535.0f * 0.8f) / eff_gain;
+        float theoretical_max = (65535.0f * (wb ? std::max({wb[0], wb[1], wb[3]}) : 1.0f)) / eff_gain;
         float max_rgb = std::max({r, g, b});
-        float theoretical_max = 65535.0f * (wb ? std::max({wb[0], wb[1], wb[3]}) : 1.0f);
-        float threshold = 65535.0f * 0.8f;
         if (max_rgb > threshold) {
-            float desat = std::clamp((max_rgb - threshold) / (theoretical_max - threshold), 0.0f, 1.0f);
+            float desat = std::clamp((max_rgb - threshold) / std::max(1.0f, theoretical_max - threshold), 0.0f, 1.0f);
             desat = desat * desat * (3.0f - 2.0f * desat); // Smoothstep
-            float y_lum = 0.299f * r + 0.587f * g + 0.114f * b;
+            float y_lum = 0.2126f * r + 0.7152f * g + 0.0722f * b;
             r = r * (1.0f - desat) + y_lum * desat;
             g = g * (1.0f - desat) + y_lum * desat;
             b = b * (1.0f - desat) + y_lum * desat;
@@ -883,7 +961,6 @@ bool process_and_save_image(
         g = std::min(g, 65535.0f);
         b = std::min(b, 65535.0f);
         
-        float exp_gain = std::pow(2.0f, exposure);
         float norm_r = (r / 65535.0f) * gain * exp_gain;
         float norm_g = (g / 65535.0f) * gain * exp_gain;
         float norm_b = (b / 65535.0f) * gain * exp_gain;
@@ -918,7 +995,13 @@ bool process_and_save_image(
         switch (targetLog) {
             case 1: color = multiply(M_XYZ_to_AlexaWideGamut_D65, color); break;
             case 2:
-            case 3: color = multiply(M_XYZ_to_Rec2020_D65, color); break;
+            case 3:
+            case 4:
+            case 8:
+            case 9:
+            case 10:
+            case 11:
+            case 12: color = multiply(M_XYZ_to_Rec2020_D65, color); break;
             case 5:
             case 6: color = multiply(M_XYZ_to_SGamut3Cine_D65, color); break;
             case 7: color = multiply(M_XYZ_to_VGamut_D65, color); break;
@@ -936,7 +1019,7 @@ bool process_and_save_image(
                     color = apply_pure_luma_filmic(color);
                     break;
                 case COLOR_ENGINE_SONY_UCHIMURA:
-                    color = apply_sony_uchimura(color);
+                    color = apply_sony_uchimura(color, gain);
                     break;
                 case COLOR_ENGINE_ACES_FIT:
                 default:
@@ -1045,9 +1128,12 @@ bool process_and_save_image(
 
                 Vec3 color = process_pixel(cropX + sx, cropY + sy, nullptr, nullptr, nullptr);
                 size_t outIdx = (static_cast<size_t>(py) * renderW + px) * 3;
-                unsigned char r8 = (unsigned char)std::max(0.0f, std::min(255.0f, color.r * 255.0f + 0.5f));
-                unsigned char g8 = (unsigned char)std::max(0.0f, std::min(255.0f, color.g * 255.0f + 0.5f));
-                unsigned char b8 = (unsigned char)std::max(0.0f, std::min(255.0f, color.b * 255.0f + 0.5f));
+                float r8_f = color.r * 255.0f + 0.5f + spatial_tpdf_dither(px, py, 0);
+                float g8_f = color.g * 255.0f + 0.5f + spatial_tpdf_dither(px, py, 1);
+                float b8_f = color.b * 255.0f + 0.5f + spatial_tpdf_dither(px, py, 2);
+                unsigned char r8 = (unsigned char)std::clamp(r8_f, 0.0f, 255.0f);
+                unsigned char g8 = (unsigned char)std::clamp(g8_f, 0.0f, 255.0f);
+                unsigned char b8 = (unsigned char)std::clamp(b8_f, 0.0f, 255.0f);
 
                 previewRgb8[outIdx + 0] = r8;
                 previewRgb8[outIdx + 1] = g8;
@@ -1251,9 +1337,12 @@ bool write_jpeg(const char* filename, int width, int height, const unsigned shor
             size_t g_idx = (size_t)y * stride_y + (size_t)x * stride_x + 1 * stride_c;
             size_t b_idx = (size_t)y * stride_y + (size_t)x * stride_x + 2 * stride_c;
             size_t dst_idx = ((size_t)y * width + x) * 3;
-            rgb8[dst_idx + 0] = (unsigned char)std::min(255, (planarData[r_idx] + 128) >> 8);
-            rgb8[dst_idx + 1] = (unsigned char)std::min(255, (planarData[g_idx] + 128) >> 8);
-            rgb8[dst_idx + 2] = (unsigned char)std::min(255, (planarData[b_idx] + 128) >> 8);
+            float r_f = static_cast<float>(planarData[r_idx]) * (255.0f / 65535.0f) + 0.5f + spatial_tpdf_dither(x, y, 0);
+            float g_f = static_cast<float>(planarData[g_idx]) * (255.0f / 65535.0f) + 0.5f + spatial_tpdf_dither(x, y, 1);
+            float b_f = static_cast<float>(planarData[b_idx]) * (255.0f / 65535.0f) + 0.5f + spatial_tpdf_dither(x, y, 2);
+            rgb8[dst_idx + 0] = static_cast<unsigned char>(std::clamp(r_f, 0.0f, 255.0f));
+            rgb8[dst_idx + 1] = static_cast<unsigned char>(std::clamp(g_f, 0.0f, 255.0f));
+            rgb8[dst_idx + 2] = static_cast<unsigned char>(std::clamp(b_f, 0.0f, 255.0f));
         }
     }
     return write_jpeg_turbo(filename, width, height, TJSAMP_422, rgb8.data(), quality);
@@ -1267,7 +1356,7 @@ int compute_preview_downsample_factor(int width, int height, int targetLongEdge)
 
 
 
-static const std::vector<unsigned char>& make_preview_rgb8(
+static std::vector<unsigned char> make_preview_rgb8(
     const unsigned short* planarData, int stride_x, int stride_y, int stride_c,
     int width,
     int height,
@@ -1277,7 +1366,8 @@ static const std::vector<unsigned char>& make_preview_rgb8(
     float gain,
     int& outWidth,
     int& outHeight,
-    const float* wbVec = nullptr
+    const float* wbVec = nullptr,
+    const Matrix3x3* ccmMat = nullptr
 ) {
     const int longEdge = std::max(width, height);
     const int scale = std::max(1, (longEdge + targetLongEdge - 1) / targetLongEdge);
@@ -1287,7 +1377,11 @@ static const std::vector<unsigned char>& make_preview_rgb8(
     outWidth = swapDims ? sampledHeight : sampledWidth;
     outHeight = swapDims ? sampledWidth : sampledHeight;
 
-    thread_local std::vector<unsigned char> preview;
+    const float wb_r = wbVec ? wbVec[0] : 1.0f;
+    const float wb_g = wbVec ? wbVec[1] : 1.0f;
+    const float wb_b = wbVec ? wbVec[3] : 1.0f;
+
+    std::vector<unsigned char> preview;
     preview.resize(static_cast<size_t>(outWidth) * outHeight * 3);
     for (int y = 0; y < outHeight; ++y) {
         for (int x = 0; x < outWidth; ++x) {
@@ -1314,19 +1408,25 @@ static const std::vector<unsigned char>& make_preview_rgb8(
             const size_t b_idx = (size_t)srcY*stride_y + (size_t)srcX*stride_x + 2*stride_c;
             const size_t dstIdx = (static_cast<size_t>(y) * outWidth + x) * 3;
 
-            auto encodePreviewChannel = [&](unsigned short sample, float wbGain) -> unsigned char {
-                const float linear = std::clamp((sample * wbGain / 65535.0f) * gain, 0.0f, 1.0f); // 16-bit max from Halide
-                const float gammaEncoded = std::pow(linear, 1.0f / 2.2f);
-                return (unsigned char)std::clamp(gammaEncoded * 255.0f + 0.5f, 0.0f, 255.0f);
+            float r = static_cast<float>(planarData[r_idx]);
+            float g = static_cast<float>(planarData[g_idx]);
+            float b = static_cast<float>(planarData[b_idx]);
+
+            Vec3 linear = {
+                (r * wb_r / 65535.0f) * gain,
+                (g * wb_g / 65535.0f) * gain,
+                (b * wb_b / 65535.0f) * gain
             };
 
-            float wb_r = wbVec ? wbVec[0] : 1.0f;
-            float wb_g = wbVec ? wbVec[1] : 1.0f;
-            float wb_b = wbVec ? wbVec[3] : 1.0f;
+            if (ccmMat) {
+                linear = multiply(*ccmMat, linear);
+            }
 
-            preview[dstIdx + 0] = encodePreviewChannel(planarData[r_idx], wb_r);
-            preview[dstIdx + 1] = encodePreviewChannel(planarData[g_idx], wb_g);
-            preview[dstIdx + 2] = encodePreviewChannel(planarData[b_idx], wb_b);
+            linear = apply_khronos_pbr_neutral(linear);
+
+            preview[dstIdx + 0] = (unsigned char)std::clamp(srgb_oetf(linear.r) * 255.0f + 0.5f + spatial_tpdf_dither(x, y, 0), 0.0f, 255.0f);
+            preview[dstIdx + 1] = (unsigned char)std::clamp(srgb_oetf(linear.g) * 255.0f + 0.5f + spatial_tpdf_dither(x, y, 1), 0.0f, 255.0f);
+            preview[dstIdx + 2] = (unsigned char)std::clamp(srgb_oetf(linear.b) * 255.0f + 0.5f + spatial_tpdf_dither(x, y, 2), 0.0f, 255.0f);
         }
     }
     return preview;
@@ -1350,7 +1450,29 @@ Matrix3x3 inverse_matrix(const Matrix3x3& m) {
     return inv;
 }
 
-bool write_dng(const char* filename, int width, int height, const unsigned short* planarData, int stride_x, int stride_y, int stride_c, int whiteLevel, const std::vector<float>& ccm, const ImageMetadata& metadata, int orientation, bool mirror, float baselineExposure, const float* wbVec) {
+bool write_dng(
+    const char* filename,
+    int width,
+    int height,
+    const unsigned short* planarData,
+    int stride_x,
+    int stride_y,
+    int stride_c,
+    int whiteLevel,
+    const std::vector<float>& ccm,
+    const ImageMetadata& metadata,
+    int orientation,
+    bool mirror,
+    float baselineExposure,
+    const float* wbVec,
+    const float* colorMatrix1,
+    const float* colorMatrix2,
+    const float* forwardMatrix1,
+    const float* forwardMatrix2,
+    int calibIllum1,
+    int calibIllum2,
+    const float* neutralColorPoint
+) {
     TIFFSetTagExtender(DNGTagExtender);
     TIFF* tif = TIFFOpen(filename, "w");
     if (!tif) return false;
@@ -1388,38 +1510,65 @@ bool write_dng(const char* filename, int width, int height, const unsigned short
     uint32_t black_level_val = 0;
     TIFFSetField(tif, TIFFTAG_BLACKLEVEL, 1, &black_level_val);
 
-    float as_shot_neutral[3] = {
-        wbVec ? (1.0f / std::max(1e-4f, wbVec[0])) : 1.0f,
-        wbVec ? (1.0f / std::max(1e-4f, wbVec[1])) : 1.0f,
-        wbVec ? (1.0f / std::max(1e-4f, wbVec[3])) : 1.0f
-    };
+    float as_shot_neutral[3];
+    if (neutralColorPoint != nullptr) {
+        as_shot_neutral[0] = neutralColorPoint[0];
+        as_shot_neutral[1] = neutralColorPoint[1];
+        as_shot_neutral[2] = neutralColorPoint[2];
+    } else {
+        as_shot_neutral[0] = wbVec ? (1.0f / std::max(1e-4f, wbVec[0])) : 1.0f;
+        as_shot_neutral[1] = wbVec ? (1.0f / std::max(1e-4f, wbVec[1])) : 1.0f;
+        as_shot_neutral[2] = wbVec ? (1.0f / std::max(1e-4f, wbVec[3])) : 1.0f;
+    }
     TIFFSetField(tif, TIFFTAG_ASSHOTNEUTRAL, 3, as_shot_neutral);
 
-    // In Android Camera2 API, CCM maps White-Balanced Sensor RGB -> sRGB Linear.
-    // In Adobe DNG Specification, ColorMatrix1 maps XYZ -> Un-white-balanced Raw Sensor Space.
-    // Therefore:
-    // RawSensorRGB = diag(AsShotNeutral) * CCM^-1 * sRGB
-    // ColorMatrix1 = diag(AsShotNeutral) * Inverse(CCM) * M_XYZ_to_sRGB_D65
-    Matrix3x3 colorMatrix1 = M_XYZ_to_sRGB_D65; // Fallback
+    Matrix3x3 sensor_to_srgb = {0};
+    bool has_sensor_to_srgb = false;
     if (ccm.size() >= 9) {
-        Matrix3x3 sensor_to_srgb = {
+        sensor_to_srgb = {
             ccm[0], ccm[1], ccm[2],
             ccm[3], ccm[4], ccm[5],
             ccm[6], ccm[7], ccm[8]
         };
-        Matrix3x3 srgb_to_sensor = inverse_matrix(sensor_to_srgb);
-        colorMatrix1 = multiply(srgb_to_sensor, M_XYZ_to_sRGB_D65);
+        has_sensor_to_srgb = true;
     }
-    
-    // Scale each row by AsShotNeutral to map XYZ into Raw Sensor space
-    for (int r = 0; r < 3; r++) {
-        colorMatrix1.m[r * 3 + 0] *= as_shot_neutral[r];
-        colorMatrix1.m[r * 3 + 1] *= as_shot_neutral[r];
-        colorMatrix1.m[r * 3 + 2] *= as_shot_neutral[r];
-    }
-    TIFFSetField(tif, TIFFTAG_COLORMATRIX1, 9, colorMatrix1.m);
 
-    TIFFSetField(tif, TIFFTAG_CALIBRATIONILLUMINANT1, 21);
+    if (colorMatrix1 != nullptr) {
+        TIFFSetField(tif, TIFFTAG_COLORMATRIX1, 9, colorMatrix1);
+        const float* cm2 = colorMatrix2 ? colorMatrix2 : colorMatrix1;
+        TIFFSetField(tif, TIFFTAG_COLORMATRIX2, 9, cm2);
+        TIFFSetField(tif, TIFFTAG_CALIBRATIONILLUMINANT1, (uint16_t)calibIllum1);
+        TIFFSetField(tif, TIFFTAG_CALIBRATIONILLUMINANT2, (uint16_t)calibIllum2);
+        if (forwardMatrix1 != nullptr) {
+            TIFFSetField(tif, TIFFTAG_FORWARDMATRIX1, 9, forwardMatrix1);
+        }
+        if (forwardMatrix2 != nullptr) {
+            TIFFSetField(tif, TIFFTAG_FORWARDMATRIX2, 9, forwardMatrix2);
+        }
+        float analogBalance[3] = {1.0f, 1.0f, 1.0f};
+        TIFFSetField(tif, TIFFTAG_ANALOGBALANCE, 3, analogBalance);
+    } else {
+        // In Android Camera2 API, CCM maps White-Balanced Sensor RGB -> sRGB Linear.
+        // In Adobe DNG Specification, ColorMatrix1 maps XYZ -> Un-white-balanced Raw Sensor Space.
+        // Therefore:
+        // RawSensorRGB = diag(AsShotNeutral) * CCM^-1 * sRGB
+        // ColorMatrix1 = diag(AsShotNeutral) * Inverse(CCM) * M_XYZ_to_sRGB_D65
+        Matrix3x3 colorMatrix1Fallback = M_XYZ_to_sRGB_D65; // Fallback
+        if (has_sensor_to_srgb) {
+            Matrix3x3 srgb_to_sensor = inverse_matrix(sensor_to_srgb);
+            colorMatrix1Fallback = multiply(srgb_to_sensor, M_XYZ_to_sRGB_D65);
+        }
+        
+        // Scale each row by AsShotNeutral to map XYZ into Raw Sensor space
+        for (int r = 0; r < 3; r++) {
+            colorMatrix1Fallback.m[r * 3 + 0] *= as_shot_neutral[r];
+            colorMatrix1Fallback.m[r * 3 + 1] *= as_shot_neutral[r];
+            colorMatrix1Fallback.m[r * 3 + 2] *= as_shot_neutral[r];
+        }
+        TIFFSetField(tif, TIFFTAG_COLORMATRIX1, 9, colorMatrix1Fallback.m);
+
+        TIFFSetField(tif, TIFFTAG_CALIBRATIONILLUMINANT1, 21);
+    }
     float exposureTimeSec = (float)metadata.exposureTime / 1000000000.0f;
     TIFFSetField(tif, TIFFTAG_EXPOSURETIME, exposureTimeSec);
     TIFFSetField(tif, TIFFTAG_FNUMBER, metadata.fNumber);
@@ -1428,7 +1577,7 @@ bool write_dng(const char* filename, int width, int height, const unsigned short
         TIFFSetField(tif, TIFFTAG_FOCALLENGTHIN35MMFILM, (uint16_t)metadata.focalLengthIn35mmFilm);
     }
 
-    float safeBaselineExposure = std::clamp(baselineExposure, 0.0f, 0.5f);
+    float safeBaselineExposure = std::clamp(baselineExposure, 0.0f, 4.0f);
     TIFFSetField(tif, TIFFTAG_BASELINEEXPOSURE, safeBaselineExposure);
 
     unsigned short iso_short = (unsigned short)metadata.iso;
@@ -1468,8 +1617,8 @@ bool write_dng(const char* filename, int width, int height, const unsigned short
 
     for (const auto& spec : previewSpecs) {
         int previewWidth = 0, previewHeight = 0;
-        const std::vector<unsigned char>& previewRgb8 = make_preview_rgb8(
-            planarData, stride_x, stride_y, stride_c, width, height, spec.targetLongEdge, orientation, mirror, std::pow(2.0f, baselineExposure), previewWidth, previewHeight, wbVec
+        std::vector<unsigned char> previewRgb8 = make_preview_rgb8(
+            planarData, stride_x, stride_y, stride_c, width, height, spec.targetLongEdge, orientation, mirror, std::pow(2.0f, baselineExposure), previewWidth, previewHeight, wbVec, has_sensor_to_srgb ? &sensor_to_srgb : nullptr
         );
 
         if (previewRgb8.empty()) {
@@ -1477,7 +1626,7 @@ bool write_dng(const char* filename, int width, int height, const unsigned short
             return false;
         }
 
-        const std::vector<unsigned char>& jpegPreview = encode_rgb8_jpeg(previewRgb8, previewWidth, previewHeight, 82);
+        std::vector<unsigned char> jpegPreview = encode_rgb8_jpeg(previewRgb8, previewWidth, previewHeight, 82);
         if (jpegPreview.empty()) {
             TIFFClose(tif);
             return false;

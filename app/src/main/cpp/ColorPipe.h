@@ -72,7 +72,7 @@ enum ColorEngineMode {
 
 Vec3 apply_khronos_pbr_neutral(Vec3 color);
 Vec3 apply_pure_luma_filmic(Vec3 c);
-Vec3 apply_sony_uchimura(Vec3 c);
+Vec3 apply_sony_uchimura(Vec3 c, float gain = 1.0f);
 Vec3 apply_aces_fit(Vec3 c);
 
 // --- Initialization ---
@@ -117,7 +117,29 @@ bool process_and_save_image(
     int colorEngineMode = 0
 );
 
-bool write_dng(const char* filename, int width, int height, const unsigned short* planarData, int stride_x, int stride_y, int stride_c, int whiteLevel, const std::vector<float>& ccm, const ImageMetadata& metadata, int orientation, bool mirror = false, float baselineExposure = 0.0f, const float* wbVec = nullptr);
+bool write_dng(
+    const char* filename,
+    int width,
+    int height,
+    const unsigned short* planarData,
+    int stride_x,
+    int stride_y,
+    int stride_c,
+    int whiteLevel,
+    const std::vector<float>& ccm,
+    const ImageMetadata& metadata,
+    int orientation,
+    bool mirror = false,
+    float baselineExposure = 0.0f,
+    const float* wbVec = nullptr,
+    const float* colorMatrix1 = nullptr,
+    const float* colorMatrix2 = nullptr,
+    const float* forwardMatrix1 = nullptr,
+    const float* forwardMatrix2 = nullptr,
+    int calibIllum1 = 21,
+    int calibIllum2 = 17,
+    const float* neutralColorPoint = nullptr
+);
 
 bool write_bmp(const char* filename, int width, int height, const unsigned short* planarData, int stride_x, int stride_y, int stride_c);
 

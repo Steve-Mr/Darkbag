@@ -488,6 +488,7 @@ object ImageSaver {
                 put("hf_layout", cfg.hfLayout)
                 put("is_swapped", cfg.isSwapped)
                 put("zoom_factor", cfg.zoomFactor.toDouble())
+                put("color_engine_mode", cfg.colorEngineMode)
             }
         }
     }
