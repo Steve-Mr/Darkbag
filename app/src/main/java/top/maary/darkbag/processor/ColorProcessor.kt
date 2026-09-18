@@ -105,7 +105,14 @@ object ColorProcessor {
         mirror: Boolean,
         metadata: CaptureMetadata,
         enableMemoryColor: Boolean = false,
-        colorEngineMode: Int = 0
+        colorEngineMode: Int = 0,
+        colorMatrix1: FloatArray? = null,
+        colorMatrix2: FloatArray? = null,
+        forwardMatrix1: FloatArray? = null,
+        forwardMatrix2: FloatArray? = null,
+        calibrationIlluminant1: Int = 21,
+        calibrationIlluminant2: Int = 17,
+        neutralColorPoint: FloatArray? = null
     ): Int
 
     /**
@@ -167,7 +174,14 @@ object ColorProcessor {
         mirror: Boolean,
         metadata: CaptureMetadata,
         enableMemoryColor: Boolean = false,
-        colorEngineMode: Int = 0
+        colorEngineMode: Int = 0,
+        colorMatrix1: FloatArray? = null,
+        colorMatrix2: FloatArray? = null,
+        forwardMatrix1: FloatArray? = null,
+        forwardMatrix2: FloatArray? = null,
+        calibrationIlluminant1: Int = 21,
+        calibrationIlluminant2: Int = 17,
+        neutralColorPoint: FloatArray? = null
     ): Int
 
     external fun processHdrPlus(
@@ -199,6 +213,13 @@ object ColorProcessor {
         mirror: Boolean,
         metadata: CaptureMetadata,
         enableMemoryColor: Boolean = false,
-        colorEngineMode: Int = 0
+        colorEngineMode: Int = 0,
+        colorMatrix1: FloatArray? = null,
+        colorMatrix2: FloatArray? = null,
+        forwardMatrix1: FloatArray? = null,
+        forwardMatrix2: FloatArray? = null,
+        calibrationIlluminant1: Int = 21,
+        calibrationIlluminant2: Int = 17,
+        neutralColorPoint: FloatArray? = null
     ): Int
 }

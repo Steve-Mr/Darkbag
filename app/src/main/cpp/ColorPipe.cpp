@@ -166,11 +166,26 @@ static std::vector<unsigned char> encode_rgb8_jpeg(
 #ifndef TIFFTAG_COLORMATRIX1
 #define TIFFTAG_COLORMATRIX1 50721
 #endif
+#ifndef TIFFTAG_COLORMATRIX2
+#define TIFFTAG_COLORMATRIX2 50722
+#endif
+#ifndef TIFFTAG_FORWARDMATRIX1
+#define TIFFTAG_FORWARDMATRIX1 50964
+#endif
+#ifndef TIFFTAG_FORWARDMATRIX2
+#define TIFFTAG_FORWARDMATRIX2 50965
+#endif
 #ifndef TIFFTAG_ASSHOTNEUTRAL
 #define TIFFTAG_ASSHOTNEUTRAL 50728
 #endif
 #ifndef TIFFTAG_CALIBRATIONILLUMINANT1
 #define TIFFTAG_CALIBRATIONILLUMINANT1 50778
+#endif
+#ifndef TIFFTAG_CALIBRATIONILLUMINANT2
+#define TIFFTAG_CALIBRATIONILLUMINANT2 50779
+#endif
+#ifndef TIFFTAG_ANALOGBALANCE
+#define TIFFTAG_ANALOGBALANCE 50727
 #endif
 #ifndef TIFFTAG_OPCODELIST1
 #define TIFFTAG_OPCODELIST1 51008
@@ -200,8 +215,13 @@ static const TIFFFieldInfo dng_field_info[] = {
     { TIFFTAG_BLACKLEVEL, -1, -1, TIFF_LONG, FIELD_CUSTOM, 1, 1, const_cast<char*>("BlackLevel") },
     { TIFFTAG_WHITELEVEL, -1, -1, TIFF_LONG, FIELD_CUSTOM, 1, 1, const_cast<char*>("WhiteLevel") },
     { TIFFTAG_COLORMATRIX1, -1, -1, TIFF_SRATIONAL, FIELD_CUSTOM, 1, 1, const_cast<char*>("ColorMatrix1") },
+    { TIFFTAG_COLORMATRIX2, -1, -1, TIFF_SRATIONAL, FIELD_CUSTOM, 1, 1, const_cast<char*>("ColorMatrix2") },
+    { TIFFTAG_FORWARDMATRIX1, -1, -1, TIFF_SRATIONAL, FIELD_CUSTOM, 1, 1, const_cast<char*>("ForwardMatrix1") },
+    { TIFFTAG_FORWARDMATRIX2, -1, -1, TIFF_SRATIONAL, FIELD_CUSTOM, 1, 1, const_cast<char*>("ForwardMatrix2") },
     { TIFFTAG_ASSHOTNEUTRAL, -1, -1, TIFF_RATIONAL, FIELD_CUSTOM, 1, 1, const_cast<char*>("AsShotNeutral") },
     { TIFFTAG_CALIBRATIONILLUMINANT1, 1, 1, TIFF_SHORT, FIELD_CUSTOM, 1, 0, const_cast<char*>("CalibrationIlluminant1") },
+    { TIFFTAG_CALIBRATIONILLUMINANT2, 1, 1, TIFF_SHORT, FIELD_CUSTOM, 1, 0, const_cast<char*>("CalibrationIlluminant2") },
+    { TIFFTAG_ANALOGBALANCE, -1, -1, TIFF_RATIONAL, FIELD_CUSTOM, 1, 1, const_cast<char*>("AnalogBalance") },
     { TIFFTAG_BASELINEEXPOSURE, 1, 1, TIFF_SRATIONAL, FIELD_CUSTOM, 1, 0, const_cast<char*>("BaselineExposure") },
     { TIFFTAG_DATETIMEORIGINAL, -1, -1, TIFF_ASCII, FIELD_CUSTOM, 1, 0, const_cast<char*>("DateTimeOriginal") },
     { TIFFTAG_DATETIMEDIGITIZED, -1, -1, TIFF_ASCII, FIELD_CUSTOM, 1, 0, const_cast<char*>("DateTimeDigitized") },
@@ -422,13 +442,13 @@ Vec3 apply_pure_luma_filmic(Vec3 c) {
 }
 
 // 3. Sony Uchimura (Gran Turismo 7 piecewise photographic tone curve)
-inline float uchimura_scalar(float x, float P = 1.0f, float a = 1.25f, float m = 0.22f, float l = 0.40f, float c = 1.33f, float b = 0.0f) {
+inline float uchimura_scalar(float x, float P = 1.0f, float a = 1.25f, float m = 0.22f, float l = 0.40f, float c = 1.33f, float b = 0.0f, float gain = 1.0f) {
     if (x <= 0.0f) return 0.0f;
     float l0 = ((P - m) * l) / a;
     float S0 = m + l0;
     float S1 = m + a * l0;
     float C2 = (a * P) / (P - S1);
-    float CP = -C2 / P;
+    float CP = -C2 / (P * std::max(1.0f, gain * 0.75f));
 
     if (x <= m) {
         return m * std::pow(x / m, c) + b;
@@ -439,11 +459,11 @@ inline float uchimura_scalar(float x, float P = 1.0f, float a = 1.25f, float m =
     }
 }
 
-Vec3 apply_sony_uchimura(Vec3 c) {
+Vec3 apply_sony_uchimura(Vec3 c, float gain) {
     float luma = 0.2126f * c.r + 0.7152f * c.g + 0.0722f * c.b;
     if (luma <= 0.00001f) return {0.0f, 0.0f, 0.0f};
 
-    float mapped_luma = uchimura_scalar(luma);
+    float mapped_luma = uchimura_scalar(luma, 1.0f, 1.25f, 0.22f, 0.40f, 1.33f, 0.0f, gain);
     float scale = mapped_luma / luma;
     Vec3 out = { c.r * scale, c.g * scale, c.b * scale };
 
@@ -459,6 +479,20 @@ Vec3 apply_sony_uchimura(Vec3 c) {
     out.g = std::clamp(out.g, 0.0f, 1.0f);
     out.b = std::clamp(out.b, 0.0f, 1.0f);
     return out;
+}
+
+// Fast spatial triangular probability density function (TPDF) dither for 8-bit quantization
+inline float spatial_tpdf_dither(int x, int y, int c) {
+    auto hash = [](uint32_t a, uint32_t b, uint32_t c) -> float {
+        uint32_t h = (a * 1597334677U) ^ (b * 3812015801U) ^ (c * 2798796415U);
+        h = (h ^ (h >> 16)) * 0x85ebca6b;
+        h = (h ^ (h >> 13)) * 0xc2b2ae35;
+        h = h ^ (h >> 16);
+        return (h & 0x00ffffff) * (1.0f / 16777216.0f) - 0.5f;
+    };
+    float u1 = hash(static_cast<uint32_t>(x), static_cast<uint32_t>(y), static_cast<uint32_t>(c * 2 + 0));
+    float u2 = hash(static_cast<uint32_t>(x), static_cast<uint32_t>(y), static_cast<uint32_t>(c * 2 + 1));
+    return u1 + u2; // in [-1.0f, 1.0f]
 }
 
 // 4. ACES Fit (Classic cinematic display transform)
@@ -985,7 +1019,7 @@ bool process_and_save_image(
                     color = apply_pure_luma_filmic(color);
                     break;
                 case COLOR_ENGINE_SONY_UCHIMURA:
-                    color = apply_sony_uchimura(color);
+                    color = apply_sony_uchimura(color, gain);
                     break;
                 case COLOR_ENGINE_ACES_FIT:
                 default:
@@ -1094,9 +1128,12 @@ bool process_and_save_image(
 
                 Vec3 color = process_pixel(cropX + sx, cropY + sy, nullptr, nullptr, nullptr);
                 size_t outIdx = (static_cast<size_t>(py) * renderW + px) * 3;
-                unsigned char r8 = (unsigned char)std::max(0.0f, std::min(255.0f, color.r * 255.0f + 0.5f));
-                unsigned char g8 = (unsigned char)std::max(0.0f, std::min(255.0f, color.g * 255.0f + 0.5f));
-                unsigned char b8 = (unsigned char)std::max(0.0f, std::min(255.0f, color.b * 255.0f + 0.5f));
+                float r8_f = color.r * 255.0f + 0.5f + spatial_tpdf_dither(px, py, 0);
+                float g8_f = color.g * 255.0f + 0.5f + spatial_tpdf_dither(px, py, 1);
+                float b8_f = color.b * 255.0f + 0.5f + spatial_tpdf_dither(px, py, 2);
+                unsigned char r8 = (unsigned char)std::clamp(r8_f, 0.0f, 255.0f);
+                unsigned char g8 = (unsigned char)std::clamp(g8_f, 0.0f, 255.0f);
+                unsigned char b8 = (unsigned char)std::clamp(b8_f, 0.0f, 255.0f);
 
                 previewRgb8[outIdx + 0] = r8;
                 previewRgb8[outIdx + 1] = g8;
@@ -1300,9 +1337,12 @@ bool write_jpeg(const char* filename, int width, int height, const unsigned shor
             size_t g_idx = (size_t)y * stride_y + (size_t)x * stride_x + 1 * stride_c;
             size_t b_idx = (size_t)y * stride_y + (size_t)x * stride_x + 2 * stride_c;
             size_t dst_idx = ((size_t)y * width + x) * 3;
-            rgb8[dst_idx + 0] = (unsigned char)std::min(255, (planarData[r_idx] + 128) >> 8);
-            rgb8[dst_idx + 1] = (unsigned char)std::min(255, (planarData[g_idx] + 128) >> 8);
-            rgb8[dst_idx + 2] = (unsigned char)std::min(255, (planarData[b_idx] + 128) >> 8);
+            float r_f = static_cast<float>(planarData[r_idx]) * (255.0f / 65535.0f) + 0.5f + spatial_tpdf_dither(x, y, 0);
+            float g_f = static_cast<float>(planarData[g_idx]) * (255.0f / 65535.0f) + 0.5f + spatial_tpdf_dither(x, y, 1);
+            float b_f = static_cast<float>(planarData[b_idx]) * (255.0f / 65535.0f) + 0.5f + spatial_tpdf_dither(x, y, 2);
+            rgb8[dst_idx + 0] = static_cast<unsigned char>(std::clamp(r_f, 0.0f, 255.0f));
+            rgb8[dst_idx + 1] = static_cast<unsigned char>(std::clamp(g_f, 0.0f, 255.0f));
+            rgb8[dst_idx + 2] = static_cast<unsigned char>(std::clamp(b_f, 0.0f, 255.0f));
         }
     }
     return write_jpeg_turbo(filename, width, height, TJSAMP_422, rgb8.data(), quality);
@@ -1384,9 +1424,9 @@ static std::vector<unsigned char> make_preview_rgb8(
 
             linear = apply_khronos_pbr_neutral(linear);
 
-            preview[dstIdx + 0] = (unsigned char)std::clamp(srgb_oetf(linear.r) * 255.0f + 0.5f, 0.0f, 255.0f);
-            preview[dstIdx + 1] = (unsigned char)std::clamp(srgb_oetf(linear.g) * 255.0f + 0.5f, 0.0f, 255.0f);
-            preview[dstIdx + 2] = (unsigned char)std::clamp(srgb_oetf(linear.b) * 255.0f + 0.5f, 0.0f, 255.0f);
+            preview[dstIdx + 0] = (unsigned char)std::clamp(srgb_oetf(linear.r) * 255.0f + 0.5f + spatial_tpdf_dither(x, y, 0), 0.0f, 255.0f);
+            preview[dstIdx + 1] = (unsigned char)std::clamp(srgb_oetf(linear.g) * 255.0f + 0.5f + spatial_tpdf_dither(x, y, 1), 0.0f, 255.0f);
+            preview[dstIdx + 2] = (unsigned char)std::clamp(srgb_oetf(linear.b) * 255.0f + 0.5f + spatial_tpdf_dither(x, y, 2), 0.0f, 255.0f);
         }
     }
     return preview;
@@ -1410,7 +1450,29 @@ Matrix3x3 inverse_matrix(const Matrix3x3& m) {
     return inv;
 }
 
-bool write_dng(const char* filename, int width, int height, const unsigned short* planarData, int stride_x, int stride_y, int stride_c, int whiteLevel, const std::vector<float>& ccm, const ImageMetadata& metadata, int orientation, bool mirror, float baselineExposure, const float* wbVec) {
+bool write_dng(
+    const char* filename,
+    int width,
+    int height,
+    const unsigned short* planarData,
+    int stride_x,
+    int stride_y,
+    int stride_c,
+    int whiteLevel,
+    const std::vector<float>& ccm,
+    const ImageMetadata& metadata,
+    int orientation,
+    bool mirror,
+    float baselineExposure,
+    const float* wbVec,
+    const float* colorMatrix1,
+    const float* colorMatrix2,
+    const float* forwardMatrix1,
+    const float* forwardMatrix2,
+    int calibIllum1,
+    int calibIllum2,
+    const float* neutralColorPoint
+) {
     TIFFSetTagExtender(DNGTagExtender);
     TIFF* tif = TIFFOpen(filename, "w");
     if (!tif) return false;
@@ -1448,19 +1510,18 @@ bool write_dng(const char* filename, int width, int height, const unsigned short
     uint32_t black_level_val = 0;
     TIFFSetField(tif, TIFFTAG_BLACKLEVEL, 1, &black_level_val);
 
-    float as_shot_neutral[3] = {
-        wbVec ? (1.0f / std::max(1e-4f, wbVec[0])) : 1.0f,
-        wbVec ? (1.0f / std::max(1e-4f, wbVec[1])) : 1.0f,
-        wbVec ? (1.0f / std::max(1e-4f, wbVec[3])) : 1.0f
-    };
+    float as_shot_neutral[3];
+    if (neutralColorPoint != nullptr) {
+        as_shot_neutral[0] = neutralColorPoint[0];
+        as_shot_neutral[1] = neutralColorPoint[1];
+        as_shot_neutral[2] = neutralColorPoint[2];
+    } else {
+        as_shot_neutral[0] = wbVec ? (1.0f / std::max(1e-4f, wbVec[0])) : 1.0f;
+        as_shot_neutral[1] = wbVec ? (1.0f / std::max(1e-4f, wbVec[1])) : 1.0f;
+        as_shot_neutral[2] = wbVec ? (1.0f / std::max(1e-4f, wbVec[3])) : 1.0f;
+    }
     TIFFSetField(tif, TIFFTAG_ASSHOTNEUTRAL, 3, as_shot_neutral);
 
-    // In Android Camera2 API, CCM maps White-Balanced Sensor RGB -> sRGB Linear.
-    // In Adobe DNG Specification, ColorMatrix1 maps XYZ -> Un-white-balanced Raw Sensor Space.
-    // Therefore:
-    // RawSensorRGB = diag(AsShotNeutral) * CCM^-1 * sRGB
-    // ColorMatrix1 = diag(AsShotNeutral) * Inverse(CCM) * M_XYZ_to_sRGB_D65
-    Matrix3x3 colorMatrix1 = M_XYZ_to_sRGB_D65; // Fallback
     Matrix3x3 sensor_to_srgb = {0};
     bool has_sensor_to_srgb = false;
     if (ccm.size() >= 9) {
@@ -1470,19 +1531,44 @@ bool write_dng(const char* filename, int width, int height, const unsigned short
             ccm[6], ccm[7], ccm[8]
         };
         has_sensor_to_srgb = true;
-        Matrix3x3 srgb_to_sensor = inverse_matrix(sensor_to_srgb);
-        colorMatrix1 = multiply(srgb_to_sensor, M_XYZ_to_sRGB_D65);
     }
-    
-    // Scale each row by AsShotNeutral to map XYZ into Raw Sensor space
-    for (int r = 0; r < 3; r++) {
-        colorMatrix1.m[r * 3 + 0] *= as_shot_neutral[r];
-        colorMatrix1.m[r * 3 + 1] *= as_shot_neutral[r];
-        colorMatrix1.m[r * 3 + 2] *= as_shot_neutral[r];
-    }
-    TIFFSetField(tif, TIFFTAG_COLORMATRIX1, 9, colorMatrix1.m);
 
-    TIFFSetField(tif, TIFFTAG_CALIBRATIONILLUMINANT1, 21);
+    if (colorMatrix1 != nullptr) {
+        TIFFSetField(tif, TIFFTAG_COLORMATRIX1, 9, colorMatrix1);
+        const float* cm2 = colorMatrix2 ? colorMatrix2 : colorMatrix1;
+        TIFFSetField(tif, TIFFTAG_COLORMATRIX2, 9, cm2);
+        TIFFSetField(tif, TIFFTAG_CALIBRATIONILLUMINANT1, (uint16_t)calibIllum1);
+        TIFFSetField(tif, TIFFTAG_CALIBRATIONILLUMINANT2, (uint16_t)calibIllum2);
+        if (forwardMatrix1 != nullptr) {
+            TIFFSetField(tif, TIFFTAG_FORWARDMATRIX1, 9, forwardMatrix1);
+        }
+        if (forwardMatrix2 != nullptr) {
+            TIFFSetField(tif, TIFFTAG_FORWARDMATRIX2, 9, forwardMatrix2);
+        }
+        float analogBalance[3] = {1.0f, 1.0f, 1.0f};
+        TIFFSetField(tif, TIFFTAG_ANALOGBALANCE, 3, analogBalance);
+    } else {
+        // In Android Camera2 API, CCM maps White-Balanced Sensor RGB -> sRGB Linear.
+        // In Adobe DNG Specification, ColorMatrix1 maps XYZ -> Un-white-balanced Raw Sensor Space.
+        // Therefore:
+        // RawSensorRGB = diag(AsShotNeutral) * CCM^-1 * sRGB
+        // ColorMatrix1 = diag(AsShotNeutral) * Inverse(CCM) * M_XYZ_to_sRGB_D65
+        Matrix3x3 colorMatrix1Fallback = M_XYZ_to_sRGB_D65; // Fallback
+        if (has_sensor_to_srgb) {
+            Matrix3x3 srgb_to_sensor = inverse_matrix(sensor_to_srgb);
+            colorMatrix1Fallback = multiply(srgb_to_sensor, M_XYZ_to_sRGB_D65);
+        }
+        
+        // Scale each row by AsShotNeutral to map XYZ into Raw Sensor space
+        for (int r = 0; r < 3; r++) {
+            colorMatrix1Fallback.m[r * 3 + 0] *= as_shot_neutral[r];
+            colorMatrix1Fallback.m[r * 3 + 1] *= as_shot_neutral[r];
+            colorMatrix1Fallback.m[r * 3 + 2] *= as_shot_neutral[r];
+        }
+        TIFFSetField(tif, TIFFTAG_COLORMATRIX1, 9, colorMatrix1Fallback.m);
+
+        TIFFSetField(tif, TIFFTAG_CALIBRATIONILLUMINANT1, 21);
+    }
     float exposureTimeSec = (float)metadata.exposureTime / 1000000000.0f;
     TIFFSetField(tif, TIFFTAG_EXPOSURETIME, exposureTimeSec);
     TIFFSetField(tif, TIFFTAG_FNUMBER, metadata.fNumber);

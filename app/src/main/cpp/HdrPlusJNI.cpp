@@ -290,6 +290,72 @@ Java_top_maary_darkbag_processor_ColorProcessor_freeDirectBuffer(JNIEnv* env, jo
     }
 }
 
+static void extract_calibration_data(
+    JNIEnv* env,
+    jfloatArray colorMatrix1,
+    jfloatArray colorMatrix2,
+    jfloatArray forwardMatrix1,
+    jfloatArray forwardMatrix2,
+    jfloatArray neutralColorPoint,
+    std::vector<float>& cm1Vec,
+    std::vector<float>& cm2Vec,
+    std::vector<float>& fm1Vec,
+    std::vector<float>& fm2Vec,
+    std::vector<float>& neutralVec,
+    const float*& cm1Ptr,
+    const float*& cm2Ptr,
+    const float*& fm1Ptr,
+    const float*& fm2Ptr,
+    const float*& neutralPtr
+) {
+    cm1Ptr = nullptr;
+    cm2Ptr = nullptr;
+    fm1Ptr = nullptr;
+    fm2Ptr = nullptr;
+    neutralPtr = nullptr;
+
+    if (colorMatrix1) {
+        jsize len = env->GetArrayLength(colorMatrix1);
+        if (len >= 9) {
+            cm1Vec.resize(9);
+            env->GetFloatArrayRegion(colorMatrix1, 0, 9, cm1Vec.data());
+            cm1Ptr = cm1Vec.data();
+        }
+    }
+    if (colorMatrix2) {
+        jsize len = env->GetArrayLength(colorMatrix2);
+        if (len >= 9) {
+            cm2Vec.resize(9);
+            env->GetFloatArrayRegion(colorMatrix2, 0, 9, cm2Vec.data());
+            cm2Ptr = cm2Vec.data();
+        }
+    }
+    if (forwardMatrix1) {
+        jsize len = env->GetArrayLength(forwardMatrix1);
+        if (len >= 9) {
+            fm1Vec.resize(9);
+            env->GetFloatArrayRegion(forwardMatrix1, 0, 9, fm1Vec.data());
+            fm1Ptr = fm1Vec.data();
+        }
+    }
+    if (forwardMatrix2) {
+        jsize len = env->GetArrayLength(forwardMatrix2);
+        if (len >= 9) {
+            fm2Vec.resize(9);
+            env->GetFloatArrayRegion(forwardMatrix2, 0, 9, fm2Vec.data());
+            fm2Ptr = fm2Vec.data();
+        }
+    }
+    if (neutralColorPoint) {
+        jsize len = env->GetArrayLength(neutralColorPoint);
+        if (len >= 3) {
+            neutralVec.resize(3);
+            env->GetFloatArrayRegion(neutralColorPoint, 0, 3, neutralVec.data());
+            neutralPtr = neutralVec.data();
+        }
+    }
+}
+
 extern "C" JNIEXPORT jint JNICALL
 Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
     JNIEnv* env, jobject /* this */, jstring tempRawPath, jint width, jint height, jint orientation, jfloat digitalGain, jint targetLog, jstring lutPath,
@@ -298,7 +364,14 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
     jfloatArray ccm, jfloatArray whiteBalance, jfloat zoomFactor, jboolean mirror,
     jobject metadata,
     jboolean enableMemoryColor,
-    jint colorEngineMode
+    jint colorEngineMode,
+    jfloatArray colorMatrix1,
+    jfloatArray colorMatrix2,
+    jfloatArray forwardMatrix1,
+    jfloatArray forwardMatrix2,
+    jint calibrationIlluminant1,
+    jint calibrationIlluminant2,
+    jfloatArray neutralColorPoint
 ) {
     LOGD("Native exportHdrPlus started (enableMemoryColor=%d, colorEngineMode=%d).", enableMemoryColor, colorEngineMode);
 
@@ -334,6 +407,15 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
     std::vector<float> ccmVec(9); for(int i=0; i<9; ++i) ccmVec[i] = ccmData[i];
     env->ReleaseFloatArrayElements(ccm, ccmData, JNI_ABORT);
 
+    std::vector<float> cm1Vec, cm2Vec, fm1Vec, fm2Vec, neutralVec;
+    const float* cm1Ptr = nullptr;
+    const float* cm2Ptr = nullptr;
+    const float* fm1Ptr = nullptr;
+    const float* fm2Ptr = nullptr;
+    const float* neutralPtr = nullptr;
+    extract_calibration_data(env, colorMatrix1, colorMatrix2, forwardMatrix1, forwardMatrix2, neutralColorPoint,
+                             cm1Vec, cm2Vec, fm1Vec, fm2Vec, neutralVec,
+                             cm1Ptr, cm2Ptr, fm1Ptr, fm2Ptr, neutralPtr);
 
     const char* lut_path_cstr = (lutPath) ? env->GetStringUTFChars(lutPath, 0) : nullptr;
     LUT3D lut; if (lut_path_cstr) { lut = load_lut(lut_path_cstr); env->ReleaseStringUTFChars(lutPath, lut_path_cstr); }
@@ -346,7 +428,8 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
     if (dng_path_cstr) {
         LOGD("Exporting DNG to %s", dng_path_cstr);
         float baselineExposure = (digitalGain > 0.0f) ? std::log2(digitalGain) : 0.0f;
-        write_dng(dng_path_cstr, width, height, finalImage.data(), 1, width, width*height, kMax16BitValue, ccmVec, meta, orientation, (bool)mirror, baselineExposure, wbVec.data());
+        write_dng(dng_path_cstr, width, height, finalImage.data(), 1, width, width*height, kMax16BitValue, ccmVec, meta, orientation, (bool)mirror, baselineExposure, wbVec.data(),
+                  cm1Ptr, cm2Ptr, fm1Ptr, fm2Ptr, (int)calibrationIlluminant1, (int)calibrationIlluminant2, neutralPtr);
     }
 
     bool saveOk = true;
@@ -373,7 +456,14 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
     jfloat digitalGain, jlongArray debugStats, jobject outputBitmap, jstring tempRawPath, jfloat zoomFactor, jboolean mirror,
     jobject metadata,
     jboolean enableMemoryColor,
-    jint colorEngineMode
+    jint colorEngineMode,
+    jfloatArray colorMatrix1,
+    jfloatArray colorMatrix2,
+    jfloatArray forwardMatrix1,
+    jfloatArray forwardMatrix2,
+    jint calibrationIlluminant1,
+    jint calibrationIlluminant2,
+    jfloatArray neutralColorPoint
 ) {
     LOGD("Native processHdrPlus started (enableMemoryColor=%d, colorEngineMode=%d).", enableMemoryColor, colorEngineMode);
     (void)useSensorColorMatrix;
@@ -441,6 +531,16 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
         ccmAltVec.assign(ccmAltData, ccmAltData + 9);
         env->ReleaseFloatArrayElements(ccmAlt, ccmAltData, JNI_ABORT);
     }
+
+    std::vector<float> cm1Vec, cm2Vec, fm1Vec, fm2Vec, neutralVec;
+    const float* cm1Ptr = nullptr;
+    const float* cm2Ptr = nullptr;
+    const float* fm1Ptr = nullptr;
+    const float* fm2Ptr = nullptr;
+    const float* neutralPtr = nullptr;
+    extract_calibration_data(env, colorMatrix1, colorMatrix2, forwardMatrix1, forwardMatrix2, neutralColorPoint,
+                             cm1Vec, cm2Vec, fm1Vec, fm2Vec, neutralVec,
+                             cm1Ptr, cm2Ptr, fm1Ptr, fm2Ptr, neutralPtr);
 
     Buffer<float> ccmHalideBuf(ccmVec.data(), 3, 3);
     auto jniPrepMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - jniPrepStart).count();
@@ -560,7 +660,8 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
         ImageMetadata meta = metadataFromJava(env, metadata);
         if (!dngPathStr.empty()) {
             float baselineExposure = (digitalGain > 0.0f) ? std::log2(digitalGain) : 0.0f;
-            write_dng(dngPathStr.c_str(), width, height, raw_ptr, stride_x, stride_y, stride_c, kMax16BitValue, ccmVec, meta, orientation, (bool)mirror, baselineExposure, wbVec.data());
+            write_dng(dngPathStr.c_str(), width, height, raw_ptr, stride_x, stride_y, stride_c, kMax16BitValue, ccmVec, meta, orientation, (bool)mirror, baselineExposure, wbVec.data(),
+                      cm1Ptr, cm2Ptr, fm1Ptr, fm2Ptr, (int)calibrationIlluminant1, (int)calibrationIlluminant2, neutralPtr);
         }
 
         if (!jpgPathStr.empty()) {
@@ -593,7 +694,14 @@ Java_top_maary_darkbag_processor_ColorProcessor_processSingleFrameRaw(
     jfloat digitalGain, jlongArray debugStats, jobject outputBitmap, jstring tempRawPath, jfloat zoomFactor, jboolean mirror,
     jobject metadata,
     jboolean enableMemoryColor,
-    jint colorEngineMode
+    jint colorEngineMode,
+    jfloatArray colorMatrix1,
+    jfloatArray colorMatrix2,
+    jfloatArray forwardMatrix1,
+    jfloatArray forwardMatrix2,
+    jint calibrationIlluminant1,
+    jint calibrationIlluminant2,
+    jfloatArray neutralColorPoint
 ) {
     LOGD("Native processSingleFrameRaw started (enableMemoryColor=%d, colorEngineMode=%d).", enableMemoryColor, colorEngineMode);
 
@@ -606,6 +714,13 @@ Java_top_maary_darkbag_processor_ColorProcessor_processSingleFrameRaw(
         cfaPattern, targetLog, lutPath,
         outputJpgPath, outputDngPath, digitalGain, debugStats, outputBitmap, tempRawPath, zoomFactor, mirror, metadata,
         enableMemoryColor,
-        colorEngineMode
+        colorEngineMode,
+        colorMatrix1,
+        colorMatrix2,
+        forwardMatrix1,
+        forwardMatrix2,
+        calibrationIlluminant1,
+        calibrationIlluminant2,
+        neutralColorPoint
     );
 }

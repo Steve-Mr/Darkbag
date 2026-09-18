@@ -15,9 +15,9 @@ object ExposureUtils {
     private const val ISO_THRESHOLD_MID = 400
     private const val ISO_THRESHOLD_HIGH = 800
 
-    private const val FACTOR_EV_MINUS_3 = 0.125f    // -3 EV
-    private const val FACTOR_EV_MINUS_2 = 0.25f     // -2 EV
     private const val FACTOR_EV_MINUS_1_5 = 0.3535f // -1.5 EV
+    private const val FACTOR_EV_MINUS_1 = 0.5f      // -1.0 EV
+    private const val FACTOR_EV_MINUS_0_5 = 0.7071f // -0.5 EV
     private const val FACTOR_EV_0 = 1.0f            // 0 EV
 
     private const val CLIPPING_RATIO_THRESHOLD = 0.03
@@ -70,21 +70,21 @@ object ExposureUtils {
             "-2 EV" -> 0.25f
             else -> {
                 // Dynamic Logic Refined:
-                // - ISO 40 or less: -3 EV
-                // - ISO 100: -2 EV
-                // - ISO 400: -1.5 EV
+                // - ISO 40 or less: -1.5 EV
+                // - ISO 100: -1.0 EV
+                // - ISO 400: -0.5 EV
                 // - ISO 800 or more: 0 EV
                 when {
-                    currentIso <= ISO_THRESHOLD_VERY_LOW -> FACTOR_EV_MINUS_3
+                    currentIso <= ISO_THRESHOLD_VERY_LOW -> FACTOR_EV_MINUS_1_5
                     currentIso <= ISO_THRESHOLD_LOW -> {
-                        interpolate(currentIso, ISO_THRESHOLD_VERY_LOW, ISO_THRESHOLD_LOW, FACTOR_EV_MINUS_3, FACTOR_EV_MINUS_2)
+                        interpolate(currentIso, ISO_THRESHOLD_VERY_LOW, ISO_THRESHOLD_LOW, FACTOR_EV_MINUS_1_5, FACTOR_EV_MINUS_1)
                     }
                     currentIso <= ISO_THRESHOLD_MID -> {
-                        interpolate(currentIso, ISO_THRESHOLD_LOW, ISO_THRESHOLD_MID, FACTOR_EV_MINUS_2, FACTOR_EV_MINUS_1_5)
+                        interpolate(currentIso, ISO_THRESHOLD_LOW, ISO_THRESHOLD_MID, FACTOR_EV_MINUS_1, FACTOR_EV_MINUS_0_5)
                     }
                     currentIso >= ISO_THRESHOLD_HIGH -> FACTOR_EV_0
                     else -> {
-                        interpolate(currentIso, ISO_THRESHOLD_MID, ISO_THRESHOLD_HIGH, FACTOR_EV_MINUS_1_5, FACTOR_EV_0)
+                        interpolate(currentIso, ISO_THRESHOLD_MID, ISO_THRESHOLD_HIGH, FACTOR_EV_MINUS_0_5, FACTOR_EV_0)
                     }
                 }
             }

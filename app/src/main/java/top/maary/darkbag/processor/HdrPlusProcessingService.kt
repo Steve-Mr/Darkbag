@@ -85,7 +85,14 @@ class HdrPlusProcessingService : LifecycleService() {
                     req.mirror,
                     req.metadata,
                     req.enableMemoryColor,
-                    req.colorEngineMode
+                    req.colorEngineMode,
+                    req.colorMatrix1,
+                    req.colorMatrix2,
+                    req.forwardMatrix1,
+                    req.forwardMatrix2,
+                    req.calibrationIlluminant1,
+                    req.calibrationIlluminant2,
+                    req.neutralColorPoint
                 )
             } else {
                 ColorProcessor.processHdrPlus(
@@ -108,7 +115,14 @@ class HdrPlusProcessingService : LifecycleService() {
                     req.mirror,
                     req.metadata,
                     req.enableMemoryColor,
-                    req.colorEngineMode
+                    req.colorEngineMode,
+                    req.colorMatrix1,
+                    req.colorMatrix2,
+                    req.forwardMatrix1,
+                    req.forwardMatrix2,
+                    req.calibrationIlluminant1,
+                    req.calibrationIlluminant2,
+                    req.neutralColorPoint
                 )
             }
 
@@ -143,7 +157,14 @@ class HdrPlusProcessingService : LifecycleService() {
                     mirror = req.mirror,
                     metadata = req.metadata,
                     enableMemoryColor = req.enableMemoryColor,
-                    colorEngineMode = req.colorEngineMode
+                    colorEngineMode = req.colorEngineMode,
+                    colorMatrix1 = req.colorMatrix1,
+                    colorMatrix2 = req.colorMatrix2,
+                    forwardMatrix1 = req.forwardMatrix1,
+                    forwardMatrix2 = req.forwardMatrix2,
+                    calibrationIlluminant1 = req.calibrationIlluminant1,
+                    calibrationIlluminant2 = req.calibrationIlluminant2,
+                    neutralColorPoint = req.neutralColorPoint
                 )
             }
 

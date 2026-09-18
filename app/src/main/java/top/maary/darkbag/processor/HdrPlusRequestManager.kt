@@ -52,7 +52,14 @@ data class HdrPlusRequest(
     val motionPhotoMp4Path: String? = null,
     val motionPhotoStillPtsUs: Long = 0L,
     val enableMemoryColor: Boolean = false,
-    val colorEngineMode: Int = 0
+    val colorEngineMode: Int = 0,
+    val colorMatrix1: FloatArray? = null,
+    val colorMatrix2: FloatArray? = null,
+    val forwardMatrix1: FloatArray? = null,
+    val forwardMatrix2: FloatArray? = null,
+    val calibrationIlluminant1: Int = 21,
+    val calibrationIlluminant2: Int = 17,
+    val neutralColorPoint: FloatArray? = null
 )
 
 object HdrPlusRequestManager {
