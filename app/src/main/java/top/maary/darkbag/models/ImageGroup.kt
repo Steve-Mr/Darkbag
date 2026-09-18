@@ -168,7 +168,8 @@ data class EditConfig(
     val flareType: Int = -1, // -1: None, 0: Random, 1: Vertical, 2: Corner
     val hfLayout: String? = null, // "SBS" or "TB"
     val isSwapped: Boolean = false,
-    val zoomFactor: Float = 1.0f
+    val zoomFactor: Float = 1.0f,
+    val colorEngineMode: Int = 0
 ) : Parcelable
 
 @Parcelize

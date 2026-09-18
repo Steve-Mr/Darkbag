@@ -1914,9 +1914,9 @@ class CameraFragment : Fragment() {
                 }
 
                 val singleCalib = extractSensorCalibration(chars, captureResult, wb)
-                if (chars.get(CameraCharacteristics.SENSOR_COLOR_TRANSFORM1) != null) {
-                    ccm = singleCalib.colorMatrix1.copyOf()
-                }
+                val ccmCapture = ccm.copyOf()
+                val useSensorColorMatrix = true
+                val finalCcm = if (useSensorColorMatrix && singleCalib.renderCcm != null) singleCalib.renderCcm else ccmCapture
 
                 val request = top.maary.darkbag.processor.HdrPlusRequest(
                     requestId = java.util.UUID.randomUUID().toString(),
@@ -1930,9 +1930,9 @@ class CameraFragment : Fragment() {
                     lensShadingMap = lensShadingMapData,
                     lensShadingRows = lensShadingRows,
                     lensShadingCols = lensShadingCols,
-                    useSensorColorMatrix = true,
+                    useSensorColorMatrix = useSensorColorMatrix,
                     whiteBalance = wb,
-                    ccm = ccm,
+                    ccm = finalCcm,
                     ccmAlt = null,
                     exportMatrixAB = false,
                     cfaPattern = cfa,
@@ -1964,7 +1964,8 @@ class CameraFragment : Fragment() {
                         } else null,
                         hfLayout = if (image.halfFrameMetadata?.profile == top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_HALF_TOP) "TB" else if (image.halfFrameMetadata?.profile == top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_HALF_SIDE) "SBS" else null,
                         showTimestamp = image.halfFrameMetadata?.dateStamp ?: false,
-                        zoomFactor = image.zoomRatio
+                        zoomFactor = image.zoomRatio,
+                        colorEngineMode = prefs.getInt(SettingsFragment.KEY_COLOR_ENGINE_MODE, 0)
                     ),
                     runAblationTest = false,
                     motionPhotoMp4Path = motionMp4Path,
@@ -3407,7 +3408,6 @@ class CameraFragment : Fragment() {
                     0.0f, -1.0f, 2.0f
                 )
                 var cfa = 0
-                var ccmSensor = ccmMain.copyOf()
                 var ccmCapture = ccmMain.copyOf()
                 var lensShadingMapData: FloatArray? = null
                 var lensShadingRows = 0
@@ -3448,19 +3448,6 @@ class CameraFragment : Fragment() {
                         }
                     }
 
-                    if (useSensorColorMatrix) {
-                        val sensorMat = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_COLOR_TRANSFORM1)
-                        if (sensorMat != null) {
-                            var idx = 0
-                            for (row in 0 until 3) {
-                                for (col in 0 until 3) {
-                                    val rat = sensorMat.getElement(col, row)
-                                    ccmSensor[idx++] = rat.toFloat()
-                                }
-                            }
-                        }
-                    }
-
                     val lsc = r.get(android.hardware.camera2.CaptureResult.STATISTICS_LENS_SHADING_CORRECTION_MAP)
                     if (lsc != null) {
                         lensShadingRows = lsc.rowCount
@@ -3479,7 +3466,8 @@ class CameraFragment : Fragment() {
                     }
                 }
 
-                
+                val burstCalib = extractSensorCalibration(chars, result, wb)
+                val ccmSensor = burstCalib.renderCcm ?: ccmCapture
                 val ccm = if (useSensorColorMatrix) ccmSensor else ccmCapture
                 val ccmAlt = if (useSensorColorMatrix) ccmCapture else ccmSensor
                 val exportMatrixAB = false
@@ -3567,8 +3555,6 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         motionStillPtsUs = result?.second ?: 0L
                     }
 
-                    val burstCalib = extractSensorCalibration(chars, result, wb)
-
                     val request = top.maary.darkbag.processor.HdrPlusRequest(
                         requestId = java.util.UUID.randomUUID().toString(),
                         megaBuffer = megaBuffer,
@@ -3616,7 +3602,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                             hfLayout = if (hfMetadata?.profile == top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_HALF_TOP) "TB" else if (hfMetadata?.profile == top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_HALF_SIDE) "SBS" else null,
                             showTimestamp = hfMetadata?.dateStamp ?: false,
                             flareType = hfMetadata?.flareType ?: -1,
-                            zoomFactor = currentZoom
+                            zoomFactor = currentZoom,
+                            colorEngineMode = prefs.getInt(SettingsFragment.KEY_COLOR_ENGINE_MODE, 0)
                         ),
                         runAblationTest = false,
                         motionPhotoMp4Path = motionMp4Path,
@@ -5422,7 +5409,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         val forwardMatrix2: FloatArray?,
         val calibrationIlluminant1: Int,
         val calibrationIlluminant2: Int,
-        val neutralColorPoint: FloatArray?
+        val neutralColorPoint: FloatArray?,
+        val renderCcm: FloatArray? = null
     )
 
     private fun extractSensorCalibration(
@@ -5512,6 +5500,15 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             }
         }
 
+        val renderCcm = top.maary.darkbag.processor.SensorCalibrationHelper.computeRenderCcm(
+            forwardMatrix1 = forwardMatrix1,
+            forwardMatrix2 = forwardMatrix2,
+            calibrationIlluminant1 = calibrationIlluminant1,
+            calibrationIlluminant2 = calibrationIlluminant2,
+            neutralColorPoint = neutralColorPoint,
+            wb = wb
+        )
+
         return SensorCalibration(
             colorMatrix1 = colorMatrix1,
             colorMatrix2 = colorMatrix2,
@@ -5519,7 +5516,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             forwardMatrix2 = forwardMatrix2,
             calibrationIlluminant1 = calibrationIlluminant1,
             calibrationIlluminant2 = calibrationIlluminant2,
-            neutralColorPoint = neutralColorPoint
+            neutralColorPoint = neutralColorPoint,
+            renderCcm = renderCcm
         )
     }
 

@@ -833,7 +833,8 @@ class ImageRepository(private val context: Context) {
                 flareType = json.optInt("flare_type", -1),
                 hfLayout = if (json.has("hf_layout")) json.optString("hf_layout") else null,
                 isSwapped = json.optBoolean("is_swapped", false),
-                zoomFactor = json.optDouble("zoom_factor", 1.0).toFloat()
+                zoomFactor = json.optDouble("zoom_factor", 1.0).toFloat(),
+                colorEngineMode = json.optInt("color_engine_mode", 0)
             )
         } catch (e: Exception) {
             null
