@@ -190,6 +190,18 @@ class HdrPlusProcessingService : LifecycleService() {
                 Log.i(TAG, report)
                 top.maary.darkbag.utils.DebugLogManager.addLog(report)
 
+                val baselineReport = top.maary.darkbag.processor.SensorCalibrationHelper.formatHardwareBaselineLog(
+                    cfaPattern = req.cfaPattern,
+                    blackLevelPattern = req.blackLevelPattern,
+                    lensShadingMap = req.lensShadingMap,
+                    lensShadingRows = req.lensShadingRows,
+                    lensShadingCols = req.lensShadingCols,
+                    whiteBalance = req.whiteBalance,
+                    digitalGain = req.digitalGain
+                )
+                Log.i(TAG, baselineReport)
+                top.maary.darkbag.utils.DebugLogManager.addLog(baselineReport)
+
                 if (req.saveJpg || req.saveRaw) {
                     var savedUri: android.net.Uri? = null
                     val shouldSaveJpg = req.saveJpg

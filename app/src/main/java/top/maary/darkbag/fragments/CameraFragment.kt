@@ -1965,13 +1965,13 @@ class CameraFragment : Fragment() {
                         hfLayout = if (image.halfFrameMetadata?.profile == top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_HALF_TOP) "TB" else if (image.halfFrameMetadata?.profile == top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_HALF_SIDE) "SBS" else null,
                         showTimestamp = image.halfFrameMetadata?.dateStamp ?: false,
                         zoomFactor = image.zoomRatio,
-                        colorEngineMode = prefs.getInt(SettingsFragment.KEY_COLOR_ENGINE_MODE, 0)
+                        colorEngineMode = prefs.getInt(SettingsFragment.KEY_COLOR_ENGINE_MODE, 2)
                     ),
                     runAblationTest = false,
                     motionPhotoMp4Path = motionMp4Path,
                     motionPhotoStillPtsUs = motionStillPtsUs,
                     enableMemoryColor = false,
-                    colorEngineMode = prefs.getInt(SettingsFragment.KEY_COLOR_ENGINE_MODE, 0),
+                    colorEngineMode = prefs.getInt(SettingsFragment.KEY_COLOR_ENGINE_MODE, 2),
                     colorMatrix1 = singleCalib.colorMatrix1,
                     colorMatrix2 = singleCalib.colorMatrix2,
                     forwardMatrix1 = singleCalib.forwardMatrix1,
@@ -2002,6 +2002,18 @@ class CameraFragment : Fragment() {
                     """.trimIndent()
                     Log.i(TAG, report)
                     DebugLogManager.addLog(report)
+
+                    val baselineReport = top.maary.darkbag.processor.SensorCalibrationHelper.formatHardwareBaselineLog(
+                        cfaPattern = cfa,
+                        blackLevelPattern = blackLevelPattern ?: intArrayOf(64, 64, 64, 64),
+                        lensShadingMap = lensShadingMapData,
+                        lensShadingRows = lensShadingRows,
+                        lensShadingCols = lensShadingCols,
+                        whiteBalance = wb,
+                        digitalGain = image.digitalGain
+                    )
+                    Log.i(TAG, baselineReport)
+                    DebugLogManager.addLog(baselineReport)
                 }
 
             } catch (e: Exception) {
@@ -3136,7 +3148,7 @@ class CameraFragment : Fragment() {
                 }
             }
             if (isActive) {
-                val engineMode = prefs.getInt(SettingsFragment.KEY_COLOR_ENGINE_MODE, 0)
+                val engineMode = prefs.getInt(SettingsFragment.KEY_COLOR_ENGINE_MODE, 2)
                 proc.updateColorEngineMode(engineMode)
                 proc.updateLut(lutData, size, targetLogIndex)
             }
@@ -3603,13 +3615,13 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                             showTimestamp = hfMetadata?.dateStamp ?: false,
                             flareType = hfMetadata?.flareType ?: -1,
                             zoomFactor = currentZoom,
-                            colorEngineMode = prefs.getInt(SettingsFragment.KEY_COLOR_ENGINE_MODE, 0)
+                            colorEngineMode = prefs.getInt(SettingsFragment.KEY_COLOR_ENGINE_MODE, 2)
                         ),
                         runAblationTest = false,
                         motionPhotoMp4Path = motionMp4Path,
                         motionPhotoStillPtsUs = motionStillPtsUs,
                         enableMemoryColor = false,
-                        colorEngineMode = prefs.getInt(SettingsFragment.KEY_COLOR_ENGINE_MODE, 0),
+                        colorEngineMode = prefs.getInt(SettingsFragment.KEY_COLOR_ENGINE_MODE, 2),
                         colorMatrix1 = burstCalib.colorMatrix1,
                         colorMatrix2 = burstCalib.colorMatrix2,
                         forwardMatrix1 = burstCalib.forwardMatrix1,
@@ -4108,7 +4120,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                             zoomFactor = 1.0f,
                             metadata = frame.captureMetadata,
                             enableMemoryColor = false,
-                            colorEngineMode = prefs.getInt(SettingsFragment.KEY_COLOR_ENGINE_MODE, 0)
+                            colorEngineMode = prefs.getInt(SettingsFragment.KEY_COLOR_ENGINE_MODE, 2)
                         )
                         if (ret >= 0 && renderedFile.exists() && renderedFile.length() > 0) {
                             jpgPathToSave = renderedFile.absolutePath
@@ -5506,7 +5518,9 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             calibrationIlluminant1 = calibrationIlluminant1,
             calibrationIlluminant2 = calibrationIlluminant2,
             neutralColorPoint = neutralColorPoint,
-            wb = wb
+            wb = wb,
+            colorMatrix1 = colorMatrix1,
+            colorMatrix2 = colorMatrix2
         )
 
         return SensorCalibration(

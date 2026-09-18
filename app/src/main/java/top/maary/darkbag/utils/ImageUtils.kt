@@ -307,7 +307,7 @@ object ImageUtils {
             val bitmap = Bitmap.createBitmap(bmpW, bmpH, Bitmap.Config.ARGB_8888)
 
             val prefs = context.getSharedPreferences(top.maary.darkbag.fragments.SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
-            val engineMode = prefs.getInt(top.maary.darkbag.fragments.SettingsFragment.KEY_COLOR_ENGINE_MODE, 0)
+            val engineMode = prefs.getInt(top.maary.darkbag.fragments.SettingsFragment.KEY_COLOR_ENGINE_MODE, 2)
 
             coroutineContext.ensureActive()
             val result = ColorProcessor.processRaw(

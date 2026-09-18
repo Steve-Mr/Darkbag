@@ -5,7 +5,7 @@ import java.util.LinkedList
 import java.util.Locale
 
 object DebugLogManager {
-    private const val MAX_LOGS = 5
+    private const val MAX_LOGS = 20
     private val logs = LinkedList<String>()
 
     fun addLog(log: String) {
