@@ -151,6 +151,9 @@ class HdrPlusProcessingService : LifecycleService() {
                     blacks = edit?.blacks ?: 0f,
                     jpgPath = if (req.saveJpg) req.fullResJpgPath else null,
                     dngPath = if (req.saveRaw && !req.isSingleFrame) req.linearDngPath else null,
+                    // This is the call that actually writes the photo: the minimal path
+                    // must keep its linear/neutral highlight handling here as well.
+                    faithfulHighlights = req.isSingleFrame,
                     ccm = req.ccm,
                     whiteBalance = req.whiteBalance,
                     zoomFactor = req.zoomFactor,

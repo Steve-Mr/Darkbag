@@ -930,14 +930,14 @@ bool process_and_save_image(
         //    linear up to the sensor white level. A pixel whose channels reached
         //    that level has an unknowable colour, so it is neutralized point-wise
         //    (no reconstruction, no neighbourhood, no parameters).
+        //    Detection happens here, in the sensor domain; the neutralization itself
+        //    is applied *after* white balance and the container clamp (see below),
+        //    because equalizing raw channels would still come out coloured once the
+        //    per-channel gains and the clamp are applied.
+        bool sensorBlown = false;
         if (faithfulHighlights) {
             constexpr float kSensorWhiteLevel = 65535.0f * 0.98f;
-            float max_ch = std::max({r, g, b});
-            if (max_ch >= kSensorWhiteLevel) {
-                r = max_ch;
-                g = max_ch;
-                b = max_ch;
-            }
+            sensorBlown = (std::max({r, g, b}) >= kSensorWhiteLevel);
         } else {
             // Smooth knee shoulder compression for display rendering highlights (Joint Proportional)
             float max_rgb_raw = std::max({r, g, b});
@@ -963,7 +963,7 @@ bool process_and_save_image(
         // 2. Highlight Desaturation
         // Multi-frame path only: this ramp is gain dependent and effectively inert
         // at gain == 1, so the minimal path leaves highlight colour to the display
-        // transform (and to the point-wise neutralization above).
+        // transform (and to the point-wise neutralization applied after the clamp).
         float exp_gain = std::pow(2.0f, exposure);
         float eff_gain = std::max(1.0f, gain * exp_gain);
         if (!faithfulHighlights) {
@@ -983,6 +983,17 @@ bool process_and_save_image(
         r = std::min(r, 65535.0f);
         g = std::min(g, 65535.0f);
         b = std::min(b, 65535.0f);
+
+        // Minimal path: neutralize sensor-saturated pixels here, i.e. after white
+        // balance and the container clamp. Equalizing in the raw domain would not be
+        // neutral once the per-channel gains are applied (R and B clamp while G does
+        // not), which would leave a magenta ring at the saturation boundary.
+        if (sensorBlown) {
+            float max_wb = std::max({r, g, b});
+            r = max_wb;
+            g = max_wb;
+            b = max_wb;
+        }
         
         float norm_r = (r / 65535.0f) * gain * exp_gain;
         float norm_g = (g / 65535.0f) * gain * exp_gain;
