@@ -856,10 +856,11 @@ bool process_and_save_image(
     int out_width, int out_height,
     bool isPreview, int downsampleFactor, float zoomFactor, bool mirror,
     bool enableMemoryColor,
-    int colorEngineMode
+    int colorEngineMode,
+    bool faithfulHighlights
 ) {
-    LOGD("process_and_save_image: %dx%d, gain=%.2f, log=%d, lut=%d, jpg=%s, tiff=%s, preview=%d, ds=%d, zoom=%.2f, mirror=%d, memColor=%d, engineMode=%d",
-         width, height, gain, targetLog, lut.size, jpgPath ? jpgPath : "null", tiffPath ? tiffPath : "null", isPreview, downsampleFactor, zoomFactor, mirror, enableMemoryColor, colorEngineMode);
+    LOGD("process_and_save_image: %dx%d, gain=%.2f, log=%d, lut=%d, jpg=%s, tiff=%s, preview=%d, ds=%d, zoom=%.2f, mirror=%d, memColor=%d, engineMode=%d, faithful=%d",
+         width, height, gain, targetLog, lut.size, jpgPath ? jpgPath : "null", tiffPath ? tiffPath : "null", isPreview, downsampleFactor, zoomFactor, mirror, enableMemoryColor, colorEngineMode, faithfulHighlights);
     int outW = width / downsampleFactor, outH = height / downsampleFactor;
     bool swapDims = (orientation == 90 || orientation == 270);
     int finalW = swapDims ? outH : outW, finalH = swapDims ? outW : outH;
@@ -922,17 +923,34 @@ bool process_and_save_image(
         float g = static_cast<float>(planarData[g_idx]);
         float b = static_cast<float>(planarData[b_idx]);
         
-        // Smooth knee shoulder compression for display rendering highlights (Joint Proportional)
-        float max_rgb_raw = std::max({r, g, b});
-        const float knee = 50000.0f;
-        if (max_rgb_raw > knee) {
-            const float range = 65535.0f - knee;
-            float excess = max_rgb_raw - knee;
-            float compressed = knee + range * (excess / (excess + range));
-            float scale = compressed / max_rgb_raw;
-            r *= scale;
-            g *= scale;
-            b *= scale;
+        // Highlight handling.
+        //  * Multi-frame path (faithfulHighlights == false): joint proportional
+        //    knee (display-oriented soft shoulder) + ad-hoc highlight desaturation.
+        //  * Minimal single-frame path (faithfulHighlights == true): the data stays
+        //    linear up to the sensor white level. A pixel whose channels reached
+        //    that level has an unknowable colour, so it is neutralized point-wise
+        //    (no reconstruction, no neighbourhood, no parameters).
+        //    Detection happens here, in the sensor domain; the neutralization itself
+        //    is applied *after* white balance and the container clamp (see below),
+        //    because equalizing raw channels would still come out coloured once the
+        //    per-channel gains and the clamp are applied.
+        bool sensorBlown = false;
+        if (faithfulHighlights) {
+            constexpr float kSensorWhiteLevel = 65535.0f * 0.98f;
+            sensorBlown = (std::max({r, g, b}) >= kSensorWhiteLevel);
+        } else {
+            // Smooth knee shoulder compression for display rendering highlights (Joint Proportional)
+            float max_rgb_raw = std::max({r, g, b});
+            const float knee = 50000.0f;
+            if (max_rgb_raw > knee) {
+                const float range = 65535.0f - knee;
+                float excess = max_rgb_raw - knee;
+                float compressed = knee + range * (excess / (excess + range));
+                float scale = compressed / max_rgb_raw;
+                r *= scale;
+                g *= scale;
+                b *= scale;
+            }
         }
 
         // 1. Apply White Balance
@@ -943,23 +961,39 @@ bool process_and_save_image(
         }
 
         // 2. Highlight Desaturation
+        // Multi-frame path only: this ramp is gain dependent and effectively inert
+        // at gain == 1, so the minimal path leaves highlight colour to the display
+        // transform (and to the point-wise neutralization applied after the clamp).
         float exp_gain = std::pow(2.0f, exposure);
         float eff_gain = std::max(1.0f, gain * exp_gain);
-        float threshold = (65535.0f * 0.8f) / eff_gain;
-        float theoretical_max = (65535.0f * (wb ? std::max({wb[0], wb[1], wb[3]}) : 1.0f)) / eff_gain;
-        float max_rgb = std::max({r, g, b});
-        if (max_rgb > threshold) {
-            float desat = std::clamp((max_rgb - threshold) / std::max(1.0f, theoretical_max - threshold), 0.0f, 1.0f);
-            desat = desat * desat * (3.0f - 2.0f * desat); // Smoothstep
-            float y_lum = 0.2126f * r + 0.7152f * g + 0.0722f * b;
-            r = r * (1.0f - desat) + y_lum * desat;
-            g = g * (1.0f - desat) + y_lum * desat;
-            b = b * (1.0f - desat) + y_lum * desat;
+        if (!faithfulHighlights) {
+            float threshold = (65535.0f * 0.8f) / eff_gain;
+            float theoretical_max = (65535.0f * (wb ? std::max({wb[0], wb[1], wb[3]}) : 1.0f)) / eff_gain;
+            float max_rgb = std::max({r, g, b});
+            if (max_rgb > threshold) {
+                float desat = std::clamp((max_rgb - threshold) / std::max(1.0f, theoretical_max - threshold), 0.0f, 1.0f);
+                desat = desat * desat * (3.0f - 2.0f * desat); // Smoothstep
+                float y_lum = 0.2126f * r + 0.7152f * g + 0.0722f * b;
+                r = r * (1.0f - desat) + y_lum * desat;
+                g = g * (1.0f - desat) + y_lum * desat;
+                b = b * (1.0f - desat) + y_lum * desat;
+            }
         }
 
         r = std::min(r, 65535.0f);
         g = std::min(g, 65535.0f);
         b = std::min(b, 65535.0f);
+
+        // Minimal path: neutralize sensor-saturated pixels here, i.e. after white
+        // balance and the container clamp. Equalizing in the raw domain would not be
+        // neutral once the per-channel gains are applied (R and B clamp while G does
+        // not), which would leave a magenta ring at the saturation boundary.
+        if (sensorBlown) {
+            float max_wb = std::max({r, g, b});
+            r = max_wb;
+            g = max_wb;
+            b = max_wb;
+        }
         
         float norm_r = (r / 65535.0f) * gain * exp_gain;
         float norm_g = (g / 65535.0f) * gain * exp_gain;

@@ -181,7 +181,10 @@ object ColorProcessor {
         forwardMatrix2: FloatArray? = null,
         calibrationIlluminant1: Int = 21,
         calibrationIlluminant2: Int = 17,
-        neutralColorPoint: FloatArray? = null
+        neutralColorPoint: FloatArray? = null,
+        // Minimal single-frame (non-HDR+) path: keep sensor highlights linear and
+        // neutralize saturated pixels point-wise inside ColorPipe.
+        faithfulHighlights: Boolean = false
     ): Int
 
     external fun processHdrPlus(
