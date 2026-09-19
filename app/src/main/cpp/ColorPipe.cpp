@@ -868,8 +868,6 @@ bool process_and_save_image(
     thread_local std::vector<unsigned short> tls_processedImage; 
     thread_local std::vector<unsigned char> tls_previewRgb8;
 
-    AdaptiveEdgeComp edgeComp = calculate_adaptive_edge_comp(planarData, stride_x, stride_y, stride_c, width, height);
-
     // Debug stage split output (A/B/C):
     const bool enableStageDebug = false;
     std::string debugBasePath = jpgPath ? std::string(jpgPath) : std::string();
@@ -880,6 +878,8 @@ bool process_and_save_image(
     thread_local std::vector<unsigned char> tls_debugA8;
     thread_local std::vector<unsigned char> tls_debugB8;
     thread_local std::vector<unsigned char> tls_debugC8;
+    float exp_gain = std::pow(2.0f, exposure);
+    float eff_gain = std::max(1.0f, gain * exp_gain);
     
     std::vector<unsigned short>& processedImage = tls_processedImage;
     std::vector<unsigned char>& previewRgb8 = tls_previewRgb8;
@@ -964,8 +964,6 @@ bool process_and_save_image(
         // Multi-frame path only: this ramp is gain dependent and effectively inert
         // at gain == 1, so the minimal path leaves highlight colour to the display
         // transform (and to the point-wise neutralization applied after the clamp).
-        float exp_gain = std::pow(2.0f, exposure);
-        float eff_gain = std::max(1.0f, gain * exp_gain);
         if (!faithfulHighlights) {
             float threshold = (65535.0f * 0.8f) / eff_gain;
             float theoretical_max = (65535.0f * (wb ? std::max({wb[0], wb[1], wb[3]}) : 1.0f)) / eff_gain;
@@ -998,25 +996,6 @@ bool process_and_save_image(
         float norm_r = (r / 65535.0f) * gain * exp_gain;
         float norm_g = (g / 65535.0f) * gain * exp_gain;
         float norm_b = (b / 65535.0f) * gain * exp_gain;
-
-        if (edgeComp.enabled) {
-            const float nx = (x - edgeComp.centerX) * edgeComp.invMaxRadius;
-            const float ny = (y - edgeComp.centerY) * edgeComp.invMaxRadius;
-            float r = std::sqrt(nx * nx + ny * ny);
-
-            // Smooth radial blend: start near 55% radius and fully applied at edges.
-            float t = std::clamp((r - kBlendStartRadius) / (kBlendEndRadius - kBlendStartRadius), 0.0f, 1.0f);
-            t = t * t * (3.0f - 2.0f * t); // smoothstep
-
-            float lumaGain = 1.0f + (edgeComp.lumaEdgeGain - 1.0f) * t;
-            float rGain = (1.0f + (edgeComp.chromaEdgeGain[0] - 1.0f) * t) * lumaGain;
-            float gGain = (1.0f + (edgeComp.chromaEdgeGain[1] - 1.0f) * t) * lumaGain;
-            float bGain = (1.0f + (edgeComp.chromaEdgeGain[2] - 1.0f) * t) * lumaGain;
-
-            norm_r *= rGain;
-            norm_g *= gGain;
-            norm_b *= bGain;
-        }
 
         Vec3 colorA = {norm_r, norm_g, norm_b};
         if (stageA) *stageA = colorA;
