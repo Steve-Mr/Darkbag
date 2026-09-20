@@ -82,7 +82,12 @@ object ImageSaver {
         // 1. Process Input Bitmap or JPEG File from JNI -> Final MediaStore JPG
         if (inputBitmap != null || bmpPath != null) {
             val isNativeJpeg = bmpPath != null && (bmpPath.endsWith(".jpg") || bmpPath.endsWith(".jpeg"))
-            val needsBitmapProcessing = rotationDegrees != 0 || zoomFactor > 1.05f || inputBitmap != null || mirror
+            // When the JNI/export path already applied zoom and mirror (isAlreadyCropped),
+            // neither pass may be repeated here: doing so defeats the fast path and would
+            // crop/mirror twice. Otherwise both still have to be applied to the bitmap.
+            val effectiveNeedsCrop = zoomFactor > 1.05f && !isAlreadyCropped
+            val effectiveNeedsMirror = mirror && !isAlreadyCropped
+            val needsBitmapProcessing = rotationDegrees != 0 || effectiveNeedsCrop || inputBitmap != null || effectiveNeedsMirror
 
             if (isNativeJpeg && !needsBitmapProcessing && actualSaveJpg) {
                 // FAST PATH: Directly use JNI-generated JPEG

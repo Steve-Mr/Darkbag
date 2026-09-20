@@ -4,6 +4,7 @@
 #include <unordered_map>
 #include <mutex>
 #include <memory>
+#include <chrono>
 
 #define TAG "ColorPipe"
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, TAG, __VA_ARGS__)
@@ -906,10 +907,13 @@ bool process_and_save_image(
     bool enableMemoryColor,
     int colorEngineMode,
     bool faithfulHighlights,
-    int jpgFd
+    int jpgFd,
+    int* outColorPipeMs,
+    int* outJpegSaveMs
 ) {
     LOGD("process_and_save_image: %dx%d, gain=%.2f, log=%d, lut=%d, jpg=%s, jpgFd=%d, tiff=%s, preview=%d, ds=%d, zoom=%.2f, mirror=%d, memColor=%d, engineMode=%d, faithful=%d",
          width, height, gain, targetLog, lut.size, jpgPath ? jpgPath : "null", jpgFd, tiffPath ? tiffPath : "null", isPreview, downsampleFactor, zoomFactor, mirror, enableMemoryColor, colorEngineMode, faithfulHighlights);
+    const auto cpStart = std::chrono::high_resolution_clock::now();
     int outW = width / downsampleFactor, outH = height / downsampleFactor;
     bool swapDims = (orientation == 90 || orientation == 270);
     int finalW = swapDims ? outH : outW, finalH = swapDims ? outW : outH;
@@ -1286,6 +1290,14 @@ bool process_and_save_image(
         }
     }
 
+    // Colour-pipeline work (demosaic/WB/CCM/LUT/zoom pixel pass) ends here;
+    // everything below is file serialisation and is timed separately.
+    const auto cpEnd = std::chrono::high_resolution_clock::now();
+    const auto jsStart = std::chrono::high_resolution_clock::now();
+    if (outColorPipeMs) {
+        *outColorPipeMs = (int)std::chrono::duration_cast<std::chrono::milliseconds>(cpEnd - cpStart).count();
+    }
+
     bool tiffOk = true;
     if (tiffPath && !isPreview) {
         tiffOk = write_tiff(tiffPath, finalW_zoomed, finalH_zoomed, processedImage.data(), 3, finalW_zoomed*3, 1, metadata);
@@ -1327,6 +1339,10 @@ bool process_and_save_image(
              debugPathA.c_str(), (int)aOk,
              debugPathB.c_str(), (int)bOk,
              debugPathC.c_str(), (int)cOk);
+    }
+
+    if (outJpegSaveMs) {
+        *outJpegSaveMs = (int)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - jsStart).count();
     }
 
     return jpgOk;

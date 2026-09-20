@@ -186,7 +186,8 @@ class HdrPlusProcessingService : LifecycleService() {
                                 calibrationIlluminant2 = req.calibrationIlluminant2,
                                 neutralColorPoint = req.neutralColorPoint,
                                 jpgFd = jpgFd,
-                                dngFd = -1
+                                dngFd = -1,
+                                debugStats = debugStats
                             )
                         } finally {
                             jpgPfd?.close()

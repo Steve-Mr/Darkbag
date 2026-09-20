@@ -374,7 +374,8 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
     jfloatArray neutralColorPoint,
     jboolean faithfulHighlights,
     jint jpgFd,
-    jint dngFd
+    jint dngFd,
+    jlongArray debugStats
 ) {
     LOGD("Native exportHdrPlus started (enableMemoryColor=%d, colorEngineMode=%d, faithful=%d).", enableMemoryColor, colorEngineMode, faithfulHighlights);
 
@@ -428,22 +429,47 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
 
     ImageMetadata meta = metadataFromJava(env, metadata);
 
+    // Export-phase timings. debugStats[2..4] are the "C++ Post/ColorPipe",
+    // "DNG Encode" and "JPEG Native Save" slots printed by the Kotlin side; the
+    // processing stage can only fill them with processing-side numbers, so the
+    // export stage overwrites them with what actually happened here, and writes the
+    // total export cost into the otherwise unused slot 5.
+    const auto exportStart = std::chrono::high_resolution_clock::now();
+    jlong colorPipeMs = 0;
+    jlong dngEncodeMs = 0;
+    jlong jpegSaveMs = 0;
+
     if (dngFd >= 0 || dng_path_cstr) {
         LOGD("Exporting DNG to dngFd=%d / %s", dngFd, dng_path_cstr ? dng_path_cstr : "null");
         float baselineExposure = (digitalGain > 0.0f) ? std::log2(digitalGain) : 0.0f;
+        const auto dngStart = std::chrono::high_resolution_clock::now();
         write_dng(dng_path_cstr, width, height, finalImage.data(), 1, width, width*height, kMax16BitValue, ccmVec, meta, orientation, (bool)mirror, baselineExposure, wbVec.data(),
                   cm1Ptr, cm2Ptr, fm1Ptr, fm2Ptr, (int)calibrationIlluminant1, (int)calibrationIlluminant2, neutralPtr, dngFd);
+        dngEncodeMs = (jlong)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - dngStart).count();
     }
 
     bool saveOk = true;
     if (jpgFd >= 0 || jpg_path_cstr) {
         LOGD("Exporting JPG: jpgFd=%d / JPG=%s", jpgFd, jpg_path_cstr ? jpg_path_cstr : "null");
+        int cpMs = 0, jsMs = 0;
         saveOk = process_and_save_image(finalImage.data(), 1, width, width*height, nullptr, 0, 0, width, height, digitalGain, targetLog, lut,
                                         exposure, contrast, saturation, highlights, shadows, whites, blacks,
-                                        jpg_path_cstr, nullptr, &meta, 1, ccmVec.data(), wbVec.data(), orientation, nullptr, 0, 0, false, 1, zoomFactor, (bool)mirror, (bool)enableMemoryColor, (int)colorEngineMode, faithfulHighlights, jpgFd);
+                                        jpg_path_cstr, nullptr, &meta, 1, ccmVec.data(), wbVec.data(), orientation, nullptr, 0, 0, false, 1, zoomFactor, (bool)mirror, (bool)enableMemoryColor, (int)colorEngineMode, faithfulHighlights, jpgFd,
+                                        &cpMs, &jsMs);
+        colorPipeMs = cpMs;
+        jpegSaveMs = jsMs;
     }
     if (jpgPath && jpg_path_cstr) env->ReleaseStringUTFChars(jpgPath, jpg_path_cstr);
     if (dngPath && dng_path_cstr) env->ReleaseStringUTFChars(dngPath, dng_path_cstr);
+
+    if (debugStats != nullptr) {
+        const jsize len = env->GetArrayLength(debugStats);
+        if (len > 2) {
+            const jlong totalExportMs = (jlong)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - exportStart).count();
+            const jlong stats[4] = { colorPipeMs, dngEncodeMs, jpegSaveMs, totalExportMs };
+            env->SetLongArrayRegion(debugStats, 2, std::min<jsize>(len - 2, (jsize)4), stats);
+        }
+    }
 
     // No longer a physical file, so we don't delete anything
     // (the shared ptr cleans itself up)

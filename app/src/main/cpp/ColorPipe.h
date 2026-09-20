@@ -119,7 +119,12 @@ bool process_and_save_image(
     // (no knee) and neutralize sensor-saturated pixels point-wise instead of
     // applying the display-oriented highlight desaturation ramp.
     bool faithfulHighlights = false,
-    int jpgFd = -1
+    int jpgFd = -1,
+    // Optional export-phase timings: the colour-pipeline (pixel processing) cost and
+    // the JPEG serialisation cost are measured separately so the telemetry does not
+    // collapse them into one number.
+    int* outColorPipeMs = nullptr,
+    int* outJpegSaveMs = nullptr
 );
 
 bool write_dng(

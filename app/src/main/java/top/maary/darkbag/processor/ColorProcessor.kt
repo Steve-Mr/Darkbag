@@ -200,7 +200,11 @@ object ColorProcessor {
         // neutralize saturated pixels point-wise inside ColorPipe.
         faithfulHighlights: Boolean = false,
         jpgFd: Int = -1,
-        dngFd: Int = -1
+        dngFd: Int = -1,
+        // Export-phase timings are written back into slots 2..4 (C++ Post/ColorPipe,
+        // DNG Encode, JPEG Native Save) plus slot 5 (total export), overwriting the
+        // processing-stage numbers that processHdrPlus filled in.
+        debugStats: LongArray? = null
     ): Int
 
     external fun processHdrPlus(
