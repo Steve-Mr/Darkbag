@@ -807,7 +807,9 @@ bool process_and_save_image(
     bool isPreview, int downsampleFactor, float zoomFactor, bool mirror,
     bool enableMemoryColor,
     int colorEngineMode,
-    bool faithfulHighlights
+    bool faithfulHighlights,
+    int* outColorPipeMs,
+    int* outJpegSaveMs
 ) {
     LOGD("process_and_save_image: %dx%d, gain=%.2f, log=%d, lut=%d, jpg=%s, tiff=%s, preview=%d, ds=%d, zoom=%.2f, mirror=%d, memColor=%d, engineMode=%d, faithful=%d",
          width, height, gain, targetLog, lut.size, jpgPath ? jpgPath : "null", tiffPath ? tiffPath : "null", isPreview, downsampleFactor, zoomFactor, mirror, enableMemoryColor, colorEngineMode, faithfulHighlights);
@@ -1088,6 +1090,8 @@ bool process_and_save_image(
         debugC8.resize(n);
     }
 
+    auto cpStart = std::chrono::high_resolution_clock::now();
+
     if (isPreview) {
         // If a bitmap buffer is provided, prioritize its dimensions.
         // This ensures no out-of-bounds writes even if Kotlin and JNI have different size expectations.
@@ -1188,6 +1192,11 @@ bool process_and_save_image(
         }
     }
 
+    auto cpEnd = std::chrono::high_resolution_clock::now();
+    if (outColorPipeMs) {
+        *outColorPipeMs = (int)std::chrono::duration_cast<std::chrono::milliseconds>(cpEnd - cpStart).count();
+    }
+
     bool tiffOk = true;
     if (tiffPath && !isPreview) {
         tiffOk = write_tiff(tiffPath, finalW_zoomed, finalH_zoomed, processedImage.data(), 3, finalW_zoomed*3, 1, metadata);
@@ -1198,10 +1207,15 @@ bool process_and_save_image(
     const int jpegQuality = isPreview ? 78 : 95;
     bool jpgOk = true;
     if (jpgPath) {
+        auto jsStart = std::chrono::high_resolution_clock::now();
         if (isPreview && !previewRgb8.empty()) {
             jpgOk = write_jpeg_turbo(jpgPath, finalW_zoomed, finalH_zoomed, TJSAMP_422, previewRgb8.data(), jpegQuality);
         } else {
             jpgOk = write_jpeg(jpgPath, finalW_zoomed, finalH_zoomed, processedImage.data(), 3, finalW_zoomed*3, 1, jpegQuality);
+        }
+        auto jsEnd = std::chrono::high_resolution_clock::now();
+        if (outJpegSaveMs) {
+            *outJpegSaveMs = (int)std::chrono::duration_cast<std::chrono::milliseconds>(jsEnd - jsStart).count();
         }
         if (!jpgOk) LOGE("write_jpeg/stbi_write_jpg failed for %s", jpgPath);
         else {

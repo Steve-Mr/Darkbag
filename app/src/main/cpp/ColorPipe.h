@@ -118,7 +118,9 @@ bool process_and_save_image(
     // Minimal, spec-faithful single-frame path: keep the sensor data linear
     // (no knee) and neutralize sensor-saturated pixels point-wise instead of
     // applying the display-oriented highlight desaturation ramp.
-    bool faithfulHighlights = false
+    bool faithfulHighlights = false,
+    int* outColorPipeMs = nullptr,
+    int* outJpegSaveMs = nullptr
 );
 
 bool write_dng(

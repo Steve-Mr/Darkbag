@@ -434,6 +434,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
 
     jlong dngDurationMs = 0;
     jlong colorPipeDurationMs = 0;
+    jlong jpegSaveDurationMs = 0;
 
     if (dng_path_cstr) {
         LOGD("Exporting DNG to %s", dng_path_cstr);
@@ -447,17 +448,19 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
     bool saveOk = true;
     if (jpg_path_cstr) {
         LOGD("Exporting JPG: JPG=%s", jpg_path_cstr);
-        auto cpStart = std::chrono::high_resolution_clock::now();
+        int cpMs = 0, jsMs = 0;
         saveOk = process_and_save_image(finalImage.data(), 1, width, width*height, nullptr, 0, 0, width, height, digitalGain, targetLog, lut,
                                         exposure, contrast, saturation, highlights, shadows, whites, blacks,
-                                        jpg_path_cstr, nullptr, &meta, 1, ccmVec.data(), wbVec.data(), orientation, nullptr, 0, 0, false, 1, zoomFactor, (bool)mirror, (bool)enableMemoryColor, (int)colorEngineMode, faithfulHighlights);
-        colorPipeDurationMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - cpStart).count();
+                                        jpg_path_cstr, nullptr, &meta, 1, ccmVec.data(), wbVec.data(), orientation, nullptr, 0, 0, false, 1, zoomFactor, (bool)mirror, (bool)enableMemoryColor, (int)colorEngineMode, faithfulHighlights,
+                                        &cpMs, &jsMs);
+        colorPipeDurationMs = cpMs;
+        jpegSaveDurationMs = jsMs;
     }
 
     if (debugStats != nullptr) {
         const jsize len = env->GetArrayLength(debugStats);
         if (len >= 5) {
-            jlong stats[3] = { colorPipeDurationMs, dngDurationMs, colorPipeDurationMs };
+            jlong stats[3] = { colorPipeDurationMs, dngDurationMs, jpegSaveDurationMs };
             env->SetLongArrayRegion(debugStats, 2, 3, stats);
         }
     }
