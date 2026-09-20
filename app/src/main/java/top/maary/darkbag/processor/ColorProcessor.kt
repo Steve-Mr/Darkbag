@@ -185,7 +185,8 @@ object ColorProcessor {
         // Minimal single-frame (non-HDR+) path: keep sensor highlights linear and
         // neutralize saturated pixels point-wise inside ColorPipe.
         faithfulHighlights: Boolean = false,
-        debugStats: LongArray? = null
+        jpgFd: Int = -1,
+        dngFd: Int = -1
     ): Int
 
     external fun processHdrPlus(

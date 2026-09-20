@@ -11,6 +11,54 @@
 
 
 #include <turbojpeg.h>
+#include <unistd.h>
+#include <sys/stat.h>
+
+static bool write_jpeg_turbo_fd(int fd, int width, int height, int subsamp, const unsigned char* buffer, int quality) {
+    tjhandle _jpegCompressor = tjInitCompress();
+    if (!_jpegCompressor) {
+        LOGE("tjInitCompress failed");
+        return false;
+    }
+
+    unsigned char* jpegBuf = NULL;
+    unsigned long jpegSize = 0;
+
+    int tj_stat = tjCompress2(_jpegCompressor, buffer, width, 0, height, TJPF_RGB,
+                              &jpegBuf, &jpegSize, subsamp, quality, TJFLAG_FASTDCT);
+
+    if (tj_stat != 0) {
+        LOGE("tjCompress2 failed: %s", tjGetErrorStr());
+        tjDestroy(_jpegCompressor);
+        if (jpegBuf) tjFree(jpegBuf);
+        return false;
+    }
+
+    int dup_fd = dup(fd);
+    if (dup_fd < 0) {
+        LOGE("Failed to dup fd %d", fd);
+        tjDestroy(_jpegCompressor);
+        tjFree(jpegBuf);
+        return false;
+    }
+    lseek(dup_fd, 0, SEEK_SET);
+
+    FILE* file = fdopen(dup_fd, "wb");
+    if (!file) {
+        LOGE("Failed to fdopen %d for writing", dup_fd);
+        close(dup_fd);
+        tjDestroy(_jpegCompressor);
+        tjFree(jpegBuf);
+        return false;
+    }
+    fwrite(jpegBuf, 1, jpegSize, file);
+    fflush(file);
+    fclose(file); // fclose also closes dup_fd
+
+    tjDestroy(_jpegCompressor);
+    tjFree(jpegBuf);
+    return true;
+}
 
 static bool write_jpeg_turbo(const char* filename, int width, int height, int subsamp, const unsigned char* buffer, int quality) {
     tjhandle _jpegCompressor = tjInitCompress();
@@ -772,7 +820,6 @@ std::string build_debug_stage_path(const char* basePath, const char* stageSuffix
 
 AdaptiveEdgeComp calculate_adaptive_edge_comp(const unsigned short* planarData, int stride_x, int stride_y, int stride_c, int width, int height) {
     AdaptiveEdgeComp edgeComp;
-    (void)planarData; (void)stride_x; (void)stride_y; (void)stride_c;
     const float cx = 0.5f * (width - 1);
     const float cy = 0.5f * (height - 1);
     const float maxRadius = std::sqrt(cx * cx + cy * cy);
@@ -780,6 +827,57 @@ AdaptiveEdgeComp calculate_adaptive_edge_comp(const unsigned short* planarData, 
     edgeComp.centerX = cx;
     edgeComp.centerY = cy;
     edgeComp.invMaxRadius = (maxRadius > 1e-6f) ? (1.0f / maxRadius) : 1.0f;
+
+    double c_sum0 = 0.0, c_sum1 = 0.0, c_sum2 = 0.0;
+    double e_sum0 = 0.0, e_sum1 = 0.0, e_sum2 = 0.0;
+    int centerCount = 0;
+    int edgeCount = 0;
+
+    #pragma omp parallel for reduction(+:c_sum0,c_sum1,c_sum2,e_sum0,e_sum1,e_sum2,centerCount,edgeCount)
+    for (int y = 0; y < height; y += kAnalysisStep) {
+        for (int x = 0; x < width; x += kAnalysisStep) {
+            const float nx = (x - cx) * edgeComp.invMaxRadius;
+            const float ny = (y - cy) * edgeComp.invMaxRadius;
+            const float r = std::sqrt(nx * nx + ny * ny);
+
+            size_t r_idx = x*stride_x + y*stride_y + 0*stride_c;
+            size_t g_idx = x*stride_x + y*stride_y + 1*stride_c;
+            size_t b_idx = x*stride_x + y*stride_y + 2*stride_c;
+            float rr = static_cast<float>(planarData[r_idx]);
+            float gg = static_cast<float>(planarData[g_idx]);
+            float bb = static_cast<float>(planarData[b_idx]);
+
+            if (r <= kCenterRegionRadius) {
+                c_sum0 += rr; c_sum1 += gg; c_sum2 += bb; centerCount++;
+            } else if (r >= kEdgeRegionStartRadius) {
+                e_sum0 += rr; e_sum1 += gg; e_sum2 += bb; edgeCount++;
+            }
+        }
+    }
+
+    std::array<double, 3> centerSum{c_sum0, c_sum1, c_sum2};
+    std::array<double, 3> edgeSum{e_sum0, e_sum1, e_sum2};
+
+    if (centerCount <= 0 || edgeCount <= 0) {
+        return edgeComp;
+    }
+
+    std::array<float, 3> centerMean{
+        static_cast<float>(centerSum[0] / centerCount),
+        static_cast<float>(centerSum[1] / centerCount),
+        static_cast<float>(centerSum[2] / centerCount)
+    };
+    std::array<float, 3> edgeMean{
+        static_cast<float>(edgeSum[0] / edgeCount),
+        static_cast<float>(edgeSum[1] / edgeCount),
+        static_cast<float>(edgeSum[2] / edgeCount)
+    };
+
+    float centerLuma = kRec709LinearLumaR * centerMean[0] + kRec709LinearLumaG * centerMean[1] + kRec709LinearLumaB * centerMean[2];
+    float edgeLuma = kRec709LinearLumaR * edgeMean[0] + kRec709LinearLumaG * edgeMean[1] + kRec709LinearLumaB * edgeMean[2];
+
+    float centerGvsRB = safe_div(centerMean[1], 0.5f * (centerMean[0] + centerMean[2]));
+    float edgeGvsRB = safe_div(edgeMean[1], 0.5f * (edgeMean[0] + edgeMean[2]));
 
     // Adaptive edge compensation is disabled in favor of sensor-calibrated hardware LensShadingCorrection.
     edgeComp.enabled = false;
@@ -808,11 +906,10 @@ bool process_and_save_image(
     bool enableMemoryColor,
     int colorEngineMode,
     bool faithfulHighlights,
-    int* outColorPipeMs,
-    int* outJpegSaveMs
+    int jpgFd
 ) {
-    LOGD("process_and_save_image: %dx%d, gain=%.2f, log=%d, lut=%d, jpg=%s, tiff=%s, preview=%d, ds=%d, zoom=%.2f, mirror=%d, memColor=%d, engineMode=%d, faithful=%d",
-         width, height, gain, targetLog, lut.size, jpgPath ? jpgPath : "null", tiffPath ? tiffPath : "null", isPreview, downsampleFactor, zoomFactor, mirror, enableMemoryColor, colorEngineMode, faithfulHighlights);
+    LOGD("process_and_save_image: %dx%d, gain=%.2f, log=%d, lut=%d, jpg=%s, jpgFd=%d, tiff=%s, preview=%d, ds=%d, zoom=%.2f, mirror=%d, memColor=%d, engineMode=%d, faithful=%d",
+         width, height, gain, targetLog, lut.size, jpgPath ? jpgPath : "null", jpgFd, tiffPath ? tiffPath : "null", isPreview, downsampleFactor, zoomFactor, mirror, enableMemoryColor, colorEngineMode, faithfulHighlights);
     int outW = width / downsampleFactor, outH = height / downsampleFactor;
     bool swapDims = (orientation == 90 || orientation == 270);
     int finalW = swapDims ? outH : outW, finalH = swapDims ? outW : outH;
@@ -821,9 +918,6 @@ bool process_and_save_image(
     thread_local std::vector<unsigned char> tls_previewRgb8;
 
     AdaptiveEdgeComp edgeComp = calculate_adaptive_edge_comp(planarData, stride_x, stride_y, stride_c, width, height);
-
-    const float exp_gain = std::pow(2.0f, exposure);
-    const float eff_gain = std::max(1.0f, gain * exp_gain);
 
     // Debug stage split output (A/B/C):
     const bool enableStageDebug = false;
@@ -919,6 +1013,8 @@ bool process_and_save_image(
         // Multi-frame path only: this ramp is gain dependent and effectively inert
         // at gain == 1, so the minimal path leaves highlight colour to the display
         // transform (and to the point-wise neutralization applied after the clamp).
+        float exp_gain = std::pow(2.0f, exposure);
+        float eff_gain = std::max(1.0f, gain * exp_gain);
         if (!faithfulHighlights) {
             float threshold = (65535.0f * 0.8f) / eff_gain;
             float theoretical_max = (65535.0f * (wb ? std::max({wb[0], wb[1], wb[3]}) : 1.0f)) / eff_gain;
@@ -1090,8 +1186,6 @@ bool process_and_save_image(
         debugC8.resize(n);
     }
 
-    auto cpStart = std::chrono::high_resolution_clock::now();
-
     if (isPreview) {
         // If a bitmap buffer is provided, prioritize its dimensions.
         // This ensures no out-of-bounds writes even if Kotlin and JNI have different size expectations.
@@ -1192,11 +1286,6 @@ bool process_and_save_image(
         }
     }
 
-    auto cpEnd = std::chrono::high_resolution_clock::now();
-    if (outColorPipeMs) {
-        *outColorPipeMs = (int)std::chrono::duration_cast<std::chrono::milliseconds>(cpEnd - cpStart).count();
-    }
-
     bool tiffOk = true;
     if (tiffPath && !isPreview) {
         tiffOk = write_tiff(tiffPath, finalW_zoomed, finalH_zoomed, processedImage.data(), 3, finalW_zoomed*3, 1, metadata);
@@ -1206,16 +1295,19 @@ bool process_and_save_image(
 
     const int jpegQuality = isPreview ? 78 : 95;
     bool jpgOk = true;
-    if (jpgPath) {
-        auto jsStart = std::chrono::high_resolution_clock::now();
+    if (jpgFd >= 0) {
+        if (isPreview && !previewRgb8.empty()) {
+            jpgOk = write_jpeg_turbo_fd(jpgFd, finalW_zoomed, finalH_zoomed, TJSAMP_422, previewRgb8.data(), jpegQuality);
+        } else {
+            jpgOk = write_jpeg_fd(jpgFd, finalW_zoomed, finalH_zoomed, processedImage.data(), 3, finalW_zoomed*3, 1, jpegQuality);
+        }
+        if (!jpgOk) LOGE("write_jpeg_fd failed for fd %d", jpgFd);
+        else LOGD("Successfully wrote JPEG to fd %d", jpgFd);
+    } else if (jpgPath) {
         if (isPreview && !previewRgb8.empty()) {
             jpgOk = write_jpeg_turbo(jpgPath, finalW_zoomed, finalH_zoomed, TJSAMP_422, previewRgb8.data(), jpegQuality);
         } else {
             jpgOk = write_jpeg(jpgPath, finalW_zoomed, finalH_zoomed, processedImage.data(), 3, finalW_zoomed*3, 1, jpegQuality);
-        }
-        auto jsEnd = std::chrono::high_resolution_clock::now();
-        if (outJpegSaveMs) {
-            *outJpegSaveMs = (int)std::chrono::duration_cast<std::chrono::milliseconds>(jsEnd - jsStart).count();
         }
         if (!jpgOk) LOGE("write_jpeg/stbi_write_jpg failed for %s", jpgPath);
         else {
@@ -1315,6 +1407,36 @@ bool write_tiff_rgba8(const char* filename, int width, int height, const unsigne
     }
     TIFFClose(tif);
     return true;
+}
+
+bool write_jpeg_fd(int fd, int width, int height, const unsigned short* planarData, int stride_x, int stride_y, int stride_c, int quality) {
+    LOGD("write_jpeg_fd: fd=%d, %dx%d", fd, width, height);
+    size_t total_pixels = static_cast<size_t>(width) * height;
+    thread_local std::vector<unsigned char> tls_rgb8;
+    std::vector<unsigned char>& rgb8 = tls_rgb8;
+    try {
+        rgb8.resize(total_pixels * 3);
+    } catch (const std::bad_alloc& e) {
+        LOGE("Failed to allocate memory for JPEG conversion: %zu bytes", total_pixels * 3);
+        return false;
+    }
+
+    #pragma omp parallel for
+    for (int y = 0; y < height; y++) {
+        for (int x = 0; x < width; x++) {
+            size_t r_idx = (size_t)y * stride_y + (size_t)x * stride_x + 0 * stride_c;
+            size_t g_idx = (size_t)y * stride_y + (size_t)x * stride_x + 1 * stride_c;
+            size_t b_idx = (size_t)y * stride_y + (size_t)x * stride_x + 2 * stride_c;
+            size_t dst_idx = ((size_t)y * width + x) * 3;
+            float r_f = static_cast<float>(planarData[r_idx]) * (255.0f / 65535.0f) + 0.5f + spatial_tpdf_dither(x, y, 0);
+            float g_f = static_cast<float>(planarData[g_idx]) * (255.0f / 65535.0f) + 0.5f + spatial_tpdf_dither(x, y, 1);
+            float b_f = static_cast<float>(planarData[b_idx]) * (255.0f / 65535.0f) + 0.5f + spatial_tpdf_dither(x, y, 2);
+            rgb8[dst_idx + 0] = static_cast<unsigned char>(std::clamp(r_f, 0.0f, 255.0f));
+            rgb8[dst_idx + 1] = static_cast<unsigned char>(std::clamp(g_f, 0.0f, 255.0f));
+            rgb8[dst_idx + 2] = static_cast<unsigned char>(std::clamp(b_f, 0.0f, 255.0f));
+        }
+    }
+    return write_jpeg_turbo_fd(fd, width, height, TJSAMP_422, rgb8.data(), quality);
 }
 
 bool write_jpeg(const char* filename, int width, int height, const unsigned short* planarData, int stride_x, int stride_y, int stride_c, int quality) {
@@ -1449,6 +1571,34 @@ Matrix3x3 inverse_matrix(const Matrix3x3& m) {
     return inv;
 }
 
+// Custom LibTIFF callbacks for integer file descriptor
+static tmsize_t tiff_fd_read(thandle_t fd, void* buf, tmsize_t size) {
+    return read((int)(intptr_t)fd, buf, size);
+}
+static tmsize_t tiff_fd_write(thandle_t fd, void* buf, tmsize_t size) {
+    return write((int)(intptr_t)fd, buf, size);
+}
+static toff_t tiff_fd_seek(thandle_t fd, toff_t off, int whence) {
+    return lseek((int)(intptr_t)fd, off, whence);
+}
+static int tiff_fd_close(thandle_t fd) {
+    // Note: Do not close the user-provided fd here if we duplicated it, or close duped fd.
+    // We duped the fd when calling TIFFClientOpen, so closing the duped fd is fine.
+    return close((int)(intptr_t)fd);
+}
+static toff_t tiff_fd_size(thandle_t fd) {
+    struct stat st;
+    if (fstat((int)(intptr_t)fd, &st) == 0) {
+        return st.st_size;
+    }
+    return 0;
+}
+static int tiff_fd_map(thandle_t fd, void** pbase, toff_t* psize) {
+    return 0;
+}
+static void tiff_fd_unmap(thandle_t fd, void* base, toff_t size) {
+}
+
 bool write_dng(
     const char* filename,
     int width,
@@ -1470,10 +1620,24 @@ bool write_dng(
     const float* forwardMatrix2,
     int calibIllum1,
     int calibIllum2,
-    const float* neutralColorPoint
+    const float* neutralColorPoint,
+    int dngFd
 ) {
     TIFFSetTagExtender(DNGTagExtender);
-    TIFF* tif = TIFFOpen(filename, "w");
+    TIFF* tif = nullptr;
+    if (dngFd >= 0) {
+        int dup_fd = dup(dngFd);
+        if (dup_fd < 0) {
+            LOGE("Failed to dup dngFd %d", dngFd);
+            return false;
+        }
+        lseek(dup_fd, 0, SEEK_SET);
+        tif = TIFFClientOpen("dng_fd", "w", (thandle_t)(intptr_t)dup_fd,
+                             tiff_fd_read, tiff_fd_write, tiff_fd_seek,
+                             tiff_fd_close, tiff_fd_size, tiff_fd_map, tiff_fd_unmap);
+    } else if (filename) {
+        tif = TIFFOpen(filename, "w");
+    }
     if (!tif) return false;
 
     TIFFSetField(tif, TIFFTAG_IMAGEWIDTH, width);
@@ -1492,7 +1656,7 @@ bool write_dng(
     TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_LINEAR_RAW);
     TIFFSetField(tif, TIFFTAG_SAMPLESPERPIXEL, 3);
     TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG);
-    TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, 64);
+    TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, 1);
     TIFFSetField(tif, TIFFTAG_SUBFILETYPE, 0);
 
     write_tiff_metadata(tif, &metadata);

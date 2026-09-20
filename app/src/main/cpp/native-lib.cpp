@@ -239,8 +239,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processRaw(
     const char* lut_path_cstr = (lutPath) ? env->GetStringUTFChars(lutPath, 0) : nullptr;
     LUT3D lut;
     if (lut_path_cstr) {
-        auto cachedLut = get_cached_lut(lut_path_cstr);
-        if (cachedLut) lut = *cachedLut;
+        lut = load_lut(lut_path_cstr);
         env->ReleaseStringUTFChars(lutPath, lut_path_cstr);
     } else if (lutPath) {
         LOGE("GetStringUTFChars failed for lutPath");

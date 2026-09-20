@@ -130,46 +130,85 @@ class HdrPlusProcessingService : LifecycleService() {
             HdrPlusBurst.releaseBuffer(req.megaBuffer)
             buffersReleased = true
 
+            var mediaStoreJpgUri: android.net.Uri? = null
             var exportRet = ret
             if (ret >= 0) {
-                // Export full resolution image from shared memory using C++
                 val edit = req.editConfig
-                exportRet = ColorProcessor.exportHdrPlus(
-                    tempRawPath = req.requestId,
-                    width = req.width,
-                    height = req.height,
-                    orientation = req.orientation,
-                    digitalGain = req.digitalGain,
-                    targetLog = req.targetLogIndex,
-                    lutPath = req.lutPath,
-                    exposure = edit?.exposure ?: 0f,
-                    contrast = edit?.contrast ?: 0f,
-                    saturation = edit?.saturation ?: 0f,
-                    highlights = edit?.highlights ?: 0f,
-                    shadows = edit?.shadows ?: 0f,
-                    whites = edit?.whites ?: 0f,
-                    blacks = edit?.blacks ?: 0f,
-                    jpgPath = if (req.saveJpg) req.fullResJpgPath else null,
-                    dngPath = if (req.saveRaw && !req.isSingleFrame) req.linearDngPath else null,
-                    // This is the call that actually writes the photo: the minimal path
-                    // must keep its linear/neutral highlight handling here as well.
-                    faithfulHighlights = req.isSingleFrame,
-                    ccm = req.ccm,
-                    whiteBalance = req.whiteBalance,
-                    zoomFactor = req.zoomFactor,
-                    mirror = req.mirror,
-                    metadata = req.metadata,
-                    enableMemoryColor = req.enableMemoryColor,
-                    colorEngineMode = req.colorEngineMode,
-                    colorMatrix1 = req.colorMatrix1,
-                    colorMatrix2 = req.colorMatrix2,
-                    forwardMatrix1 = req.forwardMatrix1,
-                    forwardMatrix2 = req.forwardMatrix2,
-                    calibrationIlluminant1 = req.calibrationIlluminant1,
-                    calibrationIlluminant2 = req.calibrationIlluminant2,
-                    neutralColorPoint = req.neutralColorPoint,
-                    debugStats = debugStats
-                )
+                val shouldSaveJpg = req.saveJpg
+                val shouldSaveRaw = req.saveRaw && !req.isSingleFrame
+
+                // Direct MediaStore FileDescriptor optimization if saving directly to MediaStore
+                mediaStoreJpgUri = if (shouldSaveJpg && req.jpgFolderUri == null && req.hfMetadata == null) {
+                    top.maary.darkbag.utils.ImageSaver.prepareMediaStoreJpegUri(
+                        context = this@HdrPlusProcessingService,
+                        displayName = "${req.baseName}.jpg",
+                        targetUri = null
+                    )
+                } else null
+
+                val jpgPfd = mediaStoreJpgUri?.let { contentResolver.openFileDescriptor(it, "rw") }
+                val jpgFd = jpgPfd?.fd ?: -1
+
+                try {
+                    exportRet = ColorProcessor.exportHdrPlus(
+                        tempRawPath = req.requestId,
+                        width = req.width,
+                        height = req.height,
+                        orientation = req.orientation,
+                        digitalGain = req.digitalGain,
+                        targetLog = req.targetLogIndex,
+                        lutPath = req.lutPath,
+                        exposure = edit?.exposure ?: 0f,
+                        contrast = edit?.contrast ?: 0f,
+                        saturation = edit?.saturation ?: 0f,
+                        highlights = edit?.highlights ?: 0f,
+                        shadows = edit?.shadows ?: 0f,
+                        whites = edit?.whites ?: 0f,
+                        blacks = edit?.blacks ?: 0f,
+                        jpgPath = if (shouldSaveJpg && jpgFd < 0) req.fullResJpgPath else null,
+                        dngPath = if (shouldSaveRaw) req.linearDngPath else null,
+                        faithfulHighlights = req.isSingleFrame,
+                        ccm = req.ccm,
+                        whiteBalance = req.whiteBalance,
+                        zoomFactor = req.zoomFactor,
+                        mirror = req.mirror,
+                        metadata = req.metadata,
+                        enableMemoryColor = req.enableMemoryColor,
+                        colorEngineMode = req.colorEngineMode,
+                        colorMatrix1 = req.colorMatrix1,
+                        colorMatrix2 = req.colorMatrix2,
+                        forwardMatrix1 = req.forwardMatrix1,
+                        forwardMatrix2 = req.forwardMatrix2,
+                        calibrationIlluminant1 = req.calibrationIlluminant1,
+                        calibrationIlluminant2 = req.calibrationIlluminant2,
+                        neutralColorPoint = req.neutralColorPoint,
+                        jpgFd = jpgFd,
+                        dngFd = -1
+                    )
+                } finally {
+                    jpgPfd?.close()
+                }
+
+                if (exportRet == 0 && mediaStoreJpgUri != null) {
+                    top.maary.darkbag.utils.ImageSaver.finishMediaStoreJpeg(
+                        context = this@HdrPlusProcessingService,
+                        uri = mediaStoreJpgUri,
+                        editConfig = edit,
+                        zoomFactor = req.zoomFactor,
+                        captureMetadata = req.metadata
+                    )
+                    ColorProcessor.backgroundSaveFlow.tryEmit(
+                        ColorProcessor.BackgroundSaveEvent(
+                            baseName = req.baseName,
+                            dngPath = if (shouldSaveRaw) req.linearDngPath else null,
+                            jpgPath = null,
+                            targetUri = mediaStoreJpgUri.toString(),
+                            zoomFactor = req.zoomFactor,
+                            orientation = req.orientation,
+                            saveJpg = true
+                        )
+                    )
+                }
             }
 
             if (exportRet == 0) {
@@ -206,11 +245,11 @@ class HdrPlusProcessingService : LifecycleService() {
                 Log.i(TAG, baselineReport)
                 top.maary.darkbag.utils.DebugLogManager.addLog(baselineReport)
 
-                if (req.saveJpg || req.saveRaw) {
+                if ((req.saveJpg && mediaStoreJpgUri == null) || req.saveRaw) {
                     var savedUri: android.net.Uri? = null
-                    val shouldSaveJpg = req.saveJpg
+                    val shouldSaveJpg = req.saveJpg && mediaStoreJpgUri == null
                     val shouldSaveRaw = req.saveRaw && !req.isSingleFrame // Single Bayer RAW was already saved in front-end
-                    
+
                     if (shouldSaveJpg || shouldSaveRaw) {
                         savedUri = top.maary.darkbag.utils.ImageSaver.saveProcessedImage(
                             context = this@HdrPlusProcessingService,
@@ -224,7 +263,7 @@ class HdrPlusProcessingService : LifecycleService() {
                             saveRaw = shouldSaveRaw,
                             jpgFolderUri = req.jpgFolderUri,
                             rawFolderUri = req.rawFolderUri,
-                            mirror = false, // JNI has already applied horizontal mirroring in exportHdrPlus
+                            mirror = req.mirror,
                             isFastPath = false,
                             halfFrameMetadata = req.hfMetadata,
                             editConfig = req.editConfig,

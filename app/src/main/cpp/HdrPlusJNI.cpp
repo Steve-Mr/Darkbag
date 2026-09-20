@@ -373,7 +373,8 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
     jint calibrationIlluminant2,
     jfloatArray neutralColorPoint,
     jboolean faithfulHighlights,
-    jlongArray debugStats
+    jint jpgFd,
+    jint dngFd
 ) {
     LOGD("Native exportHdrPlus started (enableMemoryColor=%d, colorEngineMode=%d, faithful=%d).", enableMemoryColor, colorEngineMode, faithfulHighlights);
 
@@ -420,51 +421,27 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
                              cm1Ptr, cm2Ptr, fm1Ptr, fm2Ptr, neutralPtr);
 
     const char* lut_path_cstr = (lutPath) ? env->GetStringUTFChars(lutPath, 0) : nullptr;
-    LUT3D lut;
-    if (lut_path_cstr) {
-        auto cachedLut = get_cached_lut(lut_path_cstr);
-        if (cachedLut) lut = *cachedLut;
-        env->ReleaseStringUTFChars(lutPath, lut_path_cstr);
-    }
+    LUT3D lut; if (lut_path_cstr) { lut = load_lut(lut_path_cstr); env->ReleaseStringUTFChars(lutPath, lut_path_cstr); }
 
     const char* jpg_path_cstr = (jpgPath) ? env->GetStringUTFChars(jpgPath, 0) : nullptr;
     const char* dng_path_cstr = (dngPath) ? env->GetStringUTFChars(dngPath, 0) : nullptr;
 
     ImageMetadata meta = metadataFromJava(env, metadata);
 
-    jlong dngDurationMs = 0;
-    jlong colorPipeDurationMs = 0;
-    jlong jpegSaveDurationMs = 0;
-
-    if (dng_path_cstr) {
-        LOGD("Exporting DNG to %s", dng_path_cstr);
-        auto dngStart = std::chrono::high_resolution_clock::now();
+    if (dngFd >= 0 || dng_path_cstr) {
+        LOGD("Exporting DNG to dngFd=%d / %s", dngFd, dng_path_cstr ? dng_path_cstr : "null");
         float baselineExposure = (digitalGain > 0.0f) ? std::log2(digitalGain) : 0.0f;
         write_dng(dng_path_cstr, width, height, finalImage.data(), 1, width, width*height, kMax16BitValue, ccmVec, meta, orientation, (bool)mirror, baselineExposure, wbVec.data(),
-                  cm1Ptr, cm2Ptr, fm1Ptr, fm2Ptr, (int)calibrationIlluminant1, (int)calibrationIlluminant2, neutralPtr);
-        dngDurationMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - dngStart).count();
+                  cm1Ptr, cm2Ptr, fm1Ptr, fm2Ptr, (int)calibrationIlluminant1, (int)calibrationIlluminant2, neutralPtr, dngFd);
     }
 
     bool saveOk = true;
-    if (jpg_path_cstr) {
-        LOGD("Exporting JPG: JPG=%s", jpg_path_cstr);
-        int cpMs = 0, jsMs = 0;
+    if (jpgFd >= 0 || jpg_path_cstr) {
+        LOGD("Exporting JPG: jpgFd=%d / JPG=%s", jpgFd, jpg_path_cstr ? jpg_path_cstr : "null");
         saveOk = process_and_save_image(finalImage.data(), 1, width, width*height, nullptr, 0, 0, width, height, digitalGain, targetLog, lut,
                                         exposure, contrast, saturation, highlights, shadows, whites, blacks,
-                                        jpg_path_cstr, nullptr, &meta, 1, ccmVec.data(), wbVec.data(), orientation, nullptr, 0, 0, false, 1, zoomFactor, (bool)mirror, (bool)enableMemoryColor, (int)colorEngineMode, faithfulHighlights,
-                                        &cpMs, &jsMs);
-        colorPipeDurationMs = cpMs;
-        jpegSaveDurationMs = jsMs;
+                                        jpg_path_cstr, nullptr, &meta, 1, ccmVec.data(), wbVec.data(), orientation, nullptr, 0, 0, false, 1, zoomFactor, (bool)mirror, (bool)enableMemoryColor, (int)colorEngineMode, faithfulHighlights, jpgFd);
     }
-
-    if (debugStats != nullptr) {
-        const jsize len = env->GetArrayLength(debugStats);
-        if (len >= 5) {
-            jlong stats[3] = { colorPipeDurationMs, dngDurationMs, jpegSaveDurationMs };
-            env->SetLongArrayRegion(debugStats, 2, 3, stats);
-        }
-    }
-
     if (jpgPath && jpg_path_cstr) env->ReleaseStringUTFChars(jpgPath, jpg_path_cstr);
     if (dngPath && dng_path_cstr) env->ReleaseStringUTFChars(dngPath, dng_path_cstr);
 
@@ -646,12 +623,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
     if (outputBitmap) AndroidBitmap_lockPixels(env, outputBitmap, (void**)&bitmapPixels);
 
     const char* lut_path_cstr = (lutPath) ? env->GetStringUTFChars(lutPath, 0) : nullptr;
-    LUT3D lut;
-    if (lut_path_cstr) {
-        auto cachedLut = get_cached_lut(lut_path_cstr);
-        if (cachedLut) lut = *cachedLut;
-        env->ReleaseStringUTFChars(lutPath, lut_path_cstr);
-    }
+    LUT3D lut; if (lut_path_cstr) { lut = load_lut(lut_path_cstr); env->ReleaseStringUTFChars(lutPath, lut_path_cstr); }
 
     int stride_x = outputBuf.dim(0).stride(), stride_y = outputBuf.dim(1).stride(), stride_c = outputBuf.dim(2).stride();
     const uint16_t* raw_ptr = outputBuf.data();

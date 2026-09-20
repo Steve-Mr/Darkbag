@@ -119,8 +119,7 @@ bool process_and_save_image(
     // (no knee) and neutralize sensor-saturated pixels point-wise instead of
     // applying the display-oriented highlight desaturation ramp.
     bool faithfulHighlights = false,
-    int* outColorPipeMs = nullptr,
-    int* outJpegSaveMs = nullptr
+    int jpgFd = -1
 );
 
 bool write_dng(
@@ -144,8 +143,11 @@ bool write_dng(
     const float* forwardMatrix2 = nullptr,
     int calibIllum1 = 21,
     int calibIllum2 = 17,
-    const float* neutralColorPoint = nullptr
+    const float* neutralColorPoint = nullptr,
+    int dngFd = -1
 );
+
+bool write_jpeg_fd(int nativeFd, int width, int height, const unsigned short* planarData, int stride_x, int stride_y, int stride_c, int quality);
 
 bool write_bmp(const char* filename, int width, int height, const unsigned short* planarData, int stride_x, int stride_y, int stride_c);
 
