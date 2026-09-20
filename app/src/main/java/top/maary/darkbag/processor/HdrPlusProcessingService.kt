@@ -233,6 +233,7 @@ class HdrPlusProcessingService : LifecycleService() {
                             - C++ Post/ColorPipe: ${debugStats[2]}ms
                             - DNG Encode: ${debugStats[3]}ms
                             - JPEG Native Save: ${debugStats[4]}ms
+                            - Total Export: ${debugStats[5]}ms
                         """.trimIndent()
                         Log.i(TAG, report)
                         top.maary.darkbag.utils.DebugLogManager.addLog(report)
