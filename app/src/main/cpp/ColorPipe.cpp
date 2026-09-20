@@ -772,6 +772,7 @@ std::string build_debug_stage_path(const char* basePath, const char* stageSuffix
 
 AdaptiveEdgeComp calculate_adaptive_edge_comp(const unsigned short* planarData, int stride_x, int stride_y, int stride_c, int width, int height) {
     AdaptiveEdgeComp edgeComp;
+    (void)planarData; (void)stride_x; (void)stride_y; (void)stride_c;
     const float cx = 0.5f * (width - 1);
     const float cy = 0.5f * (height - 1);
     const float maxRadius = std::sqrt(cx * cx + cy * cy);
@@ -779,57 +780,6 @@ AdaptiveEdgeComp calculate_adaptive_edge_comp(const unsigned short* planarData, 
     edgeComp.centerX = cx;
     edgeComp.centerY = cy;
     edgeComp.invMaxRadius = (maxRadius > 1e-6f) ? (1.0f / maxRadius) : 1.0f;
-
-    double c_sum0 = 0.0, c_sum1 = 0.0, c_sum2 = 0.0;
-    double e_sum0 = 0.0, e_sum1 = 0.0, e_sum2 = 0.0;
-    int centerCount = 0;
-    int edgeCount = 0;
-
-    #pragma omp parallel for reduction(+:c_sum0,c_sum1,c_sum2,e_sum0,e_sum1,e_sum2,centerCount,edgeCount)
-    for (int y = 0; y < height; y += kAnalysisStep) {
-        for (int x = 0; x < width; x += kAnalysisStep) {
-            const float nx = (x - cx) * edgeComp.invMaxRadius;
-            const float ny = (y - cy) * edgeComp.invMaxRadius;
-            const float r = std::sqrt(nx * nx + ny * ny);
-
-            size_t r_idx = x*stride_x + y*stride_y + 0*stride_c;
-            size_t g_idx = x*stride_x + y*stride_y + 1*stride_c;
-            size_t b_idx = x*stride_x + y*stride_y + 2*stride_c;
-            float rr = static_cast<float>(planarData[r_idx]);
-            float gg = static_cast<float>(planarData[g_idx]);
-            float bb = static_cast<float>(planarData[b_idx]);
-
-            if (r <= kCenterRegionRadius) {
-                c_sum0 += rr; c_sum1 += gg; c_sum2 += bb; centerCount++;
-            } else if (r >= kEdgeRegionStartRadius) {
-                e_sum0 += rr; e_sum1 += gg; e_sum2 += bb; edgeCount++;
-            }
-        }
-    }
-
-    std::array<double, 3> centerSum{c_sum0, c_sum1, c_sum2};
-    std::array<double, 3> edgeSum{e_sum0, e_sum1, e_sum2};
-
-    if (centerCount <= 0 || edgeCount <= 0) {
-        return edgeComp;
-    }
-
-    std::array<float, 3> centerMean{
-        static_cast<float>(centerSum[0] / centerCount),
-        static_cast<float>(centerSum[1] / centerCount),
-        static_cast<float>(centerSum[2] / centerCount)
-    };
-    std::array<float, 3> edgeMean{
-        static_cast<float>(edgeSum[0] / edgeCount),
-        static_cast<float>(edgeSum[1] / edgeCount),
-        static_cast<float>(edgeSum[2] / edgeCount)
-    };
-
-    float centerLuma = kRec709LinearLumaR * centerMean[0] + kRec709LinearLumaG * centerMean[1] + kRec709LinearLumaB * centerMean[2];
-    float edgeLuma = kRec709LinearLumaR * edgeMean[0] + kRec709LinearLumaG * edgeMean[1] + kRec709LinearLumaB * edgeMean[2];
-
-    float centerGvsRB = safe_div(centerMean[1], 0.5f * (centerMean[0] + centerMean[2]));
-    float edgeGvsRB = safe_div(edgeMean[1], 0.5f * (edgeMean[0] + edgeMean[2]));
 
     // Adaptive edge compensation is disabled in favor of sensor-calibrated hardware LensShadingCorrection.
     edgeComp.enabled = false;
@@ -869,6 +819,9 @@ bool process_and_save_image(
     thread_local std::vector<unsigned char> tls_previewRgb8;
 
     AdaptiveEdgeComp edgeComp = calculate_adaptive_edge_comp(planarData, stride_x, stride_y, stride_c, width, height);
+
+    const float exp_gain = std::pow(2.0f, exposure);
+    const float eff_gain = std::max(1.0f, gain * exp_gain);
 
     // Debug stage split output (A/B/C):
     const bool enableStageDebug = false;
@@ -964,8 +917,6 @@ bool process_and_save_image(
         // Multi-frame path only: this ramp is gain dependent and effectively inert
         // at gain == 1, so the minimal path leaves highlight colour to the display
         // transform (and to the point-wise neutralization applied after the clamp).
-        float exp_gain = std::pow(2.0f, exposure);
-        float eff_gain = std::max(1.0f, gain * exp_gain);
         if (!faithfulHighlights) {
             float threshold = (65535.0f * 0.8f) / eff_gain;
             float theoretical_max = (65535.0f * (wb ? std::max({wb[0], wb[1], wb[3]}) : 1.0f)) / eff_gain;

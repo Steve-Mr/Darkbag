@@ -1990,6 +1990,9 @@ class CameraFragment : Fragment() {
 
                 // 6. Timing Report
                 timing?.let { t ->
+                    val now = System.currentTimeMillis()
+                    if (t.jniDone == 0L) t.jniDone = now
+                    if (t.firstOutputWritten == 0L) t.firstOutputWritten = now
                     val report = """
                         [Standard Mode Report]
                         Total (to First Output): ${t.firstOutputWritten - t.shutterClick}ms

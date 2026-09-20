@@ -133,8 +133,8 @@ add_custom_command(
 )
 
 # Run the generator to produce the target object file
-# We target arm-64-android with OpenCL and Vulkan support, plus profiling.
-set(HALIDE_TARGET "arm-64-android-opencl-vulkan-vk_int16-profile")
+# We target arm-64-android with OpenCL and Vulkan support.
+set(HALIDE_TARGET "arm-64-android-opencl-vulkan-vk_int16")
 set(GENERATED_HEADER "${GENERATOR_OUTPUT_DIR}/hdrplus_raw_pipeline.h")
 set(GENERATED_LIB "${GENERATOR_OUTPUT_DIR}/hdrplus_raw_pipeline.a") # Static lib output
 set(SINGLE_GENERATED_HEADER "${GENERATOR_OUTPUT_DIR}/hdrplus_single_pipeline.h")
@@ -283,6 +283,16 @@ target_link_libraries(
         -fopenmp
         -static-openmp)
 
+
+string(REPLACE "-O2" "-O3" CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE}")
+string(REPLACE "-O2" "-O3" CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE}")
+string(REPLACE "-O2" "-O3" CMAKE_C_FLAGS_RELWITHDEBINFO "${CMAKE_C_FLAGS_RELWITHDEBINFO}")
+string(REPLACE "-O2" "-O3" CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO}")
+
+set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -O3 -ffast-math")
+set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -ffast-math")
+set(CMAKE_C_FLAGS_RELWITHDEBINFO "${CMAKE_C_FLAGS_RELWITHDEBINFO} -O3 -ffast-math")
+set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} -O3 -ffast-math")
 
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fopenmp -O3 -ffast-math")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fopenmp -O3 -ffast-math")

@@ -167,7 +167,8 @@ class HdrPlusProcessingService : LifecycleService() {
                     forwardMatrix2 = req.forwardMatrix2,
                     calibrationIlluminant1 = req.calibrationIlluminant1,
                     calibrationIlluminant2 = req.calibrationIlluminant2,
-                    neutralColorPoint = req.neutralColorPoint
+                    neutralColorPoint = req.neutralColorPoint,
+                    debugStats = debugStats
                 )
             }
 
@@ -223,7 +224,7 @@ class HdrPlusProcessingService : LifecycleService() {
                             saveRaw = shouldSaveRaw,
                             jpgFolderUri = req.jpgFolderUri,
                             rawFolderUri = req.rawFolderUri,
-                            mirror = req.mirror,
+                            mirror = false, // JNI has already applied horizontal mirroring in exportHdrPlus
                             isFastPath = false,
                             halfFrameMetadata = req.hfMetadata,
                             editConfig = req.editConfig,
