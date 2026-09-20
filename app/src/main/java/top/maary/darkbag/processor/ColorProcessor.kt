@@ -27,6 +27,20 @@ object ColorProcessor {
         }
     }.asCoroutineDispatcher()
 
+    val exportProcessingDispatcher = java.util.concurrent.Executors.newSingleThreadExecutor { runnable ->
+        Thread {
+            try {
+                android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND)
+            } catch (e: Exception) {
+                // Ignore
+            }
+            runnable.run()
+        }.apply {
+            name = "HdrPlusExporter"
+            isDaemon = true
+        }
+    }.asCoroutineDispatcher()
+
     external fun initMemoryPool(width: Int, height: Int, frames: Int)
 
     external fun allocateDirectBuffer(capacity: Long): ByteBuffer?
@@ -184,7 +198,13 @@ object ColorProcessor {
         neutralColorPoint: FloatArray? = null,
         // Minimal single-frame (non-HDR+) path: keep sensor highlights linear and
         // neutralize saturated pixels point-wise inside ColorPipe.
-        faithfulHighlights: Boolean = false
+        faithfulHighlights: Boolean = false,
+        jpgFd: Int = -1,
+        dngFd: Int = -1,
+        // Export-phase timings are written back into slots 2..4 (C++ Post/ColorPipe,
+        // DNG Encode, JPEG Native Save) plus slot 5 (total export), overwriting the
+        // processing-stage numbers that processHdrPlus filled in.
+        debugStats: LongArray? = null
     ): Int
 
     external fun processHdrPlus(

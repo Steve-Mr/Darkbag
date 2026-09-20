@@ -4,6 +4,7 @@
 #include <unordered_map>
 #include <mutex>
 #include <memory>
+#include <chrono>
 
 #define TAG "ColorPipe"
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, TAG, __VA_ARGS__)
@@ -11,6 +12,54 @@
 
 
 #include <turbojpeg.h>
+#include <unistd.h>
+#include <sys/stat.h>
+
+static bool write_jpeg_turbo_fd(int fd, int width, int height, int subsamp, const unsigned char* buffer, int quality) {
+    tjhandle _jpegCompressor = tjInitCompress();
+    if (!_jpegCompressor) {
+        LOGE("tjInitCompress failed");
+        return false;
+    }
+
+    unsigned char* jpegBuf = NULL;
+    unsigned long jpegSize = 0;
+
+    int tj_stat = tjCompress2(_jpegCompressor, buffer, width, 0, height, TJPF_RGB,
+                              &jpegBuf, &jpegSize, subsamp, quality, TJFLAG_FASTDCT);
+
+    if (tj_stat != 0) {
+        LOGE("tjCompress2 failed: %s", tjGetErrorStr());
+        tjDestroy(_jpegCompressor);
+        if (jpegBuf) tjFree(jpegBuf);
+        return false;
+    }
+
+    int dup_fd = dup(fd);
+    if (dup_fd < 0) {
+        LOGE("Failed to dup fd %d", fd);
+        tjDestroy(_jpegCompressor);
+        tjFree(jpegBuf);
+        return false;
+    }
+    lseek(dup_fd, 0, SEEK_SET);
+
+    FILE* file = fdopen(dup_fd, "wb");
+    if (!file) {
+        LOGE("Failed to fdopen %d for writing", dup_fd);
+        close(dup_fd);
+        tjDestroy(_jpegCompressor);
+        tjFree(jpegBuf);
+        return false;
+    }
+    fwrite(jpegBuf, 1, jpegSize, file);
+    fflush(file);
+    fclose(file); // fclose also closes dup_fd
+
+    tjDestroy(_jpegCompressor);
+    tjFree(jpegBuf);
+    return true;
+}
 
 static bool write_jpeg_turbo(const char* filename, int width, int height, int subsamp, const unsigned char* buffer, int quality) {
     tjhandle _jpegCompressor = tjInitCompress();
@@ -857,10 +906,14 @@ bool process_and_save_image(
     bool isPreview, int downsampleFactor, float zoomFactor, bool mirror,
     bool enableMemoryColor,
     int colorEngineMode,
-    bool faithfulHighlights
+    bool faithfulHighlights,
+    int jpgFd,
+    int* outColorPipeMs,
+    int* outJpegSaveMs
 ) {
-    LOGD("process_and_save_image: %dx%d, gain=%.2f, log=%d, lut=%d, jpg=%s, tiff=%s, preview=%d, ds=%d, zoom=%.2f, mirror=%d, memColor=%d, engineMode=%d, faithful=%d",
-         width, height, gain, targetLog, lut.size, jpgPath ? jpgPath : "null", tiffPath ? tiffPath : "null", isPreview, downsampleFactor, zoomFactor, mirror, enableMemoryColor, colorEngineMode, faithfulHighlights);
+    LOGD("process_and_save_image: %dx%d, gain=%.2f, log=%d, lut=%d, jpg=%s, jpgFd=%d, tiff=%s, preview=%d, ds=%d, zoom=%.2f, mirror=%d, memColor=%d, engineMode=%d, faithful=%d",
+         width, height, gain, targetLog, lut.size, jpgPath ? jpgPath : "null", jpgFd, tiffPath ? tiffPath : "null", isPreview, downsampleFactor, zoomFactor, mirror, enableMemoryColor, colorEngineMode, faithfulHighlights);
+    const auto cpStart = std::chrono::high_resolution_clock::now();
     int outW = width / downsampleFactor, outH = height / downsampleFactor;
     bool swapDims = (orientation == 90 || orientation == 270);
     int finalW = swapDims ? outH : outW, finalH = swapDims ? outW : outH;
@@ -1237,6 +1290,14 @@ bool process_and_save_image(
         }
     }
 
+    // Colour-pipeline work (demosaic/WB/CCM/LUT/zoom pixel pass) ends here;
+    // everything below is file serialisation and is timed separately.
+    const auto cpEnd = std::chrono::high_resolution_clock::now();
+    const auto jsStart = std::chrono::high_resolution_clock::now();
+    if (outColorPipeMs) {
+        *outColorPipeMs = (int)std::chrono::duration_cast<std::chrono::milliseconds>(cpEnd - cpStart).count();
+    }
+
     bool tiffOk = true;
     if (tiffPath && !isPreview) {
         tiffOk = write_tiff(tiffPath, finalW_zoomed, finalH_zoomed, processedImage.data(), 3, finalW_zoomed*3, 1, metadata);
@@ -1246,7 +1307,15 @@ bool process_and_save_image(
 
     const int jpegQuality = isPreview ? 78 : 95;
     bool jpgOk = true;
-    if (jpgPath) {
+    if (jpgFd >= 0) {
+        if (isPreview && !previewRgb8.empty()) {
+            jpgOk = write_jpeg_turbo_fd(jpgFd, finalW_zoomed, finalH_zoomed, TJSAMP_422, previewRgb8.data(), jpegQuality);
+        } else {
+            jpgOk = write_jpeg_fd(jpgFd, finalW_zoomed, finalH_zoomed, processedImage.data(), 3, finalW_zoomed*3, 1, jpegQuality);
+        }
+        if (!jpgOk) LOGE("write_jpeg_fd failed for fd %d", jpgFd);
+        else LOGD("Successfully wrote JPEG to fd %d", jpgFd);
+    } else if (jpgPath) {
         if (isPreview && !previewRgb8.empty()) {
             jpgOk = write_jpeg_turbo(jpgPath, finalW_zoomed, finalH_zoomed, TJSAMP_422, previewRgb8.data(), jpegQuality);
         } else {
@@ -1270,6 +1339,10 @@ bool process_and_save_image(
              debugPathA.c_str(), (int)aOk,
              debugPathB.c_str(), (int)bOk,
              debugPathC.c_str(), (int)cOk);
+    }
+
+    if (outJpegSaveMs) {
+        *outJpegSaveMs = (int)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - jsStart).count();
     }
 
     return jpgOk;
@@ -1350,6 +1423,36 @@ bool write_tiff_rgba8(const char* filename, int width, int height, const unsigne
     }
     TIFFClose(tif);
     return true;
+}
+
+bool write_jpeg_fd(int fd, int width, int height, const unsigned short* planarData, int stride_x, int stride_y, int stride_c, int quality) {
+    LOGD("write_jpeg_fd: fd=%d, %dx%d", fd, width, height);
+    size_t total_pixels = static_cast<size_t>(width) * height;
+    thread_local std::vector<unsigned char> tls_rgb8;
+    std::vector<unsigned char>& rgb8 = tls_rgb8;
+    try {
+        rgb8.resize(total_pixels * 3);
+    } catch (const std::bad_alloc& e) {
+        LOGE("Failed to allocate memory for JPEG conversion: %zu bytes", total_pixels * 3);
+        return false;
+    }
+
+    #pragma omp parallel for
+    for (int y = 0; y < height; y++) {
+        for (int x = 0; x < width; x++) {
+            size_t r_idx = (size_t)y * stride_y + (size_t)x * stride_x + 0 * stride_c;
+            size_t g_idx = (size_t)y * stride_y + (size_t)x * stride_x + 1 * stride_c;
+            size_t b_idx = (size_t)y * stride_y + (size_t)x * stride_x + 2 * stride_c;
+            size_t dst_idx = ((size_t)y * width + x) * 3;
+            float r_f = static_cast<float>(planarData[r_idx]) * (255.0f / 65535.0f) + 0.5f + spatial_tpdf_dither(x, y, 0);
+            float g_f = static_cast<float>(planarData[g_idx]) * (255.0f / 65535.0f) + 0.5f + spatial_tpdf_dither(x, y, 1);
+            float b_f = static_cast<float>(planarData[b_idx]) * (255.0f / 65535.0f) + 0.5f + spatial_tpdf_dither(x, y, 2);
+            rgb8[dst_idx + 0] = static_cast<unsigned char>(std::clamp(r_f, 0.0f, 255.0f));
+            rgb8[dst_idx + 1] = static_cast<unsigned char>(std::clamp(g_f, 0.0f, 255.0f));
+            rgb8[dst_idx + 2] = static_cast<unsigned char>(std::clamp(b_f, 0.0f, 255.0f));
+        }
+    }
+    return write_jpeg_turbo_fd(fd, width, height, TJSAMP_422, rgb8.data(), quality);
 }
 
 bool write_jpeg(const char* filename, int width, int height, const unsigned short* planarData, int stride_x, int stride_y, int stride_c, int quality) {
@@ -1484,6 +1587,34 @@ Matrix3x3 inverse_matrix(const Matrix3x3& m) {
     return inv;
 }
 
+// Custom LibTIFF callbacks for integer file descriptor
+static tmsize_t tiff_fd_read(thandle_t fd, void* buf, tmsize_t size) {
+    return read((int)(intptr_t)fd, buf, size);
+}
+static tmsize_t tiff_fd_write(thandle_t fd, void* buf, tmsize_t size) {
+    return write((int)(intptr_t)fd, buf, size);
+}
+static toff_t tiff_fd_seek(thandle_t fd, toff_t off, int whence) {
+    return lseek((int)(intptr_t)fd, off, whence);
+}
+static int tiff_fd_close(thandle_t fd) {
+    // Note: Do not close the user-provided fd here if we duplicated it, or close duped fd.
+    // We duped the fd when calling TIFFClientOpen, so closing the duped fd is fine.
+    return close((int)(intptr_t)fd);
+}
+static toff_t tiff_fd_size(thandle_t fd) {
+    struct stat st;
+    if (fstat((int)(intptr_t)fd, &st) == 0) {
+        return st.st_size;
+    }
+    return 0;
+}
+static int tiff_fd_map(thandle_t fd, void** pbase, toff_t* psize) {
+    return 0;
+}
+static void tiff_fd_unmap(thandle_t fd, void* base, toff_t size) {
+}
+
 bool write_dng(
     const char* filename,
     int width,
@@ -1505,10 +1636,24 @@ bool write_dng(
     const float* forwardMatrix2,
     int calibIllum1,
     int calibIllum2,
-    const float* neutralColorPoint
+    const float* neutralColorPoint,
+    int dngFd
 ) {
     TIFFSetTagExtender(DNGTagExtender);
-    TIFF* tif = TIFFOpen(filename, "w");
+    TIFF* tif = nullptr;
+    if (dngFd >= 0) {
+        int dup_fd = dup(dngFd);
+        if (dup_fd < 0) {
+            LOGE("Failed to dup dngFd %d", dngFd);
+            return false;
+        }
+        lseek(dup_fd, 0, SEEK_SET);
+        tif = TIFFClientOpen("dng_fd", "w", (thandle_t)(intptr_t)dup_fd,
+                             tiff_fd_read, tiff_fd_write, tiff_fd_seek,
+                             tiff_fd_close, tiff_fd_size, tiff_fd_map, tiff_fd_unmap);
+    } else if (filename) {
+        tif = TIFFOpen(filename, "w");
+    }
     if (!tif) return false;
 
     TIFFSetField(tif, TIFFTAG_IMAGEWIDTH, width);

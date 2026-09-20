@@ -1853,51 +1853,62 @@ class CameraFragment : Fragment() {
                 }
 
                 if (saveRaw && captureResult != null) {
-                    try {
-                        val dngThumbnailSource: java.io.File? = null
+                    // Deep copy image.data to prevent use-after-free when megaBuffer is released by HdrPlusBurst
+                    val dngBuffer = ByteBuffer.allocateDirect(image.data.capacity())
+                    val srcBuffer = image.data.duplicate()
+                    srcBuffer.rewind()
+                    dngBuffer.put(srcBuffer)
+                    dngBuffer.rewind()
 
-                        val dngCreator = android.hardware.camera2.DngCreator(chars, captureResult)
-                        dngCreator.setDescription(DarkbagIdentity.imageDescription(isHdrPlus = false))
-                        captureMetadata.location?.let { dngCreator.setLocation(it) }
+                    val imgWidth = image.width
+                    val imgHeight = image.height
+                    val imgOrientation = image.combinedOrientation
 
-                        val dngOrientation = when (image.combinedOrientation) {
-                            90 -> ExifInterface.ORIENTATION_ROTATE_90
-                            180 -> ExifInterface.ORIENTATION_ROTATE_180
-                            270 -> ExifInterface.ORIENTATION_ROTATE_270
-                            else -> ExifInterface.ORIENTATION_NORMAL
-                        }
-                        dngCreator.setOrientation(dngOrientation)
-                        dngThumbnailSource?.let { createDngThumbnailBitmap(it) }?.let { thumb ->
-                            try {
-                                dngCreator.setThumbnail(thumb)
-                            } finally {
-                                thumb.recycle()
+                    (context.applicationContext as MainApplication).applicationScope.launch(Dispatchers.IO) {
+                        try {
+                            val dngThumbnailSource: java.io.File? = null
+
+                            val dngCreator = android.hardware.camera2.DngCreator(chars, captureResult)
+                            dngCreator.setDescription(DarkbagIdentity.imageDescription(isHdrPlus = false))
+                            captureMetadata.location?.let { dngCreator.setLocation(it) }
+
+                            val dngOrientation = when (imgOrientation) {
+                                90 -> ExifInterface.ORIENTATION_ROTATE_90
+                                180 -> ExifInterface.ORIENTATION_ROTATE_180
+                                270 -> ExifInterface.ORIENTATION_ROTATE_270
+                                else -> ExifInterface.ORIENTATION_NORMAL
                             }
-                        }
+                            dngCreator.setOrientation(dngOrientation)
+                            dngThumbnailSource?.let { createDngThumbnailBitmap(it) }?.let { thumb ->
+                                try {
+                                    dngCreator.setThumbnail(thumb)
+                                } finally {
+                                    thumb.recycle()
+                                }
+                            }
 
-                        val dngBuffer = image.data.duplicate()
-                        dngBuffer.rewind()
-                        FileOutputStream(bayerDngFile).use { out ->
-                            dngCreator.writeByteBuffer(out, Size(image.width, image.height), dngBuffer, 0)
+                            FileOutputStream(bayerDngFile).use { out ->
+                                dngCreator.writeByteBuffer(out, Size(imgWidth, imgHeight), dngBuffer, 0)
+                            }
+
+                            ImageSaver.saveProcessedImage(
+                                context = context,
+                                inputBitmap = null,
+                                bmpPath = null,
+                                rotationDegrees = 0,
+                                zoomFactor = 1.0f,
+                                baseName = dngName,
+                                linearDngPath = bayerDngFile.absolutePath,
+                                saveJpg = false,
+                                saveRaw = saveRaw,
+                                jpgFolderUri = null,
+                                rawFolderUri = rawFolderUri,
+                                isFastPath = false,
+                                captureMetadata = captureMetadata
+                            )
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Failed to save DNG asynchronously", e)
                         }
-                        
-                        ImageSaver.saveProcessedImage(
-                            context = context,
-                            inputBitmap = null,
-                            bmpPath = null,
-                            rotationDegrees = 0,
-                            zoomFactor = 1.0f,
-                            baseName = dngName,
-                            linearDngPath = bayerDngFile.absolutePath,
-                            saveJpg = false,
-                            saveRaw = saveRaw,
-                            jpgFolderUri = null,
-                            rawFolderUri = rawFolderUri,
-                            isFastPath = false,
-                            captureMetadata = captureMetadata
-                        )
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Failed to save DNG asynchronously", e)
                     }
                 }
 

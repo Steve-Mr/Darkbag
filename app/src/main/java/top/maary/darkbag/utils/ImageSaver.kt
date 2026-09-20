@@ -82,7 +82,12 @@ object ImageSaver {
         // 1. Process Input Bitmap or JPEG File from JNI -> Final MediaStore JPG
         if (inputBitmap != null || bmpPath != null) {
             val isNativeJpeg = bmpPath != null && (bmpPath.endsWith(".jpg") || bmpPath.endsWith(".jpeg"))
-            val needsBitmapProcessing = rotationDegrees != 0 || zoomFactor > 1.05f || inputBitmap != null || mirror
+            // When the JNI/export path already applied zoom and mirror (isAlreadyCropped),
+            // neither pass may be repeated here: doing so defeats the fast path and would
+            // crop/mirror twice. Otherwise both still have to be applied to the bitmap.
+            val effectiveNeedsCrop = zoomFactor > 1.05f && !isAlreadyCropped
+            val effectiveNeedsMirror = mirror && !isAlreadyCropped
+            val needsBitmapProcessing = rotationDegrees != 0 || effectiveNeedsCrop || inputBitmap != null || effectiveNeedsMirror
 
             if (isNativeJpeg && !needsBitmapProcessing && actualSaveJpg) {
                 // FAST PATH: Directly use JNI-generated JPEG
@@ -616,6 +621,71 @@ object ImageSaver {
         return editConfig?.let {
             if (it.zoomFactor <= 1.05f && zoomFactor > 1.05f) it.copy(zoomFactor = zoomFactor) else it
         } ?: if (zoomFactor > 1.05f) EditConfig(zoomFactor = zoomFactor) else null
+    }
+
+    fun prepareMediaStoreJpegUri(
+        context: Context,
+        displayName: String,
+        targetUri: Uri?,
+        width: Int? = null,
+        height: Int? = null
+    ): Uri? {
+        val contentResolver = context.contentResolver
+        val jpgValues = ContentValues()
+        var uri = targetUri
+        try {
+            if (uri == null) {
+                jpgValues.apply {
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
+                    put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/Darkbag")
+                        put(MediaStore.MediaColumns.IS_PENDING, 1)
+                    }
+                    width?.let { put(MediaStore.MediaColumns.WIDTH, it) }
+                    height?.let { put(MediaStore.MediaColumns.HEIGHT, it) }
+                }
+                uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, jpgValues)
+            } else {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    jpgValues.put(MediaStore.MediaColumns.IS_PENDING, 1)
+                }
+                width?.let { jpgValues.put(MediaStore.MediaColumns.WIDTH, it) }
+                height?.let { jpgValues.put(MediaStore.MediaColumns.HEIGHT, it) }
+                if (jpgValues.size() > 0) {
+                    contentResolver.update(uri, jpgValues, null, null)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to prepare MediaStore entry", e)
+            return null
+        }
+        return uri
+    }
+
+    fun finishMediaStoreJpeg(
+        context: Context,
+        uri: Uri,
+        editConfig: EditConfig? = null,
+        zoomFactor: Float = 1.0f,
+        captureMetadata: CaptureMetadata? = null,
+        writeExifMetadata: Boolean = true
+    ) {
+        val contentResolver = context.contentResolver
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val finalValues = ContentValues().apply {
+                put(MediaStore.MediaColumns.IS_PENDING, 0)
+            }
+            try {
+                contentResolver.update(uri, finalValues, null, null)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to clear IS_PENDING for $uri", e)
+            }
+        }
+        if (writeExifMetadata) {
+            val finalEditConfig = createFinalEditConfig(editConfig, zoomFactor)
+            writeMetadataToExif(context, uri, finalEditConfig, captureMetadata)
+        }
     }
 
     private fun saveJpegToMediaStore(
