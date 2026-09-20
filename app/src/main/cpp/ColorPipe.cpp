@@ -1492,7 +1492,7 @@ bool write_dng(
     TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_LINEAR_RAW);
     TIFFSetField(tif, TIFFTAG_SAMPLESPERPIXEL, 3);
     TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG);
-    TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, 1);
+    TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, 64);
     TIFFSetField(tif, TIFFTAG_SUBFILETYPE, 0);
 
     write_tiff_metadata(tif, &metadata);
