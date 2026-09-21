@@ -52,13 +52,27 @@ static bool write_jpeg_turbo_fd(int fd, int width, int height, int subsamp, cons
         tjFree(jpegBuf);
         return false;
     }
-    fwrite(jpegBuf, 1, jpegSize, file);
-    fflush(file);
-    fclose(file); // fclose also closes dup_fd
+
+    // B5 fix: ftruncate to ensure no stale trailing bytes exist from previous writes
+    ftruncate(dup_fd, 0);
+
+    size_t written = fwrite(jpegBuf, 1, jpegSize, file);
+    bool write_ok = (written == jpegSize);
+    if (!write_ok) {
+        LOGE("fwrite failed or incomplete: wrote %zu of %lu bytes", written, jpegSize);
+    }
+    if (fflush(file) != 0) {
+        LOGE("fflush failed");
+        write_ok = false;
+    }
+    if (fclose(file) != 0) { // fclose also closes dup_fd
+        LOGE("fclose failed");
+        write_ok = false;
+    }
 
     tjDestroy(_jpegCompressor);
     tjFree(jpegBuf);
-    return true;
+    return write_ok;
 }
 
 static bool write_jpeg_turbo(const char* filename, int width, int height, int subsamp, const unsigned char* buffer, int quality) {
@@ -88,12 +102,23 @@ static bool write_jpeg_turbo(const char* filename, int width, int height, int su
         tjFree(jpegBuf);
         return false;
     }
-    fwrite(jpegBuf, 1, jpegSize, file);
-    fclose(file);
+    size_t written = fwrite(jpegBuf, 1, jpegSize, file);
+    bool write_ok = (written == jpegSize);
+    if (!write_ok) {
+        LOGE("fwrite failed or incomplete for %s: wrote %zu of %lu bytes", filename, written, jpegSize);
+    }
+    if (fflush(file) != 0) {
+        LOGE("fflush failed for %s", filename);
+        write_ok = false;
+    }
+    if (fclose(file) != 0) {
+        LOGE("fclose failed for %s", filename);
+        write_ok = false;
+    }
     
     tjDestroy(_jpegCompressor);
     tjFree(jpegBuf);
-    return true;
+    return write_ok;
 }
 
 static std::vector<unsigned char> encode_rgb8_jpeg(
@@ -921,7 +946,12 @@ bool process_and_save_image(
     thread_local std::vector<unsigned short> tls_processedImage; 
     thread_local std::vector<unsigned char> tls_previewRgb8;
 
-    AdaptiveEdgeComp edgeComp = calculate_adaptive_edge_comp(planarData, stride_x, stride_y, stride_c, width, height);
+    // S7 fix: Skip calculate_adaptive_edge_comp pass since it is hardcoded enabled=false
+    AdaptiveEdgeComp edgeComp;
+
+    // S8 fix: Lift exp_gain and eff_gain loop invariants outside the per-pixel processing function
+    const float exp_gain = std::pow(2.0f, exposure);
+    const float eff_gain = std::max(1.0f, gain * exp_gain);
 
     // Debug stage split output (A/B/C):
     const bool enableStageDebug = false;
@@ -1017,8 +1047,6 @@ bool process_and_save_image(
         // Multi-frame path only: this ramp is gain dependent and effectively inert
         // at gain == 1, so the minimal path leaves highlight colour to the display
         // transform (and to the point-wise neutralization applied after the clamp).
-        float exp_gain = std::pow(2.0f, exposure);
-        float eff_gain = std::max(1.0f, gain * exp_gain);
         if (!faithfulHighlights) {
             float threshold = (65535.0f * 0.8f) / eff_gain;
             float theoretical_max = (65535.0f * (wb ? std::max({wb[0], wb[1], wb[3]}) : 1.0f)) / eff_gain;
