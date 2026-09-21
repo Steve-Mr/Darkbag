@@ -16,6 +16,8 @@
 
 @file:SuppressLint("RestrictedApi")
 package top.maary.darkbag.fragments
+
+import top.maary.darkbag.models.StandardTimingTracker
 import top.maary.darkbag.ui.ExpressiveShutterButton
 import top.maary.darkbag.utils.DebugLogManager
 import top.maary.darkbag.utils.LensInfo
@@ -447,15 +449,6 @@ class CameraFragment : Fragment() {
     private var camera2RetryCount = 0
     private val processingChannel = kotlinx.coroutines.channels.Channel<RawImageHolder>(2)
     private var processingChannelJob: kotlinx.coroutines.Job? = null
-
-    data class StandardTimingTracker(
-        val shutterClick: Long,
-        var captureCallback: Long = 0,
-        var enqueued: Long = 0,
-        var processingStart: Long = 0,
-        var jniDone: Long = 0,
-        var firstOutputWritten: Long = 0
-    )
 
     data class RawImageHolder(
         val data: ByteBuffer,
@@ -1545,7 +1538,7 @@ class CameraFragment : Fragment() {
                 takeMultiCameraPicture(timing)
             } else {
                 if (isHdrPlusEnabled && isRawSupported) {
-                    triggerHdrPlusBurstCamera2(isFrame1Trigger, hfMetadataForTrigger)
+                    triggerHdrPlusBurstCamera2(isFrame1Trigger, hfMetadataForTrigger, timing)
                 } else {
                     takeSinglePictureCamera2(timing, isFrame1Trigger, hfMetadataForTrigger)
                 }
@@ -1978,7 +1971,8 @@ class CameraFragment : Fragment() {
                     forwardMatrix2 = singleCalib.forwardMatrix2,
                     calibrationIlluminant1 = singleCalib.calibrationIlluminant1,
                     calibrationIlluminant2 = singleCalib.calibrationIlluminant2,
-                    neutralColorPoint = singleCalib.neutralColorPoint
+                    neutralColorPoint = singleCalib.neutralColorPoint,
+                    timing = timing
                 )
                 top.maary.darkbag.processor.HdrPlusRequestManager.enqueue(request)
                 val serviceIntent = android.content.Intent(context, top.maary.darkbag.processor.HdrPlusProcessingService::class.java)
@@ -3374,7 +3368,8 @@ class CameraFragment : Fragment() {
     private fun processHdrPlusBurst(
         burstResult: BurstResult,
         digitalGain: Float,
-        hfMetadata: HalfFrameManager.Metadata? = null
+        hfMetadata: HalfFrameManager.Metadata? = null,
+        timing: StandardTimingTracker? = null
     ) {
         val currentZoom = if (currentLens?.isZoomPreset == true && currentLens?.targetZoomRatio != null) {
             currentLens!!.targetZoomRatio!!
@@ -3628,7 +3623,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         forwardMatrix2 = burstCalib.forwardMatrix2,
                         calibrationIlluminant1 = burstCalib.calibrationIlluminant1,
                         calibrationIlluminant2 = burstCalib.calibrationIlluminant2,
-                        neutralColorPoint = burstCalib.neutralColorPoint
+                        neutralColorPoint = burstCalib.neutralColorPoint,
+                        timing = timing
                     )
                     top.maary.darkbag.processor.HdrPlusRequestManager.enqueue(request)
                     val serviceIntent = android.content.Intent(context, top.maary.darkbag.processor.HdrPlusProcessingService::class.java)
@@ -4313,7 +4309,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
     private fun triggerHdrPlusBurstCamera2(
         isFrame1Trigger: Boolean = false,
-        hfMetadata: HalfFrameManager.Metadata? = null
+        hfMetadata: HalfFrameManager.Metadata? = null,
+        timing: StandardTimingTracker? = null
     ) {
         val device = camera2Device ?: run { processingSemaphore.release(); return }
         val session = camera2Session ?: run { processingSemaphore.release(); return }
@@ -4352,7 +4349,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             }
 
             hdrPlusBurstHelper = HdrPlusBurst(frameCount = burstSize, onBurstComplete = { burstResult ->
-                processHdrPlusBurst(burstResult, burstGain, hfMetadata?.copy(digitalGain = burstGain))
+                processHdrPlusBurst(burstResult, burstGain, hfMetadata?.copy(digitalGain = burstGain), timing = timing)
             })
 
             lifecycleScope.launch(Dispatchers.Main) {
@@ -4389,7 +4386,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     val partialResult = hdrPlusBurstHelper?.flush()
                     if (partialResult != null && partialResult.frames.isNotEmpty()) {
                         Log.i(TAG, "Submitting partial burst (${partialResult.frames.size} frames) for processing.")
-                        processHdrPlusBurst(partialResult, burstGain, hfMetadata?.copy(digitalGain = burstGain))
+                        processHdrPlusBurst(partialResult, burstGain, hfMetadata?.copy(digitalGain = burstGain), timing = timing)
                     } else {
                         hdrPlusBurstHelper?.reset()
                         processingSemaphore.release()
