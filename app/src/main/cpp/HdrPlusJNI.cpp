@@ -372,7 +372,8 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
     jint calibrationIlluminant1,
     jint calibrationIlluminant2,
     jfloatArray neutralColorPoint,
-    jboolean faithfulHighlights
+    jboolean faithfulHighlights,
+    jlongArray debugStats
 ) {
     LOGD("Native exportHdrPlus started (enableMemoryColor=%d, colorEngineMode=%d, faithful=%d).", enableMemoryColor, colorEngineMode, faithfulHighlights);
 
@@ -419,26 +420,49 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
                              cm1Ptr, cm2Ptr, fm1Ptr, fm2Ptr, neutralPtr);
 
     const char* lut_path_cstr = (lutPath) ? env->GetStringUTFChars(lutPath, 0) : nullptr;
-    LUT3D lut; if (lut_path_cstr) { lut = load_lut(lut_path_cstr); env->ReleaseStringUTFChars(lutPath, lut_path_cstr); }
+    LUT3D lut; if (lut_path_cstr) { auto cached = get_cached_lut(lut_path_cstr); if (cached) lut = *cached; env->ReleaseStringUTFChars(lutPath, lut_path_cstr); }
 
     const char* jpg_path_cstr = (jpgPath) ? env->GetStringUTFChars(jpgPath, 0) : nullptr;
     const char* dng_path_cstr = (dngPath) ? env->GetStringUTFChars(dngPath, 0) : nullptr;
 
     ImageMetadata meta = metadataFromJava(env, metadata);
 
+    auto exportStart = std::chrono::high_resolution_clock::now();
+    jlong dngMs = 0;
+    jlong jpgMs = 0;
+
     if (dng_path_cstr) {
         LOGD("Exporting DNG to %s", dng_path_cstr);
+        auto dngStart = std::chrono::high_resolution_clock::now();
         float baselineExposure = (digitalGain > 0.0f) ? std::log2(digitalGain) : 0.0f;
         write_dng(dng_path_cstr, width, height, finalImage.data(), 1, width, width*height, kMax16BitValue, ccmVec, meta, orientation, (bool)mirror, baselineExposure, wbVec.data(),
                   cm1Ptr, cm2Ptr, fm1Ptr, fm2Ptr, (int)calibrationIlluminant1, (int)calibrationIlluminant2, neutralPtr);
+        dngMs = (jlong)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - dngStart).count();
     }
 
     bool saveOk = true;
     if (jpg_path_cstr) {
         LOGD("Exporting JPG: JPG=%s", jpg_path_cstr);
+        auto jpgStart = std::chrono::high_resolution_clock::now();
         saveOk = process_and_save_image(finalImage.data(), 1, width, width*height, nullptr, 0, 0, width, height, digitalGain, targetLog, lut,
                                         exposure, contrast, saturation, highlights, shadows, whites, blacks,
                                         jpg_path_cstr, nullptr, &meta, 1, ccmVec.data(), wbVec.data(), orientation, nullptr, 0, 0, false, 1, zoomFactor, (bool)mirror, (bool)enableMemoryColor, (int)colorEngineMode, faithfulHighlights);
+        jpgMs = (jlong)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - jpgStart).count();
+    }
+
+    auto exportTotalMs = (jlong)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - exportStart).count();
+    jlong postMs = (exportTotalMs - dngMs - jpgMs > 0) ? (exportTotalMs - dngMs - jpgMs) : 0;
+
+    if (debugStats != nullptr) {
+        const jsize len = env->GetArrayLength(debugStats);
+        if (len >= 5) {
+            jlong stats[15] = {0};
+            env->GetLongArrayRegion(debugStats, 0, std::min<jsize>(len, 15), stats);
+            stats[2] = postMs;
+            stats[3] = dngMs;
+            stats[4] = jpgMs;
+            env->SetLongArrayRegion(debugStats, 0, std::min<jsize>(len, 15), stats);
+        }
     }
     if (jpgPath && jpg_path_cstr) env->ReleaseStringUTFChars(jpgPath, jpg_path_cstr);
     if (dngPath && dng_path_cstr) env->ReleaseStringUTFChars(dngPath, dng_path_cstr);
@@ -621,7 +645,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
     if (outputBitmap) AndroidBitmap_lockPixels(env, outputBitmap, (void**)&bitmapPixels);
 
     const char* lut_path_cstr = (lutPath) ? env->GetStringUTFChars(lutPath, 0) : nullptr;
-    LUT3D lut; if (lut_path_cstr) { lut = load_lut(lut_path_cstr); env->ReleaseStringUTFChars(lutPath, lut_path_cstr); }
+    LUT3D lut; if (lut_path_cstr) { auto cached = get_cached_lut(lut_path_cstr); if (cached) lut = *cached; env->ReleaseStringUTFChars(lutPath, lut_path_cstr); }
 
     int stride_x = outputBuf.dim(0).stride(), stride_y = outputBuf.dim(1).stride(), stride_c = outputBuf.dim(2).stride();
     const uint16_t* raw_ptr = outputBuf.data();

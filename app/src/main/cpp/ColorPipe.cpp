@@ -891,6 +891,11 @@ bool process_and_save_image(
     auto lsc_idx = [&](int ch, int row, int col) -> int {
         return ch * lensShadingRows * lensShadingCols + row * lensShadingCols + col;
     };
+    const float exp_gain = std::pow(2.0f, exposure);
+    const float eff_gain = std::max(1.0f, gain * exp_gain);
+    const float desat_threshold = (65535.0f * 0.8f) / eff_gain;
+    const float theoretical_max = (65535.0f * (wb ? std::max({wb[0], wb[1], wb[3]}) : 1.0f)) / eff_gain;
+
     struct LscWeight { int idx0, idx1; float w0, w1; };
     std::vector<LscWeight> lscX, lscY;
     if (hasLsc) {
@@ -964,14 +969,10 @@ bool process_and_save_image(
         // Multi-frame path only: this ramp is gain dependent and effectively inert
         // at gain == 1, so the minimal path leaves highlight colour to the display
         // transform (and to the point-wise neutralization applied after the clamp).
-        float exp_gain = std::pow(2.0f, exposure);
-        float eff_gain = std::max(1.0f, gain * exp_gain);
         if (!faithfulHighlights) {
-            float threshold = (65535.0f * 0.8f) / eff_gain;
-            float theoretical_max = (65535.0f * (wb ? std::max({wb[0], wb[1], wb[3]}) : 1.0f)) / eff_gain;
             float max_rgb = std::max({r, g, b});
-            if (max_rgb > threshold) {
-                float desat = std::clamp((max_rgb - threshold) / std::max(1.0f, theoretical_max - threshold), 0.0f, 1.0f);
+            if (max_rgb > desat_threshold) {
+                float desat = std::clamp((max_rgb - desat_threshold) / std::max(1.0f, theoretical_max - desat_threshold), 0.0f, 1.0f);
                 desat = desat * desat * (3.0f - 2.0f * desat); // Smoothstep
                 float y_lum = 0.2126f * r + 0.7152f * g + 0.0722f * b;
                 r = r * (1.0f - desat) + y_lum * desat;

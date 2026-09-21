@@ -62,6 +62,7 @@ class HdrPlusProcessingService : LifecycleService() {
         var buffersReleased = false
         try {
             val start = System.currentTimeMillis()
+            req.timing?.processingStart = start
             val debugStats = LongArray(15)
             
             // Just one mask for normal processing (unlike ablation which did multiple passes)
@@ -167,8 +168,10 @@ class HdrPlusProcessingService : LifecycleService() {
                     forwardMatrix2 = req.forwardMatrix2,
                     calibrationIlluminant1 = req.calibrationIlluminant1,
                     calibrationIlluminant2 = req.calibrationIlluminant2,
-                    neutralColorPoint = req.neutralColorPoint
+                    neutralColorPoint = req.neutralColorPoint,
+                    debugStats = debugStats
                 )
+                req.timing?.jniDone = System.currentTimeMillis()
             }
 
             if (exportRet == 0) {
@@ -223,7 +226,7 @@ class HdrPlusProcessingService : LifecycleService() {
                             saveRaw = shouldSaveRaw,
                             jpgFolderUri = req.jpgFolderUri,
                             rawFolderUri = req.rawFolderUri,
-                            mirror = req.mirror,
+                            mirror = false, // Already mirrored in JNI / ColorPipe
                             isFastPath = false,
                             halfFrameMetadata = req.hfMetadata,
                             editConfig = req.editConfig,
@@ -234,6 +237,21 @@ class HdrPlusProcessingService : LifecycleService() {
                             motionPhotoStillPtsUs = req.motionPhotoStillPtsUs
                         )
                     }
+                }
+                req.timing?.firstOutputWritten = System.currentTimeMillis()
+
+                req.timing?.let { t ->
+                    val timingReport = """
+                        [Lifecycle Timing Report]
+                        Total Shutter-to-Output: ${t.firstOutputWritten - t.shutterClick}ms
+                        - Shutter to Callback: ${t.captureCallback - t.shutterClick}ms
+                        - Callback to Enqueued: ${t.enqueued - t.captureCallback}ms
+                        - Queue Wait: ${t.processingStart - t.enqueued}ms
+                        - Halide + JNI Export: ${t.jniDone - t.processingStart}ms
+                        - Disk Save & MediaStore: ${t.firstOutputWritten - t.jniDone}ms
+                    """.trimIndent()
+                    Log.i(TAG, timingReport)
+                    top.maary.darkbag.utils.DebugLogManager.addLog(timingReport)
                 }
             } else {
                 Log.e(TAG, "Processing failed for ${req.requestId}")
