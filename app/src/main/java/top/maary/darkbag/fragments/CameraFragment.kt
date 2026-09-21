@@ -1868,27 +1868,28 @@ class CameraFragment : Fragment() {
                         try {
                             val dngThumbnailSource: java.io.File? = null
 
-                            val dngCreator = android.hardware.camera2.DngCreator(chars, captureResult)
-                            dngCreator.setDescription(DarkbagIdentity.imageDescription(isHdrPlus = false))
-                            captureMetadata.location?.let { dngCreator.setLocation(it) }
+                            android.hardware.camera2.DngCreator(chars, captureResult).use { dngCreator ->
+                                dngCreator.setDescription(DarkbagIdentity.imageDescription(isHdrPlus = false))
+                                captureMetadata.location?.let { dngCreator.setLocation(it) }
 
-                            val dngOrientation = when (imgOrientation) {
-                                90 -> ExifInterface.ORIENTATION_ROTATE_90
-                                180 -> ExifInterface.ORIENTATION_ROTATE_180
-                                270 -> ExifInterface.ORIENTATION_ROTATE_270
-                                else -> ExifInterface.ORIENTATION_NORMAL
-                            }
-                            dngCreator.setOrientation(dngOrientation)
-                            dngThumbnailSource?.let { createDngThumbnailBitmap(it) }?.let { thumb ->
-                                try {
-                                    dngCreator.setThumbnail(thumb)
-                                } finally {
-                                    thumb.recycle()
+                                val dngOrientation = when (imgOrientation) {
+                                    90 -> ExifInterface.ORIENTATION_ROTATE_90
+                                    180 -> ExifInterface.ORIENTATION_ROTATE_180
+                                    270 -> ExifInterface.ORIENTATION_ROTATE_270
+                                    else -> ExifInterface.ORIENTATION_NORMAL
                                 }
-                            }
+                                dngCreator.setOrientation(dngOrientation)
+                                dngThumbnailSource?.let { createDngThumbnailBitmap(it) }?.let { thumb ->
+                                    try {
+                                        dngCreator.setThumbnail(thumb)
+                                    } finally {
+                                        thumb.recycle()
+                                    }
+                                }
 
-                            FileOutputStream(bayerDngFile).use { out ->
-                                dngCreator.writeByteBuffer(out, Size(imgWidth, imgHeight), dngBuffer, 0)
+                                FileOutputStream(bayerDngFile).use { out ->
+                                    dngCreator.writeByteBuffer(out, Size(imgWidth, imgHeight), dngBuffer, 0)
+                                }
                             }
 
                             ImageSaver.saveProcessedImage(
@@ -1906,7 +1907,7 @@ class CameraFragment : Fragment() {
                                 isFastPath = false,
                                 captureMetadata = captureMetadata
                             )
-                        } catch (e: Exception) {
+                        } catch (e: Throwable) {
                             Log.e(TAG, "Failed to save DNG asynchronously", e)
                         }
                     }

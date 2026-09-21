@@ -131,7 +131,8 @@ class HdrPlusProcessingService : LifecycleService() {
             buffersReleased = true
 
             // Decouple Stage 2 (I/O Export / ColorPipe & MediaStore write) to exportProcessingDispatcher
-            lifecycleScope.launch(ColorProcessor.exportProcessingDispatcher) {
+            lifecycleScope.launch(ColorProcessor.exportProcessingDispatcher + kotlinx.coroutines.NonCancellable) {
+                var directFdWrite = false
                 try {
                     var mediaStoreJpgUri: android.net.Uri? = null
                     var exportRet = ret
@@ -140,17 +141,37 @@ class HdrPlusProcessingService : LifecycleService() {
                         val shouldSaveJpg = req.saveJpg
                         val shouldSaveRaw = req.saveRaw && !req.isSingleFrame
 
-                        // Direct MediaStore FileDescriptor optimization if saving directly to MediaStore
-                        mediaStoreJpgUri = if (shouldSaveJpg && req.jpgFolderUri == null && req.hfMetadata == null) {
-                            top.maary.darkbag.utils.ImageSaver.prepareMediaStoreJpegUri(
+                        // B1 fix: Motion photos require post-muxing in saveProcessedImage, so direct FD optimization is strictly bypassed when Motion Photo is present.
+                        val isMotionPhoto = req.motionPhotoMp4Path != null && java.io.File(req.motionPhotoMp4Path).exists()
+
+                        if (shouldSaveJpg && req.jpgFolderUri == null && req.hfMetadata == null && !isMotionPhoto) {
+                            mediaStoreJpgUri = top.maary.darkbag.utils.ImageSaver.prepareMediaStoreJpegUri(
                                 context = this@HdrPlusProcessingService,
                                 displayName = "${req.baseName}.jpg",
                                 targetUri = null
                             )
-                        } else null
+                        }
 
-                        val jpgPfd = mediaStoreJpgUri?.let { contentResolver.openFileDescriptor(it, "rw") }
+                        val jpgPfd = mediaStoreJpgUri?.let {
+                            try {
+                                contentResolver.openFileDescriptor(it, "rwt")
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Failed to open FileDescriptor for $it", e)
+                                null
+                            }
+                        }
                         val jpgFd = jpgPfd?.fd ?: -1
+                        directFdWrite = (mediaStoreJpgUri != null && jpgFd >= 0)
+
+                        // If mediaStoreJpgUri was prepared but pfd failed, delete the pending entry to avoid an empty orphaned row (B4 fix)
+                        if (mediaStoreJpgUri != null && !directFdWrite) {
+                            try {
+                                contentResolver.delete(mediaStoreJpgUri, null, null)
+                            } catch (e: Exception) {
+                                Log.w(TAG, "Failed to clean up pending MediaStore URI after pfd error", e)
+                            }
+                            mediaStoreJpgUri = null
+                        }
 
                         try {
                             exportRet = ColorProcessor.exportHdrPlus(
@@ -168,7 +189,7 @@ class HdrPlusProcessingService : LifecycleService() {
                                 shadows = edit?.shadows ?: 0f,
                                 whites = edit?.whites ?: 0f,
                                 blacks = edit?.blacks ?: 0f,
-                                jpgPath = if (shouldSaveJpg && jpgFd < 0) req.fullResJpgPath else null,
+                                jpgPath = if (shouldSaveJpg && !directFdWrite) req.fullResJpgPath else null,
                                 dngPath = if (shouldSaveRaw) req.linearDngPath else null,
                                 faithfulHighlights = req.isSingleFrame,
                                 ccm = req.ccm,
@@ -185,7 +206,7 @@ class HdrPlusProcessingService : LifecycleService() {
                                 calibrationIlluminant1 = req.calibrationIlluminant1,
                                 calibrationIlluminant2 = req.calibrationIlluminant2,
                                 neutralColorPoint = req.neutralColorPoint,
-                                jpgFd = jpgFd,
+                                jpgFd = if (directFdWrite) jpgFd else -1,
                                 dngFd = -1,
                                 debugStats = debugStats
                             )
@@ -193,7 +214,7 @@ class HdrPlusProcessingService : LifecycleService() {
                             jpgPfd?.close()
                         }
 
-                        if (exportRet == 0 && mediaStoreJpgUri != null) {
+                        if (exportRet == 0 && directFdWrite && mediaStoreJpgUri != null) {
                             top.maary.darkbag.utils.ImageSaver.finishMediaStoreJpeg(
                                 context = this@HdrPlusProcessingService,
                                 uri = mediaStoreJpgUri,
@@ -212,6 +233,13 @@ class HdrPlusProcessingService : LifecycleService() {
                                     saveJpg = true
                                 )
                             )
+                        } else if (exportRet != 0 && directFdWrite && mediaStoreJpgUri != null) {
+                            // M3/B4 fix: Delete pending MediaStore row on export failure
+                            try {
+                                contentResolver.delete(mediaStoreJpgUri, null, null)
+                            } catch (e: Exception) {
+                                Log.w(TAG, "Failed to delete MediaStore row on export error", e)
+                            }
                         }
                     }
 
@@ -250,21 +278,21 @@ class HdrPlusProcessingService : LifecycleService() {
                         Log.i(TAG, baselineReport)
                         top.maary.darkbag.utils.DebugLogManager.addLog(baselineReport)
 
-                        if ((req.saveJpg && mediaStoreJpgUri == null) || req.saveRaw) {
+                        val shouldSaveJpgFallback = req.saveJpg && !directFdWrite
+                        if (shouldSaveJpgFallback || req.saveRaw) {
                             var savedUri: android.net.Uri? = null
-                            val shouldSaveJpg = req.saveJpg && mediaStoreJpgUri == null
                             val shouldSaveRaw = req.saveRaw && !req.isSingleFrame // Single Bayer RAW was already saved in front-end
 
-                            if (shouldSaveJpg || shouldSaveRaw) {
+                            if (shouldSaveJpgFallback || shouldSaveRaw) {
                                 savedUri = top.maary.darkbag.utils.ImageSaver.saveProcessedImage(
                                     context = this@HdrPlusProcessingService,
                                     inputBitmap = null,
-                                    bmpPath = if (shouldSaveJpg) req.fullResJpgPath else null,
+                                    bmpPath = if (shouldSaveJpgFallback) req.fullResJpgPath else null,
                                     rotationDegrees = 0,
                                     zoomFactor = req.zoomFactor,
                                     baseName = req.baseName,
                                     linearDngPath = if (shouldSaveRaw) req.linearDngPath else null,
-                                    saveJpg = shouldSaveJpg,
+                                    saveJpg = shouldSaveJpgFallback,
                                     saveRaw = shouldSaveRaw,
                                     jpgFolderUri = req.jpgFolderUri,
                                     rawFolderUri = req.rawFolderUri,
@@ -287,25 +315,29 @@ class HdrPlusProcessingService : LifecycleService() {
                 } catch (e: Exception) {
                     Log.e(TAG, "Exception exporting ${req.requestId}", e)
                 } finally {
-                    HdrPlusRequestManager.onTaskFinished()
-                    val remaining = HdrPlusRequestManager.pendingTasksCount.value
-                    if (remaining == 0) {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                            stopForeground(STOP_FOREGROUND_REMOVE)
-                        } else {
-                            @Suppress("DEPRECATION")
-                            stopForeground(true)
-                        }
-                        stopSelf()
-                    }
+                    finishTaskAndCheckStop()
                 }
             }
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             Log.e(TAG, "Exception processing ${req.requestId}", e)
             if (!buffersReleased) {
                 HdrPlusBurst.releaseBuffer(req.megaBuffer)
             }
-            HdrPlusRequestManager.onTaskFinished()
+            finishTaskAndCheckStop()
+        }
+    }
+
+    private fun finishTaskAndCheckStop() {
+        HdrPlusRequestManager.onTaskFinished()
+        val remaining = HdrPlusRequestManager.pendingTasksCount.value
+        if (remaining == 0) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+            } else {
+                @Suppress("DEPRECATION")
+                stopForeground(true)
+            }
+            stopSelf()
         }
     }
 

@@ -422,7 +422,16 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
                              cm1Ptr, cm2Ptr, fm1Ptr, fm2Ptr, neutralPtr);
 
     const char* lut_path_cstr = (lutPath) ? env->GetStringUTFChars(lutPath, 0) : nullptr;
-    LUT3D lut; if (lut_path_cstr) { lut = load_lut(lut_path_cstr); env->ReleaseStringUTFChars(lutPath, lut_path_cstr); }
+    LUT3D lut;
+    if (lut_path_cstr) {
+        auto cached_lut = get_cached_lut(lut_path_cstr);
+        if (cached_lut) {
+            lut = *cached_lut;
+        } else {
+            lut = load_lut(lut_path_cstr);
+        }
+        env->ReleaseStringUTFChars(lutPath, lut_path_cstr);
+    }
 
     const char* jpg_path_cstr = (jpgPath) ? env->GetStringUTFChars(jpgPath, 0) : nullptr;
     const char* dng_path_cstr = (dngPath) ? env->GetStringUTFChars(dngPath, 0) : nullptr;
@@ -649,7 +658,16 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
     if (outputBitmap) AndroidBitmap_lockPixels(env, outputBitmap, (void**)&bitmapPixels);
 
     const char* lut_path_cstr = (lutPath) ? env->GetStringUTFChars(lutPath, 0) : nullptr;
-    LUT3D lut; if (lut_path_cstr) { lut = load_lut(lut_path_cstr); env->ReleaseStringUTFChars(lutPath, lut_path_cstr); }
+    LUT3D lut;
+    if (lut_path_cstr) {
+        auto cached_lut = get_cached_lut(lut_path_cstr);
+        if (cached_lut) {
+            lut = *cached_lut;
+        } else {
+            lut = load_lut(lut_path_cstr);
+        }
+        env->ReleaseStringUTFChars(lutPath, lut_path_cstr);
+    }
 
     int stride_x = outputBuf.dim(0).stride(), stride_y = outputBuf.dim(1).stride(), stride_c = outputBuf.dim(2).stride();
     const uint16_t* raw_ptr = outputBuf.data();

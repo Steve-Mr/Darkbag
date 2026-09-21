@@ -133,8 +133,9 @@ add_custom_command(
 )
 
 # Run the generator to produce the target object file
-# We target arm-64-android with OpenCL and Vulkan support, plus profiling.
-set(HALIDE_TARGET "arm-64-android-opencl-vulkan-vk_int16-profile")
+# We target arm-64-android with OpenCL and Vulkan support.
+# H10 fix: Remove -profile from HALIDE_TARGET in release builds to avoid runtime profiling overhead.
+set(HALIDE_TARGET "arm-64-android-opencl-vulkan-vk_int16")
 set(GENERATED_HEADER "${GENERATOR_OUTPUT_DIR}/hdrplus_raw_pipeline.h")
 set(GENERATED_LIB "${GENERATOR_OUTPUT_DIR}/hdrplus_raw_pipeline.a") # Static lib output
 set(SINGLE_GENERATED_HEADER "${GENERATOR_OUTPUT_DIR}/hdrplus_single_pipeline.h")
@@ -284,8 +285,8 @@ target_link_libraries(
         -static-openmp)
 
 
-# Force -O3 for release/relwithdebinfo builds: the NDK release toolchain defaults
-# to -O2, which measurably slows the Halide/ColorPipe hot paths.
+# M5 fix: AGP 8.x maps Gradle release build to CMAKE_BUILD_TYPE=RelWithDebInfo.
+# Ensure -O3 and -ffast-math are set across all build types and flag variables.
 string(REPLACE "-O2" "-O3" CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE}")
 string(REPLACE "-O2" "-O3" CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE}")
 string(REPLACE "-O2" "-O3" CMAKE_C_FLAGS_RELWITHDEBINFO "${CMAKE_C_FLAGS_RELWITHDEBINFO}")
