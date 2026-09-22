@@ -39,11 +39,17 @@ class CameraRepository(private val context: Context) {
 
     companion object {
         // Global cache to persist across repository instances and fragment recreations
-        private val idToCharsCache = mutableMapOf<String, CameraCharacteristics>()
+        private val idToCharsCache = java.util.concurrent.ConcurrentHashMap<String, CameraCharacteristics>()
         private var hasProbed = false
         private val probeLock = Any()
 
         const val VIRTUAL_TELE_2X_SUFFIX = "-virtual-tele-2x"
+
+        fun getCharacteristics(cameraManager: CameraManager, id: String): CameraCharacteristics {
+            return idToCharsCache.getOrPut(id) {
+                cameraManager.getCameraCharacteristics(id)
+            }
+        }
     }
 
     private fun probeAllCameras() {
