@@ -1093,7 +1093,7 @@ class CameraFragment : Fragment() {
         val targetId = currentLens?.id ?: if (lensFacing == CameraCharacteristics.LENS_FACING_BACK) "0" else "1"
 
         try {
-            val chars = camera2Manager.getCameraCharacteristics(targetId)
+            val chars = CameraRepository.getCharacteristics(camera2Manager, targetId)
 
             isoRange = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
             exposureTimeRange = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
@@ -1690,7 +1690,7 @@ class CameraFragment : Fragment() {
     private fun hasBackCamera(): Boolean {
         return try {
             camera2Manager.cameraIdList.any { id ->
-                val chars = camera2Manager.getCameraCharacteristics(id)
+                val chars = CameraRepository.getCharacteristics(camera2Manager, id)
                 chars.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK
             }
         } catch (e: Exception) { false }
@@ -1700,7 +1700,7 @@ class CameraFragment : Fragment() {
     private fun hasFrontCamera(): Boolean {
         return try {
             camera2Manager.cameraIdList.any { id ->
-                val chars = camera2Manager.getCameraCharacteristics(id)
+                val chars = CameraRepository.getCharacteristics(camera2Manager, id)
                 chars.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_FRONT
             }
         } catch (e: Exception) { false }
@@ -1744,7 +1744,7 @@ class CameraFragment : Fragment() {
 
                 val targetCharId = activePhysicalId ?: image.physicalId ?: currentLens?.id ?: "0"
                 Log.d(TAG, "Fetching characteristics for processing using ID: $targetCharId")
-                val chars = cameraManager.getCameraCharacteristics(targetCharId)
+                val chars = CameraRepository.getCharacteristics(cameraManager, targetCharId)
 
                 // Metadata Extraction
                 var whiteLevel = 1023
@@ -2043,7 +2043,7 @@ class CameraFragment : Fragment() {
 
         lifecycleScope.launch(Dispatchers.Default) {
             try {
-                val characteristics = camera2Manager.getCameraCharacteristics(device.id)
+                val characteristics = CameraRepository.getCharacteristics(camera2Manager, device.id)
                 val sensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
                 val activeArray = characteristics.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE) ?: return@launch
 
@@ -3404,7 +3404,7 @@ class CameraFragment : Fragment() {
 
                 val targetCharId = activePhysicalId ?: frames[0].physicalId ?: currentLens?.id ?: "0"
                 Log.d(TAG, "Fetching HDR+ characteristics for processing using ID: $targetCharId")
-                val chars = cameraManager.getCameraCharacteristics(targetCharId)
+                val chars = CameraRepository.getCharacteristics(cameraManager, targetCharId)
 
                 var whiteLevel = 1023
                 var blackLevelPattern = intArrayOf(64, 64, 64, 64)
@@ -3727,7 +3727,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             // Restore flash visibility if supported
             val targetId = currentLens?.id ?: if (lensFacing == CameraCharacteristics.LENS_FACING_BACK) "0" else "1"
             val hasFlash = try {
-                val c2Chars = camera2Manager.getCameraCharacteristics(targetId)
+                val c2Chars = CameraRepository.getCharacteristics(camera2Manager, targetId)
                 c2Chars.get(android.hardware.camera2.CameraCharacteristics.FLASH_INFO_AVAILABLE) ?: false
             } catch (e: Exception) { false }
 
@@ -3806,7 +3806,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
         Log.d(TAG, "Creating Camera2 Capture Session for device: ${device.id}")
 
-        val chars = camera2Manager.getCameraCharacteristics(device.id)
+        val chars = CameraRepository.getCharacteristics(camera2Manager, device.id)
         val map = chars.get(android.hardware.camera2.CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
 
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
@@ -3888,7 +3888,9 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         try {
                             val request = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_PREVIEW)
                             request.addTarget(surface)
-                            analysisImageReader?.surface?.let { request.addTarget(it) }
+                            if (isHdrPlusEnabled && !isManualExposure) {
+                                analysisImageReader?.surface?.let { request.addTarget(it) }
+                            }
 
                             applyManualSettingsToRequest(request)
 
@@ -4396,7 +4398,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             }
 
             val burstLensId = currentLens?.id ?: "0"
-            val burstChars = camera2Manager.getCameraCharacteristics(burstLensId)
+            val burstChars = CameraRepository.getCharacteristics(camera2Manager, burstLensId)
             val burstSensorOrientation = burstChars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
 
             reader.setOnImageAvailableListener({ r ->
@@ -4489,7 +4491,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         }
         data.rewind()
 
-        val chars = camera2Manager.getCameraCharacteristics(physicalId ?: "0")
+        val chars = CameraRepository.getCharacteristics(camera2Manager, physicalId ?: "0")
         val sensorOrientation = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
 
         return RawImageHolder(
@@ -4511,7 +4513,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         val session = camera2Session ?: return
         val reader = rawImageReader ?: return
 
-        val chars = camera2Manager.getCameraCharacteristics(device.id)
+        val chars = CameraRepository.getCharacteristics(camera2Manager, device.id)
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
 
         val targetFpsStr = prefs.getString(SettingsFragment.KEY_RAW_VIDEO_FPS, "24") ?: "24"
@@ -4866,7 +4868,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         if (currentLens?.useCamera2 == true) {
             val deviceId = camera2Device?.id ?: currentLens?.id
             if (deviceId != null) {
-                val chars = camera2Manager.getCameraCharacteristics(deviceId)
+                val chars = CameraRepository.getCharacteristics(camera2Manager, deviceId)
                 val activeArray = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
                 if (activeArray != null) {
                     val targetRatio = if (currentLens?.isZoomPreset == true && currentLens?.targetZoomRatio != null) {
@@ -5548,7 +5550,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         var focalIn35mm: Int? = null
         var finalFocalLength = focalLength
         try {
-            val chars = targetCharId?.let { camera2Manager.getCameraCharacteristics(it) }
+            val chars = targetCharId?.let { CameraRepository.getCharacteristics(camera2Manager, it) }
             if (chars != null) {
                 focalIn35mm = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.let { focalLengths ->
                     val focal = captureResult?.get(CaptureResult.LENS_FOCAL_LENGTH) ?: focalLengths.firstOrNull() ?: 0f
