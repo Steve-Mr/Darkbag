@@ -1590,6 +1590,7 @@ class CameraFragment : Fragment() {
                     .edit().putBoolean(KEY_HDR_PLUS_ENABLED, isHdrPlusEnabled).apply()
                 updateHdrPlusUi()
                 updateHdrPlusConstraints()
+                applyCameraControls()
             }
         }
 
@@ -2988,6 +2989,9 @@ class CameraFragment : Fragment() {
         try {
             val request = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_PREVIEW)
             request.addTarget(surface)
+            if (isHdrPlusEnabled && !isManualExposure) {
+                analysisImageReader?.surface?.let { request.addTarget(it) }
+            }
             applyManualSettingsToRequest(request, isHdrBurst)
 
             session.setRepeatingRequest(request.build(), object : android.hardware.camera2.CameraCaptureSession.CaptureCallback() {
