@@ -398,7 +398,9 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
     jint calibrationIlluminant2,
     jfloatArray neutralColorPoint,
     jboolean faithfulHighlights,
-    jlongArray debugStats
+    jlongArray debugStats,
+    jint outJpgFd,
+    jint outDngFd
 ) {
     LOGD("Native exportHdrPlus started (enableMemoryColor=%d, colorEngineMode=%d, faithful=%d).", enableMemoryColor, colorEngineMode, faithfulHighlights);
 
@@ -456,22 +458,22 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
     jlong dngMs = 0;
     jlong jpgMs = 0;
 
-    if (dng_path_cstr) {
-        LOGD("Exporting DNG to %s", dng_path_cstr);
+    if (outDngFd >= 0 || dng_path_cstr) {
+        LOGD("Exporting DNG to %s (outDngFd=%d)", dng_path_cstr ? dng_path_cstr : "FD", outDngFd);
         auto dngStart = std::chrono::high_resolution_clock::now();
         float baselineExposure = (digitalGain > 0.0f) ? std::log2(digitalGain) : 0.0f;
         write_dng(dng_path_cstr, width, height, finalImage.data(), 1, width, width*height, kMax16BitValue, ccmVec, meta, orientation, (bool)mirror, baselineExposure, wbVec.data(),
-                  cm1Ptr, cm2Ptr, fm1Ptr, fm2Ptr, (int)calibrationIlluminant1, (int)calibrationIlluminant2, neutralPtr);
+                  cm1Ptr, cm2Ptr, fm1Ptr, fm2Ptr, (int)calibrationIlluminant1, (int)calibrationIlluminant2, neutralPtr, outDngFd);
         dngMs = (jlong)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - dngStart).count();
     }
 
     bool saveOk = true;
-    if (jpg_path_cstr) {
-        LOGD("Exporting JPG: JPG=%s", jpg_path_cstr);
+    if (outJpgFd >= 0 || jpg_path_cstr) {
+        LOGD("Exporting JPG: JPG=%s (outJpgFd=%d)", jpg_path_cstr ? jpg_path_cstr : "FD", outJpgFd);
         auto jpgStart = std::chrono::high_resolution_clock::now();
         saveOk = process_and_save_image(finalImage.data(), 1, width, width*height, nullptr, 0, 0, width, height, digitalGain, targetLog, lut,
                                         exposure, contrast, saturation, highlights, shadows, whites, blacks,
-                                        jpg_path_cstr, nullptr, &meta, 1, ccmVec.data(), wbVec.data(), orientation, nullptr, 0, 0, false, 1, zoomFactor, (bool)mirror, (bool)enableMemoryColor, (int)colorEngineMode, faithfulHighlights);
+                                        jpg_path_cstr, nullptr, &meta, 1, ccmVec.data(), wbVec.data(), orientation, nullptr, 0, 0, false, 1, zoomFactor, (bool)mirror, (bool)enableMemoryColor, (int)colorEngineMode, faithfulHighlights, outJpgFd);
         jpgMs = (jlong)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - jpgStart).count();
     }
 

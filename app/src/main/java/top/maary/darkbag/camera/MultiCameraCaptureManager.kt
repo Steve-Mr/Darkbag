@@ -1206,7 +1206,7 @@ class MultiCameraCaptureManager(
                     val image = r.acquireLatestImage() ?: return@setOnImageAvailableListener
                     scope.launch(Dispatchers.IO) {
                         try {
-                            val chars = lens.characteristics ?: cameraManager.getCameraCharacteristics(lens.physicalId)
+                            val chars = lens.characteristics ?: top.maary.darkbag.utils.CameraRepository.getCharacteristics(cameraManager, lens.physicalId)
                             val captureRes = withTimeoutOrNull(2500L) { resultDeferred.await() }
                             if (captureRes != null) {
                                 val tempPath = writeDngToFile(image, chars, captureRes, orientationDegrees, lens.physicalId)

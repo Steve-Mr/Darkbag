@@ -12,6 +12,56 @@
 
 #include <turbojpeg.h>
 
+#include <unistd.h>
+
+static bool write_jpeg_turbo_fd(int fd, int width, int height, int subsamp, const unsigned char* buffer, int quality) {
+    if (fd < 0) return false;
+    tjhandle _jpegCompressor = tjInitCompress();
+    if (!_jpegCompressor) {
+        LOGE("tjInitCompress failed");
+        return false;
+    }
+
+    unsigned char* jpegBuf = NULL;
+    unsigned long jpegSize = 0;
+
+    int tj_stat = tjCompress2(_jpegCompressor, buffer, width, 0, height, TJPF_RGB,
+                              &jpegBuf, &jpegSize, subsamp, quality, TJFLAG_FASTDCT);
+
+    if (tj_stat != 0) {
+        LOGE("tjCompress2 failed: %s", tjGetErrorStr());
+        tjDestroy(_jpegCompressor);
+        if (jpegBuf) tjFree(jpegBuf);
+        return false;
+    }
+
+    int dup_fd = dup(fd);
+    if (dup_fd < 0) {
+        LOGE("dup(fd) failed: %d", fd);
+        tjDestroy(_jpegCompressor);
+        tjFree(jpegBuf);
+        return false;
+    }
+
+    ftruncate(dup_fd, 0);
+    FILE* file = fdopen(dup_fd, "wb");
+    if (!file) {
+        LOGE("fdopen failed for dup_fd: %d", dup_fd);
+        close(dup_fd);
+        tjDestroy(_jpegCompressor);
+        tjFree(jpegBuf);
+        return false;
+    }
+
+    size_t written = fwrite(jpegBuf, 1, jpegSize, file);
+    fflush(file);
+    fclose(file);
+
+    tjDestroy(_jpegCompressor);
+    tjFree(jpegBuf);
+    return written == jpegSize;
+}
+
 static bool write_jpeg_turbo(const char* filename, int width, int height, int subsamp, const unsigned char* buffer, int quality) {
     tjhandle _jpegCompressor = tjInitCompress();
     if (!_jpegCompressor) {
@@ -857,7 +907,8 @@ bool process_and_save_image(
     bool isPreview, int downsampleFactor, float zoomFactor, bool mirror,
     bool enableMemoryColor,
     int colorEngineMode,
-    bool faithfulHighlights
+    bool faithfulHighlights,
+    int outJpgFd
 ) {
     LOGD("process_and_save_image: %dx%d, gain=%.2f, log=%d, lut=%d, jpg=%s, tiff=%s, preview=%d, ds=%d, zoom=%.2f, mirror=%d, memColor=%d, engineMode=%d, faithful=%d",
          width, height, gain, targetLog, lut.size, jpgPath ? jpgPath : "null", tiffPath ? tiffPath : "null", isPreview, downsampleFactor, zoomFactor, mirror, enableMemoryColor, colorEngineMode, faithfulHighlights);
@@ -1247,7 +1298,26 @@ bool process_and_save_image(
 
     const int jpegQuality = isPreview ? 78 : 95;
     bool jpgOk = true;
-    if (jpgPath) {
+    if (outJpgFd >= 0) {
+        LOGD("Direct single-pass writing JPEG to FileDescriptor %d", outJpgFd);
+        if (isPreview && !previewRgb8.empty()) {
+            jpgOk = write_jpeg_turbo_fd(outJpgFd, finalW_zoomed, finalH_zoomed, TJSAMP_422, previewRgb8.data(), jpegQuality);
+        } else {
+            size_t total_pixels = static_cast<size_t>(finalW_zoomed) * finalH_zoomed;
+            std::vector<unsigned char> rgb8(total_pixels * 3);
+            #pragma omp parallel for
+            for (int y = 0; y < finalH_zoomed; y++) {
+                for (int x = 0; x < finalW_zoomed; x++) {
+                    size_t idx = (static_cast<size_t>(y) * finalW_zoomed + x) * 3;
+                    rgb8[idx + 0] = static_cast<unsigned char>((processedImage[idx + 0] + 128) >> 8);
+                    rgb8[idx + 1] = static_cast<unsigned char>((processedImage[idx + 1] + 128) >> 8);
+                    rgb8[idx + 2] = static_cast<unsigned char>((processedImage[idx + 2] + 128) >> 8);
+                }
+            }
+            jpgOk = write_jpeg_turbo_fd(outJpgFd, finalW_zoomed, finalH_zoomed, TJSAMP_422, rgb8.data(), jpegQuality);
+        }
+        if (!jpgOk) LOGE("write_jpeg_turbo_fd failed for fd %d", outJpgFd);
+    } else if (jpgPath) {
         if (isPreview && !previewRgb8.empty()) {
             jpgOk = write_jpeg_turbo(jpgPath, finalW_zoomed, finalH_zoomed, TJSAMP_422, previewRgb8.data(), jpegQuality);
         } else {
@@ -1506,16 +1576,33 @@ bool write_dng(
     const float* forwardMatrix2,
     int calibIllum1,
     int calibIllum2,
-    const float* neutralColorPoint
+    const float* neutralColorPoint,
+    int outFd
 ) {
-    TIFFSetTagExtender(DNGTagExtender);
-    TIFF* tif = TIFFOpen(filename, "w");
+    static std::once_flag extender_flag;
+    std::call_once(extender_flag, [](){
+        TIFFSetTagExtender(DNGTagExtender);
+    });
+
+    TIFF* tif = nullptr;
+    if (outFd >= 0) {
+        int dup_fd = dup(outFd);
+        if (dup_fd < 0) {
+            LOGE("dup(outFd) failed for DNG writing: %d", outFd);
+            return false;
+        }
+        ftruncate(dup_fd, 0);
+        tif = TIFFFdOpen(dup_fd, "DNG_Stream", "w");
+    } else if (filename) {
+        tif = TIFFOpen(filename, "w");
+    }
+
     if (!tif) return false;
 
     TIFFSetField(tif, TIFFTAG_IMAGEWIDTH, width);
     TIFFSetField(tif, TIFFTAG_IMAGELENGTH, height);
     TIFFSetField(tif, TIFFTAG_BITSPERSAMPLE, 16);
-    TIFFSetField(tif, TIFFTAG_COMPRESSION, COMPRESSION_NONE);
+    TIFFSetField(tif, TIFFTAG_COMPRESSION, COMPRESSION_DEFLATE);
 
     uint16_t tiffOrientation = 1;
     switch (orientation) {

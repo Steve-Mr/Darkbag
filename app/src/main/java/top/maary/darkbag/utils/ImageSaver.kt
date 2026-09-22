@@ -26,6 +26,57 @@ import kotlin.math.min
 object ImageSaver {
     private const val TAG = "ImageSaver"
 
+    fun createMediaStorePendingPfd(
+        context: Context,
+        displayName: String,
+        mimeType: String
+    ): Pair<android.os.ParcelFileDescriptor, Uri>? {
+        val contentResolver = context.contentResolver
+        val values = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
+            put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/Darkbag")
+                put(MediaStore.MediaColumns.IS_PENDING, 1)
+            }
+        }
+        val uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: return null
+        return try {
+            val pfd = contentResolver.openFileDescriptor(uri, "rwt")
+            if (pfd != null) Pair(pfd, uri) else {
+                contentResolver.delete(uri, null, null)
+                null
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to open PFD for MediaStore Uri: $uri", e)
+            contentResolver.delete(uri, null, null)
+            null
+        }
+    }
+
+    fun finalizeMediaStorePendingPfd(
+        context: Context,
+        pfdPair: Pair<android.os.ParcelFileDescriptor, Uri>,
+        success: Boolean
+    ) {
+        val (pfd, uri) = pfdPair
+        try {
+            pfd.close()
+            if (success) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    val values = ContentValues().apply {
+                        put(MediaStore.MediaColumns.IS_PENDING, 0)
+                    }
+                    context.contentResolver.update(uri, values, null, null)
+                }
+            } else {
+                context.contentResolver.delete(uri, null, null)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to finalize MediaStore PFD for $uri", e)
+        }
+    }
+
     /**
      * Shared helper to handle Bitmap post-processing (Rotate, Crop, Compress) and Saving (JPG, LinearDNG).
      * Deletes input temp files after saving.

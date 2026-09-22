@@ -18,13 +18,18 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import top.maary.darkbag.R
 
+import kotlinx.coroutines.sync.Semaphore
+
 class HdrPlusProcessingService : LifecycleService() {
 
     companion object {
         private const val TAG = "HdrPlusService"
         private const val NOTIFICATION_ID = 1001
         private const val CHANNEL_ID = "hdrplus_processing_channel"
+        private const val MAX_CONCURRENT_STAGE2_EXPORTS = 2
     }
+
+    private val exportSemaphore = Semaphore(MAX_CONCURRENT_STAGE2_EXPORTS)
 
     override fun onCreate() {
         super.onCreate()
@@ -137,42 +142,81 @@ class HdrPlusProcessingService : LifecycleService() {
                 var stage2HandedOff = false
                 try {
                     lifecycleScope.launch(ColorProcessor.exportProcessingDispatcher) {
+                        exportSemaphore.acquire()
                         try {
                             val edit = req.editConfig
-                            val exportRet = ColorProcessor.exportHdrPlus(
-                                tempRawPath = req.requestId,
-                                width = req.width,
-                                height = req.height,
-                                orientation = req.orientation,
-                                digitalGain = req.digitalGain,
-                                targetLog = req.targetLogIndex,
-                                lutPath = req.lutPath,
-                                exposure = edit?.exposure ?: 0f,
-                                contrast = edit?.contrast ?: 0f,
-                                saturation = edit?.saturation ?: 0f,
-                                highlights = edit?.highlights ?: 0f,
-                                shadows = edit?.shadows ?: 0f,
-                                whites = edit?.whites ?: 0f,
-                                blacks = edit?.blacks ?: 0f,
-                                jpgPath = if (req.saveJpg) req.fullResJpgPath else null,
-                                dngPath = if (req.saveRaw && !req.isSingleFrame) req.linearDngPath else null,
-                                faithfulHighlights = req.isSingleFrame,
-                                ccm = req.ccm,
-                                whiteBalance = req.whiteBalance,
-                                zoomFactor = req.zoomFactor,
-                                mirror = req.mirror,
-                                metadata = req.metadata,
-                                enableMemoryColor = req.enableMemoryColor,
-                                colorEngineMode = req.colorEngineMode,
-                                colorMatrix1 = req.colorMatrix1,
-                                colorMatrix2 = req.colorMatrix2,
-                                forwardMatrix1 = req.forwardMatrix1,
-                                forwardMatrix2 = req.forwardMatrix2,
-                                calibrationIlluminant1 = req.calibrationIlluminant1,
-                                calibrationIlluminant2 = req.calibrationIlluminant2,
-                                neutralColorPoint = req.neutralColorPoint,
-                                debugStats = debugStats
-                            )
+                            val shouldSaveJpg = req.saveJpg
+                            val shouldSaveRaw = req.saveRaw && !req.isSingleFrame
+
+                            val pfdJpg = if (shouldSaveJpg && req.jpgFolderUri == null && req.motionPhotoMp4Path == null) {
+                                top.maary.darkbag.utils.ImageSaver.createMediaStorePendingPfd(
+                                    context = this@HdrPlusProcessingService,
+                                    displayName = "${req.baseName}.jpg",
+                                    mimeType = "image/jpeg"
+                                )
+                            } else null
+
+                            val pfdDng = if (shouldSaveRaw && req.rawFolderUri == null) {
+                                top.maary.darkbag.utils.ImageSaver.createMediaStorePendingPfd(
+                                    context = this@HdrPlusProcessingService,
+                                    displayName = "${req.baseName}_linear.dng",
+                                    mimeType = "image/x-adobe-dng"
+                                )
+                            } else null
+
+                            val exportRet = try {
+                                ColorProcessor.exportHdrPlus(
+                                    tempRawPath = req.requestId,
+                                    width = req.width,
+                                    height = req.height,
+                                    orientation = req.orientation,
+                                    digitalGain = req.digitalGain,
+                                    targetLog = req.targetLogIndex,
+                                    lutPath = req.lutPath,
+                                    exposure = edit?.exposure ?: 0f,
+                                    contrast = edit?.contrast ?: 0f,
+                                    saturation = edit?.saturation ?: 0f,
+                                    highlights = edit?.highlights ?: 0f,
+                                    shadows = edit?.shadows ?: 0f,
+                                    whites = edit?.whites ?: 0f,
+                                    blacks = edit?.blacks ?: 0f,
+                                    jpgPath = if (shouldSaveJpg && pfdJpg == null) req.fullResJpgPath else null,
+                                    dngPath = if (shouldSaveRaw && pfdDng == null) req.linearDngPath else null,
+                                    faithfulHighlights = req.isSingleFrame,
+                                    ccm = req.ccm,
+                                    whiteBalance = req.whiteBalance,
+                                    zoomFactor = req.zoomFactor,
+                                    mirror = req.mirror,
+                                    metadata = req.metadata,
+                                    enableMemoryColor = req.enableMemoryColor,
+                                    colorEngineMode = req.colorEngineMode,
+                                    colorMatrix1 = req.colorMatrix1,
+                                    colorMatrix2 = req.colorMatrix2,
+                                    forwardMatrix1 = req.forwardMatrix1,
+                                    forwardMatrix2 = req.forwardMatrix2,
+                                    calibrationIlluminant1 = req.calibrationIlluminant1,
+                                    calibrationIlluminant2 = req.calibrationIlluminant2,
+                                    neutralColorPoint = req.neutralColorPoint,
+                                    debugStats = debugStats,
+                                    outJpgFd = pfdJpg?.first?.fd ?: -1,
+                                    outDngFd = pfdDng?.first?.fd ?: -1
+                                )
+                            } finally {
+                                if (pfdJpg != null) {
+                                    top.maary.darkbag.utils.ImageSaver.finalizeMediaStorePendingPfd(
+                                        context = this@HdrPlusProcessingService,
+                                        pfdPair = pfdJpg,
+                                        success = true
+                                    )
+                                }
+                                if (pfdDng != null) {
+                                    top.maary.darkbag.utils.ImageSaver.finalizeMediaStorePendingPfd(
+                                        context = this@HdrPlusProcessingService,
+                                        pfdPair = pfdDng,
+                                        success = true
+                                    )
+                                }
+                            }
                             req.timing?.jniDone = System.currentTimeMillis()
 
                             if (exportRet == 0) {
@@ -259,6 +303,7 @@ class HdrPlusProcessingService : LifecycleService() {
                         } catch (e: Exception) {
                             Log.e(TAG, "Exception during Stage 2 export for ${req.requestId}", e)
                         } finally {
+                            exportSemaphore.release()
                             finishTaskAndCheckStopService()
                         }
                     }

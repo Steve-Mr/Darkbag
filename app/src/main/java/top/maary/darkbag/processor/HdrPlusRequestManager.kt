@@ -64,8 +64,9 @@ data class HdrPlusRequest(
 )
 
 object HdrPlusRequestManager {
-    // UNLIMITED channel to prevent dropping requests during bursts
-    private val requestChannel = Channel<HdrPlusRequest>(Channel.UNLIMITED)
+    // Bounded capacity to enforce pipeline backpressure during high-frequency capture bursts
+    const val MAX_IN_FLIGHT_REQUESTS = 3
+    private val requestChannel = Channel<HdrPlusRequest>(capacity = MAX_IN_FLIGHT_REQUESTS)
     
     val requestFlow = requestChannel.receiveAsFlow()
 
@@ -77,7 +78,7 @@ object HdrPlusRequestManager {
         val result = requestChannel.trySend(request)
         if (!result.isSuccess) {
             _pendingTasksCount.update { (it - 1).coerceAtLeast(0) }
-            throw IllegalStateException("Failed to enqueue HdrPlusRequest: ${request.requestId}")
+            throw IllegalStateException("Failed to enqueue HdrPlusRequest (pipeline queue full/rejected): ${request.requestId}")
         }
     }
 
