@@ -87,7 +87,7 @@ include_directories("${LIBJPEG_TURBO_INSTALL_DIR}/include")
 set(HDRPLUS_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/hdr-plus/src")
 set(HDRPLUS_GENERATOR_SRC
     "${CMAKE_CURRENT_SOURCE_DIR}/hdrplus_pipeline_generator.cpp"
-    "${HDRPLUS_SRC_DIR}/align.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/hdrplus_align.cpp"
     "${HDRPLUS_SRC_DIR}/merge.cpp"
     "${HDRPLUS_SRC_DIR}/finish.cpp"
     "${HDRPLUS_SRC_DIR}/util.cpp"

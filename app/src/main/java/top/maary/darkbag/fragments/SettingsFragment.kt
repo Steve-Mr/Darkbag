@@ -318,10 +318,10 @@ class SettingsFragment : Fragment() {
         val cameraManager = requireContext().getSystemService(Context.CAMERA_SERVICE) as? CameraManager
         val backCameraChars = try {
             val backId = cameraManager?.cameraIdList?.firstOrNull { id ->
-                val c = cameraManager.getCameraCharacteristics(id)
+                val c = top.maary.darkbag.utils.CameraRepository.getCharacteristics(cameraManager, id)
                 c.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK
             } ?: cameraManager?.cameraIdList?.firstOrNull()
-            backId?.let { cameraManager?.getCameraCharacteristics(it) }
+            backId?.let { id -> cameraManager?.let { top.maary.darkbag.utils.CameraRepository.getCharacteristics(it, id) } }
         } catch (_: Exception) {
             null
         }

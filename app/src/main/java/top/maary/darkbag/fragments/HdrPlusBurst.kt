@@ -163,29 +163,37 @@ class HdrPlusBurst(
         cleanData.position(frames.size * dataLength)
         cleanData.limit(cleanData.position() + dataLength)
 
-        val oldPos = buffer.position()
-        buffer.rewind()
-        if (rowStride == rowLength) {
-            if (buffer.remaining() == dataLength) {
-                cleanData.put(buffer)
+        if (buffer.isDirect && cleanData.isDirect) {
+            ColorProcessor.copyBayerWithStride(
+                buffer, buffer.position(),
+                cleanData, cleanData.position(),
+                width, height, rowStride, pixelStride
+            )
+        } else {
+            val oldPos = buffer.position()
+            buffer.rewind()
+            if (rowStride == rowLength) {
+                if (buffer.remaining() == dataLength) {
+                    cleanData.put(buffer)
+                } else {
+                    val oldLimit = buffer.limit()
+                    buffer.limit(buffer.position() + dataLength)
+                    cleanData.put(buffer)
+                    buffer.limit(oldLimit)
+                }
             } else {
                 val oldLimit = buffer.limit()
-                buffer.limit(buffer.position() + dataLength)
-                cleanData.put(buffer)
+                for (y in 0 until height) {
+                    val rowStart = y * rowStride
+                    if (rowStart + rowLength > buffer.capacity()) break
+                    buffer.position(rowStart)
+                    buffer.limit(rowStart + rowLength)
+                    cleanData.put(buffer)
+                }
                 buffer.limit(oldLimit)
             }
-        } else {
-            val oldLimit = buffer.limit()
-            for (y in 0 until height) {
-                val rowStart = y * rowStride
-                if (rowStart + rowLength > buffer.capacity()) break
-                buffer.position(rowStart)
-                buffer.limit(rowStart + rowLength)
-                cleanData.put(buffer)
-            }
-            buffer.limit(oldLimit)
+            buffer.position(oldPos)
         }
-        buffer.position(oldPos)
         
         // Reset limit and position of megaBuffer for future ops, though we rely on position management
         cleanData.limit(cleanData.capacity())

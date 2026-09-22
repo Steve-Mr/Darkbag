@@ -54,7 +54,7 @@ class ConcurrentFrontCameraManager(
     fun getFrontCameraId(): String? {
         return try {
             cameraManager.cameraIdList.find { id ->
-                val chars = cameraManager.getCameraCharacteristics(id)
+                val chars = top.maary.darkbag.utils.CameraRepository.getCharacteristics(cameraManager, id)
                 chars.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_FRONT
             }
         } catch (e: Exception) {
