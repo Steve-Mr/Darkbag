@@ -46,6 +46,17 @@ object ColorProcessor {
     external fun allocateDirectBuffer(capacity: Long): ByteBuffer?
     external fun freeDirectBuffer(buffer: ByteBuffer)
 
+    external fun copyBayerWithStride(
+        srcBuffer: ByteBuffer,
+        srcPos: Int,
+        dstBuffer: ByteBuffer,
+        dstPos: Int,
+        width: Int,
+        height: Int,
+        rowStride: Int,
+        pixelStride: Int
+    )
+
     data class BackgroundSaveEvent(
         val baseName: String,
         val dngPath: String?,

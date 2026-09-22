@@ -271,6 +271,31 @@ Java_top_maary_darkbag_processor_ColorProcessor_allocateDirectBuffer(JNIEnv* env
 }
 
 extern "C" JNIEXPORT void JNICALL
+Java_top_maary_darkbag_processor_ColorProcessor_copyBayerWithStride(
+    JNIEnv* env, jobject /* this */, jobject srcBuffer, jint srcPos, jobject dstBuffer, jint dstPos, jint width, jint height, jint rowStride, jint pixelStride
+) {
+    if (!srcBuffer || !dstBuffer) return;
+    uint8_t* srcBase = (uint8_t*)env->GetDirectBufferAddress(srcBuffer);
+    uint8_t* dstBase = (uint8_t*)env->GetDirectBufferAddress(dstBuffer);
+    if (!srcBase || !dstBase) return;
+
+    uint8_t* src = srcBase + srcPos;
+    uint8_t* dst = dstBase + dstPos;
+
+    const size_t rowLength = static_cast<size_t>(width) * pixelStride;
+    if (rowStride == (jint)rowLength) {
+        memcpy(dst, src, rowLength * height);
+    } else {
+        #pragma omp parallel for
+        for (int y = 0; y < height; ++y) {
+            const uint8_t* srcRow = src + static_cast<size_t>(y) * rowStride;
+            uint8_t* dstRow = dst + static_cast<size_t>(y) * rowLength;
+            memcpy(dstRow, srcRow, rowLength);
+        }
+    }
+}
+
+extern "C" JNIEXPORT void JNICALL
 Java_top_maary_darkbag_processor_ColorProcessor_freeDirectBuffer(JNIEnv* env, jobject /* this */, jobject buffer) {
     if (!buffer) return;
     void* ptr = env->GetDirectBufferAddress(buffer);

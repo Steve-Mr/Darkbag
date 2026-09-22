@@ -507,7 +507,7 @@ class MultiCameraCaptureManager(
         val session = captureSession ?: return
 
         try {
-            val chars = cameraManager.getCameraCharacteristics(dev.id)
+            val chars = top.maary.darkbag.utils.CameraRepository.getCharacteristics(cameraManager, dev.id)
             val requestBuilder = dev.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
                 addTarget(surface)
                 set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
@@ -529,7 +529,7 @@ class MultiCameraCaptureManager(
                 currentPrimaryLens = activeLenses.find { it.type == LensType.WIDE } ?: activeLenses.firstOrNull()
             }
             val prim = currentPrimaryLens
-            val chars = cameraManager.getCameraCharacteristics(device.id)
+            val chars = top.maary.darkbag.utils.CameraRepository.getCharacteristics(cameraManager, device.id)
             val requestBuilder = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
                 addTarget(targetPreviewSurface)
                 set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
@@ -597,7 +597,7 @@ class MultiCameraCaptureManager(
         lens: PhysicalLensInfo?
     ) {
         try {
-            val chars = cameraManager.getCameraCharacteristics(device.id)
+            val chars = top.maary.darkbag.utils.CameraRepository.getCharacteristics(cameraManager, device.id)
             val triggerReq = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
                 addTarget(targetPreviewSurface)
                 set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
@@ -784,7 +784,7 @@ class MultiCameraCaptureManager(
                     val image = r.acquireLatestImage() ?: return@setOnImageAvailableListener
                     scope.launch(Dispatchers.IO) {
                         try {
-                            val chars = lens.characteristics ?: cameraManager.getCameraCharacteristics(lens.physicalId)
+                            val chars = lens.characteristics ?: top.maary.darkbag.utils.CameraRepository.getCharacteristics(cameraManager, lens.physicalId)
                             val captureRes = withTimeoutOrNull(2500L) { resultDeferredMap[lens.physicalId]?.await() }
                             if (captureRes != null) {
                                 val isPrimary = lens.physicalId == (currentPrimaryLens?.physicalId ?: expectedLenses.first().physicalId)
@@ -931,7 +931,7 @@ class MultiCameraCaptureManager(
                     val image = r.acquireLatestImage() ?: return@setOnImageAvailableListener
                     scope.launch(Dispatchers.IO) {
                         try {
-                            val chars = lens.characteristics ?: cameraManager.getCameraCharacteristics(lens.physicalId)
+                            val chars = lens.characteristics ?: top.maary.darkbag.utils.CameraRepository.getCharacteristics(cameraManager, lens.physicalId)
                             val captureRes = withTimeoutOrNull(2500L) { resultDeferredMap[lens.physicalId]?.await() }
                             if (captureRes != null) {
                                 val tempPath = writeDngToFile(image, chars, captureRes, orientationDegrees, lens.physicalId)
@@ -1022,7 +1022,7 @@ class MultiCameraCaptureManager(
                             val image = r.acquireLatestImage() ?: return@setOnImageAvailableListener
                             scope.launch(Dispatchers.IO) {
                                 try {
-                                    val chars = primaryLens.characteristics ?: cameraManager.getCameraCharacteristics(primaryLens.physicalId)
+                                    val chars = primaryLens.characteristics ?: top.maary.darkbag.utils.CameraRepository.getCharacteristics(cameraManager, primaryLens.physicalId)
                                     val captureRes = withTimeoutOrNull(2500L) { resultDeferred.await() }
                                     if (captureRes != null) {
                                         val tempPath = writeDngToFile(image, chars, captureRes, orientationDegrees, primaryLens.physicalId, isHdrPlus = isHdrPlusActive)
@@ -1224,7 +1224,7 @@ class MultiCameraCaptureManager(
                 dngDeferred.complete(null)
             }
 
-            val chars = lens.characteristics ?: cameraManager.getCameraCharacteristics(lens.physicalId)
+            val chars = lens.characteristics ?: top.maary.darkbag.utils.CameraRepository.getCharacteristics(cameraManager, lens.physicalId)
             val req = device.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE).apply {
                 addTarget(jpegReader.surface)
                 rawReader?.surface?.let { addTarget(it) }

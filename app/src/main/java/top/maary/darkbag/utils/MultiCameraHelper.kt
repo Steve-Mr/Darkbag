@@ -69,7 +69,7 @@ object MultiCameraHelper {
                 var hasBack = false
                 var hasFront = false
                 for (id in set) {
-                    val facing = cameraManager.getCameraCharacteristics(id).get(CameraCharacteristics.LENS_FACING)
+                    val facing = top.maary.darkbag.utils.CameraRepository.getCharacteristics(cameraManager, id).get(CameraCharacteristics.LENS_FACING)
                     if (facing == CameraCharacteristics.LENS_FACING_BACK) hasBack = true
                     if (facing == CameraCharacteristics.LENS_FACING_FRONT) hasFront = true
                 }
@@ -95,7 +95,7 @@ object MultiCameraHelper {
         try {
             val cameraIds = cameraManager.cameraIdList
             for (id in cameraIds) {
-                val chars = cameraManager.getCameraCharacteristics(id)
+                val chars = top.maary.darkbag.utils.CameraRepository.getCharacteristics(cameraManager, id)
                 val lensFacing = chars.get(CameraCharacteristics.LENS_FACING)
                 if (lensFacing != facing) continue
 
@@ -113,7 +113,7 @@ object MultiCameraHelper {
                     val tempInfos = mutableListOf<Pair<String, CameraCharacteristics>>()
                     for (physId in physicalIds) {
                         try {
-                            val physChars = cameraManager.getCameraCharacteristics(physId)
+                            val physChars = top.maary.darkbag.utils.CameraRepository.getCharacteristics(cameraManager, physId)
                             tempInfos.add(physId to physChars)
                         } catch (e: Exception) {
                             Log.w(TAG, "Failed to get characteristics for physical camera $physId", e)
@@ -189,7 +189,7 @@ object MultiCameraHelper {
                 }
 
                 val physicalList = standalonePhysicalLenses.map { lens ->
-                    val chars = try { cameraManager.getCameraCharacteristics(lens.id) } catch (e: Exception) { null }
+                    val chars = try { top.maary.darkbag.utils.CameraRepository.getCharacteristics(cameraManager, lens.id) } catch (e: Exception) { null }
                     val lensName = if (lens.name.endsWith("x") || lens.name.endsWith("mm")) {
                         lens.name
                     } else {
