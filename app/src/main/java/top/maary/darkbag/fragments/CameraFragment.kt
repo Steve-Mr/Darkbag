@@ -3648,7 +3648,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     try {
                         val firstFrame = burstResult.frames[0]
                         val frameSize = firstFrame.width * firstFrame.height * 2
-                        val data = ByteBuffer.allocateDirect(frameSize)
+                        val data = HdrPlusBurst.acquireBuffer(frameSize)
                         burstResult.megaBuffer.position(0)
                         burstResult.megaBuffer.limit(frameSize)
                         data.put(burstResult.megaBuffer)
@@ -4478,8 +4478,27 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         val width = image.width
         val height = image.height
 
+        val chars = CameraRepository.getCharacteristics(camera2Manager, physicalId ?: "0")
+        val sensorOrientation = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
+
         val rowLength = width * pixelStride
-        val data = ByteBuffer.allocateDirect(rowLength * height)
+        if (buffer.isDirect && rowStride == rowLength) {
+            // Direct zero-copy passthrough
+            return RawImageHolder(
+                data = buffer.duplicate(),
+                width = width,
+                height = height,
+                timestamp = image.timestamp,
+                rotationDegrees = sensorOrientation,
+                combinedOrientation = combinedOrientation,
+                zoomRatio = zoomRatio,
+                physicalId = physicalId,
+                halfFrameMetadata = halfFrameMetadata
+            )
+        }
+
+        val capacity = rowLength * height
+        val data = HdrPlusBurst.acquireBuffer(capacity)
 
         if (buffer.isDirect) {
             ColorProcessor.copyBayerWithStride(
@@ -4501,9 +4520,6 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             }
             data.rewind()
         }
-
-        val chars = CameraRepository.getCharacteristics(camera2Manager, physicalId ?: "0")
-        val sensorOrientation = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
 
         return RawImageHolder(
             data = data,

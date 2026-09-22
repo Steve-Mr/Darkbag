@@ -118,7 +118,8 @@ bool process_and_save_image(
     // Minimal, spec-faithful single-frame path: keep the sensor data linear
     // (no knee) and neutralize sensor-saturated pixels point-wise instead of
     // applying the display-oriented highlight desaturation ramp.
-    bool faithfulHighlights = false
+    bool faithfulHighlights = false,
+    int outJpgFd = -1
 );
 
 bool write_dng(
@@ -142,7 +143,8 @@ bool write_dng(
     const float* forwardMatrix2 = nullptr,
     int calibIllum1 = 21,
     int calibIllum2 = 17,
-    const float* neutralColorPoint = nullptr
+    const float* neutralColorPoint = nullptr,
+    int outFd = -1
 );
 
 bool write_bmp(const char* filename, int width, int height, const unsigned short* planarData, int stride_x, int stride_y, int stride_c);

@@ -208,7 +208,9 @@ object ColorProcessor {
         calibrationIlluminant2: Int = 17,
         neutralColorPoint: FloatArray? = null,
         faithfulHighlights: Boolean = false,
-        debugStats: LongArray? = null
+        debugStats: LongArray? = null,
+        outJpgFd: Int = -1,
+        outDngFd: Int = -1
     ): Int
 
     external fun processHdrPlus(
