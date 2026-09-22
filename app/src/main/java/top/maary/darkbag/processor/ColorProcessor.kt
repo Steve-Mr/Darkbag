@@ -27,6 +27,20 @@ object ColorProcessor {
         }
     }.asCoroutineDispatcher()
 
+    val exportProcessingDispatcher = java.util.concurrent.Executors.newSingleThreadExecutor { runnable ->
+        Thread {
+            try {
+                android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_DEFAULT + 2)
+            } catch (e: Exception) {
+                // Ignore
+            }
+            runnable.run()
+        }.apply {
+            name = "HdrPlusExporter"
+            isDaemon = true
+        }
+    }.asCoroutineDispatcher()
+
     external fun initMemoryPool(width: Int, height: Int, frames: Int)
 
     external fun allocateDirectBuffer(capacity: Long): ByteBuffer?

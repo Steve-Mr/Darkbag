@@ -341,8 +341,11 @@ object ImageSaver {
                     )
                     if (dngUri != null) {
                         try {
-                            contentResolver.openOutputStream(dngUri)?.use { out ->
-                                FileInputStream(dngFile).copyTo(out)
+                            context.contentResolver.openFileDescriptor(dngUri, "w")?.use { pfd ->
+                                FileOutputStream(pfd.fileDescriptor).use { out ->
+                                    FileInputStream(dngFile).copyTo(out)
+                                    out.flush()
+                                }
                             }
 
                             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -673,30 +676,32 @@ object ImageSaver {
 
         if (uri != null) {
             try {
-                contentResolver.openOutputStream(uri, "wt")?.use { out ->
-                    if (isMotionPhoto) {
-                        val mp4File = File(motionPhotoMp4Path!!)
-                        val tempJpeg = File(context.cacheDir, "temp_motion_exif_${System.currentTimeMillis()}.jpg")
-                        try {
-                            FileOutputStream(tempJpeg).use { writeData(it) }
-                            if (writeExifMetadata) {
-                                writeMetadataToExifFile(tempJpeg, finalEditConfig, captureMetadata)
+                context.contentResolver.openFileDescriptor(uri, "w")?.use { pfd ->
+                    FileOutputStream(pfd.fileDescriptor).use { out ->
+                        if (isMotionPhoto) {
+                            val mp4File = File(motionPhotoMp4Path!!)
+                            val tempJpeg = File(context.cacheDir, "temp_motion_exif_${System.currentTimeMillis()}.jpg")
+                            try {
+                                FileOutputStream(tempJpeg).use { writeData(it) }
+                                if (writeExifMetadata) {
+                                    writeMetadataToExifFile(tempJpeg, finalEditConfig, captureMetadata)
+                                }
+                                val jpegBytes = tempJpeg.readBytes()
+                                top.maary.darkbag.motionphoto.MotionPhotoXmpWriter.writeMotionPhoto(
+                                    jpegBytes = jpegBytes,
+                                    mp4File = mp4File,
+                                    presentationTimestampUs = motionPhotoStillPtsUs,
+                                    outputStream = out
+                                )
+                            } finally {
+                                tempJpeg.delete()
+                                mp4File.delete()
                             }
-                            val jpegBytes = tempJpeg.readBytes()
-                            top.maary.darkbag.motionphoto.MotionPhotoXmpWriter.writeMotionPhoto(
-                                jpegBytes = jpegBytes,
-                                mp4File = mp4File,
-                                presentationTimestampUs = motionPhotoStillPtsUs,
-                                outputStream = out
-                            )
-                        } finally {
-                            tempJpeg.delete()
-                            mp4File.delete()
+                        } else {
+                            writeData(out)
                         }
-                    } else {
-                        writeData(out)
+                        out.flush()
                     }
-                    out.flush()
                 }
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     val finalValues = ContentValues().apply {
