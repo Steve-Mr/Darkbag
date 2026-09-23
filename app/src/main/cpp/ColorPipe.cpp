@@ -1602,7 +1602,7 @@ bool write_dng(
     TIFFSetField(tif, TIFFTAG_IMAGEWIDTH, width);
     TIFFSetField(tif, TIFFTAG_IMAGELENGTH, height);
     TIFFSetField(tif, TIFFTAG_BITSPERSAMPLE, 16);
-    TIFFSetField(tif, TIFFTAG_COMPRESSION, COMPRESSION_DEFLATE);
+    TIFFSetField(tif, TIFFTAG_COMPRESSION, COMPRESSION_NONE);
 
     uint16_t tiffOrientation = 1;
     switch (orientation) {
@@ -1622,7 +1622,7 @@ bool write_dng(
 
     static const uint8_t dng_version[] = {1, 4, 0, 0};
     TIFFSetField(tif, TIFFTAG_DNGVERSION, dng_version);
-    static const uint8_t dng_backward_version[] = {1, 1, 0, 0};
+    static const uint8_t dng_backward_version[] = {1, 4, 0, 0};
     TIFFSetField(tif, TIFFTAG_DNGBACKWARDVERSION, dng_backward_version);
     TIFFSetField(tif, TIFFTAG_UNIQUECAMERAMODEL, metadata.uniqueCameraModel.c_str());
 
