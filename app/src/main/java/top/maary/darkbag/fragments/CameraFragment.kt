@@ -1972,7 +1972,8 @@ class CameraFragment : Fragment() {
                     calibrationIlluminant1 = singleCalib.calibrationIlluminant1,
                     calibrationIlluminant2 = singleCalib.calibrationIlluminant2,
                     neutralColorPoint = singleCalib.neutralColorPoint,
-                    timing = timing
+                    timing = timing,
+                    dngCompressionMode = prefs.getInt(SettingsFragment.KEY_DNG_COMPRESSION_MODE, 0)
                 )
                 top.maary.darkbag.processor.HdrPlusRequestManager.enqueue(request)
                 val serviceIntent = android.content.Intent(context, top.maary.darkbag.processor.HdrPlusProcessingService::class.java)
@@ -3627,7 +3628,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         calibrationIlluminant1 = burstCalib.calibrationIlluminant1,
                         calibrationIlluminant2 = burstCalib.calibrationIlluminant2,
                         neutralColorPoint = burstCalib.neutralColorPoint,
-                        timing = timing
+                        timing = timing,
+                        dngCompressionMode = prefs.getInt(SettingsFragment.KEY_DNG_COMPRESSION_MODE, 0)
                     )
                     top.maary.darkbag.processor.HdrPlusRequestManager.enqueue(request)
                     val serviceIntent = android.content.Intent(context, top.maary.darkbag.processor.HdrPlusProcessingService::class.java)

@@ -137,7 +137,8 @@ object ColorProcessor {
         forwardMatrix2: FloatArray? = null,
         calibrationIlluminant1: Int = 21,
         calibrationIlluminant2: Int = 17,
-        neutralColorPoint: FloatArray? = null
+        neutralColorPoint: FloatArray? = null,
+        dngCompressionMode: Int = 0
     ): Int
 
     /**
@@ -210,7 +211,8 @@ object ColorProcessor {
         faithfulHighlights: Boolean = false,
         debugStats: LongArray? = null,
         outJpgFd: Int = -1,
-        outDngFd: Int = -1
+        outDngFd: Int = -1,
+        dngCompressionMode: Int = 0
     ): Int
 
     external fun processHdrPlus(
@@ -249,6 +251,7 @@ object ColorProcessor {
         forwardMatrix2: FloatArray? = null,
         calibrationIlluminant1: Int = 21,
         calibrationIlluminant2: Int = 17,
-        neutralColorPoint: FloatArray? = null
+        neutralColorPoint: FloatArray? = null,
+        dngCompressionMode: Int = 0
     ): Int
 }

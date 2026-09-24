@@ -400,7 +400,8 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
     jboolean faithfulHighlights,
     jlongArray debugStats,
     jint outJpgFd,
-    jint outDngFd
+    jint outDngFd,
+    jint dngCompressionMode
 ) {
     LOGD("Native exportHdrPlus started (enableMemoryColor=%d, colorEngineMode=%d, faithful=%d).", enableMemoryColor, colorEngineMode, faithfulHighlights);
 
@@ -459,11 +460,11 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
     jlong jpgMs = 0;
 
     if (outDngFd >= 0 || dng_path_cstr) {
-        LOGD("Exporting DNG to %s (outDngFd=%d)", dng_path_cstr ? dng_path_cstr : "FD", outDngFd);
+        LOGD("Exporting DNG to %s (outDngFd=%d, mode=%d)", dng_path_cstr ? dng_path_cstr : "FD", outDngFd, dngCompressionMode);
         auto dngStart = std::chrono::high_resolution_clock::now();
         float baselineExposure = (digitalGain > 0.0f) ? std::log2(digitalGain) : 0.0f;
         write_dng(dng_path_cstr, width, height, finalImage.data(), 1, width, width*height, kMax16BitValue, ccmVec, meta, orientation, (bool)mirror, baselineExposure, wbVec.data(),
-                  cm1Ptr, cm2Ptr, fm1Ptr, fm2Ptr, (int)calibrationIlluminant1, (int)calibrationIlluminant2, neutralPtr, outDngFd);
+                  cm1Ptr, cm2Ptr, fm1Ptr, fm2Ptr, (int)calibrationIlluminant1, (int)calibrationIlluminant2, neutralPtr, outDngFd, (int)dngCompressionMode);
         dngMs = (jlong)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - dngStart).count();
     }
 
@@ -515,7 +516,8 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
     jfloatArray forwardMatrix2,
     jint calibrationIlluminant1,
     jint calibrationIlluminant2,
-    jfloatArray neutralColorPoint
+    jfloatArray neutralColorPoint,
+    jint dngCompressionMode
 ) {
     LOGD("Native processHdrPlus started (enableMemoryColor=%d, colorEngineMode=%d).", enableMemoryColor, colorEngineMode);
     (void)useSensorColorMatrix;
@@ -717,7 +719,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
         if (!dngPathStr.empty()) {
             float baselineExposure = (digitalGain > 0.0f) ? std::log2(digitalGain) : 0.0f;
             write_dng(dngPathStr.c_str(), width, height, raw_ptr, stride_x, stride_y, stride_c, kMax16BitValue, ccmVec, meta, orientation, (bool)mirror, baselineExposure, wbVec.data(),
-                      cm1Ptr, cm2Ptr, fm1Ptr, fm2Ptr, (int)calibrationIlluminant1, (int)calibrationIlluminant2, neutralPtr);
+                      cm1Ptr, cm2Ptr, fm1Ptr, fm2Ptr, (int)calibrationIlluminant1, (int)calibrationIlluminant2, neutralPtr, -1, (int)dngCompressionMode);
         }
 
         if (!jpgPathStr.empty()) {
@@ -757,7 +759,8 @@ Java_top_maary_darkbag_processor_ColorProcessor_processSingleFrameRaw(
     jfloatArray forwardMatrix2,
     jint calibrationIlluminant1,
     jint calibrationIlluminant2,
-    jfloatArray neutralColorPoint
+    jfloatArray neutralColorPoint,
+    jint dngCompressionMode
 ) {
     LOGD("Native processSingleFrameRaw started (enableMemoryColor=%d, colorEngineMode=%d).", enableMemoryColor, colorEngineMode);
 
@@ -777,6 +780,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processSingleFrameRaw(
         forwardMatrix2,
         calibrationIlluminant1,
         calibrationIlluminant2,
-        neutralColorPoint
+        neutralColorPoint,
+        dngCompressionMode
     );
 }

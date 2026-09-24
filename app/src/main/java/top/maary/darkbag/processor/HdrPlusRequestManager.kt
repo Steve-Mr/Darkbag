@@ -60,7 +60,8 @@ data class HdrPlusRequest(
     val calibrationIlluminant1: Int = 21,
     val calibrationIlluminant2: Int = 17,
     val neutralColorPoint: FloatArray? = null,
-    val timing: top.maary.darkbag.models.StandardTimingTracker? = null
+    val timing: top.maary.darkbag.models.StandardTimingTracker? = null,
+    val dngCompressionMode: Int = 0
 )
 
 object HdrPlusRequestManager {

@@ -98,7 +98,8 @@ class HdrPlusProcessingService : LifecycleService() {
                     req.forwardMatrix2,
                     req.calibrationIlluminant1,
                     req.calibrationIlluminant2,
-                    req.neutralColorPoint
+                    req.neutralColorPoint,
+                    req.dngCompressionMode
                 )
             } else {
                 ColorProcessor.processHdrPlus(
@@ -128,7 +129,8 @@ class HdrPlusProcessingService : LifecycleService() {
                     req.forwardMatrix2,
                     req.calibrationIlluminant1,
                     req.calibrationIlluminant2,
-                    req.neutralColorPoint
+                    req.neutralColorPoint,
+                    req.dngCompressionMode
                 )
             }
 
@@ -199,7 +201,8 @@ class HdrPlusProcessingService : LifecycleService() {
                                     neutralColorPoint = req.neutralColorPoint,
                                     debugStats = debugStats,
                                     outJpgFd = pfdJpg?.first?.fd ?: -1,
-                                    outDngFd = pfdDng?.first?.fd ?: -1
+                                    outDngFd = pfdDng?.first?.fd ?: -1,
+                                    dngCompressionMode = req.dngCompressionMode
                                 )
                             } finally {
                                 if (pfdJpg != null) {
