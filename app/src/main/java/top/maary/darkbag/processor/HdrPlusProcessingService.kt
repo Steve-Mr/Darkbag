@@ -209,7 +209,20 @@ class HdrPlusProcessingService : LifecycleService() {
                                     top.maary.darkbag.utils.ImageSaver.finalizeMediaStorePendingPfd(
                                         context = this@HdrPlusProcessingService,
                                         pfdPair = pfdJpg,
-                                        success = true
+                                        success = true,
+                                        editConfig = req.editConfig,
+                                        captureMetadata = req.metadata
+                                    )
+                                    top.maary.darkbag.processor.ColorProcessor.backgroundSaveFlow.tryEmit(
+                                        top.maary.darkbag.processor.ColorProcessor.BackgroundSaveEvent(
+                                            baseName = req.baseName,
+                                            dngPath = if (req.saveRaw) req.linearDngPath else null,
+                                            jpgPath = req.fullResJpgPath,
+                                            targetUri = pfdJpg.second.toString(),
+                                            zoomFactor = req.zoomFactor,
+                                            orientation = req.orientation,
+                                            saveJpg = req.saveJpg
+                                        )
                                     )
                                 }
                                 if (pfdDng != null) {
