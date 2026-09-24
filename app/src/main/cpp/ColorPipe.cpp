@@ -11,8 +11,57 @@
 
 
 #include <turbojpeg.h>
+#include <jpeglib.h>
 
 #include <unistd.h>
+
+static std::vector<unsigned char> encode_lossless_jpeg16(const unsigned short* planarData, int width, int height, int stride_x, int stride_y, int stride_c) {
+    std::vector<unsigned char> ljpeg_bytes;
+    struct jpeg_compress_struct cinfo;
+    struct jpeg_error_mgr jerr;
+
+    cinfo.err = jpeg_std_error(&jerr);
+    jpeg_create_compress(&cinfo);
+
+    unsigned char* outbuffer = NULL;
+    unsigned long outsize = 0;
+    jpeg_mem_dest(&cinfo, &outbuffer, &outsize);
+
+    cinfo.image_width = width;
+    cinfo.image_height = height;
+    cinfo.input_components = 3;
+    cinfo.in_color_space = JCS_RGB;
+
+    jpeg_set_defaults(&cinfo);
+    cinfo.data_precision = 16;
+    jpeg_enable_lossless(&cinfo, 1, 0);
+
+    jpeg_start_compress(&cinfo, TRUE);
+
+    std::vector<J16SAMPLE> rowBuffer(static_cast<size_t>(width) * 3);
+    while (cinfo.next_scanline < cinfo.image_height) {
+        int y = cinfo.next_scanline;
+        for (int x = 0; x < width; x++) {
+            size_t r_idx = (size_t)y * stride_y + (size_t)x * stride_x + 0 * stride_c;
+            size_t g_idx = (size_t)y * stride_y + (size_t)x * stride_x + 1 * stride_c;
+            size_t b_idx = (size_t)y * stride_y + (size_t)x * stride_x + 2 * stride_c;
+            rowBuffer[x * 3 + 0] = planarData[r_idx];
+            rowBuffer[x * 3 + 1] = planarData[g_idx];
+            rowBuffer[x * 3 + 2] = planarData[b_idx];
+        }
+        J16SAMPROW row_pointer[1] = { rowBuffer.data() };
+        jpeg16_write_scanlines(&cinfo, row_pointer, 1);
+    }
+
+    jpeg_finish_compress(&cinfo);
+
+    if (outbuffer && outsize > 0) {
+        ljpeg_bytes.assign(outbuffer, outbuffer + outsize);
+        free(outbuffer);
+    }
+    jpeg_destroy_compress(&cinfo);
+    return ljpeg_bytes;
+}
 
 static bool write_jpeg_turbo_fd(int fd, int width, int height, int subsamp, const unsigned char* buffer, int quality) {
     if (fd < 0) return false;
@@ -1577,7 +1626,8 @@ bool write_dng(
     int calibIllum1,
     int calibIllum2,
     const float* neutralColorPoint,
-    int outFd
+    int outFd,
+    int dngCompressionMode
 ) {
     static std::once_flag extender_flag;
     std::call_once(extender_flag, [](){
@@ -1599,10 +1649,70 @@ bool write_dng(
 
     if (!tif) return false;
 
+    // Pre-encode preview images first to calculate SubIFDs offsets
+    const struct PreviewSpec {
+        int targetLongEdge;
+        const char* description;
+    } previewSpecs[] = {
+        {512, "Darkbag Embedded JPEG Thumbnail"},
+        {2048, "Darkbag Embedded JPEG Preview"},
+    };
+
+    Matrix3x3 sensor_to_srgb = {0};
+    bool has_sensor_to_srgb = false;
+    if (ccm.size() >= 9) {
+        sensor_to_srgb = {
+            ccm[0], ccm[1], ccm[2],
+            ccm[3], ccm[4], ccm[5],
+            ccm[6], ccm[7], ccm[8]
+        };
+        has_sensor_to_srgb = true;
+    }
+
+    struct PreEncodedPreview {
+        int w, h;
+        std::vector<unsigned char> jpegBytes;
+        const char* desc;
+    };
+    std::vector<PreEncodedPreview> encodedPreviews;
+    encodedPreviews.reserve(2);
+
+    for (const auto& spec : previewSpecs) {
+        int pw = 0, ph = 0;
+        std::vector<unsigned char> previewRgb8 = make_preview_rgb8(
+            planarData, stride_x, stride_y, stride_c, width, height, spec.targetLongEdge, orientation, mirror, std::pow(2.0f, baselineExposure), pw, ph, wbVec, has_sensor_to_srgb ? &sensor_to_srgb : nullptr
+        );
+        if (!previewRgb8.empty()) {
+            std::vector<unsigned char> jpegPreview = encode_rgb8_jpeg(previewRgb8, pw, ph, 82);
+            if (!jpegPreview.empty()) {
+                encodedPreviews.push_back({pw, ph, std::move(jpegPreview), spec.description});
+            }
+        }
+    }
+
+    // IFD0 (Main RAW Image) Configuration
     TIFFSetField(tif, TIFFTAG_IMAGEWIDTH, width);
     TIFFSetField(tif, TIFFTAG_IMAGELENGTH, height);
     TIFFSetField(tif, TIFFTAG_BITSPERSAMPLE, 16);
-    TIFFSetField(tif, TIFFTAG_COMPRESSION, COMPRESSION_DEFLATE);
+
+    // Set compression and backward version based on mode
+    // dngCompressionMode: 0 = Lossless JPEG (COMPRESSION_JPEG = 7), 1 = Adobe Deflate (COMPRESSION_ADOBE_DEFLATE = 8), 2 = Uncompressed (COMPRESSION_NONE = 1)
+    uint16_t tiffCompression = COMPRESSION_JPEG;
+    uint8_t backwardVersion[4] = {1, 1, 0, 0};
+
+    if (dngCompressionMode == 1) {
+        tiffCompression = COMPRESSION_ADOBE_DEFLATE;
+        backwardVersion[0] = 1; backwardVersion[1] = 4; backwardVersion[2] = 0; backwardVersion[3] = 0;
+    } else if (dngCompressionMode == 2) {
+        tiffCompression = COMPRESSION_NONE;
+        backwardVersion[0] = 1; backwardVersion[1] = 1; backwardVersion[2] = 0; backwardVersion[3] = 0;
+    } else {
+        // Default Lossless JPEG
+        tiffCompression = COMPRESSION_JPEG;
+        backwardVersion[0] = 1; backwardVersion[1] = 1; backwardVersion[2] = 0; backwardVersion[3] = 0;
+    }
+
+    TIFFSetField(tif, TIFFTAG_COMPRESSION, tiffCompression);
 
     uint16_t tiffOrientation = 1;
     switch (orientation) {
@@ -1615,15 +1725,15 @@ bool write_dng(
     TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_LINEAR_RAW);
     TIFFSetField(tif, TIFFTAG_SAMPLESPERPIXEL, 3);
     TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG);
-    TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, 64);
+    TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, height); // Single strip for raw
     TIFFSetField(tif, TIFFTAG_SUBFILETYPE, 0);
+
 
     write_tiff_metadata(tif, &metadata);
 
     static const uint8_t dng_version[] = {1, 4, 0, 0};
     TIFFSetField(tif, TIFFTAG_DNGVERSION, dng_version);
-    static const uint8_t dng_backward_version[] = {1, 1, 0, 0};
-    TIFFSetField(tif, TIFFTAG_DNGBACKWARDVERSION, dng_backward_version);
+    TIFFSetField(tif, TIFFTAG_DNGBACKWARDVERSION, backwardVersion);
     TIFFSetField(tif, TIFFTAG_UNIQUECAMERAMODEL, metadata.uniqueCameraModel.c_str());
 
     uint32_t white_level_val = (uint32_t)whiteLevel;
@@ -1644,17 +1754,6 @@ bool write_dng(
     }
     TIFFSetField(tif, TIFFTAG_ASSHOTNEUTRAL, 3, as_shot_neutral);
 
-    Matrix3x3 sensor_to_srgb = {0};
-    bool has_sensor_to_srgb = false;
-    if (ccm.size() >= 9) {
-        sensor_to_srgb = {
-            ccm[0], ccm[1], ccm[2],
-            ccm[3], ccm[4], ccm[5],
-            ccm[6], ccm[7], ccm[8]
-        };
-        has_sensor_to_srgb = true;
-    }
-
     if (colorMatrix1 != nullptr) {
         TIFFSetField(tif, TIFFTAG_COLORMATRIX1, 9, colorMatrix1);
         const float* cm2 = colorMatrix2 ? colorMatrix2 : colorMatrix1;
@@ -1670,18 +1769,12 @@ bool write_dng(
         float analogBalance[3] = {1.0f, 1.0f, 1.0f};
         TIFFSetField(tif, TIFFTAG_ANALOGBALANCE, 3, analogBalance);
     } else {
-        // In Android Camera2 API, CCM maps White-Balanced Sensor RGB -> sRGB Linear.
-        // In Adobe DNG Specification, ColorMatrix1 maps XYZ -> Un-white-balanced Raw Sensor Space.
-        // Therefore:
-        // RawSensorRGB = diag(AsShotNeutral) * CCM^-1 * sRGB
-        // ColorMatrix1 = diag(AsShotNeutral) * Inverse(CCM) * M_XYZ_to_sRGB_D65
-        Matrix3x3 colorMatrix1Fallback = M_XYZ_to_sRGB_D65; // Fallback
+        Matrix3x3 colorMatrix1Fallback = M_XYZ_to_sRGB_D65;
         if (has_sensor_to_srgb) {
             Matrix3x3 srgb_to_sensor = inverse_matrix(sensor_to_srgb);
             colorMatrix1Fallback = multiply(srgb_to_sensor, M_XYZ_to_sRGB_D65);
         }
         
-        // Scale each row by AsShotNeutral to map XYZ into Raw Sensor space
         for (int r = 0; r < 3; r++) {
             colorMatrix1Fallback.m[r * 3 + 0] *= as_shot_neutral[r];
             colorMatrix1Fallback.m[r * 3 + 1] *= as_shot_neutral[r];
@@ -1705,22 +1798,33 @@ bool write_dng(
     unsigned short iso_short = (unsigned short)metadata.iso;
     TIFFSetField(tif, TIFFTAG_ISOSPEEDRATINGS, (uint16_t)1, &iso_short);
 
-    std::vector<unsigned short> rowBuffer(width * 3);
-
-    for (int y = 0; y < height; y++) {
-        for (int x = 0; x < width; x++) {
-             size_t r_idx = (size_t)y*stride_y + (size_t)x*stride_x + 0*stride_c;
-             size_t g_idx = (size_t)y*stride_y + (size_t)x*stride_x + 1*stride_c;
-             size_t b_idx = (size_t)y*stride_y + (size_t)x*stride_x + 2*stride_c;
-             
-             // Keep pure Sensor Linear data in DNG without destructive pre-multiplied WB clamping
-             rowBuffer[x*3+0] = planarData[r_idx];
-             rowBuffer[x*3+1] = planarData[g_idx];
-             rowBuffer[x*3+2] = planarData[b_idx];
-        }
-        if (TIFFWriteScanline(tif, rowBuffer.data(), y, 0) < 0) {
+    // Write Main RAW Data based on selected compression mode
+    if (dngCompressionMode == 0) {
+        // Mode 0: Lossless JPEG 16-bit
+        std::vector<unsigned char> ljpegData = encode_lossless_jpeg16(planarData, width, height, stride_x, stride_y, stride_c);
+        if (ljpegData.empty() || TIFFWriteRawStrip(tif, 0, ljpegData.data(), static_cast<tmsize_t>(ljpegData.size())) < 0) {
+            LOGE("Failed to write Lossless JPEG raw strip");
             TIFFClose(tif);
             return false;
+        }
+    } else {
+        // Mode 1 (Adobe Deflate) & Mode 2 (Uncompressed): Scanline writing
+        TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, 64);
+        std::vector<unsigned short> rowBuffer(width * 3);
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                 size_t r_idx = (size_t)y*stride_y + (size_t)x*stride_x + 0*stride_c;
+                 size_t g_idx = (size_t)y*stride_y + (size_t)x*stride_x + 1*stride_c;
+                 size_t b_idx = (size_t)y*stride_y + (size_t)x*stride_x + 2*stride_c;
+
+                 rowBuffer[x*3+0] = planarData[r_idx];
+                 rowBuffer[x*3+1] = planarData[g_idx];
+                 rowBuffer[x*3+2] = planarData[b_idx];
+            }
+            if (TIFFWriteScanline(tif, rowBuffer.data(), y, 0) < 0) {
+                TIFFClose(tif);
+                return false;
+            }
         }
     }
 
@@ -1729,48 +1833,25 @@ bool write_dng(
         return false;
     }
 
-    const struct PreviewSpec {
-        int targetLongEdge;
-        const char* description;
-    } previewSpecs[] = {
-        {512, "Darkbag Embedded JPEG Thumbnail"},
-        {2048, "Darkbag Embedded JPEG Preview"},
-    };
-
-    for (const auto& spec : previewSpecs) {
-        int previewWidth = 0, previewHeight = 0;
-        std::vector<unsigned char> previewRgb8 = make_preview_rgb8(
-            planarData, stride_x, stride_y, stride_c, width, height, spec.targetLongEdge, orientation, mirror, std::pow(2.0f, baselineExposure), previewWidth, previewHeight, wbVec, has_sensor_to_srgb ? &sensor_to_srgb : nullptr
-        );
-
-        if (previewRgb8.empty()) {
-            TIFFClose(tif);
-            return false;
-        }
-
-        std::vector<unsigned char> jpegPreview = encode_rgb8_jpeg(previewRgb8, previewWidth, previewHeight, 82);
-        if (jpegPreview.empty()) {
-            TIFFClose(tif);
-            return false;
-        }
-
+    // Write SubIFDs for previews
+    for (const auto& prev : encodedPreviews) {
         TIFFSetField(tif, TIFFTAG_SUBFILETYPE, FILETYPE_REDUCEDIMAGE);
-        TIFFSetField(tif, TIFFTAG_IMAGEWIDTH, previewWidth);
-        TIFFSetField(tif, TIFFTAG_IMAGELENGTH, previewHeight);
+        TIFFSetField(tif, TIFFTAG_IMAGEWIDTH, prev.w);
+        TIFFSetField(tif, TIFFTAG_IMAGELENGTH, prev.h);
         TIFFSetField(tif, TIFFTAG_BITSPERSAMPLE, 8);
         TIFFSetField(tif, TIFFTAG_COMPRESSION, COMPRESSION_JPEG);
         TIFFSetField(tif, TIFFTAG_ORIENTATION, ORIENTATION_TOPLEFT);
         TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_YCBCR);
         TIFFSetField(tif, TIFFTAG_SAMPLESPERPIXEL, 3);
         TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG);
-        TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, previewHeight);
+        TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, prev.h);
         TIFFSetField(tif, TIFFTAG_JPEGCOLORMODE, JPEGCOLORMODE_RGB);
         TIFFSetField(tif, TIFFTAG_MAKE, metadata.make.c_str());
         TIFFSetField(tif, TIFFTAG_MODEL, metadata.model.c_str());
         TIFFSetField(tif, TIFFTAG_SOFTWARE, metadata.software.c_str());
-        TIFFSetField(tif, TIFFTAG_IMAGEDESCRIPTION, spec.description);
+        TIFFSetField(tif, TIFFTAG_IMAGEDESCRIPTION, prev.desc);
 
-        if (TIFFWriteRawStrip(tif, 0, const_cast<unsigned char*>(jpegPreview.data()), static_cast<tmsize_t>(jpegPreview.size())) < 0) {
+        if (TIFFWriteRawStrip(tif, 0, const_cast<unsigned char*>(prev.jpegBytes.data()), static_cast<tmsize_t>(prev.jpegBytes.size())) < 0) {
             TIFFClose(tif);
             return false;
         }

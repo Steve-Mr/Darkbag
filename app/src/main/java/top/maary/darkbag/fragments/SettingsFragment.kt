@@ -289,6 +289,16 @@ class SettingsFragment : Fragment() {
             prefs.edit().putInt(KEY_COLOR_ENGINE_MODE, position).apply()
         }
 
+        // DNG Compression Mode
+        val dngCompressionAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, DNG_COMPRESSION_MODES)
+        binding.menuDngCompression.setAdapter(dngCompressionAdapter)
+        val savedDngCompressionIndex = prefs.getInt(KEY_DNG_COMPRESSION_MODE, 0)
+        val safeDngCompressionIndex = savedDngCompressionIndex.coerceIn(0, DNG_COMPRESSION_MODES.size - 1)
+        binding.menuDngCompression.setText(DNG_COMPRESSION_MODES[safeDngCompressionIndex], false)
+        binding.menuDngCompression.setOnItemClickListener { _, _, position, _ ->
+            prefs.edit().putInt(KEY_DNG_COMPRESSION_MODE, position).apply()
+        }
+
         // Shutter Long-Press Action
         val shutterLongPressAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, SHUTTER_LONG_PRESS_OPTIONS)
         binding.menuShutterLongPress.setAdapter(shutterLongPressAdapter)
@@ -869,6 +879,8 @@ class SettingsFragment : Fragment() {
         const val KEY_MOTION_PHOTO = "motion_photo_enabled"
         const val KEY_SAVE_LOCATION = "save_location_enabled"
         const val KEY_SAVE_RAW = "save_raw"
+        const val KEY_DNG_COMPRESSION_MODE = "dng_compression_mode"
+        val DNG_COMPRESSION_MODES = listOf("Lossless JPEG (Default)", "Adobe Deflate", "Uncompressed")
         const val KEY_JPG_STORAGE_URI = "jpg_storage_uri"
         const val KEY_JPG_STORAGE_URI_NAME = "jpg_storage_uri_name"
         const val KEY_RAW_STORAGE_URI = "raw_storage_uri"

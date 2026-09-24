@@ -891,6 +891,23 @@
                         <Space android:layout_width="match_parent" android:layout_height="@dimen/spacing_small" />
                     </LinearLayout>
 
+                    <Space android:layout_width="match_parent" android:layout_height="@dimen/spacing_small" />
+
+                    <com.google.android.material.textfield.TextInputLayout
+                        android:id="@+id/layout_dng_compression_menu"
+                        style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:hint="DNG Compression Mode">
+
+                        <AutoCompleteTextView
+                            android:id="@+id/menu_dng_compression"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:inputType="none"
+                            android:text="Lossless JPEG (Default)" />
+                    </com.google.android.material.textfield.TextInputLayout>
+
 
                     <com.google.android.material.checkbox.MaterialCheckBox
                         android:id="@+id/cb_save_raw"

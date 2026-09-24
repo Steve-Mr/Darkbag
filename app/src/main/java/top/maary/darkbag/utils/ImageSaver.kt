@@ -57,12 +57,17 @@ object ImageSaver {
     fun finalizeMediaStorePendingPfd(
         context: Context,
         pfdPair: Pair<android.os.ParcelFileDescriptor, Uri>,
-        success: Boolean
+        success: Boolean,
+        editConfig: EditConfig? = null,
+        captureMetadata: CaptureMetadata? = null
     ) {
         val (pfd, uri) = pfdPair
         try {
             pfd.close()
             if (success) {
+                if (editConfig != null || captureMetadata != null) {
+                    writeMetadataToExif(context, uri, editConfig, captureMetadata)
+                }
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     val values = ContentValues().apply {
                         put(MediaStore.MediaColumns.IS_PENDING, 0)

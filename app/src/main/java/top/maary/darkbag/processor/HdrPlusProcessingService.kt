@@ -98,7 +98,8 @@ class HdrPlusProcessingService : LifecycleService() {
                     req.forwardMatrix2,
                     req.calibrationIlluminant1,
                     req.calibrationIlluminant2,
-                    req.neutralColorPoint
+                    req.neutralColorPoint,
+                    req.dngCompressionMode
                 )
             } else {
                 ColorProcessor.processHdrPlus(
@@ -128,7 +129,8 @@ class HdrPlusProcessingService : LifecycleService() {
                     req.forwardMatrix2,
                     req.calibrationIlluminant1,
                     req.calibrationIlluminant2,
-                    req.neutralColorPoint
+                    req.neutralColorPoint,
+                    req.dngCompressionMode
                 )
             }
 
@@ -199,14 +201,28 @@ class HdrPlusProcessingService : LifecycleService() {
                                     neutralColorPoint = req.neutralColorPoint,
                                     debugStats = debugStats,
                                     outJpgFd = pfdJpg?.first?.fd ?: -1,
-                                    outDngFd = pfdDng?.first?.fd ?: -1
+                                    outDngFd = pfdDng?.first?.fd ?: -1,
+                                    dngCompressionMode = req.dngCompressionMode
                                 )
                             } finally {
                                 if (pfdJpg != null) {
                                     top.maary.darkbag.utils.ImageSaver.finalizeMediaStorePendingPfd(
                                         context = this@HdrPlusProcessingService,
                                         pfdPair = pfdJpg,
-                                        success = true
+                                        success = true,
+                                        editConfig = req.editConfig,
+                                        captureMetadata = req.metadata
+                                    )
+                                    top.maary.darkbag.processor.ColorProcessor.backgroundSaveFlow.tryEmit(
+                                        top.maary.darkbag.processor.ColorProcessor.BackgroundSaveEvent(
+                                            baseName = req.baseName,
+                                            dngPath = if (req.saveRaw) req.linearDngPath else null,
+                                            jpgPath = req.fullResJpgPath,
+                                            targetUri = pfdJpg.second.toString(),
+                                            zoomFactor = req.zoomFactor,
+                                            orientation = req.orientation,
+                                            saveJpg = req.saveJpg
+                                        )
                                     )
                                 }
                                 if (pfdDng != null) {

@@ -144,7 +144,8 @@ bool write_dng(
     int calibIllum1 = 21,
     int calibIllum2 = 17,
     const float* neutralColorPoint = nullptr,
-    int outFd = -1
+    int outFd = -1,
+    int dngCompressionMode = 0
 );
 
 bool write_bmp(const char* filename, int width, int height, const unsigned short* planarData, int stride_x, int stride_y, int stride_c);
