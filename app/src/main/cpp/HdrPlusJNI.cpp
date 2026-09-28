@@ -271,6 +271,31 @@ Java_top_maary_darkbag_processor_ColorProcessor_allocateDirectBuffer(JNIEnv* env
 }
 
 extern "C" JNIEXPORT void JNICALL
+Java_top_maary_darkbag_processor_ColorProcessor_copyBayerWithStride(
+    JNIEnv* env, jobject /* this */, jobject srcBuffer, jint srcPos, jobject dstBuffer, jint dstPos, jint width, jint height, jint rowStride, jint pixelStride
+) {
+    if (!srcBuffer || !dstBuffer) return;
+    uint8_t* srcBase = (uint8_t*)env->GetDirectBufferAddress(srcBuffer);
+    uint8_t* dstBase = (uint8_t*)env->GetDirectBufferAddress(dstBuffer);
+    if (!srcBase || !dstBase) return;
+
+    uint8_t* src = srcBase + srcPos;
+    uint8_t* dst = dstBase + dstPos;
+
+    const size_t rowLength = static_cast<size_t>(width) * pixelStride;
+    if (rowStride == (jint)rowLength) {
+        memcpy(dst, src, rowLength * height);
+    } else {
+        #pragma omp parallel for
+        for (int y = 0; y < height; ++y) {
+            const uint8_t* srcRow = src + static_cast<size_t>(y) * rowStride;
+            uint8_t* dstRow = dst + static_cast<size_t>(y) * rowLength;
+            memcpy(dstRow, srcRow, rowLength);
+        }
+    }
+}
+
+extern "C" JNIEXPORT void JNICALL
 Java_top_maary_darkbag_processor_ColorProcessor_freeDirectBuffer(JNIEnv* env, jobject /* this */, jobject buffer) {
     if (!buffer) return;
     void* ptr = env->GetDirectBufferAddress(buffer);
@@ -372,7 +397,11 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
     jint calibrationIlluminant1,
     jint calibrationIlluminant2,
     jfloatArray neutralColorPoint,
-    jboolean faithfulHighlights
+    jboolean faithfulHighlights,
+    jlongArray debugStats,
+    jint outJpgFd,
+    jint outDngFd,
+    jint dngCompressionMode
 ) {
     LOGD("Native exportHdrPlus started (enableMemoryColor=%d, colorEngineMode=%d, faithful=%d).", enableMemoryColor, colorEngineMode, faithfulHighlights);
 
@@ -419,26 +448,50 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
                              cm1Ptr, cm2Ptr, fm1Ptr, fm2Ptr, neutralPtr);
 
     const char* lut_path_cstr = (lutPath) ? env->GetStringUTFChars(lutPath, 0) : nullptr;
-    LUT3D lut; if (lut_path_cstr) { lut = load_lut(lut_path_cstr); env->ReleaseStringUTFChars(lutPath, lut_path_cstr); }
+    LUT3D lut; if (lut_path_cstr) { auto cached = get_cached_lut(lut_path_cstr); if (cached) lut = *cached; env->ReleaseStringUTFChars(lutPath, lut_path_cstr); }
 
     const char* jpg_path_cstr = (jpgPath) ? env->GetStringUTFChars(jpgPath, 0) : nullptr;
     const char* dng_path_cstr = (dngPath) ? env->GetStringUTFChars(dngPath, 0) : nullptr;
 
     ImageMetadata meta = metadataFromJava(env, metadata);
 
-    if (dng_path_cstr) {
-        LOGD("Exporting DNG to %s", dng_path_cstr);
+    auto exportStart = std::chrono::high_resolution_clock::now();
+    jlong dngMs = 0;
+    jlong jpgMs = 0;
+
+    bool dngOk = true;
+    if (outDngFd >= 0 || dng_path_cstr) {
+        LOGD("Exporting DNG to %s (outDngFd=%d, mode=%d)", dng_path_cstr ? dng_path_cstr : "FD", outDngFd, dngCompressionMode);
+        auto dngStart = std::chrono::high_resolution_clock::now();
         float baselineExposure = (digitalGain > 0.0f) ? std::log2(digitalGain) : 0.0f;
-        write_dng(dng_path_cstr, width, height, finalImage.data(), 1, width, width*height, kMax16BitValue, ccmVec, meta, orientation, (bool)mirror, baselineExposure, wbVec.data(),
-                  cm1Ptr, cm2Ptr, fm1Ptr, fm2Ptr, (int)calibrationIlluminant1, (int)calibrationIlluminant2, neutralPtr);
+        dngOk = write_dng(dng_path_cstr, width, height, finalImage.data(), 1, width, width*height, kMax16BitValue, ccmVec, meta, orientation, (bool)mirror, baselineExposure, wbVec.data(),
+                          cm1Ptr, cm2Ptr, fm1Ptr, fm2Ptr, (int)calibrationIlluminant1, (int)calibrationIlluminant2, neutralPtr, outDngFd, (int)dngCompressionMode);
+        dngMs = (jlong)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - dngStart).count();
     }
 
     bool saveOk = true;
-    if (jpg_path_cstr) {
-        LOGD("Exporting JPG: JPG=%s", jpg_path_cstr);
+    if (outJpgFd >= 0 || jpg_path_cstr) {
+        LOGD("Exporting JPG: JPG=%s (outJpgFd=%d)", jpg_path_cstr ? jpg_path_cstr : "FD", outJpgFd);
+        auto jpgStart = std::chrono::high_resolution_clock::now();
         saveOk = process_and_save_image(finalImage.data(), 1, width, width*height, nullptr, 0, 0, width, height, digitalGain, targetLog, lut,
                                         exposure, contrast, saturation, highlights, shadows, whites, blacks,
-                                        jpg_path_cstr, nullptr, &meta, 1, ccmVec.data(), wbVec.data(), orientation, nullptr, 0, 0, false, 1, zoomFactor, (bool)mirror, (bool)enableMemoryColor, (int)colorEngineMode, faithfulHighlights);
+                                        jpg_path_cstr, nullptr, &meta, 1, ccmVec.data(), wbVec.data(), orientation, nullptr, 0, 0, false, 1, zoomFactor, (bool)mirror, (bool)enableMemoryColor, (int)colorEngineMode, faithfulHighlights, outJpgFd);
+        jpgMs = (jlong)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - jpgStart).count();
+    }
+
+    auto exportTotalMs = (jlong)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - exportStart).count();
+    jlong postMs = (exportTotalMs - dngMs - jpgMs > 0) ? (exportTotalMs - dngMs - jpgMs) : 0;
+
+    if (debugStats != nullptr) {
+        const jsize len = env->GetArrayLength(debugStats);
+        if (len >= 5) {
+            jlong stats[15] = {0};
+            env->GetLongArrayRegion(debugStats, 0, std::min<jsize>(len, 15), stats);
+            stats[2] = postMs;
+            stats[3] = dngMs;
+            stats[4] = jpgMs;
+            env->SetLongArrayRegion(debugStats, 0, std::min<jsize>(len, 15), stats);
+        }
     }
     if (jpgPath && jpg_path_cstr) env->ReleaseStringUTFChars(jpgPath, jpg_path_cstr);
     if (dngPath && dng_path_cstr) env->ReleaseStringUTFChars(dngPath, dng_path_cstr);
@@ -446,8 +499,9 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
     // No longer a physical file, so we don't delete anything
     // (the shared ptr cleans itself up)
 
-    LOGD("Native exportHdrPlus finished. Success=%d", saveOk);
-    return saveOk ? 0 : -2;
+    bool overallSuccess = saveOk && dngOk;
+    LOGD("Native exportHdrPlus finished. Success=%d (saveOk=%d, dngOk=%d)", overallSuccess, saveOk, dngOk);
+    return overallSuccess ? 0 : -2;
 }
 
 extern "C" JNIEXPORT jint JNICALL
@@ -464,7 +518,8 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
     jfloatArray forwardMatrix2,
     jint calibrationIlluminant1,
     jint calibrationIlluminant2,
-    jfloatArray neutralColorPoint
+    jfloatArray neutralColorPoint,
+    jint dngCompressionMode
 ) {
     LOGD("Native processHdrPlus started (enableMemoryColor=%d, colorEngineMode=%d).", enableMemoryColor, colorEngineMode);
     (void)useSensorColorMatrix;
@@ -621,7 +676,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
     if (outputBitmap) AndroidBitmap_lockPixels(env, outputBitmap, (void**)&bitmapPixels);
 
     const char* lut_path_cstr = (lutPath) ? env->GetStringUTFChars(lutPath, 0) : nullptr;
-    LUT3D lut; if (lut_path_cstr) { lut = load_lut(lut_path_cstr); env->ReleaseStringUTFChars(lutPath, lut_path_cstr); }
+    LUT3D lut; if (lut_path_cstr) { auto cached = get_cached_lut(lut_path_cstr); if (cached) lut = *cached; env->ReleaseStringUTFChars(lutPath, lut_path_cstr); }
 
     int stride_x = outputBuf.dim(0).stride(), stride_y = outputBuf.dim(1).stride(), stride_c = outputBuf.dim(2).stride();
     const uint16_t* raw_ptr = outputBuf.data();
@@ -666,7 +721,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
         if (!dngPathStr.empty()) {
             float baselineExposure = (digitalGain > 0.0f) ? std::log2(digitalGain) : 0.0f;
             write_dng(dngPathStr.c_str(), width, height, raw_ptr, stride_x, stride_y, stride_c, kMax16BitValue, ccmVec, meta, orientation, (bool)mirror, baselineExposure, wbVec.data(),
-                      cm1Ptr, cm2Ptr, fm1Ptr, fm2Ptr, (int)calibrationIlluminant1, (int)calibrationIlluminant2, neutralPtr);
+                      cm1Ptr, cm2Ptr, fm1Ptr, fm2Ptr, (int)calibrationIlluminant1, (int)calibrationIlluminant2, neutralPtr, -1, (int)dngCompressionMode);
         }
 
         if (!jpgPathStr.empty()) {
@@ -706,7 +761,8 @@ Java_top_maary_darkbag_processor_ColorProcessor_processSingleFrameRaw(
     jfloatArray forwardMatrix2,
     jint calibrationIlluminant1,
     jint calibrationIlluminant2,
-    jfloatArray neutralColorPoint
+    jfloatArray neutralColorPoint,
+    jint dngCompressionMode
 ) {
     LOGD("Native processSingleFrameRaw started (enableMemoryColor=%d, colorEngineMode=%d).", enableMemoryColor, colorEngineMode);
 
@@ -726,6 +782,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processSingleFrameRaw(
         forwardMatrix2,
         calibrationIlluminant1,
         calibrationIlluminant2,
-        neutralColorPoint
+        neutralColorPoint,
+        dngCompressionMode
     );
 }

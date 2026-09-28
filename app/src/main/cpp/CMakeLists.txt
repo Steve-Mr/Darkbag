@@ -87,7 +87,7 @@ include_directories("${LIBJPEG_TURBO_INSTALL_DIR}/include")
 set(HDRPLUS_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/hdr-plus/src")
 set(HDRPLUS_GENERATOR_SRC
     "${CMAKE_CURRENT_SOURCE_DIR}/hdrplus_pipeline_generator.cpp"
-    "${HDRPLUS_SRC_DIR}/align.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/hdrplus_align.cpp"
     "${HDRPLUS_SRC_DIR}/merge.cpp"
     "${HDRPLUS_SRC_DIR}/finish.cpp"
     "${HDRPLUS_SRC_DIR}/util.cpp"
@@ -283,6 +283,11 @@ target_link_libraries(
         -fopenmp
         -static-openmp)
 
+
+string(REPLACE "-O2" "-O3 -ffast-math" CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE}")
+string(REPLACE "-O2" "-O3 -ffast-math" CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE}")
+string(REPLACE "-O2" "-O3 -ffast-math" CMAKE_C_FLAGS_RELWITHDEBINFO "${CMAKE_C_FLAGS_RELWITHDEBINFO}")
+string(REPLACE "-O2" "-O3 -ffast-math" CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO}")
 
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fopenmp -O3 -ffast-math")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fopenmp -O3 -ffast-math")
