@@ -27,10 +27,35 @@ object ColorProcessor {
         }
     }.asCoroutineDispatcher()
 
+    val exportProcessingDispatcher = java.util.concurrent.Executors.newSingleThreadExecutor { runnable ->
+        Thread {
+            try {
+                android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_DEFAULT + 2)
+            } catch (e: Exception) {
+                // Ignore
+            }
+            runnable.run()
+        }.apply {
+            name = "HdrPlusExporter"
+            isDaemon = true
+        }
+    }.asCoroutineDispatcher()
+
     external fun initMemoryPool(width: Int, height: Int, frames: Int)
 
     external fun allocateDirectBuffer(capacity: Long): ByteBuffer?
     external fun freeDirectBuffer(buffer: ByteBuffer)
+
+    external fun copyBayerWithStride(
+        srcBuffer: ByteBuffer,
+        srcPos: Int,
+        dstBuffer: ByteBuffer,
+        dstPos: Int,
+        width: Int,
+        height: Int,
+        rowStride: Int,
+        pixelStride: Int
+    )
 
     data class BackgroundSaveEvent(
         val baseName: String,
@@ -112,7 +137,8 @@ object ColorProcessor {
         forwardMatrix2: FloatArray? = null,
         calibrationIlluminant1: Int = 21,
         calibrationIlluminant2: Int = 17,
-        neutralColorPoint: FloatArray? = null
+        neutralColorPoint: FloatArray? = null,
+        dngCompressionMode: Int = 0
     ): Int
 
     /**
@@ -182,9 +208,11 @@ object ColorProcessor {
         calibrationIlluminant1: Int = 21,
         calibrationIlluminant2: Int = 17,
         neutralColorPoint: FloatArray? = null,
-        // Minimal single-frame (non-HDR+) path: keep sensor highlights linear and
-        // neutralize saturated pixels point-wise inside ColorPipe.
-        faithfulHighlights: Boolean = false
+        faithfulHighlights: Boolean = false,
+        debugStats: LongArray? = null,
+        outJpgFd: Int = -1,
+        outDngFd: Int = -1,
+        dngCompressionMode: Int = 0
     ): Int
 
     external fun processHdrPlus(
@@ -223,6 +251,7 @@ object ColorProcessor {
         forwardMatrix2: FloatArray? = null,
         calibrationIlluminant1: Int = 21,
         calibrationIlluminant2: Int = 17,
-        neutralColorPoint: FloatArray? = null
+        neutralColorPoint: FloatArray? = null,
+        dngCompressionMode: Int = 0
     ): Int
 }

@@ -11,6 +11,125 @@
 
 
 #include <turbojpeg.h>
+#include <jpeglib.h>
+
+#include <unistd.h>
+#include <setjmp.h>
+
+struct my_error_mgr {
+    struct jpeg_error_mgr pub;
+    jmp_buf setjmp_buffer;
+};
+
+static void my_error_exit(j_common_ptr cinfo) {
+    my_error_mgr* myerr = (my_error_mgr*) cinfo->err;
+    (*cinfo->err->output_message)(cinfo);
+    longjmp(myerr->setjmp_buffer, 1);
+}
+
+static std::vector<unsigned char> encode_lossless_jpeg16(const unsigned short* planarData, int width, int height, int stride_x, int stride_y, int stride_c) {
+    std::vector<unsigned char> ljpeg_bytes;
+    struct jpeg_compress_struct cinfo;
+    struct my_error_mgr jerr;
+
+    cinfo.err = jpeg_std_error(&jerr.pub);
+    jerr.pub.error_exit = my_error_exit;
+
+    if (setjmp(jerr.setjmp_buffer)) {
+        LOGE("LibJPEG lossless compression error encountered");
+        jpeg_destroy_compress(&cinfo);
+        return {};
+    }
+
+    jpeg_create_compress(&cinfo);
+
+    unsigned char* outbuffer = NULL;
+    unsigned long outsize = 0;
+    jpeg_mem_dest(&cinfo, &outbuffer, &outsize);
+
+    cinfo.image_width = width;
+    cinfo.image_height = height;
+    cinfo.input_components = 3;
+    cinfo.in_color_space = JCS_RGB;
+
+    jpeg_set_defaults(&cinfo);
+    cinfo.data_precision = 16;
+    jpeg_enable_lossless(&cinfo, 1, 0);
+
+    jpeg_start_compress(&cinfo, TRUE);
+
+    std::vector<J16SAMPLE> rowBuffer(static_cast<size_t>(width) * 3);
+    while (cinfo.next_scanline < cinfo.image_height) {
+        int y = cinfo.next_scanline;
+        for (int x = 0; x < width; x++) {
+            size_t r_idx = (size_t)y * stride_y + (size_t)x * stride_x + 0 * stride_c;
+            size_t g_idx = (size_t)y * stride_y + (size_t)x * stride_x + 1 * stride_c;
+            size_t b_idx = (size_t)y * stride_y + (size_t)x * stride_x + 2 * stride_c;
+            rowBuffer[x * 3 + 0] = planarData[r_idx];
+            rowBuffer[x * 3 + 1] = planarData[g_idx];
+            rowBuffer[x * 3 + 2] = planarData[b_idx];
+        }
+        J16SAMPROW row_pointer[1] = { rowBuffer.data() };
+        jpeg16_write_scanlines(&cinfo, row_pointer, 1);
+    }
+
+    jpeg_finish_compress(&cinfo);
+
+    if (outbuffer && outsize > 0) {
+        ljpeg_bytes.assign(outbuffer, outbuffer + outsize);
+        free(outbuffer);
+    }
+    jpeg_destroy_compress(&cinfo);
+    return ljpeg_bytes;
+}
+
+static bool write_jpeg_turbo_fd(int fd, int width, int height, int subsamp, const unsigned char* buffer, int quality) {
+    if (fd < 0) return false;
+    tjhandle _jpegCompressor = tjInitCompress();
+    if (!_jpegCompressor) {
+        LOGE("tjInitCompress failed");
+        return false;
+    }
+
+    unsigned char* jpegBuf = NULL;
+    unsigned long jpegSize = 0;
+
+    int tj_stat = tjCompress2(_jpegCompressor, buffer, width, 0, height, TJPF_RGB,
+                              &jpegBuf, &jpegSize, subsamp, quality, TJFLAG_FASTDCT);
+
+    if (tj_stat != 0) {
+        LOGE("tjCompress2 failed: %s", tjGetErrorStr());
+        tjDestroy(_jpegCompressor);
+        if (jpegBuf) tjFree(jpegBuf);
+        return false;
+    }
+
+    int dup_fd = dup(fd);
+    if (dup_fd < 0) {
+        LOGE("dup(fd) failed: %d", fd);
+        tjDestroy(_jpegCompressor);
+        tjFree(jpegBuf);
+        return false;
+    }
+
+    ftruncate(dup_fd, 0);
+    FILE* file = fdopen(dup_fd, "wb");
+    if (!file) {
+        LOGE("fdopen failed for dup_fd: %d", dup_fd);
+        close(dup_fd);
+        tjDestroy(_jpegCompressor);
+        tjFree(jpegBuf);
+        return false;
+    }
+
+    size_t written = fwrite(jpegBuf, 1, jpegSize, file);
+    fflush(file);
+    fclose(file);
+
+    tjDestroy(_jpegCompressor);
+    tjFree(jpegBuf);
+    return written == jpegSize;
+}
 
 static bool write_jpeg_turbo(const char* filename, int width, int height, int subsamp, const unsigned char* buffer, int quality) {
     tjhandle _jpegCompressor = tjInitCompress();
@@ -857,7 +976,8 @@ bool process_and_save_image(
     bool isPreview, int downsampleFactor, float zoomFactor, bool mirror,
     bool enableMemoryColor,
     int colorEngineMode,
-    bool faithfulHighlights
+    bool faithfulHighlights,
+    int outJpgFd
 ) {
     LOGD("process_and_save_image: %dx%d, gain=%.2f, log=%d, lut=%d, jpg=%s, tiff=%s, preview=%d, ds=%d, zoom=%.2f, mirror=%d, memColor=%d, engineMode=%d, faithful=%d",
          width, height, gain, targetLog, lut.size, jpgPath ? jpgPath : "null", tiffPath ? tiffPath : "null", isPreview, downsampleFactor, zoomFactor, mirror, enableMemoryColor, colorEngineMode, faithfulHighlights);
@@ -891,6 +1011,11 @@ bool process_and_save_image(
     auto lsc_idx = [&](int ch, int row, int col) -> int {
         return ch * lensShadingRows * lensShadingCols + row * lensShadingCols + col;
     };
+    const float exp_gain = std::pow(2.0f, exposure);
+    const float eff_gain = std::max(1.0f, gain * exp_gain);
+    const float desat_threshold = (65535.0f * 0.8f) / eff_gain;
+    const float theoretical_max = (65535.0f * (wb ? std::max({wb[0], wb[1], wb[3]}) : 1.0f)) / eff_gain;
+
     struct LscWeight { int idx0, idx1; float w0, w1; };
     std::vector<LscWeight> lscX, lscY;
     if (hasLsc) {
@@ -964,14 +1089,10 @@ bool process_and_save_image(
         // Multi-frame path only: this ramp is gain dependent and effectively inert
         // at gain == 1, so the minimal path leaves highlight colour to the display
         // transform (and to the point-wise neutralization applied after the clamp).
-        float exp_gain = std::pow(2.0f, exposure);
-        float eff_gain = std::max(1.0f, gain * exp_gain);
         if (!faithfulHighlights) {
-            float threshold = (65535.0f * 0.8f) / eff_gain;
-            float theoretical_max = (65535.0f * (wb ? std::max({wb[0], wb[1], wb[3]}) : 1.0f)) / eff_gain;
             float max_rgb = std::max({r, g, b});
-            if (max_rgb > threshold) {
-                float desat = std::clamp((max_rgb - threshold) / std::max(1.0f, theoretical_max - threshold), 0.0f, 1.0f);
+            if (max_rgb > desat_threshold) {
+                float desat = std::clamp((max_rgb - desat_threshold) / std::max(1.0f, theoretical_max - desat_threshold), 0.0f, 1.0f);
                 desat = desat * desat * (3.0f - 2.0f * desat); // Smoothstep
                 float y_lum = 0.2126f * r + 0.7152f * g + 0.0722f * b;
                 r = r * (1.0f - desat) + y_lum * desat;
@@ -1246,7 +1367,26 @@ bool process_and_save_image(
 
     const int jpegQuality = isPreview ? 78 : 95;
     bool jpgOk = true;
-    if (jpgPath) {
+    if (outJpgFd >= 0) {
+        LOGD("Direct single-pass writing JPEG to FileDescriptor %d", outJpgFd);
+        if (isPreview && !previewRgb8.empty()) {
+            jpgOk = write_jpeg_turbo_fd(outJpgFd, finalW_zoomed, finalH_zoomed, TJSAMP_422, previewRgb8.data(), jpegQuality);
+        } else {
+            size_t total_pixels = static_cast<size_t>(finalW_zoomed) * finalH_zoomed;
+            std::vector<unsigned char> rgb8(total_pixels * 3);
+            #pragma omp parallel for
+            for (int y = 0; y < finalH_zoomed; y++) {
+                for (int x = 0; x < finalW_zoomed; x++) {
+                    size_t idx = (static_cast<size_t>(y) * finalW_zoomed + x) * 3;
+                    rgb8[idx + 0] = static_cast<unsigned char>((processedImage[idx + 0] + 128) >> 8);
+                    rgb8[idx + 1] = static_cast<unsigned char>((processedImage[idx + 1] + 128) >> 8);
+                    rgb8[idx + 2] = static_cast<unsigned char>((processedImage[idx + 2] + 128) >> 8);
+                }
+            }
+            jpgOk = write_jpeg_turbo_fd(outJpgFd, finalW_zoomed, finalH_zoomed, TJSAMP_422, rgb8.data(), jpegQuality);
+        }
+        if (!jpgOk) LOGE("write_jpeg_turbo_fd failed for fd %d", outJpgFd);
+    } else if (jpgPath) {
         if (isPreview && !previewRgb8.empty()) {
             jpgOk = write_jpeg_turbo(jpgPath, finalW_zoomed, finalH_zoomed, TJSAMP_422, previewRgb8.data(), jpegQuality);
         } else {
@@ -1505,16 +1645,129 @@ bool write_dng(
     const float* forwardMatrix2,
     int calibIllum1,
     int calibIllum2,
-    const float* neutralColorPoint
+    const float* neutralColorPoint,
+    int outFd,
+    int dngCompressionMode
 ) {
-    TIFFSetTagExtender(DNGTagExtender);
-    TIFF* tif = TIFFOpen(filename, "w");
-    if (!tif) return false;
+    static std::once_flag extender_flag;
+    std::call_once(extender_flag, [](){
+        TIFFSetTagExtender(DNGTagExtender);
+    });
 
+    TIFF* tif = nullptr;
+    if (outFd >= 0) {
+        int dup_fd = dup(outFd);
+        if (dup_fd < 0) {
+            LOGE("dup(outFd) failed for DNG writing: %d", outFd);
+            return false;
+        }
+        ftruncate(dup_fd, 0);
+        tif = TIFFFdOpen(dup_fd, "DNG_Stream", "w");
+        if (!tif) {
+            close(dup_fd);
+            return false;
+        }
+    } else if (filename) {
+        tif = TIFFOpen(filename, "w");
+        if (!tif) return false;
+    } else {
+        return false;
+    }
+
+    // Pre-encode preview images first to calculate SubIFDs offsets
+    const struct PreviewSpec {
+        int targetLongEdge;
+        const char* description;
+    } previewSpecs[] = {
+        {512, "Darkbag Embedded JPEG Thumbnail"},
+        {2048, "Darkbag Embedded JPEG Preview"},
+    };
+
+    Matrix3x3 sensor_to_srgb = {0};
+    bool has_sensor_to_srgb = false;
+    if (ccm.size() >= 9) {
+        sensor_to_srgb = {
+            ccm[0], ccm[1], ccm[2],
+            ccm[3], ccm[4], ccm[5],
+            ccm[6], ccm[7], ccm[8]
+        };
+        has_sensor_to_srgb = true;
+    }
+
+    struct PreEncodedPreview {
+        int w, h;
+        std::vector<unsigned char> jpegBytes;
+        const char* desc;
+    };
+    std::vector<PreEncodedPreview> encodedPreviews;
+    encodedPreviews.reserve(2);
+
+    for (const auto& spec : previewSpecs) {
+        int pw = 0, ph = 0;
+        std::vector<unsigned char> previewRgb8 = make_preview_rgb8(
+            planarData, stride_x, stride_y, stride_c, width, height, spec.targetLongEdge, orientation, mirror, std::pow(2.0f, baselineExposure), pw, ph, wbVec, has_sensor_to_srgb ? &sensor_to_srgb : nullptr
+        );
+        if (!previewRgb8.empty()) {
+            std::vector<unsigned char> jpegPreview = encode_rgb8_jpeg(previewRgb8, pw, ph, 82);
+            if (!jpegPreview.empty()) {
+                encodedPreviews.push_back({pw, ph, std::move(jpegPreview), spec.description});
+            }
+        }
+    }
+
+    // Write SubIFD custom directories for previews first to collect their file offsets
+    std::vector<uint64_t> subifd_offsets;
+    for (const auto& prev : encodedPreviews) {
+        TIFFSetField(tif, TIFFTAG_SUBFILETYPE, FILETYPE_REDUCEDIMAGE);
+        TIFFSetField(tif, TIFFTAG_IMAGEWIDTH, prev.w);
+        TIFFSetField(tif, TIFFTAG_IMAGELENGTH, prev.h);
+        TIFFSetField(tif, TIFFTAG_BITSPERSAMPLE, 8);
+        TIFFSetField(tif, TIFFTAG_COMPRESSION, COMPRESSION_JPEG);
+        TIFFSetField(tif, TIFFTAG_ORIENTATION, ORIENTATION_TOPLEFT);
+        TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_YCBCR);
+        TIFFSetField(tif, TIFFTAG_SAMPLESPERPIXEL, 3);
+        TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG);
+        TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, prev.h);
+        TIFFSetField(tif, TIFFTAG_JPEGCOLORMODE, JPEGCOLORMODE_RGB);
+        TIFFSetField(tif, TIFFTAG_MAKE, metadata.make.c_str());
+        TIFFSetField(tif, TIFFTAG_MODEL, metadata.model.c_str());
+        TIFFSetField(tif, TIFFTAG_SOFTWARE, metadata.software.c_str());
+        TIFFSetField(tif, TIFFTAG_IMAGEDESCRIPTION, prev.desc);
+
+        if (TIFFWriteRawStrip(tif, 0, const_cast<unsigned char*>(prev.jpegBytes.data()), static_cast<tmsize_t>(prev.jpegBytes.size())) < 0) {
+            TIFFClose(tif);
+            return false;
+        }
+
+        uint64_t subifd_offset = 0;
+        if (!TIFFWriteCustomDirectory(tif, &subifd_offset)) {
+            TIFFClose(tif);
+            return false;
+        }
+        subifd_offsets.push_back(subifd_offset);
+    }
+
+    // IFD0 (Main RAW Image) Configuration
     TIFFSetField(tif, TIFFTAG_IMAGEWIDTH, width);
     TIFFSetField(tif, TIFFTAG_IMAGELENGTH, height);
     TIFFSetField(tif, TIFFTAG_BITSPERSAMPLE, 16);
-    TIFFSetField(tif, TIFFTAG_COMPRESSION, COMPRESSION_NONE);
+
+    // Set compression and backward version based on mode:
+    // Mode 0: Lossless JPEG (COMPRESSION_JPEG = 7), Mode 1 / Mode 2: Uncompressed (COMPRESSION_NONE = 1)
+    // Note: Deflate (COMPRESSION_ADOBE_DEFLATE = 8) is prohibited for 16-bit integer RAW per Adobe DNG specification.
+    uint16_t tiffCompression = COMPRESSION_JPEG;
+    uint8_t backwardVersion[4] = {1, 1, 0, 0};
+
+    if (dngCompressionMode == 1 || dngCompressionMode == 2) {
+        tiffCompression = COMPRESSION_NONE;
+        backwardVersion[0] = 1; backwardVersion[1] = 1; backwardVersion[2] = 0; backwardVersion[3] = 0;
+    } else {
+        // Default Lossless JPEG
+        tiffCompression = COMPRESSION_JPEG;
+        backwardVersion[0] = 1; backwardVersion[1] = 1; backwardVersion[2] = 0; backwardVersion[3] = 0;
+    }
+
+    TIFFSetField(tif, TIFFTAG_COMPRESSION, tiffCompression);
 
     uint16_t tiffOrientation = 1;
     switch (orientation) {
@@ -1527,22 +1780,25 @@ bool write_dng(
     TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_LINEAR_RAW);
     TIFFSetField(tif, TIFFTAG_SAMPLESPERPIXEL, 3);
     TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG);
-    TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, 1);
+    TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, height); // Single strip for raw
     TIFFSetField(tif, TIFFTAG_SUBFILETYPE, 0);
+
+    if (!subifd_offsets.empty()) {
+        TIFFSetField(tif, TIFFTAG_SUBIFD, static_cast<uint16_t>(subifd_offsets.size()), subifd_offsets.data());
+    }
 
     write_tiff_metadata(tif, &metadata);
 
     static const uint8_t dng_version[] = {1, 4, 0, 0};
     TIFFSetField(tif, TIFFTAG_DNGVERSION, dng_version);
-    static const uint8_t dng_backward_version[] = {1, 1, 0, 0};
-    TIFFSetField(tif, TIFFTAG_DNGBACKWARDVERSION, dng_backward_version);
+    TIFFSetField(tif, TIFFTAG_DNGBACKWARDVERSION, backwardVersion);
     TIFFSetField(tif, TIFFTAG_UNIQUECAMERAMODEL, metadata.uniqueCameraModel.c_str());
 
     uint32_t white_level_val = (uint32_t)whiteLevel;
     if (white_level_val == 0) white_level_val = 65535;
     TIFFSetField(tif, TIFFTAG_WHITELEVEL, 1, &white_level_val);
-    uint32_t black_level_val = 0;
-    TIFFSetField(tif, TIFFTAG_BLACKLEVEL, 1, &black_level_val);
+    uint32_t black_level_vals[3] = {0, 0, 0};
+    TIFFSetField(tif, TIFFTAG_BLACKLEVEL, 3, black_level_vals);
 
     float as_shot_neutral[3];
     if (neutralColorPoint != nullptr) {
@@ -1555,17 +1811,6 @@ bool write_dng(
         as_shot_neutral[2] = wbVec ? (1.0f / std::max(1e-4f, wbVec[3])) : 1.0f;
     }
     TIFFSetField(tif, TIFFTAG_ASSHOTNEUTRAL, 3, as_shot_neutral);
-
-    Matrix3x3 sensor_to_srgb = {0};
-    bool has_sensor_to_srgb = false;
-    if (ccm.size() >= 9) {
-        sensor_to_srgb = {
-            ccm[0], ccm[1], ccm[2],
-            ccm[3], ccm[4], ccm[5],
-            ccm[6], ccm[7], ccm[8]
-        };
-        has_sensor_to_srgb = true;
-    }
 
     if (colorMatrix1 != nullptr) {
         TIFFSetField(tif, TIFFTAG_COLORMATRIX1, 9, colorMatrix1);
@@ -1582,18 +1827,12 @@ bool write_dng(
         float analogBalance[3] = {1.0f, 1.0f, 1.0f};
         TIFFSetField(tif, TIFFTAG_ANALOGBALANCE, 3, analogBalance);
     } else {
-        // In Android Camera2 API, CCM maps White-Balanced Sensor RGB -> sRGB Linear.
-        // In Adobe DNG Specification, ColorMatrix1 maps XYZ -> Un-white-balanced Raw Sensor Space.
-        // Therefore:
-        // RawSensorRGB = diag(AsShotNeutral) * CCM^-1 * sRGB
-        // ColorMatrix1 = diag(AsShotNeutral) * Inverse(CCM) * M_XYZ_to_sRGB_D65
-        Matrix3x3 colorMatrix1Fallback = M_XYZ_to_sRGB_D65; // Fallback
+        Matrix3x3 colorMatrix1Fallback = M_XYZ_to_sRGB_D65;
         if (has_sensor_to_srgb) {
             Matrix3x3 srgb_to_sensor = inverse_matrix(sensor_to_srgb);
             colorMatrix1Fallback = multiply(srgb_to_sensor, M_XYZ_to_sRGB_D65);
         }
         
-        // Scale each row by AsShotNeutral to map XYZ into Raw Sensor space
         for (int r = 0; r < 3; r++) {
             colorMatrix1Fallback.m[r * 3 + 0] *= as_shot_neutral[r];
             colorMatrix1Fallback.m[r * 3 + 1] *= as_shot_neutral[r];
@@ -1617,80 +1856,39 @@ bool write_dng(
     unsigned short iso_short = (unsigned short)metadata.iso;
     TIFFSetField(tif, TIFFTAG_ISOSPEEDRATINGS, (uint16_t)1, &iso_short);
 
-    std::vector<unsigned short> rowBuffer(width * 3);
-
-    for (int y = 0; y < height; y++) {
-        for (int x = 0; x < width; x++) {
-             size_t r_idx = (size_t)y*stride_y + (size_t)x*stride_x + 0*stride_c;
-             size_t g_idx = (size_t)y*stride_y + (size_t)x*stride_x + 1*stride_c;
-             size_t b_idx = (size_t)y*stride_y + (size_t)x*stride_x + 2*stride_c;
-             
-             // Keep pure Sensor Linear data in DNG without destructive pre-multiplied WB clamping
-             rowBuffer[x*3+0] = planarData[r_idx];
-             rowBuffer[x*3+1] = planarData[g_idx];
-             rowBuffer[x*3+2] = planarData[b_idx];
-        }
-        if (TIFFWriteScanline(tif, rowBuffer.data(), y, 0) < 0) {
+    // Write Main RAW Data based on selected compression mode
+    if (dngCompressionMode == 0) {
+        // Mode 0: Lossless JPEG 16-bit
+        std::vector<unsigned char> ljpegData = encode_lossless_jpeg16(planarData, width, height, stride_x, stride_y, stride_c);
+        if (ljpegData.empty() || TIFFWriteRawStrip(tif, 0, ljpegData.data(), static_cast<tmsize_t>(ljpegData.size())) < 0) {
+            LOGE("Failed to write Lossless JPEG raw strip");
             TIFFClose(tif);
             return false;
+        }
+    } else {
+        // Mode 1 (Adobe Deflate) & Mode 2 (Uncompressed): Scanline writing
+        TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, 64);
+        std::vector<unsigned short> rowBuffer(width * 3);
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                 size_t r_idx = (size_t)y*stride_y + (size_t)x*stride_x + 0*stride_c;
+                 size_t g_idx = (size_t)y*stride_y + (size_t)x*stride_x + 1*stride_c;
+                 size_t b_idx = (size_t)y*stride_y + (size_t)x*stride_x + 2*stride_c;
+
+                 rowBuffer[x*3+0] = planarData[r_idx];
+                 rowBuffer[x*3+1] = planarData[g_idx];
+                 rowBuffer[x*3+2] = planarData[b_idx];
+            }
+            if (TIFFWriteScanline(tif, rowBuffer.data(), y, 0) < 0) {
+                TIFFClose(tif);
+                return false;
+            }
         }
     }
 
     if (!TIFFWriteDirectory(tif)) {
         TIFFClose(tif);
         return false;
-    }
-
-    const struct PreviewSpec {
-        int targetLongEdge;
-        const char* description;
-    } previewSpecs[] = {
-        {512, "Darkbag Embedded JPEG Thumbnail"},
-        {2048, "Darkbag Embedded JPEG Preview"},
-    };
-
-    for (const auto& spec : previewSpecs) {
-        int previewWidth = 0, previewHeight = 0;
-        std::vector<unsigned char> previewRgb8 = make_preview_rgb8(
-            planarData, stride_x, stride_y, stride_c, width, height, spec.targetLongEdge, orientation, mirror, std::pow(2.0f, baselineExposure), previewWidth, previewHeight, wbVec, has_sensor_to_srgb ? &sensor_to_srgb : nullptr
-        );
-
-        if (previewRgb8.empty()) {
-            TIFFClose(tif);
-            return false;
-        }
-
-        std::vector<unsigned char> jpegPreview = encode_rgb8_jpeg(previewRgb8, previewWidth, previewHeight, 82);
-        if (jpegPreview.empty()) {
-            TIFFClose(tif);
-            return false;
-        }
-
-        TIFFSetField(tif, TIFFTAG_SUBFILETYPE, FILETYPE_REDUCEDIMAGE);
-        TIFFSetField(tif, TIFFTAG_IMAGEWIDTH, previewWidth);
-        TIFFSetField(tif, TIFFTAG_IMAGELENGTH, previewHeight);
-        TIFFSetField(tif, TIFFTAG_BITSPERSAMPLE, 8);
-        TIFFSetField(tif, TIFFTAG_COMPRESSION, COMPRESSION_JPEG);
-        TIFFSetField(tif, TIFFTAG_ORIENTATION, ORIENTATION_TOPLEFT);
-        TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_YCBCR);
-        TIFFSetField(tif, TIFFTAG_SAMPLESPERPIXEL, 3);
-        TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG);
-        TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, previewHeight);
-        TIFFSetField(tif, TIFFTAG_JPEGCOLORMODE, JPEGCOLORMODE_RGB);
-        TIFFSetField(tif, TIFFTAG_MAKE, metadata.make.c_str());
-        TIFFSetField(tif, TIFFTAG_MODEL, metadata.model.c_str());
-        TIFFSetField(tif, TIFFTAG_SOFTWARE, metadata.software.c_str());
-        TIFFSetField(tif, TIFFTAG_IMAGEDESCRIPTION, spec.description);
-
-        if (TIFFWriteRawStrip(tif, 0, const_cast<unsigned char*>(jpegPreview.data()), static_cast<tmsize_t>(jpegPreview.size())) < 0) {
-            TIFFClose(tif);
-            return false;
-        }
-
-        if (!TIFFWriteDirectory(tif)) {
-            TIFFClose(tif);
-            return false;
-        }
     }
 
     TIFFClose(tif);

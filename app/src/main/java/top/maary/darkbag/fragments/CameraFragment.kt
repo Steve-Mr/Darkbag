@@ -16,6 +16,8 @@
 
 @file:SuppressLint("RestrictedApi")
 package top.maary.darkbag.fragments
+
+import top.maary.darkbag.models.StandardTimingTracker
 import top.maary.darkbag.ui.ExpressiveShutterButton
 import top.maary.darkbag.utils.DebugLogManager
 import top.maary.darkbag.utils.LensInfo
@@ -447,15 +449,6 @@ class CameraFragment : Fragment() {
     private var camera2RetryCount = 0
     private val processingChannel = kotlinx.coroutines.channels.Channel<RawImageHolder>(2)
     private var processingChannelJob: kotlinx.coroutines.Job? = null
-
-    data class StandardTimingTracker(
-        val shutterClick: Long,
-        var captureCallback: Long = 0,
-        var enqueued: Long = 0,
-        var processingStart: Long = 0,
-        var jniDone: Long = 0,
-        var firstOutputWritten: Long = 0
-    )
 
     data class RawImageHolder(
         val data: ByteBuffer,
@@ -1100,7 +1093,7 @@ class CameraFragment : Fragment() {
         val targetId = currentLens?.id ?: if (lensFacing == CameraCharacteristics.LENS_FACING_BACK) "0" else "1"
 
         try {
-            val chars = camera2Manager.getCameraCharacteristics(targetId)
+            val chars = CameraRepository.getCharacteristics(camera2Manager, targetId)
 
             isoRange = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
             exposureTimeRange = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
@@ -1545,7 +1538,7 @@ class CameraFragment : Fragment() {
                 takeMultiCameraPicture(timing)
             } else {
                 if (isHdrPlusEnabled && isRawSupported) {
-                    triggerHdrPlusBurstCamera2(isFrame1Trigger, hfMetadataForTrigger)
+                    triggerHdrPlusBurstCamera2(isFrame1Trigger, hfMetadataForTrigger, timing)
                 } else {
                     takeSinglePictureCamera2(timing, isFrame1Trigger, hfMetadataForTrigger)
                 }
@@ -1697,7 +1690,7 @@ class CameraFragment : Fragment() {
     private fun hasBackCamera(): Boolean {
         return try {
             camera2Manager.cameraIdList.any { id ->
-                val chars = camera2Manager.getCameraCharacteristics(id)
+                val chars = CameraRepository.getCharacteristics(camera2Manager, id)
                 chars.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK
             }
         } catch (e: Exception) { false }
@@ -1707,7 +1700,7 @@ class CameraFragment : Fragment() {
     private fun hasFrontCamera(): Boolean {
         return try {
             camera2Manager.cameraIdList.any { id ->
-                val chars = camera2Manager.getCameraCharacteristics(id)
+                val chars = CameraRepository.getCharacteristics(camera2Manager, id)
                 chars.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_FRONT
             }
         } catch (e: Exception) { false }
@@ -1751,7 +1744,7 @@ class CameraFragment : Fragment() {
 
                 val targetCharId = activePhysicalId ?: image.physicalId ?: currentLens?.id ?: "0"
                 Log.d(TAG, "Fetching characteristics for processing using ID: $targetCharId")
-                val chars = cameraManager.getCameraCharacteristics(targetCharId)
+                val chars = CameraRepository.getCharacteristics(cameraManager, targetCharId)
 
                 // Metadata Extraction
                 var whiteLevel = 1023
@@ -1978,7 +1971,9 @@ class CameraFragment : Fragment() {
                     forwardMatrix2 = singleCalib.forwardMatrix2,
                     calibrationIlluminant1 = singleCalib.calibrationIlluminant1,
                     calibrationIlluminant2 = singleCalib.calibrationIlluminant2,
-                    neutralColorPoint = singleCalib.neutralColorPoint
+                    neutralColorPoint = singleCalib.neutralColorPoint,
+                    timing = timing,
+                    dngCompressionMode = prefs.getInt(SettingsFragment.KEY_DNG_COMPRESSION_MODE, 0)
                 )
                 top.maary.darkbag.processor.HdrPlusRequestManager.enqueue(request)
                 val serviceIntent = android.content.Intent(context, top.maary.darkbag.processor.HdrPlusProcessingService::class.java)
@@ -2049,7 +2044,7 @@ class CameraFragment : Fragment() {
 
         lifecycleScope.launch(Dispatchers.Default) {
             try {
-                val characteristics = camera2Manager.getCameraCharacteristics(device.id)
+                val characteristics = CameraRepository.getCharacteristics(camera2Manager, device.id)
                 val sensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
                 val activeArray = characteristics.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE) ?: return@launch
 
@@ -2885,7 +2880,7 @@ class CameraFragment : Fragment() {
     private fun updateZoomCamera2() {
         val session = camera2Session ?: return
         val device = camera2Device ?: return
-        val chars = camera2Manager.getCameraCharacteristics(device.id)
+        val chars = CameraRepository.getCharacteristics(camera2Manager, device.id)
         val activeArray = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE) ?: return
 
         val targetRatio = if (currentLens?.isZoomPreset == true && currentLens?.targetZoomRatio != null) {
@@ -2960,7 +2955,7 @@ class CameraFragment : Fragment() {
             val lens = currentLens
             val targetId = lens?.id ?: if (lensFacing == CameraCharacteristics.LENS_FACING_BACK) "0" else "1"
 
-            camera2Manager.getCameraCharacteristics(targetId)
+            CameraRepository.getCharacteristics(camera2Manager, targetId)
                 .get(android.hardware.camera2.CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
         } catch (e: Exception) { 0 }
 
@@ -2994,6 +2989,9 @@ class CameraFragment : Fragment() {
         try {
             val request = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_PREVIEW)
             request.addTarget(surface)
+            if (isManualExposure || isHdrPlusEnabled) {
+                analysisImageReader?.surface?.let { request.addTarget(it) }
+            }
             applyManualSettingsToRequest(request, isHdrBurst)
 
             session.setRepeatingRequest(request.build(), object : android.hardware.camera2.CameraCaptureSession.CaptureCallback() {
@@ -3374,7 +3372,8 @@ class CameraFragment : Fragment() {
     private fun processHdrPlusBurst(
         burstResult: BurstResult,
         digitalGain: Float,
-        hfMetadata: HalfFrameManager.Metadata? = null
+        hfMetadata: HalfFrameManager.Metadata? = null,
+        timing: StandardTimingTracker? = null
     ) {
         val currentZoom = if (currentLens?.isZoomPreset == true && currentLens?.targetZoomRatio != null) {
             currentLens!!.targetZoomRatio!!
@@ -3409,7 +3408,7 @@ class CameraFragment : Fragment() {
 
                 val targetCharId = activePhysicalId ?: frames[0].physicalId ?: currentLens?.id ?: "0"
                 Log.d(TAG, "Fetching HDR+ characteristics for processing using ID: $targetCharId")
-                val chars = cameraManager.getCameraCharacteristics(targetCharId)
+                val chars = CameraRepository.getCharacteristics(cameraManager, targetCharId)
 
                 var whiteLevel = 1023
                 var blackLevelPattern = intArrayOf(64, 64, 64, 64)
@@ -3628,7 +3627,9 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         forwardMatrix2 = burstCalib.forwardMatrix2,
                         calibrationIlluminant1 = burstCalib.calibrationIlluminant1,
                         calibrationIlluminant2 = burstCalib.calibrationIlluminant2,
-                        neutralColorPoint = burstCalib.neutralColorPoint
+                        neutralColorPoint = burstCalib.neutralColorPoint,
+                        timing = timing,
+                        dngCompressionMode = prefs.getInt(SettingsFragment.KEY_DNG_COMPRESSION_MODE, 0)
                     )
                     top.maary.darkbag.processor.HdrPlusRequestManager.enqueue(request)
                     val serviceIntent = android.content.Intent(context, top.maary.darkbag.processor.HdrPlusProcessingService::class.java)
@@ -3649,7 +3650,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     try {
                         val firstFrame = burstResult.frames[0]
                         val frameSize = firstFrame.width * firstFrame.height * 2
-                        val data = ByteBuffer.allocateDirect(frameSize)
+                        val data = HdrPlusBurst.acquireBuffer(frameSize)
                         burstResult.megaBuffer.position(0)
                         burstResult.megaBuffer.limit(frameSize)
                         data.put(burstResult.megaBuffer)
@@ -3731,7 +3732,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             // Restore flash visibility if supported
             val targetId = currentLens?.id ?: if (lensFacing == CameraCharacteristics.LENS_FACING_BACK) "0" else "1"
             val hasFlash = try {
-                val c2Chars = camera2Manager.getCameraCharacteristics(targetId)
+                val c2Chars = CameraRepository.getCharacteristics(camera2Manager, targetId)
                 c2Chars.get(android.hardware.camera2.CameraCharacteristics.FLASH_INFO_AVAILABLE) ?: false
             } catch (e: Exception) { false }
 
@@ -3810,7 +3811,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
         Log.d(TAG, "Creating Camera2 Capture Session for device: ${device.id}")
 
-        val chars = camera2Manager.getCameraCharacteristics(device.id)
+        val chars = CameraRepository.getCharacteristics(camera2Manager, device.id)
         val map = chars.get(android.hardware.camera2.CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
 
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
@@ -3892,7 +3893,9 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         try {
                             val request = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_PREVIEW)
                             request.addTarget(surface)
-                            analysisImageReader?.surface?.let { request.addTarget(it) }
+                            if (isManualExposure || isHdrPlusEnabled) {
+                                analysisImageReader?.surface?.let { request.addTarget(it) }
+                            }
 
                             applyManualSettingsToRequest(request)
 
@@ -4313,7 +4316,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
     private fun triggerHdrPlusBurstCamera2(
         isFrame1Trigger: Boolean = false,
-        hfMetadata: HalfFrameManager.Metadata? = null
+        hfMetadata: HalfFrameManager.Metadata? = null,
+        timing: StandardTimingTracker? = null
     ) {
         val device = camera2Device ?: run { processingSemaphore.release(); return }
         val session = camera2Session ?: run { processingSemaphore.release(); return }
@@ -4352,7 +4356,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             }
 
             hdrPlusBurstHelper = HdrPlusBurst(frameCount = burstSize, onBurstComplete = { burstResult ->
-                processHdrPlusBurst(burstResult, burstGain, hfMetadata?.copy(digitalGain = burstGain))
+                processHdrPlusBurst(burstResult, burstGain, hfMetadata?.copy(digitalGain = burstGain), timing = timing)
             })
 
             lifecycleScope.launch(Dispatchers.Main) {
@@ -4389,7 +4393,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     val partialResult = hdrPlusBurstHelper?.flush()
                     if (partialResult != null && partialResult.frames.isNotEmpty()) {
                         Log.i(TAG, "Submitting partial burst (${partialResult.frames.size} frames) for processing.")
-                        processHdrPlusBurst(partialResult, burstGain, hfMetadata?.copy(digitalGain = burstGain))
+                        processHdrPlusBurst(partialResult, burstGain, hfMetadata?.copy(digitalGain = burstGain), timing = timing)
                     } else {
                         hdrPlusBurstHelper?.reset()
                         processingSemaphore.release()
@@ -4399,7 +4403,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             }
 
             val burstLensId = currentLens?.id ?: "0"
-            val burstChars = camera2Manager.getCameraCharacteristics(burstLensId)
+            val burstChars = CameraRepository.getCharacteristics(camera2Manager, burstLensId)
             val burstSensorOrientation = burstChars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
 
             reader.setOnImageAvailableListener({ r ->
@@ -4476,24 +4480,48 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         val width = image.width
         val height = image.height
 
-        val rowLength = width * pixelStride
-        val data = ByteBuffer.allocateDirect(rowLength * height)
-
-        buffer.rewind()
-        if (rowStride == rowLength) {
-            data.put(buffer)
-        } else {
-            for (y in 0 until height) {
-                buffer.position(y * rowStride)
-                buffer.limit(y * rowStride + rowLength)
-                data.put(buffer)
-            }
-            buffer.limit(buffer.capacity())
-        }
-        data.rewind()
-
-        val chars = camera2Manager.getCameraCharacteristics(physicalId ?: "0")
+        val chars = CameraRepository.getCharacteristics(camera2Manager, physicalId ?: "0")
         val sensorOrientation = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
+
+        val rowLength = width * pixelStride
+        if (buffer.isDirect && rowStride == rowLength) {
+            // Direct zero-copy passthrough
+            return RawImageHolder(
+                data = buffer.duplicate(),
+                width = width,
+                height = height,
+                timestamp = image.timestamp,
+                rotationDegrees = sensorOrientation,
+                combinedOrientation = combinedOrientation,
+                zoomRatio = zoomRatio,
+                physicalId = physicalId,
+                halfFrameMetadata = halfFrameMetadata
+            )
+        }
+
+        val capacity = rowLength * height
+        val data = HdrPlusBurst.acquireBuffer(capacity)
+
+        if (buffer.isDirect) {
+            ColorProcessor.copyBayerWithStride(
+                buffer, buffer.position(),
+                data, data.position(),
+                width, height, rowStride, pixelStride
+            )
+        } else {
+            buffer.rewind()
+            if (rowStride == rowLength) {
+                data.put(buffer)
+            } else {
+                for (y in 0 until height) {
+                    buffer.position(y * rowStride)
+                    buffer.limit(y * rowStride + rowLength)
+                    data.put(buffer)
+                }
+                buffer.limit(buffer.capacity())
+            }
+            data.rewind()
+        }
 
         return RawImageHolder(
             data = data,
@@ -4514,7 +4542,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         val session = camera2Session ?: return
         val reader = rawImageReader ?: return
 
-        val chars = camera2Manager.getCameraCharacteristics(device.id)
+        val chars = CameraRepository.getCharacteristics(camera2Manager, device.id)
         val prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
 
         val targetFpsStr = prefs.getString(SettingsFragment.KEY_RAW_VIDEO_FPS, "24") ?: "24"
@@ -4869,7 +4897,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         if (currentLens?.useCamera2 == true) {
             val deviceId = camera2Device?.id ?: currentLens?.id
             if (deviceId != null) {
-                val chars = camera2Manager.getCameraCharacteristics(deviceId)
+                val chars = CameraRepository.getCharacteristics(camera2Manager, deviceId)
                 val activeArray = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
                 if (activeArray != null) {
                     val targetRatio = if (currentLens?.isZoomPreset == true && currentLens?.targetZoomRatio != null) {
@@ -5551,7 +5579,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         var focalIn35mm: Int? = null
         var finalFocalLength = focalLength
         try {
-            val chars = targetCharId?.let { camera2Manager.getCameraCharacteristics(it) }
+            val chars = targetCharId?.let { CameraRepository.getCharacteristics(camera2Manager, it) }
             if (chars != null) {
                 focalIn35mm = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.let { focalLengths ->
                     val focal = captureResult?.get(CaptureResult.LENS_FOCAL_LENGTH) ?: focalLengths.firstOrNull() ?: 0f
