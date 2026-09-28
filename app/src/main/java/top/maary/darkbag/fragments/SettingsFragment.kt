@@ -289,6 +289,16 @@ class SettingsFragment : Fragment() {
             prefs.edit().putInt(KEY_COLOR_ENGINE_MODE, position).apply()
         }
 
+        // RAW Output Type Menu
+        val rawOutputTypeAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, RAW_OUTPUT_TYPES)
+        binding.menuRawOutputType.setAdapter(rawOutputTypeAdapter)
+        val savedRawOutputTypeIndex = prefs.getInt(KEY_RAW_OUTPUT_TYPE, 0)
+        val safeRawOutputTypeIndex = savedRawOutputTypeIndex.coerceIn(0, RAW_OUTPUT_TYPES.size - 1)
+        binding.menuRawOutputType.setText(RAW_OUTPUT_TYPES[safeRawOutputTypeIndex], false)
+        binding.menuRawOutputType.setOnItemClickListener { _, _, position, _ ->
+            prefs.edit().putInt(KEY_RAW_OUTPUT_TYPE, position).apply()
+        }
+
         // DNG Compression Mode
         val dngCompressionAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, DNG_COMPRESSION_MODES)
         binding.menuDngCompression.setAdapter(dngCompressionAdapter)
@@ -649,6 +659,7 @@ class SettingsFragment : Fragment() {
     private fun updateStorageVisibility() {
         binding.layoutJpgStorage.visibility = if (binding.cbSaveJpg.isChecked) View.VISIBLE else View.GONE
         binding.layoutRawStorage.visibility = if (binding.cbSaveRaw.isChecked) View.VISIBLE else View.GONE
+        binding.layoutRawOutputTypeMenu.visibility = if (binding.cbSaveRaw.isChecked) View.VISIBLE else View.GONE
         binding.layoutDngCompressionMenu.visibility = if (binding.cbSaveRaw.isChecked) View.VISIBLE else View.GONE
 
         binding.tvJpgPath.text = prefs.getString(KEY_JPG_STORAGE_URI_NAME, "Default (Pictures/Darkbag)")
@@ -880,6 +891,8 @@ class SettingsFragment : Fragment() {
         const val KEY_MOTION_PHOTO = "motion_photo_enabled"
         const val KEY_SAVE_LOCATION = "save_location_enabled"
         const val KEY_SAVE_RAW = "save_raw"
+        const val KEY_RAW_OUTPUT_TYPE = "raw_output_type"
+        val RAW_OUTPUT_TYPES = listOf("Bayer CFA RAW (~12MB, Default)", "Linear RGB RAW (~50MB)")
         const val KEY_DNG_COMPRESSION_MODE = "dng_compression_mode"
         val DNG_COMPRESSION_MODES = listOf("Lossless JPEG (Default)", "Uncompressed")
         const val KEY_JPG_STORAGE_URI = "jpg_storage_uri"

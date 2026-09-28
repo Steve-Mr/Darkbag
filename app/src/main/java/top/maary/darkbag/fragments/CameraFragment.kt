@@ -1845,54 +1845,7 @@ class CameraFragment : Fragment() {
                     // 保持加载动画，直到服务处理完毕
                 }
 
-                if (saveRaw && captureResult != null) {
-                    try {
-                        val dngThumbnailSource: java.io.File? = null
-
-                        val dngCreator = android.hardware.camera2.DngCreator(chars, captureResult)
-                        dngCreator.setDescription(DarkbagIdentity.imageDescription(isHdrPlus = false))
-                        captureMetadata.location?.let { dngCreator.setLocation(it) }
-
-                        val dngOrientation = when (image.combinedOrientation) {
-                            90 -> ExifInterface.ORIENTATION_ROTATE_90
-                            180 -> ExifInterface.ORIENTATION_ROTATE_180
-                            270 -> ExifInterface.ORIENTATION_ROTATE_270
-                            else -> ExifInterface.ORIENTATION_NORMAL
-                        }
-                        dngCreator.setOrientation(dngOrientation)
-                        dngThumbnailSource?.let { createDngThumbnailBitmap(it) }?.let { thumb ->
-                            try {
-                                dngCreator.setThumbnail(thumb)
-                            } finally {
-                                thumb.recycle()
-                            }
-                        }
-
-                        val dngBuffer = image.data.duplicate()
-                        dngBuffer.rewind()
-                        FileOutputStream(bayerDngFile).use { out ->
-                            dngCreator.writeByteBuffer(out, Size(image.width, image.height), dngBuffer, 0)
-                        }
-                        
-                        ImageSaver.saveProcessedImage(
-                            context = context,
-                            inputBitmap = null,
-                            bmpPath = null,
-                            rotationDegrees = 0,
-                            zoomFactor = 1.0f,
-                            baseName = dngName,
-                            linearDngPath = bayerDngFile.absolutePath,
-                            saveJpg = false,
-                            saveRaw = saveRaw,
-                            jpgFolderUri = null,
-                            rawFolderUri = rawFolderUri,
-                            isFastPath = false,
-                            captureMetadata = captureMetadata
-                        )
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Failed to save DNG asynchronously", e)
-                    }
-                }
+                // Single-frame RAW DNG creation is handled by HdrPlusProcessingService and native write_dng
 
 
                 // 5. Enqueue HQ Processing
@@ -1973,7 +1926,8 @@ class CameraFragment : Fragment() {
                     calibrationIlluminant2 = singleCalib.calibrationIlluminant2,
                     neutralColorPoint = singleCalib.neutralColorPoint,
                     timing = timing,
-                    dngCompressionMode = prefs.getInt(SettingsFragment.KEY_DNG_COMPRESSION_MODE, 0)
+                    dngCompressionMode = prefs.getInt(SettingsFragment.KEY_DNG_COMPRESSION_MODE, 0),
+                    rawOutputType = prefs.getInt(SettingsFragment.KEY_RAW_OUTPUT_TYPE, 0)
                 )
                 top.maary.darkbag.processor.HdrPlusRequestManager.enqueue(request)
                 val serviceIntent = android.content.Intent(context, top.maary.darkbag.processor.HdrPlusProcessingService::class.java)
@@ -3629,7 +3583,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         calibrationIlluminant2 = burstCalib.calibrationIlluminant2,
                         neutralColorPoint = burstCalib.neutralColorPoint,
                         timing = timing,
-                        dngCompressionMode = prefs.getInt(SettingsFragment.KEY_DNG_COMPRESSION_MODE, 0)
+                        dngCompressionMode = prefs.getInt(SettingsFragment.KEY_DNG_COMPRESSION_MODE, 0),
+                        rawOutputType = prefs.getInt(SettingsFragment.KEY_RAW_OUTPUT_TYPE, 0)
                     )
                     top.maary.darkbag.processor.HdrPlusRequestManager.enqueue(request)
                     val serviceIntent = android.content.Intent(context, top.maary.darkbag.processor.HdrPlusProcessingService::class.java)

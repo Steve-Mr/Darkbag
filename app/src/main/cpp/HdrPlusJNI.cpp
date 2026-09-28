@@ -28,6 +28,7 @@
 #include "hdrplus_raw_pipeline.h" // Generated header
 #include "hdrplus_high_pipeline.h"
 #include "hdrplus_single_pipeline.h" // Generated header for single frame
+#include "hdrplus_bayer_pipeline.h"
 
 
 #define TAG "HdrPlusJNI"
@@ -401,9 +402,12 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
     jlongArray debugStats,
     jint outJpgFd,
     jint outDngFd,
-    jint dngCompressionMode
+    jint dngCompressionMode,
+    jint rawOutputType,
+    jint cfaPattern,
+    jintArray blackLevelPattern
 ) {
-    LOGD("Native exportHdrPlus started (enableMemoryColor=%d, colorEngineMode=%d, faithful=%d).", enableMemoryColor, colorEngineMode, faithfulHighlights);
+    LOGD("Native exportHdrPlus started (enableMemoryColor=%d, colorEngineMode=%d, faithful=%d, rawOutputType=%d).", enableMemoryColor, colorEngineMode, faithfulHighlights, rawOutputType);
 
     if (!tempRawPath) return -1;
     const char* temp_path_cstr = env->GetStringUTFChars(tempRawPath, 0);
@@ -459,18 +463,24 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
     jlong dngMs = 0;
     jlong jpgMs = 0;
 
+    int bl_pattern[4] = {0, 0, 0, 0};
+    if (blackLevelPattern && env->GetArrayLength(blackLevelPattern) >= 4) {
+        env->GetIntArrayRegion(blackLevelPattern, 0, 4, bl_pattern);
+    }
+
     bool dngOk = true;
     if (outDngFd >= 0 || dng_path_cstr) {
-        LOGD("Exporting DNG to %s (outDngFd=%d, mode=%d)", dng_path_cstr ? dng_path_cstr : "FD", outDngFd, dngCompressionMode);
+        LOGD("Exporting DNG to %s (outDngFd=%d, mode=%d, rawOutputType=%d)", dng_path_cstr ? dng_path_cstr : "FD", outDngFd, dngCompressionMode, rawOutputType);
         auto dngStart = std::chrono::high_resolution_clock::now();
         float baselineExposure = (digitalGain > 0.0f) ? std::log2(digitalGain) : 0.0f;
-        dngOk = write_dng(dng_path_cstr, width, height, finalImage.data(), 1, width, width*height, kMax16BitValue, ccmVec, meta, orientation, (bool)mirror, baselineExposure, wbVec.data(),
-                          cm1Ptr, cm2Ptr, fm1Ptr, fm2Ptr, (int)calibrationIlluminant1, (int)calibrationIlluminant2, neutralPtr, outDngFd, (int)dngCompressionMode);
+        const bool isBayer = (rawOutputType == 0);
+        dngOk = write_dng(dng_path_cstr, width, height, finalImage.data(), 1, width, isBayer ? width * height : width * height, kMax16BitValue, ccmVec, meta, orientation, (bool)mirror, baselineExposure, wbVec.data(),
+                          cm1Ptr, cm2Ptr, fm1Ptr, fm2Ptr, (int)calibrationIlluminant1, (int)calibrationIlluminant2, neutralPtr, outDngFd, (int)dngCompressionMode, isBayer, (int)cfaPattern, bl_pattern);
         dngMs = (jlong)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - dngStart).count();
     }
 
     bool saveOk = true;
-    if (outJpgFd >= 0 || jpg_path_cstr) {
+    if ((outJpgFd >= 0 || jpg_path_cstr) && rawOutputType != 0) {
         LOGD("Exporting JPG: JPG=%s (outJpgFd=%d)", jpg_path_cstr ? jpg_path_cstr : "FD", outJpgFd);
         auto jpgStart = std::chrono::high_resolution_clock::now();
         saveOk = process_and_save_image(finalImage.data(), 1, width, width*height, nullptr, 0, 0, width, height, digitalGain, targetLog, lut,
@@ -519,9 +529,10 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
     jint calibrationIlluminant1,
     jint calibrationIlluminant2,
     jfloatArray neutralColorPoint,
-    jint dngCompressionMode
+    jint dngCompressionMode,
+    jint rawOutputType
 ) {
-    LOGD("Native processHdrPlus started (enableMemoryColor=%d, colorEngineMode=%d).", enableMemoryColor, colorEngineMode);
+    LOGD("Native processHdrPlus started (enableMemoryColor=%d, colorEngineMode=%d, rawOutputType=%d).", enableMemoryColor, colorEngineMode, rawOutputType);
     (void)useSensorColorMatrix;
 
     auto nativeStart = std::chrono::high_resolution_clock::now();
@@ -544,14 +555,25 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
 
     Buffer<uint16_t> inputBuf(rawDataPtr, width, height, numFrames);
 
+    const bool isBayerOutput = (rawOutputType == 0);
+    const size_t outputElements = static_cast<size_t>(width) * height * (isBayerOutput ? 1 : 3);
+
     const char* tr_p_cstr = (tempRawPath) ? env->GetStringUTFChars(tempRawPath, 0) : nullptr;
     std::shared_ptr<std::vector<uint16_t>> sharedBuf;
     Buffer<uint16_t> outputBuf;
     if (tr_p_cstr) {
-        sharedBuf = std::make_shared<std::vector<uint16_t>>(static_cast<size_t>(width) * height * 3);
-        outputBuf = Buffer<uint16_t>(sharedBuf->data(), width, height, 3);
+        sharedBuf = std::make_shared<std::vector<uint16_t>>(outputElements);
+        if (isBayerOutput) {
+            outputBuf = Buffer<uint16_t>(sharedBuf->data(), width, height);
+        } else {
+            outputBuf = Buffer<uint16_t>(sharedBuf->data(), width, height, 3);
+        }
     } else {
-        outputBuf = Buffer<uint16_t>(width, height, 3);
+        if (isBayerOutput) {
+            outputBuf = Buffer<uint16_t>(width, height);
+        } else {
+            outputBuf = Buffer<uint16_t>(width, height, 3);
+        }
     }
 
     jfloat* wbData = env->GetFloatArrayElements(whiteBalance, nullptr);
@@ -650,15 +672,19 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
 
     auto halideStart = std::chrono::high_resolution_clock::now();
     int halide_res;
-    if (numFrames == 1) {
-        halide_res = hdrplus_single_pipeline(inputBuf, bl_r, bl_g0, bl_g1, bl_b, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, ccmHalideBuf, lscMapBuf, 1.0f, 1.0f, outputBuf);
+    if (isBayerOutput) {
+        halide_res = hdrplus_bayer_pipeline(inputBuf, bl_r, bl_g0, bl_g1, bl_b, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, ccmHalideBuf, lscMapBuf, 1.0f, 1.0f, outputBuf);
     } else {
-        if (denoiseLevel == 0) {
-            halide_res = hdrplus_fast_pipeline(inputBuf, bl_r, bl_g0, bl_g1, bl_b, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, ccmHalideBuf, lscMapBuf, 1.0f, 1.0f, outputBuf);
-        } else if (denoiseLevel == 2) {
-            halide_res = hdrplus_high_pipeline(inputBuf, bl_r, bl_g0, bl_g1, bl_b, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, ccmHalideBuf, lscMapBuf, 1.0f, 1.0f, outputBuf);
+        if (numFrames == 1) {
+            halide_res = hdrplus_single_pipeline(inputBuf, bl_r, bl_g0, bl_g1, bl_b, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, ccmHalideBuf, lscMapBuf, 1.0f, 1.0f, outputBuf);
         } else {
-            halide_res = hdrplus_raw_pipeline(inputBuf, bl_r, bl_g0, bl_g1, bl_b, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, ccmHalideBuf, lscMapBuf, 1.0f, 1.0f, outputBuf);
+            if (denoiseLevel == 0) {
+                halide_res = hdrplus_fast_pipeline(inputBuf, bl_r, bl_g0, bl_g1, bl_b, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, ccmHalideBuf, lscMapBuf, 1.0f, 1.0f, outputBuf);
+            } else if (denoiseLevel == 2) {
+                halide_res = hdrplus_high_pipeline(inputBuf, bl_r, bl_g0, bl_g1, bl_b, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, ccmHalideBuf, lscMapBuf, 1.0f, 1.0f, outputBuf);
+            } else {
+                halide_res = hdrplus_raw_pipeline(inputBuf, bl_r, bl_g0, bl_g1, bl_b, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, ccmHalideBuf, lscMapBuf, 1.0f, 1.0f, outputBuf);
+            }
         }
     }
     auto halideDurationMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - halideStart).count();
@@ -720,11 +746,11 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
         ImageMetadata meta = metadataFromJava(env, metadata);
         if (!dngPathStr.empty()) {
             float baselineExposure = (digitalGain > 0.0f) ? std::log2(digitalGain) : 0.0f;
-            write_dng(dngPathStr.c_str(), width, height, raw_ptr, stride_x, stride_y, stride_c, kMax16BitValue, ccmVec, meta, orientation, (bool)mirror, baselineExposure, wbVec.data(),
-                      cm1Ptr, cm2Ptr, fm1Ptr, fm2Ptr, (int)calibrationIlluminant1, (int)calibrationIlluminant2, neutralPtr, -1, (int)dngCompressionMode);
+            write_dng(dngPathStr.c_str(), width, height, raw_ptr, stride_x, stride_y, isBayerOutput ? 0 : stride_c, kMax16BitValue, ccmVec, meta, orientation, (bool)mirror, baselineExposure, wbVec.data(),
+                      cm1Ptr, cm2Ptr, fm1Ptr, fm2Ptr, (int)calibrationIlluminant1, (int)calibrationIlluminant2, neutralPtr, -1, (int)dngCompressionMode, isBayerOutput, (int)cfaPattern, bl_pattern);
         }
 
-        if (!jpgPathStr.empty()) {
+        if (!jpgPathStr.empty() && !isBayerOutput) {
             process_and_save_image(raw_ptr, stride_x, stride_y, stride_c, lensShadingVec.empty() ? nullptr : lensShadingVec.data(), lensShadingRows, lensShadingCols,
                                     width, height, digitalGain, targetLog, lut,
                                     0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
@@ -762,11 +788,12 @@ Java_top_maary_darkbag_processor_ColorProcessor_processSingleFrameRaw(
     jint calibrationIlluminant1,
     jint calibrationIlluminant2,
     jfloatArray neutralColorPoint,
-    jint dngCompressionMode
+    jint dngCompressionMode,
+    jint rawOutputType
 ) {
-    LOGD("Native processSingleFrameRaw started (enableMemoryColor=%d, colorEngineMode=%d).", enableMemoryColor, colorEngineMode);
+    LOGD("Native processSingleFrameRaw started (enableMemoryColor=%d, colorEngineMode=%d, rawOutputType=%d).", enableMemoryColor, colorEngineMode, rawOutputType);
 
-    // Call the existing processHdrPlus logic directly with the buffer and numFrames=1
+    // Call processHdrPlus with numFrames=1 and rawOutputType
     return Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
         env, nullptr, bayerBuffer, 1, width, height, orientation, whiteLevel, blackLevelPattern, lensShadingMap, lensShadingRows, lensShadingCols,
         false, // useSensorColorMatrix
@@ -783,6 +810,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processSingleFrameRaw(
         calibrationIlluminant1,
         calibrationIlluminant2,
         neutralColorPoint,
-        dngCompressionMode
+        dngCompressionMode,
+        rawOutputType
     );
 }

@@ -27,7 +27,7 @@ static void my_error_exit(j_common_ptr cinfo) {
     longjmp(myerr->setjmp_buffer, 1);
 }
 
-static std::vector<unsigned char> encode_lossless_jpeg16(const unsigned short* planarData, int width, int height, int stride_x, int stride_y, int stride_c) {
+static std::vector<unsigned char> encode_lossless_jpeg16(const unsigned short* planarData, int width, int height, int stride_x, int stride_y, int stride_c, int channels = 3) {
     std::vector<unsigned char> ljpeg_bytes;
     struct jpeg_compress_struct cinfo;
     struct my_error_mgr jerr;
@@ -49,8 +49,8 @@ static std::vector<unsigned char> encode_lossless_jpeg16(const unsigned short* p
 
     cinfo.image_width = width;
     cinfo.image_height = height;
-    cinfo.input_components = 3;
-    cinfo.in_color_space = JCS_RGB;
+    cinfo.input_components = channels;
+    cinfo.in_color_space = (channels == 1) ? JCS_GRAYSCALE : JCS_RGB;
 
     jpeg_set_defaults(&cinfo);
     cinfo.data_precision = 16;
@@ -58,16 +58,23 @@ static std::vector<unsigned char> encode_lossless_jpeg16(const unsigned short* p
 
     jpeg_start_compress(&cinfo, TRUE);
 
-    std::vector<J16SAMPLE> rowBuffer(static_cast<size_t>(width) * 3);
+    std::vector<J16SAMPLE> rowBuffer(static_cast<size_t>(width) * channels);
     while (cinfo.next_scanline < cinfo.image_height) {
         int y = cinfo.next_scanline;
-        for (int x = 0; x < width; x++) {
-            size_t r_idx = (size_t)y * stride_y + (size_t)x * stride_x + 0 * stride_c;
-            size_t g_idx = (size_t)y * stride_y + (size_t)x * stride_x + 1 * stride_c;
-            size_t b_idx = (size_t)y * stride_y + (size_t)x * stride_x + 2 * stride_c;
-            rowBuffer[x * 3 + 0] = planarData[r_idx];
-            rowBuffer[x * 3 + 1] = planarData[g_idx];
-            rowBuffer[x * 3 + 2] = planarData[b_idx];
+        if (channels == 1) {
+            for (int x = 0; x < width; x++) {
+                size_t idx = (size_t)y * stride_y + (size_t)x * stride_x;
+                rowBuffer[x] = planarData[idx];
+            }
+        } else {
+            for (int x = 0; x < width; x++) {
+                size_t r_idx = (size_t)y * stride_y + (size_t)x * stride_x + 0 * stride_c;
+                size_t g_idx = (size_t)y * stride_y + (size_t)x * stride_x + 1 * stride_c;
+                size_t b_idx = (size_t)y * stride_y + (size_t)x * stride_x + 2 * stride_c;
+                rowBuffer[x * 3 + 0] = planarData[r_idx];
+                rowBuffer[x * 3 + 1] = planarData[g_idx];
+                rowBuffer[x * 3 + 2] = planarData[b_idx];
+            }
         }
         J16SAMPROW row_pointer[1] = { rowBuffer.data() };
         jpeg16_write_scanlines(&cinfo, row_pointer, 1);
@@ -1530,6 +1537,122 @@ int compute_preview_downsample_factor(int width, int height, int targetLongEdge)
 
 
 
+static void map_cfa_pattern(int cfaPattern, uint8_t cfa_bytes[4]) {
+    // 0: RGGB, 1: GRBG, 2: GBRG, 3: BGGR
+    // DNG CFA tag values: 0 = Red, 1 = Green, 2 = Blue
+    switch (cfaPattern) {
+        case 0: // RGGB
+            cfa_bytes[0] = 0; cfa_bytes[1] = 1; cfa_bytes[2] = 1; cfa_bytes[3] = 2; break;
+        case 1: // GRBG
+            cfa_bytes[0] = 1; cfa_bytes[1] = 0; cfa_bytes[2] = 2; cfa_bytes[3] = 1; break;
+        case 2: // GBRG
+            cfa_bytes[0] = 1; cfa_bytes[1] = 2; cfa_bytes[2] = 0; cfa_bytes[3] = 1; break;
+        case 3: // BGGR
+            cfa_bytes[0] = 2; cfa_bytes[1] = 1; cfa_bytes[2] = 1; cfa_bytes[3] = 0; break;
+        default: // Default to RGGB
+            cfa_bytes[0] = 0; cfa_bytes[1] = 1; cfa_bytes[2] = 1; cfa_bytes[3] = 2; break;
+    }
+}
+
+static std::vector<unsigned char> make_bayer_preview_rgb8(
+    const unsigned short* planarData, int stride_x, int stride_y,
+    int width,
+    int height,
+    int targetLongEdge,
+    int orientation,
+    bool mirror,
+    float gain,
+    int cfaPattern,
+    int& outWidth,
+    int& outHeight,
+    const float* wbVec = nullptr,
+    const Matrix3x3* ccmMat = nullptr
+) {
+    const int longEdge = std::max(width / 2, height / 2);
+    const int scale = std::max(1, (longEdge + targetLongEdge - 1) / targetLongEdge);
+    const int bayerW = width / 2;
+    const int bayerH = height / 2;
+    const int sampledWidth = std::max(1, bayerW / scale);
+    const int sampledHeight = std::max(1, bayerH / scale);
+    const bool swapDims = (orientation == 90 || orientation == 270);
+    outWidth = swapDims ? sampledHeight : sampledWidth;
+    outHeight = swapDims ? sampledWidth : sampledHeight;
+
+    const float wb_r = wbVec ? wbVec[0] : 1.0f;
+    const float wb_g0 = wbVec ? wbVec[1] : 1.0f;
+    const float wb_g1 = wbVec ? wbVec[2] : 1.0f;
+    const float wb_b = wbVec ? wbVec[3] : 1.0f;
+
+    std::vector<unsigned char> preview(static_cast<size_t>(outWidth) * outHeight * 3);
+
+    for (int y = 0; y < outHeight; ++y) {
+        for (int x = 0; x < outWidth; ++x) {
+            int sx = x;
+            int sy = y;
+            const int opx = mirror ? (outWidth - 1 - x) : x;
+            if (orientation == 90) {
+                sx = y;
+                sy = (outWidth - 1) - opx;
+            } else if (orientation == 180) {
+                sx = (outWidth - 1) - opx;
+                sy = (outHeight - 1) - y;
+            } else if (orientation == 270) {
+                sx = (outHeight - 1) - y;
+                sy = opx;
+            } else {
+                sx = opx;
+            }
+
+            const int bx = std::min(bayerW - 1, sx * scale);
+            const int by = std::min(bayerH - 1, sy * scale);
+            const int srcX = bx * 2;
+            const int srcY = by * 2;
+
+            size_t p00 = (size_t)srcY * stride_y + (size_t)srcX * stride_x;
+            size_t p10 = (size_t)srcY * stride_y + (size_t)(srcX + 1) * stride_x;
+            size_t p01 = (size_t)(srcY + 1) * stride_y + (size_t)srcX * stride_x;
+            size_t p11 = (size_t)(srcY + 1) * stride_y + (size_t)(srcX + 1) * stride_x;
+
+            float v00 = static_cast<float>(planarData[p00]);
+            float v10 = static_cast<float>(planarData[p10]);
+            float v01 = static_cast<float>(planarData[p01]);
+            float v11 = static_cast<float>(planarData[p11]);
+
+            float r = 0.0f, g = 0.0f, b = 0.0f;
+            switch (cfaPattern) {
+                case 0: // RGGB
+                    r = v00 * wb_r; g = 0.5f * (v10 * wb_g0 + v01 * wb_g1); b = v11 * wb_b; break;
+                case 1: // GRBG
+                    g = 0.5f * (v00 * wb_g0 + v11 * wb_g1); r = v10 * wb_r; b = v01 * wb_b; break;
+                case 2: // GBRG
+                    g = 0.5f * (v00 * wb_g0 + v11 * wb_g1); b = v10 * wb_b; r = v01 * wb_r; break;
+                case 3: // BGGR
+                    b = v00 * wb_b; g = 0.5f * (v10 * wb_g0 + v01 * wb_g1); r = v11 * wb_r; break;
+                default:
+                    r = v00 * wb_r; g = 0.5f * (v10 * wb_g0 + v01 * wb_g1); b = v11 * wb_b; break;
+            }
+
+            Vec3 linear = {
+                (r / 65535.0f) * gain,
+                (g / 65535.0f) * gain,
+                (b / 65535.0f) * gain
+            };
+
+            if (ccmMat) {
+                linear = multiply(*ccmMat, linear);
+            }
+
+            linear = apply_khronos_pbr_neutral(linear);
+
+            const size_t dstIdx = (static_cast<size_t>(y) * outWidth + x) * 3;
+            preview[dstIdx + 0] = (unsigned char)std::clamp(srgb_oetf(linear.r) * 255.0f + 0.5f + spatial_tpdf_dither(x, y, 0), 0.0f, 255.0f);
+            preview[dstIdx + 1] = (unsigned char)std::clamp(srgb_oetf(linear.g) * 255.0f + 0.5f + spatial_tpdf_dither(x, y, 1), 0.0f, 255.0f);
+            preview[dstIdx + 2] = (unsigned char)std::clamp(srgb_oetf(linear.b) * 255.0f + 0.5f + spatial_tpdf_dither(x, y, 2), 0.0f, 255.0f);
+        }
+    }
+    return preview;
+}
+
 static std::vector<unsigned char> make_preview_rgb8(
     const unsigned short* planarData, int stride_x, int stride_y, int stride_c,
     int width,
@@ -1647,7 +1770,10 @@ bool write_dng(
     int calibIllum2,
     const float* neutralColorPoint,
     int outFd,
-    int dngCompressionMode
+    int dngCompressionMode,
+    bool isBayer,
+    int cfaPattern,
+    const int* blackLevelPattern
 ) {
     static std::once_flag extender_flag;
     std::call_once(extender_flag, [](){
@@ -1704,9 +1830,16 @@ bool write_dng(
 
     for (const auto& spec : previewSpecs) {
         int pw = 0, ph = 0;
-        std::vector<unsigned char> previewRgb8 = make_preview_rgb8(
-            planarData, stride_x, stride_y, stride_c, width, height, spec.targetLongEdge, orientation, mirror, std::pow(2.0f, baselineExposure), pw, ph, wbVec, has_sensor_to_srgb ? &sensor_to_srgb : nullptr
-        );
+        std::vector<unsigned char> previewRgb8;
+        if (isBayer) {
+            previewRgb8 = make_bayer_preview_rgb8(
+                planarData, stride_x, stride_y, width, height, spec.targetLongEdge, orientation, mirror, std::pow(2.0f, baselineExposure), cfaPattern, pw, ph, wbVec, has_sensor_to_srgb ? &sensor_to_srgb : nullptr
+            );
+        } else {
+            previewRgb8 = make_preview_rgb8(
+                planarData, stride_x, stride_y, stride_c, width, height, spec.targetLongEdge, orientation, mirror, std::pow(2.0f, baselineExposure), pw, ph, wbVec, has_sensor_to_srgb ? &sensor_to_srgb : nullptr
+            );
+        }
         if (!previewRgb8.empty()) {
             std::vector<unsigned char> jpegPreview = encode_rgb8_jpeg(previewRgb8, pw, ph, 82);
             if (!jpegPreview.empty()) {
@@ -1745,8 +1878,20 @@ bool write_dng(
         default: tiffOrientation = mirror ? 2 : 1; break;
     }
     TIFFSetField(tif, TIFFTAG_ORIENTATION, tiffOrientation);
-    TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_LINEAR_RAW);
-    TIFFSetField(tif, TIFFTAG_SAMPLESPERPIXEL, 3);
+    if (isBayer) {
+        TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_CFA);
+        TIFFSetField(tif, TIFFTAG_SAMPLESPERPIXEL, 1);
+
+        static const uint16_t cfa_repeat_dim[2] = {2, 2};
+        TIFFSetField(tif, TIFFTAG_CFAREPEATPATTERNDIM, cfa_repeat_dim);
+
+        uint8_t cfa_bytes[4];
+        map_cfa_pattern(cfaPattern, cfa_bytes);
+        TIFFSetField(tif, TIFFTAG_CFAPATTERN, 4, cfa_bytes);
+    } else {
+        TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_LINEAR_RAW);
+        TIFFSetField(tif, TIFFTAG_SAMPLESPERPIXEL, 3);
+    }
     TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG);
     TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, height); // Single strip for raw
     TIFFSetField(tif, TIFFTAG_SUBFILETYPE, 0);
@@ -1766,8 +1911,21 @@ bool write_dng(
     uint32_t white_level_val = (uint32_t)whiteLevel;
     if (white_level_val == 0) white_level_val = 65535;
     TIFFSetField(tif, TIFFTAG_WHITELEVEL, 1, &white_level_val);
-    uint32_t black_level_vals[3] = {0, 0, 0};
-    TIFFSetField(tif, TIFFTAG_BLACKLEVEL, 3, black_level_vals);
+
+    if (isBayer && blackLevelPattern != nullptr) {
+        uint32_t bl_vals[4] = {
+            static_cast<uint32_t>(blackLevelPattern[0]),
+            static_cast<uint32_t>(blackLevelPattern[1]),
+            static_cast<uint32_t>(blackLevelPattern[2]),
+            static_cast<uint32_t>(blackLevelPattern[3])
+        };
+        static const uint16_t bl_repeat_dim[2] = {2, 2};
+        TIFFSetField(tif, TIFFTAG_BLACKLEVELREPEATDIM, bl_repeat_dim);
+        TIFFSetField(tif, TIFFTAG_BLACKLEVEL, 4, bl_vals);
+    } else {
+        uint32_t black_level_vals[3] = {0, 0, 0};
+        TIFFSetField(tif, TIFFTAG_BLACKLEVEL, 3, black_level_vals);
+    }
 
     float as_shot_neutral[3];
     if (neutralColorPoint != nullptr) {
@@ -1828,29 +1986,43 @@ bool write_dng(
     // Write Main RAW Data based on selected compression mode
     if (dngCompressionMode == 0) {
         // Mode 0: Lossless JPEG 16-bit
-        std::vector<unsigned char> ljpegData = encode_lossless_jpeg16(planarData, width, height, stride_x, stride_y, stride_c);
+        std::vector<unsigned char> ljpegData = encode_lossless_jpeg16(planarData, width, height, stride_x, stride_y, stride_c, isBayer ? 1 : 3);
         if (ljpegData.empty() || TIFFWriteRawStrip(tif, 0, ljpegData.data(), static_cast<tmsize_t>(ljpegData.size())) < 0) {
             LOGE("Failed to write Lossless JPEG raw strip");
             TIFFClose(tif);
             return false;
         }
     } else {
-        // Mode 1 (Adobe Deflate) & Mode 2 (Uncompressed): Scanline writing
+        // Mode 1 & Mode 2 (Uncompressed): Scanline writing
         TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, 64);
-        std::vector<unsigned short> rowBuffer(width * 3);
-        for (int y = 0; y < height; y++) {
-            for (int x = 0; x < width; x++) {
-                 size_t r_idx = (size_t)y*stride_y + (size_t)x*stride_x + 0*stride_c;
-                 size_t g_idx = (size_t)y*stride_y + (size_t)x*stride_x + 1*stride_c;
-                 size_t b_idx = (size_t)y*stride_y + (size_t)x*stride_x + 2*stride_c;
-
-                 rowBuffer[x*3+0] = planarData[r_idx];
-                 rowBuffer[x*3+1] = planarData[g_idx];
-                 rowBuffer[x*3+2] = planarData[b_idx];
+        if (isBayer) {
+            std::vector<unsigned short> rowBuffer(width);
+            for (int y = 0; y < height; y++) {
+                for (int x = 0; x < width; x++) {
+                    size_t idx = (size_t)y * stride_y + (size_t)x * stride_x;
+                    rowBuffer[x] = planarData[idx];
+                }
+                if (TIFFWriteScanline(tif, rowBuffer.data(), y, 0) < 0) {
+                    TIFFClose(tif);
+                    return false;
+                }
             }
-            if (TIFFWriteScanline(tif, rowBuffer.data(), y, 0) < 0) {
-                TIFFClose(tif);
-                return false;
+        } else {
+            std::vector<unsigned short> rowBuffer(width * 3);
+            for (int y = 0; y < height; y++) {
+                for (int x = 0; x < width; x++) {
+                     size_t r_idx = (size_t)y*stride_y + (size_t)x*stride_x + 0*stride_c;
+                     size_t g_idx = (size_t)y*stride_y + (size_t)x*stride_x + 1*stride_c;
+                     size_t b_idx = (size_t)y*stride_y + (size_t)x*stride_x + 2*stride_c;
+
+                     rowBuffer[x*3+0] = planarData[r_idx];
+                     rowBuffer[x*3+1] = planarData[g_idx];
+                     rowBuffer[x*3+2] = planarData[b_idx];
+                }
+                if (TIFFWriteScanline(tif, rowBuffer.data(), y, 0) < 0) {
+                    TIFFClose(tif);
+                    return false;
+                }
             }
         }
     }

@@ -894,6 +894,23 @@
                     <Space android:layout_width="match_parent" android:layout_height="@dimen/spacing_small" />
 
                     <com.google.android.material.textfield.TextInputLayout
+                        android:id="@+id/layout_raw_output_type_menu"
+                        style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:hint="RAW Format">
+
+                        <AutoCompleteTextView
+                            android:id="@+id/menu_raw_output_type"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:inputType="none"
+                            android:text="Bayer CFA RAW (~12MB, Default)" />
+                    </com.google.android.material.textfield.TextInputLayout>
+
+                    <Space android:layout_width="match_parent" android:layout_height="@dimen/spacing_small" />
+
+                    <com.google.android.material.textfield.TextInputLayout
                         android:id="@+id/layout_dng_compression_menu"
                         style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
                         android:layout_width="match_parent"

@@ -99,7 +99,8 @@ class HdrPlusProcessingService : LifecycleService() {
                     req.calibrationIlluminant1,
                     req.calibrationIlluminant2,
                     req.neutralColorPoint,
-                    req.dngCompressionMode
+                    req.dngCompressionMode,
+                    req.rawOutputType
                 )
             } else {
                 ColorProcessor.processHdrPlus(
@@ -130,7 +131,8 @@ class HdrPlusProcessingService : LifecycleService() {
                     req.calibrationIlluminant1,
                     req.calibrationIlluminant2,
                     req.neutralColorPoint,
-                    req.dngCompressionMode
+                    req.dngCompressionMode,
+                    req.rawOutputType
                 )
             }
 
@@ -148,7 +150,7 @@ class HdrPlusProcessingService : LifecycleService() {
                         try {
                             val edit = req.editConfig
                             val shouldSaveJpg = req.saveJpg
-                            val shouldSaveRaw = req.saveRaw && !req.isSingleFrame
+                                val shouldSaveRaw = req.saveRaw
 
                             val pfdJpg = if (shouldSaveJpg && req.jpgFolderUri == null && req.motionPhotoMp4Path == null) {
                                 top.maary.darkbag.utils.ImageSaver.createMediaStorePendingPfd(
@@ -158,10 +160,11 @@ class HdrPlusProcessingService : LifecycleService() {
                                 )
                             } else null
 
+                            val dngFileName = if (req.rawOutputType == 0) "${req.baseName}.dng" else "${req.baseName}_linear.dng"
                             val pfdDng = if (shouldSaveRaw && req.rawFolderUri == null) {
                                 top.maary.darkbag.utils.ImageSaver.createMediaStorePendingPfd(
                                     context = this@HdrPlusProcessingService,
-                                    displayName = "${req.baseName}_linear.dng",
+                                    displayName = dngFileName,
                                     mimeType = "image/x-adobe-dng"
                                 )
                             } else null
@@ -204,7 +207,10 @@ class HdrPlusProcessingService : LifecycleService() {
                                     debugStats = debugStats,
                                     outJpgFd = pfdJpg?.first?.fd ?: -1,
                                     outDngFd = pfdDng?.first?.fd ?: -1,
-                                    dngCompressionMode = req.dngCompressionMode
+                                    dngCompressionMode = req.dngCompressionMode,
+                                    rawOutputType = req.rawOutputType,
+                                    cfaPattern = req.cfaPattern,
+                                    blackLevelPattern = req.blackLevelPattern
                                 )
                                 exportSuccessful = (exportRet == 0)
                             } finally {
@@ -276,7 +282,7 @@ class HdrPlusProcessingService : LifecycleService() {
 
                                 if (req.saveJpg || req.saveRaw) {
                                     val shouldSaveJpg = req.saveJpg
-                                    val shouldSaveRaw = req.saveRaw && !req.isSingleFrame
+                                    val shouldSaveRaw = req.saveRaw
 
                                     if (shouldSaveJpg || shouldSaveRaw) {
                                         top.maary.darkbag.utils.ImageSaver.saveProcessedImage(

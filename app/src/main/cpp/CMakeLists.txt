@@ -205,8 +205,25 @@ add_custom_command(
     COMMENT "Running Halide Generator for High Pipeline (No Runtime)"
 )
 
+set(BAYER_GENERATED_HEADER "${GENERATOR_OUTPUT_DIR}/hdrplus_bayer_pipeline.h")
+set(BAYER_GENERATED_LIB "${GENERATOR_OUTPUT_DIR}/hdrplus_bayer_pipeline.a")
+
+add_custom_command(
+    OUTPUT "${BAYER_GENERATED_HEADER}" "${BAYER_GENERATED_LIB}"
+    COMMAND "${GENERATOR_EXEC}"
+            -g hdrplus_bayer_pipeline
+            -f hdrplus_bayer_pipeline
+            -e static_library,h
+            -o "${GENERATOR_OUTPUT_DIR}"
+            target=${HALIDE_TARGET}-no_runtime
+            use_optimized_schedule=true
+            use_gpu=false
+    DEPENDS "${GENERATOR_EXEC}"
+    COMMENT "Running Halide Generator for Bayer Pipeline (No Runtime)"
+)
+
 # Update dependency target
-add_custom_target(generate_hdrplus_halide DEPENDS "${GENERATED_LIB}" "${GENERATED_HEADER}" "${SINGLE_GENERATED_LIB}" "${SINGLE_GENERATED_HEADER}" "${FAST_GENERATED_LIB}" "${FAST_GENERATED_HEADER}" "${HIGH_GENERATED_LIB}" "${HIGH_GENERATED_HEADER}")
+add_custom_target(generate_hdrplus_halide DEPENDS "${GENERATED_LIB}" "${GENERATED_HEADER}" "${SINGLE_GENERATED_LIB}" "${SINGLE_GENERATED_HEADER}" "${FAST_GENERATED_LIB}" "${FAST_GENERATED_HEADER}" "${HIGH_GENERATED_LIB}" "${HIGH_GENERATED_HEADER}" "${BAYER_GENERATED_LIB}" "${BAYER_GENERATED_HEADER}")
 
 # Expose generated files to the build
 include_directories(${GENERATOR_OUTPUT_DIR})
@@ -241,6 +258,7 @@ add_library(
         "${SINGLE_GENERATED_LIB}"
         "${FAST_GENERATED_LIB}"
         "${HIGH_GENERATED_LIB}"
+        "${BAYER_GENERATED_LIB}"
 )
 
 # Ensure the generation happens before native-lib compilation
@@ -272,6 +290,7 @@ target_link_libraries(
         "${SINGLE_GENERATED_LIB}"
         "${FAST_GENERATED_LIB}"
         "${HIGH_GENERATED_LIB}"
+        "${BAYER_GENERATED_LIB}"
         tiff
         "-L${LIBJPEG_TURBO_INSTALL_DIR}/lib"
         -lturbojpeg

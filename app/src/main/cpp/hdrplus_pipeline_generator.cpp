@@ -415,6 +415,65 @@ private:
   }
 };
 
+class HdrPlusBayerPipeline : public Generator<HdrPlusBayerPipeline> {
+public:
+  GeneratorParam<bool> use_optimized_schedule{"use_optimized_schedule", true};
+  GeneratorParam<bool> use_gpu{"use_gpu", false};
+  GeneratorParam<bool> single_frame_mode{"single_frame_mode", false};
+
+  Input<Buffer<uint16_t>> inputs{"inputs", 3};
+
+  // Unused inputs kept for uniform interface/arguments if needed
+  Input<uint16_t> black_point_r{"black_point_r"};
+  Input<uint16_t> black_point_g0{"black_point_g0"};
+  Input<uint16_t> black_point_g1{"black_point_g1"};
+  Input<uint16_t> black_point_b{"black_point_b"};
+  Input<uint16_t> white_point{"white_point"};
+  Input<float> white_balance_r{"white_balance_r"};
+  Input<float> white_balance_g0{"white_balance_g0"};
+  Input<float> white_balance_g1{"white_balance_g1"};
+  Input<float> white_balance_b{"white_balance_b"};
+  Input<int> cfa_pattern{"cfa_pattern"};
+  Input<Buffer<float>> ccm{"ccm", 2};
+  Input<Buffer<float>> lens_shading_map{"lens_shading_map", 3};
+
+  Input<float> compression{"compression"};
+  Input<float> gain{"gain"};
+
+  // 16-bit 2D Bayer output (width, height)
+  Output<Buffer<uint16_t>> output{"output", 2};
+
+  void generate() {
+    Func alignment;
+    Func merged{"merged"};
+    if (!single_frame_mode) {
+        alignment = align(inputs, inputs.width(), inputs.height());
+        merged = merge(inputs, inputs.width(), inputs.height(),
+                       inputs.dim(2).extent(), alignment);
+    } else {
+        Func inputs_mirror = BoundaryConditions::mirror_interior(
+            inputs, {Range(0, inputs.width()), Range(0, inputs.height())});
+        merged(x, y) = inputs_mirror(x, y, 0);
+    }
+
+    output(x, y) = u16_sat(merged(x, y));
+
+    if (use_gpu) {
+        Var tx{"tx"}, ty{"ty"};
+        output.gpu_tile(x, y, tx, ty, xi, yi, 16, 16);
+    } else {
+        output.compute_root()
+            .tile(x, y, xo, yo, xi, yi, kTileX, kTileY)
+            .parallel(yo)
+            .vectorize(xi, kVec);
+    }
+  }
+
+private:
+  Var x{"x"}, y{"y"}, xo{"xo"}, yo{"yo"}, xi{"xi"}, yi{"yi"};
+};
+
 } // namespace
 
 HALIDE_REGISTER_GENERATOR(HdrPlusRawPipeline, hdrplus_raw_pipeline)
+HALIDE_REGISTER_GENERATOR(HdrPlusBayerPipeline, hdrplus_bayer_pipeline)
