@@ -459,12 +459,13 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
     jlong dngMs = 0;
     jlong jpgMs = 0;
 
+    bool dngOk = true;
     if (outDngFd >= 0 || dng_path_cstr) {
         LOGD("Exporting DNG to %s (outDngFd=%d, mode=%d)", dng_path_cstr ? dng_path_cstr : "FD", outDngFd, dngCompressionMode);
         auto dngStart = std::chrono::high_resolution_clock::now();
         float baselineExposure = (digitalGain > 0.0f) ? std::log2(digitalGain) : 0.0f;
-        write_dng(dng_path_cstr, width, height, finalImage.data(), 1, width, width*height, kMax16BitValue, ccmVec, meta, orientation, (bool)mirror, baselineExposure, wbVec.data(),
-                  cm1Ptr, cm2Ptr, fm1Ptr, fm2Ptr, (int)calibrationIlluminant1, (int)calibrationIlluminant2, neutralPtr, outDngFd, (int)dngCompressionMode);
+        dngOk = write_dng(dng_path_cstr, width, height, finalImage.data(), 1, width, width*height, kMax16BitValue, ccmVec, meta, orientation, (bool)mirror, baselineExposure, wbVec.data(),
+                          cm1Ptr, cm2Ptr, fm1Ptr, fm2Ptr, (int)calibrationIlluminant1, (int)calibrationIlluminant2, neutralPtr, outDngFd, (int)dngCompressionMode);
         dngMs = (jlong)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - dngStart).count();
     }
 
@@ -498,8 +499,9 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
     // No longer a physical file, so we don't delete anything
     // (the shared ptr cleans itself up)
 
-    LOGD("Native exportHdrPlus finished. Success=%d", saveOk);
-    return saveOk ? 0 : -2;
+    bool overallSuccess = saveOk && dngOk;
+    LOGD("Native exportHdrPlus finished. Success=%d (saveOk=%d, dngOk=%d)", overallSuccess, saveOk, dngOk);
+    return overallSuccess ? 0 : -2;
 }
 
 extern "C" JNIEXPORT jint JNICALL

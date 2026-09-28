@@ -14,13 +14,33 @@
 #include <jpeglib.h>
 
 #include <unistd.h>
+#include <setjmp.h>
+
+struct my_error_mgr {
+    struct jpeg_error_mgr pub;
+    jmp_buf setjmp_buffer;
+};
+
+static void my_error_exit(j_common_ptr cinfo) {
+    my_error_mgr* myerr = (my_error_mgr*) cinfo->err;
+    (*cinfo->err->output_message)(cinfo);
+    longjmp(myerr->setjmp_buffer, 1);
+}
 
 static std::vector<unsigned char> encode_lossless_jpeg16(const unsigned short* planarData, int width, int height, int stride_x, int stride_y, int stride_c) {
     std::vector<unsigned char> ljpeg_bytes;
     struct jpeg_compress_struct cinfo;
-    struct jpeg_error_mgr jerr;
+    struct my_error_mgr jerr;
 
-    cinfo.err = jpeg_std_error(&jerr);
+    cinfo.err = jpeg_std_error(&jerr.pub);
+    jerr.pub.error_exit = my_error_exit;
+
+    if (setjmp(jerr.setjmp_buffer)) {
+        LOGE("LibJPEG lossless compression error encountered");
+        jpeg_destroy_compress(&cinfo);
+        return {};
+    }
+
     jpeg_create_compress(&cinfo);
 
     unsigned char* outbuffer = NULL;
@@ -1643,11 +1663,16 @@ bool write_dng(
         }
         ftruncate(dup_fd, 0);
         tif = TIFFFdOpen(dup_fd, "DNG_Stream", "w");
+        if (!tif) {
+            close(dup_fd);
+            return false;
+        }
     } else if (filename) {
         tif = TIFFOpen(filename, "w");
+        if (!tif) return false;
+    } else {
+        return false;
     }
-
-    if (!tif) return false;
 
     // Pre-encode preview images first to calculate SubIFDs offsets
     const struct PreviewSpec {
@@ -1690,20 +1715,50 @@ bool write_dng(
         }
     }
 
+    // Write SubIFD custom directories for previews first to collect their file offsets
+    std::vector<uint64_t> subifd_offsets;
+    for (const auto& prev : encodedPreviews) {
+        TIFFSetField(tif, TIFFTAG_SUBFILETYPE, FILETYPE_REDUCEDIMAGE);
+        TIFFSetField(tif, TIFFTAG_IMAGEWIDTH, prev.w);
+        TIFFSetField(tif, TIFFTAG_IMAGELENGTH, prev.h);
+        TIFFSetField(tif, TIFFTAG_BITSPERSAMPLE, 8);
+        TIFFSetField(tif, TIFFTAG_COMPRESSION, COMPRESSION_JPEG);
+        TIFFSetField(tif, TIFFTAG_ORIENTATION, ORIENTATION_TOPLEFT);
+        TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_YCBCR);
+        TIFFSetField(tif, TIFFTAG_SAMPLESPERPIXEL, 3);
+        TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG);
+        TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, prev.h);
+        TIFFSetField(tif, TIFFTAG_JPEGCOLORMODE, JPEGCOLORMODE_RGB);
+        TIFFSetField(tif, TIFFTAG_MAKE, metadata.make.c_str());
+        TIFFSetField(tif, TIFFTAG_MODEL, metadata.model.c_str());
+        TIFFSetField(tif, TIFFTAG_SOFTWARE, metadata.software.c_str());
+        TIFFSetField(tif, TIFFTAG_IMAGEDESCRIPTION, prev.desc);
+
+        if (TIFFWriteRawStrip(tif, 0, const_cast<unsigned char*>(prev.jpegBytes.data()), static_cast<tmsize_t>(prev.jpegBytes.size())) < 0) {
+            TIFFClose(tif);
+            return false;
+        }
+
+        uint64_t subifd_offset = 0;
+        if (!TIFFWriteCustomDirectory(tif, &subifd_offset)) {
+            TIFFClose(tif);
+            return false;
+        }
+        subifd_offsets.push_back(subifd_offset);
+    }
+
     // IFD0 (Main RAW Image) Configuration
     TIFFSetField(tif, TIFFTAG_IMAGEWIDTH, width);
     TIFFSetField(tif, TIFFTAG_IMAGELENGTH, height);
     TIFFSetField(tif, TIFFTAG_BITSPERSAMPLE, 16);
 
-    // Set compression and backward version based on mode
-    // dngCompressionMode: 0 = Lossless JPEG (COMPRESSION_JPEG = 7), 1 = Adobe Deflate (COMPRESSION_ADOBE_DEFLATE = 8), 2 = Uncompressed (COMPRESSION_NONE = 1)
+    // Set compression and backward version based on mode:
+    // Mode 0: Lossless JPEG (COMPRESSION_JPEG = 7), Mode 1 / Mode 2: Uncompressed (COMPRESSION_NONE = 1)
+    // Note: Deflate (COMPRESSION_ADOBE_DEFLATE = 8) is prohibited for 16-bit integer RAW per Adobe DNG specification.
     uint16_t tiffCompression = COMPRESSION_JPEG;
     uint8_t backwardVersion[4] = {1, 1, 0, 0};
 
-    if (dngCompressionMode == 1) {
-        tiffCompression = COMPRESSION_ADOBE_DEFLATE;
-        backwardVersion[0] = 1; backwardVersion[1] = 4; backwardVersion[2] = 0; backwardVersion[3] = 0;
-    } else if (dngCompressionMode == 2) {
+    if (dngCompressionMode == 1 || dngCompressionMode == 2) {
         tiffCompression = COMPRESSION_NONE;
         backwardVersion[0] = 1; backwardVersion[1] = 1; backwardVersion[2] = 0; backwardVersion[3] = 0;
     } else {
@@ -1728,6 +1783,9 @@ bool write_dng(
     TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, height); // Single strip for raw
     TIFFSetField(tif, TIFFTAG_SUBFILETYPE, 0);
 
+    if (!subifd_offsets.empty()) {
+        TIFFSetField(tif, TIFFTAG_SUBIFD, static_cast<uint16_t>(subifd_offsets.size()), subifd_offsets.data());
+    }
 
     write_tiff_metadata(tif, &metadata);
 
@@ -1739,8 +1797,8 @@ bool write_dng(
     uint32_t white_level_val = (uint32_t)whiteLevel;
     if (white_level_val == 0) white_level_val = 65535;
     TIFFSetField(tif, TIFFTAG_WHITELEVEL, 1, &white_level_val);
-    uint32_t black_level_val = 0;
-    TIFFSetField(tif, TIFFTAG_BLACKLEVEL, 1, &black_level_val);
+    uint32_t black_level_vals[3] = {0, 0, 0};
+    TIFFSetField(tif, TIFFTAG_BLACKLEVEL, 3, black_level_vals);
 
     float as_shot_neutral[3];
     if (neutralColorPoint != nullptr) {
@@ -1831,35 +1889,6 @@ bool write_dng(
     if (!TIFFWriteDirectory(tif)) {
         TIFFClose(tif);
         return false;
-    }
-
-    // Write SubIFDs for previews
-    for (const auto& prev : encodedPreviews) {
-        TIFFSetField(tif, TIFFTAG_SUBFILETYPE, FILETYPE_REDUCEDIMAGE);
-        TIFFSetField(tif, TIFFTAG_IMAGEWIDTH, prev.w);
-        TIFFSetField(tif, TIFFTAG_IMAGELENGTH, prev.h);
-        TIFFSetField(tif, TIFFTAG_BITSPERSAMPLE, 8);
-        TIFFSetField(tif, TIFFTAG_COMPRESSION, COMPRESSION_JPEG);
-        TIFFSetField(tif, TIFFTAG_ORIENTATION, ORIENTATION_TOPLEFT);
-        TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_YCBCR);
-        TIFFSetField(tif, TIFFTAG_SAMPLESPERPIXEL, 3);
-        TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG);
-        TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, prev.h);
-        TIFFSetField(tif, TIFFTAG_JPEGCOLORMODE, JPEGCOLORMODE_RGB);
-        TIFFSetField(tif, TIFFTAG_MAKE, metadata.make.c_str());
-        TIFFSetField(tif, TIFFTAG_MODEL, metadata.model.c_str());
-        TIFFSetField(tif, TIFFTAG_SOFTWARE, metadata.software.c_str());
-        TIFFSetField(tif, TIFFTAG_IMAGEDESCRIPTION, prev.desc);
-
-        if (TIFFWriteRawStrip(tif, 0, const_cast<unsigned char*>(prev.jpegBytes.data()), static_cast<tmsize_t>(prev.jpegBytes.size())) < 0) {
-            TIFFClose(tif);
-            return false;
-        }
-
-        if (!TIFFWriteDirectory(tif)) {
-            TIFFClose(tif);
-            return false;
-        }
     }
 
     TIFFClose(tif);

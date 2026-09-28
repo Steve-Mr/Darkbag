@@ -649,6 +649,7 @@ class SettingsFragment : Fragment() {
     private fun updateStorageVisibility() {
         binding.layoutJpgStorage.visibility = if (binding.cbSaveJpg.isChecked) View.VISIBLE else View.GONE
         binding.layoutRawStorage.visibility = if (binding.cbSaveRaw.isChecked) View.VISIBLE else View.GONE
+        binding.layoutDngCompressionMenu.visibility = if (binding.cbSaveRaw.isChecked) View.VISIBLE else View.GONE
 
         binding.tvJpgPath.text = prefs.getString(KEY_JPG_STORAGE_URI_NAME, "Default (Pictures/Darkbag)")
         binding.tvRawPath.text = prefs.getString(KEY_RAW_STORAGE_URI_NAME, "Default (Pictures/Darkbag)")
@@ -880,7 +881,7 @@ class SettingsFragment : Fragment() {
         const val KEY_SAVE_LOCATION = "save_location_enabled"
         const val KEY_SAVE_RAW = "save_raw"
         const val KEY_DNG_COMPRESSION_MODE = "dng_compression_mode"
-        val DNG_COMPRESSION_MODES = listOf("Lossless JPEG (Default)", "Adobe Deflate", "Uncompressed")
+        val DNG_COMPRESSION_MODES = listOf("Lossless JPEG (Default)", "Uncompressed")
         const val KEY_JPG_STORAGE_URI = "jpg_storage_uri"
         const val KEY_JPG_STORAGE_URI_NAME = "jpg_storage_uri_name"
         const val KEY_RAW_STORAGE_URI = "raw_storage_uri"

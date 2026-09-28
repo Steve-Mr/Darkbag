@@ -166,8 +166,10 @@ class HdrPlusProcessingService : LifecycleService() {
                                 )
                             } else null
 
-                            val exportRet = try {
-                                ColorProcessor.exportHdrPlus(
+                            var exportRet = -1
+                            var exportSuccessful = false
+                            try {
+                                exportRet = ColorProcessor.exportHdrPlus(
                                     tempRawPath = req.requestId,
                                     width = req.width,
                                     height = req.height,
@@ -204,32 +206,35 @@ class HdrPlusProcessingService : LifecycleService() {
                                     outDngFd = pfdDng?.first?.fd ?: -1,
                                     dngCompressionMode = req.dngCompressionMode
                                 )
+                                exportSuccessful = (exportRet == 0)
                             } finally {
                                 if (pfdJpg != null) {
                                     top.maary.darkbag.utils.ImageSaver.finalizeMediaStorePendingPfd(
                                         context = this@HdrPlusProcessingService,
                                         pfdPair = pfdJpg,
-                                        success = true,
+                                        success = exportSuccessful,
                                         editConfig = req.editConfig,
                                         captureMetadata = req.metadata
                                     )
-                                    top.maary.darkbag.processor.ColorProcessor.backgroundSaveFlow.tryEmit(
-                                        top.maary.darkbag.processor.ColorProcessor.BackgroundSaveEvent(
-                                            baseName = req.baseName,
-                                            dngPath = if (req.saveRaw) req.linearDngPath else null,
-                                            jpgPath = req.fullResJpgPath,
-                                            targetUri = pfdJpg.second.toString(),
-                                            zoomFactor = req.zoomFactor,
-                                            orientation = req.orientation,
-                                            saveJpg = req.saveJpg
+                                    if (exportSuccessful) {
+                                        top.maary.darkbag.processor.ColorProcessor.backgroundSaveFlow.tryEmit(
+                                            top.maary.darkbag.processor.ColorProcessor.BackgroundSaveEvent(
+                                                baseName = req.baseName,
+                                                dngPath = if (req.saveRaw) req.linearDngPath else null,
+                                                jpgPath = null,
+                                                targetUri = pfdJpg.second.toString(),
+                                                zoomFactor = req.zoomFactor,
+                                                orientation = req.orientation,
+                                                saveJpg = req.saveJpg
+                                            )
                                         )
-                                    )
+                                    }
                                 }
                                 if (pfdDng != null) {
                                     top.maary.darkbag.utils.ImageSaver.finalizeMediaStorePendingPfd(
                                         context = this@HdrPlusProcessingService,
                                         pfdPair = pfdDng,
-                                        success = true
+                                        success = exportSuccessful
                                     )
                                 }
                             }
