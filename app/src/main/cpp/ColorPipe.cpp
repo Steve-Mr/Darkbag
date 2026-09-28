@@ -1715,38 +1715,6 @@ bool write_dng(
         }
     }
 
-    // Write SubIFD custom directories for previews first to collect their file offsets
-    std::vector<uint64_t> subifd_offsets;
-    for (const auto& prev : encodedPreviews) {
-        TIFFSetField(tif, TIFFTAG_SUBFILETYPE, FILETYPE_REDUCEDIMAGE);
-        TIFFSetField(tif, TIFFTAG_IMAGEWIDTH, prev.w);
-        TIFFSetField(tif, TIFFTAG_IMAGELENGTH, prev.h);
-        TIFFSetField(tif, TIFFTAG_BITSPERSAMPLE, 8);
-        TIFFSetField(tif, TIFFTAG_COMPRESSION, COMPRESSION_JPEG);
-        TIFFSetField(tif, TIFFTAG_ORIENTATION, ORIENTATION_TOPLEFT);
-        TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_YCBCR);
-        TIFFSetField(tif, TIFFTAG_SAMPLESPERPIXEL, 3);
-        TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG);
-        TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, prev.h);
-        TIFFSetField(tif, TIFFTAG_JPEGCOLORMODE, JPEGCOLORMODE_RGB);
-        TIFFSetField(tif, TIFFTAG_MAKE, metadata.make.c_str());
-        TIFFSetField(tif, TIFFTAG_MODEL, metadata.model.c_str());
-        TIFFSetField(tif, TIFFTAG_SOFTWARE, metadata.software.c_str());
-        TIFFSetField(tif, TIFFTAG_IMAGEDESCRIPTION, prev.desc);
-
-        if (TIFFWriteRawStrip(tif, 0, const_cast<unsigned char*>(prev.jpegBytes.data()), static_cast<tmsize_t>(prev.jpegBytes.size())) < 0) {
-            TIFFClose(tif);
-            return false;
-        }
-
-        uint64_t subifd_offset = 0;
-        if (!TIFFWriteCustomDirectory(tif, &subifd_offset)) {
-            TIFFClose(tif);
-            return false;
-        }
-        subifd_offsets.push_back(subifd_offset);
-    }
-
     // IFD0 (Main RAW Image) Configuration
     TIFFSetField(tif, TIFFTAG_IMAGEWIDTH, width);
     TIFFSetField(tif, TIFFTAG_IMAGELENGTH, height);
@@ -1783,7 +1751,8 @@ bool write_dng(
     TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, height); // Single strip for raw
     TIFFSetField(tif, TIFFTAG_SUBFILETYPE, 0);
 
-    if (!subifd_offsets.empty()) {
+    if (!encodedPreviews.empty()) {
+        std::vector<uint64_t> subifd_offsets(encodedPreviews.size(), 0);
         TIFFSetField(tif, TIFFTAG_SUBIFD, static_cast<uint16_t>(subifd_offsets.size()), subifd_offsets.data());
     }
 
@@ -1889,6 +1858,35 @@ bool write_dng(
     if (!TIFFWriteDirectory(tif)) {
         TIFFClose(tif);
         return false;
+    }
+
+    // Write Preview SubIFDs sequentially after IFD0 is committed
+    for (const auto& prev : encodedPreviews) {
+        TIFFSetField(tif, TIFFTAG_SUBFILETYPE, FILETYPE_REDUCEDIMAGE);
+        TIFFSetField(tif, TIFFTAG_IMAGEWIDTH, prev.w);
+        TIFFSetField(tif, TIFFTAG_IMAGELENGTH, prev.h);
+        TIFFSetField(tif, TIFFTAG_BITSPERSAMPLE, 8);
+        TIFFSetField(tif, TIFFTAG_COMPRESSION, COMPRESSION_JPEG);
+        TIFFSetField(tif, TIFFTAG_ORIENTATION, ORIENTATION_TOPLEFT);
+        TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_YCBCR);
+        TIFFSetField(tif, TIFFTAG_SAMPLESPERPIXEL, 3);
+        TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG);
+        TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, prev.h);
+        TIFFSetField(tif, TIFFTAG_JPEGCOLORMODE, JPEGCOLORMODE_RGB);
+        TIFFSetField(tif, TIFFTAG_MAKE, metadata.make.c_str());
+        TIFFSetField(tif, TIFFTAG_MODEL, metadata.model.c_str());
+        TIFFSetField(tif, TIFFTAG_SOFTWARE, metadata.software.c_str());
+        TIFFSetField(tif, TIFFTAG_IMAGEDESCRIPTION, prev.desc);
+
+        if (TIFFWriteRawStrip(tif, 0, const_cast<unsigned char*>(prev.jpegBytes.data()), static_cast<tmsize_t>(prev.jpegBytes.size())) < 0) {
+            TIFFClose(tif);
+            return false;
+        }
+
+        if (!TIFFWriteDirectory(tif)) {
+            TIFFClose(tif);
+            return false;
+        }
     }
 
     TIFFClose(tif);
