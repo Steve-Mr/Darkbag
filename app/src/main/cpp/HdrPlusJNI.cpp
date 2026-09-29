@@ -480,12 +480,13 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
     }
 
     bool saveOk = true;
-    if ((outJpgFd >= 0 || jpg_path_cstr) && rawOutputType != 0) {
-        LOGD("Exporting JPG: JPG=%s (outJpgFd=%d)", jpg_path_cstr ? jpg_path_cstr : "FD", outJpgFd);
+    if (outJpgFd >= 0 || jpg_path_cstr) {
+        LOGD("Exporting JPG: JPG=%s (outJpgFd=%d, rawOutputType=%d)", jpg_path_cstr ? jpg_path_cstr : "FD", outJpgFd, rawOutputType);
         auto jpgStart = std::chrono::high_resolution_clock::now();
-        saveOk = process_and_save_image(finalImage.data(), 1, width, width*height, nullptr, 0, 0, width, height, digitalGain, targetLog, lut,
+        const bool isBayer = (rawOutputType == 0);
+        saveOk = process_and_save_image(finalImage.data(), 1, width, isBayer ? 0 : width*height, nullptr, 0, 0, width, height, digitalGain, targetLog, lut,
                                         exposure, contrast, saturation, highlights, shadows, whites, blacks,
-                                        jpg_path_cstr, nullptr, &meta, 1, ccmVec.data(), wbVec.data(), orientation, nullptr, 0, 0, false, 1, zoomFactor, (bool)mirror, (bool)enableMemoryColor, (int)colorEngineMode, faithfulHighlights, outJpgFd);
+                                        jpg_path_cstr, nullptr, &meta, 1, ccmVec.data(), wbVec.data(), orientation, nullptr, 0, 0, false, 1, zoomFactor, (bool)mirror, (bool)enableMemoryColor, (int)colorEngineMode, faithfulHighlights, outJpgFd, isBayer, (int)cfaPattern);
         jpgMs = (jlong)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - jpgStart).count();
     }
 

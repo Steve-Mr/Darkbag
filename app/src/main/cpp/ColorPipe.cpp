@@ -984,7 +984,9 @@ bool process_and_save_image(
     bool enableMemoryColor,
     int colorEngineMode,
     bool faithfulHighlights,
-    int outJpgFd
+    int outJpgFd,
+    bool isBayerInput,
+    int cfaPattern
 ) {
     LOGD("process_and_save_image: %dx%d, gain=%.2f, log=%d, lut=%d, jpg=%s, tiff=%s, preview=%d, ds=%d, zoom=%.2f, mirror=%d, memColor=%d, engineMode=%d, faithful=%d",
          width, height, gain, targetLog, lut.size, jpgPath ? jpgPath : "null", tiffPath ? tiffPath : "null", isPreview, downsampleFactor, zoomFactor, mirror, enableMemoryColor, colorEngineMode, faithfulHighlights);
@@ -1046,14 +1048,48 @@ bool process_and_save_image(
     auto process_pixel = [&](int x, int y, Vec3* stageA, Vec3* stageB, Vec3* stageC) -> Vec3 {
         x = std::max(0, std::min(x, width - 1));
         y = std::max(0, std::min(y, height - 1));
-        
-        size_t r_idx = (size_t)y*stride_y + (size_t)x*stride_x + 0*stride_c;
-        size_t g_idx = (size_t)y*stride_y + (size_t)x*stride_x + 1*stride_c;
-        size_t b_idx = (size_t)y*stride_y + (size_t)x*stride_x + 2*stride_c;
-        
-        float r = static_cast<float>(planarData[r_idx]);
-        float g = static_cast<float>(planarData[g_idx]);
-        float b = static_cast<float>(planarData[b_idx]);
+
+        float r = 0.0f, g = 0.0f, b = 0.0f;
+
+        if (stride_c == 0) {
+            // Single-channel Bayer input: perform fast 2x2 bilinear/box demosaic
+            int bx = (x / 2) * 2;
+            int by = (y / 2) * 2;
+            bx = std::min(bx, width - 2);
+            by = std::min(by, height - 2);
+
+            size_t p00 = (size_t)by * stride_y + (size_t)bx * stride_x;
+            size_t p10 = (size_t)by * stride_y + (size_t)(bx + 1) * stride_x;
+            size_t p01 = (size_t)(by + 1) * stride_y + (size_t)bx * stride_x;
+            size_t p11 = (size_t)(by + 1) * stride_y + (size_t)(bx + 1) * stride_x;
+
+            float v00 = static_cast<float>(planarData[p00]);
+            float v10 = static_cast<float>(planarData[p10]);
+            float v01 = static_cast<float>(planarData[p01]);
+            float v11 = static_cast<float>(planarData[p11]);
+
+            // cfaPattern: 0: RGGB, 1: GRBG, 2: GBRG, 3: BGGR
+            switch (cfaPattern) {
+                case 0: // RGGB
+                    r = v00; g = 0.5f * (v10 + v01); b = v11; break;
+                case 1: // GRBG
+                    g = 0.5f * (v00 + v11); r = v10; b = v01; break;
+                case 2: // GBRG
+                    g = 0.5f * (v00 + v11); b = v10; r = v01; break;
+                case 3: // BGGR
+                    b = v00; g = 0.5f * (v10 + v01); r = v11; break;
+                default:
+                    r = v00; g = 0.5f * (v10 + v01); b = v11; break;
+            }
+        } else {
+            size_t r_idx = (size_t)y*stride_y + (size_t)x*stride_x + 0*stride_c;
+            size_t g_idx = (size_t)y*stride_y + (size_t)x*stride_x + 1*stride_c;
+            size_t b_idx = (size_t)y*stride_y + (size_t)x*stride_x + 2*stride_c;
+
+            r = static_cast<float>(planarData[r_idx]);
+            g = static_cast<float>(planarData[g_idx]);
+            b = static_cast<float>(planarData[b_idx]);
+        }
         
         // Highlight handling.
         //  * Multi-frame path (faithfulHighlights == false): joint proportional
@@ -1849,6 +1885,7 @@ bool write_dng(
     }
 
     // IFD0 (Main RAW Image) Configuration
+    TIFFSetField(tif, TIFFTAG_SUBFILETYPE, 0);
     TIFFSetField(tif, TIFFTAG_IMAGEWIDTH, width);
     TIFFSetField(tif, TIFFTAG_IMAGELENGTH, height);
     TIFFSetField(tif, TIFFTAG_BITSPERSAMPLE, 16);
@@ -1894,7 +1931,6 @@ bool write_dng(
     }
     TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG);
     TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, height); // Single strip for raw
-    TIFFSetField(tif, TIFFTAG_SUBFILETYPE, 0);
 
     if (!encodedPreviews.empty()) {
         std::vector<uint64_t> subifd_offsets(encodedPreviews.size(), 0);
