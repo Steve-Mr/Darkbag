@@ -143,31 +143,34 @@ class HdrPlusProcessingService : LifecycleService() {
                 // so imageProcessingDispatcher can immediately start the next capture computation.
                 var stage2HandedOff = false
                 try {
-                    lifecycleScope.launch(ColorProcessor.exportProcessingDispatcher) {
+                    val app = applicationContext as top.maary.darkbag.MainApplication
+                    app.applicationScope.launch(ColorProcessor.exportProcessingDispatcher) {
                         exportSemaphore.acquire()
+                        var pfdJpg: Pair<android.os.ParcelFileDescriptor, android.net.Uri>? = null
+                        var pfdDng: Pair<android.os.ParcelFileDescriptor, android.net.Uri>? = null
+                        var exportSuccessful = false
                         try {
                             val edit = req.editConfig
                             val shouldSaveJpg = req.saveJpg
-                            val shouldSaveRaw = req.saveRaw && !req.isSingleFrame
+                            val shouldSaveRaw = req.saveRaw
 
-                            val pfdJpg = if (shouldSaveJpg && req.jpgFolderUri == null && req.motionPhotoMp4Path == null) {
-                                top.maary.darkbag.utils.ImageSaver.createMediaStorePendingPfd(
+                            if (shouldSaveJpg && req.jpgFolderUri == null && req.motionPhotoMp4Path == null) {
+                                pfdJpg = top.maary.darkbag.utils.ImageSaver.createMediaStorePendingPfd(
                                     context = this@HdrPlusProcessingService,
                                     displayName = "${req.baseName}.jpg",
                                     mimeType = "image/jpeg"
                                 )
-                            } else null
+                            }
 
-                            val pfdDng = if (shouldSaveRaw && req.rawFolderUri == null) {
-                                top.maary.darkbag.utils.ImageSaver.createMediaStorePendingPfd(
+                            if (shouldSaveRaw && req.rawFolderUri == null) {
+                                pfdDng = top.maary.darkbag.utils.ImageSaver.createMediaStorePendingPfd(
                                     context = this@HdrPlusProcessingService,
                                     displayName = "${req.baseName}_linear.dng",
                                     mimeType = "image/x-adobe-dng"
                                 )
-                            } else null
+                            }
 
                             var exportRet = -1
-                            var exportSuccessful = false
                             try {
                                 exportRet = ColorProcessor.exportHdrPlus(
                                     tempRawPath = req.requestId,
@@ -236,6 +239,19 @@ class HdrPlusProcessingService : LifecycleService() {
                                         pfdPair = pfdDng,
                                         success = exportSuccessful
                                     )
+                                    if (pfdJpg == null && exportSuccessful) {
+                                        top.maary.darkbag.processor.ColorProcessor.backgroundSaveFlow.tryEmit(
+                                            top.maary.darkbag.processor.ColorProcessor.BackgroundSaveEvent(
+                                                baseName = req.baseName,
+                                                dngPath = if (req.saveRaw) req.linearDngPath else null,
+                                                jpgPath = null,
+                                                targetUri = pfdDng.second.toString(),
+                                                zoomFactor = req.zoomFactor,
+                                                orientation = req.orientation,
+                                                saveJpg = false
+                                            )
+                                        )
+                                    }
                                 }
                             }
                             req.timing?.jniDone = System.currentTimeMillis()
@@ -276,7 +292,7 @@ class HdrPlusProcessingService : LifecycleService() {
 
                                 if (req.saveJpg || req.saveRaw) {
                                     val shouldSaveJpg = req.saveJpg
-                                    val shouldSaveRaw = req.saveRaw && !req.isSingleFrame
+                                    val shouldSaveRaw = req.saveRaw
 
                                     if (shouldSaveJpg || shouldSaveRaw) {
                                         top.maary.darkbag.utils.ImageSaver.saveProcessedImage(
@@ -325,7 +341,7 @@ class HdrPlusProcessingService : LifecycleService() {
                             Log.e(TAG, "Exception during Stage 2 export for ${req.requestId}", e)
                         } finally {
                             exportSemaphore.release()
-                            finishTaskAndCheckStopService()
+                            finishTaskAndCheckStopService(req.requestId)
                         }
                     }
                     stage2HandedOff = true
@@ -334,22 +350,29 @@ class HdrPlusProcessingService : LifecycleService() {
                 }
 
                 if (!stage2HandedOff) {
-                    finishTaskAndCheckStopService()
+                    finishTaskAndCheckStopService(req.requestId)
                 }
             } else {
                 Log.e(TAG, "Stage 1 Halide processing failed for ${req.requestId}")
-                finishTaskAndCheckStopService()
+                finishTaskAndCheckStopService(req.requestId)
             }
         } catch (e: Exception) {
             Log.e(TAG, "Exception processing ${req.requestId}", e)
             if (!buffersReleased) {
                 HdrPlusBurst.releaseBuffer(req.megaBuffer)
             }
-            finishTaskAndCheckStopService()
+            finishTaskAndCheckStopService(req.requestId)
         }
     }
 
-    private fun finishTaskAndCheckStopService() {
+    private fun finishTaskAndCheckStopService(requestId: String? = null) {
+        if (requestId != null) {
+            try {
+                ColorProcessor.freeSharedRawMemory(requestId)
+            } catch (e: Throwable) {
+                Log.e(TAG, "Error freeing shared raw memory for $requestId", e)
+            }
+        }
         HdrPlusRequestManager.onTaskFinished()
         val remaining = HdrPlusRequestManager.pendingTasksCount.value
         if (remaining == 0) {

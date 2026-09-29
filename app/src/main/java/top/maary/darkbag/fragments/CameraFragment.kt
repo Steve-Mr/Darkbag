@@ -1710,6 +1710,7 @@ class CameraFragment : Fragment() {
         withContext(Dispatchers.IO) {
             val timing = image.timing
             timing?.processingStart = System.currentTimeMillis()
+            var enqueued = false
             try {
                 val contentResolver = context.contentResolver
                 val dngName = if (image.halfFrameMetadata != null) {
@@ -1810,8 +1811,6 @@ class CameraFragment : Fragment() {
 
                 val fullResJpgFile = File(context.cacheDir, "${dngName}_full.jpg")
                 val linearDngFile = File(context.cacheDir, "${dngName}_linear.dng")
-                val bayerDngFile = File(context.cacheDir, "${dngName}_bayer.dng")
-                var dngWritten = false
 
                 val iso = captureResult?.get(android.hardware.camera2.CaptureResult.SENSOR_SENSITIVITY) ?: 100
                 val exposureTime = captureResult?.get(android.hardware.camera2.CaptureResult.SENSOR_EXPOSURE_TIME) ?: 10_000_000L
@@ -1845,54 +1844,6 @@ class CameraFragment : Fragment() {
                     // 保持加载动画，直到服务处理完毕
                 }
 
-                if (saveRaw && captureResult != null) {
-                    try {
-                        val dngThumbnailSource: java.io.File? = null
-
-                        val dngCreator = android.hardware.camera2.DngCreator(chars, captureResult)
-                        dngCreator.setDescription(DarkbagIdentity.imageDescription(isHdrPlus = false))
-                        captureMetadata.location?.let { dngCreator.setLocation(it) }
-
-                        val dngOrientation = when (image.combinedOrientation) {
-                            90 -> ExifInterface.ORIENTATION_ROTATE_90
-                            180 -> ExifInterface.ORIENTATION_ROTATE_180
-                            270 -> ExifInterface.ORIENTATION_ROTATE_270
-                            else -> ExifInterface.ORIENTATION_NORMAL
-                        }
-                        dngCreator.setOrientation(dngOrientation)
-                        dngThumbnailSource?.let { createDngThumbnailBitmap(it) }?.let { thumb ->
-                            try {
-                                dngCreator.setThumbnail(thumb)
-                            } finally {
-                                thumb.recycle()
-                            }
-                        }
-
-                        val dngBuffer = image.data.duplicate()
-                        dngBuffer.rewind()
-                        FileOutputStream(bayerDngFile).use { out ->
-                            dngCreator.writeByteBuffer(out, Size(image.width, image.height), dngBuffer, 0)
-                        }
-                        
-                        ImageSaver.saveProcessedImage(
-                            context = context,
-                            inputBitmap = null,
-                            bmpPath = null,
-                            rotationDegrees = 0,
-                            zoomFactor = 1.0f,
-                            baseName = dngName,
-                            linearDngPath = bayerDngFile.absolutePath,
-                            saveJpg = false,
-                            saveRaw = saveRaw,
-                            jpgFolderUri = null,
-                            rawFolderUri = rawFolderUri,
-                            isFastPath = false,
-                            captureMetadata = captureMetadata
-                        )
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Failed to save DNG asynchronously", e)
-                    }
-                }
 
 
                 // 5. Enqueue HQ Processing
@@ -1976,6 +1927,7 @@ class CameraFragment : Fragment() {
                     dngCompressionMode = prefs.getInt(SettingsFragment.KEY_DNG_COMPRESSION_MODE, 0)
                 )
                 top.maary.darkbag.processor.HdrPlusRequestManager.enqueue(request)
+                enqueued = true
                 val serviceIntent = android.content.Intent(context, top.maary.darkbag.processor.HdrPlusProcessingService::class.java)
                 if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
                     context.startForegroundService(serviceIntent)
@@ -1983,21 +1935,7 @@ class CameraFragment : Fragment() {
                     context.startService(serviceIntent)
                 }
 
-                // 6. Timing Report
                 timing?.let { t ->
-                    val report = """
-                        [Standard Mode Report]
-                        Total (to First Output): ${t.firstOutputWritten - t.shutterClick}ms
-                        Shutter to Callback: ${t.captureCallback - t.shutterClick}ms
-                        Callback to Enqueued: ${t.enqueued - t.captureCallback}ms
-                        Wait in Queue: ${t.processingStart - t.enqueued}ms
-                        JNI (Halide + FastJPG): ${t.jniDone - t.processingStart}ms
-                        DNG Write (DngCreator): ${t.firstOutputWritten - t.jniDone}ms
-                        Native Halide Detail: ${debugStats[0]}ms
-                    """.trimIndent()
-                    Log.i(TAG, report)
-                    DebugLogManager.addLog(report)
-
                     val baselineReport = top.maary.darkbag.processor.SensorCalibrationHelper.formatHardwareBaselineLog(
                         cfaPattern = cfa,
                         blackLevelPattern = blackLevelPattern ?: intArrayOf(64, 64, 64, 64),
@@ -2013,6 +1951,10 @@ class CameraFragment : Fragment() {
 
             } catch (e: Exception) {
                 Log.e(TAG, "Error in background processing", e)
+            } finally {
+                if (!enqueued) {
+                    HdrPlusBurst.releaseBuffer(image.data)
+                }
             }
         }
 
@@ -4484,21 +4426,6 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         val sensorOrientation = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
 
         val rowLength = width * pixelStride
-        if (buffer.isDirect && rowStride == rowLength) {
-            // Direct zero-copy passthrough
-            return RawImageHolder(
-                data = buffer.duplicate(),
-                width = width,
-                height = height,
-                timestamp = image.timestamp,
-                rotationDegrees = sensorOrientation,
-                combinedOrientation = combinedOrientation,
-                zoomRatio = zoomRatio,
-                physicalId = physicalId,
-                halfFrameMetadata = halfFrameMetadata
-            )
-        }
-
         val capacity = rowLength * height
         val data = HdrPlusBurst.acquireBuffer(capacity)
 
@@ -4509,19 +4436,32 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 width, height, rowStride, pixelStride
             )
         } else {
+            val oldPos = buffer.position()
             buffer.rewind()
             if (rowStride == rowLength) {
-                data.put(buffer)
+                if (buffer.remaining() == capacity) {
+                    data.put(buffer)
+                } else {
+                    val oldLimit = buffer.limit()
+                    buffer.limit(buffer.position() + capacity)
+                    data.put(buffer)
+                    buffer.limit(oldLimit)
+                }
             } else {
+                val oldLimit = buffer.limit()
                 for (y in 0 until height) {
-                    buffer.position(y * rowStride)
-                    buffer.limit(y * rowStride + rowLength)
+                    val rowStart = y * rowStride
+                    if (rowStart + rowLength > buffer.capacity()) break
+                    buffer.position(rowStart)
+                    buffer.limit(rowStart + rowLength)
                     data.put(buffer)
                 }
-                buffer.limit(buffer.capacity())
+                buffer.limit(oldLimit)
             }
-            data.rewind()
+            buffer.position(oldPos)
         }
+        data.limit(capacity)
+        data.rewind()
 
         return RawImageHolder(
             data = data,

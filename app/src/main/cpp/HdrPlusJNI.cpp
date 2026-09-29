@@ -315,6 +315,21 @@ Java_top_maary_darkbag_processor_ColorProcessor_freeDirectBuffer(JNIEnv* env, jo
     }
 }
 
+extern "C" JNIEXPORT void JNICALL
+Java_top_maary_darkbag_processor_ColorProcessor_freeSharedRawMemory(JNIEnv* env, jobject /* this */, jstring tempRawPath) {
+    if (!tempRawPath) return;
+    const char* temp_path_cstr = env->GetStringUTFChars(tempRawPath, 0);
+    if (!temp_path_cstr) return;
+    {
+        std::lock_guard<std::mutex> mapLock(g_sharedMemoryMutex);
+        auto it = g_sharedMemoryMap.find(temp_path_cstr);
+        if (it != g_sharedMemoryMap.end()) {
+            g_sharedMemoryMap.erase(it);
+        }
+    }
+    env->ReleaseStringUTFChars(tempRawPath, temp_path_cstr);
+}
+
 static void extract_calibration_data(
     JNIEnv* env,
     jfloatArray colorMatrix1,

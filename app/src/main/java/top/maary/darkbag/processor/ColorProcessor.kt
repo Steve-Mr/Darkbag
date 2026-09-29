@@ -45,6 +45,7 @@ object ColorProcessor {
 
     external fun allocateDirectBuffer(capacity: Long): ByteBuffer?
     external fun freeDirectBuffer(buffer: ByteBuffer)
+    external fun freeSharedRawMemory(tempRawPath: String)
 
     external fun copyBayerWithStride(
         srcBuffer: ByteBuffer,
