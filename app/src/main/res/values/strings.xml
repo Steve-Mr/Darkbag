@@ -243,4 +243,8 @@
     <string name="dialog_mic_permission_silent">Record Silent</string>
     <string name="dialog_mic_permission_settings">Settings</string>
     <string name="toast_audio_permission_granted">Microphone permission granted; audio recording enabled</string>
+
+    <string name="setting_raw_format_hint">RAW Format</string>
+    <string name="raw_output_type_bayer">Bayer CFA RAW (~12MB, Default)</string>
+    <string name="raw_output_type_linear">Linear RGB RAW (~50MB)</string>
 </resources>

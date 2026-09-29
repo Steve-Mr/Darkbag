@@ -1862,6 +1862,7 @@ class CameraFragment : Fragment() {
                 val useSensorColorMatrix = true
                 val finalCcm = if (useSensorColorMatrix && singleCalib.renderCcm != null) singleCalib.renderCcm else ccmCapture
 
+                val rawOutputType = prefs.getInt(SettingsFragment.KEY_RAW_OUTPUT_TYPE, 0)
                 val request = top.maary.darkbag.processor.HdrPlusRequest(
                     requestId = java.util.UUID.randomUUID().toString(),
                     megaBuffer = image.data!!,
@@ -1924,7 +1925,8 @@ class CameraFragment : Fragment() {
                     calibrationIlluminant2 = singleCalib.calibrationIlluminant2,
                     neutralColorPoint = singleCalib.neutralColorPoint,
                     timing = timing,
-                    dngCompressionMode = prefs.getInt(SettingsFragment.KEY_DNG_COMPRESSION_MODE, 0)
+                    dngCompressionMode = prefs.getInt(SettingsFragment.KEY_DNG_COMPRESSION_MODE, 0),
+                    rawOutputType = rawOutputType
                 )
                 top.maary.darkbag.processor.HdrPlusRequestManager.enqueue(request)
                 enqueued = true
@@ -3508,6 +3510,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         motionStillPtsUs = result?.second ?: 0L
                     }
 
+                    val rawOutputType = prefs.getInt(SettingsFragment.KEY_RAW_OUTPUT_TYPE, 0)
                     val request = top.maary.darkbag.processor.HdrPlusRequest(
                         requestId = java.util.UUID.randomUUID().toString(),
                         megaBuffer = megaBuffer,
@@ -3571,7 +3574,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         calibrationIlluminant2 = burstCalib.calibrationIlluminant2,
                         neutralColorPoint = burstCalib.neutralColorPoint,
                         timing = timing,
-                        dngCompressionMode = prefs.getInt(SettingsFragment.KEY_DNG_COMPRESSION_MODE, 0)
+                        dngCompressionMode = prefs.getInt(SettingsFragment.KEY_DNG_COMPRESSION_MODE, 0),
+                        rawOutputType = rawOutputType
                     )
                     top.maary.darkbag.processor.HdrPlusRequestManager.enqueue(request)
                     val serviceIntent = android.content.Intent(context, top.maary.darkbag.processor.HdrPlusProcessingService::class.java)

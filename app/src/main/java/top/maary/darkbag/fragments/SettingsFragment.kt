@@ -106,6 +106,7 @@ class SettingsFragment : Fragment() {
         setupStartupSettings()
         setupCheckboxes()
         setupStoragePickers()
+        setupStorageSettings()
         setupCacheManagement()
         setupNavigation()
         updateDebugStats()
@@ -118,6 +119,7 @@ class SettingsFragment : Fragment() {
         updateDebugStats()
         // Re-apply adapters to fix dropdown disappearance bug
         setupMenus()
+        setupStorageSettings()
         updateCheckboxStates()
         syncLocationSettingState()
         updateStorageVisibility()
@@ -650,6 +652,7 @@ class SettingsFragment : Fragment() {
         binding.layoutJpgStorage.visibility = if (binding.cbSaveJpg.isChecked) View.VISIBLE else View.GONE
         binding.layoutRawStorage.visibility = if (binding.cbSaveRaw.isChecked) View.VISIBLE else View.GONE
         binding.layoutDngCompressionMenu.visibility = if (binding.cbSaveRaw.isChecked) View.VISIBLE else View.GONE
+        binding.layoutRawOutputTypeMenu.visibility = if (binding.cbSaveRaw.isChecked) View.VISIBLE else View.GONE
 
         binding.tvJpgPath.text = prefs.getString(KEY_JPG_STORAGE_URI_NAME, "Default (Pictures/Darkbag)")
         binding.tvRawPath.text = prefs.getString(KEY_RAW_STORAGE_URI_NAME, "Default (Pictures/Darkbag)")
@@ -789,6 +792,22 @@ class SettingsFragment : Fragment() {
         }
     }
 
+    private fun setupStorageSettings() {
+        val rawOutputOptions = listOf(
+            getString(R.string.raw_output_type_bayer),
+            getString(R.string.raw_output_type_linear)
+        )
+        val rawOutputTypeAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, rawOutputOptions)
+        binding.menuRawOutputType.setAdapter(rawOutputTypeAdapter)
+        val savedRawOutputType = prefs.getInt(KEY_RAW_OUTPUT_TYPE, 0)
+        val safeRawOutputType = savedRawOutputType.coerceIn(0, rawOutputOptions.size - 1)
+        binding.menuRawOutputType.setText(rawOutputOptions[safeRawOutputType], false)
+        binding.menuRawOutputType.setOnItemClickListener { _, _, position, _ ->
+            prefs.edit().putInt(KEY_RAW_OUTPUT_TYPE, position).apply()
+        }
+        binding.layoutRawOutputTypeMenu.visibility = if (binding.cbSaveRaw.isChecked) View.VISIBLE else View.GONE
+    }
+
     private fun setupCacheManagement() {
         binding.btnClearCache.setOnClickListener {
             MaterialAlertDialogBuilder(requireContext())
@@ -880,6 +899,8 @@ class SettingsFragment : Fragment() {
         const val KEY_MOTION_PHOTO = "motion_photo_enabled"
         const val KEY_SAVE_LOCATION = "save_location_enabled"
         const val KEY_SAVE_RAW = "save_raw"
+        const val KEY_RAW_OUTPUT_TYPE = "raw_output_type"
+        val RAW_OUTPUT_TYPES = listOf("Bayer CFA RAW (~12MB, Default)", "Linear RGB RAW (~50MB)")
         const val KEY_DNG_COMPRESSION_MODE = "dng_compression_mode"
         val DNG_COMPRESSION_MODES = listOf("Lossless JPEG (Default)", "Uncompressed")
         const val KEY_JPG_STORAGE_URI = "jpg_storage_uri"
