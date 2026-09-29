@@ -162,10 +162,17 @@ class HdrPlusProcessingService : LifecycleService() {
                                 )
                             }
 
+                            val dngFileName = if (req.rawOutputType == 0) "${req.baseName}.dng" else "${req.baseName}_linear.dng"
+                            val dngPathToUse = if (req.rawOutputType == 0 && req.linearDngPath.endsWith("_linear.dng")) {
+                                req.linearDngPath.removeSuffix("_linear.dng") + ".dng"
+                            } else {
+                                req.linearDngPath
+                            }
+
                             if (shouldSaveRaw && req.rawFolderUri == null) {
                                 pfdDng = top.maary.darkbag.utils.ImageSaver.createMediaStorePendingPfd(
                                     context = this@HdrPlusProcessingService,
-                                    displayName = "${req.baseName}_linear.dng",
+                                    displayName = dngFileName,
                                     mimeType = "image/x-adobe-dng"
                                 )
                             }
@@ -188,7 +195,7 @@ class HdrPlusProcessingService : LifecycleService() {
                                     whites = edit?.whites ?: 0f,
                                     blacks = edit?.blacks ?: 0f,
                                     jpgPath = if (shouldSaveJpg && pfdJpg == null) req.fullResJpgPath else null,
-                                    dngPath = if (shouldSaveRaw && pfdDng == null) req.linearDngPath else null,
+                                    dngPath = if (shouldSaveRaw && pfdDng == null) dngPathToUse else null,
                                     faithfulHighlights = req.isSingleFrame,
                                     ccm = req.ccm,
                                     whiteBalance = req.whiteBalance,
@@ -207,7 +214,11 @@ class HdrPlusProcessingService : LifecycleService() {
                                     debugStats = debugStats,
                                     outJpgFd = pfdJpg?.first?.fd ?: -1,
                                     outDngFd = pfdDng?.first?.fd ?: -1,
-                                    dngCompressionMode = req.dngCompressionMode
+                                    dngCompressionMode = req.dngCompressionMode,
+                                    rawOutputType = req.rawOutputType,
+                                    cfaPattern = req.cfaPattern,
+                                    blackLevelPattern = req.blackLevelPattern,
+                                    whiteLevel = req.whiteLevel
                                 )
                                 exportSuccessful = (exportRet == 0)
                             } finally {
@@ -223,7 +234,7 @@ class HdrPlusProcessingService : LifecycleService() {
                                         top.maary.darkbag.processor.ColorProcessor.backgroundSaveFlow.tryEmit(
                                             top.maary.darkbag.processor.ColorProcessor.BackgroundSaveEvent(
                                                 baseName = req.baseName,
-                                                dngPath = if (req.saveRaw) req.linearDngPath else null,
+                                                dngPath = if (req.saveRaw) dngPathToUse else null,
                                                 jpgPath = null,
                                                 targetUri = pfdJpg.second.toString(),
                                                 zoomFactor = req.zoomFactor,
@@ -243,7 +254,7 @@ class HdrPlusProcessingService : LifecycleService() {
                                         top.maary.darkbag.processor.ColorProcessor.backgroundSaveFlow.tryEmit(
                                             top.maary.darkbag.processor.ColorProcessor.BackgroundSaveEvent(
                                                 baseName = req.baseName,
-                                                dngPath = if (req.saveRaw) req.linearDngPath else null,
+                                                dngPath = if (req.saveRaw) dngPathToUse else null,
                                                 jpgPath = null,
                                                 targetUri = pfdDng.second.toString(),
                                                 zoomFactor = req.zoomFactor,
@@ -302,7 +313,7 @@ class HdrPlusProcessingService : LifecycleService() {
                                             rotationDegrees = 0,
                                             zoomFactor = req.zoomFactor,
                                             baseName = req.baseName,
-                                            linearDngPath = if (shouldSaveRaw) req.linearDngPath else null,
+                                            linearDngPath = if (shouldSaveRaw) dngPathToUse else null,
                                             saveJpg = shouldSaveJpg,
                                             saveRaw = shouldSaveRaw,
                                             jpgFolderUri = req.jpgFolderUri,

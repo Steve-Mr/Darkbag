@@ -123,7 +123,11 @@ void fillDebugStats(JNIEnv* env, jlongArray debugStats, jlong copyMs, jlong hali
     env->SetLongArrayRegion(debugStats, 0, std::min<jsize>(len, 15), stats);
 }
 
-std::unordered_map<std::string, std::shared_ptr<std::vector<uint16_t>>> g_sharedMemoryMap;
+struct SharedCaptureResult {
+    std::vector<uint16_t> bayerBuf; // width * height (Bayer CFA)
+    std::vector<uint16_t> rgbBuf;   // width * height * 3 (Linear RGB)
+};
+static std::unordered_map<std::string, std::shared_ptr<SharedCaptureResult>> g_sharedMemoryMap;
 std::mutex g_sharedMemoryMutex;
 static std::unordered_set<void*> g_nativeAllocatedBuffers;
 static std::mutex g_nativeBufferMutex;
@@ -416,37 +420,45 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
     jlongArray debugStats,
     jint outJpgFd,
     jint outDngFd,
-    jint dngCompressionMode
+    jint dngCompressionMode,
+    jint rawOutputType,
+    jint cfaPattern,
+    jintArray blackLevelPattern,
+    jint whiteLevel
 ) {
-    LOGD("Native exportHdrPlus started (enableMemoryColor=%d, colorEngineMode=%d, faithful=%d).", enableMemoryColor, colorEngineMode, faithfulHighlights);
+    LOGD("Native exportHdrPlus started (enableMemoryColor=%d, colorEngineMode=%d, faithful=%d, rawOutputType=%d).", enableMemoryColor, colorEngineMode, faithfulHighlights, rawOutputType);
 
     if (!tempRawPath) return -1;
     const char* temp_path_cstr = env->GetStringUTFChars(tempRawPath, 0);
     if (!temp_path_cstr) return -1;
 
-    std::shared_ptr<std::vector<uint16_t>> sharedMem;
+    std::shared_ptr<SharedCaptureResult> sharedResult;
     {
         std::lock_guard<std::mutex> mapLock(g_sharedMemoryMutex);
         auto it = g_sharedMemoryMap.find(temp_path_cstr);
         if (it != g_sharedMemoryMap.end()) {
-            sharedMem = it->second;
+            sharedResult = it->second;
             g_sharedMemoryMap.erase(it);
         }
     }
 
-    if (!sharedMem) {
+    if (!sharedResult) {
         LOGE("Failed to find shared memory for tempRawPath: %s", temp_path_cstr);
         env->ReleaseStringUTFChars(tempRawPath, temp_path_cstr);
         return -1;
     }
-    
-    // We can use a reference to the shared vector
-    const std::vector<uint16_t>& finalImage = *sharedMem;
     env->ReleaseStringUTFChars(tempRawPath, temp_path_cstr);
 
     jfloat* wbData = env->GetFloatArrayElements(whiteBalance, nullptr);
     std::vector<float> wbVec = {wbData[0], wbData[1], wbData[2], wbData[3]};
     env->ReleaseFloatArrayElements(whiteBalance, wbData, JNI_ABORT);
+
+    int bl_pattern[4] = {64, 64, 64, 64};
+    int* bl_ptr = nullptr;
+    if (blackLevelPattern && env->GetArrayLength(blackLevelPattern) >= 4) {
+        env->GetIntArrayRegion(blackLevelPattern, 0, 4, bl_pattern);
+        bl_ptr = bl_pattern;
+    }
 
     jfloat* ccmData = env->GetFloatArrayElements(ccm, nullptr);
     std::vector<float> ccmVec(9); for(int i=0; i<9; ++i) ccmVec[i] = ccmData[i];
@@ -476,11 +488,49 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
 
     bool dngOk = true;
     if (outDngFd >= 0 || dng_path_cstr) {
-        LOGD("Exporting DNG to %s (outDngFd=%d, mode=%d)", dng_path_cstr ? dng_path_cstr : "FD", outDngFd, dngCompressionMode);
+        LOGD("Exporting DNG to %s (outDngFd=%d, mode=%d, rawOutputType=%d)", dng_path_cstr ? dng_path_cstr : "FD", outDngFd, dngCompressionMode, rawOutputType);
         auto dngStart = std::chrono::high_resolution_clock::now();
         float baselineExposure = (digitalGain > 0.0f) ? std::log2(digitalGain) : 0.0f;
-        dngOk = write_dng(dng_path_cstr, width, height, finalImage.data(), 1, width, width*height, kMax16BitValue, ccmVec, meta, orientation, (bool)mirror, baselineExposure, wbVec.data(),
-                          cm1Ptr, cm2Ptr, fm1Ptr, fm2Ptr, (int)calibrationIlluminant1, (int)calibrationIlluminant2, neutralPtr, outDngFd, (int)dngCompressionMode);
+        bool isBayer = (rawOutputType == 0);
+
+        const uint16_t* dngRawData = nullptr;
+        int dngStrideX = 1;
+        int dngStrideY = width;
+        int dngStrideC = 0;
+        int effectiveWhiteLevel = whiteLevel;
+
+        if (isBayer) {
+            if (!sharedResult->bayerBuf.empty()) {
+                dngRawData = sharedResult->bayerBuf.data();
+                dngStrideX = 1;
+                dngStrideY = width;
+                dngStrideC = 0;
+                effectiveWhiteLevel = (whiteLevel > 0) ? whiteLevel : 1023;
+            } else {
+                // Fallback to rgbBuf if bayerBuf is not present
+                dngRawData = sharedResult->rgbBuf.data();
+                dngStrideX = 1;
+                dngStrideY = width;
+                dngStrideC = width * height;
+                effectiveWhiteLevel = (whiteLevel > 0) ? whiteLevel : kMax16BitValue;
+            }
+        } else {
+            dngRawData = sharedResult->rgbBuf.data();
+            dngStrideX = 1;
+            dngStrideY = width;
+            dngStrideC = width * height;
+            effectiveWhiteLevel = kMax16BitValue;
+        }
+
+        dngOk = write_dng(
+            dng_path_cstr, width, height, dngRawData,
+            dngStrideX, dngStrideY, dngStrideC,
+            effectiveWhiteLevel,
+            ccmVec, meta, orientation, (bool)mirror, baselineExposure, wbVec.data(),
+            cm1Ptr, cm2Ptr, fm1Ptr, fm2Ptr, (int)calibrationIlluminant1, (int)calibrationIlluminant2, neutralPtr,
+            outDngFd, (int)dngCompressionMode,
+            isBayer, (int)cfaPattern, bl_ptr
+        );
         dngMs = (jlong)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - dngStart).count();
     }
 
@@ -488,7 +538,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
     if (outJpgFd >= 0 || jpg_path_cstr) {
         LOGD("Exporting JPG: JPG=%s (outJpgFd=%d)", jpg_path_cstr ? jpg_path_cstr : "FD", outJpgFd);
         auto jpgStart = std::chrono::high_resolution_clock::now();
-        saveOk = process_and_save_image(finalImage.data(), 1, width, width*height, nullptr, 0, 0, width, height, digitalGain, targetLog, lut,
+        saveOk = process_and_save_image(sharedResult->rgbBuf.data(), 1, width, width*height, nullptr, 0, 0, width, height, digitalGain, targetLog, lut,
                                         exposure, contrast, saturation, highlights, shadows, whites, blacks,
                                         jpg_path_cstr, nullptr, &meta, 1, ccmVec.data(), wbVec.data(), orientation, nullptr, 0, 0, false, 1, zoomFactor, (bool)mirror, (bool)enableMemoryColor, (int)colorEngineMode, faithfulHighlights, outJpgFd);
         jpgMs = (jlong)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - jpgStart).count();
@@ -560,11 +610,14 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
     Buffer<uint16_t> inputBuf(rawDataPtr, width, height, numFrames);
 
     const char* tr_p_cstr = (tempRawPath) ? env->GetStringUTFChars(tempRawPath, 0) : nullptr;
-    std::shared_ptr<std::vector<uint16_t>> sharedBuf;
+    std::shared_ptr<SharedCaptureResult> sharedResult;
     Buffer<uint16_t> outputBuf;
     if (tr_p_cstr) {
-        sharedBuf = std::make_shared<std::vector<uint16_t>>(static_cast<size_t>(width) * height * 3);
-        outputBuf = Buffer<uint16_t>(sharedBuf->data(), width, height, 3);
+        sharedResult = std::make_shared<SharedCaptureResult>();
+        sharedResult->rgbBuf.resize(static_cast<size_t>(width) * height * 3);
+        outputBuf = Buffer<uint16_t>(sharedResult->rgbBuf.data(), width, height, 3);
+        // Save a copy of sensor Bayer CFA data (for single-frame, or frame 0 fallback in Milestone 2)
+        sharedResult->bayerBuf.assign(rawDataPtr, rawDataPtr + (static_cast<size_t>(width) * height));
     } else {
         outputBuf = Buffer<uint16_t>(width, height, 3);
     }
@@ -726,7 +779,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
     if (tr_p_cstr) {
         {
             std::lock_guard<std::mutex> mapLock(g_sharedMemoryMutex);
-            g_sharedMemoryMap[tr_p_cstr] = sharedBuf;
+            g_sharedMemoryMap[tr_p_cstr] = sharedResult;
         }
         env->ReleaseStringUTFChars(tempRawPath, tr_p_cstr);
     }

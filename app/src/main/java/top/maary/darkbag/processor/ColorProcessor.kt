@@ -213,7 +213,11 @@ object ColorProcessor {
         debugStats: LongArray? = null,
         outJpgFd: Int = -1,
         outDngFd: Int = -1,
-        dngCompressionMode: Int = 0
+        dngCompressionMode: Int = 0,
+        rawOutputType: Int = 0,
+        cfaPattern: Int = 0,
+        blackLevelPattern: IntArray? = null,
+        whiteLevel: Int = 0
     ): Int
 
     external fun processHdrPlus(
