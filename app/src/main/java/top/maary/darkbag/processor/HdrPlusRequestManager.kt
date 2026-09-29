@@ -15,7 +15,8 @@ import java.nio.ByteBuffer
 
 data class HdrPlusRequest(
     val requestId: String,
-    val megaBuffer: ByteBuffer,
+    val megaBuffer: ByteBuffer? = null,
+    val streamingSessionHandle: Long = 0L,
     val numFrames: Int,
     val width: Int,
     val height: Int,
@@ -67,6 +68,7 @@ data class HdrPlusRequest(
     val noiseProfile: DoubleArray? = null,
     val activeArray: IntArray? = null
 )
+
 
 object HdrPlusRequestManager {
     // Bounded capacity to enforce pipeline backpressure during high-frequency capture bursts

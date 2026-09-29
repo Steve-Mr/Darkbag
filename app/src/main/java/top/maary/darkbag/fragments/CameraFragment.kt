@@ -251,8 +251,10 @@ class CameraFragment : Fragment() {
             .show()
     }
     private var hdrPlusBurstHelper: HdrPlusBurst? = null
+    private var hdrPlusStreamingBurstHelper: top.maary.darkbag.processor.HdrPlusStreamingBurst? = null
     private var lastHdrPlusConfig: ExposureUtils.ExposureConfig? = null // Cache for instant trigger
     private var burstStartTime: Long = 0L // Profiling
+
 
     private var minFocusDistance = 0.0f
     private var isoRange: android.util.Range<Int>? = null
@@ -550,6 +552,7 @@ class CameraFragment : Fragment() {
         locationHelper.stopListening()
         orientationEventListener.disable()
         lutProcessor?.setEncoderSurface(null, 0, 0)
+
         motionPhotoEncoder?.stop()
         motionPhotoEncoder = null
         // Ensure Camera2 is closed when stopping to release hardware resources
@@ -622,6 +625,7 @@ class CameraFragment : Fragment() {
         lutProcessor = null
 
         // Unregister the broadcast receivers and listeners
+
         displayManager.unregisterDisplayListener(displayListener)
     }
 
@@ -3349,6 +3353,7 @@ class CameraFragment : Fragment() {
             var isHdrPlusSuccess = false
             try {
                 val context = appContext
+
                 val frames = burstResult.frames
                 val megaBuffer = burstResult.megaBuffer
                 Log.d(TAG, "processHdrPlusBurst started with ${frames.size} frames. DigitalGain=$digitalGain")
@@ -3455,7 +3460,19 @@ class CameraFragment : Fragment() {
                     }
                     arr
                 } else null
-Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB=${wb.joinToString()}, CFA=$cfa, LSC=${lensShadingRows}x${lensShadingCols}, useSensorCCM=$useSensorColorMatrix")
+
+                val frameTimestampsNs = LongArray(frames.size) { frames[it].timestamp }
+                val defaultExposure = result?.get(android.hardware.camera2.CaptureResult.SENSOR_EXPOSURE_TIME) ?: 10_000_000L
+                val exposureTimesNs = LongArray(frames.size) { i ->
+                    val frameTs = frames[i].timestamp
+                    val res = synchronized(captureResults) {
+                        captureResults.entries.firstOrNull { abs(it.key - frameTs) < 5_000_000L }?.value
+                    }
+                    res?.get(android.hardware.camera2.CaptureResult.SENSOR_EXPOSURE_TIME) ?: defaultExposure
+                }
+
+Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB=${wb.joinToString()}, CFA=$cfa, LSC=${lensShadingRows}x${lensShadingCols}, useSensorCCM=$useSensorColorMatrix, noiseProfile=${noiseProfileFlat?.contentToString()}")
+
 
                 val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
                 val targetLogName = prefs.getString(SettingsFragment.KEY_TARGET_LOG, "None")
@@ -3605,6 +3622,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         noiseProfile = noiseProfileFlat,
                         activeArray = activeArray
                     )
+
                     top.maary.darkbag.processor.HdrPlusRequestManager.enqueue(request)
                     val serviceIntent = android.content.Intent(context, top.maary.darkbag.processor.HdrPlusProcessingService::class.java)
                     if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
@@ -3660,6 +3678,218 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         if (!isHdrPlusSuccess) {
                             hideProcessingAnimation()
                         }
+                    }
+                }
+            }
+        }
+    }
+
+    private fun processStreamingHdrPlusBurst(
+        streamingResult: top.maary.darkbag.processor.StreamingBurstResult,
+        digitalGain: Float,
+        hfMetadata: HalfFrameManager.Metadata? = null,
+        timing: StandardTimingTracker? = null,
+        width: Int,
+        height: Int,
+        combinedOrientation: Int,
+        targetCharId: String,
+        chars: android.hardware.camera2.CameraCharacteristics,
+        result: android.hardware.camera2.CaptureResult?,
+        whiteLevel: Int,
+        blackLevelPattern: IntArray,
+        wb: FloatArray,
+        ccm: FloatArray,
+        ccmAlt: FloatArray?,
+        exportMatrixAB: Boolean,
+        cfa: Int,
+        lensShadingMapData: FloatArray?,
+        lensShadingRows: Int,
+        lensShadingCols: Int,
+        useSensorColorMatrix: Boolean,
+        noiseProfileFlat: DoubleArray?
+    ) {
+        val currentZoom = if (currentLens?.isZoomPreset == true && currentLens?.targetZoomRatio != null) {
+            currentLens!!.targetZoomRatio!!
+        } else {
+            1.0f
+        }
+        val appContext = context?.applicationContext ?: return
+
+        (appContext as MainApplication).applicationScope.launch(Dispatchers.IO) {
+            var isHdrPlusSuccess = false
+            try {
+                val context = appContext
+
+                val frames = streamingResult.frames
+                Log.d(TAG, "processStreamingHdrPlusBurst started with ${frames.size} frames. DigitalGain=$digitalGain, session=${streamingResult.sessionHandle}")
+
+                val burstCalib = extractSensorCalibration(chars, result, wb)
+                val activeArrayRect = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
+                val activeArray = if (activeArrayRect != null) {
+                    intArrayOf(activeArrayRect.top, activeArrayRect.left, activeArrayRect.bottom, activeArrayRect.right)
+                } else null
+                val dynamicBlackLevel = result?.get(android.hardware.camera2.CaptureResult.SENSOR_DYNAMIC_BLACK_LEVEL)
+
+                val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
+                val targetLogName = prefs.getString(SettingsFragment.KEY_TARGET_LOG, "None")
+                val targetLogIndex = SettingsFragment.LOG_CURVES.indexOf(targetLogName)
+                val activeLutName = prefs.getString(SettingsFragment.KEY_ACTIVE_LUT, null)
+
+                var nativeLutPath: String? = null
+                if (activeLutName != null) {
+                    val lutFile = File(File(context.filesDir, "luts"), activeLutName)
+                    if (lutFile.exists()) nativeLutPath = lutFile.absolutePath
+                }
+
+                val iso = result?.get(android.hardware.camera2.CaptureResult.SENSOR_SENSITIVITY) ?: 100
+                val exposureTime = result?.get(android.hardware.camera2.CaptureResult.SENSOR_EXPOSURE_TIME) ?: 10_000_000L
+                val fNumber = result?.get(android.hardware.camera2.CaptureResult.LENS_APERTURE) ?: 1.8f
+                val focalLength = result?.get(android.hardware.camera2.CaptureResult.LENS_FOCAL_LENGTH) ?: 0.0f
+                val captureTime = System.currentTimeMillis()
+
+                val captureMetadata = createCaptureMetadata(
+                    iso = iso.toInt(),
+                    exposureTime = exposureTime,
+                    fNumber = fNumber,
+                    focalLength = focalLength,
+                    captureTime = captureTime,
+                    targetCharId = targetCharId,
+                    isHdrPlus = true,
+                    captureResult = result
+                )
+
+                val dngName = if (hfMetadata != null) {
+                    val suffix = if (hfMetadata.frame1BaseName != null) "_HF2" else "_HF1"
+                    val group = hfMetadata.frame1BaseName ?: SimpleDateFormat(FILENAME, Locale.US).format(hfMetadata.captureTimeMillis)
+                    DarkbagIdentity.prefixedBaseName(group + suffix + "_HDRPLUS")
+                } else {
+                    DarkbagIdentity.prefixedBaseName(SimpleDateFormat(FILENAME, Locale.US).format(System.currentTimeMillis()) + "_HDRPLUS")
+                }
+                val saveJpg = prefs.getBoolean(SettingsFragment.KEY_SAVE_JPG, true)
+                val saveRaw = prefs.getBoolean(SettingsFragment.KEY_SAVE_RAW, true)
+                val jpgFolderUri = prefs.getString(SettingsFragment.KEY_JPG_STORAGE_URI, null)
+                val rawFolderUri = prefs.getString(SettingsFragment.KEY_RAW_STORAGE_URI, null)
+
+                val fullResJpgFile = File(context.cacheDir, "${dngName}_full.jpg")
+                val linearDngFile = File(context.cacheDir, "${dngName}_linear.dng")
+
+                val mirror = shouldMirror
+                isHdrPlusSuccess = true
+
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(requireContext(), getString(R.string.toast_hdr_queued), Toast.LENGTH_SHORT).show()
+                    if (isHalfFrameModeEnabled && prefs.getInt(scopedHalfFrameStepKey(prefs), 0) == 1) {
+                        setGalleryThumbnail(null)
+                    }
+                }
+
+                var motionMp4Path: String? = null
+                var motionStillPtsUs: Long = 0L
+                if (pendingMotionPhotoTask != null) {
+                    val task = pendingMotionPhotoTask
+                    pendingMotionPhotoTask = null
+                    val res = withTimeoutOrNull(2500L) { task?.await() }
+                    motionMp4Path = res?.first
+                    motionStillPtsUs = res?.second ?: 0L
+                }
+
+                val rawOutputType = prefs.getInt(SettingsFragment.KEY_RAW_OUTPUT_TYPE, 0)
+                val request = top.maary.darkbag.processor.HdrPlusRequest(
+                    requestId = java.util.UUID.randomUUID().toString(),
+                    megaBuffer = null,
+                    streamingSessionHandle = streamingResult.sessionHandle,
+                    numFrames = frames.size,
+                    width = width,
+                    height = height,
+                    orientation = combinedOrientation,
+                    whiteLevel = whiteLevel,
+                    blackLevelPattern = blackLevelPattern,
+                    lensShadingMap = lensShadingMapData,
+                    lensShadingRows = lensShadingRows,
+                    lensShadingCols = lensShadingCols,
+                    useSensorColorMatrix = useSensorColorMatrix,
+                    whiteBalance = wb,
+                    ccm = ccm,
+                    ccmAlt = ccmAlt,
+                    exportMatrixAB = exportMatrixAB,
+                    cfaPattern = cfa,
+                    targetLogIndex = targetLogIndex,
+                    lutPath = nativeLutPath,
+                    digitalGain = digitalGain,
+                    zoomFactor = currentZoom,
+                    mirror = mirror,
+                    metadata = captureMetadata,
+                    isSingleFrame = false,
+                    saveJpg = saveJpg,
+                    saveRaw = saveRaw,
+                    baseName = dngName,
+                    fullResJpgPath = fullResJpgFile.absolutePath,
+                    linearDngPath = linearDngFile.absolutePath,
+                    zslTargetUriStr = null,
+                    jpgFolderUri = jpgFolderUri,
+                    rawFolderUri = rawFolderUri,
+                    hfMetadata = hfMetadata?.copy(digitalGain = digitalGain),
+                    editConfig = top.maary.darkbag.models.EditConfig(
+                        log = targetLogName ?: "None",
+                        lut = activeLutName ?: "None",
+                        digitalGain = digitalGain,
+                        adjustments = if (hfMetadata?.profile != null && hfMetadata.profile != top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_NORMAL) {
+                            listOf(
+                                top.maary.darkbag.models.BasicAdjustments(digitalGain = hfMetadata.frame1DigitalGain),
+                                top.maary.darkbag.models.BasicAdjustments(digitalGain = digitalGain)
+                            )
+                        } else null,
+                        hfLayout = if (hfMetadata?.profile == top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_HALF_TOP) "TB" else if (hfMetadata?.profile == top.maary.darkbag.utils.HalfFrameSessionStore.PROFILE_HALF_SIDE) "SBS" else null,
+                        showTimestamp = hfMetadata?.dateStamp ?: false,
+                        flareType = hfMetadata?.flareType ?: -1,
+                        zoomFactor = currentZoom,
+                        colorEngineMode = prefs.getInt(SettingsFragment.KEY_COLOR_ENGINE_MODE, 2)
+                    ),
+                    runAblationTest = false,
+                    motionPhotoMp4Path = motionMp4Path,
+                    motionPhotoStillPtsUs = motionStillPtsUs,
+                    enableMemoryColor = false,
+                    colorEngineMode = prefs.getInt(SettingsFragment.KEY_COLOR_ENGINE_MODE, 2),
+                    colorMatrix1 = burstCalib.colorMatrix1,
+                    colorMatrix2 = burstCalib.colorMatrix2,
+                    forwardMatrix1 = burstCalib.forwardMatrix1,
+                    forwardMatrix2 = burstCalib.forwardMatrix2,
+                    calibrationIlluminant1 = burstCalib.calibrationIlluminant1,
+                    calibrationIlluminant2 = burstCalib.calibrationIlluminant2,
+                    neutralColorPoint = burstCalib.neutralColorPoint,
+                    timing = timing,
+                    dngCompressionMode = prefs.getInt(SettingsFragment.KEY_DNG_COMPRESSION_MODE, 0),
+                    rawOutputType = rawOutputType,
+                    dynamicBlackLevel = dynamicBlackLevel,
+                    noiseProfile = noiseProfileFlat,
+                    activeArray = activeArray
+                )
+
+
+                timing?.enqueued = System.currentTimeMillis()
+                top.maary.darkbag.processor.HdrPlusRequestManager.enqueue(request)
+                val serviceIntent = android.content.Intent(context, top.maary.darkbag.processor.HdrPlusProcessingService::class.java)
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                    context.startForegroundService(serviceIntent)
+                } else {
+                    context.startService(serviceIntent)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Streaming HDR+ enqueue failed", e)
+                try {
+                    ColorProcessor.nativeAbortStreamingSession(streamingResult.sessionHandle)
+                } catch (abortEx: Throwable) {
+                    Log.w(TAG, "Error aborting session", abortEx)
+                }
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(appContext, appContext.getString(R.string.toast_hdr_failed_fallback), Toast.LENGTH_SHORT).show()
+                }
+            } finally {
+                processingSemaphore.release()
+                lifecycleScope.launch(Dispatchers.Main) {
+                    resetBurstUi()
+                    if (!isHdrPlusSuccess) {
+                        hideProcessingAnimation()
                     }
                 }
             }
@@ -4303,6 +4533,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         burstStartTime = captureStartTime
 
         try {
+
             val result = captureResultFlow.replayCache.lastOrNull()
             val curIso = result?.get(android.hardware.camera2.CaptureResult.SENSOR_SENSITIVITY) ?: 100
             val curTime = result?.get(android.hardware.camera2.CaptureResult.SENSOR_EXPOSURE_TIME) ?: 10_000_000L
@@ -4329,9 +4560,138 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 writeScopedHalfFrameStep(requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE), 1, captureStartTime, digitalGain = burstGain, flareType = hfMetadata?.flareType ?: -1)
             }
 
-            hdrPlusBurstHelper = HdrPlusBurst(frameCount = burstSize, onBurstComplete = { burstResult ->
-                processHdrPlusBurst(burstResult, burstGain, hfMetadata?.copy(digitalGain = burstGain), timing = timing)
-            })
+            val burstLensId = currentLens?.id ?: "0"
+            val burstChars = CameraRepository.getCharacteristics(camera2Manager, burstLensId)
+            val burstSensorOrientation = burstChars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
+
+            val whiteLevel = burstChars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_WHITE_LEVEL) ?: 1023
+            val bl = burstChars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_BLACK_LEVEL_PATTERN)
+            val blackLevelPattern = if (bl != null) intArrayOf(
+                bl.getOffsetForIndex(0, 0),
+                bl.getOffsetForIndex(1, 0),
+                bl.getOffsetForIndex(0, 1),
+                bl.getOffsetForIndex(1, 1)
+            ) else intArrayOf(64, 64, 64, 64)
+
+            val cfa = burstChars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_COLOR_FILTER_ARRANGEMENT) ?: 0
+
+            val wb = floatArrayOf(2.0f, 1.0f, 1.0f, 1.5f)
+            val ccmCapture = floatArrayOf(
+                2.0f, -1.0f, 0.0f,
+                -0.5f, 2.0f, -0.5f,
+                0.0f, -1.0f, 2.0f
+            )
+            var lensShadingMapData: FloatArray? = null
+            var lensShadingRows = 0
+            var lensShadingCols = 0
+
+            result?.let { r ->
+                val wbVec = r.get(android.hardware.camera2.CaptureResult.COLOR_CORRECTION_GAINS)
+                if (wbVec != null) {
+                    wb[0] = wbVec.red
+                    wb[1] = wbVec.greenEven
+                    wb[2] = wbVec.greenOdd
+                    wb[3] = wbVec.blue
+                }
+                val ccmMat = r.get(android.hardware.camera2.CaptureResult.COLOR_CORRECTION_TRANSFORM)
+                if (ccmMat != null) {
+                    var idx = 0
+                    for (row in 0 until 3) {
+                        for (col in 0 until 3) {
+                            ccmCapture[idx++] = ccmMat.getElement(col, row).toFloat()
+                        }
+                    }
+                }
+                val lsc = r.get(android.hardware.camera2.CaptureResult.STATISTICS_LENS_SHADING_CORRECTION_MAP)
+                if (lsc != null) {
+                    lensShadingRows = lsc.rowCount
+                    lensShadingCols = lsc.columnCount
+                    val out = FloatArray(4 * lensShadingRows * lensShadingCols)
+                    fun idx(ch: Int, row: Int, col: Int): Int = ch * lensShadingRows * lensShadingCols + row * lensShadingCols + col
+                    for (row in 0 until lensShadingRows) {
+                        for (col in 0 until lensShadingCols) {
+                            out[idx(0, row, col)] = lsc.getGainFactor(0, col, row)
+                            out[idx(1, row, col)] = lsc.getGainFactor(1, col, row)
+                            out[idx(2, row, col)] = lsc.getGainFactor(2, col, row)
+                            out[idx(3, row, col)] = lsc.getGainFactor(3, col, row)
+                        }
+                    }
+                    lensShadingMapData = out
+                }
+            }
+
+            val useSensorColorMatrix = true
+            val burstCalib = extractSensorCalibration(burstChars, result, wb)
+            val ccmSensor = burstCalib.renderCcm ?: ccmCapture
+            val ccm = if (useSensorColorMatrix) ccmSensor else ccmCapture
+            val ccmAlt = if (useSensorColorMatrix) ccmCapture else ccmSensor
+
+            val noisePairs = result?.get(android.hardware.camera2.CaptureResult.SENSOR_NOISE_PROFILE)
+            val noiseProfileFlat: DoubleArray? = if (noisePairs != null && noisePairs.isNotEmpty()) {
+                val arr = DoubleArray(noisePairs.size * 2)
+                for (i in noisePairs.indices) {
+                    arr[i * 2] = noisePairs[i].first
+                    arr[i * 2 + 1] = noisePairs[i].second
+                }
+                arr
+            } else null
+
+            val combinedOrientation = getCombinedOrientation()
+
+            val sessionHandle = top.maary.darkbag.processor.ColorProcessor.nativeCreateStreamingSession(
+                width = reader.width,
+                height = reader.height,
+                orientation = combinedOrientation,
+                whiteLevel = whiteLevel,
+                blackLevelPattern = blackLevelPattern,
+                lensShadingMap = lensShadingMapData,
+                lensShadingRows = lensShadingRows,
+                lensShadingCols = lensShadingCols,
+                whiteBalance = wb,
+                ccm = ccm,
+                cfaPattern = cfa,
+                noiseProfile = noiseProfileFlat
+            )
+            if (sessionHandle == 0L) {
+                Log.e(TAG, "Failed to create native streaming session")
+                isBurstActive = false
+                processingSemaphore.release()
+                return
+            }
+
+            val burstHelper = top.maary.darkbag.processor.HdrPlusStreamingBurst(
+                sessionHandle = sessionHandle,
+                frameCount = burstSize,
+                timing = timing,
+                onBurstComplete = { burstResult ->
+
+                    processStreamingHdrPlusBurst(
+                        streamingResult = burstResult,
+                        digitalGain = burstGain,
+                        hfMetadata = hfMetadata?.copy(digitalGain = burstGain),
+                        timing = timing,
+                        width = reader.width,
+                        height = reader.height,
+                        combinedOrientation = combinedOrientation,
+                        targetCharId = burstLensId,
+                        chars = burstChars,
+                        result = result,
+                        whiteLevel = whiteLevel,
+                        blackLevelPattern = blackLevelPattern,
+                        wb = wb,
+                        ccm = ccm,
+                        ccmAlt = ccmAlt,
+                        exportMatrixAB = false,
+                        cfa = cfa,
+                        lensShadingMapData = lensShadingMapData,
+                        lensShadingRows = lensShadingRows,
+                        lensShadingCols = lensShadingCols,
+                        useSensorColorMatrix = useSensorColorMatrix,
+                        noiseProfileFlat = noiseProfileFlat
+                    )
+                }
+            )
+            hdrPlusStreamingBurstHelper = burstHelper
 
             lifecycleScope.launch(Dispatchers.Main) {
                 cameraUiContainerBinding?.cameraCaptureButton?.setProgress(0f)
@@ -4341,7 +4701,6 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
             }
 
             val burstRequests = mutableListOf<android.hardware.camera2.CaptureRequest>()
-            val combinedOrientation = getCombinedOrientation()
             for (i in 0 until burstSize) {
                 val request = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_STILL_CAPTURE)
                 request.addTarget(reader.surface)
@@ -4364,44 +4723,53 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     Log.e(TAG, "Burst capture timed out! Captured $framesCaptured/$burstSize frames.")
                     isBurstActive = false
                     resetBurstUi()
-                    val partialResult = hdrPlusBurstHelper?.flush()
-                    if (partialResult != null && partialResult.frames.isNotEmpty()) {
-                        Log.i(TAG, "Submitting partial burst (${partialResult.frames.size} frames) for processing.")
-                        processHdrPlusBurst(partialResult, burstGain, hfMetadata?.copy(digitalGain = burstGain), timing = timing)
+
+                    if (framesCaptured > 0) {
+                        Log.i(TAG, "Flushing partial burst ($framesCaptured frames) to background worker.")
+                        burstHelper.flush()
                     } else {
-                        hdrPlusBurstHelper?.reset()
+                        burstHelper.abort()
+                        hdrPlusStreamingBurstHelper = null
                         processingSemaphore.release()
                         hideProcessingAnimation()
                     }
                 }
             }
 
-            val burstLensId = currentLens?.id ?: "0"
-            val burstChars = CameraRepository.getCharacteristics(camera2Manager, burstLensId)
-            val burstSensorOrientation = burstChars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
-
             reader.setOnImageAvailableListener({ r ->
                 val image = r.acquireNextImage() ?: return@setOnImageAvailableListener
+                var frameAccepted = false
                 try {
                     val plane = image.planes[0]
+                    val frameTs = image.timestamp
+                    val exposureTimeNs = synchronized(captureResults) {
+                        captureResults.entries.firstOrNull { abs(it.key - frameTs) < 5_000_000L }?.value
+                    }?.get(android.hardware.camera2.CaptureResult.SENSOR_EXPOSURE_TIME) ?: burstTime
 
-                    hdrPlusBurstHelper?.addManualFrame(
-                        plane.buffer,
-                        image.width,
-                        image.height,
-                        plane.rowStride,
-                        plane.pixelStride,
-                        image.timestamp,
-                        burstSensorOrientation,
-                        burstLensId
+                    frameAccepted = burstHelper.addFrame(
+                        buffer = plane.buffer,
+                        width = image.width,
+                        height = image.height,
+                        rowStride = plane.rowStride,
+                        pixelStride = plane.pixelStride,
+                        timestampNs = image.timestamp,
+                        exposureTimeNs = exposureTimeNs,
+                        rotationDegrees = burstSensorOrientation,
+                        physicalId = burstLensId
                     )
-                    image.close()
+                } finally {
+                    image.close() // Instant hardware buffer recycling!
+                }
+
+                if (frameAccepted) {
+                    timing?.recordFrameArrival()
                     framesCaptured++
                     lifecycleScope.launch(Dispatchers.Main) {
                         cameraUiContainerBinding?.cameraCaptureButton?.setProgress(framesCaptured.toFloat() / burstSize)
                     }
                     if (framesCaptured >= burstSize) {
                         watchdog.cancel()
+                        timing?.captureCallback = System.currentTimeMillis()
                         lifecycleScope.launch(Dispatchers.Main) {
                             resetBurstUi()
                             if (!isFrame1Trigger) {
@@ -4413,9 +4781,6 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                             }
                         }
                     }
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to add C2 frame", e)
-                    image.close()
                 }
             }, handler)
 
@@ -4433,6 +4798,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         } catch (e: Exception) {
             Log.e(TAG, "Camera2 burst failed", e)
             isBurstActive = false
+            hdrPlusStreamingBurstHelper?.abort()
+            hdrPlusStreamingBurstHelper = null
             processingSemaphore.release()
             lifecycleScope.launch(Dispatchers.Main) {
                 resetBurstUi()
