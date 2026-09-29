@@ -216,7 +216,8 @@ object ColorProcessor {
         dngCompressionMode: Int = 0,
         rawOutputType: Int = 0,
         cfaPattern: Int = 0,
-        blackLevelPattern: IntArray? = null
+        blackLevelPattern: IntArray? = null,
+        whiteLevel: Int = 65535
     ): Int
 
     external fun processHdrPlus(

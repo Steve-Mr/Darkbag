@@ -210,7 +210,8 @@ class HdrPlusProcessingService : LifecycleService() {
                                     dngCompressionMode = req.dngCompressionMode,
                                     rawOutputType = req.rawOutputType,
                                     cfaPattern = req.cfaPattern,
-                                    blackLevelPattern = req.blackLevelPattern
+                                    blackLevelPattern = req.blackLevelPattern,
+                                    whiteLevel = req.whiteLevel
                                 )
                                 exportSuccessful = (exportRet == 0)
                             } finally {

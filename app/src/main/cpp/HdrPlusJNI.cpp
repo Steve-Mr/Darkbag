@@ -405,7 +405,8 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
     jint dngCompressionMode,
     jint rawOutputType,
     jint cfaPattern,
-    jintArray blackLevelPattern
+    jintArray blackLevelPattern,
+    jint whiteLevel
 ) {
     LOGD("Native exportHdrPlus started (enableMemoryColor=%d, colorEngineMode=%d, faithful=%d, rawOutputType=%d).", enableMemoryColor, colorEngineMode, faithfulHighlights, rawOutputType);
 
@@ -474,7 +475,8 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
         auto dngStart = std::chrono::high_resolution_clock::now();
         float baselineExposure = (digitalGain > 0.0f) ? std::log2(digitalGain) : 0.0f;
         const bool isBayer = (rawOutputType == 0);
-        dngOk = write_dng(dng_path_cstr, width, height, finalImage.data(), 1, width, isBayer ? width * height : width * height, kMax16BitValue, ccmVec, meta, orientation, (bool)mirror, baselineExposure, wbVec.data(),
+        int effectiveWhiteLevel = (whiteLevel > 0) ? whiteLevel : kMax16BitValue;
+        dngOk = write_dng(dng_path_cstr, width, height, finalImage.data(), 1, width, isBayer ? width * height : width * height, effectiveWhiteLevel, ccmVec, meta, orientation, (bool)mirror, baselineExposure, wbVec.data(),
                           cm1Ptr, cm2Ptr, fm1Ptr, fm2Ptr, (int)calibrationIlluminant1, (int)calibrationIlluminant2, neutralPtr, outDngFd, (int)dngCompressionMode, isBayer, (int)cfaPattern, bl_pattern);
         dngMs = (jlong)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - dngStart).count();
     }
