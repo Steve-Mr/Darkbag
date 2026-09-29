@@ -145,7 +145,44 @@ bool write_dng(
     int calibIllum2 = 17,
     const float* neutralColorPoint = nullptr,
     int outFd = -1,
-    int dngCompressionMode = 0
+    int dngCompressionMode = 0,
+    bool isBayer = false,
+    int cfaPattern = 0,
+    const float* blackLevelPattern = nullptr,
+    const double* noiseProfile = nullptr,
+    const int* activeArea = nullptr,
+    const float* lensShadingMap = nullptr,
+    int lensShadingRows = 0,
+    int lensShadingCols = 0
+);
+
+std::vector<unsigned char> encode_lossless_jpeg16(
+    const unsigned short* planarData,
+    int width,
+    int height,
+    int stride_x,
+    int stride_y,
+    int stride_c,
+    int num_channels = 3
+);
+
+std::vector<unsigned char> make_bayer_preview_rgb8(
+    const unsigned short* bayerData,
+    int stride_x,
+    int stride_y,
+    int width,
+    int height,
+    int cfaPattern,
+    int targetLongEdge,
+    int orientation,
+    bool mirror,
+    float gain,
+    int& outWidth,
+    int& outHeight,
+    const float* wbVec = nullptr,
+    const Matrix3x3* ccmMat = nullptr,
+    const float* blackLevelPattern = nullptr,
+    int whiteLevel = 65535
 );
 
 bool write_bmp(const char* filename, int width, int height, const unsigned short* planarData, int stride_x, int stride_y, int stride_c);

@@ -27,7 +27,7 @@ static void my_error_exit(j_common_ptr cinfo) {
     longjmp(myerr->setjmp_buffer, 1);
 }
 
-static std::vector<unsigned char> encode_lossless_jpeg16(const unsigned short* planarData, int width, int height, int stride_x, int stride_y, int stride_c) {
+std::vector<unsigned char> encode_lossless_jpeg16(const unsigned short* planarData, int width, int height, int stride_x, int stride_y, int stride_c, int num_channels) {
     std::vector<unsigned char> ljpeg_bytes;
     struct jpeg_compress_struct cinfo;
     struct my_error_mgr jerr;
@@ -49,8 +49,8 @@ static std::vector<unsigned char> encode_lossless_jpeg16(const unsigned short* p
 
     cinfo.image_width = width;
     cinfo.image_height = height;
-    cinfo.input_components = 3;
-    cinfo.in_color_space = JCS_RGB;
+    cinfo.input_components = num_channels;
+    cinfo.in_color_space = (num_channels == 1) ? JCS_GRAYSCALE : JCS_RGB;
 
     jpeg_set_defaults(&cinfo);
     cinfo.data_precision = 16;
@@ -58,16 +58,22 @@ static std::vector<unsigned char> encode_lossless_jpeg16(const unsigned short* p
 
     jpeg_start_compress(&cinfo, TRUE);
 
-    std::vector<J16SAMPLE> rowBuffer(static_cast<size_t>(width) * 3);
+    std::vector<J16SAMPLE> rowBuffer(static_cast<size_t>(width) * num_channels);
     while (cinfo.next_scanline < cinfo.image_height) {
         int y = cinfo.next_scanline;
-        for (int x = 0; x < width; x++) {
-            size_t r_idx = (size_t)y * stride_y + (size_t)x * stride_x + 0 * stride_c;
-            size_t g_idx = (size_t)y * stride_y + (size_t)x * stride_x + 1 * stride_c;
-            size_t b_idx = (size_t)y * stride_y + (size_t)x * stride_x + 2 * stride_c;
-            rowBuffer[x * 3 + 0] = planarData[r_idx];
-            rowBuffer[x * 3 + 1] = planarData[g_idx];
-            rowBuffer[x * 3 + 2] = planarData[b_idx];
+        if (num_channels == 1) {
+            for (int x = 0; x < width; x++) {
+                rowBuffer[x] = planarData[(size_t)y * stride_y + (size_t)x * stride_x];
+            }
+        } else {
+            for (int x = 0; x < width; x++) {
+                size_t r_idx = (size_t)y * stride_y + (size_t)x * stride_x + 0 * stride_c;
+                size_t g_idx = (size_t)y * stride_y + (size_t)x * stride_x + 1 * stride_c;
+                size_t b_idx = (size_t)y * stride_y + (size_t)x * stride_x + 2 * stride_c;
+                rowBuffer[x * 3 + 0] = planarData[r_idx];
+                rowBuffer[x * 3 + 1] = planarData[g_idx];
+                rowBuffer[x * 3 + 2] = planarData[b_idx];
+            }
         }
         J16SAMPROW row_pointer[1] = { rowBuffer.data() };
         jpeg16_write_scanlines(&cinfo, row_pointer, 1);
@@ -75,8 +81,10 @@ static std::vector<unsigned char> encode_lossless_jpeg16(const unsigned short* p
 
     jpeg_finish_compress(&cinfo);
 
-    if (outbuffer && outsize > 0) {
-        ljpeg_bytes.assign(outbuffer, outbuffer + outsize);
+    if (outbuffer) {
+        if (outsize > 0) {
+            ljpeg_bytes.assign(outbuffer, outbuffer + outsize);
+        }
         free(outbuffer);
     }
     jpeg_destroy_compress(&cinfo);
@@ -268,7 +276,7 @@ static std::vector<unsigned char> encode_rgb8_jpeg(
 #define TIFFTAG_BLACKLEVEL 50714
 #endif
 #ifndef TIFFTAG_ACTIVEAREA
-#define TIFFTAG_ACTIVEAREA 50710
+#define TIFFTAG_ACTIVEAREA 50829
 #endif
 #ifndef TIFFTAG_BLACKLEVELREPEATDIM
 #define TIFFTAG_BLACKLEVELREPEATDIM 50713
@@ -288,11 +296,20 @@ static std::vector<unsigned char> encode_rgb8_jpeg(
 #ifndef TIFFTAG_COLORMATRIX2
 #define TIFFTAG_COLORMATRIX2 50722
 #endif
+#ifndef TIFFTAG_CAMERACALIBRATION1
+#define TIFFTAG_CAMERACALIBRATION1 50723
+#endif
+#ifndef TIFFTAG_CAMERACALIBRATION2
+#define TIFFTAG_CAMERACALIBRATION2 50724
+#endif
 #ifndef TIFFTAG_FORWARDMATRIX1
 #define TIFFTAG_FORWARDMATRIX1 50964
 #endif
 #ifndef TIFFTAG_FORWARDMATRIX2
 #define TIFFTAG_FORWARDMATRIX2 50965
+#endif
+#ifndef TIFFTAG_NOISEPROFILE
+#define TIFFTAG_NOISEPROFILE 51041
 #endif
 #ifndef TIFFTAG_ASSHOTNEUTRAL
 #define TIFFTAG_ASSHOTNEUTRAL 50728
@@ -331,12 +348,22 @@ static const TIFFFieldInfo dng_field_info[] = {
     { TIFFTAG_DNGVERSION, 4, 4, TIFF_BYTE, FIELD_CUSTOM, 1, 0, const_cast<char*>("DNGVersion") },
     { TIFFTAG_DNGBACKWARDVERSION, 4, 4, TIFF_BYTE, FIELD_CUSTOM, 1, 0, const_cast<char*>("DNGBackwardVersion") },
     { TIFFTAG_UNIQUECAMERAMODEL, -1, -1, TIFF_ASCII, FIELD_CUSTOM, 1, 0, const_cast<char*>("UniqueCameraModel") },
-    { TIFFTAG_BLACKLEVEL, -1, -1, TIFF_LONG, FIELD_CUSTOM, 1, 1, const_cast<char*>("BlackLevel") },
+    { TIFFTAG_CFAREPEATPATTERNDIM, 2, 2, TIFF_SHORT, FIELD_CUSTOM, 1, 0, const_cast<char*>("CFARepeatPatternDim") },
+    { TIFFTAG_CFAPATTERN, 4, 4, TIFF_BYTE, FIELD_CUSTOM, 1, 1, const_cast<char*>("CFAPattern") },
+    { TIFFTAG_BLACKLEVELREPEATDIM, 2, 2, TIFF_SHORT, FIELD_CUSTOM, 1, 0, const_cast<char*>("BlackLevelRepeatDim") },
+    { TIFFTAG_BLACKLEVEL, -1, -1, TIFF_RATIONAL, FIELD_CUSTOM, 1, 1, const_cast<char*>("BlackLevel") },
     { TIFFTAG_WHITELEVEL, -1, -1, TIFF_LONG, FIELD_CUSTOM, 1, 1, const_cast<char*>("WhiteLevel") },
+    { TIFFTAG_ACTIVEAREA, 4, 4, TIFF_LONG, FIELD_CUSTOM, 1, 0, const_cast<char*>("ActiveArea") },
+    { TIFFTAG_DEFAULTCROPORIGIN, 2, 2, TIFF_RATIONAL, FIELD_CUSTOM, 1, 0, const_cast<char*>("DefaultCropOrigin") },
+    { TIFFTAG_DEFAULTCROPSIZE, 2, 2, TIFF_RATIONAL, FIELD_CUSTOM, 1, 0, const_cast<char*>("DefaultCropSize") },
     { TIFFTAG_COLORMATRIX1, -1, -1, TIFF_SRATIONAL, FIELD_CUSTOM, 1, 1, const_cast<char*>("ColorMatrix1") },
     { TIFFTAG_COLORMATRIX2, -1, -1, TIFF_SRATIONAL, FIELD_CUSTOM, 1, 1, const_cast<char*>("ColorMatrix2") },
+    { TIFFTAG_CAMERACALIBRATION1, -1, -1, TIFF_SRATIONAL, FIELD_CUSTOM, 1, 1, const_cast<char*>("CameraCalibration1") },
+    { TIFFTAG_CAMERACALIBRATION2, -1, -1, TIFF_SRATIONAL, FIELD_CUSTOM, 1, 1, const_cast<char*>("CameraCalibration2") },
     { TIFFTAG_FORWARDMATRIX1, -1, -1, TIFF_SRATIONAL, FIELD_CUSTOM, 1, 1, const_cast<char*>("ForwardMatrix1") },
     { TIFFTAG_FORWARDMATRIX2, -1, -1, TIFF_SRATIONAL, FIELD_CUSTOM, 1, 1, const_cast<char*>("ForwardMatrix2") },
+    { TIFFTAG_NOISEPROFILE, -1, -1, TIFF_DOUBLE, FIELD_CUSTOM, 1, 1, const_cast<char*>("NoiseProfile") },
+    { TIFFTAG_OPCODELIST2, -1, -1, TIFF_UNDEFINED, FIELD_CUSTOM, 1, 1, const_cast<char*>("OpcodeList2") },
     { TIFFTAG_ASSHOTNEUTRAL, -1, -1, TIFF_RATIONAL, FIELD_CUSTOM, 1, 1, const_cast<char*>("AsShotNeutral") },
     { TIFFTAG_CALIBRATIONILLUMINANT1, 1, 1, TIFF_SHORT, FIELD_CUSTOM, 1, 0, const_cast<char*>("CalibrationIlluminant1") },
     { TIFFTAG_CALIBRATIONILLUMINANT2, 1, 1, TIFF_SHORT, FIELD_CUSTOM, 1, 0, const_cast<char*>("CalibrationIlluminant2") },
@@ -351,11 +378,35 @@ static const TIFFFieldInfo dng_field_info[] = {
     { TIFFTAG_SUBSECTIMEORIGINAL, -1, -1, TIFF_ASCII, FIELD_CUSTOM, 1, 0, const_cast<char*>("SubSecTimeOriginal") },
     { TIFFTAG_SUBSECTIMEDIGITIZED, -1, -1, TIFF_ASCII, FIELD_CUSTOM, 1, 0, const_cast<char*>("SubSecTimeDigitized") },
     { TIFFTAG_LENSMODEL, -1, -1, TIFF_ASCII, FIELD_CUSTOM, 1, 0, const_cast<char*>("LensModel") },
-    { TIFFTAG_FOCALLENGTHIN35MMFILM, 1, 1, TIFF_SHORT, FIELD_CUSTOM, 1, 0, const_cast<char*>("FocalLengthIn35mmFilm") }
+    { TIFFTAG_FOCALLENGTHIN35MMFILM, 1, 1, TIFF_SHORT, FIELD_CUSTOM, 1, 0, const_cast<char*>("FocalLengthIn35mmFilm") },
+    { TIFFTAG_EXPOSURETIME, 1, 1, TIFF_RATIONAL, FIELD_CUSTOM, 1, 0, const_cast<char*>("ExposureTime") },
+    { TIFFTAG_FNUMBER, 1, 1, TIFF_RATIONAL, FIELD_CUSTOM, 1, 0, const_cast<char*>("FNumber") },
+    { TIFFTAG_FOCALLENGTH, 1, 1, TIFF_RATIONAL, FIELD_CUSTOM, 1, 0, const_cast<char*>("FocalLength") },
+    { TIFFTAG_ISOSPEEDRATINGS, 1, 1, TIFF_SHORT, FIELD_CUSTOM, 1, 0, const_cast<char*>("ISOSpeedRatings") }
 };
 
 static void DNGTagExtender(TIFF *tif) {
     TIFFMergeFieldInfo(tif, dng_field_info, sizeof(dng_field_info) / sizeof(dng_field_info[0]));
+}
+
+static void map_cfa_pattern(int cfaPattern, uint8_t cfa_bytes[4]) {
+    switch (cfaPattern) {
+        case 0: // RGGB
+            cfa_bytes[0] = 0; cfa_bytes[1] = 1; cfa_bytes[2] = 1; cfa_bytes[3] = 2;
+            break;
+        case 1: // GRBG
+            cfa_bytes[0] = 1; cfa_bytes[1] = 0; cfa_bytes[2] = 2; cfa_bytes[3] = 1;
+            break;
+        case 2: // GBRG
+            cfa_bytes[0] = 1; cfa_bytes[1] = 2; cfa_bytes[2] = 0; cfa_bytes[3] = 1;
+            break;
+        case 3: // BGGR
+            cfa_bytes[0] = 2; cfa_bytes[1] = 1; cfa_bytes[2] = 1; cfa_bytes[3] = 0;
+            break;
+        default: // Default RGGB
+            cfa_bytes[0] = 0; cfa_bytes[1] = 1; cfa_bytes[2] = 1; cfa_bytes[3] = 2;
+            break;
+    }
 }
 
 // --- Metadata Helpers ---
@@ -1624,6 +1675,286 @@ Matrix3x3 inverse_matrix(const Matrix3x3& m) {
     return inv;
 }
 
+std::vector<unsigned char> make_bayer_preview_rgb8(
+    const unsigned short* bayerData, int stride_x, int stride_y,
+    int width,
+    int height,
+    int cfaPattern,
+    int targetLongEdge,
+    int orientation,
+    bool mirror,
+    float gain,
+    int& outWidth,
+    int& outHeight,
+    const float* wbVec,
+    const Matrix3x3* ccmMat,
+    const float* blackLevelPattern,
+    int whiteLevel
+) {
+    const int longEdge = std::max(width, height);
+    const int baseScale = std::max(1, (longEdge + targetLongEdge - 1) / targetLongEdge);
+    // Align scale to an even factor >= 2 so each sample step maps to a 2x2 Bayer quad
+    const int bayerScale = std::max(2, ((baseScale + 1) / 2) * 2);
+
+    const int sampledWidth = std::max(1, width / bayerScale);
+    const int sampledHeight = std::max(1, height / bayerScale);
+    const bool swapDims = (orientation == 90 || orientation == 270);
+    outWidth = swapDims ? sampledHeight : sampledWidth;
+    outHeight = swapDims ? sampledWidth : sampledHeight;
+
+    const float wb_r = wbVec ? wbVec[0] : 1.0f;
+    const float wb_g0 = (wbVec && wbVec[1] > 0.0f) ? wbVec[1] : 1.0f;
+    const float wb_g1 = (wbVec && wbVec[2] > 0.0f) ? wbVec[2] : wb_g0;
+    const float wb_g = 0.5f * (wb_g0 + wb_g1);
+    const float wb_b = wbVec ? wbVec[3] : 1.0f;
+
+    float bl00 = blackLevelPattern ? blackLevelPattern[0] : 64.0f;
+    float bl10 = blackLevelPattern ? blackLevelPattern[1] : 64.0f;
+    float bl01 = blackLevelPattern ? blackLevelPattern[2] : 64.0f;
+    float bl11 = blackLevelPattern ? blackLevelPattern[3] : 64.0f;
+    if (bl00 <= 0.0f && bl10 <= 0.0f && bl01 <= 0.0f && bl11 <= 0.0f) {
+        bl00 = 64.0f; bl10 = 64.0f; bl01 = 64.0f; bl11 = 64.0f;
+    }
+
+    const float wl = (whiteLevel > 0) ? (float)whiteLevel : 65535.0f;
+    const float norm00 = 1.0f / std::max(1.0f, wl - bl00);
+    const float norm10 = 1.0f / std::max(1.0f, wl - bl10);
+    const float norm01 = 1.0f / std::max(1.0f, wl - bl01);
+    const float norm11 = 1.0f / std::max(1.0f, wl - bl11);
+
+    std::vector<unsigned char> preview;
+    preview.resize(static_cast<size_t>(outWidth) * outHeight * 3);
+
+    for (int y = 0; y < outHeight; ++y) {
+        for (int x = 0; x < outWidth; ++x) {
+            int sx = x;
+            int sy = y;
+            const int opx = mirror ? (outWidth - 1 - x) : x;
+            if (orientation == 90) {
+                sx = y;
+                sy = (outWidth - 1) - opx;
+            } else if (orientation == 180) {
+                sx = (outWidth - 1) - opx;
+                sy = (outHeight - 1) - y;
+            } else if (orientation == 270) {
+                sx = (outHeight - 1) - y;
+                sy = opx;
+            } else {
+                sx = opx;
+            }
+
+            const int srcX = std::max(0, std::min(width - 2, (sx * bayerScale) & ~1));
+            const int srcY = std::max(0, std::min(height - 2, (sy * bayerScale) & ~1));
+
+            float p00 = static_cast<float>(bayerData[(size_t)srcY * stride_y + (size_t)srcX * stride_x]);
+            float p10 = static_cast<float>(bayerData[(size_t)srcY * stride_y + (size_t)(srcX + 1) * stride_x]);
+            float p01 = static_cast<float>(bayerData[(size_t)(srcY + 1) * stride_y + (size_t)srcX * stride_x]);
+            float p11 = static_cast<float>(bayerData[(size_t)(srcY + 1) * stride_y + (size_t)(srcX + 1) * stride_x]);
+
+            float c00 = std::max(0.0f, p00 - bl00) * norm00;
+            float c10 = std::max(0.0f, p10 - bl10) * norm10;
+            float c01 = std::max(0.0f, p01 - bl01) * norm01;
+            float c11 = std::max(0.0f, p11 - bl11) * norm11;
+
+            float r = 0.0f, g = 0.0f, b = 0.0f;
+            switch (cfaPattern) {
+                case 0: // RGGB: (0,0)=R, (1,0)=Gr, (0,1)=Gb, (1,1)=B
+                    r = c00;
+                    g = 0.5f * (c10 + c01);
+                    b = c11;
+                    break;
+                case 1: // GRBG: (0,0)=Gr, (1,0)=R, (0,1)=B, (1,1)=Gb
+                    r = c10;
+                    g = 0.5f * (c00 + c11);
+                    b = c01;
+                    break;
+                case 2: // GBRG: (0,0)=Gb, (1,0)=B, (0,1)=R, (1,1)=Gr
+                    r = c01;
+                    g = 0.5f * (c00 + c11);
+                    b = c10;
+                    break;
+                case 3: // BGGR: (0,0)=B, (1,0)=Gb, (0,1)=Gr, (1,1)=R
+                    r = c11;
+                    g = 0.5f * (c10 + c01);
+                    b = c00;
+                    break;
+                default: // Default RGGB
+                    r = c00;
+                    g = 0.5f * (c10 + c01);
+                    b = c11;
+                    break;
+            }
+
+            Vec3 linear = {
+                (r * wb_r) * gain,
+                (g * wb_g) * gain,
+                (b * wb_b) * gain
+            };
+
+            if (ccmMat) {
+                linear = multiply(*ccmMat, linear);
+            }
+
+            linear = apply_khronos_pbr_neutral(linear);
+
+            const size_t dstIdx = (static_cast<size_t>(y) * outWidth + x) * 3;
+            preview[dstIdx + 0] = (unsigned char)std::clamp(srgb_oetf(linear.r) * 255.0f + 0.5f + spatial_tpdf_dither(x, y, 0), 0.0f, 255.0f);
+            preview[dstIdx + 1] = (unsigned char)std::clamp(srgb_oetf(linear.g) * 255.0f + 0.5f + spatial_tpdf_dither(x, y, 1), 0.0f, 255.0f);
+            preview[dstIdx + 2] = (unsigned char)std::clamp(srgb_oetf(linear.b) * 255.0f + 0.5f + spatial_tpdf_dither(x, y, 2), 0.0f, 255.0f);
+        }
+    }
+
+    return preview;
+}
+
+static inline uint32_t swap_u32(uint32_t val) {
+    return ((val & 0xFF000000) >> 24) |
+           ((val & 0x00FF0000) >> 8)  |
+           ((val & 0x0000FF00) << 8)  |
+           ((val & 0x000000FF) << 24);
+}
+
+static inline uint64_t swap_u64(uint64_t val) {
+    return ((val & 0xFF00000000000000ULL) >> 56) |
+           ((val & 0x00FF000000000000ULL) >> 40) |
+           ((val & 0x0000FF0000000000ULL) >> 24) |
+           ((val & 0x000000FF00000000ULL) >> 8)  |
+           ((val & 0x00000000FF000000ULL) << 8)  |
+           ((val & 0x0000000000FF0000ULL) << 24) |
+           ((val & 0x000000000000FF00ULL) << 40) |
+           ((val & 0x00000000000000FFULL) << 56);
+}
+
+static inline uint32_t swap_f32(float val) {
+    uint32_t u = 0;
+    memcpy(&u, &val, 4);
+    return swap_u32(u);
+}
+
+static inline uint64_t swap_f64(double val) {
+    uint64_t u = 0;
+    memcpy(&u, &val, 8);
+    return swap_u64(u);
+}
+
+static std::vector<uint8_t> build_dng_gainmap_opcodes(
+    const float* lensShadingMap,
+    int rows,
+    int cols,
+    int imageWidth,
+    int imageHeight,
+    int cfaPattern
+) {
+    if (!lensShadingMap || rows <= 1 || cols <= 1) return {};
+
+    const uint32_t numOpcodes = 4;
+    const uint32_t pointsCount = static_cast<uint32_t>(rows * cols);
+    const uint32_t mapDataBytes = pointsCount * 4;
+    const uint32_t paramBytes = 40 + 32 + 4 + mapDataBytes;
+    const uint32_t opcodeTotalBytes = 16 + paramBytes;
+    const uint32_t totalBufferSize = 4 + numOpcodes * opcodeTotalBytes;
+
+    std::vector<uint8_t> buf(totalBufferSize, 0);
+    uint8_t* ptr = buf.data();
+
+    uint32_t numOpsBe = swap_u32(numOpcodes);
+    memcpy(ptr, &numOpsBe, 4);
+    ptr += 4;
+
+    const double mapSpacingV = 1.0 / static_cast<double>(rows - 1);
+    const double mapSpacingH = 1.0 / static_cast<double>(cols - 1);
+
+    for (int ch = 0; ch < 4; ++ch) {
+        uint32_t top = 0, left = 0;
+        switch(cfaPattern) {
+            case 0: // RGGB
+                if (ch == 0) { top = 0; left = 0; }
+                else if (ch == 1) { top = 0; left = 1; }
+                else if (ch == 2) { top = 1; left = 0; }
+                else { top = 1; left = 1; }
+                break;
+            case 1: // GRBG
+                if (ch == 0) { top = 0; left = 1; }
+                else if (ch == 1) { top = 0; left = 0; }
+                else if (ch == 2) { top = 1; left = 1; }
+                else { top = 1; left = 0; }
+                break;
+            case 2: // GBRG
+                if (ch == 0) { top = 1; left = 0; }
+                else if (ch == 1) { top = 0; left = 0; }
+                else if (ch == 2) { top = 1; left = 1; }
+                else { top = 0; left = 1; }
+                break;
+            case 3: // BGGR
+                if (ch == 0) { top = 1; left = 1; }      // Red
+                else if (ch == 1) { top = 0; left = 1; } // Green_even (Gr)
+                else if (ch == 2) { top = 1; left = 0; } // Green_odd (Gb)
+                else { top = 0; left = 0; }               // Blue
+                break;
+            default:
+                if (ch == 0) { top = 0; left = 0; }
+                else if (ch == 1) { top = 0; left = 1; }
+                else if (ch == 2) { top = 1; left = 0; }
+                else { top = 1; left = 1; }
+                break;
+        }
+
+        uint32_t opId = swap_u32(9); // GainMap
+        uint32_t dngVer = swap_u32(0x01030000); // DNG 1.3.0.0
+        uint32_t flags = swap_u32(1);
+        uint32_t pBytes = swap_u32(paramBytes);
+
+        memcpy(ptr, &opId, 4); ptr += 4;
+        memcpy(ptr, &dngVer, 4); ptr += 4;
+        memcpy(ptr, &flags, 4); ptr += 4;
+        memcpy(ptr, &pBytes, 4); ptr += 4;
+
+        uint32_t pTop = swap_u32(top);
+        uint32_t pLeft = swap_u32(left);
+        uint32_t pBottom = swap_u32(static_cast<uint32_t>(imageHeight));
+        uint32_t pRight = swap_u32(static_cast<uint32_t>(imageWidth));
+        uint32_t pPlane = swap_u32(0);
+        uint32_t pPlanes = swap_u32(1);
+        uint32_t pRowPitch = swap_u32(2);
+        uint32_t pColPitch = swap_u32(2);
+        uint32_t pPointsV = swap_u32(static_cast<uint32_t>(rows));
+        uint32_t pPointsH = swap_u32(static_cast<uint32_t>(cols));
+
+        memcpy(ptr, &pTop, 4); ptr += 4;
+        memcpy(ptr, &pLeft, 4); ptr += 4;
+        memcpy(ptr, &pBottom, 4); ptr += 4;
+        memcpy(ptr, &pRight, 4); ptr += 4;
+        memcpy(ptr, &pPlane, 4); ptr += 4;
+        memcpy(ptr, &pPlanes, 4); ptr += 4;
+        memcpy(ptr, &pRowPitch, 4); ptr += 4;
+        memcpy(ptr, &pColPitch, 4); ptr += 4;
+        memcpy(ptr, &pPointsV, 4); ptr += 4;
+        memcpy(ptr, &pPointsH, 4); ptr += 4;
+
+        uint64_t pSpacingV = swap_f64(mapSpacingV);
+        uint64_t pSpacingH = swap_f64(mapSpacingH);
+        uint64_t pOriginV = swap_f64(0.0);
+        uint64_t pOriginH = swap_f64(0.0);
+
+        memcpy(ptr, &pSpacingV, 8); ptr += 8;
+        memcpy(ptr, &pSpacingH, 8); ptr += 8;
+        memcpy(ptr, &pOriginV, 8); ptr += 8;
+        memcpy(ptr, &pOriginH, 8); ptr += 8;
+
+        uint32_t pMapPlanes = swap_u32(1);
+        memcpy(ptr, &pMapPlanes, 4); ptr += 4;
+
+        const float* chMap = lensShadingMap + (static_cast<size_t>(ch) * pointsCount);
+        for (uint32_t i = 0; i < pointsCount; ++i) {
+            uint32_t gVal = swap_f32(chMap[i]);
+            memcpy(ptr, &gVal, 4);
+            ptr += 4;
+        }
+    }
+
+    return buf;
+}
+
 bool write_dng(
     const char* filename,
     int width,
@@ -1647,7 +1978,15 @@ bool write_dng(
     int calibIllum2,
     const float* neutralColorPoint,
     int outFd,
-    int dngCompressionMode
+    int dngCompressionMode,
+    bool isBayer,
+    int cfaPattern,
+    const float* blackLevelPattern,
+    const double* noiseProfile,
+    const int* activeArea,
+    const float* lensShadingMap,
+    int lensShadingRows,
+    int lensShadingCols
 ) {
     static std::once_flag extender_flag;
     std::call_once(extender_flag, [](){
@@ -1704,9 +2043,20 @@ bool write_dng(
 
     for (const auto& spec : previewSpecs) {
         int pw = 0, ph = 0;
-        std::vector<unsigned char> previewRgb8 = make_preview_rgb8(
-            planarData, stride_x, stride_y, stride_c, width, height, spec.targetLongEdge, orientation, mirror, std::pow(2.0f, baselineExposure), pw, ph, wbVec, has_sensor_to_srgb ? &sensor_to_srgb : nullptr
-        );
+        std::vector<unsigned char> previewRgb8;
+        if (isBayer) {
+            previewRgb8 = make_bayer_preview_rgb8(
+                planarData, stride_x, stride_y, width, height, cfaPattern, spec.targetLongEdge,
+                orientation, mirror, std::pow(2.0f, baselineExposure), pw, ph,
+                wbVec, has_sensor_to_srgb ? &sensor_to_srgb : nullptr, blackLevelPattern, whiteLevel
+            );
+        } else {
+            previewRgb8 = make_preview_rgb8(
+                planarData, stride_x, stride_y, stride_c, width, height, spec.targetLongEdge,
+                orientation, mirror, std::pow(2.0f, baselineExposure), pw, ph,
+                wbVec, has_sensor_to_srgb ? &sensor_to_srgb : nullptr
+            );
+        }
         if (!previewRgb8.empty()) {
             std::vector<unsigned char> jpegPreview = encode_rgb8_jpeg(previewRgb8, pw, ph, 82);
             if (!jpegPreview.empty()) {
@@ -1745,8 +2095,94 @@ bool write_dng(
         default: tiffOrientation = mirror ? 2 : 1; break;
     }
     TIFFSetField(tif, TIFFTAG_ORIENTATION, tiffOrientation);
-    TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_LINEAR_RAW);
-    TIFFSetField(tif, TIFFTAG_SAMPLESPERPIXEL, 3);
+
+    if (isBayer) {
+        TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_CFA);
+        TIFFSetField(tif, TIFFTAG_SAMPLESPERPIXEL, 1);
+        uint16_t cfa_repeat_dim[2] = {2, 2};
+        TIFFSetField(tif, TIFFTAG_CFAREPEATPATTERNDIM, cfa_repeat_dim);
+        uint8_t cfa_bytes[4] = {0};
+        map_cfa_pattern(cfaPattern, cfa_bytes);
+        TIFFSetField(tif, TIFFTAG_CFAPATTERN, 4, cfa_bytes);
+        uint16_t bl_repeat_dim[2] = {2, 2};
+        TIFFSetField(tif, TIFFTAG_BLACKLEVELREPEATDIM, bl_repeat_dim);
+        float bl_vals[4] = {64.0f, 64.0f, 64.0f, 64.0f};
+        if (blackLevelPattern) {
+            bl_vals[0] = std::max(0.0f, blackLevelPattern[0]);
+            bl_vals[1] = std::max(0.0f, blackLevelPattern[1]);
+            bl_vals[2] = std::max(0.0f, blackLevelPattern[2]);
+            bl_vals[3] = std::max(0.0f, blackLevelPattern[3]);
+        }
+        if (bl_vals[0] <= 0.0f && bl_vals[1] <= 0.0f && bl_vals[2] <= 0.0f && bl_vals[3] <= 0.0f) {
+            bl_vals[0] = 64.0f; bl_vals[1] = 64.0f; bl_vals[2] = 64.0f; bl_vals[3] = 64.0f;
+        }
+        TIFFSetField(tif, TIFFTAG_BLACKLEVEL, 4, bl_vals);
+    } else {
+        TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_LINEAR_RAW);
+        TIFFSetField(tif, TIFFTAG_SAMPLESPERPIXEL, 3);
+        float black_level_vals[3] = {0.0f, 0.0f, 0.0f};
+        TIFFSetField(tif, TIFFTAG_BLACKLEVEL, 3, black_level_vals);
+    }
+
+    float identityCalib[9] = {1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f};
+    TIFFSetField(tif, TIFFTAG_CAMERACALIBRATION1, 9, identityCalib);
+    TIFFSetField(tif, TIFFTAG_CAMERACALIBRATION2, 9, identityCalib);
+
+    if (activeArea) {
+        uint32_t aa[4] = {
+            (uint32_t)std::max(0, activeArea[0]), // top
+            (uint32_t)std::max(0, activeArea[1]), // left
+            (uint32_t)std::max(0, activeArea[2]), // bottom
+            (uint32_t)std::max(0, activeArea[3])  // right
+        };
+        TIFFSetField(tif, TIFFTAG_ACTIVEAREA, aa);
+
+        const float margin = 8.0f;
+        float cropOrigin[2] = {0.0f, 0.0f};
+        float cropSize[2] = {(float)width, (float)height};
+        if (width > 16 && height > 16) {
+            cropOrigin[0] = margin;
+            cropOrigin[1] = margin;
+            cropSize[0] = (float)(width - 16);
+            cropSize[1] = (float)(height - 16);
+        }
+        TIFFSetField(tif, TIFFTAG_DEFAULTCROPORIGIN, cropOrigin);
+        TIFFSetField(tif, TIFFTAG_DEFAULTCROPSIZE, cropSize);
+    }
+
+    if (noiseProfile) {
+        double rgbNoise[6] = {0};
+        int r_idx = 0, g0_idx = 1, g1_idx = 2, b_idx = 3;
+        switch(cfaPattern) {
+            case 0: r_idx=0; g0_idx=1; g1_idx=2; b_idx=3; break; // RGGB
+            case 1: g0_idx=0; r_idx=1; b_idx=2; g1_idx=3; break; // GRBG
+            case 2: g0_idx=0; b_idx=1; r_idx=2; g1_idx=3; break; // GBRG
+            case 3: b_idx=0; g0_idx=1; g1_idx=2; r_idx=3; break; // BGGR
+        }
+        rgbNoise[0] = noiseProfile[r_idx * 2];
+        rgbNoise[1] = noiseProfile[r_idx * 2 + 1];
+        if (noiseProfile[g0_idx * 2] >= noiseProfile[g1_idx * 2]) {
+            rgbNoise[2] = noiseProfile[g0_idx * 2];
+            rgbNoise[3] = noiseProfile[g0_idx * 2 + 1];
+        } else {
+            rgbNoise[2] = noiseProfile[g1_idx * 2];
+            rgbNoise[3] = noiseProfile[g1_idx * 2 + 1];
+        }
+        rgbNoise[4] = noiseProfile[b_idx * 2];
+        rgbNoise[5] = noiseProfile[b_idx * 2 + 1];
+
+        TIFFSetField(tif, TIFFTAG_NOISEPROFILE, (uint16_t)6, rgbNoise);
+    }
+
+    if (isBayer && lensShadingMap && lensShadingRows > 1 && lensShadingCols > 1) {
+        std::vector<uint8_t> opcodeList = build_dng_gainmap_opcodes(
+            lensShadingMap, lensShadingRows, lensShadingCols, width, height, cfaPattern
+        );
+        if (!opcodeList.empty()) {
+            TIFFSetField(tif, TIFFTAG_OPCODELIST2, (uint32_t)opcodeList.size(), opcodeList.data());
+        }
+    }
+
     TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG);
     TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, height); // Single strip for raw
     TIFFSetField(tif, TIFFTAG_SUBFILETYPE, 0);
@@ -1766,8 +2202,6 @@ bool write_dng(
     uint32_t white_level_val = (uint32_t)whiteLevel;
     if (white_level_val == 0) white_level_val = 65535;
     TIFFSetField(tif, TIFFTAG_WHITELEVEL, 1, &white_level_val);
-    uint32_t black_level_vals[3] = {0, 0, 0};
-    TIFFSetField(tif, TIFFTAG_BLACKLEVEL, 3, black_level_vals);
 
     float as_shot_neutral[3];
     if (neutralColorPoint != nullptr) {
@@ -1823,12 +2257,13 @@ bool write_dng(
     TIFFSetField(tif, TIFFTAG_BASELINEEXPOSURE, safeBaselineExposure);
 
     unsigned short iso_short = (unsigned short)metadata.iso;
-    TIFFSetField(tif, TIFFTAG_ISOSPEEDRATINGS, (uint16_t)1, &iso_short);
+    TIFFSetField(tif, TIFFTAG_ISOSPEEDRATINGS, iso_short);
 
     // Write Main RAW Data based on selected compression mode
     if (dngCompressionMode == 0) {
         // Mode 0: Lossless JPEG 16-bit
-        std::vector<unsigned char> ljpegData = encode_lossless_jpeg16(planarData, width, height, stride_x, stride_y, stride_c);
+        int num_channels = isBayer ? 1 : 3;
+        std::vector<unsigned char> ljpegData = encode_lossless_jpeg16(planarData, width, height, stride_x, stride_y, stride_c, num_channels);
         if (ljpegData.empty() || TIFFWriteRawStrip(tif, 0, ljpegData.data(), static_cast<tmsize_t>(ljpegData.size())) < 0) {
             LOGE("Failed to write Lossless JPEG raw strip");
             TIFFClose(tif);
@@ -1837,20 +2272,33 @@ bool write_dng(
     } else {
         // Mode 1 (Adobe Deflate) & Mode 2 (Uncompressed): Scanline writing
         TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, 64);
-        std::vector<unsigned short> rowBuffer(width * 3);
-        for (int y = 0; y < height; y++) {
-            for (int x = 0; x < width; x++) {
-                 size_t r_idx = (size_t)y*stride_y + (size_t)x*stride_x + 0*stride_c;
-                 size_t g_idx = (size_t)y*stride_y + (size_t)x*stride_x + 1*stride_c;
-                 size_t b_idx = (size_t)y*stride_y + (size_t)x*stride_x + 2*stride_c;
-
-                 rowBuffer[x*3+0] = planarData[r_idx];
-                 rowBuffer[x*3+1] = planarData[g_idx];
-                 rowBuffer[x*3+2] = planarData[b_idx];
+        if (isBayer) {
+            std::vector<unsigned short> rowBuffer(width);
+            for (int y = 0; y < height; y++) {
+                for (int x = 0; x < width; x++) {
+                    rowBuffer[x] = planarData[(size_t)y * stride_y + (size_t)x * stride_x];
+                }
+                if (TIFFWriteScanline(tif, rowBuffer.data(), y, 0) < 0) {
+                    TIFFClose(tif);
+                    return false;
+                }
             }
-            if (TIFFWriteScanline(tif, rowBuffer.data(), y, 0) < 0) {
-                TIFFClose(tif);
-                return false;
+        } else {
+            std::vector<unsigned short> rowBuffer(width * 3);
+            for (int y = 0; y < height; y++) {
+                for (int x = 0; x < width; x++) {
+                     size_t r_idx = (size_t)y*stride_y + (size_t)x*stride_x + 0*stride_c;
+                     size_t g_idx = (size_t)y*stride_y + (size_t)x*stride_x + 1*stride_c;
+                     size_t b_idx = (size_t)y*stride_y + (size_t)x*stride_x + 2*stride_c;
+
+                     rowBuffer[x*3+0] = planarData[r_idx];
+                     rowBuffer[x*3+1] = planarData[g_idx];
+                     rowBuffer[x*3+2] = planarData[b_idx];
+                }
+                if (TIFFWriteScanline(tif, rowBuffer.data(), y, 0) < 0) {
+                    TIFFClose(tif);
+                    return false;
+                }
             }
         }
     }

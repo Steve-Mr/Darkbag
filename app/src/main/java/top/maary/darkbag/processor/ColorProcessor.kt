@@ -45,6 +45,7 @@ object ColorProcessor {
 
     external fun allocateDirectBuffer(capacity: Long): ByteBuffer?
     external fun freeDirectBuffer(buffer: ByteBuffer)
+    external fun freeSharedRawMemory(tempRawPath: String)
 
     external fun copyBayerWithStride(
         srcBuffer: ByteBuffer,
@@ -212,7 +213,17 @@ object ColorProcessor {
         debugStats: LongArray? = null,
         outJpgFd: Int = -1,
         outDngFd: Int = -1,
-        dngCompressionMode: Int = 0
+        dngCompressionMode: Int = 0,
+        rawOutputType: Int = 0,
+        cfaPattern: Int = 0,
+        blackLevelPattern: IntArray? = null,
+        whiteLevel: Int = 0,
+        dynamicBlackLevel: FloatArray? = null,
+        noiseProfile: DoubleArray? = null,
+        activeArray: IntArray? = null,
+        lensShadingMap: FloatArray? = null,
+        lensShadingRows: Int = 0,
+        lensShadingCols: Int = 0
     ): Int
 
     external fun processHdrPlus(

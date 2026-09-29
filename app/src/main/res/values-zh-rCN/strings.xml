@@ -224,4 +224,8 @@
     <string name="dialog_mic_permission_silent">直接静音录制</string>
     <string name="dialog_mic_permission_settings">去设置</string>
     <string name="toast_audio_permission_granted">已授予麦克风权限，将包含音频录制</string>
+
+    <string name="setting_raw_format_hint">RAW 格式</string>
+    <string name="raw_output_type_bayer">Bayer CFA RAW (~12MB, 默认)</string>
+    <string name="raw_output_type_linear">线性 RGB RAW (~50MB)</string>
 </resources>

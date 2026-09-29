@@ -53,10 +53,16 @@ struct CaptureMetadataFieldIDs {
     jfieldID exposureTime;
     jfieldID fNumber;
     jfieldID focalLength;
+    jfieldID focalLengthIn35mmFilm;
     jfieldID dateTimeOriginal;
+    jfieldID dateTimeDigitized;
+    jfieldID offsetTime;
+    jfieldID offsetTimeOriginal;
+    jfieldID offsetTimeDigitized;
     jfieldID make;
     jfieldID model;
     jfieldID uniqueCameraModel;
+    jfieldID lensModel;
     jfieldID software;
     jfieldID imageDescription;
 } g_metadataFields;
@@ -123,7 +129,11 @@ void fillDebugStats(JNIEnv* env, jlongArray debugStats, jlong copyMs, jlong hali
     env->SetLongArrayRegion(debugStats, 0, std::min<jsize>(len, 15), stats);
 }
 
-std::unordered_map<std::string, std::shared_ptr<std::vector<uint16_t>>> g_sharedMemoryMap;
+struct SharedCaptureResult {
+    std::vector<uint16_t> bayerBuf; // width * height (Bayer CFA)
+    std::vector<uint16_t> rgbBuf;   // width * height * 3 (Linear RGB)
+};
+static std::unordered_map<std::string, std::shared_ptr<SharedCaptureResult>> g_sharedMemoryMap;
 std::mutex g_sharedMemoryMutex;
 static std::unordered_set<void*> g_nativeAllocatedBuffers;
 static std::mutex g_nativeBufferMutex;
@@ -195,10 +205,16 @@ extern "C" jint JNI_OnLoad(JavaVM* vm, void* reserved) {
     g_metadataFields.exposureTime = getField(metadataClazz, "exposureTime", "Ljava/lang/Long;");
     g_metadataFields.fNumber = getField(metadataClazz, "fNumber", "Ljava/lang/Float;");
     g_metadataFields.focalLength = getField(metadataClazz, "focalLength", "Ljava/lang/Float;");
+    g_metadataFields.focalLengthIn35mmFilm = getField(metadataClazz, "focalLengthIn35mmFilm", "Ljava/lang/Integer;");
     g_metadataFields.dateTimeOriginal = getField(metadataClazz, "dateTimeOriginal", "Ljava/lang/Long;");
+    g_metadataFields.dateTimeDigitized = getField(metadataClazz, "dateTimeDigitized", "Ljava/lang/Long;");
+    g_metadataFields.offsetTime = getField(metadataClazz, "offsetTime", "Ljava/lang/String;");
+    g_metadataFields.offsetTimeOriginal = getField(metadataClazz, "offsetTimeOriginal", "Ljava/lang/String;");
+    g_metadataFields.offsetTimeDigitized = getField(metadataClazz, "offsetTimeDigitized", "Ljava/lang/String;");
     g_metadataFields.make = getField(metadataClazz, "make", "Ljava/lang/String;");
     g_metadataFields.model = getField(metadataClazz, "model", "Ljava/lang/String;");
     g_metadataFields.uniqueCameraModel = getField(metadataClazz, "uniqueCameraModel", "Ljava/lang/String;");
+    g_metadataFields.lensModel = getField(metadataClazz, "lensModel", "Ljava/lang/String;");
     g_metadataFields.software = getField(metadataClazz, "software", "Ljava/lang/String;");
     g_metadataFields.imageDescription = getField(metadataClazz, "imageDescription", "Ljava/lang/String;");
 
@@ -235,10 +251,16 @@ ImageMetadata metadataFromJava(JNIEnv* env, jobject metadataObj) {
     meta.exposureTime = getLongField(env, metadataObj, g_metadataFields.exposureTime, 10000000L);
     meta.fNumber = getFloatField(env, metadataObj, g_metadataFields.fNumber, 1.8f);
     meta.focalLength = getFloatField(env, metadataObj, g_metadataFields.focalLength, 0.0f);
+    meta.focalLengthIn35mmFilm = getIntField(env, metadataObj, g_metadataFields.focalLengthIn35mmFilm, 0);
     meta.captureTimeMillis = getLongField(env, metadataObj, g_metadataFields.dateTimeOriginal, 0);
+    meta.digitizedTimeMillis = getLongField(env, metadataObj, g_metadataFields.dateTimeDigitized, meta.captureTimeMillis);
+    meta.offsetTime = getStringField(env, metadataObj, g_metadataFields.offsetTime, "");
+    meta.offsetTimeOriginal = getStringField(env, metadataObj, g_metadataFields.offsetTimeOriginal, meta.offsetTime);
+    meta.offsetTimeDigitized = getStringField(env, metadataObj, g_metadataFields.offsetTimeDigitized, meta.offsetTime);
     meta.make = getStringField(env, metadataObj, g_metadataFields.make, "Unknown");
     meta.model = getStringField(env, metadataObj, g_metadataFields.model, "Unknown");
     meta.uniqueCameraModel = getStringField(env, metadataObj, g_metadataFields.uniqueCameraModel, meta.model);
+    meta.lensModel = getStringField(env, metadataObj, g_metadataFields.lensModel, "");
     meta.software = getStringField(env, metadataObj, g_metadataFields.software, "Darkbag");
     meta.imageDescription = getStringField(env, metadataObj, g_metadataFields.imageDescription, "Processed by Darkbag");
 
@@ -313,6 +335,21 @@ Java_top_maary_darkbag_processor_ColorProcessor_freeDirectBuffer(JNIEnv* env, jo
     if (isNative) {
         free(ptr);
     }
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_top_maary_darkbag_processor_ColorProcessor_freeSharedRawMemory(JNIEnv* env, jobject /* this */, jstring tempRawPath) {
+    if (!tempRawPath) return;
+    const char* temp_path_cstr = env->GetStringUTFChars(tempRawPath, 0);
+    if (!temp_path_cstr) return;
+    {
+        std::lock_guard<std::mutex> mapLock(g_sharedMemoryMutex);
+        auto it = g_sharedMemoryMap.find(temp_path_cstr);
+        if (it != g_sharedMemoryMap.end()) {
+            g_sharedMemoryMap.erase(it);
+        }
+    }
+    env->ReleaseStringUTFChars(tempRawPath, temp_path_cstr);
 }
 
 static void extract_calibration_data(
@@ -401,37 +438,85 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
     jlongArray debugStats,
     jint outJpgFd,
     jint outDngFd,
-    jint dngCompressionMode
+    jint dngCompressionMode,
+    jint rawOutputType,
+    jint cfaPattern,
+    jintArray blackLevelPattern,
+    jint whiteLevel,
+    jfloatArray dynamicBlackLevel,
+    jdoubleArray noiseProfile,
+    jintArray activeArea,
+    jfloatArray lensShadingMap,
+    jint lensShadingRows,
+    jint lensShadingCols
 ) {
-    LOGD("Native exportHdrPlus started (enableMemoryColor=%d, colorEngineMode=%d, faithful=%d).", enableMemoryColor, colorEngineMode, faithfulHighlights);
+    LOGD("Native exportHdrPlus started (enableMemoryColor=%d, colorEngineMode=%d, faithful=%d, rawOutputType=%d).", enableMemoryColor, colorEngineMode, faithfulHighlights, rawOutputType);
 
     if (!tempRawPath) return -1;
     const char* temp_path_cstr = env->GetStringUTFChars(tempRawPath, 0);
     if (!temp_path_cstr) return -1;
 
-    std::shared_ptr<std::vector<uint16_t>> sharedMem;
+    std::shared_ptr<SharedCaptureResult> sharedResult;
     {
         std::lock_guard<std::mutex> mapLock(g_sharedMemoryMutex);
         auto it = g_sharedMemoryMap.find(temp_path_cstr);
         if (it != g_sharedMemoryMap.end()) {
-            sharedMem = it->second;
+            sharedResult = it->second;
             g_sharedMemoryMap.erase(it);
         }
     }
 
-    if (!sharedMem) {
+    if (!sharedResult) {
         LOGE("Failed to find shared memory for tempRawPath: %s", temp_path_cstr);
         env->ReleaseStringUTFChars(tempRawPath, temp_path_cstr);
         return -1;
     }
-    
-    // We can use a reference to the shared vector
-    const std::vector<uint16_t>& finalImage = *sharedMem;
     env->ReleaseStringUTFChars(tempRawPath, temp_path_cstr);
 
     jfloat* wbData = env->GetFloatArrayElements(whiteBalance, nullptr);
     std::vector<float> wbVec = {wbData[0], wbData[1], wbData[2], wbData[3]};
     env->ReleaseFloatArrayElements(whiteBalance, wbData, JNI_ABORT);
+
+    float bl_pattern[4] = {64.0f, 64.0f, 64.0f, 64.0f};
+    bool has_bl = false;
+    if (dynamicBlackLevel && env->GetArrayLength(dynamicBlackLevel) >= 4) {
+        env->GetFloatArrayRegion(dynamicBlackLevel, 0, 4, bl_pattern);
+        has_bl = true;
+    } else if (blackLevelPattern && env->GetArrayLength(blackLevelPattern) >= 4) {
+        int int_bl[4] = {64, 64, 64, 64};
+        env->GetIntArrayRegion(blackLevelPattern, 0, 4, int_bl);
+        bl_pattern[0] = (float)int_bl[0];
+        bl_pattern[1] = (float)int_bl[1];
+        bl_pattern[2] = (float)int_bl[2];
+        bl_pattern[3] = (float)int_bl[3];
+        has_bl = true;
+    }
+
+    double noise_prof[8] = {0};
+    const double* noise_ptr = nullptr;
+    if (noiseProfile && env->GetArrayLength(noiseProfile) >= 8) {
+        env->GetDoubleArrayRegion(noiseProfile, 0, 8, noise_prof);
+        noise_ptr = noise_prof;
+    }
+
+    int active_area[4] = {0};
+    const int* active_area_ptr = nullptr;
+    if (activeArea && env->GetArrayLength(activeArea) >= 4) {
+        env->GetIntArrayRegion(activeArea, 0, 4, active_area);
+        active_area_ptr = active_area;
+    }
+
+    std::vector<float> lensShadingVec;
+    const float* lens_shading_ptr = nullptr;
+    if (lensShadingMap && lensShadingRows > 0 && lensShadingCols > 0) {
+        int lsSize = env->GetArrayLength(lensShadingMap);
+        int expected = 4 * lensShadingRows * lensShadingCols;
+        if (lsSize >= expected) {
+            lensShadingVec.resize(expected);
+            env->GetFloatArrayRegion(lensShadingMap, 0, expected, lensShadingVec.data());
+            lens_shading_ptr = lensShadingVec.data();
+        }
+    }
 
     jfloat* ccmData = env->GetFloatArrayElements(ccm, nullptr);
     std::vector<float> ccmVec(9); for(int i=0; i<9; ++i) ccmVec[i] = ccmData[i];
@@ -461,11 +546,51 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
 
     bool dngOk = true;
     if (outDngFd >= 0 || dng_path_cstr) {
-        LOGD("Exporting DNG to %s (outDngFd=%d, mode=%d)", dng_path_cstr ? dng_path_cstr : "FD", outDngFd, dngCompressionMode);
+        LOGD("Exporting DNG to %s (outDngFd=%d, mode=%d, rawOutputType=%d)", dng_path_cstr ? dng_path_cstr : "FD", outDngFd, dngCompressionMode, rawOutputType);
         auto dngStart = std::chrono::high_resolution_clock::now();
         float baselineExposure = (digitalGain > 0.0f) ? std::log2(digitalGain) : 0.0f;
-        dngOk = write_dng(dng_path_cstr, width, height, finalImage.data(), 1, width, width*height, kMax16BitValue, ccmVec, meta, orientation, (bool)mirror, baselineExposure, wbVec.data(),
-                          cm1Ptr, cm2Ptr, fm1Ptr, fm2Ptr, (int)calibrationIlluminant1, (int)calibrationIlluminant2, neutralPtr, outDngFd, (int)dngCompressionMode);
+        bool isBayer = (rawOutputType == 0);
+
+        const uint16_t* dngRawData = nullptr;
+        int dngStrideX = 1;
+        int dngStrideY = width;
+        int dngStrideC = 0;
+        int effectiveWhiteLevel = whiteLevel;
+
+        if (isBayer) {
+            if (!sharedResult->bayerBuf.empty()) {
+                dngRawData = sharedResult->bayerBuf.data();
+                dngStrideX = 1;
+                dngStrideY = width;
+                dngStrideC = 0;
+                effectiveWhiteLevel = (whiteLevel > 0) ? whiteLevel : 1023;
+            } else {
+                // Fallback to rgbBuf if bayerBuf is not present
+                dngRawData = sharedResult->rgbBuf.data();
+                dngStrideX = 1;
+                dngStrideY = width;
+                dngStrideC = width * height;
+                isBayer = false;
+                effectiveWhiteLevel = kMax16BitValue;
+            }
+        } else {
+            dngRawData = sharedResult->rgbBuf.data();
+            dngStrideX = 1;
+            dngStrideY = width;
+            dngStrideC = width * height;
+            effectiveWhiteLevel = kMax16BitValue;
+        }
+
+        dngOk = write_dng(
+            dng_path_cstr, width, height, dngRawData,
+            dngStrideX, dngStrideY, dngStrideC,
+            effectiveWhiteLevel,
+            ccmVec, meta, orientation, (bool)mirror, baselineExposure, wbVec.data(),
+            cm1Ptr, cm2Ptr, fm1Ptr, fm2Ptr, (int)calibrationIlluminant1, (int)calibrationIlluminant2, neutralPtr,
+            outDngFd, (int)dngCompressionMode,
+            isBayer, (int)cfaPattern, has_bl ? bl_pattern : nullptr,
+            noise_ptr, active_area_ptr, lens_shading_ptr, lensShadingRows, lensShadingCols
+        );
         dngMs = (jlong)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - dngStart).count();
     }
 
@@ -473,7 +598,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
     if (outJpgFd >= 0 || jpg_path_cstr) {
         LOGD("Exporting JPG: JPG=%s (outJpgFd=%d)", jpg_path_cstr ? jpg_path_cstr : "FD", outJpgFd);
         auto jpgStart = std::chrono::high_resolution_clock::now();
-        saveOk = process_and_save_image(finalImage.data(), 1, width, width*height, nullptr, 0, 0, width, height, digitalGain, targetLog, lut,
+        saveOk = process_and_save_image(sharedResult->rgbBuf.data(), 1, width, width*height, nullptr, 0, 0, width, height, digitalGain, targetLog, lut,
                                         exposure, contrast, saturation, highlights, shadows, whites, blacks,
                                         jpg_path_cstr, nullptr, &meta, 1, ccmVec.data(), wbVec.data(), orientation, nullptr, 0, 0, false, 1, zoomFactor, (bool)mirror, (bool)enableMemoryColor, (int)colorEngineMode, faithfulHighlights, outJpgFd);
         jpgMs = (jlong)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - jpgStart).count();
@@ -545,12 +670,17 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
     Buffer<uint16_t> inputBuf(rawDataPtr, width, height, numFrames);
 
     const char* tr_p_cstr = (tempRawPath) ? env->GetStringUTFChars(tempRawPath, 0) : nullptr;
-    std::shared_ptr<std::vector<uint16_t>> sharedBuf;
+    std::shared_ptr<SharedCaptureResult> sharedResult;
+    Buffer<uint16_t> bayerBuf;
     Buffer<uint16_t> outputBuf;
     if (tr_p_cstr) {
-        sharedBuf = std::make_shared<std::vector<uint16_t>>(static_cast<size_t>(width) * height * 3);
-        outputBuf = Buffer<uint16_t>(sharedBuf->data(), width, height, 3);
+        sharedResult = std::make_shared<SharedCaptureResult>();
+        sharedResult->bayerBuf.resize(static_cast<size_t>(width) * height);
+        sharedResult->rgbBuf.resize(static_cast<size_t>(width) * height * 3);
+        bayerBuf = Buffer<uint16_t>(sharedResult->bayerBuf.data(), width, height);
+        outputBuf = Buffer<uint16_t>(sharedResult->rgbBuf.data(), width, height, 3);
     } else {
+        bayerBuf = Buffer<uint16_t>(width, height);
         outputBuf = Buffer<uint16_t>(width, height, 3);
     }
 
@@ -651,14 +781,14 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
     auto halideStart = std::chrono::high_resolution_clock::now();
     int halide_res;
     if (numFrames == 1) {
-        halide_res = hdrplus_single_pipeline(inputBuf, bl_r, bl_g0, bl_g1, bl_b, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, ccmHalideBuf, lscMapBuf, 1.0f, 1.0f, outputBuf);
+        halide_res = hdrplus_single_pipeline(inputBuf, bl_r, bl_g0, bl_g1, bl_b, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, ccmHalideBuf, lscMapBuf, 1.0f, 1.0f, outputBuf, bayerBuf);
     } else {
         if (denoiseLevel == 0) {
-            halide_res = hdrplus_fast_pipeline(inputBuf, bl_r, bl_g0, bl_g1, bl_b, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, ccmHalideBuf, lscMapBuf, 1.0f, 1.0f, outputBuf);
+            halide_res = hdrplus_fast_pipeline(inputBuf, bl_r, bl_g0, bl_g1, bl_b, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, ccmHalideBuf, lscMapBuf, 1.0f, 1.0f, outputBuf, bayerBuf);
         } else if (denoiseLevel == 2) {
-            halide_res = hdrplus_high_pipeline(inputBuf, bl_r, bl_g0, bl_g1, bl_b, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, ccmHalideBuf, lscMapBuf, 1.0f, 1.0f, outputBuf);
+            halide_res = hdrplus_high_pipeline(inputBuf, bl_r, bl_g0, bl_g1, bl_b, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, ccmHalideBuf, lscMapBuf, 1.0f, 1.0f, outputBuf, bayerBuf);
         } else {
-            halide_res = hdrplus_raw_pipeline(inputBuf, bl_r, bl_g0, bl_g1, bl_b, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, ccmHalideBuf, lscMapBuf, 1.0f, 1.0f, outputBuf);
+            halide_res = hdrplus_raw_pipeline(inputBuf, bl_r, bl_g0, bl_g1, bl_b, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, ccmHalideBuf, lscMapBuf, 1.0f, 1.0f, outputBuf, bayerBuf);
         }
     }
     auto halideDurationMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - halideStart).count();
@@ -711,7 +841,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
     if (tr_p_cstr) {
         {
             std::lock_guard<std::mutex> mapLock(g_sharedMemoryMutex);
-            g_sharedMemoryMap[tr_p_cstr] = sharedBuf;
+            g_sharedMemoryMap[tr_p_cstr] = sharedResult;
         }
         env->ReleaseStringUTFChars(tempRawPath, tr_p_cstr);
     }
