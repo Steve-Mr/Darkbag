@@ -512,7 +512,8 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
                 dngStrideX = 1;
                 dngStrideY = width;
                 dngStrideC = width * height;
-                effectiveWhiteLevel = (whiteLevel > 0) ? whiteLevel : kMax16BitValue;
+                isBayer = false;
+                effectiveWhiteLevel = kMax16BitValue;
             }
         } else {
             dngRawData = sharedResult->rgbBuf.data();
@@ -611,14 +612,16 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
 
     const char* tr_p_cstr = (tempRawPath) ? env->GetStringUTFChars(tempRawPath, 0) : nullptr;
     std::shared_ptr<SharedCaptureResult> sharedResult;
+    Buffer<uint16_t> bayerBuf;
     Buffer<uint16_t> outputBuf;
     if (tr_p_cstr) {
         sharedResult = std::make_shared<SharedCaptureResult>();
+        sharedResult->bayerBuf.resize(static_cast<size_t>(width) * height);
         sharedResult->rgbBuf.resize(static_cast<size_t>(width) * height * 3);
+        bayerBuf = Buffer<uint16_t>(sharedResult->bayerBuf.data(), width, height);
         outputBuf = Buffer<uint16_t>(sharedResult->rgbBuf.data(), width, height, 3);
-        // Save a copy of sensor Bayer CFA data (for single-frame, or frame 0 fallback in Milestone 2)
-        sharedResult->bayerBuf.assign(rawDataPtr, rawDataPtr + (static_cast<size_t>(width) * height));
     } else {
+        bayerBuf = Buffer<uint16_t>(width, height);
         outputBuf = Buffer<uint16_t>(width, height, 3);
     }
 
@@ -719,14 +722,14 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
     auto halideStart = std::chrono::high_resolution_clock::now();
     int halide_res;
     if (numFrames == 1) {
-        halide_res = hdrplus_single_pipeline(inputBuf, bl_r, bl_g0, bl_g1, bl_b, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, ccmHalideBuf, lscMapBuf, 1.0f, 1.0f, outputBuf);
+        halide_res = hdrplus_single_pipeline(inputBuf, bl_r, bl_g0, bl_g1, bl_b, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, ccmHalideBuf, lscMapBuf, 1.0f, 1.0f, outputBuf, bayerBuf);
     } else {
         if (denoiseLevel == 0) {
-            halide_res = hdrplus_fast_pipeline(inputBuf, bl_r, bl_g0, bl_g1, bl_b, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, ccmHalideBuf, lscMapBuf, 1.0f, 1.0f, outputBuf);
+            halide_res = hdrplus_fast_pipeline(inputBuf, bl_r, bl_g0, bl_g1, bl_b, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, ccmHalideBuf, lscMapBuf, 1.0f, 1.0f, outputBuf, bayerBuf);
         } else if (denoiseLevel == 2) {
-            halide_res = hdrplus_high_pipeline(inputBuf, bl_r, bl_g0, bl_g1, bl_b, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, ccmHalideBuf, lscMapBuf, 1.0f, 1.0f, outputBuf);
+            halide_res = hdrplus_high_pipeline(inputBuf, bl_r, bl_g0, bl_g1, bl_b, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, ccmHalideBuf, lscMapBuf, 1.0f, 1.0f, outputBuf, bayerBuf);
         } else {
-            halide_res = hdrplus_raw_pipeline(inputBuf, bl_r, bl_g0, bl_g1, bl_b, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, ccmHalideBuf, lscMapBuf, 1.0f, 1.0f, outputBuf);
+            halide_res = hdrplus_raw_pipeline(inputBuf, bl_r, bl_g0, bl_g1, bl_b, (uint16_t)whiteLevel, wb_r, wb_g0, wb_g1, wb_b, halideCfa, ccmHalideBuf, lscMapBuf, 1.0f, 1.0f, outputBuf, bayerBuf);
         }
     }
     auto halideDurationMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - halideStart).count();

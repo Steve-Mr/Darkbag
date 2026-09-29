@@ -40,6 +40,8 @@ public:
 
   // 16-bit Linear RGB output
   Output<Buffer<uint16_t>> output{"output", 3};
+  // Merged Bayer CFA output
+  Output<Buffer<uint16_t>> bayer_output{"bayer_output", 2};
 
   void generate() {
     Func alignment;
@@ -53,6 +55,8 @@ public:
             inputs, {Range(0, inputs.width()), Range(0, inputs.height())});
         merged(x, y) = inputs_mirror(x, y, 0);
     }
+    bayer_output(x, y) = u16_sat(merged(x, y));
+
     CompiletimeWhiteBalance wb{white_balance_r, white_balance_g0,
                                white_balance_g1, white_balance_b};
 
@@ -84,6 +88,7 @@ public:
         // GPU Schedule
         Var tx{"tx"}, ty{"ty"};
         output.gpu_tile(x, y, tx, ty, xi, yi, 16, 16);
+        bayer_output.gpu_tile(x, y, tx, ty, xi, yi, 16, 16);
         demosaic_output.compute_at(output, tx);
         linear_rgb_output.compute_at(output, tx);
 
@@ -118,6 +123,11 @@ public:
             .tile(x, y, xo, yo, xi, yi, kTileX, kTileY)
             .parallel(yo)
             .vectorize(xi, kVec);
+
+        bayer_output.compute_root()
+            .tile(x, y, xo, yo, xi, yi, kTileX, kTileY)
+            .parallel(yo)
+            .vectorize(xi, kVec);
     } else {
         // Optimized CPU Schedule (Stage Fusion)
         // Fuse early stages into demosaic
@@ -145,6 +155,11 @@ public:
 
         // Fuse sRGB and YUV conversions into output
         output.compute_root()
+            .tile(x, y, xo, yo, xi, yi, kTileX, kTileY)
+            .parallel(yo)
+            .vectorize(xi, kVec);
+
+        bayer_output.compute_root()
             .tile(x, y, xo, yo, xi, yi, kTileX, kTileY)
             .parallel(yo)
             .vectorize(xi, kVec);
