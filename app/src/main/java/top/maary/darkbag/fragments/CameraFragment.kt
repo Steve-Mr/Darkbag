@@ -1868,10 +1868,8 @@ class CameraFragment : Fragment() {
                             }
                         }
 
-                        val dngBuffer = image.data.duplicate()
-                        dngBuffer.rewind()
                         FileOutputStream(bayerDngFile).use { out ->
-                            dngCreator.writeByteBuffer(out, Size(image.width, image.height), dngBuffer, 0)
+                            writeDngToStream(dngCreator, image, out)
                         }
                         
                         ImageSaver.saveProcessedImage(
