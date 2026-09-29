@@ -11,6 +11,7 @@
 #include <chrono> // For timing
 #include <thread>
 #include <mutex>
+#include <atomic>
 #include <future>
 #include <utility>
 #include <regex>
@@ -28,6 +29,7 @@
 #include "hdrplus_raw_pipeline.h" // Generated header
 #include "hdrplus_high_pipeline.h"
 #include "hdrplus_single_pipeline.h" // Generated header for single frame
+#include "HdrPlusStreamingSession.h"
 
 
 #define TAG "HdrPlusJNI"
@@ -129,12 +131,35 @@ void fillDebugStats(JNIEnv* env, jlongArray debugStats, jlong copyMs, jlong hali
     env->SetLongArrayRegion(debugStats, 0, std::min<jsize>(len, 15), stats);
 }
 
-struct SharedCaptureResult {
-    std::vector<uint16_t> bayerBuf; // width * height (Bayer CFA)
-    std::vector<uint16_t> rgbBuf;   // width * height * 3 (Linear RGB)
-};
 static std::unordered_map<std::string, std::shared_ptr<SharedCaptureResult>> g_sharedMemoryMap;
 std::mutex g_sharedMemoryMutex;
+static std::atomic<int64_t> g_nextSessionHandle{1};
+static std::mutex g_streamingSessionsMutex;
+static std::unordered_map<int64_t, std::shared_ptr<HdrPlusStreamingSession>> g_activeStreamingSessions;
+
+static int64_t registerSession(std::shared_ptr<HdrPlusStreamingSession> session) {
+    if (!session) return 0;
+    int64_t handle = g_nextSessionHandle.fetch_add(1, std::memory_order_relaxed);
+    std::lock_guard<std::mutex> lock(g_streamingSessionsMutex);
+    g_activeStreamingSessions[handle] = std::move(session);
+    return handle;
+}
+
+static std::shared_ptr<HdrPlusStreamingSession> getValidSession(jlong handle) {
+    if (handle <= 0) return nullptr;
+    std::lock_guard<std::mutex> lock(g_streamingSessionsMutex);
+    auto it = g_activeStreamingSessions.find(handle);
+    if (it != g_activeStreamingSessions.end()) {
+        return it->second;
+    }
+    return nullptr;
+}
+
+static void unregisterSession(int64_t handle) {
+    if (handle <= 0) return;
+    std::lock_guard<std::mutex> lock(g_streamingSessionsMutex);
+    g_activeStreamingSessions.erase(handle);
+}
 static std::unordered_set<void*> g_nativeAllocatedBuffers;
 static std::mutex g_nativeBufferMutex;
 
@@ -644,10 +669,29 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
     jint calibrationIlluminant1,
     jint calibrationIlluminant2,
     jfloatArray neutralColorPoint,
-    jint dngCompressionMode
+    jint dngCompressionMode,
+    jdoubleArray noiseProfile
 ) {
-    LOGD("Native processHdrPlus started (enableMemoryColor=%d, colorEngineMode=%d).", enableMemoryColor, colorEngineMode);
+    LOGD("Native processHdrPlus started (enableMemoryColor=%d, colorEngineMode=%d, dngCompressionMode=%d).", enableMemoryColor, colorEngineMode, dngCompressionMode);
     (void)useSensorColorMatrix;
+
+    // Parse Camera2 SENSOR_NOISE_PROFILE if provided
+    std::vector<double> noiseProfileVec;
+    if (noiseProfile) {
+        jsize npLen = env->GetArrayLength(noiseProfile);
+        if (npLen > 0) {
+            noiseProfileVec.resize(npLen);
+            env->GetDoubleArrayRegion(noiseProfile, 0, npLen, noiseProfileVec.data());
+            LOGD("Native processHdrPlus: Received SENSOR_NOISE_PROFILE (%d values, %d channels):",
+                 (int)npLen, (int)(npLen / 2));
+            for (int ch = 0; ch < npLen / 2; ++ch) {
+                LOGD("  Channel %d: Slope (S) = %.6e, Intercept (O) = %.6e",
+                     ch, noiseProfileVec[ch * 2], noiseProfileVec[ch * 2 + 1]);
+            }
+        }
+    } else {
+        LOGD("Native processHdrPlus: No noiseProfile provided");
+    }
 
     auto nativeStart = std::chrono::high_resolution_clock::now();
     auto jniPrepStart = std::chrono::high_resolution_clock::now();
@@ -677,9 +721,11 @@ Java_top_maary_darkbag_processor_ColorProcessor_processHdrPlus(
         sharedResult = std::make_shared<SharedCaptureResult>();
         sharedResult->bayerBuf.resize(static_cast<size_t>(width) * height);
         sharedResult->rgbBuf.resize(static_cast<size_t>(width) * height * 3);
+        sharedResult->noiseProfile = noiseProfileVec;
         bayerBuf = Buffer<uint16_t>(sharedResult->bayerBuf.data(), width, height);
         outputBuf = Buffer<uint16_t>(sharedResult->rgbBuf.data(), width, height, 3);
     } else {
+
         bayerBuf = Buffer<uint16_t>(width, height);
         outputBuf = Buffer<uint16_t>(width, height, 3);
     }
@@ -913,6 +959,191 @@ Java_top_maary_darkbag_processor_ColorProcessor_processSingleFrameRaw(
         calibrationIlluminant1,
         calibrationIlluminant2,
         neutralColorPoint,
-        dngCompressionMode
+        dngCompressionMode,
+        nullptr // noiseProfile
     );
+}
+
+
+extern "C" JNIEXPORT jlong JNICALL
+Java_top_maary_darkbag_processor_ColorProcessor_nativeCreateStreamingSession(
+    JNIEnv* env, jobject /* this */,
+    jint width, jint height, jint orientation, jint whiteLevel,
+    jintArray blackLevelPattern,
+    jfloatArray lensShadingMap, jint lensShadingRows, jint lensShadingCols,
+    jfloatArray whiteBalance, jfloatArray ccm,
+    jint cfaPattern, jdoubleArray noiseProfile
+) {
+    int bl_pattern[4] = {64, 64, 64, 64};
+    if (blackLevelPattern && env->GetArrayLength(blackLevelPattern) >= 4) {
+        env->GetIntArrayRegion(blackLevelPattern, 0, 4, bl_pattern);
+    }
+
+    float wb[4] = {2.0f, 1.0f, 1.0f, 1.5f};
+    if (whiteBalance && env->GetArrayLength(whiteBalance) >= 4) {
+        env->GetFloatArrayRegion(whiteBalance, 0, 4, wb);
+    }
+
+    float ccmArr[9] = {1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f};
+    if (ccm && env->GetArrayLength(ccm) >= 9) {
+        env->GetFloatArrayRegion(ccm, 0, 9, ccmArr);
+    }
+
+    std::vector<float> lscVec;
+    const float* lscPtr = nullptr;
+    if (lensShadingMap && lensShadingRows > 0 && lensShadingCols > 0) {
+        int expected = 4 * lensShadingRows * lensShadingCols;
+        if (env->GetArrayLength(lensShadingMap) >= expected) {
+            lscVec.resize(expected);
+            env->GetFloatArrayRegion(lensShadingMap, 0, expected, lscVec.data());
+            lscPtr = lscVec.data();
+        }
+    }
+
+    std::vector<double> npVec;
+    const double* npPtr = nullptr;
+    int npLen = 0;
+    if (noiseProfile) {
+        npLen = env->GetArrayLength(noiseProfile);
+        if (npLen > 0) {
+            npVec.resize(npLen);
+            env->GetDoubleArrayRegion(noiseProfile, 0, npLen, npVec.data());
+            npPtr = npVec.data();
+        }
+    }
+
+    auto session = std::make_shared<HdrPlusStreamingSession>(
+        width, height, orientation, whiteLevel,
+        bl_pattern, lscPtr, lensShadingRows, lensShadingCols,
+        wb, ccmArr, cfaPattern, npPtr, npLen
+    );
+    int64_t handle = registerSession(session);
+    LOGD("nativeCreateStreamingSession: handle=%lld (%dx%d)", (long long)handle, width, height);
+    return static_cast<jlong>(handle);
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_top_maary_darkbag_processor_ColorProcessor_nativePushStreamingFrame(
+    JNIEnv* env, jobject /* this */,
+    jlong sessionHandle, jobject frameBuffer
+) {
+    auto session = getValidSession(sessionHandle);
+    if (!session) {
+        LOGE("nativePushStreamingFrame: invalid session handle %lld", (long long)sessionHandle);
+        return JNI_FALSE;
+    }
+    if (!frameBuffer) {
+        LOGE("nativePushStreamingFrame: frameBuffer is null");
+        return JNI_FALSE;
+    }
+    uint16_t* rawData = static_cast<uint16_t*>(env->GetDirectBufferAddress(frameBuffer));
+    if (!rawData) {
+        LOGE("nativePushStreamingFrame: failed to get direct buffer address");
+        return JNI_FALSE;
+    }
+    jlong capacity = env->GetDirectBufferCapacity(frameBuffer);
+    size_t expectedBytes = static_cast<size_t>(session->width()) * session->height() * sizeof(uint16_t);
+    if (capacity < static_cast<jlong>(expectedBytes)) {
+        LOGE("nativePushStreamingFrame: buffer capacity %lld < expected %zu", (long long)capacity, expectedBytes);
+        return JNI_FALSE;
+    }
+
+    size_t numPixels = static_cast<size_t>(session->width()) * session->height();
+    bool success = session->pushFrame(rawData, numPixels);
+    return success ? JNI_TRUE : JNI_FALSE;
+}
+
+
+extern "C" JNIEXPORT jint JNICALL
+Java_top_maary_darkbag_processor_ColorProcessor_nativeFinishStreamingSession(
+    JNIEnv* env, jobject /* this */,
+    jlong sessionHandle, jstring tempRawPath, jobject outputBitmap,
+    jfloat digitalGain, jint targetLog, jstring lutPath,
+    jfloat zoomFactor, jboolean mirror,
+    jboolean enableMemoryColor, jint colorEngineMode
+) {
+    auto session = getValidSession(sessionHandle);
+    if (!session) {
+        LOGE("nativeFinishStreamingSession: invalid session handle %lld", (long long)sessionHandle);
+        return -1;
+    }
+
+    // Unregister session so new push calls on this handle fail immediately,
+    // while `session` shared_ptr keeps it alive during finish & bitmap rendering.
+    unregisterSession(sessionHandle);
+
+    const bool faithfulHighlights = (session->framesPushed() == 1);
+
+    std::shared_ptr<SharedCaptureResult> sharedResult;
+    Halide::Runtime::Buffer<uint16_t> outRgbBuf;
+    Halide::Runtime::Buffer<uint16_t> outBayerBuf;
+    int finishRes = session->finish(sharedResult, outRgbBuf, outBayerBuf);
+    if (finishRes != 0 || !sharedResult) {
+        LOGE("nativeFinishStreamingSession: finish failed with code %d", finishRes);
+        return -1;
+    }
+
+    const char* tr_p_cstr = tempRawPath ? env->GetStringUTFChars(tempRawPath, 0) : nullptr;
+    if (tr_p_cstr) {
+        {
+            std::lock_guard<std::mutex> mapLock(g_sharedMemoryMutex);
+            g_sharedMemoryMap[tr_p_cstr] = sharedResult;
+        }
+        env->ReleaseStringUTFChars(tempRawPath, tr_p_cstr);
+    }
+
+    if (outputBitmap) {
+        unsigned char* bitmapPixels = nullptr;
+        int out_w = 0, out_h = 0;
+        if (AndroidBitmap_lockPixels(env, outputBitmap, reinterpret_cast<void**>(&bitmapPixels)) >= 0) {
+            AndroidBitmapInfo info;
+            AndroidBitmap_getInfo(env, outputBitmap, &info);
+            out_w = info.width;
+            out_h = info.height;
+        }
+        if (bitmapPixels) {
+            const char* lut_path_cstr = lutPath ? env->GetStringUTFChars(lutPath, 0) : nullptr;
+            LUT3D lut;
+            if (lut_path_cstr) {
+                auto cached = get_cached_lut(lut_path_cstr);
+                if (cached) lut = *cached;
+                env->ReleaseStringUTFChars(lutPath, lut_path_cstr);
+            }
+
+            int width = session->width();
+            int height = session->height();
+            uint16_t* raw_ptr = sharedResult->rgbBuf.data();
+            int stride_x = 1;
+            int stride_y = width;
+            int stride_c = width * height;
+            const int fastPreviewDownsample = compute_preview_downsample_factor(width, height, 1280);
+
+            process_and_save_image(
+                raw_ptr, stride_x, stride_y, stride_c,
+                session->lensShadingData(), session->lensShadingRows(), session->lensShadingCols(),
+                width, height, digitalGain, targetLog, lut,
+                0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                nullptr, nullptr, nullptr, 1,
+                session->ccmData(), session->whiteBalanceData(),
+                session->orientation(), bitmapPixels, out_w, out_h,
+                true, fastPreviewDownsample, zoomFactor, (bool)mirror,
+                (bool)enableMemoryColor, (int)colorEngineMode, faithfulHighlights
+            );
+            AndroidBitmap_unlockPixels(env, outputBitmap);
+        }
+    }
+
+    LOGD("nativeFinishStreamingSession: successfully finished session %lld", (long long)sessionHandle);
+    return 0;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_top_maary_darkbag_processor_ColorProcessor_nativeAbortStreamingSession(
+    JNIEnv* /* env */, jobject /* this */, jlong sessionHandle
+) {
+    auto session = getValidSession(sessionHandle);
+    if (session) {
+        LOGD("nativeAbortStreamingSession: aborting session %lld", (long long)sessionHandle);
+        unregisterSession(sessionHandle);
+    }
 }
