@@ -62,7 +62,10 @@ data class HdrPlusRequest(
     val neutralColorPoint: FloatArray? = null,
     val timing: top.maary.darkbag.models.StandardTimingTracker? = null,
     val dngCompressionMode: Int = 0,
-    val rawOutputType: Int = 0
+    val rawOutputType: Int = 0,
+    val dynamicBlackLevel: FloatArray? = null,
+    val noiseProfile: DoubleArray? = null,
+    val activeArray: IntArray? = null
 )
 
 object HdrPlusRequestManager {

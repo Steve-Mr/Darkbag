@@ -276,7 +276,7 @@ static std::vector<unsigned char> encode_rgb8_jpeg(
 #define TIFFTAG_BLACKLEVEL 50714
 #endif
 #ifndef TIFFTAG_ACTIVEAREA
-#define TIFFTAG_ACTIVEAREA 50710
+#define TIFFTAG_ACTIVEAREA 50829
 #endif
 #ifndef TIFFTAG_BLACKLEVELREPEATDIM
 #define TIFFTAG_BLACKLEVELREPEATDIM 50713
@@ -296,11 +296,20 @@ static std::vector<unsigned char> encode_rgb8_jpeg(
 #ifndef TIFFTAG_COLORMATRIX2
 #define TIFFTAG_COLORMATRIX2 50722
 #endif
+#ifndef TIFFTAG_CAMERACALIBRATION1
+#define TIFFTAG_CAMERACALIBRATION1 50723
+#endif
+#ifndef TIFFTAG_CAMERACALIBRATION2
+#define TIFFTAG_CAMERACALIBRATION2 50724
+#endif
 #ifndef TIFFTAG_FORWARDMATRIX1
 #define TIFFTAG_FORWARDMATRIX1 50964
 #endif
 #ifndef TIFFTAG_FORWARDMATRIX2
 #define TIFFTAG_FORWARDMATRIX2 50965
+#endif
+#ifndef TIFFTAG_NOISEPROFILE
+#define TIFFTAG_NOISEPROFILE 51041
 #endif
 #ifndef TIFFTAG_ASSHOTNEUTRAL
 #define TIFFTAG_ASSHOTNEUTRAL 50728
@@ -342,12 +351,19 @@ static const TIFFFieldInfo dng_field_info[] = {
     { TIFFTAG_CFAREPEATPATTERNDIM, 2, 2, TIFF_SHORT, FIELD_CUSTOM, 1, 0, const_cast<char*>("CFARepeatPatternDim") },
     { TIFFTAG_CFAPATTERN, 4, 4, TIFF_BYTE, FIELD_CUSTOM, 1, 1, const_cast<char*>("CFAPattern") },
     { TIFFTAG_BLACKLEVELREPEATDIM, 2, 2, TIFF_SHORT, FIELD_CUSTOM, 1, 0, const_cast<char*>("BlackLevelRepeatDim") },
-    { TIFFTAG_BLACKLEVEL, -1, -1, TIFF_LONG, FIELD_CUSTOM, 1, 1, const_cast<char*>("BlackLevel") },
+    { TIFFTAG_BLACKLEVEL, -1, -1, TIFF_RATIONAL, FIELD_CUSTOM, 1, 1, const_cast<char*>("BlackLevel") },
     { TIFFTAG_WHITELEVEL, -1, -1, TIFF_LONG, FIELD_CUSTOM, 1, 1, const_cast<char*>("WhiteLevel") },
+    { TIFFTAG_ACTIVEAREA, 4, 4, TIFF_LONG, FIELD_CUSTOM, 1, 0, const_cast<char*>("ActiveArea") },
+    { TIFFTAG_DEFAULTCROPORIGIN, 2, 2, TIFF_RATIONAL, FIELD_CUSTOM, 1, 0, const_cast<char*>("DefaultCropOrigin") },
+    { TIFFTAG_DEFAULTCROPSIZE, 2, 2, TIFF_RATIONAL, FIELD_CUSTOM, 1, 0, const_cast<char*>("DefaultCropSize") },
     { TIFFTAG_COLORMATRIX1, -1, -1, TIFF_SRATIONAL, FIELD_CUSTOM, 1, 1, const_cast<char*>("ColorMatrix1") },
     { TIFFTAG_COLORMATRIX2, -1, -1, TIFF_SRATIONAL, FIELD_CUSTOM, 1, 1, const_cast<char*>("ColorMatrix2") },
+    { TIFFTAG_CAMERACALIBRATION1, -1, -1, TIFF_SRATIONAL, FIELD_CUSTOM, 1, 1, const_cast<char*>("CameraCalibration1") },
+    { TIFFTAG_CAMERACALIBRATION2, -1, -1, TIFF_SRATIONAL, FIELD_CUSTOM, 1, 1, const_cast<char*>("CameraCalibration2") },
     { TIFFTAG_FORWARDMATRIX1, -1, -1, TIFF_SRATIONAL, FIELD_CUSTOM, 1, 1, const_cast<char*>("ForwardMatrix1") },
     { TIFFTAG_FORWARDMATRIX2, -1, -1, TIFF_SRATIONAL, FIELD_CUSTOM, 1, 1, const_cast<char*>("ForwardMatrix2") },
+    { TIFFTAG_NOISEPROFILE, -1, -1, TIFF_DOUBLE, FIELD_CUSTOM, 1, 1, const_cast<char*>("NoiseProfile") },
+    { TIFFTAG_OPCODELIST2, -1, -1, TIFF_UNDEFINED, FIELD_CUSTOM, 1, 1, const_cast<char*>("OpcodeList2") },
     { TIFFTAG_ASSHOTNEUTRAL, -1, -1, TIFF_RATIONAL, FIELD_CUSTOM, 1, 1, const_cast<char*>("AsShotNeutral") },
     { TIFFTAG_CALIBRATIONILLUMINANT1, 1, 1, TIFF_SHORT, FIELD_CUSTOM, 1, 0, const_cast<char*>("CalibrationIlluminant1") },
     { TIFFTAG_CALIBRATIONILLUMINANT2, 1, 1, TIFF_SHORT, FIELD_CUSTOM, 1, 0, const_cast<char*>("CalibrationIlluminant2") },
@@ -362,7 +378,11 @@ static const TIFFFieldInfo dng_field_info[] = {
     { TIFFTAG_SUBSECTIMEORIGINAL, -1, -1, TIFF_ASCII, FIELD_CUSTOM, 1, 0, const_cast<char*>("SubSecTimeOriginal") },
     { TIFFTAG_SUBSECTIMEDIGITIZED, -1, -1, TIFF_ASCII, FIELD_CUSTOM, 1, 0, const_cast<char*>("SubSecTimeDigitized") },
     { TIFFTAG_LENSMODEL, -1, -1, TIFF_ASCII, FIELD_CUSTOM, 1, 0, const_cast<char*>("LensModel") },
-    { TIFFTAG_FOCALLENGTHIN35MMFILM, 1, 1, TIFF_SHORT, FIELD_CUSTOM, 1, 0, const_cast<char*>("FocalLengthIn35mmFilm") }
+    { TIFFTAG_FOCALLENGTHIN35MMFILM, 1, 1, TIFF_SHORT, FIELD_CUSTOM, 1, 0, const_cast<char*>("FocalLengthIn35mmFilm") },
+    { TIFFTAG_EXPOSURETIME, 1, 1, TIFF_RATIONAL, FIELD_CUSTOM, 1, 0, const_cast<char*>("ExposureTime") },
+    { TIFFTAG_FNUMBER, 1, 1, TIFF_RATIONAL, FIELD_CUSTOM, 1, 0, const_cast<char*>("FNumber") },
+    { TIFFTAG_FOCALLENGTH, 1, 1, TIFF_RATIONAL, FIELD_CUSTOM, 1, 0, const_cast<char*>("FocalLength") },
+    { TIFFTAG_ISOSPEEDRATINGS, 1, 1, TIFF_SHORT, FIELD_CUSTOM, 1, 0, const_cast<char*>("ISOSpeedRatings") }
 };
 
 static void DNGTagExtender(TIFF *tif) {
@@ -1668,7 +1688,7 @@ std::vector<unsigned char> make_bayer_preview_rgb8(
     int& outHeight,
     const float* wbVec,
     const Matrix3x3* ccmMat,
-    const int* blackLevelPattern,
+    const float* blackLevelPattern,
     int whiteLevel
 ) {
     const int longEdge = std::max(width, height);
@@ -1688,10 +1708,13 @@ std::vector<unsigned char> make_bayer_preview_rgb8(
     const float wb_g = 0.5f * (wb_g0 + wb_g1);
     const float wb_b = wbVec ? wbVec[3] : 1.0f;
 
-    const float bl00 = blackLevelPattern ? (float)blackLevelPattern[0] : 0.0f;
-    const float bl10 = blackLevelPattern ? (float)blackLevelPattern[1] : 0.0f;
-    const float bl01 = blackLevelPattern ? (float)blackLevelPattern[2] : 0.0f;
-    const float bl11 = blackLevelPattern ? (float)blackLevelPattern[3] : 0.0f;
+    float bl00 = blackLevelPattern ? blackLevelPattern[0] : 64.0f;
+    float bl10 = blackLevelPattern ? blackLevelPattern[1] : 64.0f;
+    float bl01 = blackLevelPattern ? blackLevelPattern[2] : 64.0f;
+    float bl11 = blackLevelPattern ? blackLevelPattern[3] : 64.0f;
+    if (bl00 <= 0.0f && bl10 <= 0.0f && bl01 <= 0.0f && bl11 <= 0.0f) {
+        bl00 = 64.0f; bl10 = 64.0f; bl01 = 64.0f; bl11 = 64.0f;
+    }
 
     const float wl = (whiteLevel > 0) ? (float)whiteLevel : 65535.0f;
     const float norm00 = 1.0f / std::max(1.0f, wl - bl00);
@@ -1784,6 +1807,154 @@ std::vector<unsigned char> make_bayer_preview_rgb8(
     return preview;
 }
 
+static inline uint32_t swap_u32(uint32_t val) {
+    return ((val & 0xFF000000) >> 24) |
+           ((val & 0x00FF0000) >> 8)  |
+           ((val & 0x0000FF00) << 8)  |
+           ((val & 0x000000FF) << 24);
+}
+
+static inline uint64_t swap_u64(uint64_t val) {
+    return ((val & 0xFF00000000000000ULL) >> 56) |
+           ((val & 0x00FF000000000000ULL) >> 40) |
+           ((val & 0x0000FF0000000000ULL) >> 24) |
+           ((val & 0x000000FF00000000ULL) >> 8)  |
+           ((val & 0x00000000FF000000ULL) << 8)  |
+           ((val & 0x0000000000FF0000ULL) << 24) |
+           ((val & 0x000000000000FF00ULL) << 40) |
+           ((val & 0x00000000000000FFULL) << 56);
+}
+
+static inline uint32_t swap_f32(float val) {
+    uint32_t u = 0;
+    memcpy(&u, &val, 4);
+    return swap_u32(u);
+}
+
+static inline uint64_t swap_f64(double val) {
+    uint64_t u = 0;
+    memcpy(&u, &val, 8);
+    return swap_u64(u);
+}
+
+static std::vector<uint8_t> build_dng_gainmap_opcodes(
+    const float* lensShadingMap,
+    int rows,
+    int cols,
+    int imageWidth,
+    int imageHeight,
+    int cfaPattern
+) {
+    if (!lensShadingMap || rows <= 1 || cols <= 1) return {};
+
+    const uint32_t numOpcodes = 4;
+    const uint32_t pointsCount = static_cast<uint32_t>(rows * cols);
+    const uint32_t mapDataBytes = pointsCount * 4;
+    const uint32_t paramBytes = 40 + 32 + 4 + mapDataBytes;
+    const uint32_t opcodeTotalBytes = 16 + paramBytes;
+    const uint32_t totalBufferSize = 4 + numOpcodes * opcodeTotalBytes;
+
+    std::vector<uint8_t> buf(totalBufferSize, 0);
+    uint8_t* ptr = buf.data();
+
+    uint32_t numOpsBe = swap_u32(numOpcodes);
+    memcpy(ptr, &numOpsBe, 4);
+    ptr += 4;
+
+    const double mapSpacingV = 1.0 / static_cast<double>(rows - 1);
+    const double mapSpacingH = 1.0 / static_cast<double>(cols - 1);
+
+    for (int ch = 0; ch < 4; ++ch) {
+        uint32_t top = 0, left = 0;
+        switch(cfaPattern) {
+            case 0: // RGGB
+                if (ch == 0) { top = 0; left = 0; }
+                else if (ch == 1) { top = 0; left = 1; }
+                else if (ch == 2) { top = 1; left = 0; }
+                else { top = 1; left = 1; }
+                break;
+            case 1: // GRBG
+                if (ch == 0) { top = 0; left = 1; }
+                else if (ch == 1) { top = 0; left = 0; }
+                else if (ch == 2) { top = 1; left = 1; }
+                else { top = 1; left = 0; }
+                break;
+            case 2: // GBRG
+                if (ch == 0) { top = 1; left = 0; }
+                else if (ch == 1) { top = 0; left = 0; }
+                else if (ch == 2) { top = 1; left = 1; }
+                else { top = 0; left = 1; }
+                break;
+            case 3: // BGGR
+                if (ch == 0) { top = 1; left = 1; }      // Red
+                else if (ch == 1) { top = 0; left = 1; } // Green_even (Gr)
+                else if (ch == 2) { top = 1; left = 0; } // Green_odd (Gb)
+                else { top = 0; left = 0; }               // Blue
+                break;
+            default:
+                if (ch == 0) { top = 0; left = 0; }
+                else if (ch == 1) { top = 0; left = 1; }
+                else if (ch == 2) { top = 1; left = 0; }
+                else { top = 1; left = 1; }
+                break;
+        }
+
+        uint32_t opId = swap_u32(9); // GainMap
+        uint32_t dngVer = swap_u32(0x01030000); // DNG 1.3.0.0
+        uint32_t flags = swap_u32(1);
+        uint32_t pBytes = swap_u32(paramBytes);
+
+        memcpy(ptr, &opId, 4); ptr += 4;
+        memcpy(ptr, &dngVer, 4); ptr += 4;
+        memcpy(ptr, &flags, 4); ptr += 4;
+        memcpy(ptr, &pBytes, 4); ptr += 4;
+
+        uint32_t pTop = swap_u32(top);
+        uint32_t pLeft = swap_u32(left);
+        uint32_t pBottom = swap_u32(static_cast<uint32_t>(imageHeight));
+        uint32_t pRight = swap_u32(static_cast<uint32_t>(imageWidth));
+        uint32_t pPlane = swap_u32(0);
+        uint32_t pPlanes = swap_u32(1);
+        uint32_t pRowPitch = swap_u32(2);
+        uint32_t pColPitch = swap_u32(2);
+        uint32_t pPointsV = swap_u32(static_cast<uint32_t>(rows));
+        uint32_t pPointsH = swap_u32(static_cast<uint32_t>(cols));
+
+        memcpy(ptr, &pTop, 4); ptr += 4;
+        memcpy(ptr, &pLeft, 4); ptr += 4;
+        memcpy(ptr, &pBottom, 4); ptr += 4;
+        memcpy(ptr, &pRight, 4); ptr += 4;
+        memcpy(ptr, &pPlane, 4); ptr += 4;
+        memcpy(ptr, &pPlanes, 4); ptr += 4;
+        memcpy(ptr, &pRowPitch, 4); ptr += 4;
+        memcpy(ptr, &pColPitch, 4); ptr += 4;
+        memcpy(ptr, &pPointsV, 4); ptr += 4;
+        memcpy(ptr, &pPointsH, 4); ptr += 4;
+
+        uint64_t pSpacingV = swap_f64(mapSpacingV);
+        uint64_t pSpacingH = swap_f64(mapSpacingH);
+        uint64_t pOriginV = swap_f64(0.0);
+        uint64_t pOriginH = swap_f64(0.0);
+
+        memcpy(ptr, &pSpacingV, 8); ptr += 8;
+        memcpy(ptr, &pSpacingH, 8); ptr += 8;
+        memcpy(ptr, &pOriginV, 8); ptr += 8;
+        memcpy(ptr, &pOriginH, 8); ptr += 8;
+
+        uint32_t pMapPlanes = swap_u32(1);
+        memcpy(ptr, &pMapPlanes, 4); ptr += 4;
+
+        const float* chMap = lensShadingMap + (static_cast<size_t>(ch) * pointsCount);
+        for (uint32_t i = 0; i < pointsCount; ++i) {
+            uint32_t gVal = swap_f32(chMap[i]);
+            memcpy(ptr, &gVal, 4);
+            ptr += 4;
+        }
+    }
+
+    return buf;
+}
+
 bool write_dng(
     const char* filename,
     int width,
@@ -1810,7 +1981,12 @@ bool write_dng(
     int dngCompressionMode,
     bool isBayer,
     int cfaPattern,
-    const int* blackLevelPattern
+    const float* blackLevelPattern,
+    const double* noiseProfile,
+    const int* activeArea,
+    const float* lensShadingMap,
+    int lensShadingRows,
+    int lensShadingCols
 ) {
     static std::once_flag extender_flag;
     std::call_once(extender_flag, [](){
@@ -1928,27 +2104,83 @@ bool write_dng(
         uint8_t cfa_bytes[4] = {0};
         map_cfa_pattern(cfaPattern, cfa_bytes);
         TIFFSetField(tif, TIFFTAG_CFAPATTERN, 4, cfa_bytes);
+        uint16_t bl_repeat_dim[2] = {2, 2};
+        TIFFSetField(tif, TIFFTAG_BLACKLEVELREPEATDIM, bl_repeat_dim);
+        float bl_vals[4] = {64.0f, 64.0f, 64.0f, 64.0f};
         if (blackLevelPattern) {
-            uint16_t bl_repeat_dim[2] = {2, 2};
-            TIFFSetField(tif, TIFFTAG_BLACKLEVELREPEATDIM, bl_repeat_dim);
-            uint32_t bl_vals[4] = {
-                (uint32_t)std::max(0, blackLevelPattern[0]),
-                (uint32_t)std::max(0, blackLevelPattern[1]),
-                (uint32_t)std::max(0, blackLevelPattern[2]),
-                (uint32_t)std::max(0, blackLevelPattern[3])
-            };
-            TIFFSetField(tif, TIFFTAG_BLACKLEVEL, 4, bl_vals);
-        } else {
-            uint16_t bl_repeat_dim[2] = {2, 2};
-            TIFFSetField(tif, TIFFTAG_BLACKLEVELREPEATDIM, bl_repeat_dim);
-            uint32_t bl_vals[4] = {0, 0, 0, 0};
-            TIFFSetField(tif, TIFFTAG_BLACKLEVEL, 4, bl_vals);
+            bl_vals[0] = std::max(0.0f, blackLevelPattern[0]);
+            bl_vals[1] = std::max(0.0f, blackLevelPattern[1]);
+            bl_vals[2] = std::max(0.0f, blackLevelPattern[2]);
+            bl_vals[3] = std::max(0.0f, blackLevelPattern[3]);
         }
+        if (bl_vals[0] <= 0.0f && bl_vals[1] <= 0.0f && bl_vals[2] <= 0.0f && bl_vals[3] <= 0.0f) {
+            bl_vals[0] = 64.0f; bl_vals[1] = 64.0f; bl_vals[2] = 64.0f; bl_vals[3] = 64.0f;
+        }
+        TIFFSetField(tif, TIFFTAG_BLACKLEVEL, 4, bl_vals);
     } else {
         TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_LINEAR_RAW);
         TIFFSetField(tif, TIFFTAG_SAMPLESPERPIXEL, 3);
-        uint32_t black_level_vals[3] = {0, 0, 0};
+        float black_level_vals[3] = {0.0f, 0.0f, 0.0f};
         TIFFSetField(tif, TIFFTAG_BLACKLEVEL, 3, black_level_vals);
+    }
+
+    float identityCalib[9] = {1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f};
+    TIFFSetField(tif, TIFFTAG_CAMERACALIBRATION1, 9, identityCalib);
+    TIFFSetField(tif, TIFFTAG_CAMERACALIBRATION2, 9, identityCalib);
+
+    if (activeArea) {
+        uint32_t aa[4] = {
+            (uint32_t)std::max(0, activeArea[0]), // top
+            (uint32_t)std::max(0, activeArea[1]), // left
+            (uint32_t)std::max(0, activeArea[2]), // bottom
+            (uint32_t)std::max(0, activeArea[3])  // right
+        };
+        TIFFSetField(tif, TIFFTAG_ACTIVEAREA, aa);
+
+        const float margin = 8.0f;
+        float cropOrigin[2] = {0.0f, 0.0f};
+        float cropSize[2] = {(float)width, (float)height};
+        if (width > 16 && height > 16) {
+            cropOrigin[0] = margin;
+            cropOrigin[1] = margin;
+            cropSize[0] = (float)(width - 16);
+            cropSize[1] = (float)(height - 16);
+        }
+        TIFFSetField(tif, TIFFTAG_DEFAULTCROPORIGIN, cropOrigin);
+        TIFFSetField(tif, TIFFTAG_DEFAULTCROPSIZE, cropSize);
+    }
+
+    if (noiseProfile) {
+        double rgbNoise[6] = {0};
+        int r_idx = 0, g0_idx = 1, g1_idx = 2, b_idx = 3;
+        switch(cfaPattern) {
+            case 0: r_idx=0; g0_idx=1; g1_idx=2; b_idx=3; break; // RGGB
+            case 1: g0_idx=0; r_idx=1; b_idx=2; g1_idx=3; break; // GRBG
+            case 2: g0_idx=0; b_idx=1; r_idx=2; g1_idx=3; break; // GBRG
+            case 3: b_idx=0; g0_idx=1; g1_idx=2; r_idx=3; break; // BGGR
+        }
+        rgbNoise[0] = noiseProfile[r_idx * 2];
+        rgbNoise[1] = noiseProfile[r_idx * 2 + 1];
+        if (noiseProfile[g0_idx * 2] >= noiseProfile[g1_idx * 2]) {
+            rgbNoise[2] = noiseProfile[g0_idx * 2];
+            rgbNoise[3] = noiseProfile[g0_idx * 2 + 1];
+        } else {
+            rgbNoise[2] = noiseProfile[g1_idx * 2];
+            rgbNoise[3] = noiseProfile[g1_idx * 2 + 1];
+        }
+        rgbNoise[4] = noiseProfile[b_idx * 2];
+        rgbNoise[5] = noiseProfile[b_idx * 2 + 1];
+
+        TIFFSetField(tif, TIFFTAG_NOISEPROFILE, (uint16_t)6, rgbNoise);
+    }
+
+    if (isBayer && lensShadingMap && lensShadingRows > 1 && lensShadingCols > 1) {
+        std::vector<uint8_t> opcodeList = build_dng_gainmap_opcodes(
+            lensShadingMap, lensShadingRows, lensShadingCols, width, height, cfaPattern
+        );
+        if (!opcodeList.empty()) {
+            TIFFSetField(tif, TIFFTAG_OPCODELIST2, (uint32_t)opcodeList.size(), opcodeList.data());
+        }
     }
 
     TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG);
@@ -2025,7 +2257,7 @@ bool write_dng(
     TIFFSetField(tif, TIFFTAG_BASELINEEXPOSURE, safeBaselineExposure);
 
     unsigned short iso_short = (unsigned short)metadata.iso;
-    TIFFSetField(tif, TIFFTAG_ISOSPEEDRATINGS, (uint16_t)1, &iso_short);
+    TIFFSetField(tif, TIFFTAG_ISOSPEEDRATINGS, iso_short);
 
     // Write Main RAW Data based on selected compression mode
     if (dngCompressionMode == 0) {

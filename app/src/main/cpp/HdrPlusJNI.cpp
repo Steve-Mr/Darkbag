@@ -53,10 +53,16 @@ struct CaptureMetadataFieldIDs {
     jfieldID exposureTime;
     jfieldID fNumber;
     jfieldID focalLength;
+    jfieldID focalLengthIn35mmFilm;
     jfieldID dateTimeOriginal;
+    jfieldID dateTimeDigitized;
+    jfieldID offsetTime;
+    jfieldID offsetTimeOriginal;
+    jfieldID offsetTimeDigitized;
     jfieldID make;
     jfieldID model;
     jfieldID uniqueCameraModel;
+    jfieldID lensModel;
     jfieldID software;
     jfieldID imageDescription;
 } g_metadataFields;
@@ -199,10 +205,16 @@ extern "C" jint JNI_OnLoad(JavaVM* vm, void* reserved) {
     g_metadataFields.exposureTime = getField(metadataClazz, "exposureTime", "Ljava/lang/Long;");
     g_metadataFields.fNumber = getField(metadataClazz, "fNumber", "Ljava/lang/Float;");
     g_metadataFields.focalLength = getField(metadataClazz, "focalLength", "Ljava/lang/Float;");
+    g_metadataFields.focalLengthIn35mmFilm = getField(metadataClazz, "focalLengthIn35mmFilm", "Ljava/lang/Integer;");
     g_metadataFields.dateTimeOriginal = getField(metadataClazz, "dateTimeOriginal", "Ljava/lang/Long;");
+    g_metadataFields.dateTimeDigitized = getField(metadataClazz, "dateTimeDigitized", "Ljava/lang/Long;");
+    g_metadataFields.offsetTime = getField(metadataClazz, "offsetTime", "Ljava/lang/String;");
+    g_metadataFields.offsetTimeOriginal = getField(metadataClazz, "offsetTimeOriginal", "Ljava/lang/String;");
+    g_metadataFields.offsetTimeDigitized = getField(metadataClazz, "offsetTimeDigitized", "Ljava/lang/String;");
     g_metadataFields.make = getField(metadataClazz, "make", "Ljava/lang/String;");
     g_metadataFields.model = getField(metadataClazz, "model", "Ljava/lang/String;");
     g_metadataFields.uniqueCameraModel = getField(metadataClazz, "uniqueCameraModel", "Ljava/lang/String;");
+    g_metadataFields.lensModel = getField(metadataClazz, "lensModel", "Ljava/lang/String;");
     g_metadataFields.software = getField(metadataClazz, "software", "Ljava/lang/String;");
     g_metadataFields.imageDescription = getField(metadataClazz, "imageDescription", "Ljava/lang/String;");
 
@@ -239,10 +251,16 @@ ImageMetadata metadataFromJava(JNIEnv* env, jobject metadataObj) {
     meta.exposureTime = getLongField(env, metadataObj, g_metadataFields.exposureTime, 10000000L);
     meta.fNumber = getFloatField(env, metadataObj, g_metadataFields.fNumber, 1.8f);
     meta.focalLength = getFloatField(env, metadataObj, g_metadataFields.focalLength, 0.0f);
+    meta.focalLengthIn35mmFilm = getIntField(env, metadataObj, g_metadataFields.focalLengthIn35mmFilm, 0);
     meta.captureTimeMillis = getLongField(env, metadataObj, g_metadataFields.dateTimeOriginal, 0);
+    meta.digitizedTimeMillis = getLongField(env, metadataObj, g_metadataFields.dateTimeDigitized, meta.captureTimeMillis);
+    meta.offsetTime = getStringField(env, metadataObj, g_metadataFields.offsetTime, "");
+    meta.offsetTimeOriginal = getStringField(env, metadataObj, g_metadataFields.offsetTimeOriginal, meta.offsetTime);
+    meta.offsetTimeDigitized = getStringField(env, metadataObj, g_metadataFields.offsetTimeDigitized, meta.offsetTime);
     meta.make = getStringField(env, metadataObj, g_metadataFields.make, "Unknown");
     meta.model = getStringField(env, metadataObj, g_metadataFields.model, "Unknown");
     meta.uniqueCameraModel = getStringField(env, metadataObj, g_metadataFields.uniqueCameraModel, meta.model);
+    meta.lensModel = getStringField(env, metadataObj, g_metadataFields.lensModel, "");
     meta.software = getStringField(env, metadataObj, g_metadataFields.software, "Darkbag");
     meta.imageDescription = getStringField(env, metadataObj, g_metadataFields.imageDescription, "Processed by Darkbag");
 
@@ -424,7 +442,13 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
     jint rawOutputType,
     jint cfaPattern,
     jintArray blackLevelPattern,
-    jint whiteLevel
+    jint whiteLevel,
+    jfloatArray dynamicBlackLevel,
+    jdoubleArray noiseProfile,
+    jintArray activeArea,
+    jfloatArray lensShadingMap,
+    jint lensShadingRows,
+    jint lensShadingCols
 ) {
     LOGD("Native exportHdrPlus started (enableMemoryColor=%d, colorEngineMode=%d, faithful=%d, rawOutputType=%d).", enableMemoryColor, colorEngineMode, faithfulHighlights, rawOutputType);
 
@@ -453,11 +477,45 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
     std::vector<float> wbVec = {wbData[0], wbData[1], wbData[2], wbData[3]};
     env->ReleaseFloatArrayElements(whiteBalance, wbData, JNI_ABORT);
 
-    int bl_pattern[4] = {64, 64, 64, 64};
-    int* bl_ptr = nullptr;
-    if (blackLevelPattern && env->GetArrayLength(blackLevelPattern) >= 4) {
-        env->GetIntArrayRegion(blackLevelPattern, 0, 4, bl_pattern);
-        bl_ptr = bl_pattern;
+    float bl_pattern[4] = {64.0f, 64.0f, 64.0f, 64.0f};
+    bool has_bl = false;
+    if (dynamicBlackLevel && env->GetArrayLength(dynamicBlackLevel) >= 4) {
+        env->GetFloatArrayRegion(dynamicBlackLevel, 0, 4, bl_pattern);
+        has_bl = true;
+    } else if (blackLevelPattern && env->GetArrayLength(blackLevelPattern) >= 4) {
+        int int_bl[4] = {64, 64, 64, 64};
+        env->GetIntArrayRegion(blackLevelPattern, 0, 4, int_bl);
+        bl_pattern[0] = (float)int_bl[0];
+        bl_pattern[1] = (float)int_bl[1];
+        bl_pattern[2] = (float)int_bl[2];
+        bl_pattern[3] = (float)int_bl[3];
+        has_bl = true;
+    }
+
+    double noise_prof[8] = {0};
+    const double* noise_ptr = nullptr;
+    if (noiseProfile && env->GetArrayLength(noiseProfile) >= 8) {
+        env->GetDoubleArrayRegion(noiseProfile, 0, 8, noise_prof);
+        noise_ptr = noise_prof;
+    }
+
+    int active_area[4] = {0};
+    const int* active_area_ptr = nullptr;
+    if (activeArea && env->GetArrayLength(activeArea) >= 4) {
+        env->GetIntArrayRegion(activeArea, 0, 4, active_area);
+        active_area_ptr = active_area;
+    }
+
+    std::vector<float> lensShadingVec;
+    const float* lens_shading_ptr = nullptr;
+    if (lensShadingMap && lensShadingRows > 0 && lensShadingCols > 0) {
+        int lsSize = env->GetArrayLength(lensShadingMap);
+        int expected = 4 * lensShadingRows * lensShadingCols;
+        if (lsSize >= expected) {
+            lensShadingVec.resize(expected);
+            env->GetFloatArrayRegion(lensShadingMap, 0, expected, lensShadingVec.data());
+            lens_shading_ptr = lensShadingVec.data();
+        }
     }
 
     jfloat* ccmData = env->GetFloatArrayElements(ccm, nullptr);
@@ -530,7 +588,8 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
             ccmVec, meta, orientation, (bool)mirror, baselineExposure, wbVec.data(),
             cm1Ptr, cm2Ptr, fm1Ptr, fm2Ptr, (int)calibrationIlluminant1, (int)calibrationIlluminant2, neutralPtr,
             outDngFd, (int)dngCompressionMode,
-            isBayer, (int)cfaPattern, bl_ptr
+            isBayer, (int)cfaPattern, has_bl ? bl_pattern : nullptr,
+            noise_ptr, active_area_ptr, lens_shading_ptr, lensShadingRows, lensShadingCols
         );
         dngMs = (jlong)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - dngStart).count();
     }

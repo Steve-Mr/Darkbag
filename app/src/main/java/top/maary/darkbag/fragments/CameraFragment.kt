@@ -1862,6 +1862,18 @@ class CameraFragment : Fragment() {
                 val useSensorColorMatrix = true
                 val finalCcm = if (useSensorColorMatrix && singleCalib.renderCcm != null) singleCalib.renderCcm else ccmCapture
 
+                val dynamicBlackLevel = captureResult?.get(android.hardware.camera2.CaptureResult.SENSOR_DYNAMIC_BLACK_LEVEL)
+
+                val noisePairs = captureResult?.get(android.hardware.camera2.CaptureResult.SENSOR_NOISE_PROFILE)
+                val noiseProfileFlat: DoubleArray? = if (noisePairs != null && noisePairs.isNotEmpty()) {
+                    val arr = DoubleArray(noisePairs.size * 2)
+                    for (i in noisePairs.indices) {
+                        arr[i * 2] = noisePairs[i].first
+                        arr[i * 2 + 1] = noisePairs[i].second
+                    }
+                    arr
+                } else null
+
                 val rawOutputType = prefs.getInt(SettingsFragment.KEY_RAW_OUTPUT_TYPE, 0)
                 val request = top.maary.darkbag.processor.HdrPlusRequest(
                     requestId = java.util.UUID.randomUUID().toString(),
@@ -1926,7 +1938,10 @@ class CameraFragment : Fragment() {
                     neutralColorPoint = singleCalib.neutralColorPoint,
                     timing = timing,
                     dngCompressionMode = prefs.getInt(SettingsFragment.KEY_DNG_COMPRESSION_MODE, 0),
-                    rawOutputType = rawOutputType
+                    rawOutputType = rawOutputType,
+                    dynamicBlackLevel = dynamicBlackLevel,
+                    noiseProfile = noiseProfileFlat,
+                    activeArray = activeArray
                 )
                 top.maary.darkbag.processor.HdrPlusRequestManager.enqueue(request)
                 enqueued = true
@@ -3430,6 +3445,16 @@ class CameraFragment : Fragment() {
                 val activeArray = if (activeArrayRect != null) {
                     intArrayOf(activeArrayRect.top, activeArrayRect.left, activeArrayRect.bottom, activeArrayRect.right)
                 } else null
+                val dynamicBlackLevel = result?.get(android.hardware.camera2.CaptureResult.SENSOR_DYNAMIC_BLACK_LEVEL)
+                val noisePairs = result?.get(android.hardware.camera2.CaptureResult.SENSOR_NOISE_PROFILE)
+                val noiseProfileFlat: DoubleArray? = if (noisePairs != null && noisePairs.isNotEmpty()) {
+                    val arr = DoubleArray(noisePairs.size * 2)
+                    for (i in noisePairs.indices) {
+                        arr[i * 2] = noisePairs[i].first
+                        arr[i * 2 + 1] = noisePairs[i].second
+                    }
+                    arr
+                } else null
 Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB=${wb.joinToString()}, CFA=$cfa, LSC=${lensShadingRows}x${lensShadingCols}, useSensorCCM=$useSensorColorMatrix")
 
                 val prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE)
@@ -3575,7 +3600,10 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         neutralColorPoint = burstCalib.neutralColorPoint,
                         timing = timing,
                         dngCompressionMode = prefs.getInt(SettingsFragment.KEY_DNG_COMPRESSION_MODE, 0),
-                        rawOutputType = rawOutputType
+                        rawOutputType = rawOutputType,
+                        dynamicBlackLevel = dynamicBlackLevel,
+                        noiseProfile = noiseProfileFlat,
+                        activeArray = activeArray
                     )
                     top.maary.darkbag.processor.HdrPlusRequestManager.enqueue(request)
                     val serviceIntent = android.content.Intent(context, top.maary.darkbag.processor.HdrPlusProcessingService::class.java)

@@ -217,7 +217,13 @@ object ColorProcessor {
         rawOutputType: Int = 0,
         cfaPattern: Int = 0,
         blackLevelPattern: IntArray? = null,
-        whiteLevel: Int = 0
+        whiteLevel: Int = 0,
+        dynamicBlackLevel: FloatArray? = null,
+        noiseProfile: DoubleArray? = null,
+        activeArray: IntArray? = null,
+        lensShadingMap: FloatArray? = null,
+        lensShadingRows: Int = 0,
+        lensShadingCols: Int = 0
     ): Int
 
     external fun processHdrPlus(

@@ -218,7 +218,13 @@ class HdrPlusProcessingService : LifecycleService() {
                                     rawOutputType = req.rawOutputType,
                                     cfaPattern = req.cfaPattern,
                                     blackLevelPattern = req.blackLevelPattern,
-                                    whiteLevel = req.whiteLevel
+                                    whiteLevel = req.whiteLevel,
+                                    dynamicBlackLevel = req.dynamicBlackLevel,
+                                    noiseProfile = req.noiseProfile,
+                                    activeArray = req.activeArray,
+                                    lensShadingMap = req.lensShadingMap,
+                                    lensShadingRows = req.lensShadingRows,
+                                    lensShadingCols = req.lensShadingCols
                                 )
                                 exportSuccessful = (exportRet == 0)
                             } finally {

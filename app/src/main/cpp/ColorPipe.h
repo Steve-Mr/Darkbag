@@ -148,7 +148,12 @@ bool write_dng(
     int dngCompressionMode = 0,
     bool isBayer = false,
     int cfaPattern = 0,
-    const int* blackLevelPattern = nullptr
+    const float* blackLevelPattern = nullptr,
+    const double* noiseProfile = nullptr,
+    const int* activeArea = nullptr,
+    const float* lensShadingMap = nullptr,
+    int lensShadingRows = 0,
+    int lensShadingCols = 0
 );
 
 std::vector<unsigned char> encode_lossless_jpeg16(
@@ -176,7 +181,7 @@ std::vector<unsigned char> make_bayer_preview_rgb8(
     int& outHeight,
     const float* wbVec = nullptr,
     const Matrix3x3* ccmMat = nullptr,
-    const int* blackLevelPattern = nullptr,
+    const float* blackLevelPattern = nullptr,
     int whiteLevel = 65535
 );
 
