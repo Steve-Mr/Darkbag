@@ -82,7 +82,8 @@ class HdrPlusProcessingService : LifecycleService() {
                     zoomFactor = req.zoomFactor,
                     mirror = req.mirror,
                     enableMemoryColor = req.enableMemoryColor,
-                    colorEngineMode = req.colorEngineMode
+                    colorEngineMode = req.colorEngineMode,
+                    fusionMode = req.fusionMode
                 )
             } else if (req.isSingleFrame) {
                 ColorProcessor.processSingleFrameRaw(

@@ -279,7 +279,9 @@ object ColorProcessor {
         whiteBalance: FloatArray,
         ccm: FloatArray,
         cfaPattern: Int,
-        noiseProfile: DoubleArray? = null
+        noiseProfile: DoubleArray? = null,
+        fusionMode: Int = 0,
+        zoomFactor: Float = 1.0f
     ): Long
 
     external fun nativePushStreamingFrame(
@@ -298,7 +300,8 @@ object ColorProcessor {
         zoomFactor: Float = 1.0f,
         mirror: Boolean = false,
         enableMemoryColor: Boolean = false,
-        colorEngineMode: Int = 0
+        colorEngineMode: Int = 0,
+        fusionMode: Int = 0
     ): Int
 
     external fun nativeAbortStreamingSession(

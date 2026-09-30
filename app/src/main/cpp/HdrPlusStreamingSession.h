@@ -8,6 +8,7 @@
 #include <mutex>
 #include <HalideBuffer.h>
 #include <HalideRuntime.h>
+#include "sabre/SabreEngine.h"
 
 /**
  * Shared capture result holding normalized Bayer and demosaiced linear RGB buffers.
@@ -40,10 +41,21 @@ public:
         const float* ccm,
         int cfaPattern,
         const double* noiseProfile,
-        int noiseProfileLen
+        int noiseProfileLen,
+        int fusionMode = 0,
+        float zoomFactor = 1.0f
     );
 
     ~HdrPlusStreamingSession();
+
+    void setFusionParameters(int fusionMode, float zoomFactor) {
+        std::lock_guard<std::mutex> lock(m_sessionMutex);
+        m_fusionMode = fusionMode;
+        m_zoomFactor = zoomFactor;
+    }
+
+    int fusionMode() const { return m_fusionMode; }
+    float zoomFactor() const { return m_zoomFactor; }
 
     // Push an incoming RAW Bayer frame.
     // Frame 0 becomes the reference frame, subsequent frames are aligned and accumulated.
@@ -101,4 +113,7 @@ private:
     std::vector<float> m_accumWeight[2];
     int m_accumIdx = 0;
     int m_framesPushed = 0;
+    int m_fusionMode = 0;
+    float m_zoomFactor = 1.0f;
+    std::unique_ptr<darkbag::sabre::SabreEngine> m_sabreEngine;
 };

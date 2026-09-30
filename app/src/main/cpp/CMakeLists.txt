@@ -247,6 +247,7 @@ add_library(
         HdrPlusStreamingSession.cpp
         ColorPipe.cpp
         demosaic/RcdDemosaic.cpp
+        sabre/SabreEngine.cpp
         rawvideo/lz4/lz4.c
         rawvideo/RawVideoContainer.cpp
         rawvideo/RawVideoRecorder.cpp

@@ -973,7 +973,8 @@ Java_top_maary_darkbag_processor_ColorProcessor_nativeCreateStreamingSession(
     jintArray blackLevelPattern,
     jfloatArray lensShadingMap, jint lensShadingRows, jint lensShadingCols,
     jfloatArray whiteBalance, jfloatArray ccm,
-    jint cfaPattern, jdoubleArray noiseProfile
+    jint cfaPattern, jdoubleArray noiseProfile,
+    jint fusionMode, jfloat zoomFactor
 ) {
     int bl_pattern[4] = {64, 64, 64, 64};
     if (blackLevelPattern && env->GetArrayLength(blackLevelPattern) >= 4) {
@@ -1016,10 +1017,12 @@ Java_top_maary_darkbag_processor_ColorProcessor_nativeCreateStreamingSession(
     auto session = std::make_shared<HdrPlusStreamingSession>(
         width, height, orientation, whiteLevel,
         bl_pattern, lscPtr, lensShadingRows, lensShadingCols,
-        wb, ccmArr, cfaPattern, npPtr, npLen
+        wb, ccmArr, cfaPattern, npPtr, npLen,
+        fusionMode, zoomFactor
     );
     int64_t handle = registerSession(session);
-    LOGD("nativeCreateStreamingSession: handle=%lld (%dx%d)", (long long)handle, width, height);
+    LOGD("nativeCreateStreamingSession: handle=%lld (%dx%d, fusionMode=%d, zoom=%.2f)",
+         (long long)handle, width, height, fusionMode, zoomFactor);
     return static_cast<jlong>(handle);
 }
 
@@ -1061,13 +1064,17 @@ Java_top_maary_darkbag_processor_ColorProcessor_nativeFinishStreamingSession(
     jlong sessionHandle, jstring tempRawPath, jobject outputBitmap,
     jfloat digitalGain, jint targetLog, jstring lutPath,
     jfloat zoomFactor, jboolean mirror,
-    jboolean enableMemoryColor, jint colorEngineMode
+    jboolean enableMemoryColor, jint colorEngineMode,
+    jint fusionMode
 ) {
     auto session = getValidSession(sessionHandle);
     if (!session) {
         LOGE("nativeFinishStreamingSession: invalid session handle %lld", (long long)sessionHandle);
         return -1;
     }
+
+    // Set fusion parameters before finish
+    session->setFusionParameters(fusionMode, zoomFactor);
 
     // Unregister session so new push calls on this handle fail immediately,
     // while `session` shared_ptr keeps it alive during finish & bitmap rendering.

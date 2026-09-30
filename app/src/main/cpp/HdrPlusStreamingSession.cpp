@@ -25,7 +25,9 @@ HdrPlusStreamingSession::HdrPlusStreamingSession(
     const float* ccm,
     int cfaPattern,
     const double* noiseProfile,
-    int noiseProfileLen
+    int noiseProfileLen,
+    int fusionMode,
+    float zoomFactor
 ) : m_width(width),
     m_height(height),
     m_orientation(orientation),
@@ -34,7 +36,9 @@ HdrPlusStreamingSession::HdrPlusStreamingSession(
     m_lensShadingRows(lensShadingRows),
     m_lensShadingCols(lensShadingCols),
     m_accumIdx(0),
-    m_framesPushed(0)
+    m_framesPushed(0),
+    m_fusionMode(fusionMode),
+    m_zoomFactor(zoomFactor)
 {
     m_bl_r  = static_cast<uint16_t>(std::max(0, blackLevelPattern ? blackLevelPattern[0] : 64));
     m_bl_g0 = static_cast<uint16_t>(std::max(0, blackLevelPattern ? blackLevelPattern[1] : 64));
@@ -72,8 +76,29 @@ HdrPlusStreamingSession::HdrPlusStreamingSession(
     m_accumWeight[0].resize(numPixels);
     m_accumWeight[1].resize(numPixels);
 
-    LOGD("HdrPlusStreamingSession initialized: %dx%d, orientation=%d, WL=%d, BL=[%u,%u,%u,%u]",
-         m_width, m_height, m_orientation, m_whiteLevel, m_bl_r, m_bl_g0, m_bl_g1, m_bl_b);
+    // Initialize Sabre Super-Resolution Engine
+    darkbag::sabre::SabreConfig sabreCfg;
+    sabreCfg.width = m_width;
+    sabreCfg.height = m_height;
+    sabreCfg.cfa = static_cast<darkbag::sabre::CfaPattern>(m_cfaPattern);
+    sabreCfg.blackLevel[0] = m_bl_r;
+    sabreCfg.blackLevel[1] = m_bl_g0;
+    sabreCfg.blackLevel[2] = m_bl_g1;
+    sabreCfg.blackLevel[3] = m_bl_b;
+    sabreCfg.whiteLevel = static_cast<uint16_t>(m_whiteLevel);
+    sabreCfg.whiteBalance[0] = m_wb_r;
+    sabreCfg.whiteBalance[1] = m_wb_g0;
+    sabreCfg.whiteBalance[2] = m_wb_g1;
+    sabreCfg.whiteBalance[3] = m_wb_b;
+    sabreCfg.zoomFactor = m_zoomFactor;
+    if (m_noiseProfile.size() >= 2) {
+        sabreCfg.noiseModelS = static_cast<float>(m_noiseProfile[0]);
+        sabreCfg.noiseModelO = static_cast<float>(m_noiseProfile[1]);
+    }
+    m_sabreEngine = std::make_unique<darkbag::sabre::SabreEngine>(sabreCfg);
+
+    LOGD("HdrPlusStreamingSession initialized: %dx%d, orientation=%d, WL=%d, BL=[%u,%u,%u,%u], fusionMode=%d, zoom=%.2f",
+         m_width, m_height, m_orientation, m_whiteLevel, m_bl_r, m_bl_g0, m_bl_g1, m_bl_b, m_fusionMode, m_zoomFactor);
 }
 
 HdrPlusStreamingSession::~HdrPlusStreamingSession() {
@@ -102,6 +127,10 @@ bool HdrPlusStreamingSession::pushFrame(const uint16_t* rawData, size_t numPixel
             m_accumWeight[0][i] = 1.0f;
         }
 
+        if (m_sabreEngine) {
+            m_sabreEngine->setReferenceFrame(rawData);
+        }
+
         m_accumIdx = 0;
         m_framesPushed = 1;
         LOGD("pushFrame: registered reference frame 0");
@@ -123,6 +152,10 @@ bool HdrPlusStreamingSession::pushFrame(const uint16_t* rawData, size_t numPixel
     if (res != 0) {
         LOGE("hdrplus_accumulate_step failed with error %d at frame %d", res, m_framesPushed);
         return false;
+    }
+
+    if (m_sabreEngine) {
+        m_sabreEngine->accumulateFrame(rawData);
     }
 
     m_accumIdx = outIdx;
@@ -151,6 +184,31 @@ int HdrPlusStreamingSession::finish(
     outSharedResult->rgbBuf.resize(numPixels * 3);
     outSharedResult->noiseProfile = m_noiseProfile;
 
+    // Determine effective fusion mode:
+    // 0: Auto (Spatial+RCD for zoom < 1.25x, Sabre for zoom >= 1.25x)
+    // 1: Spatial + RCD
+    // 2: Sabre (Super-Resolution)
+    // 3: Classic Wiener
+    int effectiveMode = m_fusionMode;
+    if (effectiveMode == 0) {
+        effectiveMode = (m_zoomFactor >= 1.25f) ? 2 : 1;
+    }
+
+    if (effectiveMode == 2 && m_sabreEngine && m_framesPushed > 1) {
+        LOGD("HdrPlusStreamingSession: resolving with Sabre Super-Resolution (zoom=%.2fx, frames=%d)",
+             m_zoomFactor, m_framesPushed);
+        bool sabreOk = m_sabreEngine->resolve(
+            outSharedResult->rgbBuf.data(),
+            outSharedResult->bayerBuf.data()
+        );
+        if (sabreOk) {
+            outBayerBuf = Halide::Runtime::Buffer<uint16_t>(outSharedResult->bayerBuf.data(), m_width, m_height);
+            outRgbBuf = Halide::Runtime::Buffer<uint16_t>(outSharedResult->rgbBuf.data(), m_width, m_height, 3);
+            LOGD("HdrPlusStreamingSession: Sabre Super-Resolution resolve succeeded");
+            return 0;
+        }
+        LOGW("HdrPlusStreamingSession: Sabre resolve returned false, falling back to Spatial + RCD");
+    }
 
     // Normalize accumulated val / weight into m_refFrame buffer to avoid input/output aliasing
     const float* valData = m_accumVal[m_accumIdx].data();

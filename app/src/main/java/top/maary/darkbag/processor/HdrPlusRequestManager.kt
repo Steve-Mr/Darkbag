@@ -66,7 +66,8 @@ data class HdrPlusRequest(
     val rawOutputType: Int = 0,
     val dynamicBlackLevel: FloatArray? = null,
     val noiseProfile: DoubleArray? = null,
-    val activeArray: IntArray? = null
+    val activeArray: IntArray? = null,
+    val fusionMode: Int = 0
 )
 
 

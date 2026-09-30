@@ -3862,7 +3862,13 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                     rawOutputType = rawOutputType,
                     dynamicBlackLevel = dynamicBlackLevel,
                     noiseProfile = noiseProfileFlat,
-                    activeArray = activeArray
+                    activeArray = activeArray,
+                    fusionMode = when (prefs.getString(SettingsFragment.KEY_HDR_FUSION_MODE, SettingsFragment.HDR_FUSION_AUTO)) {
+                        SettingsFragment.HDR_FUSION_SPATIAL_RCD -> 1
+                        SettingsFragment.HDR_FUSION_SABRE -> 2
+                        SettingsFragment.HDR_FUSION_CLASSIC -> 3
+                        else -> 0
+                    }
                 )
 
 
@@ -4638,6 +4644,20 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
             val combinedOrientation = getCombinedOrientation()
 
+            val fusionModePref = prefs.getString(SettingsFragment.KEY_HDR_FUSION_MODE, SettingsFragment.HDR_FUSION_AUTO)
+            val fusionModeInt = when (fusionModePref) {
+                SettingsFragment.HDR_FUSION_SPATIAL_RCD -> 1
+                SettingsFragment.HDR_FUSION_SABRE -> 2
+                SettingsFragment.HDR_FUSION_CLASSIC -> 3
+                else -> 0
+            }
+
+            val currentZoom = if (currentLens?.isZoomPreset == true && currentLens?.targetZoomRatio != null) {
+                currentLens!!.targetZoomRatio!!
+            } else {
+                1.0f
+            }
+
             val sessionHandle = top.maary.darkbag.processor.ColorProcessor.nativeCreateStreamingSession(
                 width = reader.width,
                 height = reader.height,
@@ -4650,7 +4670,9 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 whiteBalance = wb,
                 ccm = ccm,
                 cfaPattern = cfa,
-                noiseProfile = noiseProfileFlat
+                noiseProfile = noiseProfileFlat,
+                fusionMode = fusionModeInt,
+                zoomFactor = currentZoom
             )
             if (sessionHandle == 0L) {
                 Log.e(TAG, "Failed to create native streaming session")
