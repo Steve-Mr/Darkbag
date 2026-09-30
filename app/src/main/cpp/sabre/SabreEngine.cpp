@@ -329,6 +329,15 @@ bool SabreEngine::resolve(uint16_t* outRgb, uint16_t* outBayer) {
     }
 
     const uint16_t whiteLevel = m_config.whiteLevel;
+    const float wl = static_cast<float>(whiteLevel);
+
+    const float bl_r = static_cast<float>(m_config.blackLevel[0]);
+    const float bl_g = 0.5f * (static_cast<float>(m_config.blackLevel[1]) + static_cast<float>(m_config.blackLevel[2]));
+    const float bl_b = static_cast<float>(m_config.blackLevel[3]);
+
+    const float scale_r = 65535.0f / std::max(1.0f, wl - bl_r);
+    const float scale_g = 65535.0f / std::max(1.0f, wl - bl_g);
+    const float scale_b = 65535.0f / std::max(1.0f, wl - bl_b);
 
     // Temporary normalized RGB buffers
     std::vector<float> normR(m_numPixels);
@@ -395,14 +404,14 @@ bool SabreEngine::resolve(uint16_t* outRgb, uint16_t* outBayer) {
             }
 
             // Pack planar RGB: channel 0 = R, channel 1 = G, channel 2 = B
-            outRgb[idx]                          = static_cast<uint16_t>(clampf(rOut, 0.0f, 65535.0f));
-            outRgb[m_numPixels + idx]            = static_cast<uint16_t>(clampf(gOut, 0.0f, 65535.0f));
-            outRgb[2 * m_numPixels + idx]        = static_cast<uint16_t>(clampf(bOut, 0.0f, 65535.0f));
+            outRgb[idx]                          = static_cast<uint16_t>(clampf((rOut - bl_r) * scale_r, 0.0f, 65535.0f));
+            outRgb[m_numPixels + idx]            = static_cast<uint16_t>(clampf((gOut - bl_g) * scale_g, 0.0f, 65535.0f));
+            outRgb[2 * m_numPixels + idx]        = static_cast<uint16_t>(clampf((bOut - bl_b) * scale_b, 0.0f, 65535.0f));
 
             if (outBayer) {
                 int c = getBayerChannel(x, y);
                 float val = (c == 0) ? rOut : ((c == 1) ? gOut : bOut);
-                outBayer[idx] = static_cast<uint16_t>(clampf(val, 0.0f, 65535.0f));
+                outBayer[idx] = static_cast<uint16_t>(clampf(val, 0.0f, static_cast<float>(whiteLevel)));
             }
         }
     }

@@ -117,10 +117,7 @@ void rcd_demosaic(const uint16_t* bayer_input,
     constexpr float eps = 1e-5f;
     constexpr float epssq = 1e-10f;
 
-    const float wb_r  = white_balance ? white_balance[0] : 1.0f;
-    const float wb_g0 = white_balance ? white_balance[1] : 1.0f;
-    const float wb_g1 = white_balance ? white_balance[2] : 1.0f;
-    const float wb_b  = white_balance ? white_balance[3] : 1.0f;
+    (void)white_balance;
     
     #pragma omp parallel
     {
@@ -158,20 +155,16 @@ void rcd_demosaic(const uint16_t* bayer_input,
                     for (int col = colStart, indx = (row - rowStart) * tileSize; col < colEnd; ++col, ++indx) {
                         int c_color = fc(cfa_pattern, row, col);
                         float bl;
-                        float wb;
                         if (c_color == 0) {
                             bl = black_level[0];
-                            wb = wb_r;
                         } else if (c_color == 1) {
                             bl = (row % 2 == 0) ? black_level[1] : black_level[2];
-                            wb = (row % 2 == 0) ? wb_g0 : wb_g1;
                         } else {
                             bl = black_level[3];
-                            wb = wb_b;
                         }
                         float val = static_cast<float>(bayer_input[row * width + col]);
                         float denom = std::max(1.0f, static_cast<float>(white_level) - bl);
-                        val = LIM01(((val - bl) / denom) * wb);
+                        val = LIM01((val - bl) / denom);
                         
                         cfa[indx] = val;
                         rgb0[indx] = val;

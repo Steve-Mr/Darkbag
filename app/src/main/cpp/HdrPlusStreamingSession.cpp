@@ -202,6 +202,9 @@ int HdrPlusStreamingSession::finish(
             outSharedResult->bayerBuf.data()
         );
         if (sabreOk) {
+            if (m_zoomFactor > 1.05f) {
+                outSharedResult->isZoomCropped = true;
+            }
             outBayerBuf = Halide::Runtime::Buffer<uint16_t>(outSharedResult->bayerBuf.data(), m_width, m_height);
             outRgbBuf = Halide::Runtime::Buffer<uint16_t>(outSharedResult->rgbBuf.data(), m_width, m_height, 3);
             LOGD("HdrPlusStreamingSession: Sabre Super-Resolution resolve succeeded");
@@ -261,20 +264,22 @@ int HdrPlusStreamingSession::finish(
     }
 
     // High-Fidelity RCD Demosaicing (replaces Malvar 5x5 demosaic in outSharedResult->rgbBuf)
-    uint16_t bl_array[4] = {m_bl_r, m_bl_g0, m_bl_g1, m_bl_b};
-    float wb_array[4] = {m_wb_r, m_wb_g0, m_wb_g1, m_wb_b};
-    darkbag::demosaic::rcd_demosaic(
-        outSharedResult->bayerBuf.data(),
-        m_width,
-        m_height,
-        m_cfaPattern,
-        bl_array,
-        static_cast<uint16_t>(m_whiteLevel),
-        wb_array,
-        outSharedResult->rgbBuf.data()
-    );
+    if (effectiveMode != 3) {
+        uint16_t bl_array[4] = {m_bl_r, m_bl_g0, m_bl_g1, m_bl_b};
+        float wb_array[4] = {m_wb_r, m_wb_g0, m_wb_g1, m_wb_b};
+        darkbag::demosaic::rcd_demosaic(
+            outSharedResult->bayerBuf.data(),
+            m_width,
+            m_height,
+            m_cfaPattern,
+            bl_array,
+            static_cast<uint16_t>(m_whiteLevel),
+            wb_array,
+            outSharedResult->rgbBuf.data()
+        );
+    }
 
-    LOGD("HdrPlusStreamingSession finish successful: %d frames accumulated into %dx%d result with RCD demosaicing",
-         m_framesPushed, m_width, m_height);
+    LOGD("HdrPlusStreamingSession finish successful: %d frames accumulated into %dx%d result with %s demosaicing",
+         m_framesPushed, m_width, m_height, (effectiveMode == 3) ? "Malvar" : "RCD");
     return 0;
 }
