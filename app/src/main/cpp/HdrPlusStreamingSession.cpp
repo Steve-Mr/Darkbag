@@ -2,6 +2,7 @@
 #include "hdrplus_accumulate_step.h"
 #include "hdrplus_single_pipeline.h"
 #include "ColorPipe.h"
+#include "demosaic/RcdDemosaic.h"
 #include <android/log.h>
 #include <omp.h>
 #include <cmath>
@@ -201,7 +202,21 @@ int HdrPlusStreamingSession::finish(
         return halide_res;
     }
 
-    LOGD("HdrPlusStreamingSession finish successful: %d frames accumulated into %dx%d result",
+    // High-Fidelity RCD Demosaicing (replaces Malvar 5x5 demosaic in outSharedResult->rgbBuf)
+    uint16_t bl_array[4] = {m_bl_r, m_bl_g0, m_bl_g1, m_bl_b};
+    float wb_array[4] = {m_wb_r, m_wb_g0, m_wb_g1, m_wb_b};
+    darkbag::demosaic::rcd_demosaic(
+        outSharedResult->bayerBuf.data(),
+        m_width,
+        m_height,
+        m_cfaPattern,
+        bl_array,
+        static_cast<uint16_t>(m_whiteLevel),
+        wb_array,
+        outSharedResult->rgbBuf.data()
+    );
+
+    LOGD("HdrPlusStreamingSession finish successful: %d frames accumulated into %dx%d result with RCD demosaicing",
          m_framesPushed, m_width, m_height);
     return 0;
 }

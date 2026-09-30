@@ -246,6 +246,7 @@ add_library(
         HdrPlusJNI.cpp
         HdrPlusStreamingSession.cpp
         ColorPipe.cpp
+        demosaic/RcdDemosaic.cpp
         rawvideo/lz4/lz4.c
         rawvideo/RawVideoContainer.cpp
         rawvideo/RawVideoRecorder.cpp

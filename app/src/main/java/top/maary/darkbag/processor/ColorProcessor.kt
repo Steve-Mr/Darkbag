@@ -304,4 +304,15 @@ object ColorProcessor {
     external fun nativeAbortStreamingSession(
         sessionHandle: Long
     )
+
+    external fun rcdDemosaicNative(
+        bayerBuffer: ByteBuffer,
+        width: Int,
+        height: Int,
+        cfaPattern: Int,
+        blackLevelPattern: IntArray,
+        whiteLevel: Int,
+        whiteBalanceGains: FloatArray?,
+        rgbBuffer: ByteBuffer
+    )
 }

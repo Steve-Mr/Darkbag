@@ -30,6 +30,7 @@
 #include "hdrplus_high_pipeline.h"
 #include "hdrplus_single_pipeline.h" // Generated header for single frame
 #include "HdrPlusStreamingSession.h"
+#include "demosaic/RcdDemosaic.h"
 
 
 #define TAG "HdrPlusJNI"
@@ -1146,4 +1147,57 @@ Java_top_maary_darkbag_processor_ColorProcessor_nativeAbortStreamingSession(
         LOGD("nativeAbortStreamingSession: aborting session %lld", (long long)sessionHandle);
         unregisterSession(sessionHandle);
     }
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_top_maary_darkbag_processor_ColorProcessor_rcdDemosaicNative(
+    JNIEnv* env, jobject /* this */,
+    jobject bayerBuffer,
+    jint width,
+    jint height,
+    jint cfaPattern,
+    jintArray blackLevelPattern,
+    jint whiteLevel,
+    jfloatArray whiteBalanceGains,
+    jobject rgbBuffer
+) {
+    if (!bayerBuffer || !rgbBuffer || !blackLevelPattern) {
+        LOGE("rcdDemosaicNative: Null buffer or parameters provided");
+        return;
+    }
+
+    auto* bayerData = static_cast<const uint16_t*>(env->GetDirectBufferAddress(bayerBuffer));
+    auto* rgbData = static_cast<uint16_t*>(env->GetDirectBufferAddress(rgbBuffer));
+    
+    if (!bayerData || !rgbData) {
+        LOGE("rcdDemosaicNative: Invalid direct buffers");
+        return;
+    }
+
+    jint* blData = env->GetIntArrayElements(blackLevelPattern, nullptr);
+    uint16_t blArray[4] = {
+        static_cast<uint16_t>(std::max(0, blData[0])),
+        static_cast<uint16_t>(std::max(0, blData[1])),
+        static_cast<uint16_t>(std::max(0, blData[2])),
+        static_cast<uint16_t>(std::max(0, blData[3]))
+    };
+    env->ReleaseIntArrayElements(blackLevelPattern, blData, JNI_ABORT);
+
+    float wbArray[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+    const float* wbPtr = nullptr;
+    if (whiteBalanceGains && env->GetArrayLength(whiteBalanceGains) >= 4) {
+        env->GetFloatArrayRegion(whiteBalanceGains, 0, 4, wbArray);
+        wbPtr = wbArray;
+    }
+
+    darkbag::demosaic::rcd_demosaic(
+        bayerData,
+        width,
+        height,
+        cfaPattern,
+        blArray,
+        static_cast<uint16_t>(whiteLevel),
+        wbPtr,
+        rgbData
+    );
 }
