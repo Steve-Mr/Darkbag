@@ -205,6 +205,7 @@ int HdrPlusStreamingSession::finish(
             if (m_zoomFactor > 1.05f) {
                 outSharedResult->isZoomCropped = true;
             }
+            outSharedResult->isWhiteBalanceApplied = false;
             outBayerBuf = Halide::Runtime::Buffer<uint16_t>(outSharedResult->bayerBuf.data(), m_width, m_height);
             outRgbBuf = Halide::Runtime::Buffer<uint16_t>(outSharedResult->rgbBuf.data(), m_width, m_height, 3);
             LOGD("HdrPlusStreamingSession: Sabre Super-Resolution resolve succeeded");
@@ -222,6 +223,8 @@ int HdrPlusStreamingSession::finish(
         float norm = valData[i] / std::max(0.001f, weightData[i]) + 0.5f;
         m_refFrame[i] = static_cast<uint16_t>(std::clamp(norm, 0.0f, 65535.0f));
     }
+
+    std::copy(m_refFrame.begin(), m_refFrame.end(), outSharedResult->bayerBuf.begin());
 
     Halide::Runtime::Buffer<uint16_t> inputBuf(m_refFrame.data(), m_width, m_height, 1);
     outBayerBuf = Halide::Runtime::Buffer<uint16_t>(outSharedResult->bayerBuf.data(), m_width, m_height);
@@ -277,6 +280,9 @@ int HdrPlusStreamingSession::finish(
             wb_array,
             outSharedResult->rgbBuf.data()
         );
+        outSharedResult->isWhiteBalanceApplied = false;
+    } else {
+        outSharedResult->isWhiteBalanceApplied = true;
     }
 
     LOGD("HdrPlusStreamingSession finish successful: %d frames accumulated into %dx%d result with %s demosaicing",

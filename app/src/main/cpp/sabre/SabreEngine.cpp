@@ -208,6 +208,8 @@ bool SabreEngine::accumulateFrame(
     const float noiseS = m_config.noiseModelS;
     const float noiseO = m_config.noiseModelO;
     const bool isRef = (m_framesAccumulated == 0);
+    const float kernelRadius = std::max(1.5f, m_config.zoomFactor * 1.25f);
+    const float kernelRadiusSq = kernelRadius * kernelRadius;
 
     // Bounding box of crop in sensor pixels (with 2px margin)
     int ySensorMin = std::max(0, static_cast<int>(std::floor(m_cropYStart)) - 2);
@@ -240,11 +242,11 @@ bool SabreEngine::accumulateFrame(
             float tx = (sx - m_cropXStart) * z;
             float ty = (sy - m_cropYStart) * z;
 
-            // Target neighborhood radius (1.5 output pixels)
-            int itx_min = std::max(0, static_cast<int>(std::floor(tx - 1.5f)));
-            int itx_max = std::min(m_width - 1, static_cast<int>(std::ceil(tx + 1.5f)));
-            int ity_min = std::max(0, static_cast<int>(std::floor(ty - 1.5f)));
-            int ity_max = std::min(m_height - 1, static_cast<int>(std::ceil(ty + 1.5f)));
+            // Target neighborhood radius
+            int itx_min = std::max(0, static_cast<int>(std::floor(tx - kernelRadius)));
+            int itx_max = std::min(m_width - 1, static_cast<int>(std::ceil(tx + kernelRadius)));
+            int ity_min = std::max(0, static_cast<int>(std::floor(ty - kernelRadius)));
+            int ity_max = std::min(m_height - 1, static_cast<int>(std::ceil(ty + kernelRadius)));
 
             if (itx_min > itx_max || ity_min > ity_max) continue;
 
@@ -263,25 +265,65 @@ bool SabreEngine::accumulateFrame(
             // Motion rejection against reference frame
             float w_motion = 1.0f;
             if (!isRef && !m_refBayer.empty()) {
-                int ref_x = std::clamp(static_cast<int>(std::round(sx)), 0, m_width - 1);
-                int ref_y = std::clamp(static_cast<int>(std::round(sy)), 0, m_height - 1);
-                // Ensure comparing same Bayer phase
-                if (((ref_x ^ x) & 1) == 0 && ((ref_y ^ y) & 1) == 0) {
-                    float refVal = static_cast<float>(m_refBayer[ref_y * m_width + ref_x]);
-                    float diff = std::abs(rawVal - refVal);
-                    float variance = noiseS * std::max(rawVal, refVal) + noiseO + 16.0f;
+                int px = x & 1;
+                int py = y & 1;
+                int ref_x = 2 * static_cast<int>(std::round((sx - px) * 0.5f)) + px;
+                int ref_y = 2 * static_cast<int>(std::round((sy - py) * 0.5f)) + py;
+                int min_x = px;
+                int max_x = (m_width - 1) - (((m_width - 1) ^ px) & 1);
+                int min_y = py;
+                int max_y = (m_height - 1) - (((m_height - 1) ^ py) & 1);
+                ref_x = std::clamp(ref_x, min_x, max_x);
+                ref_y = std::clamp(ref_y, min_y, max_y);
+
+                float minVal = 1e9f;
+                float maxVal = -1e9f;
+                for (int dy_off = -2; dy_off <= 2; dy_off += 2) {
+                    int ny = ref_y + dy_off;
+                    if (ny < 0 || ny >= m_height) continue;
+                    for (int dx_off = -2; dx_off <= 2; dx_off += 2) {
+                        int nx = ref_x + dx_off;
+                        if (nx < 0 || nx >= m_width) continue;
+                        float v = static_cast<float>(m_refBayer[static_cast<size_t>(ny) * m_width + nx]);
+                        minVal = std::min(minVal, v);
+                        maxVal = std::max(maxVal, v);
+                    }
+                }
+
+                float variance = noiseS * std::max(rawVal, maxVal) + noiseO + 16.0f;
+                float sigma = std::sqrt(variance);
+
+                float diff = 0.0f;
+                if (rawVal < minVal - 2.0f * sigma) {
+                    diff = (minVal - 2.0f * sigma) - rawVal;
+                } else if (rawVal > maxVal + 2.0f * sigma) {
+                    diff = rawVal - (maxVal + 2.0f * sigma);
+                }
+
+                if (diff > 0.0f) {
                     float distSq = (diff * diff) / variance;
                     // Soft Gaussian motion penalty
                     w_motion = fast_exp2(-distSq * 0.15f);
-                    if (w_motion < 0.05f) continue;
+                } else {
+                    w_motion = 1.0f;
                 }
+                // Floor weight to guarantee valid geometric samples never become holes
+                w_motion = std::max(0.08f, w_motion);
             }
 
             // Scatter sample into target grid pixels
             for (int ity = ity_min; ity <= ity_max; ++ity) {
-                float dty = (ty - static_cast<float>(ity)) / z; // Normalize to sensor scale
+                float dty_target = ty - static_cast<float>(ity);
                 for (int itx = itx_min; itx <= itx_max; ++itx) {
-                    float dtx = (tx - static_cast<float>(itx)) / z;
+                    float dtx_target = tx - static_cast<float>(itx);
+
+                    // Euclidean distance coarse screening
+                    if (dtx_target * dtx_target + dty_target * dty_target > kernelRadiusSq) {
+                        continue;
+                    }
+
+                    float dtx = dtx_target / z; // Normalize to sensor scale
+                    float dty = dty_target / z;
 
                     // Anisotropic distance D^2 = delta^T Omega delta
                     float d2 = dtx * dtx * oxx + dty * dty * oyy + 2.0f * dtx * dty * oxy;
@@ -375,9 +417,9 @@ bool SabreEngine::resolve(uint16_t* outRgb, uint16_t* outBayer) {
                 float sumDiffR = 0.0f, sumWeightR = 0.0f;
                 float sumDiffB = 0.0f, sumWeightB = 0.0f;
 
-                for (int dy = -1; dy <= 1; ++dy) {
+                for (int dy = -2; dy <= 2; ++dy) {
                     int ny = std::clamp(y + dy, 0, m_height - 1);
-                    for (int dx = -1; dx <= 1; ++dx) {
+                    for (int dx = -2; dx <= 2; ++dx) {
                         int nx = std::clamp(x + dx, 0, m_width - 1);
                         size_t nidx = static_cast<size_t>(ny) * m_width + nx;
 
@@ -395,11 +437,19 @@ bool SabreEngine::resolve(uint16_t* outRgb, uint16_t* outBayer) {
                     }
                 }
 
-                if (wr < 0.25f && sumWeightR > 0.0f) {
-                    rOut = clampf(gCenter + sumDiffR / sumWeightR, 0.0f, static_cast<float>(whiteLevel));
+                if (wr < 0.25f) {
+                    if (sumWeightR > 0.0f) {
+                        rOut = clampf(gCenter + sumDiffR / sumWeightR, bl_r, static_cast<float>(whiteLevel));
+                    } else {
+                        rOut = bl_r + std::max(0.0f, gOut - bl_g);
+                    }
                 }
-                if (wb < 0.25f && sumWeightB > 0.0f) {
-                    bOut = clampf(gCenter + sumDiffB / sumWeightB, 0.0f, static_cast<float>(whiteLevel));
+                if (wb < 0.25f) {
+                    if (sumWeightB > 0.0f) {
+                        bOut = clampf(gCenter + sumDiffB / sumWeightB, bl_b, static_cast<float>(whiteLevel));
+                    } else {
+                        bOut = bl_b + std::max(0.0f, gOut - bl_g);
+                    }
                 }
             }
 

@@ -625,9 +625,10 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
         LOGD("Exporting JPG: JPG=%s (outJpgFd=%d)", jpg_path_cstr ? jpg_path_cstr : "FD", outJpgFd);
         auto jpgStart = std::chrono::high_resolution_clock::now();
         float effectiveZoom = (sharedResult && sharedResult->isZoomCropped) ? 1.0f : zoomFactor;
+        const float* effectiveWb = (sharedResult && sharedResult->isWhiteBalanceApplied) ? nullptr : wbVec.data();
         saveOk = process_and_save_image(sharedResult->rgbBuf.data(), 1, width, width*height, nullptr, 0, 0, width, height, digitalGain, targetLog, lut,
                                         exposure, contrast, saturation, highlights, shadows, whites, blacks,
-                                        jpg_path_cstr, nullptr, &meta, 1, ccmVec.data(), wbVec.data(), orientation, nullptr, 0, 0, false, 1, effectiveZoom, (bool)mirror, (bool)enableMemoryColor, (int)colorEngineMode, faithfulHighlights, outJpgFd);
+                                        jpg_path_cstr, nullptr, &meta, 1, ccmVec.data(), effectiveWb, orientation, nullptr, 0, 0, false, 1, effectiveZoom, (bool)mirror, (bool)enableMemoryColor, (int)colorEngineMode, faithfulHighlights, outJpgFd);
         jpgMs = (jlong)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - jpgStart).count();
     }
 
@@ -1128,6 +1129,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_nativeFinishStreamingSession(
             const int fastPreviewDownsample = compute_preview_downsample_factor(width, height, 1280);
 
             float effectiveZoom = (sharedResult && sharedResult->isZoomCropped) ? 1.0f : zoomFactor;
+            const float* effectiveWb = (sharedResult && sharedResult->isWhiteBalanceApplied) ? nullptr : session->whiteBalanceData();
 
             process_and_save_image(
                 raw_ptr, stride_x, stride_y, stride_c,
@@ -1135,7 +1137,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_nativeFinishStreamingSession(
                 width, height, digitalGain, targetLog, lut,
                 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
                 nullptr, nullptr, nullptr, 1,
-                session->ccmData(), session->whiteBalanceData(),
+                session->ccmData(), effectiveWb,
                 session->orientation(), bitmapPixels, out_w, out_h,
                 true, fastPreviewDownsample, effectiveZoom, (bool)mirror,
                 (bool)enableMemoryColor, (int)colorEngineMode, faithfulHighlights
