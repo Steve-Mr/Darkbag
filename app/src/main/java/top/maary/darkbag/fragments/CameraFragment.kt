@@ -3713,7 +3713,17 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
         } else {
             1.0f
         }
-        val appContext = context?.applicationContext ?: return
+        val appContext = context?.applicationContext ?: run {
+            Log.e(TAG, "Fragment detached before processStreamingHdrPlusBurst could launch. Cleaning up.")
+            top.maary.darkbag.processor.HdrPlusRequestManager.onTaskFinished()
+            processingSemaphore.release()
+            try {
+                ColorProcessor.nativeAbortStreamingSession(streamingResult.sessionHandle)
+            } catch (t: Throwable) {
+                Log.w(TAG, "Error aborting session on detach cleanup", t)
+            }
+            return
+        }
 
         (appContext as MainApplication).applicationScope.launch(Dispatchers.IO) {
             var isHdrPlusSuccess = false
@@ -3873,7 +3883,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
 
                 timing?.enqueued = System.currentTimeMillis()
-                top.maary.darkbag.processor.HdrPlusRequestManager.enqueue(request)
+                top.maary.darkbag.processor.HdrPlusRequestManager.enqueue(request, alreadyTracked = true)
                 val serviceIntent = android.content.Intent(context, top.maary.darkbag.processor.HdrPlusProcessingService::class.java)
                 if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
                     context.startForegroundService(serviceIntent)
@@ -3882,6 +3892,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Streaming HDR+ enqueue failed", e)
+                top.maary.darkbag.processor.HdrPlusRequestManager.onTaskFinished()
+                isHdrPlusSuccess = false
                 try {
                     ColorProcessor.nativeAbortStreamingSession(streamingResult.sessionHandle)
                 } catch (abortEx: Throwable) {
@@ -4748,6 +4760,10 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
                     if (framesCaptured > 0) {
                         Log.i(TAG, "Flushing partial burst ($framesCaptured frames) to background worker.")
+                        top.maary.darkbag.processor.HdrPlusRequestManager.onTaskStarted()
+                        if (!isFrame1Trigger) {
+                            showProcessingAnimation()
+                        }
                         burstHelper.flush()
                     } else {
                         burstHelper.abort()
@@ -4793,6 +4809,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         watchdog.cancel()
                         timing?.captureCallback = System.currentTimeMillis()
                         lifecycleScope.launch(Dispatchers.Main) {
+                            top.maary.darkbag.processor.HdrPlusRequestManager.onTaskStarted()
                             resetBurstUi()
                             if (!isFrame1Trigger) {
                                 showProcessingAnimation()

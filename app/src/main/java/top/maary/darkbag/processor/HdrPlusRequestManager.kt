@@ -74,18 +74,26 @@ data class HdrPlusRequest(
 object HdrPlusRequestManager {
     // Bounded capacity to enforce pipeline backpressure during high-frequency capture bursts
     const val MAX_IN_FLIGHT_REQUESTS = 3
-    private val requestChannel = Channel<HdrPlusRequest>(capacity = MAX_IN_FLIGHT_REQUESTS)
+    internal val requestChannel = Channel<HdrPlusRequest>(capacity = MAX_IN_FLIGHT_REQUESTS)
     
     val requestFlow = requestChannel.receiveAsFlow()
 
     private val _pendingTasksCount = MutableStateFlow(0)
     val pendingTasksCount: StateFlow<Int> = _pendingTasksCount.asStateFlow()
 
-    fun enqueue(request: HdrPlusRequest) {
+    fun onTaskStarted() {
         _pendingTasksCount.update { it + 1 }
+    }
+
+    fun enqueue(request: HdrPlusRequest, alreadyTracked: Boolean = false) {
+        if (!alreadyTracked) {
+            _pendingTasksCount.update { it + 1 }
+        }
         val result = requestChannel.trySend(request)
         if (!result.isSuccess) {
-            _pendingTasksCount.update { (it - 1).coerceAtLeast(0) }
+            if (!alreadyTracked) {
+                _pendingTasksCount.update { (it - 1).coerceAtLeast(0) }
+            }
             throw IllegalStateException("Failed to enqueue HdrPlusRequest (pipeline queue full/rejected): ${request.requestId}")
         }
     }
