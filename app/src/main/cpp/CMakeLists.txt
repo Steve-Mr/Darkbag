@@ -248,6 +248,7 @@ add_library(
         ColorPipe.cpp
         demosaic/RcdDemosaic.cpp
         sabre/SabreEngine.cpp
+        sabre/TileAligner.cpp
         rawvideo/lz4/lz4.c
         rawvideo/RawVideoContainer.cpp
         rawvideo/RawVideoRecorder.cpp

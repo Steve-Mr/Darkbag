@@ -9,6 +9,7 @@
 #include <HalideBuffer.h>
 #include <HalideRuntime.h>
 #include "sabre/SabreEngine.h"
+#include "sabre/TileAligner.h"
 
 /**
  * Shared capture result holding normalized Bayer and demosaiced linear RGB buffers.
@@ -118,4 +119,9 @@ private:
     int m_fusionMode = 0;
     float m_zoomFactor = 1.0f;
     std::unique_ptr<darkbag::sabre::SabreEngine> m_sabreEngine;
+    std::unique_ptr<darkbag::sabre::TileAligner> m_tileAligner;
+    std::vector<float> m_flowX;
+    std::vector<float> m_flowY;
+    int m_flowWidth = 0;
+    int m_flowHeight = 0;
 };

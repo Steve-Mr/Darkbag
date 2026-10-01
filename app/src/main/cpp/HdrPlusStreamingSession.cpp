@@ -96,6 +96,7 @@ HdrPlusStreamingSession::HdrPlusStreamingSession(
         sabreCfg.noiseModelO = static_cast<float>(m_noiseProfile[1]);
     }
     m_sabreEngine = std::make_unique<darkbag::sabre::SabreEngine>(sabreCfg);
+    m_tileAligner = std::make_unique<darkbag::sabre::TileAligner>();
 
     LOGD("HdrPlusStreamingSession initialized: %dx%d, orientation=%d, WL=%d, BL=[%u,%u,%u,%u], fusionMode=%d, zoom=%.2f",
          m_width, m_height, m_orientation, m_whiteLevel, m_bl_r, m_bl_g0, m_bl_g1, m_bl_b, m_fusionMode, m_zoomFactor);
@@ -127,6 +128,10 @@ bool HdrPlusStreamingSession::pushFrame(const uint16_t* rawData, size_t numPixel
             m_accumWeight[0][i] = 1.0f;
         }
 
+        if (m_tileAligner) {
+            m_tileAligner->setReferenceFrame(rawData, m_width, m_height, m_cfaPattern);
+        }
+
         if (m_sabreEngine) {
             m_sabreEngine->setReferenceFrame(rawData);
         }
@@ -154,7 +159,14 @@ bool HdrPlusStreamingSession::pushFrame(const uint16_t* rawData, size_t numPixel
         return false;
     }
 
-    if (m_sabreEngine) {
+    if (m_sabreEngine && m_tileAligner) {
+        bool alignOk = m_tileAligner->alignFrame(rawData, m_flowX, m_flowY, m_flowWidth, m_flowHeight);
+        if (alignOk) {
+            m_sabreEngine->accumulateFrame(rawData, m_flowX.data(), m_flowY.data(), m_flowWidth, m_flowHeight);
+        } else {
+            m_sabreEngine->accumulateFrame(rawData);
+        }
+    } else if (m_sabreEngine) {
         m_sabreEngine->accumulateFrame(rawData);
     }
 
