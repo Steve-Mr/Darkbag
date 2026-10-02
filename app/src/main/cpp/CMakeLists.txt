@@ -86,8 +86,8 @@ include_directories("${LIBJPEG_TURBO_INSTALL_DIR}/include")
 
 set(HDRPLUS_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/hdr-plus/src")
 set(HDRPLUS_GENERATOR_SRC
-    "${CMAKE_CURRENT_SOURCE_DIR}/hdrplus_pipeline_generator.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/hdrplus_align.cpp"
+    "${HDRPLUS_SRC_DIR}/hdrplus_pipeline_generator.cpp"
+    "${HDRPLUS_SRC_DIR}/align.cpp"
     "${HDRPLUS_SRC_DIR}/merge.cpp"
     "${HDRPLUS_SRC_DIR}/finish.cpp"
     "${HDRPLUS_SRC_DIR}/util.cpp"
@@ -205,8 +205,23 @@ add_custom_command(
     COMMENT "Running Halide Generator for High Pipeline (No Runtime)"
 )
 
+set(ACCUMULATE_GENERATED_HEADER "${GENERATOR_OUTPUT_DIR}/hdrplus_accumulate_step.h")
+set(ACCUMULATE_GENERATED_LIB "${GENERATOR_OUTPUT_DIR}/hdrplus_accumulate_step.a")
+
+add_custom_command(
+    OUTPUT "${ACCUMULATE_GENERATED_HEADER}" "${ACCUMULATE_GENERATED_LIB}"
+    COMMAND "${GENERATOR_EXEC}"
+            -g hdrplus_accumulate_step
+            -f hdrplus_accumulate_step
+            -e static_library,h
+            -o "${GENERATOR_OUTPUT_DIR}"
+            target=${HALIDE_TARGET}-no_runtime
+    DEPENDS "${GENERATOR_EXEC}"
+    COMMENT "Running Halide Generator for Accumulate Step (No Runtime)"
+)
+
 # Update dependency target
-add_custom_target(generate_hdrplus_halide DEPENDS "${GENERATED_LIB}" "${GENERATED_HEADER}" "${SINGLE_GENERATED_LIB}" "${SINGLE_GENERATED_HEADER}" "${FAST_GENERATED_LIB}" "${FAST_GENERATED_HEADER}" "${HIGH_GENERATED_LIB}" "${HIGH_GENERATED_HEADER}")
+add_custom_target(generate_hdrplus_halide DEPENDS "${GENERATED_LIB}" "${GENERATED_HEADER}" "${SINGLE_GENERATED_LIB}" "${SINGLE_GENERATED_HEADER}" "${FAST_GENERATED_LIB}" "${FAST_GENERATED_HEADER}" "${HIGH_GENERATED_LIB}" "${HIGH_GENERATED_HEADER}" "${ACCUMULATE_GENERATED_LIB}" "${ACCUMULATE_GENERATED_HEADER}")
 
 # Expose generated files to the build
 include_directories(${GENERATOR_OUTPUT_DIR})
@@ -229,7 +244,11 @@ add_library(
         SHARED
         native-lib.cpp
         HdrPlusJNI.cpp
+        HdrPlusStreamingSession.cpp
         ColorPipe.cpp
+        demosaic/RcdDemosaic.cpp
+        sabre/SabreEngine.cpp
+        sabre/TileAligner.cpp
         rawvideo/lz4/lz4.c
         rawvideo/RawVideoContainer.cpp
         rawvideo/RawVideoRecorder.cpp
@@ -241,6 +260,7 @@ add_library(
         "${SINGLE_GENERATED_LIB}"
         "${FAST_GENERATED_LIB}"
         "${HIGH_GENERATED_LIB}"
+        "${ACCUMULATE_GENERATED_LIB}"
 )
 
 # Ensure the generation happens before native-lib compilation
@@ -272,6 +292,7 @@ target_link_libraries(
         "${SINGLE_GENERATED_LIB}"
         "${FAST_GENERATED_LIB}"
         "${HIGH_GENERATED_LIB}"
+        "${ACCUMULATE_GENERATED_LIB}"
         tiff
         "-L${LIBJPEG_TURBO_INSTALL_DIR}/lib"
         -lturbojpeg

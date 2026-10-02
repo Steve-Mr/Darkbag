@@ -168,4 +168,21 @@ class SettingsFragmentTest {
         assertEquals("Balanced (Smooth UI)", SettingsFragment.BURST_STRATEGY_BALANCED)
         assertEquals("Rapid Burst (Maximum Shots)", SettingsFragment.BURST_STRATEGY_AGGRESSIVE)
     }
+
+    @Test
+    fun testHdrFusionModes() {
+        assertEquals(
+            listOf(
+                SettingsFragment.HDR_FUSION_AUTO,
+                SettingsFragment.HDR_FUSION_SPATIAL_RCD,
+                SettingsFragment.HDR_FUSION_SABRE,
+                SettingsFragment.HDR_FUSION_CLASSIC
+            ),
+            SettingsFragment.HDR_FUSION_MODES
+        )
+        assertEquals("Auto (Spatial / Sabre Zoom)", SettingsFragment.HDR_FUSION_AUTO)
+        assertEquals("Spatial Merge + RCD", SettingsFragment.HDR_FUSION_SPATIAL_RCD)
+        assertEquals("Sabre (Super-Resolution)", SettingsFragment.HDR_FUSION_SABRE)
+        assertEquals("Classic HDR+ (Wiener)", SettingsFragment.HDR_FUSION_CLASSIC)
+    }
 }

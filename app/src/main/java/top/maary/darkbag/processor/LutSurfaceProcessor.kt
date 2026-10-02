@@ -567,8 +567,14 @@ class LutSurfaceProcessor {
             }
 
             // 2. Precise Linear to sRGB OETF
+            float linearToSrgb(float c) {
+                float low = 12.92 * max(c, 0.0);
+                float high = 1.055 * pow(max(c, 0.0), 1.0 / 2.4) - 0.055;
+                return mix(low, high, step(0.0031308, c));
+            }
+
             vec3 linearToSrgb(vec3 c) {
-                vec3 low = 12.92 * c;
+                vec3 low = 12.92 * max(c, vec3(0.0));
                 vec3 high = 1.055 * pow(max(c, vec3(0.0)), vec3(1.0 / 2.4)) - vec3(0.055);
                 return mix(low, high, step(vec3(0.0031308), c));
             }
@@ -716,8 +722,8 @@ class LutSurfaceProcessor {
                     const float c = 0.01;
                     if (x >= 0.0) return a * log10_f(x * b + 1.0) + c;
                     else return -a * log10_f(-x * b + 1.0) + c;
-                } else { // Default sRGB: ACES Filmic Tone Mapping + sRGB OETF
-                    return applyAcesFit(vec3(x)).r;
+                } else { // Default sRGB: Standard sRGB OETF transfer curve
+                    return linearToSrgb(x);
                 }
             }
 

@@ -226,6 +226,15 @@ class SettingsFragment : Fragment() {
             prefs.edit().putString(KEY_BURST_PROCESSING_STRATEGY, BURST_PROCESSING_STRATEGIES[position]).apply()
         }
 
+        // HDR+ Fusion Engine
+        val fusionAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, HDR_FUSION_MODES)
+        binding.menuHdrFusionMode.setAdapter(fusionAdapter)
+        val savedFusion = prefs.getString(KEY_HDR_FUSION_MODE, HDR_FUSION_AUTO) ?: HDR_FUSION_AUTO
+        binding.menuHdrFusionMode.setText(savedFusion, false)
+        binding.menuHdrFusionMode.setOnItemClickListener { _, _, position, _ ->
+            prefs.edit().putString(KEY_HDR_FUSION_MODE, HDR_FUSION_MODES[position]).apply()
+        }
+
         // Default Lens (Startup)
         val lenses = cameraRepository.getAllFocalLengthPresets()
         val lensDisplayNames = lenses.map { it.name }
@@ -882,6 +891,17 @@ class SettingsFragment : Fragment() {
         const val BURST_STRATEGY_BALANCED = "Balanced (Smooth UI)"
         const val BURST_STRATEGY_AGGRESSIVE = "Rapid Burst (Maximum Shots)"
         val BURST_PROCESSING_STRATEGIES = listOf(BURST_STRATEGY_BALANCED, BURST_STRATEGY_AGGRESSIVE)
+        const val KEY_HDR_FUSION_MODE = "hdr_fusion_mode"
+        const val HDR_FUSION_AUTO = "Auto (Spatial / Sabre Zoom)"
+        const val HDR_FUSION_SPATIAL_RCD = "Spatial Merge + RCD"
+        const val HDR_FUSION_SABRE = "Sabre (Super-Resolution)"
+        const val HDR_FUSION_CLASSIC = "Classic HDR+ (Wiener)"
+        val HDR_FUSION_MODES = listOf(
+            HDR_FUSION_AUTO,
+            HDR_FUSION_SPATIAL_RCD,
+            HDR_FUSION_SABRE,
+            HDR_FUSION_CLASSIC
+        )
         const val KEY_SHOW_HDR_UNDEREXPOSURE_BUTTON = "show_hdr_underexposure_button"
         const val KEY_SHOW_HDR_PLUS_SWITCH = "show_hdr_plus_switch"
         const val KEY_USE_INTERNAL_VIEWER = "use_internal_viewer"

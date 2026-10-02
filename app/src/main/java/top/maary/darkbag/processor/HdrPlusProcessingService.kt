@@ -71,9 +71,23 @@ class HdrPlusProcessingService : LifecycleService() {
             val debugStats = LongArray(15)
             
             // Just one mask for normal processing (unlike ablation which did multiple passes)
-            val ret = if (req.isSingleFrame) {
+            val ret = if (req.streamingSessionHandle != 0L) {
+                ColorProcessor.nativeFinishStreamingSession(
+                    sessionHandle = req.streamingSessionHandle,
+                    tempRawPath = req.requestId,
+                    outputBitmap = null,
+                    digitalGain = req.digitalGain,
+                    targetLog = req.targetLogIndex,
+                    lutPath = req.lutPath,
+                    zoomFactor = req.zoomFactor,
+                    mirror = req.mirror,
+                    enableMemoryColor = req.enableMemoryColor,
+                    colorEngineMode = req.colorEngineMode,
+                    fusionMode = req.fusionMode
+                )
+            } else if (req.isSingleFrame) {
                 ColorProcessor.processSingleFrameRaw(
-                    req.megaBuffer,
+                    req.megaBuffer!!,
                     req.width, req.height,
                     req.orientation,
                     req.whiteLevel, req.blackLevelPattern,
@@ -103,7 +117,7 @@ class HdrPlusProcessingService : LifecycleService() {
                 )
             } else {
                 ColorProcessor.processHdrPlus(
-                    req.megaBuffer,
+                    req.megaBuffer!!,
                     req.numFrames,
                     req.width, req.height,
                     req.orientation,
@@ -130,12 +144,16 @@ class HdrPlusProcessingService : LifecycleService() {
                     req.calibrationIlluminant1,
                     req.calibrationIlluminant2,
                     req.neutralColorPoint,
-                    req.dngCompressionMode
+                    req.dngCompressionMode,
+                    noiseProfile = req.noiseProfile
                 )
             }
 
+
             // Immediately release megaBuffer as soon as Halide processing is done to free ~168-208MB memory
-            HdrPlusBurst.releaseBuffer(req.megaBuffer)
+            if (req.megaBuffer != null) {
+                HdrPlusBurst.releaseBuffer(req.megaBuffer)
+            }
             buffersReleased = true
 
             if (ret >= 0) {
@@ -339,15 +357,7 @@ class HdrPlusProcessingService : LifecycleService() {
                                 req.timing?.firstOutputWritten = System.currentTimeMillis()
 
                                 req.timing?.let { t ->
-                                    val timingReport = """
-                                        [Lifecycle Timing Report]
-                                        Total Shutter-to-Output: ${t.firstOutputWritten - t.shutterClick}ms
-                                        - Shutter to Callback: ${t.captureCallback - t.shutterClick}ms
-                                        - Callback to Enqueued: ${t.enqueued - t.captureCallback}ms
-                                        - Queue Wait: ${t.processingStart - t.enqueued}ms
-                                        - Halide + JNI Export: ${t.jniDone - t.processingStart}ms
-                                        - Disk Save & MediaStore: ${t.firstOutputWritten - t.jniDone}ms
-                                    """.trimIndent()
+                                    val timingReport = t.buildSummaryReport()
                                     Log.i(TAG, timingReport)
                                     top.maary.darkbag.utils.DebugLogManager.addLog(timingReport)
                                 }
@@ -375,8 +385,15 @@ class HdrPlusProcessingService : LifecycleService() {
             }
         } catch (e: Exception) {
             Log.e(TAG, "Exception processing ${req.requestId}", e)
-            if (!buffersReleased) {
+            if (!buffersReleased && req.megaBuffer != null) {
                 HdrPlusBurst.releaseBuffer(req.megaBuffer)
+            }
+            if (req.streamingSessionHandle != 0L) {
+                try {
+                    ColorProcessor.nativeAbortStreamingSession(req.streamingSessionHandle)
+                } catch (abortEx: Throwable) {
+                    Log.w(TAG, "Error aborting streaming session ${req.streamingSessionHandle}", abortEx)
+                }
             }
             finishTaskAndCheckStopService(req.requestId)
         }

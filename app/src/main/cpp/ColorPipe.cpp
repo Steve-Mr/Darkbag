@@ -1239,10 +1239,9 @@ bool process_and_save_image(
             color.b = srgb_oetf(color.b);
         } else {
             // Standard Log / LUT pipeline
-            if (targetLog == 0) {
-                color = apply_aces_fit(color);
-            }
-
+            // When a 3D LUT is attached (lut.size > 0), bypass tone mapping (ACES Fit)
+            // and pass the standard Rec.709 signal via sRGB OETF (apply_log type 0) directly
+            // into the 3D LUT, avoiding double S-curve tone compression that causes crushed shadows.
             color.r = apply_log(color.r, targetLog);
             color.g = apply_log(color.g, targetLog);
             color.b = apply_log(color.b, targetLog);

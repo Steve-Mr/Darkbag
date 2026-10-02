@@ -7,7 +7,11 @@ import top.maary.darkbag.models.CaptureMetadata
 
 object ColorProcessor {
     init {
-        System.loadLibrary("native-lib")
+        try {
+            System.loadLibrary("native-lib")
+        } catch (e: UnsatisfiedLinkError) {
+            // Expected during host unit tests
+        }
     }
 
     val backgroundSaveFlow = MutableSharedFlow<BackgroundSaveEvent>(extraBufferCapacity = 10)
@@ -263,6 +267,70 @@ object ColorProcessor {
         calibrationIlluminant1: Int = 21,
         calibrationIlluminant2: Int = 17,
         neutralColorPoint: FloatArray? = null,
-        dngCompressionMode: Int = 0
+        dngCompressionMode: Int = 0,
+        noiseProfile: DoubleArray? = null
     ): Int
+
+    external fun nativeCreateStreamingSession(
+        width: Int,
+        height: Int,
+        orientation: Int,
+        whiteLevel: Int,
+        blackLevelPattern: IntArray,
+        lensShadingMap: FloatArray?,
+        lensShadingRows: Int,
+        lensShadingCols: Int,
+        whiteBalance: FloatArray,
+        ccm: FloatArray,
+        cfaPattern: Int,
+        noiseProfile: DoubleArray? = null,
+        fusionMode: Int = 0,
+        zoomFactor: Float = 1.0f
+    ): Long
+
+    external fun nativePushStreamingFrame(
+        sessionHandle: Long,
+        frameBuffer: ByteBuffer
+    ): Boolean
+
+    external fun nativeComputeGcamFrameScore(
+        frameBuffer: ByteBuffer,
+        width: Int,
+        height: Int,
+        cfaPattern: Int,
+        noiseProfileS: Float,
+        noiseProfileO: Float,
+        exposureTimeNs: Long,
+        timeDeltaFromFirstNs: Long
+    ): Float
+
+
+    external fun nativeFinishStreamingSession(
+        sessionHandle: Long,
+        tempRawPath: String?,
+        outputBitmap: android.graphics.Bitmap? = null,
+        digitalGain: Float = 1.0f,
+        targetLog: Int = 0,
+        lutPath: String? = null,
+        zoomFactor: Float = 1.0f,
+        mirror: Boolean = false,
+        enableMemoryColor: Boolean = false,
+        colorEngineMode: Int = 0,
+        fusionMode: Int = 0
+    ): Int
+
+    external fun nativeAbortStreamingSession(
+        sessionHandle: Long
+    )
+
+    external fun rcdDemosaicNative(
+        bayerBuffer: ByteBuffer,
+        width: Int,
+        height: Int,
+        cfaPattern: Int,
+        blackLevelPattern: IntArray,
+        whiteLevel: Int,
+        whiteBalanceGains: FloatArray?,
+        rgbBuffer: ByteBuffer
+    )
 }

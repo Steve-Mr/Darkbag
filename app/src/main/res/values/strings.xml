@@ -247,4 +247,12 @@
     <string name="setting_raw_format_hint">RAW Format</string>
     <string name="raw_output_type_bayer">Bayer CFA RAW (~12MB, Default)</string>
     <string name="raw_output_type_linear">Linear RGB RAW (~50MB)</string>
+
+    <!-- HDR+ Fusion Engine -->
+    <string name="pref_hdr_fusion_mode_title">HDR+ Fusion Engine</string>
+    <string name="pref_hdr_fusion_mode_helper">Auto: Spatial+RCD at 1.0x, Sabre on zoom (≥1.25x)</string>
+    <string name="hdr_fusion_auto">Auto (Spatial / Sabre Zoom)</string>
+    <string name="hdr_fusion_spatial">Spatial Merge + RCD</string>
+    <string name="hdr_fusion_sabre">Sabre (Super-Resolution)</string>
+    <string name="hdr_fusion_classic">Classic HDR+ (Wiener)</string>
 </resources>
