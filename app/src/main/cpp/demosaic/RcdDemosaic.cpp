@@ -139,14 +139,16 @@ void rcd_demosaic(const uint16_t* bayer_input,
             for(int tc = 0; tc < numTw; ++tc) {
                 const int rowStart = tr * tileSizeN;
                 const int rowEnd = std::min(rowStart + tileSize, height);
-                if(rowStart + rcdBorder == rowEnd - rcdBorder) {
+                if(rowStart + rcdBorder >= rowEnd - rcdBorder) {
                     continue;
                 }
                 const int colStart = tc * tileSizeN;
                 const int colEnd = std::min(colStart + tileSize, width);
-                if(colStart + rcdBorder == colEnd - rcdBorder) {
+                if(colStart + rcdBorder >= colEnd - rcdBorder) {
                     continue;
                 }
+
+                std::fill(PQ_Dir.begin(), PQ_Dir.end(), 0.0f);
 
                 const int tileRows = std::min(rowEnd - rowStart, tileSize);
                 const int tilecols = std::min(colEnd - colStart, tileSize);
@@ -223,8 +225,8 @@ void rcd_demosaic(const uint16_t* bayer_input,
                         const float E_Grad = eps + (std::fabs(cfa[indx -  1] - cfa[indx +  1]) + std::fabs(cfai - cfa[indx +  2])) + (std::fabs(cfa[indx +  1] - cfa[indx +  3]) + std::fabs(cfa[indx +  2] - cfa[indx +  4]));
 
                         const float lpfi = lpf[lpindx];
-                        const float N_Est = cfa[indx - w1] * (lpfi + lpfi) / (eps + lpfi + lpf[lpindx - w1 / 2]);
-                        const float S_Est = cfa[indx + w1] * (lpfi + lpfi) / (eps + lpfi + lpf[lpindx + w1 / 2]);
+                        const float N_Est = cfa[indx - w1] * (lpfi + lpfi) / (eps + lpfi + lpf[lpindx - w1]);
+                        const float S_Est = cfa[indx + w1] * (lpfi + lpfi) / (eps + lpfi + lpf[lpindx + w1]);
                         const float W_Est = cfa[indx -  1] * (lpfi + lpfi) / (eps + lpfi + lpf[lpindx -  1]);
                         const float E_Est = cfa[indx +  1] * (lpfi + lpfi) / (eps + lpfi + lpf[lpindx +  1]);
 

@@ -59,6 +59,10 @@ public:
 
     int fusionMode() const { return m_fusionMode; }
     float zoomFactor() const { return m_zoomFactor; }
+    bool isSabreEngineActive() const {
+        std::lock_guard<std::mutex> lock(m_sessionMutex);
+        return m_sabreEngine != nullptr;
+    }
 
     // Push an incoming RAW Bayer frame.
     // Frame 0 becomes the reference frame, subsequent frames are aligned and accumulated.

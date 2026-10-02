@@ -35,7 +35,8 @@ class HdrPlusStreamingBurst(
     val sessionHandle: Long,
     private val frameCount: Int,
     private val timing: StandardTimingTracker? = null,
-    private val onBurstComplete: (StreamingBurstResult) -> Unit
+    private val onBurstComplete: (StreamingBurstResult) -> Unit,
+    private val onBurstFailed: ((Throwable) -> Unit)? = null
 ) {
     companion object {
         private const val TAG = "HdrPlusStreamingBurst"
@@ -47,7 +48,7 @@ class HdrPlusStreamingBurst(
     )
 
     private val lock = Any()
-    private val frameChannel = Channel<QueuedFrame>(Channel.UNLIMITED)
+    private val frameChannel = Channel<QueuedFrame>(capacity = 4)
 
     @Volatile private var enqueuedCount = 0
     @Volatile private var isCompleted = false
@@ -89,11 +90,18 @@ class HdrPlusStreamingBurst(
                     StreamingBurstResult(sessionHandle, processedFrames.toList())
                 } else null
             }
-            result?.let { onBurstComplete(it) }
+            if (result != null) {
+                onBurstComplete(result)
+            } else if (!isAborted && !isCompleted) {
+                abort()
+                onBurstFailed?.invoke(IllegalStateException("No frames were accumulated for session $sessionHandle"))
+            }
         } catch (e: CancellationException) {
             Log.d(TAG, "Streaming worker cancelled for session $sessionHandle")
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             Log.e(TAG, "Error in streaming worker for session $sessionHandle", e)
+            abort()
+            onBurstFailed?.invoke(e)
         } finally {
             // Drain and return any remaining buffers in frameChannel
             while (true) {
@@ -162,14 +170,14 @@ class HdrPlusStreamingBurst(
                 physicalId = physicalId
             )
 
-            enqueuedCount++
             val sendResult = frameChannel.trySend(QueuedFrame(cleanBuffer, frame))
             if (!sendResult.isSuccess) {
-                Log.e(TAG, "Failed to enqueue frame $enqueuedCount to frameChannel")
+                Log.e(TAG, "Failed to enqueue frame to frameChannel (capacity full or closed)")
                 StreamingBufferPool.release(cleanBuffer)
                 return false
             }
 
+            enqueuedCount++
             Log.d(TAG, "Streaming frame $enqueuedCount/$frameCount enqueued (fast copy)")
 
             if (enqueuedCount == frameCount) {

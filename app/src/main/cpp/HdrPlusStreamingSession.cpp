@@ -76,27 +76,36 @@ HdrPlusStreamingSession::HdrPlusStreamingSession(
     m_accumWeight[0].resize(numPixels);
     m_accumWeight[1].resize(numPixels);
 
-    // Initialize Sabre Super-Resolution Engine
-    darkbag::sabre::SabreConfig sabreCfg;
-    sabreCfg.width = m_width;
-    sabreCfg.height = m_height;
-    sabreCfg.cfa = static_cast<darkbag::sabre::CfaPattern>(m_cfaPattern);
-    sabreCfg.blackLevel[0] = m_bl_r;
-    sabreCfg.blackLevel[1] = m_bl_g0;
-    sabreCfg.blackLevel[2] = m_bl_g1;
-    sabreCfg.blackLevel[3] = m_bl_b;
-    sabreCfg.whiteLevel = static_cast<uint16_t>(m_whiteLevel);
-    sabreCfg.whiteBalance[0] = m_wb_r;
-    sabreCfg.whiteBalance[1] = m_wb_g0;
-    sabreCfg.whiteBalance[2] = m_wb_g1;
-    sabreCfg.whiteBalance[3] = m_wb_b;
-    sabreCfg.zoomFactor = m_zoomFactor;
-    if (m_noiseProfile.size() >= 2) {
-        sabreCfg.noiseModelS = static_cast<float>(m_noiseProfile[0]);
-        sabreCfg.noiseModelO = static_cast<float>(m_noiseProfile[1]);
+    // Initialize Sabre Super-Resolution Engine only if eligible
+    // Sabre is eligible if Force Sabre (mode == 2), or Auto (mode == 0) with zoom >= 1.25x
+    const bool isSabreEligible = (m_fusionMode == 2) || (m_fusionMode == 0 && m_zoomFactor >= 1.25f);
+    if (isSabreEligible) {
+        darkbag::sabre::SabreConfig sabreCfg;
+        sabreCfg.width = m_width;
+        sabreCfg.height = m_height;
+        sabreCfg.cfa = static_cast<darkbag::sabre::CfaPattern>(m_cfaPattern);
+        sabreCfg.blackLevel[0] = m_bl_r;
+        sabreCfg.blackLevel[1] = m_bl_g0;
+        sabreCfg.blackLevel[2] = m_bl_g1;
+        sabreCfg.blackLevel[3] = m_bl_b;
+        sabreCfg.whiteLevel = static_cast<uint16_t>(m_whiteLevel);
+        sabreCfg.whiteBalance[0] = m_wb_r;
+        sabreCfg.whiteBalance[1] = m_wb_g0;
+        sabreCfg.whiteBalance[2] = m_wb_g1;
+        sabreCfg.whiteBalance[3] = m_wb_b;
+        sabreCfg.zoomFactor = m_zoomFactor;
+        if (m_noiseProfile.size() >= 2) {
+            sabreCfg.noiseModelS = static_cast<float>(m_noiseProfile[0]);
+            sabreCfg.noiseModelO = static_cast<float>(m_noiseProfile[1]);
+        }
+        m_sabreEngine = std::make_unique<darkbag::sabre::SabreEngine>(sabreCfg);
+        m_tileAligner = std::make_unique<darkbag::sabre::TileAligner>();
+        LOGD("HdrPlusStreamingSession: Sabre Super-Resolution engine initialized (zoom=%.2f, mode=%d)", m_zoomFactor, m_fusionMode);
+    } else {
+        m_sabreEngine = nullptr;
+        m_tileAligner = nullptr;
+        LOGD("HdrPlusStreamingSession: Sabre skipped (zoom=%.2f, mode=%d), saving ~350MB RAM", m_zoomFactor, m_fusionMode);
     }
-    m_sabreEngine = std::make_unique<darkbag::sabre::SabreEngine>(sabreCfg);
-    m_tileAligner = std::make_unique<darkbag::sabre::TileAligner>();
 
     LOGD("HdrPlusStreamingSession initialized: %dx%d, orientation=%d, WL=%d, BL=[%u,%u,%u,%u], fusionMode=%d, zoom=%.2f",
          m_width, m_height, m_orientation, m_whiteLevel, m_bl_r, m_bl_g0, m_bl_g1, m_bl_b, m_fusionMode, m_zoomFactor);

@@ -624,6 +624,9 @@ class CameraFragment : Fragment() {
         lutProcessor?.release()
         lutProcessor = null
 
+        hdrPlusStreamingBurstHelper?.abort()
+        hdrPlusStreamingBurstHelper = null
+
         // Unregister the broadcast receivers and listeners
 
         displayManager.unregisterDisplayListener(displayListener)
@@ -3787,8 +3790,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 isHdrPlusSuccess = true
 
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(requireContext(), getString(R.string.toast_hdr_queued), Toast.LENGTH_SHORT).show()
-                    if (isHalfFrameModeEnabled && prefs.getInt(scopedHalfFrameStepKey(prefs), 0) == 1) {
+                    Toast.makeText(appContext, appContext.getString(R.string.toast_hdr_queued), Toast.LENGTH_SHORT).show()
+                    if (isAdded && isHalfFrameModeEnabled && prefs.getInt(scopedHalfFrameStepKey(prefs), 0) == 1) {
                         setGalleryThumbnail(null)
                     }
                 }
@@ -4693,6 +4696,8 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 return
             }
 
+            val isTaskStarted = java.util.concurrent.atomic.AtomicBoolean(false)
+
             val burstHelper = top.maary.darkbag.processor.HdrPlusStreamingBurst(
                 sessionHandle = sessionHandle,
                 frameCount = burstSize,
@@ -4723,6 +4728,19 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         useSensorColorMatrix = useSensorColorMatrix,
                         noiseProfileFlat = noiseProfileFlat
                     )
+                },
+                onBurstFailed = { error ->
+                    Log.e(TAG, "Streaming burst failed in workerJob", error)
+                    if (isTaskStarted.compareAndSet(true, false)) {
+                        top.maary.darkbag.processor.HdrPlusRequestManager.onTaskFinished()
+                    }
+                    isBurstActive = false
+                    hdrPlusStreamingBurstHelper = null
+                    processingSemaphore.release()
+                    lifecycleScope.launch(Dispatchers.Main) {
+                        hideProcessingAnimation()
+                        resetBurstUi()
+                    }
                 }
             )
             hdrPlusStreamingBurstHelper = burstHelper
@@ -4760,7 +4778,9 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
                     if (framesCaptured > 0) {
                         Log.i(TAG, "Flushing partial burst ($framesCaptured frames) to background worker.")
-                        top.maary.darkbag.processor.HdrPlusRequestManager.onTaskStarted()
+                        if (isTaskStarted.compareAndSet(false, true)) {
+                            top.maary.darkbag.processor.HdrPlusRequestManager.onTaskStarted()
+                        }
                         if (!isFrame1Trigger) {
                             showProcessingAnimation()
                         }
@@ -4809,7 +4829,9 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         watchdog.cancel()
                         timing?.captureCallback = System.currentTimeMillis()
                         lifecycleScope.launch(Dispatchers.Main) {
-                            top.maary.darkbag.processor.HdrPlusRequestManager.onTaskStarted()
+                            if (isTaskStarted.compareAndSet(false, true)) {
+                                top.maary.darkbag.processor.HdrPlusRequestManager.onTaskStarted()
+                            }
                             resetBurstUi()
                             if (!isFrame1Trigger) {
                                 showProcessingAnimation()
