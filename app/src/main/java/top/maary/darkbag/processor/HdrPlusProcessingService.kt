@@ -155,6 +155,9 @@ class HdrPlusProcessingService : LifecycleService() {
                 HdrPlusBurst.releaseBuffer(req.megaBuffer)
             }
             buffersReleased = true
+            val stage1End = System.currentTimeMillis()
+            req.timing?.stage1ComputeDone = stage1End
+            req.timing?.jniDone = stage1End
 
             if (ret >= 0) {
                 // Handoff Stage 2 (Export & MediaStore Save) to exportProcessingDispatcher
@@ -244,7 +247,13 @@ class HdrPlusProcessingService : LifecycleService() {
                                     lensShadingRows = req.lensShadingRows,
                                     lensShadingCols = req.lensShadingCols
                                 )
-                                exportSuccessful = (exportRet == 0)
+                                 exportSuccessful = (exportRet == 0)
+                                req.timing?.stage2ExportDone = System.currentTimeMillis()
+                                req.timing?.recordStage2Metrics(
+                                    postMs = debugStats[2],
+                                    dngMs = debugStats[3],
+                                    jpgMs = debugStats[4]
+                                )
                             } finally {
                                 if (pfdJpg != null) {
                                     top.maary.darkbag.utils.ImageSaver.finalizeMediaStorePendingPfd(
@@ -289,7 +298,10 @@ class HdrPlusProcessingService : LifecycleService() {
                                     }
                                 }
                             }
-                            req.timing?.jniDone = System.currentTimeMillis()
+
+                            if (exportSuccessful && req.timing?.firstOutputWritten == 0L) {
+                                req.timing?.firstOutputWritten = System.currentTimeMillis()
+                            }
 
                             if (exportRet == 0) {
                                 val totalTime = System.currentTimeMillis() - start
@@ -311,7 +323,6 @@ class HdrPlusProcessingService : LifecycleService() {
                                     - JPEG Native Save: ${debugStats[4]}ms
                                 """.trimIndent()
                                 Log.i(TAG, report)
-                                top.maary.darkbag.utils.DebugLogManager.addLog(report)
 
                                 val baselineReport = top.maary.darkbag.processor.SensorCalibrationHelper.formatHardwareBaselineLog(
                                     cfaPattern = req.cfaPattern,
@@ -323,7 +334,7 @@ class HdrPlusProcessingService : LifecycleService() {
                                     digitalGain = req.digitalGain
                                 )
                                 Log.i(TAG, baselineReport)
-                                top.maary.darkbag.utils.DebugLogManager.addLog(baselineReport)
+                                top.maary.darkbag.utils.DebugLogManager.addDiagnosticLog(baselineReport)
 
                                 if (req.saveJpg || req.saveRaw) {
                                     val shouldSaveJpg = req.saveJpg
@@ -354,12 +365,14 @@ class HdrPlusProcessingService : LifecycleService() {
                                         )
                                     }
                                 }
-                                req.timing?.firstOutputWritten = System.currentTimeMillis()
+                                if (req.timing?.firstOutputWritten == 0L) {
+                                    req.timing?.firstOutputWritten = System.currentTimeMillis()
+                                }
 
                                 req.timing?.let { t ->
                                     val timingReport = t.buildSummaryReport()
                                     Log.i(TAG, timingReport)
-                                    top.maary.darkbag.utils.DebugLogManager.addLog(timingReport)
+                                    top.maary.darkbag.utils.DebugLogManager.addTimingReport(timingReport)
                                 }
                             } else {
                                 Log.e(TAG, "Processing failed for ${req.requestId}")
@@ -367,6 +380,7 @@ class HdrPlusProcessingService : LifecycleService() {
                         } catch (e: Exception) {
                             Log.e(TAG, "Exception during Stage 2 export for ${req.requestId}", e)
                         } finally {
+                            req.timing?.taskCompleted = System.currentTimeMillis()
                             exportSemaphore.release()
                             finishTaskAndCheckStopService(req.requestId)
                         }
