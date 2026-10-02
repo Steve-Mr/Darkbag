@@ -7,7 +7,11 @@ import top.maary.darkbag.models.CaptureMetadata
 
 object ColorProcessor {
     init {
-        System.loadLibrary("native-lib")
+        try {
+            System.loadLibrary("native-lib")
+        } catch (e: UnsatisfiedLinkError) {
+            // Expected during host unit tests
+        }
     }
 
     val backgroundSaveFlow = MutableSharedFlow<BackgroundSaveEvent>(extraBufferCapacity = 10)
@@ -288,6 +292,17 @@ object ColorProcessor {
         sessionHandle: Long,
         frameBuffer: ByteBuffer
     ): Boolean
+
+    external fun nativeComputeGcamFrameScore(
+        frameBuffer: ByteBuffer,
+        width: Int,
+        height: Int,
+        cfaPattern: Int,
+        noiseProfileS: Float,
+        noiseProfileO: Float,
+        exposureTimeNs: Long,
+        timeDeltaFromFirstNs: Long
+    ): Float
 
 
     external fun nativeFinishStreamingSession(

@@ -14,7 +14,9 @@ data class StreamingBurstFrame(
     val timestampNs: Long,
     val exposureTimeNs: Long,
     val rotationDegrees: Int,
-    val physicalId: String? = null
+    val physicalId: String? = null,
+    var noiseProfileS: Float = 0.0001f,
+    var noiseProfileO: Float = 0.00001f
 )
 
 data class StreamingBurstResult(
@@ -35,11 +37,13 @@ class HdrPlusStreamingBurst(
     val sessionHandle: Long,
     private val frameCount: Int,
     private val timing: StandardTimingTracker? = null,
+    val cfaPattern: Int = 0,
     private val onBurstComplete: (StreamingBurstResult) -> Unit,
     private val onBurstFailed: ((Throwable) -> Unit)? = null
 ) {
     companion object {
         private const val TAG = "HdrPlusStreamingBurst"
+        const val STEADY_SCORE_THRESHOLD = 25.0f
     }
 
     private class QueuedFrame(
@@ -58,28 +62,201 @@ class HdrPlusStreamingBurst(
 
     private val workerJob: Job = HdrPlusAccumulationDispatcher.scope.launch {
         try {
-            for (item in frameChannel) {
-                if (isAborted) {
-                    StreamingBufferPool.release(item.buffer)
-                    continue
-                }
-
-                try {
-                    val success = ColorProcessor.nativePushStreamingFrame(sessionHandle, item.buffer)
-                    if (!success) {
-                        Log.e(TAG, "Failed to push frame ${processedFrames.size} to native session $sessionHandle")
+            if (frameCount <= 1) {
+                for (item in frameChannel) {
+                    if (isAborted) {
+                        StreamingBufferPool.release(item.buffer)
+                        continue
                     }
-                    synchronized(lock) {
-                        processedFrames.add(item.frame)
-                    }
-                    Log.d(TAG, "Streaming frame ${processedFrames.size}/$frameCount accumulated")
-                } finally {
-                    // IMMEDIATELY return the frame buffer to the global pool for reuse!
-                    StreamingBufferPool.release(item.buffer)
-                }
 
-                if (processedFrames.size == frameCount) {
-                    break
+                    try {
+                        val success = ColorProcessor.nativePushStreamingFrame(sessionHandle, item.buffer)
+                        if (!success) {
+                            Log.e(TAG, "Failed to push frame 0 to native session $sessionHandle")
+                        }
+                        synchronized(lock) {
+                            processedFrames.add(item.frame)
+                        }
+                        Log.d(TAG, "Streaming frame 1/$frameCount accumulated (single frame)")
+                    } finally {
+                        StreamingBufferPool.release(item.buffer)
+                    }
+
+                    if (processedFrames.size == frameCount) {
+                        break
+                    }
+                }
+            } else {
+                // Multi-frame burst with GCam Adaptive Base Frame Anchoring
+                val item0 = frameChannel.receiveCatching().getOrNull()
+                if (item0 != null) {
+                    if (isAborted) {
+                        StreamingBufferPool.release(item0.buffer)
+                    } else {
+                        val score0 = ColorProcessor.nativeComputeGcamFrameScore(
+                            frameBuffer = item0.buffer,
+                            width = item0.frame.width,
+                            height = item0.frame.height,
+                            cfaPattern = cfaPattern,
+                            noiseProfileS = item0.frame.noiseProfileS,
+                            noiseProfileO = item0.frame.noiseProfileO,
+                            exposureTimeNs = item0.frame.exposureTimeNs,
+                            timeDeltaFromFirstNs = 0L
+                        )
+                        Log.d(TAG, "Frame 0 GCam score: $score0 (threshold: $STEADY_SCORE_THRESHOLD)")
+
+                        if (score0 >= STEADY_SCORE_THRESHOLD) {
+                            // FAST PATH: Tripod / steady hand detected. Push Frame 0 directly as reference frame.
+                            try {
+                                val success = ColorProcessor.nativePushStreamingFrame(sessionHandle, item0.buffer)
+                                if (!success) {
+                                    Log.e(TAG, "Failed to push frame 0 to native session $sessionHandle")
+                                }
+                                synchronized(lock) {
+                                    processedFrames.add(item0.frame)
+                                }
+                                Log.d(TAG, "Streaming frame 1/$frameCount accumulated (Fast Path steady base frame, score=$score0)")
+                            } finally {
+                                StreamingBufferPool.release(item0.buffer)
+                            }
+
+                            // Stream subsequent frames normally with zero buffering
+                            for (item in frameChannel) {
+                                if (isAborted) {
+                                    StreamingBufferPool.release(item.buffer)
+                                    continue
+                                }
+
+                                try {
+                                    val success = ColorProcessor.nativePushStreamingFrame(sessionHandle, item.buffer)
+                                    if (!success) {
+                                        Log.e(TAG, "Failed to push frame ${processedFrames.size} to native session $sessionHandle")
+                                    }
+                                    synchronized(lock) {
+                                        processedFrames.add(item.frame)
+                                    }
+                                    Log.d(TAG, "Streaming frame ${processedFrames.size}/$frameCount accumulated")
+                                } finally {
+                                    StreamingBufferPool.release(item.buffer)
+                                }
+
+                                if (processedFrames.size == frameCount) {
+                                    break
+                                }
+                            }
+                        } else {
+                            // FALLBACK ADAPTIVE PATH: Button press shake detected on Frame 0.
+                            // Buffer up to maxCandidates (Frames 0, 1, 2) and select highest-scoring candidate as reference.
+                            val maxCandidates = minOf(3, frameCount)
+                            val candidateItems = mutableListOf<QueuedFrame>()
+                            val candidateScores = mutableListOf<Float>()
+                            val releasedBuffers = mutableSetOf<ByteBuffer>()
+
+                            fun safeRelease(buf: ByteBuffer) {
+                                if (releasedBuffers.add(buf)) {
+                                    StreamingBufferPool.release(buf)
+                                }
+                            }
+
+                            candidateItems.add(item0)
+                            candidateScores.add(score0)
+                            val firstFrameTimestampNs = item0.frame.timestampNs
+
+                            try {
+                                while (candidateItems.size < maxCandidates) {
+                                    if (isAborted) break
+                                    val nextItem = frameChannel.receiveCatching().getOrNull() ?: break
+                                    if (isAborted) {
+                                        candidateItems.add(nextItem)
+                                        break
+                                    }
+                                    val timeDeltaNs = maxOf(0L, nextItem.frame.timestampNs - firstFrameTimestampNs)
+                                    val score = ColorProcessor.nativeComputeGcamFrameScore(
+                                        frameBuffer = nextItem.buffer,
+                                        width = nextItem.frame.width,
+                                        height = nextItem.frame.height,
+                                        cfaPattern = cfaPattern,
+                                        noiseProfileS = nextItem.frame.noiseProfileS,
+                                        noiseProfileO = nextItem.frame.noiseProfileO,
+                                        exposureTimeNs = nextItem.frame.exposureTimeNs,
+                                        timeDeltaFromFirstNs = timeDeltaNs
+                                    )
+                                    candidateItems.add(nextItem)
+                                    candidateScores.add(score)
+                                    Log.d(TAG, "Candidate ${candidateItems.size - 1} score: $score (delta: ${timeDeltaNs / 1_000_000}ms)")
+                                }
+
+                                if (!isAborted && candidateItems.isNotEmpty()) {
+                                    val bestIdx = candidateScores.indices.maxByOrNull { candidateScores[it] } ?: 0
+                                    Log.i(TAG, "Adaptive base frame selected candidate $bestIdx (score ${candidateScores[bestIdx]}) out of ${candidateItems.size} candidates (score0=$score0, threshold=$STEADY_SCORE_THRESHOLD)")
+
+                                    // Push best candidate first (becomes reference frame in HdrPlusStreamingSession)
+                                    val bestCand = candidateItems[bestIdx]
+                                    try {
+                                        val success = ColorProcessor.nativePushStreamingFrame(sessionHandle, bestCand.buffer)
+                                        if (!success) {
+                                            Log.e(TAG, "Failed to push best candidate frame $bestIdx to native session $sessionHandle")
+                                        }
+                                        synchronized(lock) {
+                                            processedFrames.add(bestCand.frame)
+                                        }
+                                        Log.d(TAG, "Streaming frame 1/$frameCount accumulated (Adaptive Best Base: candidate $bestIdx)")
+                                    } finally {
+                                        safeRelease(bestCand.buffer)
+                                    }
+
+                                    // Push remaining candidates in order
+                                    for ((idx, cand) in candidateItems.withIndex()) {
+                                        if (idx == bestIdx) continue
+                                        if (isAborted) break
+                                        try {
+                                            val success = ColorProcessor.nativePushStreamingFrame(sessionHandle, cand.buffer)
+                                            if (!success) {
+                                                Log.e(TAG, "Failed to push candidate frame $idx to native session $sessionHandle")
+                                            }
+                                            synchronized(lock) {
+                                                processedFrames.add(cand.frame)
+                                            }
+                                            Log.d(TAG, "Streaming frame ${processedFrames.size}/$frameCount accumulated (Candidate $idx)")
+                                        } finally {
+                                            safeRelease(cand.buffer)
+                                        }
+                                    }
+                                }
+                            } finally {
+                                for (cand in candidateItems) {
+                                    safeRelease(cand.buffer)
+                                }
+                            }
+
+                            // Continue streaming any remaining frames normally
+                            if (!isAborted && processedFrames.size < frameCount) {
+                                for (item in frameChannel) {
+                                    if (isAborted) {
+                                        StreamingBufferPool.release(item.buffer)
+                                        continue
+                                    }
+
+                                    try {
+                                        val success = ColorProcessor.nativePushStreamingFrame(sessionHandle, item.buffer)
+                                        if (!success) {
+                                            Log.e(TAG, "Failed to push frame ${processedFrames.size} to native session $sessionHandle")
+                                        }
+                                        synchronized(lock) {
+                                            processedFrames.add(item.frame)
+                                        }
+                                        Log.d(TAG, "Streaming frame ${processedFrames.size}/$frameCount accumulated")
+                                    } finally {
+                                        StreamingBufferPool.release(item.buffer)
+                                    }
+
+                                    if (processedFrames.size == frameCount) {
+                                        break
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
@@ -124,7 +301,9 @@ class HdrPlusStreamingBurst(
         timestampNs: Long,
         exposureTimeNs: Long,
         rotationDegrees: Int,
-        physicalId: String? = null
+        physicalId: String? = null,
+        noiseProfileS: Float = 0.0001f,
+        noiseProfileO: Float = 0.00001f
     ): Boolean {
         synchronized(lock) {
             if (isCompleted || isAborted || enqueuedCount >= frameCount) {
@@ -167,7 +346,9 @@ class HdrPlusStreamingBurst(
                 timestampNs = timestampNs,
                 exposureTimeNs = exposureTimeNs,
                 rotationDegrees = rotationDegrees,
-                physicalId = physicalId
+                physicalId = physicalId,
+                noiseProfileS = noiseProfileS,
+                noiseProfileO = noiseProfileO
             )
 
             val sendResult = frameChannel.trySend(QueuedFrame(cleanBuffer, frame))

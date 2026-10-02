@@ -4702,6 +4702,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 sessionHandle = sessionHandle,
                 frameCount = burstSize,
                 timing = timing,
+                cfaPattern = cfa,
                 onBurstComplete = { burstResult ->
 
                     processStreamingHdrPlusBurst(
@@ -4804,6 +4805,16 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         captureResults.entries.firstOrNull { abs(it.key - frameTs) < 5_000_000L }?.value
                     }?.get(android.hardware.camera2.CaptureResult.SENSOR_EXPOSURE_TIME) ?: burstTime
 
+                    val noisePair = synchronized(captureResults) {
+                        captureResults.entries.firstOrNull { abs(it.key - frameTs) < 5_000_000L }?.value
+                    }?.get(android.hardware.camera2.CaptureResult.SENSOR_NOISE_PROFILE)
+                    val npS = noisePair?.firstOrNull()?.first?.toFloat()
+                        ?: noiseProfileFlat?.getOrNull(0)?.toFloat()
+                        ?: 0.0001f
+                    val npO = noisePair?.firstOrNull()?.second?.toFloat()
+                        ?: noiseProfileFlat?.getOrNull(1)?.toFloat()
+                        ?: 0.00001f
+
                     frameAccepted = burstHelper.addFrame(
                         buffer = plane.buffer,
                         width = image.width,
@@ -4813,7 +4824,9 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                         timestampNs = image.timestamp,
                         exposureTimeNs = exposureTimeNs,
                         rotationDegrees = burstSensorOrientation,
-                        physicalId = burstLensId
+                        physicalId = burstLensId,
+                        noiseProfileS = npS,
+                        noiseProfileO = npO
                     )
                 } finally {
                     image.close() // Instant hardware buffer recycling!

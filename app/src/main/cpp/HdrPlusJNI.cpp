@@ -1059,6 +1059,96 @@ Java_top_maary_darkbag_processor_ColorProcessor_nativePushStreamingFrame(
     return success ? JNI_TRUE : JNI_FALSE;
 }
 
+extern "C" JNIEXPORT jfloat JNICALL
+Java_top_maary_darkbag_processor_ColorProcessor_nativeComputeGcamFrameScore(
+    JNIEnv* env, jobject /* this */,
+    jobject frameBuffer,
+    jint width,
+    jint height,
+    jint cfaPattern,
+    jfloat noiseProfileS,
+    jfloat noiseProfileO,
+    jlong /* exposureTimeNs */,
+    jlong timeDeltaFromFirstNs
+) {
+    if (!frameBuffer) {
+        LOGE("nativeComputeGcamFrameScore: frameBuffer is null");
+        return 0.0f;
+    }
+    const uint16_t* rawData = static_cast<const uint16_t*>(env->GetDirectBufferAddress(frameBuffer));
+    if (!rawData) {
+        LOGE("nativeComputeGcamFrameScore: failed to get direct buffer address");
+        return 0.0f;
+    }
+    jlong capacity = env->GetDirectBufferCapacity(frameBuffer);
+    size_t expectedBytes = static_cast<size_t>(width) * height * sizeof(uint16_t);
+    if (capacity < static_cast<jlong>(expectedBytes)) {
+        LOGE("nativeComputeGcamFrameScore: buffer capacity %lld < expected %zu", (long long)capacity, expectedBytes);
+        return 0.0f;
+    }
+    if (width < 8 || height < 8) {
+        LOGE("nativeComputeGcamFrameScore: dimensions too small (%dx%d)", width, height);
+        return 0.0f;
+    }
+
+    int regionW = std::min(512, width - 4);
+    int regionH = std::min(512, height - 4);
+    if (regionW < 4 || regionH < 4) {
+        return 0.0f;
+    }
+
+    int startX = (width - regionW) / 2;
+    int endX = startX + regionW;
+    int startY = (height - regionH) / 2;
+    int endY = startY + regionH;
+
+    if (startX < 2) startX = 2;
+    if (endX > width - 2) endX = width - 2;
+    if (startY < 2) startY = 2;
+    if (endY > height - 2) endY = height - 2;
+
+    // Align startY to an even row
+    if (startY % 2 != 0) {
+        startY++;
+    }
+
+    // Bayer Green channel phase:
+    // RGGB (0): row 0 is (R, Gr) => Green at x odd (parity 1)
+    // GRBG (1): row 0 is (Gr, R) => Green at x even (parity 0)
+    // GBRG (2): row 0 is (Gb, B) => Green at x even (parity 0)
+    // BGGR (3): row 0 is (B, Gb) => Green at x odd (parity 1)
+    int targetXParity = (cfaPattern == 1 || cfaPattern == 2) ? 0 : 1;
+    if ((startX % 2) != targetXParity) {
+        startX++;
+    }
+
+    constexpr int kStride = 2;
+    double sumEnergy = 0.0;
+    int64_t sampleCount = 0;
+
+    for (int y = startY; y < endY; y += kStride) {
+        const uint16_t* rowCenter = rawData + static_cast<size_t>(y) * width;
+        const uint16_t* rowUp = rawData + static_cast<size_t>(y - 2) * width;
+        const uint16_t* rowDown = rawData + static_cast<size_t>(y + 2) * width;
+
+        for (int x = startX; x < endX; x += kStride) {
+            float g = static_cast<float>(rowCenter[x]);
+            float lap = 4.0f * g - static_cast<float>(rowCenter[x - 2])
+                                 - static_cast<float>(rowCenter[x + 2])
+                                 - static_cast<float>(rowUp[x])
+                                 - static_cast<float>(rowDown[x]);
+            float var = std::max(16.0f, noiseProfileS * g + noiseProfileO);
+            sumEnergy += (lap * lap) / var;
+            sampleCount++;
+        }
+    }
+
+    float sharpness = (sampleCount > 0) ? static_cast<float>(sumEnergy / sampleCount) : 0.0f;
+    float timePenalty = 0.5f * (static_cast<float>(std::max(0LL, static_cast<long long>(timeDeltaFromFirstNs))) / 100000000.0f);
+    float finalScore = std::max(0.0f, sharpness - timePenalty);
+    return finalScore;
+}
+
 
 extern "C" JNIEXPORT jint JNICALL
 Java_top_maary_darkbag_processor_ColorProcessor_nativeFinishStreamingSession(
