@@ -11,7 +11,7 @@ import java.util.concurrent.ConcurrentLinkedQueue
  */
 object StreamingBufferPool {
     private const val TAG = "StreamingBufferPool"
-    private const val MAX_CACHED_BUFFERS = 4 // Up to 4 frames (~96MB max), bounds memory while covering burst accumulation
+    private const val MAX_CACHED_BUFFERS = 8 // Up to 8 frames (~192MB max), matches burst size for zero-allocation recycling
     private val pool = ConcurrentLinkedQueue<ByteBuffer>()
 
     @Synchronized

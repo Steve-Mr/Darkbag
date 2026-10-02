@@ -52,7 +52,7 @@ class HdrPlusStreamingBurst(
     )
 
     private val lock = Any()
-    private val frameChannel = Channel<QueuedFrame>(capacity = 4)
+    private val frameChannel = Channel<QueuedFrame>(capacity = maxOf(8, frameCount))
 
     @Volatile private var enqueuedCount = 0
     @Volatile private var isCompleted = false

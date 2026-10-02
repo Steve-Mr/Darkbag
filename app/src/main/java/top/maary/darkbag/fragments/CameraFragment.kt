@@ -4755,8 +4755,13 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
 
             val burstRequests = mutableListOf<android.hardware.camera2.CaptureRequest>()
             for (i in 0 until burstSize) {
-                val request = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_STILL_CAPTURE)
+                val request = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_PREVIEW)
                 request.addTarget(reader.surface)
+                camera2PreviewSurface?.let { previewSurf ->
+                    if (previewSurf.isValid) {
+                        request.addTarget(previewSurf)
+                    }
+                }
                 request.set(android.hardware.camera2.CaptureRequest.JPEG_ORIENTATION, combinedOrientation)
 
                 applyManualSettingsToRequest(request, true)
@@ -4764,6 +4769,7 @@ Log.d(TAG, "Metadata: WL=$whiteLevel, BL=${blackLevelPattern.joinToString()}, WB
                 request.set(android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE, android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE_OFF)
                 request.set(android.hardware.camera2.CaptureRequest.SENSOR_SENSITIVITY, burstIso)
                 request.set(android.hardware.camera2.CaptureRequest.SENSOR_EXPOSURE_TIME, burstTime)
+                request.set(android.hardware.camera2.CaptureRequest.CONTROL_AWB_LOCK, true)
 
                 burstRequests.add(request.build())
             }
