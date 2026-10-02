@@ -1,15 +1,34 @@
 package top.maary.darkbag.models
 
+import java.text.SimpleDateFormat
+import java.util.Locale
+
+enum class CaptureTimingMode(val displayName: String) {
+    HDR_BURST("HDR+ Burst"),
+    SINGLE_RAW("Single RAW"),
+    SINGLE_JPEG("Single JPEG"),
+    MULTI_CAMERA("Multi-Camera"),
+    HALF_FRAME("Half-Frame")
+}
+
 data class StandardTimingTracker(
     val shutterClick: Long,
-    var firstFrameCaptured: Long = 0,
-    var lastFrameCaptured: Long = 0,
-    var captureCallback: Long = 0,
-    var accumulateDone: Long = 0,
-    var enqueued: Long = 0,
-    var processingStart: Long = 0,
-    var jniDone: Long = 0,
-    var firstOutputWritten: Long = 0
+    var captureMode: CaptureTimingMode = CaptureTimingMode.HDR_BURST,
+    @Volatile var firstFrameCaptured: Long = 0,
+    @Volatile var lastFrameCaptured: Long = 0,
+    @Volatile var captureCallback: Long = 0,
+    @Volatile var shutterReady: Long = 0,
+    @Volatile var accumulateDone: Long = 0,
+    @Volatile var enqueued: Long = 0,
+    @Volatile var processingStart: Long = 0,
+    @Volatile var stage1ComputeDone: Long = 0,
+    @Volatile var stage2ExportDone: Long = 0,
+    @Volatile var jniDone: Long = 0, // Retained for backwards compatibility
+    @Volatile var firstOutputWritten: Long = 0,
+    @Volatile var taskCompleted: Long = 0,
+    @Volatile var nativePostProcessMs: Long = 0,
+    @Volatile var nativeDngEncodeMs: Long = 0,
+    @Volatile var nativeJpegEncodeMs: Long = 0
 ) {
     val frameArrivalTimes = mutableListOf<Long>()
 
@@ -23,34 +42,127 @@ data class StandardTimingTracker(
         }
     }
 
+    fun recordShutterReady(timestampMs: Long = System.currentTimeMillis()) {
+        if (shutterReady == 0L) {
+            shutterReady = timestampMs
+        }
+    }
+
+    fun recordStage2Metrics(postMs: Long, dngMs: Long, jpgMs: Long) {
+        nativePostProcessMs = postMs
+        nativeDngEncodeMs = dngMs
+        nativeJpegEncodeMs = jpgMs
+    }
+
     fun buildSummaryReport(): String {
-        val total = if (firstOutputWritten > 0) "${firstOutputWritten - shutterClick}ms" else "in progress"
-        val shutterToFirst = if (firstFrameCaptured > 0) "${firstFrameCaptured - shutterClick}ms" else "N/A"
-        val captureCadence = synchronized(frameArrivalTimes) {
+        val timeStr = SimpleDateFormat("HH:mm:ss.SSS", Locale.US).format(shutterClick)
+        val frameCount = synchronized(frameArrivalTimes) { frameArrivalTimes.size }
+        val modeHeader = if (frameCount > 1) {
+            "${captureMode.displayName} ($frameCount frames)"
+        } else {
+            captureMode.displayName
+        }
+
+        // T1: Shutter to UI Ready (Shutter Lag / UI Recovery)
+        val t1 = if (shutterReady > 0 && shutterClick > 0) {
+            "${(shutterReady - shutterClick).coerceAtLeast(0)}ms"
+        } else "N/A"
+
+        // T2: Shutter to First Output in MediaStore (Time to Output)
+        val t2 = if (firstOutputWritten > 0 && shutterClick > 0) {
+            "${(firstOutputWritten - shutterClick).coerceAtLeast(0)}ms"
+        } else "in progress"
+
+        // T3: Shutter to Task Completed (Full End-to-End Throughput)
+        val t3 = if (taskCompleted > 0 && shutterClick > 0) {
+            "${(taskCompleted - shutterClick).coerceAtLeast(0)}ms"
+        } else if (firstOutputWritten > 0 && shutterClick > 0) {
+            "${(firstOutputWritten - shutterClick).coerceAtLeast(0)}ms"
+        } else "in progress"
+
+        // Stage 1 Sensor details
+        val shutterToFirst = if (firstFrameCaptured > 0 && shutterClick > 0) {
+            "${(firstFrameCaptured - shutterClick).coerceAtLeast(0)}ms"
+        } else "N/A"
+
+        val cadenceStr = synchronized(frameArrivalTimes) {
             if (frameArrivalTimes.size > 1) {
-                val intervals = frameArrivalTimes.zipWithNext { a, b -> b - a }
-                val totalCap = lastFrameCaptured - firstFrameCaptured
-                "intervals: ${intervals.joinToString(", ")}ms (Total: ${totalCap}ms for ${frameArrivalTimes.size} frames)"
+                val intervals = frameArrivalTimes.zipWithNext { a, b -> (b - a).coerceAtLeast(0) }
+                val totalCap = (lastFrameCaptured - firstFrameCaptured).coerceAtLeast(0)
+                "intervals: [${intervals.joinToString(", ")}]ms (Total: ${totalCap}ms)"
             } else if (frameArrivalTimes.size == 1) {
-                "1 frame"
+                "1 frame received"
             } else "N/A"
         }
-        val hwCaptureTotal = if (captureCallback > 0) "${captureCallback - shutterClick}ms" else "N/A"
-        val halideDuration = if (accumulateDone > 0 && firstFrameCaptured > 0) "${accumulateDone - firstFrameCaptured}ms" else "N/A"
-        val queueWait = if (processingStart > 0 && enqueued > 0) "${processingStart - enqueued}ms" else "N/A"
-        val stage1Cost = if (jniDone > 0 && processingStart > 0) "${jniDone - processingStart}ms" else "N/A"
-        val diskSaveCost = if (firstOutputWritten > 0 && jniDone > 0) "${firstOutputWritten - jniDone}ms" else "N/A"
+
+        val accumulationStr = if (accumulateDone > 0 && firstFrameCaptured > 0) {
+            "${(accumulateDone - firstFrameCaptured).coerceAtLeast(0)}ms"
+        } else null
+
+        // Stage 2 Queue
+        val queueWait = if (processingStart > 0 && enqueued > 0) {
+            "${(processingStart - enqueued).coerceAtLeast(0)}ms"
+        } else "N/A"
+
+        // Stage 3 Compute
+        val effectiveStage1End = if (stage1ComputeDone > 0) stage1ComputeDone else jniDone
+        val stage1Cost = if (effectiveStage1End > 0 && processingStart > 0) {
+            "${(effectiveStage1End - processingStart).coerceAtLeast(0)}ms"
+        } else "N/A"
+
+        // Stage 4 Export & Disk Save
+        val exportSection = StringBuilder()
+        val stage2TotalMs = if (firstOutputWritten > 0 && effectiveStage1End > 0) {
+            (firstOutputWritten - effectiveStage1End).coerceAtLeast(0)
+        } else -1L
+
+        val stage2Header = if (stage2TotalMs >= 0) "${stage2TotalMs}ms" else "in progress"
+        exportSection.append("  [4] Stage 2 导出落盘 (总计: $stage2Header):\n")
+
+        val hasNativeBreakdown = nativePostProcessMs > 0 || nativeDngEncodeMs > 0 || nativeJpegEncodeMs > 0
+        if (hasNativeBreakdown) {
+            if (nativePostProcessMs > 0) exportSection.append("      - C++ ColorPipe: ${nativePostProcessMs}ms\n")
+            if (nativeDngEncodeMs > 0) exportSection.append("      - DNG 编码:     ${nativeDngEncodeMs}ms\n")
+            if (nativeJpegEncodeMs > 0) exportSection.append("      - JPEG 编码:    ${nativeJpegEncodeMs}ms\n")
+            val nativeSum = nativePostProcessMs + nativeDngEncodeMs + nativeJpegEncodeMs
+            val ioTime = (stage2TotalMs - nativeSum).coerceAtLeast(0)
+            if (stage2TotalMs > 0 && ioTime > 0) {
+                exportSection.append("      - MediaStore 写库/EXIF: ${ioTime}ms\n")
+            }
+        } else if (stage2ExportDone > 0 && effectiveStage1End > 0) {
+            val exportMs = (stage2ExportDone - effectiveStage1End).coerceAtLeast(0)
+            exportSection.append("      - Native 导出:  ${exportMs}ms\n")
+            if (firstOutputWritten > 0) {
+                val ioMs = (firstOutputWritten - stage2ExportDone).coerceAtLeast(0)
+                exportSection.append("      - MediaStore 写库: ${ioMs}ms\n")
+            }
+        } else {
+            exportSection.append("      - 导出与写库: $stage2Header\n")
+        }
+
+        val sensorSection = StringBuilder()
+        sensorSection.append("  [1] 传感器捕获:\n")
+        sensorSection.append("      - 首帧延迟: $shutterToFirst\n")
+        if (frameCount > 1) {
+            sensorSection.append("      - 连拍分布: $cadenceStr\n")
+        }
+        if (accumulationStr != null) {
+            sensorSection.append("      - 流式累加完成: $accumulationStr\n")
+        }
 
         return """
-            [HDR+ Lifecycle Timing Report]
-            Total Shutter-to-Output: $total
-            - Shutter to First Frame: $shutterToFirst
-            - Sensor Capture Cadence: $captureCadence
-            - Shutter to HW Capture Complete: $hwCaptureTotal
-            - Halide Streaming Accumulation: $halideDuration
-            - Queue Wait: $queueWait
-            - Native Stage 1 (Demosaic & Matrix): $stage1Cost
-            - Stage 2 Disk Save (DNG & MediaStore): $diskSaveCost
+========================================
+[$modeHeader] $timeStr
+========================================
+⚡ 核心延迟指标:
+  • T1 快门就绪延迟: $t1
+  • T2 首张出片耗时: $t2
+  • T3 全流程总吞吐: $t3
+
+📊 阶段耗时分解:
+$sensorSection  [2] 并发排队等待: $queueWait
+  [3] Stage 1 计算 (管线解算/融合): $stage1Cost
+$exportSection========================================
         """.trimIndent()
     }
 }
