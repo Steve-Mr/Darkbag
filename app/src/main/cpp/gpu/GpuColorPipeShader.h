@@ -270,22 +270,22 @@ float applyHswb(float v) {
 
 void main() {
     // 1. Fetch 16-bit linear sensor RGB from planar textures
-    float r = float(texture(uTexR, vTexCoord).r) / 65535.0;
-    float g = float(texture(uTexG, vTexCoord).g) / 65535.0;
-    float b = float(texture(uTexB, vTexCoord).b) / 65535.0;
+    float rawR = float(texture(uTexR, vTexCoord).r) / 65535.0;
+    float rawG = float(texture(uTexG, vTexCoord).g) / 65535.0;
+    float rawB = float(texture(uTexB, vTexCoord).b) / 65535.0;
+    float rawMax = max(rawR, max(rawG, rawB));
 
     // 2. White Balance Gains & Digital Gain
-    r *= uWbGain.r * uDigitalGain;
-    g *= uWbGain.g * uDigitalGain;
-    b *= uWbGain.b * uDigitalGain;
+    float r = rawR * uWbGain.r * uDigitalGain;
+    float g = rawG * uWbGain.g * uDigitalGain;
+    float b = rawB * uWbGain.b * uDigitalGain;
 
     // 3. Combined Color Matrix Transformation (Sensor -> Target Wide Gamut / Rec709)
     vec3 color = max(vec3(0.0), uColorTransform * vec3(r, g, b));
 
-    // Highlight desaturation protection to prevent magenta/pink clipping fringes
-    float maxSensorVal = max(r, max(g, b));
-    if (maxSensorVal > 0.90) {
-        float blendFactor = smoothstep(0.90, 1.0, maxSensorVal);
+    // Highlight desaturation protection for blown sensor pixels to prevent magenta/pink clipping fringes
+    if (rawMax > 0.98) {
+        float blendFactor = smoothstep(0.98, 1.0, rawMax);
         float peakLuma = max(color.r, max(color.g, color.b));
         color = mix(color, vec3(peakLuma), blendFactor);
     }

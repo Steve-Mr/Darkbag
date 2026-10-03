@@ -213,6 +213,9 @@ bool GpuColorPipeEngine::processAndSaveImage(
         glUniform1i(u.uHasLut, 1);
         glUniform1f(u.uLutSize, static_cast<float>(lutSize));
     } else {
+        glActiveTexture(GL_TEXTURE3);
+        glBindTexture(GL_TEXTURE_3D, 0);
+        glUniform1i(u.uLut3D, 3);
         glUniform1i(u.uHasLut, 0);
         glUniform1f(u.uLutSize, 0.0f);
     }
@@ -244,14 +247,8 @@ bool GpuColorPipeEngine::processAndSaveImage(
     Matrix3x3 M_srgb_to_target = multiply(M_XYZ_to_Target, M_sRGB_D65_to_XYZ);
     Matrix3x3 M_final = multiply(M_srgb_to_target, effective_CCM);
 
-    // Convert row-major to column-major order for glUniformMatrix3fv
-    float colMajorTransform[9];
-    for (int r = 0; r < 3; ++r) {
-        for (int c = 0; c < 3; ++c) {
-            colMajorTransform[c * 3 + r] = M_final.m[r * 3 + c];
-        }
-    }
-    glUniformMatrix3fv(u.uColorTransform, 1, GL_FALSE, colMajorTransform);
+    // Pass row-major matrix directly to glUniformMatrix3fv to match GLSL row dot-product evaluation
+    glUniformMatrix3fv(u.uColorTransform, 1, GL_FALSE, M_final.m);
 
     // 7. White balance gains & combined exposure / digital gain
     float wbR = 1.0f, wbG = 1.0f, wbB = 1.0f;

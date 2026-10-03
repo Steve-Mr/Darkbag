@@ -13,10 +13,10 @@ namespace {
 
 const float kQuadVertices[] = {
     // Pos(x, y),   Tex(u, v)
-    -1.0f, -1.0f,   0.0f, 1.0f,
-     1.0f, -1.0f,   1.0f, 1.0f,
-    -1.0f,  1.0f,   0.0f, 0.0f,
-     1.0f,  1.0f,   1.0f, 0.0f,
+    -1.0f, -1.0f,   0.0f, 0.0f,
+     1.0f, -1.0f,   1.0f, 0.0f,
+    -1.0f,  1.0f,   0.0f, 1.0f,
+     1.0f,  1.0f,   1.0f, 1.0f,
 };
 
 } // namespace
