@@ -247,8 +247,8 @@ bool GpuColorPipeEngine::processAndSaveImage(
     Matrix3x3 M_srgb_to_target = multiply(M_XYZ_to_Target, M_sRGB_D65_to_XYZ);
     Matrix3x3 M_final = multiply(M_srgb_to_target, effective_CCM);
 
-    // Pass row-major matrix directly to glUniformMatrix3fv to match GLSL row dot-product evaluation
-    glUniformMatrix3fv(u.uColorTransform, 1, GL_FALSE, M_final.m);
+    // In GLES 3.0, pass GL_TRUE for transpose to convert C++ row-major Matrix3x3 to GLSL column-major mat3
+    glUniformMatrix3fv(u.uColorTransform, 1, GL_TRUE, M_final.m);
 
     // 7. White balance gains & combined exposure / digital gain
     float wbR = 1.0f, wbG = 1.0f, wbB = 1.0f;

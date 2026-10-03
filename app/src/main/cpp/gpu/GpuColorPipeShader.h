@@ -270,9 +270,10 @@ float applyHswb(float v) {
 
 void main() {
     // 1. Fetch 16-bit linear sensor RGB from planar textures
+    // Note: All planar textures are GL_R16UI (single-channel red integer), so each channel data resides in .r
     float rawR = float(texture(uTexR, vTexCoord).r) / 65535.0;
-    float rawG = float(texture(uTexG, vTexCoord).g) / 65535.0;
-    float rawB = float(texture(uTexB, vTexCoord).b) / 65535.0;
+    float rawG = float(texture(uTexG, vTexCoord).r) / 65535.0;
+    float rawB = float(texture(uTexB, vTexCoord).r) / 65535.0;
     float rawMax = max(rawR, max(rawG, rawB));
 
     // 2. White Balance Gains & Digital Gain
