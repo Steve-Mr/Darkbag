@@ -38,6 +38,11 @@
 #define LOGW(...) __android_log_print(ANDROID_LOG_WARN, TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 
+extern "C" {
+__attribute__((weak)) void halide_profiler_report(void* /* user_context */) {}
+__attribute__((weak)) void halide_profiler_reset() {}
+}
+
 using namespace Halide::Runtime;
 
 namespace {
@@ -571,7 +576,15 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
     jlong jpgMs = 0;
 
     bool dngOk = true;
-    if (outDngFd >= 0 || dng_path_cstr) {
+    bool saveOk = true;
+    jlong colorPipeMs = 0;
+    jlong jpegEncodeMs = 0;
+    std::future<bool> dngFuture;
+
+    const bool shouldExportDng = (outDngFd >= 0 || dng_path_cstr);
+    const bool shouldExportJpg = (outJpgFd >= 0 || jpg_path_cstr);
+
+    auto doDngExport = [&]() -> bool {
         LOGD("Exporting DNG to %s (outDngFd=%d, mode=%d, rawOutputType=%d)", dng_path_cstr ? dng_path_cstr : "FD", outDngFd, dngCompressionMode, rawOutputType);
         auto dngStart = std::chrono::high_resolution_clock::now();
         float baselineExposure = (digitalGain > 0.0f) ? std::log2(digitalGain) : 0.0f;
@@ -607,7 +620,7 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
             effectiveWhiteLevel = kMax16BitValue;
         }
 
-        dngOk = write_dng(
+        bool ok = write_dng(
             dng_path_cstr, width, height, dngRawData,
             dngStrideX, dngStrideY, dngStrideC,
             effectiveWhiteLevel,
@@ -618,12 +631,19 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
             noise_ptr, active_area_ptr, lens_shading_ptr, lensShadingRows, lensShadingCols
         );
         dngMs = (jlong)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - dngStart).count();
+        return ok;
+    };
+
+    if (shouldExportDng) {
+        if (shouldExportJpg) {
+            // Concurrently write DNG in background thread while main thread executes ColorPipe + JPEG
+            dngFuture = std::async(std::launch::async, doDngExport);
+        } else {
+            dngOk = doDngExport();
+        }
     }
 
-    bool saveOk = true;
-    jlong colorPipeMs = 0;
-    jlong jpegEncodeMs = 0;
-    if (outJpgFd >= 0 || jpg_path_cstr) {
+    if (shouldExportJpg) {
         LOGD("Exporting JPG: JPG=%s (outJpgFd=%d)", jpg_path_cstr ? jpg_path_cstr : "FD", outJpgFd);
         auto jpgStart = std::chrono::high_resolution_clock::now();
         float effectiveZoom = (sharedResult && sharedResult->isZoomCropped) ? 1.0f : zoomFactor;
@@ -640,6 +660,10 @@ Java_top_maary_darkbag_processor_ColorProcessor_exportHdrPlus(
         if (jpegEncodeMs == 0 && jpgMs > colorPipeMs) {
             jpegEncodeMs = jpgMs - colorPipeMs;
         }
+    }
+
+    if (dngFuture.valid()) {
+        dngOk = dngFuture.get();
     }
 
     auto exportTotalMs = (jlong)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - exportStart).count();

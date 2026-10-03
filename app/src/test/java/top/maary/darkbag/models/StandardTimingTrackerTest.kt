@@ -141,4 +141,22 @@ class StandardTimingTrackerTest {
         assertTrue(report.contains("Stage 1 计算 (管线解算/融合): 400ms"))
         assertTrue(report.contains("Stage 2 导出落盘 (总计: 300ms)"))
     }
+
+    @Test
+    fun testBuildSummaryReport_concurrentExportIoTime() {
+        val timing = StandardTimingTracker(shutterClick = 4000L)
+        timing.processingStart = 4100L
+        timing.stage1ComputeDone = 4500L
+        timing.stage2ExportDone = 6550L
+        timing.firstOutputWritten = 6620L // stage2TotalMs = 2120ms
+        // DNG = 1000ms, ColorPipe = 2000ms, JPEG = 50ms (concurrently run in ~2050ms)
+        timing.recordStage2Metrics(postMs = 2000L, dngMs = 1000L, jpgMs = 50L)
+
+        val report = timing.buildSummaryReport()
+        assertTrue(report.contains("Stage 2 导出落盘 (总计: 2120ms)"))
+        assertTrue(report.contains("C++ ColorPipe (调色/LUT): 2000ms"))
+        assertTrue(report.contains("DNG 编码:     1000ms"))
+        assertTrue(report.contains("JPEG 压缩:    50ms"))
+        assertTrue(report.contains("MediaStore 写库/EXIF: 70ms"))
+    }
 }

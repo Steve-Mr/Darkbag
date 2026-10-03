@@ -193,7 +193,9 @@ data class StandardTimingTracker(
             if (nativeDngEncodeMs > 0) exportSection.append("      - DNG 编码:     ${nativeDngEncodeMs}ms\n")
             if (nativeJpegEncodeMs > 0) exportSection.append("      - JPEG 压缩:    ${nativeJpegEncodeMs}ms\n")
             val nativeSum = nativePostProcessMs + nativeDngEncodeMs + nativeJpegEncodeMs
-            val ioTime = (stage2TotalMs - nativeSum).coerceAtLeast(0)
+            val maxJob = maxOf(nativeDngEncodeMs, nativePostProcessMs + nativeJpegEncodeMs)
+            val nativeWallClock = if (stage2TotalMs >= nativeSum) nativeSum else maxJob
+            val ioTime = (stage2TotalMs - nativeWallClock).coerceAtLeast(0)
             if (stage2TotalMs > 0 && ioTime > 0) {
                 exportSection.append("      - MediaStore 写库/EXIF: ${ioTime}ms\n")
             }

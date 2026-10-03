@@ -276,48 +276,52 @@ int HdrPlusStreamingSession::finish(
 
     auto fusionStart = std::chrono::high_resolution_clock::now();
 
-    Halide::Runtime::Buffer<uint16_t> inputBuf(m_refFrame.data(), m_width, m_height, 1);
     outBayerBuf = Halide::Runtime::Buffer<uint16_t>(outSharedResult->bayerBuf.data(), m_width, m_height);
     outRgbBuf = Halide::Runtime::Buffer<uint16_t>(outSharedResult->rgbBuf.data(), m_width, m_height, 3);
-    Halide::Runtime::Buffer<float> ccmHalideBuf(m_ccm.data(), 3, 3);
 
-    int halideCfa = 1;
-    switch (m_cfaPattern) {
-        case 0: halideCfa = 1; break; // RGGB
-        case 1: halideCfa = 2; break; // GRBG
-        case 2: halideCfa = 4; break; // GBRG
-        case 3: halideCfa = 3; break; // BGGR
-        default: halideCfa = 1; break;
-    }
+    if (effectiveMode == 3) {
+        // Classic Wiener mode: requires Halide single pipeline with Malvar 5x5 demosaic
+        Halide::Runtime::Buffer<uint16_t> inputBuf(m_refFrame.data(), m_width, m_height, 1);
+        Halide::Runtime::Buffer<float> ccmHalideBuf(m_ccm.data(), 3, 3);
 
-    Halide::Runtime::Buffer<float> lscMapBuf;
-    std::vector<float> dummyLsc = {1.0f, 1.0f, 1.0f, 1.0f};
-    if (m_lensShadingMap.empty() || m_lensShadingRows <= 0 || m_lensShadingCols <= 0) {
-        lscMapBuf = Halide::Runtime::Buffer<float>(dummyLsc.data(), 1, 1, 4);
+        int halideCfa = 1;
+        switch (m_cfaPattern) {
+            case 0: halideCfa = 1; break; // RGGB
+            case 1: halideCfa = 2; break; // GRBG
+            case 2: halideCfa = 4; break; // GBRG
+            case 3: halideCfa = 3; break; // BGGR
+            default: halideCfa = 1; break;
+        }
+
+        Halide::Runtime::Buffer<float> lscMapBuf;
+        std::vector<float> dummyLsc = {1.0f, 1.0f, 1.0f, 1.0f};
+        if (m_lensShadingMap.empty() || m_lensShadingRows <= 0 || m_lensShadingCols <= 0) {
+            lscMapBuf = Halide::Runtime::Buffer<float>(dummyLsc.data(), 1, 1, 4);
+        } else {
+            lscMapBuf = Halide::Runtime::Buffer<float>(const_cast<float*>(m_lensShadingMap.data()), m_lensShadingCols, m_lensShadingRows, 4);
+        }
+
+        int halide_res = hdrplus_single_pipeline(
+            inputBuf,
+            m_bl_r, m_bl_g0, m_bl_g1, m_bl_b,
+            static_cast<uint16_t>(m_whiteLevel),
+            m_wb_r, m_wb_g0, m_wb_g1, m_wb_b,
+            halideCfa,
+            ccmHalideBuf,
+            lscMapBuf,
+            1.0f, 1.0f,
+            outRgbBuf,
+            outBayerBuf
+        );
+
+        if (halide_res != 0) {
+            LOGE("hdrplus_single_pipeline failed in streaming finish: %d", halide_res);
+            return halide_res;
+        }
+        outSharedResult->isWhiteBalanceApplied = true;
     } else {
-        lscMapBuf = Halide::Runtime::Buffer<float>(const_cast<float*>(m_lensShadingMap.data()), m_lensShadingCols, m_lensShadingRows, 4);
-    }
-
-    int halide_res = hdrplus_single_pipeline(
-        inputBuf,
-        m_bl_r, m_bl_g0, m_bl_g1, m_bl_b,
-        static_cast<uint16_t>(m_whiteLevel),
-        m_wb_r, m_wb_g0, m_wb_g1, m_wb_b,
-        halideCfa,
-        ccmHalideBuf,
-        lscMapBuf,
-        1.0f, 1.0f,
-        outRgbBuf,
-        outBayerBuf
-    );
-
-    if (halide_res != 0) {
-        LOGE("hdrplus_single_pipeline failed in streaming finish: %d", halide_res);
-        return halide_res;
-    }
-
-    // High-Fidelity RCD Demosaicing (replaces Malvar 5x5 demosaic in outSharedResult->rgbBuf)
-    if (effectiveMode != 3) {
+        // High-Fidelity RCD Demosaicing (Spatial + RCD)
+        // Directly demosaics from normalized bayerBuf, avoiding redundant Malvar demosaic in Halide
         uint16_t bl_array[4] = {m_bl_r, m_bl_g0, m_bl_g1, m_bl_b};
         float wb_array[4] = {m_wb_r, m_wb_g0, m_wb_g1, m_wb_b};
         darkbag::demosaic::rcd_demosaic(
@@ -331,8 +335,6 @@ int HdrPlusStreamingSession::finish(
             outSharedResult->rgbBuf.data()
         );
         outSharedResult->isWhiteBalanceApplied = false;
-    } else {
-        outSharedResult->isWhiteBalanceApplied = true;
     }
 
     m_fusionComputeMs = (int64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
